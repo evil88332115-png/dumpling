@@ -70,6 +70,14 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 - `workflow_dispatch` 的 `stop_after=build` 只編譯；`reuse_build_run=<run id>` 沿用另一個 run 的 build artifact（artifact 只保留 1 天；開發除錯用，Release 的草稿會因此不是「同一個 run 編的」，見 `release-meta.json` 的 `workflow_run` 與 build.json）。
 - `dev/<專案>` 滾動 pre-release 會建立 git tag `dev/<專案>`（`gh release create` 的行為）；不會觸發 `release.yml`（tag 樣式 `*/v*` 要求第二段以 v 開頭；專案名稱以 v 開頭時 `info` job 會因找不到專案立刻失敗，無害）。
 
-## 7. 待確認
+## 7. 待確認（已採最保守做法，不阻擋）
 
-（跑通後補）
+1. **`public_sources.tbz2` 的整包 sha256 是首次下載記錄（TOFU）**：NVIDIA 沒有公布整包雜湊。若 NVIDIA 之後更新檔案，fetch 會因 sha256 不符而失敗（預期行為），要人工確認後才改 `sources.yml`。
+2. **UEFI 未自編**（D-002）：刷機包裡的 UEFI、OP-TEE、MB1／MB2 以 BSP 原樣；A0 成品比對（`upstream-baseline-artifacts`）是否對得上 BSP 見第 8 節。
+3. **assemble 是近似值**（第 4 節）：所有 arm64／all 的 NVIDIA 套件都併進 rootfs，不依板子挑；沒有維護者腳本產生的檔案。真實出貨的刷機包是 `apply_binaries.sh` 的結果。
+4. **刷機包的 dtb**：CI 的 `make dtbs` 也編出同名 dtb 的（只有一個）換成 CI 的，其餘（`.dtbo` 疊加檔等）保留 BSP 的；換了哪些記在 `assemble.json` 的 `dtb_replaced`。dtb 目前沒有 CVE 資料，只記身分。
+5. **映像裡的核心建置設定**：CI 的 `.config`、`Makefile`、`Module.symvers` 放在 `usr/lib/modules/<版本>/build/`（NVIDIA 的 headers 套件裡沒有掃描要的頂層 `.config`），讓 `C-kernel-config` 找得到出貨核心的設定；真實出貨的 headers 套件內容要由 RD 確認。
+6. **NVD 沒開**（PLAN 已知卡點：NVD 第一次同步要 1–3 小時），`D-dt-data-sources`／`C-dt-feeds` 因此是 GAP；弱點資料來自 OSV、Grype、CISA／ENISA KEV、NVIDIA 公告、Linux 核心 CNA。ENISA EU KEV 的檔沒有發布日期（`D-dt-kev-sources` GAP）。
+7. **完整掃描也會建一個 DT 專案與一份報告**（第 5 節第 3 點），分層後 `-bsp`／`-os` 才是各自的待辦；完整那份只當對照。DT 的專案階層（parent／child）沒用（見 `docs/LAYERS.md`）。
+8. **標準答案的漏洞數用範圍**，因為資料庫每天變；元件數、核心版本、狀態用 equals。範圍是跑第一次的實際值上下抓寬鬆，之後資料庫變化讓範圍不符時，人工看過再改範圍並寫理由。
+9. **L 軌的測試 `tools/cra/tests/test_layers_report.py::test_untagged_sbom_changes_nothing` 偶爾失敗**（比對兩次執行的風險評估文字時，VEX 的 SHA-256 摘要受時間影響；跨過整秒時才出現，再跑一次就過）。不是這次的改動造成的，尚未修。
