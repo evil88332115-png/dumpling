@@ -7,7 +7,7 @@
 # 用法：pipeline/firmware-dt.sh --work <工作資料夾> --result <結果資料夾>
 #          [--sample <firmware.yml> <SBOM>]...          已有 SBOM 的樣本（BIOS：firmware-ci.sh 的 fw.cdx.json；供應商 SBOM：下載的 *.sbom.json）
 #          [--synthetic-vbios <firmware.yml>]           用 tools/cra/tests/synthetic_vbios.py 產合成 ROM → firmware-bios.sh → SBOM（firmware.yml 是 GAP 的 vBIOS）
-# 輸出：<結果>/<專案名>/{scan/,summary.json,summary.md}（sca-scan 與 dt-verify 的輸出）、<結果>/report/firmware-dt.md、<結果>/firmware-dt.log
+# 輸出：<結果>/<專案名>/{scan/,summary.json,summary.md}（sca-scan 與 dt-verify 的輸出）、<結果>/<專案名>/normalize.json（供應商 SBOM 上傳前的格式正規化紀錄，有才有）、<結果>/report/firmware-dt.md、<結果>/firmware-dt.log
 # stdout：每個步驟的狀態行，最後是 report 的 FIRMWARE-DT 行（每個樣本一行）。沒有整體 PASS 或「安全」的結論。
 # 退出碼：0＝每個步驟都跑完且沒有 FAIL；1＝有 FAIL（prep 失敗、sca-scan 失敗、必要階段不是 OK、dt-verify FAIL、report FAIL）；64＝參數錯誤。
 #   GAP／ATTENTION／NOT_RUN 本身不讓結束碼變 1（report 的狀態行才是結果）；單一樣本失敗不中止其他樣本。
@@ -89,6 +89,10 @@ for p in "${preps[@]}"; do
     say "FIRMWARE-DT-STEP	FAIL	$name	結果資料夾已有舊結果（$sd/scan）：請用全新的 --result 資料夾"; rc=1; continue
   fi
   mkdir -p "$sd"
+  # 供應商 SBOM 的格式正規化紀錄（prep 產生；kind: sbom 才有）跟結果放在一起，workflow 的 artifact 才帶得走
+  if [ -f "$p/normalize.json" ] && ! cp "$p/normalize.json" "$sd/normalize.json"; then
+    say "FIRMWARE-DT-STEP	GAP	$name	normalize.json 複製不到結果資料夾（artifact 少一個檔）"
+  fi
   if [ ! -x "$root/tools/pilot/sca-scan" ]; then
     say "FIRMWARE-DT-STEP	NOT_RUN	$name	沒有 tools/pilot/sca-scan（C1 的工具還沒進這個分支）"; continue
   fi

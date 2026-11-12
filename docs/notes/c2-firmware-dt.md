@@ -10,6 +10,7 @@
         │
         ▼  firmware_dt.py prep --sbom fw.cdx.json --sample firmware.yml --out prep/<slug>
         │     → prep/<slug>/sbom.cdx.json、dt-project.json
+        │     （kind: sbom 的供應商 SBOM 另做最小格式正規化 → normalize.json；見 c2-supplier-sbom.md）
         ▼  firmware_dt.py expected --prep prep/<slug>
         │     → expected.json（C1 格式）、firmware-dt-expected.json（我們的）
         ▼  dt-ephemeral.sh up → wait → env <自己的子資料夾>/pilot.env
@@ -22,6 +23,7 @@
 report 讀的結果資料夾（`--dt-result`）：
 
     dt/dt-wait.rc                          選用：dt-ephemeral wait 的結束碼（3＝GAP，所有樣本標 GAP）
+    dt/<專案名>/normalize.json             供應商 SBOM 的正規化紀錄（firmware-dt.sh 從 prep 複製過來；report 不讀它，只讀 prep 的 dt-project.json）
     dt/<專案名>/summary.json               dt-verify 的輸出（components、findings_total、checks）
     dt/<專案名>/scan/status.tsv            sca-scan 的 status.tsv
     dt/<專案名>/scan/scan/grype.json       sca-scan --out 底下的 scan/grype.json
@@ -59,13 +61,17 @@ NVIDIA 公告步驟 → 小型 artifact（不含 pilot.env）→ `down`（`if: a
 D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿掉**，在 `firmware-dt.sh` 明列。韌體的 `C-sbomgate` 是 NOT_ASSESSED（sbomgate 只把 library／framework 當套件），
 不在必要清單內，也不能要求。本機實測四個上傳成功的樣本，11 個必要階段全部 OK。
 
-供應商 SBOM 被 DT 拒收（`expected_dt`）：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
+供應商 SBOM 被 DT 拒收（`expected_dt`）：**目前沒有樣本使用**——Dasharo NS5x 的 SBOM 原檔不符 CycloneDX 1.4 schema，改在 prep 做最小格式正規化後上傳（正規化規則與紀錄見 `docs/notes/c2-supplier-sbom.md`），
+它的 `firmware.yml` 已拿掉 `expected_dt`。機制本身保留給「正規化也修不了」的供應商 SBOM（不認得的違規類型）。機制如下：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
 report 的判斷：宣告 rejected 且 `D-dt-upload` 是 DT 的「BOM 不符 schema」回應（`BOM_INVALID_RE`：說明開頭必須是 `http=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"`，DT 5.2.0 實測）→ 狀態照實標 FAIL，說明寫「與 firmware.yml 宣告的 expected_dt 一致」，不讓 job 失敗；
 同時 dt-verify 的「弱點分析完成」「元件數」FAIL 是同一個原因，合併成一則說明、不另外計算。**只放行「上傳被拒」這一種**：上傳之前的必要階段（A-source、B-sandbox、B-sandbox-secrets、
 B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、F-secret-scan）不是 OK、sca-scan 有別的 FAIL 階段、Grype FAIL、dt-verify 有別項 FAIL，都照常 FAIL 並註明「不放行」。
 宣告了卻上傳成功＝MISMATCH（job 失敗，供應商可能修好了）；沒宣告卻被拒收＝一般 FAIL；宣告了但失敗不是這種拒收＝一般 FAIL，**其他 400 也是**（例如 `projectName must not be blank`，那是 dumpling 自己的參數錯誤；PR #14 驗證時發現只看 http=400 會被放行，已改成比對回應開頭）。宣告了卻沒有上傳結果（NOT_RUN／GAP，例如沒有 PILOT_ENV）＝狀態照實，但 report 以 1 結束，與沒宣告的樣本一致。DT 改了訊息時會比對不到，被拒收的樣本變成一般 FAIL（安全的方向），屆時依新回應更新 `BOM_INVALID_RE`。
 `firmware-dt.sh` 對有宣告的樣本，sca-scan 結束碼 1、必要階段不是 OK、dt-verify 失敗三步只記 `FIRMWARE-DT-STEP EXPECTED`，是否放行交給 report。
 `firmware-sbom-check` 另會提示「DT 可能拒收（schema 不符）」：license 物件沒有 id 也沒有 name、頂層有 CycloneDX 沒有的欄位（寫死的欄位聯集清單，不是 schema 檔，沒提示不代表合格）。
+
+正規化與 report：`dt-project.json` 的 `normalize`（`applied`、`changes`、`unnormalized`）有值時，report 的該樣本說明加「已正規化 N 處（見 normalize.json；上傳的是正規化副本，原檔不變）」，
+無法正規化的另加「另有 M 處已知違規無法正規化」。正規化只影響上傳的副本：元件數與 `expected.json` 不變（正規化不增減元件）。
 
 NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對照：NOT_ASSESSED（…）」，文字用路徑載入 `tools/pilot/lib/nvidia_bulletins.py` 的 `VBIOS_NOT_ASSESSED`（不複製）；
 載入失敗寫 GAP 加原因。workflow 另有一步：對照表用 gpu-firmware 專用的空表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（C1 M2 提供，不借 Jetson 的表）。

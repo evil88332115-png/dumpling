@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C2 x86 韌體（BIOS／vBIOS → CycloneDX）的單元測試：tools/cra/tests/test_x86_firmware*.py、test_coreboot_cbfs.py、test_ami_pfat.py、test_vbios_synthetic.py、test_vbios_intel.py、test_uefi_gfx.py、test_uefi_image_contract.py（對 C1 uefi_image 的介面契約）。
+# C2 x86 韌體（BIOS／vBIOS → CycloneDX）的單元測試：tools/cra/tests/test_x86_firmware*.py、test_coreboot_cbfs.py、test_ami_pfat.py、test_vbios_synthetic.py、test_vbios_intel.py、test_uefi_gfx.py、test_uefi_image_contract.py（對 C1 uefi_image 的介面契約）、test_supplier_sbom_schema.py（供應商 SBOM 正規化後用 CycloneDX 1.4 官方 schema 驗證）。
 # 在 venv 裡裝固定版本的 pytest、jsonschema、referencing（tools/cra/tests/requirements.txt）；
 # 不用 --user／系統 python，因為 ubuntu-24.04 的系統 python 有 PEP 668 限制（pip install 會被拒絕），
 # 本機也不能污染使用者的全域 Python。DUMPLING_REQUIRE_TEST_DATA=1：任何 skip 都算失敗（缺 jsonschema 不能靜默少跑）。
@@ -47,4 +47,5 @@ export DUMPLING_REQUIRE_TEST_DATA=1
   "$root/tools/cra/tests/test_x86_firmware.py" "$root/tools/cra/tests/test_x86_firmware_sbom.py" \
   "$root/tools/cra/tests/test_coreboot_cbfs.py" "$root/tools/cra/tests/test_ami_pfat.py" \
   "$root/tools/cra/tests/test_vbios_synthetic.py" "$root/tools/cra/tests/test_vbios_intel.py" \
-  "$root/tools/cra/tests/test_uefi_gfx.py" "$root/tools/cra/tests/test_uefi_image_contract.py"
+  "$root/tools/cra/tests/test_uefi_gfx.py" "$root/tools/cra/tests/test_uefi_image_contract.py" \
+  "$root/tools/cra/tests/test_supplier_sbom_schema.py"

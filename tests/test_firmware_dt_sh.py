@@ -175,6 +175,24 @@ sys.exit(1 if bad else 0)
         self.assertEqual(rc, 0, out)
         self.assertIn("FIRMWARE-DT\tGAP\t", out)
 
+    def test_supplier_sbom_normalization_record_goes_to_result_dir(self):
+        self.fakes()
+        w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")
+        y, _ = self.sample("sup", kind="sbom")
+        doc = sbom()
+        doc["specVersion"] = "1.4"
+        doc["platform"] = "Notebook X"
+        s = self.w("in/sup.json", doc)
+        rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("已正規化 1 處（見 normalize.json", out)
+        with open(os.path.join(res, "firmware-sbom-sup", "normalize.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["changes"][0]["from"], "/platform")
+        # BIOS 樣本（本工具自己產的 SBOM）沒有這個檔
+        y2, s2 = self.sample("bios1")
+        self.assertEqual(self.run_sh("--work", w, "--result", res, "--sample", y2, s2)[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(res, "firmware-bios-bios1", "normalize.json")))
+
     def test_old_results_are_not_mixed(self):
         self.fakes()
         w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")

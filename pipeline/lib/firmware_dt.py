@@ -4,6 +4,8 @@
 子指令：
   prep     --sbom <fw.cdx.json> --sample <firmware.yml> --out <資料夾> [--synthetic]
            產出 <out>/sbom.cdx.json（要上傳的 SBOM）與 <out>/dt-project.json（DT 專案名稱、版本、摘要）。
+           kind: sbom（供應商 SBOM）另做上傳前的最小格式正規化（只改這份副本；規則見 firmware_sbom_normalize.py），
+           紀錄寫在 <out>/normalize.json，report 會註明「已正規化 N 處」。
   expected --prep <資料夾>
            在 prep 資料夾寫 expected.json（給 pipeline/dt-verify.py verify；格式依 C1 目前版本）與
            firmware-dt-expected.json（我們自己的、與 DT 工具介面無關的預期）。
@@ -211,6 +213,16 @@ def check_refs(doc, root_ref, comps):
                 raise DtError("dependencies[%d].dependsOn 指到不存在的 bom-ref：%s" % (i, r))
 
 
+def _load_normalizer():
+    # python3 -I 不把腳本所在資料夾放進 sys.path，用路徑載入同資料夾的模組（和 firmware_mdsafe 一樣）
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "firmware_sbom_normalize", os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware_sbom_normalize.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def write_json(path, obj):
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(obj, fh, ensure_ascii=False, indent=1)
@@ -288,6 +300,15 @@ def prep(sbom_path, sample_path, out, synthetic=False):
     meta["component"] = root
     out_doc["metadata"] = meta
     os.makedirs(out, exist_ok=True)
+    # 供應商 SBOM（kind: sbom）上傳前的最小格式正規化：只改上傳用的副本，原檔不動；規則與紀錄格式見 firmware_sbom_normalize.py。
+    # 其他 kind（本工具自己產的 SBOM）不處理；舊的 normalize.json 不能留著混進這次的 artifact。
+    norm_path = os.path.join(out, "normalize.json")
+    norm = None
+    if kind == "sbom":
+        norm = _load_normalizer().normalize(out_doc, hashlib.sha256(raw).hexdigest())
+        write_json(norm_path, norm)
+    elif os.path.lexists(norm_path):
+        os.unlink(norm_path)
     sbom_out = os.path.join(out, "sbom.cdx.json")
     write_json(sbom_out, out_doc)
     with open(sbom_out, "rb") as fh:
@@ -297,6 +318,8 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "synthetic": is_synth, "synthetic_reasons": synth_reasons, "expected_dt": expected_dt,
         "firmware_name": fw_name, "firmware_version": sample.get("firmware_version"),
         "sbom_file": "sbom.cdx.json", "sbom_sha256": sha, "input_sbom_sha256": hashlib.sha256(raw).hexdigest(),
+        "normalize": ({"file": "normalize.json", "applied": norm["applied"], "changes": len(norm["changes"]),
+                       "unnormalized": len(norm["unnormalized"])} if norm else None),
         "replaced_metadata_component": ({"name": old.get("name"), "version": old.get("version")} if isinstance(old, dict) else None),
         "summary": summarize(comps),
     }
@@ -500,6 +523,20 @@ def sample_result(info, dt_dir, wait_rc):
     return r
 
 
+def _normalize_note(info):
+    """上傳副本做過格式正規化的說明（固定文字加數字；沒有正規化回空字串）。"""
+    n = info.get("normalize")
+    if not isinstance(n, dict):
+        return ""
+    ch, un = n.get("changes"), n.get("unnormalized")
+    out = ""
+    if isinstance(ch, int) and ch > 0:
+        out += "；已正規化 %d 處（見 normalize.json；上傳的是正規化副本，原檔不變）" % ch
+    if isinstance(un, int) and un > 0:
+        out += "；另有 %d 處已知違規無法正規化（見 normalize.json；欄位原樣保留）" % un
+    return out
+
+
 def _unverified_declaration(r, exp_dt):
     """宣告了 expected_dt，但沒有上傳結果可以核對（NOT_RUN／GAP）：狀態照實，但 report 以 1 結束。
     與沒宣告的樣本一致（沒宣告時 firmware-dt.sh 的必要階段檢查會失敗）；宣告不能讓「沒跑」變成 job 綠燈。"""
@@ -544,6 +581,9 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
     for d in prep_dirs:
         info = load_prep(d)
         res = sample_result(info, dt_dir, wait_rc)
+        nn = _normalize_note(info)
+        if nn:
+            res["notes"].append(nn[1:])
         s = info["summary"]
         rows.append((info, res))
         va = "、".join("%s=%d" % kv for kv in sorted(s["vuln_assessment"].items()))
@@ -617,8 +657,9 @@ def main(argv=None):
         if a.cmd == "prep":
             info = prep(a.sbom, a.sample, a.out, a.synthetic)
             s = info["summary"]
-            print("FIRMWARE-DT-PREP\tOK\t%s@%s；元件 %d、purl %d、cpe %d、version-status GAP %d" % (
-                info["project_name"], info["project_version"], s["components"], s["with_purl"], s["with_cpe"], s["version_gap"]))
+            print("FIRMWARE-DT-PREP\tOK\t%s@%s；元件 %d、purl %d、cpe %d、version-status GAP %d%s" % (
+                info["project_name"], info["project_version"], s["components"], s["with_purl"], s["with_cpe"], s["version_gap"],
+                _normalize_note(info)))
         elif a.cmd == "expected":
             exp, _ = expected(a.prep)
             print("FIRMWARE-DT-EXPECTED\tOK\t%s@%s；元件 %d" % (exp["project_name"], exp["project_version"], exp["components"]))
