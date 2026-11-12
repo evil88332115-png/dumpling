@@ -2,11 +2,35 @@ name: m2-probe
 # 暫時的探測（M2 J 軌開發用，完成後刪除）：只讀 BSP 與範例 rootfs 的 tar 成員清單與核心 deb 的內容清單，不解開、不執行。
 on:
   push:
-    paths: [".github/workflows/m2-probe.yml"]
+    paths: [".github/workflows/m2-probe.yml", ".github/probe/**"]
     branches: ["wp1/m2-jetson"]
 permissions:
   contents: read
 jobs:
+  patchprobe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 核心原始碼＋候選修補
+        run: |
+          set +e +o pipefail
+          W=$RUNNER_TEMP/pp; mkdir -p $W/dl && cd $W
+          curl -fsSL -o dl/public_sources.tbz2 https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/sources/public_sources.tbz2
+          echo "8346f0371649a92c42293b2d4a7bf3d69e4dd1de23009e1463ea910994a81371  dl/public_sources.tbz2" | sha256sum -c -
+          python3 -I $GITHUB_WORKSPACE/pipeline/lib/safe_extract.py dl/public_sources.tbz2 ps
+          python3 -I $GITHUB_WORKSPACE/pipeline/lib/safe_extract.py ps/Linux_for_Tegra/source/kernel_src.tbz2 src
+          ls src src/kernel
+          head -8 src/kernel/kernel-noble/Makefile
+          git -c protocol.allow=never -c protocol.https.allow=always clone -q --depth 1 https://git.kernel.org/pub/scm/linux/security/vulns.git vulns
+          python3 -I $GITHUB_WORKSPACE/.github/probe/find_patch.py src/kernel/kernel-noble vulns $W/cand
+          ls -l $W/cand | head -40
+          for f in $W/cand/*.patch; do echo "=== $f"; cat "$f"; done | head -400
   probe:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
