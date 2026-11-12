@@ -672,7 +672,7 @@ def l4t_release(nv_text, dpkg):
 
 
 def version_note(product_version, release):
-    """產品版本（例如 V39.2.0.1）與 L4T 版本的關係，一句話。"""
+    """產品版本（例如 V1.0.1）與 L4T 版本的關係，一句話。"""
     if not product_version or not release:
         return None
     pv = re.sub(r"^[vV]", "", product_version)

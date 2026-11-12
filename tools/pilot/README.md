@@ -10,7 +10,7 @@ tools/pilot/sca-scan --sbom <CycloneDX JSON> [--name N]
 共用：--out <資料夾>  --no-upload  --allow-network-resolve  --no-package-scan  --no-files-scan  --no-license（只做漏洞，不跑 ScanCode.io／DejaCode）
       --version <字串>（DT 專案版本；預設是 commit、內容雜湊或映像 ID）
 ```
-`--version`：DT 專案（與 DejaCode 產品）的版本改用指定的字串，例如產品版本 `V39.2.0.2_a (rootfs_no_gui)`；預設由內容決定的值仍記在
+`--version`：DT 專案（與 DejaCode 產品）的版本改用指定的字串，例如產品版本 `V1.0.2_a (rootfs_no_gui)`；預設由內容決定的值仍記在
 `meta.json` 的 `content_version`（`image_id`、`digest` 等照舊）。只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」、最多 100 字元，其他 → 參數錯誤（64）。
 同一個名稱與版本重跑會沿用同一個 DT 專案、上傳新的 SBOM（取代舊的元件清單）。
 結果：`<out>/status.tsv`（每階段一列，狀態只有 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN）、`report.html`、`report.json`。

@@ -605,7 +605,7 @@ def prev_result(tmp_path, archive, md5=None):
     v = prev / "rootfs_no_gui" / "scan"
     (v / "sbom").mkdir(parents=True)
     (v / "sbom" / "sbom.cdx.json").write_text(json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}))
-    (v / "meta.json").write_text(json.dumps({"name": "product-a-OrinNano", "version": "V39.2.0.2_a (rootfs_no_gui)"}))
+    (v / "meta.json").write_text(json.dumps({"name": "product-a-OrinNano", "version": "V1.0.2_a (rootfs_no_gui)"}))
     lst = {"source": {"type": "archive", "file": archive.name}, "archive": {"file": archive.name, "bytes": archive.stat().st_size},
            "rootfs": [{"variant": "rootfs_no_gui", "prefix": "product-a/Linux_for_Tegra/rootfs_no_gui", "bytes": 10, "looks_like_rootfs": True,
                        "l4t": {"release": "39.2.1"}}], "ambiguous": {}}
@@ -646,7 +646,7 @@ def test_rescan_flow(tmp_path):
     assert f"A-md5\tOK\tmd5 {md5}：沿用上一次核對過的值" in st and "這次重算 product-a.tbz2 相符" in st
     assert (out / "list.json").exists() and (out / "rootfs_no_gui" / "logs" / "sca-scan.txt").exists()
     meta = json.loads((out / "rootfs_no_gui" / "scan" / "meta.json").read_text())
-    assert meta["name"] == "product-a-OrinNano" and meta["version"] == "V39.2.0.2_a (rootfs_no_gui)" and meta["mode"] == "sbom"
+    assert meta["name"] == "product-a-OrinNano" and meta["version"] == "V1.0.2_a (rootfs_no_gui)" and meta["mode"] == "sbom"
     # 上一次沒有映像的靜態安全檢查：從刷機包讀（rootfs 前綴）
     assert re.search(r"^B-image-check-rootfs_no_gui\t(OK|ATTENTION|GAP)\t", st, re.M), st
     assert (out / "rootfs_no_gui" / "image-check" / "image-check.json").is_file()

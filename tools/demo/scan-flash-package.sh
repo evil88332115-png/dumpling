@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 廠商 Jetson 刷機包（例如 product-a_OrinNano_V39.2.0.2_a.tbz2）的弱點掃描：核對 MD5 → 清點刷機包（rootfs 的位置、L4T 版本、bootloader 檔案）
+# 廠商 Jetson 刷機包（例如 product-a_OrinNano_V1.0.2_a.tbz2）的弱點掃描：核對 MD5 → 清點刷機包（rootfs 的位置、L4T 版本、bootloader 檔案）
 # → 把選定的 rootfs 轉成 tar（全部 rootfs 一次讀完）、docker import 成映像（不啟動容器）→ sca-scan（Syft、Grype、上傳常駐 DT）
 # → CRA 文件草稿 → 套件依賴說明（<rootfs>/package-dependencies.md：漏洞多的套件為什麼在映像裡）→ 刪除暫存與映像。
 #

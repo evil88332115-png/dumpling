@@ -53,7 +53,7 @@ def test_local_image_missing(tmp_path):
 
 def test_local_image_with_version(tmp_path):
     """--version：DT／meta 的版本用指定的字串，映像 ID 另記 content_version。"""
-    st, meta, _ = scan(tmp_path, IID, extra=("--version", "V39.2.0.2_a (rootfs_no_gui)"))
+    st, meta, _ = scan(tmp_path, IID, extra=("--version", "V1.0.2_a (rootfs_no_gui)"))
     assert st["A-source"][0] == "OK"
-    assert meta["version"] == "V39.2.0.2_a (rootfs_no_gui)" and meta["content_version"] == IID and meta["image_id"] == IID
+    assert meta["version"] == "V1.0.2_a (rootfs_no_gui)" and meta["content_version"] == IID and meta["image_id"] == IID
     assert meta["version_from"] == "--version"

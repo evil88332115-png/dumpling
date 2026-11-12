@@ -14,7 +14,7 @@
 #         --no-files-scan（不用 ScanCode.io 掃專案本身或映像的檔案層級授權與版權；E-files-scan 記 NOT_RUN）
 #         --no-license（只做漏洞：不連 ScanCode.io／DejaCode，E 段全部記 NOT_RUN；大型映像省掉授權那段的時間）
 #         --version <字串>（DT 專案版本與 meta 的 version，取代預設的 commit／內容雜湊／映像 ID；原本的值另記 content_version。
-#           只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」，最多 100 字元，例如 "V39.2.0.2_a (rootfs_no_gui)"）
+#           只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」，最多 100 字元，例如 "V1.0.2_a (rootfs_no_gui)"）
 #         --kernel-build <路徑> [--kernel-build-prefix <前綴>]（只用於 --image、--sbom：核心建置設定的來源，給 C-kernel-config；
 #           rootfs tar、rootfs 資料夾，或刷機包 tbz2 加上 rootfs 在裡面的路徑。--image 沒給時用 docker save 的映像 tar）
 #   環境變數 KERNEL_BUILD_RECORD（選用；只用於 --image、--sbom）：這個出貨版本的核心建置紀錄（make 之後的建置資料夾，或它的

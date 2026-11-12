@@ -96,7 +96,7 @@ def archive(request, tmp_path, monkeypatch):
             pytest.skip("沒有 lbzip2／pbzip2／bzip2")
         monkeypatch.setattr(fp.shutil, "which", lambda n: alt if n in ("lbzip2", "pbzip2") else real(n))
     monkeypatch.setenv("FLASHPKG_PARALLEL", "1" if request.param == "external" else "0")
-    return make_archive(str(tmp_path / "product-a_OrinNano_V39.2.0.1_a.tbz2"))
+    return make_archive(str(tmp_path / "product-a_OrinNano_V1.0.1_a.tbz2"))
 
 
 def names(tar_path):
@@ -137,7 +137,7 @@ def test_parse_md5_formats():
 # ---------- list ----------
 
 def test_list_finds_rootfs_inventory_and_release(archive, tmp_path):
-    r = fp.do_list(str(tmp_path / "list.json"), str(tmp_path / "inv.json"), archive=archive, product_version="V39.2.0.1")
+    r = fp.do_list(str(tmp_path / "list.json"), str(tmp_path / "inv.json"), archive=archive, product_version="V1.0.1")
     by = {c["prefix"]: c for c in r["rootfs"]}
     assert set(by) == {f"{TOP}/rootfs_no_gui", f"{TOP}/rootfs_gui", f"{TOP}/rootfs"}
     ng = by[f"{TOP}/rootfs_no_gui"]
@@ -145,7 +145,7 @@ def test_list_finds_rootfs_inventory_and_release(archive, tmp_path):
     assert ng["files"] == 6 and ng["symlinks"] == 2 and ng["hardlinks"] == 2 and ng["devices"] == 1 and ng["fifos"] == 1
     assert ng["l4t"]["release"] == "39.2.1" and ng["l4t"]["status"] == "OK"
     assert ng["l4t"]["sources"] == {"nv_tegra_release": "39.2.1", "nvidia-l4t-core": "39.2.1", "nvidia-l4t-kernel": "39.2.1"}
-    assert "39.2.1" in ng["l4t"]["note"] and ng["l4t"]["note"].startswith("注意")   # V39.2.0.1 不是 39.2.1
+    assert "39.2.1" in ng["l4t"]["note"] and ng["l4t"]["note"].startswith("注意")   # V1.0.1 不是 39.2.1
     assert ng["dpkg"]["installed_packages"] == 3
     assert ng["os_release"] == "Ubuntu 24.04.3 LTS"
     assert by[f"{TOP}/rootfs"]["looks_like_rootfs"] is False
@@ -172,8 +172,8 @@ def test_release_detection_cases():
     assert fp.l4t_release("", None)["status"] == "GAP"
     r = fp.l4t_release("", {"nvidia-l4t-core": "39.2.0-2026", "nvidia-l4t-kernel": "6.8.12-tegra-39.2.0-2026"})
     assert r["status"] == "OK" and r["release"] == "39.2.0" and "nv_tegra_release" in r["detail"]
-    assert fp.version_note("V39.2.0.1", "39.2.0") == "產品版本 V39.2.0.1 以 L4T 版本 39.2.0 開頭"
-    assert fp.version_note("V39.2.0.1", "39.2.1").startswith("注意")
+    assert fp.version_note("V39.2.0.7", "39.2.0") == "產品版本 V39.2.0.7 以 L4T 版本 39.2.0 開頭"
+    assert fp.version_note("V39.2.0.7", "39.2.1").startswith("注意")
 
 
 def test_pick_all_and_ambiguous(archive, tmp_path):
@@ -279,8 +279,8 @@ def test_cra_config_validates(archive, tmp_path):
     r = fp.do_list(str(tmp_path / "l.json"), str(tmp_path / "i.json"), archive=archive)
     cra = load_cra()
     for with_company in (False, True):
-        cfg = fp.cra_config(r, "rootfs_no_gui", "product-a-OrinNano", "V39.2.0.1", "ab" * 16, None if with_company else "ACME Inc.")
-        assert cfg["product"]["version"] == "V39.2.0.1 (rootfs_no_gui)"
+        cfg = fp.cra_config(r, "rootfs_no_gui", "product-a-OrinNano", "V1.0.1", "ab" * 16, None if with_company else "ACME Inc.")
+        assert cfg["product"]["version"] == "V1.0.1 (rootfs_no_gui)"
         assert "L4T) 39.2.1" in cfg["product"]["identification"] and "ab" * 16 in cfg["product"]["identification"]
         proj = tmp_path / f"p{int(with_company)}"
         (proj / "CRA" / "Config").mkdir(parents=True)
@@ -367,13 +367,13 @@ def test_script_flow_until_import(tmp_path):
     h = hashlib.md5(open(a, "rb").read()).hexdigest()
     (tmp_path / "product-a.tbz2.md5").write_text(f"{h}  product-a.tbz2\n")
     out = tmp_path / "res"
-    p = run_script(tmp_path, "--archive", a, "--rootfs", "all", "--name", "product-a", "--version", "V39.2.0.1", "--out", str(out), "--no-upload")
+    p = run_script(tmp_path, "--archive", a, "--rootfs", "all", "--name", "product-a", "--version", "V1.0.1", "--out", str(out), "--no-upload")
     st = (out / "status.tsv").read_text()
     assert p.returncode == 1, st
     for row in ("A-md5\tOK", "B-list\tOK", "B-l4t-rootfs_no_gui\tATTENTION", "B-l4t-rootfs_gui\tATTENTION", "B-rootfs-tar-rootfs_no_gui\tATTENTION",
                 "B-rootfs-tar-rootfs_gui\tATTENTION", "B-import-rootfs_no_gui\tFAIL", "E-summary\tOK"):
         assert row in st, row
-    assert "C-scan" not in st and "注意：產品版本 V39.2.0.1" in st
+    assert "C-scan" not in st and "注意：產品版本 V1.0.1" in st
     # 套件資料庫在 docker import 之前從自己寫的 rootfs tar 取出（import 失敗也留著；D-pkg-why 要等 CRA 文件）
     assert "B-pkgdb-rootfs_no_gui\tOK" in st and (out / "rootfs_no_gui" / "pkgdb" / "dpkg-status").is_file()
     # 映像的靜態安全檢查也在 import 之前從同一個 tar 讀
@@ -607,7 +607,7 @@ def tree(tmp_path):
 
 def test_dir_list(tree, tmp_path):
     base, top = tree
-    r = fp.do_list(str(tmp_path / "l.json"), str(tmp_path / "i.json"), directory=str(base), product_version="V39.2.0.2")
+    r = fp.do_list(str(tmp_path / "l.json"), str(tmp_path / "i.json"), directory=str(base), product_version="V1.0.2")
     by = {c["prefix"]: c for c in r["rootfs"]}
     ng = by["Linux_for_Tegra/rootfs_no_gui"]
     assert ng["l4t"]["release"] == "39.2.1" and ng["dpkg"]["installed_packages"] == 3
@@ -699,7 +699,7 @@ def test_split_name_rejects_traversal():
 def test_script_dir_flow_until_import(tree, tmp_path):
     base, top = tree
     out = tmp_path / "res"
-    p = run_script(tmp_path, "--dir", str(base), "--rootfs", "rootfs_gui", "--name", "product-a", "--version", "V39.2.0.2_a", "--out", str(out),
+    p = run_script(tmp_path, "--dir", str(base), "--rootfs", "rootfs_gui", "--name", "product-a", "--version", "V1.0.2_a", "--out", str(out),
                    "--no-upload")
     st = (out / "status.tsv").read_text()
     assert p.returncode == 1, st
