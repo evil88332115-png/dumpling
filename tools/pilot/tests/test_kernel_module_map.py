@@ -427,14 +427,14 @@ def test_review_cases(name, tree, config, order, want, why):
 
 
 def test_other_same_name_keeps_directory_dashes():
-    # 資料夾名稱有 - 的模組（media 資料夾底下的 v4l2-core/videodev）：自己的 .ko 不算「別的位置的同名模組」
+    # 資料夾名稱有 - 的模組（drivers/media/v4l2-core/videodev）：自己的 .ko 不算「別的位置的同名模組」
     tree = {"drivers/Makefile": "obj-y += v4l2-core/\n", "drivers/v4l2-core/Makefile": "obj-m += videodev.o\nvideodev-y := v4l2-dev.o\n"}
     order = "kernel/drivers/v4l2-core/videodev.ko\n"
     r = adv(tree, "", order, ["drivers/v4l2-core/v4l2-dev.c"], ko=["kernel/drivers/v4l2-core/videodev.ko.zst"])
     assert r["builtin"] is False and r["files"][0]["other_same_name"] == [] and r["shadowed_by"] == {"videodev": []}
     r = adv(tree, "", order, ["drivers/v4l2-core/v4l2-dev.c"],
-            ko=["kernel/drivers/v4l2-core/videodev.ko.zst", "updates/drivers/video/videodev.ko"])
-    assert r["shadowed_by"] == {"videodev": ["updates/drivers/video/videodev.ko"]}
+            ko=["kernel/drivers/v4l2-core/videodev.ko.zst", "updates/drivers/media/videodev.ko"])
+    assert r["shadowed_by"] == {"videodev": ["updates/drivers/media/videodev.ko"]}
 
 
 

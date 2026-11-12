@@ -2235,7 +2235,7 @@ def test_build_record_unsafe_members_rejected(tmp_path):
     # ../ 與絕對路徑的成員不收；不需要的符號連結（source -> …）略過；需要的檔案是符號連結 → GAP
     extra = [("../evil/.x.o.cmd", cmd_text("evil/x.o", "include/linux/absent.h").encode(), None),
              ("/abs/.y.o.cmd", cmd_text("abs/y.o", "include/linux/absent.h").encode(), None),
-             ("source", None, "/home" "/someone/linux")]
+             ("source", None, "/home/someone/linux")]
     out = br_run(tmp_path, write_record_tar(tmp_path / "r.tar", record_members(), extra=extra))[2]
     br = out["kernel"]["build_record"]
     assert br["status"] == "OK" and br["rejected_members"] == 2 and br["ignored_links"] == 1
@@ -2381,7 +2381,7 @@ def test_build_record_vdso_abspath_counts_as_built(tmp_path):
     """in-tree 建置裡 vdso 的 Makefile 用 $(abspath …)：lib/vdso/gettimeofday.c 只以絕對路徑出現在 deps。對不上樹的絕對路徑
     以 /<檔案> 結尾也算有編；即使映像的核心樹有這個檔案，也不能判沒編。"""
     objs = dict(REC_OBJS)
-    objs["arch/arm64/kernel/setup.o"] = ("arch/arm64/kernel/setup.c", ["/home" "/builder/linux-6.8/lib/vdso/gettimeofday.c"])
+    objs["arch/arm64/kernel/setup.o"] = ("arch/arm64/kernel/setup.c", ["/home/builder/linux-6.8/lib/vdso/gettimeofday.c"])
     src = br_rootfs(tmp_path, extra=[(f"{HDR}/lib/vdso/gettimeofday.c", b"int v;\n", None)], name="vdso.tar")
     out = br_run(tmp_path, write_record_dir(tmp_path / "v", record_members(objs=objs)), src=src,
                  records={"CVE-2024-2001": ["lib/vdso/gettimeofday.c"]})[2]

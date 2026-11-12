@@ -115,7 +115,7 @@ def test_extra_or_missing_data_section_is_not_verified():
 
 
 def test_build_date_time_and_path_prefix_strings_are_masked():
-    a = elf(base(strs=b"built Nov 11 2026 12:34:56\0/work/a/src/drv/foo/bar.c\0keep\0"))
+    a = elf(base(strs=b"built Nov 11 2026 12:34:56\0/home/a/src/drv/foo/bar.c\0keep\0"))
     b = elf(base(strs=b"built Dec  3 2027 01:02:03\0/other/root/x/src/drv/foo/bar.c\0keep\0"))
     lvl, why = cmp(a, b)
     assert lvl == "sections_masked", why

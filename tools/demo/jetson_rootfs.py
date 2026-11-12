@@ -282,7 +282,7 @@ def acme_overlay():
         f"{di}/RECORD": f"{di.split('site-packages/')[1]}/METADATA,,\n".encode(),
     }
     para = [("Package", ACME_PKG), ("Status", "install ok installed"), ("Priority", "optional"), ("Section", "misc"),
-            ("Installed-Size", "1"), ("Maintainer", "ACME (simulated) <noreply@example.com>"), ("Architecture", "arm64"),
+            ("Installed-Size", "1"), ("Maintainer", "ACME (simulated) <noreply@example.invalid>"), ("Architecture", "arm64"),
             ("Version", ACME_VER), ("Depends", "python3, nvidia-l4t-core"),
             ("Description", "simulated customer application (sca-center demo, metadata only)")]
     return files, para

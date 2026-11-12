@@ -41,7 +41,7 @@ def ar(members):
 
 
 def deb(pkg, ver, arch, files, data_comp="xz", multiarch=None):
-    ctl = f"Package: {pkg}\nVersion: {ver}\nArchitecture: {arch}\nMaintainer: x <x@example.com>\n"
+    ctl = f"Package: {pkg}\nVersion: {ver}\nArchitecture: {arch}\nMaintainer: x <x@example.invalid>\n"
     if multiarch:
         ctl += f"Multi-Arch: {multiarch}\n"
     ctl += "Description: test\n long line\n"

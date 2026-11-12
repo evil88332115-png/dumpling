@@ -3,3 +3,6 @@
 # - 本機禁用字（公司代號等）與 commit 信箱不能用白名單放行。
 # - 不能只寫網域（例如 @gmail.com），少於 6 個字元的項目也會被拒絕。
 # - 每一項都要寫原因；新增項目會出現在 PR diff 裡，由驗證代理與 C0 審查。
+/home/someone/linux	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（假的建置者家目錄）
+/home/builder/linux-6.8/lib/vdso/gettimeofday.c	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（假的建置者家目錄）
+/home/a/src/drv/foo/bar.c	tools/pilot/tests/test_kernel_oot_sections.py 的合成 ELF 字串（假的建置路徑）

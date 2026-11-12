@@ -289,7 +289,7 @@ class Mapper:
 
     def other_same_name(self, name, own_stem):
         """模組目錄裡同名、但不在 own_stem（modules.order 的路徑，或樹內的物件路徑）的 .ko（原文路徑）。
-        只正規化檔名：資料夾名稱裡的 - 不換（media 資料夾底下的 v4l2-core/videodev 不能被當成別的位置）。"""
+        只正規化檔名：資料夾名稱裡的 - 不換（drivers/media/v4l2-core/videodev 不能被當成別的位置）。"""
         own = key_of(own_stem[len("kernel/"):] if own_stem.startswith("kernel/") else own_stem) if own_stem else None
         return sorted(p for p in self.ko_by_name.get(name, ()) if key_of(strip_ko(p)) != own)
 

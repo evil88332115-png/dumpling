@@ -91,7 +91,7 @@ def test_module_metadata_then_package_version_fallback(tmp_path):
     _, st, detail, ev = run(tmp_path, sb, {"matches": []})
     assert st == "GAP" and ev["version_source"] == "module_metadata" and ev["versions"][0]["version"] == KVER
     rpm = {"type": "library", "name": "kernel-core", "version": "5.14.0-427.13.1.el9_4",
-           "purl": "pkg:rpm/redhat/kernel-core@" "5.14.0-427.13.1.el9_4?arch=x86_64"}
+           "purl": "pkg:rpm/redhat/kernel-core@5.14.0-427.13.1.el9_4?arch=x86_64"}
     _, st, detail, ev = run(tmp_path, {"components": [rpm]}, {"matches": []})
     assert st == "GAP" and ev["version_source"] == "kernel_package" and "版本 5.14.0-427.13.1.el9_4" in detail
 
