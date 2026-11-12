@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:58 -0500（C2）
+最後更新：2026-11-12 10:59 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -23,40 +23,35 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-- 目前在做：M1 完成、等 C0 合併（PR #9 已轉正式）；M2 試驗（`wp1/m2-spike`）進行中
+- 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
 - 分支／PR／commit：
-  - `wp1/m1-tools`：bd95a8c（fb1ac02 之後只有 PROVENANCE 文件修正；V2 修正已併入：public-check f7830fc、F 的 8ae599b、C1 的 fb1ac02；tools/ 全部、PROVENANCE C1 節、白名單、public-check 掃壓縮檔、provenance-check、c1-tools／c1-pipeline／c1-public-check、tests.yml 裝 bubblewrap、臨時 DT＋dt-smoke 用 `sca-scan --sbom`）；PR #9（**正式 PR，C0 審查通過，CI 綠燈後背景合併；合併前不要再推送 `wp1/m1-tools`**；說明附逐檔對照 196 檔（實際比對：相同 56、有修改或自寫 140）、資料來源表、給 C0 的決定事項）
-  - `wp1/m1-tools-pilot`（b210000）已 fast-forward 併入 m1-tools；`wp1/m1-dt` 已併入；PR #6 已關
-  - 來源：sca-center 25fa89a
+  - `wp1/m2`：M2 整合分支（從 main 0e706cb 開）；子分支做完併進來；M2 完成後開一個 PR（D-020）
+  - `wp1/m2-platform`：P 軌（從 0e706cb 開）
+  - `wp1/m2-spike`：試驗分支（不合併）
+  - M1 的 worktree 與子分支（m1-dt、m1-fix、m1-tools-pilot、m1-tools）已清掉
 - 代理：
-  - 寫程式 A（cra／vexconv／sbomgate）：完成
-  - 寫程式 P（pilot／demo／mirror／wizard／e2e、dt-smoke 整合、DT 加固）：完成；pilot 分支 tests run 43237031501（c1-tools 2918 passed／0 failed／NOT_RUN 0）、dt-smoke run 43237039925 綠燈；wait=0 失敗會變紅的證明 run 43231324313
-  - 寫程式 B（臨時 DT）：完成
-  - 驗證 V1（m1-dt）：不通過（pipefail）→ P 已修，併入 V2 重驗
-  - 寫程式 S（M2 試驗，使用者同意、C0 轉達）：分支 `wp1/m2-spike`（從 2555a66 開，**不合併、不開 PR**），`.github/workflows/m2-spike.yml`（只有 workflow_dispatch）量測 arm runner 磁碟清理、L4T BSP／原始碼下載＋sha256＋actions/cache、原生編譯核心＋樹外模組；結果放分支的 `docs/m2-spike-results.md`，C1 摘要寫進下面的 M2 設計備忘；Sonnet 5.5／high；進行中
-  - 驗證 V2（M1 全部，2555a66）：完成，**不通過**（PR #9 issuecomment-6827049283）；必須修 3 項：(1) public-check 壓縮檔檢查被非 ASCII 檔名繞過 → C1 已修（f7830fc：-z、不分大小寫、.tgz／.tar、.zip 等算命中、白名單完整字串比對）；(2) PROVENANCE 引用改寫前的內部原值；(3) PROVENANCE 多處與實際不符 → 交給 F；CI（tests、dt-smoke，workflow_dispatch＋pull_request）全綠
-  - 寫程式 F（`wp1/m1-fix` 8ae599b，已 fast-forward 併入、worktree 已移除）：完成——PROVENANCE 不引用原值且與實際一致、還原 2 處多刪的斷言、scan-status-check 加 B-sandbox／C-upload-sbom／D-dt-vuln-analysis、dt-ephemeral 數值參數驗證、約 42 個檔的註解移除上游私有 repo 編號與內部部署描述；tests run 43246075631、dt-smoke run 43246083315 綠燈
-  - 驗證 V3（M1 全部，fb1ac02）：**通過**（PR #9 issuecomment-6828295257），沒有必須修
-- CI：fb1ac02：tests run 43249261477、dt-smoke run 43249270588 綠燈（各含 pull_request 一次）
-- 下一步：C0 合併 #9 → 通知 C2（臨時 DT 可用）→ 清 C1 的舊 worktree（m1-dt、m1-tools-pilot）→ 開 M2（先讀 C4 的 platforms-research.md 與 m2-spike 結果）
-- M2 設計備忘（C0 轉達，C4 的平台研究；試驗結果待 S 回報後補）：
-  - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
-  - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
-  - C4 平台研究：`wp7/platform-samples` 754f7f3 的 `docs/platforms-research.md`（M2 開工前讀）
-  - `project.yml` 要有欄位表示「OS 層也是我們的待辦」（自有品牌 AI NAS；D-025：由角色決定，不寫死在平台設定）
-  - 角色值要能表示「上游 OS 廠商負責、我們只通知客戶」，例如 `os_responsibility: upstream-vendor`（只轉售 TrueNAS；與 Jetson OS 層「通知客戶」同一概念）
-  - bsp／os 分層：平台設定裡的「套件名稱清單」決定，不看版本字尾（同 nvidia-l4t-* 做法）
-  - Rockchip 分割區外的開機程式：以原始磁區為準
+  - 寫程式 S（M2 試驗）：`wp1/m2-spike`，`.github/workflows/m2-spike.yml` 量測 arm runner 清理、L4T 下載＋快取、原生編譯核心＋樹外模組；Sonnet 5.5／high；進行中（build run 43246860803）
+  - 寫程式 P（平台介面與開案範本）：`wp1/m2-platform`；project.yml（含 OS 歸屬欄位）、sources.yml（files[] 沿用 firmware.yml）、templates/project/、pipeline/new-project.sh、pipeline/platforms/ 四步介面＋原始磁區掛點、dispatcher、project-info、pipeline/lib/fetch_verify.py（從 firmware_fetch 抽出，行為與簽名不變，不改 C2 的檔）、Jetson 轉接器骨架、projects/orin-nano-demo/、docs/PLATFORM-INTERFACE.md；另：scan-flash-package.sh 平台改由明確參數傳入、沒給就 GAP；Sonnet 5.5／medium；進行中
+  - 預定 L（依層分開 bsp／os／host-tool、P1 只放 bsp、DT 分兩段）：S 完成空出名額後開，high
+  - 預定 J（Jetson build／assemble／scan、release.yml、dev.yml、sboms/、patch 版）：依 S 的結果決定 job 拆法
+- CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
+- 下一步：S 回報 → 寫進下面的 M2 設計備忘、決定 J 的 job 拆法 → 開 L → P 完成併入 wp1/m2 → 開 J
+- M2 設計備忘：
+  - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
+  - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
+  - bsp／os 分層：平台設定裡的「套件名稱清單」決定，不看版本字尾（同 nvidia-l4t-* 做法，D-027）
+  - Rockchip 分割區外的開機程式：以原始磁區為準（D-027）；assemble／scan 留掛點
+  - **平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測；沒給就把開機程式分類標 GAP**（C4 發現 scan-flash-package.sh 對所有 raw-disk-img 固定傳 raspberrypi；P 軌修）
+  - 共用下載核對：P 新增 `pipeline/lib/fetch_verify.py`（行為與簽名同 firmware_fetch.py）；M2 合併後由 C2 把 firmware_fetch.py 改成 import（C0 會通知 C2）
+  - D-028：看不到內容的二進位檔要登記在 `ci/public-binary-allow.txt`（路徑＋sha256＋原因）；M2 的二進位測資盡量當場產生
+  - GitHub 動態封存檔：以 commit SHA 為準，sha256 不符時 clone＋checkout 再核對或標 GAP，不自動接受新的 sha256（D-025、D-027）
+  - D-023～D-028 在 PR #13（`wp0/docs-batch-2`），合併中
 - 對外介面約定（改之前先通知對方）：
-  - C2 依賴 `tools/cra/uefi_image.py` 的內部名稱：`Scan`（子類別覆寫 `scan_bytes(data, module)` 接 GOP／VBT／legacy VBIOS）、`parse_fvs(data, sc, depth)`、`Stop`、`MAX_*` 常數
+  - C2 依賴 `tools/cra/uefi_image.py` 的內部名稱：`Scan`（子類別覆寫 `scan_bytes(data, module)` 接 GOP／VBT／legacy VBIOS）、`parse_fvs(data, sc, depth)`、`Stop`、`MAX_*` 常數（C2 有契約測試）
   - C2 依賴臨時 DT 介面：`pipeline/dt-ephemeral.sh up|wait|env|down`、`tools/pilot/sca-scan --sbom`、`pipeline/scan-status-check.py`（預設 11 個必要階段）、`pipeline/dt-verify.py verify`
 - 卡住／等決定：
-  - 等使用者（C0 轉問）：PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
-  - （已定）public-check 反向規則（沒掃到的二進位檔不在放行清單就算無法檢查）：C0 同意，由 C0 下一批 PR 做，不放 M2
-  - （已定）上游部署預設路徑保留；alert_mail.py 留給 C3（C0 交接事項）
-  - （已定）假交付物命名符合 D-023；`prefilled_from.by` 保留
-  - 已處理：alert_mail.py 沒帶（PROVENANCE 標「C3 視需要帶回」）；D-023（形狀參考內部觀察的合成測資可收）已套用；上限註解的「實測」精確數量改成估計
-  - M1 合併前本機 pre-push hook 不掃壓縮檔：改了 *.xz 等要手動跑 worktree 裡的新版 public-check
+  - 等使用者（C0 轉問）：M1 PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
+  - （已定）public-check 反向規則：D-028（C0 做）；上游部署預設路徑保留；alert_mail.py 留給 C3
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
