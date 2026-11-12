@@ -15,7 +15,7 @@
 | 檔案 | 內容 |
 |---|---|
 | [docs/PLAN.md](docs/PLAN.md) | 規劃（工作包、里程碑、驗收方式） |
-| [docs/STATUS.md](docs/STATUS.md) | 進度（實際內容在 `status` 分支） |
+| [docs/STATUS.md](docs/STATUS.md) | 進度指標；實際進度表在 [`status` 分支](https://github.com/evil88332115-png/dumpling/blob/status/docs/STATUS.md) |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 決定紀錄 |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | 中斷後重開的接手步驟與工作規則 |
 
