@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:05 -0500（C0）
+最後更新：2026-11-12 09:08 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -24,7 +24,7 @@
 
 - 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；D-020：M1 完成後一個 PR（#9 轉正式）
 - 分支／PR／commit：
-  - `wp1/m1-tools`：d1fd77b（tools/ 全部清理完、PROVENANCE C1 節、白名單 18 項、provenance-check、c1-tools.sh（py3.12）；已併 m1-dt；C1 另清 Jetson fixture 與 test_cra_report 的自架 runner 路徑）；PR #9（draft）
+  - `wp1/m1-tools`：fb44881（C1 加：`ci/public-check.sh` 掃壓縮檔內容＋`tests/run.d/c1-public-check.sh`（C0 同意在 M1 改 ci/）；tools/ 全部清理完、PROVENANCE C1 節、白名單 18 項、provenance-check、c1-tools.sh（py3.12）；已併 m1-dt；C1 另清 Jetson fixture 與 test_cra_report 的自架 runner 路徑）；PR #9（draft）
   - `wp1/m1-tools-pilot`：從 bd7fa1b 開，pilot／demo／mirror／wizard／e2e 的收尾，做完由 C1 merge 回 `wp1/m1-tools`
   - `wp1/m1-dt`：62107c1（臨時 DT，已併入 m1-tools；PR #6 已關）
   - 來源：sca-center 25fa89a
@@ -34,11 +34,12 @@
   - 驗證 V1：`wp1/m1-dt`（62107c1）臨時 DT 部分；完成，**不通過**（PR #9 留言 issuecomment-6825077261）：dt-smoke.yml 的 `| tee` 沒有 pipefail，會吃掉 wait／sca-scan 的結束碼。已交給 P 修（加 `shell: bash`，並實證失敗會紅），另附 6 項建議（admin 密碼不放命令列、生態系不內插、down 的 rm 防護、讀回確認 NVD 關閉、409 舊結果、wait 措辭）；修完再驗
   - 寫程式 B（臨時 DT）：完成
   - C0 預審（f9d0cee）完成，#9 issuecomment-6825088823：已對照 bd7fa1b 分派——A：libnvinfer 版本誤改、cra_report 內部實測說法、信箱改保留網域、內部稱呼、c1-tools.sh／tests.yml 改用 Python 3.12；P：殘留 scripts/ 路徑、l4t-kernel-map 等內部實測說法、帶入 kernel_included_c.py、缺檔改 NOT_RUN、拿掉 android
-- CI：手動觸發（`gh workflow run <wf> --ref <分支>`）；最近 dt-smoke（m1-dt）run 43225729729 綠燈
+- CI：tests.yml 在 wp1/m1-tools 手動觸發中（預期 unit-tests 仍因 pilot 37 個失敗 FAIL）；手動觸發（`gh workflow run <wf> --ref <分支>`）；最近 dt-smoke（m1-dt）run 43225729729 綠燈
 - 下一步：A、P 完成 → merge `wp1/m1-tools-pilot` 進 `wp1/m1-tools`、整合 PROVENANCE → tests＋dt-smoke 在 m1-tools 綠燈 → 驗證整個 M1 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
 - 卡住／等決定：
   - V1 的問題修完需要重驗 DT 部分
-  - 已告知 C0：alert_mail.py 沒帶（M1／M2 用不到，C3 的 watch.yml 需要時再帶）；3 項「參考內部觀察的合成測試」由 C1 判斷可收，寫在 PR 說明供推翻
+  - 已告知 C0：alert_mail.py 沒帶（PROVENANCE 已標「C3 視需要帶回」）；3 項「參考內部觀察的合成測試」C0 拿去問使用者；在那之前照 C1 判斷先做（kernel/Image 依據改用公開 BSP）
+  - M1 合併前本機 hook 不掃壓縮檔：改了 *.xz 等要手動跑新版 public-check
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
