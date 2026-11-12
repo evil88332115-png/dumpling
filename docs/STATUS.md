@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 16:04 -0500（C0）
+最後更新：2026-11-13 05:09 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -93,8 +93,8 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：WP7 第一階段完成；CRA 開源調查完成；M1 已 merge 進 `wp7/platform-samples`（只在自己的 worktree），已讀 tools/ 與 pipeline/ 結構。等 C1 的 M2
-- 分支／PR／commit：`wp7/platform-samples`（最後 commit 868f064）、`wp7/cra-survey`（最後 commit 0ac8e30），兩支都已 merge main cd62514（D-028 反向規則下 public-check 通過；兩支都沒有二進位檔）；PR 都尚未開（D-020）
+- 目前在做：D-032 的 PLAN 修改提案已完成並推送（C0 指派，不開 PR）；轉接器等 C1 的 M2 P 軌
+- 分支／PR／commit：`wp7/platform-samples`（最後 commit 868f064）、`wp7/cra-survey`（最後 commit 122042c：D-032 的 PLAN 修改提案 `docs/references/cra-plan-proposal.md`，C0 會併進文件批次），兩支都已 merge main cd62514（D-028 反向規則下 public-check 通過；兩支都沒有二進位檔）；PR 都尚未開（D-020）
 - 代理：無執行中（先前研究代理 1 個已完成）
 - CI：無；本機背景工作：無
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單（Raspberry Pi、Radxa ROCK 5B、Debian 13＋OMV、TrueNAS 只研究）；`docs/references/cra-github-survey.md`
