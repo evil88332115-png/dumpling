@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 11:53 -0500（C1）
+最後更新：2026-11-12 11:58 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -25,15 +25,16 @@
   - `wp1/m2`：M2 整合分支，fdabd22（main cd62514＋P 軌＋gpu-firmware 公告空對照表）；子分支做完併進來；M2 完成後開一個 PR（D-020）
   - `wp1/m2-layers`：L 軌（從 wp1/m2 dbb7263 開）
   - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
-  - `wp1/m2-spike`：試驗分支（不合併）
+  - `wp1/m2-jetson`：J 軌（從 wp1/m2 fdabd22 開）
+  - `wp1/m2-spike`：試驗分支（4b8b7b8，不合併；量測在 `docs/m2-spike-results.md`），worktree 已移除
   - M1 的 worktree 與子分支（m1-dt、m1-fix、m1-tools-pilot、m1-tools）已清掉
 - 代理：
-  - 寫程式 S（M2 試驗）：`wp1/m2-spike`，`.github/workflows/m2-spike.yml` 量測 arm runner 清理、L4T 下載＋快取、原生編譯核心＋樹外模組；Sonnet 5.5／high；進行中（build run 43246860803）
+  - 寫程式 S（M2 試驗）：完成。arm runner 單一 job 約 36 分鐘原生編完核心＋全部樹外模組（nvbuild.sh，make -j4），磁碟峰值約 8 GiB、RAM 約 3 GiB；run 43242393210（清理）、43246860803／43254234938（編譯＋傳檔）
   - 寫程式 P（平台介面與開案範本）：完成，CI run 43256946338 綠燈。契約見 `docs/PLATFORM-INTERFACE.md`：`pipeline/platform.sh <validate|fetch|build|assemble|scan|raw-sectors> <專案資料夾> <版本>`，結束碼 OK 0／FAIL 1／GAP 3／NOT_RUN 4／用法 64；project.yml 的 `os_responsibility: ours|customer|upstream-vendor`；sources.yml 是 `releases.<版本>.files[]`（gap、sha1、commit＋repo）；platform.yml 的 `layers`（bsp 套件名稱清單、host-tool 路徑、default os）；`pipeline/lib/project_config.py` 的 `classify_package`／`classify_path`；fetch_verify.py 簽名同 firmware_fetch；scan-flash-package.sh 改成明確 `--platform`、沒給就 GAP。待確認見該文件第 8 節（r39.2.0 public_sources.tbz2 的 sha256 尚未記錄＝gap）
   - 寫程式 L（依層分開）：`wp1/m2-layers`；分層模組（套件名稱／路徑／own_software → bsp、host-tool、os、unknown）、cra_report／report_package 加「層」欄位、P1 判斷表只放 bsp（os_responsibility=ours 時含 os；沒給時 GAP＋保守）、host-tool 不進漏洞清單、SBOM 依層拆成兩個 DT 專案、Jetson fixture 各層數量當標準答案起點；Sonnet 5.5／high；進行中
-  - 預定 J（Jetson build／assemble／scan、release.yml、dev.yml、sboms/、patch 版）：依 S 的結果決定 job 拆法
+  - 寫程式 J（Jetson build／assemble／scan、release.yml、dev.yml、patch 版、標準答案測試）：`wp1/m2-jetson`；Sonnet 5.5／high；進行中。手動觸發只建 draft Release，測完刪 draft；不建 git tag
 - CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
-- 下一步：S 回報 → 寫進 M2 設計備忘、決定 J 的 job 拆法 → 開 J（Jetson build／assemble／scan、dev.yml、release.yml、sboms/、patch 版）→ L、J 併入 wp1/m2 → 驗證 → PR
+- 下一步：L、J 完成 → 併入 wp1/m2 → 整合分層（J 的 scan 呼叫 L 的拆分工具）→ 兩個版本 release.yml（draft）全程跑通 → 驗證 → PR → 通知 C0（正式 tag 由 C0 問使用者）
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
@@ -43,7 +44,10 @@
   - 共用下載核對：P 新增 `pipeline/lib/fetch_verify.py`（行為與簽名同 firmware_fetch.py）；M2 合併後由 C2 把 firmware_fetch.py 改成 import（C0 會通知 C2）
   - D-028：看不到內容的二進位檔要登記在 `ci/public-binary-allow.txt`（路徑＋sha256＋原因）；M2 的二進位測資盡量當場產生
   - GitHub 動態封存檔：以 commit SHA 為準，sha256 不符時 clone＋checkout 再核對或標 GAP，不自動接受新的 sha256（D-025、D-027）
-  - D-023～D-028 在 PR #13（`wp0/docs-batch-2`），合併中
+  - **試驗結果（D-029，以實測為準）**：runner `/` 145 GiB，清理前可用 arm 106 GiB、x64 86 GiB（不用清理）；`public_sources.tbz2` 沒有 NVIDIA 公布的整包雜湊——整包 SHA-256 寫「首次下載記錄（TOFU）」，元件 SHA-1 對 NVIDIA `public_sources_sha.txt`；核心建置不可重現——建置紀錄與刷機包的核心要同一次編譯
+  - J 的 job 拆法：build（arm，約 40 分鐘）→ artifact（BuildRecord 約 169 MB＋交付與紀錄約 152 MB，compression 0、retention 1 天）→ scan（arm，重新下載 BSP／rootfs 約 32 秒，比 cache 快）→ release（只有它 contents: write）
+  - **SBOM 存放（D-029）**：不提交 `sboms/`，Release 是正式來源；附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`（project、version、tag、status、platform、os_responsibility、commit、built_at、workflow_run）；開發版發到滾動 pre-release `dev/<專案>`（只在 main 或 dev/** 發佈）
+  - 新 workflow 不在預設分支時 `gh workflow run <檔名>` 回 404：先用一次 push 觸發登錄，之後改回（PR 裡不留 push 觸發）
 - 對外介面約定（改之前先通知對方）：
   - C2 依賴 `tools/cra/uefi_image.py` 的內部名稱：`Scan`（子類別覆寫 `scan_bytes(data, module)` 接 GOP／VBT／legacy VBIOS）、`parse_fvs(data, sc, depth)`、`Stop`、`MAX_*` 常數（C2 有契約測試）
   - C2 依賴 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（路徑與檔名；`wp1/m2` fdabd22 新增的空表，M2 合併後生效；C2 在檔不存在時印 GAP）
