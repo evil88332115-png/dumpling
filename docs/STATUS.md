@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:39 -0500（C2）
+最後更新：2026-11-12 08:45 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -44,21 +44,23 @@
 - 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
 - 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX），main 4700739
 - 分支（M3 時整合成一個 PR）：
-  - `wp3/coreboot-cbfs` b71b10e：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分。手動 CI run 43228476529 綠燈。Dasharo：元件 7→16，coreboot `protectli_vault_jsl_v0.9.2`／add9d7206e30／Dasharo v1.2.0、FSP 9.0.123.32＋9.2.123.32、VBT 1.00（BDB 2.28）、edk2 payload purl（完整 40 碼 commit）
-  - `wp3/ami-pfat` e575d4e：AMI PFAT 解封裝＋fetch 測試補強＋run.d venv 快取。CI run 43228597744、firmware run 43228603247 綠燈。NUC：21 檔 29 block、AMI、微碼 2 份（000806C1/0x80 rev 0xBE 與 release notes 相符）；**CAP 只更新 BIOS 區域，沒有 ME**；組回映像是依封裝順序串接，不是 SPI 位址對應
+  - **`wp3/m3` e5be2ab：整合分支**＝coreboot-cbfs＋ami-pfat（衝突已解、模組載入統一成 load_sibling）。本機 tests/run.sh 232 passed、Dasharo 結果不變；手動 CI tests run 43230179222、firmware run 43230187065
+  - `wp3/coreboot-cbfs` b71b10e（已併入 m3）：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分。手動 CI run 43228476529 綠燈。Dasharo：元件 7→16，coreboot `protectli_vault_jsl_v0.9.2`／add9d7206e30／Dasharo v1.2.0、FSP 9.0.123.32＋9.2.123.32、VBT 1.00（BDB 2.28）、edk2 payload purl（完整 40 碼 commit）
+  - `wp3/ami-pfat` 42e9bc0（已併入 m3）：AMI PFAT 解封裝＋fetch 測試補強＋run.d venv 快取。CI run 43228597744、firmware run 43228603247 綠燈。NUC：21 檔 29 block、AMI、微碼 2 份（000806C1/0x80 rev 0xBE 與 release notes 相符）；**CAP 只更新 BIOS 區域，沒有 ME**；組回映像是依封裝順序串接，不是 SPI 位址對應
+  - `wp3/firmware-expect`（從 m3 開出）：firmware workflow 對真實樣本跑 firmware-bios.sh＋比對 expected（`pipeline/firmware-expect.py`），附「改錯 expected 會紅」的證明 run
   - `wp4/vbios`（從 b71b10e 開出，worktree `$AGENT_TMP/dumpling-wt-c2-vbios`）：NVIDIA 更新工具是否含 vBIOS、合成獨立 vBIOS、Intel legacy VBIOS／GOP 版本讀法、VBT 解析共用模組
 - M3 剩下要做的（等 C1 M1，PR #9 目前 draft、CI 紅）：
   - BIOS 成品端 UEFI 解開：用 `tools/cra/uefi_image.py`（D-016）→ 接 Intel GOP／VBT（NUC 的 GOP 在主要 FV 的 LZMA 裡，VBT 在 FV_BB_AFTER_MEMORY_WRAPPER）
   - NVIDIA gpu-firmware 公告比對：用 C1 的 `tools/pilot/lib/nvidia_bulletins.py`，沒對到標 NOT_ASSESSED
   - 上傳臨時 DT＋Grype（C1 的 DT 工具；C0：排在 BIOS／vBIOS 之後）；firmware workflow 對 expected 的 CI 驗收；供應商 SBOM 匯入
-  - firmware.yml 的 `| tee` 沒有 pipefail（修正在 `wp3/ami-pfat`，附「sha256 故意不符會變紅」的 run 連結）
+  - ✅ firmware.yml 的 `| tee` pipefail 已修（42e9bc0，`defaults: run: shell: bash`）：正常 run 43229479139 綠、sha256 故意不符 run 43229520867 紅（暫時分支已刪）
 - 代理：
-  - 代理 D（寫程式，Sonnet 5.5 high）：`wp3/ami-pfat` 加修 firmware.yml pipefail＋紅燈證明 run，狀態：進行中
+  - 代理 F（寫程式，Sonnet 5.5 medium）：`wp3/firmware-expect`，狀態：進行中
   - 代理 E（寫程式，Sonnet 5.5 high）：`wp4/vbios`，狀態：進行中
   - 預驗代理（驗證，Sonnet 5.5 high）：預驗 `wp3/coreboot-cbfs` b71b10e，狀態：進行中；之後預驗 `wp3/ami-pfat`
-  - （已完成：代理 A、B、C，PR #7 驗證代理；PR #8 由 C0 驗證）
+  - （已完成：代理 A、B、C、D，PR #7 驗證代理；PR #8 由 C0 驗證）
 - CI：見上面各分支 run
-- 下一步：預驗 cbfs → 預驗 pfat → 整合三條分支成 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
+- 下一步：預驗 cbfs（進行中）→ 預驗 pfat；代理 E、F 完成後併入 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
 - 卡住／等決定：UEFI 解開、GOP、公告比對、DT 上傳等 C1 M1。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`（約 65 MB）、`dumpling-tmp-c2-pfat`（空的）被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
