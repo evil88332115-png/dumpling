@@ -24,7 +24,7 @@
 | `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣 |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
-| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：說明文字：內部主機名稱改成「本機」（1 行） |
+| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：內部主機名稱改成「本機」（1 行） |
 | `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/exploited_watch.py` | `scripts/cra/exploited_watch.py` | 25fa89a | 路徑調整 11 處、清理 2 行（其他 2）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
@@ -57,7 +57,7 @@
 | `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_distro.py` | `scripts/cra/tests/test_cra_distro.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/cra/tests/test_cra_euvd.py` | `scripts/cra/tests/test_cra_euvd.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行：讀 cra/README.md 的文件測試（README 沒帶）改成只保留 `KERNEL_NET_*` 常數斷言（`test_kernel_network_staging_list_constants`）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（皆為 CLAUDE.md 字樣）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
 | `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明；遮蔽路徑測試的輸入改用中性的 runner 路徑（不沿用 sca-center 自架 runner 的目錄結構），斷言意義不變；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -95,7 +95,7 @@
 | `tools/cra/tests/test_upstream_baseline.py` | `scripts/cra/tests/test_upstream_baseline.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3） |
 | `tools/cra/tests/test_vex_evidence.py` | `scripts/cra/tests/test_vex_evidence.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_vex_export.py` | `scripts/cra/tests/test_vex_export.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、CycloneDX 1.6 驗證改用 cdx_validator；OpenVEX schema 改讀 tests/data/openvex/（不再連網取得，也不再 skip）；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行、刪 2 個用到 csaf_advisory.py 的測試；移除對 test_csaf_advisory 的 import；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行：刪 1 個用到 csaf_advisory.py 的測試，另 1 個只刪 CSAF 那一半（CDX／OpenVEX 那一半保留為 `test_legacy_responses_keep_cdx_and_openvex`）；移除對 test_csaf_advisory 的 import；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_vex_rules.py` | `scripts/cra/tests/test_vex_rules.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、同 test_vex_export.py：cdx_validator＋tests/data/openvex/ |
 | `tools/cra/tests/test_vex_u1_flag.py` | `scripts/cra/tests/test_vex_u1_flag.py` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_vex_u2.py` | `scripts/cra/tests/test_vex_u2.py` | 25fa89a | 原樣 |
@@ -298,6 +298,9 @@
 | `kernel_boot.py`／`kernel_config.py`／`scan-flash-package.sh`／`pilot/README.md` 的「預設用 `kernel/Image`」 | 原本的依據是內部的板子實測。**已改成公開 BSP 的依據**（已下載 `Jetson_Linux_R39.2.1_aarch64.tbz2`，sha256 `2e561908…` 與 `tools/demo/jetson.sh` 寫死的值相符，2026-11-12 逐項核對）：`Linux_for_Tegra/apply_binaries.sh` 呼叫 `Linux_for_Tegra/nv_tools/scripts/nv_apply_kernel_files.sh`，該腳本第 41–44 行把 `kernel/Image` 以 `install … "${ROOTFS_DIR}/boot/Image"` 裝成 rootfs 的 `/boot/Image`；`Linux_for_Tegra/bootloader/extlinux.conf` 的 `LINUX /boot/Image`。判定邏輯沒改；UEFI 開機模式可改，所以說明仍寫「有板子的 `uname -v` 時以它為準」 | 公開（NVIDIA 公開 BSP 的檔案） |
 | `tools/cra/data/support-lifecycle.json`、`vex-rules.example.json`、`config.example.json`、`company.example.json`、`config.schema.json`、`templates/*.md` | 手寫的範例與範本 | 合成 |
 | `tools/cra/vendor-watch.example.json` | 手寫範例（`deploy/exploited-watch/vendor-watch.example.json`） | 合成 |
+| `tools/cra/tests/data/cyclonedx-1.6.1/`、`cyclonedx-1.5/`、`openvex/` | CycloneDX 與 OpenVEX 官方 JSON schema（來源網址與 SHA-256 見各資料夾的 `README.md`；1.6.1 由 C2 依 D-017 建立） | 公開 |
+| `tests/fixtures/sbom/smoke.cdx.json`、`smoke.expected.json` | dt-smoke 用的手寫 CycloneDX（jinja2 2.10、lodash 4.17.15、Ubuntu openssl deb）與預期值，選擇理由見 `tests/fixtures/sbom/README.md` | 合成（公開套件） |
+| `tests/run.d/c1-public-check.sh` 的壓縮測資 | 測試執行時在暫存 repo 當場產生，不進 git | 合成 |
 
 **已移除的資料檔**：`tools/pilot/tests/data/euvd-dt-enisa-golden.json`（唯一使用它的 `test_euvd_dt_feed.py` 測的是 `deploy/` 的包裝腳本，沒有帶進來，所以這個檔案成了沒人用的孤兒；內容本身是公開 CVE 的小型 EUVD 格式資料，不是內部來源）。
 
