@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:32 -0500（C2）
+最後更新：2026-11-12 08:33 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -21,18 +21,21 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-- 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；依 D-020（做完里程碑才開 PR）M1 完成後一個 PR
+- 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；D-020：M1 完成後一個 PR（#9 轉正式）
 - 分支／PR／commit：
-  - `wp1/m1-tools`：工具複製＋PROVENANCE＋`tests/run.d/c1-tools.sh`；PR #9（draft，M1 完成後轉正式）；代理 A 進行中，會把 `wp1/m1-dt` 併進來
-  - `wp1/m1-dt`：臨時 DT（`pipeline/dt-ephemeral.sh`、`dt-compose.yaml`、`dt-verify.py`）＋測試 SBOM＋`dt-smoke.yml`；5df9d3b（ENISA 改選用、deb 下限 1）；PR #6 已關（D-020）
+  - `wp1/m1-tools`：bd7fa1b（tools/ 全部初步清理完、PROVENANCE C1 節、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`；已併入 `wp1/m1-dt`）；PR #9（draft）
+  - `wp1/m1-tools-pilot`：從 bd7fa1b 開，pilot／demo／mirror／wizard／e2e 的收尾，做完由 C1 merge 回 `wp1/m1-tools`
+  - `wp1/m1-dt`：62107c1（臨時 DT，已併入 m1-tools；PR #6 已關）
   - 來源：sca-center 25fa89a
 - 代理：
-  - 寫程式 A：工具清理複製（`wp1/m1-tools`），Sonnet 5.5／high，進行中；追加：併入 m1-dt、準備逐檔對照表與資料來源表、剔除從內部資料產生的測試資料
-  - 寫程式 B：臨時 DT（`wp1/m1-dt`），Sonnet 5.5／medium，完成（dt-smoke run 43223829151 綠燈）
-  - 驗證：尚未開（A 完成、sca-scan --sbom 實跑後開）
-- CI：dt-smoke 重跑中（`gh run list --branch wp1/m1-dt --workflow dt-smoke.yml`）；之後一律 `gh workflow run <wf> --ref <分支>` 手動觸發
-- 下一步：A 完成 → `gh workflow run dt-smoke.yml --ref wp1/m1-tools`（用 sca-scan --sbom 上傳）＋tests → 開驗證代理 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
-- 卡住／等決定：無（PR #8 已合併、D-018 規則已修）
+  - 寫程式 A：`wp1/m1-tools`，範圍縮為 tools/cra、vexconv、sbomgate、provenance-check、c1-tools.sh、cra fixtures；Sonnet 5.5／high；進行中
+  - 寫程式 P：`wp1/m1-tools-pilot`，tools/pilot、demo、mirror、wizard、e2e；修失敗測試、資料來源審查（內部資料產生的剔除）、sca-scan 缺 scio_prep 時 NOT_RUN、wizard 改用目前 HEAD 取工具、dt-smoke 用 `sca-scan --sbom` 上傳；Sonnet 5.5／high；進行中
+  - 驗證 V1：`wp1/m1-dt`（62107c1）臨時 DT 部分，結論留 PR #9；Sonnet 5.5／medium；進行中
+  - 寫程式 B（臨時 DT）：完成
+  - C0 另派一個預審代理看 `wp1/m1-tools` 已推送內容（資料來源、清理、範圍），結論留 #9
+- CI：手動觸發（`gh workflow run <wf> --ref <分支>`）；最近 dt-smoke（m1-dt）run 43225729729 綠燈
+- 下一步：A、P 完成 → merge `wp1/m1-tools-pilot` 進 `wp1/m1-tools`、整合 PROVENANCE → tests＋dt-smoke 在 m1-tools 綠燈 → 驗證整個 M1 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
+- 卡住／等決定：無
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
