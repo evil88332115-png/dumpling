@@ -1,0 +1,41 @@
+name: firmware
+
+on:
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - 'pipeline/firmware-fetch.sh'
+      - 'pipeline/lib/firmware_fetch.py'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware-fetch:
+    name: firmware-fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 確認 PyYAML 可用
+        run: python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
+      - name: 下載全部樣本並核對 sha256／大小
+        run: |
+          pipeline/firmware-fetch.sh firmware/*/*/firmware.yml --out "$RUNNER_TEMP/firmware-dl" | tee "$RUNNER_TEMP/fetch.log"
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo '### firmware-fetch'
+            echo '```'
+            cut -f2- "$RUNNER_TEMP/fetch.log" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
