@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:49 +0800（C4）
+最後更新：2026-11-12 09:51 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -33,10 +33,11 @@
   - 寫程式 P（pilot／demo／mirror／wizard／e2e、dt-smoke 整合、DT 加固）：完成；pilot 分支 tests run 43237031501（c1-tools 2918 passed／0 failed／NOT_RUN 0）、dt-smoke run 43237039925 綠燈；wait=0 失敗會變紅的證明 run 43231324313
   - 寫程式 B（臨時 DT）：完成
   - 驗證 V1（m1-dt）：不通過（pipefail）→ P 已修，併入 V2 重驗
+  - 寫程式 S（M2 試驗，使用者同意、C0 轉達）：分支 `wp1/m2-spike`（從 2555a66 開，**不合併、不開 PR**），`.github/workflows/m2-spike.yml`（只有 workflow_dispatch）量測 arm runner 磁碟清理、L4T BSP／原始碼下載＋sha256＋actions/cache、原生編譯核心＋樹外模組；結果放分支的 `docs/m2-spike-results.md`，C1 摘要寫進下面的 M2 設計備忘；Sonnet 5.5／high；進行中
   - 驗證 V2：M1 全部（2555a66），Sonnet 5.5／high，進行中；結論留 PR #9（第一行「驗證：通過／不通過（M1 全部，2555a66）」）
 - CI：`wp1/m1-tools` 2555a66：tests run 43239253974、dt-smoke run 43239262833（進行中）；之前 e874441 的 tests：bubblewrap OK、NOT_RUN 0（pilot 修正併入前 37 failed）
 - 下一步：V2 通過＋兩個 run 綠燈 → #9 轉正式 PR（說明附逐檔對照、資料來源表，引用 PROVENANCE）→ 通知 C0、C2（C2 等臨時 DT）→ M1 合併後開 M2
-- M2 設計備忘（C0 轉達，C4 的平台研究）：
+- M2 設計備忘（C0 轉達，C4 的平台研究；試驗結果待 S 回報後補）：
   - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
   - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
   - C4 平台研究：`wp7/platform-samples` 754f7f3 的 `docs/platforms-research.md`（M2 開工前讀）
