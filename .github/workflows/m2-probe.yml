@@ -21,11 +21,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          echo "== GET releases"; gh api "repos/$GITHUB_REPOSITORY/releases" --jq 'length'; echo "rc=$?"
-          echo "== GET releases --paginate"; gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[]|select(.draft)|.tag_name'; echo "rc=$?"
-          echo "== create draft"; echo hi > a.txt
-          gh release create "m2-probe/test" a.txt --draft --target "$GITHUB_SHA" --title probe --notes probe --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[]|select(.draft and .tag_name=="m2-probe/test")|.id'); do echo "delete $id"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; echo "rc=$?"; done
+          T="orin-nano-demo/v39.2.1-demo1"
+          echo hi > a.txt
+          echo "== A: list with tag filter"; gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$T\") | .id"; echo "rc=$?"
+          echo "== B: create (tag with slash, ascii label)"; gh release create "$T" "a.txt#plain" --draft --target "$GITHUB_SHA" --title probe --notes probe --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
+          echo "== C: create (chinese label, notes-file)"; echo "# n" > n.md
+          gh release create "$T" "a.txt#漏洞清單.xlsx" --draft --target "$GITHUB_SHA" --title "probe（手動觸發的草稿）" --notes-file n.md --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
+          echo "== D: view by tag"; gh release view "$T" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft; echo "rc=$?"
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$T\") | .id"); do echo "delete $id"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; echo "rc=$?"; done
   patchprobe:
     if: false
     runs-on: ubuntu-24.04
