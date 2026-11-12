@@ -103,6 +103,9 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 - TF-A BL31／OP-TEE：`tee_bundled.py` 能不能從 rkbin 成品讀出版本與內建 Mbed TLS → 未驗證（NOT_ASSESSED）。BL31 是閉源成品 → 至少版本與雜湊要列，安全公告比對 **GAP**。
 - DDR 初始化／miniloader（`rk3588_ddr_*.bin`、`rk3588_spl_*`、`rk3588_usbplug_*`）：閉源、沒有安全公告 → **GAP**（PLAN 已指定）。
 - `bootloader_coverage.py` 要加 `--platform rockchip` 的分類（目前是整體 NOT_ASSESSED）。
+- **注意（M1 合併後讀 `tools/demo/scan-flash-package.sh` 發現）**：`raw-disk-img*` 一律傳 `--platform raspberrypi`（第 414 行附近）。
+  Radxa 的 GPT 磁碟映像若直接丟進去，開機程式分類會被當成 Raspberry Pi（找不到 GPU 韌體等）→ 結果錯。平台必須由專案設定明確指定，
+  不能從映像格式推；M2 的平台介面要把 `--platform` 當輸入。`rpi_img.py` 能不能正確讀 Radxa 映像的分割區：未實測（NOT_RUN）。
 
 **原始碼包**
 - `radxa/kernel`、`radxa/u-boot` 的原始碼用 GitHub 依 commit 產生的封存檔。**GitHub 動態產生的封存檔 sha256 可能變動**（C2 的 Dasharo 樣本有同樣註記）；
