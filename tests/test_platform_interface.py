@@ -75,6 +75,35 @@ class FetchVerify(Tmp):
         self.assertTrue(ok)
         self.assertEqual(d.calls, [])
 
+    def test_sha1_match_is_checked_by_fetch_one_itself(self):
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1=hashlib.sha1(b"hello").hexdigest()), self.tmp, d)
+        self.assertTrue(ok, msg)
+        self.assertIn("SHA-1", msg)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "a.bin")))
+
+    def test_sha1_mismatch_fails_like_a_sha256_mismatch(self):
+        for kw in ({"sha1": "0" * 40}, {"sha256": sha(b"x")}):       # sha1 不符與 sha256 不符：同樣失敗、同樣不留檔案（正式檔與暫存檔都沒有）
+            tmp = tempfile.mkdtemp(prefix="dumpling-sha1-")
+            self.addCleanup(shutil.rmtree, tmp, True)
+            ok, msg = fv.fetch_one(self.entry(**kw), tmp, self.dl(b"hello"))
+            self.assertFalse(ok, kw)
+            self.assertEqual(os.listdir(tmp), [], kw)
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, self.dl(b"hello"))
+        self.assertIn("sha1 不符", msg)
+
+    def test_no_sha1_is_fine(self):
+        ok, msg = fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        self.assertTrue(ok, msg)
+        self.assertNotIn("SHA-1", msg)
+
+    def test_existing_file_with_wrong_sha1_is_downloaded_again(self):
+        fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, d)      # 已存在的檔案 sha256 相符、sha1 不符：不信任，重新下載後仍不符 → 失敗
+        self.assertFalse(ok)
+        self.assertEqual(len(d.calls), 1)
+
     def test_sha_mismatch(self):
         ok, msg = fv.fetch_one(self.entry(sha256=sha(b"x")), self.tmp, self.dl(b"hello"))
         self.assertFalse(ok)

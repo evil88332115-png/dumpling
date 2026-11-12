@@ -7,7 +7,7 @@
 - 有 gap 的檔案不下載，回報 GAP（沒有可核對的雜湊，不自動接受第一次看到的雜湊）。
 - sha256 不符一律不接受。若檔案有 commit（GitHub 動態封存檔，以 commit SHA 為準），改用 git clone 取那個 commit
   並核對 `git rev-parse HEAD`，工作樹放在 <下載資料夾>/<name>.checkout；失敗就是 FAIL。
-- 有 sha1（例如 NVIDIA 公布的 SHA-1）時另外核對；不符就刪檔、FAIL。
+- 有 sha1（例如 NVIDIA 公布的 SHA-1）時由 fetch_verify.fetch_one 自己另外核對；不符就刪檔、FAIL（邏輯只在 fetch_verify，這裡不重複）。
 """
 import argparse
 import os
@@ -42,10 +42,6 @@ def git_clone_commit(repo, commit, dest):
     return None
 
 
-def _sha1_ok(path, want):
-    return fetch_verify._digest_of(path, "sha1") == want
-
-
 def fetch_entry(entry, dest_dir, downloader=fetch_verify.curl_download, cloner=git_clone_commit):
     """處理一個檔案；回傳 (狀態 OK|GAP|FAIL, 說明)。"""
     name = entry["name"]
@@ -62,9 +58,6 @@ def fetch_entry(entry, dest_dir, downloader=fetch_verify.curl_download, cloner=g
                 return "OK", "%s 封存檔 sha256 不符（未接受新雜湊），已改用 clone 核對 commit %s" % (name, entry["commit"])
             return "FAIL", "%s；clone 核對也失敗：%s" % (msg, err)
         return "FAIL", msg
-    if entry.get("sha1") and not _sha1_ok(os.path.join(dest_dir, name), entry["sha1"]):
-        os.unlink(os.path.join(dest_dir, name))
-        return "FAIL", "%s sha256 相符但 SHA-1 和記錄不同（已刪除）" % name
     return "OK", msg
 
 
