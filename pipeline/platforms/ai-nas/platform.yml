@@ -1,0 +1,38 @@
+# AI NAS（x86，Debian 系）平台設定。欄位說明見 docs/PLATFORM-INTERFACE.md，研究見 docs/platforms-research.md。
+# OS 層算不算我們的待辦由 project.yml 的 os_responsibility 決定（自有品牌是 ours），不寫在這裡（D-025）。
+schema: 1
+platform: ai-nas
+description: x86 的 Debian 系 NAS：Debian 官方雲端映像（tar.xz 裡的 disk.raw，GPT）＋ NAS 網頁介面與 App 的原始碼（OpenMediaVault，固定 commit）
+build:
+  mode: none               # 不編譯；Debian 的核心與套件用官方成品
+raw_sectors:
+  enabled: false           # x86 的開機程式在 EFI 分割區（FAT）與 BIOS boot 分割區，不清點分割區外的磁區
+# 分層：x86 沒有板子專屬的 BSP。NAS 應用（OpenMediaVault）是我們的軟體：已安裝的 deb 依名稱歸 bsp；
+# 只從原始碼掃到的元件由 own_software 與 scan 步驟加的來源屬性標記。Debian 的核心與套件是 os。
+layers:
+  bsp:
+    packages:
+      - "openmediavault"
+      - "openmediavault-*"
+  os:
+    paths:
+      - "usr/lib/modules/*"
+      - "lib/modules/*"
+      - "boot/*"
+  default: os
+scan:
+  rootfs: rootfs
+project_defaults:
+  platform_version: Debian 13 trixie amd64
+  bsp_os_source: Debian 官方雲端映像（cloud.debian.org）＋ OpenMediaVault 原始碼（GitHub，固定 commit）
+  kernel_source: Debian 的 linux 原始碼包（snapshot.debian.org 的固定網址）
+  bootloader: Debian 的 GRUB／shim（EFI 分割區）；主機板 BIOS／UEFI 另外由韌體流程處理
+  own_software:
+    - openmediavault
+  interfaces:
+    - Ethernet
+    - 網頁管理介面（HTTP／HTTPS）
+    - SSH
+    - SMB／NFS 檔案分享
+    - USB
+  platform_params: {}

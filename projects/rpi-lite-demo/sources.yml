@@ -1,0 +1,56 @@
+# 公開示範資料（Raspberry Pi OS Lite（trixie，arm64；Raspberry Pi 3／4／5、Zero 2 W））：網址與 sha256 是 C4 實際下載核對的結果，來源見 docs/platforms-research.md。
+# role: metadata 的官方清單檔（2026-10-06-raspios-trixie-arm64-lite.sbom.xz、2026-10-06-raspios-trixie-arm64-lite.info）等 FILE_ROLES 支援 metadata 後補上。
+schema: 1
+releases:
+  v1.0.0-demo1:
+    platform_params:
+      upstream_release: '2026-10-06'
+      image: 2026-10-06-raspios-trixie-arm64-lite.img.xz
+    files:
+    - name: 2026-10-06-raspios-trixie-arm64-lite.img.xz
+      url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.img.xz
+      sha256: 483db18a48da399b5b7022ffae9a07bc6d99daab30e593aedac09b69ff422843
+      size: 550466056
+      role: image
+      version: '2026-10-06'
+      license_url: https://www.raspberrypi.com/software/operating-systems/
+      note: sha256 與官方 .img.xz.sha256 相同
+    - name: linux_6.18.50-1+rpt1.dsc
+      url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50-1+rpt1.dsc
+      sha256: 3d49184a38ee5c6dab095ef583c6397e3cb2149ceb102d58f81950969f03b252
+      size: 20229
+      role: source
+      version: 1:6.18.50-1+rpt1
+      license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+    - name: linux_6.18.50.orig.tar.xz
+      url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50.orig.tar.xz
+      sha256: d2fc041dab4e11d9645e3ba53be058faa52b8ce28a8a97c889bb2cacee170461
+      size: 154612024
+      role: source
+      version: 6.18.50
+      license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+      note: sha256 與 .dsc 的 Checksums-Sha256 相同
+    - name: linux_6.18.50-1+rpt1.debian.tar.xz
+      url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50-1+rpt1.debian.tar.xz
+      sha256: 98c2e147fda1eac197a221e6fb824e794c04830112d306f32c836433833e355e
+      size: 2513140
+      role: source
+      version: 1:6.18.50-1+rpt1
+      license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+      note: sha256 與 .dsc 的 Checksums-Sha256 相同
+    - name: raspberrypi-linux-stable_20260911.tar.gz
+      url: https://github.com/raspberrypi/linux/archive/refs/tags/stable_20260911.tar.gz
+      sha256: 5f1865774de3540137535802ac52c60b78227fa19d1254b781c3fe089677dceb
+      size: 257089471
+      role: source
+      version: stable_20260911（commit cff533aec2fa601846766b32ff57204e0a61bed7；Makefile 6.18.50）
+      license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+      note: GitHub 動態產生的封存檔，sha256 可能變動；跟上面 apt 原始碼包是否同一個 commit：NOT_ASSESSED
+    - name: raspi-firmware_1.20260915-1_all.deb
+      url: https://archive.raspberrypi.com/debian/pool/main/r/raspi-firmware/raspi-firmware_1.20260915-1_all.deb
+      sha256: 56b6f8792fb27bcc22f101a5a0d27af637e0d13e85dfc0fde5ff140abc929b0f
+      size: 13032414
+      role: package
+      version: 1:1.20260915-1
+      license_url: https://github.com/raspberrypi/firmware/blob/master/boot/LICENCE.broadcom
+      note: 閉源開機韌體（start*.elf、fixup*.dat、bootcode.bin）的官方原版，給映像內檔案的身分比對用；sha256 與 trixie arm64 Packages 索引相同

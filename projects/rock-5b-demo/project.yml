@@ -1,0 +1,18 @@
+# 開案資訊（《開案-CRA資訊表》的機器可讀版）。欄位說明見 docs/PLATFORM-INTERFACE.md。
+# 值是 "TO BE COMPLETED" 的欄位還沒填；status 改成 shipped 之前都要填完。
+schema: 1
+product_name: "ROCK 5B 示範"
+brand: "dumpling 公開示範"                       # 品牌或客戶
+company_role: "manufacturer"         # manufacturer｜supplier｜both
+markets: ["EU"]                   # 銷售市場
+platform: "rockchip"
+platform_version: "Rockchip RK3588 開發板（板子廠商的 Debian 系映像）" # 平台與版本
+bsp_os_source: "板子廠商在 GitHub Release 發行的 GPT 原始磁碟映像與其 apt 套件庫"       # BSP／OS 來源
+kernel_source: "Rockchip BSP 核心（板子廠商的 kernel repo，依 commit）"       # 核心來源
+bootloader: "原始磁區的 idbloader（DDR 初始化＋SPL，閉源成品）與 u-boot.itb（U-Boot＋TF-A BL31＋OP-TEE，rkbin 成品）"             # 開機程式
+own_software: []         # 自有軟體（沒有就留空清單 []）
+interfaces: ["Ethernet", "Wi-Fi", "Bluetooth", "USB", "HDMI", "SSH"]             # 對外介面
+support_until: "2031-12-31"       # 支援期限 YYYY-MM-DD
+status: "development"                     # development｜shipped
+# OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
+os_responsibility: "customer"
