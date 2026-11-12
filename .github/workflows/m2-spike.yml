@@ -5,6 +5,10 @@ name: m2-spike
 # 結果見 docs/m2-spike-results.md。
 
 on:
+  # 暫時：新 workflow 不在預設分支時 gh 找不到，先用一次 push 讓 GitHub 登錄（所有 job 在 push 時都因 inputs.stage 為空而略過），登錄後移除
+  push:
+    branches: [wp1/m2-spike]
+    paths: ['.github/workflows/m2-spike.yml']
   workflow_dispatch:
     inputs:
       stage:
