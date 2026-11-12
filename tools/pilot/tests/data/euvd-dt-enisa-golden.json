@@ -1,0 +1,46 @@
+[
+ {
+  "cveID": "CVE-2019-0001",
+  "dataOrigin": "enisaeu/CNW eukev.json only (not an eukev_kev entry in ENISA EUVD /api/kev/dump)",
+  "dateReported": "2025/01/17",
+  "euvdID": "EUVD-2019-0001",
+  "exploitationType": "unknown",
+  "shortDescription": "-"
+ },
+ {
+  "cveID": "CVE-2023-4911",
+  "dataOrigin": "ENISA EUVD /api/kev/dump + enisaeu/CNW eukev.json",
+  "dateReported": "2026/07/31",
+  "euvdDateAdded": "2023-11-21",
+  "euvdID": "EUVD-2023-54750",
+  "euvdSources": [
+   "cisa_kev",
+   "eukev_kev"
+  ],
+  "exploitationType": "ransomware",
+  "product": "glibc",
+  "shortDescription": "Buffer overflow in ld.so",
+  "vendorProject": "GNU"
+ },
+ {
+  "cveID": "CVE-2026-51001",
+  "dataOrigin": "ENISA EUVD /api/kev/dump",
+  "dateReported": "2026/10/20",
+  "euvdDateAdded": "2026-10-20",
+  "euvdID": "EUVD-2026-51001",
+  "euvdSources": [
+   "eukev_kev"
+  ],
+  "product": "Thymeleaf",
+  "vendorProject": "Thymeleaf"
+ },
+ {
+  "cveID": "CVE-2026-51002",
+  "dataOrigin": "ENISA EUVD /api/kev/dump",
+  "dateReported": "2026/10/25",
+  "euvdDateAdded": "2026-10-25",
+  "euvdSources": [
+   "eukev_kev"
+  ]
+ }
+]

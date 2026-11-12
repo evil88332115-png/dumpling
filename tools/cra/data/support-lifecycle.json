@@ -1,0 +1,197 @@
+{
+ "schema": "sca-center-support-lifecycle/1",
+ "$comment": "元件的維護期（支援期檢查 support_check.py 用）。每筆要有來源網址與查核日期（checked）；end 是 YYYY-MM，沒有公開資料時 null。查核日期超過 max_age_days 天時提醒重新查核。informational：只列出、不影響狀態（例如上游分支已停止，但實際維護由發行版或廠商負責）。families：SBOM 裡有這類元件、卻沒有任何（非 informational）項目對到時，結果是 NOT_ASSESSED 並寫出元件與版本。名稱 NVIDIA Jetson Linux 是刷機包掃描時 firmware_bom.py 加進產品 SBOM 的 L4T 元件。不放公司產品資料。",
+ "max_age_days": 180,
+ "families": [
+  {
+   "name": "operating system",
+   "match": {
+    "type": "operating-system"
+   }
+  },
+  {
+   "name": "NVIDIA Jetson Linux",
+   "match": {
+    "name_regex": "^(nvidia-l4t-core|NVIDIA Jetson Linux)$"
+   }
+  },
+  {
+   "name": "Linux kernel",
+   "match": {
+    "name_regex": "^(linux-kernel|nvidia-l4t-kernel|linux-image-(unsigned-)?[0-9].*)$"
+   }
+  }
+ ],
+ "entries": [
+  {
+   "id": "ubuntu-24.04",
+   "name": "Ubuntu 24.04 LTS",
+   "match": [
+    {
+     "type": "operating-system",
+     "name": "ubuntu",
+     "version_prefix": "24.04"
+    }
+   ],
+   "phases": [
+    {
+     "name": "standard security maintenance",
+     "end": "2029-05"
+    },
+    {
+     "name": "Expanded Security Maintenance (Ubuntu Pro)",
+     "end": "2034-04",
+     "requires": "Ubuntu Pro"
+    },
+    {
+     "name": "Legacy add-on",
+     "end": "2039-04",
+     "requires": "Ubuntu Pro Legacy add-on"
+    }
+   ],
+   "sources": [
+    "https://ubuntu.com/about/release-cycle",
+    "https://endoflife.date/ubuntu"
+   ],
+   "checked": "2026-11-03",
+   "note": "Ubuntu Pro phases build on each other: Legacy add-on requires Ubuntu Pro. Canonical's release-cycle page shows May 2034 (ESM) and May 2039 (Legacy); endoflife.date gives 2034-04-25 for ESM and has no Legacy date. April is used for both (one month earlier than Canonical's page for Legacy, a conservative choice without a separate source).",
+   "coverage": "Only packages from the Ubuntu main and restricted components, which Canonical maintains in the standard period. Packages from universe are maintained only with Ubuntu Pro (ESM-Apps); packages from other repositories (for example Docker, ROS or vendor apt repositories) are not maintained by Canonical and were not assessed here."
+  },
+  {
+   "id": "ubuntu-24.04-kernel-6.8",
+   "name": "Ubuntu 24.04 GA kernel 6.8 (linux-image generic/lowlatency, Canonical)",
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.8\\.0-[0-9]+-(generic|lowlatency)$",
+     "version_regex": "^6\\.8\\.0-[0-9]+\\.[0-9]+$"
+    }
+   ],
+   "phases": [
+    {
+     "name": "standard security maintenance",
+     "end": "2029-05"
+    },
+    {
+     "name": "Expanded Security Maintenance (Ubuntu Pro)",
+     "end": "2034-04",
+     "requires": "Ubuntu Pro"
+    }
+   ],
+   "sources": [
+    "https://ubuntu.com/kernel/lifecycle",
+    "https://endoflife.date/ubuntu"
+   ],
+   "checked": "2026-11-03",
+   "note": "Only the 24.04 GA kernel (versions without a '~' suffix; 22.04 HWE kernels such as 6.8.0-52.53~22.04.1 follow 22.04) and the generic/lowlatency flavours; other flavours (oem, aws, nvidia, nvidia-tegra) have their own lifecycle and are not in this table. ESM end: the earlier of Canonical's page (May 2034) and endoflife.date (2034-04-25) is used."
+  },
+  {
+   "id": "jetson-linux-r39",
+   "name": "NVIDIA Jetson Linux R39 (JetPack 7.2)",
+   "match": [
+    {
+     "name": "nvidia-l4t-core",
+     "version_prefix": "39."
+    },
+    {
+     "name": "NVIDIA Jetson Linux",
+     "version_prefix": "39."
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by NVIDIA",
+     "end": null
+    }
+   ],
+   "note": "NVIDIA has not published an end of maintenance for Jetson Linux R39 (release notes; the roadmap page is an image and was not checked). Precedent: maintenance of JetPack 4 and the corresponding Jetson Linux releases ended in November 2024.",
+   "sources": [
+    "https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2.1.md",
+    "https://developer.nvidia.com/embedded/develop/roadmap",
+    "https://ubuntu.com/blog/jetpack-4-eol"
+   ],
+   "checked": "2026-11-03"
+  },
+  {
+   "id": "jetson-linux-r38",
+   "name": "NVIDIA Jetson Linux R38 (JetPack 7.0, 7.1)",
+   "match": [
+    {
+     "name": "nvidia-l4t-core",
+     "version_prefix": "38."
+    },
+    {
+     "name": "NVIDIA Jetson Linux",
+     "version_prefix": "38."
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by NVIDIA",
+     "end": null
+    }
+   ],
+   "note": "NVIDIA has not published an end of maintenance for Jetson Linux R38 (release notes; the roadmap page is an image and was not checked).",
+   "sources": [
+    "https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.1.md",
+    "https://developer.nvidia.com/embedded/develop/roadmap"
+   ],
+   "checked": "2026-11-03"
+  },
+  {
+   "id": "linux-6.8-tegra",
+   "name": "NVIDIA Jetson kernel 6.8 (nvidia-l4t-kernel)",
+   "match": [
+    {
+     "name": "nvidia-l4t-kernel",
+     "version_prefix": "6.8."
+    },
+    {
+     "name": "linux-kernel",
+     "version_regex": "^6\\.8\\..*tegra"
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by NVIDIA as part of Jetson Linux",
+     "end": null
+    }
+   ],
+   "note": "Maintained by NVIDIA as part of Jetson Linux; no separate end date published. The upstream 6.8 stable branch has ended (see linux-6.8-upstream).",
+   "sources": [
+    "https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2.1.md"
+   ],
+   "checked": "2026-11-03"
+  },
+  {
+   "id": "linux-6.8-upstream",
+   "name": "Linux kernel 6.8 (upstream stable branch)",
+   "informational": true,
+   "match": [
+    {
+     "name": "nvidia-l4t-kernel",
+     "version_prefix": "6.8."
+    },
+    {
+     "name_regex": "^linux-image-6\\.8\\.",
+     "version_prefix": "6.8."
+    },
+    {
+     "name": "linux-kernel",
+     "version_prefix": "6.8."
+    }
+   ],
+   "phases": [
+    {
+     "name": "upstream stable maintenance",
+     "end": "2024-05"
+    }
+   ],
+   "note": "6.8 is not a longterm branch; 6.8.12 (2024-05-30) was the last upstream release. Security fixes after that depend on the kernel vendor (Canonical for Ubuntu kernels, NVIDIA for Jetson kernels).",
+   "sources": [
+    "https://lwn.net/Articles/976009",
+    "https://www.kernel.org/category/releases.html"
+   ],
+   "checked": "2026-11-03"
+  }
+ ]
+}

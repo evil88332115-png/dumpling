@@ -1,0 +1,77 @@
+{
+ "schema": 1,
+ "platform": "android",
+ "draft": true,
+ "note": "草稿：Android 映像（sparse、super、ext4、EROFS、boot image）；盤點階段。",
+ "inputs": [
+  {
+   "id": "flash_package",
+   "label": "刷機包（映像檔或 zip）",
+   "provider": "RD",
+   "required": true,
+   "kind": "flash_package",
+   "locate": {
+    "plan": "archive",
+    "companion": ".md5"
+   },
+   "affects": "沒有就無法掃描"
+  },
+  {
+   "id": "source_archive",
+   "label": "原始碼壓縮檔（核心、廠商修改）",
+   "provider": "RD",
+   "required": true,
+   "kind": "source_archive",
+   "locate": {
+    "plan": "source_archive",
+    "companion": ".md5"
+   },
+   "affects": "核心與廠商修改的原始碼比對不能做"
+  },
+  {
+   "id": "build_record",
+   "label": "核心建置紀錄",
+   "provider": "RD",
+   "required": true,
+   "kind": "build_record",
+   "locate": {
+    "plan": "build_record"
+   },
+   "affects": "核心判斷不了的一律當成受影響（路線 B）"
+  },
+  {
+   "id": "upstream_bsp",
+   "label": "AOSP／晶片廠 BSP 上游基準",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "upstream_bsp",
+   "locate": {
+    "manual": true
+   },
+   "affects": "與上游差異不明",
+   "note": "找不到就標 GAP"
+  },
+  {
+   "id": "vendor_bulletin",
+   "label": "Android 安全公告",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "vendor_bulletin",
+   "locate": {
+    "manual": true
+   },
+   "affects": "安全修補等級對應不明"
+  },
+  {
+   "id": "product_config",
+   "label": "產品設定包（CRA/Config，含 config.json）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "product_config",
+   "locate": {
+    "plan": "config"
+   },
+   "affects": "沒有就改套通用規則或不套規則，未評估的列較多"
+  }
+ ]
+}

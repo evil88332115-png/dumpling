@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sca-center/tools/cra/config.schema.json",
+  "title": "CRA 文件產生器的產品設定（<專案>/CRA/Config/config.json）",
+  "description": "cra_report.py 只實作這份 schema 用到的子集：type、required、properties、items、enum、pattern、minimum、maximum。自訂關鍵字 x-report=false 表示該段不是報告欄位（缺少時不標 TO BE COMPLETED）。報告欄位缺少或為空字串時，報告顯示 TO BE COMPLETED 並記在 summary.json 的 missing_fields。字串欄位標 string/array 的可以是一段文字或字串陣列（陣列輸出成清單）。",
+  "type": "object",
+  "required": ["schema_version", "manufacturer", "product"],
+  "properties": {
+    "$comment": {"type": "string", "x-report": false},
+    "schema_version": {"type": "integer", "enum": [1], "x-report": false},
+    "role": {"type": "string", "enum": ["manufacturer", "supplier"], "x-report": false,
+             "description": "公司在這個產品的角色（預設 manufacturer）。supplier：客戶用自己的品牌賣、客戶是製造商 [法務]；不產生 user-information.md 與 technical-documentation.md，另外產生 CRA/Reports/supplier-package/"},
+    "supplier": {
+      "type": "object", "x-report": false,
+      "description": "role 是 supplier 時的資料包欄位（handoff 分支 文件/供應商資料包規格.md 第 3 節）。空的欄位在資料包標 TO BE COMPLETED。客戶名稱只放產品的設定檔，不放 repo",
+      "properties": {
+        "customer": {"type": "object", "properties": {"name": {"type": "string", "description": "客戶（終端產品的製造商）名稱"}}},
+        "contract_reference": {"type": "string", "description": "供貨合約的編號或名稱"},
+        "security_update_delivery": {"type": "string", "description": "安全更新怎麼提供給客戶"},
+        "notification": {"type": "object", "properties": {
+          "exploited_hours": {"type": ["number", "string"], "minLength": 1, "minimum": 1, "maximum": 8760, "description": "被積極利用的漏洞，知悉後幾小時內通知客戶（公司決定 [法務]）。數字寫成 N hours；也可以寫一段文字（例如 as agreed in the contract），原文放進資料包。沒填時資料包寫 TO BE COMPLETED，不寫建議值"},
+          "other_days": {"type": ["number", "string"], "minLength": 1, "minimum": 1, "maximum": 3650, "description": "其他影響產品的漏洞，幾天內通知客戶（數字寫成 N days；也可以寫一段文字，例如 as agreed in the contract，原文放進資料包）"},
+          "channel": {"type": "string", "description": "通知管道"}}},
+        "integration": {"type": "object", "properties": {
+          "known_risks": {"type": "array", "items": {"type": "string"}, "description": "已知的風險與限制（Annex II 5）"},
+          "recommended_configuration": {"type": "array", "items": {"type": "string"}, "description": "建議的安全設定（依 Jetson 共用基準）"},
+          "manufacturer_responsibilities": {"type": "array", "items": {"type": "string"}, "description": "要由製造商做的事"}}},
+        "risks": {"type": "array", "description": "給客戶的風險摘要：我們這部分的風險、緩解措施、剩餘風險",
+                  "items": {"type": "object", "properties": {"risk": {"type": "string"}, "mitigation": {"type": "string"}, "residual": {"type": "string"}}}}
+      }
+    },
+    "manufacturer": {
+      "type": "object",
+      "description": "Annex II 第 1 項：製造商名稱、地址、聯絡方式",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "description": "名稱、註冊商號或註冊商標"},
+        "address": {"type": "string", "description": "郵寄地址"},
+        "email": {"type": "string", "description": "電子郵件或其他數位聯絡方式"},
+        "website": {"type": "string", "description": "網站（有的話）"}
+      }
+    },
+    "vulnerability_contact": {
+      "type": "object",
+      "description": "Annex II 第 2 項：弱點通報的單一聯絡窗口與協調揭露（CVD）政策",
+      "properties": {
+        "contact": {"type": "string", "description": "單一聯絡窗口（電子郵件、網址或表單）"},
+        "cvd_policy_url": {"type": "string", "description": "CVD 政策的網址"}
+      }
+    },
+    "product": {
+      "type": "object",
+      "description": "Annex II 第 3 項：產品名稱、類型與唯一識別資訊",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string", "description": "產品類型，例如 edge AI computer（硬體＋韌體＋作業系統映像）"},
+        "model": {"type": "string", "description": "型號"},
+        "version": {"type": "string", "description": "本次發行的版本（硬體版次與軟體版本）"},
+        "identification": {"type": ["string", "array"], "items": {"type": "string"}, "description": "其他可唯一識別產品的資訊（序號規則、映像 ID、標籤位置等）"},
+        "first_placing_on_market": {"type": "string", "x-report": false, "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", "description": "首次上市日（YYYY-MM-DD，選填）。只用在 vulnerability_policy.scheme exploitation 的出貨關卡：這個日期與報告產生的日期（UTC）較晚的那個和 2027-12-11（CRA 主要義務開始適用）比（上市是每一台各自算）；沒寫時用報告日；要是真的日期"}
+      }
+    },
+    "intended_use": {
+      "type": "object",
+      "description": "Annex II 第 4 項",
+      "properties": {
+        "purpose": {"type": "string", "description": "預期用途"},
+        "security_environment": {"type": ["string", "array"], "items": {"type": "string"}, "description": "製造商提供或假設的安全環境"},
+        "essential_functionalities": {"type": ["string", "array"], "items": {"type": "string"}},
+        "security_properties": {"type": ["string", "array"], "items": {"type": "string"}}
+      }
+    },
+    "foreseeable_risks": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Annex II 第 5 項：依預期用途使用或可合理預見的誤用下，可能導致重大資安風險的已知或可預見情況"},
+    "eu_declaration_of_conformity_url": {"type": "string", "description": "Annex II 第 6 項：EU 符合性聲明的網址（不適用時寫 Not applicable 並說明）"},
+    "support": {
+      "type": "object",
+      "description": "Annex II 第 7 項；第 13(19) 條要求支援期結束日至少寫到月與年",
+      "properties": {
+        "type": {"type": "string", "description": "提供的技術安全支援類型"},
+        "end_date": {"type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$", "description": "支援期結束（YYYY-MM）"},
+        "subscriptions": {"type": "array", "items": {"type": "string"}, "x-report": false,
+                          "description": "產品支援期內會一直有的付費維護（例如 \"Ubuntu Pro\"）；支援期檢查只把這些算進元件的維護期（tools/cra/data/support-lifecycle.json 的 requires）"}
+      }
+    },
+    "instructions": {
+      "type": "object",
+      "description": "Annex II 第 8 項：詳細說明或指向說明的網址",
+      "properties": {
+        "url": {"type": "string", "description": "完整使用說明的網址（有的話）"},
+        "secure_use": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(a) 初次啟用與整個使用期間的安全措施"},
+        "data_security_changes": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(b) 對產品的變更如何影響資料安全"},
+        "security_updates": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(c) 如何安裝安全更新"},
+        "decommissioning": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(d) 安全除役與使用者資料的安全移除"},
+        "disable_automatic_updates": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(e) 如何關閉預設啟用的自動安全更新"},
+        "integrator_information": {"type": ["string", "array"], "items": {"type": "string"}, "description": "8(f) 給整合者的資訊（產品會被整合進其他產品時）"}
+      }
+    },
+    "sbom": {
+      "type": "object",
+      "description": "Annex II 第 9 項（製造商決定提供 SBOM 給使用者時）",
+      "properties": {
+        "availability": {"type": "string", "description": "使用者可在哪裡取得 SBOM；決定不提供時寫明"},
+        "tools_scope_note": {"type": "boolean", "x-report": false,
+                             "description": "sbom.md 與技術文件寫一句範圍說明：隨原始碼交付的建置工具（建置環境容器映像、交叉工具鏈）與主機端刷機工具不裝在產品上，不在產品 SBOM、不掃描。沒寫時：刷機包掃描預設寫，其他掃描不寫"},
+        "component_type": {"type": "string", "x-report": false, "enum": ["application", "firmware", "device", "operating-system", "container", "platform"],
+                           "description": "產品 SBOM 主元件的 CycloneDX 類型（沒寫時映像是 firmware、其他是 application）"},
+        "flash_package_supplier": {"type": "object", "x-report": false, "required": ["name"],
+                                   "description": "刷機包是誰交給我們的（CycloneDX supplier）：刷機包掃描時加進產品 SBOM 的開機韌體、kernel 模組、MCU 韌體都用這個；沒寫時不填，sbom.md 標 TO BE COMPLETED",
+                                   "properties": {"name": {"type": "string"}, "url": {"type": "string"}, "email": {"type": "string"}}},
+        "vendor_domains": {"type": "array", "items": {"type": "string"}, "x-report": false,
+                           "description": "供應商（BSP、晶片廠）的信箱網域或網址（例如 \"vendor.example\"）：「沒有漏洞資料的套件」只印出這些網域、sbom.flash_package_supplier 與 manufacturer.email 的網域和 nvidia.com，其他維護者網域寫 (not shown)"},
+        "deliverable_firmware": {"type": "array", "items": {"type": "string"}, "x-report": false,
+                                 "description": "壓縮檔旁邊的交付檔中，要當成韌體元件加進 SBOM 的檔名樣式（fnmatch，不分大小寫，例如 \"*_MCU_*.zip\"）；檔名含 mcu、fw、firmware 的不用列"},
+        "own_software": {"type": "array", "x-report": false,
+                         "description": "產品自有軟體（腳本、小型程式、out-of-tree .ko）在 rootfs 裡的路徑或樣式：tools/cra/own_software.py 算雜湊，cra_report.py 以 pkg:generic 元件加進產品 SBOM（supplier＝manufacturer.name）。每筆是路徑字串，或 {path, name, version}。path 從 rootfs 的根算（開頭的 / 可省略），每一層可用 * ? [..]（不跨 /，不支援 **），不可含 ..；只照這份清單，不猜。列了但 rootfs 裡找不到 → GAP。version 只在這裡給或取自 .ko 的 modinfo，沒有就是版本未知（不從檔名猜）；name 只在這一筆剛好對到一個檔案時用。沒寫或空陣列 → 不做（輸出和以前相同）",
+                         "items": {"type": ["string", "object"], "required": ["path"],
+                                   "properties": {"path": {"type": "string", "description": "rootfs 裡的路徑或樣式，例如 /usr/bin/example-agent、/opt/example/bin/*、/lib/modules/*/extra/example_*.ko"},
+                                                  "name": {"type": "string", "description": "元件名稱（只在剛好對到一個檔案時用；沒寫用檔名，.ko 用 modinfo 的 name）"},
+                                                  "version": {"type": "string", "description": "版本（產品自己的版本號；沒寫時 .ko 用 modinfo 的 version，其他是版本未知）"}}}}
+      }
+    },
+    "csaf": {
+      "type": "object", "x-report": false,
+      "description": "修補公告（tools/cra/csaf_advisory.py，CSAF 2.0）的發布者資料；沒有時退回 manufacturer.name、manufacturer.website，再沒有就是 TO BE COMPLETED",
+      "properties": {
+        "publisher_name": {"type": "string", "description": "CSAF document.publisher.name"},
+        "publisher_namespace": {"type": "string", "description": "CSAF document.publisher.namespace（發布者的網址，https://…）"},
+        "tracking_id_prefix": {"type": "string", "description": "公告編號的前綴（例如 EXCO-SA-）；編號＝前綴＋產品名稱＋版本"}
+      }
+    },
+    "technical_documentation": {
+      "type": "object",
+      "description": "Annex VII（技術文件）裡工具無法自動產生、要由人提供的內容；缺少時 technical-documentation.md 顯示 TO BE COMPLETED 與負責人",
+      "properties": {
+        "software_versions": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 1(b)：會影響是否符合 Annex I 的軟體版本（映像、BSP、應用程式）"},
+        "hardware_illustrations": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 1(c)：硬體外觀、標示與內部配置的照片或圖示（檔名或文件編號）"},
+        "architecture": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 2(a)：設計與開發資訊、系統架構，以及軟體元件如何組合（文件編號或說明）"},
+        "secure_update_distribution": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 2(b)：安全派送更新的技術方案（簽章、傳輸、驗證）"},
+        "production_monitoring": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 2(c)：生產與監控流程，以及這些流程的驗證"},
+        "support_period_rationale": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 4：決定支援期間時考量的資訊（Article 13(8)）"},
+        "standards": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 5：採用的調和標準、共同規格或認證方案（全部或部分）；沒有採用時用什麼方法滿足 Annex I"},
+        "test_reports": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 6：這份漏洞掃描以外的測試報告（滲透測試、模糊測試等；檔名或文件編號）"},
+        "eu_declaration_of_conformity_copy": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VII 7：EU 符合性聲明副本的位置（檔名或文件編號）"}
+      }
+    },
+    "risk_assessment": {
+      "type": "object",
+      "description": "Article 13 的資安風險評估裡，工具無法自動產生、要由人提供的內容（risk-assessment.md 的骨架）；Annex I Part I (2)(a) 的漏洞清單由掃描結果自動產生",
+      "properties": {
+        "method": {"type": ["string", "array"], "items": {"type": "string"}, "description": "評估方法：等級、公式與門檻（例如可能性 × 影響）；CRA 沒有指定方法"},
+        "assets": {"type": ["string", "array"], "items": {"type": "string"}, "description": "要保護的資產（資料、功能、金鑰等）"},
+        "expected_use_period": {"type": "string", "description": "產品預期使用多久（和支援期間一起考量）"},
+        "attack_surface": {"type": ["string", "array"], "items": {"type": "string"}, "description": "架構與攻擊面：對外介面、通訊協定、實體埠、信任邊界"},
+        "risk_register": {"type": ["string", "array"], "items": {"type": "string"}, "description": "風險清單：威脅、可能性、影響、處理方式（或風險清單文件的位置）"},
+        "annex_i_applicability": {
+          "type": "object",
+          "x-report": false,
+          "description": "Annex I Part I (2) 的 (b)–(m) 逐項：applies（是否適用）、measures（怎麼做到）、justification（不適用的理由）；(a) 由漏洞清單處理。缺的項目顯示 TO BE COMPLETED",
+          "properties": {"b": {"$ref": "#/$defs/applicability"}, "c": {"$ref": "#/$defs/applicability"}, "d": {"$ref": "#/$defs/applicability"}, "e": {"$ref": "#/$defs/applicability"}, "f": {"$ref": "#/$defs/applicability"}, "g": {"$ref": "#/$defs/applicability"}, "h": {"$ref": "#/$defs/applicability"}, "i": {"$ref": "#/$defs/applicability"}, "j": {"$ref": "#/$defs/applicability"}, "k": {"$ref": "#/$defs/applicability"}, "l": {"$ref": "#/$defs/applicability"}, "m": {"$ref": "#/$defs/applicability"}}
+        },
+        "part_i_1_and_part_ii": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Article 13(3)：怎麼做到 Annex I Part I point (1)（依風險設計、開發、生產）與 Part II 的弱點處理要求"},
+        "residual_risk": {"type": ["string", "array"], "items": {"type": "string"}, "description": "剩餘風險與接受理由"},
+        "approval": {
+          "type": "object",
+          "properties": {
+            "owner": {"type": "string", "description": "核准人（姓名與職稱）"},
+            "date": {"type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", "description": "核准日期（YYYY-MM-DD）"}
+          }
+        },
+        "revision_history": {"type": ["string", "array"], "items": {"type": "string"}, "description": "修訂紀錄（日期、版本、變更內容）"}
+      }
+    },
+    "scan": {
+      "type": "object",
+      "x-report": false,
+      "description": "cra_report.py --run-scan（GitLab CI 範本）用的 sca-scan 參數",
+      "properties": {
+        "mode": {"type": "string", "enum": ["image", "dir", "sbom"]},
+        "target": {"type": "string", "description": "image：映像（建議 名稱@sha256:…）；dir、sbom：相對於專案根目錄的路徑（dir 預設 .）"},
+        "name": {"type": "string", "description": "DT 與 DejaCode 的專案名稱（預設 product.name）"},
+        "options": {"type": "array", "items": {"type": "string", "enum": ["--no-package-scan", "--no-files-scan", "--no-license"]}}
+      }
+    },
+    "vulnerability_policy": {
+      "type": "object",
+      "x-report": false,
+      "description": "弱點處理優先級（草案）。依序判斷：accepted → p1 → p2 → p3，第一個符合的生效。p1、p2 的條件任一符合即可（kev、epss_percentile_min、epss_probability_min、severities、cvss_min）；p3 是其他所有未處理的 finding。沒寫的鍵用 default。",
+      "default": {
+        "status": "DRAFT - to be decided by the manufacturer",
+        "severity_sources": ["vendor", "distro", "nvd"],
+        "tiers": {
+          "p1": {"label": "Immediate", "kev": true, "epss_percentile_min": 0.9,
+                 "action": "Mitigate or fix without undue delay; assess whether this is an actively exploited vulnerability that must be notified under CRA Article 14 (early warning within 24 hours)."},
+          "p2": {"label": "Next release", "severities": ["CRITICAL", "HIGH"],
+                 "action": "Fix in the next scheduled security update."},
+          "p3": {"label": "Track",
+                 "action": "Monitor; fix when an update is available or at the next convenient release."}
+        },
+        "accepted": {"label": "Not affected / accepted", "states": ["NOT_AFFECTED", "FALSE_POSITIVE"], "include_suppressed": true,
+                     "action": "Keep the justification, owner and date on record; re-assess when the component or the vulnerability data change."}
+      },
+      "properties": {
+        "status": {"type": "string"},
+        "scheme": {"type": "string", "enum": ["current", "exploitation"], "description": "分級方式。current（沒寫＝這個）：下面 tiers 的條件（KEV、EPSS、嚴重度、CVSS），行為和以前一樣。exploitation（依被利用狀態，主管核定前預設不用，待公司決定）：P1＝已被利用（KEV 任一來源、scan/euvd.json 標 exploited、CRA/Config/exploitation-evidence.json 的人工證據）而且沒有判定不受影響；P1 只有人判斷過不受影響（DT 分析變成的 VEX 陳述是 not_affected／false_positive，或具名的判定）才離開；P2＝沒有被利用的證據、但人判斷為可被利用（DT 分析 EXPLOITABLE 或具名的 VEX exploitable；批次規則的 exploitable 留在 P3）；P3＝其他。tiers 的條件（kev、epss_*、severities、cvss_min）不使用，label、action 照用。另外產生「出貨前要判斷的」小節（KEV 與其他被利用證據的列，加上對外服務清單 CRA/Config/exposed-services.json 上元件的列中 CVSS（各來源最高）≥ 7 且 AV:N／AV:A、或沒有 CVSS 而 Ubuntu priority high／critical 的）與依日期的出貨關卡（見 README）"},
+        "severity_sources": {
+          "type": "array",
+          "description": "分級（P2 的 severities）用的嚴重度從哪裡取，依序第一個有值的：vendor＝NVIDIA 安全公告（對照表已審核的列）、distro＝Ubuntu priority（Ubuntu 套件與 Canonical 核心）、nvd＝Dependency-Track 的值（NVD 的 CVSS 或其他來源）。最後一個要是 nvd。沒寫＝[\"vendor\", \"distro\", \"nvd\"]；要維持只看 DT／NVD 的舊行為就寫 [\"nvd\"]。cvss_min 只在用 nvd 的值時套用。",
+          "items": {"type": "string", "enum": ["vendor", "distro", "nvd"]}
+        },
+        "tiers": {
+          "type": "object",
+          "properties": {
+            "p1": {"$ref": "#/$defs/tier"},
+            "p2": {"$ref": "#/$defs/tier"},
+            "p3": {"type": "object", "properties": {"label": {"type": "string"}, "action": {"type": "string"}}}
+          }
+        },
+        "accepted": {
+          "type": "object",
+          "properties": {
+            "label": {"type": "string"},
+            "action": {"type": "string"},
+            "states": {"type": "array", "items": {"type": "string", "enum": ["NOT_AFFECTED", "FALSE_POSITIVE", "RESOLVED", "EXPLOITABLE", "IN_TRIAGE", "NOT_SET"]}},
+            "include_suppressed": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "applicability": {
+      "type": "object",
+      "properties": {
+        "applies": {"type": "boolean"},
+        "measures": {"type": ["string", "array"], "items": {"type": "string"}, "description": "怎麼做到（設計、設定、流程）"},
+        "justification": {"type": "string", "description": "不適用時的理由"}
+      }
+    },
+    "tier": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "action": {"type": "string"},
+        "kev": {"type": "boolean"},
+        "epss_percentile_min": {"type": "number", "minimum": 0, "maximum": 1},
+        "epss_probability_min": {"type": "number", "minimum": 0, "maximum": 1, "description": "EPSS 機率（未來 30 天出現利用活動的機率）≥ 這個值。百分位會隨其他 CVE 的分數漂移，機率不會；建議值 0.10，用不用待公司決定（預設沒有）。只看這一列自己的 DT finding 的 EPSS（同一個 CVE 其他來源的值只並列顯示）。"},
+        "severities": {"type": "array", "items": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNASSIGNED"]}},
+        "cvss_min": {"type": "number", "minimum": 0, "maximum": 10}
+      }
+    }
+  }
+}
