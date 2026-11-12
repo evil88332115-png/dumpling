@@ -48,7 +48,7 @@
 - commit 信箱已設成 GitHub noreply（D-011，repo config，worktree 共用）。不要改。
 - commit 訊息結尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`；PR 說明結尾加 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`。
 - **pre-push hook**：`$REPO_MAIN/.git/hooks/pre-push`（worktree 共用）會在推送前跑 `ci/public-check.sh`，並加上本機禁用字清單 `~/.config/dumpling/forbidden.txt`。被擋就改內容，**不要用 `--no-verify`**。hook 不見了就重裝：`cp ci/pre-push.hook "$REPO_MAIN/.git/hooks/pre-push"`。
-- 合併條件（D-010）：CI 的 `public-check`、`unit-tests` 綠燈＋分支是最新（在 worktree 裡 `git fetch origin && git merge origin/main` 再推送；**不要用 `gh pr update-branch` 或網頁的 Update branch**，GitHub 端的 merge commit 作者可能是帳號主信箱，見 D-019）＋獨立驗證代理在 PR 留言「驗證：通過」。合併由 C0 做（squash），**一定要指定作者信箱**：`gh pr merge <PR> --squash --author-email 287638252+evil88332115-png@users.noreply.github.com`。不要在網頁按合併：網頁合併會把帳號主信箱寫成 commit 作者（D-013）。
+- 合併條件（D-010）：CI 的 `public-check`、`unit-tests` 綠燈（不要求分支是最新，D-021；PR 有衝突時才更新分支：在 worktree 裡 `git fetch origin && git merge origin/main` 再推送；**不要用 `gh pr update-branch` 或網頁的 Update branch**，GitHub 端的 merge commit 作者可能是帳號主信箱，見 D-019）＋獨立驗證代理在 PR 留言「驗證：通過」。合併由 C0 做（squash，驗證通過後可用 `--auto` 讓 CI 綠燈時自動合併，D-021），**一定要指定作者信箱**：`gh pr merge <PR> --squash --author-email 287638252+evil88332115-png@users.noreply.github.com`。不要在網頁按合併：網頁合併會把帳號主信箱寫成 commit 作者（D-013）。
 
 ### 公開資料
 - 只用公開 BSP、公開 BIOS／vBIOS 檔；不放任何公司資料、內部 IP、主機名、本機路徑、個人信箱。

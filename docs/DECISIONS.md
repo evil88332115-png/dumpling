@@ -24,3 +24,4 @@
 | D-018 | 2026-11-12 | C0（C1 提出） | 公開檢查的本機路徑規則改成「前面不是路徑字元才算」：`(^\|[^A-Za-z0-9_.-])/media/…`、`(^\|[^A-Za-z0-9_.-])/home/…/` | 原規則會誤擋核心原始碼的相對路徑（如 `drivers/media/`）；真的絕對路徑（行首、引號、`=`、空白之後）仍會被抓 |
 | D-019 | 2026-11-12 | C0 | 更新 PR 分支一律在本機 worktree `git merge origin/main` 後推送（noreply 身分）；不用 `gh pr update-branch`、不按網頁的 Update branch | GitHub 端建立的 merge commit 作者可能是帳號主信箱，會像 D-013 那次一樣把個人信箱寫進公開 commit |
 | D-020 | 2026-11-12 | 使用者 | **取代 D-014**：C1–C4 做完一個里程碑才開一個 PR（例如 C1 的 M1、C2 的 M3）。做的過程中只推到分支、不開 WIP／draft PR；需要 CI 時用 `gh workflow run --ref <分支>` 手動觸發。開 PR 時附逐檔對照表（跟 sca-center 25fa89a 相同／修改了什麼）與資料檔來源說明 | 使用者大多時間在等 PR；一個里程碑合併一次，等待次數最少 |
+| D-021 | 2026-11-12 | 使用者 | 修改 D-010：main 分支保護**不再要求分支是最新**（strict=false），其他不變（必須走 PR、public-check／unit-tests 綠燈、禁止 force-push、管理員適用）；PR 有衝突時才在本機 `git merge origin/main`（D-019）。repo 開啟 auto-merge：驗證通過後 C0 用 `gh pr merge --auto --squash --author-email <noreply>`，CI 綠燈自動合併 | 每次合併省一輪 CI、C0 不必守著等；一個里程碑一個 PR，PR 之間互相打架的機會小，真的發生時 main 的 CI 會抓到 |
