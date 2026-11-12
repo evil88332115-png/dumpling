@@ -789,7 +789,7 @@ def test_rescan_argument_errors(tmp_path):
     assert '--kernel-build "${ARCHIVE:-$SRCDIR}" --kernel-build-prefix "$prefix"' in s
 
 
-# ---------- PR #111 審查後補的情境（以 linux 6.8 的真實寫法為範本） ----------
+# ---------- 審查後補的情境（以 linux 6.8 的真實寫法為範本） ----------
 
 REVIEW_TREE = dict(TREE)
 REVIEW_TREE.update({
@@ -864,7 +864,7 @@ def test_value_options_without_value_exit_64(tmp_path):
         assert p.returncode == 64 and f"{opt} 要給值" in p.stderr, (script, opt)
 
 
-# ---------- PR #111 第二次審查後補的情境 ----------
+# ---------- 第二次審查後補的情境 ----------
 
 def test_non_object_variables_with_literal_suffix_do_not_poison_tree():
     """上游 6.8 根目錄 Kbuild 的 atomic-checks += $(addprefix …)、lib/Makefile 的 clean-files += …、init/ 的 build-version：

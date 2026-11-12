@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lockcheck.py：依生態系判斷依賴樹是否可宣告為完整（CLAUDE.md 規則 11），給 sbomgate 的 --tree 與 --manifest 用。
+"""lockcheck.py：依生態系判斷依賴樹是否可宣告為完整（專案規則 11），給 sbomgate 的 --tree 與 --manifest 用。
 
 用法：python3 -I lockcheck.py <原始碼資料夾> <輸出.json>
 只讀檔名與 go.mod 的 require 行，不執行任何東西。

@@ -1,7 +1,7 @@
 # EUVD 標註（`euvd.py`，階段 `C-euvd`）
 
 鏡像腳本（`tools/mirror/euvd.sh`）、標註工具（`euvd.py annotate`，sca-scan 的 `C-euvd`）、DT 的 ENISA KEV 來源檔（`euvd.py dt-enisa`，
-`tools/mirror/dt-feeds.sh` 的 `euvdkev` 部分）；報告與每日監控的讀取端見〈讀取端〉（#159）。每日更新：`deploy/pilot/euvd-mirror.sh`。
+`tools/mirror/dt-feeds.sh` 的 `euvdkev` 部分）；報告與每日監控的讀取端見〈讀取端〉。每日更新：`deploy/pilot/euvd-mirror.sh`。
 
 ## EUVD 是什麼
 
@@ -90,7 +90,7 @@ status 一行 `C-euvd`：沒有設定鏡像（`--index ""`）、索引不存在�
 - EUVD 的「已被利用」＝`kev/dump`：1,785 筆（只在 CISA 1,703、兩邊都有 66、只在 EU KEV 16）；`/search?exploited=true` 全部翻頁的集合相同。
 - DT 的 CISA（1,768）∪ eukev.json（39）＝1,773，是 EUVD 的嚴格子集：EUVD 多 **12 個 CVE**（11 個只在 EU KEV，9–10 月加入；1 個 EUVD 標
   cisa_kev 但當天的 CISA 檔沒有——CVE-2026-69836，可能被 CISA 移除，未核對）；DT 有而 EUVD 沒有的 0 個。
-- 所以「ENISA KEV 與 EUVD 的已遭利用清單是否相同」的答案是**不同**：我們這層（`cra_report.py`、`exploited_watch.py`）讀 EUVD（#159），
+- 所以「ENISA KEV 與 EUVD 的已遭利用清單是否相同」的答案是**不同**：我們這層（`cra_report.py`、`exploited_watch.py`）讀 EUVD，
   DT 的 ENISA KEV 也改讀 EUVD 產生的檔（下一節）。
 
 ## DT 的 ENISA KEV 來源檔（`euvd.py dt-enisa`）
@@ -115,14 +115,14 @@ EUVD 鏡像通過檢查時設定）。
 - **和 CISA KEV 比對**：另抓 CISA KEV（`www.cisa.gov`，DT 的 CISA 來源讀的同一份檔），`SOURCE.json` 的 `euvd_not_in_dt` 列出 EUVD 標已遭利用、
   但 CISA KEV ∪ 這份檔都沒有的 CVE（DT 的 isKev 不會標；2026-11-05 是 CVE-2026-69836，EUVD 標 cisa_kev、當天的 CISA 檔沒有）。
   `D-dt-kev-sources` 的狀態不因此改變（來源之間的不一致，不是缺資料），只在說明以 NOTE 列出（過期時 GAP 的說明也列出）；
-  風險評估把它們逐筆放進 P1（#159）。`skipped_no_date` 的條目則記 ATTENTION（DT 的檔真的少了它們）。
+  風險評估把它們逐筆放進 P1。`skipped_no_date` 的條目則記 ATTENTION（DT 的檔真的少了它們）。
   - CISA KEV 沒有下載或無法解析時 `euvd_not_in_dt` 是 `null`、`cisa_problem` 寫原因：比對被跳過，`D-dt-kev-sources` 記 **ATTENTION**（不是 OK），
     說明寫出 `cisa_problem`；下一次 `euvd-mirror.sh update` 抓到 CISA KEV 後恢復。
   - 比對用的是 `euvd-mirror.sh update`（`dt-feeds.sh` 的 euvdkev 部分）另抓的 `cisa-kev.json`，**不是 DT 的 CISA 來源實際讀的那一份**
     （DT 在自己的排程，每天 02:00 UTC，直接讀 www.cisa.gov）。兩份通常差不到一天，每日更新連續失敗時最多可差 `EUVD_MAX_AGE_DAYS`（預設 3）天：這段期間 CISA 新增的 CVE 可能漏列（我們的檔有、DT 還沒讀到），
     移除的可能多列（我們的檔沒有、DT 還留著）。會出現在：`SOURCE.json` 的 `euvd_not_in_dt`；`dt-feeds.sh --check`（`euvd-mirror.sh check`）的 NOTE 行；
     sca-scan 的 `D-dt-kev-sources` 說明（`data-sources.json` 的 `enisa_feed.source.euvd_not_in_dt`）。後兩處的文字都註明這一點。
-    報告端的 P1（#159）讀 EUVD 本身（`scan/euvd.json`；`exploited_watch.py` 讀鏡像的索引），不讀這份清單，所以不受這個時間差影響。
+    報告端的 P1 讀 EUVD 本身（`scan/euvd.json`；`exploited_watch.py` 讀鏡像的索引），不讀這份清單，所以不受這個時間差影響。
   - 同一個 CVE 只列一次：已在 `skipped_no_date`（這裡沒寫進 DT 的檔，ATTENTION）的 CVE 不再列入 `euvd_not_in_dt`（來源不一致，NOTE）。
 - **連線**：`euvd.sh` 對 euvdservices.enisa.europa.eu 2 個請求；`euvdkev` 部分另抓上游 eukev.json（raw.githubusercontent.com）與 CISA KEV（www.cisa.gov）
   各 1 次（`DT_KEV_EUVD_FROM` 時不再抓 kev/dump；kev 部分已下載時複製），後兩個失敗時只 WARN、照樣產生。

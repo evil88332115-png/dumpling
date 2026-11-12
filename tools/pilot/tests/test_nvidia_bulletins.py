@@ -804,7 +804,7 @@ def test_check_counts_deep_non_jetson_csaf_instead_of_failing(tmp_path):
     assert c.returncode == 1 and "5797: CSAF 無法讀取（RecursionError）" in c.stdout and "Traceback" not in c.stderr, c.stdout + c.stderr
 
 
-# ---------- #147 審查：中 1、中 2、低 ----------
+# ---------- 審查：中 1、中 2、低 ----------
 
 def test_check_counts_other_unreadable_non_jetson_csaf(tmp_path):
     """中 2：非 Jetson 公告（5861，gpu-driver）的 CSAF 其他結構錯也只計數；BOM、UTF-16 讀得懂；Jetson 的照舊 FAIL。"""

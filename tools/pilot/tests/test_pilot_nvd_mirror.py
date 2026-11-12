@@ -1,5 +1,5 @@
 """NVD 鏡像新鮮度（pilot.env 的 PILOT_NVD_MIRROR、NVD_MIRROR_MODIFIED）在掃描端的判定：dtsources.py、sca-scan、報告首頁。
-規則（審查 pilot/nvd-mirror）：鏡像過期不能顯示 OK；鏡像模式但讀不到新鮮度 → GAP（寫明「鏡像模式，NVD 新鮮度未知」）。"""
+規則：鏡像過期不能顯示 OK；鏡像模式但讀不到新鮮度 → GAP（寫明「鏡像模式，NVD 新鮮度未知」）。"""
 import datetime
 import json
 import os

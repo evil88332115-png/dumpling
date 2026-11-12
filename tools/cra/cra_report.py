@@ -507,13 +507,13 @@ def num(x):
 
 
 def pct_key(p):
-    """同機率時比百分位用：沒有百分位（None）排最後；0.0 是有效的值（#149 審查：`or -1` 把 0.0 當成沒有）。"""
+    """同機率時比百分位用：沒有百分位（None）排最後；0.0 是有效的值（審查：`or -1` 把 0.0 當成沒有）。"""
     return -1.0 if p is None else p
 
 
 def dt_epss_invalid(findings):
     """DT finding 裡有寫、但不收的 EPSS 值（epssScore、epssPercentile 各算一個）：超出 0–1、NaN、Infinity、不是數字（unit 回 None）。
-    #149 審查 L1：丟掉的值要計數（counts.epss.dt_invalid），不能靜默消失。"""
+    審查 L1：丟掉的值要計數（counts.epss.dt_invalid），不能靜默消失。"""
     n = 0
     for f in findings if isinstance(findings, list) else []:
         v = (f.get("vulnerability") or {}) if isinstance(f, dict) else {}
@@ -1799,7 +1799,7 @@ def build_rows(findings, pol, gidx, have_grype, srcmap=None, kmap=None, usn=None
             src.append("same CVE")
             r["kev_by_cve"] = True
         # kev_more 的鍵可以是 CVE 或其他編號：其他編號（GHSA 等）只在這一列沒有任何 CVE 別名時才用，
-        # 否則 Grype 對同一個 GHSA 的 KEV 會擴散到這個 GHSA 的其他 CVE（#149 審查中 1）
+        # 否則 Grype 對同一個 GHSA 的 KEV 會擴散到這個 GHSA 的其他 CVE（審查中 1）
         keys = set(r["cves"]) if r["cves"] else {i.upper() for i in r["all_ids"]}
         src += sorted({x for c in keys for x in (kev_more or {}).get(c, ())})
         r["kev_sources"] = src
@@ -2799,7 +2799,7 @@ def link_inherited_owners(rows):
 
 
 def inherited_dt_usable(row, acc):
-    """沿用來的 DT 判定在被利用的列上算不算人的判定（#152 審查）：擁有它的 deb 列每一筆 finding 都要判過（dt_complete；RESOLVED 要有
+    """沿用來的 DT 判定在被利用的列上算不算人的判定（審查）：擁有它的 deb 列每一筆 finding 都要判過（dt_complete；RESOLVED 要有
     details，使用者決定 B）——和 deb 列自己離開 P1 的條件相同。對不到擁有者 → 不算（偏保守）。"""
     owners = row.get("dt_inherited_owners") or []
     return bool(owners) and all(dt_complete(o, acc) for o in owners)
@@ -2837,7 +2837,7 @@ def resolved_without_details(row, acc):
 
 def unassessed_note(r, acc):
     """被利用、範圍內、沒有算判斷過、也不是「部分 finding 有判定」（partial_text）的列，VEX 卻看起來有結論時的原因（範圍表的 Assessed 欄、
-    關卡理由；#152 審查的低）：(a) DT 的判定只有 RESOLVED 沒有 details（VEX resolved (DT)）；沿用來的 DT 判定在擁有它的 deb 列上是這樣；
+    關卡理由；審查的低）：(a) DT 的判定只有 RESOLVED 沒有 details（VEX resolved (DT)）；沿用來的 DT 判定在擁有它的 deb 列上是這樣；
     (b) 這一列有陳述，但併進來的其他 CVE（vex_extra）沒有陳述。回傳文字或 None。"""
     out = []
     n, tot = resolved_without_details(r, acc), len(r.get("analysis") or [])

@@ -1,4 +1,4 @@
-"""PR #185 第 1 輪審查的修正：clone 的設定不可執行程式、樹外模組的 srcversion 核對不可被繞過、短雜湊至少 12 位。"""
+"""第 1 輪審查的修正：clone 的設定不可執行程式、樹外模組的 srcversion 核對不可被繞過、短雜湊至少 12 位。"""
 import os
 import subprocess
 import sys

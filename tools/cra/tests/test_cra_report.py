@@ -573,7 +573,7 @@ def test_mapped_kernel_component_is_labelled(tmp_path):
     assert cr.kernel_map_index({"status": "GAP", "release": "39.2.1"}) == {}       # 沒有對應時不加註記
 
 
-# ---------- 審查（PR #96）：缺資料不可變成 OK ----------
+# ---------- 審查：缺資料不可變成 OK ----------
 
 @pytest.mark.parametrize("stages,expect,status", [
     ({"C-kernel-coverage": "GAP"}, "C-kernel-coverage is GAP", "GAP"),
@@ -1425,7 +1425,7 @@ def test_report_shows_severity_source(tmp_path):
     assert c["severity_sources"]["policy"] == ["vendor", "distro", "nvd"] and s["inputs"]["scan/ubuntu-priority.json"]["sha256"]
 
 
-# ---------- #148 審查：高 1、中 1–4、低 ----------
+# ---------- 審查：高 1、中 1–4、低 ----------
 
 def test_nvd_only_policy_keeps_nvidia_bulletin_rows():
     """高 1：["nvd"]（舊行為）或沒有 vendor 的順序時，只有 NVIDIA 公告 finding 的列照舊用公告的評級（以前是全部來源取最嚴重），不變成 UNASSIGNED。"""
@@ -1572,7 +1572,7 @@ def test_epss_probability_min_must_be_0_to_1(tmp_path):
 
 def test_epss_of_the_same_cve_elsewhere_is_shown_not_tiered():
     """DT 的 UBUNTU-CVE 紀錄沒有 EPSS，同一個 CVE 的 NVD 紀錄（別的元件）百分位 0.99：Ubuntu 那一列並列顯示，但分級照舊只看自己的 DT（P3）。
-    使用者決定（f8c2502）：新分級不用 EPSS，#149 只顯示。"""
+    使用者決定：新分級不用 EPSS，只顯示。"""
     ub = finding("linux", "6.8.0-1", "UBUNTU-CVE-2026-7201", "OSV", "LOW")
     nvd = epss_finding("linux-src", "CVE-2026-7201", 0.6, 0.99)
     rows = rows_for(findings=[ub, nvd])
@@ -1648,7 +1648,7 @@ def test_report_explains_epss_and_counts_other_sources(tmp_path):
 
 
 def test_grype_kev_on_a_ghsa_only_row(tmp_path):
-    """#146 低 2：DT 的列只有 GHSA（沒有 CVE 別名），Grype 同一個 GHSA 帶 KEV 的 CVE-Y → 那一列標 KEV，原因文字不說 CVE-Y「不在風險表」。"""
+    """審查（低）：DT 的列只有 GHSA（沒有 CVE 別名），Grype 同一個 GHSA 帶 KEV 的 CVE-Y → 那一列標 KEV，原因文字不說 CVE-Y「不在風險表」。"""
     gh = finding("lib", "1.0", "GHSA-kkkk-kkkk-kkkk", "GITHUB", "LOW", purl="pkg:pypi/lib@1.0")
     g = {"matches": [{"vulnerability": {"id": "GHSA-kkkk-kkkk-kkkk", "knownExploited": [{"cve": "CVE-2026-8801"}]},
                       "relatedVulnerabilities": [{"id": "CVE-2026-8801"}], "artifact": {"name": "lib", "version": "1.0", "type": "python"}}]}
@@ -1660,7 +1660,7 @@ def test_grype_kev_on_a_ghsa_only_row(tmp_path):
     assert "CVE-2026-8801" not in s["documents"]["risk-assessment"]["detail"] and s["counts"]["kev_grype_only_not_in_table"] == []
 
 
-# ---------- #149 審查（30f2434）：中 1、低 1–4 ----------
+# ---------- 審查：中 1、低 1–4 ----------
 
 def test_grype_kev_by_ghsa_id_only_for_rows_without_cve():
     """中 1 重現 1：DT 有 GHSA（別名 0301、0302）與 NVD 0302；Grype 同一個 GHSA 的 KEV 是 0301 → 只有 0301 那一列是 KEV，0302 不是。"""

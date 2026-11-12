@@ -21,28 +21,28 @@
 | `tools/cra/config.example.json` | `scripts/cra/config.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
 | `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處、清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
-| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處、清理 17 行（其他 15、信箱或路徑字串拆成相鄰字串（值不變） 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改） |
+| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣 |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
-| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1） |
-| `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：說明文字：內部主機名稱改成「本機」（1 行） |
+| `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/exploited_watch.py` | `scripts/cra/exploited_watch.py` | 25fa89a | 路徑調整 11 處、清理 2 行（其他 2）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
-| `tools/cra/firmware_bom.py` | `scripts/cra/firmware_bom.py` | 25fa89a | 路徑調整 2 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
-| `tools/cra/image_check.py` | `scripts/cra/image_check.py` | 25fa89a | 路徑調整 3 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1） |
+| `tools/cra/firmware_bom.py` | `scripts/cra/firmware_bom.py` | 25fa89a | 路徑調整 2 處、說明文字：提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/image_check.py` | `scripts/cra/image_check.py` | 25fa89a | 路徑調整 3 處、說明字串：systemd 樣板單元名稱的範例信箱樣式改成佔位文字（見「影響邏輯的替換」） |
 | `tools/cra/initrd_coverage.py` | `scripts/cra/initrd_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/kernel_modules.py` | `scripts/cra/kernel_modules.py` | 25fa89a | 路徑調整 7 處 |
 | `tools/cra/no_vuln_data.py` | `scripts/cra/no_vuln_data.py` | 25fa89a | 路徑調整 1 處、清理 4 行（信箱換成 example／佔位 2、其他 1、去掉產品名或內部實測說明 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/nvidia_distro.py` | `scripts/cra/nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/own_software.py` | `scripts/cra/own_software.py` | 25fa89a | 原樣 |
-| `tools/cra/pkg_why.py` | `scripts/cra/pkg_why.py` | 25fa89a | 路徑調整 2 處 |
+| `tools/cra/pkg_why.py` | `scripts/cra/pkg_why.py` | 25fa89a | 路徑調整 2 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/py_dpkg_version.py` | `scripts/cra/py_dpkg_version.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_diff.py` | `scripts/cra/report_diff.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
 | `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣 |
 | `tools/cra/security_findings.py` | `scripts/cra/security_findings.py` | 25fa89a | 路徑調整 6 處 |
-| `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動 |
-| `tools/cra/support_check.py` | `scripts/cra/support_check.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/support_check.py` | `scripts/cra/support_check.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tee_bundled.py` | `scripts/cra/tee_bundled.py` | 25fa89a | 原樣 |
 | `tools/cra/tee_source.py` | `scripts/cra/tee_source.py` | 25fa89a | 原樣 |
 | `tools/cra/templates/risk-assessment.md` | `scripts/cra/templates/risk-assessment.md` | 25fa89a | 原樣 |
@@ -53,51 +53,51 @@
 | `tools/cra/tests/data/openvex/`（openvex_json_schema.json、README.md） | 不是 sca-center 的檔：openvex/spec 的 `openvex_json_schema.json`（commit 61b5f885，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。取代 sca-center 的 `scripts/ci/fetch-test-data.sh` 連網取得 |
 | `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_bootloader_report.py` | `scripts/cra/tests/test_bootloader_report.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改） |
-| `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣 |
+| `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_distro.py` | `scripts/cra/tests/test_cra_distro.py` | 25fa89a | 路徑調整 3 處 |
-| `tools/cra/tests/test_cra_euvd.py` | `scripts/cra/tests/test_cra_euvd.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶） |
-| `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（其他 2、信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
-| `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明；遮蔽路徑測試的輸入改用中性的 runner 路徑（不沿用 sca-center 自架 runner 的目錄結構），斷言意義不變 |
+| `tools/cra/tests/test_cra_euvd.py` | `scripts/cra/tests/test_cra_euvd.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（皆為 CLAUDE.md 字樣）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
+| `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明；遮蔽路徑測試的輸入改用中性的 runner 路徑（不沿用 sca-center 自架 runner 的目錄結構），斷言意義不變；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_ubuntu_tracker_fix.py` | `scripts/cra/tests/test_cra_ubuntu_tracker_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_cra_usn_fix.py` | `scripts/cra/tests/test_cra_usn_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_customer_package_wording.py` | `scripts/cra/tests/test_customer_package_wording.py` | 25fa89a | 清理 2 行（本機路徑換成中性路徑 2） |
-| `tools/cra/tests/test_dashboard_sheet.py` | `scripts/cra/tests/test_dashboard_sheet.py` | 25fa89a | 清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、只有路徑調整與環境變數改名 |
+| `tools/cra/tests/test_dashboard_sheet.py` | `scripts/cra/tests/test_dashboard_sheet.py` | 25fa89a | 只有路徑調整與環境變數改名（`SCA_REQUIRE_TEST_DATA` → `DUMPLING_REQUIRE_TEST_DATA`，docstring 1 行） |
 | `tools/cra/tests/test_dt_writeback.py` | `scripts/cra/tests/test_dt_writeback.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_evidence_bundle.py` | `scripts/cra/tests/test_evidence_bundle.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 2、本機路徑換成中性路徑 1） |
 | `tools/cra/tests/test_exploited_vendor.py` | `scripts/cra/tests/test_exploited_vendor.py` | 25fa89a | 刪段 44 行、刪 4 個用到 alert_mail.py 的測試；移除 import alert_mail |
-| `tools/cra/tests/test_exploited_watch.py` | `scripts/cra/tests/test_exploited_watch.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/tests/test_exploited_watch_grype.py` | `scripts/cra/tests/test_exploited_watch_grype.py` | 25fa89a | 路徑調整 1 處、刪段 266 行、刪 11 個用到 alert_mail.py（compose／寄信）或 exploited-watch-daily.sh 的測試與 compose 輔助函式 |
+| `tools/cra/tests/test_exploited_watch.py` | `scripts/cra/tests/test_exploited_watch.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_exploited_watch_grype.py` | `scripts/cra/tests/test_exploited_watch_grype.py` | 25fa89a | 路徑調整 1 處、刪段 266 行、刪 11 個用到 alert_mail.py（compose／寄信）或 exploited-watch-daily.sh 的測試與 compose 輔助函式；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_exploited_watch_refresh.py` | `scripts/cra/tests/test_exploited_watch_refresh.py` | 25fa89a | 路徑調整 2 處、刪段 323 行、刪 14 個用到 alert_mail.py、每日／備份腳本、deploy/ 安裝腳本的測試 |
 | `tools/cra/tests/test_firmware_bom.py` | `scripts/cra/tests/test_firmware_bom.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 2、新增（資料／說明） 1）、刪段 15 行、schema 驗證改成 import 共用的 cdx_schema.cdx_validator（刪掉自己那份 SCHEMA_DIR／cdx_validator；D-017） |
-| `tools/cra/tests/test_image_check.py` | `scripts/cra/tests/test_image_check.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3） |
+| `tools/cra/tests/test_image_check.py` | `scripts/cra/tests/test_image_check.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_image_check_modules.py` | `scripts/cra/tests/test_image_check_modules.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_initrd_coverage.py` | `scripts/cra/tests/test_initrd_coverage.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試 |
-| `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（其他 2）、libnvinfer 版本字串維持原值（拆成相鄰字串，避免被私有 IP 規則誤判，見「暫時拆字串」） |
+| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（廠商信箱、免費信箱各改成已登記在 `ci/public-allow.txt` 的同網域信箱，判定只看網域）；libnvinfer 版本字串維持原值（登記在白名單，見「public-check 白名單」） |
 | `tools/cra/tests/test_nvidia_distro.py` | `scripts/cra/tests/test_nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_own_software.py` | `scripts/cra/tests/test_own_software.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_pkg_why.py` | `scripts/cra/tests/test_pkg_why.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_py_dpkg_version.py` | `scripts/cra/tests/test_py_dpkg_version.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_report_diff.py` | `scripts/cra/tests/test_report_diff.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_report_package.py` | `scripts/cra/tests/test_report_package.py` | 25fa89a | 清理 4 行（其他 3、信箱或路徑字串拆成相鄰字串（值不變） 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改） |
+| `tools/cra/tests/test_report_package.py` | `scripts/cra/tests/test_report_package.py` | 25fa89a | 清理 4 行（環境變數改名 1、「內部窗口」→「專案負責人」3）（公開版不放公司內部稱呼）（斷言同步改） |
 | `tools/cra/tests/test_runtime_evidence.py` | `scripts/cra/tests/test_runtime_evidence.py` | 25fa89a | 路徑調整 1 處、刪段 34 行、刪 2 個測板子端腳本 board-on-device.sh 的測試（腳本沒帶） |
-| `tools/cra/tests/test_security_testing.py` | `scripts/cra/tests/test_security_testing.py` | 25fa89a | 路徑調整 1 處、清理 6 行（私有 IP／近似 IP 的字串換成文件網段 6） |
+| `tools/cra/tests/test_security_testing.py` | `scripts/cra/tests/test_security_testing.py` | 25fa89a | 路徑調整 1 處、清理 6 行（私有 IP／近似 IP 的字串換成文件網段 6）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_supplier_package.py` | `scripts/cra/tests/test_supplier_package.py` | 25fa89a | 清理 1 行（其他 1） |
 | `tools/cra/tests/test_support_check.py` | `scripts/cra/tests/test_support_check.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_tee_source.py` | `scripts/cra/tests/test_tee_source.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_uefi_bundled.py` | `scripts/cra/tests/test_uefi_bundled.py` | 25fa89a | 原樣 |
+| `tools/cra/tests/test_uefi_bundled.py` | `scripts/cra/tests/test_uefi_bundled.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_uefi_followup.py` | `scripts/cra/tests/test_uefi_followup.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_uefi_image.py` | `scripts/cra/tests/test_uefi_image.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_uefi_source.py` | `scripts/cra/tests/test_uefi_source.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/tests/test_upstream_baseline.py` | `scripts/cra/tests/test_upstream_baseline.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3） |
-| `tools/cra/tests/test_vex_evidence.py` | `scripts/cra/tests/test_vex_evidence.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_vex_export.py` | `scripts/cra/tests/test_vex_export.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、CycloneDX 1.6 驗證改用 cdx_validator；OpenVEX schema 改讀 tests/data/openvex/（不再連網取得，也不再 skip） |
-| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行、刪 2 個用到 csaf_advisory.py 的測試；移除對 test_csaf_advisory 的 import |
+| `tools/cra/tests/test_vex_evidence.py` | `scripts/cra/tests/test_vex_evidence.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_vex_export.py` | `scripts/cra/tests/test_vex_export.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、CycloneDX 1.6 驗證改用 cdx_validator；OpenVEX schema 改讀 tests/data/openvex/（不再連網取得，也不再 skip）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行、刪 2 個用到 csaf_advisory.py 的測試；移除對 test_csaf_advisory 的 import；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_vex_rules.py` | `scripts/cra/tests/test_vex_rules.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、同 test_vex_export.py：cdx_validator＋tests/data/openvex/ |
-| `tools/cra/tests/test_vex_u1_flag.py` | `scripts/cra/tests/test_vex_u1_flag.py` | 25fa89a | 路徑調整 4 處 |
+| `tools/cra/tests/test_vex_u1_flag.py` | `scripts/cra/tests/test_vex_u1_flag.py` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_vex_u2.py` | `scripts/cra/tests/test_vex_u2.py` | 25fa89a | 原樣 |
 | `tools/cra/uefi_bundled.py` | `scripts/cra/uefi_bundled.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/uefi_dsc.py` | `scripts/cra/uefi_dsc.py` | 25fa89a | 原樣 |
@@ -106,7 +106,7 @@
 | `tools/cra/upstream_baseline.py` | `scripts/cra/upstream_baseline.py` | 25fa89a | 清理 1 行（產品代號換成中性代稱 1） |
 | `tools/cra/vendor-watch.example.json` | `deploy/exploited-watch/vendor-watch.example.json` | 25fa89a | 原樣 |
 | `tools/cra/vex-rules.example.json` | `scripts/cra/vex-rules.example.json` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處 |
+| `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/xlsx_min.py` | `scripts/cra/xlsx_min.py` | 25fa89a | 原樣 |
 | `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處；改寫 CI 分支流程與「已知限制」兩段（原本是 sca-center 的內部 CI 與執行編號，改成中性說明並指向 pipeline/） |
 | `tools/demo/board-import.sh` | `scripts/demo/board-import.sh` | 25fa89a | 路徑調整 7 處 |
@@ -119,30 +119,30 @@
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行 |
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
-| `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行 |
+| `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_jetson_rootfs.py` | `scripts/demo/tests/test_jetson_rootfs.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行） |
+| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
-| `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變 |
-| `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處 |
+| `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/mirror/euvd.sh` | `scripts/mirror/euvd.sh` | 25fa89a | 路徑調整 3 處 |
-| `tools/mirror/grype-db.sh` | `scripts/mirror/grype-db.sh` | 25fa89a | 原樣 |
+| `tools/mirror/grype-db.sh` | `scripts/mirror/grype-db.sh` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/mirror/kernel-cve.sh` | `scripts/mirror/kernel-cve.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/nvidia-bulletins.sh` | `scripts/mirror/nvidia-bulletins.sh` | 25fa89a | 路徑調整 2 處 |
 | `tools/mirror/osv-distro.sh` | `scripts/mirror/osv-distro.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/ubuntu-cve-status.sh` | `scripts/mirror/ubuntu-cve-status.sh` | 25fa89a | 原樣 |
-| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行；內部掃描的執行編號改成「示範掃描」、「板子實測」依據說明改成設計預期（5 處） |
-| `tools/pilot/lib/common.sh` | `scripts/pilot/lib/common.sh` | 25fa89a | 路徑調整 4 處 |
+| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行；內部掃描的執行編號改成「示範掃描」、「板子實測」依據說明改成設計預期（5 處）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/lib/common.sh` | `scripts/pilot/lib/common.sh` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/data/kernel-included-c-6.1.json` | `scripts/pilot/lib/data/kernel-included-c-6.1.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/data/kernel-included-c-6.8.json` | `scripts/pilot/lib/data/kernel-included-c-6.8.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/deb_sources.py` | `scripts/pilot/lib/deb_sources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/lib/distro_recheck.py` | `scripts/pilot/lib/distro_recheck.py` | 25fa89a | 路徑調整 3 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/dtsources.py` | `scripts/pilot/lib/dtsources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「示範掃描」（1 行） |
-| `tools/pilot/lib/euvd.md` | `scripts/pilot/lib/euvd.md` | 25fa89a | 路徑調整 7 處、清理 1 行 |
+| `tools/pilot/lib/dtsources.py` | `scripts/pilot/lib/dtsources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「示範掃描」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/lib/euvd.md` | `scripts/pilot/lib/euvd.md` | 25fa89a | 路徑調整 7 處、清理 1 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
@@ -153,19 +153,19 @@
 | `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
 | `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/lib/l4t-kernel-map.json` | `scripts/pilot/lib/l4t-kernel-map.json` | 25fa89a | 清理 2 個 `checked` 欄（原本引用廠商映像與內部 CI 執行編號，見資料來源） |
-| `tools/pilot/lib/l4t_kernel.py` | `scripts/pilot/lib/l4t_kernel.py` | 25fa89a | 原樣 |
+| `tools/pilot/lib/l4t_kernel.py` | `scripts/pilot/lib/l4t_kernel.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/leakscan.py` | `scripts/pilot/lib/leakscan.py` | 25fa89a | 原樣 |
-| `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣 |
+| `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh` |
 | `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
-| `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
-| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
-| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL |
+| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/conftest.py` | `scripts/pilot/tests/conftest.py` | 25fa89a | 重寫（比照 D-017）：原檔載入 sca-center 的 `integration/conftest.py`，改成載入 `tools/cra/tests/conftest.py`（`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗）；沒有帶 `integration/` |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |
@@ -173,20 +173,20 @@
 | `tools/pilot/tests/test_kernel_boot.py` | `scripts/pilot/tests/test_kernel_boot.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；`IMAGE_PRODUCT_A` 改寫成合成的 `IMAGE_VENDOR_REBUILT`（見資料來源）；註解內部執行編號改成中性 |
+| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣 |
+| `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_oot_sections.py` | `scripts/pilot/tests/test_kernel_oot_sections.py` | 25fa89a | 原樣（合成 ELF 字串裡的建置路徑登記在 `ci/public-allow.txt`） |
 | `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」） |
+| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
-| `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處 |
+| `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/tests/test_pilot_l4t_kernel.py` | `scripts/pilot/tests/test_pilot_l4t_kernel.py` | 25fa89a | 路徑調整 1 處；刪段：`test_deb_sources_…` 去掉用 `scio_prep.py` 的一半（函式改名），保留 `deb_sources.py` 的檢查 |
 | `tools/pilot/tests/test_pilot_lock_sandbox.py` | `scripts/pilot/tests/test_pilot_lock_sandbox.py` | 25fa89a | 路徑調整 15 處、刪段 75 行 |
-| `tools/pilot/tests/test_pilot_nvd_mirror.py` | `scripts/pilot/tests/test_pilot_nvd_mirror.py` | 25fa89a | 原樣 |
+| `tools/pilot/tests/test_pilot_nvd_mirror.py` | `scripts/pilot/tests/test_pilot_nvd_mirror.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_report.py` | `scripts/pilot/tests/test_pilot_report.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_pilot_sources_scio.py` | `scripts/pilot/tests/test_pilot_sources_scio.py` | 25fa89a | 路徑調整 1 處、清理 1 行、刪段 109 行；註解內部執行編號改成中性（2 行） |
 | `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行；`shell_files()` 不再掃 `deploy/`，檔案數門檻 20 → 10（`tools/` 共 14 個 shell 檔） |
@@ -195,9 +195,9 @@
 | `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL |
 | `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處；`test_script_safety_and_docs` 去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，改名 `test_script_safety` |
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處 |
+| `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_usn_cves.py` | `scripts/pilot/tests/test_usn_cves.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/sbomgate/sbomgate.py` | `integration/sbomgate/sbomgate.py` | 25fa89a | 清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/sbomgate/sbomgate.py` | `integration/sbomgate/sbomgate.py` | 25fa89a | 說明文字：提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/sbomgate/tests/test_sbomgate.py` | `integration/sbomgate/tests/test_sbomgate.py` | 25fa89a | 刪段 95 行、刪掉 RealEvidence 類與 6 個用到 tests/results、tests/projects（e2e 的真實輸出，不帶）的測試方法 |
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
@@ -209,7 +209,7 @@
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
 
-以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔（*.xz、*.gz、*.bz2、*.zst）解壓後檢查（C0 同意在 M1 修改）。
+以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
 
 ### 改動類型說明
 
@@ -224,7 +224,7 @@
 
 | 沒帶進來的檔案 | 誰會呼叫 | 走到時的行為 |
 |---|---|---|
-| `scripts/pilot/lib/{djsbom,filescan,licverdict,notice,oscopyright,pkgscan,scio_cancel,scio_chunks,scio_diag,scio_failures,scio_prep}.py`、`scripts/e2e/{djread,licexpr}.py`、`integration/policysync/` | `sca-scan` 的 E 段（DejaCode 授權匯入）與 E2 段（ScanCode.io 檔案層級掃描） | `pilot.env` 沒有 `DEJACODE_URL`／`SCANCODEIO_URL`、或給 `--no-license`、`--no-upload` 時，這些階段記 NOT_RUN（程式碼原有的判斷）。**若 `pilot.env` 設了那些網址，會因為找不到檔案而記 FAIL**；dumpling 的 pipeline 不設它們 |
+| `scripts/pilot/lib/{djsbom,filescan,licverdict,notice,oscopyright,pkgscan,scio_cancel,scio_chunks,scio_diag,scio_failures,scio_prep}.py`、`scripts/e2e/{djread,licexpr}.py`、`integration/policysync/` | `sca-scan` 的 E 段（DejaCode 授權匯入）與 E2 段（ScanCode.io 檔案層級掃描） | `pilot.env` 沒有 `DEJACODE_URL`／`SCANCODEIO_URL`、或給 `--no-license`、`--no-upload` 時，這些階段記 NOT_RUN（程式碼原有的判斷）。**若 `pilot.env` 設了那些網址，sca-scan 也是記 NOT_RUN 並附原因（程式與 `test_sca_scan_no_license_libs.py` 的行為）**；dumpling 的 pipeline 不設它們 |
 | `scripts/e2e/dt-compose.yaml`、`scripts/e2e/dtlib.sh` | 臨時 DT | 由 `pipeline/dt-ephemeral.sh`、`pipeline/dt-compose.yaml` 取代（見上面 pipeline 列） |
 | `scripts/mirror/dt-feeds.sh` | `mirror/euvd.sh`（只有鏡像資料夾裡有 `dt-feeds/` 時才呼叫） | dumpling 的 EUVD 鏡像不會產生 `dt-feeds/`，不會走到 |
 | `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知。**沒帶進來（C3 視需要帶回，含約 29 個被刪的寄信測試：test_exploited_vendor 4、test_exploited_watch_grype 11、test_exploited_watch_refresh 14）**；M1／M2 用不到 |
@@ -245,19 +245,19 @@
 | 檔案 | 行為說明 | 換成 |
 |---|---|---|
 | `tools/demo/scan-flash-package.sh` | `--out` 預設的上層資料夾（`FLASHPKG_RESULTS`）與 `PILOT_ENV` 預設路徑，原本指向公司常駐環境的本機路徑 | `$HOME/sca-results`、`$HOME/.config/sca-scan/pilot.env`（只是預設值；pipeline 一律明確傳） |
-| `tools/cra/exploited_grype.py` | 只有說明字串：`--results-root` 的例子路徑 | `$HOME/sca-results` |
+| `tools/cra/exploited_grype.py` | 只有說明字串：`--results-root` 的例子路徑 | `$HOME/sca-results`；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/jetson_rootfs.py` | （已還原，原樣）模擬的客戶應用程式在 dpkg status 的 Maintainer 信箱是 `noreply@example.invalid`；D-022 之後 `.invalid` 結尾的信箱自動放行 | 無（值與 25fa89a 相同；`test_jetson_rootfs.py`、`test_kernel_k1_improve.py` 的 `@example.invalid` 也還原） |
 | `tools/pilot/lib/kernel_boot.py`、`kernel_config.py`、`tools/demo/scan-flash-package.sh`、`tools/pilot/README.md` | 「預設用刷機包的 `kernel/Image`」的依據說明字串（輸出到報告備註與 JSON）原本點名某個廠商產品的板子實測。判定邏輯（預設用 `kernel/Image`、有 `KERNEL_BOARD_OS_TXT` 時以板子的 `uname -v` 為準）沒改 | 改成公開 BSP 的依據（見「資料檔與測試資料的來源」） |
 | `tools/cra/image_check.py`、`tools/cra/no_vuln_data.py` | 只有說明字串裡的範例信箱（systemd 樣板單元名稱的範例、`dh_make` 預設信箱），公開檢查會把它們當信箱 | 把網域部分換成佔位文字；`DISTRO_DOMAINS` 等判定用的網域清單沒動 |
-| 全部 `tools/*/tests/*.py` | 測試資料裡的信箱（例如 `@lists.debian.org`、`@nvidia.com`，`no_vuln_data` 的判定依網域）與 `/home/…` 路徑（`image_check` 的映像內路徑）若直接改字會改變測試意義，所以改成「字串拼接」（`"a@" "debian.org"`）：執行時的值與原本完全相同，只是原始碼裡不出現完整信箱／路徑 | 無（值不變） |
-| `tools/cra/tests/test_security_testing.py`、`test_cra_report.py` | 測試資料裡板子網路掃描的 IP（私有 IP） | `192.0.2.20`、`192.0.2.2`（文件用網段） |
-| `tools/cra/tests/test_no_vuln_data.py` | 一個四段式套件版本字串（開頭是 10，後面接 cuda 標記）被私有 IP 規則誤判 | 把開頭的 10 改成 11 |
+| 全部 `tools/*/tests/*.py` | 測試資料裡的信箱（例如 `@lists.debian.org`、`@nvidia.com`，`no_vuln_data` 的判定依網域）與 `/home/…` 路徑（`image_check` 的映像內路徑）若直接改字會改變測試意義，所以**維持原值**，登記在 `ci/public-allow.txt`（完整字串比對，每項附原因，見下一節）；其餘可改的信箱改成保留網域（`example.com`、`.invalid` 等） | 無（值不變） |
+| `tools/cra/tests/test_security_testing.py`、`test_cra_report.py` | 測試資料裡板子網路掃描的 IP（私有 IP） | `192.0.2.20`、`192.0.2.2`（文件用網段）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_no_vuln_data.py` | 一個四段式套件版本字串（TensorRT 的 libnvinfer，後面接 cuda 標記）會被私有 IP 規則誤判 | 維持原值，登記在 `ci/public-allow.txt`（改版本號會改變測試資料） |
 | `tools/wizard/**` 與 `tools/cra/tests/*` | 產品代號（`product-a`、`product-b`、`product-c` 是中性代稱，分別對應三個不公開的廠商產品名）出現在測試用的假刷機包名稱、`platforms/*.json` 的 `note` | `product-a` 等；不影響邏輯 |
 | `tools/wizard/cra-scan.py` | **行為修改**（sca-center 原版：掃描前 `git fetch origin`，對 `origin/main` 做 `git archive` 放到 `<輸出>/wt/` 再執行 `wt/tools/…`，也就是跑遠端 main，在 CI 的 tag 或分支 checkout 上不是正在測的那個 commit）。dumpling：新增 `resolve_tools_rev()`／`extract_tools()`，預設對目前 checkout 的 `HEAD` 做 `git archive`（保留「從 git 取乾淨副本」，沒 commit 的修改不會混進去），`--tools-rev <rev>` 或環境變數 `DUMPLING_TOOLS_REV` 可指定其他版本（寫成 `origin/…` 才會 fetch）；實際用的完整 commit hash、要求的版本、工作目錄是否有沒 commit 的修改，寫進 `<輸出>/tools-version.json`，commit 也經 `SCA_CENTER_COMMIT` 進掃描的 `provenance.json`（原有機制）。測試：`tools/demo/tests/test_wizard_plan.py` 的 `test_tools_rev_*` | 預設 `HEAD`；找不到版本就停止並說明 |
 
 ### public-check 白名單（`ci/public-allow.txt`）
 
-`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因：cra 測試 18 項，另 5 項是 `tests/run.d/c1-public-check.sh` 的合成測資），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
+`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串比對，每項附原因；依用途分三類：`tools/cra/` 的測試、`tools/pilot/` 的測試、`tests/run.d/c1-public-check.sh` 的合成測資，各項與數量以 `ci/public-allow.txt` 為準），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
 
 | 完整字串 | 用途 |
 |---|---|
@@ -271,6 +271,8 @@
 | `/home/x/test/id_rsa`、`/home/nvidia/.netrc` | 映像**內部**路徑：`image_check` 判斷 `/home` 底下的私鑰、.netrc 一律算真的 |
 | `/home/builder/ws/sources/uefi`、`/home/u/Build/Foo/DEBUG/AutoGen.c` | 測建置機器路徑（含使用者名稱）要被偵測、報告不可出現 |
 | `10.3.0.30-1+cuda12.5` | TensorRT（libnvinfer10）的套件版本字串，不是 IP |
+| `tools/pilot/tests/` 的合成路徑（`test_kernel_config.py`、`test_kernel_oot_sections.py`） | 假的核心樹或 ELF 字串裡的建置機器路徑，是測試要偵測的內容 |
+| `tests/run.d/c1-public-check.sh` 的合成測資 | 測 public-check 本身（私有 IP、不允許的信箱、白名單放行）；每項見 `ci/public-allow.txt` |
 
 為了少登記，三處測試資料不是照原檔：`test_no_vuln_data.py` 裡另一個 gmail 位址與另一個 nvidia.com 位址，改成上表已登記的同網域位址（判定只看網域），`test_supplier_package.py` 的一個 `/home` 底下的假路徑改成 `/mnt` 底下（偵測的本機路徑樣式兩者都有）。
 
@@ -287,12 +289,12 @@
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `/path/to/work/.sca-scan-work.…/image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
 | `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
 | `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
-| `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：原本引用「廠商以 L4T 39.2.0 為基礎的映像」的套件版本字串與內部 CI 執行編號，改成公開資料的說法（39.2.0 的 ABI 1021 改標為推論） |
+| `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：改成只引用公開資料的說法，不含內部映像的套件版本字串與內部 CI 執行編號（無公開依據的部分改標為推論） |
 | `tools/pilot/lib/*.md`、`README.md` 等說明文件 | 手寫的說明 | 合成。內部 CI 的執行編號與代號已改成中性說法（「Jetson R39.2.1 示範映像」「示範掃描」） |
 | `tools/wizard/platforms/{jetson,rockchip,raspberrypi}.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例（要檢查的輸入清單：刷機包、原始碼、建置紀錄、上游基準、板子檢查…） | 合成。`note` 欄原本寫「依某產品演練整理」，已改成「某平台的範本」 |
-| `tools/demo/tests/*.py`、`tools/pilot/tests/*.py` 的假刷機包、映像、rootfs | 測試用 `tarfile`／程式現組的假檔案：`product-a_OrinNano/Linux_for_Tegra/…` 的結構是 NVIDIA 公開 BSP 的結構（`apply_binaries.sh`、`bootloader/`、`kernel/Image`、`rootfs/`…），`product-a` 是合成的名稱；Rockchip `update.img`、Raspberry Pi 磁碟映像、ext4／FAT 也都是測試程式組出來的。**合成，形狀參考內部觀察（廠商刷機包的交付結構），已確認無可識別資訊（D-023）**：沒有產品代號（`product-a`／`product-b` 是中性代稱）、沒有內部版本字串（vendor 風格的 4 段版本 `V39.2.0.1`／`V39.2.0.2_a` 已改成 `V1.0.1`／`V1.0.2_a`；只有測 `version_note`（產品版本要以 L4T 版本開頭）的一個測試用 `V39.2.0.7` 這種明顯另編的值；測試通過）、沒有實際數量或雜湊（md5／sha256 都是測試當場算出或 `"ab" * 16`、`"0" * 32` 之類重複字元）、沒有真實路徑 | 合成（形狀參考內部觀察，已確認無可識別資訊） |
+| `tools/demo/tests/*.py`、`tools/pilot/tests/*.py` 的假刷機包、映像、rootfs | 測試用 `tarfile`／程式現組的假檔案：`product-a_OrinNano/Linux_for_Tegra/…` 的結構是 NVIDIA 公開 BSP 的結構（`apply_binaries.sh`、`bootloader/`、`kernel/Image`、`rootfs/`…），`product-a` 是合成的名稱；Rockchip `update.img`、Raspberry Pi 磁碟映像、ext4／FAT 也都是測試程式組出來的。**合成，形狀參考內部觀察（廠商刷機包的交付結構），已確認無可識別資訊（D-023）**：沒有產品代號（`product-a`／`product-b` 是中性代稱）、沒有內部版本字串（vendor 風格的版本字串已改成合成值，例如 `V1.0.1`、`V1.0.2_a`；測 `version_note` 的測試用另編的值；測試通過）、沒有實際數量或雜湊（md5／sha256 都是測試當場算出或 `"ab" * 16`、`"0" * 32` 之類重複字元）、沒有真實路徑 | 合成（形狀參考內部觀察，已確認無可識別資訊） |
 | `tools/pilot/tests/*.py` 的資料 | 測試自己組出來的假 SBOM、Grype／DT 輸出、核心 `.config`、IKCONFIG、Kbuild 樹、OSV zip、公告 Markdown。欄位格式取自公開工具（Syft、Grype、Dependency-Track、NVIDIA／Ubuntu／Debian／OSV 公開資料）的輸出形狀；CVE 編號與套件版本多為公開資料 | 合成 |
-| `tools/pilot/tests/test_kernel_config.py` 的「第四輪」一段 | 原本的 `IMAGE_PRODUCT_A`（30 個 `CONFIG_VENDOR*`、231 個 `MISSING*`，形狀參考某個內部產品映像的觀察）**已改寫**：改名 `IMAGE_VENDOR_REBUILT`，數字改成明顯合成的 10 與 100（斷言的差異數同步改為 115／15／11，測試通過），註明不對應任何實際產品。工具鏈那一組（Ubuntu 13.2.0 與 Buildroot 2022.08 的 `CC_VERSION_TEXT`）是 NVIDIA 公開的 Jetson 工具鏈字串。**合成，形狀參考內部觀察，已確認無可識別資訊（D-023）**：沒有產品代號、內部版本字串、實際數量或雜湊、真實路徑 | 合成（形狀參考內部觀察，已確認無可識別資訊） |
+| `tools/pilot/tests/test_kernel_config.py` 的「第四輪」一段 | 測試映像常數 `IMAGE_VENDOR_REBUILT`（形狀參考內部觀察）**已改寫為合成值**：個數改成明顯合成的 10 與 100，斷言的差異數同步調整，測試通過，註明不對應任何實際產品。工具鏈那一組（Ubuntu 13.2.0 與 Buildroot 2022.08 的 `CC_VERSION_TEXT`）是 NVIDIA 公開的 Jetson 工具鏈字串。**合成，形狀參考內部觀察，已確認無可識別資訊（D-023）**：沒有產品代號、內部版本字串、實際數量或雜湊、真實路徑 | 合成（形狀參考內部觀察，已確認無可識別資訊）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `kernel_boot.py`／`kernel_config.py`／`scan-flash-package.sh`／`pilot/README.md` 的「預設用 `kernel/Image`」 | 原本的依據是內部的板子實測。**已改成公開 BSP 的依據**（已下載 `Jetson_Linux_R39.2.1_aarch64.tbz2`，sha256 `2e561908…` 與 `tools/demo/jetson.sh` 寫死的值相符，2026-11-12 逐項核對）：`Linux_for_Tegra/apply_binaries.sh` 呼叫 `Linux_for_Tegra/nv_tools/scripts/nv_apply_kernel_files.sh`，該腳本第 41–44 行把 `kernel/Image` 以 `install … "${ROOTFS_DIR}/boot/Image"` 裝成 rootfs 的 `/boot/Image`；`Linux_for_Tegra/bootloader/extlinux.conf` 的 `LINUX /boot/Image`。判定邏輯沒改；UEFI 開機模式可改，所以說明仍寫「有板子的 `uname -v` 時以它為準」 | 公開（NVIDIA 公開 BSP 的檔案） |
 | `tools/cra/data/support-lifecycle.json`、`vex-rules.example.json`、`config.example.json`、`company.example.json`、`config.schema.json`、`templates/*.md` | 手寫的範例與範本 | 合成 |
 | `tools/cra/vendor-watch.example.json` | 手寫範例（`deploy/exploited-watch/vendor-watch.example.json`） | 合成 |
@@ -312,9 +314,9 @@
 - `test_ubuntu_cve_status.py::test_script_safety_and_docs` 改名 `test_script_safety`，去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，腳本安全項目保留；`test_pilot_utf8_truncation.py` 不再掃 `deploy/`（門檻 20 → 10 個檔）；`test_pilot_l4t_kernel.py` 去掉用 `scio_prep.py` 的一半。
 - `test_pilot_compare_and_scripts.py`、`test_pilot_lock_sandbox.py`、`test_pilot_sources_scio.py`：移除用到 `compare_expected.py`、`scio_prep.py`、`scio_diag.py`、`real-projects.sh`、`install-maven.sh`、`cdxgen_regression.py`、`tests/results` 的測試函式。
 - `test_exploited_vendor.py`、`test_exploited_watch_grype.py`、`test_exploited_watch_refresh.py`：移除用到 `alert_mail.py`、每日／備份腳本、`deploy/` 安裝腳本的測試函式。
-- `test_vex_no_response.py`：移除兩個用到 `csaf_advisory.py` 的測試函式。
+- `test_vex_no_response.py`：移除用到 `csaf_advisory.py` 的 CSAF 測試函式 1 個；另 1 個同時測 CSAF 與 CDX／OpenVEX 的函式，只刪 CSAF 的後半，CDX／OpenVEX 的斷言保留（改名 `test_legacy_responses_keep_cdx_and_openvex`）。
 - `tools/sbomgate/tests/test_sbomgate.py`：移除 `RealEvidence` 類與 6 個測試方法，它們讀 sca-center 的 `tests/results/`（e2e 的真實掃描輸出）、`tests/projects/`（被掃描的開源專案原始碼）和 `tests/expected/`，這些不帶（硬性限制：不帶 `tests/results/`）。其餘 sbomgate 單元測試（合成 SBOM）都保留。
-- `test_runtime_evidence.py`、`test_kernel_modules.py`：移除測板子端腳本 `board-on-device.sh` 的 3 個測試；`test_cra_exploitation.py`：移除讀 `cra/README.md` 的 1 個文件測試。
+- `test_runtime_evidence.py`、`test_kernel_modules.py`：移除測板子端腳本 `board-on-device.sh` 的 3 個測試；`test_cra_exploitation.py`：讀 `cra/README.md` 的文件測試改成只留常數斷言（`KERNEL_NET_STAGING`、`KERNEL_NET_PREFIXES`），README 的內容核對未保留。
 - 不帶：`test_alert_mail.py`、`test_csaf_advisory.py`、`test_customer_package_round2.py`、`test_customer_sbom_and_wording.py`（都 import `csaf_advisory`）、`test_gitlab_ci.py`、`test_gitlab_bot.py`、`test_gitlab_runner.py`、`demo/tests/test_board_test.py`、`test_x86_firmware.py`（歸 C2）。
 
 ## C2 韌體工具（WP3＋WP4）

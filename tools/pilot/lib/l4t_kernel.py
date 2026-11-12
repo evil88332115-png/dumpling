@@ -23,7 +23,7 @@ Grype 的 Ubuntu 資料與 DT 的 OSV Ubuntu 資料就會套用 Canonical 對這
      對應項目的 modules_kernel_version（必填，例如 6.8.12-1021-tegra，其中 1021 是 Ubuntu 的 ABI 編號，和 Canonical 版本 6.8.0-1021.21 的
      1021 相同）：SBOM 有模組卻沒有這個目錄 → GAP：核心可能重新建置過或是其他版本，套用對應會錯。SBOM 沒有模組時不核對（說明註明）。
   3. 對應檔以 L4T 版本為鍵；沒有這個版本，或 component 的 version、purl 與 modules_kernel_version、evidence、checked 是空的或含
-     TODO（不分大小寫）→ GAP（未對應）。沒有出處或沒有核對紀錄的對應不使用（CLAUDE.md：標準答案必須有出處）。
+     TODO（不分大小寫）→ GAP（未對應）。沒有出處或沒有核對紀錄的對應不使用（專案規則：標準答案必須有出處）。
      對應檔錯誤 → FAIL：component 的 purl 不是 pkg:deb/ubuntu/…、名稱或版本和 name、version 不一致、qualifiers 沒有 arch=source
      或 distro=（Ubuntu 的弱點資料以原始碼套件與發行版記錄）、缺 modules_kernel_version。
   4. SBOM 已經有同名同版本的元件，或有 deb 套件是從這個原始碼套件同版本建的（syft:metadata:source／sourceVersion，或 purl 的

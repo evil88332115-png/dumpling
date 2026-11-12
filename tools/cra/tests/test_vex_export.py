@@ -519,7 +519,7 @@ def test_unscoped_annotations_in_file_are_ignored_with_warning(tmp_path):
     assert "| untriaged |" in next(x for x in md.splitlines() if "CVE-2026-61897" in x and "accountsservice" in x)
 
 
-# ---------- 審查（PR #110）後補的情境 ----------
+# ---------- 審查後補的情境 ----------
 
 def two_cve_row(**kw):
     """GHSA 同時是 CVE-2026-0001 與 CVE-2026-0002：cra_report 把它列在 CVE-2026-0001（第一個 CVE）。"""
@@ -667,7 +667,7 @@ def test_report_grouped_alias_row_end_to_end(tmp_path):
     assert s["vex"]["gate"]["verdict"] != "OK"
 
 
-# ---------- 第二次審查（PR #110）後補的情境 ----------
+# ---------- 第二次審查後補的情境 ----------
 
 def test_report_alias_second_cve_without_statement_blocks_gate(tmp_path):
     """DT 有 GHSA（別名 CVE-A、CVE-B）與 NVD 的 CVE-A，併成 CVE-A 一列；CVE-A 有人工判定，CVE-B 沒有 → 閘門不能 OK。
@@ -732,7 +732,7 @@ def test_check_reports_ignored_annotations(tmp_path):
     assert r.returncode == 1 and "WARN\t" in r.stdout and "CVE-2026-0001" in r.stdout and "其他 1 筆可用" in r.stdout
 
 
-# ---------- 第三次審查（PR #110）後補的情境 ----------
+# ---------- 第三次審查後補的情境 ----------
 
 def test_extra_cve_with_own_row_is_not_split_again():
     """GHSA(A,B)＋NVD A 併成 A 列，NVD B 自己一列（同一個元件版本）。A 列 distro_fixed、DT 在 B 列設 EXPLOITABLE：
@@ -791,7 +791,7 @@ def test_report_alias_with_own_row_end_to_end(tmp_path):
     assert len({v["bom-ref"] for v in vs}) == len(vs)
 
 
-# ---------- 合併前審查（PR #110，990ebea）後補的情境 ----------
+# ---------- 合併前審查後補的情境 ----------
 
 def test_report_self_no_version_match_blocks_gate(tmp_path):
     """sbomgate 的 SELF_NO_VERSION（Grype 比對到產品本身、沒有版本）沒有評估、不在任何一列：每一列都有判定也不能 OK。"""

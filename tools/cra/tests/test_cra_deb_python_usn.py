@@ -367,7 +367,7 @@ def test_deb_python_does_not_inherit_partial_dt_analysis(tmp_path):
 
 
 def test_deb_python_uses_ubuntu_priority_of_owning_package(tmp_path):
-    """#148 低 4：Ubuntu 打包的 brotli（pypi 列，GHSA HIGH）和擁有它的 Ubuntu 套件一樣用 Ubuntu priority（low）；
+    """審查（低）：Ubuntu 打包的 brotli（pypi 列，GHSA HIGH）和擁有它的 Ubuntu 套件一樣用 Ubuntu priority（low）；
     pip 裝的 requests 照舊用 DT 的值。"""
     scan = make_scan(tmp_path / "s", findings=DFINDINGS, grype=DGRYPE, sbom=DSBOM)
     write_json(scan / "scan" / "ubuntu-priority.json", {"schema": "sca-center-ubuntu-priority/1", "status": "OK", "mirror": {},

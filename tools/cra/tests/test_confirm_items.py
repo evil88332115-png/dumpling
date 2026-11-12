@@ -385,7 +385,7 @@ def test_build_order_and_ids_unit():
                     cfg={"product": {"first_placing_on_market": "2026-01-01"}}) == items
 
 
-# ---------- #169 審查 ----------
+# ---------- 審查 ----------
 
 def test_rejected_decision_stays(tmp_path):
     # KEV 列上沒有具名負責人（TBD）的 not_affected：cra_report 不採用（列還在 P1），表裡要留著並寫出原因

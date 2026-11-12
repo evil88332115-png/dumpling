@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""供應商資料包（計畫總表 #9，對應 S-1、M-6）：config 的 role 是 supplier 時，cra_report.py 呼叫 write() 產生
+"""供應商資料包（對應 S-1、M-6）：config 的 role 是 supplier 時，cra_report.py 呼叫 write() 產生
 CRA/Reports/supplier-package/，給把我們的板子與系統映像整合進自己產品的製造商（客戶）。規格：專案文件「供應商資料包規格」。
 
 規則：
@@ -238,7 +238,7 @@ def customer_response(x):
 
 
 def bundled_fix(x, fs, vers):
-    """韌體（UEFI）內建的函式庫：apt 升級不適用，要用修補後的函式庫重建韌體。（#188 改 Fix 欄時漏掉，這裡補回，不含工具名稱。）
+    """韌體（UEFI）內建的函式庫：apt 升級不適用，要用修補後的函式庫重建韌體。（Fix 欄不含工具名稱。）
     修補版本只取與安裝版本同一條發行線的（3.4.1 → 3.4.x）；沒有同線的就全部。"""
     m = re.match(r"(.*?)\s+(\d[^\s]*)\s*\(", str(x.get("component") or ""))
     name, ver = (m.group(1), m.group(2)) if m else (str(x.get("component") or "the library").split(" (")[0], "")

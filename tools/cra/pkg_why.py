@@ -17,7 +17,7 @@ report：讀 summary.json 的 vex.gate.open_components（還沒處理完的列�
   列數最多的 --top 個（預設 30）deb 套件，各寫：實際安裝的二進位套件、直接依賴它的套件、往上追到「手動安裝」套件的最短路徑
   （Pre-Depends／Depends 與 Recommends；apt 預設會裝 Recommends）、一句提示。核心與非 deb 套件另列（dpkg 沒有它們的依賴資料）。
   印一行：D-pkg-why<TAB>狀態<TAB>說明。
-rank：拿掉套件或換基底「可以少掉多少未處理的漏洞列」的估計排行（CRA Annex I Part I (2)(j)；計畫總表 #11）。
+rank：拿掉套件或換基底「可以少掉多少未處理的漏洞列」的估計排行（CRA Annex I Part I (2)(j)）。
   - 每個手動安裝、不是基本套件（Priority required／important、Essential）的套件 M：拿掉 M 時 apt 會一起拿掉的套件
     ＝依賴它的套件（Pre-Depends／Depends 的每一組替代都被拿掉才算壞掉，反覆到不變）＋之後沒有被剩下的手動安裝套件
     以 Depends／Recommends 需要的連帶安裝套件（apt autoremove；Recommends 預設算需要）。

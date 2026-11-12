@@ -210,7 +210,7 @@ def test_annotate_json_string_list_and_object(tmp_path):
     (lambda m: (m / "index.tsv").write_text((m / "index.tsv").read_text().replace("EUVD-2024-16861", "<script>")), "格式錯誤"),
 ])
 def test_annotate_unusable_index_is_gap_without_cves(tmp_path, damage, msg):
-    """沒有可用的索引：GAP，而且輸出沒有 cves（main 與 #152 的讀取端不看 status，有 cves 就會算成「0 個已被利用」）。"""
+    """沒有可用的索引：GAP，而且輸出沒有 cves（讀取端不看 status，有 cves 就會算成「0 個已被利用」）。"""
     if damage is None:
         m = tmp_path / "nope"
     else:

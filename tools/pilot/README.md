@@ -1,6 +1,6 @@
 # 試行版掃描入口：`sca-scan` 與報告
 
-範圍見 `docs/decisions/0002-pilot-scope.md`。用法與各階段的判定寫在 `sca-scan` 檔頭；這裡只列需求、安全限制與檔案。
+範圍：試行版（線上資料源，不是離線鏡像）。用法與各階段的判定寫在 `sca-scan` 檔頭；這裡只列需求、安全限制與檔案。
 
 ```
 tools/pilot/sca-scan --git <網址> --ref <完整 commit SHA> [--name N]
@@ -114,7 +114,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   `D-dt-kev-sources` 另讀 DT 的 ENISA KEV `feedUrl`：不完全等於 EUVD 產生的檔的網址（`EUVD_DT_FEED_URL`，預設 `http://dt-nvd-mirror/kev/euvd/eukev.json`）、
   或那份檔過期（以 `EUVD_MIRROR` 判斷）→ GAP；有 EU KEV 條目沒寫進那份檔（沒有可用的日期）→ ATTENTION。
   `D-ubuntu-status`（`lib/ubuntu_status.py`，`scan/ubuntu-status.json`）：DT findings 裡 Ubuntu 套件（核心以外）上的 (CVE, 原始碼套件, 發行版)，
-  從 Ubuntu CVE Tracker 狀態鏡像（PILOT_ENV 的 `UBUNTU_CVE_STATUS_MIRROR`，`tools/mirror/ubuntu-cve-status.sh` 的輸出，PR #150）只取出這些，
+  從 Ubuntu CVE Tracker 狀態鏡像（PILOT_ENV 的 `UBUNTU_CVE_STATUS_MIRROR`，`tools/mirror/ubuntu-cve-status.sh` 的輸出）只取出這些，
   給 CRA 報告的證據規則 U1（Ubuntu 標 not-affected、安裝的版本符合註記 → not_affected），以及 Grype 沒有修補狀態的 Ubuntu 列的修補狀態
   （released → fixed、needed／pending／in-progress／deferred → not-fixed、ignored → wont-fix；tools/cra/README.md）。DT findings 裡 Ubuntu
   打包的 Python 模組（dist-packages 的 pypi 元件）也收 SBOM 裡唯一擁有它的 deb 與 (CVE, 它的原始碼套件, 發行版)（`counts.deb_python_owners`）。沒有 Ubuntu 套件上的 CVE 時不寫這一列；
@@ -206,8 +206,8 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   限制：EFI zboot（`zimg`）不解開；Ubuntu 的 `/boot/vmlinuz-*` 不讀；`/boot/Image` 的連結目標在 `/boot` 以外時不讀。
   判定的規則不變，只換設定的來源。修補只動到其他架構（`arch/<非 SRCARCH>/`）的 Makefile／Kbuild／Kconfig 也判沒編（和那裡的 .c 一樣）。
   兩種 arch 規則只在架構確定時用：headers 要有 `arch/<SRCARCH>/Makefile`（標頭寫 `Linux/aarch64` 之類時不用），UML（`um`）不用。
-  沒有 .config、模組目錄對不上、鏡像沒有或過期（7 天）→ GAP。只列出；PR #110 的 `tools/cra/vex_export.py` 讀這個檔（not_affected → VEX 的 code_not_present）。核心的主.次版本沒有 `data/kernel-included-c-<版本>.json`（目前只有 6.8）時不判 not_affected，limitations 註明。
-  實測（Jetson R39.2.1，NVIDIA 公開的 nvidia-l4t-kernel-headers 的 .config，sha256 與 SBOM 記的相同；**PR #111 審查修正之前的版本**，
+  沒有 .config、模組目錄對不上、鏡像沒有或過期（7 天）→ GAP。只列出；`tools/cra/vex_export.py` 讀這個檔（not_affected → VEX 的 code_not_present）。核心的主.次版本沒有 `data/kernel-included-c-<版本>.json`（目前只有 6.8）時不判 not_affected，limitations 註明。
+  實測（Jetson R39.2.1，NVIDIA 公開的 nvidia-l4t-kernel-headers 的 .config，sha256 與 SBOM 記的相同；**審查修正之前的版本**，
   修正後 unknown 會變多，數字要重跑）：6,270 個核心 CVE 中 2,919 個沒編進核心；
   映像實際的 1,352 個模組與 modules.builtin 的 1,305 項沒有一個被判成沒編。
   **核心原始碼樹（選用，Makefile 的來源）**：環境變數 `KERNEL_SOURCE_DIR`（只用於 `--image`、`--sbom`；轉成 `--source-tree`，兩個核心階段都收到）：
@@ -360,7 +360,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
     （最多 `PACKAGE_SCAN_WAIT_SECONDS`，預設 3600）。webhook 可能送不到（逾時 10 秒），所以再觸發一次補上。失敗的掃描另存原因
     （`dejacode/package-scan-failures.json`，`lib/scio_failures.py`）。沒有授權的套件在上傳的 SBOM 裡標成 `unknown`（元件屬性
     `aboutcode:declared_license_expression`；`dejacode/djsbom.json`，`lib/djsbom.py`）。NuGet 改寫成 v3 下載網址、apk 補上下載網址（DejaCode 推出來的網址 HEAD 回 404，或讓整份匯入失敗；查不到 repo 時用猜的網址，只讓那個套件掃描失敗）、沒有授權的 Maven jar 有 `-sources.jar` 時改掃它（只有 .class 的 jar 掃不到授權）。下載網址也是 DejaCode 找既有套件的依據：這個修改之前匯入過的 NuGet 套件，重新匯入時同一個 purl 會多一個 v3 網址的套件，`E-package-scans` 會寫出「同一個 purl 有多個套件」並標 ATTENTION，舊的要從產品移除（離線或網路不穩時，Maven 改不了 sources jar、APKINDEX 讀不到而猜錯 repo，也會造成同樣的情形）。這時產品套件只由 `load_sboms` 匯入、不先 `import_from_scan`：
-    兩者找既有套件的欄位不同（`filename`），混用會讓同一個 purl 建兩個套件（pilot-run/12）。`load_sboms` 失敗時，只有匯入已經結束（或沒有送出）、而且產品套件數和匯入前相同才改用
+    兩者找既有套件的欄位不同（`filename`），混用會讓同一個 purl 建兩個套件（曾讓 npm-lodash 從 3 個變 6 個）。`load_sboms` 失敗時，只有匯入已經結束（或沒有送出）、而且產品套件數和匯入前相同才改用
     `import_from_scan`（`pkgscan.py count`）；否則只讀回已匯入的。
     等待逾時時，取消這個產品留在 ScanCode.io 佇列裡的掃描與匯入（排隊中的刪 run 再刪專案；執行中的不停止、讓它跑完，因為 `stop_pipeline` 會殺掉 worker 的子程序；`dejacode/*-cancel.json`，`lib/scio_cancel.py`）：
     ScanCode.io 只有一個佇列，留下的工作會讓下一次 sca-scan 排隊逾時。ScanCode.io 是共用的，同時有別的產品在掃同一個下載網址時，那個掃描也會被取消。
@@ -387,7 +387,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   - `E-files-scan`：專案本身（原始碼，在 cdxgen 之前封存，不含 cdxgen 裝的依賴）用 ScanCode.io `scan_codebase`，映像用 `analyze_docker_image`，
     掃檔案層級的授權與版權（`scancode/files-summary.json`，`lib/filescan.py`）。`--sbom` 沒有檔案，記 NOT_RUN。
     `--dir` 複製來源時排除 sca-scan 自己的暫存區與輸出資料夾（`lib/common.sh` 的 `copy_dir`；`sca-scan --dir .` 時它們在來源底下，暫存區有金鑰標頭檔）。
-  - 逐套件掃描會從套件來源（npm、Maven Central、PyPI…）下載；離線部署要讓 DejaCode 與 ScanCode.io 連內部套件代理（CLAUDE.md 修正 4）。
+  - 逐套件掃描會從套件來源（npm、Maven Central、PyPI…）下載；離線部署要讓 DejaCode 與 ScanCode.io 連內部套件代理。
     已知限制：apk 推不出下載網址（not_scannable）、deb 推出的網址用套件名稱當 pool 路徑，來源套件名稱不同時不存在（no_scan）；PyPI 名稱含 `-` 時 DejaCode 推的 sdist 網址可能不存在（e2e 第 18 輪 8 個不可達）。
 - 報告：非 OK 的階段放最前面；階段說明與工具輸出原樣顯示；報告自己不寫結論字樣（`report.conclusion_hits`，否定句型放行）。
 
@@ -422,7 +422,7 @@ python3 -I tools/pilot/lib/kernel_cna_version.py --kernel-version 6.1.118 --mirr
 |---|---|
 | `sca-scan` | 掃描入口 |
 | `report.py` | `report.html`（單一檔案、離線、深色模式）與 `report.json` |
-| `compare_expected.py`、`ci-scan-check.sh` | 對照 `tests/expected` 與 PHP 映像已知答案（給自架 runner） |
+| `compare_expected.py`、`ci-scan-check.sh` | 對照 `tests/expected` 與 PHP 映像已知答案（給長期使用的 runner） |
 | `lib/common.sh` | 與 `tools/e2e/real-projects.sh` 共用的函式 |
 | `lib/lockcheck.py`、`lib/strip_versions.py`、`lib/leakscan.py` | 規則 11、規則 13、外洩檢查 |
 | `lib/kernelcheck.py` | 作業系統核心有沒有做弱點比對（C-kernel-coverage） |

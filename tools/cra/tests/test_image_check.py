@@ -492,7 +492,7 @@ def test_resolve_stays_in_image():
     assert img.glob("usr/*/x", [100]) == (["usr/lib/x"], False)
 
 
-# ---------- 審查後的修正（PR #122） ----------
+# ---------- 審查後的修正 ----------
 
 def test_include_glob_is_bounded(tmp_path):
     """Include 的萬用字元與樣式數有總量上限：大量連結到同一個大資料夾、一行很多樣式，不會卡住或吃光記憶體。"""

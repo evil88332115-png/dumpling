@@ -1,4 +1,4 @@
-"""cra_report.py 的 NVIDIA 安全公告（Jetson Linux）段落（風險評估 8.8 節）與 #105 複審的三點（附錄 A 的元件說明、版面說明不當成狀態理由、
+"""cra_report.py 的 NVIDIA 安全公告（Jetson Linux）段落（風險評估 8.8 節）與複審的三點（附錄 A 的元件說明、版面說明不當成狀態理由、
 英文單複數）。scan/nvidia-bulletins.json 由真的 nvidia_bulletins.match 產生：R39.2.1 的 Syft SBOM（tests/fixtures）＋預填的對照表。"""
 import json
 import lzma
@@ -123,7 +123,7 @@ def test_project_template_without_nvidia_section_warns(tmp_path):
     assert not any("Note (layout" in x for x in s["documents"]["risk-assessment"]["detail"])
 
 
-# ---------- #105 複審 ----------
+# ---------- 複審 ----------
 
 def test_main_tables_layout_note_and_accepted_component_text(tmp_path):
     tpl = "{{ risk.data_status_detail }}\n## P1\n{{ tables.p1 }}\n## ACC\n{{ tables.accepted }}\n"

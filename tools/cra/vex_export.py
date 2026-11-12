@@ -1851,7 +1851,7 @@ N_RULES = ("N1", "N2")
 
 
 def all_suggestions(row):
-    """一列的所有建議：row["suggestion"]（主要的一筆，#208 的格式）＋ row["suggestion_more"]（同一列另有別的來源的建議時，通常沒有）。"""
+    """一列的所有建議：row["suggestion"]（主要的一筆）＋ row["suggestion_more"]（同一列另有別的來源的建議時，通常沒有）。"""
     out = [row["suggestion"]] if isinstance(row.get("suggestion"), dict) else []
     return out + [x for x in row.get("suggestion_more") or [] if isinstance(x, dict)]
 

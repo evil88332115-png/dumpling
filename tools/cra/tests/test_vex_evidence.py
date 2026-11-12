@@ -1,7 +1,7 @@
 """vex_export.py 的證據規則 K1、K2（vex-rules.json 的 "evidence"）與標記 K3、K4：格式驗證；嚴重度／EPSS／層級永遠不是
 not_affected 的輸入（結構與行為兩邊鎖住）；KEV／被利用的列永遠不套用；人的判定不被蓋過、被蓋過的記 shadowed；輸入改變（模組、映像、
 核心設定、生效日、適用映像、責任人）時自動不套用；沒有生效的 K1 照舊讓核心設定檢查自動套用；照抄範例規則檔不改任何輸出；
-K2 各種載入限制；cra_report 的整合（summary.json、風險評估、VEX 的屬性、rules check）與 #149 的兩個收尾（counts.epss.dt_invalid、百分位 0.0）。
+K2 各種載入限制；cra_report 的整合（summary.json、風險評估、VEX 的屬性、rules check）與兩個收尾（counts.epss.dt_invalid、百分位 0.0）。
 全部是合成資料。"""
 import copy
 import hashlib
@@ -492,7 +492,7 @@ def test_example_rules_file_copied_as_is_changes_no_output(tmp_path):
     example_noop(tmp_path)
 
 
-# ---------- #149 的收尾：counts.epss.dt_invalid、百分位 0.0 ----------
+# ---------- 收尾：counts.epss.dt_invalid、百分位 0.0 ----------
 
 def test_dt_epss_invalid_count_and_zero_percentile_tie(tmp_path):
     bad = [finding("libz1", "1.0-1", "CVE-2026-2001", "NVD"), finding("libz1", "1.0-1", "CVE-2026-2002", "NVD"),
@@ -630,7 +630,7 @@ def test_manual_exploitation_evidence_excludes_rules_in_both_schemes(tmp_path):
         assert not any(x["id"] == "CVE-2025-0104" for x in cdx["vulnerabilities"])
 
 
-# ---------- #155 審查：M1（名稱要在建置的 modules.order）、L1、L2、L4、L6 ----------
+# ---------- 審查：M1（名稱要在建置的 modules.order）、L1、L2、L4、L6 ----------
 
 def test_k2_removed_needs_the_name_in_the_builds_modules_order():
     rules = rules_of(erule("K2", "K2"))
@@ -733,7 +733,7 @@ def test_k2_same_named_ko_anywhere_in_the_module_tree_is_present():
     # modules_present 是清單、沒有它 → 判已移除
     mm = mmap({"CVE-H": {"modules": ["host1x"], "builtin": False}}, modules_present=sorted(vx.norm_module(x) for x in kmods()["modules_in_image"]))
     assert assess([krow("CVE-H")], rules, module_map=mm, kernel_modules=kmods())[0][0]["vex"]["justification"] == "code_not_present"
-    # #157 第三輪 R3-H1：modules_present 是 null、沒有這個鍵、或 modules_present_gaps 不是空的 → 第二道檢查做不了，不判已移除（K3）
+    # 第三輪 R3-H1：modules_present 是 null、沒有這個鍵、或 modules_present_gaps 不是空的 → 第二道檢查做不了，不判已移除（K3）
     for top in ({"modules_present": None}, {"modules_present": ["kept_mod"], "modules_present_gaps": ["updates -> /opt/nothere"]},
                 {"modules_present": ["kept_mod"], "modules_present_gaps": "x"}):
         mm = mmap({"CVE-H": {"modules": ["host1x"], "builtin": False}}, **top)
@@ -810,7 +810,7 @@ def test_k2_install_follows_kmod_first_match_with_wildcards():
 
 
 def test_k2_install_block_needs_kmods_rules_softdep_continuation_and_certain_patterns():
-    """#158 驗證：會讓 K2 誤判「被擋」的輸入一律不算被擋（K3）。"""
+    """驗證：會讓 K2 誤判「被擋」的輸入一律不算被擋（K3）。"""
     rules = rules_of(erule("K2", "K2"))
 
     def state(lines, **km):

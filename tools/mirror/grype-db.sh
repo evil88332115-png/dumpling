@@ -6,7 +6,7 @@
 #   grype/db/v6/distribution/latest.go  latest.json 的 path 是「相對於 latest.json 的位置」，checksum 為 sha256:<hex>（整個壓縮檔）。
 #   cmd/grype/cli/commands/db_import.go `grype db import <檔案或 URL>` 可直接匯入壓縮檔。
 # 所以內網只要把 DEST 目錄原樣放上檔案伺服器（DEST/v6/latest.json 與壓縮檔同一層），掃描器設定
-#   GRYPE_DB_UPDATE_URL=http://<內部伺服器>/<路徑>   （或直接 grype db import <壓縮檔>，CLAUDE.md 規定用匯入方式）
+#   GRYPE_DB_UPDATE_URL=http://<內部伺服器>/<路徑>   （或直接 grype db import <壓縮檔>，離線環境規定用匯入方式）
 #   GRYPE_DB_AUTO_UPDATE=false  GRYPE_CHECK_FOR_APP_UPDATE=false
 # 用法：grype-db.sh <鏡像輸出資料夾（必須全新）> <manifest 輸出檔>
 #       grype-db.sh --check <鏡像資料夾>      只做自我檢查（latest.json 可解析、壓縮檔 checksum 相符；有 grype 時另做匯入測試）

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sca-scan：試行版（docs/decisions/0002-pilot-scope.md）的掃描入口。產生 SBOM、弱點比對、上傳 DT、匯入 DejaCode，最後產生 HTML 報告。
+# sca-scan：試行版的掃描入口。產生 SBOM、弱點比對、上傳 DT、匯入 DejaCode，最後產生 HTML 報告。
 #
 # 用法：
 #   sca-scan --git <網址> --ref <完整 commit SHA> [--name N]
@@ -39,7 +39,7 @@
 #     經 --cves 給 C-kernel-config 與 C-kernel-module-map。狀態列 C-kernel-cve-list 記清單的來源（不是 Grype／DT）；版本取不到或被拒絕 → GAP，不猜。
 #     Grype 或 DT 已有核心 CVE 的產品不受影響（先照舊執行，只有 NOT_RUN 時才走這一條）。
 #
-# 規則（CLAUDE.md、docs/decisions/0002）：
+# 規則（專案規則、試行版範圍）：
 # - 每個階段寫一列到 <out>/status.tsv（stage、status、detail），狀態只用 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN，
 #   不合併成一個「成功」。OK 只表示該階段完成且輸出可用，不代表安全。
 # - 退出碼：有 FAIL → 1；沒有 FAIL 但有任何非 OK（GAP／NOT_ASSESSED／NOT_RUN／ATTENTION）→ 2；全部 OK → 0。參數錯誤 → 64。
@@ -51,7 +51,7 @@
 #   （D-usn-cves，scan/usn-cves.json；cra_report.py 把 USN 併進同一個元件上那個 CVE 的列）。Ubuntu 套件（含 Canonical 核心）上的 CVE
 #   從同一個鏡像讀 Ubuntu priority（D-ubuntu-priority，scan/ubuntu-priority.json；cra_report.py 分級的嚴重度依供應商評級優先）。
 #   核心的 CVE 以產品核心的 .config 與 Makefile 判斷修補的程式有沒有編進核心（C-kernel-config，scan/kernel-config.json；
-#   只列出，原始 findings 不改；PR #110 的 tools/cra/vex_export.py 讀這個檔，把 not_affected 寫成 VEX 的 code_not_present）。
+#   只列出，原始 findings 不改；tools/cra/vex_export.py 讀這個檔，把 not_affected 寫成 VEX 的 code_not_present）。
 #   同樣的輸入另依 Kbuild 規則把修補動到的檔案對應到 builtin／模組（C-kernel-module-map，scan/kernel-module-map.json；只對應，給 K2）。
 # - sudo 執行時（sudo 會把 PATH 重設成 secure_path）找不到 grype 或 syft，而且 /opt/sca-tools/bin 存在（SCA_TOOLS_DIR 可改；
 #   deploy/gitlab-runner/install.sh 裝工具的位置）：把 /opt/sca-tools 的 bin、node/bin、go/bin 加到 PATH 前面（A-tools 的說明會寫出來）。
@@ -912,7 +912,7 @@ scio_diag(){ local pu=$1 dir=$2 pre=$3 ru; SCIO_DIAG=
 #   逐套件掃描時產品套件只由 load_sboms 匯入（不先 import_from_scan；原因寫在下面匯入的地方）。
 # 第二次觸發：webhook 逾時 10 秒，dj-web 忙時會漏；第二次 scan_all 時已有掃描的套件改走 update_package_from_existing_scan_data 補上
 #   （只補套件；產品套件由 pkgscan.py sync-unknown 依 ProductPackage.update_license_unknown 的同一條規則補）。詳見 lib/pkgscan.py。
-# 下載網址連的是套件來源（npm、Maven Central、PyPI…）；離線部署要讓 DejaCode 與 ScanCode.io 連內部套件代理（CLAUDE.md 修正 4）。
+# 下載網址連的是套件來源（npm、Maven Central、PyPI…）；離線部署要讓 DejaCode 與 ScanCode.io 連內部套件代理。
 scio_cancel(){ [ -s "$2" ] || return 0; SCANCODEIO_URL=$SCANCODEIO_URL SCANCODEIO_API_KEY=$SCANCODEIO_API_KEY python3 -I "$ROOT/tools/pilot/lib/scio_cancel.py" "$@"; }
 pkg(){ DEJACODE_URL=$DEJACODE_URL DEJACODE_API_TOKEN=$DEJACODE_API_KEY DJ_PRODUCT=$PID python3 -I "$ROOT/tools/pilot/lib/pkgscan.py" "$@"; }
 scan_trigger(){  # $1＝輸出檔名前綴；回傳 0＝匯入結束（狀態寫在 SCAN_ST、SCAN_D）
@@ -1057,7 +1057,7 @@ PY
       #   兩者不能先後混用（DejaCode v6.0.1 product_portfolio/importers.py）：import_from_scan 找既有套件用 purl＋download_url＋filename，
       #   filename 取下載網址的檔名（component_catalog/importers.py prepare_package）；load_sboms 的 look_for_existing_package 用
       #   ScanCode.io 套件的 filename（SBOM 載入時是空的），沒有下載網址時才退回只比 purl（且只在剛好一個時）。先後混用時
-      #   同一個 purl 建兩個套件（pilot-run/12：npm-lodash 3 → 6），推下載網址後更新既有套件還會撞唯一鍵（php-8.4.27 匯入失敗）。
+      #   同一個 purl 建兩個套件（npm-lodash 曾因此從 3 個變 6 個），推下載網址後更新既有套件還會撞唯一鍵（php-8.4.27 匯入失敗）。
       #   load_sboms 匯入失敗時改用 import_from_scan（沒有逐套件掃描），授權讀回照做；匯入逾時則不再匯入，讀回已匯入的部分。
       IMP=import_from_scan
       if [ $PKGSCAN = 1 ]; then

@@ -149,3 +149,14 @@ def test_customer_fix_for_python_module_with_ambiguous_or_unknown_owner():
     assert sp.customer_fix(none).startswith("Installed by a distribution package; the upstream PyPI fix 13.0.0 may not apply")
 
 
+def test_legacy_responses_keep_cdx_and_openvex(tmp_path):
+    rows = [row("CVE-2026-0011", "liba", "1.0", fix_state="not-fixed", fix_versions=[]),
+            row("CVE-2026-0012", "libb", "1.0", fix_state="wont-fix", fix_versions=[])]
+    d = doc(rule("R2", response=("can_not_fix",), detail="No fix yet for {component}.", fix_state=["not-fixed"]),
+            rule("R7", response=("will_not_fix",), detail="Distribution marked {component} will not fix.", fix_state=["wont-fix"]))
+    vx.check_rules(d)
+    allr, _, _ = assess(rows, vx.effective_rules(d), ctx={"kernel_fix_all": {}})
+    cdx, _ = vx.cdx_vex(allr, PBOM, {"finished": "2026-11-02T02:43:55Z", "name": "img"}, {"name": "P"}, "ATTENTION")
+    assert all(v["analysis"]["response"] in (["can_not_fix"], ["will_not_fix"]) for v in cdx["vulnerabilities"])     # 舊設定檔照常
+    ov = vx.openvex(cdx, "Example Co.", vx.purl_by_bomlink(PBOM))
+    assert all("can_not_fix" not in s["action_statement"] and "will_not_fix" not in s["action_statement"] for s in ov["statements"])

@@ -1,6 +1,6 @@
 """tools/pilot/lib/ubuntu_status.py（sca-scan 的 D-ubuntu-status）：從 Ubuntu CVE Tracker 狀態鏡像（schema sca-ubuntu-cve-status/1，
-PR #150 合併到 main（c8f85d5）的格式）只取出映像要的 (CVE, 原始碼套件, 發行版)。
-鏡像照 #150 的測試（tools/pilot/tests/test_ubuntu_cve_status.py）的建法：假的 tracker 倉庫（active/、retired/ 每個 CVE 一個檔）
+的格式）只取出映像要的 (CVE, 原始碼套件, 發行版)。
+鏡像照 tools/pilot/tests/test_ubuntu_cve_status.py 的建法：假的 tracker 倉庫（active/、retired/ 每個 CVE 一個檔）
 用 git commit 之後，以真的 tools/mirror/ubuntu-cve-status.sh 建出來；要測壞掉的鏡像時，建好之後改檔，再把 SOURCE 的 sha256 與大小改對
 （同那份測試的 rewrite），只留下要測的那個錯。"""
 import gzip
@@ -43,7 +43,7 @@ def E(status, note="", **kw):
     return {"status": status, "note": note, **kw}
 
 
-# 假的 ubuntu-cve-tracker 倉庫（同 #150 test_ubuntu_cve_status.py 的建法：active/、retired/ 每個 CVE 一個檔，git commit 之後用真的
+# 假的 ubuntu-cve-tracker 倉庫（同 test_ubuntu_cve_status.py 的建法：active/、retired/ 每個 CVE 一個檔，git commit 之後用真的
 # tools/mirror/ubuntu-cve-status.sh 建鏡像）。每個檔旁邊寫鏡像裡的結果。
 TRACKER = {
     "active/CVE-2026-1001": ("Candidate: CVE-2026-1001\nPriority: medium\n\nPatches_openssl:\n"
@@ -85,7 +85,7 @@ def source(m):
 
 
 def rewrite(m, idx=None, **source_kv):
-    """（同 #150 測試的 rewrite）改一般檔的索引後把 SOURCE 的 sha256 與大小改對，再改 SOURCE 的鍵：只留下要測的那個錯。"""
+    """（同 test_ubuntu_cve_status.py 的 rewrite）改一般檔的索引後把 SOURCE 的 sha256 與大小改對，再改 SOURCE 的鍵：只留下要測的那個錯。"""
     gz = m / FILES["main"]
     if idx is not None:
         gz.write_bytes(gzip.compress(json.dumps(idx).encode(), mtime=0))

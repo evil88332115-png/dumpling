@@ -717,7 +717,7 @@ def test_script_version_validation(tmp_path):
     assert p.returncode == 64
 
 
-# ---------- 審查（PR #107）：兩棵 rootfs 之間的硬連結、多段 bzip2、略過要說明 ----------
+# ---------- 審查：兩棵 rootfs 之間的硬連結、多段 bzip2、略過要說明 ----------
 
 def cross_archive(path, multi=False):
     """cp -al 式的兩棵樹：GNU tar 把第二份存成指向第一份的硬連結，兩個方向都有；dpkg status 是硬連結；連結指向連結；

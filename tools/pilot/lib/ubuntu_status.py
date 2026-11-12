@@ -5,8 +5,8 @@
 
 用法：python3 -I ubuntu_status.py --findings <dt/findings.json[.xz]> [--sbom <sbom.cdx.json[.xz]>] [--mirror <鏡像資料夾>]
                                [--max-age-days N] [--max-commit-age-days N] --out <scan/ubuntu-status.json>
-  --mirror：tools/mirror/ubuntu-cve-status.sh 的輸出（PILOT_ENV 的 UBUNTU_CVE_STATUS_MIRROR；PR #150，main c8f85d5 的最後格式，
-    docs/offline-mirrors.md「Ubuntu CVE Tracker 狀態鏡像」，schema sca-ubuntu-cve-status/1）。只讀一般套件的索引 ubuntu-cve-status.json.gz
+  --mirror：tools/mirror/ubuntu-cve-status.sh 的輸出（PILOT_ENV 的 UBUNTU_CVE_STATUS_MIRROR；
+    Ubuntu CVE Tracker 狀態鏡像，schema sca-ubuntu-cve-status/1）。只讀一般套件的索引 ubuntu-cve-status.json.gz
     （核心 linux、linux-* 的索引約 1.3 GB 不讀：證據規則 U1 不用在核心的列，核心走 K1–K4）。一個 CVE 可以兩個檔都有，但核心以外的
     套件只在一般檔，所以不用合併。
   --max-age-days：SOURCE 的 fetched_utc 最多幾天（預設 3，環境變數 UBUNTU_CVE_MAX_AGE_DAYS；同 ubuntu-cve-status.sh --check）。

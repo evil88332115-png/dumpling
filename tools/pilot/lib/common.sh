@@ -1,5 +1,5 @@
 # 共用函式：由 tools/pilot/sca-scan 與 tools/e2e/real-projects.sh 載入（只定義函式，不執行任何步驟）。
-# 這些函式是從 real-projects.sh 原樣搬出來的（行為不變）；grype_db_check 是 e2e/images 分支 images.sh 的 Grype DB 檢查。
+# 這些函式是從 real-projects.sh 原樣搬出來的（行為不變）；grype_db_check 是 e2e 的 Grype DB 檢查。
 # 呼叫前需要：status()（各腳本自己定義；寫 status.tsv）。runlog 需要 LOG。
 # 狀態只用 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN；OK 只表示該階段完成且輸出可用，不代表沒有弱點。
 
@@ -89,7 +89,7 @@ grype_db_eval(){  # grype執行檔 輸出資料夾 上限天數 更新結果(OK|
   else printf 'OK\tBuilt=%s（UTC，%s 小時，上限 %s 小時）Status=%s\n' "$built" "$age" "$lim" "$dbst"; fi; }
 
 grype_db_check(){  # grype執行檔 輸出資料夾 [上限天數，預設 1]：線上更新 Grype DB 並判斷狀態，印「狀態<TAB>說明」（每日監控 exploited-watch-daily.sh 用；更新失敗＝FAIL，嚴格）
-  # 出處：e2e/images 分支 tools/e2e/images.sh（自架 runner 會保留 ~/.cache/grype，更新失敗時 grype 會靜默沿用舊資料庫）。
+  # 長期使用的機器會保留 ~/.cache/grype，更新失敗時 grype 會靜默沿用舊資料庫，所以更新失敗要當 FAIL。
   local r; r=$(grype_db_refresh "$1" "$2" online); grype_db_eval "$1" "$2" "${3:-1}" "${r%%$'\t'*}" 1 "${r#*$'\t'}"; }
 
 pick_python(){  # [最低版本，預設 3.12]：印出第一個版本夠新的 Python 的路徑；都不夠新時回傳 1（不印）。

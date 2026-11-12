@@ -366,7 +366,7 @@ def test_report_marker_counts_include_possible_false_positives(tmp_path):
     assert s["vex"]["markers"].get("distro_no_range_upstream_excludes") == 1 == s["vex"]["gate"]["untriaged_markers"]["distro_no_range_upstream_excludes"]
 
 
-# ---------- #156 審查 H1：not-affected (版本) 是「這個版本不受影響」，不是下限 ----------
+# ---------- 審查 H1：not-affected (版本) 是「這個版本不受影響」，不是下限 ----------
 
 XZ_PURL = DEB.format("xz-utils", "{}")
 

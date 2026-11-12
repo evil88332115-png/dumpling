@@ -7,7 +7,7 @@
   meta.json、status.tsv、sbom/sbom.cdx.json、scan/grype.json、scan/sbomgate.json、scan/govulncheck.json、scan/kernel-coverage.json、scan/l4t-kernel-map.json、scan/nvidia-bulletins.json、
   dt/findings.json、dt/deb-sources.json、dejacode/compliance.json、dejacode/scio-summary.json
 
-規則（CLAUDE.md 驗收原則、docs/decisions/0002）：
+規則（專案驗收原則、試行版範圍）：
 - 任何非 OK 的階段（未完成或不完整）放在最前面；整體狀態只有 FAIL／INCOMPLETE／COMPLETE，COMPLETE 也不代表沒有弱點。
 - 報告自己不寫任何結論字樣（FORBIDDEN_WORDS，測試會檢查）；0 筆比對只描述為「比對結果 0 筆」並附範圍說明。
   階段說明與工具輸出原樣顯示（不改寫證據）；conclusion_hits() 找出肯定句的結論字樣，只放行「不代表…」「不可當作…」這類否定句型。

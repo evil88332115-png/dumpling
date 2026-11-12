@@ -222,7 +222,7 @@ def fake_grype(tmp_path, g=None, built="2999-01-01T00:00:00Z", status="valid"):
     exe.write_text(FAKE)
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
     env = {"FAKE_LOG": str(tmp_path / "log"), "FAKE_BUILT": built, "FAKE_STATUS": status, "PATH": os.environ["PATH"], "HOME": str(tmp_path),
-           **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}   # 自架 runner 的 python 動態連結 libpython，要 LD_LIBRARY_PATH
+           **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}   # CI 的 python 動態連結 libpython，要 LD_LIBRARY_PATH
     if g is not None:
         write_json(tmp_path / "g.json", g)
         env["FAKE_OUT"] = str(tmp_path / "g.json")

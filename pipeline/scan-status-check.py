@@ -7,8 +7,8 @@
 import csv
 import sys
 
-DEFAULT_NEED = ["A-source", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "D-dt-project", "D-dt-upload",
-                "D-dt-bom-processing", "F-secret-scan"]
+DEFAULT_NEED = ["A-source", "B-sandbox", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "C-upload-sbom",
+                "D-dt-project", "D-dt-upload", "D-dt-bom-processing", "D-dt-vuln-analysis", "F-secret-scan"]
 
 
 def main(argv):

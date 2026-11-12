@@ -24,7 +24,7 @@ ENISA KEV 的檔（--enisa-config：GET /api/v2/extension-points/kev-data-source
     SOURCE.json 的 fetched_utc 超過 EUVD_MAX_AGE_DAYS（預設 3）天、kev/dump 最新 dateAdded 超過 EUVD_KEV_MAX_AGE_DAYS（預設 14）天、
     或掃描端讀不到 SOURCE.json → GAP（說明照樣列出下面兩種 CVE）；有條目因為沒有可用的日期沒寫進 DT 的檔（skipped_no_date）→ ATTENTION，點名 CVE
     （不補日期）；EUVD 標已遭利用而 DT 的 CISA KEV ∪ 這份檔都沒有的 CVE（euvd_not_in_dt，例如 CISA 已移除的）是來源之間的不一致、不是缺資料：
-    狀態不變，只在說明以 NOTE 列出（風險評估不因此變 GAP；報告端讀 EUVD，逐筆列為 P1，#159）；
+    狀態不變，只在說明以 NOTE 列出（風險評估不因此變 GAP；報告端讀 EUVD，逐筆列為 P1）；
     沒有和 CISA KEV 比對（SOURCE.json 的 euvd_not_in_dt 是 null：cisa-kev.json 沒有下載或無法解析、或舊的 SOURCE.json）→ ATTENTION，
     說明寫出 cisa_problem（比對被跳過，「DT 沒有的 CVE」未知，不能顯示 OK）；
     euvd_not_in_dt 比對的是 euvd-mirror.sh（dt-feeds.sh 的 euvdkev 部分）下載的 CISA 檔，不是 DT 的 CISA 來源實際讀的那一份
@@ -40,7 +40,7 @@ ENISA KEV 的檔（--enisa-config：GET /api/v2/extension-points/kev-data-source
   沒有 mirror 紀錄（尚未觸發、已不保留）或資料源名稱不存在時回 404。
 - schemas/vuln-data-source-mirror-status.yaml：status（PENDING、RUNNING、COMPLETED、FAILED，必填）、started_at、completed_at（epoch 毫秒）、failure_reason。
 判定只看「最近一次」：最近一次是 RUNNING（例如例行更新）時，前一次的資料可能仍在，但這支 API 看不出來，所以仍記 GAP（未核對）。
-GitHub（GHSA）依設計關閉（CLAUDE.md 修正 2），不檢查；EPSS 在 DT 5.2.0 沒有 mirror 狀態 API（未核對），不列入。
+GitHub（GHSA）依設計關閉，不檢查；EPSS 在 DT 5.2.0 沒有 mirror 狀態 API（未核對），不列入。
 
 OSV 生態系涵蓋（出處：DT 5.2.0 api/src/main/openapi/openapi.yaml /extension-points/{extension_point_name}/extensions/{extension_name}/config，
 GET 需 SYSTEM_CONFIGURATION 或 SYSTEM_CONFIGURATION_READ，回應 {"config": {...}}；擴充點名稱 vuln-data-source（VulnDataSource.java

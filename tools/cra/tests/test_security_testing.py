@@ -309,7 +309,7 @@ def test_firewall_and_updates_rules():
     assert bi.parse_auto_updates(on, "s") == [] and bi.parse_auto_updates(on.replace('"1";\nunatt', '"0";\nunatt'), "s")
 
 
-# ---------- 審查（PR #124）指出的問題，每項一個測試 ----------
+# ---------- 審查指出的問題，每項一個測試 ----------
 
 def test_r1_long_whitespace_files_parse_fast():
     """16 MB 的換行或空白（gzip 後只有幾 KB）：逐行解析、行數上限，不能卡住。"""

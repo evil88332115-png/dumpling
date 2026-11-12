@@ -35,6 +35,12 @@ mask() { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::add-mask::$1"; fi; }
 die() { echo "dt-ephemeral $sub: FAIL（$*）"; exit 1; }
 pj() { python3 -I -c "$@"; }
 
+# 數字型的環境變數要先驗證是正整數（會進算術或命令）
+for _v in DT_PORT DT_UP_TIMEOUT_SEC DT_WAIT_MIN DT_OPTIONAL_GRACE_MIN DT_API_KEY_DAYS; do
+  if [ -n "${!_v:-}" ] && ! [[ "${!_v}" =~ ^[1-9][0-9]{0,8}$ ]]; then die "$_v 必須是正整數（現在是「${!_v}」）"; fi
+done
+unset _v
+
 # 以管理員 JWT 呼叫（含 curl 失敗時的退出）；秘密放標頭檔，不出現在指令列
 HDR=
 mkhdr() { # $1=Authorization 的值

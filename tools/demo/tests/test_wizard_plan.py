@@ -39,7 +39,7 @@ def site(tmp_path):
 
 def run(args, env_extra=None):
     env = {"PATH": os.environ["PATH"], "HOME": args[0],
-           **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}   # 自架 runner 的 python 動態連結 libpython，要 LD_LIBRARY_PATH
+           **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}   # CI 的 python 動態連結 libpython，要 LD_LIBRARY_PATH
     env.update(env_extra or {})
     return subprocess.run([sys.executable, "-I", WIZ, *args[1:]], capture_output=True, text=True, env=env)
 

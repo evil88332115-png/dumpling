@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""刷機包的韌體元件併進產品 SBOM，並對照 BSI TR-03183-2 v2.1.0 的欄位（計畫總表 #10，對應 II-1）。
+"""刷機包的韌體元件併進產品 SBOM，並對照 BSI TR-03183-2 v2.1.0 的欄位（對應 II-1）。
 
 來源（都是 tools/demo/scan-flash-package.sh 的結果資料夾最上層，cra_report.py 自動找；不是刷機包的掃描就不做）：
 - flash-inventory.json（tools/demo/flash_package.py list）：

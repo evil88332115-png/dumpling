@@ -694,7 +694,7 @@ def test_kernel_config_collector_has_no_hooks():
 COMMON = HERE.parents[2] / "tools" / "pilot" / "lib" / "common.sh"
 
 
-# 自架 runner 的 setup-python 是動態連結 libpython，靠 LD_LIBRARY_PATH 才找得到；假的 python 用 sys.executable，所以要把它帶進去
+# CI 的 setup-python 是動態連結 libpython，靠 LD_LIBRARY_PATH 才找得到；假的 python 用 sys.executable，所以要把它帶進去
 LIBPATH = {k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}
 
 
@@ -769,10 +769,10 @@ def test_accepted_unread_initramfs_withholds_all_blocks(tmp_path):
     vx.check_kernel_modules(doc)
 
 
-# ---------- PR #158 的消費端：modules_softdep、所有目錄的檔依檔名排序、/run 的同名檔 ----------
+# ---------- 新版消費端：modules_softdep、所有目錄的檔依檔名排序、/run 的同名檔 ----------
 
 def consumer158():
-    """PR #158 的 vex_export（modules_softdep、install_block）：main 已經有就用 main 的；否則從 origin/cra/k2-modprobe-fnmatch 讀（git show，
+    """新版 vex_export（modules_softdep、install_block）：目前的 vex_export 已經有就用它；否則從另一個分支讀（git show，
     不複製進 repo）；都沒有 → None（呼叫端測舊版消費端的行為）。"""
     if hasattr(vx, "SOFTDEP_HEADER"):
         return vx
@@ -804,7 +804,7 @@ def test_modules_softdep_round_trip_with_pr158_consumer(tmp_path, monkeypatch):
     st, detail, out = gen(tmp_path, root)
     doc, src = load(out)
     assert doc["modules_softdep"] == [km.SOFTDEP_HEADER, "softdep sd_mod pre: crc32"]
-    c.check_kernel_modules(doc)                                                    # PR #158 的驗證
+    c.check_kernel_modules(doc)                                                    # 新版消費端的驗證
     _, inst, soft = c.modprobe_state(doc["modprobe_d"])
     assert c.install_block("bar", inst, soft + [c.kmod_pattern("sd_mod")]) == "install bar /bin/false"
     # modules.softdep 沒有 → 不寫欄位、寫 note；消費端就不認 install 的擋住
@@ -883,12 +883,12 @@ def test_modprobe_d_elements_are_physical_lines(tmp_path):
     assert all("\n" not in x and "\r" not in x for x in md)
     i = md.index("install cont \\")
     assert md[i + 1:i + 4] == ["/bin/false", "# comment \\", "install hid /bin/false"]
-    for c in [x for x in (vx, consumer158()) if x is not None]:    # main 的消費端與 #158 的（有的話）
+    for c in [x for x in (vx, consumer158()) if x is not None]:    # 目前的消費端與新版的（有的話）
         c.check_kernel_modules(doc)
         b = km.consumer_blocked(c, md, doc.get("modules_softdep"), {"cont", "hid", "bar"})
         assert "cont" not in b                    # 續行：不算被擋（兩版的消費端都一樣）
         if hasattr(c, "install_block"):
-            assert b == {}                        # #158：清單裡有反斜線 → install 一律不算被擋
+            assert b == {}                        # 清單裡有反斜線 → install 一律不算被擋
     # 行中間的 CR：不輸出 CR（換成空白），擋住行全部不放
     (root / "etc/modprobe.d/cont.conf").write_text("install crx\r/bin/false\n")
     st, detail, out = gen(tmp_path / "b", root)

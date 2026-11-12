@@ -78,7 +78,7 @@ sbx_rebinds(){  # 印出「ro <路徑>」（唯讀掛回）與「ln <目標> <�
 sbx_toolchain_roots(){  # 印出工具鏈的根目錄（每行一個；給呼叫端明確放進 SBX_RO）：只掛 bin 時無法執行的工具
   # JAVA_HOME（沒設時由 java 的實際位置推：<JAVA_HOME>/bin/java）、Maven 安裝目錄（<MAVEN_HOME>/bin/mvn；mvn 需要 boot、lib、conf）、
   # Gradle 安裝目錄、GOROOT、Python 的 base_prefix 與 prefix。只是候選：sbx_rebinds 只掛回在遮蔽範圍內、且不是不安全路徑的。
-  # 2026-10-23 實機：自架 runner 沒有 java／mvn 時 cdxgen 退回只讀 pom.xml（petclinic 163 → 19 個元件），這裡無法補上沒有安裝的工具。
+  # 沒有 java／mvn 時 cdxgen 退回只讀 pom.xml，元件會少很多，這裡無法補上沒有安裝的工具。
   local t r
   if [ -n "${JAVA_HOME:-}" ]; then echo "$JAVA_HOME"
   elif command -v java > /dev/null; then r=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")"); [ "$(basename "$r")" = jre ] && r=$(dirname "$r"); echo "$r"; fi

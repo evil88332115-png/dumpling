@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""支援期檢查（計畫總表 #13，對應 M-3；Art 13(8)、Annex VII 第 4 點）。
+"""支援期檢查（對應 M-3；Art 13(8)、Annex VII 第 4 點）。
 
 產品的支援期（設定 support.end_date，YYYY-MM）比元件的維護期長時，產品在支援期後段會收不到那個元件的安全更新。
 這裡用內建的資料表（tools/cra/data/support-lifecycle.json：Ubuntu、Jetson Linux、kernel 的維護期，每筆附來源網址與查核日期）

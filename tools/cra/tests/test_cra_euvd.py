@@ -1,7 +1,7 @@
 """cra_report.py／vex_export.py 讀 scan/euvd.json（C 線② PR-2；使用者決定：EUVD 是另一種被利用證據，不設 kev，只走 exploited_sources）。
 
 - 兩種分級方式（current、exploitation）下，EUVD 標示已遭利用的列都是 P1；包括 DT 沒有標 isKev 的 CVE（例如 EUVD 只標 cisa_kev、
-  當天的 CISA 檔沒有的 CVE-2026-69836 那種：#154 的 D-dt-kev-sources 只記 NOTE，前提就是這裡讓它逐筆進 P1）。
+  當天的 CISA 檔沒有的 CVE-2026-69836 那種：D-dt-kev-sources 只記 NOTE，前提就是這裡讓它逐筆進 P1）。
 - KEV 欄與 summary.json 分得出 DT／Grype 的 KEV 與 EUVD 寫的 CISA KEV、ENISA EU KEV。
 - status 不是 OK、讀不到、沒有 status → 當作沒有 EUVD 資料、文件 GAP（理由只出現一次），不顯示成沒有被利用。
 - 沒有 scan/euvd.json 時輸出和以前相同（逐位元組的比較在 PR 說明；這裡比 current 有沒有 EUVD 以外的差異）。
@@ -280,7 +280,7 @@ def test_lc_risk_table_ranks_euvd_with_kev(tmp_path):
     assert [r["id"] for r in rows][0] == "CVE-2026-9130"
 
 
-# ---------- #159 審查（中 M1）：EUVD 不能用時不寫 0 ----------
+# ---------- 審查（中 M1）：EUVD 不能用時不寫 0 ----------
 
 KFS = FS + [finding("linux-kernel", "6.8.0", "CVE-2026-9140", "NVD", "LOW", purl="pkg:generic/linux-kernel@6.8.0")]
 STALE = dict(EUVD, status="GAP", detail="EUVD 索引過期")     # 過期：C-euvd 照樣標註，但 status 是 GAP
