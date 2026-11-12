@@ -2,13 +2,13 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 05:11 +0800（C4）
+最後更新：2026-11-12 16:11 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main b6d341a。**M1（#9）、M3（#14）已合併**；文件批次 #13 已合併；本機累積分支 `wp0/docs-batch-3`（D-029～D-032，d5bfa70），還沒推；等 C4 的 CRA 提案一起併入，C3 開工前合併
+- 分支／PR／commit：main b6d341a。**M1（#9）、M3（#14）已合併**；文件批次 #13 已合併；文件批次 PR #15（`wp0/docs-batch-3`：D-029～D-033＋C4 的 CRA 調查與提案）等 CI 後背景合併
 - 代理：PR #14 驗證代理已完成（第一輪不通過：expected_dt 只看 http=400；C2 修正 8f02635 由 C0 複驗通過）；目前沒有 C0 代理在跑
 - 各對話：C1 做 M2（wp1/m2：P 平台介面＋開案範本、L 依層分開已完成、J Jetson 編譯＋掃描＋release 進行中）；C2：wp3/supplier-normalize（dd54722）正規化已完成、CI 綠，另修 report 假 OK 路徑；等 M2 合併後加 fetch_verify 再開 PR；C4（WSL）等 M2 的 P 軌
 - CI：PR #15 背景等待並合併（gh pr checks --watch → 確認 head 不變 → squash＋noreply）
