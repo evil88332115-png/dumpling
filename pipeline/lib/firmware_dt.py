@@ -440,7 +440,27 @@ def sample_result(info, dt_dir, wait_rc):
     return r
 
 
-def report(prep_dirs, dt_dir, out):
+def vbios_assessment(root=None):
+    """NVIDIA vBIOS 的公告對照說明：(狀態, 文字)。文字取自 C1 的 tools/pilot/lib/nvidia_bulletins.py（VBIOS_NOT_ASSESSED），不複製一份。
+    載入失敗（檔案不存在、語法錯、沒有該常數）→ ("GAP", 原因)。載入的是本 repo 自己的程式（不是輸入資料）。"""
+    import importlib.util
+    base = root or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    path = os.path.join(base, "tools", "pilot", "lib", "nvidia_bulletins.py")
+    try:
+        if not os.path.isfile(path):
+            return "GAP", "沒有 tools/pilot/lib/nvidia_bulletins.py（C1 的公告對照工具），NVIDIA 公告對照未評估"
+        spec = importlib.util.spec_from_file_location("nvidia_bulletins_c1", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        text = getattr(mod, "VBIOS_NOT_ASSESSED", None)
+        if not isinstance(text, str) or not text.strip():
+            return "GAP", "nvidia_bulletins.py 沒有 VBIOS_NOT_ASSESSED 文字，NVIDIA 公告對照未評估"
+        return "NOT_ASSESSED", text.strip()
+    except Exception as e:   # 載入失敗一律寫 GAP，不讓報告中斷
+        return "GAP", "無法載入 nvidia_bulletins.py（%s），NVIDIA 公告對照未評估" % type(e).__name__
+
+
+def report(prep_dirs, dt_dir, out, nvidia_root=None):
     wait_rc = None
     if dt_dir:
         if not os.path.isdir(dt_dir):
@@ -452,6 +472,7 @@ def report(prep_dirs, dt_dir, out):
             except (ValueError, UnicodeDecodeError):
                 raise DtError("dt-wait.rc 不是整數")
     lines, rows = [], []
+    nv = None
     for d in prep_dirs:
         info = load_prep(d)
         res = sample_result(info, dt_dir, wait_rc)
@@ -461,6 +482,11 @@ def report(prep_dirs, dt_dir, out):
         detail = "DT 專案 %s@%s；元件 %d（purl %d、cpe %d）；上傳 %s；DT 元件 %s；漏洞 %s；Grype %s（%s）；NOT_ASSESSED 與版本 GAP：%s／%d" % (
             info["project_name"], info["project_version"], s["components"], s["with_purl"], s["with_cpe"], res["upload"],
             res["dt_components"], res["dt_findings"], res["grype"], res["grype_matches"], va, s["version_gap"])
+        if info.get("kind") == "vbios":
+            if nv is None:
+                nv = vbios_assessment(nvidia_root)
+            res["nvidia"] = "NVIDIA 公告對照：%s（%s）" % (nv[0], _cell(nv[1]))
+            detail += "；" + res["nvidia"]
         if res["notes"]:
             detail += "；" + "；".join(res["notes"])
         if res["verify_fail"]:
@@ -490,6 +516,8 @@ def report(prep_dirs, dt_dir, out):
         md.append("- 元件 %d，有 purl %d，有 cpe %d，vuln-assessment：%s，version-status GAP %d" % (
             s["components"], s["with_purl"], s["with_cpe"],
             "、".join("%s=%d" % kv for kv in sorted(s["vuln_assessment"].items())) or "無", s["version_gap"]))
+        if res.get("nvidia"):
+            md.append("- " + res["nvidia"])   # 文字取自 C1 的 nvidia_bulletins.py，已經過 _cell
         for n in res["notes"]:
             md.append("- " + n)               # notes／verify_fail 在產生時已經過 _cell
         if res["verify_fail"]:
@@ -510,6 +538,7 @@ def main(argv=None):
     e.add_argument("--prep", required=True)
     r = sub.add_parser("report", allow_abbrev=False)
     r.add_argument("--prep", nargs="+", required=True); r.add_argument("--dt-result"); r.add_argument("--out", required=True)
+    r.add_argument("--repo-root", help="找 tools/pilot/lib/nvidia_bulletins.py 的根資料夾（預設本檔往上兩層；測試用）")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -524,7 +553,7 @@ def main(argv=None):
             exp, _ = expected(a.prep)
             print("FIRMWARE-DT-EXPECTED\tOK\t%s@%s；元件 %d" % (exp["project_name"], exp["project_version"], exp["components"]))
         else:
-            lines, failed = report(a.prep, a.dt_result, a.out)
+            lines, failed = report(a.prep, a.dt_result, a.out, a.repo_root)
             print("\n".join(lines))
             return 1 if failed else 0
     except DtError as ex:
