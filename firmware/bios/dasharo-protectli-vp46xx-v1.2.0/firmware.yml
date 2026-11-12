@@ -1,0 +1,40 @@
+kind: bios
+vendor: Protectli／3mdeb（Dasharo）
+model: Protectli VP46xx（Dasharo coreboot+edk2）
+firmware_version: v1.2.0
+ibv: coreboot+edk2
+status: ok
+files:
+  - name: protectli_vp46xx_v1.2.0.rom
+    url: https://dl.3mdeb.com/open-source-firmware/Dasharo/protectli_vault_cml/v1.2.0/protectli_vp46xx_v1.2.0.rom
+    sha256: dee03bc4de525012316b982e0c301d246a562cd9a79f6164987694942a940a57
+    size: 16777216
+    role: image
+  - name: coreboot-add9d7206e30.tar.gz
+    url: https://github.com/Dasharo/coreboot/archive/add9d7206e30b24629e68b826cf93187dc54c73b.tar.gz
+    sha256: 670eb6909b306782322b7381a1850f0675df40d3136ea8012dd40b5a6777d306
+    size: 26511898
+    role: source
+  - name: edk2-2a15268b36cc.tar.gz
+    url: https://github.com/Dasharo/edk2/archive/2a15268b36cc732aa9d0a34a33965de6b0fca122.tar.gz
+    sha256: 49ed3e80527f691f1f577eaa37ed8c038a8cd8f87edc70016de299bf8b03ee38
+    size: 14352904
+    role: source
+license:
+  name: Dasharo 開放原始碼韌體（coreboot GPL-2.0；edk2 BSD-2-Clause-Patent；內含 Intel ME／FSP／微碼二進位 blob）
+  url: https://docs.dasharo.com/
+  note: 3mdeb 公開下載；blob 的條款屬 Intel 所有。本 repo 只在 CI 下載核對，不重新散布。
+notes: |
+  映像連結位於 Dasharo 的 protectli_vault_cml 目錄（VP46xx 是 Comet Lake 機型）。
+  兩個 GitHub 原始碼包是 GitHub 動態產生的 commit 封存，雜湊「可能因 GitHub 調整壓縮而變動」；
+  若 firmware-fetch 出現 sha256 不符而大小相同，先懷疑封存格式變動，再人工確認內容後更新雜湊。
+  封存內沒有 git submodule 內容（3rdparty、OpensslLib/openssl 等是空目錄）。
+expected:
+  intel_me: 14.0.47.1558
+  microcode:
+    - {cpuid: "000806EC", platform_mask: "0x94", revision: "0xF8"}
+    - {cpuid: "000A0660", platform_mask: "0x80", revision: "0xF8"}
+    - {cpuid: "000A0661", platform_mask: "0x80", revision: "0xF8"}
+  fsp: ["9.0.123.32", "9.2.123.32"]
+  coreboot_revision: add9d7206e30
+  edk2_revision: 2a15268b36cc
