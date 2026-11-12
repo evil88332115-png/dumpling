@@ -1,7 +1,7 @@
 # 平台研究：Raspberry Pi、Rockchip、AI NAS（WP7 第一階段）
 
 C4 寫的研究筆記，給 M2 之後寫平台轉接器（`pipeline/platforms/<平台>/`）時用。這份文件只整理現況與建議，**不是決定**；
-要定案的項目列在最後一節「待決定」，由 C0 統一問，決定寫進 `docs/DECISIONS.md`。
+已定案與待定案的項目列在最後一節「決定與待決定」；待決定的由 C0 統一問，決定寫進 `docs/DECISIONS.md`。
 
 - 來源：sca-center 25fa89a 的 `scripts/wizard/platforms/{raspberrypi,rockchip}.json`、`scripts/demo/rpi_img.py`（#201）、
   `scripts/demo/rockchip_img.py`、`scripts/demo/flash_package.py`、`scripts/cra/bootloader_coverage.py`。
@@ -27,7 +27,7 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 （該 tag 的 Makefile 是 6.18.50；跟 Raspberry Pi apt 原始碼包 `linux_6.18.50.orig.tar.xz` 是否同一個 commit：NOT_ASSESSED）。
 官方在映像旁另外附一份 SBOM（`.sbom.xz`），可以當交叉核對用的第二來源。
 
-**分層（建議，待決定）**
+**分層（D-027：用套件名稱清單決定，不以版本字尾 `+rpt` 判斷；跟 Jetson 用 `nvidia-l4t-*` 的做法一致）**
 
 | 層 | 內容 | 怎麼認 |
 |---|---|---|
@@ -35,10 +35,23 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 | bsp | 開機韌體：`start*.elf`、`fixup*.dat`、`bootcode.bin`（閉源 VideoCore 韌體）、`config.txt`、`cmdline.txt` | boot 分割區（`bootloader/`）；來源套件 `raspi-firmware` |
 | bsp | device tree：`*.dtb`、`overlays/*.dtbo` | boot 分割區 |
 | bsp | EEPROM 開機程式的**更新檔**（`rpi-eeprom` 套件內的 `pieeprom-*.bin`，推論） | rootfs 的套件；板子上**實際**在跑的 EEPROM 版本不在映像裡 → NOT_ASSESSED（現有 `not_in_image`） |
-| bsp | 無線網路／藍牙韌體（`firmware-brcm80211`、`bluez-firmware` 的 `+rpt` 版） | 套件名稱＋版本含 `+rpt` |
-| bsp 或 os（**待決定**） | Raspberry Pi 重新包的 Debian 套件（版本含 `+rpt`，例如 `alsa-utils 1.2.14-1+rpt1`、`bluez 5.82-1.1+rpt2`、`cloud-init …+rpt20`） | 版本字尾 `+rpt`；或 apt 來源 `archive.raspberrypi.com` |
-| os | Debian 官方套件（沒有 `+rpt`） | 其他 |
+| bsp | 板子上的無線網路／藍牙晶片韌體（`firmware-brcm80211`、`bluez-firmware`） | 套件名稱清單（下面） |
+| bsp | 板子專屬的系統套件、工具與相機堆疊 | 套件名稱清單（下面） |
+| os | 其他所有套件：Debian 官方套件，以及 Raspberry Pi 重新打包的一般程式（版本含 `+rpt` 也一樣，例如 `alsa-utils 1.2.14-1+rpt1`、`bluez 5.82-1.1+rpt2`、`cloud-init …+rpt20`、USB 網卡用的 `firmware-atheros`／`firmware-realtek`…） | 不在清單裡的一律 os |
 | host-tool | `rpi-imager` 等燒錄工具（不在板子上執行，不在映像裡） | 不列 |
+
+**bsp 套件名稱清單（轉接器實作時放進平台設定；依 2026-10-06 Lite 映像的 `.info` 整理）**
+
+`*` 是萬用字元，比對 dpkg 的套件名稱（`Package`，去掉 `:arm64`）。新版映像多出的板子專屬套件要人工補進清單；不在清單裡的一律 os，不猜。
+
+| 類別 | 套件名稱 |
+|---|---|
+| 核心 | `linux-image-*rpi*`、`linux-headers-*rpi*`、`linux-base-*rpi*` |
+| 開機韌體與 bootloader | `raspi-firmware`、`rpi-eeprom`、`rpieepromab`、`librpieepromab0`、`rpifwcrypto`、`librpifwcrypto0`、`rpi-update` |
+| 板上無線網路／藍牙韌體 | `firmware-brcm80211`、`bluez-firmware` |
+| 板子專屬的系統設定 | `raspberrypi-sys-mods`、`raspberrypi-net-mods`、`raspberrypi-archive-keyring`、`rpi-cloud-init-mods`、`rpi-systemd-config`、`rpi-swap`、`rpi-loop-utils`、`rpi-usb-gadget`、`rpi-keyboard-config`、`rpi-keyboard-fw-update`、`userconf-pi` |
+| 板子專屬的工具 | `raspi-config`、`raspi-config-core`、`raspi-utils*`（`-core`、`-dt`、`-eeprom`、`-otp`）、`raspinfo`、`python3-rpi-lgpio`、`rpi-connect*` |
+| 相機堆疊（Raspberry Pi 版，含 Pi 的 ISP 模組） | `libcamera0.*`、`libcamera-ipa`、`rpicam-apps*`、`librpicam-app*` |
 
 **韌體檢查**
 - `start*.elf`／`fixup*.dat`／`bootcode.bin`：閉源，只有廠商發行說明、沒有安全公告可比對 → **GAP**（現有行為，保留）。
@@ -62,8 +75,10 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 **映像格式的落差（重要）**
 - 公開的 Radxa／Armbian 映像都是**原始磁碟映像**（GPT），不是 `update.img`。`rockchip_img.py` 的 RKFW 路徑用不到；要走 `rpi_img.py` 的磁碟映像路徑。
 - Rockchip 的開機程式（`idbloader.img`＝DDR 初始化＋SPL、`u-boot.itb`＝U-Boot＋TF-A＋OP-TEE）放在**第一個分割區之前**的原始磁區（慣例是 sector 64 與 16384，推論），
-  不屬於任何分割區。`rpi_img.py` 只讀分割區 → **這些開機程式目前不會被清點**。轉接器要補一種做法（之後 PR 決定）：
-  (a) 讀分割區之前的區域並辨識 idbloader／FIT；或 (b) 從 rootfs 裡 `u-boot-rk2410` 套件的檔案（推論在 `/usr/lib/u-boot/` 底下）清點，並跟映像開頭的原始磁區比對雜湊。
+  不屬於任何分割區。`rpi_img.py` 只讀分割區 → **這些開機程式目前不會被清點**。轉接器的做法（D-027）：
+  - **以映像開頭的原始磁區為準**（那才是實際出貨的東西）：讀分割區之前的區域，辨識 idbloader／FIT，清點出身分與雜湊。
+  - rootfs 裡 `u-boot-rk2410` 套件的檔案（推論在 `/usr/lib/u-boot/` 底下）只當佐證：雜湊相符記「一致」；不符或找不到記 GAP 並附說明。
+    **不拿套件版本去推磁區裡的版本。**
 - 公開的 `update.img`（RKFW）樣本：**沒有找到**可以合法、固定網址下載的。RKFW 路徑只能用合成測試資料（sca-center 已有）；之後若廠商或團隊提供，再當第二個樣本。
 
 **分層（建議，待決定）**
@@ -198,13 +213,15 @@ TrueNAS-SCALE-25.10.8.update        squashfs 4.0（gzip，2.0 GB）
 `sources.yml` 的 `files[]` 沿用 `firmware.yml` 的格式（`name`、`url`、`sha256`、`size`、`role`），這樣兩邊共用一份下載核對。
 這次的 `platform-samples/*/samples.yml` 就是照 `firmware.yml` 的 `files[]` 格式寫的，M2 定出 `sources.yml` 後再搬過去。
 
-## 待決定（由 C0 統一問）
+## 決定與待決定
 
-1. Raspberry Pi 重新包的 Debian 套件（版本含 `+rpt`）算 bsp 還是 os？
-2. AI NAS 的「OS 是不是我們的待辦」：方向已決定（D-025：寫在 `project.yml` 的角色，自有品牌時 OS 層算我們的待辦）；欄位名稱跟平台介面一起由 C1 在 M2 定。
-3. Rockchip 原始磁區的開機程式要用哪種方式清點（讀原始磁區，或從 rootfs 的 u-boot 套件清點再比對）。
-4. ~~AI NAS 示範要不要做「Debian＋OMV 已安裝」的映像~~：已決定（D-025）：Debian 映像＋OMV 原始碼用 cdxgen 掃，兩條分開；不用 ISO。
-5. GitHub 動態封存檔（`raspberrypi/linux` tag、`radxa/kernel`、`radxa/u-boot`）要核對封存檔的 sha256，還是改成核對 git commit SHA。
-   （OMV 已決定：以 commit SHA 為準，封存檔 sha256 照記；核對失敗時改用 git clone 或標 GAP，不自動接受新的 sha256。建議其他封存檔比照。）
-6. TrueNAS 的 App 層：只算公司自己的 App，還是使用者自己裝的第三方 App 也要列（D-026 範圍外，之後真的要掃時再決定）。
-7. 只轉售 TrueNAS（不改 OS）的情況：OS 層的待辦在上游廠商，`project.yml` 要不要多一種角色「上游 OS 廠商負責、我們通知客戶」。
+已決定（D-025、D-026、D-027）：
+1. Raspberry Pi 的分層：用套件名稱清單，不以 `+rpt` 判斷（D-027；清單見「Raspberry Pi」一節）。
+2. AI NAS「OS 也是我們的待辦」：寫在 `project.yml` 的角色（D-025）；欄位名稱由 C1 在 M2 的平台介面一起定（D-027）。
+3. Rockchip 分割區外的開機程式：以映像開頭的原始磁區為準，rootfs 的 u-boot 套件只當佐證（D-027）。
+4. AI NAS 示範：Debian 映像＋OMV 原始碼用 cdxgen 掃，兩條分開；不用 ISO（D-025）。
+5. GitHub 動態封存檔：以 commit SHA 為準，封存檔 sha256 照記；不符時改用 clone 加 checkout 那個 SHA 再核對，或標 GAP，不自動接受新的 sha256（D-025、D-027）。
+7. `project.yml` 的角色多一種值（例如 `os_responsibility: upstream-vendor`：上游 OS 廠商負責、我們只通知客戶），資料模型先支援；某個產品實際用哪一種，由 PM 與法務判斷（D-027；欄位由 C1 在 M2 定）。
+
+待決定：
+6. TrueNAS 的 App 層要列到哪裡（只算公司自己的 App，還是使用者自己裝的第三方 App 也列）：D-026 範圍外，等真的要掃時再問使用者（D-027 暫緩）。
