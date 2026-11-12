@@ -110,7 +110,7 @@ actions/cache（key 帶檔名＋SHA-256，每個檔案一個 cache）：
 直接用 NVIDIA 原始碼包附的 `nvbuild.sh`（`kernel_src.tbz2` 內，BSD-3-Clause；依 `nv_public_src_build.sh` 的做法把 `kernel_src`、`kernel_oot_modules_src`、`nvidia_kernel_display_driver_source`、`nvidia_unified_gpu_display_driver_source` 四包解到同一個資料夾，再 `./nvbuild.sh -o <輸出>`）。**執行前讀過內容**（`nvbuild.sh`、`nvcommon_build.sh`、`kernel_src_build_env.sh`、`generic_rt_build.sh`、`kernel/Makefile`、樹外模組的 `Makefile`）：
 - 它只用 `rsync` 與 `make`；`-i`（install，會 `sudo`）不使用；aarch64 主機上不需要 `CROSS_COMPILE`（`IS_CROSS_COMPILATION` 只在 `uname -m` 含 x86 時為 1）。
 - 設定：`KERNEL_SRC_DIR=kernel-noble`、`KERNEL_DEF_CONFIG=defconfig`、`KERNEL_MODULAR_BUILD=y`；樹外清單 `nvethernetrm nvgpu nvidia-oot hwpm hardware nvdisplay build/nvidia-public/devicetree unifiedgpudisp`。
-- 順序：`make -C <輸出>/kernel`（`make -j $(nproc)` 的 Image、dtbs 以外的 modules）→ `make modules`（conftest、hwpm、nvidia-oot、nvgpu、nvidia-display、nvidia-gpu-display）→ `make dtbs`。
+- 順序：`make -C <輸出>/kernel`（`make -j $(nproc)`，核心 Image 與核心 modules）→ `make modules`（conftest、hwpm、nvidia-oot、nvgpu、nvidia-display、nvidia-gpu-display）→ `make dtbs`。
 - 解壓用 `tools/spike/m2_safe_extract.py`（`python3 -I`；Python `tarfile` 的 `data` 過濾器；拒絕絕對路徑、`..`、裝置檔、FIFO、指向目的資料夾外的符號連結／硬連結；解完再走一遍檢查），不執行 BSP 或 rootfs 的任何東西（這次根本沒解開它們）。
 - 注意：Actions 的日誌顯示會吃掉部分行（含縮排的程式碼行），要讀原始檔請另外用 artifact 取回，不要靠日誌。
 
@@ -135,7 +135,7 @@ actions/cache（key 帶檔名＋SHA-256，每個檔案一個 cache）：
 
 | 段 | 開始 → 結束 | 用時 |
 |---|---|---:|
-| 核心（`make -C kernel`：Image、全部核心 modules） | 5 → 1491 | 約 1486 秒（24.8 分） |
+| 核心（`make -C kernel`：核心 Image 與全部核心 modules） | 5 → 1491 | 約 1486 秒（24.8 分） |
 | 樹外 conftest | 1492 → 1503 | 11 |
 | hwpm | 1503 → 1506 | 3 |
 | nvidia-oot | 1506 → 1719 | 213 |
