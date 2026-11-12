@@ -2,16 +2,17 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：（尚未）
+最後更新：2026-11-12 07:47 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：WP0 收尾（repo 已重建）
-- 分支／PR／commit：main 6528412（重建後的第一個 commit）；status 分支
+- 目前在做：WP0 完成；接下來看 PR、合併、驗收，回覆 C1–C4
+- 分支／PR／commit：main dcbe067（PR #1 已合併，驗證過 noreply 作者合併流程）；status 分支
+- 已完成（WP0）：公開 repo（Apache-2.0，個人信箱外洩後已刪除重建）、docs（PLAN 公開版、DECISIONS D-001～D-013、HANDOFF、STATUS 指標）、`status` 分支、CI tests.yml（public-check、unit-tests，main 綠燈）、pre-push hook（本機禁用字）、main／status 分支保護、Actions 權限唯讀、fork PR 需核准
 - 代理：無
-- CI：確認 main 的 tests.yml
-- 下一步：套 repo 設定與分支保護、確認 CI 綠燈、通知使用者開 C1
+- CI：無進行中
+- 下一步：使用者開 C1；C1 的 PR 由 C0 派獨立驗證代理驗證後合併（`gh pr merge --squash --author-email <noreply>`）
 - 卡住／等決定：無
 <!-- END C0 -->
 
