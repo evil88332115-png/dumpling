@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 17:52 -0500（C2）
+最後更新：2026-11-13 06:57 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -94,12 +94,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：D-032 提案已併進 C0 的文件批次 PR #15（D-033 已決定四個待決事項）；轉接器等 C1 的 M2 P 軌
-- 分支／PR／commit：`wp7/platform-samples`（最後 commit 868f064）、`wp7/cra-survey`（最後 commit 122042c；已併進 PR #15，PR #15 合併後刪除這支分支），兩支都已 merge main cd62514（D-028 反向規則下 public-check 通過；兩支都沒有二進位檔）；PR 都尚未開（D-020）
-- 代理：無執行中（先前研究代理 1 個已完成）
-- CI：無；本機背景工作：無
-- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單（Raspberry Pi、Radxa ROCK 5B、Debian 13＋OMV、TrueNAS 只研究）；`docs/references/cra-github-survey.md`
-- 發現：`tools/demo/scan-flash-package.sh` 對所有磁碟映像（raw-disk-img*）都套 `--platform raspberrypi` → Rockchip GPT 映像會被誤分類；M2 平台介面要明確傳平台（已寫進研究文件；C0 已轉給 C1，P 軌處理：平台由 project.yml 給定，沒給標 GAP）
-- 下一步：M2 P 軌後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml。另隨 M6 交平台的 OS EOL 資料（Debian 13、Raspberry Pi OS、Radxa rsdk、OMV → support-lifecycle.json，每筆查原始來源，D-033）。PR #15 合併後刪除 wp7/cra-survey（遠端與 worktree）
-- 卡住／等決定：無。等 C1 的 M2 P 軌（平台介面、開案範本）完成後開始寫轉接器；rpi_img.py 讀 Radxa 分割區屆時實測
+- 目前在做：M6 轉接器（C0 指示不等 M2 合併，從 origin/wp1/m2 開分支）。已完成三個 platform.yml、三個示範專案、build／assemble、Rockchip raw-sectors（Radxa 實測兩個區段與官方 deb、rootfs 一致）；scan.sh 等 C1 的 platform_scan.py、build.mode none 的 workflow、scan-flash-package 的 generic／--arch、FILE_ROLES metadata
+- 分支／PR／commit：`wp7/adapters`（最後 commit eae76d2，從 origin/wp1/m2）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
+- 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；任務：審查 raw_sectors.py、_shared/disk_image.py 與測試；分支 wp7/adapters；狀態：進行中）
+- CI：無；本機背景工作：AI NAS 示範專案的 fetch＋assemble 實測（輸出 $AGENT_TMP/out/ai-nas-demo/，紀錄 $AGENT_TMP/out/ai-nas.log）
+- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；wp7/adapters 上述內容與 26 項單元測試（tests/run.d/c4-wp7.sh）
+- 下一步：scan.sh（三平台；ai-nas 另掃 OMV 原始碼併進產品 SBOM，元件標來源與 commit、合併 dependencies、原始碼與正式 deb 是否相同標 NOT_ASSESSED）；C1 的 M2 介面推上來後併進來接上；隨 M6 交平台 OS EOL 資料（D-033）
+- 卡住／等決定：等 C1（platform_scan.py、workflow 的 build.mode none／handoff、scan-flash-package generic 與 --arch、FILE_ROLES metadata）
 <!-- END C4 -->
