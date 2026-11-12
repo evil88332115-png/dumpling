@@ -88,6 +88,18 @@ class Rules(unittest.TestCase):
         self.assertNotIn("name", [l["license"] for l in c["licenses"]][0])    # 沒有把 url 填成 name
         self.assertEqual(d["components"][1], {"type": "library", "name": "nolic", "bom-ref": "b"})
 
+    def test_license_change_records_whether_component_properties_existed(self):
+        # 還原用：副本的 properties 一律是陣列，原檔可能沒有這個鍵、是 null 或空陣列，三者在副本裡分不出來，所以紀錄原本的狀態
+        for before, setter in (("absent", None), ("null", None), ("array", [])):
+            d = doc14(bad=True)
+            if before != "absent":
+                d["components"][0]["properties"] = setter
+            rec = fsn.normalize(d, SHA)
+            self.assertEqual(rec["changes"][0]["component_properties_before"], before)
+        self.assertEqual([fsn.key_state({"a": 1}, "a"), fsn.key_state({"a": {}}, "a"), fsn.key_state({}, "a"), fsn.key_state(None, "a"),
+                          fsn.key_state({"a": None}, "a"), fsn.key_state({"a": []}, "a"), fsn.key_state({"a": "x"}, "a")],
+                         ["int", "object", "absent", "absent", "null", "array", "str"])
+
     def test_license_with_other_fields_kept_as_json(self):
         d = doc14(bad=True)
         d["components"][0]["licenses"][1] = {"license": {"url": "https://example.com/l", "text": {"content": "abc"}}}

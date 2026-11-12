@@ -33,12 +33,34 @@ report 讀的結果資料夾（`--dt-result`）：
 - **漏洞比對以 Grype 為主，DT 只收件與留存。** 臨時 DT 只開 OSV、KEV（NVD 關閉）：`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到。
   Grype 對有 CPE 的元件（例如 CSME）會用 NVD 資料比對。沒有 purl 也沒有 CPE 的元件兩邊都查不到，**但 C-grype 仍顯示 OK**（「N matches（比對完成；不代表不存在其他弱點）」），
   所以 0 筆不是「沒有漏洞」；`dumpling:vuln-assessment` 是 NOT_ASSESSED 的元件（Intel ME、微碼、FSP、GOP／VBT；NVIDIA vBIOS）要靠公告對照。報告固定寫明這點。
-- 報告狀態：
-  - FAIL：上傳階段 FAIL、sca-scan 的 C-grype FAIL、dt-verify 有 FAIL 檢查、輸出檔讀不到。
-  - GAP：`wait` 結束碼 3、上傳或 Grype 階段 GAP（含 C-grype NOT_RUN，例如 Grype 資料庫不可用）、或結果不齊全。
+- 報告狀態（原則：**資料不完整、有疑點、讀不到，一律不是 OK**；OK 也不代表安全，報告沒有整體 PASS）：
+  - FAIL：上傳階段 FAIL、sca-scan **任何**階段 FAIL（不只上傳那三個；`expected_dt` 放行的 `D-dt-upload` 那一列除外）、C-grype FAIL（含 `matches` 不是陣列）、dt-verify 有 FAIL 檢查（同名檢查有多個時任一個 FAIL 就算）、輸出檔讀不到。
+  - MISMATCH：樣本宣告 `expected_dt` 卻上傳成功。
+  - GAP：`wait` 結束碼 3、上傳或 Grype 階段 GAP（含 C-grype NOT_RUN，例如 Grype 資料庫不可用）、結果不齊全，或 **dt-verify 的資料不全**——`checks` 不是非空陣列／項目格式不對、
+    出現 `OK／FAIL／NOT_RUN` 以外的狀態、有檢查 NOT_RUN、必要檢查（`專案存在`、`弱點分析完成`、`元件數`、`漏洞總數`，名稱取自 C1 的 `dt-verify.py`）缺漏、DT 回報的 `components` 不是 >= 1 的整數。
+    理由：驗證沒有完整做完，語意同 `wait` 結束碼 3（資料不完整），不是「有問題」也不是「通過」。GAP 不讓 job 失敗。
   - NOT_RUN：沒有 DT 結果（上傳那三個階段都沒跑）。
-  - ATTENTION：上傳與驗證完成，但仍有元件版本 GAP、沒有 purl、或 NOT_ASSESSED（實際樣本幾乎都是這個）。
-  - OK：完成，而且以下都沒有（`attention_reasons()`）：版本 GAP、沒有 purl 的元件、purl 是 `pkg:generic` 的元件（DT／OSV 沒有 generic 的漏洞資料）、NOT_ASSESSED、沒有 `dumpling:vuln-assessment` 標記的元件（供應商 SBOM 不是 dumpling 產的，評估狀態不明）、Grype 或 DT 有任何比對結果（要人審）。**OK 不代表安全**，報告沒有整體 PASS。（正規化後的供應商 SBOM 曾在 Grype 36 筆、purl 全是 pkg:generic 的情況下被標成 OK，所以加了後三項。）
+  - ATTENTION：上傳與驗證完成，但有任何需要人看的原因（逐項寫在說明裡，見下）。實際樣本都是這個。
+  - OK：完成，而且 `attention_reasons()` 沒有任何原因。目前**沒有真樣本能到 OK**（韌體的 `C-sbomgate` 一定是 NOT_ASSESSED，被列為 sca-scan 其他階段不是 OK；`dumpling:vuln-assessment` 也沒有工具會寫 `NONE`）。
+- `attention_reasons()` 的項目：
+  - **DT 漏洞數與 Grype 比對數**：只有 `type(v) is int and v >= 0` 算讀到（`-3`、null、字串 `-`、bool、浮點數、NaN 都是「讀不到」→ ATTENTION，不當成 0）；> 0 要人審。
+  - **`dumpling:vuln-assessment`**：只有**完全等於** `NONE`（已評估、沒有已知漏洞）才放行；沒標、`NOT_ASSESSED`、`not_assessed`、前後有空白、`garbage`、`OK`、非字串，一律要人看。同一元件有多個同名標記時，只要任一個不是 `NONE` 就算。
+    **目前沒有任何 dumpling 工具會寫 `NONE`**：`tools/cra/x86_firmware.py` 的 `assessed()` 只寫 `NOT_ASSESSED`（加 `-note` 與 `version-status`）。`NONE` 是預留給「真的做過漏洞評估」的工具；在那之前所有 dumpling 產的 SBOM 都是 ATTENTION。
+  - **`dumpling:version-status`**：只認完全相同的 `OK`、`GAP`（`GAP` 列入版本 GAP；其他值，例如 `gap`、` GAP`，列為「不是 OK／GAP」）。**沒有 version 又沒有 `GAP` 標記**的元件另列一條（版本缺漏沒有被記錄）。
+  - **供應商 SBOM（`kind: sbom`）自帶的 `dumpling:` 標記不採信**：供應商可以自己塞，一律當作沒標（vuln-assessment 都是「(未標)」、不算版本 GAP），另列「供應商 SBOM 自帶 dumpling: 標記的元件 N 個」。
+  - **purl**：先 strip，`^pkg:/*<type>/`（不分大小寫，容許 `pkg://generic/`）才算有 purl；`x`、`generic/x`、`pkg:generic`、空白都算沒有（有填但格式不合的另註明個數）。`PKG:GENERIC/x`、` pkg:generic/x`、`pkg://generic/x` 都算 `pkg:generic`（DT／OSV 沒有 generic 的漏洞資料）。
+  - **sca-scan 其他階段**：任何非 OK 的階段（GAP、NOT_ASSESSED、ATTENTION、NOT_RUN、空的或不認得的狀態；例如 `D-dt-data-sources GAP`、`C-sbomgate NOT_ASSESSED`、`C-mirror-freshness NOT_RUN`）都列進一條說明。
+    上傳三階段與 C-grype 另有專屬判斷，不重複列。**預期的 NOT_RUN 不列**：`E-*`（`firmware-dt.sh` 固定 `--no-license`，授權與版權整段 NOT_RUN）、`C-kernel-config`、`C-kernel-module-map`（沒給 `--kernel-build`，韌體沒有產品核心的 `.config`）。
+    其餘 NOT_RUN（沒檢查鏡像新鮮度、DT 資料源、EUVD…）代表該做的檢查沒做，要列。`scan-status-check.py` 只擋「必要階段」與 FAIL，這裡比它嚴：它回答「必要的有沒有做到」，report 回答「能不能顯示 OK」。
+    同一階段在 `status.tsv` 出現多列時留最嚴重的一列（前面的 FAIL 不會被後面的 OK 蓋掉）。
+  - **輸入 SBOM 有重複鍵**：見下一節。
+- 元件欄位型別：`group`、`name`、`version`、`purl`、`cpe` 必須是字串（或沒有／null），`properties` 必須是陣列（或沒有／null）；不符合 → prep 失敗（`FIRMWARE-DT-PREP FAIL`，訊息寫明第幾個元件、哪個欄位），這個樣本不上傳。
+  理由：不符合 CycloneDX（DT 也會拒收），後面的計數與 DT 元件身分比對都假設是字串；不猜、不轉型。
+- **重複鍵**：讀輸入 SBOM 時用 `object_pairs_hook` 偵測同一個物件裡的重複鍵（標準庫預設後值悄悄蓋掉前值，上傳的副本只剩後值）。
+  `dt-project.json` 的 `duplicate_keys`（筆數與前 50 筆：物件完成解析的序號 `object_index`、`pointer`、鍵、丟掉的前值的標準 JSON sha256）、`summary.duplicate_keys`；`kind: sbom` 另在 `normalize.json` 的 `notes` 逐筆寫出。
+  report 與 prep 狀態行都會提到；狀態至少 ATTENTION，**不直接 FAIL**：DT 不會因此拒收，上傳的內容就是我們解析到的內容，差別只是供應商原檔有被丟掉的值，要人知道並判斷。
+- **單獨代理字元**（例如 `\ud800`）：prep 先把 `sbom.cdx.json`、`normalize.json`、`dt-project.json` 都序列化並確認能編成 UTF-8，全部成功才寫檔；失敗是 `FIRMWARE-DT-PREP FAIL … 單獨代理字元…`，不留任何檔案（寫檔中途失敗也會清掉已寫的）。
+  `main()` 對非預期的例外也印 FAIL 行（不印 traceback），錯誤訊息經 `md_safe` 才輸出。
 - sca-scan 的 `C-sbomgate` 對韌體會是 `NOT_ASSESSED`（sbomgate 只把 library／framework 算成套件，firmware 列為忽略類型）。這是預期，不是失敗。
 - `expected.json`：`components` 用「不同身分的元件數」（group、name、version、purl、cpe、sha256 都相同的元件 DT 會合併；實際 DT 合併規則尚未用真 DT 確認，若 verify 的元件數不符先看這點）。
   `min_findings_total: 0`、`min_findings_by_purl_type: {}`；`informational_purl_types` 放 SBOM 裡出現的 purl 類型（只記錄，verify 不拿它當條件）。
@@ -84,9 +106,9 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 | 項目 | 依賴內容 | 在哪裡用 |
 |---|---|---|
 | `dt-verify.py verify` 的 expected 格式 | 欄位 `project_name`、`project_version`、`components`、`min_findings_total`、`min_findings_by_purl_type`、`informational_purl_types` | `firmware_dt.expected()` |
-| `dt-verify.py` 輸出 | `<out>/summary.json` 的 `components`、`findings_total`、`checks[].name／status` | `sample_result()` |
-| `sca-scan` 輸出位置 | `<out>/status.tsv`（欄 stage／status／detail）、`<out>/scan/grype.json`（matches 陣列） | `sample_result()` |
-| 階段名稱 | `D-dt-project`、`D-dt-upload`、`D-dt-bom-processing`、`C-grype` | `UPLOAD_STAGES`、`sample_result()` |
+| `dt-verify.py` 輸出 | `<out>/summary.json` 的 `components`、`findings_total`、`checks[].name／status`；檢查名 `專案存在`、`弱點分析完成`、`元件數`、`漏洞總數`（必要，`REQUIRED_VERIFY_CHECKS`）、`依生態系的漏洞數`；狀態只有 `OK／FAIL／NOT_RUN` | `sample_result()` |
+| `sca-scan` 輸出位置 | `<out>/status.tsv`（欄 stage／status／detail；狀態 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN）、`<out>/scan/grype.json`（matches 陣列） | `sample_result()` |
+| 階段名稱 | `D-dt-project`、`D-dt-upload`、`D-dt-bom-processing`、`C-grype`；預期 NOT_RUN 的 `E-*`、`C-kernel-config`、`C-kernel-module-map` | `UPLOAD_STAGES`、`EXPECTED_NOT_RUN_*`、`sample_result()` |
 | `--name`／`--version` 的過濾 | 名稱換掉 `[A-Za-z0-9._-]` 以外字元；版本 `^[A-Za-z0-9][A-Za-z0-9 ._+~()-]{0,99}$` | `project_name()`、`safe_version()` |
 | `dt-ephemeral.sh wait` 結束碼 3 | GAP（資料不完整） | `dt-wait.rc` |
 | 專案查詢 | dt-verify 用 `name`＋`version` 查，所以 expected 的名稱版本必須和 sca-scan 傳的完全相同 | `dt-project.json` |
@@ -124,7 +146,7 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 
 - 正規化 3 處：`/platform`、`/firmware_version`、`/components/0/licenses/18`；`normalize.json` 在 `<結果>/firmware-sbom-…/normalize.json`。原檔 SHA-256 不變（`5c42344d…6a44ae`）。
 - 樣本已沒有 `expected_dt`；之前（原檔直接上傳）同一個樣本是 http=400、report FAIL。
-- 注意 report 的狀態是 OK，但這份 SBOM 的 purl 全是 `pkg:generic/…`（DT 的 OSV 不比對）、5 個元件沒有 cpe、沒有 `dumpling:vuln-assessment` 標記：DT 漏洞數 0 不代表沒有漏洞，漏洞比對的依據是 Grype（36 筆）。report 的 OK 判斷只看 purl 有沒有、版本 GAP、NOT_ASSESSED（既有邏輯，這次沒改）。
+- 注意 report 的狀態是 OK，但這份 SBOM 的 purl 全是 `pkg:generic/…`（DT 的 OSV 不比對）、5 個元件沒有 cpe、沒有 `dumpling:vuln-assessment` 標記：DT 漏洞數 0 不代表沒有漏洞，漏洞比對的依據是 Grype（36 筆）。這是當時的結果；之後 report 加嚴（沒有 `dumpling:vuln-assessment` 標記、`pkg:generic`、Grype 有比對結果、sca-scan 其他階段不是 OK 都不能是 OK），現在這個樣本是 ATTENTION。
 
 ## Actions 實測（run 43266687645，commit bcfef21，workflow_dispatch）
 

@@ -55,6 +55,14 @@ def pointer(*parts):
     return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
 
 
+def key_state(d, key):
+    """鍵在原檔裡的狀態：absent（沒有這個鍵）｜null｜array｜object｜其他型別名稱。副本一律寫成陣列，所以要記原本是哪一種。"""
+    if not isinstance(d, dict) or key not in d:
+        return "absent"
+    v = d[key]
+    return "null" if v is None else "array" if isinstance(v, list) else "object" if isinstance(v, dict) else type(v).__name__
+
+
 def canonical_sha256(value):
     """原值的標準 JSON 的 SHA-256；無法序列化（例如遞迴太深）回 None。"""
     try:
@@ -127,7 +135,8 @@ def normalize(doc, input_sha256):
     """就地正規化 doc（CycloneDX JSON 的 dict），回傳紀錄 dict。先完整規劃、通過才套用；規劃中出任何例外都不改 doc。
 
     紀錄：{schema, input_sha256, spec_version, applied, supported, changes: [...], unnormalized: [...], notes: [...]}。
-    changes[]: {rule, from, to[], property[], value_sha256}（每個搬移的項目一筆；to／property 是陣列，license 項目可能同時寫 url 與整個物件）；unnormalized[]: {rule, at, reason}（已知違規但無法搬移，欄位原樣保留）。
+    changes[]: {rule, from, to[], property[], value_sha256}（每個搬移的項目一筆；to／property 是陣列，license 項目可能同時寫 url 與整個物件；
+    license 項目另有 component_properties_before：元件的 properties 鍵原本是 absent／null／array，副本一律是陣列）；unnormalized[]: {rule, at, reason}（已知違規但無法搬移，欄位原樣保留）。
     """
     rec = {"schema": SCHEMA_ID, "input_sha256": input_sha256, "spec_version": None, "supported": False, "applied": False,
            "changes": [], "unnormalized": [], "notes": []}
@@ -212,6 +221,7 @@ def _plan(doc, meta, spec):
             for i in cands:
                 skip("license-without-id-or-name", "%s/licenses/%d" % (cptr, i), "元件的 properties 不是陣列，沒有地方放")
             continue
+        pstate = key_state(comp, "properties")       # 元件的 properties 原本有沒有這個鍵（副本會是陣列）
         remove, adds = set(), []
         for i in cands:
             at = "%s/licenses/%d" % (cptr, i)
@@ -236,7 +246,7 @@ def _plan(doc, meta, spec):
             budget[0] -= need
             count[0] += 1
             remove.add(i)
-            adds.append((at, sha, vals))
+            adds.append((at, sha, vals, pstate))
         if remove:
             lic_moves.append((comp, cptr, remove, adds))
     # 計算「新位置」的索引並組紀錄
@@ -244,13 +254,13 @@ def _plan(doc, meta, spec):
         ch["to"] = [pointer("metadata", "properties", base + ch.pop("_idx"))]
     for comp, cptr, remove, adds in lic_moves:
         pos = len(comp.get("properties") or [])
-        for at, sha, vals in adds:
+        for at, sha, vals, pstate in adds:
             tos = []
             for n, _ in vals:
                 tos.append("%s/properties/%d" % (cptr, pos))
                 pos += 1
             changes.append({"rule": "license-without-id-or-name", "from": at, "to": tos,
-                            "property": [n for n, _ in vals], "value_sha256": sha})
+                            "property": [n for n, _ in vals], "value_sha256": sha, "component_properties_before": pstate})
     return {"changes": changes, "unnormalized": unnorm, "top_moves": top_moves, "lic_moves": lic_moves}
 
 
@@ -261,7 +271,7 @@ def _apply(doc, meta, plan, input_sha256):
         del doc[k]
     for comp, cptr, remove, adds in plan["lic_moves"]:
         cprops = list(comp.get("properties") or [])
-        for _, _, vals in adds:
+        for _, _, vals, _ in adds:
             for n, v in vals:
                 cprops.append({"name": n, "value": v})
         comp["properties"] = cprops

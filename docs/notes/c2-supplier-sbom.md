@@ -109,6 +109,13 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
 - DT 的授權欄位少了那筆 url-only 的項目；它本來就不是 DT 能辨識的授權（沒有 id 與 name）。
 - `firmware-sbom-check` 檢查的是原檔，仍會提示「DT 可能拒收（schema 不符）」；那是對原檔的陳述，不因副本被正規化而改變。
 - 供應商修好原檔後，副本不會有變更（`changes: []`）；仍被 DT 拒收（別種違規）就是一般 FAIL。
+- **還原時 `metadata`／`metadata.properties` 一律還原成空陣列**：無法從副本區分原檔是「沒有這個鍵」「`null`」還是「空陣列」。內容不會遺失（空陣列沒有資料），但還原後的形狀可能和原檔不同。
+  `normalize.json` 的 `original_shape` 記原本的狀態（`{"metadata": "absent｜null｜object", "metadata.properties": "absent｜null｜array"}`），license 規則的每一筆另有 `component_properties_before`（元件的 `properties` 原本是 `absent｜null｜array`）；
+  要逐位元還原原檔，以這些欄位加上 `input_sha256` 核對為準（原檔本身不動、仍是權威）。
+- **供應商自帶同名的 `dumpling:normalized-*` property**：副本的 `metadata.properties` 會出現兩個同名 property（供應商的與我們加的）。以 `normalize.json` 的 `input_sha256`、`changes` 筆數、各筆 `to` 的位置指標為準
+  （我們加的永遠是 `metadata.properties` 的最後兩個，位置可由 `to` 與 `changes` 筆數推得）；不去除供應商的那兩個（不刪資料）。
+- **供應商 SBOM 有重複 JSON 鍵**：標準庫讀檔時後值會悄悄蓋掉前值，上傳的副本只剩後值。`firmware_dt.py prep` 用 `object_pairs_hook` 偵測，`normalize.json` 的 `notes` 逐筆寫
+  「第幾個完成解析的物件（與位置指標）、鍵、被丟掉的前值的 SHA-256」，report 狀態至少 ATTENTION（見 `docs/notes/c2-firmware-dt.md`）。前值本身不保存（原檔才是權威）。
 
 ## 還沒做
 

@@ -139,8 +139,9 @@ exit 2
         self.w("repo/pipeline/dt-verify.py", """import json, sys
 exp = json.load(open(sys.argv[2])); out = sys.argv[3]
 bad = %r in exp['project_name']
-json.dump({'components': exp['components'], 'findings_total': 0,
-           'checks': [{'name': '元件數', 'status': 'FAIL' if bad else 'OK'}]}, open(out + '/summary.json', 'w'))
+json.dump({'components': max(exp['components'], 1), 'findings_total': 0,
+           'checks': [{'name': n, 'status': 'FAIL' if bad and n == '元件數' else 'OK'}
+                      for n in ('專案存在', '弱點分析完成', '元件數', '漏洞總數', '依生態系的漏洞數')]}, open(out + '/summary.json', 'w'))
 sys.exit(1 if bad else 0)
 """ % bad)
 
