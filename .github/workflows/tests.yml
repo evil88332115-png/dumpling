@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-check:
+    name: public-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 公開檢查（本機路徑、私有 IP、個人信箱、commit 信箱）
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            range="$BASE_SHA..$HEAD_SHA"
+          else
+            range="$HEAD_SHA"
+          fi
+          bash ci/public-check.sh --rev HEAD --range "$range"
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck（ci/、pipeline/）
+        run: |
+          files=$(git ls-files 'ci/*.sh' 'ci/*.hook' 'pipeline/*.sh' 'pipeline/**/*.sh')
+          shellcheck $files
+          echo "shellcheck: OK（$(echo "$files" | wc -w) 個檔）"
+      - name: 單元測試
+        run: |
+          if [ -x tests/run.sh ]; then
+            tests/run.sh
+          else
+            echo "unit-tests: NOT_RUN（還沒有 tests/run.sh；C1 加入後自動啟用）"
+          fi

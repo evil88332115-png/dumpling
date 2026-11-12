@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+# 二進位檔一律不進 git（CI 從官方網址下載並核對 sha256）
+*.tbz2
+*.tar
+*.tar.*
+*.tgz
+*.img
+*.iso
+*.bin
+*.rom
+*.fd
+*.cap
+*.zip
+*.deb
+# 本機輸出
+out/
+work/
