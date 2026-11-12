@@ -3,6 +3,7 @@ schema: 1
 releases:
   v1.0.0-demo1:
     platform_params:
+      kernel_source_file: raspberrypi-linux-stable_20260911.tar.gz
       upstream_release: '2026-10-06'
       image: 2026-10-06-raspios-trixie-arm64-lite.img.xz
     files:

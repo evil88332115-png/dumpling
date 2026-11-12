@@ -3,6 +3,7 @@ schema: 1
 releases:
   v1.0.0-demo1:
     platform_params:
+      kernel_source_file: radxa-kernel-87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
       upstream_release: rsdk-r6
       image: rock-5b_bookworm_kde_r6.output_512.img.xz
       uboot_board: rock-5b

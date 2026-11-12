@@ -6,7 +6,8 @@
 # 平台設的變數：
 #   WP7_AUGMENT        none｜raw-sectors（Rockchip：assemble 的 raw-sectors.json 併成 firmware 元件）｜app-source（AI NAS：掃 NAS 應用原始碼後併入）
 #   DT_OSV_ECOSYSTEMS  臨時 DT 的 OSV 生態系（平台給預設）
-# 輸入：assemble 的 assemble.json（磁碟映像的相對路徑）、raw-sectors.json（Rockchip）；sources.yml 的 platform_params（AI NAS 的 app_repo、app_commit）。
+# 輸入：assemble 的 assemble.json（磁碟映像的相對路徑）、raw-sectors.json（Rockchip）；fetch 的 downloads/；
+#       sources.yml 的 platform_params：kernel_source_file（給精靈的核心原始碼壓縮檔，role: source）、AI NAS 的 app_repo、app_commit。
 # 輸出（$DUMPLING_OUT）：release/（Release 附件＋manifest.tsv＋notes.md）、scan.json、summary.md、wizard-out/。
 # 平台一律由 project.yml 明確給定（scan.platform_arg，沒有就是 $DUMPLING_PLATFORM），原樣傳給精靈，不從映像格式推測。
 # 最後一行：scan: OK｜GAP｜FAIL（說明）。GAP＝資料不齊（沒有標準答案、分層或補充元件有 GAP）：結果照樣產生，但不當成通過。
@@ -27,6 +28,10 @@ parg=$(python3 -I -c 'import sys;sys.path.insert(0,sys.argv[1]);import project_c
 print((p.load_platform_config(sys.argv[2]).get("scan") or {}).get("platform_arg") or sys.argv[2])' "$root/pipeline/lib" "$DUMPLING_PLATFORM") \
   || fail "讀不到平台設定"
 if [ "$augment" = raw-sectors ] && [ ! -f "$out/raw-sectors.json" ]; then fail "沒有 raw-sectors.json（先執行 assemble）"; fi
+# 精靈要一份原始碼壓縮檔（核心判斷、上游比對）：sources.yml 的 platform_params.kernel_source_file，必須是 fetch 核對過的 role: source
+ksrc=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_source_file) || fail "sources.yml 沒有 platform_params.kernel_source_file（精靈需要核心原始碼壓縮檔）"
+python3 -I "$here/disk_image.py" files "$proj" "$ver" --role source | cut -f2 | grep -qxF -- "$ksrc" || fail "kernel_source_file（$ksrc）不是 sources.yml 裡 role: source 的檔案"
+if [ ! -f "$out/downloads/$ksrc" ] || [ -L "$out/downloads/$ksrc" ]; then fail "downloads/ 沒有 $ksrc（先執行 fetch）"; fi
 if [ "$augment" = app-source ]; then
   arepo=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_repo) || fail "sources.yml 沒有 platform_params.app_repo"
   acommit=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_commit) || fail "sources.yml 沒有 platform_params.app_commit"
@@ -66,7 +71,7 @@ python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$roo
 export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
-  python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" \
+  python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$out/downloads/$ksrc" \
     --name "$DUMPLING_PROJECT$suffix" --version "$ver" --rootfs rootfs --config "$out/cra-config" --role "$crole" --yes \
     --platform "$parg" "$@" > "$out/wizard$suffix.log" 2>&1
   local rc=$?

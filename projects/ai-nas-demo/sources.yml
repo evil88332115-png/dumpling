@@ -3,6 +3,8 @@ schema: 1
 releases:
   v1.0.0-demo1:
     platform_params:
+      kernel_source_file: linux_6.12.116.orig.tar.xz
+      kernel_source_note: 上游原始碼（orig）；Debian 的修補在 debian.tar.xz，沒有套用到這份
       upstream_release: debian-13-generic-amd64-20261111
       image: debian-13-generic-amd64-20261111-2659.tar.xz
       image_member: disk.raw
