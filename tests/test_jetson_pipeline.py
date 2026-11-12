@@ -420,7 +420,7 @@ class ScanHelpers(Tmp):
             js.rewrite_inputs(src, self.p("cfg2"), "39;rm")
 
     def test_site_config_keys_accepted_by_wizard(self):
-        js.site_config(self.p("w.json"), "/r", "/w", "/o", "/p/pilot.env", "/g", "jetson-r39.2.1", "/ps.tbz2", "/bsp.tbz2", "/usr/bin/python3")
+        js.jetson_site_config(self.p("w.json"), "/r", "/w", "/o", "/p/pilot.env", "/g", "jetson-r39.2.1", "/ps.tbz2", "/bsp.tbz2", "/usr/bin/python3")
         d = json.load(open(self.p("w.json")))
         src = open(os.path.join(ROOT, "tools", "wizard", "cra-scan.py"), encoding="utf-8").read()
         site_keys = eval(src.split("SITE_KEYS = ", 1)[1].split("\n", 1)[0])
