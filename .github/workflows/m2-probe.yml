@@ -10,26 +10,37 @@ permissions:
 jobs:
   relprobe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
     defaults:
       run:
         shell: bash
     steps:
-      - name: release API 探測（只建 draft，用完刪）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scan-orin-nano-demo-v39.2.1-demo1
+          path: ${{ runner.temp }}/result
+          run-id: "43294605217"
+          github-token: ${{ github.token }}
+      - name: 重現 Release 步驟
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: orin-nano-demo/v39.2.1-demo1
+          EVENT: workflow_dispatch
         run: |
           set +e
-          T="orin-nano-demo/v39.2.1-demo1"
-          echo hi > a.txt
-          echo "== A: list with tag filter"; gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$T\") | .id"; echo "rc=$?"
-          echo "== B: create (tag with slash, ascii label)"; gh release create "$T" "a.txt#plain" --draft --target "$GITHUB_SHA" --title probe --notes probe --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
-          echo "== C: create (chinese label, notes-file)"; echo "# n" > n.md
-          gh release create "$T" "a.txt#漏洞清單.xlsx" --draft --target "$GITHUB_SHA" --title "probe（手動觸發的草稿）" --notes-file n.md --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
-          echo "== D: view by tag"; gh release view "$T" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft; echo "rc=$?"
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$T\") | .id"); do echo "delete $id"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; echo "rc=$?"; done
+          cd "$RUNNER_TEMP/result"
+          ls | head -5
+          echo "== 1 api list"; gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id"; echo "rc=$?"
+          args=()
+          while IFS=$'\t' read -r f label; do args+=("$f#$label"); done < manifest.tsv
+          echo "args=${#args[@]}"
+          echo "== 2 create"; gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG probe" --notes-file notes.md --repo "$GITHUB_REPOSITORY"; echo "rc=$?"
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id"); do echo "delete $id"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; echo "rc=$?"; done
   patchprobe:
     if: false
     runs-on: ubuntu-24.04
