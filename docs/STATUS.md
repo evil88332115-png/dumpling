@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:17 -0500（C2）
+最後更新：2026-11-12 09:18 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -55,12 +55,14 @@
   - vBIOS：NVIDIA DP 更新工具**沒有完整 vBIOS**（只有 3 組 GPU 家族 GOP 範本，佔位版本字串）；合成獨立 vBIOS（`tools/cra/tests/synthetic_vbios.py`）端到端產 SBOM；Intel legacy VBIOS 辨識（NUC 樣本 `Build Number: 1003 PC 14.34`）；`intel_vbt.py` 共用；`gop_driver()`（GOP 版本只讀得到 build 1070）待接 FV 走訪
   - 本機 c2 測試 279 passed、0 skip；Dasharo 16 個元件不變。CI：8688cd4 的 tests 43232541990／firmware 43232547319 綠；4183a96 的 tests 43233831760、firmware 43233837796 已觸發
   - 供應商 SBOM 品質檢查（a2ed40f，已併入）：3mdeb Dasharo SBOM 範例 → ATTENTION（10 元件、1 缺版本、5 缺 cpe、sbomqs v2.1.3 分數 4.3 僅供參考）；sbomqs 版本與 sha256 固定在 `pipeline/lib/tools.lock`。CI：firmware 43234922758、tests 43234916860 綠
-- M3 剩下要做的（等 C1 M1，PR #9 仍是 draft）：
+- 進行中的分支：`wp3/firmware-dt`（從 m3 開出，worktree `$AGENT_TMP/dumpling-wt-c2-dt`）：韌體 SBOM → DT 的準備（專案名稱規則、SBOM 正規化、expected 兩種格式、report）。C1 介面已定案（`origin/wp1/m1-tools-pilot`）：上傳用 `tools/pilot/sca-scan --sbom`（含 C-grype），順序 up→wait→env→sca-scan→dt-verify verify→down，成功看 status.tsv＋`scan-status-check.py`；M1 合併前只在暫存試接，不改 firmware.yml
+- M3 剩下要做的（等 C1 M1，C1 估 1～2 小時轉正式 PR）：
   - BIOS 成品端 UEFI FV 解開：用 `tools/cra/uefi_image.py`（D-016）→ 接 Intel GOP（`gop_driver()`）／AMI 映像裡的 VBT／legacy VBIOS
   - NVIDIA gpu-firmware 公告比對：用 C1 的 `tools/pilot/lib/nvidia_bulletins.py`，沒對到標 NOT_ASSESSED
   - 上傳臨時 DT＋Grype（BIOS SBOM、vBIOS SBOM、供應商 SBOM）
 - 代理：
   - 代理 G（寫程式，Sonnet 5.5 medium）：`wp3/supplier-sbom`，狀態：完成
+  - 代理 H（寫程式，Sonnet 5.5 medium）：`wp3/firmware-dt`，狀態：進行中
   - 預驗代理（驗證，Sonnet 5.5 high）：`wp3/m3` 4183a96（複驗兩個修正＋vBIOS 部分），狀態：進行中
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
 - 下一步：預驗 m3 結果 → 有問題就修；已問 C0 M1 時程與是否先串 DT 上傳；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
