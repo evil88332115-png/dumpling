@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:16 -0500（C2）
+最後更新：2026-11-12 08:17 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -20,20 +20,18 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-- 目前在做：M1（PLAN「里程碑」M1、「可以沿用的東西」）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；依 D-014 合成一個 PR
+- 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；依 D-020（做完里程碑才開 PR）M1 完成後一個 PR
 - 分支／PR／commit：
-  - `wp1/m1-tools`（工具複製＋PROVENANCE＋tests/run.d/c1-tools.sh；最後要合併的 PR）——draft PR #9，WIP 3121fd8
-  - `wp1/m1-dt`（臨時 DT＋測試 SBOM＋dt-smoke workflow；只用 draft PR 跑 CI，最後併進 `wp1/m1-tools`，#6 之後關掉不合併）——draft PR #6，f88ebd6；dt-smoke 綠燈（run 43223829151，約 6 分鐘，OSV／CISA／ENISA 鏡像 318 秒；測試 SBOM 元件 3、漏洞 83）
-  - 來源：sca-center `origin/main` 25fa89a
+  - `wp1/m1-tools`：工具複製＋PROVENANCE＋`tests/run.d/c1-tools.sh`；PR #9（draft，M1 完成後轉正式）；代理 A 進行中，會把 `wp1/m1-dt` 併進來
+  - `wp1/m1-dt`：臨時 DT（`pipeline/dt-ephemeral.sh`、`dt-compose.yaml`、`dt-verify.py`）＋測試 SBOM＋`dt-smoke.yml`；5df9d3b（ENISA 改選用、deb 下限 1）；PR #6 已關（D-020）
+  - 來源：sca-center 25fa89a
 - 代理：
-  - 寫程式 A：工具清理複製進 `tools/`＋`docs/PROVENANCE.md`＋單元測試，分支 `wp1/m1-tools`，Sonnet 5.5／high，進行中
-  - 寫程式 B：`pipeline/dt-ephemeral.sh`＋`pipeline/dt-compose.yaml`＋`tests/fixtures/sbom/`＋`.github/workflows/dt-smoke.yml`，分支 `wp1/m1-dt`，Sonnet 5.5／medium，完成（尚未整合 tools/，`sca-scan --sbom` 待整合後實跑）
-  - 驗證：尚未開（兩個寫程式代理完成、合併分支後開）
-- CI：#6、#9 的 tests／dt-smoke（`gh pr checks 6`、`gh pr checks 9`）
-- 下一步：等 A 完成 → 把 `wp1/m1-dt` 併進 `wp1/m1-tools`（同時調整：ENISA 鏡像未完成改報 GAP 不判失敗；deb 漏洞設保守下限 ≥1）→ 實跑 `sca-scan --sbom` → 開驗證代理 → 交 C0 合併 → M1 完成通知 C0（C2 的上傳 DT 等這個）
-- 卡住／等決定：
-  - 等 C2 的 PR 2a（`wp3/bios-sbom`）合併：M1 的 cra 測試要用它的 `cdx_schema.py`、CycloneDX schema、`conftest.py`（D-017，C0 決定先合併 2a；2a＝PR #8，C0 驗證中，合併後 A merge main）
-  - （已解決）`/media/` 規則誤擋 `drivers/media/`：C0 已修（D-018，main 631646e），A merge main 後補推 `kernel-included-c-6.{1,8}.json`
+  - 寫程式 A：工具清理複製（`wp1/m1-tools`），Sonnet 5.5／high，進行中；追加：併入 m1-dt、準備逐檔對照表與資料來源表、剔除從內部資料產生的測試資料
+  - 寫程式 B：臨時 DT（`wp1/m1-dt`），Sonnet 5.5／medium，完成（dt-smoke run 43223829151 綠燈）
+  - 驗證：尚未開（A 完成、sca-scan --sbom 實跑後開）
+- CI：dt-smoke 重跑中（`gh run list --branch wp1/m1-dt --workflow dt-smoke.yml`）；之後一律 `gh workflow run <wf> --ref <分支>` 手動觸發
+- 下一步：A 完成 → `gh workflow run dt-smoke.yml --ref wp1/m1-tools`（用 sca-scan --sbom 上傳）＋tests → 開驗證代理 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
+- 卡住／等決定：無（PR #8 已合併、D-018 規則已修）
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
