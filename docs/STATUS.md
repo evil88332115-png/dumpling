@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:23 +0800（C4）
+最後更新：2026-11-12 09:24 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -51,7 +51,7 @@
 
 - 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
 - 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX）
-- **整合分支 `wp3/m3` a2ed40f**（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
+- **整合分支 `wp3/m3` 7e40fe7**（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
   - coreboot CBFS（FMAP、LZMA／LZ4、coreboot 版本／config、FSP、VBT、SELF payload）＋預驗修正 0f28182（ReDoS、掃描雜湊放大、解壓失敗計量、FSP ExtendedImageRevision）
   - AMI PFAT 解封裝＋預驗修正（清單數字欄位崩潰、MAX_TOTAL 跨巢狀、檔名截短）；fetch 測試補強、run.d venv 快取、firmware.yml pipefail 修正（綠 run 43229479139／故意 sha256 不符紅 run 43229520867）
   - 真實樣本 CI 驗收 `pipeline/firmware-expect.py`（綠 run 43231626732：Dasharo 11 項 OK、NUC 1 項 OK；改錯 ME 版本紅 run 43231826497）
@@ -66,7 +66,8 @@
 - 代理：
   - 代理 G（寫程式，Sonnet 5.5 medium）：`wp3/supplier-sbom`，狀態：完成
   - 代理 H（寫程式，Sonnet 5.5 medium）：`wp3/firmware-dt`，狀態：進行中
-  - 預驗代理（驗證，Sonnet 5.5 high）：`wp3/m3` 4183a96（複驗兩個修正＋vBIOS 部分），狀態：進行中
+  - 預驗 `wp3/m3` 4183a96（完成，不通過）：cbfs／pfat 的修正複驗都過；必修 1：我上一輪加的 FSP ExtendedImageRevision 讀錯偏移（+0x44 是 SiliconInit 入口，應為 +0x4C、header ≥ 0x50），Dasharo FSP-S 多出假 note；中等 1：Intel VBIOS 橫幅 regex 128 倍放大。**已在 7e40fe7 修好**（依 coreboot info_header.h 逐欄核對；橫幅改線性搜尋；PROVENANCE 措辭）
+  - 預驗代理（驗證，Sonnet 5.5 high）：`wp3/m3` 7e40fe7（複驗 7e40fe7＋預驗供應商 SBOM），狀態：進行中
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
 - 下一步：預驗 m3 結果 → 有問題就修；已問 C0 M1 時程與是否先串 DT 上傳；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
 - 卡住／等決定：UEFI 解開、GOP、公告比對、DT 上傳等 C1 M1。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`dumpling-tmp-c2-pfat`、`dumpling-tmp-c2-verify-cbfs` 被安全檢查擋下沒刪，要使用者手動刪
