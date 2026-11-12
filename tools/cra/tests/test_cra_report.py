@@ -633,7 +633,7 @@ def test_product_sbom_keeps_nested_components_and_no_fake_version(tmp_path):
 
 
 def test_product_sbom_does_not_leak_scan_paths(tmp_path):
-    sb = dict(SBOM, metadata=dict(SBOM["metadata"], component={"type": "file", "name": "/mnt/data/runner/x/.sca-scan-work.ab/image.tar"}))
+    sb = dict(SBOM, metadata=dict(SBOM["metadata"], component={"type": "file", "name": "/path/to/runner/x/.sca-scan-work.ab/image.tar"}))
     r, s, reports = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s", sbom=sb))
     text = (reports / "sbom.cdx.json").read_text(encoding="utf-8")
     assert ".sca-scan-work" not in text and "image.tar" in text
@@ -873,7 +873,7 @@ def test_namespaced_packages_get_grype_fix_and_full_name(tmp_path):
 
 
 def test_product_sbom_has_no_runner_paths(tmp_path):
-    work = "/mnt/data/gitlab-runner/builds/sca-scan/.sca-scan-work.FVUF2l/cdxgen-src/"
+    work = "/builds/ci-runner/sca-scan/.sca-scan-work.FVUF2l/cdxgen-src/"
     sb = dict(SBOM, components=SBOM["components"] + [{"type": "library", "name": "flask", "version": "2.0.0", "purl": "pkg:pypi/flask@2.0.0",
               "properties": [{"name": "SrcFile", "value": work + "labs/xss/requirements.txt"}],
               "evidence": {"occurrences": [{"location": work + "requirements.txt"}]}}],
@@ -882,7 +882,7 @@ def test_product_sbom_has_no_runner_paths(tmp_path):
                   {"name": "root", "value": work.rstrip("/")}]))
     r, s, reports = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s", sbom=sb))
     text = (reports / "sbom.cdx.json").read_text(encoding="utf-8")
-    assert ".sca-scan-work" not in text and "gitlab-runner" not in text
+    assert ".sca-scan-work" not in text and "ci-runner" not in text
     b = json.loads(text)
     flask = next(c for c in b["components"] if c["name"] == "flask")
     assert flask["properties"][0]["value"] == "labs/xss/requirements.txt" and flask["evidence"]["occurrences"][0]["location"] == "requirements.txt"

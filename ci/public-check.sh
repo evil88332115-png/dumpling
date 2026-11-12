@@ -5,6 +5,7 @@
 #   - 本機禁用字（--private，固定字串、不分大小寫；只在本機 pre-push hook 用，CI 沒有這份清單）
 #   - 白名單（--allow，預設 ci/public-allow.txt）：完整字串，命中行含白名單字串就不報；
 #     只套用在通用規則與檔案裡的信箱，**不套用在本機禁用字與 commit 信箱**
+#   - 壓縮檔（*.xz、*.gz、*.bz2、*.zst）：解壓後（每個最多 PUBLIC_CHECK_ZLIMIT 位元組，預設 64 MB）套用上面同一組檢查
 # 用法：ci/public-check.sh [--rev REV] [--range RANGE] [--patterns FILE] [--private FILE] [--allow FILE]
 # 輸出：命中的每一行，最後一行是 "public-check: OK" 或 "public-check: FAIL（N 筆）"。
 set -uo pipefail
@@ -61,13 +62,56 @@ c_commit_email() { git log --format='%h author=%ae%n%h committer=%ce' $range | s
 # shellcheck disable=SC2086
 c_commit_private() { git log --format='%h %s%n%b' $range | grep -iF -f "$priv"; }
 
+# 壓縮檔（git grep 看不到內容）：rev 裡追蹤的 *.xz、*.gz、*.bz2、*.zst 解到暫存檔（每個最多 zlimit 位元組），
+# 套用同一組檢查；命中顯示「路徑（解壓後）:行號:內容」。超過大小或解不開一律算命中（無法檢查＝不能公開）。
+zlimit=${PUBLIC_CHECK_ZLIMIT:-67108864}
+mkdir -p "$tmp/z"
+: > "$tmp/zlist"
+: > "$tmp/zerr"
+zi=0
+while IFS= read -r zp; do
+  case $zp in
+    *.xz) dec=(xz -dc) ;; *.gz) dec=(gzip -dc) ;; *.bz2) dec=(bzip2 -dc) ;; *) dec=(zstd -dc) ;;
+  esac
+  zi=$((zi + 1))
+  if ! command -v "${dec[0]}" >/dev/null 2>&1; then
+    echo "$zp: 無法檢查（沒有 ${dec[0]}）" >> "$tmp/zerr"; continue
+  fi
+  git cat-file blob "$rev:$zp" | "${dec[@]}" 2>/dev/null | head -c $((zlimit + 1)) > "$tmp/z/$zi"
+  st=("${PIPESTATUS[@]}")
+  zsize=$(wc -c < "$tmp/z/$zi")
+  if [ "$zsize" -gt "$zlimit" ]; then
+    echo "$zp: 無法檢查（解壓後超過 $zlimit 位元組）" >> "$tmp/zerr"
+  elif [ "${st[1]}" -ne 0 ] && [ "${st[1]}" -ne 141 ]; then
+    echo "$zp: 無法檢查（解壓失敗，exit ${st[1]}）" >> "$tmp/zerr"
+  else
+    printf '%s\t%s\n' "$zi" "$zp" >> "$tmp/zlist"
+  fi
+done < <(git ls-tree -r --name-only "$rev" | grep -E '\.(xz|gz|bz2|zst)$')
+# $1：generic／email／private
+zscan() {
+  local i p
+  while IFS=$'\t' read -r i p; do
+    case $1 in
+      generic) grep -naiE -f "$tmp/pat" "$tmp/z/$i" | grep -vE "$path_allow" | grep -vF -f "$tmp/allow" ;;
+      email) grep -naoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' "$tmp/z/$i" | grep -viE "$email_allow" | grep -vF -f "$tmp/allow" ;;
+      private) grep -naiF -f "$priv" "$tmp/z/$i" ;;
+    esac | awk -v p="$p" '{ print p "（解壓後）:" $0 }'
+  done < "$tmp/zlist"
+}
+c_zerr() { cat "$tmp/zerr"; }
+
 run "通用規則（本機路徑、私有 IP）" c_generic
 run "檔案裡的信箱（只允許 noreply／example）" c_email
+run "壓縮檔：無法檢查" c_zerr
+run "壓縮檔：通用規則（本機路徑、私有 IP）" zscan generic
+run "壓縮檔：信箱（只允許 noreply／example）" zscan email
 if [ -n "$range" ]; then
   run "commit 的作者／提交者信箱" c_commit_email
 fi
 if [ -n "$priv" ] && [ -s "$priv" ]; then
   run "本機禁用字（檔案）" c_private
+  run "壓縮檔：本機禁用字" zscan private
   [ -n "$range" ] && run "本機禁用字（commit 訊息）" c_commit_private
 fi
 

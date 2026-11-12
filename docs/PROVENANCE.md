@@ -14,7 +14,7 @@
 | `pipeline/dt-ephemeral.sh` | `scripts/e2e/dtlib.sh`（做法參考，重寫） | 25fa89a | 改寫成 up／wait／env／down 四個子指令；狀態檔取代 sca-center 的 status／secret 函式；關 NVD、開 OSV 與 KEV、API key 流程沿用；新增 KEV 與 OSV 鏡像等待與逾時 GAP、`::add-mask::`；驗證代理審查後再改：admin 密碼改用權限 600 的 curl 設定檔（不在 `ps` 看得到的指令列）、`DT_OSV_ECOSYSTEMS` 驗證格式並以 argv 傳進 python（不內插進原始碼）、`down` 只刪有標記檔的狀態資料夾、`up` 設定後讀回確認（NVD 關、OSV 開且生態系一致、KEV 開）、`up` 觸發鏡像回 409 時 `wait` 只接受完成時間在觸發之後的鏡像（讀不到完成時間就在狀態行註明未核對）、`wait: OK` 改為「必要鏡像完成」 |
 | `pipeline/scan-status-check.py` | （dumpling 自己寫） | — | 新增：檢查 `tools/pilot/sca-scan` 的 status.tsv，必要階段都要是 OK 且沒有 FAIL（dt-smoke 用） |
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
-| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾）改成 /mnt/data/runner/_work/demo/…、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
+| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾與自架 runner 的工作目錄結構）改成 /path/to/work/.sca-scan-work.…/image.tar（metadata.component.name，僅此一處）、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/company.example.json` | `scripts/cra/company.example.json` | 25fa89a | 原樣 |
@@ -60,7 +60,7 @@
 | `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶） |
 | `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（其他 2、信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
 | `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明 |
+| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明；遮蔽路徑測試的輸入改用中性的 runner 路徑（不沿用 sca-center 自架 runner 的目錄結構），斷言意義不變 |
 | `tools/cra/tests/test_cra_ubuntu_tracker_fix.py` | `scripts/cra/tests/test_cra_ubuntu_tracker_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_cra_usn_fix.py` | `scripts/cra/tests/test_cra_usn_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_customer_package_wording.py` | `scripts/cra/tests/test_customer_package_wording.py` | 25fa89a | 清理 2 行（本機路徑換成中性路徑 2） |
@@ -209,7 +209,7 @@
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
 
-以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`。
+以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔（*.xz、*.gz、*.bz2、*.zst）解壓後檢查（C0 同意在 M1 修改）。
 
 ### 改動類型說明
 
@@ -227,7 +227,7 @@
 | `scripts/pilot/lib/{djsbom,filescan,licverdict,notice,oscopyright,pkgscan,scio_cancel,scio_chunks,scio_diag,scio_failures,scio_prep}.py`、`scripts/e2e/{djread,licexpr}.py`、`integration/policysync/` | `sca-scan` 的 E 段（DejaCode 授權匯入）與 E2 段（ScanCode.io 檔案層級掃描） | `pilot.env` 沒有 `DEJACODE_URL`／`SCANCODEIO_URL`、或給 `--no-license`、`--no-upload` 時，這些階段記 NOT_RUN（程式碼原有的判斷）。**若 `pilot.env` 設了那些網址，會因為找不到檔案而記 FAIL**；dumpling 的 pipeline 不設它們 |
 | `scripts/e2e/dt-compose.yaml`、`scripts/e2e/dtlib.sh` | 臨時 DT | 由 `pipeline/dt-ephemeral.sh`、`pipeline/dt-compose.yaml` 取代（見上面 pipeline 列） |
 | `scripts/mirror/dt-feeds.sh` | `mirror/euvd.sh`（只有鏡像資料夾裡有 `dt-feeds/` 時才呼叫） | dumpling 的 EUVD 鏡像不會產生 `dt-feeds/`，不會走到 |
-| `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知 |
+| `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知。**沒帶進來（C3 視需要帶回，含約 29 個被刪的寄信測試：test_exploited_vendor 4、test_exploited_watch_grype 11、test_exploited_watch_refresh 14）**；M1／M2 用不到 |
 | `scripts/cra/csaf_advisory.py` | 沒有程式呼叫（獨立指令） | 不在範圍內 |
 | `scripts/mirror/ci-run.sh`、`scripts/ci/fast-check.sh`、`scripts/e2e/{install-maven.sh,cdxgen_regression.py,real-projects.sh,license.sh}`、`docs/offline-mirrors.md`、`docs/offline-egress.md` | 只被說明文字與已刪掉的測試引用（sca-center 自己的 CI、鏡像排程與文件） | 帶進來的程式不呼叫它們；對應的測試斷言已刪（見「刪掉的測試」）。`tools/e2e/sandbox.sh`、`tools/pilot/lib/common.sh` 的檔頭說明仍提到 `real-projects.sh`、`license.sh`（只是說明文字） |
 | `scripts/pilot/tests/data/euvd-dt-enisa-golden.json` | `test_euvd_dt_feed.py`（測 `deploy/` 的包裝腳本，整檔不帶） | 孤兒資料檔，不帶。內容是公開 CVE 的小型 EUVD 格式資料，不是內部來源 |
@@ -257,7 +257,7 @@
 
 ### public-check 白名單（`ci/public-allow.txt`）
 
-`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因，共 18 項），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
+`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因：cra 測試 18 項，另 5 項是 `tests/run.d/c1-public-check.sh` 的合成測資），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
 
 | 完整字串 | 用途 |
 |---|---|
@@ -284,7 +284,7 @@
 
 | 檔案 | 來源 | 判定 |
 |---|---|---|
-| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
+| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `/path/to/work/.sca-scan-work.…/image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
 | `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
 | `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
 | `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：原本引用「廠商以 L4T 39.2.0 為基礎的映像」的套件版本字串與內部 CI 執行編號，改成公開資料的說法（39.2.0 的 ABI 1021 改標為推論） |

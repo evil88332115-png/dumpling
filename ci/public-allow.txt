@@ -22,6 +22,12 @@ secret@github.com	測 git 遠端網址帶帳密時要遮蔽，且 github.com/tia
 /home/builder/ws/sources/uefi	測 UEFI 映像內嵌的建置路徑前綴會被偵測與遮蔽（test_bootloader_coverage.py）
 /home/u/Build/Foo/DEBUG/AutoGen.c	同上：建置機器的路徑（含使用者名稱）要被偵測，報告不可出現（test_bootloader_coverage.py）
 10.3.0.30-1+cuda12.5	TensorRT（libnvinfer10）的套件版本字串，不是 IP（test_no_vuln_data.py）
+
+/media/dumpling-pc-test/build	tests/run.d/c1-public-check.sh 的合成測資（壓縮檔檢查要抓到的本機路徑）
+192.168.250.251	tests/run.d/c1-public-check.sh 的合成測資（私有 IP）
+dev@pc-test-corp.com	tests/run.d/c1-public-check.sh 的合成測資（不允許的信箱）
+10.250.251.252	tests/run.d/c1-public-check.sh 的合成測資（私有 IP，zstd）
+/media/dumpling-pc-allow/opt	tests/run.d/c1-public-check.sh 的合成測資（白名單放行）
 /home/someone/linux	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
 /home/builder/linux-6.8/lib/vdso/gettimeofday.c	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
 /home/a/src/drv/foo/bar.c	tools/pilot/tests/test_kernel_oot_sections.py 的合成 ELF 字串（測試用的假建置路徑）
