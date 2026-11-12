@@ -2,18 +2,18 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:17 -0500（C2）
+最後更新：2026-11-12 08:17 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main 4700739（C2 的 PR #7 樣本清單、#8 BIOS／vBIOS→CycloneDX 已合併；WP0 的 #1–#5、#10 已合併）；本機累積分支 `wp0/docs-batch-1`（D-019＋HANDOFF 修正，還沒推，等累積成批再開 PR）
-- 代理：PR #8 驗證代理已完成（通過，留言在 PR #8）；目前沒有 C0 代理在跑
-- 代理總數（全部對話）：C1 寫程式 2、C2 寫程式約 2，約 4／上限 8
+- 分支／PR／commit：main 4700739（C2 的 #7、#8 已合併；WP0 的 #1–#5、#10 已合併）；本機累積分支 `wp0/docs-batch-1`（D-019 不用 update-branch、D-020 里程碑做完才開 PR，還沒推，等下一次合併時一起開 PR）
+- 代理：目前沒有 C0 代理在跑
+- 代理總數（全部對話）：C1 寫程式 1（A）、C2 寫程式 2，約 3／上限 8
 - CI：無進行中
-- 下一步：等 C1 的 M1（A merge main 取得 D-017 共用檔 → 正式 PR）→ C0 派獨立驗證代理 → 合併 → M1；C2 接著做 PR 2b／vBIOS
-- 規則提醒：更新 PR 分支用本機 `git merge origin/main`，不用 `gh pr update-branch`（已通知 C1、C2，D-019 待合併）
+- 下一步：等 C1 把 #9 轉成正式 M1 PR（附逐檔對照表與資料來源）→ C0 派獨立驗證代理 → 合併；等 C2 做到 M3 開一個 PR
+- 已回覆：C2 的 NVIDIA 公告檔已在 M1 分支（nvidia_bulletins.py 等），歸 C1；ASSESS_NOTES 維持英文
 - 卡住／等決定：無
 <!-- END C0 -->
 
