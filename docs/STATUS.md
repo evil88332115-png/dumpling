@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:31 -0500（C0）
+最後更新：2026-11-12 08:32 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -50,6 +50,7 @@
 - 代理：
   - 代理 C（寫程式，Sonnet 5.5 high）：`wp3/coreboot-cbfs`，狀態：進行中
   - 代理 D（寫程式，Sonnet 5.5 high）：`wp3/ami-pfat`，狀態：進行中
+  - 預驗代理（驗證，Sonnet 5.5 high）：預驗 `wp3/coreboot-cbfs`（6c88ccc 起），結論記在這裡，狀態：進行中；`wp3/ami-pfat` 推送後接著預驗
   - （已完成：代理 A／B、PR #7 驗證代理；PR #8 由 C0 驗證）
 - CI：無進行中
 - 下一步：等代理 C、D 完成 → 我檢查並整合到 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／DT 上傳；M3 完成開一個 PR、派驗證代理、通知 C0
