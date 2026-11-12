@@ -25,6 +25,11 @@ on:
         required: false
         default: ""
         type: string
+      reuse_scan_run:
+        description: "開發用：略過 build＋scan，直接用另一個 run 的 scan artifact 測試 Release 步驟（空白＝正常流程）"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -61,6 +66,7 @@ jobs:
   pipeline:
     name: build ＋ scan
     needs: info
+    if: ${{ (inputs.reuse_scan_run || '') == '' }}
     uses: ./.github/workflows/pipeline.yml
     with:
       project: ${{ needs.info.outputs.project }}
@@ -71,7 +77,7 @@ jobs:
   release:
     name: Release
     needs: [info, pipeline]
-    if: ${{ !cancelled() && needs.pipeline.result == 'success' && (inputs.stop_after || 'all') == 'all' }}
+    if: ${{ !cancelled() && (needs.pipeline.result == 'success' || ((inputs.reuse_scan_run || '') != '' && needs.pipeline.result == 'skipped')) && (inputs.stop_after || 'all') == 'all' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # 只有這個 job 有寫入權限（D-012）
@@ -89,6 +95,8 @@ jobs:
         with:
           name: scan-${{ needs.info.outputs.project }}-${{ needs.info.outputs.version }}
           path: ${{ runner.temp }}/result
+          run-id: ${{ inputs.reuse_scan_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: release-meta.json
         env:
           PROJECT: ${{ needs.info.outputs.project }}
