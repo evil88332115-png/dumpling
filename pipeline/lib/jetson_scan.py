@@ -195,6 +195,7 @@ def collect(a):
                            "unknown": comp.get("unknown"), "host_tool": comp.get("host-tool"),
                            "deb_bsp": (deb_all or {}).get("bsp"), "deb_os": (deb_all or {}).get("os")},
             "unknown_by_purl_type": (layers.get("unknown") or {}).get("by_purl_type"),
+            "unknown_by_reason": (layers.get("unknown") or {}).get("by_reason"),
             "layers_gaps": layers.get("gaps"),
             "assemble": {k: asm.get(k) for k in ("kernel_image_replaced", "rootfs_boot_image_replaced", "ci_modules_in_tree",
                                                  "ci_modules_out_of_tree", "nvidia_modules_dropped", "package_sha256", "dtb_replaced")},

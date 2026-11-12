@@ -335,6 +335,38 @@ class CheckExpected(Tmp):
         self.assertEqual(r.returncode, 1)
 
 
+class ExpectedFiles(unittest.TestCase):
+    def test_every_expected_file_is_well_formed_and_matches_a_real_release(self):
+        base = os.path.join(ROOT, "tests", "expected")
+        found = 0
+        for proj in sorted(os.listdir(base)):
+            sources = jb.pc.load_sources(os.path.join(ROOT, "projects", proj, "sources.yml"))
+            for fn in sorted(os.listdir(os.path.join(base, proj))):
+                with open(os.path.join(base, proj, fn), encoding="utf-8") as fh:
+                    d = json.load(fh)
+                found += 1
+                self.assertEqual((d["schema"], d["project"], d["version"] + ".json"), (1, proj, fn))
+                self.assertIn(d["version"], sources["releases"])
+                self.assertTrue(d["checks"])
+                for path, spec in d["checks"].items():
+                    self.assertTrue({"equals", "min", "max", "in"} & set(spec), path)
+                    self.assertTrue(spec.get("reason"), "%s 要寫理由（為什麼是這個值或範圍）" % path)
+                    if "min" in spec and "max" in spec:
+                        self.assertLessEqual(spec["min"], spec["max"], path)
+                # 驗收項目一定在：建置紀錄 OK、C-kernel-boot OK、上游比對的修改檔數
+                for must in ("build_record_status", "kernel_boot", "upstream_source.modified"):
+                    self.assertIn(must, d["checks"])
+        self.assertGreaterEqual(found, 2)
+
+    def test_patch_versions_expect_one_modified_file_and_the_others_zero(self):
+        base = os.path.join(ROOT, "tests", "expected", "orin-nano-demo")
+        for ver in ("v39.2.0-demo1", "v39.2.1-demo1"):
+            d = json.load(open(os.path.join(base, ver + ".json"), encoding="utf-8"))
+            patched = bool(jb.release_patches(os.path.join(ROOT, "projects", "orin-nano-demo"), ver))
+            self.assertEqual(d["checks"]["upstream_source.modified"]["equals"], len(jb.release_patches(os.path.join(ROOT, "projects", "orin-nano-demo"), ver)) and 1)
+            self.assertEqual(patched, ver == "v39.2.1-demo1")
+
+
 class ReleaseMeta(Tmp):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), *args], capture_output=True, text=True)
