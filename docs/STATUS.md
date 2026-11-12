@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:40 +0800（C4）
+最後更新：2026-11-12 09:41 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -39,6 +39,11 @@
 - M2 設計備忘（C0 轉達，C4 的平台研究）：
   - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
   - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
+  - C4 平台研究：`wp7/platform-samples` 754f7f3 的 `docs/platforms-research.md`（M2 開工前讀）
+  - `project.yml` 要有欄位表示「OS 層也是我們的待辦」（自有品牌 AI NAS；D-025：由角色決定，不寫死在平台設定）
+  - 角色值要能表示「上游 OS 廠商負責、我們只通知客戶」，例如 `os_responsibility: upstream-vendor`（只轉售 TrueNAS；與 Jetson OS 層「通知客戶」同一概念）
+  - bsp／os 分層：平台設定裡的「套件名稱清單」決定，不看版本字尾（同 nvidia-l4t-* 做法）
+  - Rockchip 分割區外的開機程式：以原始磁區為準
 - 卡住／等決定：無
   - 已處理：alert_mail.py 沒帶（PROVENANCE 標「C3 視需要帶回」）；D-023（形狀參考內部觀察的合成測資可收）已套用；上限註解的「實測」精確數量改成估計
   - M1 合併前本機 pre-push hook 不掃壓縮檔：改了 *.xz 等要手動跑 worktree 裡的新版 public-check
