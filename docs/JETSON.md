@@ -81,3 +81,24 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 7. **完整掃描也會建一個 DT 專案與一份報告**（第 5 節第 3 點），分層後 `-bsp`／`-os` 才是各自的待辦；完整那份只當對照。DT 的專案階層（parent／child）沒用（見 `docs/LAYERS.md`）。
 8. **標準答案的漏洞數用範圍**，因為資料庫每天變；元件數、核心版本、狀態用 equals。範圍是跑第一次的實際值上下抓寬鬆，之後資料庫變化讓範圍不符時，人工看過再改範圍並寫理由。
 9. **L 軌的測試 `tools/cra/tests/test_layers_report.py::test_untagged_sbom_changes_nothing` 偶爾失敗**（比對兩次執行的風險評估文字時，VEX 的 SHA-256 摘要受時間影響；跨過整秒時才出現，再跑一次就過）。不是這次的改動造成的，尚未修。
+
+## 8. 跑通結果（2026-11-12；數字隨弱點資料庫變動，固定的部分在 `tests/expected/orin-nano-demo/*.json`）
+
+| | `v39.2.0-demo1` | `v39.2.1-demo1`（套 patch） |
+|---|---|---|
+| 核心 | 6.8.12-1021-tegra | 6.8.12-1021-tegra |
+| 建置紀錄狀態（`kernel.build_record.status`） | OK | OK |
+| C-kernel-boot | OK | OK |
+| 上游比對（原始碼）被修改的檔案 | **0** | **1**（`kernel/kernel-noble/net/ipv4/inet_connection_sock.c`） |
+| 上游比對（成品）| OK（62 個閉源開機韌體與 NVIDIA 原版相同） | OK（同左） |
+| 元件 | 115,170（bsp 22,890／os 87,518／unknown 4,762） | 115,943（bsp 22,893／os 88,263／unknown 4,787） |
+| 漏洞列（完整／-bsp／-os） | 10,211／6,578／3,656 | 10,018／6,589／3,458 |
+| P1 判斷表列數（bsp＋unknown） | 10 | 10 |
+| nvbuild.sh | 1,899 秒 | 1,941 秒 |
+
+- 兩個版本的差異報告（`tools/cra/report_diff.py` 對兩份 -bsp 報告）：新增 33 列、消失 22 列，分類／判定／修補資訊的改變都是 0；消失的列原因是 `nvidia-l4t-core 39.2.0-… → 39.2.1-…`（元件版本變了），沒有「原因未判定」以外的猜測。
+- `C-kernel-config` 是 ATTENTION：映像的 headers `.config`（CI 編完後的 `.config`）和燒錄核心內建的 IKCONFIG 差 7 個設定（`CONFIG_CC_VERSION_TEXT` 等由編譯器決定的項目），掃描依設計改用燒錄核心的內建設定。
+- 第一次實跑發現並修掉的問題：(1) assemble 寫 tar 時，PAX 格式的長路徑成員帶著舊的 `path` 標頭，改名後仍寫回沒有 `Linux_for_Tegra/rootfs/` 前綴的舊路徑（rootfs 少了 18,431 個檔案）——`jetson_assemble.py` 清掉讀進來的 `pax_headers`，並有測試；
+  (2) 映像裡沒有核心的 `.config` 與 `Makefile`（NVIDIA 的 headers 套件沒有掃描要的頂層檔案）→ `C-kernel-config` GAP，建置紀錄沒被採用——assemble 把 CI 的建置設定放進 `usr/lib/modules/<版本>/build/`；
+  (3) Syft 的檔案紀錄讓 unknown 變成 9 萬多個——用 dpkg `.list` 的擁有者分層（見 `docs/LAYERS.md`）；(4) l4t 核心對應列的 `mapped_from` 是「名稱 版本」，原本找不到層。
+- Release 步驟的 403：跑了一個多小時的 run，最後的 `release` job 呼叫 GitHub API 回 `403 Resource not accessible by integration`，同樣的步驟在新的 run 裡成功。見第 9 節。

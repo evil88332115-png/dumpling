@@ -173,7 +173,18 @@ D-030 校正前後（platform.yml 的 NVIDIA 套件清單加 `nvidia-igx-*`）�
 | `host-tool` | 0 | rootfs 映像裡沒有刷機工具 |
 
 測試把這些數字釘死（`tests/test_layers.py` 的 `JETSON_EXPECTED`）：規則或 platform.yml 讓數字變動時，必須確認新歸屬是對的才改。
-CI 實際跑出來的分層數字見 `docs/JETSON.md` 與 `tests/expected/orin-nano-demo/*.json`。
+**CI 實跑（精靈的 Syft SBOM，含檔案紀錄；2026-11-12，R39.2.1＋patch，`tests/expected/orin-nano-demo/v39.2.1-demo1.json`）**：
+
+| 層 | 第一次實跑（只看路徑） | 加上 dpkg 擁有者（`--owners`）與 D-030 校正後 |
+|---|---:|---:|
+| `bsp` | 3,249 | **22,893**（`nvidia-l4t-*`／`nvidia-igx-*` 71 個套件、它們擁有的檔案紀錄、核心模組 1,536、/boot） |
+| `os` | 1,973 | **88,263**（Ubuntu 套件 1,972 ＋ 它們擁有的檔案紀錄） |
+| `host-tool` | 0 | 0 |
+| `unknown` | 92,290 | **4,787**：沒有擁有者的檔案紀錄 4,448（`file-unowned`）、Go／Python／Java 套件 339（`path-no-rule`） |
+| 總計 | 97,512 | 115,943（第一次實跑的 rootfs 漏了 18,431 個長路徑成員，已修，見 `docs/JETSON.md`） |
+
+另一個校正：核心的漏洞列（`linux-nvidia-tegra`，Canonical 核心對應 NVIDIA 的核心套件）原本全是 `unknown`（6,556 列），因為 `mapped_from` 的值是「名稱 版本」、
+`cra_report.layer_of_row` 拿整串去找套件索引；改成只用名稱後，這些列是 `bsp`（-bsp 報告：bsp 6,366 列、unknown 223 列）。
 
 ## 8. 待確認（已採最保守做法，不阻擋）
 
