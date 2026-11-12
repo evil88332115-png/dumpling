@@ -1,0 +1,123 @@
+{
+  "$comment": "FICTIONAL EXAMPLE. Example Co. and the EX-J100 product do not exist; replace every value. Copy to <project>/CRA/Config/config.json.",
+  "schema_version": 1,
+  "manufacturer": {
+    "name": "Example Co.",
+    "address": "1 Example Street, 00000 Example City, Exampleland",
+    "email": "contact@example.com",
+    "website": "https://www.example.com"
+  },
+  "vulnerability_contact": {
+    "contact": "security@example.com (PGP key: https://www.example.com/.well-known/security.txt)",
+    "cvd_policy_url": "https://www.example.com/security/cvd-policy"
+  },
+  "product": {
+    "name": "Example EX-J100 Edge AI Controller",
+    "type": "Industrial edge AI computer (custom carrier board with NVIDIA Jetson module, custom Jetson Linux / Ubuntu 24.04 image)",
+    "model": "EX-J100",
+    "version": "HW rev. B, software image 2.3.0",
+    "identification": [
+      "Serial number format EXJ100-YYWW-NNNNN, printed on the rating label on the bottom of the enclosure",
+      "Software image version shown by `cat /etc/example-release` and in the web console under System > About",
+      "The analysed software image is identified by its image ID / digest in section 3 above"
+    ]
+  },
+  "intended_use": {
+    "purpose": "Running customer-provided computer-vision inference workloads at the network edge in industrial environments (factory floor, warehouses), operated by trained professional staff.",
+    "security_environment": [
+      "Installed inside a locked cabinet or restricted area; physical access limited to authorised staff",
+      "Connected to a segmented operational technology (OT) network behind a firewall; not directly reachable from the internet",
+      "Managed through the local web console (HTTPS) and SSH with key-based authentication"
+    ],
+    "essential_functionalities": [
+      "Acquire video streams from up to 4 cameras and run GPU-accelerated inference",
+      "Publish inference results to the customer's systems over MQTT/TLS",
+      "Receive signed software updates (A/B partitions with rollback)"
+    ],
+    "security_properties": [
+      "Secure boot with fused keys; only images signed by Example Co. boot",
+      "Root file system mounted read-only; data partition encrypted (LUKS2, key sealed to the device)",
+      "No default passwords: a unique initial password is printed on the device label and must be changed at first login",
+      "Only HTTPS (443) and SSH (22) are open by default; all other services disabled"
+    ]
+  },
+  "foreseeable_risks": [
+    "Exposing the web console or SSH directly to the internet",
+    "Installing unsigned third-party software or containers that run with elevated privileges",
+    "Not installing security updates during the support period, or using the device after the support period has ended",
+    "Physical access by unauthorised persons (debug ports on the carrier board)"
+  ],
+  "eu_declaration_of_conformity_url": "https://www.example.com/compliance/ex-j100/eu-doc",
+  "support": {
+    "type": "Security updates for the operating system image, NVIDIA Jetson Linux BSP components and Example Co. applications, delivered as signed full-image updates; vulnerability handling per the CVD policy",
+    "end_date": "2031-12"
+  },
+  "instructions": {
+    "url": "https://www.example.com/docs/ex-j100/security",
+    "secure_use": [
+      "At first start, change the initial password and upload your SSH public key; disable password login for SSH",
+      "Connect the device only to a segmented network; keep the default firewall rules",
+      "Review the security log (System > Logs) regularly and keep automatic security updates enabled"
+    ],
+    "data_security_changes": "Installing additional software, enabling extra services, changing firewall rules or disabling secure boot can expose stored data and credentials. Such changes are outside the supported configuration and void the security properties described in item 4.",
+    "security_updates": "Security updates are installed automatically by default (nightly check). Manual installation: System > Update > Install signed update package, or `example-update install <file>`. The device verifies the signature and keeps the previous image for rollback.",
+    "decommissioning": "Use System > Maintenance > Factory reset with secure erase. This destroys the encryption key of the data partition (cryptographic erase) and restores the factory image. Remove the device from your management systems and revoke its certificates.",
+    "disable_automatic_updates": "System > Update > Automatic security updates > Off (requires administrator role). Example Co. recommends keeping automatic updates enabled.",
+    "integrator_information": "Integrators receive the SBOM, the list of open network ports and services, the secure boot key management guide and this vulnerability report on request (security@example.com)."
+  },
+  "sbom": {
+    "availability": "A machine-readable SBOM (CycloneDX JSON) for each software release is available on request from security@example.com.",
+    "component_type": "firmware",
+    "flash_package_supplier": {"name": "Example Module Vendor Ltd.", "url": "https://vendor.example.com"},
+    "own_software": [
+      {"path": "/usr/bin/example-agent", "version": "2.3.0"},
+      "/opt/example/bin/*",
+      "/lib/modules/*/extra/example_*.ko"
+    ]
+  },
+  "technical_documentation": {
+    "software_versions": ["Software image 2.3.0 (Ubuntu 24.04 based, NVIDIA Jetson Linux BSP 39.2.1)", "Example Vision Runtime 4.1.2", "Bootloader and secure boot configuration version 1.4"],
+    "hardware_illustrations": "Document EXJ100-HW-PHOTO rev. B (enclosure front/rear, rating label, carrier board top/bottom with debug header J12 marked)",
+    "architecture": "Document EXJ100-ARCH rev. 3: system architecture, software component diagram, data flows and trust boundaries",
+    "secure_update_distribution": "Full-image updates signed with an offline ECDSA P-384 key; downloaded over HTTPS from updates.example.com; signature and version checked by the device before installation; A/B partitions with automatic rollback",
+    "production_monitoring": "Document EXJ100-PROD rev. 2: build pipeline with reproducible image builds, key ceremony for secure boot fusing, end-of-line test; monitoring of new vulnerabilities in the SBOM components after release",
+    "support_period_rationale": "Expected time in use of industrial edge computers at customers (7 years), NVIDIA Jetson module availability and BSP support, Ubuntu 24.04 standard support",
+    "standards": "No harmonised standard applied yet; IEC 62443-4-1 and IEC 62443-4-2 used as guidance (gap analysis document EXJ100-STD rev. 1)",
+    "test_reports": ["Penetration test report EXJ100-PT-2026-01 (external test lab)", "Fuzzing report for the web console API EXJ100-FZ-2026-01"],
+    "eu_declaration_of_conformity_copy": "Document EXJ100-DOC-2026 (signed PDF in the compliance archive)"
+  },
+  "risk_assessment": {
+    "method": "Likelihood (1-4) x impact (1-4) matrix; risks scoring 9 or more require treatment before release",
+    "assets": ["Customer video streams and inference results", "Device credentials and TLS keys", "Secure boot keys and the integrity of the software image"],
+    "expected_use_period": "7 years from first delivery",
+    "attack_surface": ["HTTPS web console (443) and SSH (22) on the OT network", "Camera inputs (GigE Vision)", "USB ports and debug header J12 (physical access)"],
+    "risk_register": "Risk register EXJ100-RISK rev. 4 (23 risks; 3 high risks treated by secure boot, encrypted data partition and signed updates)",
+    "annex_i_applicability": {
+      "b": {"applies": true, "measures": "Unique initial password, only HTTPS and SSH enabled by default; factory reset restores the original state"},
+      "c": {"applies": true, "measures": "Signed full-image updates, automatic installation enabled by default with opt-out (see user information 8(c) and 8(e))"},
+      "d": {"applies": true, "measures": "Role-based access in the web console, SSH key authentication, login attempts logged"},
+      "e": {"applies": true, "measures": "TLS 1.3 for all network services; LUKS2 encryption of the data partition"},
+      "f": {"applies": true, "measures": "Secure boot, read-only root file system, signed updates, integrity check at boot reported in the security log"},
+      "g": {"applies": true, "measures": "Only inference results are stored; video frames are not retained after processing"},
+      "h": {"applies": true, "measures": "Watchdog and automatic service restart; rate limiting on the web console"},
+      "i": {"applies": true, "measures": "Outbound traffic limited to the configured MQTT broker and update server"},
+      "j": {"applies": true, "measures": "Two open ports by default; unused services removed from the image; debug header disabled in production"},
+      "k": {"applies": true, "measures": "ASLR, stack protection and hardened compiler flags; services run as unprivileged users"},
+      "l": {"applies": true, "measures": "Security log of logins, configuration changes and updates, exportable via syslog; opt-out in System > Logs"},
+      "m": {"applies": true, "measures": "Factory reset with cryptographic erase of the data partition"}
+    },
+    "part_i_1_and_part_ii": ["Part I point (1): secure development process EXJ100-SDL rev. 2 (threat modelling per release, code review, hardened build)", "Part II: vulnerability handling process EXJ100-VH rev. 1 (SBOM per release, CVD policy, triage within 5 working days, signed security updates free of charge during the support period)"],
+    "residual_risk": "Physical attacks by persons with access to the locked cabinet are accepted; mitigated by the installation requirements in the user information",
+    "approval": {"owner": "Head of Product Security, Example Co.", "date": "2026-10-01"},
+    "revision_history": ["2026-10-01 rev. 4: update for software image 2.3.0", "2026-03-15 rev. 3: initial release"]
+  },
+  "scan": {
+    "mode": "image",
+    "target": "registry.example.com/ex-j100/rootfs@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "ex-j100-image",
+    "options": ["--no-license"]
+  },
+  "vulnerability_policy": {
+    "status": "DRAFT - example only, to be decided by Example Co."
+  }
+}

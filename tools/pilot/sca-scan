@@ -1,0 +1,1225 @@
+#!/usr/bin/env bash
+# sca-scan：試行版的掃描入口。產生 SBOM、弱點比對、上傳 DT、匯入 DejaCode，最後產生 HTML 報告。
+#
+# 用法：
+#   sca-scan --git <網址> --ref <完整 commit SHA> [--name N]
+#   sca-scan --dir <路徑> [--name N]
+#   sca-scan --image <映像，建議 名稱@sha256:…> [--name N]
+#     （本機的映像 ID sha256:<64 個十六進位字元>，例如 docker import 的結果：不 pull，以映像 ID 固定）
+#   sca-scan --sbom <CycloneDX JSON 檔> [--name N]（已經有 SBOM：不跑產生器，直接比對、上傳）
+#   共用：--out <資料夾>（預設 ./sca-results/<name>-<UTC 時間>，必須不存在或是空的）
+#         --no-upload（不上傳 DT、不匯入 DejaCode；那些階段記 NOT_RUN）
+#         --allow-network-resolve（原始碼：cdxgen 與 govulncheck 的依賴解析可以連網；報告標「連網解析」）
+#         --no-package-scan（不讓 DejaCode 逐套件掃描授權與版權；那些階段記 NOT_RUN）
+#         --no-files-scan（不用 ScanCode.io 掃專案本身或映像的檔案層級授權與版權；E-files-scan 記 NOT_RUN）
+#         --no-license（只做漏洞：不連 ScanCode.io／DejaCode，E 段全部記 NOT_RUN；大型映像省掉授權那段的時間）
+#         --version <字串>（DT 專案版本與 meta 的 version，取代預設的 commit／內容雜湊／映像 ID；原本的值另記 content_version。
+#           只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」，最多 100 字元，例如 "V1.0.2_a (rootfs_no_gui)"）
+#         --kernel-build <路徑> [--kernel-build-prefix <前綴>]（只用於 --image、--sbom：核心建置設定的來源，給 C-kernel-config；
+#           rootfs tar、rootfs 資料夾，或刷機包 tbz2 加上 rootfs 在裡面的路徑。--image 沒給時用 docker save 的映像 tar）
+#   環境變數 KERNEL_BUILD_RECORD（選用；只用於 --image、--sbom）：這個出貨版本的核心建置紀錄（make 之後的建置資料夾，或它的
+#     .tar／.tar.gz／.tar.xz；保留 .config、每個 .*.cmd、modules.order、modules.builtin、System.map、include/config/kernel.release、
+#     include/generated/（utsversion.h、compile.h：和燒錄的 Image 的版本字串核對，證明是出貨的那一次建置）），
+#     給 C-kernel-config 的 --build-record：直接以每個物件的 source_／deps_ 判斷修補的檔案有沒有編。和這次判定用的 .config、
+#     核心版本、映像的模組清單對不上或不完整 → 不採用（kernel.build_record 記 GAP 與原因，照舊依 Makefile 判定）。
+#     出貨映像有模組（/lib/modules/<版本>/kernel/ 底下的 .ko）不在紀錄的 modules.order 時不整份拒收：紀錄照用，這些模組的檔案不判
+#     not_affected（樹內的 unknown；找不到來源的標 GAP，kernel.build_record.image_modules_not_in_record）。
+#   環境變數 KERNEL_OOT_BUILD_RECORDS（選用；只用於 --image、--sbom，需要 KERNEL_BUILD_RECORD）：樹外模組（例如 nvidia-oot、nvgpu）的建置資料夾，
+#     用冒號分隔多個；讀裡面的 .*.o.cmd／.*.ko.cmd，判斷核心標頭檔有沒有被已編的樹外模組用到。映像每個樹外 .ko 都有完整的紀錄才採用，
+#     否則標頭檔照舊因為樹外模組而 unknown（kernel.build_record.out_of_tree_records 記原因）。給 C-kernel-config 的 --oot-build-record。
+#   環境變數 KERNEL_STABLE_GIT（選用；只用於 --image、--sbom）：linux-stable 的本機 clone（唯讀，不 fetch）：沒有 CNA 紀錄的 CVE 從 References 的
+#     上游 commit 查改了哪些檔案；有 CNA 紀錄的 CVE 把產品分支 backport 實際改的程式檔併進 programFiles（聯集）。給 C-kernel-config 的 --stable-git。
+#   環境變數 KERNEL_SOURCE_DIR（選用；只用於 --image、--sbom）：核心原始碼樹（資料夾，唯讀）當 Makefile／Kbuild 的來源——映像／刷機包的
+#     linux-headers 不完整（例如廠商核心不是套件安裝的）時。.config、IKCONFIG 核對、模組與 Image 照舊來自 --kernel-build；
+#     樹有 .config 時和判定用的設定核對，不同記出來（ATTENTION）；主.次版本不同 → GAP。不執行樹裡的任何東西，符號連結不跟隨。
+#     給 C-kernel-config 與 C-kernel-module-map 的 --source-tree。
+#   環境變數 KERNEL_CVES（選用）：明確給的核心 CVE 清單（檔案，每行一個 CVE；Grype、DT 都沒有核心 CVE 時用，或兩者都沒執行時）。
+#     沒給時，Grype、DT 都沒有核心元件的 CVE（廠商核心不是套件，例如 SoC 廠商的 BSP 核心）而且有 KERNEL_CVE_MIRROR：依產品核心版本
+#     （/lib/modules/<版本>，沒有時 Image 的版本字串）用 lib/kernel_cna_version.py 從 CNA 鏡像產生清單（scan/kernel-cve-list.txt、.json），
+#     經 --cves 給 C-kernel-config 與 C-kernel-module-map。狀態列 C-kernel-cve-list 記清單的來源（不是 Grype／DT）；版本取不到或被拒絕 → GAP，不猜。
+#     Grype 或 DT 已有核心 CVE 的產品不受影響（先照舊執行，只有 NOT_RUN 時才走這一條）。
+#
+# 規則（專案規則、試行版範圍）：
+# - 每個階段寫一列到 <out>/status.tsv（stage、status、detail），狀態只用 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN，
+#   不合併成一個「成功」。OK 只表示該階段完成且輸出可用，不代表安全。
+# - 退出碼：有 FAIL → 1；沒有 FAIL 但有任何非 OK（GAP／NOT_ASSESSED／NOT_RUN／ATTENTION）→ 2；全部 OK → 0。參數錯誤 → 64。
+# - 原始碼只用 cdxgen（在 bwrap 沙箱、預設無網路）；映像只用 Syft（同一產物只用一個產生器）。Grype 比對 SBOM（sbom:）；Go 專案加 govulncheck。
+#   映像與 --sbom 另檢查作業系統核心有沒有做比對（C-kernel-coverage，SBOM 有核心時才寫）：有核心但 0 筆比對 → GAP，不可當作核心沒有弱點。
+#   Jetson Linux（SBOM 有 nvidia-l4t-* 套件）另用人工對照表比對 NVIDIA 安全公告（C-nvidia-bulletins，scan/nvidia-bulletins.json）。
+#   Debian／Ubuntu 套件上只經 NVD 等非發行版資料比對到的 DT 發現，以發行版的 OSV 紀錄再判（D-distro-recheck，scan/distro-recheck.json；
+#   原始 findings 不改，cra_report.py 把「發行版已修補」的列移出 P1–P3）。沒有 CVE 別名的 USN 從同一個鏡像查它列的 CVE
+#   （D-usn-cves，scan/usn-cves.json；cra_report.py 把 USN 併進同一個元件上那個 CVE 的列）。Ubuntu 套件（含 Canonical 核心）上的 CVE
+#   從同一個鏡像讀 Ubuntu priority（D-ubuntu-priority，scan/ubuntu-priority.json；cra_report.py 分級的嚴重度依供應商評級優先）。
+#   核心的 CVE 以產品核心的 .config 與 Makefile 判斷修補的程式有沒有編進核心（C-kernel-config，scan/kernel-config.json；
+#   只列出，原始 findings 不改；tools/cra/vex_export.py 讀這個檔，把 not_affected 寫成 VEX 的 code_not_present）。
+#   同樣的輸入另依 Kbuild 規則把修補動到的檔案對應到 builtin／模組（C-kernel-module-map，scan/kernel-module-map.json；只對應，給 K2）。
+# - sudo 執行時（sudo 會把 PATH 重設成 secure_path）找不到 grype 或 syft，而且 /opt/sca-tools/bin 存在（SCA_TOOLS_DIR 可改；
+#   deploy/gitlab-runner/install.sh 裝工具的位置）：把 /opt/sca-tools 的 bin、node/bin、go/bin 加到 PATH 前面（A-tools 的說明會寫出來）。
+#   root 執行時只接受 root 擁有、群組與其他人不可寫的資料夾。
+# - --sbom：使用者提供的 SBOM（CycloneDX JSON）原樣當作 sbom/sbom.cdx.json，不執行任何產生器；依賴樹是否完整由提供者決定，
+#   sbomgate 一律 --tree unknown（最多 PARTIAL，不宣稱完整）。版本、DT／DejaCode 的版本用檔案的 sha256。
+# - 不可信的程式（cdxgen 會執行套件管理器、govulncheck 會載入專案）只在沙箱內執行（tools/e2e/sandbox.sh）：
+#   不論是否連網，家目錄（getent passwd）與 /home/runner/runners 一律以 tmpfs 遮蔽，PILOT_ENV 與本程式的秘密資料夾另外遮蔽，
+#   只唯讀掛回工具、暫存區與 Grype DB。
+# - --allow-network-resolve 只能用於可信的專案：沙箱有網路時，專案的建置腳本可以連到外部，也可以連到主機 127.0.0.1 上
+#   沒有驗證的服務（例如 Ollama 11434 埠）；bwrap 無法依目的地過濾。
+# - API key 不寫進任何輸出：HTTP 標頭放在權限 600 的暫存檔（curl -H @檔案），不出現在指令列；結束前掃描輸出資料夾。
+#
+# 與部署的介面：環境變數 PILOT_ENV（預設 <repo>/deploy/pilot/state/pilot.env），KEY=VALUE 格式，只讀下列鍵（不 source，不執行內容）：
+#   PILOT_NVD_MIRROR、NVD_MIRROR_MODIFIED（NVD 鏡像模式與鏡像日期；不是秘密，給 dtsources.py 判斷新鮮度）、
+#   NVIDIA_BULLETINS_MIRROR（NVIDIA 安全公告鏡像的資料夾，tools/mirror/nvidia-bulletins.sh 的輸出；不是秘密，給 C-nvidia-bulletins）、
+#   OSV_DISTRO_MIRROR（Ubuntu／Debian 的 OSV 鏡像資料夾，tools/mirror/osv-distro.sh 的輸出；不是秘密，給 D-distro-recheck、D-usn-cves、D-ubuntu-priority）、
+#   KERNEL_CVE_MIRROR（Linux 核心 CNA 的 CVE 紀錄鏡像，tools/mirror/kernel-cve.sh 的輸出；不是秘密，給 C-kernel-config）、
+#   EUVD_MIRROR（ENISA EUVD 鏡像資料夾，tools/mirror/euvd.sh 的輸出；不是秘密，給 C-euvd，以及 D-dt-kev-sources 判斷 DT 讀的 EU KEV 檔是否最新）、
+#   UBUNTU_CVE_STATUS_MIRROR（Ubuntu CVE Tracker 狀態鏡像，tools/mirror/ubuntu-cve-status.sh 的輸出；不是秘密，給 D-ubuntu-status）、
+#   DT_URL（DT API 基底，可帶或不帶結尾的 /api）、DT_FRONTEND_URL、DT_API_KEY、DEJACODE_URL、DEJACODE_API_KEY、
+#   SCANCODEIO_URL、SCANCODEIO_API_KEY（可空）。檔案不存在時 DT／DejaCode 階段記 NOT_RUN，其餘照跑。
+# DT 金鑰需要的權限（DT 5.2.0 原始碼的 @PermissionRequired）：
+#   VIEW_PORTFOLIO（專案查詢）、PORTFOLIO_MANAGEMENT 或 PORTFOLIO_MANAGEMENT_CREATE（建立專案）、BOM_UPLOAD、VIEW_VULNERABILITY（finding）；
+#   建議另給 SYSTEM_CONFIGURATION_READ：才能讀 /api/v2/internal/workflow-runs，把「BOM 處理」與「弱點分析」分開確認。
+#   沒有時退回 /api/v1/bom/token/{token} 加專案的 lastBomImport／lastVulnerabilityAnalysis 時間（見 D 段）。
+#   SYSTEM_CONFIGURATION_READ 也用來讀弱點資料源的 mirror 狀態（D-dt-data-sources）；沒有這個權限時資料源狀態未知 → GAP。
+#
+# 共用（不重寫邏輯）：tools/e2e/sandbox.sh（sbx、sandbox_probe）、tools/pilot/lib/common.sh（由 real-projects.sh 搬出）、
+#   tools/sbomgate/sbomgate.py（規則 11–14）、tools/e2e/dtread.py（finding 分頁與 X-Total-Count 核對）、
+#   tools/e2e/djread.py（DejaCode 授權與 usage policy；無授權標 no_license）、tools/e2e/install-tools.sh（版本固定值）。
+set -uo pipefail
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "需要 bash 4 以上" >&2; exit 64; }
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
+
+usage(){ sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
+MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS=
+while [ $# -gt 0 ]; do case $1 in
+  --git) optval "$@"; MODE=git; SRC=$2; shift 2;;
+  --dir) optval "$@"; MODE=dir; SRC=$2; shift 2;;
+  --image) optval "$@"; MODE=image; SRC=$2; shift 2;;
+  --sbom) optval "$@"; MODE=sbom; SRC=$2; shift 2;;
+  --ref) optval "$@"; REF=$2; shift 2;;
+  --name) optval "$@"; NAME=$2; shift 2;;
+  --out) optval "$@"; OUT=$2; shift 2;;
+  --version) optval "$@"; PVER=$2; PVER_SET=1; shift 2;;
+  --no-upload) NOUP=1; shift;;
+  --allow-network-resolve) NETRES=1; shift;;
+  --no-package-scan) PKGSCAN=0; shift;;
+  --no-files-scan) FILESCAN=0; shift;;
+  --no-license) LICENSE=0; shift;;
+  --kernel-build) optval "$@"; KBUILD=$2; shift 2;;
+  --kernel-build-prefix) optval "$@"; KBUILD_PREFIX=$2; shift 2;;
+  --py-versions) optval "$@"; PYVERS=$2; shift 2;;
+  -h|--help) usage; exit 0;;
+  *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
+esac; done
+[ -n "$MODE" ] && [ -n "$SRC" ] || { echo "需要 --git、--dir、--image 或 --sbom 其中之一" >&2; usage >&2; exit 64; }
+# --version：DT 的 name／version 查詢與 DejaCode 的 name:version 都用它，所以只收安全的字元（不含「:」「/」、引號、控制字元）
+if [ $PVER_SET = 1 ] && ! [[ "$PVER" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._+~()-]{0,99}$ ]] ; then
+  echo "--version 只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」，最多 100 字元：${PVER:0:120}" >&2; exit 64; fi
+if [ "$MODE" = git ]; then
+  [[ "$REF" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]] || { echo "--git 需要 --ref <完整 commit SHA>（40 或 64 個小寫十六進位字元；不接受分支或標籤，避免結果隨時間改變）" >&2; exit 64; }
+elif [ -n "$REF" ]; then echo "--ref 只用於 --git" >&2; exit 64; fi
+if [ -n "$PYVERS" ]; then
+  [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--py-versions 只用於 --image 或 --sbom" >&2; exit 64; }
+  [ -f "$PYVERS" ] || { echo "--py-versions 找不到：$PYVERS" >&2; exit 64; }
+  PYVERS=$(readlink -f -- "$PYVERS")
+fi
+[ "$MODE" = dir ] && { [ -d "$SRC" ] || { echo "不是資料夾：$SRC" >&2; exit 64; }; SRC=$(cd "$SRC" && pwd); }
+[ "$MODE" = sbom ] && { [ -f "$SRC" ] || { echo "不是檔案：$SRC" >&2; exit 64; }; SRC=$(cd "$(dirname "$SRC")" && pwd)/$(basename "$SRC"); }
+[[ "$MODE" =~ ^(image|sbom)$ ]] && [ "$NETRES" = 1 ] && { echo "--allow-network-resolve 只用於原始碼" >&2; exit 64; }
+if [ -n "$KBUILD" ] || [ -n "$KBUILD_PREFIX" ]; then
+  [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-build 只用於 --image 或 --sbom" >&2; exit 64; }
+  [ -e "$KBUILD" ] || { echo "--kernel-build 找不到：${KBUILD:-未指定}" >&2; exit 64; }
+  KBUILD=$(readlink -f -- "$KBUILD")
+  [[ -z "$KBUILD_PREFIX" || "$KBUILD_PREFIX" =~ ^[A-Za-z0-9._/-]{1,300}$ ]] && [[ "/$KBUILD_PREFIX/" != */../* ]] \
+    || { echo "--kernel-build-prefix 只接受英數字與「. _ / -」，不能有 ..：$KBUILD_PREFIX" >&2; exit 64; }
+fi
+if [ -z "$NAME" ]; then
+  case $MODE in git) NAME=$(basename "${SRC%/}" .git);; dir) NAME=$(basename "$SRC");; image) NAME=${SRC%%@*}; NAME=${NAME##*/}; NAME=${NAME%%:*};; sbom) NAME=$(basename "$SRC"); NAME=${NAME%.json}; NAME=${NAME%.cdx};; esac
+fi
+NAME=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-100); [ -n "$NAME" ] || NAME=scan
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+OUT=${OUT:-./sca-results/$NAME-$TS}
+if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then echo "輸出資料夾已存在且不是空的：$OUT（不混用舊結果）" >&2; exit 64; fi
+mkdir -p "$OUT" || { echo "無法建立 $OUT" >&2; exit 64; }; OUT=$(cd "$OUT" && pwd)
+# 暫存區：沙箱把 /tmp 蓋成空的 tmpfs，所以暫存區不能放在 /tmp 或 /run 底下（沙箱內會看不到）
+WORK=$(mktemp -d "$(dirname "$OUT")/.sca-scan-work.XXXXXX") || exit 64
+case $WORK in /tmp/*|/run/*|/var/run/*) rmdir "$WORK"; mkdir -p "$HOME/.cache/sca-scan"; WORK=$(mktemp -d "$HOME/.cache/sca-scan/work.XXXXXX") || exit 64;; esac
+trap 'rm -rf "$WORK"' EXIT
+SECDIR=$WORK/secrets; mkdir -m 700 "$SECDIR"; SECRETS=$SECDIR/list.txt; : > "$SECRETS"
+mkdir -p "$OUT"/{sbom,scan,dt,dejacode} "$WORK"/o
+ST=$OUT/status.tsv; LOG=$OUT/commands.tsv; printf 'stage\tstatus\tdetail\n' > "$ST"
+. "$ROOT/tools/pilot/lib/common.sh"
+. "$ROOT/tools/e2e/sandbox.sh"
+status(){ local d; d=$(printf '%s' "${3:-}" | tr '\n\t' '  ' | cut -c1-500 | iconv -f UTF-8 -t UTF-8 -c); printf '%s\t%s\t%s\n' "$1" "$2" "$d" >> "$ST"; echo "[$2] $1 $d"; }   # 說明欄壓成一行（同 license.sh）
+secret(){ [ -n "$1" ] && printf '%s\n' "$1" >> "$SECRETS"; return 0; }
+declare -A META=([mode]=$MODE [source]=$SRC [name]=$NAME [started]=$(now) [network_resolve]=$NETRES [no_upload]=$NOUP [out]=$OUT)
+[ "$MODE" = git ] && META[commit]=$REF
+
+# ---------- 0. 設定檔（不 source；只讀已知鍵） ----------
+PILOT_ENV=${PILOT_ENV:-$ROOT/deploy/pilot/state/pilot.env}
+DT_URL= DT_FRONTEND_URL= DT_API_KEY= DEJACODE_URL= DEJACODE_API_KEY= SCANCODEIO_URL= SCANCODEIO_API_KEY=
+PILOT_NVD_MIRROR= NVD_MIRROR_MODIFIED=   # 不是秘密：NVD 鏡像模式與鏡像的 modified 日期（deploy/pilot 寫入；dtsources.py 判斷新鮮度）
+NVIDIA_BULLETINS_MIRROR=   # 不是秘密：NVIDIA 安全公告鏡像的資料夾（deploy/pilot/nvbul-mirror.sh 寫入；C-nvidia-bulletins）
+OSV_DISTRO_MIRROR=   # 不是秘密：Ubuntu／Debian 的 OSV 鏡像資料夾（deploy/pilot/osv-distro-mirror.sh 寫入；D-distro-recheck）
+KERNEL_CVE_MIRROR=   # 不是秘密：Linux 核心 CNA 的 CVE 紀錄鏡像（deploy/pilot/kernel-cve-mirror.sh 寫入；C-kernel-config）
+EUVD_MIRROR=   # 不是秘密：ENISA EUVD 鏡像（deploy/pilot/euvd-mirror.sh 寫入；C-euvd、D-dt-kev-sources）
+UBUNTU_CVE_STATUS_MIRROR=   # 不是秘密：Ubuntu CVE Tracker 狀態鏡像（tools/mirror/ubuntu-cve-status.sh 的輸出；D-ubuntu-status）
+HAVE_ENV=0
+if [ -f "$PILOT_ENV" ]; then
+  HAVE_ENV=1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}; [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Z_]+)=(.*)$ ]] || continue
+    k=${BASH_REMATCH[2]}; v=${BASH_REMATCH[3]}
+    [[ "$v" =~ ^\"(.*)\"$ || "$v" =~ ^\'(.*)\'$ ]] && v=${BASH_REMATCH[1]}
+    case $k in DT_URL|DT_FRONTEND_URL|DT_API_KEY|DEJACODE_URL|DEJACODE_API_KEY|SCANCODEIO_URL|SCANCODEIO_API_KEY|EUVD_MIRROR|PILOT_NVD_MIRROR|NVD_MIRROR_MODIFIED|NVIDIA_BULLETINS_MIRROR|OSV_DISTRO_MIRROR|KERNEL_CVE_MIRROR|UBUNTU_CVE_STATUS_MIRROR) printf -v "$k" '%s' "$v";; esac
+  done < "$PILOT_ENV"
+  secret "$DT_API_KEY"; secret "$DEJACODE_API_KEY"; secret "$SCANCODEIO_API_KEY"
+fi
+DT_URL=${DT_URL%/}; DT_URL=${DT_URL%/api}; DT_FRONTEND_URL=${DT_FRONTEND_URL%/}; DEJACODE_URL=${DEJACODE_URL%/}; SCANCODEIO_URL=${SCANCODEIO_URL%/}
+# HTTP 標頭檔（權限 600，在遮蔽的秘密資料夾內）：金鑰不出現在指令列與 commands.tsv
+hdr(){ local f=$SECDIR/$1; ( umask 077; printf '%s\n' "$2" > "$f" ); echo "$f"; }
+DT_HDR=$(hdr dt.h "X-Api-Key: $DT_API_KEY"); DJ_HDR=$(hdr dj.h "Authorization: Token $DEJACODE_API_KEY")
+SCIO_HDR=$(hdr scio.h "$( [ -n "$SCANCODEIO_API_KEY" ] && echo "Authorization: Token $SCANCODEIO_API_KEY" || echo "Accept: application/json")")
+# sandbox.sh 的 sbx 會遮蔽這些路徑（資料夾蓋成空 tmpfs、檔案以 /dev/null 覆蓋）：秘密資料夾、PILOT_ENV 所在的整個資料夾
+# （部署的 state 資料夾還有其他秘密）。PILOT_ENV 放在系統資料夾（/、/etc、/usr…）時不能整個蓋掉，只遮檔案本身並記錄。
+PENV_DIR=$(dirname "$(readlink -m "$PILOT_ENV")")
+case $PENV_DIR in /|/etc|/usr|/usr/*|/bin|/sbin|/lib|/lib64|/opt|/home|/tmp|/var|/run|/proc|/dev|/sys) PENV_HIDE=("$PILOT_ENV"); PENV_NOTE="（PILOT_ENV 在系統資料夾 $PENV_DIR，只遮檔案本身）";;
+  *) PENV_HIDE=("$PENV_DIR"); PENV_NOTE=;; esac
+SBX_HIDE=("$SECDIR" "${PENV_HIDE[@]}" "$ROOT/deploy/pilot/state")
+export GRYPE_DB_CACHE_DIR=${GRYPE_DB_CACHE_DIR:-$HOME/.cache/grype/db} SYFT_CHECK_FOR_APP_UPDATE=false GRYPE_CHECK_FOR_APP_UPDATE=false
+# 家目錄被遮蔽後要唯讀掛回的：暫存區（原始碼副本、映像檔、上傳用 SBOM；秘密資料夾在 SBX_HIDE 仍遮住）與 Grype DB 快取
+# 工具鏈根目錄（cdxgen 會叫 mvn／go／python；govulncheck 需要 GOROOT）在家目錄或 runner 目錄內時也要掛回
+mapfile -t TOOLCHAINS < <(sbx_toolchain_roots)   # JAVA_HOME、Maven、Gradle、GOROOT、Python（見 sandbox.sh）
+SBX_RO=("$WORK" "$GRYPE_DB_CACHE_DIR" "${TOOLCHAINS[@]}")
+
+# 工具與固定版本（tools/e2e/install-tools.sh 的 SYFT=… GRYPE=… CDXGEN=… GOVULNCHECK=…）
+pins=$(sed -n 's/^SYFT=\([^ ]*\) GRYPE=\([^ ]*\) CDXGEN=\([^ ]*\) GOVULNCHECK=\([^ ]*\).*/syft=\1 grype=\2 cdxgen=\3 govulncheck=\4/p' "$ROOT/tools/e2e/install-tools.sh")
+tool_ver(){ case $1 in
+  syft|grype) "$1" version 2>/dev/null | sed -n 's/^Version:[[:space:]]*//p' | head -1;;
+  cdxgen) cdxgen --version 2>/dev/null | tr -d '\033' | sed 's/\[[0-9;]*m//g' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1;;
+  govulncheck) govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p' | head -1;;
+  bwrap) bwrap --version 2>/dev/null | awk '{print $2}';;
+esac; }
+# sudo 重設了 PATH（secure_path 不含 /opt/sca-tools/bin）：找不到 grype 或 syft 時，把安裝工具的資料夾加到 PATH 前面。
+# root 執行時，那些資料夾必須 root 擁有、群組與其他人不可寫：否則別的帳號放進去的程式會以 root 執行。
+TOOLS_DIR=${SCA_TOOLS_DIR:-/opt/sca-tools}; PATH_NOTE=
+# 檢查的是這個資料夾與它所有的上層（寫出的路徑與解開連結後的路徑兩條都看）：任何一層別人可寫，都能把整個資料夾換掉。
+tools_dir_ok(){ local p m r; [ "$(id -u)" != 0 ] && return 0
+  r=$(readlink -f -- "$1") || return 1
+  for p in "$1" "$r"; do
+    while :; do m=$(stat -Lc '%u %a' -- "$p" 2>/dev/null) || return 1
+      [ "${m%% *}" = 0 ] && (( (8#${m##* } & 8#022) == 0 )) || return 1
+      [ "$p" = / ] && break; p=$(dirname -- "$p"); done; done; }
+if { ! command -v grype > /dev/null || ! command -v syft > /dev/null; } && [ -d "$TOOLS_DIR/bin" ]; then
+  if tools_dir_ok "$TOOLS_DIR/bin"; then
+    add=$TOOLS_DIR/bin; for d in node/bin go/bin; do [ -d "$TOOLS_DIR/$d" ] && tools_dir_ok "$TOOLS_DIR/$d" && add+=":$TOOLS_DIR/$d"; done
+    export PATH=$add:$PATH; PATH_NOTE="（PATH 沒有 grype 或 syft，例如 sudo 重設了 PATH：已把 $add 加到 PATH 前面）"
+  else PATH_NOTE="（PATH 沒有 grype 或 syft；$TOOLS_DIR/bin 不是 root 擁有或群組、其他人可寫，root 執行時不加進 PATH）"; fi
+fi
+need=(grype bwrap); case $MODE in image) need+=(syft docker);; sbom) ;; *) need+=(cdxgen);; esac; [ "$MODE" = git ] && need+=(git)
+miss=(); vers=(); mism=()
+for t in "${need[@]}"; do command -v "$t" > /dev/null || { miss+=("$t"); continue; }
+  [ "$t" = docker ] && continue; v=$(tool_ver "$t"); META[tool_$t]=${v:-未知}; vers+=("$t ${v:-未知}")
+  want=$(echo "$pins" | tr ' ' '\n' | sed -n "s/^$t=//p"); [ -n "$want" ] && [ "${v#v}" != "${want#v}" ] && mism+=("$t ${v:-未知}≠$want")
+done
+if [ ${#miss[@]} -gt 0 ]; then status A-tools FAIL "找不到：${miss[*]}（安裝見 tools/e2e/install-tools.sh）$PATH_NOTE"
+elif [ ${#mism[@]} -gt 0 ]; then status A-tools ATTENTION "版本與 install-tools.sh 的固定值不同：${mism[*]}$PATH_NOTE"
+else status A-tools OK "${vers[*]}$PATH_NOTE"; fi
+have(){ command -v "$1" > /dev/null; }
+
+# ---------- A. 取得來源（不執行專案的任何腳本） ----------
+S=$WORK/src; SRC_OK=0; IMG_TAR=
+case $MODE in
+git)
+  if fetch_pinned "$S" "$SRC" "$REF" > "$WORK/fetch.txt" 2>&1; then status A-source OK "git ${REF}（已刪 .git）"; SRC_OK=1; META[version]=$REF
+  else status A-source FAIL "取不到 $REF：$(tail -1 "$WORK/fetch.txt")"; fi;;
+dir)
+  mkdir -p "$S"
+  if copy_dir "$SRC" "$S" "$WORK" "$OUT" 2>"$WORK/copy.txt"; then
+    # 身分：有 .git 時記 HEAD（只用 rev-parse，不跑會觸發 hook 或 fsmonitor 的指令）；另算內容雜湊（不含 .git）
+    head=; [ -e "$SRC/.git" ] && head=$(git -C "$SRC" -c core.fsmonitor=false rev-parse HEAD 2>/dev/null)
+    cs=$(python3 -I - "$S" <<'PY'
+import hashlib,os,sys
+r=sys.argv[1];h=hashlib.sha256()
+for d,ds,fs in os.walk(r):
+    ds.sort()
+    for f in sorted(fs):
+        p=os.path.join(d,f);rel=os.path.relpath(p,r)
+        if os.path.islink(p): h.update(b"L"+rel.encode()+b"\0"+os.readlink(p).encode()+b"\0"); continue
+        fd=hashlib.sha256()
+        with open(p,"rb") as fh:
+            for b in iter(lambda: fh.read(1<<20), b""): fd.update(b)
+        h.update(b"F"+rel.encode()+b"\0"+fd.digest())
+print(h.hexdigest())
+PY
+)
+    # DT／DejaCode 的版本一律用內容雜湊：工作區可能有未提交的修改，HEAD 不代表實際掃描的內容（HEAD 只記為參考）
+    META[content_sha256]=$cs; [ -n "$head" ] && META[git_head]=$head
+    META[version]=dir-sha256-${cs:0:16}
+    status A-source OK "資料夾複本（不含 .git）；內容 sha256=${cs:0:16}…${head:+；git HEAD=$head（參考；以內容雜湊為準）}"; SRC_OK=1
+  else status A-source FAIL "複製失敗：$(tail -1 "$WORK/copy.txt")"; fi;;
+image)
+  LOCAL_ID=0; [[ "$SRC" =~ ^sha256:[0-9a-f]{64}$ ]] && LOCAL_ID=1   # 本機映像 ID（docker import 等）：沒有 registry，不 pull
+  if ! have docker; then status A-source FAIL "沒有 docker（映像需要 docker pull／save）"
+  elif [ $LOCAL_ID = 1 ] && ! docker image inspect "$SRC" > /dev/null 2>&1; then status A-source FAIL "本機沒有映像 $SRC"
+  elif [ $LOCAL_ID = 0 ] && ! docker pull -q "$SRC" > "$WORK/pull.txt" 2>&1; then status A-source FAIL "拉取失敗：$(tail -1 "$WORK/pull.txt")"
+  else
+    dg=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$SRC" 2>/dev/null | grep -F "@sha256:" | head -1)
+    iid=$(docker image inspect --format '{{.Id}}' "$SRC" 2>/dev/null)
+    META[digest]=${dg##*@}; META[image_id]=$iid; META[version]=${dg##*@}
+    [ $LOCAL_ID = 1 ] && META[version]=$iid
+    envphp=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$SRC" 2>/dev/null | sed -n 's/^PHP_VERSION=//p')
+    IMG_TAR=$WORK/image.tar
+    if docker save -o "$IMG_TAR" "$SRC" 2> "$WORK/save.txt"; then
+      if [ $LOCAL_ID = 1 ]; then
+        if [ "$iid" = "$SRC" ]; then status A-source OK "本機映像 $SRC（沒有 registry digest，以映像 ID 固定；來源見呼叫端的紀錄）"
+        else status A-source ATTENTION "指定 $SRC，inspect 得到的映像 ID 為 ${iid:-無}：不一致"; fi
+      elif [[ "$SRC" == *@sha256:* ]]; then
+        if [ "${SRC##*@}" = "${META[digest]}" ]; then status A-source OK "$dg（映像 ID ${iid:0:19}）"
+        else status A-source ATTENTION "指定 ${SRC##*@}，拉取後 RepoDigests 為 ${dg:-無}：不一致"; fi
+      else status A-source ATTENTION "未以 @sha256 固定；以拉取當下的 digest 記錄：${dg:-無}（tag 會被重建，結果會跟著變）"; fi
+      SRC_OK=1
+    else status A-source FAIL "docker save 失敗：$(tail -1 "$WORK/save.txt")"; fi
+  fi;;
+sbom)
+  # 只複製、驗證是 CycloneDX JSON（bomFormat）；內容不執行、不改寫
+  mkdir -p "$S"
+  if ! cp "$SRC" "$S/sbom.json" 2> "$WORK/copy.txt"; then status A-source FAIL "複製失敗：$(tail -1 "$WORK/copy.txt")"
+  elif ! r=$(python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[1],encoding="utf-8"))
+if not isinstance(d,dict) or d.get("bomFormat")!="CycloneDX": raise SystemExit("不是 CycloneDX JSON（bomFormat 不是 CycloneDX）")
+print(d.get("specVersion") or "?")' "$S/sbom.json" 2>&1); then status A-source FAIL "SBOM 無法使用：$(echo "$r" | tail -1)"
+  else
+    cs=$(sha256sum "$S/sbom.json" | cut -d' ' -f1); META[content_sha256]=$cs; META[version]=sbom-sha256-${cs:0:16}
+    status A-source OK "提供的 SBOM（CycloneDX $r）；sha256=${cs:0:16}…（不執行產生器）"; SRC_OK=1
+  fi;;
+esac
+[ -n "${META[version]:-}" ] || META[version]=unknown
+# --version：DT 專案版本與 meta 的 version 用指定的字串；原本由內容決定的值（commit、內容雜湊、映像 ID）另記，結果仍可追溯
+if [ $PVER_SET = 1 ]; then META[content_version]=${META[version]}; META[version]=$PVER; META[version_from]=--version; fi
+# E-files-scan 用的原始碼封存：在 cdxgen 之前做（cdxgen 可能把依賴裝進 node_modules 等目錄，那些不是專案本身的檔案）。只封存，不執行。
+SRC_TAR=
+if [ $SRC_OK = 1 ] && [[ $MODE =~ ^(git|dir)$ ]] && [ $NOUP = 0 ] && [ $FILESCAN = 1 ]; then
+  SRC_TAR=$WORK/source.tar.gz; tar -C "$S" -czf "$SRC_TAR" . 2> "$WORK/srctar.txt" || SRC_TAR=
+fi
+
+# ---------- B. 沙箱與 SBOM ----------
+SBOM=$OUT/sbom/sbom.cdx.json; SBX_OK=0; SBOM_OK=0
+if [ $SRC_OK = 1 ] && have bwrap; then
+  case $MODE in image) SBX_TOOL=syft;; sbom) SBX_TOOL=grype;; *) SBX_TOOL=cdxgen;; esac
+  ( SBX_TOOL=$SBX_TOOL; sandbox_probe "$OUT/sbom/sandbox-probe.txt" ) && SBX_OK=1   # 子 shell：探測失敗時它會 exit，這裡改成繼續產生報告
+  if [ $SBX_OK = 1 ]; then   # 秘密遮蔽是否生效（只記能不能讀到，不輸出內容）
+    # 家目錄的測試用假檔與常見憑證位置、runner 的 .credentials、PILOT_ENV、金鑰標頭檔：只記能不能讀到，不輸出內容
+    if sandbox_secret_probe "$OUT/sbom/sandbox-secrets.txt" "$PILOT_ENV" "$PENV_DIR" "$DT_HDR" "$DJ_HDR"; then
+      status B-sandbox-secrets OK "沙箱內讀不到：$(grep -c '^讀不到' "$OUT/sbom/sandbox-secrets.txt") 個受測路徑（家目錄與 RUNNER_TEMP 的假檔、憑證位置、npm 全域設定、runner 目錄、PILOT_ENV 與其資料夾、金鑰標頭；見 sbom/sandbox-secrets.txt）$PENV_NOTE"
+    else status B-sandbox-secrets FAIL "沙箱內讀得到：$(grep '讀得到（不應該）' "$OUT/sbom/sandbox-secrets.txt" | sed 's/^讀得到（不應該）：//' | tr '\n' ' ')"; SBX_OK=0; fi
+  fi
+fi
+if [ $SRC_OK != 1 ]; then status B-sbom NOT_RUN "沒有來源"
+elif [ $SBX_OK != 1 ]; then status B-sbom NOT_RUN "沙箱不可用（見 B-sandbox）：不在沒有隔離的環境執行不可信程式"
+elif [ "$MODE" = sbom ]; then
+  cp "$S/sbom.json" "$SBOM"; sbom_status B-sbom-provided 0 "$SBOM"; [ "$(jlen "$SBOM" components)" != x ] && SBOM_OK=1
+elif [ "$MODE" = image ]; then
+  o=$WORK/o/syft; mkdir -p "$o" "$WORK/o/syft-tmp"
+  # Syft 1.55.0 scan 說明：docker-archive:path/to/yourimage.tar（cmd/syft/internal/commands/scan.go）；映像先由 docker save 存成檔，沙箱內無網路。
+  # 解開映像層用 TMPDIR（指到暫存區，不用沙箱的 /tmp tmpfs，避免大映像佔用記憶體）
+  runlog syft "$OUT/sbom/syft.stdout.txt" "$OUT/sbom/syft.stderr.txt" sbx "$o" "$WORK/o/syft-tmp" -- SYFT_CHECK_FOR_APP_UPDATE=false "TMPDIR=$WORK/o/syft-tmp" \
+    syft "docker-archive:$IMG_TAR" -o "cyclonedx-json=$o/bom.cdx.json" -o "syft-json=$o/syft.json"; x=$?
+  cp "$o/bom.cdx.json" "$SBOM" 2>/dev/null; sbom_status B-sbom-syft $x "$SBOM"; [ "$(jlen "$SBOM" components)" != x ] && [ $x = 0 ] && SBOM_OK=1
+  # PHP 執行檔辨識（同 images.sh）：映像的 PHP_VERSION 環境變數 vs Syft 辨識的 php-cli／php-fpm／php-cgi 版本
+  if [ $SBOM_OK = 1 ]; then
+    sv=$(python3 -I -c 'import json,sys
+a=json.load(open(sys.argv[1])).get("artifacts",[])
+print(",".join(sorted({x.get("version","") for x in a if x.get("name") in ("php-cli","php-fpm","php","php-cgi") and x.get("version")})))' "$o/syft.json" 2>/dev/null)
+    META[php_env]=${envphp:-}; META[php_syft]=${sv:-}
+    if [ -n "$envphp" ] || [ -n "$sv" ]; then
+      if [ -z "$envphp" ]; then status B-php-runtime ATTENTION "Syft 辨識 PHP 執行檔 $sv；映像沒有 PHP_VERSION 環境變數，無法交叉核對"
+      elif [ -z "$sv" ]; then status B-php-runtime GAP "映像 PHP_VERSION $envphp，但 Syft 沒有辨識出 PHP 執行檔版本：PHP 核心弱點（例如 PHP2Shell）無法比對"
+      elif [ "$envphp" = "$sv" ]; then status B-php-runtime OK "Syft 辨識 $sv＝映像 PHP_VERSION $envphp"
+      else status B-php-runtime ATTENTION "Syft 辨識 $sv，映像 PHP_VERSION $envphp：不一致"; fi
+    fi
+  fi
+else
+  # Maven／Gradle 專案要 java（與 mvn）才能解析依賴；沒有時 cdxgen 只會退回讀 pom.xml（2026-10-23 實機：petclinic 163 → 19 個元件）
+  if [ -n "$(find "$S" -maxdepth 3 \( -name pom.xml -o -name build.gradle -o -name build.gradle.kts \) -not -path '*/node_modules/*' 2>/dev/null | head -1)" ]; then
+    # pom.xml 可能在子資料夾（例如 spring-guides 的 complete/、initial/），只看根目錄會漏報缺 mvn
+    miss=; have java || miss="$miss java"
+    [ -n "$(find "$S" -maxdepth 3 -name pom.xml -not -path '*/node_modules/*' 2>/dev/null | head -1)" ] && ! have mvn && miss="$miss mvn"
+    [ -n "$miss" ] && status B-toolchain GAP "Maven／Gradle 專案但缺$miss：cdxgen 只能讀 pom.xml／build.gradle，依賴不完整"
+  fi
+  o=$WORK/o/cdxgen; C=$WORK/cdxgen-src; mkdir -p "$o"; rm -rf "$C"; cp -a "$S" "$C"   # cdxgen 可能改寫專案（套件管理器），給它獨立副本
+  net=(); goenv=(GOPROXY=off); [ $NETRES = 1 ] && { net=(--net); goenv=(); }
+  runlog cdxgen "$OUT/sbom/cdxgen.stdout.txt" "$OUT/sbom/cdxgen.stderr.txt" sbx "${net[@]}" "$C" "$o" -- "${goenv[@]}" GOFLAGS= GOTOOLCHAIN=local GOCACHE=/tmp/gocache GOPATH=/tmp/gopath \
+    "JAVA_HOME=${JAVA_HOME:-}" JAVA_TOOL_OPTIONS=-Duser.home=/tmp/home GRADLE_USER_HOME=/tmp/gradle \
+    cdxgen -r "$C" -o "$o/bom.json" --no-banner; x=$?
+  cp "$o/bom.json" "$SBOM" 2>/dev/null; sbom_status B-sbom-cdxgen $x "$SBOM"; [ "$(jlen "$SBOM" components)" != x ] && [ $x = 0 ] && SBOM_OK=1
+  [ $NETRES = 1 ] && status B-network-resolve ATTENTION "cdxgen 在有網路的沙箱內執行（連網解析）：結果依解析當下的套件註冊中心而定"
+  # 規則 14：沒有鎖定檔的 npm 專案，cdxgen 會執行 npm install（已在沙箱內）；沒有網路時依賴解析不出來
+  if [ -f "$S/package.json" ] && ! [ -f "$S/package-lock.json" ] && ! [ -f "$S/npm-shrinkwrap.json" ] && ! [ -f "$S/yarn.lock" ] && ! [ -f "$S/pnpm-lock.yaml" ]; then
+    if [ $NETRES = 1 ]; then status B-npm-no-lockfile ATTENTION "沒有鎖定檔：cdxgen 在沙箱內連網執行 npm install（規則 14），版本是解析當下的結果"
+    else status B-npm-no-lockfile GAP "沒有鎖定檔：cdxgen 在無網路沙箱內執行 npm install（規則 14），依賴無法解析；要完整結果需提供鎖定檔或 --allow-network-resolve"; fi
+  fi
+  rm -rf "$C"
+fi
+[ -s "$SBOM" ] || rm -f "$SBOM"
+# 之後的 Grype（沙箱內）與上傳都用暫存區的副本：輸出資料夾可能在 /tmp 底下（沙箱內看不到），路徑也可能含 curl -F 會解讀的 ; 或 ,
+BOMW=$WORK/bom.cdx.json; [ -s "$SBOM" ] && cp "$SBOM" "$BOMW"
+# --py-versions（tools/cra/py_dpkg_version.py scan 的 python-versions.json）：Debian 打包的 Python 模組的 egg-info 版本是佔位值（0.0.0）時，
+# $BOMW 換成把「dpkg 擁有者的上游版本」寫進去的副本（只改 RESOLVED 的元件；版本、purl、cpe，並加 sca:version-source／sca:original-version 屬性），
+# Grype、sbomgate、上傳 DT 都用它；原始 SBOM（$SBOM＝sbom/sbom.cdx.json）不動，另存一份 sbom/sbom.pyver.cdx.json 當作實際比對的那一份。
+# 失敗 → 照原本的 SBOM 比對，記 GAP（C-pyver），不靜默。
+rm -f "$OUT/sbom/sbom.pyver.cdx.json"
+if [ -n "$PYVERS" ] && [ $SBOM_OK = 1 ] && [ -s "$BOMW" ]; then
+  r=$(python3 -I "$ROOT/tools/cra/py_dpkg_version.py" apply --sbom "$BOMW" --resolved "$PYVERS" --out "$WORK/bom.pyver.cdx.json" 2>&1); x=$?
+  l=$(printf '%s\n' "$r" | grep -m1 $'^PYVER-APPLY\t')
+  if [ $x = 0 ] && [ -n "$l" ] && [ -s "$WORK/bom.pyver.cdx.json" ]; then IFS=$'\t' read -r _ s2 s3 <<< "$l"
+    if mv "$WORK/bom.pyver.cdx.json" "$BOMW" && cp "$BOMW" "$OUT/sbom/sbom.pyver.cdx.json"; then status C-pyver "$s2" "$s3（Grype 與 DT 用 sbom/sbom.pyver.cdx.json；原始 SBOM 為 sbom/sbom.cdx.json）"
+    else status C-pyver GAP "無法換用改過版本的 SBOM；照原本的 SBOM 比對（佔位值版本的 Python 模組未解析）"; fi
+  else status C-pyver GAP "py_dpkg_version.py apply 失敗：$(echo "$r" | tail -1)；照原本的 SBOM 比對（佔位值版本的 Python 模組未解析）"; fi
+elif [ -n "$PYVERS" ]; then status C-pyver NOT_RUN "沒有 SBOM"; fi
+# Jetson Linux（L4T）的核心（tools/pilot/lib/l4t_kernel.py）：映像與 --sbom。nvidia-l4t-kernel 的 L4T 版本在 l4t-kernel-map.json 有對應時，
+# $BOMW 換成加上對應的 Canonical 核心原始碼套件（例如 linux-nvidia-tegra，只供比對）的副本，Grype、sbomgate、上傳 DT 都用它；
+# 原始 SBOM（$SBOM）不動，ScanCode.io／DejaCode 不收這個元件（scio_prep.py）。沒有 L4T 核心（NOT_RUN）時不寫這一列；
+# 版本沒有對應 → GAP（核心仍沒有比對，C-kernel-coverage 也會是 GAP）。
+rm -f "$OUT/scan/l4t-kernel-map.json"   # 同一個 --out 重跑：不留上一次的摘要給 kernelcheck、cra_report（l4t_kernel.py 失敗或沒有執行時）
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ -s "$BOMW" ]; then
+  r=$(python3 -I "$ROOT/tools/pilot/lib/l4t_kernel.py" --sbom "$BOMW" --map "$ROOT/tools/pilot/lib/l4t-kernel-map.json" \
+    --out-sbom "$WORK/bom.kmap.cdx.json" --summary "$OUT/scan/l4t-kernel-map.json" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-l4t-map\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in
+      NOT_RUN) rm -f "$OUT/scan/l4t-kernel-map.json";;
+      OK) if mv "$WORK/bom.kmap.cdx.json" "$BOMW"; then status "$s1" OK "$s3（scan/l4t-kernel-map.json）"
+          else status C-kernel-l4t-map FAIL "無法換用加上核心元件的 SBOM；照原本的 SBOM 比對，核心沒有比對"; rm -f "$OUT/scan/l4t-kernel-map.json"; fi;;
+      *) status "$s1" "$s2" "$s3";;
+    esac
+  else status C-kernel-l4t-map FAIL "l4t_kernel.py 失敗：$(echo "$r" | tail -1)；照原本的 SBOM 比對"; rm -f "$OUT/scan/l4t-kernel-map.json"; fi
+fi
+
+# ---------- C. Grype（DB 線上更新後，比對在無網路沙箱內）、sbomgate、govulncheck ----------
+GR=$OUT/scan/grype.json; DBST=FAIL
+# 每次掃描前明確更新 Grype DB（GRYPE_DB_UPDATE=online 預設｜import:<鏡像檔案或 URL>｜off），在沙箱外；比對本身仍是 GRYPE_DB_AUTO_UPDATE=false
+if have grype; then
+  ur=$(grype_db_refresh grype "$OUT/scan"); UST=${ur%%$'\t'*}; status C-grype-db-update "$UST" "${ur#*$'\t'}"
+  r=$(grype_db_eval grype "$OUT/scan" "${GRYPE_DB_MAX_AGE_DAYS:-1}" "$UST"); DBST=${r%%$'\t'*}; status C-grype-db "$DBST" "${r#*$'\t'}"
+  META[grype_db_built]=$(sed -n 's/^Built:[[:space:]]*//p' "$OUT/scan/grype-db-status.txt"); META[grype_db_schema]=$(sed -n 's/^Schema:[[:space:]]*//p' "$OUT/scan/grype-db-status.txt")
+  META[grype_db_update]=${GRYPE_DB_UPDATE:-online}; META[grype_db_update_status]=$UST
+else status C-grype-db FAIL "找不到 grype"; fi
+# 其他每日鏡像（DT 的 NVD、EUVD 等）的新鮮度：讀 sca-nvd-refresh 的狀態檔；MIRROR_REFRESH_STATUS 設成空字串＝不檢查（NOT_RUN，不是 OK）
+mf=$(python3 -I "$ROOT/tools/pilot/lib/mirror_freshness.py" "${MIRROR_REFRESH_STATUS-/var/lib/sca-gitlab/refresh-status.tsv}" 2>/dev/null) || mf=
+[ -n "$mf" ] || mf=$'GAP\t鏡像新鮮度檢查沒有輸出'
+status C-mirror-freshness "${mf%%$'\t'*}" "${mf#*$'\t'}"
+dbvalid=$(sed -n 's/^Status:[[:space:]]*//p' "$OUT/scan/grype-db-status.txt" 2>/dev/null)
+if [ $SBOM_OK != 1 ]; then status C-grype NOT_RUN "沒有 SBOM"
+elif [ "$dbvalid" != valid ]; then status C-grype NOT_RUN "Grype 資料庫不可用（見 C-grype-db）"
+else
+  runlog grype "$GR" "$OUT/scan/grype.stderr.txt" sbx -- GRYPE_DB_AUTO_UPDATE=false GRYPE_CHECK_FOR_APP_UPDATE=false "GRYPE_DB_CACHE_DIR=$GRYPE_DB_CACHE_DIR" \
+    grype "sbom:$BOMW" -o json; x=$?; n=$(jlen "$GR" matches)
+  if [ $x != 0 ]; then status C-grype FAIL "exit=$x $(tail -1 "$OUT/scan/grype.stderr.txt")"; rm -f "$GR"
+  elif [ "$n" = x ]; then status C-grype FAIL "輸出無法解析"; rm -f "$GR"
+  else status C-grype OK "$n matches（比對完成；不代表不存在其他弱點）"; fi
+fi
+# 作業系統核心的比對涵蓋（tools/pilot/lib/kernelcheck.py）：映像與 --sbom。SBOM 有核心（linux-kernel／linux-kernel-module 元件、
+# Linux 核心 CPE 或核心套件）但 Grype 對核心 0 筆 → GAP（核心的 CVE 未評估）。沒有核心、沒有 SBOM（B 段已記）或原始碼模式
+# 不寫這一列：一般容器映像本來就沒有核心，多一列 NOT_RUN 會讓整體退出碼從 0 變 2（同 C-govulncheck 只在 Go 專案出現）。
+if [[ "$MODE" =~ ^(image|sbom)$ ]]; then
+  if [ $SBOM_OK = 1 ]; then
+    ka=(); [ -s "$GR" ] && ka=(--grype "$GR")
+    [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")   # 說明寫出比對對象是對應的 Canonical 核心
+    r=$(python3 -I "$ROOT/tools/pilot/lib/kernelcheck.py" --sbom "$SBOM" "${ka[@]+"${ka[@]}"}" --out "$OUT/scan/kernel-coverage.json" 2>&1)
+    l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-coverage\t')
+    if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"; [ "$s2" = NOT_RUN ] || status "$s1" "$s2" "$s3"
+    else status C-kernel-coverage FAIL "kernelcheck.py 失敗：$(echo "$r" | tail -1)"; fi
+  fi
+fi
+# NVIDIA 安全公告（tools/pilot/lib/nvidia_bulletins.py，說明見 lib/nvidia-bulletins.md）：映像與 --sbom。SBOM 有 nvidia-l4t-* 套件
+# （Jetson Linux）時，以人工對照表 lib/nvidia-bulletins.json 比較版本，只有已審核的列產生發現（source NVIDIA）。公告鏡像取自 PILOT_ENV 的
+# NVIDIA_BULLETINS_MIRROR，沒有或過期 → GAP（無法確認對照表涵蓋最新公告）。不是 Jetson Linux（NOT_RUN）不寫這一列，同 C-kernel-coverage。
+NVB=$OUT/scan/nvidia-bulletins.json
+rm -f "$NVB"   # 同一個 --out 重跑：不留上一次的結果給 cra_report、report.py（這次沒有執行或失敗時）
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ]; then
+  na=(); [ -n "$NVIDIA_BULLETINS_MIRROR" ] && na=(--mirror "$NVIDIA_BULLETINS_MIRROR")
+  r=$(python3 -I "$ROOT/tools/pilot/lib/nvidia_bulletins.py" match --sbom "$SBOM" --table "$ROOT/tools/pilot/lib/nvidia-bulletins.json" \
+    "${na[@]+"${na[@]}"}" --out "$NVB" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^C-nvidia-bulletins\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) rm -f "$NVB";; FAIL) rm -f "$NVB"; status "$s1" "$s2" "$s3";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$NVB"; status C-nvidia-bulletins FAIL "nvidia_bulletins.py 失敗：$(echo "$r" | tail -1)"; fi
+fi
+# 規則 11：依生態系判斷鎖定檔（tools/pilot/lib/lockcheck.py）。每個偵測到的清單檔都要有對應的鎖定檔才宣告 full；
+# 任一生態系缺鎖定檔 → unknown（sbomgate 最多 PARTIAL）。映像是「已安裝」的內容，沒有依賴解析問題，宣告 full。
+tree=unknown; man=(); selfp=(); tnote=
+if [ "$MODE" = image ]; then tree=full; tnote="（映像：已安裝套件即實際內容，--tree full；Syft 沒有辨識的檔案不在範圍內）"
+elif [ "$MODE" = sbom ]; then tnote="（提供的 SBOM：依賴樹是否完整由提供者決定，--tree unknown）"
+elif [ $SRC_OK = 1 ]; then
+  if r=$(python3 -I "$ROOT/tools/pilot/lib/lockcheck.py" "$S" "$OUT/scan/lockfiles.json" 2>&1); then
+    tree=${r%%$'\t'*}
+    mapfile -t mfs < <(python3 -I -c 'import json,sys;[print(m) for m in json.load(open(sys.argv[1]))["manifests_for_sbomgate"]]' "$OUT/scan/lockfiles.json")
+    for m in "${mfs[@]+"${mfs[@]}"}"; do man+=(--manifest "$S/$m"); done
+    nc=$(python3 -I -c 'import json,sys;print("、".join(json.load(open(sys.argv[1]))["manifests_not_checked"]))' "$OUT/scan/lockfiles.json")
+    eco=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["summary"])' "$OUT/scan/lockfiles.json")
+    detail="${r#*$'\t'}；${eco:-沒有清單檔}${nc:+；sbomgate 不支援、未比對內容的清單檔：$nc}"
+    [ "$tree" = full ] && status C-lockfiles OK "$detail" || status C-lockfiles GAP "$detail（規則 11：依賴樹完整性未知）"
+    tnote="（--tree $tree：${r#*$'\t'}）"
+  else status C-lockfiles FAIL "lockcheck.py 失敗：$(echo "$r" | tail -1)"; fi
+  mod=$(python3 -I -c 'import re,sys
+for l in open(sys.argv[1],encoding="utf-8",errors="replace"):
+    m=re.match(r"\s*module\s+(\S+)",l)
+    if m: print(m.group(1).strip("\"")); break' "$S/go.mod" 2>/dev/null)
+  [ -n "$mod" ] && selfp=(--self "pkg:golang/$mod")
+  # 根目錄 composer.json／package.json 的 name：專案檔宣告的名稱（不可信），以 --self-hint 傳給 sbomgate——只排除對不上元件的
+  # 無版本比對，不豁免元件，和元件同名時不採用（GitLab 實測：filamentphp/demo 的 composer.json name 是 laravel/laravel，
+  # SBOM 主元件卻取自 package.json，Grype 對沒有版本的 laravel/laravel 套上同名套件的公告）。npm scoped 名稱要編碼（@ → %40）
+  while IFS= read -r sp; do [ -n "$sp" ] && selfp+=(--self-hint "$sp"); done < <(python3 -I -c 'import json,sys,urllib.parse
+for f, t in (("composer.json", "composer"), ("package.json", "npm")):
+    try:
+        n = json.load(open(sys.argv[1] + "/" + f, encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        continue
+    if isinstance(n, str) and n.strip() and not any(c in n for c in "\n\r\t ?#"):
+        print(f"pkg:{t}/" + urllib.parse.quote(n.strip(), safe="/"))' "$S" 2>/dev/null)
+fi
+META[dependency_tree]=$tree
+# sbomgate（規則 11–14）：讀 $BOMW（Grype 比對的同一份；有 C-kernel-l4t-map 的元件時，對它的比對才不會被算成找不到元件）
+if [ -s "$SBOM" ] && [ -s "$GR" ]; then
+  python3 -I "$ROOT/tools/sbomgate/sbomgate.py" --sbom "$BOMW" --grype "$GR" "${man[@]}" "${selfp[@]}" --tree "$tree" --max-db-age-days "${GRYPE_DB_MAX_AGE_DAYS:-1}" \
+    --out "$OUT/scan/sbomgate.json" > "$OUT/scan/sbomgate.txt" 2>&1; x=$?
+  d=$(python3 -I -c 'import sys;print(open(sys.argv[1],encoding="utf-8",errors="replace").read().replace("\n"," ")[:300])' "$OUT/scan/sbomgate.txt")
+  case $x in 0) status C-sbomgate OK "COMPLETE（只表示在這份 SBOM 與資料庫範圍內比對完成，不代表安全）$tnote";; 1) status C-sbomgate GAP "PARTIAL$tnote：$d";;
+    2) status C-sbomgate NOT_ASSESSED "$d";; *) status C-sbomgate FAIL "exit=$x $d"; rm -f "$OUT/scan/sbomgate.json";; esac
+elif [ -s "$SBOM" ]; then
+  python3 -I "$ROOT/tools/sbomgate/sbomgate.py" --sbom "$BOMW" "${man[@]}" "${selfp[@]}" --tree "$tree" --out "$OUT/scan/sbomgate.json" > "$OUT/scan/sbomgate.txt" 2>&1; x=$?
+  [ $x -le 2 ] && status C-sbomgate NOT_ASSESSED "沒有 Grype 結果，無法判斷比對完整性" || { status C-sbomgate FAIL "exit=$x"; rm -f "$OUT/scan/sbomgate.json"; }
+else status C-sbomgate NOT_RUN "沒有 SBOM"; fi
+# govulncheck：Go 專案（根目錄有 go.mod）。要連 vuln.go.dev，所以沙箱有網路，但根目錄唯讀、環境變數清空、秘密遮蔽
+if [ "$MODE" != image ] && [ $SRC_OK = 1 ] && [ -f "$S/go.mod" ]; then
+  if ! have govulncheck; then status C-govulncheck FAIL "Go 專案但找不到 govulncheck"
+  elif [ $SBX_OK != 1 ]; then status C-govulncheck NOT_RUN "沙箱不可用"
+  elif [ ! -f "$S/vendor/modules.txt" ] && [ $NETRES != 1 ]; then status C-govulncheck GAP "沒有 vendor/：govulncheck 需要下載模組，未允許連網解析（--allow-network-resolve）"
+  else
+    gv=$(tool_ver govulncheck); META[tool_govulncheck]=${gv:-未知}; want=$(echo "$pins" | tr ' ' '\n' | sed -n 's/^govulncheck=//p')
+    [ -n "$want" ] && [ "$gv" != "$want" ] && status A-tools-govulncheck ATTENTION "govulncheck ${gv:-未知}≠install-tools.sh 的 $want"
+    if [ -f "$S/vendor/modules.txt" ]; then genv=(GOFLAGS=-mod=vendor GOPROXY=off); else genv=(GOFLAGS=-mod=mod); fi
+    runlog govulncheck "$OUT/scan/govulncheck.json" "$OUT/scan/govulncheck.stderr.txt" sbx --net --chdir "$S" -- \
+      "${genv[@]}" GOTOOLCHAIN=local GOCACHE=/tmp/gocache GOPATH=/tmp/gopath govulncheck -format json ./...; gx=$?
+    gn=$(govuln_count "$OUT/scan/govulncheck.json")
+    if [ $gx != 0 ]; then status C-govulncheck FAIL "exit=$gx $(tail -1 "$OUT/scan/govulncheck.stderr.txt")"
+    elif [ "$gn" = x ]; then status C-govulncheck FAIL "輸出無法解析或沒有 config"
+    else status C-govulncheck OK "$gn 個 OSV ID（線上 vuln.go.dev$( [ -f "$S/vendor/modules.txt" ] || echo '；模組連網下載' )）"; fi
+  fi
+fi
+
+# ---------- C3. 上傳用 SBOM（規則 13）：版本未知的元件移除版本後才上傳 DT 與 ScanCode.io；原始 SBOM 原樣保留 ----------
+UPLOAD=$WORK/bom.upload.cdx.json
+if [ $SBOM_OK = 1 ] && [ -s "$OUT/scan/sbomgate.json" ]; then
+  if r=$(python3 -I "$ROOT/tools/pilot/lib/strip_versions.py" "$BOMW" "$OUT/scan/sbomgate.json" "$UPLOAD" 2>&1); then
+    n=$(echo "$r" | grep -oE '[0-9]+' | head -1); META[upload_versions_removed]=${n:-0}
+    if [ "${n:-0}" -gt 0 ]; then cp "$UPLOAD" "$OUT/sbom/sbom.upload.cdx.json"
+      status C-upload-sbom OK "$r（規則 13：避免 DT 用範圍下限版本比對出誤報；上傳的是 sbom/sbom.upload.cdx.json，原始 SBOM 為 sbom/sbom.cdx.json）"
+    else status C-upload-sbom OK "沒有版本未知的元件，上傳原始 SBOM"; fi
+  else status C-upload-sbom FAIL "strip_versions.py 失敗：$(echo "$r" | tail -1)；不上傳"; UPLOAD=; fi
+elif [ $SBOM_OK = 1 ]; then cp "$BOMW" "$UPLOAD"; status C-upload-sbom GAP "沒有 sbomgate 結果，無法判斷版本未知的元件：原樣上傳（DT 結果可能含範圍下限版本的誤報）"
+else UPLOAD=; fi
+
+# ---------- D. Dependency-Track 5.2.0 ----------
+# 出處（DT 5.2.0 原始碼，tag 5.2.0）：
+#   GET /api/v1/project/lookup?name=&version=（ProjectResource，VIEW_PORTFOLIO）；PUT /api/v1/project（PORTFOLIO_MANAGEMENT／_CREATE，已存在回 409）
+#   POST /api/v1/bom multipart project、bom（BomResource.uploadBom，BOM_UPLOAD，回 {"token"}）
+#   GET /api/v2/internal/workflow-runs?label=bom_upload_token=<token>（api/src/main/openapi/resources/internal/workflows/workflow-runs.yaml，
+#     需 SYSTEM_CONFIGURATION 或 SYSTEM_CONFIGURATION_READ；import-bom、analyze-project、vuln-analysis 各一筆，0006 已觀察）
+#   GET /api/v1/bom/token/{token}（BomResource.isTokenBeingProcessed，BOM_UPLOAD）只回「最後建立的那個 workflow」的狀態，無法分辨匯入與分析，
+#     所以退回模式另以專案的 lastBomImport、lastVulnerabilityAnalysis（ReconcileVulnAnalysisResultsActivity 結束時 updateLastVulnAnalysis）確認。
+#   GET /api/v1/finding/project/{uuid}（FindingResource，VIEW_VULNERABILITY；欄位含 epssScore、epssPercentile、isKev、aliases）→ dtread.py
+#   前端專案頁：<DT_FRONTEND_URL>/projects/<uuid>（frontend 5.2.0 src/router/index.js，history 模式）
+dt_http(){ local m=$1 p=$2 out=$3 c; shift 3; c=$(curl -sS -m 120 -X "$m" -H @"$DT_HDR" -o "$out" -w '%{http_code}' "$@" "$DT_URL$p" 2>>"$WORK/curl-dt.err"); echo "${c:-000}"; }
+jget(){ python3 -I -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    for k in sys.argv[2].split("."): d=d[int(k)] if isinstance(d,list) else d[k]
+    print("" if d is None else d)
+except Exception: print("")' "$1" "$2"; }
+DT_UUID=; DT_SKIP=
+[ $NOUP = 1 ] && DT_SKIP="--no-upload"
+[ -z "$DT_SKIP" ] && [ $HAVE_ENV != 1 ] && DT_SKIP="沒有 $PILOT_ENV"
+[ -z "$DT_SKIP" ] && { [ -n "$DT_URL" ] && [ -n "$DT_API_KEY" ] || DT_SKIP="pilot.env 缺 DT_URL 或 DT_API_KEY"; }
+[ -z "$DT_SKIP" ] && [ -z "$UPLOAD" ] && DT_SKIP="沒有可上傳的 SBOM"
+if [ -n "$DT_SKIP" ]; then for s in C-dt-feeds D-dt-data-sources D-dt-kev-sources D-dt-osv-coverage D-dt-project D-dt-upload D-dt-bom-processing D-dt-vuln-analysis D-dt-findings; do status "$s" NOT_RUN "$DT_SKIP"; done
+else
+  O=$OUT/dt
+  curl -sS -m 30 -o "$O/version.json" "$DT_URL/api/version" 2>>"$WORK/curl-dt.err"; META[dt_version]=$(jget "$O/version.json" version)
+  # 資料源狀態（tools/pilot/lib/dtsources.py 的出處）：在上傳前讀，NVD 或 OSV 最近一次 mirror 不是 COMPLETED → D-dt-data-sources GAP，
+  # compare_expected 與報告把 DT 的弱點結果當作不完整。KEV（CISA、ENISA）另記 D-dt-kev-sources。
+  # C-dt-feeds：同一批回應判斷 DT 資料源（NVD、OSV、CISA、ENISA；GitHub 關閉不看）最近一次是否 COMPLETED 且在 DT_FEEDS_MAX_AGE_HOURS（預設 26）小時內；沒有 SYSTEM_CONFIGURATION_READ → NOT_RUN。
+  srcargs=()
+  for ks in vuln:nvd vuln:osv kev:cisa kev:enisa; do k=${ks%%:*}; n=${ks#*:}
+    c=$(dt_http GET "/api/v2/$k-data-sources/$n/mirror-runs/latest" "$WORK/mirror-$k-$n.json"); srcargs+=("$k:$n:$c:$WORK/mirror-$k-$n.json"); done
+  # OSV 啟用的生態系 vs SBOM 的 purl 類型（D-dt-osv-coverage）：沒有啟用的生態系在 DT 只能經 NVD（CPE）比對
+  c=$(dt_http GET /api/v2/extension-points/vuln-data-source/extensions/osv/config "$WORK/osv-config.json")
+  # NVD 鏡像模式（pilot.env 的 PILOT_NVD_MIRROR=1）：鏡像 modified 過期或未知 → D-dt-data-sources GAP（dtsources.py）
+  [ -n "$PILOT_NVD_MIRROR" ] && srcargs=(--nvd-mirror "$PILOT_NVD_MIRROR|$NVD_MIRROR_MODIFIED" "${srcargs[@]}")
+  # DT 的 ENISA KEV 讀哪一份檔（上游 eukev.json 2026-08-13 後沒有更新）：不是 EUVD 產生的檔、或那份檔過期 → D-dt-kev-sources GAP，
+  # DT 的 ENISA mirror COMPLETED 也一樣（dtsources.py 的說明；新舊以 EUVD_MIRROR 的 dt-feeds/kev/euvd/SOURCE.json 判斷）
+  c2=$(dt_http GET /api/v2/extension-points/kev-data-source/extensions/enisa/config "$WORK/enisa-config.json")
+  srcargs=(--enisa-config "$c2:$WORK/enisa-config.json" --euvd-kev "$EUVD_MIRROR" "${srcargs[@]}")
+  if r=$(python3 -I "$ROOT/tools/pilot/lib/dtsources.py" "$O/data-sources.json" --osv-config "$c:$WORK/osv-config.json" --sbom "$UPLOAD" "${srcargs[@]}" 2>&1); then
+    while IFS=$'\t' read -r s1 s2 s3; do [ -n "$s1" ] && status "$s1" "$s2" "$s3"; done <<< "$r"
+    META[dt_data_sources]=$(jget "$O/data-sources.json" vuln_status)
+  else status D-dt-data-sources FAIL "dtsources.py 失敗：$(echo "$r" | tail -1)"; status D-dt-kev-sources NOT_RUN "dtsources.py 失敗"; status C-dt-feeds NOT_RUN "dtsources.py 失敗"; status D-dt-osv-coverage NOT_RUN "dtsources.py 失敗"; fi
+  q=$(python3 -I -c 'import sys,urllib.parse as u;print(u.urlencode({"name":sys.argv[1],"version":sys.argv[2]}))' "$NAME" "${META[version]}")
+  c=$(dt_http GET "/api/v1/project/lookup?$q" "$O/project.json")
+  if [ "$c" = 404 ]; then
+    body=$(python3 -I -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"version":sys.argv[2],"active":True}))' "$NAME" "${META[version]}")
+    c=$(dt_http PUT /api/v1/project "$O/project.json" -H 'Content-Type: application/json' --data "$body")
+    [ "$c" = 409 ] && c=$(dt_http GET "/api/v1/project/lookup?$q" "$O/project.json")   # 同時有人建立
+    how=建立
+  else how=沿用; fi
+  DT_UUID=$(jget "$O/project.json" uuid)
+  if [[ "$c" =~ ^20[01]$ ]] && [ -n "$DT_UUID" ]; then status D-dt-project OK "$how $NAME@${META[version]}（$DT_UUID；DT ${META[dt_version]:-版本未知}）"
+    META[dt_project_uuid]=$DT_UUID; [ -n "$DT_FRONTEND_URL" ] && META[dt_project_url]=$DT_FRONTEND_URL/projects/$DT_UUID
+  else status D-dt-project FAIL "http=$c（DT_URL=$DT_URL）"; DT_UUID=; fi
+  if [ -z "$DT_UUID" ]; then for s in D-dt-upload D-dt-bom-processing D-dt-vuln-analysis D-dt-findings; do status "$s" NOT_RUN "沒有 DT 專案"; done
+  else
+    dt_http GET "/api/v1/project/$DT_UUID" "$O/project.before.json" > /dev/null
+    pb_imp=$(jget "$O/project.before.json" lastBomImport); pb_va=$(jget "$O/project.before.json" lastVulnerabilityAnalysis)
+    # Debian／Ubuntu：補上原始碼套件元件，只給 DT（lib/deb_sources.py 的說明：Ubuntu 漏洞資料以原始碼套件名稱記錄，
+    # 二進位名稱不同的套件 DT 比對不到）。沒有 deb 元件時不寫這一列；失敗時照原本的 SBOM 上傳並記 FAIL。
+    DT_UP=$UPLOAD
+    r=$(python3 -I "$ROOT/tools/pilot/lib/deb_sources.py" "$UPLOAD" "$WORK/bom.dt.cdx.json" "$O/deb-sources.json" 2>&1)
+    case ${r%%$'\t'*} in
+      OK) DT_UP=$WORK/bom.dt.cdx.json; status D-dt-deb-sources OK "${r#*$'\t'}（dt/deb-sources.json）";;
+      NOT_RUN) rm -f "$O/deb-sources.json";;
+      *) status D-dt-deb-sources FAIL "deb_sources.py：$(echo "$r" | tail -1)；改上傳沒有原始碼套件的 SBOM，二進位名稱不同的 deb 套件 DT 比對不到";;
+    esac
+    c=$(dt_http POST /api/v1/bom "$O/bom-upload.json" -F "project=$DT_UUID" -F "bom=@$DT_UP;type=application/json")
+    tok=$(jget "$O/bom-upload.json" token)
+    if [ "$c" != 200 ] || [ -z "$tok" ]; then status D-dt-upload FAIL "http=$c $(head -c 200 "$O/bom-upload.json" 2>/dev/null)"
+      status D-dt-bom-processing NOT_RUN "上傳失敗"; status D-dt-vuln-analysis NOT_RUN "上傳失敗"; status D-dt-findings NOT_RUN "上傳失敗"
+    else
+      status D-dt-upload OK "http=200 token=$tok"; META[dt_bom_token]=$tok
+      lim=${DT_WAIT_SECONDS:-900}; t0=$(date +%s); mode=; st=; imp=; va=; va_t=
+      while :; do
+        if [ "$mode" != fallback ]; then
+          c=$(dt_http GET "/api/v2/internal/workflow-runs?label=bom_upload_token%3D$tok&limit=100" "$O/workflow-runs.json")
+          if [ "$c" = 200 ]; then mode=workflow; st=$(dt_workflow_status "$O/workflow-runs.json" "$tok")
+            echo "$st" | grep -qE "import-bom=(FAILED|CANCELLED)" && break
+            echo "$st" | grep -qE "vuln-analysis=(FAILED|CANCELLED)" && break
+            # analyze-project（AnalyzeProjectWorkflow）＝vuln-analysis → 政策評估 → 專案 metrics；findings 在 vuln-analysis 完成後即可讀，
+            # 但多等 analyze-project 最多 DT_POLICY_WAIT_SECONDS（預設 120）秒，讓政策評估也完成
+            echo "$st" | grep -qE "analyze-project=(COMPLETED|FAILED|CANCELLED)" && echo "$st" | grep -q "vuln-analysis=COMPLETED" && break
+            if echo "$st" | grep -q "vuln-analysis=COMPLETED"; then
+              echo "$st" | grep -q "analyze-project=" || break
+              [ -z "$va_t" ] && va_t=$(date +%s)
+              [ $(( $(date +%s) - va_t )) -ge "${DT_POLICY_WAIT_SECONDS:-120}" ] && break
+            fi
+          elif [ "$c" = 401 ] || [ "$c" = 403 ]; then mode=fallback; echo "workflow-runs http=$c：改用 bom/token＋專案時間" > "$O/workflow-mode.txt"
+          fi
+        fi
+        if [ "$mode" = fallback ]; then
+          dt_http GET "/api/v1/bom/token/$tok" "$O/bom-token.json" > /dev/null; dt_http GET "/api/v1/project/$DT_UUID" "$O/project.after.json" > /dev/null
+          pr=$(jget "$O/bom-token.json" processing); ts=$(jget "$O/bom-token.json" status)
+          imp=$(jget "$O/project.after.json" lastBomImport); va=$(jget "$O/project.after.json" lastVulnerabilityAnalysis)
+          st="token processing=$pr status=$ts；lastBomImport ${pb_imp:-無}→${imp:-無}；lastVulnerabilityAnalysis ${pb_va:-無}→${va:-無}"
+          [ "$ts" = FAILED ] && break
+          [ "$pr" = False ] || [ "$pr" = false ] && [ -n "$va" ] && [ "$va" != "$pb_va" ] && [ -n "$imp" ] && [ "$imp" != "$pb_imp" ] && break
+        fi
+        [ $(( $(date +%s) - t0 )) -ge "$lim" ] && { st="$st（等待 ${lim} 秒逾時）"; break; }
+        sleep 3
+      done
+      echo "$(now) mode=$mode $st" > "$O/workflow-status.txt"
+      if [ "$mode" = workflow ]; then
+        echo "$st" | grep -q "import-bom=COMPLETED" && status D-dt-bom-processing OK "$st" || status D-dt-bom-processing FAIL "$st"
+        apn=; echo "$st" | grep -q "analyze-project=COMPLETED" || apn="（analyze-project 未完成：政策評估與專案 metrics 尚未完成；findings 是 vuln-analysis 完成後讀的）"
+        echo "$st" | grep -q "vuln-analysis=COMPLETED" && status D-dt-vuln-analysis OK "$st$apn" || status D-dt-vuln-analysis FAIL "$st"
+      elif [ "$mode" = fallback ]; then
+        note="（金鑰沒有 SYSTEM_CONFIGURATION_READ，改看專案時間）"
+        [ -n "$imp" ] && [ "$imp" != "$pb_imp" ] && status D-dt-bom-processing OK "$st$note" || status D-dt-bom-processing FAIL "$st$note"
+        [ -n "$va" ] && [ "$va" != "$pb_va" ] && [ "$ts" != FAILED ] && status D-dt-vuln-analysis OK "$st$note" || status D-dt-vuln-analysis FAIL "$st$note"
+      else status D-dt-bom-processing FAIL "讀不到處理狀態（workflow-runs http=$c）"; status D-dt-vuln-analysis FAIL "讀不到處理狀態"; fi
+      if r=$(DT=$DT_URL DT_API_KEY=$DT_API_KEY python3 -I "$ROOT/tools/e2e/dtread.py" findings "$DT_UUID" "$O/findings.json" 2>&1); then
+        k=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print(sum(1 for f in d if f["vulnerability"].get("isKev")),sum(1 for f in d if f["vulnerability"].get("epssScore") is not None))' "$O/findings.json" 2>/dev/null)
+        if [ "${META[dt_data_sources]}" = OK ]; then status D-dt-findings OK "$r（KEV ${k%% *}、有 EPSS ${k##* }；含 suppressed）"
+        else status D-dt-findings GAP "讀取完成：$r（KEV ${k%% *}、有 EPSS ${k##* }；含 suppressed）；但弱點資料源不完整或狀態未知（D-dt-data-sources=${META[dt_data_sources]:-未讀}），DT 的弱點結果不完整"; fi
+      else status D-dt-findings FAIL "$(echo "$r" | tail -1)"; fi
+    fi
+  fi
+fi
+# 發行版再判（tools/pilot/lib/distro_recheck.py）：Debian／Ubuntu 套件上只經 NVD（或 GitHub、非發行版的 OSV）比對到、Grype 沒有比對到的
+# DT 發現，以發行版自己的 OSV 紀錄（PILOT_ENV 的 OSV_DISTRO_MIRROR，tools/mirror/osv-distro.sh 的輸出）再判，寫 scan/distro-recheck.json
+# （cra_report.py 把「發行版已修補」的列移出 P1–P3）。原始的 dt/findings.json 不改。要在 D-dt-findings 之後（要 DT 的 findings），
+# C-grype 的結果已經寫好（Grype 比對到的不再判）。沒有要再判的列（NOT_RUN）不寫這一列；鏡像沒有、過期或不完整 → GAP（沒有判定）。
+DRC=$OUT/scan/distro-recheck.json
+rm -f "$DRC" "$DRC.xz"   # 同一個 --out 重跑：不留上一次的結果給 cra_report（這次沒有執行或失敗時；cra_report 也讀 .xz）
+dtf=$(awk -F'\t' '$1=="D-dt-findings"{s=$2} END{print s}' "$ST")
+if [[ "$dtf" =~ ^(OK|GAP)$ ]] && [ -s "$OUT/dt/findings.json" ]; then   # findings 讀取完成（GAP＝資料源不完整，但清單是完整讀回的）
+  da=(); [ -s "$GR" ] && da+=(--grype "$GR"); [ -s "${SBOM:-}" ] && da+=(--sbom "$SBOM")
+  [ -s "$OUT/dt/deb-sources.json" ] && da+=(--deb-sources "$OUT/dt/deb-sources.json")
+  [ -s "$OUT/scan/l4t-kernel-map.json" ] && da+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")
+  [ -n "$OSV_DISTRO_MIRROR" ] && da+=(--mirror "$OSV_DISTRO_MIRROR")
+  r=$(timeout 900 python3 -I "$ROOT/tools/pilot/lib/distro_recheck.py" --findings "$OUT/dt/findings.json" "${da[@]+"${da[@]}"}" --out "$DRC" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^D-distro-recheck\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) rm -f "$DRC";; FAIL) rm -f "$DRC"; status "$s1" "$s2" "$s3";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$DRC"; status D-distro-recheck FAIL "distro_recheck.py 失敗（或超過 900 秒）：$(echo "$r" | tail -1)"; fi
+fi
+# USN → CVE（tools/pilot/lib/usn_cves.py）：DT 的 OSV 資料裡沒有 CVE 別名的 USN，從同一個 Ubuntu OSV 鏡像查它列的 CVE
+# （upstream、aliases；不用 related），寫 scan/usn-cves.json（含鏡像的來源資料）。cra_report.py 用它把 USN 併進同一個元件版本上
+# 那個 CVE 的列。沒有這種 USN → 不寫這一列；沒有鏡像或過期 → NOT_RUN（檔案記原因，USN 照舊各自成列）。
+UC=$OUT/scan/usn-cves.json
+rm -f "$UC" "$UC.xz"   # 同一個 --out 重跑：不留上一次的對應
+if [[ "$dtf" =~ ^(OK|GAP)$ ]] && [ -s "$OUT/dt/findings.json" ]; then
+  ua=(); [ -n "$OSV_DISTRO_MIRROR" ] && ua+=(--mirror "$OSV_DISTRO_MIRROR")
+  r=$(timeout 600 python3 -I "$ROOT/tools/pilot/lib/usn_cves.py" --findings "$OUT/dt/findings.json" "${ua[@]+"${ua[@]}"}" --out "$UC" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^D-usn-cves\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) [ -s "$UC" ] && status "$s1" "$s2" "$s3";; FAIL) rm -f "$UC"; status "$s1" "$s2" "$s3";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$UC"; status D-usn-cves FAIL "usn_cves.py 失敗（或超過 600 秒）：$(echo "$r" | tail -1)"; fi
+fi
+# Ubuntu priority（tools/pilot/lib/ubuntu_priority.py）：Ubuntu 套件（含 Canonical 核心）上的 CVE，從同一個 Ubuntu OSV 鏡像讀
+# UBUNTU-CVE-<CVE> 的 Ubuntu priority，寫 scan/ubuntu-priority.json。cra_report.py 分級的嚴重度依供應商評級優先（NVIDIA 公告 → Ubuntu priority
+# → NVD）。沒有 Ubuntu 套件上的 CVE → 不寫這一列；沒有鏡像或過期 → NOT_RUN（檔案記原因；嚴重度照 Grype 的 Ubuntu 比對或 DT／NVD）。
+UP=$OUT/scan/ubuntu-priority.json
+rm -f "$UP" "$UP.xz"   # 同一個 --out 重跑：不留上一次的結果
+if [[ "$dtf" =~ ^(OK|GAP)$ ]] && [ -s "$OUT/dt/findings.json" ]; then
+  pa=(); [ -n "$OSV_DISTRO_MIRROR" ] && pa+=(--mirror "$OSV_DISTRO_MIRROR")
+  r=$(timeout 600 python3 -I "$ROOT/tools/pilot/lib/ubuntu_priority.py" --findings "$OUT/dt/findings.json" "${pa[@]+"${pa[@]}"}" --out "$UP" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^D-ubuntu-priority\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) [ -s "$UP" ] && status "$s1" "$s2" "$s3";; FAIL) rm -f "$UP"; status "$s1" "$s2" "$s3";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$UP"; status D-ubuntu-priority FAIL "ubuntu_priority.py 失敗（或超過 600 秒）：$(echo "$r" | tail -1)"; fi
+fi
+# Ubuntu CVE Tracker 的狀態（tools/pilot/lib/ubuntu_status.py）：DT findings 裡 Ubuntu 套件（核心以外）上的 (CVE, 原始碼套件, 發行版)，
+# 從 Tracker 狀態鏡像（PILOT_ENV 的 UBUNTU_CVE_STATUS_MIRROR）只取出這個映像要的，寫 scan/ubuntu-status.json（cra_report 的證據規則 U1：
+# Ubuntu 標 not-affected、安裝的版本符合註記 → not_affected）。沒有 Ubuntu 套件上的 CVE → 不寫這一列；沒有鏡像或過期 → NOT_RUN
+# （檔案記原因；U1 不套用，列照樣受影響）。
+US=$OUT/scan/ubuntu-status.json
+rm -f "$US" "$US.xz"   # 同一個 --out 重跑：不留上一次的結果
+if [[ "$dtf" =~ ^(OK|GAP)$ ]] && [ -s "$OUT/dt/findings.json" ]; then
+  sa=(); [ -s "${SBOM:-}" ] && sa+=(--sbom "$SBOM"); [ -n "$UBUNTU_CVE_STATUS_MIRROR" ] && sa+=(--mirror "$UBUNTU_CVE_STATUS_MIRROR"); [ -n "$PYVERS" ] && sa+=(--py-versions "$PYVERS")
+  r=$(timeout 600 python3 -I "$ROOT/tools/pilot/lib/ubuntu_status.py" --findings "$OUT/dt/findings.json" "${sa[@]+"${sa[@]}"}" --out "$US" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^D-ubuntu-status\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) [ -s "$US" ] && status "$s1" "$s2" "$s3";; FAIL) rm -f "$US"; status "$s1" "$s2" "$s3";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$US"; status D-ubuntu-status FAIL "ubuntu_status.py 失敗（或超過 600 秒）：$(echo "$r" | tail -1)"; fi
+fi
+# 核心 config 過濾（tools/pilot/lib/kernel_config.py）：映像與 --sbom。核心元件（C-kernel-l4t-map 加上的 Canonical 核心等）上的 CVE，
+# 以 Linux 核心 CNA 紀錄的 programFiles（PILOT_ENV 的 KERNEL_CVE_MIRROR，tools/mirror/kernel-cve.sh 的輸出）對照產品核心的 .config
+# 與 Makefile（映像裡 /usr/src/linux-headers-<版本>/），判斷修補的程式有沒有編進核心，寫 scan/kernel-config.json。
+# 放在 D-dt-findings 之後：CVE 清單取 Grype 與 DT 兩邊（C-kernel-coverage 之後，Grype 的結果已經寫好）。只列出，原始的發現不改。
+# 建置設定的來源：--kernel-build（rootfs tar、資料夾，或刷機包＋--kernel-build-prefix）；--image 沒給時用 docker save 的映像 tar。
+# --sbom 沒給 --kernel-build 時不執行，記 NOT_RUN；沒有核心的 CVE（kernel_config.py 回 NOT_RUN）不寫這一列；沒有 .config、版本不符、
+# CNA 鏡像沒有或過期 → GAP（沒有判定，清單不變）。
+# 接著是模組對應（tools/pilot/lib/kernel_module_map.py，C-kernel-module-map，scan/kernel-module-map.json）：同樣的輸入，
+# 每個核心 CVE 的 programFiles 依 Kbuild 規則對應到 builtin／模組（.ko 名稱，與 modules.order／modules.builtin 核對）／沒編／unknown。
+# 只對應，不判定；K2（模組移除或停用）讀這個檔。NOT_RUN（沒有核心的 CVE）不寫這一列；沒有模組目錄或模組清單 → GAP（照列，K2 不採用）。
+KCF=$OUT/scan/kernel-config.json
+KMM=$OUT/scan/kernel-module-map.json
+rm -f "$KCF" "$KCF.xz"   # 同一個 --out 重跑：不留上一次的結果給 VEX 匯出（這次沒有執行或失敗時）
+rm -f "$KMM" "$KMM.xz"
+rm -f "$OUT/scan/kernel-cve-list.txt" "$OUT/scan/kernel-cve-list.json"   # 同一個 --out 重跑：不留上一次的核心 CVE 清單（cra_report 會讀）
+KSRC=(); KLABEL=; KREC=(); KCVL=; KPREF=()
+# 核心建置紀錄（環境變數 KERNEL_BUILD_RECORD，選用）：只給 kernel_config.py（kernel_module_map.py 不讀）；不存在等問題由 kernel_config.py 記 GAP
+[ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+# 樹外模組的建置紀錄（環境變數 KERNEL_OOT_BUILD_RECORDS，選用；用冒號分隔多個資料夾）：給 kernel_config.py 的 --oot-build-record（可重複）。
+# 標頭檔只有在「核心與所有樹外 .ko 的紀錄都沒有列它」而且映像每個樹外 .ko 都有紀錄時，才不因為樹外模組而 unknown。需要 KERNEL_BUILD_RECORD。
+if [ -n "${KERNEL_OOT_BUILD_RECORDS:-}" ]; then
+  IFS=: read -r -a _oot <<< "$KERNEL_OOT_BUILD_RECORDS"
+  for _d in "${_oot[@]}"; do [ -n "$_d" ] && KREC+=(--oot-build-record "$(readlink -m -- "$_d")"); done
+fi
+# 本機 linux-stable 的 clone（環境變數 KERNEL_STABLE_GIT，選用，唯讀、不 fetch）：給 kernel_config.py 的 --stable-git
+[ -n "${KERNEL_STABLE_GIT:-}" ] && KREC+=(--stable-git "$(readlink -m -- "$KERNEL_STABLE_GIT")")
+if [ -n "$KBUILD" ]; then KSRC=(--from "$KBUILD"); [ -n "$KBUILD_PREFIX" ] && KSRC+=(--prefix "$KBUILD_PREFIX"); KLABEL="--kernel-build"
+elif [ "$MODE" = image ] && [ -s "${IMG_TAR:-}" ]; then KSRC=(--from "$IMG_TAR"); KLABEL="映像"; fi
+# 核心原始碼樹（環境變數 KERNEL_SOURCE_DIR，選用）：Makefile／Kbuild 的來源；放進 KSRC，C-kernel-config 與 C-kernel-module-map 都收到
+[ -n "${KERNEL_SOURCE_DIR:-}" ] && [ ${#KSRC[@]} -gt 0 ] && KSRC+=(--source-tree "$(readlink -m -- "$KERNEL_SOURCE_DIR")")
+# Grype、DT 都沒有核心元件的 CVE（廠商核心不是套件）時的核心 CVE 清單：KERNEL_CVES（明確給的清單），或依產品核心版本從 CNA 鏡像產生。
+# 成功 → 設 KCVL（清單檔）與 KCVO（來源說明），回傳 0；其他（版本取不到、被拒絕、沒有清單來源、產生失敗）→ 寫 GAP／NOT_RUN 的狀態列，回傳 1；
+# 映像裡看不到核心（沒有模組資料夾也沒有 Image）→ 回傳 2，什麼都不寫（沒有核心可評估）。
+kernel_cve_list(){
+  local kl=$OUT/scan/kernel-cve-list.txt kj=$OUT/scan/kernel-cve-list.json pr ps pv pt cr cs ct cl
+  rm -f "$kl" "$kj"
+  if [ -n "${KERNEL_CVES:-}" ]; then
+    if [ -r "$KERNEL_CVES" ] && [ -f "$KERNEL_CVES" ] && grep -Eq 'CVE-[0-9]{4}-[0-9]{4,}' -- "$KERNEL_CVES"; then
+      grep -Eo 'CVE-[0-9]{4}-[0-9]{4,}' -- "$KERNEL_CVES" | LC_ALL=C sort -u > "$kl"
+      KCVL=$kl; KCVO="KERNEL_CVES（明確給的清單）"
+      status C-kernel-cve-list OK "核心 CVE 清單 $(wc -l < "$kl") 個，來自 KERNEL_CVES（明確給的清單；sha256 $(sha256sum "$kl" | cut -c1-12)…）：不是 Grype／DT，也不是 CNA 版本比對"
+      return 0
+    fi
+    status C-kernel-cve-list GAP "KERNEL_CVES 讀不到、不是檔案，或裡面沒有 CVE 編號：核心的 CVE 沒有依 .config 判定"
+    status C-kernel-config GAP "KERNEL_CVES 不能用：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
+    status C-kernel-module-map GAP "KERNEL_CVES 不能用：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
+    return 1
+  fi
+  pr=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --probe-kernel-version "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" 2>&1)
+  pr=$(printf '%s\n' "$pr" | grep -m1 $'^KERNEL-VERSION\t')
+  if [ -z "$pr" ]; then
+    status C-kernel-cve-list GAP "Grype、DT 都沒有核心 CVE，產品核心版本讀不出來（kernel_config.py --probe-kernel-version 失敗或超過 3600 秒；來源：$KLABEL）：不猜"
+    status C-kernel-config GAP "沒有核心 CVE 清單（核心版本讀不出來）：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
+    status C-kernel-module-map GAP "沒有核心 CVE 清單（核心版本讀不出來）：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
+    return 1
+  fi
+  IFS=$'\t' read -r _ ps pv <<< "$pr"
+  case $ps in
+    NONE) return 2;;
+    OK) :;;
+    *) status C-kernel-cve-list GAP "Grype、DT 都沒有核心 CVE，產品核心版本不能確定：$pv（來源：$KLABEL）：不猜，核心的 CVE 沒有依 .config 判定"
+       status C-kernel-config GAP "沒有核心 CVE 清單（核心版本不能確定：$pv）：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
+       status C-kernel-module-map GAP "沒有核心 CVE 清單（核心版本不能確定）：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
+       return 1;;
+  esac
+  if [ -z "$KERNEL_CVE_MIRROR" ]; then
+    status C-kernel-cve-list NOT_RUN "Grype、DT 都沒有核心 CVE，核心 $pv 的 CVE 清單沒有來源：沒有 KERNEL_CVE_MIRROR（CNA 鏡像），也沒有 KERNEL_CVES"
+    status C-kernel-config NOT_RUN "核心 $pv 沒有核心 CVE 清單：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
+    status C-kernel-module-map NOT_RUN "核心 $pv 沒有核心 CVE 清單：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
+    return 1
+  fi
+  cr=$(timeout 600 python3 -I "$ROOT/tools/pilot/lib/kernel_cna_version.py" --kernel-version "$pv" --mirror "$KERNEL_CVE_MIRROR" --out "$kj" --cves-out "$kl" 2>&1)
+  cl=$(printf '%s\n' "$cr" | grep -m1 $'^KERNEL-CNA-VERSION\t')
+  if [ -z "$cl" ] || [ ! -s "$kl" ]; then
+    rm -f "$kl" "$kj"
+    ct=${cl:+$(printf '%s' "$cl" | cut -f2- | tr '\t' ' ')}
+    status C-kernel-cve-list GAP "核心 $pv 的 CVE 清單不能依 CNA 版本比對產生（${ct:-kernel_cna_version.py 失敗或超過 600 秒}）：不猜，核心的 CVE 沒有依 .config 判定"
+    status C-kernel-config GAP "沒有核心 CVE 清單（CNA 版本比對失敗）：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
+    status C-kernel-module-map GAP "沒有核心 CVE 清單（CNA 版本比對失敗）：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
+    return 1
+  fi
+  IFS=$'\t' read -r _ cs ct <<< "$cl"
+  KCVL=$kl; KCVO="kernel-cna-version（核心 $pv）"
+  status C-kernel-cve-list "$cs" "核心 $pv 的 CVE 清單 $(wc -l < "$kl") 個，由 Linux 核心 CNA 的版本範圍比對產生（kernel_cna_version.py），不是 Grype／DT：$ct"
+  return 0
+}
+# 刷機包有兩顆不同的核心（C-kernel-boot，tools/pilot/lib/kernel_boot.py，scan/kernel-boot.json）：kernel/Image 與 rootfs/boot/Image 並列
+# （版本字串、建置時間、設定差異）。預設不改 K1：燒錄流程預期裝 kernel/Image。環境變數 KERNEL_BOARD_OS_TXT（選用，板子 board-test 的 os.txt）
+# 有 uname -v 時比對；只有板子的 uname -v 只對上 rootfs/boot/Image 時（k1_kernel rootfs），C-kernel-config 才改用該 Image（--prefer-rootfs-image），
+# 核心建置紀錄除非 BUILD-INFO.txt 的 sha256 對得上，否則 GAP。需要刷機包的前綴（--kernel-build-prefix）；沒有兩顆核心時不寫這一列。
+KBF=$OUT/scan/kernel-boot.json
+rm -f "$KBF"
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && [ -n "$KBUILD_PREFIX" ]; then
+  kba=(--out "$KBF"); [ -n "${KERNEL_BOARD_OS_TXT:-}" ] && kba+=(--board-os-txt "$(readlink -m -- "$KERNEL_BOARD_OS_TXT")")
+  [ -n "${KERNEL_BUILD_RECORD:-}" ] && kba+=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+  r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_boot.py" --from "$KBUILD" --prefix "$KBUILD_PREFIX" "${kba[@]}" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-boot\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) rm -f "$KBF";; *) status "$s1" "$s2" "$s3";; esac
+  else rm -f "$KBF"; status C-kernel-boot FAIL "kernel_boot.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
+  [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
+fi
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
+  ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")
+  [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")
+  [ -n "$KERNEL_CVE_MIRROR" ] && ka+=(--mirror "$KERNEL_CVE_MIRROR")
+  # 刷機包要整個解壓（數 GB 的 bzip2）：時間上限 3600 秒；映像 tar 與資料夾通常幾十秒
+  kcl_tried=0; kskip=0
+  if [ -n "${KERNEL_CVES:-}" ]; then      # 明確給的清單：和 Grype／DT 的核心 CVE 合併（kernel_config.py 的 --cves）
+    kcl_tried=1
+    if kernel_cve_list; then ka+=(--cves "$KCVL" --cves-origin "$KCVO"); else kskip=1; fi
+  fi
+  while [ $kskip = 0 ]; do
+    r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" --out "$KCF" "${KREC[@]+"${KREC[@]}"}" 2>&1)
+    l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-config\t')
+    if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+      # NOT_RUN＝Grype、DT（與 --cves）都沒有核心元件的 CVE：廠商核心（不是套件）。以前什麼都不寫；現在找清單來源（上面的 kernel_cve_list），
+      # 有清單就帶 --cves 重跑一次；沒有清單時也寫狀態列（核心存在而沒有評估，不可以靜默消失）。映像裡看不到核心時照舊不寫。
+      if [ "$s2" = NOT_RUN ] && [ $kcl_tried = 0 ]; then
+        kcl_tried=1; rm -f "$KCF"
+        kernel_cve_list && { ka+=(--cves "$KCVL" --cves-origin "$KCVO"); continue; }
+        break
+      fi
+      case $s2 in NOT_RUN) rm -f "$KCF";; FAIL) rm -f "$KCF"; status "$s1" "$s2" "$s3（來源：$KLABEL）";; *) status "$s1" "$s2" "$s3（來源：$KLABEL）";; esac
+    else rm -f "$KCF"; status C-kernel-config FAIL "kernel_config.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
+    break
+  done
+  # 模組對應：同樣的輸入再讀一次（刷機包也是 3600 秒上限）
+  kk=(); [ -s "$KCF" ] && kk=(--kernel-config "$KCF")      # 兩個階段各讀一次 CNA 鏡像：commit 不同時模組對應記 GAP
+  r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_module_map.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" "${kk[@]+"${kk[@]}"}" --out "$KMM" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-module-map\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
+    case $s2 in NOT_RUN) rm -f "$KMM";; FAIL) rm -f "$KMM"; status "$s1" "$s2" "$s3（來源：$KLABEL）";; *) status "$s1" "$s2" "$s3（來源：$KLABEL）";; esac
+  else rm -f "$KMM"; status C-kernel-module-map FAIL "kernel_module_map.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
+elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ]; then
+  # 沒有建置設定的來源：明示沒有執行（核心的 CVE 都沒有依 .config 判定），不是「沒有問題」
+  status C-kernel-config NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有依產品核心的 .config 判定"
+  status C-kernel-module-map NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有對應到模組"
+fi
+
+# ---- C-euvd（tools/pilot/lib/euvd.py annotate）----
+# ENISA EUVD 的 EUVD 編號與「已遭利用」標記（EUVD 的 exploited＝kev/dump＝CISA KEV ∪ ENISA EU KEV；2026-11-05 實測比 DT 的 CISA ∪ eukev.json
+# 多 12 個 CVE）。CVE 取 DT 的 findings（D-dt-findings 讀取完成時）與 Grype 的結果，所以放在 D-dt-findings、C-grype 之後。
+# 讀 PILOT_ENV 的 EUVD_MIRROR（deploy/pilot/euvd-mirror.sh 寫入；tools/mirror/euvd.sh 的輸出）的 index.tsv（不連網），寫 scan/euvd.json。
+# 沒有設定鏡像或索引不能用 → GAP，檔案沒有 cves（讀取端不可能把它當成「0 個已被利用」）；過期 → GAP 但照樣標註（說明寫出過期）；
+# DT 與 Grype 都沒有可用的 CVE 清單 → NOT_RUN（不寫檔）。cra_report.py 讀它：EUVD 標已遭利用的 CVE 兩種分級方式都是 P1、KEV 欄寫
+# EUVD (CISA KEV／ENISA EU KEV)、不套批次規則；檔案的 status 不是 OK，或沒有檔案但 status.tsv 有 C-euvd 這一行（FAIL、NOT_RUN）→ 風險評估 GAP。
+EUVDF=$OUT/scan/euvd.json
+rm -f "$EUVDF" "$EUVDF.xz"   # 同一個 --out 重跑：不留上一次的結果給 cra_report、vex_export（這次沒有執行或失敗時）
+ea=(); [[ "$dtf" =~ ^(OK|GAP)$ ]] && [ -s "$OUT/dt/findings.json" ] && ea+=(--cves "$OUT/dt/findings.json")
+[ -s "$GR" ] && ea+=(--cves "$GR")
+[ -s "$NVB" ] && ea+=(--cves "$NVB")   # NVIDIA 公告的 CVE（不在 DT／Grype 的結果裡）：KEV／EUVD 已遭利用的要進 P1
+[ -s "$OUT/scan/kernel-cve-list.txt" ] && ea+=(--cves "$OUT/scan/kernel-cve-list.txt")   # 廠商核心的 CVE 清單（kernel_cve_list）：已遭利用的核心 CVE 要進 P1
+if [ ${#ea[@]} = 0 ]; then
+  status C-euvd NOT_RUN "沒有 CVE 清單（D-dt-findings、C-grype 都沒有可用的結果）：沒有標註 EUVD 的已遭利用標記"
+else
+  r=$(timeout 300 python3 -I "$ROOT/tools/pilot/lib/euvd.py" annotate --index "$EUVD_MIRROR" "${ea[@]}" --out "$EUVDF" 2>&1)
+  l=$(printf '%s\n' "$r" | grep -m1 $'^C-euvd\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"; [ "$s2" = FAIL ] && rm -f "$EUVDF"; status "$s1" "$s2" "$s3"
+  else rm -f "$EUVDF"; status C-euvd FAIL "euvd.py 失敗（或超過 300 秒）：$(echo "$r" | tail -1)"; fi
+fi
+# ---- C-euvd 結束 ----
+
+# ---------- E. ScanCode.io load_sbom → DejaCode 匯入（import_from_scan；逐套件掃描時 load_sboms）→ 讀回授權 ----------
+# 出處：
+#   ScanCode.io v38.1.0 docs/rest-api.rst：POST /api/projects/（name、pipeline、execute_now、upload_file；Authorization: Token）、
+#     GET /api/projects/<uuid>/（含 runs，Run.Status：not_started/queued/running/success/failure/stopped/stale，scanpipe/models.py）、
+#     GET /api/projects/<uuid>/results/（ScanCode 格式 JSON）。load_sbom 管線（scanpipe/pipelines/load_sbom.py）以檔名
+#     *bom.json／*.cdx.json 辨識 CycloneDX（scanpipe/pipes/resolve.py）。
+#   GET /api/runs/<uuid>/（scancodeio/urls.py api_router.register("runs", RunViewSet)；RunSerializer 含 task_exitcode、task_output、log）、
+#     GET /api/projects/<uuid>/messages/?severity=error（ProjectViewSet.messages、ProjectMessageFilterSet）：load_sbom 失敗時存檔並摘要 traceback。
+#   上傳前轉換：tools/pilot/lib/scio_prep.py（移除 type=file 元件與超過 PackageURLMixin 欄位上限的元件；原因與出處見該檔）。
+#   DejaCode v6.0.1 product_portfolio/api.py：POST /api/v2/products/、POST /api/v2/products/<uuid>/import_from_scan/
+#     （upload_file、create_codebase_resources、stop_on_error，同 license.sh 與官方教學；同步請求，所以分批：lib/scio_chunks.py 的說明，
+#     每批 DJ_IMPORT_CHUNK 個套件，預設 1000）、GET /api/v2/products/?name=&version=（ProductFilterSet）；
+#     回應 absolute_url 是產品頁。讀回授權用 tools/e2e/djread.py（無授權 → no_license；授權沒有 usage policy → not_assessed）。
+#   限速：DejaCode 預設 throttle（dejacode/settings.py DEFAULT_THROTTLE_RATES），依 Retry-After 重試（同 license.sh 的 djapi）。
+djapi(){ local m=$1 p=$2 out=$3; shift 3; local i c ra; for i in 1 2 3 4 5 6; do
+  c=$(curl -sS -m 1800 -D "$WORK/dj-h.txt" -H "Expect:" -X "$m" -H @"$DJ_HDR" -o "$out" -w '%{http_code}' "$@" "$DEJACODE_URL$p" 2>>"$WORK/curl-dj.err")
+  [ "$c" != 429 ] && break
+  ra=$(grep -i '^retry-after:' "$WORK/dj-h.txt" | tr -dc 0-9); sleep $(( ${ra:-2} > 60 ? 60 : ${ra:-2} )); done; echo "${c:-000}"; }
+scio(){ local m=$1 p=$2 out=$3 c; shift 3; c=$(curl -sS -m 300 -X "$m" -H @"$SCIO_HDR" -o "$out" -w '%{http_code}' "$@" "$SCANCODEIO_URL$p" 2>>"$WORK/curl-scio.err"); echo "${c:-000}"; }
+# 等 ScanCode.io 專案的最後一個 run 結束；$1 專案 uuid、$2 秒數上限、$3 run 摘要輸出。結果放在 SCIO_RS（逾時時附註）
+scio_wait(){ local pu=$1 lim=$2 t0; t0=$(date +%s)
+  while :; do scio GET "/api/projects/$pu/" "$WORK/scio-p.json" > /dev/null
+    SCIO_RS=$(python3 -I -c 'import json,sys
+r=(json.load(open(sys.argv[1])).get("runs") or [{}])[-1];print(r.get("status",""))' "$WORK/scio-p.json" 2>/dev/null)
+    case $SCIO_RS in success|failure|stopped|stale) break;; esac
+    [ $(( $(date +%s) - t0 )) -ge "$lim" ] && { SCIO_RS="$SCIO_RS（等待 ${lim} 秒逾時）"; break; }; sleep 5; done
+  python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[1]));r=(d.get("runs") or [{}])[-1]
+json.dump({"project":d.get("name"),"uuid":d.get("uuid"),"run_status":r.get("status"),"pipeline":r.get("pipeline_name"),"scancodeio_version":r.get("scancodeio_version"),
+"run_uuid":r.get("uuid"),"task_exitcode":r.get("task_exitcode"),"execution_time":r.get("execution_time"),"log_tail":(r.get("log") or "")[-1500:],
+"task_output_tail":(r.get("task_output") or "")[-3000:]},open(sys.argv[2],"w"),ensure_ascii=False,indent=1)' "$WORK/scio-p.json" "$3" 2>/dev/null; }
+# run 失敗時：完整的 run（GET /api/runs/<uuid>/，RunSerializer 含 task_output＝traceback）與 error 等級的專案訊息；摘要放在 SCIO_DIAG
+scio_diag(){ local pu=$1 dir=$2 pre=$3 ru; SCIO_DIAG=
+  ru=$(jget "$dir/$pre-run.json" run_uuid)
+  [ -n "$ru" ] && scio GET "/api/runs/$ru/" "$dir/$pre-run-detail.json" > /dev/null
+  scio GET "/api/projects/$pu/messages/?severity=error" "$dir/$pre-messages.json" > /dev/null
+  if [ -s "$dir/$pre-run-detail.json" ]; then SCIO_DIAG=$(python3 -I "$ROOT/tools/pilot/lib/scio_diag.py" "$dir/$pre-run-detail.json" "$dir/$pre-messages.json")
+  else SCIO_DIAG="讀不到 /api/runs/${ru:-?}/（run 詳細資料）"; fi; }
+# ---- 逐套件掃描（E-package-scan*）：DejaCode 下載每個套件交給 ScanCode.io scan_single_package，掃出授權與版權 ----
+# 出處（DejaCode v6.0.1）：product_portfolio/api.py ProductViewSet.load_sboms（LoadSBOMsFormSerializer：input_file、infer_download_urls、
+#   update_existing_packages、scan_all_packages、create_dependencies）→ ScanCode.io load_sbom → 匯入（importers.py ImportPackageFromScanCodeIO：
+#   infer_download_urls 時以 purl 推下載網址；update_existing 時只補空白欄位）→ scan_all_packages 時 Product.scan_all_packages_task
+#   （只送 http(s) 下載網址；dje/tasks.py scancodeio_submit_scan 先檢查網址可達，已有掃描的直接沿用）。
+#   掃描完成 → webhook → Package.update_from_scan（只補空白、override_unknown）＋產品套件 unknown → 套件授權。
+#   這個 REST 動作是 UI「Scan all packages」以外唯一的觸發方式（scan_all_packages_view 只有網頁表單）。
+#   逐套件掃描時產品套件只由 load_sboms 匯入（不先 import_from_scan；原因寫在下面匯入的地方）。
+# 第二次觸發：webhook 逾時 10 秒，dj-web 忙時會漏；第二次 scan_all 時已有掃描的套件改走 update_package_from_existing_scan_data 補上
+#   （只補套件；產品套件由 pkgscan.py sync-unknown 依 ProductPackage.update_license_unknown 的同一條規則補）。詳見 lib/pkgscan.py。
+# 下載網址連的是套件來源（npm、Maven Central、PyPI…）；離線部署要讓 DejaCode 與 ScanCode.io 連內部套件代理。
+scio_cancel(){ [ -s "$2" ] || return 0; SCANCODEIO_URL=$SCANCODEIO_URL SCANCODEIO_API_KEY=$SCANCODEIO_API_KEY python3 -I "$ROOT/tools/pilot/lib/scio_cancel.py" "$@"; }
+pkg(){ DEJACODE_URL=$DEJACODE_URL DEJACODE_API_TOKEN=$DEJACODE_API_KEY DJ_PRODUCT=$PID python3 -I "$ROOT/tools/pilot/lib/pkgscan.py" "$@"; }
+scan_trigger(){  # $1＝輸出檔名前綴；回傳 0＝匯入結束（狀態寫在 SCAN_ST、SCAN_D）
+  local r c
+  SCAN_STAGE=unsent   # unsent＝沒有送出、done＝匯入已結束、wait＝送出了但不知道結束沒有（逾時或讀狀態失敗）
+  r=$(pkg imports "$O/$1-imports-before.json"); [ "${r%%$'\t'*}" = OK ] || { SCAN_ST=FAIL; SCAN_D="讀匯入清單失敗：${r#*$'\t'}"; return 1; }
+  c=$(djapi POST "/api/v2/products/$PID/load_sboms/" "$O/$1-load-sboms.json" -F "input_file=@$SCIO_UP;filename=bom.cdx.json" \
+      -F infer_download_urls=true -F update_existing_packages=true -F scan_all_packages=true -F create_dependencies=false)
+  [ "$c" = 200 ] || { SCAN_ST=FAIL; SCAN_D="load_sboms http=$c $(head -c 200 "$O/$1-load-sboms.json" 2>/dev/null | tr '\n' ' ')"; return 1; }
+  SCAN_STAGE=wait; r=$(pkg wait-import "$O/$1-imports-before.json" "${SCIO_WAIT_SECONDS:-1800}" "$O/$1-import.json")
+  [ "$(jget "$O/$1-import.json" timed_out)" = False ] && SCAN_STAGE=done
+  SCAN_ST=${r%%$'\t'*}; SCAN_D=${r#*$'\t'}; [ "$SCAN_ST" = OK ] || [ "$SCAN_ST" = ATTENTION ]; }
+# 第一次觸發之後：等掃描、失敗原因、第二次觸發
+# 逾時時取消這個產品留在 ScanCode.io 佇列裡的工作（lib/scio_cancel.py），不讓它們卡住第二次觸發與下一次 sca-scan。第二次觸發
+# 也是 scan_all：取消時刪掉的專案會被重送（DejaCode 只沿用還在的專案），所以第二次觸發之後再取消一次。
+package_scan_wait(){
+  local r fr cx sst sd
+  r=$(pkg wait-scans "${PACKAGE_SCAN_WAIT_SECONDS:-3600}" "$O/package-scan-progress.txt" "$O/package-scans.json")
+  cx=$(scio_cancel "$O/package-scan-cancel.json" "$O/package-scans.json")
+  fr=; case $r in *"failure "[1-9]*) fr=$(SCANCODEIO_URL=$SCANCODEIO_URL SCANCODEIO_API_KEY=$SCANCODEIO_API_KEY python3 -I "$ROOT/tools/pilot/lib/scio_failures.py" \
+    "$O/package-scans.json" "$O/package-scan-failures.json");; esac
+  status E-package-scans "${r%%$'\t'*}" "${r#*$'\t'}${fr:+；失敗原因（dejacode/package-scan-failures.json）：$fr}${cx:+；$cx（dejacode/package-scan-cancel.json）}"
+  if scan_trigger update; then sst=$SCAN_ST sd="第二次觸發（補上 webhook 沒送到的掃描結果）：$SCAN_D"
+  else sst=$SCAN_ST sd="第二次觸發失敗（webhook 沒送到的套件可能沒有更新）：$SCAN_D"
+    cx=$(scio_cancel "$O/update-cancel.json" "$O/update-import.json"); sd="$sd${cx:+；匯入：$cx}"; fi
+  # 第二次匯入後重讀掃描清單（狀態不變，套件欄位可能已更新）；重送的掃描再取消一次（清單保留取消前的狀態）
+  r=$(pkg wait-scans 0 "$O/package-scan-progress.txt" "$O/package-scans.json")
+  cx=$(scio_cancel "$O/update-scan-cancel.json" "$O/package-scans.json")
+  status E-package-scan-update "$sst" "$sd${cx:+；重送的掃描：$cx}"; }
+DJ_SKIP=
+[ $NOUP = 1 ] && DJ_SKIP="--no-upload"
+[ -z "$DJ_SKIP" ] && [ $LICENSE = 0 ] && DJ_SKIP="--no-license"
+[ -z "$DJ_SKIP" ] && [ $HAVE_ENV != 1 ] && DJ_SKIP="沒有 $PILOT_ENV"
+[ -z "$DJ_SKIP" ] && { [ -n "$DEJACODE_URL" ] && [ -n "$DEJACODE_API_KEY" ] && [ -n "$SCANCODEIO_URL" ] || DJ_SKIP="pilot.env 缺 DEJACODE_URL、DEJACODE_API_KEY 或 SCANCODEIO_URL"; }
+# dumpling 沒有帶進授權匯入（DejaCode／ScanCode.io）用的輔助程式（docs/PROVENANCE.md「沒帶進來的相依」）：pilot.env 設了網址也只能記 NOT_RUN，
+# 不能因為找不到檔案而 FAIL，也不能假裝做過。缺的檔名寫進原因。
+missing_libs(){ local f m=; for f in "$@"; do [ -f "$ROOT/$f" ] || m+="${f##*/} "; done; echo "${m% }"; }
+if [ -z "$DJ_SKIP" ]; then
+  ml=$(missing_libs tools/pilot/lib/{scio_prep,scio_diag,scio_cancel,scio_chunks,scio_failures,pkgscan,djsbom,licverdict,notice}.py tools/e2e/djread.py)
+  [ "$MODE" = image ] && [ "${OS_COPYRIGHTS:-0}" = 1 ] && ml+=" $(missing_libs tools/pilot/lib/oscopyright.py)"
+  ml=$(echo $ml)   # 去掉多餘空白
+  [ -n "$ml" ] && DJ_SKIP="授權匯入（DejaCode／ScanCode.io）的輔助程式沒有帶進 dumpling（缺：$ml），pilot.env 的網址沒有使用"
+fi
+[ -z "$DJ_SKIP" ] && [ -z "$UPLOAD" ] && DJ_SKIP="沒有可上傳的 SBOM"
+E_PKG_STAGES=(E-package-scan-submit E-package-scans E-package-scan-update E-license-sync E-copyrights)
+E_STAGES=(E-scancodeio-prep E-scancodeio-load-sbom E-dejacode-import "${E_PKG_STAGES[@]}" E-dejacode-licenses E-notice)
+# 系統套件版權檔（E-os-copyrights、E-os-license-sync）預設關閉，OS_COPYRIGHTS=1 才做：Jetson 映像的 2032 個版權檔讓 ScanCode.io 的
+# scan_for_files 程序池中止（示範掃描；推測記憶體不足，未查明），開著會讓每次映像掃描 FAIL。關閉時不寫這兩列。
+OSCP=0; [ "$MODE" = image ] && [ "${OS_COPYRIGHTS:-0}" = 1 ] && OSCP=1
+[ $OSCP = 1 ] && E_STAGES=(E-scancodeio-prep E-scancodeio-load-sbom E-os-copyrights E-dejacode-import E-os-license-sync "${E_STAGES[@]:3}")   # 只有映像有系統套件，其他模式不寫這一列（同 C-govulncheck 只在 Go 專案）
+if [ -n "$DJ_SKIP" ]; then for s in "${E_STAGES[@]}"; do status "$s" NOT_RUN "$DJ_SKIP"; done
+else
+  O=$OUT/dejacode; R=$WORK/scio-results.json
+  # DejaCode 的 name:version 篩選以最後一個「:」切開（dje/utils.py extract_name_version：版本不可含「:」），所以版本裡的 : 換成 -
+  DJV=${META[version]//:/-}; META[dejacode_version]=$DJV
+  # ScanCode.io 專用 SBOM（tools/pilot/lib/scio_prep.py 的說明）：移除 type=file 元件、超過欄位上限的元件與只供比對的元件（C-kernel-l4t-map）；DT 仍收 $UPLOAD，原始 SBOM 不動
+  SCIO_UP=$WORK/bom.scio.cdx.json
+  if r=$(python3 -I "$ROOT/tools/pilot/lib/scio_prep.py" "$UPLOAD" "$SCIO_UP" "$O/scio-prep.json" 2>&1); then
+    pst=${r%%$'\t'*}; pd=${r#*$'\t'}
+    if [ "$(python3 -I -c 'import json,sys;s=json.load(open(sys.argv[1]));print(int(s["components_in"]!=s["components_out"] or s["flattened_parents"]>0 or s["removed_dependency_refs"]>0))' "$O/scio-prep.json" 2>/dev/null)" != 0 ]; then
+      cp "$SCIO_UP" "$OUT/sbom/sbom.scancodeio.cdx.json"; pd="$pd（上傳的是 sbom/sbom.scancodeio.cdx.json；DT 與原始 SBOM 不受影響）"; fi
+    status E-scancodeio-prep "$pst" "$pd"
+  else
+    # 退回上傳未轉換的 SBOM，但只供比對的元件（sca-center:matching-only，C-kernel-l4t-map）仍不送 ScanCode.io／DejaCode
+    if python3 -I -c 'import json,sys
+def keep(cs):
+    return [dict(c, components=keep(c["components"])) if isinstance(c, dict) and isinstance(c.get("components"), list) else c
+            for c in cs if not (isinstance(c, dict) and any(isinstance(p, dict) and p.get("name") == "sca-center:matching-only" for p in c.get("properties") or []))]
+b=json.load(open(sys.argv[1],encoding="utf-8")); b["components"]=keep(b.get("components") or [])
+json.dump(b,open(sys.argv[2],"w",encoding="utf-8"),ensure_ascii=False)' "$UPLOAD" "$SCIO_UP" 2>/dev/null; then fb="（只移除了只供比對的元件）"
+    else cp "$UPLOAD" "$SCIO_UP"; fb="（只供比對的元件也沒能移除，可能出現在 ScanCode.io／DejaCode）"; fi
+    status E-scancodeio-prep FAIL "scio_prep.py 失敗：$(echo "$r" | tail -1)；改上傳未轉換的 SBOM$fb"; fi
+  c=$(scio POST /api/projects/ "$O/scio-project.json" -F "name=sca-scan-$NAME-$TS" -F pipeline=load_sbom -F execute_now=true -F "upload_file=@$SCIO_UP;filename=bom.cdx.json")
+  pu=$(jget "$O/scio-project.json" uuid); rs=; diag=
+  if [ "$c" = 201 ] && [ -n "$pu" ]; then
+    META[scancodeio_project_uuid]=$pu
+    scio_wait "$pu" "${SCIO_WAIT_SECONDS:-1800}" "$O/scio-run.json"; rs=$SCIO_RS
+    META[scancodeio_version]=$(jget "$O/scio-run.json" scancodeio_version)
+    [ "$rs" != success ] && { scio_diag "$pu" "$O" scio; diag=$SCIO_DIAG; }
+  fi
+  if [ "$rs" = success ] && [ "$(scio GET "/api/projects/$pu/results/" "$R")" = 200 ]; then
+    ip=$(python3 -I - "$R" "$O/scio-summary.json" <<'PY'
+import json,sys,hashlib,collections
+raw=open(sys.argv[1],"rb").read();d=json.loads(raw);pk=d.get("packages",[])
+u={p.get("purl") or p.get("package_uid") for p in pk}
+lic=[p for p in pk if p.get("declared_license_expression")]
+s={"sha256":hashlib.sha256(raw).hexdigest(),"bytes":len(raw),"packages":len(pk),"unique_purls":len(u),"packages_with_declared_license":len(lic),
+   "dependencies":len(d.get("dependencies",[])),"top_declared_licenses":collections.Counter(p["declared_license_expression"] for p in lic).most_common(20),
+   "messages":[str(m.get("description") or m)[:200] for m in ((d.get("headers") or [{}])[0].get("messages") or [])[:10]]}
+json.dump(s,open(sys.argv[2],"w"),ensure_ascii=False,indent=1);print(len(pk),len(u),len(lic))
+PY
+)
+    set -- $ip; npk=${1:-0}; nuniq=${2:-0}
+    if [ "$npk" = 0 ]; then status E-scancodeio-load-sbom NOT_ASSESSED "load_sbom 完成但 0 個套件（不是沒有授權問題）"
+    else status E-scancodeio-load-sbom OK "套件 $npk（唯一 purl $nuniq；有宣告授權 $3）；ScanCode.io 專案 $pu"; fi
+  elif [ "$c" = 201 ] && [ -n "$pu" ]; then
+    status E-scancodeio-load-sbom FAIL "專案 $pu run=${rs:-無}；${diag:-讀結果失敗}（完整 task_output：dejacode/scio-run-detail.json；log：dejacode/scio-run.json）"; npk=0
+  else status E-scancodeio-load-sbom FAIL "建專案 http=$c（$(head -c 200 "$O/scio-project.json" 2>/dev/null | tr '\n' ' ')）"; npk=0; fi
+  # ---- 系統套件的版權檔（E-os-copyrights；lib/oscopyright.py 的說明）：映像裡 /usr/share/doc/<套件>/copyright → ScanCode.io scan_codebase
+  #      → 每個 deb 套件的版權聲明與授權（給 E-notice）。只有映像才做；不受 --no-package-scan、--no-files-scan 影響（只掃幾千個小檔案）。
+  OSEV=
+  if [ $OSCP != 1 ]; then :
+  elif [ "${npk:-0}" = 0 ] || [ ! -s "$R" ]; then status E-os-copyrights NOT_RUN "沒有 load_sbom 結果，無法對回套件"
+  else
+    S2=$OUT/scancode; mkdir -p "$S2"
+    r=$(python3 -I "$ROOT/tools/pilot/lib/oscopyright.py" extract "$IMG_TAR" "$WORK/os-copyright.tar" "$S2/os-copyright-index.json")
+    if [ "${r%%$'\t'*}" != OK ]; then status E-os-copyrights "${r%%$'\t'*}" "${r#*$'\t'}"
+    else ex=${r#*$'\t'}
+      c=$(scio POST /api/projects/ "$WORK/os-cp-project.json" -F "name=sca-scan-oscopyright-$NAME-$TS" -F pipeline=scan_codebase -F execute_now=true \
+          -F "upload_file=@$WORK/os-copyright.tar;filename=os-copyright.tar")
+      ou=$(jget "$WORK/os-cp-project.json" uuid)
+      if [ "$c" != 201 ] || [ -z "$ou" ]; then status E-os-copyrights FAIL "建專案 http=$c（$(head -c 200 "$WORK/os-cp-project.json" 2>/dev/null | tr '\n' ' ')）；$ex"
+      else
+        META[scancodeio_oscopyright_project_uuid]=$ou
+        scio_wait "$ou" "${SCIO_WAIT_SECONDS:-1800}" "$S2/os-copyright-run.json"
+        if [ "$SCIO_RS" != success ]; then scio_diag "$ou" "$S2" os-copyright
+          status E-os-copyrights FAIL "scan_codebase 專案 $ou run=${SCIO_RS:-無}；$SCIO_DIAG；$ex"
+        elif [ "$(scio GET "/api/projects/$ou/results/" "$WORK/os-cp-results.json")" != 200 ]; then status E-os-copyrights FAIL "讀結果失敗（專案 $ou）；$ex"
+        else
+          r=$(python3 -I "$ROOT/tools/pilot/lib/oscopyright.py" evidence "$WORK/os-cp-results.json" "$S2/os-copyright-index.json" "$R" "$S2/os-copyright-evidence.json")
+          status E-os-copyrights "${r%%$'\t'*}" "${r#*$'\t'}；$ex；$(jget "$S2/os-copyright-run.json" execution_time) 秒；ScanCode.io 專案 $ou"
+          [ -s "$S2/os-copyright-evidence.json" ] && OSEV=$S2/os-copyright-evidence.json
+        fi
+      fi
+    fi
+  fi
+  if [ "${npk:-0}" -gt 0 ]; then
+    q=$(python3 -I -c 'import sys,urllib.parse as u;print(u.urlencode({"name":sys.argv[1],"version":sys.argv[2]}))' "$NAME" "$DJV")
+    c=$(djapi GET "/api/v2/products/?$q" "$O/product-lookup.json")
+    pid=$(python3 -I -c 'import json,sys;r=json.load(open(sys.argv[1])).get("results",[]);print(r[0]["uuid"] if len(r)==1 else "")' "$O/product-lookup.json" 2>/dev/null)
+    if [ -z "$pid" ]; then
+      body=$(python3 -I -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"version":sys.argv[2]}))' "$NAME" "$DJV")
+      c=$(djapi POST /api/v2/products/ "$O/product.json" -H 'Content-Type: application/json' --data "$body"); pid=$(jget "$O/product.json" uuid); how=建立
+    else python3 -I -c 'import json,sys;json.dump(json.load(open(sys.argv[1]))["results"][0],open(sys.argv[2],"w"),ensure_ascii=False,indent=1)' "$O/product-lookup.json" "$O/product.json"; how=沿用; fi
+    if [ -z "$pid" ]; then status E-dejacode-import FAIL "建產品失敗 http=$c $(head -c 200 "$O/product.json" 2>/dev/null)"
+      for s in "${E_PKG_STAGES[@]}" E-dejacode-licenses E-notice; do status "$s" NOT_RUN "沒有產品"; done
+      [ $OSCP = 1 ] && status E-os-license-sync NOT_RUN "沒有產品"
+    else
+      META[dejacode_product_uuid]=$pid; PID=$pid
+      au=$(jget "$O/product.json" absolute_url); [ -n "$au" ] && META[dejacode_product_url]=$DEJACODE_URL/$(python3 -I -c 'import sys,urllib.parse as u;p=u.urlsplit(sys.argv[1]);print((p.path+("?"+p.query if p.query else "")).lstrip("/"))' "$au")
+      # 匯入方式：--no-package-scan 用 import_from_scan（上面的 ScanCode.io 結果）；逐套件掃描時只用 load_sboms 匯入並觸發掃描。
+      #   兩者不能先後混用（DejaCode v6.0.1 product_portfolio/importers.py）：import_from_scan 找既有套件用 purl＋download_url＋filename，
+      #   filename 取下載網址的檔名（component_catalog/importers.py prepare_package）；load_sboms 的 look_for_existing_package 用
+      #   ScanCode.io 套件的 filename（SBOM 載入時是空的），沒有下載網址時才退回只比 purl（且只在剛好一個時）。先後混用時
+      #   同一個 purl 建兩個套件（npm-lodash 曾因此從 3 個變 6 個），推下載網址後更新既有套件還會撞唯一鍵（php-8.4.27 匯入失敗）。
+      #   load_sboms 匯入失敗時改用 import_from_scan（沒有逐套件掃描），授權讀回照做；匯入逾時則不再匯入，讀回已匯入的部分。
+      IMP=import_from_scan
+      if [ $PKGSCAN = 1 ]; then
+        # 上傳給 load_sboms 的 SBOM（tools/pilot/lib/djsbom.py）：沒有授權的元件標成 unknown（使用者決定 2026-10-23），
+        # NuGet 改用 v3 下載網址、apk 補上下載網址、沒有授權的 Maven jar 改掃 sources jar（DejaCode 推出來的網址不能用、會讓整份匯入失敗，
+        # 或掃不到授權；出處見該檔）。原檔不動，摘要在 djsbom.json；失敗時上傳原檔，狀態說明寫出原因。
+        SCIO_UP0=$SCIO_UP; SCIO_UP=$WORK/bom.load-sboms.cdx.json; DJF=
+        DJS=$(python3 -I "$ROOT/tools/pilot/lib/djsbom.py" "$SCIO_UP0" "$R" "$SCIO_UP" "$O/djsbom.json" 2>"$WORK/djsbom.err") || { SCIO_UP=$SCIO_UP0; DJF=1
+          DJS="djsbom.py 失敗（$(tail -n1 "$WORK/djsbom.err" | cut -c1-200 | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null)），上傳原檔：沒有 unknown 標記，也沒有補下載網址"; }
+        # 失敗時改用 import_from_scan，只限匯入已經結束（或沒有送出）、而且產品套件數和匯入前相同：DejaCode 匯入失敗時不寫 results，
+        # 已建了一部分也看不出來（importers 不在交易裡），所以直接數產品套件；還在進行或數不到時不改用，混用會重複建套件
+        np0=$(pkg count "$NAME:$DJV")
+        if scan_trigger scan; then IMP=load_sboms
+          [ -n "$DJF" ] && [ "$SCAN_ST" = OK ] && SCAN_ST=ATTENTION
+          status E-package-scan-submit "$SCAN_ST" "$SCAN_D${DJS:+；$DJS}"
+        elif [ "$SCAN_ST" = FAIL ] && ! { [ "$SCAN_STAGE" != wait ] && [ "${np0%%$'\t'*}" = OK ] && [ "$(pkg count "$NAME:$DJV")" = "$np0" ]; }; then IMP=none
+          status E-package-scan-submit FAIL "$SCAN_D（匯入可能已建了一部分套件或還在進行：產品套件 ${np0#*$'\t'} → $(pkg count "$NAME:$DJV" | cut -f2)；不改用 import_from_scan，讀回已匯入的部分）${DJS:+；$DJS}"
+          for s in E-package-scans E-package-scan-update; do status "$s" NOT_RUN "load_sboms 失敗"; done
+        elif [ "$SCAN_ST" = FAIL ]; then
+          status E-package-scan-submit FAIL "$SCAN_D（改用 import_from_scan 匯入；沒有逐套件掃描）${DJS:+；$DJS}"
+          for s in E-package-scans E-package-scan-update; do status "$s" NOT_RUN "load_sboms 失敗"; done
+        else IMP=none; cx=$(scio_cancel "$O/scan-cancel.json" "$O/scan-import.json")
+          status E-package-scan-submit "$SCAN_ST" "$SCAN_D（不再等匯入，讀回已匯入的部分）${cx:+；$cx}${DJS:+；$DJS}"
+          for s in E-package-scans E-package-scan-update; do status "$s" NOT_RUN "匯入沒有結束"; done; fi
+      fi
+      c=200 msg=
+      case $IMP in
+        load_sboms|none) msg="load_sboms $SCAN_D";;
+        *) # 分批匯入（同步請求，3851 個套件一次送會逾時）：每批的 http、秒數、回應記在 dejacode/import-chunks.tsv
+           # 每批的時間隨產品裡已有的套件數線性增加（每批結束時 DejaCode 重新評估整個產品：reevaluate_products）：示範掃描 每批 500，
+           # 新建套件時 267→632 秒、套件已存在時 141→503 秒，每多 500 個產品套件約多 60 秒。批次越大、重新評估的次數越少；
+           # 1000 一批照這個斜率估計單批最多約 13 分鐘（gunicorn 與 curl 的上限 30 分鐘），未實測
+           ck=${DJ_IMPORT_CHUNK:-1000}
+           if ! nch=$(python3 -I "$ROOT/tools/pilot/lib/scio_chunks.py" "$R" "$ck" "$WORK/chunks" 2> "$WORK/chunks.err") || [ "${nch:-0}" -lt 1 ]; then
+             c=split; msg="scio_chunks.py 失敗或沒有批次（${nch:-}）：$(tail -1 "$WORK/chunks.err")"
+           else
+             printf 'chunk\thttp\tseconds\tresponse\n' > "$O/import-chunks.tsv"; i=0; tt=$(date +%s)
+             for f in "$WORK"/chunks/chunk-*.json; do i=$((i+1)); t0=$(date +%s)
+               c=$(djapi POST "/api/v2/products/$pid/import_from_scan/" "$O/import-$i.json" -F "upload_file=@$f;filename=scio-results-$i.json" \
+                   -F create_codebase_resources=true -F stop_on_error=true)
+               printf '%s\t%s\t%s\t%s\n' "$i" "$c" "$(( $(date +%s)-t0 ))" "$(head -c 300 "$O/import-$i.json" 2>/dev/null | tr '\n\t' '  ')" >> "$O/import-chunks.tsv"
+               [ "$c" = 200 ] || break
+             done
+             msg="分 $nch 批匯入（每批最多 $ck 個套件；第 $i 批 http=$c）；共 $(( $(date +%s)-tt )) 秒，每批秒數 $(awk -F'\t' 'NR>1{printf "%s%s", (NR>2?"、":""), $3}' "$O/import-chunks.tsv")（dejacode/import-chunks.tsv）"
+             [ "$c" = 200 ] || msg="$msg；$(head -c 300 "$O/import-$i.json" 2>/dev/null | tr '\n' ' ')"
+           fi;;
+      esac
+      if [ "$c" != 200 ]; then status E-dejacode-import FAIL "http=$c $msg"
+        [ $PKGSCAN = 1 ] && E_LEFT=(E-license-sync E-copyrights) || E_LEFT=("${E_PKG_STAGES[@]}")
+        [ $OSCP = 1 ] && E_LEFT+=(E-os-license-sync)
+        for s in "${E_LEFT[@]}" E-dejacode-licenses E-notice; do status "$s" NOT_RUN "匯入失敗"; done
+      else
+        djread(){ DEJACODE_API_TOKEN=$DEJACODE_API_KEY python3 -I "$ROOT/tools/e2e/djread.py" "$DEJACODE_URL" "$NAME" "$DJV" "$O/compliance.json" 2>&1; }
+        if [ $IMP = load_sboms ]; then package_scan_wait
+        elif [ $PKGSCAN != 1 ]; then for s in E-package-scan-submit E-package-scans E-package-scan-update; do status "$s" NOT_RUN "--no-package-scan"; done; fi
+        if dr=$(djread); then
+          # 系統套件：Syft 讀不出授權（unknown）的，用映像裡版權檔的 ScanCode 結果補上產品套件授權（E-os-copyrights 的證據）
+          if [ $OSCP = 1 ]; then
+            if [ -n "$OSEV" ]; then
+              r=$(pkg sync-os "$O/compliance.json" "$OSEV" "$O/os-license-sync.json"); sst=${r%%$'\t'*}; sd=${r#*$'\t'}
+              case $r in *"版權檔掃到的授權 0 個；"*) ;; *) if dr2=$(djread); then dr=$dr2; else sst=FAIL; sd="$sd；補上後重讀失敗：$(echo "$dr2" | tail -1)"; fi;; esac
+              status E-os-license-sync "$sst" "$sd"
+            else status E-os-license-sync NOT_RUN "沒有系統套件版權檔的證據（見 E-os-copyrights）"; fi
+          fi
+          if [ $PKGSCAN = 1 ]; then
+            r=$(pkg sync-unknown "$O/compliance.json" "$O/license-sync.json"); sst=${r%%$'\t'*}; sd=${r#*$'\t'}
+            case $r in OK$'\t'*"授權 0 個"*) ;; *) if dr2=$(djread); then dr=$dr2; else sst=FAIL; sd="$sd；補上後重讀失敗：$(echo "$dr2" | tail -1)"; fi;; esac
+            status E-license-sync "$sst" "$sd"
+            if [ -s "$O/package-scans.json" ]; then r=$(pkg evidence "$O/package-scans.json" "$O/package-scan-evidence.json"); status E-copyrights "${r%%$'\t'*}" "${r#*$'\t'}"
+            else status E-copyrights NOT_RUN "沒有掃描清單"; fi
+          else for s in E-license-sync E-copyrights; do status "$s" NOT_RUN "--no-package-scan"; done; fi
+          nprod=$(jget "$O/compliance.json" packages)
+          # 以讀回的產品套件數（DejaCode 依 purl 去重）對照 ScanCode.io 的唯一 purl 數（同 license.sh）
+          if [ "$nprod" = "$nuniq" ]; then status E-dejacode-import OK "$how產品；$msg；讀回產品套件 $nprod＝唯一 purl $nuniq"
+          else status E-dejacode-import GAP "$how產品；$msg；讀回產品套件 ${nprod:-?}，ScanCode.io 唯一 purl $nuniq（不一致，原因未核對）"; fi
+          # 判定讀 compliance.json 的 counts（lib/licverdict.py）：未評估 → GAP；usage policy 有 error 或 warning → ATTENTION
+          IFS=$'\t' read -r lst lsd < <(python3 -I "$ROOT/tools/pilot/lib/licverdict.py" "$O/compliance.json")
+          status E-dejacode-licenses "${lst:-FAIL}" "$dr（${lsd:-licverdict.py 沒有輸出}）"
+          # 版權證據：逐套件掃描（package-scan-evidence.json）與系統套件版權檔（E-os-copyrights）；同一個套件兩邊都有時，有版權聲明的優先，
+          # 都有時用逐套件掃描。合併檔只給 notice.py 用（dejacode/copyright-evidence.json）。
+          EVF=-
+          if [ -s "$O/package-scan-evidence.json" ] || [ -n "$OSEV" ]; then EVF=$O/copyright-evidence.json
+            python3 -I - "$EVF" "$O/package-scan-evidence.json" "$OSEV" <<'PY' || EVF=-
+import json,os,sys
+ld=lambda p:(json.load(open(p,encoding="utf-8")).get("packages") or {}) if p and os.path.isfile(p) and os.path.getsize(p) else {}
+pk,os_=ld(sys.argv[2]),ld(sys.argv[3]); out=dict(os_)
+for k,v in pk.items():
+    if v.get("copyrights") or not (out.get(k) or {}).get("copyrights"): out[k]=v
+json.dump({"packages":out,"sources":{"package_scan":len(pk),"os_copyright_file":len(os_)}},open(sys.argv[1],"w",encoding="utf-8"),ensure_ascii=False)
+PY
+          fi
+          r=$(DEJACODE_URL=$DEJACODE_URL DEJACODE_API_TOKEN=$DEJACODE_API_KEY python3 -I "$ROOT/tools/pilot/lib/notice.py" "$O/compliance.json" \
+              "$EVF" "$O/NOTICE.txt" "$O/notice-summary.json")
+          status E-notice "${r%%$'\t'*}" "${r#*$'\t'}（dejacode/NOTICE.txt：工具產生的草稿，發布前要人工確認）"
+        else status E-dejacode-import ATTENTION "匯入 http=200 但讀回失敗：$msg"; status E-dejacode-licenses FAIL "$(echo "$dr" | tail -1)"
+          [ $OSCP = 1 ] && status E-os-license-sync NOT_RUN "讀回失敗"
+          for s in E-license-sync E-copyrights E-notice; do status "$s" NOT_RUN "讀回失敗"; done; fi
+      fi
+    fi
+  else status E-dejacode-import NOT_RUN "ScanCode.io 沒有可匯入的套件"; for s in "${E_PKG_STAGES[@]}" E-dejacode-licenses E-notice; do status "$s" NOT_RUN "沒有匯入"; done
+    [ $OSCP = 1 ] && status E-os-license-sync NOT_RUN "沒有匯入"; fi
+fi
+
+# ---------- E2. 專案本身或映像的檔案層級授權與版權（ScanCode.io） ----------
+# 出處（ScanCode.io v38.1.0）：scanpipe/pipelines/scan_codebase.py（解壓上傳的封存 → 套件 → scan_for_files：授權、版權、email、url；
+#   不再掃套件裡的檔案）、analyze_docker.py（docker save 的映像 tar：解開各層 → 系統套件 → 不屬於系統套件的檔案再掃授權與版權）。
+#   GET /api/projects/<uuid>/results/ 的 files[]（tools/pilot/lib/filescan.py）。依賴套件的檔案在 E-package-scans 由 DejaCode 逐一掃。
+#   已知：lazydocker、petclinic 的 scan_codebase 在 packagedcode 出錯（docs/status.md；e2e 第 18 輪），失敗時照實記 FAIL 與 traceback 摘要。
+FS_SKIP= FIN= FPIPE=
+[ $NOUP = 1 ] && FS_SKIP="--no-upload"
+[ -z "$FS_SKIP" ] && [ $LICENSE = 0 ] && FS_SKIP="--no-license"
+[ -z "$FS_SKIP" ] && [ $FILESCAN = 0 ] && FS_SKIP="--no-files-scan"
+[ -z "$FS_SKIP" ] && [ $HAVE_ENV != 1 ] && FS_SKIP="沒有 $PILOT_ENV"
+[ -z "$FS_SKIP" ] && [ -z "$SCANCODEIO_URL" ] && FS_SKIP="pilot.env 缺 SCANCODEIO_URL"
+if [ -z "$FS_SKIP" ]; then
+  ml=$(missing_libs tools/pilot/lib/{filescan,scio_diag}.py)
+  [ -n "$ml" ] && FS_SKIP="檔案層級授權掃描（ScanCode.io）的輔助程式沒有帶進 dumpling（缺：$ml），pilot.env 的網址沒有使用"
+fi
+case $MODE in sbom) FS_SKIP=${FS_SKIP:-"--sbom：沒有檔案可掃（只有依賴清單）"};; image) FIN=$IMG_TAR; FPIPE=analyze_docker_image;; *) FIN=$SRC_TAR; FPIPE=scan_codebase;; esac
+[ -z "$FS_SKIP" ] && { [ -n "$FIN" ] && [ -s "$FIN" ] || FS_SKIP="沒有可上傳的檔案（見 A-source）"; }
+if [ -n "$FS_SKIP" ]; then status E-files-scan NOT_RUN "$FS_SKIP"
+else
+  F=$OUT/scancode; mkdir -p "$F"
+  c=$(scio POST /api/projects/ "$F/project.json" -F "name=sca-scan-files-$NAME-$TS" -F "pipeline=$FPIPE" -F execute_now=true -F "upload_file=@$FIN")
+  fu=$(jget "$F/project.json" uuid)
+  if [ "$c" != 201 ] || [ -z "$fu" ]; then status E-files-scan FAIL "建專案 http=$c（$(head -c 200 "$F/project.json" 2>/dev/null | tr '\n' ' ')）"
+  else
+    META[scancodeio_files_project_uuid]=$fu
+    scio_wait "$fu" "${FILES_SCAN_WAIT_SECONDS:-3600}" "$F/files-run.json"
+    if [ "$SCIO_RS" != success ]; then scio_diag "$fu" "$F" files
+      status E-files-scan FAIL "$FPIPE 專案 $fu run=${SCIO_RS:-無}；$SCIO_DIAG（完整 task_output：scancode/files-run-detail.json）"
+    elif [ "$(scio GET "/api/projects/$fu/results/" "$WORK/files-results.json")" != 200 ]; then status E-files-scan FAIL "讀結果失敗（專案 $fu）"
+    else r=$(python3 -I "$ROOT/tools/pilot/lib/filescan.py" "$WORK/files-results.json" "$FPIPE" "$F/files-summary.json")
+      status E-files-scan "${r%%$'\t'*}" "${r#*$'\t'}；ScanCode.io 專案 $fu"; fi
+  fi
+fi
+
+# ---------- F. 收尾：meta.json、秘密掃描、報告 ----------
+META[finished]=$(now)
+args=(); for k in "${!META[@]}"; do args+=("$k=${META[$k]}"); done
+python3 -I - "$OUT/meta.json" "${args[@]}" <<'PY'
+import json,sys
+m={}
+for a in sys.argv[2:]:
+    k,_,v=a.partition("="); m[k]=v
+tools={k[5:]:m.pop(k) for k in list(m) if k.startswith("tool_")}
+m["tools"]=tools
+m["network"]={"sbom_resolution_online":m.get("network_resolve")=="1",
+              "data_sources_online":True,
+              "note":"試行版使用線上資料源（Grype DB、DT 的 NVD／OSV／EPSS／KEV、govulncheck 的 vuln.go.dev），不是離線鏡像"}
+json.dump(m,open(sys.argv[1],"w"),ensure_ascii=False,indent=1,sort_keys=True)
+PY
+secret_scan(){  # 輸出資料夾中出現秘密的檔案直接刪除（不是遮蔽），並記 FAIL。秘密由 leakscan.py 從檔案讀，不出現在指令列
+  local f hit=(); mapfile -t hit < <(python3 -I "$ROOT/tools/pilot/lib/leakscan.py" "$SECRETS" "$OUT")
+  if [ ${#hit[@]} -gt 0 ]; then rm -f -- "${hit[@]}"; status "$1" FAIL "輸出中出現金鑰，已刪除 ${#hit[@]} 個檔案：$(for f in "${hit[@]}"; do printf '%s ' "${f#$OUT/}"; done)"
+  else status "$1" OK "輸出中沒有 pilot.env 的金鑰"; fi; }
+secret_scan F-secret-scan
+if python3 -I "$ROOT/tools/pilot/report.py" --out "$OUT" > "$WORK/report.txt" 2>&1; then echo "報告：$OUT/report.html"
+else status F-report FAIL "$(tail -1 "$WORK/report.txt")"; python3 -I "$ROOT/tools/pilot/report.py" --out "$OUT" > /dev/null 2>&1; fi
+if [ -n "$(python3 -I "$ROOT/tools/pilot/lib/leakscan.py" "$SECRETS" "$OUT/report.html" "$OUT/report.json")" ]; then
+  rm -f "$OUT/report.html" "$OUT/report.json"; status F-report FAIL "報告中出現金鑰，已刪除報告"; fi
+# 退出碼：有 FAIL → 1；有其他非 OK → 2；全 OK → 0
+x=$(awk -F'\t' 'NR>1{ if($2=="FAIL") f=1; else if($2!="OK") n=1 } END{ print f?1:(n?2:0) }' "$ST")
+echo "狀態：$ST（退出碼 $x；0 才表示每個階段都完成，仍不代表安全）"
+exit "$x"

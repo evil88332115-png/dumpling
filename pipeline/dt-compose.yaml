@@ -1,0 +1,34 @@
+# 臨時 Dependency-Track 5.2.0（apiserver＋Postgres），給 CI 與本機測試用，由 pipeline/dt-ephemeral.sh 起停。
+# - 映像用 digest 固定；只綁 127.0.0.1；沒有 frontend。
+# - apiserver 可以連外（要線上鏡像 OSV、KEV）。這是測試用的連網實例，不是正式部署設定。
+# - 密碼由 dt-ephemeral.sh 隨機產生並以環境變數傳入，不寫入任何檔案。
+# 來源：sca-center scripts/e2e/dt-compose.yaml（25fa89a），改動見 docs/PROVENANCE.md。
+name: dumpling-dt
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17.11@sha256:3518071376d0b6156b02e1db2747a78511b5b9dc3763cc79c506ebe2dc2ee71c
+    environment:
+      POSTGRES_DB: dtrack
+      POSTGRES_USER: dtrack
+      POSTGRES_PASSWORD: ${DT_DB_PASSWORD:?}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtrack -d dtrack"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 1g
+
+  apiserver:
+    image: ghcr.io/dependencytrack/apiserver:5.2.0@sha256:7411c390182e6e42156ccf2ab033aa9120a1f37b7ce59e8c2da0d77ec23c0a5f
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DT_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dtrack
+      DT_DATASOURCE_USERNAME: dtrack
+      DT_DATASOURCE_PASSWORD: ${DT_DB_PASSWORD:?}
+      DT_TELEMETRY_SUBMISSION_DEFAULT_ENABLED: "false"
+    mem_limit: 3g
+    ports:
+      - "127.0.0.1:${DT_PORT:-8080}:8080"
