@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:41 -0500（C1）
+最後更新：2026-11-12 22:42 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -92,10 +92,10 @@
 ## C4 其他平台（WP7）
 
 - 目前在做：WP7 第一階段（不依賴 M2）完成：公開示範資料清單與平台研究（含 D-025、D-026）
-- 分支／PR／commit：`wp7/platform-samples`；PR 尚未開（D-020，M6 完成才開）；最後 commit 754f7f3
+- 分支／PR／commit：`wp7/platform-samples`；PR 尚未開（D-020，M6 完成才開）；最後 commit 3e93fed
 - 代理：無
 - CI：無；本機背景工作：無（下載的樣本與解開的檔案都已刪除）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單：Raspberry Pi OS Lite 2026-10-06、Radxa ROCK 5B rsdk-r6、Debian 13 generic amd64 20261111-2659＋OMV 8.6.1-1 原始碼、TrueNAS 25.10.8（只做研究）。所有檔案實際下載核對，跟官方公布的雜湊相符；TrueNAS .update 簽章已驗證
 - 下一步：等 C1 的 M2（平台介面與開案範本）後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml
-- 卡住／等決定：研究文件「待決定」7 項，已交給 C0 分類
+- 卡住／等決定：無（D-027 已寫進研究文件；TrueNAS App 層範圍暫緩）。等 C1 的 M2；M1 合併後先 merge main 熟悉 tools/
 <!-- END C4 -->
