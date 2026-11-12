@@ -1,0 +1,8 @@
+kind: vbios
+vendor: NVIDIA
+model: 獨立 NVIDIA vBIOS 映像（顯示卡或 mini PC 獨顯）
+status: GAP
+notes: |
+  GAP：沒有官方可合法下載、可直接讀出 vBIOS 版本的公開檔案（NVIDIA 不公開發佈消費型 vBIOS 映像；
+  TechPowerUp 等收藏站不是官方來源，不使用）。
+  之後用合成的 option ROM（55 AA、PCIR、vendor 0x10DE）測流程；實際檔案由負責單位提供。

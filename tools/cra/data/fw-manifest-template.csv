@@ -1,0 +1,10 @@
+product,firmware,firmware_version,component,identifier,version,date,vendor,note
+# 範例（假資料；product 以 # 開頭的列不會被讀）,BIOS,1.05,bios,,1.05,2026-10-15,,整個 BIOS 映像的版本
+# 範例,BIOS,1.05,ibv-core,,Aptio V 5.27,,AMI,IBV 核心版本（映像目前拆不出來，以這裡為準）
+# 範例,BIOS,1.05,me,CSME,16.1.30.2307,2023-05-01,Intel,ME 版本；identifier 可寫 CSME、ME、TXE 或 SPS（映像分不出來；不知道就空著）
+# 範例,BIOS,1.05,fsp,,4.0.0.123,,Intel,不知道就填「不知道」
+# 範例,BIOS,1.05,microcode,000B06A2,0x4121,2023-05-17,Intel,每個 CPUID 一列
+# 範例,BIOS,1.05,ec,,1.02,,ITE,
+# 範例,BIOS,1.05,module,Intel GOP Driver,21.0.1061,,Intel,外加模組：identifier 填模組名稱
+# 範例,vBIOS,94.04.5E.00.92,vbios,2489,94.04.5E.00.92,2026-09-30,NVIDIA,identifier 是 PCI device ID
+# 範例,vBIOS,94.04.5E.00.92,vbios-base,2489,94.04.5E.00.01,,NVIDIA,NVIDIA 給的基礎版本

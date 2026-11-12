@@ -1,0 +1,34 @@
+kind: bios
+vendor: Ubuntu（Canonical）／TianoCore edk2
+model: Ubuntu OVMF（虛擬機器用 UEFI）
+firmware_version: 2024.02-2ubuntu0.10
+ibv: edk2
+status: ok
+files:
+  - name: ovmf_2024.02-2ubuntu0.10_all.deb
+    url: https://launchpad.net/ubuntu/+archive/primary/+files/ovmf_2024.02-2ubuntu0.10_all.deb
+    sha256: 78a6a3a4ffa666f1cb25e9069e4ec9270b5ceac7987b6eefc2674bd3f58a1473
+    size: 5188306
+    role: package
+  - name: edk2_2024.02-2ubuntu0.10.dsc
+    url: https://launchpad.net/ubuntu/+archive/primary/+files/edk2_2024.02-2ubuntu0.10.dsc
+    sha256: 98eb54dcbaab20528fb3392dbf65eeb02283905b6a77f7cfb69f3fd502921d8b
+    size: 3248
+    role: source
+  - name: edk2_2024.02.orig.tar.xz
+    url: https://launchpad.net/ubuntu/+archive/primary/+files/edk2_2024.02.orig.tar.xz
+    sha256: 3986e42620845cf799ed2cc863fe97603a433e64842e335fe8f4746d9b3b5b21
+    size: 21761992
+    role: source
+  - name: edk2_2024.02-2ubuntu0.10.debian.tar.xz
+    url: https://launchpad.net/ubuntu/+archive/primary/+files/edk2_2024.02-2ubuntu0.10.debian.tar.xz
+    sha256: 590bbf0244e81e689ce325304c45fe20ac2d5ad9682470e3bc84352e2b1970fd
+    size: 106544
+    role: source
+license:
+  name: 各元件開源授權（edk2 主體 BSD-2-Clause-Patent；內含 OpenSSL 等，見套件內 copyright 檔）
+  url: https://launchpad.net/ubuntu/+source/edk2/2024.02-2ubuntu0.10
+  note: Ubuntu 套件與原始碼包可自由取得與散布；本 repo 仍只在 CI 下載核對，不重新散布。
+notes: |
+  成品是 deb 內的 OVMF_CODE_4M.fd／.secboot.fd；.dsc、.orig.tar.xz、.debian.tar.xz 是對應原始碼（role: source）。
+  Launchpad 網址會 303 轉到 launchpadlibrarian.net，檔案內容固定。
