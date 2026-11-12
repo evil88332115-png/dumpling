@@ -14,7 +14,7 @@ STATUS_ONE_LINE = re.compile(r"^status\(\)\s*\{.*\}")
 
 
 def shell_files():
-    for base in ("tools", "deploy"):
+    for base in ("tools",):   # 原本還掃 deploy/（沒有帶進 dumpling）
         for f in sorted((ROOT / base).rglob("*")):
             if f.is_file() and (f.suffix == ".sh" or f.name == "sca-scan") and "/tests/" not in str(f):
                 yield f
@@ -23,7 +23,7 @@ def shell_files():
 def test_every_long_cut_is_followed_by_iconv():
     bad = []
     files = list(shell_files())
-    assert len(files) > 20
+    assert len(files) > 10
     for f in files:
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             for m in CUT.finditer(line):

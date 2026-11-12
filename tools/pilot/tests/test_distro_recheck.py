@@ -1,10 +1,9 @@
-"""D-distro-recheck（lib/distro_recheck.py）、tools/mirror/osv-distro.sh、deploy 的 osv-distro-mirror.sh 與 mirror-sync.sh。
+"""D-distro-recheck（lib/distro_recheck.py）與 tools/mirror/osv-distro.sh。（常駐環境的 deploy 腳本與 mirror-sync 的測試沒有帶進來，見 docs/PROVENANCE.md。）
 
 紀錄的形狀取自 2026-11-02 下載的 OSV 資料桶（Ubuntu/all.zip 的 UBUNTU-CVE-2024-6119、USN-6986-1；Debian/all.zip 的
 DEBIAN-CVE-2024-6119、DSA-*）；DT finding 的形狀取自 round14 Jetson R39.2.1 基礎版（run 41376872500）。
 """
 import datetime
-import getpass
 import hashlib
 import http.server
 import json
@@ -26,7 +25,6 @@ import distro_recheck as dr  # noqa: E402
 
 LIB = PILOT / "lib" / "distro_recheck.py"
 MIRROR_SH = ROOT / "tools" / "mirror" / "osv-distro.sh"
-SYNC_SH = ROOT / "deploy" / "gitlab-runner" / "mirror-sync.sh"
 U24 = "distro=ubuntu-24.04"
 OSSL = "3.0.13-0ubuntu3.11"
 
@@ -511,152 +509,6 @@ def test_mirror_reuse_when_upstream_unchanged(tmp_path):
 
 # ---------- 部署：常駐環境的更新與 GitLab runner 的複本 ----------
 
-def test_osv_distro_mirror_update_and_runner_sync(tmp_path):
-    b = bucket(tmp_path)
-    state = tmp_path / "state"
-    state.mkdir()
-    (state / "pilot.env").write_text("DT_URL=http://x\n", encoding="utf-8")
-    env = {**os.environ, "PILOT_STATE_DIR": str(state), "PILOT_OSV_DISTRO_MIRROR_DIR": str(tmp_path / "persist" / "osvd"),
-           "OSV_DISTRO_BASE_URL": b.as_uri(), "OSV_DISTRO_MIN_RECORDS": "3"}
-    sh = ROOT / "deploy" / "pilot" / "osv-distro-mirror.sh"
-    assert subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True).returncode == 1   # 還沒有鏡像
-    # 上一次中斷留下的下載（沒有 manifest）：update 時刪掉
-    (tmp_path / "persist" / "osvd" / "releases" / "20200101T000000Z").mkdir(parents=True)
-    u = subprocess.run(["bash", str(sh), "update"], env=env, capture_output=True, text=True, timeout=120)
-    assert u.returncode == 0 and "RESULT OK" in u.stdout, u.stdout + u.stderr
-    assert not (tmp_path / "persist" / "osvd" / "releases" / "20200101T000000Z").exists()
-    cur = tmp_path / "persist" / "osvd" / "current"
-    assert f"OSV_DISTRO_MIRROR={cur}" in (state / "pilot.env").read_text() and "DT_URL=http://x" in (state / "pilot.env").read_text()
-    c = subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True, timeout=60)
-    assert c.returncode == 0 and c.stdout.splitlines()[-1].startswith("RESULT OK")
-    s = osync(tmp_path, state / "pilot.env", env)
-    dst = tmp_path / "runner" / "osv-distro"
-    assert s.returncode == 0 and s.stdout.strip() == str(dst), s.stderr
-    assert dst.is_symlink() and (dst / "Ubuntu" / "all.zip").is_file()
-    st, _, out = run_recheck([finding("openssl", OSSL, "CVE-2024-6119")], dst)
-    assert st == "OK" and out["rows"][0]["decision"] == "distro_fixed"
-
-
-def osync(tmp_path, penv, env, kind="osv-distro"):
-    """不是 root 時 mirror-sync.sh 以自己的身分讀；常駐環境的資料夾給 tmp_path（來源必須在它或家目錄裡）。"""
-    return subprocess.run(["bash", str(SYNC_SH), kind, str(penv), getpass.getuser(), str(tmp_path)],
-                          env={**env, "OSV_DISTRO_SYNC_DEST": str(tmp_path / "runner" / "osv-distro"),
-                               "NVBUL_SYNC_DEST": str(tmp_path / "runner" / "nvidia-bulletins"), "OSV_DISTRO_MIN_RECORDS": "3"},
-                          capture_output=True, text=True, timeout=60)
-
-
-def built(tmp_path):
-    m = make_mirror(tmp_path / "persist" / "m", pad=3)
-    penv = tmp_path / "pilot.env"
-    penv.write_text(f"OSV_DISTRO_MIRROR={m}\n", encoding="utf-8")
-    return m, penv, dict(os.environ)
-
-
-@pytest.mark.parametrize("kind", ["symlink", "fifo", "dir_symlink"])
-def test_sync_rejects_symlinks_and_fifos(tmp_path, kind):
-    m, penv, env = built(tmp_path)
-    secret = tmp_path / "secret.txt"
-    secret.write_text("TOKEN=glrt-xyz", encoding="utf-8")
-    if kind == "symlink":
-        os.symlink(secret, m / "Ubuntu" / "leak.json")
-    elif kind == "fifo":
-        os.mkfifo(m / "Debian" / "hang")
-    else:
-        os.symlink(tmp_path, m / "up")
-    s = osync(tmp_path, penv, env)
-    assert s.returncode == 1 and "一般檔案與資料夾以外" in s.stderr and s.stdout == ""
-    assert not (tmp_path / "runner" / "osv-distro").exists()
-    leaked = [p for p in (tmp_path / "runner").rglob("*") if p.is_file() and "glrt-xyz" in p.read_text(errors="ignore")] \
-        if (tmp_path / "runner").exists() else []
-    assert leaked == [] and not list((tmp_path / "runner" / "osv-distro.releases").glob("[0-9]*"))
-
-
-@pytest.mark.parametrize("where", ["outside", "relative", "dotdot", "link_out", "missing_key"])
-def test_sync_rejects_source_outside_persist(tmp_path, where):
-    m, penv, env = built(tmp_path)
-    if where == "link_out":
-        os.symlink("/etc", tmp_path / "persist" / "l")
-    val = {"outside": "/etc", "relative": "persist/m", "dotdot": f"{tmp_path}/persist/../persist/m", "link_out": f"{tmp_path}/persist/l"}.get(where)
-    penv.write_text(f"OSV_DISTRO_MIRROR={val}\n" if val else "NVIDIA_BULLETINS_MIRROR=/x\n", encoding="utf-8")
-    s = osync(tmp_path, penv, env)
-    want = {"outside": "不在", "relative": "不是絕對路徑", "dotdot": "有 . 或 ..", "link_out": "解開連結後", "missing_key": "沒有 OSV_DISTRO_MIRROR"}[where]
-    assert s.returncode == 1 and s.stdout == "" and want in s.stderr, s.stderr
-    assert not (tmp_path / "runner" / "osv-distro").exists()
-
-
-def test_sync_checks_copy_and_rejects_unknown_kind(tmp_path):
-    m, penv, env = built(tmp_path)
-    s = (m / "SOURCE").read_text().replace("fetched_utc=", "fetched_utc=2020-01-01T00:00:00Z\nold_fetched=")
-    (m / "SOURCE").write_text(s)                       # 過期：複製的那份沒有通過 --check，不換上
-    r = osync(tmp_path, penv, env)
-    assert r.returncode == 1 and "沒有通過 --check" in r.stderr and not (tmp_path / "runner" / "osv-distro").exists()
-    r = osync(tmp_path, penv, env, kind="../../etc")
-    assert r.returncode == 1 and "不認得的種類" in r.stderr
-
-
-@pytest.mark.parametrize("member", ["fifo", "chardev"])
-def test_sync_extracts_into_private_container(tmp_path, member):
-    m, penv, env = built(tmp_path)
-    stream, probe = tmp_path / "evil.tar", tmp_path / "probe.txt"
-    with tarfile.open(stream, "w", format=tarfile.GNU_FORMAT) as t:
-        dot = tarfile.TarInfo("./")
-        dot.type, dot.mode = tarfile.DIRTYPE, 0o777
-        t.addfile(dot)
-        ti = tarfile.TarInfo("./x")
-        ti.type, ti.mode = (tarfile.FIFOTYPE if member == "fifo" else tarfile.CHRTYPE), 0o666
-        if member == "chardev":
-            ti.devmajor, ti.devminor = 1, 3
-        t.addfile(ti)
-    s = osync(tmp_path, penv, {**env, "MIRROR_SYNC_TEST_STREAM": str(stream), "MIRROR_SYNC_TEST_PROBE": str(probe)})
-    assert s.returncode == 1 and s.stdout == ""
-    rel = tmp_path / "runner" / "osv-distro.releases"
-    assert not (tmp_path / "runner" / "osv-distro").exists()
-    assert [p.name for p in rel.iterdir() if p.name != ".lock"] == []        # 沒有發布、容器已刪
-    if member == "fifo":
-        modes = dict(l.rsplit(" ", 1) for l in probe.read_text().splitlines())
-        stage = next(k for k in modes if "/.stage." in k and not k.endswith("/m"))
-        assert modes[stage] == "700" and modes[stage + "/m"] == "700" and "一般檔案與資料夾以外" in s.stderr
-
-
-@pytest.mark.parametrize("how", ["oversize", "sparse", "stream", "nospace"])
-def test_sync_size_caps(tmp_path, how):
-    """常駐帳號放超大檔或稀疏檔：先量表面大小、檢查剩餘空間、串流本身也截斷；都不換上。"""
-    m, penv, env = built(tmp_path)
-    env = {**env, "OSV_DISTRO_SYNC_MAX_MB": "1"}
-    if how == "oversize":
-        (m / "Debian" / "big.bin").write_bytes(b"x" * (2 << 20))
-    elif how == "sparse":
-        with open(m / "Debian" / "sparse.bin", "wb") as f:      # 表面 100 MB、實際幾乎不佔空間；tar -c 沒有 -S 會展開
-            f.truncate(100 << 20)
-    elif how == "stream":                                       # 量的時候還小，複製時串流卻是 20 MB（兩次之間被換掉）
-        import io
-        stream = tmp_path / "big.tar"
-        with tarfile.open(stream, "w") as t:
-            ti = tarfile.TarInfo("./SOURCE")
-            ti.size = 20 << 20
-            t.addfile(ti, io.BytesIO(b"\0" * ti.size))
-        env["MIRROR_SYNC_TEST_STREAM"] = str(stream)
-    else:
-        env["MIRROR_SYNC_HEADROOM_MB"] = str(1 << 40)
-    s = osync(tmp_path, penv, env)
-    want = {"oversize": "鏡像太大", "sparse": "鏡像太大", "stream": "超過上限", "nospace": "空間不足"}[how]
-    assert s.returncode == 1 and s.stdout == "" and want in s.stderr, s.stderr
-    assert not (tmp_path / "runner" / "osv-distro").exists()
-    rel = tmp_path / "runner" / "osv-distro.releases"
-    assert not rel.exists() or [p.name for p in rel.iterdir() if p.name != ".lock"] == []
-
-
-def test_sync_script_hardening_is_shared():
-    """nvbul-sync.sh 是 mirror-sync.sh nvbul 的別名：兩種鏡像走同一段加固過的程式（不另寫一份、不用 cp -L）。"""
-    s = SYNC_SH.read_text(encoding="utf-8")
-    code = "\n".join(l for l in s.splitlines() if not l.lstrip().startswith("#"))
-    assert "cp -L" not in code and "cp " not in code and 'runuser -u "$U" --' in s and "--no-same-owner --no-same-permissions --no-overwrite-dir" in s
-    assert 'chmod 700 "$stage"' in s and "! -type f ! -type d" in s and 'timeout 600 bash "$CHECK" --check "$stage/m"' in s
-    assert "ulimit -v" in s and 'head -c $(( CAP + 1 ))' in s and "--apparent-size" in s and "MAXMB=${NVBUL_SYNC_MAX_MB:-50}" in s
-    w = (ROOT / "deploy" / "gitlab-runner" / "nvbul-sync.sh").read_text(encoding="utf-8")
-    assert 'mirror-sync.sh" nvbul "$@"' in w and "tar" not in w.split("exec", 1)[1].split("nvbul", 1)[0]
-
-
 # ---------- 接線 ----------
 
 def test_sca_scan_wiring():
@@ -669,36 +521,6 @@ def test_sca_scan_wiring():
     assert "timeout 900 python3 -I" in s and 'status D-distro-recheck FAIL "distro_recheck.py 失敗' in s
     case = next(l for l in s.splitlines() if l.strip().startswith("case $k in DT_URL|"))
     assert "|OSV_DISTRO_MIRROR|" in case and 'secret "$OSV_DISTRO_MIRROR"' not in s
-
-
-def test_deploy_wiring():
-    inst = (ROOT / "deploy" / "pilot" / "install.sh").read_text(encoding="utf-8")
-    assert '"$PILOT_DIR/osv-distro-mirror.sh" check' in inst and 'kv_set "$PILOTENV" OSV_DISTRO_MIRROR "$od/current"' in inst
-    assert 'timeout 3600 "$PILOT_DIR/osv-distro-mirror.sh" update' in inst
-    gr = (ROOT / "deploy" / "gitlab-runner" / "install.sh").read_text(encoding="utf-8")
-    assert 'timeout 900 bash "$APP/deploy/gitlab-runner/mirror-sync.sh" osv-distro "$PILOTENV" "$OWNER" "$PERSIST"' in gr
-    assert 'kv_set "$GENV" OSV_DISTRO_MIRROR "$odm"' in gr and "G-osv-distro" in gr
-    ref = (ROOT / "deploy" / "gitlab-runner" / "nvd-refresh.sh").read_text(encoding="utf-8")
-    assert 'timeout 3600 runuser -u "$U" --' in ref and 'osv-distro-mirror.sh" update' in ref
-    assert 'mirror-sync.sh" osv-distro "$PILOTENV" "$U" "$P"' in ref and 'kv_set "$t3" OSV_DISTRO_MIRROR "$odm"' in ref
-    assert ref.index("NVD_MIRROR_MODIFIED NVD_MIRROR_RELEASE; do kv_set") < ref.index('osv-distro-mirror.sh" update')   # 不擋住 NVD
-    wf = (ROOT / ".github" / "workflows" / "sca-persistent.yml").read_text(encoding="utf-8")
-    assert 'PILOT_OSV_DISTRO_MIRROR_DIR="$HOME/.cache/sca-pilot-ci/osv-distro"' in wf
-    ci = (ROOT / "tools" / "mirror" / "ci-run.sh").read_text(encoding="utf-8")
-    assert "osvdistro" in ci and "osv-distro.sh" in ci
-    for doc in ("docs/offline-mirrors.md", "docs/offline-egress.md"):
-        assert "osv-distro.sh" in (ROOT / doc).read_text(encoding="utf-8")
-
-
-def test_fast_check_expectations():
-    """fast-check：沒有 OSV 鏡像時 D-distro-recheck GAP 是預期的（INFO），有鏡像時要 OK（不是 OK → ATTENTION）。"""
-    fc = (ROOT / "tools" / "ci" / "fast-check.sh").read_text(encoding="utf-8")
-    assert "ODMIR=$(grep -m1 '^OSV_DISTRO_MIRROR='" in fc and '!(odmir=="" && $1=="D-distro-recheck" && $2=="GAP")' in fc
-    assert 'ds = "INFO" if d is None or (d == "GAP" and not odmir) else "OK" if d == "OK" else "ATTENTION"' in fc
-    ns = {}
-    exec("def f(d, odmir):\n    " + 'return "INFO" if d is None or (d == "GAP" and not odmir) else "OK" if d == "OK" else "ATTENTION"', ns)
-    assert [ns["f"](d, o) for d, o in (("GAP", ""), ("GAP", "/m"), ("OK", "/m"), ("OK", ""), (None, "/m"), ("FAIL", ""))] == \
-        ["INFO", "ATTENTION", "OK", "OK", "INFO", "ATTENTION"]
 
 
 # ---------- sudo 重設 PATH ----------

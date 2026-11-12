@@ -596,16 +596,10 @@ def test_check_not_a_directory(tmp_path):
     assert c.returncode == 1 and "不是資料夾" in c.stdout
 
 
-def test_script_safety_and_docs():
+def test_script_safety():   # 原本還檢查 ci-run.sh、docs/offline-mirrors.md、deploy/versions.md：沒有帶進 dumpling
     s = MIRROR_SH.read_text(encoding="utf-8")
     body = s.split("set -euo pipefail", 1)[1]
     assert "core.hooksPath=/dev/null" in s and "--no-checkout" in s and "ulimit -f" in s and "protocol.allow=never" in s
     assert "cat-file" in body and "git archive" not in body
     assert "python3 -I" in body and "https://git.launchpad.net/ubuntu-cve-tracker" in s
     assert "\u2028" not in s and "\u2029" not in s                    # 換行字元以跳脫寫，不放原字元
-    ci = (ROOT / "tools" / "mirror" / "ci-run.sh").read_text(encoding="utf-8")
-    assert " ubtcve" in ci and "ubuntu-cve-status.sh" in ci
-    doc = (ROOT / "docs" / "offline-mirrors.md").read_text(encoding="utf-8")
-    assert "ubuntu-cve-status.sh" in doc and SCHEMA in doc and "UBUNTU_CVE_MAX_AGE_DAYS" in doc
-    assert FILES["linux"] in doc and "conflict" in doc and "解析規則" in doc
-    assert "ubuntu-cve-tracker" in (ROOT / "deploy" / "versions.md").read_text(encoding="utf-8")

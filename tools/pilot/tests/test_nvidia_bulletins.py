@@ -592,51 +592,6 @@ def test_sca_scan_wiring():
     assert "|NVIDIA_BULLETINS_MIRROR|" in case and 'secret "$NVIDIA_BULLETINS_MIRROR"' not in s
 
 
-def test_deploy_wiring():
-    inst = (ROOT / "deploy" / "pilot" / "install.sh").read_text(encoding="utf-8")
-    assert '"$PILOT_DIR/nvbul-mirror.sh" check' in inst and 'kv_set "$PILOTENV" NVIDIA_BULLETINS_MIRROR "$nb/current"' in inst
-    gr = (ROOT / "deploy" / "gitlab-runner" / "install.sh").read_text(encoding="utf-8")
-    assert 'mirror-sync.sh" nvbul "$PILOTENV" "$OWNER" "$PERSIST"' in gr and 'kv_set "$GENV" NVIDIA_BULLETINS_MIRROR "$nbm"' in gr
-    ref = (ROOT / "deploy" / "gitlab-runner" / "nvd-refresh.sh").read_text(encoding="utf-8")
-    assert "nvbul-mirror.sh\" update" in ref and 'kv_set "$t2" NVIDIA_BULLETINS_MIRROR "$nbm"' in ref
-    assert ref.index("NVD_MIRROR_MODIFIED NVD_MIRROR_RELEASE; do kv_set") < ref.index("nvbul-mirror.sh\" update")   # NVIDIA 不會擋住 NVD
-    assert 'mirror-sync.sh" nvbul "$PILOTENV" "$U" "$P"' in ref and "timeout 600 runuser" in ref
-    wf = (ROOT / ".github" / "workflows" / "sca-persistent.yml").read_text(encoding="utf-8")
-    assert 'PILOT_NVBUL_MIRROR_DIR="$HOME/.cache/sca-pilot-ci/nvidia-bulletins"' in wf
-    fc = (ROOT / "tools" / "ci" / "fast-check.sh").read_text(encoding="utf-8")
-    assert "NVMIR=$(grep -m1 '^NVIDIA_BULLETINS_MIRROR='" in fc and '!(nvmir=="" && $1=="C-nvidia-bulletins" && $2=="GAP")' in fc
-    assert "nvbul" in (ROOT / "tools" / "mirror" / "ci-run.sh").read_text(encoding="utf-8")
-
-
-def test_nvbul_mirror_update_and_runner_sync(tmp_path):
-    tar = tmp_path / "repo.tar.gz"
-    fake_repo_tar(tar)
-    state = tmp_path / "state"
-    state.mkdir()
-    (state / "pilot.env").write_text("DT_URL=http://x\n", encoding="utf-8")
-    env = {**os.environ, "PILOT_STATE_DIR": str(state), "PILOT_NVBUL_MIRROR_DIR": str(tmp_path / "m"), "NVBUL_ARCHIVE_URL": tar.as_uri(),
-           "NVBUL_COMMIT": "b" * 40, "NVBUL_COMMIT_DATE": "2026-10-27T12:23:43Z", "NVBUL_MIN_BULLETINS": "1"}
-    sh = ROOT / "deploy" / "pilot" / "nvbul-mirror.sh"
-    assert subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True).returncode == 1   # 還沒有鏡像
-    u = subprocess.run(["bash", str(sh), "update"], env=env, capture_output=True, text=True)
-    assert u.returncode == 0 and "RESULT OK" in u.stdout, u.stdout + u.stderr
-    penv = (state / "pilot.env").read_text(encoding="utf-8")
-    assert f"NVIDIA_BULLETINS_MIRROR={tmp_path / 'm' / 'current'}" in penv and "DT_URL=http://x" in penv
-    c = subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True)
-    assert c.returncode == 0 and c.stdout.splitlines()[-1].startswith("RESULT OK")
-    # GitLab runner 的複本（root 執行時才 chown；這裡只測複製與 --check）
-    s = sync(tmp_path, state / "pilot.env", env)
-    dst = tmp_path / "runner" / "nvidia-bulletins"
-    assert s.returncode == 0 and s.stdout.strip() == str(dst), s.stderr
-    assert dst.is_symlink() and (dst / "index.json").is_file()       # 以連結換上（沒有「沒有資料夾」的空檔）
-    first = os.readlink(dst)
-    s2 = sync(tmp_path, state / "pilot.env", env)
-    assert s2.returncode == 0 and os.readlink(dst) != first and (dst / "index.json").is_file()
-    # sca-scan 讀到的路徑可以直接給 match
-    r, stage, st, detail = run("candidates", "--mirror", s.stdout.strip(), "--table", TABLE)
-    assert st == "ATTENTION"
-
-
 def test_report_html_mentions_nvidia_findings_only_when_present(tmp_path):
     from pilot_fixtures import ALL_OK, make_out, run_report
     table_ = dated_table([row("CVE-2026-24154", "36", fixed="36.5")])
@@ -654,63 +609,6 @@ def test_report_html_mentions_nvidia_findings_only_when_present(tmp_path):
 
 
 # ---------- 複審：nvbul-sync.sh 以 root 執行，來源是別的帳號可寫的資料夾 ----------
-
-def sync(tmp_path, penv, env):
-    """不是 root 時 nvbul-sync.sh 以自己的身分讀；常駐環境的資料夾給 tmp_path（來源必須在它或家目錄裡）。"""
-    import getpass
-    return subprocess.run(["bash", str(ROOT / "deploy" / "gitlab-runner" / "nvbul-sync.sh"), str(penv), getpass.getuser(), str(tmp_path)],
-                          env={**env, "NVBUL_SYNC_DEST": str(tmp_path / "runner" / "nvidia-bulletins")},
-                          capture_output=True, text=True, timeout=60)
-
-
-def built_mirror(tmp_path):
-    tar = tmp_path / "repo.tar.gz"
-    fake_repo_tar(tar)
-    m = tmp_path / "persist" / "m"
-    m.parent.mkdir()
-    r = run_sh(m, tmp_path / "manifest.txt", env={"NVBUL_ARCHIVE_URL": tar.as_uri()})
-    assert r.returncode == 0, r.stdout + r.stderr
-    penv = tmp_path / "pilot.env"
-    penv.write_text(f"NVIDIA_BULLETINS_MIRROR={m}\n", encoding="utf-8")
-    return m, penv, {**os.environ, "NVBUL_MIN_BULLETINS": "1"}
-
-
-@pytest.mark.parametrize("kind", ["symlink", "fifo", "dir_symlink"])
-def test_sync_rejects_symlinks_and_fifos(tmp_path, kind):
-    m, penv, env = built_mirror(tmp_path)
-    secret = tmp_path / "secret.txt"
-    secret.write_text("TOKEN=glrt-xyz", encoding="utf-8")
-    if kind == "symlink":
-        os.symlink(secret, m / "2026" / "5797" / "leak.json")
-    elif kind == "fifo":
-        os.mkfifo(m / "2026" / "5797" / "hang.md")
-    else:
-        os.symlink(tmp_path, m / "2026" / "up")
-    s = sync(tmp_path, penv, env)
-    assert s.returncode == 1 and "一般檔案與資料夾以外" in s.stderr and s.stdout == ""
-    dst = tmp_path / "runner" / "nvidia-bulletins"
-    assert not dst.exists()
-    leaked = [p for p in (tmp_path / "runner").rglob("*") if p.is_file() and "glrt-xyz" in p.read_text(errors="ignore")] \
-        if (tmp_path / "runner").exists() else []
-    assert leaked == [] and not list((tmp_path / "runner" / "nvidia-bulletins.releases").glob("*"))   # 失敗的複本已刪掉
-    # 鏡像本身的 --check 也擋（不開 FIFO、不跟隨連結）
-    c = subprocess.run(["bash", str(MIRROR_SH), "--check", str(m)], capture_output=True, text=True, timeout=30,
-                       env={**os.environ, "NVBUL_MIN_BULLETINS": "1"})
-    assert c.returncode == 1 and "一般檔案與資料夾以外" in c.stdout
-
-
-@pytest.mark.parametrize("where", ["outside", "relative", "dotdot", "link_out"])
-def test_sync_rejects_source_outside_persist(tmp_path, where):
-    m, penv, env = built_mirror(tmp_path)
-    val = {"outside": "/etc", "relative": "persist/m", "dotdot": f"{tmp_path}/persist/../persist/m", "link_out": f"{tmp_path}/persist/l"}[where]
-    if where == "link_out":
-        os.symlink("/etc", tmp_path / "persist" / "l")
-    penv.write_text(f"NVIDIA_BULLETINS_MIRROR={val}\n", encoding="utf-8")
-    s = sync(tmp_path, penv, env)
-    want = {"outside": "不在", "relative": "不是絕對路徑", "dotdot": "有 . 或 ..", "link_out": "解開連結後"}[where]
-    assert s.returncode == 1 and s.stdout == "" and want in s.stderr, s.stderr
-    assert not (tmp_path / "runner" / "nvidia-bulletins").exists()
-
 
 def test_mirror_state_refuses_fifo_source(tmp_path):
     m = make_mirror(tmp_path / "m")
@@ -777,40 +675,6 @@ def crafted_stream(path, extra):
             if typ == tf.CHRTYPE:
                 ti.devmajor, ti.devminor = 1, 3
             t.addfile(ti)
-
-
-@pytest.mark.parametrize("member", ["fifo", "chardev"])
-def test_sync_extracts_into_private_container(tmp_path, member):
-    import tarfile as tf
-    m, penv, env = built_mirror(tmp_path)
-    stream, probe = tmp_path / "evil.tar", tmp_path / "probe.txt"
-    crafted_stream(stream, [("./x", tf.FIFOTYPE if member == "fifo" else tf.CHRTYPE)])
-    s = sync(tmp_path, penv, {**env, "NVBUL_SYNC_TEST_STREAM": str(stream), "NVBUL_SYNC_TEST_PROBE": str(probe)})
-    assert s.returncode == 1 and s.stdout == ""
-    rel = tmp_path / "runner" / "nvidia-bulletins.releases"
-    assert not (tmp_path / "runner" / "nvidia-bulletins").exists()
-    assert [p.name for p in rel.iterdir() if p.name != ".lock"] == []        # 沒有發布、容器已刪
-    if member == "fifo":      # 非 root 建不出裝置檔（tar 先失敗）；FIFO 解得出來，用它看檢查當下的權限
-        modes = dict(l.rsplit(" ", 1) for l in probe.read_text().splitlines())
-        stage = next(k for k in modes if "/.stage." in k and not k.endswith("/m"))
-        assert modes[stage] == "700"                                         # 外層容器一直是 0700
-        assert modes[stage + "/m"] == "700"                                  # 「./」0777 也沒有改到 m（--no-overwrite-dir）
-        assert "一般檔案與資料夾以外" in s.stderr
-
-
-def test_sync_leftover_container_and_old_dir_cleanup(tmp_path):
-    m, penv, env = built_mirror(tmp_path)
-    dst = tmp_path / "runner" / "nvidia-bulletins"
-    (dst.parent / "nvidia-bulletins.releases" / ".stage.left").mkdir(parents=True)   # 上一次被 KILL 留下的
-    dst.mkdir()                                                                     # 舊版：一般資料夾
-    (dst / "old.txt").write_text("x")
-    s = sync(tmp_path, penv, env)
-    assert s.returncode == 0, s.stderr
-    old = tmp_path / "runner" / "nvidia-bulletins.old"
-    assert dst.is_symlink() and (old / "old.txt").is_file()                          # 舊資料夾留一輪
-    assert not (dst.parent / "nvidia-bulletins.releases" / ".stage.left").exists()
-    s = sync(tmp_path, penv, env)
-    assert s.returncode == 0 and not old.exists()                                    # 下一次才刪
 
 
 # ---------- 公告鏡像的選取群組（jetson、gpu-firmware、gpu-driver） ----------

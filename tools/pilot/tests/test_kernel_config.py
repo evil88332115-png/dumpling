@@ -1,4 +1,4 @@
-"""C-kernel-config（lib/kernel_config.py）、tools/mirror/kernel-cve.sh、deploy 的 kernel-cve-mirror.sh 與 mirror-sync.sh kernel-cve、
+"""C-kernel-config（lib/kernel_config.py）、tools/mirror/kernel-cve.sh、
 scan-flash-package.sh --rescan-from。
 
 紀錄的形狀取自 2026-11-02 的 vulns.git（cve/published/2024/CVE-2024-26600.json：containers.cna.affected[].programFiles）；
@@ -6,7 +6,6 @@ Grype 與核心對應摘要的形狀取自 round14 Jetson R39.2.1 基礎版（ru
 canonical/linux-noble/、/lib/modules/<版本>/build 連結）取自 NVIDIA 公開的 nvidia-l4t-kernel-headers 與 nvidia-l4t-kernel 39.2.1。
 """
 import datetime
-import getpass
 import gzip
 import hashlib
 import io
@@ -28,7 +27,6 @@ import kernel_config as kc  # noqa: E402
 
 LIB = PILOT / "lib" / "kernel_config.py"
 MIRROR_SH = ROOT / "tools" / "mirror" / "kernel-cve.sh"
-SYNC_SH = ROOT / "deploy" / "gitlab-runner" / "mirror-sync.sh"
 KVER = "6.8.12-1021-tegra"
 HDR = f"usr/src/linux-headers-{KVER}-ubuntu24.04_aarch64/3rdparty/canonical/linux-noble"
 ORG = "f4215fc3-5b6b-47ff-a258-f7189bd81038"
@@ -567,39 +565,6 @@ def test_mirror_check_failures(tmp_path, what, msg):
 
 # ---------- 部署：常駐環境的更新與 GitLab runner 的複本 ----------
 
-def test_kernel_cve_mirror_update_and_runner_sync(tmp_path):
-    repo = git_repo(tmp_path, RECORDS)
-    state = tmp_path / "state"
-    state.mkdir()
-    (state / "pilot.env").write_text("DT_URL=http://x\n", encoding="utf-8")
-    env = {**os.environ, "PILOT_STATE_DIR": str(state), "PILOT_KERNEL_CVE_MIRROR_DIR": str(tmp_path / "persist" / "kcve"),
-           "KERNEL_CVE_GIT_URL": repo.as_uri(), "KERNEL_CVE_MIN_RECORDS": "3"}
-    sh = ROOT / "deploy" / "pilot" / "kernel-cve-mirror.sh"
-    assert subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True).returncode == 1
-    (tmp_path / "persist" / "kcve" / "releases" / "20200101T000000Z").mkdir(parents=True)     # 上一次中斷留下的
-    (tmp_path / "persist" / "kcve" / "releases" / ".kernel-cve-clone.abc").mkdir()
-    u = subprocess.run(["bash", str(sh), "update"], env=env, capture_output=True, text=True, timeout=120)
-    assert u.returncode == 0 and "RESULT OK" in u.stdout, u.stdout + u.stderr
-    rel = tmp_path / "persist" / "kcve" / "releases"
-    assert not (rel / "20200101T000000Z").exists() and not (rel / ".kernel-cve-clone.abc").exists()
-    cur = tmp_path / "persist" / "kcve" / "current"
-    assert f"KERNEL_CVE_MIRROR={cur}" in (state / "pilot.env").read_text()
-    c = subprocess.run(["bash", str(sh), "check"], env=env, capture_output=True, text=True, timeout=60)
-    assert c.returncode == 0 and c.stdout.splitlines()[-1].startswith("RESULT OK")
-    s = subprocess.run(["bash", str(SYNC_SH), "kernel-cve", str(state / "pilot.env"), getpass.getuser(), str(tmp_path)],
-                       env={**env, "KERNEL_CVE_SYNC_DEST": str(tmp_path / "runner" / "kernel-cve")}, capture_output=True, text=True, timeout=60)
-    dst = tmp_path / "runner" / "kernel-cve"
-    assert s.returncode == 0 and s.stdout.strip() == str(dst), s.stderr
-    assert dst.is_symlink() and (dst / "kernel-cves.zip").is_file()
-    p, st, out = run(tmp_path, mirror=dst)
-    assert st[1] == "OK"
-    # 大小上限
-    s2 = subprocess.run(["bash", str(SYNC_SH), "kernel-cve", str(state / "pilot.env"), getpass.getuser(), str(tmp_path)],
-                        env={**env, "KERNEL_CVE_SYNC_DEST": str(tmp_path / "runner2" / "kernel-cve"), "KERNEL_CVE_SYNC_MAX_MB": "0"},
-                        capture_output=True, text=True, timeout=60)
-    assert s2.returncode == 1 and "鏡像太大" in s2.stderr
-
-
 # ---------- 接線 ----------
 
 def test_sca_scan_wiring():
@@ -627,27 +592,6 @@ def test_sca_scan_kernel_build_argument_errors(tmp_path):
                  ["--sbom", str(sb), "--kernel-build", str(sb), "--kernel-build-prefix", "a/../../etc"]):
         p = subprocess.run(["bash", str(PILOT / "sca-scan"), *args, "--out", str(tmp_path / "o")], capture_output=True, text=True, timeout=60)
         assert p.returncode == 64, args
-
-
-def test_deploy_wiring():
-    inst = (ROOT / "deploy" / "pilot" / "install.sh").read_text(encoding="utf-8")
-    assert '"$PILOT_DIR/kernel-cve-mirror.sh" check' in inst and 'kv_set "$PILOTENV" KERNEL_CVE_MIRROR "$kd/current"' in inst
-    assert 'timeout 1800 "$PILOT_DIR/kernel-cve-mirror.sh" update' in inst
-    gr = (ROOT / "deploy" / "gitlab-runner" / "install.sh").read_text(encoding="utf-8")
-    assert 'timeout 300 bash "$APP/deploy/gitlab-runner/mirror-sync.sh" kernel-cve "$PILOTENV" "$OWNER" "$PERSIST"' in gr
-    assert 'kv_set "$GENV" KERNEL_CVE_MIRROR "$kcm"' in gr and "G-kernel-cve" in gr
-    ref = (ROOT / "deploy" / "gitlab-runner" / "nvd-refresh.sh").read_text(encoding="utf-8")
-    assert 'timeout 1800 runuser -u "$U" --' in ref and 'kernel-cve-mirror.sh" update' in ref
-    assert 'mirror-sync.sh" kernel-cve "$PILOTENV" "$U" "$P"' in ref and 'kv_set "$t4" KERNEL_CVE_MIRROR "$kcm"' in ref
-    assert ref.index("NVD_MIRROR_MODIFIED NVD_MIRROR_RELEASE; do kv_set") < ref.index('kernel-cve-mirror.sh" update') < ref.rindex('exit "$x"')
-    sync = SYNC_SH.read_text(encoding="utf-8")
-    assert "kernel-cve) KEY=KERNEL_CVE_MIRROR" in sync and "MAXMB=${KERNEL_CVE_SYNC_MAX_MB:-200}" in sync
-    wf = (ROOT / ".github" / "workflows" / "sca-persistent.yml").read_text(encoding="utf-8")
-    assert 'PILOT_KERNEL_CVE_MIRROR_DIR="$HOME/.cache/sca-pilot-ci/kernel-cve"' in wf
-    ci = (ROOT / "tools" / "mirror" / "ci-run.sh").read_text(encoding="utf-8")
-    assert "kernelcve" in ci and "kernel-cve.sh" in ci
-    for doc in ("docs/offline-mirrors.md", "docs/offline-egress.md"):
-        assert "kernel-cve.sh" in (ROOT / doc).read_text(encoding="utf-8")
 
 
 # ---------- scan-flash-package.sh --rescan-from ----------

@@ -242,7 +242,7 @@ def test_kernelcheck_counts_matches_on_mapped_component_absent_from_original_sbo
     assert r.stdout.split("\t")[1] == "GAP" and any("linux-nvidia-tegra 6.8.0-1021.21" in x for x in kc["possible_reasons"])
 
 
-def test_deb_sources_keeps_mapped_component_once_and_scio_prep_drops_it(tmp_path):
+def test_deb_sources_keeps_mapped_component_once(tmp_path):
     _, st, _, _, bom = run(tmp_path, jetson(deb("libssl3t64", "3.0.13-0ubuntu3.5",
                                                 "pkg:deb/ubuntu/libssl3t64@3.0.13-0ubuntu3.5?arch=arm64&upstream=openssl&distro=ubuntu-24.04")),
                            {"39.2.1": entry()})
@@ -254,13 +254,7 @@ def test_deb_sources_keeps_mapped_component_once_and_scio_prep_drops_it(tmp_path
     dt = json.loads((tmp_path / "dt.json").read_text(encoding="utf-8"))
     assert [c.get("purl") for c in dt["components"]].count(CANON) == 1           # 不丟掉、不重複
     assert not any("linux-nvidia-tegra" in x["purl"] for x in json.loads((tmp_path / "ds.json").read_text(encoding="utf-8"))["added"])
-    r = subprocess.run(["python3", "-I", str(lib / "scio_prep.py"), str(tmp_path / "out.json"), str(tmp_path / "scio.json"), str(tmp_path / "sp.json")],
-                       capture_output=True, text=True)
-    sp = json.loads((tmp_path / "sp.json").read_text(encoding="utf-8"))
-    scio = json.loads((tmp_path / "scio.json").read_text(encoding="utf-8"))
-    assert r.stdout.startswith("OK\t") and "只供弱點比對的合成元件 1 個" in r.stdout      # 不是缺少：仍是 OK
-    assert sp["removed_matching_only"] == [CANON] and not any(c.get("name") == "linux-nvidia-tegra" for c in scio["components"])
-    assert sp["components_out"] == len(bom["components"]) - 1
+    # 原本還檢查 scio_prep.py 不送 ScanCode.io 的只供比對元件：scio_prep.py 沒有帶進 dumpling（授權匯入不在範圍內）
 
 
 def test_sca_scan_scio_prep_fallback_drops_matching_only(tmp_path):
