@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 18:41 -0500（C1）
+最後更新：2026-11-13 07:42 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -94,11 +94,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6 轉接器。三個平台的 validate／fetch／build／assemble 完成並實測（Radxa、Debian 真實映像）；Rockchip raw-sectors（磁區與官方 deb、rootfs 逐位元組一致）；scan.sh（共用 _shared/scan-disk.sh）已寫好，正在 CI 跑第一次端對端（dev.yml，rpi-lite-demo）
+- 目前在做：M6 轉接器。三個平台的 validate／fetch／build／assemble 完成並實測；scan 共用 _shared/scan-disk.sh；AI NAS 核心原始碼依 D-035 套 Debian 修補（86 個，版本對得上）；正在 CI 跑 rpi-lite-demo 第二次端對端（第一次卡在精靈要原始碼壓縮檔，已改 kernel_source_file）
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
-- 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；審查 raw_sectors.py、disk_image.py：兩輪，第一輪 3 嚴重 7 中、第二輪 2 嚴重 1 中，都已修並加測試；狀態：完成）
-- CI：tests.yml（wp7/adapters，手動觸發）；dev.yml run 43327912121（rpi-lite-demo 端對端）
+- 代理：無執行中（驗證代理兩輪審查已完成，問題都已修）
+- CI：tests.yml 在 wp7/adapters 通過（Python 3.12 確認）；dev.yml run 43329817032（rpi-lite-demo）進行中
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
-- 下一步：看 dev 端對端結果並修；接著跑 rock-5b-demo、ai-nas-demo；第一次跑通後記錄標準答案（tests/expected/<專案>/<版本>.json）；驗證「新增第四個專案不改 workflow」；M6 完成開 PR
+- 下一步：rpi 跑通後依序跑 rock-5b-demo、ai-nas-demo（dev 的 concurrency 會互相取消，一次一個）；標準答案不直接存第一次輸出：逐項核對（官方 SBOM／manifest／.info 的套件數），再由驗證代理獨立核對，PR 附核對紀錄（C0 指示）；M6 完成開 PR
 - 卡住／等決定：無
 <!-- END C4 -->
