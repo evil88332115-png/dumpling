@@ -1,0 +1,80 @@
+platform: raspberrypi
+vendor: Raspberry Pi Ltd
+model: Raspberry Pi OS Lite（trixie，arm64；Raspberry Pi 3／4／5、Zero 2 W）
+os_version: 2026-10-06（Debian 13 trixie 基底）
+kernel_version: 1:6.18.50-1+rpt1（linux-image-rpi-v8／linux-image-rpi-2712）
+boot_firmware_version: raspi-firmware 1:1.20260915-1；rpi-eeprom 28.33-1
+status: ok
+measured: 2026-11-12（實際下載、算 sha256；下載後刪除，沒有解開）
+files:
+  - name: 2026-10-06-raspios-trixie-arm64-lite.img.xz
+    url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.img.xz
+    sha256: 483db18a48da399b5b7022ffae9a07bc6d99daab30e593aedac09b69ff422843
+    size: 550466056
+    role: image
+    version: "2026-10-06"
+    license_url: https://www.raspberrypi.com/software/operating-systems/
+    note: sha256 與官方 .img.xz.sha256 相同
+  - name: 2026-10-06-raspios-trixie-arm64-lite.sbom.xz
+    url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.sbom.xz
+    sha256: 39abf3605d743a18fdfccf465e0aa1659b0bcb0f18316b9c02f15c98a7551511
+    size: 5338492
+    role: metadata
+    version: "2026-10-06"
+    license_url: https://www.raspberrypi.com/software/operating-systems/
+    note: 官方附的 SBOM（格式未解開確認），可當交叉核對的第二來源
+  - name: 2026-10-06-raspios-trixie-arm64-lite.info
+    url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.info
+    sha256: 39b54efe2cce2912f3e1d0ccee9a0f384813d7b5254f82b31ec5fa6ce1a739e4
+    size: 86232
+    role: metadata
+    version: "2026-10-06"
+    license_url: https://www.raspberrypi.com/software/operating-systems/
+    note: pi-gen 版本與 dpkg 套件清單（純文字）；上面的核心與韌體版本取自這裡
+  - name: linux_6.18.50-1+rpt1.dsc
+    url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50-1+rpt1.dsc
+    sha256: 3d49184a38ee5c6dab095ef583c6397e3cb2149ceb102d58f81950969f03b252
+    size: 20229
+    role: source
+    version: 1:6.18.50-1+rpt1
+    license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+  - name: linux_6.18.50.orig.tar.xz
+    url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50.orig.tar.xz
+    sha256: d2fc041dab4e11d9645e3ba53be058faa52b8ce28a8a97c889bb2cacee170461
+    size: 154612024
+    role: source
+    version: 6.18.50
+    license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+    note: sha256 與 .dsc 的 Checksums-Sha256 相同
+  - name: linux_6.18.50-1+rpt1.debian.tar.xz
+    url: https://archive.raspberrypi.com/debian/pool/main/l/linux/linux_6.18.50-1+rpt1.debian.tar.xz
+    sha256: 98c2e147fda1eac197a221e6fb824e794c04830112d306f32c836433833e355e
+    size: 2513140
+    role: source
+    version: 1:6.18.50-1+rpt1
+    license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+    note: sha256 與 .dsc 的 Checksums-Sha256 相同
+  - name: raspberrypi-linux-stable_20260911.tar.gz
+    url: https://github.com/raspberrypi/linux/archive/refs/tags/stable_20260911.tar.gz
+    sha256: 5f1865774de3540137535802ac52c60b78227fa19d1254b781c3fe089677dceb
+    size: 257089471
+    role: source
+    version: stable_20260911（commit cff533aec2fa601846766b32ff57204e0a61bed7；Makefile 6.18.50）
+    license_url: https://github.com/raspberrypi/linux/blob/stable_20260911/COPYING
+    note: GitHub 動態產生的封存檔，sha256 可能變動；跟上面 apt 原始碼包是否同一個 commit：NOT_ASSESSED
+  - name: raspi-firmware_1.20260915-1_all.deb
+    url: https://archive.raspberrypi.com/debian/pool/main/r/raspi-firmware/raspi-firmware_1.20260915-1_all.deb
+    sha256: 56b6f8792fb27bcc22f101a5a0d27af637e0d13e85dfc0fde5ff140abc929b0f
+    size: 13032414
+    role: package
+    version: 1:1.20260915-1
+    license_url: https://github.com/raspberrypi/firmware/blob/master/boot/LICENCE.broadcom
+    note: 閉源開機韌體（start*.elf、fixup*.dat、bootcode.bin）的官方原版，給映像內檔案的身分比對用；sha256 與 trixie arm64 Packages 索引相同
+license:
+  name: 各元件授權（核心 GPL-2.0；開機韌體 Broadcom 可再散布的二進位授權；Debian 套件見各自的 copyright 檔）
+  url: https://www.raspberrypi.com/software/operating-systems/
+  note: 只在 CI 下載核對，不重新散布。
+notes: |
+  官方最新的 Lite arm64 版本（2026-11-12 查）。核心原始碼有兩個來源：Raspberry Pi apt 的原始碼包（雜湊固定，建議用這個）
+  與 raspberrypi/linux 的 stable_20260911 tag（版本號對得上，commit 是否相同未確認）。
+  Pi 4／5 的 EEPROM 開機程式不在映像裡（板子上），只有 rpi-eeprom 套件的更新檔。
