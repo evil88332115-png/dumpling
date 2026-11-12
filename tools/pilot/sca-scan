@@ -947,6 +947,15 @@ DJ_SKIP=
 [ -z "$DJ_SKIP" ] && [ $LICENSE = 0 ] && DJ_SKIP="--no-license"
 [ -z "$DJ_SKIP" ] && [ $HAVE_ENV != 1 ] && DJ_SKIP="沒有 $PILOT_ENV"
 [ -z "$DJ_SKIP" ] && { [ -n "$DEJACODE_URL" ] && [ -n "$DEJACODE_API_KEY" ] && [ -n "$SCANCODEIO_URL" ] || DJ_SKIP="pilot.env 缺 DEJACODE_URL、DEJACODE_API_KEY 或 SCANCODEIO_URL"; }
+# dumpling 沒有帶進授權匯入（DejaCode／ScanCode.io）用的輔助程式（docs/PROVENANCE.md「沒帶進來的相依」）：pilot.env 設了網址也只能記 NOT_RUN，
+# 不能因為找不到檔案而 FAIL，也不能假裝做過。缺的檔名寫進原因。
+missing_libs(){ local f m=; for f in "$@"; do [ -f "$ROOT/$f" ] || m+="${f##*/} "; done; echo "${m% }"; }
+if [ -z "$DJ_SKIP" ]; then
+  ml=$(missing_libs tools/pilot/lib/{scio_prep,scio_diag,scio_cancel,scio_chunks,scio_failures,pkgscan,djsbom,licverdict,notice}.py tools/e2e/djread.py)
+  [ "$MODE" = image ] && [ "${OS_COPYRIGHTS:-0}" = 1 ] && ml+=" $(missing_libs tools/pilot/lib/oscopyright.py)"
+  ml=$(echo $ml)   # 去掉多餘空白
+  [ -n "$ml" ] && DJ_SKIP="授權匯入（DejaCode／ScanCode.io）的輔助程式沒有帶進 dumpling（缺：$ml），pilot.env 的網址沒有使用"
+fi
 [ -z "$DJ_SKIP" ] && [ -z "$UPLOAD" ] && DJ_SKIP="沒有可上傳的 SBOM"
 E_PKG_STAGES=(E-package-scan-submit E-package-scans E-package-scan-update E-license-sync E-copyrights)
 E_STAGES=(E-scancodeio-prep E-scancodeio-load-sbom E-dejacode-import "${E_PKG_STAGES[@]}" E-dejacode-licenses E-notice)
@@ -1163,6 +1172,10 @@ FS_SKIP= FIN= FPIPE=
 [ -z "$FS_SKIP" ] && [ $FILESCAN = 0 ] && FS_SKIP="--no-files-scan"
 [ -z "$FS_SKIP" ] && [ $HAVE_ENV != 1 ] && FS_SKIP="沒有 $PILOT_ENV"
 [ -z "$FS_SKIP" ] && [ -z "$SCANCODEIO_URL" ] && FS_SKIP="pilot.env 缺 SCANCODEIO_URL"
+if [ -z "$FS_SKIP" ]; then
+  ml=$(missing_libs tools/pilot/lib/{filescan,scio_diag}.py)
+  [ -n "$ml" ] && FS_SKIP="檔案層級授權掃描（ScanCode.io）的輔助程式沒有帶進 dumpling（缺：$ml），pilot.env 的網址沒有使用"
+fi
 case $MODE in sbom) FS_SKIP=${FS_SKIP:-"--sbom：沒有檔案可掃（只有依賴清單）"};; image) FIN=$IMG_TAR; FPIPE=analyze_docker_image;; *) FIN=$SRC_TAR; FPIPE=scan_codebase;; esac
 [ -z "$FS_SKIP" ] && { [ -n "$FIN" ] && [ -s "$FIN" ] || FS_SKIP="沒有可上傳的檔案（見 A-source）"; }
 if [ -n "$FS_SKIP" ]; then status E-files-scan NOT_RUN "$FS_SKIP"

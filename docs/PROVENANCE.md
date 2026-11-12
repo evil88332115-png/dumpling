@@ -11,7 +11,8 @@
 | dumpling 路徑 | sca-center 原路徑 | 來源 commit | 清理內容 |
 |---|---|---|---|
 | `pipeline/dt-compose.yaml` | `scripts/e2e/dt-compose.yaml` | 25fa89a | 改名 e2e-dt→dumpling-dt；埠改成 `${DT_PORT:-8080}`；註解改寫；映像 digest 與其餘設定不變 |
-| `pipeline/dt-ephemeral.sh` | `scripts/e2e/dtlib.sh`（做法參考，重寫） | 25fa89a | 改寫成 up／wait／env／down 四個子指令；狀態檔取代 sca-center 的 status／secret 函式；關 NVD、開 OSV 與 KEV、API key 流程沿用；新增 KEV 與 OSV 鏡像等待與逾時 GAP、`::add-mask::` |
+| `pipeline/dt-ephemeral.sh` | `scripts/e2e/dtlib.sh`（做法參考，重寫） | 25fa89a | 改寫成 up／wait／env／down 四個子指令；狀態檔取代 sca-center 的 status／secret 函式；關 NVD、開 OSV 與 KEV、API key 流程沿用；新增 KEV 與 OSV 鏡像等待與逾時 GAP、`::add-mask::`；驗證代理審查後再改：admin 密碼改用權限 600 的 curl 設定檔（不在 `ps` 看得到的指令列）、`DT_OSV_ECOSYSTEMS` 驗證格式並以 argv 傳進 python（不內插進原始碼）、`down` 只刪有標記檔的狀態資料夾、`up` 設定後讀回確認（NVD 關、OSV 開且生態系一致、KEV 開）、`up` 觸發鏡像回 409 時 `wait` 只接受完成時間在觸發之後的鏡像（讀不到完成時間就在狀態行註明未核對）、`wait: OK` 改為「必要鏡像完成」 |
+| `pipeline/scan-status-check.py` | （dumpling 自己寫） | — | 新增：檢查 `tools/pilot/sca-scan` 的 status.tsv，必要階段都要是 OK 且沒有 FAIL（dt-smoke 用） |
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理 1 行（SBOM 內的信箱改成 example.com、產品代號與本機路徑換成中性代稱） |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
@@ -125,7 +126,7 @@
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 原樣 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
-| `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處 |
+| `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變 |
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/euvd.sh` | `scripts/mirror/euvd.sh` | 25fa89a | 路徑調整 3 處 |
 | `tools/mirror/grype-db.sh` | `scripts/mirror/grype-db.sh` | 25fa89a | 原樣 |
@@ -162,7 +163,7 @@
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
 | `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處 |
+| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL |
 | `tools/pilot/tests/data/euvd-dt-enisa-golden.json` | `scripts/pilot/tests/data/euvd-dt-enisa-golden.json` | 25fa89a | 原樣 |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |
@@ -189,6 +190,7 @@
 | `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行 |
 | `tools/pilot/tests/test_pyver_wiring.py` | `scripts/pilot/tests/test_pyver_wiring.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/pilot/tests/test_sca_scan_local_image.py` | `scripts/pilot/tests/test_sca_scan_local_image.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL |
 | `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處 |
