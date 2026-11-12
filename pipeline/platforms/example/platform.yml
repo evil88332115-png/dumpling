@@ -3,8 +3,9 @@
 schema: 1
 platform: example
 description: 最小示範平台（build 不編譯，assemble 與 scan 只印狀態）
+arch: arm64                # 預設值（目標映像的架構：arm64｜amd64）
 build:
-  mode: none
+  mode: none               # none＝workflow 略過 build job（scan 不下載 build 的 artifact）；compile 時可再寫 runner（arm64｜amd64，預設 arm64）與 apt（build 套件清單）
 raw_sectors:
   enabled: true
 layers:
@@ -15,6 +16,8 @@ layers:
   default: os
 scan:
   platform_arg: rockchip
+  runner: amd64            # 預設值：scan 跑的 runner（amd64＝ubuntu-24.04）；scan 只匯入與讀映像，不執行目標平台的程式，不跟著 arch
+  apt: []                  # scan job 額外的 apt 套件（選填）
 project_defaults:
   platform_version: Example SoC 1.0
   bsp_os_source: Example 公開映像

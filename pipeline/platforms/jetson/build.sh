@@ -3,11 +3,13 @@
 # → 打包建置紀錄（BuildRecord）→ 整理交付檔。收到 <專案資料夾> <版本>，環境變數見 pipeline/platform.sh。
 #
 # 輸入：$DUMPLING_OUT/downloads/{public_sources.tbz2,public_sources_sha.txt}（fetch 步驟已核對 sha256）
-# 輸出（都在 $DUMPLING_OUT）：
-#   BuildRecord-<專案>-<版本>.tar.gz   pack-build-record.sh 的結果（UEFI 未自編：D-002，不給 --uefi）
-#   deliver/                           Image、樹內與樹外 .ko、dtb（assemble 步驟用）、kernel.release、modules.*
-#   build.json                         Image 的 SHA-256、核心版本字串、元件 SHA-1 核對、patch、nvbuild 結束碼與時間
-#   work/                              解壓與編譯的暫存（資料夾名稱固定；.cmd 內有絕對路徑，編譯後不要搬動）
+# 輸出（都在 $DUMPLING_OUT；交給 scan 的東西一律放 handoff/，workflow 整個資料夾上傳、在 scan job 放回同一個路徑，不指名個別檔案）：
+#   handoff/BuildRecord-<專案>-<版本>.tar.gz   pack-build-record.sh 的結果（UEFI 未自編：D-002，不給 --uefi）
+#   handoff/deliverables.tar.zst              Image、樹內與樹外 .ko、dtb、modules.*、核心建置設定（assemble 步驟用）
+#   handoff/kernel.release、kernel-subdir     核心版本字串、核心樹在編譯輸出裡的相對路徑
+#   handoff/build.json                        Image 的 SHA-256、核心版本字串、元件 SHA-1 核對、patch、nvbuild 結束碼與時間
+#   handoff/nvbuild-tail.txt、build-summary.md  nvbuild.log 的最後 40 行、一行摘要（workflow 的 step summary 用）
+#   work/                                     解壓與編譯的暫存（不交接；資料夾名稱固定；.cmd 內有絕對路徑，編譯後不要搬動）
 # 建置不可重現（同一份原始碼編兩次 Image 的 SHA-256 不同）：建置紀錄與交付檔一定來自這一次編譯。
 #
 # 規則：
@@ -28,8 +30,9 @@ for c in rsync make gcc bc bison flex pahole perl tar sha256sum patch zstd; do
 done
 [ -f "$dl/public_sources.tbz2" ] || fail "沒有 $dl/public_sources.tbz2（先執行 fetch）"
 [ -f "$dl/public_sources_sha.txt" ] || fail "沒有 $dl/public_sources_sha.txt（先執行 fetch）"
-rm -rf "$work" "$out/deliver"
-mkdir -p "$work" "$out/deliver" || fail "無法建立 $work"
+H=$out/handoff
+rm -rf "$work" "$H"
+mkdir -p "$work" "$H" || fail "無法建立 $work"
 
 # 1.～4. 解開、核對元件 SHA-1、四個元件解到同一個資料夾、套這個版本的 patch（與 assemble 共用 prepare-source.sh）
 B=$work/src
@@ -60,24 +63,24 @@ echo "核心 $krel，Image sha256 $image_sha"
 # 6. 建置紀錄（樹外模組資料夾照 pack-build-record.sh 的範例；UEFI 未自編，D-002）
 oot=()
 for d in nvidia-oot nvgpu nvdisplay hwpm nvethernetrm unifiedgpudisp/kernel-open; do [ -d "$OUT/$d" ] && oot+=("$OUT/$d"); done
-br=$out/BuildRecord-$DUMPLING_PROJECT-$ver.tar.gz
+br=$H/BuildRecord-$DUMPLING_PROJECT-$ver.tar.gz
 bash "$root/tools/demo/pack-build-record.sh" "$K" "$br" "${oot[@]}" > "$work/pack.log" 2>&1 || { tail -5 "$work/pack.log"; fail "pack-build-record.sh 失敗"; }
 tail -2 "$work/pack.log"
 br_sha=$(sha256sum "$br" | cut -d' ' -f1)
 
 # 7. 交付檔：Image、.ko（樹內與樹外，保留相對於編譯輸出的路徑）、dtb、modules.*、kernel.release
-D=$out/deliver
-( cd "$OUT" && find . \( -name '*.ko' -o -name '*.dtb' -o -name '*.dtbo' \) -type f | sort > "$D/files.list"
+D=$H
+L=$work/deliver.list
+( cd "$OUT" && find . \( -name '*.ko' -o -name '*.dtb' -o -name '*.dtbo' \) -type f | sort > "$L"
   for f in arch/arm64/boot/Image modules.order modules.builtin modules.builtin.modinfo include/config/kernel.release .config Makefile Module.symvers; do
     [ -f "kernel/$kname/$f" ] && echo "./kernel/$kname/$f"
-  done >> "$D/files.list"
-  tar -cf - -T "$D/files.list" | zstd -3 -T0 -q -o "$D/deliverables.tar.zst" ) || fail "整理交付檔失敗"
-nko=$(grep -c '\.ko$' "$D/files.list" || true); ndtb=$(grep -c '\.dtbo\?$' "$D/files.list" || true)
-cp "$K/arch/arm64/boot/Image" "$D/Image"
+  done >> "$L"
+  tar -cf - -T "$L" | zstd -3 -T0 -q -o "$D/deliverables.tar.zst" ) || fail "整理交付檔失敗"
+nko=$(grep -c '\.ko$' "$L" || true); ndtb=$(grep -c '\.dtbo\?$' "$L" || true)
 printf '%s\n' "$krel" > "$D/kernel.release"
 printf '%s\n' "./kernel/$kname" > "$D/kernel-subdir"
 
-python3 -I - "$out/build.json" "$ver" "$krel" "$image_sha" "$br_sha" "$comp_json" "$patches_json" "$rc" "$t_build" "$nko" "$ndtb" "$(( $(date +%s) - t_start ))" "$(gcc --version | head -1)" << 'PY'
+python3 -I - "$H/build.json" "$ver" "$krel" "$image_sha" "$br_sha" "$comp_json" "$patches_json" "$rc" "$t_build" "$nko" "$ndtb" "$(( $(date +%s) - t_start ))" "$(gcc --version | head -1)" << 'PY'
 import json, sys
 o, ver, krel, ish, bsh, comp, patches, rc, tb, nko, ndtb, total, gcc = sys.argv[1:14]
 json.dump({"schema": 1, "version": ver, "kernel_release": krel, "image_sha256": ish, "build_record_sha256": bsh,
@@ -86,4 +89,7 @@ json.dump({"schema": 1, "version": ver, "kernel_release": krel, "image_sha256": 
            "uefi": "未自編（D-002，使用 BSP 內建）", "reproducible": False}, open(o, "w"), indent=1, ensure_ascii=False)
 PY
 cm=$(printf '%s' "$comp_json" | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print("%d/%d"%(d["matched"],d["checked"]))')
-echo "build: OK（核心 $krel；Image sha256 $image_sha；.ko $nko、dtb $ndtb；patch $np 個；元件 SHA-1 核對 $cm；UEFI 未自編；編譯 ${t_build} 秒）"
+tail -n 40 "$work/nvbuild.log" > "$H/nvbuild-tail.txt"
+summary="build: OK（核心 $krel；Image sha256 $image_sha；.ko $nko、dtb $ndtb；patch $np 個；元件 SHA-1 核對 $cm；UEFI 未自編；編譯 ${t_build} 秒）"
+printf '%s\n' "$summary" > "$H/build-summary.md"
+echo "$summary"

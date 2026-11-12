@@ -2,8 +2,7 @@
 # Jetson 轉接器 assemble 步驟：BSP ＋ 範例 rootfs 組刷機包，核心與樹外模組換成 build 步驟編出來的那一份。
 # 收到 <專案資料夾> <版本>，環境變數見 pipeline/platform.sh。
 #
-# 輸入：$DUMPLING_OUT/downloads/（fetch）、$DUMPLING_OUT/deliver/deliverables.tar 與 kernel.release（build；scan job 從 artifact 放回來）、
-#       $DUMPLING_OUT/BuildRecord-*.tar.gz
+# 輸入：$DUMPLING_OUT/downloads/（fetch）、$DUMPLING_OUT/handoff/（build 交接：deliverables.tar.zst、kernel.release、kernel-subdir、build.json、BuildRecord-*.tar.gz）
 # 輸出：
 #   FlashPackage/<專案>-<版本>-flashpkg.tar(+.md5)  Linux_for_Tegra/ 形式（BSP ＋ rootfs；kernel/Image 與 rootfs/boot/Image 都是 CI 編的那顆）
 #   SourceCode/<專案>-<版本>-source.tar(+.md5)       套好 patch 的原始碼樹（精靈的 SourceCode 輸入；上游比對用）
@@ -22,10 +21,11 @@ root=${DUMPLING_ROOT:?}; out=${DUMPLING_OUT:?}
 pyl() { python3 -I "$root/pipeline/lib/$1" "${@:2}"; }
 fail() { echo "assemble: FAIL（$*）"; exit 1; }
 dl=$out/downloads work=$out/assemble
+h=$out/handoff      # build 交接的資料夾（workflow 在 scan job 放回同一個路徑）
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 t0=$(date +%s)
 
-for f in "$out/deliver/kernel.release" "$out/deliver/kernel-subdir" "$out/build.json"; do
+for f in "$h/kernel.release" "$h/kernel-subdir" "$h/build.json"; do
   [ -f "$f" ] || fail "缺少 build 的輸出 $f"
 done
 bsp='' rfs=''
@@ -39,9 +39,9 @@ rm -rf "$work" "$out/FlashPackage" "$out/SourceCode" "$out/tee-source"
 mkdir -p "$work" "$out/FlashPackage" "$out/SourceCode" || fail "無法建立資料夾"
 
 # 1. CI 的交付檔（我們自己的 build 輸出，仍用安全解壓）
-if [ -f "$out/deliver/deliverables.tar.zst" ]; then
-  zstd -d -q -c "$out/deliver/deliverables.tar.zst" > "$work/deliverables.tar" || fail "解壓 deliverables.tar.zst 失敗"
-elif [ -f "$out/deliver/deliverables.tar" ]; then cp "$out/deliver/deliverables.tar" "$work/deliverables.tar"
+if [ -f "$h/deliverables.tar.zst" ]; then
+  zstd -d -q -c "$h/deliverables.tar.zst" > "$work/deliverables.tar" || fail "解壓 deliverables.tar.zst 失敗"
+elif [ -f "$h/deliverables.tar" ]; then cp "$h/deliverables.tar" "$work/deliverables.tar"
 else fail "缺少 build 的輸出 deliver/deliverables.tar.zst"; fi
 pyl safe_extract.py "$work/deliverables.tar" "$work/deliver" > /dev/null || fail "解開 deliverables 被拒絕或失敗"
 rm -f "$work/deliverables.tar"
@@ -52,7 +52,7 @@ python3 -I "$root/tools/demo/jetson_rootfs.py" --bsp "$dl/$bsp" --rootfs "$dl/$r
 echo "rootfs：$(tail -1 "$work/prep.txt")"
 
 # 3. 刷機包
-krel=$(cat "$out/deliver/kernel.release"); ksub=$(sed 's|^\./||' "$out/deliver/kernel-subdir")
+krel=$(cat "$h/kernel.release"); ksub=$(sed 's|^\./||' "$h/kernel-subdir")
 pkg=$out/FlashPackage/$DUMPLING_PROJECT-$ver-flashpkg.tar
 line=$(pyl jetson_assemble.py --bsp "$dl/$bsp" --rootfs-tar "$work/base.tar" --deliver "$work/deliver" --kernel-release "$krel" \
   --kernel-subdir "$ksub" --out "$pkg" --report "$out/assemble.json" --owners-out "$out/owners.json") || fail "$(printf '%s' "$line" | sed 's/^jetson_assemble: FAIL（//; s/）$//')"

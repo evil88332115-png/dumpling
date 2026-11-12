@@ -1,5 +1,5 @@
 # 公開原始碼、BSP、成品的網址與雜湊；一個專案可以有多個版本（tag 是 <專案>/<版本>）。
-# files[] 的欄位：name、url（https）、sha256、size（選填）、role（bsp｜rootfs｜source｜image｜package｜tool）、
+# files[] 的欄位：name、url（https）、sha256、size（選填）、role（bsp｜rootfs｜source｜image｜package｜tool｜metadata；metadata＝廠商附的清單或說明檔，例如官方 SBOM、.info、.manifest、.json：只下載核對、唯讀、不掃描）、
 #   sha1（選填，廠商公布的值）、commit＋repo（GitHub 動態封存檔以 commit SHA 為準）、
 #   gap（還沒有可核對的雜湊時寫原因，取代 sha256；fetch 回報 GAP，不會自動接受第一次看到的雜湊）。
 schema: 1
@@ -11,3 +11,8 @@ releases:
         url: https://example.com/replace-me
         role: source
         gap: TO BE COMPLETED
+      # 廠商附的清單或說明檔（官方 SBOM、.info、.manifest、.json）用 role: metadata：fetch 下載並核對，之後唯讀、不掃描：
+      # - name: vendor.manifest
+      #   url: https://example.com/replace-me.manifest
+      #   sha256: <64 位小寫十六進位>
+      #   role: metadata

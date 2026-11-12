@@ -4,6 +4,7 @@
 用法：python3 -I pipeline/project-info.py <專案>/<版本>      （tag 格式）
       python3 -I pipeline/project-info.py --dir <專案資料夾> <版本>
       python3 -I pipeline/project-info.py --matrix [<專案名>]    （dev.yml 用：印 JSON 陣列 [{"project","version"}…]；每個專案取 sources.yml 的最後一個版本）
+輸出另含 workflow 的規劃值（platform.yml）：BUILD_MODE（compile｜none）、BUILD_RUNNER（runner 標籤）、BUILD_APT、SCAN_RUNNER、SCAN_APT（apt 清單用空白分隔）、ARCH。
 tag 格式錯、專案不存在、版本不在 sources.yml、欄位驗證失敗 → 不印 KEY=VALUE，印 "project-info: FAIL（…）" 並以 1 結束。
 """
 import os
@@ -28,10 +29,13 @@ def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
     if not re.match(r"^[A-Za-z0-9_./+-]+$", project_dir):
         raise pc.ConfigError("專案資料夾路徑含不安全字元")
     name = os.path.basename(os.path.normpath(project_dir))
+    plan = pc.platform_plan(pc.load_platform_config(project["platform"], platforms_dir))
     return [("PROJECT", name), ("VERSION", version), ("TAG", name + "/" + version),
             ("PLATFORM", project["platform"]), ("STATUS", project["status"]),
             ("OS_RESPONSIBILITY", project["os_responsibility"]), ("COMPANY_ROLE", project["company_role"]),
-            ("PROJECT_DIR", _rel(project_dir))]
+            ("PROJECT_DIR", _rel(project_dir)),
+            ("BUILD_MODE", plan["build_mode"]), ("BUILD_RUNNER", plan["build_runner"]), ("BUILD_APT", " ".join(plan["build_apt"])),
+            ("SCAN_RUNNER", plan["scan_runner"]), ("SCAN_APT", " ".join(plan["scan_apt"])), ("ARCH", plan["arch"])]
 
 
 def matrix(root, only=None):

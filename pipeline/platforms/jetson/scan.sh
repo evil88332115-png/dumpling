@@ -2,7 +2,7 @@
 # Jetson 轉接器 scan 步驟：臨時 DT → 鏡像資料 → 精靈（完整掃描）→ 分層（每層重跑比對）→ 收集報告 → 標準答案比對。
 # 收到 <專案資料夾> <版本>，環境變數見 pipeline/platform.sh；另需 PILOT_ENV（pilot.env 的路徑；單獨一個資料夾）。
 #
-# 輸入：assemble 的 FlashPackage/、SourceCode/、tee-source/，build 的 BuildRecord-*.tar.gz、build.json，fetch 的 downloads/。
+# 輸入：assemble 的 FlashPackage/、SourceCode/、tee-source/，build 交接的 handoff/（BuildRecord-*.tar.gz、build.json），fetch 的 downloads/。
 # 輸出（$DUMPLING_OUT）：release/（Release 附件＋manifest.tsv＋notes.md）、scan.json、expected-check.txt、summary.md、wizard-out/（精靈的輸出）。
 #
 # 流程與理由（詳見 docs/JETSON.md「scan」）：
@@ -25,7 +25,7 @@ t0=$(date +%s)
 
 for c in docker syft grype bwrap git python3 curl; do command -v "$c" > /dev/null || fail "缺少 $c"; done
 pkg=$out/FlashPackage/$DUMPLING_PROJECT-$ver-flashpkg.tar
-br=$(find "$out" -maxdepth 1 -name "BuildRecord-*.tar.gz" | head -1)
+br=$(find "$out/handoff" -maxdepth 1 -name "BuildRecord-*.tar.gz" | head -1)
 [ -f "$pkg" ] || fail "沒有 $pkg（先執行 assemble）"
 [ -n "$br" ] || fail "沒有建置紀錄 BuildRecord-*.tar.gz"
 rel=$(pyl jetson_build.py param "$proj" "$ver" l4t_release) || fail "sources.yml 的 $ver 沒有 platform_params.l4t_release"
@@ -110,7 +110,7 @@ echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
-  --build-json "$out/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" "${runargs[@]}" "${official[@]}" \
+  --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" "${runargs[@]}" "${official[@]}" \
   || fail "收集結果失敗"
 cp "$out/wizard.log" "$out/release/" 2> /dev/null; rm -f "$out/release/wizard.log"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json

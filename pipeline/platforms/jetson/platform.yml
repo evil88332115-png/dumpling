@@ -2,8 +2,31 @@
 schema: 1
 platform: jetson
 description: NVIDIA Jetson（Jetson Linux r39.x）：公開 BSP、範例 rootfs、public_sources；編核心與樹外模組後組刷機包
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/<arch>）
 build:
-  mode: compile            # 交叉編譯核心與樹外模組（J 軌實作）
+  mode: compile            # 在 arm64 runner 原生編譯核心與樹外模組（不用交叉工具鏈）
+  runner: arm64            # ubuntu-24.04-arm
+  apt:                     # build job 的 apt 相依（--no-install-recommends；M2 試驗實測 Ubuntu 24.04 arm64）
+    - build-essential
+    - bc
+    - bison
+    - flex
+    - libssl-dev
+    - libelf-dev
+    - rsync
+    - dwarves
+    - cpio
+    - kmod
+    - device-tree-compiler
+    - python3
+    - python3-yaml
+    - xz-utils
+    - zstd
+    - lz4
+    - libncurses-dev
+    - pkg-config
+    - perl
+    - patch
 raw_sectors:
   enabled: false           # Jetson 沒有分割區外的原始磁區要清點
 # 分層規則（D-027）：用套件名稱（不含版本）與路徑樣式，fnmatch 語法；不看版本字尾。其餘一律是 os。
@@ -54,6 +77,8 @@ layers:
       - "Linux_for_Tegra/nv_tools/*"
   default: os
 scan:
+  runner: amd64              # ubuntu-24.04：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和 arch 無關（預設值，寫出來當說明）
+  apt: [zstd, lbzip2]        # scan job 額外的 apt 套件（組刷機包要解壓縮；bubblewrap 與 python3-yaml 由 workflow 固定裝）
   inputs_template: jetson    # tools/wizard/platforms/jetson.json
   platform_arg: jetson       # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform
   rootfs: rootfs

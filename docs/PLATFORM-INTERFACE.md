@@ -88,7 +88,12 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
         role: source
         gap: 尚未記錄首次下載的 sha256
 ```
-`files[]` 沿用 `firmware/*/*/firmware.yml` 的 `name`、`url`、`sha256`、`size`、`role`（`size` 改為選填，`role` 多了 `bsp`、`rootfs`、`tool`）。
+`files[]` 沿用 `firmware/*/*/firmware.yml` 的 `name`、`url`、`sha256`、`size`、`role`（`size` 改為選填，`role` 多了 `bsp`、`rootfs`、`tool`、`metadata`）。
+
+| `role` | 意思 |
+|---|---|
+| `bsp`、`rootfs`、`source`、`image`、`package`、`tool` | 平台轉接器依 role 明確挑檔案（例如 Jetson 的 assemble 只挑 `bsp` 與 `rootfs`） |
+| `metadata` | 廠商附的清單或說明檔（官方 SBOM、`.info`、`.manifest`、`.json`）：唯讀、不掃描。fetch 照樣下載並核對 sha256；assemble／scan 不可把它當掃描輸入（沒有任何程式用 role 反選，只依 role 明確挑需要的） |
 規則（D-025、D-027）：
 - 有 `gap` 的檔案不下載，fetch 回報 GAP；**不自動接受第一次看到的 sha256**。
 - 有 `commit` 的封存檔若 sha256 不符，不接受新雜湊，改用 `git clone`（只 https、不跑 hook、不抓 submodule）取該 commit、核對 `git rev-parse HEAD`，工作樹放 `<下載資料夾>/<name>.checkout`；clone 也失敗就是 FAIL。
@@ -154,7 +159,11 @@ Jetson 的 `sources.yml` `platform_params`：
 schema: 1
 platform: jetson               # 必須和資料夾名稱相同
 description: …
-build: {mode: compile}         # compile｜none
+arch: arm64                    # 選填：目標映像的架構 arm64｜amd64（預設 arm64）；scan 的 docker import --platform linux/<arch>
+build:
+  mode: compile                # compile｜none（none＝workflow 略過 build job）
+  runner: arm64                # 選填：build job 的 runner arm64｜amd64（預設 arm64 → ubuntu-24.04-arm／ubuntu-24.04）
+  apt: [build-essential, …]    # 選填：build job 的 apt 套件（--no-install-recommends；小寫英數與 + . -）
 raw_sectors: {enabled: false}  # 見上
 layers:                        # 分層規則（D-027）：套件名稱（不含版本）與路徑樣式，fnmatch 語法
   bsp:
@@ -163,6 +172,8 @@ layers:                        # 分層規則（D-027）：套件名稱（不含
     paths: ["Linux_for_Tegra/flash.sh", "Linux_for_Tegra/tools/*"]
   default: os                  # 其餘一律 os
 scan:                          # 選填
+  runner: amd64                # 選填：scan job 的 runner amd64｜arm64（預設 amd64 → ubuntu-24.04）
+  apt: [zstd]                  # 選填：scan job 額外的 apt 套件
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
   platform_arg: jetson         # 傳給掃描工具的 --platform
   rootfs: rootfs
@@ -170,6 +181,21 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
 ```
+**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`ARCH`）：
+
+| 欄位 | 預設 | 作用 |
+|---|---|---|
+| `arch` | `arm64` | 目標映像的架構；scan 用 `docker import --platform linux/<arch>`（`DUMPLING_ARCH`／`SCA_ARCH`） |
+| `build.mode` | （必填） | `none`：整個 build job 略過（`if:` 為 false），scan job 照樣跑、不下載任何 build artifact。`compile`：build job 跑，runner 與 apt 取下面兩欄 |
+| `build.runner` | `arm64` | build job 的 runner：`arm64`＝`ubuntu-24.04-arm`、`amd64`＝`ubuntu-24.04` |
+| `build.apt` | `[]` | build job 的 apt 相依 |
+| `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
+| `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
+
+**build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
+workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。
+build 若寫 `handoff/build-summary.md`，workflow 把它放進 step summary（沒有就用 build 步驟的最後一行）。`build.mode: none` 的平台沒有 handoff。
+
 - 分層規則**只用套件名稱清單與路徑樣式，不看版本字尾**（例如不以 `+rpt` 判斷）。套件樣式：小寫英數與 `+ . - _`，可含 `* ? []`，不含 `/`。路徑樣式：相對路徑、不含 `..`；`*` 也比對 `/`。套件先比 `bsp`、再比 `host-tool`，都不符合是 `os`。
 - **分層的完整規則見 `docs/LAYERS.md`**。補充（向後相容的擴充）：`layers.os.paths`（選用，只有 `paths`）可明確宣告哪些路徑是 OS；路徑樣式比的是元件在映像裡的路徑
   （rootfs 映像是 `usr/lib/modules/…`，BSP 資料夾是 `Linux_for_Tegra/…`，兩種都列）。`default: os` 只用在**發行版套件**（deb／rpm／apk 的名稱）；非套件元件的路徑沒有任何規則

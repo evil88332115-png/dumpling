@@ -1,8 +1,10 @@
 name: pipeline
 
-# 共用的 build＋scan（reusable workflow）：release.yml 與 dev.yml 都呼叫它，專案與平台由 project.yml 決定，新增專案不用改這裡。
-#   build：ubuntu-24.04-arm 原生編譯（Jetson 約 36 分鐘）→ 打包建置紀錄 → artifact
-#   scan ：ubuntu-24.04 重新下載 BSP 與 rootfs → 組刷機包（核心換成 build 編的）→ 臨時 DT → 精靈掃描 → 分層 → 報告 → 標準答案比對 → artifact
+# 共用的 build＋scan（reusable workflow）：release.yml 與 dev.yml 都呼叫它，專案與平台由 project.yml 決定，新增專案或平台不用改這裡。
+#   plan ：讀 platform.yml（pipeline/project-info.py）：build.mode（compile｜none）、build.runner、build.apt、scan.runner、scan.apt、arch
+#   build：build.mode＝compile 才跑（none 時整個略過）；runner 與 apt 清單來自 platform.yml（Jetson：arm64 原生編譯，約 36 分鐘）。
+#          build 步驟把要交給 scan 的東西全部放在 $DUMPLING_OUT/handoff/，workflow 整個資料夾上傳、在 scan job 放回同一個路徑（不指名任何檔案）
+#   scan ：build 略過（none 或沿用別的 run 的 artifact）也會跑，build 失敗或被取消就不跑；重新 fetch → assemble → 臨時 DT → scan → 分層 → 報告 → 標準答案比對 → artifact
 # 這裡的 job 都只有唯讀權限（D-012）；建 Release 的 job 在 release.yml。
 # 建置不可重現：建置紀錄與刷機包裡的核心必須來自同一次編譯，所以 build 的結果用 artifact 傳給 scan，不重編、不以雜湊當 cache key。
 on:
@@ -40,11 +42,37 @@ env:
   DUMPLING_PROJECT_DIR: projects/${{ inputs.project }}
 
 jobs:
+  plan:
+    name: plan (${{ inputs.project }} ${{ inputs.version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      BUILD_MODE: ${{ steps.p.outputs.BUILD_MODE }}
+      BUILD_RUNNER: ${{ steps.p.outputs.BUILD_RUNNER }}
+      BUILD_APT: ${{ steps.p.outputs.BUILD_APT }}
+      SCAN_RUNNER: ${{ steps.p.outputs.SCAN_RUNNER }}
+      SCAN_APT: ${{ steps.p.outputs.SCAN_APT }}
+      ARCH: ${{ steps.p.outputs.ARCH }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: platform.yml 的規劃值
+        id: p
+        env:
+          PROJECT: ${{ inputs.project }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # 值只含安全字元（project-info.py 驗證過 apt 套件名稱與 runner 標籤），可直接寫進 GITHUB_OUTPUT
+          python3 -I pipeline/project-info.py --dir "projects/$PROJECT" "$VERSION" | tee info.txt
+          grep -E '^(BUILD_MODE|BUILD_RUNNER|BUILD_APT|SCAN_RUNNER|SCAN_APT|ARCH)=' info.txt >> "$GITHUB_OUTPUT"
+
   build:
     name: build (${{ inputs.project }} ${{ inputs.version }})
-    if: ${{ inputs.reuse_build_run == '' }}
-    # 平台目前都在 arm64 原生編譯；沒有編譯步驟的平台（build.sh 回報 OK／不編譯）也可以在這裡跑，很快
-    runs-on: ubuntu-24.04-arm
+    needs: plan
+    # build.mode＝none 的平台整個略過；開發時沿用別的 run 的 artifact 也略過
+    if: ${{ needs.plan.outputs.BUILD_MODE == 'compile' && inputs.reuse_build_run == '' }}
+    runs-on: ${{ needs.plan.outputs.BUILD_RUNNER }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,17 +81,18 @@ jobs:
 
       - name: 路徑
         run: |
-          # 輸出放 RUNNER_TEMP 底下（路徑不含 ..）；pilot.env 單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾）
+          # 輸出放 RUNNER_TEMP 底下（路徑不含 ..）；交給 scan 的東西都在 $DUMPLING_OUT/handoff/
           echo "DUMPLING_OUT_BASE=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
-          echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
 
-      - name: 相依套件（Jetson 核心與樹外模組）
+      - name: 相依套件（platform.yml 的 build.apt）
+        env:
+          BUILD_APT: ${{ needs.plan.outputs.BUILD_APT }}
         run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            build-essential bc bison flex libssl-dev libelf-dev rsync dwarves cpio kmod device-tree-compiler \
-            python3 python3-yaml xz-utils zstd lz4 libncurses-dev pkg-config perl patch > /dev/null
-          gcc --version | head -1; pahole --version
+          if [ -n "$BUILD_APT" ]; then
+            sudo apt-get update -qq
+            # shellcheck disable=SC2086 — 套件名稱已由 project_config 驗證（小寫英數與 + . -）
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $BUILD_APT > /dev/null
+          fi
 
       - name: 驗證專案設定
         run: bash pipeline/platform.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
@@ -74,31 +103,30 @@ jobs:
       - name: build
         run: bash pipeline/platform.sh build "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" | tee "$RUNNER_TEMP/build-line.txt"
 
-      - name: 整理傳給 scan 的檔案（建置紀錄、交付檔、build.json）
+      - name: 摘要（build.sh 寫的 handoff/build-summary.md；沒有就用最後一行）
         run: |
           o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
-          mkdir -p "$RUNNER_TEMP/handoff"
-          cp "$o"/BuildRecord-*.tar.gz "$o/build.json" "$RUNNER_TEMP/handoff/"
-          cp "$o"/deliver/deliverables.tar* "$o/deliver/kernel.release" "$o/deliver/kernel-subdir" "$RUNNER_TEMP/handoff/"
-          tail -n 40 "$o/work/nvbuild.log" > "$RUNNER_TEMP/handoff/nvbuild-tail.txt"
-          ls -l "$RUNNER_TEMP/handoff"
-          { echo "## build（${{ inputs.project }} ${{ inputs.version }}）"; tail -n 1 "$RUNNER_TEMP/build-line.txt"; } >> "$GITHUB_STEP_SUMMARY"
+          ls -l "$o/handoff"
+          {
+            echo "## build（${{ inputs.project }} ${{ inputs.version }}）"
+            if [ -f "$o/handoff/build-summary.md" ]; then cat "$o/handoff/build-summary.md"; else tail -n 1 "$RUNNER_TEMP/build-line.txt"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: artifact（同一次編譯的建置紀錄與交付檔；只保留 1 天）
+      - name: artifact（build 交給 scan 的整個 handoff 資料夾；只保留 1 天）
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-${{ inputs.project }}-${{ inputs.version }}
-          path: ${{ runner.temp }}/handoff
+          path: ${{ runner.temp }}/out/${{ inputs.project }}/${{ inputs.version }}/handoff
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
 
   scan:
     name: scan (${{ inputs.project }} ${{ inputs.version }})
-    needs: build
-    # build 被略過（沿用別的 run 的 artifact）也要跑；build 失敗或被取消就不跑
-    if: ${{ !cancelled() && inputs.stop_after != 'build' && (needs.build.result == 'success' || (inputs.reuse_build_run != '' && needs.build.result == 'skipped')) }}
-    runs-on: ubuntu-24.04
+    needs: [plan, build]
+    # plan 成功；build 成功，或被略過（build.mode＝none、或開發時沿用別的 run 的 artifact）也要跑；build 失敗或被取消就不跑
+    if: ${{ !cancelled() && inputs.stop_after != 'build' && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ${{ needs.plan.outputs.SCAN_RUNNER }}
     timeout-minutes: 240
     outputs:
       artifact: ${{ steps.names.outputs.artifact }}
@@ -117,23 +145,29 @@ jobs:
         id: names
         run: echo "artifact=scan-${{ inputs.project }}-${{ inputs.version }}" >> "$GITHUB_OUTPUT"
 
-      - name: 取得 build 的 artifact
+      - name: 取得 build 的 handoff（放回 $DUMPLING_OUT/handoff）
+        if: ${{ needs.plan.outputs.BUILD_MODE == 'compile' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-${{ inputs.project }}-${{ inputs.version }}
-          path: ${{ runner.temp }}/handoff
+          path: ${{ runner.temp }}/out/${{ inputs.project }}/${{ inputs.version }}/handoff
           run-id: ${{ inputs.reuse_build_run || github.run_id }}
           github-token: ${{ github.token }}
 
-      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）
+      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）與 platform.yml 的 scan.apt
+        env:
+          SCAN_APT: ${{ needs.plan.outputs.SCAN_APT }}
         run: |
+          # install-tools.sh 目前只裝 linux_amd64 的 Syft／Grype：scan.runner＝arm64 還不支援
+          [ "$(uname -m)" = x86_64 ] || { echo "scan: FAIL（scan.runner 不是 amd64：tools/e2e/install-tools.sh 只有 amd64 的 Syft／Grype）"; exit 1; }
           mkdir -p "$RUNNER_TEMP/tools"
           bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
           # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
           sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
           cat "$RUNNER_TEMP/tools/versions.txt"
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml zstd lbzip2 > /dev/null
+          # shellcheck disable=SC2086 — scan.apt 的套件名稱已由 project_config 驗證
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml $SCAN_APT > /dev/null
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
@@ -142,24 +176,15 @@ jobs:
       - name: 驗證專案設定
         run: bash pipeline/platform.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
 
-      - name: 放回 build 的檔案
-        run: |
-          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
-          mkdir -p "$o/deliver"
-          cp "$RUNNER_TEMP"/handoff/BuildRecord-*.tar.gz "$RUNNER_TEMP/handoff/build.json" "$o/"
-          cp "$RUNNER_TEMP"/handoff/deliverables.tar* "$RUNNER_TEMP"/handoff/kernel.release "$RUNNER_TEMP"/handoff/kernel-subdir "$o/deliver/"
-          cat "$o/build.json"
-
-      - name: fetch（BSP、範例 rootfs、public_sources 重新從 NVIDIA 下載並核對）
+      - name: fetch（重新從來源下載並核對）
         run: bash pipeline/platform.sh fetch "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
 
-      - name: assemble（組刷機包，核心與樹外模組換成 build 編的）
+      - name: assemble（組產品映像；Jetson：核心與樹外模組換成 build 編的）
         run: bash pipeline/platform.sh assemble "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
 
       - name: scan（臨時 DT → 精靈 → 分層 → 報告 → 標準答案比對）
         env:
           MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
-          GITHUB_REPOSITORY_INFO: ${{ github.repository }}
         run: |
           # 結束碼 3＝GAP（資料不齊，例如還沒有標準答案）：結果照樣產生，標成警告，不當成通過；其他非 0 一律失敗
           rc=0
@@ -173,7 +198,7 @@ jobs:
           o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
           mkdir -p "$RUNNER_TEMP/result"
           [ -d "$o/release" ] && cp -r "$o/release/." "$RUNNER_TEMP/result/" || true
-          for f in build.json assemble.json scan.json expected-check.txt; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
+          for f in handoff/build.json assemble.json scan.json expected-check.txt; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
           [ -f "$o/summary.md" ] && cat "$o/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
           # 診斷用（只在 artifact，不進 Release）：精靈輸出裡的小檔（狀態、紀錄、比對結果、報告），不含解開的原始碼與建置紀錄
           if [ -d "$o/wizard-out" ]; then
