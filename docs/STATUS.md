@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:05 -0500（C0）
+最後更新：2026-11-12 08:08 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -39,7 +39,7 @@
 
 - 目前在做：B 段。PR 1（公開樣本＋下載核對）與 PR 2a（x86_firmware 解析→CycloneDX）同時進行，各一個寫程式代理
 - 分支／PR／commit：
-  - `wp3/firmware-samples`（PR 1，draft 尚未開；worktree `$AGENT_TMP/dumpling-wt-c2-samples`）
+  - `wp3/firmware-samples`：PR #7（ready，CI 三項綠燈，最後 commit 052039b）
   - `wp3/bios-sbom`（PR 2a，從 main 3f1c260 開出；worktree `$AGENT_TMP/dumpling-wt-c2-bios-sbom`）
 - 預定 PR（D-014，一個可測的功能一個 PR）：
   1. `wp3/firmware-samples`：樣本清單＋下載並核對 sha256（`pipeline/firmware-fetch.sh`、`tests/run.d/c2-firmware.sh`、`firmware.yml` workflow）
@@ -48,10 +48,11 @@
   3. `wp4/vbios`：獨立 vBIOS＋BIOS 內 Intel GOP／VBT／legacy VBIOS，公告比對 NOT_ASSESSED
   4. `wp3/firmware-dt`：firmware workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
 - 代理：
-  - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1，分支 `wp3/firmware-samples`，狀態：進行中
+  - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1，分支 `wp3/firmware-samples`，狀態：完成
+  - 驗證代理（Sonnet 5.5 medium）：驗證 PR #7，狀態：進行中
   - 代理 B（寫程式，Sonnet 5.5 high）：PR 2a，分支 `wp3/bios-sbom`，狀態：進行中
-- CI：無（等代理開 PR）
-- 下一步：兩個 PR 綠燈後通知 C0 派驗證代理；PR 1 合併後，PR 2a 之後的 PR 加上真實樣本的 CI 驗收（Dasharo ME 14.0.47.1558、微碼 0xF8）
+- CI：PR #7 綠燈（firmware-fetch run 43223968481 真的下載 5 個樣本並核對 sha256）
+- 下一步：PR 2a 開成正式 PR、綠燈後優先驗證並通知 C0（D-017，C1 M1 等它）；PR #7 驗證通過後通知 C0。PR #7 發現 NUC CAP 是 AMI PFAT 封裝、NVIDIA 更新工具裡的 PCIR 不完整，PR 3 要處理
 - 卡住／等決定：PR 2b 等 C1 M1（uefi_image.py，D-016）；其他無
 <!-- END C2 -->
 
