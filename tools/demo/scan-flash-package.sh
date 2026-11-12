@@ -10,8 +10,11 @@
 #           （B-img-extract；磁碟需求約等於未壓縮的映像，Pi OS lite 約 3 GB；結束時刪除）。boot 的 FAT 與 root 的 ext4 直接讀（rpi_img.py）；
 #           B-bootloader-coverage 用 Raspberry Pi 的真實分類（GPU 韌體 GAP、EEPROM 不在映像裡）
 #         [--md5 <檔案>]（--archive 預設 <tbz2>.md5（存在時）；--dir 要給逐檔的 md5 清單，沒有時 A-md5 記 NOT_RUN）
-#         [--platform <jetson|raspberrypi|rockchip>]（或環境變數 SCA_PLATFORM；由 project.yml 的 platform 明確傳入，不從映像格式推測。
-#           原始磁碟映像（raw-disk-img*）沒給平台時，開機程式分類標 GAP「沒有指定平台，不推測」，不預設成 raspberrypi）
+#         [--platform <jetson|raspberrypi|rockchip|generic>]（或環境變數 SCA_PLATFORM；由 project.yml 的 platform 明確傳入，不從映像格式推測。
+#           原始磁碟映像（raw-disk-img*）沒給平台時，開機程式分類標 GAP「沒有指定平台，不推測」，不預設成 raspberrypi。
+#           generic＝沒有定義開機鏈的平台（例如 x86 NAS）：任何映像格式的開機程式分類都走 `bootloader_coverage.py --not-assessed generic`，狀態 NOT_ASSESSED（不是 GAP）；
+#           沒給平台（空值）仍然是 GAP（--unspecified））
+#         [--arch <arm64|amd64>]（或環境變數 SCA_ARCH；預設 arm64：`docker import --platform linux/<arch>` 的架構，映像只匯入與讀取、不執行。其他值結束碼 64）
 #         [--out <資料夾>]（預設 $HOME/sca-results/<name>-<version>-<UTC 時間>；FLASHPKG_RESULTS 改上層資料夾）
 #         [--product-config <config.json>]（產品的 CRA 設定；沒有時產生只有產品名稱與版本的最小設定，其他欄位標 TO BE COMPLETED）
 #         [--uefi-source <UEFI 原始碼樹>]（公司自建 UEFI 的原始碼：tools/cra/uefi_source.py 讀 edk2 版本與內建的 OpenSSL／Mbed TLS 版本 →
@@ -89,6 +92,7 @@ usage(){ sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
 
 PLATFORM=${SCA_PLATFORM:-}
+ARCH=${SCA_ARCH:-arm64}
 ARCHIVE= SRCDIR= MD5= RFS= PREFIX= NAME= VERSION= OUT= PCONF= LICENSE=0 KEEP=0 NOUP=0 COMPANY= NOCOMP=0 MANUF= RESCAN= IC_NOTE= EVOUT= PROV_MD5= PROV_ST= DECFROM= UEFISRC= UEFIDSC=() TEESRC= EXTRAS=() DTVEX=${DT_VEX_WRITEBACK:-0} DTPROD=${DT_PRODUCT_COMPONENTS:-0}
 while [ $# -gt 0 ]; do case $1 in
   --archive) optval "$@"; ARCHIVE=$2; shift 2;;
@@ -100,6 +104,7 @@ while [ $# -gt 0 ]; do case $1 in
   --version) optval "$@"; VERSION=$2; shift 2;;
   --out) optval "$@"; OUT=$2; shift 2;;
   --platform) optval "$@"; PLATFORM=$2; shift 2;;
+  --arch) optval "$@"; ARCH=$2; shift 2;;
   --product-config) optval "$@"; PCONF=$2; shift 2;;
   --vuln-only) LICENSE=0; shift;;
   --with-license) LICENSE=1; shift;;
@@ -122,7 +127,8 @@ while [ $# -gt 0 ]; do case $1 in
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
-case $PLATFORM in ""|jetson|raspberrypi|rockchip) ;; *) echo "--platform（SCA_PLATFORM）只接受 jetson、raspberrypi、rockchip：$PLATFORM" >&2; exit 64;; esac
+case $PLATFORM in ""|jetson|raspberrypi|rockchip|generic) ;; *) echo "--platform（SCA_PLATFORM）只接受 jetson、raspberrypi、rockchip、generic：$PLATFORM" >&2; exit 64;; esac
+case $ARCH in arm64|amd64) ;; *) echo "--arch（SCA_ARCH）只接受 arm64、amd64：$ARCH" >&2; exit 64;; esac
 if [ -n "$ARCHIVE" ] && [ -n "$SRCDIR" ]; then echo "--archive 與 --dir 只能選一個" >&2; exit 64; fi
 if [ -n "$DECFROM" ]; then
   [ -z "$RESCAN" ] || { echo "--decisions-from 只用於完整掃描（--rescan-from 本來就帶上一次的判定檔）" >&2; exit 64; }
@@ -423,6 +429,7 @@ coverage_step(){
         *) na=(--not-assessed "$PLATFORM");;           # 其他平台（例如 rockchip）：沒有定義開機鏈
       esac;;
   esac
+  [ "$PLATFORM" != generic ] || na=(--not-assessed generic)    # generic＝沒有定義開機鏈：不論映像格式，一律 NOT_ASSESSED（不是 GAP）
   if [ ${#na[@]} -gt 0 ]; then :
   elif [ ! -f "$OUT/flash-inventory.json" ]; then return 0; fi
   [ ! -f "$OUT/$v/tee-source/tee-source.json" ] || tj=$OUT/$v/tee-source/tee-source.json   # 和 cra_report.py 讀的同一份 tee-source
@@ -788,7 +795,7 @@ for v in "${VARS[@]}"; do
   [ -z "$TEESRC" ] || teesrc_step "$v"
   PENDING_TAG=$tag
   msg="sca-center flash package scan: $SRCNAME $prefix (imported, never run)"
-  iid=$(docker import --platform linux/arm64 -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err") || \
+  iid=$(docker import --platform "linux/$ARCH" -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err") || \
     { grep -qi 'platform' "$D/logs/import.err" && iid=$(docker import -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err"); }
   rm -f "$WORK/$v.tar"
   if [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]; then

@@ -373,3 +373,28 @@ def test_cli_p1_layers_validation(tmp_path):
     r = subprocess.run([sys.executable, "-I", str(rp.CLI if hasattr(rp, "CLI") else rp.__file__), "--project", str(p), "--out", str(tmp_path / "cli-out"),
                         "--p1-layers", "bsp,nope"], capture_output=True, text=True)
     assert r.returncode == 64 and "--p1-layers" in r.stderr
+
+
+def test_unknown_reason_counts_and_host_tool_note_are_reported(tmp_path):
+    """D-030：unknown 附判斷不了的原因（依原因計數）；host-tool 一節說明它隨 BSP 提供給客戶、在客戶的主機上執行。"""
+    fs = [fnd(UNK, "CVE-2026-0004", "HIGH", kev=True, purl=PYPI), fnd(HOST, "CVE-2026-0005", "LOW")]
+    comps = []
+    for c in TAGGED:
+        c = dict(c)
+        if c.get("name") == UNK:
+            c["properties"] = list(c.get("properties") or []) + [{"name": "dumpling:unknown-reason", "value": "no-path"}]
+        comps.append(c)
+    r, s, rep = scenario(tmp_path, fs, "customer", comps)
+    assert s["layers"]["unknown_by_reason"] == {"no-path": 1}
+    ra = (rep / "risk-assessment.md").read_text(encoding="utf-8")
+    assert "Why the layer could not be determined: no path and not a distribution package 1." in ra
+    assert "Host tools are shipped to the customer with the BSP and run on the customer's host, not on the product." in ra
+
+
+def test_l4t_kernel_map_rows_with_name_and_version_resolve_to_the_kernel_package_layer():
+    """C-kernel-l4t-map 的 mapped_from 實際值是「名稱 版本」（例如 nvidia-l4t-kernel 6.8.12-tegra-39.2.1-…）：用名稱找層，核心列是 bsp，不是 unknown。"""
+    idx = cr.build_layer_index(bom(None, comp("nvidia-l4t-kernel", "6.8.12-tegra-39.2.1", "bsp")))
+    row = {"purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21", "name": "linux-nvidia-tegra", "version": "6.8.0-1021.21",
+           "mapped_from": "nvidia-l4t-kernel 6.8.12-tegra-39.2.1"}
+    assert cr.layer_of_row(row, idx) == ("bsp", "owner-package")
+    assert cr.layer_of_row(dict(row, mapped_from=None), idx) == ("unknown", "unmatched")       # 沒有對應來源：不猜

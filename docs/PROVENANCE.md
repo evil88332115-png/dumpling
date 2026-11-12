@@ -21,7 +21,7 @@
 | `tools/cra/config.example.json` | `scripts/cra/config.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
 | `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處、清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
-| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M2 分層）**：新增 `--os-responsibility`；SBOM 元件帶 `dumpling:layer` 時才動作（沒有時輸出不變）：漏洞列加 `layer`／`layer_todo`／`layer_basis`、host-tool 元件的比對結果移出產品清單、整體狀態（ATTENTION）與依日期的出貨關卡只看我們的待辦（OS 層在 customer／upstream-vendor 時不算）、沒給 os_responsibility 標 GAP 並全部列入待辦、風險評估多一節「Layers」（通知客戶、unknown、host tools）、`summary.json` 與 `vulnerability-rows.json` 多 `layers`；發行閘門（vex_export）不變 |
+| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M2 分層）**：新增 `--os-responsibility`；SBOM 元件帶 `dumpling:layer` 時才動作（沒有時輸出不變）：漏洞列加 `layer`／`layer_todo`／`layer_basis`、host-tool 元件的比對結果移出產品清單、整體狀態（ATTENTION）與依日期的出貨關卡只看我們的待辦（OS 層在 customer／upstream-vendor 時不算）、沒給 os_responsibility 標 GAP 並全部列入待辦、風險評估多一節「Layers」（通知客戶、unknown、host tools）、`summary.json` 與 `vulnerability-rows.json` 多 `layers`；發行閘門（vex_export）不變；**行為修改（M2 J 軌／D-030）**：unknown 附判斷不了的原因（SBOM 元件的 `dumpling:unknown-reason`，`summary.json` 的 `layers.unknown_by_reason`、風險評估 Layers 一節、`漏洞清單.xlsx` 分層摘要依原因計數）；host-tool 一節加一句「隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行」；沒有分層屬性的 SBOM 輸出不變 |
 | `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣（C4 在檔尾追加 11 筆，見「C4 其他平台」節） |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
 | `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：內部主機名稱改成「本機」（1 行） |
@@ -38,7 +38,7 @@
 | `tools/cra/pkg_why.py` | `scripts/cra/pkg_why.py` | 25fa89a | 路徑調整 2 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/py_dpkg_version.py` | `scripts/cra/py_dpkg_version.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_diff.py` | `scripts/cra/report_diff.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；**行為修改（M2 分層）**：`vulnerability-rows.json` 有 `layers` 區塊時才動作（沒有時輸出不變）：清單多「層」欄並依層排、P1 判斷表預設只放我們的待辦（可用 `--p1-layers` 覆寫）、OS 層（customer／upstream-vendor）另開工作表與「通知客戶」、新增「分層摘要」、總覽只含我們的待辦 |
+| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；**行為修改（M2 分層）**：`vulnerability-rows.json` 有 `layers` 區塊時才動作（沒有時輸出不變）：清單多「層」欄並依層排、P1 判斷表預設只放我們的待辦（可用 `--p1-layers` 覆寫）、OS 層（customer／upstream-vendor）另開工作表與「通知客戶」、新增「分層摘要」、總覽只含我們的待辦；**行為修改（M2 J 軌／D-030）**：unknown 附判斷不了的原因（SBOM 元件的 `dumpling:unknown-reason`，`summary.json` 的 `layers.unknown_by_reason`、風險評估 Layers 一節、`漏洞清單.xlsx` 分層摘要依原因計數）；host-tool 一節加一句「隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行」；沒有分層屬性的 SBOM 輸出不變 |
 | `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣 |
 | `tools/cra/security_findings.py` | `scripts/cra/security_findings.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -114,11 +114,11 @@
 | `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip |
 | `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處；改 1 行註解（內部 CI 分支名稱） |
 | `tools/demo/jetson_lookup.py` | `scripts/demo/jetson_lookup.py` | 25fa89a | 原樣 |
-| `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | 原樣 |
+| `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | M2 J 軌：`--out-custom` 改為選填（不給就不寫模擬客製版）；其餘原樣 |
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP |
+| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP；**行為修改（M2 J 軌）**：`--platform generic`（沒有定義開機鏈：任何映像格式的開機程式分類走 `bootloader_coverage.py --not-assessed generic`，NOT_ASSESSED；空值仍是 GAP）、`--arch <arm64|amd64>`／環境變數 `SCA_ARCH`（`docker import --platform linux/<arch>`，預設 arm64，其他值結束碼 64）|
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
@@ -204,14 +204,16 @@
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
 | `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android；「取最新工具」改為取 HEAD 或 `--tools-rev` 的說明 |
-| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改（M2）**：`--platform` 原樣傳給 scan-flash-package.sh，並寫進 plan.json；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
+| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改（M2）**：`--platform` 原樣傳給 scan-flash-package.sh，並寫進 plan.json；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android；**行為修改（M2 J 軌）**：新增選用的 `--rescan-from <scan 資料夾>`（原樣傳給 scan-flash-package.sh，並沿用該資料夾的 A0 結果、不重算），分層時對每一層只重跑比對用；沒給時行為不變 |
 | `tools/wizard/inputs.example.json` | `scripts/wizard/inputs.example.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/jetson.json` | `scripts/wizard/platforms/jetson.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
+| `tests/expected/orin-nano-demo/v39.2.0-demo1.json` | （dumpling 自己寫的） | — | 新增（M2 J 軌）：標準答案，2026-11-12 第一次在 CI 跑通後訂定（見 `docs/JETSON.md`） |
+| `tests/expected/orin-nano-demo/v39.2.1-demo1.json` | （dumpling 自己寫的） | — | 新增（M2 J 軌）：標準答案（套 patch 的版本），同上 |
 
-以下是 dumpling 自己寫的（不是複製）：`pipeline/lib/layers.py`、`pipeline/sbom-layers.py`、`tests/test_layers.py`、`tests/run.d/c1-m2-layers.sh`（M2 分層，見 `docs/LAYERS.md`）、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
+以下是 dumpling 自己寫的（不是複製）：`pipeline/lib/layers.py`、`pipeline/sbom-layers.py`、`tests/test_layers.py`、`tests/run.d/c1-m2-layers.sh`（M2 分層，見 `docs/LAYERS.md`）、`pipeline/lib/{safe_extract,jetson_build,jetson_assemble,jetson_scan,platform_scan}.py`、`pipeline/{check-expected,release-meta}.py`、`pipeline/platforms/jetson/*.sh`、`tests/test_jetson_pipeline.py`、`tests/test_platform_plan.py`、`tests/test_platform_scan.py`、`tests/run.d/c1-m2-jetson.sh`、`tests/expected/orin-nano-demo/v39.2.0-demo1.json`、`tests/expected/orin-nano-demo/v39.2.1-demo1.json`（標準答案，M2 J 軌）、`.github/workflows/{pipeline,release,dev}.yml`（M2 J 軌，見 `docs/JETSON.md`；`safe_extract.py` 取自 M2 試驗分支的 `m2_safe_extract.py`）、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
 
 ### 改動類型說明
 

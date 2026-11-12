@@ -75,6 +75,35 @@ class FetchVerify(Tmp):
         self.assertTrue(ok)
         self.assertEqual(d.calls, [])
 
+    def test_sha1_match_is_checked_by_fetch_one_itself(self):
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1=hashlib.sha1(b"hello").hexdigest()), self.tmp, d)
+        self.assertTrue(ok, msg)
+        self.assertIn("SHA-1", msg)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "a.bin")))
+
+    def test_sha1_mismatch_fails_like_a_sha256_mismatch(self):
+        for kw in ({"sha1": "0" * 40}, {"sha256": sha(b"x")}):       # sha1 不符與 sha256 不符：同樣失敗、同樣不留檔案（正式檔與暫存檔都沒有）
+            tmp = tempfile.mkdtemp(prefix="dumpling-sha1-")
+            self.addCleanup(shutil.rmtree, tmp, True)
+            ok, msg = fv.fetch_one(self.entry(**kw), tmp, self.dl(b"hello"))
+            self.assertFalse(ok, kw)
+            self.assertEqual(os.listdir(tmp), [], kw)
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, self.dl(b"hello"))
+        self.assertIn("sha1 不符", msg)
+
+    def test_no_sha1_is_fine(self):
+        ok, msg = fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        self.assertTrue(ok, msg)
+        self.assertNotIn("SHA-1", msg)
+
+    def test_existing_file_with_wrong_sha1_is_downloaded_again(self):
+        fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, d)      # 已存在的檔案 sha256 相符、sha1 不符：不信任，重新下載後仍不符 → 失敗
+        self.assertFalse(ok)
+        self.assertEqual(len(d.calls), 1)
+
     def test_sha_mismatch(self):
         ok, msg = fv.fetch_one(self.entry(sha256=sha(b"x")), self.tmp, self.dl(b"hello"))
         self.assertFalse(ok)
@@ -471,16 +500,49 @@ class Scripts(Tmp):
             self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: %s" % (step, word))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "out", "ex1", ver, "raw-sectors.json")))
 
-    def test_jetson_skeleton_and_shared_fetch(self):
+    def test_jetson_steps_without_inputs_and_shared_fetch(self):
+        """J 軌實作後：沒有輸入（沒下載、沒有 build 的輸出）時，各步驟回報 FAIL 或 NOT_RUN（非 aarch64 的 build），不會假裝成功。"""
         proj = os.path.join(ROOT, "projects", "orin-nano-demo")
-        for step in ("build", "assemble", "scan"):
-            p = self.plat(step, proj, "v39.2.1-demo1")
+        p = self.plat("build", proj, "v39.2.1-demo1")
+        if os.uname().machine == "aarch64":
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip(), r"^build: FAIL（")
+        else:
             self.assertEqual(p.returncode, 4, p.stdout)
-            self.assertEqual(p.stdout.strip(), "%s: NOT_RUN（J 軌實作）" % step)
+            self.assertRegex(p.stdout.strip(), r"^build: NOT_RUN（只在 aarch64 主機原生編譯")
+        for step in ("assemble", "scan"):
+            p = self.plat(step, proj, "v39.2.1-demo1")
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: FAIL（" % step)
         p = self.plat("raw-sectors", proj, "v39.2.1-demo1")
         self.assertEqual((p.returncode, p.stdout.split("（")[0]), (0, "raw-sectors: OK"))
         p = self.plat("validate", proj, "v39.2.0-demo1")
         self.assertEqual(p.returncode, 0, p.stdout)
+
+    def test_scan_flash_package_platform_generic_and_arch_arguments(self):
+        """--platform generic 與 --arch／SCA_ARCH 的參數處理（不跑 Docker）：合法值過了參數檢查（之後因為沒給 --archive 才結束碼 64），不合法的值在參數檢查就被拒絕。"""
+        sfp = os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh")
+
+        def rc(*args, env=None):
+            p = run(["bash", sfp, *args], env=env)
+            return p.returncode, p.stderr
+        for args, env in ((["--platform", "generic"], None), (["--platform", "generic", "--arch", "amd64"], None), (["--arch", "arm64"], None),
+                          ([], {"SCA_ARCH": "amd64"}), ([], {"SCA_PLATFORM": "generic"})):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertNotIn("只接受", err, (args, env))             # 沒有被參數檢查擋下來，而是後面「需要 --archive」
+            self.assertIn("需要 --archive", err)
+        for args, env, word in ((["--platform", "bogus"], None, "--platform"), (["--arch", "riscv64"], None, "--arch"), (["--arch", ""], None, "--arch"),
+                                ([], {"SCA_ARCH": "x86"}, "--arch"), ([], {"SCA_ARCH": "ARM64"}, "--arch")):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertIn("只接受", err)
+            self.assertIn(word, err)
+        self.assertEqual(rc("--arch")[0], 64)                                     # 缺值
+        src = open(sfp, encoding="utf-8").read()
+        self.assertIn('docker import --platform "linux/$ARCH"', src)               # 架構參數真的用在 docker import
+        self.assertNotIn("linux/arm64", src.split("set -uo pipefail", 1)[1])        # 預設值 arm64 在變數裡，不寫死在 import
+        self.assertIn('[ "$PLATFORM" != generic ] || na=(--not-assessed generic)', src)   # generic 走 --not-assessed generic（NOT_ASSESSED，不是 GAP）
 
     def test_scan_flash_package_rejects_unknown_platform(self):
         p = run(["bash", os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh"), "--platform", "bogus"])

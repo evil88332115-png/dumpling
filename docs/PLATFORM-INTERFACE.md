@@ -88,7 +88,12 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
         role: source
         gap: 尚未記錄首次下載的 sha256
 ```
-`files[]` 沿用 `firmware/*/*/firmware.yml` 的 `name`、`url`、`sha256`、`size`、`role`（`size` 改為選填，`role` 多了 `bsp`、`rootfs`、`tool`）。
+`files[]` 沿用 `firmware/*/*/firmware.yml` 的 `name`、`url`、`sha256`、`size`、`role`（`size` 改為選填，`role` 多了 `bsp`、`rootfs`、`tool`、`metadata`）。
+
+| `role` | 意思 |
+|---|---|
+| `bsp`、`rootfs`、`source`、`image`、`package`、`tool` | 平台轉接器依 role 明確挑檔案（例如 Jetson 的 assemble 只挑 `bsp` 與 `rootfs`） |
+| `metadata` | 廠商附的清單或說明檔（官方 SBOM、`.info`、`.manifest`、`.json`）：唯讀、不掃描。fetch 照樣下載並核對 sha256；assemble／scan 不可把它當掃描輸入（沒有任何程式用 role 反選，只依 role 明確挑需要的） |
 規則（D-025、D-027）：
 - 有 `gap` 的檔案不下載，fetch 回報 GAP；**不自動接受第一次看到的 sha256**。
 - 有 `commit` 的封存檔若 sha256 不符，不接受新雜湊，改用 `git clone`（只 https、不跑 hook、不抓 submodule）取該 commit、核對 `git rev-parse HEAD`，工作樹放 `<下載資料夾>/<name>.checkout`；clone 也失敗就是 FAIL。
@@ -118,7 +123,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 | 用法錯誤 | 64 |
 
 dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…）` 結束；轉接器沒有該步驟的腳本 → `NOT_RUN`（4）。
-轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
+轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_ARCH`（platform.yml 的 `arch`，預設 `arm64`）、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
 
 **平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_PLATFORM`（或平台設定 `scan.platform_arg`）原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
 
@@ -128,9 +133,25 @@ dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…�
 平台設定 `raw_sectors.enabled: true` 時必須提供 `raw-sectors.sh`；`false`（預設）時 dispatcher 回報 `raw-sectors: OK（此平台不適用）`。
 轉接器的 `assemble.sh` 或 `scan.sh` 自己呼叫 `bash "$DUMPLING_ROOT/pipeline/platform.sh" raw-sectors "$1" "$2"`。建議輸出 `$DUMPLING_OUT/raw-sectors.json`：`{"schema": 1, "platform": …, "regions": [{"start_lba": …, "sectors": …, "sha256": …, "identity": …}]}`；與 rootfs 套件不符或找不到標 GAP，不用套件版本猜磁區版本。
 
-### Jetson 骨架（J 軌要接的）
+### Jetson 轉接器（M2 J 軌；細節見 `docs/JETSON.md`）
 
-`pipeline/platforms/jetson/`：`fetch` 用共用的（`projects/orin-nano-demo/sources.yml` 的 BSP、範例 rootfs、`public_sources.tbz2`）；`build.sh`、`assemble.sh`、`scan.sh` 目前只印 `<步驟>: NOT_RUN（J 軌實作）` 並以 4 結束，J 軌直接覆寫這三個檔。`platform.yml` 的分層規則已填 Jetson 的。r39.2.0 的 `public_sources.tbz2` 還沒有首次下載的 sha256，所以標 `gap`；CI 首次下載並人工確認後再填。
+`pipeline/platforms/jetson/`：`fetch` 用共用的（`projects/orin-nano-demo/sources.yml` 的 BSP、範例 rootfs、`public_sources.tbz2`、NVIDIA 公布的 `public_sources_sha.txt`）；
+`build.sh`（原生編核心與樹外模組，只在 aarch64）、`assemble.sh`（組刷機包）、`scan.sh`（臨時 DT＋精靈＋分層＋標準答案比對）已實作，`prepare-source.sh` 是 build 與 assemble 共用的內部腳本。
+
+Jetson 的 `sources.yml` `platform_params`：
+
+| 鍵 | 型別 | 意思 |
+|---|---|---|
+| `l4t_release` | 字串（必填） | Jetson Linux 版本（例如 `"39.2.1"`）；scan 用它設定精靈的 `upstream_set`（`jetson-r39.2.1`）與 `inputs.json` 的版本字樣 |
+| `patches` | 清單（選填） | **這個版本要套的 patch**，依序套在 `projects/<專案>/patches/` 的檔案。項目是檔名字串（套在核心樹 `kernel/kernel-noble`，`patch -p1`），或 `{file: 檔名, dir: 原始碼根底下的相對資料夾}`。只收檔名、不含路徑；`--dry-run --fuzz=0` 乾淨才套，套不上 = build FAIL。沒列在任何版本的 patch 不會套用（build 警告）。同一個專案的不同版本可以套不同的 patch（例如 `v39.2.0-demo1` 不套、`v39.2.1-demo1` 套 `0001-…`） |
+
+- `build` 輸出 `$DUMPLING_OUT/BuildRecord-<專案>-<版本>.tar.gz`、`deliver/`（Image、.ko、dtb）、`build.json`；建置不可重現，所以建置紀錄與刷機包必須來自同一次編譯（workflow 用 artifact 傳給 scan，不重編、不以雜湊當 cache key）。UEFI 未自編（D-002）。
+- `scan` 的環境變數：`PILOT_ENV`（pilot.env 的路徑，放在單獨的資料夾）。輸出 `$DUMPLING_OUT/release/`（Release 附件，檔名一律 ASCII，另有 `manifest.tsv`：檔名 TAB 顯示名稱）、`scan.json`（標準答案比對用的摘要）、`summary.md`。
+  結束碼：OK 0；GAP 3（沒有標準答案、分層有 GAP；結果照樣產生）；FAIL 1（含標準答案不符）。
+- **標準答案**：`tests/expected/<專案>/<版本>.json`，格式與規則見 `pipeline/check-expected.py` 的說明；沒有檔案 = GAP，不是通過。
+- **Release 附件命名**（機器可讀，給每日監控讀）：`sbom-<專案>-<版本>.cdx.json`（完整、標好層）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、`layers.json`、`release-meta.json`
+  （`project`、`version`、`tag`、`status`、`platform`、`os_responsibility`、`commit`、`built_at`、`workflow_run`；由 `pipeline/release-meta.py` 產生）。
+  已出貨版本的 SBOM 不提交進 repo（D-029）：Release 就是正式來源；開發版發到每個專案一個滾動的 pre-release `dev/<專案>`（只在 `main` 或 `dev/**` 分支發布）。
 
 ## 6. platform.yml
 
@@ -138,7 +159,11 @@ dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…�
 schema: 1
 platform: jetson               # 必須和資料夾名稱相同
 description: …
-build: {mode: compile}         # compile｜none
+arch: arm64                    # 選填：目標映像的架構 arm64｜amd64（預設 arm64）；scan 的 docker import --platform linux/<arch>
+build:
+  mode: compile                # compile｜none（none＝workflow 略過 build job）
+  runner: arm64                # 選填：build job 的 runner arm64｜amd64（預設 arm64 → ubuntu-24.04-arm／ubuntu-24.04）
+  apt: [build-essential, …]    # 選填：build job 的 apt 套件（--no-install-recommends；小寫英數與 + . -）
 raw_sectors: {enabled: false}  # 見上
 layers:                        # 分層規則（D-027）：套件名稱（不含版本）與路徑樣式，fnmatch 語法
   bsp:
@@ -147,6 +172,8 @@ layers:                        # 分層規則（D-027）：套件名稱（不含
     paths: ["Linux_for_Tegra/flash.sh", "Linux_for_Tegra/tools/*"]
   default: os                  # 其餘一律 os
 scan:                          # 選填
+  runner: amd64                # 選填：scan job 的 runner amd64｜arm64（預設 amd64 → ubuntu-24.04）
+  apt: [zstd]                  # 選填：scan job 額外的 apt 套件
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
   platform_arg: jetson         # 傳給掃描工具的 --platform
   rootfs: rootfs
@@ -154,6 +181,21 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
 ```
+**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`ARCH`）：
+
+| 欄位 | 預設 | 作用 |
+|---|---|---|
+| `arch` | `arm64` | 目標映像的架構；scan 用 `docker import --platform linux/<arch>`（`DUMPLING_ARCH`／`SCA_ARCH`） |
+| `build.mode` | （必填） | `none`：整個 build job 略過（`if:` 為 false），scan job 照樣跑、不下載任何 build artifact。`compile`：build job 跑，runner 與 apt 取下面兩欄 |
+| `build.runner` | `arm64` | build job 的 runner：`arm64`＝`ubuntu-24.04-arm`、`amd64`＝`ubuntu-24.04` |
+| `build.apt` | `[]` | build job 的 apt 相依 |
+| `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
+| `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
+
+**build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
+workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。
+build 若寫 `handoff/build-summary.md`，workflow 把它放進 step summary（沒有就用 build 步驟的最後一行）。`build.mode: none` 的平台沒有 handoff。
+
 - 分層規則**只用套件名稱清單與路徑樣式，不看版本字尾**（例如不以 `+rpt` 判斷）。套件樣式：小寫英數與 `+ . - _`，可含 `* ? []`，不含 `/`。路徑樣式：相對路徑、不含 `..`；`*` 也比對 `/`。套件先比 `bsp`、再比 `host-tool`，都不符合是 `os`。
 - **分層的完整規則見 `docs/LAYERS.md`**。補充（向後相容的擴充）：`layers.os.paths`（選用，只有 `paths`）可明確宣告哪些路徑是 OS；路徑樣式比的是元件在映像裡的路徑
   （rootfs 映像是 `usr/lib/modules/…`，BSP 資料夾是 `Linux_for_Tegra/…`，兩種都列）。`default: os` 只用在**發行版套件**（deb／rpm／apk 的名稱）；非套件元件的路徑沒有任何規則
@@ -176,6 +218,6 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 
 - 欄位名稱（`os_responsibility`、`company_role` 的值、`project_defaults`、`raw_sectors`）是 C1 依 D-027 自訂的，C0／PM 若要改名請告知。
 - `company_role` 目前三值（`manufacturer`、`supplier`、`both`）沿用精靈的 `--role`；若開案資訊表還有 importer／distributor 角色要再加。
-- `sources.yml` 的 `commit` 封存檔 clone 核對目前只在 fetch 實作；`public_sources.tbz2`（NVIDIA 沒公布整包雜湊）的 r39.2.0 sha256 待首次下載後填。
+- `sources.yml` 的 `commit` 封存檔 clone 核對目前只在 fetch 實作；`public_sources.tbz2`（NVIDIA 沒公布整包雜湊）的 sha256 是首次下載記錄（TOFU，2026-11-12），不是官方核對；元件 SHA-1 才對 NVIDIA 公布值。
 - `fetch_verify.py` 是 `firmware_fetch.py` 的超集（`size` 可為 None、`fetch_one` 先檢查 https）；`firmware_fetch.py` 改成 import 它由 C0 與 C2 協調。
-- `projects/orin-nano-demo/CRA/Config/inputs.json` 是精靈範本原樣（`upstream_set` 為 r39.2.0）；兩個版本各自的 upstream_set 由 J 軌處理。
+- `projects/orin-nano-demo/CRA/Config/inputs.json` 是精靈範本原樣（`upstream_set` 為 r39.2.0）；scan 步驟依 `platform_params.l4t_release` 在複本裡改成該版本（原檔不動）。

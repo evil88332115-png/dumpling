@@ -36,9 +36,14 @@ PLACEHOLDER = "TO BE COMPLETED"
 STATUSES = ("development", "shipped")
 COMPANY_ROLES = ("manufacturer", "supplier", "both")
 OS_RESPONSIBILITIES = ("ours", "customer", "upstream-vendor")
-FILE_ROLES = ("bsp", "rootfs", "source", "image", "package", "tool")
+# metadata＝廠商附的清單或說明檔（官方 SBOM、.info、.manifest、.json）：唯讀、不掃描。fetch 照樣下載並核對 sha256；
+# assemble／scan 只依 role 明確挑 bsp、rootfs 等，不會把 metadata 當掃描輸入。
+FILE_ROLES = ("bsp", "rootfs", "source", "image", "package", "tool", "metadata")
 LAYERS = ("bsp", "host-tool", "os")
 BUILD_MODES = ("compile", "none")
+ARCHES = ("arm64", "amd64")                                  # 目標映像的架構（platform.yml 的 arch）與 runner 架構（build.runner、scan.runner）
+RUNNER_LABELS = {"arm64": "ubuntu-24.04-arm", "amd64": "ubuntu-24.04"}
+APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")          # apt 套件名稱（Debian Policy 5.6.1）；進 workflow 的指令列，所以限制字元
 
 PROJECT_STRING_FIELDS = ("product_name", "brand", "platform_version", "bsp_os_source", "kernel_source", "bootloader")
 PROJECT_LIST_FIELDS = ("markets", "interfaces", "own_software")  # own_software 可以是空清單
@@ -260,6 +265,21 @@ def _validate_patterns(v, label, kind, errs):
     return list(v)
 
 
+def _validate_apt(v, label, errs):
+    if v is None:
+        return
+    if not isinstance(v, list) or not all(isinstance(x, str) and APT_RE.match(x) for x in v):
+        errs.append("%s 必須是 apt 套件名稱清單（小寫英數與 + . -）" % label)
+
+
+def platform_plan(config):
+    """platform.yml（驗證過的 dict）→ workflow 需要的規劃值：build_mode、build_runner（runner 標籤）、build_apt、scan_runner、scan_apt、arch。
+    預設：arch＝arm64；build.runner＝arm64；scan.runner＝amd64（scan 只匯入與讀映像、不執行目標平台的程式，所以不跟著 arch）。"""
+    b, sc = config.get("build") or {}, config.get("scan") or {}
+    return {"build_mode": b["mode"], "build_runner": RUNNER_LABELS[b.get("runner", "arm64")], "build_apt": list(b.get("apt") or []),
+            "scan_runner": RUNNER_LABELS[sc.get("runner", "amd64")], "scan_apt": list(sc.get("apt") or []), "arch": config.get("arch", "arm64")}
+
+
 def validate_platform_config(doc, name=None):
     """回傳錯誤清單。"""
     if not isinstance(doc, dict):
@@ -277,6 +297,15 @@ def validate_platform_config(doc, name=None):
     build = doc.get("build")
     if not isinstance(build, dict) or build.get("mode") not in BUILD_MODES:
         errs.append("build.mode 必須是 %s" % "／".join(BUILD_MODES))
+    else:
+        for k in build:
+            if k not in ("mode", "apt", "runner"):
+                errs.append("build 不認得的鍵 %s" % k)
+        _validate_apt(build.get("apt"), "build.apt", errs)
+        if "runner" in build and build["runner"] not in ARCHES:
+            errs.append("build.runner 必須是 %s" % "／".join(ARCHES))
+    if "arch" in doc and doc["arch"] not in ARCHES:
+        errs.append("arch 必須是 %s" % "／".join(ARCHES))
     rs = doc.get("raw_sectors", {"enabled": False})
     if not isinstance(rs, dict) or not isinstance(rs.get("enabled"), bool):
         errs.append("raw_sectors.enabled 必須是 true／false")
@@ -325,6 +354,12 @@ def validate_platform_config(doc, name=None):
         if not isinstance(scan, dict):
             errs.append("scan 必須是 mapping")
         else:
+            for k in scan:
+                if k not in ("inputs_template", "platform_arg", "rootfs", "apt", "runner"):
+                    errs.append("scan 不認得的鍵 %s" % k)
+            _validate_apt(scan.get("apt"), "scan.apt", errs)
+            if "runner" in scan and scan["runner"] not in ARCHES:
+                errs.append("scan.runner 必須是 %s" % "／".join(ARCHES))
             for k in ("inputs_template", "platform_arg", "rootfs"):
                 if k in scan and not (isinstance(scan[k], str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", scan[k])):
                     errs.append("scan.%s 不合法" % k)

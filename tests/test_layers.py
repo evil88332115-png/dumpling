@@ -21,9 +21,12 @@ DEMO = os.path.join(ROOT, "projects", "orin-nano-demo")
 
 # Jetson R39.2.1 base 的標準答案（Syft 1.55.0；固定資料，數字是實際數出來的，不是估計）。
 # 改了分層規則或 platform.yml 讓這些數字變動時，要同時確認新的歸屬是對的（docs/LAYERS.md「標準答案」）。
-JETSON_EXPECTED = {"total": 3851, "bsp": 1537, "os": 1975, "host-tool": 0, "unknown": 339,
-                   "nvidia_l4t_debs": 69, "kernel_modules": 1468, "other_debs": 1974,
-                   "unknown_by_purl_type": {"golang": 235, "maven": 3, "pypi": 101}}
+# 2026-11-12（D-030）：platform.yml 的 bsp 套件清單加 nvidia-igx-*（fixture 裡有 2 個），bsp 1537→1539、os 1975→1973。
+JETSON_EXPECTED = {"total": 3851, "bsp": 1539, "os": 1973, "host-tool": 0, "unknown": 339,
+                   "nvidia_l4t_debs": 69, "nvidia_igx_debs": 2, "kernel_modules": 1468, "other_debs": 1972,
+                   "unknown_by_purl_type": {"golang": 235, "maven": 3, "pypi": 101},
+                   # unknown 判斷不了的原因：Java 的 3 個有路徑（syft:metadata:virtualPath）但沒有規則對到，其餘沒有路徑
+                   "unknown_by_reason": {"no-path": 336, "path-no-rule": 3}}
 
 
 def load_fixture():
@@ -117,6 +120,43 @@ class ClassifyRules(Base):
         # 套件沒有路徑可看、也不是發行版套件 → unknown
         self.assertEqual(self.classify(comp("attrs", purl="pkg:pypi/attrs@1")), ("unknown", "unresolved"))
         self.assertEqual(self.classify(comp("x")), ("unknown", "unresolved"))
+
+    def test_unknown_reason_and_java_virtual_path(self):
+        """D-030：unknown 附判斷不了的原因；Syft 的 virtualPath（Java）當路徑用，路徑沒有對到規則 → path-no-rule。"""
+        jar = comp("apport", purl="pkg:maven/apport/apport", props={"syft:metadata:virtualPath": "/usr/share/apport/apport.jar"})
+        nop = comp("attrs", purl="pkg:pypi/attrs@1")
+        self.assertEqual(ly.unknown_reason(jar), "path-no-rule")
+        self.assertEqual(ly.unknown_reason(nop), "no-path")
+        bom = sbom(jar, nop, deb("nvidia-igx-oobe"), deb("curl"))
+        tagged, summary = ly.tag_sbom(bom, self.cfg, os_responsibility="customer")
+        self.assertEqual(summary["unknown_by_reason"], {"no-path": 1, "path-no-rule": 1})
+        props = {c["name"]: {p["name"]: p["value"] for p in c["properties"]} for c in tagged["components"]}
+        self.assertEqual(props["apport"]["dumpling:unknown-reason"], "path-no-rule")
+        self.assertEqual(props["attrs"]["dumpling:unknown-reason"], "no-path")
+        self.assertNotIn("dumpling:unknown-reason", props["curl"])
+        self.assertEqual(props["nvidia-igx-oobe"]["dumpling:layer"], "bsp")
+
+    def test_file_components_use_the_owning_package(self):
+        """Syft 的檔案紀錄（type=file，沒有 purl）：用 dpkg .list 的擁有者找層；沒有擁有者、路徑也沒規則才是 unknown（原因 file-unowned）。"""
+        owners = {"usr/lib/aarch64-linux-gnu/nvidia/libnvos.so": "nvidia-l4t-core", "usr/bin/ls": "coreutils",
+                  ly.normalize_owner_path("/lib/x86/y.so"): "libfoo"}
+        f = lambda path: {"type": "file", "name": path, "bom-ref": "f" + path}      # noqa: E731
+        self.assertEqual(ly.classify_component(f("/usr/lib/aarch64-linux-gnu/nvidia/libnvos.so"), self.cfg, owners=owners), ("bsp", "file-owner"))
+        self.assertEqual(ly.classify_component(f("/usr/bin/ls"), self.cfg, owners=owners), ("os", "file-owner"))
+        self.assertEqual(ly.classify_component(f("/usr/lib/x86/y.so"), self.cfg, owners=owners), ("os", "file-owner"))      # usrmerge
+        self.assertEqual(ly.classify_component(f("/opt/unowned"), self.cfg, owners=owners), ("unknown", "unresolved"))
+        self.assertEqual(ly.classify_component(f("/usr/bin/ls"), self.cfg), ("unknown", "unresolved"))                   # 沒有 owners：照舊
+        # 擁有者是 os、但路徑在 bsp 的規則裡（rootfs 的 boot/）→ 最保守的 bsp
+        self.assertEqual(ly.classify_component(f("/boot/extlinux/x"), self.cfg, owners={"boot/extlinux/x": "extlinux"}), ("bsp", "file-owner"))
+        self.assertEqual(ly.unknown_reason(f("/opt/unowned")), "file-unowned")
+        _, summary = ly.tag_sbom(sbom(f("/opt/unowned"), f("/usr/bin/ls")), self.cfg, owners=owners)
+        self.assertEqual(summary["unknown_by_reason"], {"file-unowned": 1})
+        self.assertEqual(summary["layers"]["os"], 1)
+
+    def test_a_known_path_is_classified_not_unknown(self):
+        """路徑對得到規則的（例如 Syft 給了 rootfs 的核心模組路徑）一律歸類，不留在 unknown。"""
+        c = comp("m", purl="pkg:maven/m/m@1", props={"syft:metadata:virtualPath": "/usr/lib/modules/6.8.12/updates/x.ko"})
+        self.assertEqual(self.classify(c), ("bsp", "path"))
 
     def test_platform_can_declare_os_paths(self):
         cfg = copy.deepcopy(self.cfg)
@@ -232,6 +272,7 @@ class FixtureJetson(Base):
         self.assertEqual(summary["total"], e["total"])
         self.assertEqual(summary["layers"], {"bsp": e["bsp"], "os": e["os"], "host-tool": e["host-tool"], "unknown": e["unknown"]})
         self.assertEqual(summary["unknown_by_purl_type"], e["unknown_by_purl_type"])
+        self.assertEqual(summary["unknown_by_reason"], e["unknown_by_reason"])
         self.assertEqual(sum(summary["layers"].values()), len(self.bom["components"]))
 
     def test_nvidia_l4t_packages_and_kernel_modules_are_bsp_and_ubuntu_is_os(self):
@@ -244,7 +285,11 @@ class FixtureJetson(Base):
                                                                 for p in c.get("properties", []))]
         self.assertEqual(len(mods), JETSON_EXPECTED["kernel_modules"])
         self.assertTrue(all(ly.component_layer(c) == "bsp" for c in mods))
-        debs = [c for c in tagged["components"] if c.get("purl", "").startswith("pkg:deb/") and not c["name"].startswith("nvidia-l4t-")]
+        igx = [c for c in tagged["components"] if c["name"].startswith("nvidia-igx-")]
+        self.assertEqual(len(igx), JETSON_EXPECTED["nvidia_igx_debs"])
+        self.assertTrue(all(ly.component_layer(c) == "bsp" for c in igx))
+        debs = [c for c in tagged["components"] if c.get("purl", "").startswith("pkg:deb/")
+                and not c["name"].startswith(("nvidia-l4t-", "nvidia-igx-"))]
         self.assertEqual(len(debs), JETSON_EXPECTED["other_debs"])
         self.assertTrue(all(ly.component_layer(c) == "os" for c in debs))
         osid = [c for c in tagged["components"] if c["type"] == "operating-system"]
@@ -257,6 +302,22 @@ class FixtureJetson(Base):
         for c in tagged["components"]:
             if ly.component_layer(c) == "os":
                 self.assertTrue(c.get("purl", "").startswith("pkg:deb/") or c["type"] == "operating-system", c["name"])
+
+
+class CliOwners(Base):
+    def test_split_with_owners_file(self):
+        bom = sbom(deb("nvidia-l4t-core"), {"type": "file", "name": "/usr/lib/nv/a.so", "bom-ref": "f1"}, {"type": "file", "name": "/usr/bin/x", "bom-ref": "f2"},
+                   {"type": "file", "name": "/opt/z", "bom-ref": "f3"})
+        src, owners, out = (os.path.join(self.tmp, n) for n in ("in.json", "owners.json", "out"))
+        json.dump(bom, open(src, "w"))
+        json.dump({"/usr/lib/nv/a.so": "nvidia-l4t-core", "/usr/bin/x": "coreutils"}, open(owners, "w"))
+        r = self.run_cli("split", src, "jetson", self.project("customer"), out, "--owners", owners)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        doc = json.load(open(os.path.join(out, "layers.json")))
+        self.assertEqual(doc["components"], {"bsp": 2, "os": 1, "host-tool": 0, "unknown": 1})
+        self.assertEqual(doc["unknown"]["by_reason"], {"file-unowned": 1})
+        bad = self.run_cli("split", src, "jetson", self.project("customer"), out + "2", "--owners", os.path.join(self.tmp, "nope.json"))
+        self.assertEqual(bad.returncode, 1)
 
 
 class Cli(Base):
@@ -275,11 +336,11 @@ class Cli(Base):
     def test_split_fixture_customer(self):
         r, out = self.split("customer")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertTrue(r.stdout.strip().startswith("sbom-layers: OK（bsp 1537、os 1975、host-tool 0、unknown 339（共 3851）"), r.stdout)
+        self.assertTrue(r.stdout.strip().startswith("sbom-layers: OK（bsp 1539、os 1973、host-tool 0、unknown 339（共 3851）"), r.stdout)
         self.assertEqual(sorted(os.listdir(out)), ["layers.json", "sbom.bsp.cdx.json", "sbom.os.cdx.json", "sbom.product.cdx.json"])
         doc = self.read(out, "layers.json")
-        self.assertEqual(doc["components"], {"bsp": 1537, "os": 1975, "host-tool": 0, "unknown": 339})
-        self.assertEqual(doc["files"]["bsp"]["layers"], {"bsp": 1537, "unknown": 339})        # unknown 跟著 bsp（待辦）
+        self.assertEqual(doc["components"], {"bsp": 1539, "os": 1973, "host-tool": 0, "unknown": 339})
+        self.assertEqual(doc["files"]["bsp"]["layers"], {"bsp": 1539, "unknown": 339})        # unknown 跟著 bsp（待辦）
         self.assertEqual(doc["files"]["bsp"]["components"] + doc["files"]["os"]["components"], 3851)
         self.assertEqual(doc["files"]["product"]["components"], 3851)
         self.assertEqual(doc["upload_excludes"], ["host-tool"])
@@ -292,7 +353,7 @@ class Cli(Base):
         self.assertEqual(len(set(parts)), len(parts))
         # 產品檔：全部，每個元件都帶層
         prod = self.read(out, "sbom.product.cdx.json")
-        self.assertEqual(ly.layer_counts(prod), {"bsp": 1537, "os": 1975, "host-tool": 0, "unknown": 339})
+        self.assertEqual(ly.layer_counts(prod), {"bsp": 1539, "os": 1973, "host-tool": 0, "unknown": 339})
         self.assertEqual(ly.sbom_os_responsibility(prod), "customer")
 
     def test_scan_plan_per_os_responsibility(self):

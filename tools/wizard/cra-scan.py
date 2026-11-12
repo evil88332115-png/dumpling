@@ -609,6 +609,8 @@ def main():
     ap.add_argument("--inputs", help="輸入清單檔（JSON）；不給時用產品設定包裡的 inputs.json")
     ap.add_argument("--platform", help="沒有清單檔時改用平台範本（tools/wizard/platforms/<名稱>.json：jetson、rockchip、raspberrypi；草稿）")
     ap.add_argument("--site-config", help="站台設定檔（JSON）；不給時用環境變數 SCA_WIZARD_CONFIG，再不然 ~/.config/sca-center/wizard.json")
+    ap.add_argument("--rescan-from", help="上一次完整掃描的 scan 資料夾（scan-flash-package.sh 的結果，要有 list.json）：只重跑比對，沿用它的 SBOM（可以事先換成某一層的 SBOM，"
+                                          "分層用）與 A0 上游比對結果；不再做 A0。見 docs/LAYERS.md、docs/JETSON.md")
     ap.add_argument("--yes", action="store_true"); ap.add_argument("--plan-only", action="store_true")
     a = ap.parse_args()
     ni = a.yes
@@ -852,6 +854,8 @@ def main():
            "--no-company", "--out", str(OUT / "scan")]
     if a.platform:      # 平台由呼叫端（project.yml）明確給，原樣傳下去；沒給時 scan-flash-package.sh 對原始磁碟映像標 GAP，不推測
         cmd += ["--platform", a.platform]
+    if a.rescan_from:   # 分層：沿用上一次完整掃描的資料夾（SBOM 已換成這一層的），只重跑比對
+        cmd += ["--rescan-from", str(Path(a.rescan_from).resolve())]
     if cfg_dir:
         cmd += ["--product-config", str(mcfg / "config.json")]
     if kt:
@@ -885,7 +889,19 @@ def main():
     say("\n== 3b. A0 與 NVIDIA 原版的逐檔比對 ==")
     for mode, tag, ours, up_path, label, lim in a0:
         t0 = datetime.datetime.now()
-        if not up_path:
+        prev_a0 = Path(a.rescan_from) / "rootfs" / f"upstream-baseline-{mode}.json" if a.rescan_from else None
+        if prev_a0 and prev_a0.is_file():      # 分層重跑：A0 與 SBOM 無關，沿用完整掃描的結果，不重算
+            for ext in ("json", "md"):
+                if (prev_a0.parent / f"upstream-baseline-{mode}.{ext}").is_file():
+                    shutil.copy2(prev_a0.parent / f"upstream-baseline-{mode}.{ext}", rd)
+            steps[tag] = {"status": "GAP", "detail": "完整掃描沒有留下這一步的狀態紀錄（wizard-steps.json），不推測", "reused": True}
+            try:
+                prev_steps = json.loads((Path(a.rescan_from).parent / "wizard-steps.json").read_text(encoding="utf-8"))
+                if tag in prev_steps:
+                    steps[tag] = dict(prev_steps[tag], reused=True, detail="沿用完整掃描的結果：" + str(prev_steps[tag].get("detail", "")))
+            except (OSError, ValueError):
+                pass
+        elif not up_path:
             steps[tag] = {"status": "GAP", "detail": "沒有上游基準檔（站台設定 upstream 沒有或檔案不存在）"}
         elif not ours or not Path(ours).exists():
             steps[tag] = {"status": "GAP", "detail": "找不到我們的 " + ("刷機包" if mode == "artifacts" else "sources 資料夾")}

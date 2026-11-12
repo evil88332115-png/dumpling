@@ -1,0 +1,111 @@
+{
+ "schema": 1,
+ "project": "orin-nano-demo",
+ "version": "v39.2.1-demo1",
+ "note": "固定的標準答案（2026-11-12 第一次在 CI 跑通後訂定）。元件數與核心版本取決於固定的輸入（BSP、rootfs、public_sources、Syft 版本），用 equals 或窄範圍；漏洞數隨弱點資料庫變動，只用範圍或下限。範圍不符時：人工看過原因（資料庫變動 vs 流程壞掉）再改，並更新 reason。",
+ "checks": {
+  "kernel_release": {
+   "equals": "6.8.12-1021-tegra",
+   "reason": "CI 自編核心的版本字串，與 NVIDIA 發行的 6.8.12-1021-tegra 相同（模組目錄名稱一致，掃描才認得是同一顆核心）"
+  },
+  "build_record_status": {
+   "equals": "OK",
+   "reason": "驗收：建置紀錄狀態 OK（CI 自編，與刷機包的核心和模組身分相符）"
+  },
+  "kernel_boot": {
+   "equals": "OK",
+   "reason": "驗收：C-kernel-boot 為 OK（kernel/Image 與 rootfs/boot/Image 位元組相同，且與建置紀錄的 Image 雜湊相符）"
+  },
+  "upstream_source.modified": {
+   "equals": 1,
+   "reason": "驗收：上游比對（原始碼 vs NVIDIA public_sources）被修改的檔案數；patch 只改 1 個檔案"
+  },
+  "upstream_source.ours_only": {
+   "equals": 0,
+   "reason": "原始碼樹沒有 NVIDIA 原版以外的新增檔案"
+  },
+  "upstream_source.status": {
+   "equals": "ATTENTION",
+   "reason": "固定是 ATTENTION：public_sources 裡有 3 個元件 NOT_ASSESSED、5 個元件只有 NVIDIA 有（我們只解開編核心要用的 4 個），不是通過"
+  },
+  "upstream_artifacts.status": {
+   "equals": "OK",
+   "reason": "成品（刷機包）對 NVIDIA BSP：閉源開機韌體（62 個）與 NVIDIA 原版逐位元組相同（UEFI 等以 BSP 原樣，D-002）"
+  },
+  "components.deb_bsp": {
+   "equals": 71,
+   "reason": "nvidia-l4t-* 與 nvidia-igx-* 套件數：BSP 固定、雜湊固定，不會隨資料庫變"
+  },
+  "components.deb_os": {
+   "equals": 1972,
+   "reason": "其他 Ubuntu 套件數：範例 rootfs 固定、雜湊固定"
+  },
+  "components.total": {
+   "min": 113624,
+   "max": 118262,
+   "reason": "全部元件（含 Syft 對套件擁有的檔案產生的檔案紀錄）；數字取決於 Syft 版本（固定 1.55.0）與檔案紀錄，容許 ±2%"
+  },
+  "components.bsp": {
+   "min": 22435,
+   "max": 23351,
+   "reason": "bsp 層元件（NVIDIA 套件、它們擁有的檔案、核心模組、/boot）；數字取決於 Syft 版本（固定 1.55.0）與檔案紀錄，容許 ±2%"
+  },
+  "components.os": {
+   "min": 86497,
+   "max": 90029,
+   "reason": "os 層元件（Ubuntu 套件與它們擁有的檔案）；數字取決於 Syft 版本（固定 1.55.0）與檔案紀錄，容許 ±2%"
+  },
+  "components.unknown": {
+   "min": 4691,
+   "max": 4883,
+   "reason": "unknown 元件（沒有擁有者的檔案紀錄、Go／Python／Java 套件）；數字取決於 Syft 版本（固定 1.55.0）與檔案紀錄，容許 ±2%"
+  },
+  "unknown_by_reason": {
+   "equals": {
+    "file-unowned": 4448,
+    "path-no-rule": 339
+   },
+   "reason": "unknown 的原因計數（D-030）：file-unowned＝沒有擁有者的檔案紀錄；path-no-rule＝Go／Python／Java 套件有路徑但沒有規則"
+  },
+  "assemble.ci_modules_in_tree": {
+   "equals": 1352,
+   "reason": "CI 編出的樹內模組數（同一份原始碼、同一份 defconfig）"
+  },
+  "assemble.ci_modules_out_of_tree": {
+   "equals": 184,
+   "reason": "CI 編出的樹外模組數（nvidia-oot、nvgpu、nvdisplay、unifiedgpudisp…）"
+  },
+  "assemble.kernel_image_replaced": {
+   "equals": true,
+   "reason": "kernel/Image 換成 CI 編的"
+  },
+  "assemble.rootfs_boot_image_replaced": {
+   "equals": true,
+   "reason": "rootfs/boot/Image 換成同一顆（避免兩顆核心）"
+  },
+  "vulnerabilities.full.rows_total": {
+   "min": 7012,
+   "max": 13024,
+   "reason": "漏洞列數隨弱點資料庫（Grype、OSV、核心 CNA）每天變動，範圍 ±30%"
+  },
+  "vulnerabilities.bsp.rows_total": {
+   "min": 4612,
+   "max": 8566,
+   "reason": "bsp＋unknown 的漏洞列數（核心 CVE 是大宗）；資料庫變動，範圍 ±30%"
+  },
+  "vulnerabilities.os.rows_total": {
+   "min": 2074,
+   "max": 4842,
+   "reason": "os 層的漏洞列數；資料庫變動，範圍 ±40%"
+  },
+  "vulnerabilities.bsp.p1_rows": {
+   "min": 1,
+   "max": 40,
+   "reason": "P1 判斷表列數（只有 bsp＋unknown，一個 CVE 一列）：已知被利用（KEV）的 CVE，數量小且隨 KEV 清單變動；至少 1 列才代表 KEV 資料有進來"
+  },
+  "vulnerabilities.os.p1_rows": {
+   "equals": 0,
+   "reason": "os 層（customer）不進 P1 判斷表"
+  }
+ }
+}
