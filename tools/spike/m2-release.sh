@@ -11,7 +11,7 @@ case $JR in
     BSP_SHA256=2e5619088ba88e85dab25247f033d70659b6f676ff835176a07766dcb0fdbe6b
     RFS=Tegra_Linux_Sample-Root-Filesystem_R39.2.1_aarch64.tbz2;  RFS_SHA1=9a991a4f94b09304d10a73c89da7d5feae11c303
     RFS_SHA256=58a6485b56c6d6b5ee8478e902eed0ed4984fd73135b88b76aeaa5c1f44be66e
-    SRC_SHA256=PENDING;;   # 首次下載記錄（待填）
+    SRC_SHA256=8346f0371649a92c42293b2d4a7bf3d69e4dd1de23009e1463ea910994a81371;;   # 首次下載記錄（2026-11-12，NVIDIA 沒有公布整包雜湊）
   39.2.0)
     REL=https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0
     BSP=Jetson_Linux_R39.2.0_aarch64.tbz2;                        BSP_SHA1=346043847d47793669f3f1d86d8d1a3b50c3dbb6
