@@ -10,6 +10,7 @@ import io
 import json
 import lzma
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -32,6 +33,21 @@ def load(name, path):
 R = load("wp7_raw_sectors", RAW)
 SECTOR = 512
 LINUX_FS = bytes.fromhex("af3dc60f838472478e793d69d8477de4")   # 0FC63DAF-8483-4772-8E79-3D69D8477DE4（混合位元組序）
+
+def rj(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def rb(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def wb(path, data):
+    with open(path, "wb") as f:
+        f.write(data)
+
 
 
 # ---------------------------------------------------------------- 合成資料
@@ -153,6 +169,7 @@ def run_raw(*args):
 class RawSectorsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="wp7-raw-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.img = os.path.join(self.tmp, "disk.img")
         self.out = os.path.join(self.tmp, "raw.json")
         self.idb = make_idb()
@@ -172,7 +189,7 @@ class RawSectorsTest(unittest.TestCase):
 
     def inv(self, *extra):
         rc, line = run_raw("--image", self.img, "--out", self.out, "--board", "test-board", *self.slots, *extra)
-        doc = json.load(open(self.out, encoding="utf-8")) if os.path.exists(self.out) else None
+        doc = rj(self.out) if os.path.exists(self.out) else None
         return rc, line, doc
 
     def test_consistent_package_is_ok(self):
@@ -285,7 +302,7 @@ class RawSectorsTest(unittest.TestCase):
     def test_not_a_deb_is_recorded(self):
         self.disk()
         junk = os.path.join(self.tmp, "junk.deb")
-        open(junk, "wb").write(b"not an ar archive")
+        wb(junk, b"not an ar archive")
         rc, _line, doc = self.inv("--deb", junk, "--deb", self.deb())
         self.assertEqual(rc, 0)
         self.assertIn("不是 ar", [x for x in doc["sources"] if x["file"] == "junk.deb"][0]["error"])
@@ -294,6 +311,7 @@ class RawSectorsTest(unittest.TestCase):
 class DiskImageTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="wp7-disk-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.proj = os.path.join(self.tmp, "proj")
         os.makedirs(self.proj)
         self.dl = os.path.join(self.tmp, "downloads")
@@ -328,9 +346,9 @@ class DiskImageTest(unittest.TestCase):
         self.sources("img.tar.xz")
         rc, line, img = self.prepare()
         self.assertEqual(rc, 0, line)
-        self.assertEqual(open(img, "rb").read(), body)
+        self.assertEqual(rb(img), body)
         self.assertEqual(os.stat(img).st_mode & 0o777, 0o600)
-        doc = json.load(open(os.path.join(self.tmp, "assemble.json")))
+        doc = rj(os.path.join(self.tmp, "assemble.json"))
         self.assertEqual(doc["disk_sha256"], hashlib.sha256(body).hexdigest())
         self.assertEqual([m["name"] for m in doc["other_members"]], ["README"])
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "work", "README")))
@@ -341,7 +359,7 @@ class DiskImageTest(unittest.TestCase):
         self.sources("img.tar.xz", "      image_member: image.raw\n")
         rc, line, img = self.prepare()
         self.assertEqual(rc, 0, line)
-        self.assertEqual(open(img, "rb").read(), body)
+        self.assertEqual(rb(img), body)
 
     def test_symlink_member_fails(self):
         self.tarxz("img.tar.xz", [self.ti("disk.raw", typ=tarfile.SYMTYPE, link="/etc/passwd")])
@@ -368,11 +386,11 @@ class DiskImageTest(unittest.TestCase):
 
     def test_img_xz_extracted(self):
         body = os.urandom(5000)
-        open(os.path.join(self.dl, "a.img.xz"), "wb").write(lzma.compress(body))
+        wb(os.path.join(self.dl, "a.img.xz"), lzma.compress(body))
         self.sources("a.img.xz")
         rc, line, img = self.prepare()
         self.assertEqual(rc, 0, line)
-        self.assertEqual(open(img, "rb").read(), body)
+        self.assertEqual(rb(img), body)
 
     def test_not_downloaded_fails(self):
         self.sources("a.img.xz")
