@@ -625,10 +625,21 @@ class HardeningTests(ReportBase):
         self.assertEqual((st, rc), ("ATTENTION", 0), out)
         for want in ("D-dt-data-sources GAP", "C-sbomgate NOT_ASSESSED", "A-tools ATTENTION", "C-mirror-freshness NOT_RUN", "D-dt-vuln-analysis NOT_RUN"):
             self.assertIn(fd._cell(want), out)            # 報告裡的不可信文字經 md_safe（底線會跳脫）
-        for bad in ("", "WEIRD", "ok"):         # 空的、不認得的狀態也不是 OK
+        for bad in ("", "WEIRD", "ok", " OK", "OK "):         # 空的、不認得的、前後有空白的狀態也不是 OK
             st, out, _ = self.case(rows=self.GOOD + [("C-x", bad, "x")])
             self.assertEqual(st, "ATTENTION", repr(bad))
             self.assertIn("C-x", out)
+
+    def test_upload_stage_status_must_be_exactly_ok(self):
+        for bad in (" OK", "ok", "OK "):
+            rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", bad, "x") for r in self.GOOD]
+            self.assertEqual(self.status(rows=rows), "GAP", repr(bad))
+
+    def test_long_duplicate_key_pointer_is_capped(self):
+        d = fd.DupKeys()
+        k = "k" * 5000
+        fd.load_json(self.w("longkey.json", '{"%s": {"a": 1, "a": 2}}' % k), fd.MAX_BYTES, "SBOM", d)
+        self.assertEqual(len(d.events[0]["pointer"]), 300)
 
     def test_expected_not_run_stages_are_ignored(self):
         # firmware-dt.sh 固定 --no-license（E 段 NOT_RUN），沒有 --kernel-build（C-kernel-* NOT_RUN）：這些不能讓乾淨樣本變 ATTENTION

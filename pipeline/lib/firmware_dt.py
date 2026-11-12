@@ -140,7 +140,7 @@ class DupKeys:
             o, path = stack.pop()
             if isinstance(o, dict):
                 for ev in want.pop(id(o), ()):
-                    ev["pointer"] = _ptr(path) or "/"
+                    ev["pointer"] = (_ptr(path) or "/")[:300]       # 鍵名沒有長度上限，位置只留前 300 字元
                 stack.extend((v, path + (k,)) for k, v in o.items())
             elif isinstance(o, list):
                 stack.extend((v, path + (i,)) for i, v in enumerate(o))
@@ -630,7 +630,7 @@ def read_status_tsv(path):
     try:
         for r in csv.DictReader(raw.splitlines(), delimiter="\t"):
             if r.get("stage"):
-                new = ((r.get("status") or "").strip(), r.get("detail") or "")
+                new = (r.get("status") or "", r.get("detail") or "")       # 不 strip：" OK" 不是 OK（scan-status-check.py 也是完全相等才算）
                 old = rows.get(r["stage"])
                 if old is None or _sev(new[0]) >= _sev(old[0]):
                     rows[r["stage"]] = new
