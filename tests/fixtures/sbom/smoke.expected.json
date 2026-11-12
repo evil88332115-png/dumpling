@@ -1,0 +1,8 @@
+{
+  "project_name": "dumpling-dt-smoke",
+  "project_version": "1.0.0",
+  "components": 3,
+  "min_findings_total": 4,
+  "min_findings_by_purl_type": {"pypi": 1, "npm": 1, "deb": 1},
+  "informational_purl_types": []
+}

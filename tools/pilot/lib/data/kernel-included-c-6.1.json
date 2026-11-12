@@ -1,0 +1,1120 @@
+{
+ "schema": "sca-center-kernel-included-c/1",
+ "kernel": "6.1",
+ "source": {
+  "name": "linux-6.1.118",
+  "type": "directory",
+  "git_tag": "v6.1.118",
+  "git_commit": "b67dc5c9ade9dc354b790eb64aa6a665d0a54ecd"
+ },
+ "generated": "2026-11-10",
+ "generator": "tools/pilot/lib/kernel_included_c.py",
+ "note": "C files #included by other kernel source files (outside tools/, scripts/, Documentation/, samples/, usr/). kernel_config.py never judges these not_affected. Generated from the public upstream source only (the generated date is the UTC date): #include of .c files added by a vendor are not included.",
+ "files": {
+  "arch/arm/kernel/insn.c": [
+   "arch/x86/tools/insn_decoder_test.c",
+   "arch/x86/tools/insn_sanity.c"
+  ],
+  "arch/arm/mm/fsr-2level.c": [
+   "arch/arm/mm/fault.c"
+  ],
+  "arch/arm/mm/fsr-3level.c": [
+   "arch/arm/mm/fault.c"
+  ],
+  "arch/arm64/lib/insn.c": [
+   "arch/x86/tools/insn_decoder_test.c",
+   "arch/x86/tools/insn_sanity.c"
+  ],
+  "arch/ia64/kernel/unwind_decoder.c": [
+   "arch/ia64/kernel/unwind.c"
+  ],
+  "arch/m68k/kernel/setup_mm.c": [
+   "arch/m68k/kernel/setup.c"
+  ],
+  "arch/m68k/kernel/setup_no.c": [
+   "arch/m68k/kernel/setup.c"
+  ],
+  "arch/mips/ath79/early_printk.c": [
+   "arch/mips/boot/compressed/uart-ath79.c"
+  ],
+  "arch/mips/boot/tools/relocs.c": [
+   "arch/mips/boot/tools/relocs_32.c",
+   "arch/mips/boot/tools/relocs_64.c"
+  ],
+  "arch/mips/lib/bswapdi.c": [
+   "arch/mips/boot/compressed/bswapdi.c"
+  ],
+  "arch/mips/lib/bswapsi.c": [
+   "arch/mips/boot/compressed/bswapsi.c"
+  ],
+  "arch/mips/mm/uasm.c": [
+   "arch/mips/mm/uasm-micromips.c",
+   "arch/mips/mm/uasm-mips.c"
+  ],
+  "arch/nios2/boot/compressed/console.c": [
+   "arch/nios2/boot/compressed/misc.c"
+  ],
+  "arch/parisc/kernel/firmware.c": [
+   "arch/parisc/boot/compressed/firmware.c"
+  ],
+  "arch/s390/kernel/ebcdic.c": [
+   "arch/s390/boot/ebcdic.c"
+  ],
+  "arch/s390/kernel/ipl_vmparm.c": [
+   "arch/s390/boot/ipl_vmparm.c"
+  ],
+  "arch/s390/kernel/machine_kexec_reloc.c": [
+   "arch/s390/boot/machine_kexec_reloc.c"
+  ],
+  "arch/s390/lib/string.c": [
+   "arch/s390/boot/string.c",
+   "arch/s390/purgatory/string.c"
+  ],
+  "arch/sh/lib/ashldi3.c": [
+   "arch/sh/boot/compressed/ashldi3.c"
+  ],
+  "arch/sparc/crypto/crop_devid.c": [
+   "arch/sparc/crypto/aes_glue.c",
+   "arch/sparc/crypto/camellia_glue.c",
+   "arch/sparc/crypto/crc32c_glue.c",
+   "arch/sparc/crypto/des_glue.c",
+   "arch/sparc/crypto/md5_glue.c",
+   "arch/sparc/crypto/sha1_glue.c",
+   "arch/sparc/crypto/sha256_glue.c",
+   "arch/sparc/crypto/sha512_glue.c"
+  ],
+  "arch/sparc/vdso/vclock_gettime.c": [
+   "arch/sparc/vdso/vdso32/vclock_gettime.c"
+  ],
+  "arch/x86/boot/cmdline.c": [
+   "arch/x86/boot/compressed/cmdline.c"
+  ],
+  "arch/x86/boot/cpuflags.c": [
+   "arch/x86/boot/compressed/cpuflags.c"
+  ],
+  "arch/x86/boot/early_serial_console.c": [
+   "arch/x86/boot/compressed/early_serial_console.c"
+  ],
+  "arch/x86/boot/regs.c": [
+   "arch/x86/realmode/rm/regs.c"
+  ],
+  "arch/x86/boot/string.c": [
+   "arch/x86/boot/compressed/string.c"
+  ],
+  "arch/x86/boot/video-bios.c": [
+   "arch/x86/realmode/rm/video-bios.c"
+  ],
+  "arch/x86/boot/video-mode.c": [
+   "arch/x86/realmode/rm/video-mode.c"
+  ],
+  "arch/x86/boot/video-vesa.c": [
+   "arch/x86/realmode/rm/video-vesa.c"
+  ],
+  "arch/x86/boot/video-vga.c": [
+   "arch/x86/realmode/rm/video-vga.c"
+  ],
+  "arch/x86/entry/vdso/vclock_gettime.c": [
+   "arch/x86/entry/vdso/vdso32/vclock_gettime.c"
+  ],
+  "arch/x86/kernel/asm-offsets_32.c": [
+   "arch/x86/kernel/asm-offsets.c"
+  ],
+  "arch/x86/kernel/asm-offsets_64.c": [
+   "arch/x86/kernel/asm-offsets.c"
+  ],
+  "arch/x86/kernel/sev-shared.c": [
+   "arch/x86/boot/compressed/sev.c",
+   "arch/x86/kernel/sev.c"
+  ],
+  "arch/x86/lib/inat.c": [
+   "arch/x86/boot/compressed/sev.c",
+   "arch/x86/tools/insn_decoder_test.c",
+   "arch/x86/tools/insn_sanity.c"
+  ],
+  "arch/x86/lib/insn.c": [
+   "arch/x86/boot/compressed/sev.c",
+   "arch/x86/tools/insn_decoder_test.c",
+   "arch/x86/tools/insn_sanity.c"
+  ],
+  "arch/x86/lib/kaslr.c": [
+   "arch/x86/boot/compressed/kaslr.c"
+  ],
+  "arch/x86/mm/ident_map.c": [
+   "arch/x86/boot/compressed/ident_map_64.c",
+   "arch/x86/mm/init_64.c"
+  ],
+  "arch/x86/mm/pat/cpa-test.c": [
+   "arch/x86/mm/pat/set_memory.c"
+  ],
+  "arch/x86/tools/relocs.c": [
+   "arch/x86/tools/relocs_32.c",
+   "arch/x86/tools/relocs_64.c"
+  ],
+  "drivers/atm/nicstarmac.c": [
+   "drivers/atm/nicstar.c"
+  ],
+  "drivers/atm/solos-attrlist.c": [
+   "drivers/atm/solos-pci.c"
+  ],
+  "drivers/block/paride/ppc6lnx.c": [
+   "drivers/block/paride/bpck6.c"
+  ],
+  "drivers/comedi/drivers/ni_mio_common.c": [
+   "drivers/comedi/drivers/ni_atmio.c",
+   "drivers/comedi/drivers/ni_mio_cs.c",
+   "drivers/comedi/drivers/ni_pcimio.c"
+  ],
+  "drivers/comedi/drivers/ni_routing/ni_device_routes.c": [
+   "drivers/comedi/drivers/ni_routing/tools/convert_c_to_py.c"
+  ],
+  "drivers/comedi/drivers/ni_routing/ni_route_values.c": [
+   "drivers/comedi/drivers/ni_routing/tools/convert_c_to_py.c"
+  ],
+  "drivers/dma/ti/k3-udma-private.c": [
+   "drivers/dma/ti/k3-udma.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/huge_gem_object.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_object.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/huge_pages.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_object.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_coherency.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_object.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_context.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_context.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_dmabuf.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_dmabuf.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_migrate.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_object.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_mman.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_mman.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_object.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_object.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/i915_gem_phys.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_phys.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/mock_context.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_context.c"
+  ],
+  "drivers/gpu/drm/i915/gem/selftests/mock_dmabuf.c": [
+   "drivers/gpu/drm/i915/gem/i915_gem_dmabuf.c"
+  ],
+  "drivers/gpu/drm/i915/gt/hsw_clear_kernel.c": [
+   "drivers/gpu/drm/i915/gt/gen7_renderclear.c"
+  ],
+  "drivers/gpu/drm/i915/gt/ivb_clear_kernel.c": [
+   "drivers/gpu/drm/i915/gt/gen7_renderclear.c"
+  ],
+  "drivers/gpu/drm/i915/gt/mock_engine.c": [
+   "drivers/gpu/drm/i915/gt/intel_engine_cs.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_context.c": [
+   "drivers/gpu/drm/i915/gt/intel_context.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_engine.c": [
+   "drivers/gpu/drm/i915/gt/intel_engine_cs.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_engine_cs.c": [
+   "drivers/gpu/drm/i915/gt/intel_engine_cs.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_engine_heartbeat.c": [
+   "drivers/gpu/drm/i915/gt/intel_engine_heartbeat.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_engine_pm.c": [
+   "drivers/gpu/drm/i915/gt/intel_engine_pm.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_execlists.c": [
+   "drivers/gpu/drm/i915/gt/intel_execlists_submission.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_gt_pm.c": [
+   "drivers/gpu/drm/i915/gt/intel_gt_pm.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_hangcheck.c": [
+   "drivers/gpu/drm/i915/gt/intel_reset.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_llc.c": [
+   "drivers/gpu/drm/i915/gt/intel_llc.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_lrc.c": [
+   "drivers/gpu/drm/i915/gt/intel_lrc.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_migrate.c": [
+   "drivers/gpu/drm/i915/gt/intel_migrate.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_mocs.c": [
+   "drivers/gpu/drm/i915/gt/intel_mocs.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_rc6.c": [
+   "drivers/gpu/drm/i915/gt/intel_rc6.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_reset.c": [
+   "drivers/gpu/drm/i915/gt/intel_reset.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_ring.c": [
+   "drivers/gpu/drm/i915/gt/intel_ring.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_ring_submission.c": [
+   "drivers/gpu/drm/i915/gt/intel_ring_submission.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_rps.c": [
+   "drivers/gpu/drm/i915/gt/intel_rps.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_slpc.c": [
+   "drivers/gpu/drm/i915/gt/intel_rps.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_timeline.c": [
+   "drivers/gpu/drm/i915/gt/intel_timeline.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftest_workarounds.c": [
+   "drivers/gpu/drm/i915/gt/intel_workarounds.c"
+  ],
+  "drivers/gpu/drm/i915/gt/selftests/mock_timeline.c": [
+   "drivers/gpu/drm/i915/gt/intel_timeline.c"
+  ],
+  "drivers/gpu/drm/i915/gt/st_shmem_utils.c": [
+   "drivers/gpu/drm/i915/gt/shmem_utils.c"
+  ],
+  "drivers/gpu/drm/i915/gt/uc/selftest_guc.c": [
+   "drivers/gpu/drm/i915/gt/uc/intel_guc_submission.c"
+  ],
+  "drivers/gpu/drm/i915/gt/uc/selftest_guc_hangcheck.c": [
+   "drivers/gpu/drm/i915/gt/uc/intel_guc_submission.c"
+  ],
+  "drivers/gpu/drm/i915/gt/uc/selftest_guc_multi_lrc.c": [
+   "drivers/gpu/drm/i915/gt/uc/intel_guc_submission.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_active.c": [
+   "drivers/gpu/drm/i915/i915_active.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_gem.c": [
+   "drivers/gpu/drm/i915/i915_gem.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_gem_evict.c": [
+   "drivers/gpu/drm/i915/i915_gem_evict.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_gem_gtt.c": [
+   "drivers/gpu/drm/i915/i915_gem_gtt.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_perf.c": [
+   "drivers/gpu/drm/i915/i915_perf.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_request.c": [
+   "drivers/gpu/drm/i915/i915_request.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_sw_fence.c": [
+   "drivers/gpu/drm/i915/i915_sw_fence.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_syncmap.c": [
+   "drivers/gpu/drm/i915/i915_syncmap.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/i915_vma.c": [
+   "drivers/gpu/drm/i915/i915_vma.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/intel_memory_region.c": [
+   "drivers/gpu/drm/i915/intel_memory_region.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/intel_uncore.c": [
+   "drivers/gpu/drm/i915/intel_uncore.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/lib_sw_fence.c": [
+   "drivers/gpu/drm/i915/i915_sw_fence.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/mock_gem_device.c": [
+   "drivers/gpu/drm/i915/i915_gem.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/mock_gtt.c": [
+   "drivers/gpu/drm/i915/gt/intel_gtt.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/mock_region.c": [
+   "drivers/gpu/drm/i915/intel_memory_region.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/mock_request.c": [
+   "drivers/gpu/drm/i915/i915_request.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/mock_uncore.c": [
+   "drivers/gpu/drm/i915/intel_uncore.c"
+  ],
+  "drivers/gpu/drm/i915/selftests/scatterlist.c": [
+   "drivers/gpu/drm/i915/i915_scatterlist.c"
+  ],
+  "drivers/gpu/host1x/hw/cdma_hw.c": [
+   "drivers/gpu/host1x/hw/host1x01.c",
+   "drivers/gpu/host1x/hw/host1x02.c",
+   "drivers/gpu/host1x/hw/host1x04.c",
+   "drivers/gpu/host1x/hw/host1x05.c",
+   "drivers/gpu/host1x/hw/host1x06.c",
+   "drivers/gpu/host1x/hw/host1x07.c",
+   "drivers/gpu/host1x/hw/host1x08.c"
+  ],
+  "drivers/gpu/host1x/hw/channel_hw.c": [
+   "drivers/gpu/host1x/hw/host1x01.c",
+   "drivers/gpu/host1x/hw/host1x02.c",
+   "drivers/gpu/host1x/hw/host1x04.c",
+   "drivers/gpu/host1x/hw/host1x05.c",
+   "drivers/gpu/host1x/hw/host1x06.c",
+   "drivers/gpu/host1x/hw/host1x07.c",
+   "drivers/gpu/host1x/hw/host1x08.c"
+  ],
+  "drivers/gpu/host1x/hw/debug_hw.c": [
+   "drivers/gpu/host1x/hw/host1x01.c",
+   "drivers/gpu/host1x/hw/host1x02.c",
+   "drivers/gpu/host1x/hw/host1x04.c",
+   "drivers/gpu/host1x/hw/host1x05.c",
+   "drivers/gpu/host1x/hw/host1x06.c",
+   "drivers/gpu/host1x/hw/host1x07.c",
+   "drivers/gpu/host1x/hw/host1x08.c"
+  ],
+  "drivers/gpu/host1x/hw/debug_hw_1x01.c": [
+   "drivers/gpu/host1x/hw/debug_hw.c"
+  ],
+  "drivers/gpu/host1x/hw/debug_hw_1x06.c": [
+   "drivers/gpu/host1x/hw/debug_hw.c"
+  ],
+  "drivers/gpu/host1x/hw/intr_hw.c": [
+   "drivers/gpu/host1x/hw/host1x01.c",
+   "drivers/gpu/host1x/hw/host1x02.c",
+   "drivers/gpu/host1x/hw/host1x04.c",
+   "drivers/gpu/host1x/hw/host1x05.c",
+   "drivers/gpu/host1x/hw/host1x06.c",
+   "drivers/gpu/host1x/hw/host1x07.c",
+   "drivers/gpu/host1x/hw/host1x08.c"
+  ],
+  "drivers/gpu/host1x/hw/syncpt_hw.c": [
+   "drivers/gpu/host1x/hw/host1x01.c",
+   "drivers/gpu/host1x/hw/host1x02.c",
+   "drivers/gpu/host1x/hw/host1x04.c",
+   "drivers/gpu/host1x/hw/host1x05.c",
+   "drivers/gpu/host1x/hw/host1x06.c",
+   "drivers/gpu/host1x/hw/host1x07.c",
+   "drivers/gpu/host1x/hw/host1x08.c"
+  ],
+  "drivers/hid/hid-input-test.c": [
+   "drivers/hid/hid-input.c"
+  ],
+  "drivers/hid/hid-uclogic-params-test.c": [
+   "drivers/hid/hid-uclogic-params.c"
+  ],
+  "drivers/md/raid1-10.c": [
+   "drivers/md/raid1.c",
+   "drivers/md/raid10.c"
+  ],
+  "drivers/media/usb/gspca/w996Xcf.c": [
+   "drivers/media/usb/gspca/ov519.c"
+  ],
+  "drivers/mmc/host/sdhci-of-aspeed-test.c": [
+   "drivers/mmc/host/sdhci-of-aspeed.c"
+  ],
+  "drivers/mtd/ubi/fastmap-wl.c": [
+   "drivers/mtd/ubi/wl.c"
+  ],
+  "drivers/net/ethernet/8390/lib8390.c": [
+   "drivers/net/ethernet/8390/8390.c",
+   "drivers/net/ethernet/8390/8390p.c",
+   "drivers/net/ethernet/8390/ax88796.c",
+   "drivers/net/ethernet/8390/etherh.c",
+   "drivers/net/ethernet/8390/hydra.c",
+   "drivers/net/ethernet/8390/mac8390.c",
+   "drivers/net/ethernet/8390/mcf8390.c",
+   "drivers/net/ethernet/8390/zorro8390.c"
+  ],
+  "drivers/net/ethernet/atheros/atlx/atlx.c": [
+   "drivers/net/ethernet/atheros/atlx/atl1.c"
+  ],
+  "drivers/net/ethernet/i825xx/lib82596.c": [
+   "drivers/net/ethernet/i825xx/lasi_82596.c",
+   "drivers/net/ethernet/i825xx/sni_82596.c"
+  ],
+  "drivers/net/ethernet/natsemi/sonic.c": [
+   "drivers/net/ethernet/natsemi/jazzsonic.c",
+   "drivers/net/ethernet/natsemi/macsonic.c",
+   "drivers/net/ethernet/natsemi/xtsonic.c"
+  ],
+  "drivers/net/wan/hd64570.c": [
+   "drivers/net/wan/c101.c",
+   "drivers/net/wan/n2.c"
+  ],
+  "drivers/net/wan/hd64572.c": [
+   "drivers/net/wan/pc300too.c",
+   "drivers/net/wan/pci200syn.c"
+  ],
+  "drivers/net/wireguard/selftest/allowedips.c": [
+   "drivers/net/wireguard/allowedips.c"
+  ],
+  "drivers/net/wireguard/selftest/counter.c": [
+   "drivers/net/wireguard/receive.c"
+  ],
+  "drivers/net/wireguard/selftest/ratelimiter.c": [
+   "drivers/net/wireguard/ratelimiter.c"
+  ],
+  "drivers/net/wireless/ath/wil6210/fw_inc.c": [
+   "drivers/net/wireless/ath/wil6210/fw.c"
+  ],
+  "drivers/net/wireless/intersil/hostap/hostap_download.c": [
+   "drivers/net/wireless/intersil/hostap/hostap_hw.c"
+  ],
+  "drivers/net/wireless/intersil/hostap/hostap_hw.c": [
+   "drivers/net/wireless/intersil/hostap/hostap_cs.c",
+   "drivers/net/wireless/intersil/hostap/hostap_pci.c",
+   "drivers/net/wireless/intersil/hostap/hostap_plx.c"
+  ],
+  "drivers/s390/char/sclp_early_core.c": [
+   "arch/s390/boot/sclp_early_core.c"
+  ],
+  "drivers/scsi/FlashPoint.c": [
+   "drivers/scsi/BusLogic.c"
+  ],
+  "drivers/scsi/NCR5380.c": [
+   "drivers/scsi/arm/cumana_1.c",
+   "drivers/scsi/arm/oak.c",
+   "drivers/scsi/atari_scsi.c",
+   "drivers/scsi/dmx3191d.c",
+   "drivers/scsi/g_NCR5380.c",
+   "drivers/scsi/mac_scsi.c",
+   "drivers/scsi/sun3_scsi.c"
+  ],
+  "drivers/scsi/aha152x.c": [
+   "drivers/scsi/pcmcia/aha152x_core.c"
+  ],
+  "drivers/scsi/nsp32_debug.c": [
+   "drivers/scsi/nsp32.c"
+  ],
+  "drivers/scsi/pcmcia/nsp_debug.c": [
+   "drivers/scsi/pcmcia/nsp_cs.c"
+  ],
+  "drivers/scsi/pcmcia/nsp_message.c": [
+   "drivers/scsi/pcmcia/nsp_cs.c"
+  ],
+  "drivers/scsi/sun3_scsi.c": [
+   "drivers/scsi/sun3_scsi_vme.c"
+  ],
+  "drivers/staging/wlan-ng/cfg80211.c": [
+   "drivers/staging/wlan-ng/p80211netdev.c"
+  ],
+  "drivers/staging/wlan-ng/hfa384x_usb.c": [
+   "drivers/staging/wlan-ng/prism2usb.c"
+  ],
+  "drivers/staging/wlan-ng/prism2fw.c": [
+   "drivers/staging/wlan-ng/prism2usb.c"
+  ],
+  "drivers/staging/wlan-ng/prism2mgmt.c": [
+   "drivers/staging/wlan-ng/prism2usb.c"
+  ],
+  "drivers/staging/wlan-ng/prism2mib.c": [
+   "drivers/staging/wlan-ng/prism2usb.c"
+  ],
+  "drivers/staging/wlan-ng/prism2sta.c": [
+   "drivers/staging/wlan-ng/prism2usb.c"
+  ],
+  "drivers/usb/host/ehci-dbg.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-grlib.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-hub.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-mem.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-ppc-of.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-ps3.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-q.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-sched.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-sh.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-sysfs.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-timer.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ehci-xilinx-of.c": [
+   "drivers/usb/host/ehci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-dbg.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-hub.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-mem.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-ppc-of.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-ps3.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-q.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-sa1111.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-sm501.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/ohci-tmio.c": [
+   "drivers/usb/host/ohci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-debug.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-grlib.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-hub.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-pci.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-platform.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/usb/host/uhci-q.c": [
+   "drivers/usb/host/uhci-hcd.c"
+  ],
+  "drivers/virt/nitro_enclaves/ne_misc_dev_test.c": [
+   "drivers/virt/nitro_enclaves/ne_misc_dev.c"
+  ],
+  "fs/binfmt_elf.c": [
+   "fs/compat_binfmt_elf.c"
+  ],
+  "fs/binfmt_elf_test.c": [
+   "fs/binfmt_elf.c"
+  ],
+  "fs/minix/itree_common.c": [
+   "fs/minix/itree_v1.c",
+   "fs/minix/itree_v2.c"
+  ],
+  "fs/nfs/nfs42xdr.c": [
+   "fs/nfs/nfs4xdr.c"
+  ],
+  "init/version-timestamp.c": [
+   "init/version.c"
+  ],
+  "kernel/locking/qspinlock.c": [
+   "kernel/locking/qspinlock.c"
+  ],
+  "kernel/locking/rtmutex.c": [
+   "kernel/locking/rtmutex_api.c",
+   "kernel/locking/rwsem.c",
+   "kernel/locking/spinlock_rt.c",
+   "kernel/locking/ww_rt_mutex.c"
+  ],
+  "kernel/locking/rwbase_rt.c": [
+   "kernel/locking/rwsem.c",
+   "kernel/locking/spinlock_rt.c"
+  ],
+  "kernel/sched/autogroup.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/clock.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/completion.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/core_sched.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/cpuacct.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/cpudeadline.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/cpufreq.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/cpufreq_schedutil.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/cpupri.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/cputime.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/deadline.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/debug.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/idle.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/isolation.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/loadavg.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/membarrier.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/pelt.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/psi.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/rt.c": [
+   "kernel/sched/build_policy.c"
+  ],
+  "kernel/sched/stats.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/stop_task.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/swait.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/topology.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/wait.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/sched/wait_bit.c": [
+   "kernel/sched/build_utility.c"
+  ],
+  "kernel/trace/trace_selftest.c": [
+   "kernel/trace/trace.c"
+  ],
+  "lib/ashldi3.c": [
+   "arch/mips/boot/compressed/ashldi3.c"
+  ],
+  "lib/clz_ctz.c": [
+   "arch/mips/boot/compressed/clz_ctz.c",
+   "arch/s390/boot/clz_ctz.c"
+  ],
+  "lib/cmdline.c": [
+   "arch/s390/boot/cmdline.c",
+   "arch/x86/boot/compressed/kaslr.c"
+  ],
+  "lib/ctype.c": [
+   "arch/s390/boot/ctype.c",
+   "arch/x86/boot/compressed/kaslr.c"
+  ],
+  "lib/decompress_bunzip2.c": [
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/sh/boot/compressed/misc.c",
+   "arch/x86/boot/compressed/misc.c"
+  ],
+  "lib/decompress_inflate.c": [
+   "arch/arm/boot/compressed/decompress.c",
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/powerpc/boot/decompress.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/sh/boot/compressed/misc.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/decompress_unlz4.c": [
+   "arch/arm/boot/compressed/decompress.c",
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/decompress_unlzma.c": [
+   "arch/arm/boot/compressed/decompress.c",
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/sh/boot/compressed/misc.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/decompress_unlzo.c": [
+   "arch/arm/boot/compressed/decompress.c",
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/sh/boot/compressed/misc.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/decompress_unxz.c": [
+   "arch/arm/boot/compressed/decompress.c",
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/parisc/boot/compressed/misc.c",
+   "arch/powerpc/boot/decompress.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/sh/boot/compressed/misc.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/decompress_unzstd.c": [
+   "arch/mips/boot/compressed/decompress.c",
+   "arch/s390/boot/decompressor.c",
+   "arch/x86/boot/compressed/misc.c",
+   "drivers/firmware/efi/libstub/zboot.c"
+  ],
+  "lib/fdt.c": [
+   "arch/arm/boot/compressed/fdt.c"
+  ],
+  "lib/fdt_ro.c": [
+   "arch/arm/boot/compressed/fdt_ro.c"
+  ],
+  "lib/fdt_rw.c": [
+   "arch/arm/boot/compressed/fdt_rw.c"
+  ],
+  "lib/fdt_wip.c": [
+   "arch/arm/boot/compressed/fdt_wip.c"
+  ],
+  "lib/fonts/font_acorn_8x8.c": [
+   "arch/arm/boot/compressed/font.c"
+  ],
+  "lib/inflate.c": [
+   "arch/alpha/boot/misc.c",
+   "arch/nios2/boot/compressed/misc.c"
+  ],
+  "lib/kunit/executor_test.c": [
+   "lib/kunit/executor.c"
+  ],
+  "lib/livepatch/test_klp_state2.c": [
+   "lib/livepatch/test_klp_state3.c"
+  ],
+  "lib/lz4/lz4_decompress.c": [
+   "lib/decompress_unlz4.c"
+  ],
+  "lib/lzo/lzo1x_decompress_safe.c": [
+   "lib/decompress_unlzo.c"
+  ],
+  "lib/reed_solomon/decode_rs.c": [
+   "lib/reed_solomon/reed_solomon.c"
+  ],
+  "lib/reed_solomon/encode_rs.c": [
+   "lib/reed_solomon/reed_solomon.c"
+  ],
+  "lib/vdso/gettimeofday.c": [
+   "arch/s390/kernel/vdso64/vdso64_generic.c",
+   "arch/x86/entry/vdso/vclock_gettime.c"
+  ],
+  "lib/xxhash.c": [
+   "lib/decompress_unzstd.c"
+  ],
+  "lib/xz/xz_crc32.c": [
+   "lib/decompress_unxz.c"
+  ],
+  "lib/xz/xz_dec_bcj.c": [
+   "lib/decompress_unxz.c"
+  ],
+  "lib/xz/xz_dec_lzma2.c": [
+   "lib/decompress_unxz.c"
+  ],
+  "lib/xz/xz_dec_stream.c": [
+   "lib/decompress_unxz.c"
+  ],
+  "lib/zlib_dfltcc/dfltcc.c": [
+   "lib/decompress_inflate.c"
+  ],
+  "lib/zlib_dfltcc/dfltcc_inflate.c": [
+   "lib/decompress_inflate.c"
+  ],
+  "lib/zlib_inflate/inffast.c": [
+   "lib/decompress_inflate.c"
+  ],
+  "lib/zlib_inflate/inflate.c": [
+   "lib/decompress_inflate.c"
+  ],
+  "lib/zlib_inflate/inftrees.c": [
+   "lib/decompress_inflate.c"
+  ],
+  "lib/zstd/common/debug.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/common/entropy_common.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/common/error_private.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/common/fse_decompress.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/common/zstd_common.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/decompress/huf_decompress.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/decompress/zstd_ddict.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/decompress/zstd_decompress.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/decompress/zstd_decompress_block.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "lib/zstd/zstd_decompress_module.c": [
+   "lib/zstd/decompress_sources.h"
+  ],
+  "mm/percpu-km.c": [
+   "mm/percpu.c"
+  ],
+  "mm/percpu-vm.c": [
+   "mm/percpu.c"
+  ],
+  "net/mctp/test/route-test.c": [
+   "net/mctp/route.c"
+  ],
+  "net/netfilter/nf_conntrack_h323_types.c": [
+   "net/netfilter/nf_conntrack_h323_asn1.c"
+  ],
+  "sound/core/control_compat.c": [
+   "sound/core/control.c"
+  ],
+  "sound/core/hwdep_compat.c": [
+   "sound/core/hwdep.c"
+  ],
+  "sound/core/pcm_compat.c": [
+   "sound/core/pcm_native.c"
+  ],
+  "sound/core/rawmidi_compat.c": [
+   "sound/core/rawmidi.c"
+  ],
+  "sound/core/seq/seq_compat.c": [
+   "sound/core/seq/seq_clientmgr.c"
+  ],
+  "sound/core/timer_compat.c": [
+   "sound/core/timer.c"
+  ],
+  "sound/isa/galaxy/galaxy.c": [
+   "sound/isa/galaxy/azt1605.c",
+   "sound/isa/galaxy/azt2316.c"
+  ],
+  "sound/isa/gus/interwave.c": [
+   "sound/isa/gus/interwave-stb.c"
+  ],
+  "sound/isa/msnd/msnd_pinnacle.c": [
+   "sound/isa/msnd/msnd_classic.c"
+  ],
+  "sound/isa/opti9xx/opti92x-ad1848.c": [
+   "sound/isa/opti9xx/opti92x-cs4231.c",
+   "sound/isa/opti9xx/opti93x.c"
+  ],
+  "sound/isa/sb/sb16.c": [
+   "sound/isa/sb/sbawe.c"
+  ],
+  "sound/pci/ac97/ac97_patch.c": [
+   "sound/pci/ac97/ac97_codec.c"
+  ],
+  "sound/pci/au88x0/au88x0.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_a3d.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_a3ddata.c": [
+   "sound/pci/au88x0/au88x0_a3d.c"
+  ],
+  "sound/pci/au88x0/au88x0_core.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_eq.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_eqdata.c": [
+   "sound/pci/au88x0/au88x0_eq.c"
+  ],
+  "sound/pci/au88x0/au88x0_game.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_mixer.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_mpu401.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_pcm.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_synth.c": [
+   "sound/pci/au88x0/au8820.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/au88x0/au88x0_xtalk.c": [
+   "sound/pci/au88x0/au8810.c",
+   "sound/pci/au88x0/au8830.c"
+  ],
+  "sound/pci/aw2/aw2-tsl.c": [
+   "sound/pci/aw2/aw2-saa7146.c"
+  ],
+  "sound/pci/echoaudio/darla20_dsp.c": [
+   "sound/pci/echoaudio/darla20.c"
+  ],
+  "sound/pci/echoaudio/darla24_dsp.c": [
+   "sound/pci/echoaudio/darla24.c"
+  ],
+  "sound/pci/echoaudio/echo3g_dsp.c": [
+   "sound/pci/echoaudio/echo3g.c"
+  ],
+  "sound/pci/echoaudio/echoaudio.c": [
+   "sound/pci/echoaudio/darla20.c",
+   "sound/pci/echoaudio/darla24.c",
+   "sound/pci/echoaudio/echo3g.c",
+   "sound/pci/echoaudio/gina20.c",
+   "sound/pci/echoaudio/gina24.c",
+   "sound/pci/echoaudio/indigo.c",
+   "sound/pci/echoaudio/indigodj.c",
+   "sound/pci/echoaudio/indigodjx.c",
+   "sound/pci/echoaudio/indigoio.c",
+   "sound/pci/echoaudio/indigoiox.c",
+   "sound/pci/echoaudio/layla20.c",
+   "sound/pci/echoaudio/layla24.c",
+   "sound/pci/echoaudio/mia.c",
+   "sound/pci/echoaudio/mona.c"
+  ],
+  "sound/pci/echoaudio/echoaudio_3g.c": [
+   "sound/pci/echoaudio/echo3g.c"
+  ],
+  "sound/pci/echoaudio/echoaudio_dsp.c": [
+   "sound/pci/echoaudio/darla20.c",
+   "sound/pci/echoaudio/darla24.c",
+   "sound/pci/echoaudio/echo3g.c",
+   "sound/pci/echoaudio/gina20.c",
+   "sound/pci/echoaudio/gina24.c",
+   "sound/pci/echoaudio/indigo.c",
+   "sound/pci/echoaudio/indigodj.c",
+   "sound/pci/echoaudio/indigodjx.c",
+   "sound/pci/echoaudio/indigoio.c",
+   "sound/pci/echoaudio/indigoiox.c",
+   "sound/pci/echoaudio/layla20.c",
+   "sound/pci/echoaudio/layla24.c",
+   "sound/pci/echoaudio/mia.c",
+   "sound/pci/echoaudio/mona.c"
+  ],
+  "sound/pci/echoaudio/echoaudio_gml.c": [
+   "sound/pci/echoaudio/gina24.c",
+   "sound/pci/echoaudio/layla24.c",
+   "sound/pci/echoaudio/mona.c"
+  ],
+  "sound/pci/echoaudio/gina20_dsp.c": [
+   "sound/pci/echoaudio/gina20.c"
+  ],
+  "sound/pci/echoaudio/gina24_dsp.c": [
+   "sound/pci/echoaudio/gina24.c"
+  ],
+  "sound/pci/echoaudio/indigo_dsp.c": [
+   "sound/pci/echoaudio/indigo.c"
+  ],
+  "sound/pci/echoaudio/indigo_express_dsp.c": [
+   "sound/pci/echoaudio/indigodjx.c",
+   "sound/pci/echoaudio/indigoiox.c"
+  ],
+  "sound/pci/echoaudio/indigodj_dsp.c": [
+   "sound/pci/echoaudio/indigodj.c"
+  ],
+  "sound/pci/echoaudio/indigodjx_dsp.c": [
+   "sound/pci/echoaudio/indigodjx.c"
+  ],
+  "sound/pci/echoaudio/indigoio_dsp.c": [
+   "sound/pci/echoaudio/indigoio.c"
+  ],
+  "sound/pci/echoaudio/indigoiox_dsp.c": [
+   "sound/pci/echoaudio/indigoiox.c"
+  ],
+  "sound/pci/echoaudio/layla20_dsp.c": [
+   "sound/pci/echoaudio/layla20.c"
+  ],
+  "sound/pci/echoaudio/layla24_dsp.c": [
+   "sound/pci/echoaudio/layla24.c"
+  ],
+  "sound/pci/echoaudio/mia_dsp.c": [
+   "sound/pci/echoaudio/mia.c"
+  ],
+  "sound/pci/echoaudio/midi.c": [
+   "sound/pci/echoaudio/echo3g.c",
+   "sound/pci/echoaudio/layla20.c",
+   "sound/pci/echoaudio/layla24.c",
+   "sound/pci/echoaudio/mia.c"
+  ],
+  "sound/pci/echoaudio/mona_dsp.c": [
+   "sound/pci/echoaudio/mona.c"
+  ],
+  "sound/pci/ens1370.c": [
+   "sound/pci/ens1371.c"
+  ],
+  "sound/pci/hda/hp_x360_helper.c": [
+   "sound/pci/hda/patch_realtek.c"
+  ],
+  "sound/pci/hda/ideapad_s740_helper.c": [
+   "sound/pci/hda/patch_realtek.c"
+  ],
+  "sound/pci/hda/thinkpad_helper.c": [
+   "sound/pci/hda/patch_conexant.c",
+   "sound/pci/hda/patch_realtek.c"
+  ],
+  "sound/pci/nm256/nm256_coef.c": [
+   "sound/pci/nm256/nm256.c"
+  ],
+  "sound/usb/mixer_maps.c": [
+   "sound/usb/mixer.c"
+  ],
+  "sound/usb/usx2y/usb_stream.c": [
+   "sound/usb/usx2y/us122l.c"
+  ],
+  "sound/usb/usx2y/usbusx2yaudio.c": [
+   "sound/usb/usx2y/usx2yhwdeppcm.c"
+  ]
+ },
+ "unresolved": [
+  "arch/x86/boot/mkcpustr.c: ../kernel/cpu/capflags.c",
+  "arch/x86/lib/inat.c: inat-tables.c",
+  "drivers/comedi/drivers/ni_routing/tools/convert_c_to_py.c: all_cfiles.c",
+  "drivers/net/wireless/intersil/hostap/hostap_hw.c: hostap_callback.c",
+  "drivers/scsi/scsi_sysfs.c: scsi_devinfo_tbl.c",
+  "lib/fdt.c: ../scripts/dtc/libfdt/fdt.c",
+  "lib/fdt_addresses.c: ../scripts/dtc/libfdt/fdt_addresses.c",
+  "lib/fdt_empty_tree.c: ../scripts/dtc/libfdt/fdt_empty_tree.c",
+  "lib/fdt_ro.c: ../scripts/dtc/libfdt/fdt_ro.c",
+  "lib/fdt_rw.c: ../scripts/dtc/libfdt/fdt_rw.c",
+  "lib/fdt_strerror.c: ../scripts/dtc/libfdt/fdt_strerror.c",
+  "lib/fdt_sw.c: ../scripts/dtc/libfdt/fdt_sw.c",
+  "lib/fdt_wip.c: ../scripts/dtc/libfdt/fdt_wip.c",
+  "lib/oid_registry.c: oid_registry_data.c"
+ ]
+}
