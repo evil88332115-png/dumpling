@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
     *) echo "未知參數：$1" >&2; usage ;;
   esac
 done
-[ -n "$work" ] && [ -n "$result" ] || usage
+if [ -z "$work" ] || [ -z "$result" ]; then usage; fi
 [ ${#yml[@]} -gt 0 ] || [ ${#vb_yml[@]} -gt 0 ] || { echo "沒有樣本（--sample 或 --synthetic-vbios）" >&2; usage; }
 mkdir -p "$work" "$result" || exit 64
 
