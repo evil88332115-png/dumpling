@@ -2,6 +2,7 @@
 schema: 1
 platform: raspberrypi
 description: Raspberry Pi OS 官方映像（MBR 原始磁碟，boot 是 FAT、root 是 ext4）；不編譯、不重組映像，直接掃官方 .img.xz
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/arm64；只匯入與讀取，不執行）
 build:
   mode: none               # 用官方的 linux-image deb；核心原始碼（raspberrypi/linux）只當對照
 raw_sectors:

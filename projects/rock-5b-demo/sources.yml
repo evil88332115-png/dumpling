@@ -1,5 +1,4 @@
 # 公開示範資料（ROCK 5B（Rockchip RK3588）官方映像 rsdk-r6（Debian 12 bookworm，KDE））：網址與 sha256 是 C4 實際下載核對的結果，來源見 docs/platforms-research.md。
-# role: metadata 的官方清單檔（rock-5b_bookworm_kde_r6.manifest）等 FILE_ROLES 支援 metadata 後補上。
 schema: 1
 releases:
   v1.0.0-demo1:
@@ -60,3 +59,11 @@ releases:
       version: commit 39cd993e5d6296635438e84f4576b3a9bf76f86e（u-boot-rk2410 版本字串 2017.09-64-39cd993 的 commit）
       license_url: https://github.com/radxa/u-boot/blob/39cd993e5d6296635438e84f4576b3a9bf76f86e/Licenses/README
       note: GitHub 動態封存檔的 sha256 可能變動；處理方式同上
+    - name: rock-5b_bookworm_kde_r6.manifest
+      url: https://github.com/radxa-build/rock-5b/releases/download/rsdk-r6/rock-5b_bookworm_kde_r6.manifest
+      sha256: 0fdfd533eab82ff32f28c3705bfda06f929db3eda893d505531a155a11009a93
+      size: 50059
+      role: metadata
+      version: rsdk-r6
+      license_url: https://github.com/radxa-build/rock-5b/blob/main/LICENSE
+      note: 映像的套件清單（純文字）；核心與 U-Boot 版本取自這裡；sha512 與 .sha512sum 相同

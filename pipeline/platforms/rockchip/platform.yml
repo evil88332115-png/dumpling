@@ -2,6 +2,7 @@
 schema: 1
 platform: rockchip
 description: Rockchip 開發板的官方映像（GPT 原始磁碟）；不編譯、不重組映像；分割區外的開機程式（idbloader、u-boot.itb）由 raw-sectors 清點
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/arm64；只匯入與讀取，不執行）
 build:
   mode: none               # 用板子廠商的 linux-image／u-boot deb；核心與 U-Boot 原始碼只當對照
 raw_sectors:

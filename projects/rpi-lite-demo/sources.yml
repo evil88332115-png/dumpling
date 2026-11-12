@@ -1,5 +1,4 @@
 # 公開示範資料（Raspberry Pi OS Lite（trixie，arm64；Raspberry Pi 3／4／5、Zero 2 W））：網址與 sha256 是 C4 實際下載核對的結果，來源見 docs/platforms-research.md。
-# role: metadata 的官方清單檔（2026-10-06-raspios-trixie-arm64-lite.sbom.xz、2026-10-06-raspios-trixie-arm64-lite.info）等 FILE_ROLES 支援 metadata 後補上。
 schema: 1
 releases:
   v1.0.0-demo1:
@@ -54,3 +53,19 @@ releases:
       version: 1:1.20260915-1
       license_url: https://github.com/raspberrypi/firmware/blob/master/boot/LICENCE.broadcom
       note: 閉源開機韌體（start*.elf、fixup*.dat、bootcode.bin）的官方原版，給映像內檔案的身分比對用；sha256 與 trixie arm64 Packages 索引相同
+    - name: 2026-10-06-raspios-trixie-arm64-lite.sbom.xz
+      url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.sbom.xz
+      sha256: 39abf3605d743a18fdfccf465e0aa1659b0bcb0f18316b9c02f15c98a7551511
+      size: 5338492
+      role: metadata
+      version: '2026-10-06'
+      license_url: https://www.raspberrypi.com/software/operating-systems/
+      note: 官方附的 SBOM（格式未解開確認），可當交叉核對的第二來源
+    - name: 2026-10-06-raspios-trixie-arm64-lite.info
+      url: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.info
+      sha256: 39b54efe2cce2912f3e1d0ccee9a0f384813d7b5254f82b31ec5fa6ce1a739e4
+      size: 86232
+      role: metadata
+      version: '2026-10-06'
+      license_url: https://www.raspberrypi.com/software/operating-systems/
+      note: pi-gen 版本與 dpkg 套件清單（純文字）；上面的核心與韌體版本取自這裡

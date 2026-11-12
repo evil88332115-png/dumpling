@@ -3,6 +3,7 @@
 schema: 1
 platform: ai-nas
 description: x86 的 Debian 系 NAS：Debian 官方雲端映像（tar.xz 裡的 disk.raw，GPT）＋ NAS 網頁介面與 App 的原始碼（OpenMediaVault，固定 commit）
+arch: amd64                # 目標映像的架構（scan 的 docker import --platform linux/amd64；只匯入與讀取，不執行）
 build:
   mode: none               # 不編譯；Debian 的核心與套件用官方成品
 raw_sectors:
@@ -21,6 +22,7 @@ layers:
       - "boot/*"
   default: os
 scan:
+  platform_arg: generic        # x86 沒有定義開機鏈：開機程式分類 NOT_ASSESSED（不是 GAP），平台由 project.yml 明確給定
   rootfs: rootfs
 project_defaults:
   platform_version: Debian 13 trixie amd64

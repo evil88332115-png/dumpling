@@ -1,5 +1,4 @@
 # 公開示範資料（AI NAS 示範：Debian 13 trixie generic amd64 映像＋OpenMediaVault 原始碼（D-025））：網址與 sha256 是 C4 實際下載核對的結果，來源見 docs/platforms-research.md。
-# role: metadata 的官方清單檔（debian-13-generic-amd64-20261111-2659.json）等 FILE_ROLES 支援 metadata 後補上。
 schema: 1
 releases:
   v1.0.0-demo1:
@@ -57,3 +56,11 @@ releases:
         內含 deb/openmediavault/workbench/package-lock.json、composer.lock、requirements.txt，給 cdxgen 掃相依套件。
 
         '
+    - name: debian-13-generic-amd64-20261111-2659.json
+      url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-generic-amd64-20261111-2659.json
+      sha256: 740c5266604bc05024836a76032273be988f6f2ee13b6c594d5a80a424aa5e40
+      size: 50844
+      role: metadata
+      version: 20261111-2659
+      license_url: https://www.debian.org/legal/licenses/
+      note: 映像的建置資訊與套件清單；核心版本取自這裡；sha512 與 SHA512SUMS 相同
