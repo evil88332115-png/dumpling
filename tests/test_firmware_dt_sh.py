@@ -175,6 +175,15 @@ sys.exit(1 if bad else 0)
         self.assertEqual(rc, 0, out)
         self.assertIn("FIRMWARE-DT\tGAP\t", out)
 
+    def test_old_results_are_not_mixed(self):
+        self.fakes()
+        w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")
+        y, s = self.sample("good")
+        self.assertEqual(self.run_sh("--work", w, "--result", res, "--sample", y, s)[0], 0)
+        rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)       # 同一個 --result 再跑一次
+        self.assertEqual(rc, 1)
+        self.assertIn("FIRMWARE-DT-STEP\tFAIL\tfirmware-bios-good\t結果資料夾已有舊結果", out)
+
     def test_prep_failure_is_fail_but_others_continue(self):
         self.fakes()
         w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")

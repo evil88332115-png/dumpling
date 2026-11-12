@@ -84,7 +84,11 @@ wait_rc=""
 for p in "${preps[@]}"; do
   name=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["project_name"])' "$p/dt-project.json")
   ver=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["project_version"])' "$p/dt-project.json")
-  sd="$result/$name"; mkdir -p "$sd"
+  sd="$result/$name"
+  if [ -e "$sd/scan" ]; then       # sca-scan 不接受非空的輸出資料夾；舊結果也不能混進這次的 report
+    say "FIRMWARE-DT-STEP	FAIL	$name	結果資料夾已有舊結果（$sd/scan）：請用全新的 --result 資料夾"; rc=1; continue
+  fi
+  mkdir -p "$sd"
   if [ ! -x "$root/tools/pilot/sca-scan" ]; then
     say "FIRMWARE-DT-STEP	NOT_RUN	$name	沒有 tools/pilot/sca-scan（C1 的工具還沒進這個分支）"; continue
   fi

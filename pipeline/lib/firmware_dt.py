@@ -133,12 +133,9 @@ def _props(c):
 
 
 def identity(c):
-    sha = ""
-    for h in c.get("hashes") or []:
-        if isinstance(h, dict) and str(h.get("alg", "")).upper() in ("SHA-256", "SHA256"):
-            sha = str(h.get("content", "")).lower()
-            break
-    return (c.get("group") or "", c.get("name") or "", c.get("version") or "", c.get("purl") or "", c.get("cpe") or "", sha)
+    """DT 合併元件的身分：group、name、version、purl、cpe。**不含 hashes**：本機端到端（DT 5.2.0）實測，
+    只有雜湊不同的元件（例如同版本的兩個 FSP-M 映像）DT 仍合併成一個。"""
+    return (c.get("group") or "", c.get("name") or "", c.get("version") or "", c.get("purl") or "", c.get("cpe") or "")
 
 
 def purl_type(purl):
@@ -297,7 +294,7 @@ def expected(prep_dir):
     s = info["summary"]
     # 依 C1 pipeline/dt-verify.py verify 目前的格式；介面改了要跟著改（見 docs/notes/c2-firmware-dt.md）。
     # 臨時 DT 只開 OSV、KEV；韌體漏洞比對以 Grype 為主，DT 只收件留存，所以重點是專案存在與元件數。
-    # components 用「不同身分」的數量（group／name／version／purl／cpe／sha256 都相同的元件 DT 會合併成一個）。
+    # components 用「不同身分」的數量（group／name／version／purl／cpe 都相同的元件 DT 會合併成一個，雜湊不算；DT 5.2.0 實測）。
     # min_findings_*：韌體元件大多沒有 purl，DT（臨時 DT 只開 OSV、KEV）查不到，所以下限是 0，只記錄有哪些 purl 類型。
     dt_verify = {"project_name": info["project_name"], "project_version": info["project_version"],
                  "components": s["distinct_identities"], "min_findings_total": 0,

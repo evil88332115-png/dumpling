@@ -1,7 +1,8 @@
 # C2：韌體 SBOM 上傳臨時 DT（M3 的「進 DT」）
 
-狀態：`pipeline/lib/firmware_dt.py`（prep／expected／report）已做完並有測試；**尚未接進 `.github/workflows/firmware.yml`**，等 C1 的臨時 DT 工具合併進 main 後才接。
-依據的 C1 版本：`origin/wp1/m1-tools-pilot`（45bb4de）。
+狀態：`pipeline/lib/firmware_dt.py`（prep／expected／report）、`pipeline/firmware-dt.sh`（每個樣本 prep → scan → verify → report 的迴圈）已做完並有測試；
+**已接進 `.github/workflows/firmware.yml` 的 `firmware-dt` job**，並在本機用真的臨時 DT 跑過一次端到端（結果見最後一節）。**job 還沒在 GitHub Actions 上跑過。**
+依據的 C1 版本：`wp1/m1-tools`（bd95a8c，M1 已合併進 main 0e706cb）。
 
 ## 流程
 
@@ -43,21 +44,24 @@ report 讀的結果資料夾（`--dt-result`）：
 - `firmware-dt-expected.json`（介面無關）：專案名稱、版本、元件數（總數與不同身分數）、`no_data_components`（沒有 purl 的元件；`reason` 區分「只有 CPE」與「兩者都沒有」）、NOT_ASSESSED 數、版本 GAP 數。
   語意：DT 漏洞數為 0 時，這些元件是「DT 沒有資料」，不是「沒有漏洞」。
 
-## workflow 草稿（之後加進 firmware.yml，現在不要加）
+## 實際 workflow（`firmware.yml` 的 `firmware-dt`）
 
-新的 job `firmware-dt`，`needs: firmware-fetch`（需要 `firmware-out` 的 SBOM，所以 SBOM 解析要先做；或同一個 job 接在解析步驟之後）。權限 `contents: read`。步驟：
+獨立 job、**不** `needs: firmware-fetch`，理由：這個 job 的上限是 90 分鐘（OSV、KEV 鏡像）；repo 沒有用過 `download-artifact`（沒有可沿用的固定 SHA），
+所以 job 自己下載 BIOS／供應商 SBOM 樣本（`firmware-fetch.sh`，同樣核對 sha256）並跑 `firmware-ci.sh` 取得 SBOM（本機實測約 4 秒，網路時間另計）。
+觸發：`workflow_dispatch` 與 `pull_request`（`paths` 加 `pipeline/dt-*`、`pipeline/scan-status-check.py`、`tools/pilot/**`、`tools/e2e/**`）。
+注意：`firmware/**` 的 PR 也會觸發這個 job（整個 workflow 共用 `paths`）；DT 鏡像本機約 6 分鐘，Actions 上可能更久。權限 `contents: read`，actions 用固定 SHA。
 
-1. checkout（固定 SHA，`persist-credentials: false`）；取得 `firmware-out`（artifact 或同 job 的 `$RUNNER_TEMP/firmware-out`）。
-2. 安裝工具：`bash tools/e2e/install-tools.sh`（Grype、Syft 等固定版本；工具要放 `/usr/local/bin`，因為沙箱會遮蔽家目錄）。
-3. 每個 BIOS／vBIOS 樣本：`firmware_dt.py prep`、`expected`（vBIOS 合成樣本：先用 `synthetic_vbios.py` 產 ROM，再 `firmware-bios.sh`，`--sample` 指向 GAP 的 `firmware.yml`）。
-4. `bash pipeline/dt-ephemeral.sh up`；`wait`（`rc=$?`，把 `$rc` 寫進 `$RESULT/dt-wait.rc`；結束碼 3 是 GAP，不中止後面的步驟，報告會標 GAP；其他非 0 才讓 job 失敗）。
-5. `bash pipeline/dt-ephemeral.sh env "$RUNNER_TEMP/pilot/pilot.env"`：**pilot.env 放在自己的子資料夾**，不能直接放在 `$RUNNER_TEMP`（沙箱會遮蔽 PILOT_ENV 所在的整個資料夾）；`export PILOT_ENV=...`。
-6. 每個樣本：`tools/pilot/sca-scan --sbom prep/<slug>/sbom.cdx.json --name <project_name> --version <project_version> --out "$RESULT/<project_name>/scan" --no-license`（結束碼 0 或 2 都正常），
-   接著 `python3 -I pipeline/scan-status-check.py "$RESULT/<project_name>/scan/status.tsv"`（預設必要階段）。
-7. 每個樣本：`python3 -I pipeline/dt-verify.py verify prep/<slug>/expected.json "$RESULT/<project_name>"`（FAIL 不要中止其他樣本，最後統一判斷）。
-8. `python3 -I pipeline/lib/firmware_dt.py report --prep prep/* --dt-result "$RESULT" --out report`，把 `firmware-dt.md` 附到 `$GITHUB_STEP_SUMMARY`；report 退出碼 1 讓 job 失敗。
-9. `dt-ephemeral.sh down`（`if: always()`）；上傳 artifact（`firmware-dt.md`、各樣本 `summary.json`、`status.tsv`、`grype.json`；不放 pilot.env）。
-10. `firmware.yml` 的 `paths` 要加 `pipeline/dt-*`、`pipeline/scan-status-check.py`、`tools/pilot/**`（PR 觸發範圍）。DT 鏡像要花幾十分鐘，建議這個 job 只在 `workflow_dispatch` 與里程碑 PR 跑，timeout 90 分鐘（比照 dt-smoke）。
+步驟：checkout → 路徑（`PILOT_ENV` 在自己的子資料夾）→ 下載（bios＋sbom 樣本）→ `firmware-ci.sh` → `install-tools.sh --sbom-only`（Syft／Grype 放 `/usr/local/bin`）→
+`dt-ephemeral.sh up` → `wait`（結束碼寫進 `dt-wait.rc`；0、3 繼續，其他非 0 失敗）→ `env` → `firmware-dt.sh`（BIOS 樣本、供應商 SBOM、`--synthetic-vbios`）→
+NVIDIA 公告步驟 → 小型 artifact（不含 pilot.env）→ `down`（`if: always()`）。摘要寫進 `$GITHUB_STEP_SUMMARY`。
+
+必要階段（`scan-status-check.py`）：用 C1 預設的 11 個（A-source、B-sandbox、B-sandbox-secrets、B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、D-dt-upload、
+D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿掉**，在 `firmware-dt.sh` 明列。韌體的 `C-sbomgate` 是 NOT_ASSESSED（sbomgate 只把 library／framework 當套件），
+不在必要清單內，也不能要求。本機實測四個上傳成功的樣本，11 個必要階段全部 OK。
+
+NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對照：NOT_ASSESSED（…）」，文字用路徑載入 `tools/pilot/lib/nvidia_bulletins.py` 的 `VBIOS_NOT_ASSESSED`（不複製）；
+載入失敗寫 GAP 加原因。workflow 另有一步：`tools/mirror/nvidia-bulletins.sh` 抓公告鏡像 → `nvidia_bulletins.py candidates --group gpu-firmware`，把那一行印進摘要；
+鏡像或工具失敗只記 GAP，不讓 job 失敗。C1 沒有 gpu-firmware 專用的對照表，這裡借用 Jetson 的 `nvidia-bulletins.json`，所以那一行會附「對照表有 N 個公告不在鏡像」（Jetson 的公告，與 vBIOS 無關）。
 
 ## 依賴 C1 介面的地方（C1 改了要跟著改）
 
@@ -71,14 +75,30 @@ report 讀的結果資料夾（`--dt-result`）：
 | `dt-ephemeral.sh wait` 結束碼 3 | GAP（資料不完整） | `dt-wait.rc` |
 | 專案查詢 | dt-verify 用 `name`＋`version` 查，所以 expected 的名稱版本必須和 sca-scan 傳的完全相同 | `dt-project.json` |
 
-## 試接結果（只在暫存，2026-11-12）
+## 本機端到端結果（2026-11-12，DT 5.2.0、Syft 1.55.0／Grype 0.121.0）
 
-- 用 `git archive origin/wp1/m1-tools-pilot` 取出 C1 的 `tools/`、`pipeline/` 到暫存；用合成 ROM 的 SBOM（prep 後）跑
-  `PILOT_ENV=<不存在的檔> tools/pilot/sca-scan --sbom … --no-license`（沒有 DT）：
-  - 主機有 Grype（`/opt/sca-tools`，A-tools 會說明），A、B、C 階段都跑得動：`A-source OK`、`B-sbom-provided OK（1 components）`、`C-grype-db OK`、
-    `C-grype OK（0 matches（比對完成；不代表不存在其他弱點））`、`C-upload-sbom OK（沒有版本未知的元件）`、`F-secret-scan OK`。
-  - `C-sbomgate NOT_ASSESSED（SBOM：EMPTY（套件元件 0）… 弱點分析：NOT_ASSESSED）`，如 C1 所說。
-  - `D-dt-*` 全是 `NOT_RUN（沒有 <PILOT_ENV>）`，退出碼 2。
-  - 把這個輸出放進 report 的 `--dt-result` 結構：Grype 欄讀得到「OK（0 筆）」，上傳 NOT_RUN，狀態 NOT_RUN。
-- `dt-verify.py verify`（PILOT_ENV 指向連不上的 DT）讀得懂我們產的 `expected.json`：`專案存在: FAIL（lookup http=錯誤 URLError）`，其餘 NOT_RUN，退出碼 1；格式沒有被拒絕。
-- 沒有在本機起 DT，所以 DT 的元件合併規則、`wait` 的實際行為、`verify` 在真 DT 上的結果都還沒驗證。
+環境：Docker 臨時 DT（OSV: PyPI,npm,Ubuntu；KEV；NVD 關閉）。Syft／Grype 用主機上同版本的 `/opt/sca-tools`（沒有 sudo，沒跑 `install-tools.sh`）。
+`RUNNER_TEMP` 要放在家目錄底下：sca-scan 的沙箱探測會在 `RUNNER_TEMP` 放假憑證檔並要求它被遮蔽，放在其他位置會得到 `B-sandbox=FAIL`（本機環境問題，runner 上的 `_temp` 在家目錄內）。
+時間：`up` 約 20 秒、`wait` 363～378 秒（三次）、五個樣本的 sca-scan＋verify 約 41 秒（沙箱失敗那次）到 671 秒（含 Grype 資料庫更新與 Grype 比對）。
+
+| 樣本 | 元件（不同身分） | DT 元件數 | 上傳 | Grype | verify | report |
+|---|---|---|---|---|---|---|
+| Protectli VP46xx（BIOS） | 16（14） | 14 | OK | OK（0） | 元件數依下方修正後見最後一欄註 | ATTENTION（見註） |
+| NUC11 PATGL357（BIOS） | 3 | 3 | OK | OK（0） | 通過 | ATTENTION |
+| Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
+| 合成 NVIDIA vBIOS | 1 | 1 | OK | OK（0） | 通過 | ATTENTION（NVIDIA 公告對照：NOT_ASSESSED） |
+| Dasharo NS5x 供應商 SBOM | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
+
+發現：
+- **DT 的元件合併規則不含雜湊**：Protectli 有兩組只有 sha256 不同、其他欄位相同的 FSP-M 映像，DT 合併成一個（16 → 14）。原本 `expected` 的身分含 sha256，預期 16，verify 因此 FAIL；已改成 group／name／version／purl／cpe（含測試）。
+  代價：DT 看不到同版本不同映像的第二份，SBOM 原檔仍保留兩份。
+- **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
+  這是上游檔案不符合 CycloneDX schema，我們不改元件內容，所以這個樣本在 DT 裡是 FAIL（Grype 仍比對了 36 筆，DT 完全沒有資料）。處理方式待 C2 決定（見回報）。
+- 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
+
+## 仍未驗證
+
+- `firmware-dt` job 在 GitHub Actions 上的實際執行（Actions 上 `install-tools.sh`、`wait` 時間、artifact）。
+- `wait` 結束碼 3（GAP）路徑只有單元測試，沒有在真的 DT 上製造。
+- NVIDIA 公告步驟在 Actions 上的執行（本機鏡像 4.7 秒、`candidates` 印出 ATTENTION：1 個待審的 gpu-firmware 公告 5674）。
+- 供應商 SBOM 被 DT 拒收的處理方式。

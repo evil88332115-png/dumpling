@@ -199,6 +199,14 @@ class ExpectedTests(Base):
         exp, own = fd.expected(o)
         self.assertEqual((exp["components"], own["components_total"]), (1, 2))
 
+    def test_components_differing_only_by_hash_merge_like_dt(self):
+        a, b = comp("fsp", "r1"), comp("fsp", "r2")
+        a["hashes"] = [{"alg": "SHA-256", "content": "aa" * 32}]
+        b["hashes"] = [{"alg": "SHA-256", "content": "bb" * 32}]
+        _, o = self.prep(bom(a, b, comp("other", "r3")))
+        exp, own = fd.expected(o)
+        self.assertEqual((exp["components"], own["components_total"]), (2, 3))
+
     def test_tampered_prep_rejected(self):
         _, o = self.prep(bom(comp("a", "r1")))
         p = os.path.join(o, "dt-project.json")
