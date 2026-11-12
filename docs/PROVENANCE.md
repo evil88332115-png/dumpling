@@ -13,7 +13,7 @@
 | `pipeline/dt-compose.yaml` | `scripts/e2e/dt-compose.yaml` | 25fa89a | 改名 e2e-dt→dumpling-dt；埠改成 `${DT_PORT:-8080}`；註解改寫；映像 digest 與其餘設定不變 |
 | `pipeline/dt-ephemeral.sh` | `scripts/e2e/dtlib.sh`（做法參考，重寫） | 25fa89a | 改寫成 up／wait／env／down 四個子指令；狀態檔取代 sca-center 的 status／secret 函式；關 NVD、開 OSV 與 KEV、API key 流程沿用；新增 KEV 與 OSV 鏡像等待與逾時 GAP、`::add-mask::` |
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
-| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾）改成 /mnt/data/runner/_work/demo/…、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
+| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾與自架 runner 的工作目錄結構）改成 /path/to/work/.sca-scan-work.…/image.tar（metadata.component.name，僅此一處）、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/company.example.json` | `scripts/cra/company.example.json` | 25fa89a | 原樣 |
@@ -59,7 +59,7 @@
 | `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶） |
 | `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（其他 2、信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
 | `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明 |
+| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明；遮蔽路徑測試的輸入改用中性的 runner 路徑（不沿用 sca-center 自架 runner 的目錄結構），斷言意義不變 |
 | `tools/cra/tests/test_cra_ubuntu_tracker_fix.py` | `scripts/cra/tests/test_cra_ubuntu_tracker_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_cra_usn_fix.py` | `scripts/cra/tests/test_cra_usn_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_customer_package_wording.py` | `scripts/cra/tests/test_customer_package_wording.py` | 25fa89a | 清理 2 行（本機路徑換成中性路徑 2） |
