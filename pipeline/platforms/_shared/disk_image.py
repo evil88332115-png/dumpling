@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 import lzma
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,6 +101,36 @@ def _pax(data):
     return out
 
 
+SPARSE_MAX_ENTRIES = 1 << 20     # GNU 稀疏表的項目上限
+ZERO = bytes(4 << 20)
+
+
+class _XzReader:
+    """串流解 .xz（LZMADecompressor）：只接受單一 xz 串流，串流結束後不能有任何其他資料（包含 xz 層級的尾端垃圾）。"""
+
+    def __init__(self, path):
+        self.f = open(path, "rb")
+        self.d = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        self.buf = b""
+
+    def read(self, n):
+        out = b""
+        while len(out) < n and not self.d.eof:
+            if self.d.needs_input:
+                chunk = self.f.read(1 << 20)
+                if not chunk:
+                    raise PrepError("xz 串流不完整（截斷）")
+            else:
+                chunk = b""
+            out += self.d.decompress(chunk, max_length=n - len(out))
+        if self.d.eof and (self.d.unused_data or self.f.read(1)):
+            raise PrepError("xz 串流之後還有其他資料")
+        return out
+
+    def close(self):
+        self.f.close()
+
+
 class _Counted:
     """包住解壓串流：計算總讀取量，超過上限就停。"""
 
@@ -130,6 +161,42 @@ class _Counted:
             n -= len(b)
 
 
+def _sparse_map(hdr, t):
+    """GNU 舊式稀疏（型別 S）：標頭 386 起 4 筆 (offset, numbytes)，482 isextended，483 realsize；延伸區塊每塊 21 筆、504 isextended。
+    → (realsize, [(offset, numbytes)…])。表要遞增、不重疊、不超過 realsize。"""
+    def entries(block, start, count):
+        out = []
+        for k in range(count):
+            o = start + 24 * k
+            off, n = _tar_num(block[o:o + 12]), _tar_num(block[o + 12:o + 24])
+            if off == 0 and n == 0 and not block[o:o + 24].strip(b"\0"):
+                continue
+            out.append((off, n))
+        return out
+    sp = entries(hdr, 386, 4)
+    ext = hdr[482]
+    real = _tar_num(hdr[483:495])
+    while ext:
+        blk = t.exact(512)
+        sp += entries(blk, 0, 21)
+        ext = blk[504]
+        if len(sp) > SPARSE_MAX_ENTRIES:
+            raise PrepError("稀疏表項目太多")
+    pos = 0
+    for off, n in sp:
+        if off < pos or off + n > real:
+            raise PrepError("稀疏表不是遞增、有重疊或超過實際大小")
+        pos = off + n
+    return real, sp
+
+
+def _hash_zeros(h, n):
+    while n > 0:
+        k = min(n, len(ZERO))
+        h.update(ZERO[:k])
+        n -= k
+
+
 def extract_member(src, member, out, max_bytes=MAX_IMAGE):
     """串流讀 .tar.xz，只把名稱等於 member 的一般檔案寫到 out。→ (bytes, sha256, 其他成員清單)。
     不用 tarfile：自己讀 512 bytes 的標頭（ustar／GNU／PAX），longname 與 PAX 內容有上限，整個 tar 的解壓總量有上限，
@@ -140,9 +207,10 @@ def extract_member(src, member, out, max_bytes=MAX_IMAGE):
         fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0), 0o600)
     except OSError as e:
         raise PrepError("無法建立 %s（%s）；檔案不能已經存在" % (os.path.basename(out), e.strerror))
-    ok = False
+    ok, xf = False, None
     try:
-        with lzma.open(src, "rb") as xf, os.fdopen(fd, "wb") as dst:
+        xf = _XzReader(src)
+        with os.fdopen(fd, "wb") as dst:
             t = _Counted(xf, TAR_TOTAL_MAX)
             longname, pax, members, zeros = None, {}, 0, 0
             while True:
@@ -177,17 +245,19 @@ def extract_member(src, member, out, max_bytes=MAX_IMAGE):
                         pax = _pax(data)
                     continue
                 name = hdr[0:100].split(b"\0", 1)[0]
-                if hdr[257:262] == b"ustar" and hdr[345:500].strip(b"\0"):
+                # prefix 只在 POSIX ustar（magic "ustar\0"＋版本 "00"）才有；GNU（"ustar  \0"）的 345 以後是時間與稀疏表
+                if hdr[257:265] == b"ustar\x0000" and hdr[345:500].strip(b"\0"):
                     name = hdr[345:500].split(b"\0", 1)[0] + b"/" + name
                 if longname is not None:
                     name = longname
                 if "path" in pax:
                     name = pax["path"]
+                if any(k.startswith("GNU.sparse") for k in pax):
+                    raise PrepError("不支援 PAX 格式的稀疏檔（GNU.sparse）")
                 if "size" in pax:
-                    try:
-                        size = int(pax["size"])
-                    except ValueError:
+                    if not re.fullmatch(rb"[0-9]{1,20}", pax["size"]):
                         raise PrepError("PAX 的 size 格式錯")
+                    size = int(pax["size"])
                     padded = (size + 511) & ~511
                 longname, pax = None, {}
                 n = name.decode("utf-8", "replace")
@@ -199,23 +269,35 @@ def extract_member(src, member, out, max_bytes=MAX_IMAGE):
                     continue
                 if found is not None:
                     raise PrepError("tar 裡有兩個 %s" % member)
-                if typ not in (b"0", b"\0"):
+                if typ not in (b"0", b"\0", b"S"):
                     raise PrepError("%s 不是一般檔案" % member)
-                if size > max_bytes:
-                    raise PrepError("%s 的大小 %d 超過上限 %d" % (member, size, max_bytes))
+                real, sp = (size, [(0, size)]) if typ != b"S" else _sparse_map(hdr, t)
+                if typ == b"S" and sum(n for _o, n in sp) != size:
+                    raise PrepError("稀疏表的資料量與標頭的大小不符")
+                if real <= 0:
+                    raise PrepError("%s 是空檔" % member)
+                if real > max_bytes:
+                    raise PrepError("%s 的大小 %d 超過上限 %d" % (member, real, max_bytes))
                 st = os.statvfs(d)
-                if st.f_bavail * st.f_frsize < size + MIN_FREE_AFTER:
-                    raise PrepError("剩餘空間不夠解出 %d bytes" % size)
-                h, left = hashlib.sha256(), size
-                while left > 0:
-                    b = t.read(min(left, 4 << 20))
-                    if not b:
-                        raise PrepError("%s 讀不完整（截斷）" % member)
-                    h.update(b)
-                    dst.write(b)
-                    left -= len(b)
+                if st.f_bavail * st.f_frsize < real + MIN_FREE_AFTER:
+                    raise PrepError("剩餘空間不夠解出 %d bytes" % real)
+                h, pos = hashlib.sha256(), 0
+                for off, n in sp:
+                    _hash_zeros(h, off - pos)         # 洞：雜湊算零，檔案用 seek 留洞（不實際寫零）
+                    dst.seek(off)
+                    left = n
+                    while left > 0:
+                        b = t.read(min(left, 4 << 20))
+                        if not b:
+                            raise PrepError("%s 讀不完整（截斷）" % member)
+                        h.update(b)
+                        dst.write(b)
+                        left -= len(b)
+                    pos = off + n
+                _hash_zeros(h, real - pos)
+                dst.truncate(real)
                 t.skip(padded - size)
-                found = (size, h.hexdigest())
+                found = (real, h.hexdigest())
             # tar 結尾之後（通常是補齊的零）一路讀到 xz 串流結尾：xz 的檢查碼與尾端完整性在這時才驗證
             while True:
                 b = t.read(4 << 20)
@@ -230,6 +312,8 @@ def extract_member(src, member, out, max_bytes=MAX_IMAGE):
     except (lzma.LZMAError, OSError, EOFError) as e:
         raise PrepError("解開失敗：%s" % type(e).__name__)
     finally:
+        if xf is not None:
+            xf.close()
         if not ok:
             try:
                 os.remove(out)

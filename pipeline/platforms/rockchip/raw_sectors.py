@@ -364,25 +364,30 @@ def rootfs_files(rpi, im, board, wanted):
 
 # ---------------------------------------------------------------- 清點
 
-def gpt_end_lba(fd):
-    """GPT 分割區陣列結束之後的第一個 LBA（依主要 GPT 表頭；rpi_img 已核對過表頭與陣列的 CRC）。"""
+SCAN_START_LBA = 2                     # LBA 0 保護 MBR、LBA 1 GPT 表頭；從 LBA 2 開始清點，只排除分割區陣列實際佔用的區間
+
+
+def gpt_array(fd):
+    """GPT 分割區陣列佔用的區間 [起始 LBA, 結束 LBA)（依主要 GPT 表頭；rpi_img 已核對過表頭與陣列的 CRC）。
+    陣列不一定緊接在表頭後面（例如放在 LBA 128），所以不能假設 LBA 34 之前都是陣列。"""
     h = pread_exact(fd, 92, SECTOR)
     ent_lba, num, esz = struct.unpack("<Q", h[72:80])[0], struct.unpack("<I", h[80:84])[0], struct.unpack("<I", h[84:88])[0]
     if not (2 <= ent_lba <= 1 << 20 and 0 < num <= 1024 and 128 <= esz <= 4096):
         raise RawError("GPT 表頭的分割區陣列欄位不合理")
-    return max(GPT_END_LBA, ent_lba + -(-(num * esz) // SECTOR))
+    return ent_lba, ent_lba + -(-(num * esz) // SECTOR)
 
 
-def regions_of(fd, first_lba, slots, start_lba=GPT_END_LBA):
-    """GPT 之後、第一個分割區之前的非零磁區 → 依槽位分組的區段 [(槽位名或 None, 起始 LBA, 磁區數)]。
+def regions_of(fd, first_lba, slots, array=(2, GPT_END_LBA)):
+    """LBA 2 到第一個分割區之前（排除 GPT 分割區陣列的區間）的非零磁區 → 依槽位分組的區段 [(槽位名或 None, 起始 LBA, 磁區數)]。
     區域超過上限 → RawError（呼叫端當 GAP：沒有清點）。"""
+    start_lba = SCAN_START_LBA
     if first_lba <= start_lba:
         return []
     if (first_lba - start_lba) * SECTOR > MAX_PRE_PARTITION:
         raise RawError("第一個分割區之前的區域超過 %d MiB，沒有清點" % (MAX_PRE_PARTITION >> 20))
     pre = pread_exact(fd, (first_lba - start_lba) * SECTOR, start_lba * SECTOR)
     nz = [lba for lba in range(start_lba, first_lba)
-          if any(pre[(lba - start_lba) * SECTOR:(lba - start_lba + 1) * SECTOR])]
+          if not array[0] <= lba < array[1] and any(pre[(lba - start_lba) * SECTOR:(lba - start_lba + 1) * SECTOR])]
     slots = sorted([s for s in slots if start_lba <= s[1] < first_lba], key=lambda s: s[1])
     groups = {}
     for lba in nz:
@@ -436,12 +441,16 @@ def inventory(a, root):
         sources.append({"source": "rootfs", "file": "/usr/lib/u-boot/%s/" % a.board, "files": files, "error": err})
 
         regions, gaps, notes = [], [], []
-        gpt_end = gpt_end_lba(im.fd)
-        outside = [s for s in slots if not gpt_end <= s[1] < first]
-        if outside:
-            notes.append("槽位不在 GPT 與第一個分割區之間，沒有清點：%s" % "、".join("%s（LBA %d）" % s for s in outside))
+        arr = gpt_array(im.fd)
+        gpt_end = arr[1]
+        in_part = [s for s in slots if s[1] >= first]
+        if in_part:
+            notes.append("槽位落在分割區裡（不屬於分割區之前的原始磁區），沒有清點：%s" % "、".join("%s（LBA %d）" % s for s in in_part))
+        for name, lba in slots:
+            if lba < SCAN_START_LBA or arr[0] <= lba < arr[1]:
+                gaps.append("槽位 %s（LBA %d）落在 GPT 表頭或分割區陣列裡，沒辦法清點" % (name, lba))
         try:
-            found = regions_of(im.fd, first, slots, gpt_end)
+            found = regions_of(im.fd, first, slots, arr)
         except RawError as e:
             found = None
             gaps.append(str(e))
@@ -500,7 +509,7 @@ def inventory(a, root):
         have = {r["slot"] for r in regions if r["slot"]}
         for name, lba in slots:
             srcs = [s["source"] + " " + s["file"] for s in sources if name in s["files"]]
-            if srcs and name not in have and gpt_end <= lba < first:
+            if found is not None and srcs and name not in have and SCAN_START_LBA <= lba < first and not arr[0] <= lba < arr[1]:
                 gaps.append("槽位 %s（LBA %d）在 %s 有檔案，磁區卻是全零" % (name, lba, "、".join(srcs)))
         doc = {"schema": 1, "platform": a.platform, "board": a.board, "image": os.path.basename(a.image),
                "partition_table": {"scheme": t["scheme"], "first_partition_lba": first,
@@ -510,7 +519,7 @@ def inventory(a, root):
                "slots_source": "板子廠商 u-boot 套件 setup.sh 的寫入位置（只讀文字，沒有執行）",
                "regions": regions,
                "sources": [{k: v for k, v in s.items() if k != "files"} | {"found": sorted(s["files"])} for s in sources],
-               "gpt_entries_end_lba": gpt_end, "notes": notes,
+               "gpt_entry_array_lba": list(arr), "notes": notes,
                "status": "GAP" if gaps else "OK", "gaps": gaps,
                "note": "以原始磁區為準；套件只當佐證，不拿套件版本推磁區裡的版本（D-027）。閉源成品（DDR 初始化、TF-A BL31）的安全公告比對不在這一步。"}
     finally:

@@ -52,7 +52,7 @@ def wb(path, data):
 
 # ---------------------------------------------------------------- 合成資料
 
-def gpt_disk(path, total_sectors, parts, payloads=()):
+def gpt_disk(path, total_sectors, parts, payloads=(), ent_lba=2):
     """parts：[(起始 LBA, 磁區數, 名稱)]；payloads：[(LBA, bytes)]。寫出有 CRC 的主要 GPT（保護 MBR＋表頭＋陣列）。"""
     disk = bytearray(total_sectors * SECTOR)
     mbr = bytearray(SECTOR)
@@ -63,9 +63,10 @@ def gpt_disk(path, total_sectors, parts, payloads=()):
     for i, (start, n, name) in enumerate(parts):
         e = LINUX_FS + os.urandom(16) + struct.pack("<QQQ", start, start + n - 1, 0) + name.encode("utf-16-le").ljust(72, b"\0")
         entries[i * 128:(i + 1) * 128] = e
-    disk[2 * SECTOR:2 * SECTOR + len(entries)] = entries
-    hdr = bytearray(struct.pack("<8sIIIIQQQQ16sQIII", b"EFI PART", 0x10000, 92, 0, 0, 1, total_sectors - 1, 34,
-                                total_sectors - 34, os.urandom(16), 2, 128, 128, binascii.crc32(entries) & 0xFFFFFFFF))
+    disk[ent_lba * SECTOR:ent_lba * SECTOR + len(entries)] = entries
+    first_usable = ent_lba + 32
+    hdr = bytearray(struct.pack("<8sIIIIQQQQ16sQIII", b"EFI PART", 0x10000, 92, 0, 0, 1, total_sectors - 1, first_usable,
+                                total_sectors - 34, os.urandom(16), ent_lba, 128, 128, binascii.crc32(entries) & 0xFFFFFFFF))
     struct.pack_into("<I", hdr, 16, binascii.crc32(hdr[:92]) & 0xFFFFFFFF)
     disk[SECTOR:SECTOR + len(hdr)] = hdr
     for lba, data in payloads:
@@ -411,6 +412,20 @@ class RawSectorsTest(unittest.TestCase):
             self.assertEqual([c["state"] for c in r["corroboration"] if c["source"] == "rootfs"], ["一致"])
         self.assertEqual([x for x in doc["sources"] if x["source"] == "rootfs"][0]["found"], ["idbloader.img", "u-boot.itb"])
 
+    def test_gpt_array_moved_still_scans_early_slots(self):
+        # 分割區陣列放在 LBA 128（第 1 到 127 磁區之間有 idbloader）：不能只從陣列之後開始掃
+        gpt_disk(self.img, 2048, [(1024, 512, "rootfs")], [(64, self.idb), (256, self.fit)], ent_lba=128)
+        rc, line, doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 0, line)
+        self.assertEqual([r["slot"] for r in doc["regions"]], ["idbloader.img", "u-boot.itb"])
+        self.assertEqual(doc["gpt_entry_array_lba"], [128, 160])
+
+    def test_slot_inside_gpt_array_is_gap(self):
+        gpt_disk(self.img, 2048, [(1024, 512, "rootfs")], [(256, self.fit)], ent_lba=48)   # 陣列 48–79，槽位 64 在裡面
+        rc, line, _doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 3, line)
+        self.assertIn("分割區陣列裡", line)
+
 
 class DiskImageTest(unittest.TestCase):
     def setUp(self):
@@ -609,6 +624,101 @@ class DiskImageTest(unittest.TestCase):
                     "      - {name: a.img.xz, url: 'https://example.com/x', role: image, gap: 還沒有雜湊}\n")
         rc, line, _img = self.prepare()
         self.assertEqual(rc, 3, line)
+
+    def gnu_hdr(self, name, size, typ=b"0", sparse=(), realsize=0, ext=False):
+        """GNU 格式（magic "ustar  \0"）的標頭；sparse：最多 4 筆 (offset, numbytes)。"""
+        h = bytearray(512)
+        h[0:len(name)] = name
+        h[100:108] = b"0000644\0"; h[108:116] = b"0000000\0"; h[116:124] = b"0000000\0"
+        h[124:136] = b"%011o\0" % size
+        h[136:148] = b"00000000000\0"
+        h[156:157] = typ
+        h[257:265] = b"ustar  \0"
+        h[345:357] = b"77777777777\0"          # GNU 的 atime：不是 prefix（POSIX 才有 prefix）
+        for k, (off, n) in enumerate(sparse):
+            o = 386 + 24 * k
+            h[o:o + 12] = b"%011o\0" % off
+            h[o + 12:o + 24] = b"%011o\0" % n
+        h[482] = 1 if ext else 0
+        h[483:495] = b"%011o\0" % realsize
+        h[148:156] = b" " * 8
+        h[148:156] = b"%06o\0 " % sum(h)
+        return bytes(h)
+
+    def test_gnu_sparse_member(self):
+        # 真實的 Debian 雲端映像是 GNU 舊式稀疏（型別 S）：資料兩段、中間與結尾是洞
+        a, b = os.urandom(1000), os.urandom(600)
+        real = 1 << 16
+        data = a + b
+        blocks = [self.gnu_hdr(b"disk.raw", len(data), b"S", [(0, 1000), (8192, 600), (real, 0)], real),
+                  data + b"\0" * (-len(data) % 512)]
+        self.raw_tar("sp.tar.xz", blocks)
+        self.sources("sp.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 0, line)
+        want = a + b"\0" * (8192 - 1000) + b + b"\0" * (real - 8192 - 600)
+        self.assertEqual(rb(img), want)
+        self.assertEqual(rj(os.path.join(self.tmp, "assemble.json"))["disk_sha256"], hashlib.sha256(want).hexdigest())
+
+    def test_gnu_sparse_extended_table(self):
+        # 4 筆以上的稀疏表放在延伸區塊（每塊 21 筆）
+        parts, data, real = [], b"", 1 << 16
+        for k in range(6):
+            parts.append((k * 4096, 100)); data += bytes([k + 1]) * 100
+        h = self.gnu_hdr(b"disk.raw", len(data), b"S", parts[:4], real, ext=True)
+        ext = bytearray(512)
+        for k, (off, n) in enumerate(parts[4:]):
+            ext[24 * k:24 * k + 12] = b"%011o\0" % off
+            ext[24 * k + 12:24 * k + 24] = b"%011o\0" % n
+        self.raw_tar("spx.tar.xz", [h, bytes(ext), data + b"\0" * (-len(data) % 512)])
+        self.sources("spx.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 0, line)
+        got = rb(img)
+        self.assertEqual(len(got), real)
+        for k, (off, n) in enumerate(parts):
+            self.assertEqual(got[off:off + n], bytes([k + 1]) * n)
+
+    def test_gnu_sparse_overlap_fails(self):
+        self.raw_tar("bad.tar.xz", [self.gnu_hdr(b"disk.raw", 200, b"S", [(100, 100), (150, 100)], 4096), b"x" * 200 + b"\0" * 312])
+        self.sources("bad.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("重疊", line)
+
+    def test_gnu_magic_does_not_use_prefix(self):
+        body = b"q" * 300
+        self.raw_tar("g.tar.xz", [self.gnu_hdr(b"disk.raw", len(body)), body + b"\0" * 212])
+        self.sources("g.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 0, line)
+        self.assertEqual(rb(img), body)
+
+    def test_negative_pax_size_fails(self):
+        rec = b"size=-5\n"
+        rec = b"%d %s" % (len(rec) + 3, rec)
+        assert int(rec.split(b" ")[0]) == len(rec)
+        pad = lambda b: b + b"\0" * (-len(b) % 512)
+        self.raw_tar("neg.tar.xz", [self.hdr(b"PaxHeader", len(rec), b"x"), pad(rec), self.hdr(b"disk.raw", 0), b"x" * 5])
+        self.sources("neg.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("size", line)
+
+    def test_empty_member_fails(self):
+        self.raw_tar("e.tar.xz", [self.hdr(b"disk.raw", 0)])
+        self.sources("e.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("空檔", line)
+
+    def test_xz_trailing_garbage_fails(self):
+        p = self.tarxz("img.tar.xz", [self.ti("disk.raw", os.urandom(3000))])
+        wb(p, rb(p) + b"JUNKJUNK")
+        self.sources("img.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 1, line)
+        self.assertFalse(os.path.exists(img))
 
     def test_param_and_files(self):
         self.sources("a.img.xz", "      uboot_board: rock-5b\n")
