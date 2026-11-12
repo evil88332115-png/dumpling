@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:51 -0500（C1）
+最後更新：2026-11-12 22:56 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -92,9 +92,9 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：WP7 第一階段（不依賴 M2）完成：公開示範資料清單與平台研究（含 D-025、D-026、D-027）；等 M2 期間做 CRA 開源專案與文件調查（使用者經 C0 指派）
-- 分支／PR／commit：`wp7/platform-samples`（最後 commit 1489d48）、`wp7/cra-survey`（新開，尚未 commit）；PR 都尚未開（D-020）
-- 代理：研究代理 1 個（Sonnet 5.5，effort medium，只讀；任務：CRA 開源專案與文件調查 → `docs/references/cra-github-survey.md`；分支 `wp7/cra-survey`；狀態：進行中）
+- 目前在做：WP7 第一階段（不依賴 M2）完成：公開示範資料清單與平台研究（含 D-025、D-026、D-027）；等 M2 期間的 CRA 開源專案與文件調查已完成（使用者經 C0 指派）
+- 分支／PR／commit：`wp7/platform-samples`（最後 commit 1489d48）、`wp7/cra-survey`（最後 commit 1bc801a）；PR 都尚未開（D-020）
+- 代理：研究代理 1 個（Sonnet 5.5，effort medium，只讀；任務：CRA 開源專案與文件調查 → `docs/references/cra-github-survey.md`；分支 `wp7/cra-survey`；狀態：完成，C4 已檢查並推送）
 - CI：無；本機背景工作：無（下載的樣本與解開的檔案都已刪除）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單：Raspberry Pi OS Lite 2026-10-06、Radxa ROCK 5B rsdk-r6、Debian 13 generic amd64 20261111-2659＋OMV 8.6.1-1 原始碼、TrueNAS 25.10.8（只做研究）。所有檔案實際下載核對，跟官方公布的雜湊相符；TrueNAS .update 簽章已驗證
 - 下一步：等 C1 的 M2（平台介面與開案範本）後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml
