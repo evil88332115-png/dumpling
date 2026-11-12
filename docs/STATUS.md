@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:01 -0500（C1）
+最後更新：2026-11-12 10:35 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -25,7 +25,7 @@
 
 - 目前在做：M1（PLAN「里程碑」M1）收尾——全部整合在 `wp1/m1-tools`，驗證中；D-020：驗證通過後 #9 轉正式 PR
 - 分支／PR／commit：
-  - `wp1/m1-tools`：2555a66（tools/ 全部、PROVENANCE C1 節、白名單、public-check 掃壓縮檔、provenance-check、c1-tools／c1-pipeline／c1-public-check、tests.yml 裝 bubblewrap、臨時 DT＋dt-smoke 用 `sca-scan --sbom`）；PR #9（draft）
+  - `wp1/m1-tools`：fb1ac02（V2 修正已併入：public-check f7830fc、F 的 8ae599b、C1 的 fb1ac02；tools/ 全部、PROVENANCE C1 節、白名單、public-check 掃壓縮檔、provenance-check、c1-tools／c1-pipeline／c1-public-check、tests.yml 裝 bubblewrap、臨時 DT＋dt-smoke 用 `sca-scan --sbom`）；PR #9（draft）
   - `wp1/m1-tools-pilot`（b210000）已 fast-forward 併入 m1-tools；`wp1/m1-dt` 已併入；PR #6 已關
   - 來源：sca-center 25fa89a
 - 代理：
@@ -35,9 +35,10 @@
   - 驗證 V1（m1-dt）：不通過（pipefail）→ P 已修，併入 V2 重驗
   - 寫程式 S（M2 試驗，使用者同意、C0 轉達）：分支 `wp1/m2-spike`（從 2555a66 開，**不合併、不開 PR**），`.github/workflows/m2-spike.yml`（只有 workflow_dispatch）量測 arm runner 磁碟清理、L4T BSP／原始碼下載＋sha256＋actions/cache、原生編譯核心＋樹外模組；結果放分支的 `docs/m2-spike-results.md`，C1 摘要寫進下面的 M2 設計備忘；Sonnet 5.5／high；進行中
   - 驗證 V2（M1 全部，2555a66）：完成，**不通過**（PR #9 issuecomment-6827049283）；必須修 3 項：(1) public-check 壓縮檔檢查被非 ASCII 檔名繞過 → C1 已修（f7830fc：-z、不分大小寫、.tgz／.tar、.zip 等算命中、白名單完整字串比對）；(2) PROVENANCE 引用改寫前的內部原值；(3) PROVENANCE 多處與實際不符 → 交給 F；CI（tests、dt-smoke，workflow_dispatch＋pull_request）全綠
-  - 寫程式 F：`wp1/m1-fix`（從 2555a66 開），PROVENANCE 修正（不引用原值、與實際一致）、還原多刪的斷言、scan-status-check 加必要階段、dt-ephemeral 數值參數驗證、註解移除上游私有 repo 編號與內部部署描述；Sonnet 5.5／medium；進行中
-- CI：`wp1/m1-tools` 2555a66：tests run 43239253974、dt-smoke run 43239262833（進行中）；之前 e874441 的 tests：bubblewrap OK、NOT_RUN 0（pilot 修正併入前 37 failed）
-- 下一步：F 完成 → merge `wp1/m1-fix` 進 `wp1/m1-tools` → tests＋dt-smoke → 驗證 V3（只看 V2 的必須修＋改動）→ #9 轉正式 PR → 通知 C0、C2
+  - 寫程式 F（`wp1/m1-fix` 8ae599b，已 fast-forward 併入、worktree 已移除）：完成——PROVENANCE 不引用原值且與實際一致、還原 2 處多刪的斷言、scan-status-check 加 B-sandbox／C-upload-sbom／D-dt-vuln-analysis、dt-ephemeral 數值參數驗證、約 42 個檔的註解移除上游私有 repo 編號與內部部署描述；tests run 43246075631、dt-smoke run 43246083315 綠燈
+  - 驗證 V3：只看 V2 的必須修＋2555a66..fb1ac02 的改動，Sonnet 5.5／high，進行中；結論留 PR #9（「驗證：通過／不通過（M1 全部，fb1ac02）」）
+- CI：fb1ac02：tests run 43249261477、dt-smoke run 43249270588（進行中）
+- 下一步：V3 通過＋兩個 run 綠燈 → #9 轉正式 PR（說明附逐檔對照、資料來源表，引用 PROVENANCE）→ 通知 C0、C2
 - M2 設計備忘（C0 轉達，C4 的平台研究；試驗結果待 S 回報後補）：
   - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
   - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
