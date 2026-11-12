@@ -339,3 +339,12 @@
 | `tools/cra/intel_vbt.py` 的 `parse_vbt()` | `tools/cra/coreboot_cbfs.py`（本 repo）的 `parse_vbt()` | 無（dumpling 內部搬移） | 原樣搬移，`coreboot_cbfs.py` 改成從 `intel_vbt` 取得並同名匯出；原本就是依 Linux i915 `intel_vbt_defs.h` 的欄位自己寫的，不是從 sca-center 複製 |
 
 以下是 dumpling 自己寫的（不是複製）：`pipeline/firmware-bios.sh`、`tools/cra/intel_vbios.py`、`tools/cra/tests/synthetic_vbios.py`、`tools/cra/tests/test_vbios_synthetic.py`、`tools/cra/tests/test_vbios_intel.py`、`tools/cra/tests/test_x86_firmware_sbom.py`、`tools/cra/tests/requirements.txt`、`tests/run.d/c2-x86-firmware.sh`、`tools/cra/ami_pfat.py`、`tools/cra/tests/test_ami_pfat.py`、`pipeline/firmware-expect.py`、`pipeline/firmware-ci.sh`、`pipeline/lib/firmware_plan.py`、`docs/notes/c2-ami-pfat.md`、`docs/notes/c2-coreboot-cbfs.md`、`docs/notes/c2-vbios.md`、`docs/notes/c2-firmware-expect.md`、`pipeline/firmware-sbom-check.sh`、`pipeline/lib/firmware_sbom_check.py`、`pipeline/install-tool.sh`、`pipeline/lib/tools.lock`、`docs/notes/c2-supplier-sbom.md`、`tools/cra/uefi_gfx.py`、`tools/cra/tests/test_uefi_gfx.py`、`tools/cra/tests/test_uefi_image_contract.py`（`uefi_gfx.py` 子類別化 C1 的 `tools/cra/uefi_image.py` 的 `Scan`，不複製它的程式碼；依賴的內部名稱見 `docs/notes/c2-vbios.md`）（`ami_pfat.py` 的格式欄位核對自 platomav/BIOSUtilities 的 AMI PFAT 解開工具，只讀原始碼、沒有複製程式碼，出處與授權寫在該檔檔頭）。
+
+## C4 其他平台（WP7）
+
+C4 沒有從 sca-center 複製新檔。對已複製檔案的修改記在這裡（原本那一列由 C1 維護，不改）：
+
+- `tools/cra/data/support-lifecycle.json`：依 D-033 **只追加** 11 筆平台的維護期資料（`debian-12`、`debian-13`、`debian-13-kernel-6.12`、
+  `raspberrypi-kernel-6.18`、`raspberrypi-firmware`、`radxa-kernel-6.1-rk2410`、`radxa-u-boot-rk2410`、`openmediavault-8`，以及 informational 的
+  `linux-6.1-upstream`、`linux-6.12-upstream`、`linux-6.18-upstream`）。既有的項目一個位元組都沒改。每筆都有原始來源網址與查核日期（2026-11-13）；
+  官方沒有公布期限的（Raspberry Pi、Radxa、openmediavault 8）寫 `null`，不推估。

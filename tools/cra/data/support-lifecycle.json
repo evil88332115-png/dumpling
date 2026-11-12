@@ -192,6 +192,272 @@
     "https://www.kernel.org/category/releases.html"
    ],
    "checked": "2026-11-03"
+  },
+  {
+   "id": "debian-12",
+   "name": "Debian 12 (bookworm)",
+   "match": [
+    {
+     "type": "operating-system",
+     "name": "debian",
+     "version_prefix": "12"
+    }
+   ],
+   "phases": [
+    {
+     "name": "regular security support (Debian security team)",
+     "end": "2026-06"
+    },
+    {
+     "name": "Debian LTS",
+     "end": "2028-06"
+    },
+    {
+     "name": "Extended LTS (Freexian, commercial)",
+     "requires": "Freexian ELTS",
+     "end": "2033-06"
+    }
+   ],
+   "sources": [
+    "https://www.debian.org/releases/bookworm/",
+    "https://wiki.debian.org/LTS",
+    "https://www.debian.org/releases/"
+   ],
+   "checked": "2026-11-13",
+   "note": "debian.org/releases/bookworm says full Debian support until 2026-07-11 (the date of the 12.15 point release); wiki.debian.org/LTS (updated 2026-08-31) gives the LTS period as 2026-06-11 to 2028-06-30. The earlier month (2026-06) is used for the regular phase. Debian LTS is free and uses the same archive; Extended LTS (2033-06-30 on debian.org/releases) is a commercial Freexian offering.",
+   "coverage": "Packages in the Debian main archive. LTS is limited to i386, amd64, armhf, arm64 and ppc64el (bookworm page); which packages stay supported during LTS was not assessed. Packages from other repositories (for example a board vendor's apt repository) are not maintained by Debian."
+  },
+  {
+   "id": "debian-13",
+   "name": "Debian 13 (trixie)",
+   "match": [
+    {
+     "type": "operating-system",
+     "name": "debian",
+     "version_prefix": "13"
+    }
+   ],
+   "phases": [
+    {
+     "name": "regular security support (Debian security team)",
+     "end": "2028-08"
+    },
+    {
+     "name": "Debian LTS",
+     "end": "2030-06"
+    },
+    {
+     "name": "Extended LTS (Freexian, commercial)",
+     "requires": "Freexian ELTS",
+     "end": "2035-06"
+    }
+   ],
+   "sources": [
+    "https://www.debian.org/releases/trixie/",
+    "https://wiki.debian.org/LTS",
+    "https://www.debian.org/releases/"
+   ],
+   "checked": "2026-11-13",
+   "note": "debian.org/releases/trixie: full Debian support until 2028-08-09, then LTS until 2030-06-30; wiki.debian.org/LTS lists the same LTS period. Extended LTS until 2035-06-30 (debian.org/releases) is a commercial Freexian offering.",
+   "coverage": "Packages in the Debian main archive. The LTS architecture list for trixie is 'to be determined' on wiki.debian.org/LTS; which packages stay supported during LTS was not assessed. Raspberry Pi OS and board vendor images also use this entry for their Debian packages, but packages from the Raspberry Pi or board vendor repositories are not maintained by Debian (see their own entries)."
+  },
+  {
+   "id": "debian-13-kernel-6.12",
+   "name": "Debian 13 kernel 6.12",
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.12\\.[0-9]+\\+deb13-[a-z0-9-]+$",
+     "version_regex": "^6\\.12\\.[0-9]+-[0-9]+"
+    }
+   ],
+   "phases": [
+    {
+     "name": "regular security support (Debian security team)",
+     "end": "2028-08"
+    },
+    {
+     "name": "Debian LTS",
+     "end": "2030-06"
+    }
+   ],
+   "sources": [
+    "https://www.debian.org/releases/trixie/",
+    "https://wiki.debian.org/LTS",
+    "https://www.debian.org/releases/"
+   ],
+   "checked": "2026-11-13",
+   "note": "The kernel package of Debian 13 is maintained by Debian as part of the release, so it follows the Debian 13 phases. Checked against the generic amd64 cloud image 20261111 (linux-image-6.12.116+deb13-amd64 6.12.116-1). Whether Debian keeps 6.12 for the whole LTS period was not assessed."
+  },
+  {
+   "id": "linux-6.12-upstream",
+   "name": "Linux 6.12 (upstream longterm)",
+   "informational": true,
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.12\\.",
+     "version_regex": "^(1:)?6\\.12\\."
+    }
+   ],
+   "phases": [
+    {
+     "name": "upstream longterm maintenance (projected)",
+     "end": "2028-12"
+    }
+   ],
+   "sources": [
+    "https://www.kernel.org/category/releases.html"
+   ],
+   "checked": "2026-11-13",
+   "note": "kernel.org longterm table: 6.12, projected EOL Dec 2028. Projected dates can change; the distribution or vendor maintenance is the relevant one."
+  },
+  {
+   "id": "raspberrypi-kernel-6.18",
+   "name": "Raspberry Pi kernel 6.18",
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.18\\.[0-9]+\\+rpt-rpi-[a-z0-9]+$",
+     "version_regex": "^(1:)?6\\.18\\."
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by Raspberry Pi",
+     "end": null
+    }
+   ],
+   "sources": [
+    "https://www.raspberrypi.com/software/operating-systems/"
+   ],
+   "checked": "2026-11-13",
+   "note": "Raspberry Pi does not publish a maintenance period for its kernel packages or for Raspberry Pi OS (the operating systems page only says the Legacy image is 'a port of Debian Bookworm with security updates'). Checked against Raspberry Pi OS Lite 2026-10-06 (linux-image-6.18.50+rpt-rpi-2712 and -rpi-v8, 1:6.18.50-1+rpt1)."
+  },
+  {
+   "id": "linux-6.18-upstream",
+   "name": "Linux 6.18 (upstream longterm)",
+   "informational": true,
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.18\\.",
+     "version_regex": "^(1:)?6\\.18\\."
+    }
+   ],
+   "phases": [
+    {
+     "name": "upstream longterm maintenance (projected)",
+     "end": "2028-12"
+    }
+   ],
+   "sources": [
+    "https://www.kernel.org/category/releases.html"
+   ],
+   "checked": "2026-11-13",
+   "note": "kernel.org longterm table: 6.18, projected EOL Dec 2028."
+  },
+  {
+   "id": "raspberrypi-firmware",
+   "name": "Raspberry Pi boot firmware (raspi-firmware)",
+   "match": [
+    {
+     "name": "raspi-firmware"
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by Raspberry Pi",
+     "end": null
+    }
+   ],
+   "sources": [
+    "https://www.raspberrypi.com/software/operating-systems/"
+   ],
+   "checked": "2026-11-13",
+   "note": "Closed-source VideoCore boot firmware from the Raspberry Pi apt repository; no published maintenance period."
+  },
+  {
+   "id": "radxa-kernel-6.1-rk2410",
+   "name": "Radxa Rockchip BSP kernel 6.1 (rk2410)",
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.1\\.[0-9]+-[0-9]+-rk[0-9]+$",
+     "version_regex": "^6\\.1\\."
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by Radxa",
+     "end": null
+    }
+   ],
+   "sources": [
+    "https://docs.radxa.com/en/software-support-matrix/rockchip",
+    "https://github.com/radxa-build/rock-5b/releases"
+   ],
+   "checked": "2026-11-13",
+   "note": "Rockchip BSP kernel (branch linux-6.1-stan-rkr4.1) built and packaged by Radxa. The Radxa software support matrix lists image versions only ('updated with the image release cycle'); no maintenance period or security update policy is published. Checked against ROCK 5B rsdk-r6 (linux-image-6.1.84-8-rk2410 6.1.84-8)."
+  },
+  {
+   "id": "linux-6.1-upstream",
+   "name": "Linux 6.1 (upstream longterm)",
+   "informational": true,
+   "match": [
+    {
+     "name_regex": "^linux-image-6\\.1\\.",
+     "version_regex": "^(1:)?6\\.1\\."
+    }
+   ],
+   "phases": [
+    {
+     "name": "upstream longterm maintenance (projected)",
+     "end": "2027-12"
+    }
+   ],
+   "sources": [
+    "https://www.kernel.org/category/releases.html"
+   ],
+   "checked": "2026-11-13",
+   "note": "kernel.org longterm table: 6.1, projected EOL Dec 2027. A vendor BSP kernel based on 6.1 does not automatically receive these fixes."
+  },
+  {
+   "id": "radxa-u-boot-rk2410",
+   "name": "Radxa U-Boot 2017.09 (u-boot-rk2410)",
+   "match": [
+    {
+     "name": "u-boot-rk2410"
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by Radxa",
+     "end": null
+    }
+   ],
+   "sources": [
+    "https://docs.radxa.com/en/software-support-matrix/rockchip",
+    "https://github.com/radxa-pkg/u-boot-rk2410/releases"
+   ],
+   "checked": "2026-11-13",
+   "note": "Rockchip vendor U-Boot 2017.09 with closed rkbin binaries (DDR init, TF-A BL31); no published maintenance period."
+  },
+  {
+   "id": "openmediavault-8",
+   "name": "openmediavault 8 (Synchrony)",
+   "match": [
+    {
+     "name": "openmediavault",
+     "version_prefix": "8."
+    }
+   ],
+   "phases": [
+    {
+     "name": "maintenance by the openmediavault project",
+     "end": null
+    }
+   ],
+   "sources": [
+    "https://docs.openmediavault.org/en/stable/releases.html"
+   ],
+   "checked": "2026-11-13",
+   "note": "The release table lists 8.0 Synchrony (Debian 13, Dec 2025) as 'Stable' without an end date; 7.0 Sandworm (Debian 12) is listed as 'EOL - Jun 2026'. That suggests OMV follows its Debian base, but no date is published for 8, so none is assumed."
   }
  ]
 }
