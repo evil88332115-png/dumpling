@@ -23,7 +23,7 @@ import re
 import stat
 import struct
 
-MAX_OOT_CMD = 16 << 20           # 單一 .cmd／.mod（實測最大約 1 MB）
+MAX_OOT_CMD = 16 << 20           # 單一 .cmd／.mod（估計：一般最大約 1 MB）
 MAX_OOT_TOTAL = 4 << 30          # 讀進來的內容合計
 MAX_OOT_ENTRIES = 3_000_000      # 走訪的項目數
 MAX_OOT_PATHS = 3_000_000        # source_／deps_ 裡不同的路徑數

@@ -189,7 +189,7 @@ CVE_RE = re.compile(r"CVE-(\d{4})-(\d{4,})")
 MAX_FILE = 8 << 20             # 擷取的單一檔案上限（.config 約 300 KB、Makefile 都很小）
 MAX_TOTAL = 256 << 20          # 擷取內容合計上限
 MAX_ENTRIES = 300_000          # 擷取的檔案與連結數上限（headers 約 1.8 萬個檔案，其中 Makefile／Kbuild 約 3,100 個）
-MAX_RECORD = 8 << 20           # 單筆 CNA 紀錄解壓後的上限（實測最大約 1 MB）
+MAX_RECORD = 8 << 20           # 單筆 CNA 紀錄解壓後的上限（估計：一般最大約 1 MB）
 MAX_LINK_HOPS = 40
 MAX_LINK_NAMES = 10_000        # 經由資料夾連結列出的 .ko 名稱上限
 MAX_SEEN = MAX_ENTRIES         # 路徑索引（連結的目標是資料夾、檔案還是不存在）的筆數上限
@@ -2560,13 +2560,13 @@ def judge_cve(model, files, mods, mapper=None, brec=None, new_code=None):
 # 「不在紀錄裡」要能當成「沒編」，紀錄必須完整：從最上層的 vmlinux.o 起，每個 archive（built-in.a、lib.a、vmlinux.a）列的成員、
 # 每個 .mod 列的模組成員、每個 modules.order 的模組都要有自己的 .cmd（membership closure）；少一個就 GAP。
 
-MAX_RECORD_MEMBER = 16 << 20       # 單一 .cmd／清單／.config（實測最大的 .cmd 約 1 MB、.config 約 300 KB；System.map 等不讀）
-MAX_RECORD_TOTAL = 4 << 30         # 讀進來的內容合計（實測 6.8 arm64 約 540 MB）
+MAX_RECORD_MEMBER = 16 << 20       # 單一 .cmd／清單／.config（估計：.cmd 一般最大約 1 MB、.config 約數百 KB；System.map 等不讀）
+MAX_RECORD_TOTAL = 4 << 30         # 讀進來的內容合計（估計：6.8 arm64 的完整建置紀錄約數百 MB）
 MAX_RECORD_STREAM = 64 << 30       # tar 全部成員（含不讀的 .o、vmlinux 等：串流讀仍要解壓過去）的大小合計
-MAX_RECORD_MEMBERS = 3_000_000     # tar 成員或資料夾項目數（實測約 1.7 萬個）
-MAX_RECORD_PATHS = 2_000_000       # source_／deps_ 裡不同的路徑數，也是成員關係（archive／.mod 的成員）的筆數上限（實測約 2 萬個）
+MAX_RECORD_MEMBERS = 3_000_000     # tar 成員或資料夾項目數（估計：一般約數萬個以內）
+MAX_RECORD_PATHS = 2_000_000       # source_／deps_ 裡不同的路徑數，也是成員關係（archive／.mod 的成員）的筆數上限（估計：一般約數萬個以內）
 MAX_RECORD_EXAMPLES = 5            # 不合格的項目（連結、太大、格式不對、缺 .cmd）只留數量與前幾個例子
-MIN_RECORD_OBJECT_CMDS = 200       # 至少要有這麼多個 .<物件>.o.cmd 才算完整（實測 1 萬多個；最小的核心也有數百個）
+MIN_RECORD_OBJECT_CMDS = 200       # 至少要有這麼多個 .<物件>.o.cmd 才算完整（估計：完整的 arm64 核心一般上萬個；最小的核心也有數百個）
 # kbuild 連結階段的產物：scripts/link-vmlinux.sh／Makefile.vmlinux* 把其他物件彙整起來（或只帶版本／export 資料），依核心版本與建置流程
 # 可能沒有 .cmd。它們不對應任何 CVE 相關的原始檔，缺 .cmd 不拒收整份紀錄；只豁免這個明確清單（樹根的路徑），其他物件仍嚴格要求。
 # 這些產物沒有 .cmd，所以不會有任何路徑從它們來；豁免只放過完整性檢查，不用來判斷任何原始檔。
@@ -2754,8 +2754,8 @@ def cmd_members(target, saved, compile_cmd=False):
     return None if any(x is None for x in got) else sorted({x for x in got if x != obj_norm(target)})
 
 
-# 編譯指令的特徵：產生依賴檔的旗標（kbuild 的 if_changed_dep；fixdep 會把它轉成 source_／deps_）。實測 6.8 arm64 的 10,958 個編譯 .cmd
-# 有 10,957 個帶 -Wp,-MMD（另一個是 vmlinux 的 link-vmlinux.sh，有 source_）；不帶 source_ 卻有這個旗標的只有 lib/test_fortify/*.log
+# 編譯指令的特徵：產生依賴檔的旗標（kbuild 的 if_changed_dep；fixdep 會把它轉成 source_／deps_）。6.8 arm64 上萬個編譯 .cmd
+# 除了一個以外都帶 -Wp,-MMD（那一個是 vmlinux 的 link-vmlinux.sh，有 source_）；不帶 source_ 卻有這個旗標的只有 lib/test_fortify/*.log
 CMD_DEPFLAG_RE = re.compile(r"(?:^|\s)(?:-Wp,-MMD,|-MMD?(?=\s|$)|-MD(?=\s|$)|--emit=dep-info)")
 COMPILE_TARGET_EXT = (".o", ".s", ".i", ".lds", ".dtb", ".dtbo", ".ll", ".rsi")
 # 沒有 source_ 的 .o：只能是連結類的指令（ld［-r、@x.mod］、objcopy、strip；前面可以有 rm -f …;）

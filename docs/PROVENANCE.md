@@ -140,17 +140,17 @@
 | `tools/pilot/lib/data/kernel-included-c-6.1.json` | `scripts/pilot/lib/data/kernel-included-c-6.1.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/data/kernel-included-c-6.8.json` | `scripts/pilot/lib/data/kernel-included-c-6.8.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/deb_sources.py` | `scripts/pilot/lib/deb_sources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
-| `tools/pilot/lib/distro_recheck.py` | `scripts/pilot/lib/distro_recheck.py` | 25fa89a | 路徑調整 3 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/lib/distro_recheck.py` | `scripts/pilot/lib/distro_recheck.py` | 25fa89a | 路徑調整 3 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
 | `tools/pilot/lib/dtsources.py` | `scripts/pilot/lib/dtsources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「示範掃描」（1 行） |
 | `tools/pilot/lib/euvd.md` | `scripts/pilot/lib/euvd.md` | 25fa89a | 路徑調整 7 處、清理 1 行 |
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
-| `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」） |
+| `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
 | `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣 |
+| `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
 | `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/lib/l4t-kernel-map.json` | `scripts/pilot/lib/l4t-kernel-map.json` | 25fa89a | 清理 2 個 `checked` 欄（原本引用廠商映像與內部 CI 執行編號，見資料來源） |
 | `tools/pilot/lib/l4t_kernel.py` | `scripts/pilot/lib/l4t_kernel.py` | 25fa89a | 原樣 |
