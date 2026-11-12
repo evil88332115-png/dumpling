@@ -262,7 +262,7 @@ def package(tmp_path, rows, resp="customer", name="pk", args=()):
         (rep / n).write_text(t, encoding="utf-8")
     (rep / "confirmation-items.csv").write_text("編號,類別\nQ1,缺少輸入\n", encoding="utf-8-sig")
     out = tmp_path / (name + "-out")
-    code, msgs = rp.build(p, out, **dict(args))
+    code, msgs = rp.build(p, out, allow_tmp=True, **dict(args))
     return code, msgs, out
 
 
@@ -357,7 +357,7 @@ def test_ours_open_list_includes_os_rows(tmp_path):
 def test_no_layers_block_keeps_the_old_layout(tmp_path):
     from test_report_package import project
     p = project(tmp_path, [row("CVE-1", "p1", exploited=True, exploitation_evidence=["KEV (DT)"]), row("CVE-2", "p3")], name="old")
-    code, msgs = rp.build(p, tmp_path / "old-out")
+    code, msgs = rp.build(p, tmp_path / "old-out", allow_tmp=True)
     shs = sheets(tmp_path / "old-out" / "交給PM" / "漏洞清單.xlsx")
     assert len(shs) == 4
     h, _ = body(shs["完整漏洞清單"], "初判")
