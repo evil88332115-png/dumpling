@@ -4,8 +4,17 @@ on:
   pull_request:
     paths:
       - 'firmware/**'
-      - 'pipeline/firmware-fetch.sh'
-      - 'pipeline/lib/firmware_fetch.py'
+      - 'pipeline/firmware-*.sh'
+      - 'pipeline/install-tool.sh'
+      - 'pipeline/check-tool-version.sh'
+      - 'pipeline/lib/tools.lock'
+      - 'pipeline/firmware-expect.py'
+      - 'pipeline/lib/firmware_*.py'
+      - 'pipeline/dt-*'
+      - 'pipeline/scan-status-check.py'
+      - 'tools/pilot/**'
+      - 'tools/e2e/**'
+      - 'tools/cra/**'
       - '.github/workflows/firmware.yml'
   workflow_dispatch:
 
@@ -15,6 +24,12 @@ permissions:
 concurrency:
   group: firmware-${{ github.ref }}
   cancel-in-progress: true
+
+# 明確指定 bash：Actions 會用 `bash --noprofile --norc -eo pipefail`，
+# 管線（例如 `… | tee`）前面的指令失敗時，步驟才會失敗（預設的 `bash -e` 沒有 pipefail，結束碼會被 tee 吃掉）。
+defaults:
+  run:
+    shell: bash
 
 jobs:
   firmware-fetch:
@@ -28,9 +43,10 @@ jobs:
       - name: 確認 PyYAML 可用
         run: python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
       - name: 下載全部樣本並核對 sha256／大小
+        id: fetch
         run: |
           pipeline/firmware-fetch.sh firmware/*/*/firmware.yml --out "$RUNNER_TEMP/firmware-dl" | tee "$RUNNER_TEMP/fetch.log"
-      - name: 摘要
+      - name: 摘要（下載）
         if: always()
         run: |
           {
@@ -39,3 +55,210 @@ jobs:
             cut -f2- "$RUNNER_TEMP/fetch.log" 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # 解析 BIOS 樣本（只讀、不執行下載檔）→ SBOM，再核對 firmware.yml 的 expected。
+      # ATTENTION／GAP（firmware-bios.sh 退出碼 2）不算失敗；FAIL、expected 的 MISMATCH／MISSING、沒有可解析的檔案才會讓這步失敗。
+      # 每一步輸出的狀態行才是結果；這個 job 綠燈不代表韌體安全。
+      - name: 解析 BIOS 樣本並核對 expected
+        run: |
+          rc=0
+          pipeline/firmware-ci.sh "$RUNNER_TEMP/firmware-dl" "$RUNNER_TEMP/firmware-work" "$RUNNER_TEMP/firmware-out" "$RUNNER_TEMP/firmware-summary.md" || rc=$?
+          {
+            echo
+            echo '### BIOS 解析與 expected 比對'
+            echo
+            cat "$RUNNER_TEMP/firmware-summary.md"
+            echo
+            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。這不是整體通過或安全的結論。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      # 供應商 SBOM（kind: sbom）的品質檢查：sbomqs 版本與 sha256 固定在 pipeline/lib/tools.lock，核對後才安裝。
+      # SBOM 檔案只當資料讀取。只有 FAIL（基本檢查失敗）讓這步失敗；ATTENTION／GAP 不算失敗，sbomqs 分數不影響狀態。
+      - name: 安裝固定版本的 sbomqs
+        if: always() && steps.fetch.conclusion == 'success'
+        run: |
+          exe=$(pipeline/install-tool.sh sbomqs "$RUNNER_TEMP/bin")
+          echo "SBOMQS=$exe" >> "$GITHUB_ENV"
+          # 執行檔回報的版本要等於 tools.lock 的 sbomqs_version（不符就紅燈）
+          pipeline/check-tool-version.sh sbomqs "$exe"
+          "$exe" version 2>&1 | grep -E 'GitVersion|GitCommit'
+      - name: 供應商 SBOM 品質檢查
+        if: always() && steps.fetch.conclusion == 'success'
+        run: |
+          # nullglob：沒有 kind: sbom 的樣本時，glob 展開成空，不會把字面的萬用字元當檔名（那會變成假的 FAIL）
+          shopt -s nullglob
+          files=("$RUNNER_TEMP"/firmware-dl/sbom/*/*.sbom.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "FIRMWARE-SBOM	NOT_RUN	-	沒有 kind: sbom 的樣本可檢查"
+            {
+              echo
+              echo '### 供應商 SBOM 品質檢查'
+              echo
+              echo 'NOT_RUN：沒有 kind: sbom 的樣本可檢查。'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          rc=0
+          pipeline/firmware-sbom-check.sh "${files[@]}" --out "$RUNNER_TEMP/sbom-check" | tee "$RUNNER_TEMP/sbom-check.log" || rc=$?
+          {
+            echo
+            echo '### 供應商 SBOM 品質檢查'
+            echo
+            echo '| 狀態 | 檔案 | 說明 |'
+            echo '|---|---|---|'
+            # 檔名與說明裡的不可信文字已由 firmware_mdsafe 跳脫（| 已是 \|）；這裡再保證每個 | 都有跳脫，且不會跳脫兩次
+            awk -F'\t' '{ gsub(/\\?\|/, "\\|", $3); gsub(/\\?\|/, "\\|", $4); print "| " $2 " | " $3 " | " $4 " |" }' "$RUNNER_TEMP/sbom-check.log"
+            echo
+            echo '_狀態只反映基本檢查（版本、purl／cpe）；sbomqs 分數僅供參考、沒有設門檻；漏洞比對 NOT_RUN。這不是整體通過或安全的結論。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: 上傳供應商 SBOM 品質檢查結果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-sbom-check
+          path: ${{ runner.temp }}/sbom-check
+          if-no-files-found: warn
+          retention-days: 14
+      - name: 上傳 SBOM 與解析結果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-sbom
+          path: ${{ runner.temp }}/firmware-out
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 韌體 SBOM 上傳臨時 Dependency-Track（DT）：BIOS 樣本、合成 vBIOS、供應商 SBOM 各自 prep → sca-scan --sbom → dt-verify，再出報告。
+  # 說明與狀態語意見 docs/notes/c2-firmware-dt.md。獨立 job、不 needs firmware-fetch：
+  #   - 這個 job 要 90 分鐘上限（OSV、KEV 鏡像要幾十分鐘），不要拖住 firmware-fetch 的結果；
+  #   - 本 repo 沒有用過 download-artifact（沒有可沿用的固定 SHA），所以在這個 job 重新下載 BIOS／SBOM 樣本並跑 firmware-ci.sh
+  #     （下載與解析只要幾分鐘，且和 firmware-fetch 同一支程式、同樣核對 sha256）。
+  # 漏洞比對以 Grype 為主，DT 只收件與留存；0 筆不代表沒有漏洞。這個 job 綠燈不代表韌體安全。
+  firmware-dt:
+    name: firmware-dt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DT_OSV_ECOSYSTEMS: PyPI,npm,Ubuntu
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 路徑
+        run: |
+          # pilot.env 單獨放一個資料夾：sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾，不能是 RUNNER_TEMP 本身
+          echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
+          echo "RESULT_DIR=$RUNNER_TEMP/firmware-dt-result" >> "$GITHUB_ENV"
+          python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
+      - name: 下載 BIOS 與供應商 SBOM 樣本並核對 sha256／大小
+        run: pipeline/firmware-fetch.sh firmware/bios/*/firmware.yml firmware/sbom/*/firmware.yml --out "$RUNNER_TEMP/firmware-dl" | cut -f1-3
+      - name: 解析 BIOS 樣本（產生 SBOM）
+        run: |
+          # 解析結果的 expected 比對由 firmware-fetch job 負責；這裡只要 SBOM。退出碼 1（FAIL、MISMATCH）仍讓這步失敗。
+          pipeline/firmware-ci.sh "$RUNNER_TEMP/firmware-dl" "$RUNNER_TEMP/firmware-work" "$RUNNER_TEMP/firmware-out" "$RUNNER_TEMP/firmware-summary.md" | cut -f1-3
+      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
+          # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
+          sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
+          cat "$RUNNER_TEMP/tools/versions.txt"
+      - name: 臨時 DT：up
+        run: bash pipeline/dt-ephemeral.sh up
+      - name: 臨時 DT：wait（OSV、KEV 鏡像）
+        run: |
+          # 結束碼 3＝GAP（資料不完整）：不中止，結束碼寫進 dt-wait.rc，report 會把所有樣本標 GAP；其他非 0 才讓這步失敗
+          mkdir -p "$RESULT_DIR"
+          s=$(date +%s)
+          rc=0; bash pipeline/dt-ephemeral.sh wait || rc=$?
+          echo "wait 用時 $(( $(date +%s) - s )) 秒，結束碼 $rc"
+          echo "$rc" > "$RESULT_DIR/dt-wait.rc"
+          case $rc in 0|3) ;; *) exit "$rc" ;; esac
+      - name: 臨時 DT：env（pilot.env）
+        run: |
+          mkdir -p "$(dirname "$PILOT_ENV")"
+          bash pipeline/dt-ephemeral.sh env "$PILOT_ENV"
+      - name: 上傳各樣本 SBOM 並驗證
+        env:
+          MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度（沒有那個狀態檔）
+        run: |
+          args=()
+          for m in firmware/bios/*/firmware.yml; do
+            slug=$(basename "$(dirname "$m")")
+            [ -f "$RUNNER_TEMP/firmware-out/$slug/fw.cdx.json" ] && args+=(--sample "$m" "$RUNNER_TEMP/firmware-out/$slug/fw.cdx.json")
+          done
+          for m in firmware/sbom/*/firmware.yml; do
+            slug=$(basename "$(dirname "$m")")
+            for f in "$RUNNER_TEMP"/firmware-dl/sbom/"$slug"/*.sbom.json; do
+              [ -f "$f" ] && args+=(--sample "$m" "$f")
+            done
+          done
+          rc=0
+          pipeline/firmware-dt.sh --work "$RUNNER_TEMP/firmware-dt-work" --result "$RESULT_DIR" "${args[@]}" \
+            --synthetic-vbios firmware/vbios/standalone-nvidia-option-rom/firmware.yml || rc=$?
+          {
+            echo '### firmware-dt'
+            echo
+            [ -f "$RESULT_DIR/report/firmware-dt.md" ] && cat "$RESULT_DIR/report/firmware-dt.md"
+            echo
+            echo '```'
+            grep -P '^FIRMWARE-DT' "$RESULT_DIR/firmware-dt.log" | cut -f1-3 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      # NVIDIA vBIOS 公告對照（C1 的 nvidia_bulletins.py candidates --group gpu-firmware）：鏡像抓不到或工具失敗只記 GAP，不讓 job 失敗。
+      # 對照表用 gpu-firmware 專用的空表 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json（C1 M2 提供）；沒有這個檔就不跑 candidates，
+      # 直接印 GAP（不借 Jetson 的表：那會把 Jetson 的公告混進來）。表是空的，所以鏡像裡的 gpu-firmware 公告全部列為待審（ATTENTION 是誠實的結果）。
+      - name: NVIDIA 公告（vBIOS）待審對照
+        if: always()
+        run: |
+          table=tools/pilot/lib/nvidia-bulletins-gpu-firmware.json
+          line=""
+          if [ ! -f "$table" ]; then
+            line="C-nvidia-bulletins-db	GAP	沒有 gpu-firmware 對照表（$table，C1 M2 提供）"
+          elif [ -f tools/pilot/lib/nvidia_bulletins.py ] && [ -f tools/mirror/nvidia-bulletins.sh ]; then
+            if bash tools/mirror/nvidia-bulletins.sh "$RUNNER_TEMP/nvbul-mirror" "$RUNNER_TEMP/nvbul-manifest.json" > "$RUNNER_TEMP/nvbul-mirror.log" 2>&1; then
+              line=$(python3 -I tools/pilot/lib/nvidia_bulletins.py candidates --mirror "$RUNNER_TEMP/nvbul-mirror" \
+                --table "$table" --group gpu-firmware 2>/dev/null | head -1) || line=""
+              [ -n "$line" ] || line="C-nvidia-bulletins-db	GAP	candidates 沒有輸出狀態行"
+            else
+              line="C-nvidia-bulletins-db	GAP	公告鏡像抓不到（$(tail -1 "$RUNNER_TEMP/nvbul-mirror.log" | cut -c1-200)）"
+            fi
+          else
+            line="C-nvidia-bulletins-db	GAP	沒有 C1 的 nvidia_bulletins.py 或 nvidia-bulletins.sh"
+          fi
+          echo "$line"
+          mkdir -p "$RESULT_DIR"
+          printf '%s\n' "$line" > "$RESULT_DIR/nvidia-gpu-firmware-line.txt"
+          {
+            echo
+            echo '### NVIDIA 公告對照（vBIOS，group gpu-firmware）'
+            echo
+            echo '```'
+            printf '%s\n' "$line" | cut -f2-
+            echo '```'
+            echo '_合成 vBIOS 樣本的公告對照一律是 NOT_ASSESSED；這一行只說明有沒有待審的 vBIOS 公告，不代表沒有漏洞。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 小型結果（短期保存；不含 pilot.env）
+        if: always()
+        run: |
+          o="$RESULT_DIR/out"; mkdir -p "$o"
+          [ -f "$RESULT_DIR/report/firmware-dt.md" ] && cp "$RESULT_DIR/report/firmware-dt.md" "$o/"
+          for f in dt-wait.rc firmware-dt.log nvidia-gpu-firmware-line.txt; do [ -f "$RESULT_DIR/$f" ] && cp "$RESULT_DIR/$f" "$o/"; done
+          for d in "$RESULT_DIR"/*/; do
+            n=$(basename "$d"); [ "$n" = out ] || [ "$n" = report ] && continue
+            mkdir -p "$o/$n"
+            for f in summary.json scan/status.tsv scan/scan/grype.json; do [ -f "$d$f" ] && cp "$d$f" "$o/$n/$(basename "$f")"; done
+          done
+          true
+      - name: 上傳小型結果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-dt
+          path: ${{ runner.temp }}/firmware-dt-result/out
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: 臨時 DT：down
+        if: always()
+        run: bash pipeline/dt-ephemeral.sh down
