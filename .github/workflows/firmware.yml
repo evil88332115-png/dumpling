@@ -16,6 +16,12 @@ concurrency:
   group: firmware-${{ github.ref }}
   cancel-in-progress: true
 
+# 明確指定 bash：Actions 會用 `bash --noprofile --norc -eo pipefail`，
+# 管線（例如 `… | tee`）前面的指令失敗時，步驟才會失敗（預設的 `bash -e` 沒有 pipefail，結束碼會被 tee 吃掉）。
+defaults:
+  run:
+    shell: bash
+
 jobs:
   firmware-fetch:
     name: firmware-fetch

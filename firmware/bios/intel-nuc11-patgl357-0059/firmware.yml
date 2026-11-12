@@ -19,6 +19,14 @@ notes: |
   下載頁（動態頁面，直接下載網址是靜態 CDN 路徑）：https://www.asus.com/supportonly/nuc11pahi7/helpdesk_bios
   zip 內有 F7 膠囊 PATGL357.0059.CAP（26279936 位元組）、UEFI／Linux 刷新工具、EBU.EXE、Recovery 檔與 release notes。
   確認為 AMI：CAP 開頭是 AMI 膠囊標記 `_AMIPFAT`（只讀位元組檢查，未解開、未執行）。
-  這份 CAP 內容為 AMI PFAT 封裝，沒有明文字串 `American Megatrends`／`$VBT`；解析 PR 需先解開 PFAT 才找得到。
+  這份 CAP 內容為 AMI PFAT 封裝，沒有明文字串 `American Megatrends`／`$VBT`；需先解開 PFAT（tools/cra/ami_pfat.py）。
+  解開後是 BIOS 區域更新（FV 與 NVRAM 區段），沒有 flash descriptor、沒有 ME 區域；release notes 的 ME 15.0.56.2834 在映像裡找不到，
+  所以不寫進 expected。release notes 另列 Integrated Graphics GOP UEFI Driver 17.0.1070（尚未從映像核對，之後 GOP／VBT 的 PR 再確認）。
   選 ASUS 而非 Intel 下載中心：downloadmirror.intel.com 的網址會被轉成小寫路徑而回 403，無法穩定下載。
   ASUS 之後若移除舊版，網址會失效，firmware-fetch 會 FAIL，此時換同系列其他版本。
+expected:
+  # 微碼：映像解開後讀到 000806C1／platform 0x80／revision 0xBE（日期 2025-07-24），
+  # 與 release notes 的 "Microcode Updates ... M80806C1_000000BE" 一致才寫進來。
+  # 映像裡另有 000806C2／revision 0x16，release notes 沒列，沒有獨立佐證，不寫。
+  microcode:
+    - {cpuid: "000806C1", platform_mask: "0x80", revision: "0xBE"}

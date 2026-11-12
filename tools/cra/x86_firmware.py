@@ -76,6 +76,11 @@ BIOS（Intel 平台的完整 SPI 映像）：
 - 拿不到（壓縮的 firmware volume 裡）：IBV 核心版本、UEFI 模組清單、FSP、EC → 標「只有版本清單、映像無法核對」，等第 2b 步。
 - 沒有 descriptor（capsule 或只有 BIOS 區域的檔案）→ 仍掃 microcode、`$FPT`、FIT（檔尾對到 4 GB），狀態 ATTENTION。
 
+AMI PFAT（AMI BIOS Guard 封裝，例如 Intel NUC 的 .CAP；解封裝在 ami_pfat.py）：每個輸入檔的 bytes 在解析前先偵測 `_AMIPFAT`，
+有的話把 block 資料依封裝順序組回映像（只在記憶體），之後照常解析；BIOS 映像記 pfat（原檔雜湊、組回雜湊、檔案清單、說明）。不驗證簽章。
+組回的映像是各區段（firmware volume、NVRAM…）依封裝順序串接再接封裝尾端資料，不是 SPI 位址對應的映像（封裝裡的 script 沒有解讀）。
+解不開（格式不認得、截斷、長度矛盾）→ 該檔記在 partial（ATTENTION），原 bytes 照一般資料掃過。
+
 SBOM 的 dumpling: property（每個元件都有）：
 - dumpling:vuln-assessment＝NOT_ASSESSED、dumpling:vuln-assessment-note＝原因。這個工具不比對漏洞：Intel ME／microcode 是「Intel 公告無法機器比對，
   需公告對照」，NVIDIA vBIOS 是「漏洞靠 NVIDIA 合作夥伴通知，工具只確認版本與雜湊」；BIOS 映像與其他區域是「這一層沒有漏洞比對」。
@@ -179,7 +184,7 @@ class Fail(Exception):
 
 
 def load_sibling(name):
-    """同目錄的模組（coreboot_cbfs）。python3 -I 不把腳本目錄放進 sys.path，所以用檔案路徑載入；測試 import 過就共用同一個。"""
+    """同目錄的模組（coreboot_cbfs、ami_pfat）。python3 -I 不把腳本目錄放進 sys.path，所以用檔案路徑載入；測試 import 過就共用同一個。"""
     mod = sys.modules.get(name)
     if mod is None:
         path = Path(__file__).resolve().with_name(name + ".py")
@@ -1634,6 +1639,17 @@ def cbfs_components(b, img, comps, sub):
         sub.append(ref)
 
 
+def pfat_props(p):
+    """BIOS 映像元件的 AMI PFAT 來源 property（原檔與組回映像的雜湊；元件本身的 hashes 是組回的映像）。"""
+    if not p:
+        return []
+    return [prop("dumpling:unwrapped-from", p["format"]), prop("dumpling:container-sha256", p["container_sha256"]),
+            prop("dumpling:unwrapped-image-sha256", p["image_sha256"]),
+            prop("dumpling:pfat-signature", "not verified"),
+            prop("dumpling:pfat-layout", f"{len(p['files'])} files from {p['info'].get('blocks', '?')} blocks concatenated in package order "
+                                         f"({p['image_label']}), then {p['info'].get('oob_size', 0)} trailing bytes; not an SPI address map")]
+
+
 def components(inv):
     comps, deps = [], {}
     for v in inv["vbios"]:
@@ -1664,6 +1680,7 @@ def components(inv):
                             *[prop(k, x) for k, x in zip(BSI_FLAGS, FIRMWARE_IMAGE)],
                             *[prop("sca-center:found-in", loc) for loc in b["locations"]],
                             *([prop("sca-center:ibv-hint", ", ".join(b["ibv_hint"]))] if b["ibv_hint"] else []),
+                            *pfat_props(b.get("pfat")),
                             *([prop("sca-center:note", b["descriptor_note"])] if b["descriptor_note"] else []),
                             *[prop("sca-center:incomplete", x) for x in b["incomplete"]],
                             prop("sca-center:me-status", b["me_status"]),
@@ -1738,6 +1755,26 @@ def bom(comps, deps):
 
 # ---------- 主流程 ----------
 
+def pfat_unwrap(label, data, budget, partial):
+    """AMI PFAT 偵測 → (pfat 資訊或 None, 要解析的 bytes)。不是 PFAT：原樣回傳。解不開：記 partial，原 bytes 照一般資料掃。"""
+    mod = load_sibling("ami_pfat")
+    try:
+        pf = mod.unwrap(data, budget)
+    except OverBudget as e:
+        partial.append((label, f"AMI PFAT 解封裝：{e}"))
+        return None, data
+    if pf is None:
+        return None, data
+    if not pf["ok"] or len(pf["image"]) > budget.total_left:
+        partial.append((label, "AMI PFAT 解封裝失敗：" + (pf["error"] or "組回的映像超過這次執行的總量上限")))
+        return None, data
+    budget.total_left -= len(pf["image"])
+    partial += [(label, f"AMI PFAT：{x}") for x in pf["unparsed"]]
+    return {"format": "AMI PFAT (AMI BIOS Guard)", "container_sha256": pf["orig_sha256"], "container_size": len(data),
+            "image_sha256": pf["image_sha256"], "image_size": len(pf["image"]), "image_label": pf["image_label"], "files": pf["files"],
+            "info": pf["info"], "notes": pf["notes"], "signature_verified": False}, pf["image"]
+
+
 def inventory(paths, manifest=None, budget=None):
     rows = read_manifest(manifest) if manifest else None
     budget = budget or Budget()
@@ -1745,6 +1782,7 @@ def inventory(paths, manifest=None, budget=None):
     partial = []                        # 讀進來、解析到一半（上限、超時、某一段失敗）的檔案；skipped 是沒有解析或內容沒展開的
     vb, other, bios = {}, {}, {}
     for label, data in gen:
+        pfat, data = pfat_unwrap(label, data, budget, partial)     # AMI PFAT 封裝 → 組回的映像（之後照常解析）
         roms, b = [], None
         for stage in ("vBIOS", "BIOS"):     # 兩段分開：BIOS 那段超時或失敗，已找到的 vBIOS 照樣保留
             try:
@@ -1779,6 +1817,10 @@ def inventory(paths, manifest=None, budget=None):
         if b and b.get("evidence") == ["amd"] and any(is_vbios(r) for r in roms):
             b = None                   # NVIDIA vBIOS 更新包（nvflash）裡只有 AMD 標記：當成巧合，不當成 BIOS 映像；
             #                            其他廠商的 option ROM（例如 AMD BIOS 裡的 PXE ROM）不算
+        if b and pfat:
+            b["pfat"] = pfat
+            if "AMI" not in b["ibv_hint"]:
+                b["ibv_hint"] = sorted(b["ibv_hint"] + ["AMI"])      # AMI BIOS Guard 封裝本身就是 AMI 的線索
         if b:
             h = hashes(data)
             e = bios.setdefault(h["sha256"], {"file": label, "locations": [], "size": len(data), **h, **b})
@@ -1934,6 +1976,10 @@ def markdown(inv):
                                         if b["descriptor"] else f"沒有（{e(b['descriptor_note'])}）")]
         if b.get("declared_version"):
             L.append(f"- BIOS 版本（版本清單）：{e(b['declared_version'])}")
+        if b.get("pfat"):
+            p = b["pfat"]
+            L.append(f"- 來自 {e(p['format'])} 封裝：原檔 SHA-256 `{p['container_sha256']}`（{p['container_size']} bytes），"
+                     f"組回映像 SHA-256 `{p['image_sha256']}`（{p['image_size']} bytes，{len(p['files'])} 個區段依封裝順序串接）；" + e("；".join(p["notes"])))
         if b["platform"]:
             L.append(f"- 平台：{e(b['platform'])}（" + "；".join(e(x) for x in b["amd_markers"]) + "）")
         L += ["", "### ME", "", "| 狀態 | 版本 | 日期 | family | 位置 | 依據 |", "|---|---|---|---|---|---|"]
