@@ -186,6 +186,7 @@ class Assemble(Tmp):
         d = self.p("deliver")
         for rel, data in (("kernel/kernel-noble/arch/arm64/boot/Image", b"CI-IMAGE"), ("kernel/kernel-noble/drivers/net/x.ko", b"ci-x"),
                           ("nvidia-oot/drivers/y/y.ko", b"ci-y"), ("kernel/kernel-noble/modules.order", b"kernel/drivers/net/x.ko\n"),
+                          ("kernel/kernel-noble/.config", b"CONFIG_X=y\n"), ("kernel/kernel-noble/Makefile", b"VERSION = 6\n"),
                           ("kernel-devicetree/a.dtb", b"ci-a"), ("one/b.dtb", b"ci-b1"), ("two/b.dtb", b"ci-b2")):
             os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
             open(os.path.join(d, rel), "wb").write(data)
@@ -212,6 +213,8 @@ class Assemble(Tmp):
         self.assertEqual(data[base + "kernel/drivers/net/x.ko"], b"ci-x")
         self.assertEqual(data[base + "updates/nvidia-oot/drivers/y/y.ko"], b"ci-y")
         self.assertIn(base + "modules.order", data)
+        self.assertEqual(data[base + "build/.config"], b"CONFIG_X=y\n")      # 映像裡要找得到出貨核心的 .config 與 Makefile
+        self.assertEqual(data[base + "build/Makefile"], b"VERSION = 6\n")
         self.assertFalse([n for n in names if "6.8.12-1021-tegra" in n])     # NVIDIA 的模組目錄整個不在
         self.assertEqual((rep["nvidia_modules_dropped"], rep["ci_modules_in_tree"], rep["ci_modules_out_of_tree"]), (2, 1, 1))
 
@@ -223,6 +226,24 @@ class Assemble(Tmp):
         self.assertEqual(names["Linux_for_Tegra/rootfs/lib"].linkname, "usr/lib")
         self.assertEqual(names["Linux_for_Tegra/rootfs/bin/hl"].linkname, "Linux_for_Tegra/rootfs/etc/os-release")
         self.assertIn("Linux_for_Tegra/flash.sh", data)
+
+    def test_long_paths_keep_the_prefix(self):
+        """PAX 格式的長路徑成員（>100 字元）帶著舊的 path 標頭：改名後一定要寫在 Linux_for_Tegra/rootfs/ 底下，不能漏在最上層。"""
+        long_dir = "./usr/share/" + "/".join(["averyveryverylongdirectoryname%d" % i for i in range(5)])
+        rfs = self.p("pax.tar")
+        with tarfile.open(rfs, "w", format=tarfile.PAX_FORMAT) as t:
+            add(t, long_dir + "/file.txt", b"long")
+            add(t, "./usr/share/short", b"s")
+            add(t, long_dir + "/hl", b"", typ=tarfile.LNKTYPE, link=long_dir + "/file.txt")
+        out = self.p("o.tar")
+        ja.assemble(self.bsp, rfs, self.deliver, "6.8.12-ci", out)
+        with tarfile.open(out) as t:
+            names = t.getnames()
+            hl = [m for m in t.getmembers() if m.name.endswith("/hl")][0]
+        stray = [n for n in names if n != "Linux_for_Tegra" and not n.startswith("Linux_for_Tegra/")]
+        self.assertEqual(stray, [])
+        self.assertIn("Linux_for_Tegra/rootfs/" + long_dir[2:] + "/file.txt", names)
+        self.assertEqual(hl.linkname, "Linux_for_Tegra/rootfs/" + long_dir[2:] + "/file.txt")
 
     def test_owners_from_dpkg_lists(self):
         rfs = self.mktar("own.tar", [("./var/lib/dpkg/info/nvidia-l4t-core.list", b"/.\n/usr\n/usr/lib/nv/a.so\n/lib/b.so\n"),

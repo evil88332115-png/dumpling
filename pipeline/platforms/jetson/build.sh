@@ -68,7 +68,7 @@ br_sha=$(sha256sum "$br" | cut -d' ' -f1)
 # 7. 交付檔：Image、.ko（樹內與樹外，保留相對於編譯輸出的路徑）、dtb、modules.*、kernel.release
 D=$out/deliver
 ( cd "$OUT" && find . \( -name '*.ko' -o -name '*.dtb' -o -name '*.dtbo' \) -type f | sort > "$D/files.list"
-  for f in arch/arm64/boot/Image modules.order modules.builtin modules.builtin.modinfo include/config/kernel.release; do
+  for f in arch/arm64/boot/Image modules.order modules.builtin modules.builtin.modinfo include/config/kernel.release .config Makefile Module.symvers; do
     [ -f "kernel/$kname/$f" ] && echo "./kernel/$kname/$f"
   done >> "$D/files.list"
   tar -cf - -T "$D/files.list" | zstd -3 -T0 -q -o "$D/deliverables.tar.zst" ) || fail "整理交付檔失敗"

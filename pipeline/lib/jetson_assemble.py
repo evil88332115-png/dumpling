@@ -11,7 +11,8 @@
 - rootfs（jetson_rootfs.py 的基礎版 tar）寫在 Linux_for_Tegra/rootfs/ 底下，除了：
     boot/Image                     換成同一顆 CI 的 Image（避免「兩顆核心」，C-kernel-boot 才會是 OK）
     usr/lib/modules/               NVIDIA 的核心模組整個不收；改放 CI 編的模組（樹內 kernel/…、樹外 updates/…，路徑取自編譯輸出）
-    ＋ modules.order、modules.builtin、modules.builtin.modinfo（CI 的核心建置資料夾）
+    ＋ modules.order、modules.builtin、modules.builtin.modinfo，以及 build/.config、build/Makefile、build/Module.symvers、
+      build/include/config/kernel.release（CI 的核心建置資料夾；掃描的 C-kernel-config 要在映像裡找到出貨核心的 .config 與 Makefile）
   NVIDIA 的 dpkg 紀錄（nvidia-l4t-kernel 等）原樣保留：真實出貨的刷機包也是 apply_binaries.sh 裝了 NVIDIA 的核心套件、再換成自己編的核心。
 - 成員名稱、連結、裝置檔的檢查同 safe_extract.py；不安全的 BSP 成員略過並記錄，rootfs-tar 是我們自己產生的，有不安全成員就中止。
 輸出報告 assemble.json：換了什麼、丟了什麼（NVIDIA 模組數、CI 模組數）、成員數、輸出的 sha256。
@@ -29,6 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import safe_extract as se  # noqa: E402
 
+BUILD_FILES = (".config", "Makefile", "Module.symvers", "include/config/kernel.release")
 REL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 
 
@@ -72,6 +74,11 @@ def scan_deliver(deliver, kname_dir):
         p = os.path.join(kroot, f)
         if os.path.isfile(p):
             meta[f] = p
+    # 核心的建置設定：放進 usr/lib/modules/<版本>/build/（出貨映像的 headers 套件通常有；掃描的 C-kernel-config 從這裡讀 .config 與 Makefile）
+    for f in BUILD_FILES:
+        p = os.path.join(kroot, f)
+        if os.path.isfile(p) and not os.path.islink(p):
+            meta["build/" + f] = p
     return kos, dtbs, meta
 
 
@@ -138,6 +145,7 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
                         continue
                     rep["dtb_kept_from_bsp"] += 1
                 m.name = n + ("/" if m.isdir() else "")
+                m.pax_headers = {}      # 讀進來的 PAX 標頭（長路徑的 path 等）會蓋掉新的名稱：清掉，tarfile 依新名稱重新產生
                 if m.islnk():
                     m.linkname = norm(m.linkname)
                 if m.isreg():
@@ -173,6 +181,7 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
                     seen_dirs.add(new)
                 lm = LIST_RE.match(n) if m.isreg() and m.size <= (64 << 20) else None
                 m.name = new + ("/" if m.isdir() else "")
+                m.pax_headers = {}      # 同上：base.tar 是 PAX 格式，長路徑成員帶著舊的 path 標頭，不清掉會寫回沒有前綴的舊路徑
                 if m.islnk():
                     m.linkname = rp + norm(m.linkname)
                 if lm:      # dpkg 的 .list：記下「檔案 → 擁有它的套件」（分層用：Syft 的檔案紀錄靠它找層）；內容照常寫進刷機包
