@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:11 -0500（C1）
+最後更新：2026-11-12 08:12 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -44,9 +44,11 @@
 - 分支／PR／commit：
   - `wp3/firmware-samples`：PR #7（CI 三項綠燈，最後 commit 052039b；驗證：通過，等 C0 合併）
   - `wp3/bios-sbom`：PR #8（正式 PR，CI 兩項綠燈，最後 commit 5271d2c；本機 Dasharo 真實樣本 ME 14.0.47.1558、微碼 3 份 0xF8 符合驗收值）
+  - `wp3/coreboot-cbfs`（PR 2c，從 `wp3/bios-sbom` 開出，#8 合併後 merge main；worktree `$AGENT_TMP/dumpling-wt-c2-cbfs`）
 - 預定 PR（D-014，一個可測的功能一個 PR）：
   1. `wp3/firmware-samples`：樣本清單＋下載並核對 sha256（`pipeline/firmware-fetch.sh`、`tests/run.d/c2-firmware.sh`、`firmware.yml` workflow）
   2a. `wp3/bios-sbom`：複製 x86_firmware.py（D-015）→ `tools/cra/`；Intel ME／微碼、vBIOS 標 NOT_ASSESSED、讀不到版本標 GAP、確定的才填 CPE；`pipeline/firmware-bios.sh`；`tests/run.d/c2-x86-firmware.sh`
+  2c. `wp3/coreboot-cbfs`：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分 → SBOM 元件
   2b. BIOS 成品端 UEFI 解開（D-016：等 C1 M1 合併後用 `tools/cra/uefi_image.py`，不正式化 fv_walk.py）＋CBFS／FSP（BIOS 試掃原型）
   3. `wp4/vbios`：獨立 vBIOS＋BIOS 內 Intel GOP／VBT／legacy VBIOS，公告比對 NOT_ASSESSED
   4. `wp3/firmware-dt`：firmware workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
@@ -54,6 +56,7 @@
   - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1，分支 `wp3/firmware-samples`，狀態：完成
   - 驗證代理（Sonnet 5.5 medium）：驗證 PR #7，狀態：完成（通過；4 條建議另開 PR 處理）
   - 代理 B（寫程式，Sonnet 5.5 high）：PR 2a，分支 `wp3/bios-sbom`，狀態：完成
+  - 代理 C（寫程式，Sonnet 5.5 high）：PR 2c，分支 `wp3/coreboot-cbfs`，狀態：進行中
   - PR #8 的驗證：由 C0 派的驗證代理在做（C2 不重複派）
 - CI：PR #8 綠燈（unit-tests 126 passed、0 skip）；PR #7 綠燈（firmware-fetch run 43223968481 真的下載 5 個樣本並核對 sha256）
 - 下一步：等 PR #7、#8 合併（C0 會 update-branch）；接著做 PR 1 驗證的建議（補 fetch 測試案例）＋真實樣本的 CI 驗收（Dasharo 解析結果對 firmware.yml expected），以及 PR 3 vBIOS／GOP／VBT 的前置研究（NUC CAP 是 AMI PFAT）
