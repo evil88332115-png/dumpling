@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 13:44 -0500（C2）
+最後更新：2026-11-12 14:21 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -67,12 +67,14 @@
   - M3 內容：coreboot CBFS、AMI PFAT、UEFI FV 的 Intel GOP／VBT／legacy VBIOS（`tools/cra/uefi_gfx.py`，子類別化 C1 的 `uefi_image.Scan`，契約測試 `test_uefi_image_contract.py`）、expected 驗收（新鍵 `intel_gop`、`intel_legacy_vbios`）、供應商 SBOM 品質檢查、`firmware-dt` job（臨時 DT＋Grype）
   - DT 結果（Actions）：Protectli 16→DT 14、NUC 8→6、OVMF 1、合成 vBIOS 1，都 ATTENTION；供應商 SBOM 被 DT 拒收（schema 不符），以 `expected_dt` 宣告，只放行 DT 的「BOM 不符 schema」400
   - 驗證：第一次不通過（issuecomment-6832127582：只看 http=400 太寬）→ 8f02635 修正（錨定 DT 回應開頭＋6 個反例），C0 複核後合併
-- 分支 `wp3/supplier-normalize`（worktree `$AGENT_TMP/dumpling-wt-c2-norm`，從 main b6d341a）
+- 分支 `wp3/supplier-normalize` 38db74c（worktree `$AGENT_TMP/dumpling-wt-c2-norm`，從 main b6d341a）
 - 代理：
-  - 代理 M（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize`，供應商 SBOM 正規化（頂層多出的欄位→`metadata.properties`、只有 url 的 license→元件 properties；不刪不猜、記錄每筆搬移與原檔 sha256、只改上傳副本；CycloneDX 1.4 官方 schema 驗證；拿掉樣本的 `expected_dt`；本機 DT 端到端），狀態：進行中
+  - 代理 M（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` 84ea369，狀態：完成。`pipeline/lib/firmware_sbom_normalize.py`（1.4～1.6；頂層多出欄位→`dumpling:supplier-extra:*`、只有 url 的 license→`dumpling:supplier-license-url`；normalize.json 記每筆原 JSON Pointer＋值 sha256；上限；先規劃後套用）、CycloneDX 1.4 官方 schema（tag 1.4）、樣本拿掉 expected_dt。本機真 DT：Dasharo NS5x **DT 收下**，10 元件，verify 5 項 OK；原檔 1.4 schema 2 錯→副本 0 錯
+  - 我補 38db74c：報告的 OK 太寬（Grype 36 筆、purl 全 pkg:generic、沒有評估標記仍標 OK）→ `attention_reasons()`，三種都 ATTENTION；用真 DT 結果重跑 report 確認。CI tests 43289059136、firmware 43289066571 已觸發
+  - 預驗 38db74c（驗證，Sonnet 5.5 high），狀態：進行中
   - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
 - 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
-- 下一步：等代理 M → 預驗 → M2 合併後加 fetch_verify 改動 → 開一個 PR → 驗證 → 通知 C0
+- 下一步：等預驗 → M2 合併後加 fetch_verify 改動 → 開一個 PR → 驗證（C0 派）→ C0 合併
 - 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`、`-c1files`、`-dt`、`-gop`、`-expect` 被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
