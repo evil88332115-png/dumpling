@@ -100,13 +100,14 @@ def test_vbios_package_zip_dedup_and_per_board(tmp_path):
         f.writestr("UpdateVBios_X.exe", nvflash_exe(a))
         f.writestr("VBios/board1.exe", nvflash_exe(a))                   # 同一個 ROM 出現兩次 → 一個元件、兩個位置
         f.writestr("VBios/board2.exe", nvflash_exe(b))
-        f.writestr("VBios/other.rom", option_image(0x8086, 0x1234, 1, 0, True))   # 不是 NVIDIA → 不算
+        f.writestr("VBios/other.rom", option_image(0x8086, 0x1234, 1, 0, True))   # 不是 NVIDIA → 不算 NVIDIA vBIOS（是 Intel legacy VBIOS，另列）
     inv = xf.inventory([z])
     assert [(v["device"], v["version"], len(v["locations"])) for v in inv["vbios"]] == [("2488", "94.04.5E.00.A1", 1),
                                                                                         ("2489", "94.04.5E.00.92", 2)]
     assert inv["bios"] == []
+    assert [v["device"] for v in inv["intel_vbios"]] == ["1234"]
     comps, deps = xf.components(inv)
-    assert {c["name"] for c in comps} == {"NVIDIA VBIOS 2488", "NVIDIA VBIOS 2489"}
+    assert {c["name"] for c in comps} == {"NVIDIA VBIOS 2488", "NVIDIA VBIOS 2489", "Intel legacy VBIOS (option ROM)"}
     assert not list(cdx_validator().iter_errors(xf.bom(comps, deps)))
 
 

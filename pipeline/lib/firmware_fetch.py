@@ -18,9 +18,9 @@ except ImportError:  # 在 main() 回報 FAIL
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
-KINDS = ("bios", "vbios")
+KINDS = ("bios", "vbios", "sbom")
 STATUSES = ("ok", "GAP")
-ROLES = ("image", "source", "package")
+ROLES = ("image", "source", "package", "sbom")
 ALWAYS_REQUIRED = ("kind", "vendor", "model", "status", "notes")
 OK_REQUIRED = ("firmware_version", "ibv", "files", "license")
 FILE_REQUIRED = ("name", "url", "sha256", "size", "role")
@@ -82,6 +82,9 @@ def validate(doc):
             errs.append("files[%d] size 必須是正整數" % i)
         if f.get("role") and f["role"] not in ROLES:
             errs.append("files[%d] role 必須是 %s" % (i, "/".join(ROLES)))
+        # sbom 只能搭 role: sbom，其他 kind 不能用 role: sbom（不放寬其他規則）
+        if f.get("role") and doc.get("kind") in KINDS and (doc["kind"] == "sbom") != (f["role"] == "sbom"):
+            errs.append("files[%d] role: sbom 只能用在 kind: sbom，kind: sbom 只能用 role: sbom" % i)
     return errs
 
 
@@ -186,7 +189,7 @@ def process(path, out_root, downloader=curl_download):
     return ("OK" if ok else "FAIL"), model, "；".join(msgs)
 
 
-def main(argv=None):
+def main(argv=None, downloader=curl_download):
     ap = argparse.ArgumentParser(description="下載韌體樣本並核對 sha256")
     ap.add_argument("manifests", nargs="+")
     ap.add_argument("--out", required=True)
@@ -196,7 +199,7 @@ def main(argv=None):
         return 1
     failed = False
     for m in args.manifests:
-        status, model, msg = process(m, args.out)
+        status, model, msg = process(m, args.out, downloader)
         print("FIRMWARE-FETCH\t%s\t%s\t%s" % (status, model, msg.replace("\t", " ").replace("\n", " ")), flush=True)
         failed = failed or status == "FAIL"
     return 1 if failed else 0

@@ -1,0 +1,7 @@
+# CI 與本機安裝的固定版本外部工具（版本與 sha256 只寫在這裡；pipeline/install-tool.sh 讀它）。
+# 格式：<工具>_<欄位>=值。換版本時三個欄位一起改，並確認發布日期至少兩週前。
+# sbomqs：interlynk-io/sbomqs 的 GitHub Release，linux amd64。發布日期 2026-10-14。
+sbomqs_version=v2.1.3
+sbomqs_url=https://github.com/interlynk-io/sbomqs/releases/download/v2.1.3/sbomqs_2.1.3_Linux_x86_64.tar.gz
+sbomqs_sha256=c96f07a6a27314c1c268af141af04f1c1b49e61400d7058f6419ca4f7f3bdd6b
+sbomqs_member=sbomqs
