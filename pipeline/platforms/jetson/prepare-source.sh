@@ -29,6 +29,14 @@ fi
 for c in "${comps[@]}"; do
   pyl safe_extract.py "$S/$c" "$B" --allow-nonempty > /dev/null || fail "解開 $c 被拒絕或失敗"
 done
+# 選用：把 OP-TEE／TF-A 的原始碼也解開（精靈的 --tee-source 用；assemble 步驟設 DUMPLING_TEE_DIR）
+if [ -n "${DUMPLING_TEE_DIR:-}" ]; then
+  mkdir -p "$DUMPLING_TEE_DIR" || fail "無法建立 $DUMPLING_TEE_DIR"
+  for c in atf_t234_src.tbz2 nvidia-jetson-optee-source.tbz2; do
+    if [ -f "$S/$c" ]; then pyl safe_extract.py "$S/$c" "$DUMPLING_TEE_DIR" --allow-nonempty > /dev/null || fail "解開 $c 被拒絕或失敗"
+    else echo "prepare-source: 注意：public_sources 裡沒有 $c（OP-TEE／TF-A 比對會標 GAP）"; fi
+  done
+fi
 rm -rf "$tmp/ps"
 ksrc=$(find "$B/kernel" -maxdepth 1 -mindepth 1 -type d -name 'kernel-*')
 if [ -z "$ksrc" ] || [ "$(printf '%s\n' "$ksrc" | wc -l)" != 1 ]; then fail "kernel/ 底下要剛好一個 kernel-* 資料夾"; fi

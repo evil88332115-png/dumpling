@@ -140,6 +140,7 @@ def cmd_split(pos, opts):
     doc = {"schema": ly.SCHEMA, "platform": config["platform"], "os_responsibility": resp, "os_responsibility_gap": resp is None,
            "components_total": summary["total"], "components": summary["layers"], "basis": summary["basis"],
            "unknown": {"count": summary["layers"]["unknown"], "by_purl_type": summary["unknown_by_purl_type"],
+                       "by_reason": summary["unknown_by_reason"], "reasons": {k: v for k, v in ly.UNKNOWN_REASONS.items()},
                        "handling": "列入我們的待辦（bsp 檔與 DT 專案 -bsp），不歸成 os"},
            "own_software": summary["own_software"], "files": info, "upload_excludes": ["host-tool"],
            "scan_plan": scan_plan(resp, files), "dropped_dependency_edges": dropped, "gaps": gaps}

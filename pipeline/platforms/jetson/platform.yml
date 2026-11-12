@@ -12,7 +12,9 @@ raw_sectors:
 layers:
   bsp:
     packages:
-      - "nvidia-l4t-*"       # L4T 使用者空間套件（驅動、函式庫、工具）：裝在 rootfs 但屬於 BSP
+      # NVIDIA 為這個平台提供的套件都算 bsp（D-030），仍是名稱清單（D-027），不看版本字尾。清單怎麼來的見 docs/LAYERS.md「NVIDIA 套件清單」：
+      - "nvidia-l4t-*"       # L4T 使用者空間套件（驅動、函式庫、工具、核心套件）：裝在 rootfs 但屬於 BSP
+      - "nvidia-igx-*"       # NVIDIA 在同一個 BSP 裡提供的 IGX 平台套件（nvidia-igx-oobe、nvidia-igx-systemd-reboot-hooks、nvidia-igx-bootloader）
     paths:                   # 核心、樹外模組、device tree、開機程式（J 軌依實際 BSP 內容再補）
       - "usr/lib/modules/*"  # rootfs：核心（in-tree）與樹外模組（nvidia-oot、nvgpu…），Syft 的 linux-kernel-module 元件
       - "lib/modules/*"
@@ -24,11 +26,31 @@ layers:
       - "Linux_for_Tegra/bootloader/*.dtb"
       - "Linux_for_Tegra/bootloader/*.dtbo"
       - "Linux_for_Tegra/bootloader/*.img"
+      - "Linux_for_Tegra/bootloader/*.fip"   # bl31_t264.fip 等
+      - "Linux_for_Tegra/bootloader/*.deb"   # nvidia-l4t-bootloader、nvidia-igx-bootloader、nvidia-l4t-kernel-partitions
+      - "Linux_for_Tegra/nv_tegra/l4t_deb_packages/*"   # NVIDIA 的 L4T 套件（apply_binaries.sh 裝進 rootfs 的來源）
   host-tool:
-    paths:                   # 主機端刷機工具：不在板子上執行，不進產品漏洞清單（J 軌依實際 BSP 內容再補）
+    # 主機端刷機工具：隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行，不進產品漏洞清單。
+    # 路徑對過公開 R39.2.1 BSP 的成員清單（2026-11-12）：Linux_for_Tegra 最上層的腳本與 flash 相關資料夾。
+    # `*` 也比對 `/`，所以最上層的腳本逐一列出名稱，不用 Linux_for_Tegra/*.sh（會吃到 rootfs 裡的腳本）。
+    paths:
       - "Linux_for_Tegra/flash.sh"
       - "Linux_for_Tegra/apply_binaries.sh"
-      - "Linux_for_Tegra/tools/*"
+      - "Linux_for_Tegra/l4t_initrd_flash.sh"
+      - "Linux_for_Tegra/l4t_generate_soc_bup.sh"
+      - "Linux_for_Tegra/l4t_sign_image.sh"
+      - "Linux_for_Tegra/l4t_uefi_sign_image.sh"
+      - "Linux_for_Tegra/build_l4t_bup.sh"
+      - "Linux_for_Tegra/nvautoflash.sh"
+      - "Linux_for_Tegra/nvsdkmanager_flash.sh"
+      - "Linux_for_Tegra/odmfuse.sh"
+      - "Linux_for_Tegra/odmfuseread.sh"
+      - "Linux_for_Tegra/nvmassfusegen.sh"
+      - "Linux_for_Tegra/create_l4t_bsp_images.py"
+      - "Linux_for_Tegra/bootloader/*.py"    # tegrasign_v3*.py 等簽署工具
+      - "Linux_for_Tegra/generate_capsule/*"
+      - "Linux_for_Tegra/unified_flash/*"
+      - "Linux_for_Tegra/tools/*"            # 含 jetson-gpio-common、python3-jetson-gpio 的 deb（主機端工具資料夾）
       - "Linux_for_Tegra/nv_tools/*"
   default: os
 scan:

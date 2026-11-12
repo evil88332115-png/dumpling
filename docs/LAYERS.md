@@ -25,14 +25,32 @@ PLAN「BSP 掃描範圍」要求：BSP（我們的待辦）、OS（範例 rootfs
 2. 型別 `operating-system` → `os`；型別 `firmware` → `bsp`。
 3. **發行版套件**（purl 類型 `deb`／`rpm`／`apk`／`alpm`）：只看套件名稱，用 `classify_package`：`layers.bsp.packages` → `bsp`、
    `layers.host-tool.packages` → `host-tool`、其餘 `os`（平台的 `default: os`）。
-4. **有路徑的元件**（Syft 的 `syft:location:N:path`、`syft:metadata:path`、CycloneDX `evidence.occurrences[].location`、型別 `file` 的名稱）：
+4. **有路徑的元件**（Syft 的 `syft:location:N:path`、`syft:metadata:path`、`syft:metadata:virtualPath`（Java）、CycloneDX `evidence.occurrences[].location`、型別 `file` 的名稱）：
    路徑去掉開頭的 `/`、`./` 後比平台的 `layers.bsp.paths` → `bsp`、`layers.host-tool.paths` → `host-tool`、`layers.os.paths` → `os`；
    **沒有任何規則對到 → `unknown`**（`default: os` 只用在發行版套件，不用在路徑）。路徑含 `..` 或 NUL 的不採用。
    核心、樹外模組、device tree、UEFI、OP-TEE／TF-A、NVIDIA 閉源韌體都在這一條，由平台設定的路徑樣式決定（不寫死在程式裡）。
 5. 其他 → `unknown`。
 
+**unknown 附原因（D-030）**：每個 unknown 元件記 `dumpling:unknown-reason`（子元件是 `inherited`），按原因計數寫進 `layers.json` 的 `unknown.by_reason`、
+cra_report 的 `summary.json`（`layers.unknown_by_reason`）、風險評估 Layers 一節（"Why the layer could not be determined"）與 `漏洞清單.xlsx` 的「分層摘要」：
+
+| 原因 | 意思 |
+|---|---|
+| `no-path` | 沒有路徑也不是發行版套件（Syft 沒給 `syft:location`／`virtualPath`，例如 Go 執行檔裡的模組、Python 套件） |
+| `path-no-rule` | 有路徑，但 `platform.yml` 沒有任何規則對到 |
+| `inherited` | 子元件，跟著父元件的 unknown |
+
+SBOM 若帶 Syft 的路徑（`syft:location:N:path`、`virtualPath`），先套平台的路徑規則，對得到的就歸類，判斷不了的才留 unknown。
+
 同一個元件有多個路徑時取最保守的：`bsp` > `unknown` > `os` > `host-tool`（在產品上、我們負責的優先；有一個路徑判斷不了就是 `unknown`，
 不會因為另一個路徑是 host-tool 就當成 host-tool）。
+
+**NVIDIA 套件清單（D-030）**：原則是「NVIDIA 為這個平台提供的套件都算 bsp」，但仍是名稱清單（D-027），只有清單裡的才歸 bsp。清單取自公開 Jetson BSP（R39.2.1）：
+BSP 的 `nv_tegra/l4t_deb_packages/`、`kernel/`、`bootloader/` 裡全部 deb 的套件名稱（2026-11-12 讀 `Jetson_Linux_R39.2.1_aarch64.tbz2` 的成員清單），
+以及 `nvidia-l4t-apt-source` 套件指向的 NVIDIA apt 倉庫（`repo.download.nvidia.com/jetson`）；範例 rootfs 的 dpkg 狀態（fixture）裡來自 NVIDIA 的只有這些。
+實際出現的名稱：`nvidia-l4t-*`（69 個）與 `nvidia-igx-oobe`、`nvidia-igx-systemd-reboot-hooks`、`nvidia-igx-bootloader`（BSP 的 bootloader 套件）→ 樣式 `nvidia-l4t-*`、`nvidia-igx-*`。
+不在清單的：`libdrm-tegra0`、`libcurl4t64`（Ubuntu 套件，名稱裡有 tegra／t64，維護者是 Ubuntu）、`python3-jetson-gpio`／`jetson-gpio-common`（BSP 的 `tools/` 裡的 deb，host-tool 路徑；rootfs 沒有）。
+換 Jetson Linux 版本或增加 NVIDIA 套件系列時，重新讀 BSP 的 deb 清單再更新 `platform.yml`。
 
 **路徑樣式比的是元件在映像裡的路徑**：rootfs 映像是 `usr/lib/modules/…`、`boot/…`；BSP 資料夾是 `Linux_for_Tegra/…`。平台設定兩種都列
 （`pipeline/platforms/jetson/platform.yml`）。`layers.os` 只有 `paths`（選用）；套件沒列在 bsp／host-tool 的本來就是 os。
@@ -74,6 +92,7 @@ cra_report 用 BSP 專屬輸入產生的列直接是 `bsp`（依據 `synthetic:*
 
 ### host-tool
 
+host-tool 隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行（風險評估與報告包的主機端工具一節都有這句話）。
 host-tool 元件上的 DT finding 與 Grype 比對**在列出之前**就移出產品的比對結果（所以不進清單、不進交叉核對、不進 P1，也不會讓狀態變差），
 `summary.json` 的 `layers.host_tool` 記元件身分、移出的 finding／比對筆數與漏洞編號；風險評估 Layers 一節寫「Host tools (not running on the product)」。
 同一個 purl（或名稱＋版本）在別的層也有時不算 host-tool 專用，保守地留在產品清單。
@@ -140,15 +159,17 @@ python3 -I "$DUMPLING_ROOT/pipeline/sbom-layers.py" split "$sbom" "$DUMPLING_PLA
 
 ## 7. Jetson 標準答案（`tests/fixtures/jetson-r39.2.1-base.cdx.json.xz`，Syft 1.55.0，3851 個元件）
 
+D-030 校正前後（platform.yml 的 NVIDIA 套件清單加 `nvidia-igx-*`）：bsp 1537 → **1539**、os 1975 → **1973**、unknown 339 不變、host-tool 0 不變。
+
 | 層 | 元件數 | 組成 |
 |---|---|---|
-| `bsp` | 1537 | `nvidia-l4t-*` deb 69 ＋ 核心與樹外模組（`/usr/lib/modules/…`，linux-kernel-module）1468 |
-| `os` | 1975 | 其他 Ubuntu deb 1974 ＋ OS 元件 1 |
-| `unknown` | 339 | Go 235、Python 101、Java 3（Syft 沒有給路徑，也不是發行版套件） |
+| `bsp` | 1539 | `nvidia-l4t-*` deb 69 ＋ `nvidia-igx-*` deb 2 ＋ 核心與樹外模組（`/usr/lib/modules/…`，linux-kernel-module）1468 |
+| `os` | 1973 | 其他 Ubuntu deb 1972 ＋ OS 元件 1 |
+| `unknown` | 339 | Go 235、Python 101、Java 3。原因：沒有路徑也不是發行版套件 336（Go、Python）、路徑沒有對到任何規則 3（Java，`virtualPath` 在 `/usr/share/…`） |
 | `host-tool` | 0 | rootfs 映像裡沒有刷機工具 |
 
 測試把這些數字釘死（`tests/test_layers.py` 的 `JETSON_EXPECTED`）：規則或 platform.yml 讓數字變動時，必須確認新歸屬是對的才改。
-真實的 BSP 資料夾掃描（含 `Linux_for_Tegra/`）要等 J 軌有實際內容再補數字。
+CI 實際跑出來的分層數字見 `docs/JETSON.md` 與 `tests/expected/orin-nano-demo/*.json`。
 
 ## 8. 待確認（已採最保守做法，不阻擋）
 

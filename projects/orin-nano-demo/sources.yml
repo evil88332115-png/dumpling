@@ -32,6 +32,8 @@ releases:
   v39.2.1-demo1:
     platform_params:
       l4t_release: "39.2.1"
+      patches:                     # 模擬 RD 把上游 CVE 修補 backport 進核心：套在核心樹 kernel/kernel-noble（見 patches/README.md）
+        - 0001-tcp-Fix-potential-UAF-in-reqsk_timer_handler.patch
     files:
       - name: Jetson_Linux_R39.2.1_aarch64.tbz2
         url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/release/Jetson_Linux_R39.2.1_aarch64.tbz2

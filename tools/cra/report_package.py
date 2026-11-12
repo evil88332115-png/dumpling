@@ -951,6 +951,10 @@ def layer_sheets(doc, fix_all, conf):
     return out
 
 
+UNKNOWN_REASON_ZH = {"no-path": "沒有路徑也不是發行版套件", "path-no-rule": "路徑沒有對到任何規則", "inherited": "子元件，跟著父元件",
+                     "(not recorded)": "沒有記錄原因（SBOM 是舊版工具標的層）"}
+
+
 def layer_summary_sheet(doc, ly):
     """各層的元件數與列數、規則說明、unknown 與主機端工具（只記數量與身分）。"""
     resp = ly.get("os_responsibility")
@@ -962,12 +966,15 @@ def layer_summary_sheet(doc, ly):
                      sum(1 for r in rs if r["tier"] in OPEN_TIERS), sum(1 for r in rs if r["tier"] in OPEN_TIERS and is_todo(r))])
     h = ly.get("host_tool") or {}
     body.append([LAYER_ZH["host-tool"] + "（不在產品上執行，不進漏洞清單與 P1）", comps.get("host-tool", 0), 0, 0, 0, 0])
+    why = ly.get("unknown_by_reason") or {}
     top = [["分層：" + RESP_ZH[resp]],
            ["unknown＝判斷不了層（沒有發行版套件身分、也沒有路徑），不猜成 OS，一律列入我們的待辦；共 "
-            f"{(ly.get('unknown') or {}).get('components', 0)} 個元件（{', '.join(f'{k} {v}' for k, v in ((ly.get('unknown') or {}).get('by_purl_type') or {}).items()) or '—'}）。"],
-           [f"主機端工具：{h.get('count', 0)} 個元件；它們的 DT 比對 {h.get('findings_not_listed', 0)} 筆、Grype 比對 {h.get('grype_matches_not_listed', 0)} 筆不在產品漏洞清單。"
-            + ("身分：" + "；".join(f"{x.get('name')} {x.get('version') or ''}".strip() for x in (h.get("components") or [])[:20]) if h.get("count") else "")],
-           []]
+            f"{(ly.get('unknown') or {}).get('components', 0)} 個元件（{', '.join(f'{k} {v}' for k, v in ((ly.get('unknown') or {}).get('by_purl_type') or {}).items()) or '—'}）。"]]
+    if why:
+        top.append(["unknown 為什麼判斷不了（依原因計數）：" + "；".join(f"{UNKNOWN_REASON_ZH.get(k, k)} {v}" for k, v in why.items())])
+    top += [[f"主機端工具：{h.get('count', 0)} 個元件（隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行）；它們的 DT 比對 {h.get('findings_not_listed', 0)} 筆、Grype 比對 {h.get('grype_matches_not_listed', 0)} 筆不在產品漏洞清單。"
+             + ("身分：" + "；".join(f"{x.get('name')} {x.get('version') or ''}".strip() for x in (h.get("components") or [])[:20]) if h.get("count") else "")],
+            []]
     return Sheet(LAYER_SHEET, ["層", "元件數", "漏洞列數", "立即處理（P1）", "還要處理的列", "其中我們的待辦"], body, widths=[44, 10, 10, 14, 14, 16], top=top, top_nowrap=True)
 
 

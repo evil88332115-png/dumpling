@@ -40,6 +40,9 @@ BASIS_PROP = "dumpling:layer-basis"
 RESP_PROP = "dumpling:os-responsibility"
 PLATFORM_PROP = "dumpling:platform"
 PART_PROP = "dumpling:layer-part"
+REASON_PROP = "dumpling:unknown-reason"
+# unknown 判斷不了的原因（D-030）：沒有路徑也不是發行版套件｜有路徑但沒有任何規則對到
+UNKNOWN_REASONS = {"no-path": "沒有路徑也不是發行版套件", "path-no-rule": "路徑沒有對到任何規則", "inherited": "子元件，跟著父元件"}
 
 LAYERS = ("bsp", "os", "host-tool", "unknown")
 # 同一個東西對到多個層時的優先順序（最保守：在產品上的、我們負責的優先；host-tool 最後，只有完全沒有別的證據才算）
@@ -48,7 +51,7 @@ DISTRO_PURL_TYPES = ("deb", "rpm", "apk", "alpm")
 OWN_REF_PREFIX = "sca-center:own:"
 OWN_SOURCE_PREFIX = "own software"
 PATH_PROP_RE = re.compile(r"^syft:location:\d+:path$")
-PATH_PROPS = ("syft:metadata:path", "sca-center:own-software-path", "sca-center:flash-package-path")
+PATH_PROPS = ("syft:metadata:path", "syft:metadata:virtualPath", "sca-center:own-software-path", "sca-center:flash-package-path")
 MAX_SBOM_BYTES = 512 << 20
 
 
@@ -219,21 +222,31 @@ def _set_props(c, **kv):
     c["properties"] = props
 
 
+def unknown_reason(c):
+    """unknown 元件為什麼判斷不了：有路徑但沒有規則對到 → path-no-rule；沒有路徑（也不是發行版套件）→ no-path。"""
+    return "path-no-rule" if component_paths(c) else "no-path"
+
+
 def _tag_tree(c, layer, basis, config, own, counts):
-    _set_props(c, **{LAYER_PROP: layer, BASIS_PROP: basis})
+    if layer == "unknown" and basis != "inherited":
+        _set_props(c, **{LAYER_PROP: layer, BASIS_PROP: basis, REASON_PROP: unknown_reason(c)})
+    else:
+        _set_props(c, **{LAYER_PROP: layer, BASIS_PROP: basis})
     counts["layers"][layer] += 1
     counts["basis"][basis] = counts["basis"].get(basis, 0) + 1
     if layer == "unknown":
         t, _ = purl_type_name(c.get("purl"))
         k = t or ("(no purl)" if not c.get("purl") else "(other)")
         counts["unknown_by_purl_type"][k] = counts["unknown_by_purl_type"].get(k, 0) + 1
+        r = unknown_reason(c) if basis != "inherited" else "inherited"
+        counts["unknown_by_reason"][r] = counts["unknown_by_reason"].get(r, 0) + 1
     for ch in c.get("components") or []:
         if isinstance(ch, dict):
             _tag_tree(ch, layer, "inherited", config, own, counts)
 
 
 def new_counts():
-    return {"layers": dict.fromkeys(LAYERS, 0), "basis": {}, "unknown_by_purl_type": {}}
+    return {"layers": dict.fromkeys(LAYERS, 0), "basis": {}, "unknown_by_purl_type": {}, "unknown_by_reason": {}}
 
 
 def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None):
@@ -261,6 +274,7 @@ def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None
     hit = sum(1 for c in iter_components(b.get("components")) if _props(c).get(BASIS_PROP) in ("own-software", "own-software-list"))
     summary = {"total": sum(counts["layers"].values()), "layers": counts["layers"], "basis": dict(sorted(counts["basis"].items())),
                "unknown_by_purl_type": dict(sorted(counts["unknown_by_purl_type"].items())),
+               "unknown_by_reason": dict(sorted(counts["unknown_by_reason"].items())),
                "own_software": {"patterns": len(own_names) + len(own_paths), "ignored_entries": skipped, "matched_components": hit}}
     return b, summary
 

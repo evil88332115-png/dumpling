@@ -34,7 +34,7 @@ done < <(pyl jetson_build.py files "$proj" "$ver")
 if [ -z "$bsp" ] || [ -z "$rfs" ]; then fail "sources.yml 的這個版本要有 role: bsp 與 role: rootfs 的檔案"; fi
 if [ ! -f "$dl/$bsp" ] || [ ! -f "$dl/$rfs" ]; then fail "downloads/ 缺 $bsp 或 $rfs（先執行 fetch）"; fi
 
-rm -rf "$work" "$out/FlashPackage" "$out/SourceCode"
+rm -rf "$work" "$out/FlashPackage" "$out/SourceCode" "$out/tee-source"
 mkdir -p "$work" "$out/FlashPackage" "$out/SourceCode" || fail "無法建立資料夾"
 
 # 1. CI 的交付檔（我們自己的 build 輸出，仍用安全解壓）
@@ -55,7 +55,7 @@ rm -f "$work/base.tar"
 ( cd "$out/FlashPackage" && md5sum "$(basename "$pkg")" > "$(basename "$pkg").md5" )
 
 # 4. 原始碼（套好 patch；重新從 public_sources 做，與 build 同樣的步驟）
-bash "$here/prepare-source.sh" "$proj" "$ver" "$work/src" "$work/tmp" "$out/source.json" > "$work/prepare.log" 2>&1 \
+DUMPLING_TEE_DIR=$out/tee-source bash "$here/prepare-source.sh" "$proj" "$ver" "$work/src" "$work/tmp" "$out/source.json" > "$work/prepare.log" 2>&1 \
   || { tail -3 "$work/prepare.log"; fail "準備原始碼失敗"; }
 grep -E '^(patch|prepare-source)' "$work/prepare.log"
 src=$out/SourceCode/$DUMPLING_PROJECT-$ver-source.tar

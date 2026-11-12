@@ -4059,6 +4059,7 @@ def scan_command(project, out, cfg):
 # SBOM 的元件由 pipeline/sbom-layers.py（pipeline/lib/layers.py）標 property；沒有任何元件帶 dumpling:layer 時
 # 這一節的程式全部不動作（layers_on 為 False），輸出和沒有分層功能時一樣。property 名稱要和 pipeline/lib/layers.py 一致（測試核對）。
 LAYER_PROP, LAYER_BASIS_PROP, LAYER_RESP_PROP = "dumpling:layer", "dumpling:layer-basis", "dumpling:os-responsibility"
+LAYER_REASON_PROP = "dumpling:unknown-reason"      # unknown 判斷不了的原因（no-path｜path-no-rule｜inherited），選用
 LAYER_VALUES = ("bsp", "os", "host-tool", "unknown")
 LAYER_PRECEDENCE = ("bsp", "unknown", "os", "host-tool")      # 同一列對到多個層時：最保守的優先（在產品上、我們負責的優先）
 LAYER_RANK = {"bsp": 0, "unknown": 1, "os": 2, "host-tool": 3}
@@ -4091,7 +4092,7 @@ def build_layer_index(bom):
               if isinstance(p, dict) and isinstance(p.get("name"), str) and isinstance(p.get("value"), str)} for c in comps]
     if not any(LAYER_PROP in p for p in props):
         return None
-    idx = {"purl": {}, "nv": {}, "deb": {}, "counts": dict.fromkeys(LAYER_VALUES, 0), "host": [], "basis": Counter(), "unknown_types": Counter()}
+    idx = {"purl": {}, "nv": {}, "deb": {}, "counts": dict.fromkeys(LAYER_VALUES, 0), "host": [], "basis": Counter(), "unknown_types": Counter(), "unknown_reasons": Counter()}
     for c, p in zip(comps, props):
         layer = p.get(LAYER_PROP) if p.get(LAYER_PROP) in LAYER_VALUES else "unknown"
         idx["counts"][layer] += 1
@@ -4108,6 +4109,7 @@ def build_layer_index(bom):
             idx["host"].append({"name": c.get("name") or "?", "version": c.get("version") or "", "purl": c.get("purl") or ""})
         if layer == "unknown":
             idx["unknown_types"][t or ("(no purl)" if not c.get("purl") else "(other)")] += 1
+            idx["unknown_reasons"][p.get(LAYER_REASON_PROP) or "(not recorded)"] += 1
     mp = {q["name"]: q["value"] for q in (bom.get("metadata") or {}).get("properties") or []
           if isinstance(q, dict) and isinstance(q.get("name"), str) and isinstance(q.get("value"), str)}
     idx["resp"] = mp.get(LAYER_RESP_PROP) if mp.get(LAYER_RESP_PROP) in OS_RESPONSIBILITIES else None
@@ -4210,6 +4212,7 @@ def layers_summary(rows, vrows, idx, resp, host_info, notify):
         "open_rows": {l: sum(1 for r in v if r["tier"] in OPEN_TIERS) for l, v in by.items()},
         "p1_rows": {l: sum(1 for r in v if r["tier"] == "p1") for l, v in by.items()},
         "todo_rows": sum(1 for r in rows if r.get("layer_todo", True)),
+        "unknown_by_reason": dict(sorted(idx["unknown_reasons"].items())),
         "unknown": {"components": idx["counts"]["unknown"], "by_purl_type": dict(sorted(idx["unknown_types"].items())),
                     "rows": len(by["unknown"]), "handling": "treated as our to-do (not defaulted to OS)"},
         "notify_customer": [{"id": r["id"], "component": r["component"], "version": r["version"], "tier": r["tier"],
@@ -4219,6 +4222,10 @@ def layers_summary(rows, vrows, idx, resp, host_info, notify):
                       "findings_not_listed": host_info["findings"], "grype_matches_not_listed": host_info["matches"],
                       "ids": sorted(host_info["ids"])},
     }
+
+
+UNKNOWN_REASON_EN = {"no-path": "no path and not a distribution package", "path-no-rule": "a path that matches no rule",
+                     "inherited": "sub-component of an unknown component", "(not recorded)": "reason not recorded (SBOM was tagged by an older tool)"}
 
 
 def layer_section(num, summ, rows, notify, table):
@@ -4243,6 +4250,10 @@ def layer_section(num, summ, rows, notify, table):
         txt.append(f"\n{plural(summ['unknown']['components'], 'component')} ({bt}) could not be assigned to a layer (no package identity from a "
                    f"distribution and no path); {plural(summ['unknown']['rows'], 'row')} {verb(summ['unknown']['rows'], 'is', 'are')} listed. "
                    "They are not defaulted to OS: they are treated as our to-do.")
+        br = summ.get("unknown_by_reason") or {}
+        if br:
+            txt.append("\nWhy the layer could not be determined: " + "; ".join(
+                f"{UNKNOWN_REASON_EN.get(k, k)} {v}" for k, v in br.items()) + ".")
     if resp in ("customer", "upstream-vendor"):
         txt.append(f"\n**Customer notification** (exploited rows in the OS layer): {plural(len(notify), 'row')}.\n")
         txt.append(table(["CVE", "Component", "Version", "Tier", "Exploitation evidence"],
@@ -4251,7 +4262,8 @@ def layer_section(num, summ, rows, notify, table):
     txt.append(f"\n**Host tools (not running on the product)**: {plural(h['count'], 'component')}; "
                f"{plural(h['findings_not_listed'], 'Dependency-Track finding')} and {plural(h['grype_matches_not_listed'], 'Grype match', 'Grype matches')} "
                "on them are not in the product vulnerability list. "
-               + ("; ".join(f"{x['name']} {x['version']}".strip() for x in h["components"][:20]) + ("; …" if h["count"] > 20 else "") if h["count"] else ""))
+               + ("; ".join(f"{x['name']} {x['version']}".strip() for x in h["components"][:20]) + ("; …" if h["count"] > 20 else "") if h["count"] else "")
+               + "\n\nHost tools are shipped to the customer with the BSP and run on the customer's host, not on the product.")
     return "\n".join(txt) + "\n"
 
 

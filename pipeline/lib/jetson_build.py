@@ -13,6 +13,9 @@
       patches 的項目：字串（檔名；套在核心樹 kernel/kernel-noble）或 {file: 檔名, dir: 原始碼根底下的相對資料夾}。
       patches/ 底下有 .patch 檔沒被任何版本列出 → 只警告（stderr），不失敗。
 
+  param <專案資料夾> <版本> <名稱>
+      印出 sources.yml 該版本 platform_params 的某個字串值（例如 l4t_release）；沒有就結束碼 1。
+
   files <專案資料夾> <版本>
       印出 sources.yml 該版本每個檔案的「role<TAB>name」（assemble 用它找 BSP 與範例 rootfs 的檔名）。
 """
@@ -159,6 +162,16 @@ def main(argv):
             with open(argv[1], encoding="utf-8", errors="replace") as f:
                 res = check_components(f.read(), argv[2], req)
             print(json.dumps(res))
+            return 0
+        if cmd == "param" and len(argv) == 4:
+            sources = pc.load_sources(os.path.join(argv[1], "sources.yml"))
+            rel = sources["releases"].get(argv[2])
+            if rel is None:
+                raise BuildError("sources.yml 沒有版本 %s" % argv[2])
+            v = (rel.get("platform_params") or {}).get(argv[3])
+            if not isinstance(v, str) or not v:
+                raise BuildError("platform_params.%s 沒有設定" % argv[3])
+            print(v)
             return 0
         if cmd == "files" and len(argv) == 3:
             sources = pc.load_sources(os.path.join(argv[1], "sources.yml"))

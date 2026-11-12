@@ -471,12 +471,20 @@ class Scripts(Tmp):
             self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: %s" % (step, word))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "out", "ex1", ver, "raw-sectors.json")))
 
-    def test_jetson_skeleton_and_shared_fetch(self):
+    def test_jetson_steps_without_inputs_and_shared_fetch(self):
+        """J 軌實作後：沒有輸入（沒下載、沒有 build 的輸出）時，各步驟回報 FAIL 或 NOT_RUN（非 aarch64 的 build），不會假裝成功。"""
         proj = os.path.join(ROOT, "projects", "orin-nano-demo")
-        for step in ("build", "assemble", "scan"):
-            p = self.plat(step, proj, "v39.2.1-demo1")
+        p = self.plat("build", proj, "v39.2.1-demo1")
+        if os.uname().machine == "aarch64":
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip(), r"^build: FAIL（")
+        else:
             self.assertEqual(p.returncode, 4, p.stdout)
-            self.assertEqual(p.stdout.strip(), "%s: NOT_RUN（J 軌實作）" % step)
+            self.assertRegex(p.stdout.strip(), r"^build: NOT_RUN（只在 aarch64 主機原生編譯")
+        for step in ("assemble", "scan"):
+            p = self.plat(step, proj, "v39.2.1-demo1")
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: FAIL（" % step)
         p = self.plat("raw-sectors", proj, "v39.2.1-demo1")
         self.assertEqual((p.returncode, p.stdout.split("（")[0]), (0, "raw-sectors: OK"))
         p = self.plat("validate", proj, "v39.2.0-demo1")
