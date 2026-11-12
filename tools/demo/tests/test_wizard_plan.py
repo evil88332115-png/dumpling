@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -588,3 +589,16 @@ def test_tools_rev_option_and_env_are_wired():
     assert '"--tools-rev"' in s and 'os.environ.get("DUMPLING_TOOLS_REV")' in s and 'or "HEAD")' in s
     body = s.split("== 1. 取工具 ==", 1)[1].split("== 2. 產品設定 ==", 1)[0]
     assert "tools-version.json" in body and 'rev-parse", "origin/main"' not in s
+
+
+def test_platform_is_explicit_and_never_guessed(site):
+    tmp, flash, src, out, cfg, stable = site
+    base = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--role", "both",
+            "--generic-rules", "no", "--yes", "--plan-only"]
+    r = run(base)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] is None
+    shutil.rmtree(out)      # 輸出資料夾名稱到分鐘，同一分鐘內重跑會被拒絕
+    r = run(base + ["--platform", "rockchip"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] == "rockchip"

@@ -16,7 +16,7 @@
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾與自架 runner 的工作目錄結構）改成 /path/to/work/.sca-scan-work.…/image.tar（metadata.component.name，僅此一處）、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處 |
+| `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處；**行為修改（M2）**：新增 `--unspecified`（沒指定平台時開機程式分類標 GAP「沒有指定平台，不推測」） |
 | `tools/cra/company.example.json` | `scripts/cra/company.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.example.json` | `scripts/cra/config.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
@@ -51,7 +51,7 @@
 | `tools/cra/templates/user-information.md` | `scripts/cra/templates/user-information.md` | 25fa89a | 原樣 |
 | `tools/cra/tests/data/cyclonedx-1.5/`（bom-1.5.schema.json、README.md） | 不是 sca-center 的檔：CycloneDX/specification 的 `schema/bom-1.5.schema.json`（commit ad83dae2，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。給 vexconv 測試用 |
 | `tools/cra/tests/data/openvex/`（openvex_json_schema.json、README.md） | 不是 sca-center 的檔：openvex/spec 的 `openvex_json_schema.json`（commit 61b5f885，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。取代 sca-center 的 `scripts/ci/fetch-test-data.sh` 連網取得 |
-| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 原樣 |
+| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 新增 `test_unspecified_platform_is_gap_not_guessed`（M2） |
 | `tools/cra/tests/test_bootloader_report.py` | `scripts/cra/tests/test_bootloader_report.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -117,7 +117,7 @@
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行 |
+| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP |
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
@@ -125,7 +125,7 @@
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；新增 `test_platform_is_explicit_and_never_guessed`（M2）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
 | `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -202,7 +202,7 @@
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
 | `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android；「取最新工具」改為取 HEAD 或 `--tools-rev` 的說明 |
-| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
+| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改（M2）**：`--platform` 原樣傳給 scan-flash-package.sh，並寫進 plan.json；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
 | `tools/wizard/inputs.example.json` | `scripts/wizard/inputs.example.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/jetson.json` | `scripts/wizard/platforms/jetson.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
