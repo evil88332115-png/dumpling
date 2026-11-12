@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 23:57 +0800（C4）
+最後更新：2026-11-12 23:58 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -108,7 +108,7 @@
 - 代理：無執行中（先前研究代理 1 個已完成）
 - CI：無；本機背景工作：無
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單（Raspberry Pi、Radxa ROCK 5B、Debian 13＋OMV、TrueNAS 只研究）；`docs/references/cra-github-survey.md`
-- 發現：`tools/demo/scan-flash-package.sh` 對所有磁碟映像（raw-disk-img*）都套 `--platform raspberrypi` → Rockchip GPT 映像會被誤分類；M2 平台介面要明確傳平台（已寫進研究文件）
+- 發現：`tools/demo/scan-flash-package.sh` 對所有磁碟映像（raw-disk-img*）都套 `--platform raspberrypi` → Rockchip GPT 映像會被誤分類；M2 平台介面要明確傳平台（已寫進研究文件；C0 已轉給 C1，P 軌處理：平台由 project.yml 給定，沒給標 GAP）
 - 下一步：M2 後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml
-- 卡住／等決定：無。等 C1 的 M2
+- 卡住／等決定：無。等 C1 的 M2 P 軌（平台介面、開案範本）完成後開始寫轉接器；rpi_img.py 讀 Radxa 分割區屆時實測
 <!-- END C4 -->
