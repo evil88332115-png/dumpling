@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:50 -0500（C2）
+最後更新：2026-11-12 10:50 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -47,6 +47,9 @@
   - 角色值要能表示「上游 OS 廠商負責、我們只通知客戶」，例如 `os_responsibility: upstream-vendor`（只轉售 TrueNAS；與 Jetson OS 層「通知客戶」同一概念）
   - bsp／os 分層：平台設定裡的「套件名稱清單」決定，不看版本字尾（同 nvidia-l4t-* 做法）
   - Rockchip 分割區外的開機程式：以原始磁區為準
+- 對外介面約定（改之前先通知對方）：
+  - C2 依賴 `tools/cra/uefi_image.py` 的內部名稱：`Scan`（子類別覆寫 `scan_bytes(data, module)` 接 GOP／VBT／legacy VBIOS）、`parse_fvs(data, sc, depth)`、`Stop`、`MAX_*` 常數
+  - C2 依賴臨時 DT 介面：`pipeline/dt-ephemeral.sh up|wait|env|down`、`tools/pilot/sca-scan --sbom`、`pipeline/scan-status-check.py`（預設 11 個必要階段）、`pipeline/dt-verify.py verify`
 - 卡住／等決定：
   - 等使用者（C0 轉問）：PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
   - （已定）public-check 反向規則（沒掃到的二進位檔不在放行清單就算無法檢查）：C0 同意，由 C0 下一批 PR 做，不放 M2
