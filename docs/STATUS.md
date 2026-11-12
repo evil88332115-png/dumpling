@@ -2,22 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:59 -0500（C1）
+最後更新：2026-11-12 11:05 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main d342a87；本機累積分支 `wp0/docs-batch-2`（0cb0089：D-023 合成測試資料可收、D-024 第二台電腦、公開檢查擋 Windows 使用者路徑），還沒推，等 M1 合併時一起開 PR
-- 代理：
-  - 預審代理（Sonnet 5.5）：預審 wp1/m1-tools f9d0cee，狀態：完成（#9 留言：有必須修的項目——測試檔語法錯誤、scripts→tools 路徑沒改完、一處版本被改、5 處疑似內部實測資訊、缺少被引用的檔），已轉給 C1
-- 代理總數（全部對話）：C1 寫程式 2＋驗證 1、C2 寫程式 2＋驗證 1，約 6／上限 8；C0 目前沒有代理在跑
-- CI：無進行中
-- 下一步：等 C1 修完 pilot／demo 的 37 個失敗 → M1 正式 PR（d1fd77b 起；cra 1734 passed；含 public-check 掃壓縮檔的擴充）→ C0 派獨立驗證代理 → 合併；C2 做到 M3
-- 設定：main 分支保護不再要求分支最新（D-021，使用者同意）；auto-merge 因帳號沒有驗證過的信箱而無法使用，改由 C0 背景等 CI 後合併
-- C4（另一台電腦 WSL2，asus wsl）：環境已設好（clone、noreply 身分、pre-push hook、local.env）；第一階段在本機做：三個平台的公開示範資料清單＋平台設定研究（分支 wp7/platform-samples），轉接器等 M2
-- 給 C3 的交接：M1 沒帶 `alert_mail.py`（每日監控寄信），exploited_* 測試約 29 個寄信相關的已刪；watch.yml 要寄信時由 C3 帶回
-- 卡住／等決定：使用者要在 WSL 那台親手建立 forbidden.txt（C4 在那之前不推送）
+- 分支／PR／commit：main cd62514。**M1 已合併**（#9，0e706cb）；#13 文件批次 D-023～D-028 已合併（含公開檢查的二進位檔反向規則、Windows 使用者路徑）；沒有未推送的累積改動
+- 代理：目前沒有 C0 代理在跑
+- 各對話：C1 開工 M2（wp1/m2：P 平台介面＋開案範本進行中、L 依層分開、J Jetson 編譯＋掃描＋release；wp1/m2-spike 量測 runner 限制）；C2 做 M3 最後兩塊（wp3/m3-dt 上傳 DT、wp3/m3-gop），完成後開一個 PR；C4（另一台 WSL2）第一階段完成（wp7/platform-samples、wp7/cra-survey），等 M2 的 P 軌
+- CI：無進行中（C0）
+- 下一步：等 C2 的 M3 PR、C1 的 M2 PR；M2 跑通後開 C3（建議開在 WSL 那台）
+- 給 C3 的交接：M1 沒帶 `alert_mail.py`（每日監控寄信），exploited_* 測試約 29 個寄信相關的已刪；watch.yml 要寄信時由 C3 帶回；GitLab 階段「已被利用」的真實案件一定要用私有 Issue（C4 的 CRA 調查）
+- 卡住／等決定：使用者（1）舊 WIP commit 的低敏感內部資訊：接受或刪 repo 重建（C0 建議接受）；（2）C4 CRA 調查的建議採用範圍（C0 建議 A、B 全採用，C 只做文件骨架標 GAP）
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
