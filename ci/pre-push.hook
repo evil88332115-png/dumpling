@@ -21,7 +21,9 @@ while read -r _lref lsha _rref rsha; do
   else
     range="$lsha"
   fi
-  bash "$tmp/check.sh" --rev "$lsha" --range "$range" --patterns "$tmp/patterns.txt" --private "$priv" || fail=1
+  # 白名單取自要推送的 commit（跟 CI 一樣，改動會出現在 PR diff 裡審查）；規則與腳本取自 origin/main
+  git show "$lsha:ci/public-allow.txt" > "$tmp/allow.txt" 2>/dev/null || : > "$tmp/allow.txt"
+  bash "$tmp/check.sh" --rev "$lsha" --range "$range" --patterns "$tmp/patterns.txt" --private "$priv" --allow "$tmp/allow.txt" || fail=1
 done
 if [ "$fail" -ne 0 ]; then
   echo "pre-push：發現不能公開的內容，已阻止推送。" >&2
