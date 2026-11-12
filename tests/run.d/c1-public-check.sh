@@ -67,5 +67,33 @@ g add -A && g commit -qm broken
 out=$(pc_run); rc=$?
 if [ "$rc" -eq 1 ] && grep -qF 'broken.txt.xz: 無法檢查（解壓失敗' <<< "$out"; then ok "解不開的壓縮檔算命中"; else bad "解不開的壓縮檔沒有被擋：$out"; fi
 
+# 6) 檔名與格式：非 ASCII／含空白的檔名、大寫副檔名、.tgz、未壓縮的 .tar、不支援的 .zip
+g rm -q big.bin.xz broken.txt.xz
+hit='work dir /media/dumpling-pc-test/build'
+printf '%s\n' "$hit" | xz -c > "$repo/資料.json.xz"
+printf '%s\n' "$hit" | gzip -nc > "$repo/UP.JSON.GZ"
+printf '%s\n' "$hit" > "$work/inner.txt"
+tar -C "$work" -cf - inner.txt | gzip -nc > "$repo/with space.tgz"
+tar -C "$work" -cf "$repo/plain.tar" inner.txt
+printf 'PK\003\004 not inspected' > "$repo/pkg.zip"
+g add -A && g commit -qm names
+out=$(pc_run); rc=$?
+if [ "$rc" -eq 1 ]; then ok "檔名與格式：有命中時 exit 1"; else bad "檔名與格式：exit 應為 1，實際 $rc"; fi
+chk '資料.json.xz（解壓後）:1:' "非 ASCII 檔名的 .xz"
+chk 'UP.JSON.GZ（解壓後）:1:' "大寫副檔名的 .GZ"
+chk 'with space.tgz（解壓後）:' "含空白檔名的 .tgz（tar 內容）"
+chk 'plain.tar（解壓後）:' "未壓縮的 .tar"
+chk 'pkg.zip: 無法檢查（不支援的封存格式' ".zip 不支援也算命中"
+
+# 7) 白名單以完整字串比對：登記的短信箱不放行「名稱以它結尾」的更長信箱（那個信箱在這裡當場組，避免本檔自己被公開檢查擋）
+g rm -q 資料.json.xz UP.JSON.GZ "with space.tgz" plain.tar pkg.zip
+printf 'a@pc-allow-test.com\tsynthetic\n' >> "$repo/ci/public-allow.txt"
+printf 'ok %s\nbad %s@%s\n' 'a@pc-allow-test.com' maria pc-allow-test.com > "$repo/emails.txt"
+g add -A && g commit -qm allow
+out=$(pc_run); rc=$?
+if [ "$rc" -eq 1 ] && grep -qF "maria@" <<< "$out" && ! grep -qE ':a@pc-allow-test\.com' <<< "$out"; then
+  ok "白名單只放行完整字串（短信箱不放行更長的同網域信箱）"
+else bad "白名單邊界不對：$out"; fi
+
 if [ "$fail" -eq 0 ]; then echo "c1-public-check: OK"; else echo "c1-public-check: FAIL"; fi
 exit "$fail"

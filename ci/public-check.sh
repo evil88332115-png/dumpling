@@ -5,7 +5,9 @@
 #   - 本機禁用字（--private，固定字串、不分大小寫；只在本機 pre-push hook 用，CI 沒有這份清單）
 #   - 白名單（--allow，預設 ci/public-allow.txt）：完整字串，命中行含白名單字串就不報；
 #     只套用在通用規則與檔案裡的信箱，**不套用在本機禁用字與 commit 信箱**
-#   - 壓縮檔（*.xz、*.gz、*.bz2、*.zst）：解壓後（每個最多 PUBLIC_CHECK_ZLIMIT 位元組，預設 64 MB）套用上面同一組檢查
+#   - 壓縮檔與封存檔（.xz .gz .bz2 .zst .tar 及 .tgz 等，不分大小寫）：解壓後（每個最多 PUBLIC_CHECK_ZLIMIT 位元組，
+#     預設 64 MB）套用上面同一組檢查；.zip .7z 等不支援的格式、解不開、太大、缺工具一律算命中
+#   - 白名單以完整字串比對（前後不能緊接 [A-Za-z0-9._%+@-]），不會放行「包含」白名單字串的更長信箱或路徑
 # 用法：ci/public-check.sh [--rev REV] [--range RANGE] [--patterns FILE] [--private FILE] [--allow FILE]
 # 輸出：命中的每一行，最後一行是 "public-check: OK" 或 "public-check: FAIL（N 筆）"。
 set -uo pipefail
@@ -40,6 +42,11 @@ if [ -f "$allowf" ]; then
   fi
 fi
 [ -s "$tmp/allow" ] || echo "__dumpling_no_allow_entries__" > "$tmp/allow"
+# 白名單以「完整字串」比對：前後不能緊接信箱／主機名稱的字元（例如登記 a 開頭的短信箱，不會放行同網域、名稱以 a 結尾的其他信箱）。
+# 每項轉成 ERE（跳脫特殊字元）並加前後邊界。
+tok='A-Za-z0-9._%+@-'
+sed -e 's/[][\.*^$+?(){}|]/\\&/g' -e "s/^/(^|[^$tok])/" -e "s/\$/(\$|[^$tok])/" "$tmp/allow" > "$tmp/allow.re"
+allow_filter() { grep -avE -f "$tmp/allow.re"; }
 path_allow='/home/runner/'
 email_allow='(noreply@anthropic\.com|@users\.noreply\.github\.com|noreply@github\.com|@example\.(com|org|net)|@([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.(example|invalid|test|localhost)|git@github\.com)$'
 hits=0
@@ -53,51 +60,65 @@ run() {
     hits=$((hits + $(wc -l < "$tmp/out")))
   fi
 }
-c_generic() { git grep -nIiE -f "$tmp/pat" "$rev" -- . ':(exclude)ci/public-patterns.txt' ':(exclude)ci/public-allow.txt' | grep -vE "$path_allow" | grep -vF -f "$tmp/allow"; }
+c_generic() { git grep -nIiE -f "$tmp/pat" "$rev" -- . ':(exclude)ci/public-patterns.txt' ':(exclude)ci/public-allow.txt' | grep -vE "$path_allow" | allow_filter; }
 # 網域結尾後面還接英數字（例如 RPM 的 kernel-core@<版本>.el9）不算信箱
-c_email() { git grep -nIoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' "$rev" -- . ':(exclude)ci/public-allow.txt' | grep -viE "$email_allow" | grep -vF -f "$tmp/allow"; }
+c_email() { git grep -nIoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' "$rev" -- . ':(exclude)ci/public-allow.txt' | grep -viE "$email_allow" | allow_filter; }
 c_private() { git grep -nIiF -f "$priv" "$rev" -- .; }
 # shellcheck disable=SC2086  # range 可以是 "A..B"
 c_commit_email() { git log --format='%h author=%ae%n%h committer=%ce' $range | sort -u | grep -viE "$email_allow"; }
 # shellcheck disable=SC2086
 c_commit_private() { git log --format='%h %s%n%b' $range | grep -iF -f "$priv"; }
 
-# 壓縮檔（git grep 看不到內容）：rev 裡追蹤的 *.xz、*.gz、*.bz2、*.zst 解到暫存檔（每個最多 zlimit 位元組），
-# 套用同一組檢查；命中顯示「路徑（解壓後）:行號:內容」。超過大小或解不開一律算命中（無法檢查＝不能公開）。
+# 壓縮檔與封存檔（git grep -I 看不到內容）：rev 裡追蹤的檔案依副檔名（不分大小寫）處理——
+#   .xz .txz .lzma → xz；.gz .tgz → gzip；.bz2 .tbz .tbz2 → bzip2；.zst .tzst → zstd；.tar → 原樣（當二進位文字掃）
+#   .zip .jar .7z .rar .lz4 .lz .z .cpio .iso → 不解，一律算命中（無法檢查）
+# 解到暫存檔（每個最多 zlimit 位元組），套用同一組檢查；命中顯示「路徑（解壓後）:行號:內容」。
+# 超過大小、解不開、缺工具一律算命中（無法檢查＝不能公開）。檔名用 -z 讀，非 ASCII 或含空白的路徑也不會漏。
 zlimit=${PUBLIC_CHECK_ZLIMIT:-67108864}
 mkdir -p "$tmp/z"
-: > "$tmp/zlist"
+: > "$tmp/zidx"
 : > "$tmp/zerr"
 zi=0
-while IFS= read -r zp; do
-  case $zp in
-    *.xz) dec=(xz -dc) ;; *.gz) dec=(gzip -dc) ;; *.bz2) dec=(bzip2 -dc) ;; *) dec=(zstd -dc) ;;
+while IFS= read -r -d '' zp; do
+  lc=${zp,,}
+  case $lc in
+    *.xz|*.txz|*.lzma) dec=(xz -dc) ;;
+    *.gz|*.tgz) dec=(gzip -dc) ;;
+    *.bz2|*.tbz|*.tbz2) dec=(bzip2 -dc) ;;
+    *.zst|*.tzst) dec=(zstd -dc) ;;
+    *.tar) dec=(cat) ;;
+    *.zip|*.jar|*.7z|*.rar|*.lz4|*.lz|*.z|*.cpio|*.iso)
+      printf '%s: 無法檢查（不支援的封存格式，不能公開）\n' "$zp" >> "$tmp/zerr"; continue ;;
+    *) continue ;;
   esac
   zi=$((zi + 1))
   if ! command -v "${dec[0]}" >/dev/null 2>&1; then
-    echo "$zp: 無法檢查（沒有 ${dec[0]}）" >> "$tmp/zerr"; continue
+    printf '%s: 無法檢查（沒有 %s）\n' "$zp" "${dec[0]}" >> "$tmp/zerr"; continue
   fi
-  git cat-file blob "$rev:$zp" | "${dec[@]}" 2>/dev/null | head -c $((zlimit + 1)) > "$tmp/z/$zi"
+  # NUL 換成換行：tar 標頭與二進位內容裡的字串才能逐行比對（文字檔沒有 NUL，行號不變）
+  git cat-file blob "$rev:$zp" | "${dec[@]}" 2>/dev/null | head -c $((zlimit + 1)) | tr '\000' '\n' > "$tmp/z/$zi"
   st=("${PIPESTATUS[@]}")
   zsize=$(wc -c < "$tmp/z/$zi")
   if [ "$zsize" -gt "$zlimit" ]; then
-    echo "$zp: 無法檢查（解壓後超過 $zlimit 位元組）" >> "$tmp/zerr"
-  elif [ "${st[1]}" -ne 0 ] && [ "${st[1]}" -ne 141 ]; then
-    echo "$zp: 無法檢查（解壓失敗，exit ${st[1]}）" >> "$tmp/zerr"
+    printf '%s: 無法檢查（解壓後超過 %s 位元組）\n' "$zp" "$zlimit" >> "$tmp/zerr"
+  elif { [ "${st[0]}" -ne 0 ] && [ "${st[0]}" -ne 141 ]; } || { [ "${st[1]}" -ne 0 ] && [ "${st[1]}" -ne 141 ]; }; then
+    printf '%s: 無法檢查（解壓失敗，exit %s）\n' "$zp" "${st[1]}" >> "$tmp/zerr"
   else
-    printf '%s\t%s\n' "$zi" "$zp" >> "$tmp/zlist"
+    printf '%s' "$zp" > "$tmp/z/$zi.path"
+    echo "$zi" >> "$tmp/zidx"
   fi
-done < <(git ls-tree -r --name-only "$rev" | grep -E '\.(xz|gz|bz2|zst)$')
+done < <(git ls-tree -r -z --name-only "$rev")
 # $1：generic／email／private
 zscan() {
   local i p
-  while IFS=$'\t' read -r i p; do
+  while IFS= read -r i; do
+    p=$(cat "$tmp/z/$i.path")
     case $1 in
-      generic) grep -naiE -f "$tmp/pat" "$tmp/z/$i" | grep -vE "$path_allow" | grep -vF -f "$tmp/allow" ;;
-      email) grep -naoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' "$tmp/z/$i" | grep -viE "$email_allow" | grep -vF -f "$tmp/allow" ;;
+      generic) grep -naiE -f "$tmp/pat" "$tmp/z/$i" | grep -avE "$path_allow" | allow_filter ;;
+      email) grep -naoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' "$tmp/z/$i" | grep -aviE "$email_allow" | allow_filter ;;
       private) grep -naiF -f "$priv" "$tmp/z/$i" ;;
     esac | awk -v p="$p" '{ print p "（解壓後）:" $0 }'
-  done < "$tmp/zlist"
+  done < "$tmp/zidx"
 }
 c_zerr() { cat "$tmp/zerr"; }
 

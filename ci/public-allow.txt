@@ -31,3 +31,4 @@ dev@pc-test-corp.com	tests/run.d/c1-public-check.sh 的合成測資（不允許�
 /home/someone/linux	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
 /home/builder/linux-6.8/lib/vdso/gettimeofday.c	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
 /home/a/src/drv/foo/bar.c	tools/pilot/tests/test_kernel_oot_sections.py 的合成 ELF 字串（測試用的假建置路徑）
+a@pc-allow-test.com	tests/run.d/c1-public-check.sh 的合成測資（白名單完整字串比對）
