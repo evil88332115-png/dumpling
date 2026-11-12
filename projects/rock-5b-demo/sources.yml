@@ -6,6 +6,7 @@ releases:
     platform_params:
       upstream_release: rsdk-r6
       image: rock-5b_bookworm_kde_r6.output_512.img.xz
+      uboot_board: rock-5b
     files:
     - name: rock-5b_bookworm_kde_r6.output_512.img.xz
       url: https://github.com/radxa-build/rock-5b/releases/download/rsdk-r6/rock-5b_bookworm_kde_r6.output_512.img.xz
@@ -31,6 +32,14 @@ releases:
       version: 2017.09-64-39cd993
       license_url: https://github.com/radxa/u-boot/blob/39cd993e5d6296635438e84f4576b3a9bf76f86e/Licenses/README
       note: 各板子的 idbloader／u-boot.itb 成品（推論，未解開）；內含 rkbin 的閉源 DDR 初始化與 TF-A（授權 https://github.com/rockchip-linux/rkbin/blob/master/LICENSE）；sha256 與 GitHub 附件 digest 相同
+    - name: u-boot-rock-5b_2017.09-64-455bd2a_all.deb
+      url: https://github.com/radxa-pkg/u-boot-rk2410/releases/download/2017.09-64/u-boot-rock-5b_2017.09-64-455bd2a_all.deb
+      sha256: 3ee7632e2a5d3b90fc7fd9f35f5504f53e2ac5c9a40c60bfcbe4728f675430d3
+      size: 1112
+      role: package
+      version: 2017.09-64-455bd2a
+      license_url: https://github.com/radxa-pkg/u-boot-rk2410
+      note: 映像裡的 u-boot-rock-5b 套件；實測是 meta 套件（Architecture all、只依賴 u-boot-rk2410、沒有開機程式檔案），版本字尾 455bd2a 不是 U-Boot 原始碼的 commit；sha256 與 GitHub 附件 digest 相同
     - name: radxa-kernel-87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
       url: https://github.com/radxa/kernel/archive/87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
       sha256: 5ab041a73216e6a0123b6befc95b1249e75a0aa1cbea636ecc033117c86b11db

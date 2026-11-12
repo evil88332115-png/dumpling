@@ -5,7 +5,8 @@ releases:
   v1.0.0-demo1:
     platform_params:
       upstream_release: debian-13-generic-amd64-20261111
-      image: TBD
+      image: debian-13-generic-amd64-20261111-2659.tar.xz
+      image_member: disk.raw
       app_repo: https://github.com/openmediavault/openmediavault.git
       app_commit: 9d8530ffa6912ece116bc6c74d0f3d06045b6c26
     files:
