@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:47 -0500（C1）
+最後更新：2026-11-12 08:56 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -57,7 +57,8 @@
 - 代理：
   - 代理 F（寫程式，Sonnet 5.5 medium）：`wp3/firmware-expect`，狀態：進行中
   - 代理 E（寫程式，Sonnet 5.5 high）：`wp4/vbios`，狀態：進行中
-  - 預驗代理（驗證，Sonnet 5.5 high）：預驗 `wp3/coreboot-cbfs` b71b10e，狀態：進行中；之後預驗 `wp3/ami-pfat`
+  - 預驗 `wp3/coreboot-cbfs` b71b10e：**不通過**（完成）。嚴重 2：(1) revision 檔 `#define` regex 平方時間（ReDoS）；(2) 沒有 FMAP 時每個 LARCHIVE 候選都對宣告長度算 sha256（候選數×檔案大小）。建議：解壓失敗的工作量不計總量、FSP ExtendedImageRevision 沒讀等。**C2 自己在 `wp3/m3` 修**（regex 改線性＋單行上限、掃描候選先不算雜湊、解壓前先扣宣告大小、ExtendedImageRevision 非 0 記 note），補回歸測試，修完再複驗
+  - 預驗代理（驗證，Sonnet 5.5 high）：預驗 `wp3/ami-pfat` 42e9bc0，狀態：進行中
   - （已完成：代理 A、B、C、D，PR #7 驗證代理；PR #8 由 C0 驗證）
 - CI：見上面各分支 run
 - 下一步：預驗 cbfs（進行中）→ 預驗 pfat；代理 E、F 完成後併入 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
