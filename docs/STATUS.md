@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:08 -0500（C2）
+最後更新：2026-11-12 08:08 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -22,16 +22,18 @@
 
 - 目前在做：M1（PLAN「里程碑」M1、「可以沿用的東西」）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；依 D-014 合成一個 PR
 - 分支／PR／commit：
-  - `wp1/m1-tools`（工具複製＋PROVENANCE＋tests/run.sh；最後要開的 PR）——尚未推送
-  - `wp1/m1-dt`（臨時 DT＋測試 SBOM＋dt-smoke workflow；只用 draft PR 跑 CI，最後併進 `wp1/m1-tools`）——尚未推送
+  - `wp1/m1-tools`（工具複製＋PROVENANCE＋tests/run.d/c1-tools.sh；最後要合併的 PR）——draft PR #9，WIP 3121fd8
+  - `wp1/m1-dt`（臨時 DT＋測試 SBOM＋dt-smoke workflow；只用 draft PR 跑 CI，最後併進 `wp1/m1-tools`，#6 之後關掉不合併）——draft PR #6
   - 來源：sca-center `origin/main` 25fa89a
 - 代理：
   - 寫程式 A：工具清理複製進 `tools/`＋`docs/PROVENANCE.md`＋單元測試，分支 `wp1/m1-tools`，Sonnet 5.5／high，進行中
   - 寫程式 B：`pipeline/dt-ephemeral.sh`＋`pipeline/dt-compose.yaml`＋`tests/fixtures/sbom/`＋`.github/workflows/dt-smoke.yml`，分支 `wp1/m1-dt`，Sonnet 5.5／medium，進行中
   - 驗證：尚未開（兩個寫程式代理完成、合併分支後開）
-- CI：無（等代理開 draft PR）
+- CI：#6、#9 的 tests／dt-smoke（`gh pr checks 6`、`gh pr checks 9`）
 - 下一步：等 A、B 推送 → 把 `wp1/m1-dt` 併進 `wp1/m1-tools` → 開驗證代理 → 交 C0 合併 → M1 完成通知 C0（C2 的上傳 DT 等這個）
-- 卡住／等決定：無
+- 卡住／等決定：
+  - 等 C2 的 PR 2a（`wp3/bios-sbom`）合併：M1 的 cra 測試要用它的 `cdx_schema.py`、CycloneDX schema、`conftest.py`（D-017，C0 決定先合併 2a）
+  - 等 C0 修 `ci/public-patterns.txt`：`/media/` 規則誤擋核心路徑 `drivers/media/`，`tools/pilot/lib/data/kernel-included-c-6.{1,8}.json` 暫未推
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
