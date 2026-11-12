@@ -1625,6 +1625,10 @@ def cbfs_components(b, img, comps, sub):
                             prop("sca-center:fsp-image-size", it["image_size"]), prop("sca-center:fsp-component-attribute", it["component_attribute"]),
                             prop("sca-center:fsp-build", f"{it['build_type']}, {it['release_type']}"), prop("sca-center:cbfs-file", it["file"]),
                             prop("sca-center:cbfs-stored-sha256", it["stored_sha256"]), *where(it)]}
+        if it.get("extended_image_revision"):
+            c["properties"] += [prop("sca-center:fsp-extended-image-revision", it["extended_image_revision"]),
+                                prop("sca-center:note", "FSP ExtendedImageRevision is non-zero: the high bytes of the revision/build fields "
+                                                        "are there, so the version above (from ImageRevision only) may be too low")]
         comps.append(assessed(c, "intel"))
         sub.append(ref)
     for it in cb["vbt"]:

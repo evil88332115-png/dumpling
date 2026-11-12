@@ -109,7 +109,7 @@ def fmap_blob(size, areas, name=b"FLASH", ver=(1, 1)):
     return out
 
 
-def fsp_blob(rev=(9, 0, 123, 32), ctype=2, image_id=b"$CMLFSP$", base=0xFF76B000, total=0x2000):
+def fsp_blob(rev=(9, 0, 123, 32), ctype=2, image_id=b"$CMLFSP$", base=0xFF76B000, total=0x2000, ext=0):
     d = bytearray(b"\xaa" * total)
     d[0:4] = b"_FVH"
     h = 0x94
@@ -120,6 +120,7 @@ def fsp_blob(rev=(9, 0, 123, 32), ctype=2, image_id=b"$CMLFSP$", base=0xFF76B000
     d[h + 16:h + 24] = image_id
     struct.pack_into("<II", d, h + 24, total, base)
     struct.pack_into("<HH", d, h + 32, 0, (ctype << 12) | 3)
+    struct.pack_into("<H", d, h + 0x44, ext)
     return bytes(d)
 
 
@@ -719,3 +720,41 @@ def test_cli_with_isolated_python_loads_the_module_and_writes_sbom(tmp_path):
     assert {"coreboot", "edk2 payload", "Intel VBT (Video BIOS Table)"} <= {c["name"] for c in doc["components"]}
     md = (out / "fw-inventory.md").read_text(encoding="utf-8")
     assert "### CBFS（coreboot）" in md and "board\\_v0.9.2" in md
+
+
+# ---------- 預驗回報的 CPU 放大與 FSP 擴充版本 ----------
+
+def test_define_line_is_linear_time():
+    """revision 檔的 #define 值不能是平方時間（舊的 (.+?)[ \\t]* 配 fullmatch 會卡住）。"""
+    import time
+    line = b"#define COREBOOT_VERSION a" + b" " * 200000 + b"b\n"
+    t = time.monotonic()
+    cb.text_values(line, cb.REVISION_KEYS, "define")
+    assert time.monotonic() - t < 1.0
+    ok = cb.text_values(b'#define COREBOOT_VERSION "v1"   \n#define COREBOOT_EXTRA_VERSION \t\n', cb.REVISION_KEYS, "define")
+    assert ok.get("COREBOOT_VERSION") == "v1" and "COREBOOT_EXTRA_VERSION" not in ok
+
+
+def test_overlong_text_line_skipped():
+    long = b"#define COREBOOT_VERSION " + b"x" * (cb.MAX_TEXT_LINE + 1) + b"\n"
+    assert cb.text_values(long, cb.REVISION_KEYS, "define") == {}
+
+
+def test_scan_does_not_hash_rejected_candidates(monkeypatch):
+    """沒有 FMAP 的掃描：只有一個有效檔案的候選不會被接受，也不能先對宣告長度算 sha256（候選數×檔案大小）。"""
+    calls = []
+    real = cb.hash_entries
+    monkeypatch.setattr(cb, "hash_entries", lambda data, files: (calls.append(len(files)), real(data, files)))
+    one = cbfs_file("revision", b"x" * 32)
+    data = bytearray(b"\xff" * 0x10000)
+    for k in range(8):                               # 8 個孤立的單一檔案候選
+        data[k * 0x1000:k * 0x1000 + len(one)] = one
+    regions, _ = cb.scan_regions(bytes(data), 0, len(data))
+    assert regions == [] and calls == []
+
+
+def test_fsp_extended_image_revision_noted():
+    plain = cb.parse_fsph(fsp_blob())
+    assert plain["extended_image_revision"] is None
+    ext = cb.parse_fsph(fsp_blob(ext=0x0102))
+    assert ext["extended_image_revision"] == "0x0102" and ext["revision"] == "9.0.123.32"

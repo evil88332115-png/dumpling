@@ -87,7 +87,9 @@ FSP_TYPES = {1: "T", 2: "M", 3: "S", 4: "O"}
 SELF_TYPES = (b"CODE", b"DATA", b"BSS ", b"PARA", b"ENTR")
 FSP_NAME = re.compile(r"fsp[a-z]?(?:[_.\-].*)?\.bin", re.I)
 VBT_NAME = re.compile(r"vbt(?:[_.\-].*)?\.bin", re.I)
-DEFINE = re.compile(r"#define[ \t]+([A-Z0-9_]+)[ \t]+(.+?)[ \t]*")
+# 值的部分用 (.*) 再自己去掉結尾空白：(.+?)[ \t]* 配 fullmatch 對「一個字元＋大量空白＋非空白」的行是平方時間（不可信輸入會卡住）
+DEFINE = re.compile(r"#define[ \t]+([A-Z0-9_]+)[ \t]+(.*)")
+MAX_TEXT_LINE = 4096                    # revision／build_info 單行長度上限；超過的行不解析（真實檔案每行都很短）
 CONFIG_LINE = re.compile(r"CONFIG_([A-Za-z0-9_]+)=(.*)")
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 DASHARO_EDK2 = re.compile(r"https://github\.com/dasharo/edk2(?:\.git)?/?", re.I)
@@ -386,9 +388,11 @@ def find_header(data, frm, end, start):
     return None, True
 
 
-def walk(data, start, end, budget=None, resync=True, file_cap=None):
+def walk(data, start, end, budget=None, resync=True, file_cap=None, hash_files=True):
     """區域 [start, end) 的 CBFS 檔案。→ (檔案 list, 空檔案數, 問題 list, 實際走到的結尾)。
-    resync：檔頭壞掉或下一個位置不是檔頭時，往後找下一個對齊的 `LARCHIVE`（FMAP 區域）；False 時在那裡結束（掃描模式）。"""
+    resync：檔頭壞掉或下一個位置不是檔頭時，往後找下一個對齊的 `LARCHIVE`（FMAP 區域）；False 時在那裡結束（掃描模式）。
+    hash_files=False：先不算 sha256（掃描模式的候選大多會被丟掉；每個候選都對宣告長度算雜湊，構造的映像會是候選數×檔案大小），
+    接受成區域後再用 hash_entries 補。"""
     files, empty, problems = [], 0, []
     pos, covered = start, start
     file_cap = MAX_FILES if file_cap is None else file_cap
@@ -415,7 +419,8 @@ def walk(data, start, end, budget=None, resync=True, file_cap=None):
                 break
             pos = nxt
             continue
-        e["sha256"] = hashlib.sha256(memoryview(data)[e["data_offset"]:e["data_offset"] + e["length"]]).hexdigest()
+        if hash_files:
+            hash_entries(data, [e])
         if e["type"] in TYPE_EMPTY:
             empty += 1
         else:
@@ -425,6 +430,11 @@ def walk(data, start, end, budget=None, resync=True, file_cap=None):
         covered = e["data_offset"] + e["length"]
         pos = start + (((covered - start) + CBFS_ALIGN - 1) // CBFS_ALIGN) * CBFS_ALIGN
     return files, empty, problems, covered
+
+
+def hash_entries(data, files):
+    for e in files:
+        e["sha256"] = hashlib.sha256(memoryview(data)[e["data_offset"]:e["data_offset"] + e["length"]]).hexdigest()
 
 
 def scan_regions(data, lo, hi, budget=None):
@@ -451,8 +461,9 @@ def scan_regions(data, lo, hi, budget=None):
             entry_at(data, i, hi)
         except CbfsError:
             continue
-        files, empty, probs, covered = walk(data, i, hi, budget, resync=False)
+        files, empty, probs, covered = walk(data, i, hi, budget, resync=False, hash_files=False)
         if len(files) + empty >= 2:
+            hash_entries(data, files)
             regions.append({"name": f"cbfs@0x{i:x}", "role": f"cbfs@0x{i:x}", "offset": i, "size": covered - i,
                             "files": files, "empty": empty, "problems": probs})
             p = covered
@@ -530,8 +541,10 @@ class Reader:
                 raise TooBig(f"declared decompressed size {declared} exceeds the limit {cap}")
             if declared > self.total_left:
                 raise TooBig(f"declared decompressed size {declared} exceeds the remaining total limit {self.total_left}")
+            # 先扣宣告大小再解：解壓失敗（長度不符、有尾巴）時也已經做了 declared 份的工作，不扣的話
+            # 構造的映像可以放大量「解到最後才失敗」的檔案，總量上限擋不住
+            self.total_left -= declared
             r = decompress(comp, bytes(self.stored(f)), declared, cap)
-            self.total_left -= len(r)
         except CbfsError as e:
             self.cache[key] = e
             raise
@@ -543,9 +556,13 @@ def text_values(raw, keys, fmt):
     """revision（#define）／build_info（KEY: 值）→ {key: 值}；只取 keys。"""
     out = {}
     for line in bytes(raw).decode("utf-8", "replace").splitlines():
+        if len(line) > MAX_TEXT_LINE:
+            continue
         if fmt == "define":
             m = DEFINE.fullmatch(line)
-            k, v = (m.group(1), m.group(2)) if m else (None, None)
+            k, v = (m.group(1), m.group(2).rstrip(" \t")) if m else (None, None)
+            if v == "":
+                k, v = None, None
             if v is not None and len(v) >= 2 and v[0] == v[-1] == '"':
                 v = v[1:-1]
         else:
@@ -594,7 +611,10 @@ def parse_fsph(d):
         comp_attr = struct.unpack_from("<H", d, i + 34)[0]
         if not 0x20 <= hl <= 0x200 or not iid or not all(32 <= c < 127 for c in iid) or not 1 <= comp_attr >> 12 <= 4:
             continue
-        return {"offset_in_file": i, "header_length": hl, "spec_version": f"{spec >> 4}.{spec & 15}", "header_revision": hrev,
+        # ExtendedImageRevision（+0x44，u16；較新的 FSP header 才有）：非 0 時 revision／build 的高位元組在這裡，
+        # 只用 ImageRevision 算出的版本會偏低。怎麼合併依 header 版本而定，這裡不猜，只記原始值（呼叫端加說明）
+        ext = struct.unpack_from("<H", d, i + 0x44)[0] if hl >= 0x48 and i + 0x46 <= len(d) else None
+        return {"extended_image_revision": f"0x{ext:04x}" if ext else None, "offset_in_file": i, "header_length": hl, "spec_version": f"{spec >> 4}.{spec & 15}", "header_revision": hrev,
                 "revision": f"{rev >> 24}.{(rev >> 16) & 255}.{(rev >> 8) & 255}.{rev & 255}", "image_id": iid.decode("ascii").strip(),
                 "image_size": size, "image_base": f"0x{base:08x}", "component_attribute": f"0x{comp_attr:04x}",
                 "type": FSP_TYPES[comp_attr >> 12], "build_type": "release" if comp_attr & 1 else "debug",
