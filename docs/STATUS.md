@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:59 -0500（C2）
+最後更新：2026-11-12 09:05 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -23,19 +23,21 @@
 
 - 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；D-020：M1 完成後一個 PR（#9 轉正式）
 - 分支／PR／commit：
-  - `wp1/m1-tools`：5c9aa33（含 D-022 白名單 `ci/public-allow.txt` 18 項；拆字串已改回；tools/ 全部初步清理完、PROVENANCE C1 節、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`；已併入 `wp1/m1-dt`）；PR #9（draft）
+  - `wp1/m1-tools`：d1fd77b（tools/ 全部清理完、PROVENANCE C1 節、白名單 18 項、provenance-check、c1-tools.sh（py3.12）；已併 m1-dt；C1 另清 Jetson fixture 與 test_cra_report 的自架 runner 路徑）；PR #9（draft）
   - `wp1/m1-tools-pilot`：從 bd7fa1b 開，pilot／demo／mirror／wizard／e2e 的收尾，做完由 C1 merge 回 `wp1/m1-tools`
   - `wp1/m1-dt`：62107c1（臨時 DT，已併入 m1-tools；PR #6 已關）
   - 來源：sca-center 25fa89a
 - 代理：
-  - 寫程式 A：`wp1/m1-tools`，範圍縮為 tools/cra、vexconv、sbomgate、provenance-check、c1-tools.sh、cra fixtures；Sonnet 5.5／high；進行中
+  - 寫程式 A：`wp1/m1-tools`（cra／vexconv／sbomgate）；完成：1734 passed／0 failed（py3.12）。完整 c1-tools 還有 37 個失敗，全在 pilot／demo，交給 P
   - 寫程式 P：`wp1/m1-tools-pilot`，tools/pilot、demo、mirror、wizard、e2e；修失敗測試、資料來源審查（內部資料產生的剔除）、sca-scan 缺 scio_prep 時 NOT_RUN、wizard 改用目前 HEAD 取工具、dt-smoke 用 `sca-scan --sbom` 上傳；Sonnet 5.5／high；進行中
   - 驗證 V1：`wp1/m1-dt`（62107c1）臨時 DT 部分；完成，**不通過**（PR #9 留言 issuecomment-6825077261）：dt-smoke.yml 的 `| tee` 沒有 pipefail，會吃掉 wait／sca-scan 的結束碼。已交給 P 修（加 `shell: bash`，並實證失敗會紅），另附 6 項建議（admin 密碼不放命令列、生態系不內插、down 的 rm 防護、讀回確認 NVD 關閉、409 舊結果、wait 措辭）；修完再驗
   - 寫程式 B（臨時 DT）：完成
   - C0 預審（f9d0cee）完成，#9 issuecomment-6825088823：已對照 bd7fa1b 分派——A：libnvinfer 版本誤改、cra_report 內部實測說法、信箱改保留網域、內部稱呼、c1-tools.sh／tests.yml 改用 Python 3.12；P：殘留 scripts/ 路徑、l4t-kernel-map 等內部實測說法、帶入 kernel_included_c.py、缺檔改 NOT_RUN、拿掉 android
 - CI：手動觸發（`gh workflow run <wf> --ref <分支>`）；最近 dt-smoke（m1-dt）run 43225729729 綠燈
 - 下一步：A、P 完成 → merge `wp1/m1-tools-pilot` 進 `wp1/m1-tools`、整合 PROVENANCE → tests＋dt-smoke 在 m1-tools 綠燈 → 驗證整個 M1 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
-- 卡住／等決定：無（V1 的問題修完需要重驗 DT 部分）
+- 卡住／等決定：
+  - V1 的問題修完需要重驗 DT 部分
+  - 已告知 C0：alert_mail.py 沒帶（M1／M2 用不到，C3 的 watch.yml 需要時再帶）；3 項「參考內部觀察的合成測試」由 C1 判斷可收，寫在 PR 說明供推翻
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
