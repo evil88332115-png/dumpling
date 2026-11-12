@@ -17,3 +17,4 @@
 | D-011 | 2026-11-12 | C0 | commit 一律用 GitHub noreply 信箱（`287638252+evil88332115-png@users.noreply.github.com`，已設在 repo 的 git config，worktree 共用） | 公開 repo 的 commit 信箱是公開的 |
 | D-012 | 2026-11-12 | C0 | Actions 預設 `GITHUB_TOKEN` 權限唯讀，需要寫入的 job 自己宣告；第三方 action 一律用 commit SHA 固定版本；外部人士的 fork PR 一律要核准才跑 CI | 公開 repo，任何人都能開 PR |
 | D-013 | 2026-11-12 | 使用者＋C0 | 合併 PR 一律用 `gh pr merge --squash --author-email <noreply 信箱>`，不在網頁合併。第一次建立的 repo 因網頁端 squash 合併把個人信箱寫進 commit 作者，已由使用者決定刪 repo 重建（舊 PR #1 隨之消失） | GitHub 合併 commit 的作者預設是帳號主信箱；force-push 改寫後舊 commit 仍可從 PR 頁面連到，只有重建能清乾淨 |
+| D-014 | 2026-11-12 | 使用者 | C1–C4 的 PR 以「一個可以獨立運作、可以測試的功能」為單位（例如 M1 的「工具複製＋臨時 DT＋上傳測試 SBOM」一個 PR）；不要一個檔案一個 PR，也不要把整個里程碑塞成一個 PR | 每個 PR 都能單獨驗證與合併；太碎難以測試，太大難以審查 |
