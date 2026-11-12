@@ -47,7 +47,7 @@ python3 -I tools/wizard/cra-scan.py --site-config /path/to/wizard.json
 
 ## 輸入清單（每個產品／平台「掃描前要先匯入什麼」）
 
-找到輸入之後，精靈讀清單、逐項檢查，列出 ✓ 找到（路徑）／✗ 缺少（影響）／－ 無法自動檢查。清單位置，依序：`--inputs <檔>` → 產品設定包裡的 `inputs.json` → `--platform <名稱>`（`tools/wizard/platforms/<名稱>.json`：jetson、rockchip、raspberrypi、android；後三個是草稿）。都沒有時印「這個產品沒有輸入清單」並照原流程。
+找到輸入之後，精靈讀清單、逐項檢查，列出 ✓ 找到（路徑）／✗ 缺少（影響）／－ 無法自動檢查。清單位置，依序：`--inputs <檔>` → 產品設定包裡的 `inputs.json` → `--platform <名稱>`（`tools/wizard/platforms/<名稱>.json`：jetson、rockchip、raspberrypi；後兩個是草稿）。都沒有時印「這個產品沒有輸入清單」並照原流程。
 範例：`tools/wizard/inputs.example.json`；真正的設定包放自己的 `inputs.json`（從平台範本複製修改）。
 
 格式（JSON）：`{"schema":1, "platform":"…", "draft":false, "upstream_set":"jetson-r39.2.0", "inputs":[…]}`。每項：

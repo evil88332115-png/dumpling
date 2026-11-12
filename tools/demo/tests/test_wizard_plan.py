@@ -191,7 +191,7 @@ def test_platform_templates_valid():
     kinds = {"flash_package", "source_archive", "build_record", "extra_deliverable", "upstream_source", "upstream_bsp",
              "upstream_uefi", "vendor_bulletin", "board_test", "product_config", "other"}
     names = sorted(os.listdir(plat))
-    assert names == ["android.json", "jetson.json", "raspberrypi.json", "rockchip.json"]
+    assert names == ["jetson.json", "raspberrypi.json", "rockchip.json"]
     for n in names:
         d = json.load(open(os.path.join(plat, n), encoding="utf-8"))
         ids = [i["id"] for i in d["inputs"]]

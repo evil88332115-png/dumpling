@@ -10,7 +10,7 @@
         （多個 --target 在同一次讀取裡寫出：壓縮檔只解壓一次）
   python3 -I flash_package.py cra-config --list <list.json> --variant <名稱> --name <產品> --version <版本> --out <config.json> [--manufacturer <名稱>]
   python3 -I flash_package.py summary --out-dir <結果資料夾> --variant <名稱> [--variant …]
-  python3 -I flash_package.py format --archive <檔案>             （印 tar、rockchip-img、rockchip-zip、raw-disk-img、raw-disk-img-xz、raw-disk-img-gz 或 android）
+  python3 -I flash_package.py format --archive <檔案>             （印 tar、rockchip-img、rockchip-zip、raw-disk-img、raw-disk-img-xz、或 raw-disk-img-gz）
   python3 -I flash_package.py img-extract --archive <.img.xz|.img.gz> --out <disk.img>   （原始磁碟映像：串流解壓到暫存檔；大小上限與剩餘空間檢查）
   Raspberry Pi OS 等原始磁碟映像（MBR／GPT；tools/demo/rpi_img.py）：boot 的 FAT 分割區與 root 的 ext4 分割區都直接讀（不掛載），
   呈現成虛擬 tar：rootfs/…、bootloader/<boot 分割區的檔案>、kernel/<kernel*.img、initramfs*>。壓縮的映像先 img-extract；
@@ -133,15 +133,6 @@ def open_stream(path):
     """壓縮的 tar → 串流模式的 TarFile。bzip2 在沒有外部程式時用 bz2.open（支援 pbzip2 產生的多段 bzip2）。"""
     path = os.path.abspath(path)          # 以 / 開頭：檔名不會被外部程式當成選項
     fmt = archive_format(path)
-    if fmt == "android":
-        an = amod()
-        try:
-            vt = an.open_virtual(path)
-        except (an.AndroidError, OSError) as e:
-            raise Fail(f"{os.path.basename(path)}: {e}")
-        with vt:
-            yield vt
-        return
     if fmt == "rockchip-zip":
         raise Fail(f"{os.path.basename(path)} 是 zip：先用 flash_package.py rk-extract 取出 update.img（scan-flash-package.sh 會自動做）")
     if fmt == "rockchip-img":
@@ -307,21 +298,7 @@ def open_source(archive=None, directory=None):
     if directory:
         if not os.path.isdir(directory):
             raise Fail(f"不是資料夾：{directory}")
-        if amod().is_android_dir(directory):
-            an = amod()
-            try:
-                vt = an.open_virtual(directory)
-            except (an.AndroidError, OSError) as e:
-                raise Fail(f"{os.path.basename(directory)}: {e}")
-            with vt:
-                yield tar_entries(vt), {"type": "dir", "path": os.path.abspath(directory), "format": "android", "reader": "android_img.py"}
-            return
         yield dir_entries(directory), {"type": "dir", "path": os.path.abspath(directory), "reader": "os.scandir（lstat，不跟隨符號連結）"}
-        return
-    if archive_format(os.path.abspath(archive)) == "android":
-        with open_stream(archive) as vt:
-            yield tar_entries(vt), {"type": "archive", "file": os.path.basename(archive), "bytes": os.path.getsize(archive),
-                                    "format": "android", "reader": "android_img.py"}
         return
     if archive_format(os.path.abspath(archive)) == "rockchip-img":
         # 分割區位置無法證明或沒有 ext4 的 rootfs：不丟例外，給空的清單與原因（list 照樣寫出分割區表；rootfs-tar 用原因失敗）
@@ -452,21 +429,6 @@ def rkmod():
     return _RK
 
 
-_AN = None
-
-
-def amod():
-    """tools/demo/android_img.py (Android image packages; loaded by path like rkmod)."""
-    global _AN
-    if _AN is None:
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "android_img.py")
-        spec = importlib.util.spec_from_file_location("sca_center_android_img", p)
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        _AN = m
-    return _AN
-
-
 _RPI = None
 
 
@@ -487,19 +449,17 @@ def is_disk_format(fmt):
 
 
 def archive_format(path):
-    """--archive 的格式。偵測順序（各格式互不搶輸入）：RKFW → rockchip-img；zip → android（內容是 Android 映像）否則 rockchip-zip；
-    bzip2 → tar；其他先試 android（sparse／super／boot／EROFS 單一映像或 tar），再試 raw-disk-img（MBR／GPT 的磁碟映像，
+    """--archive 的格式。偵測順序（各格式互不搶輸入）：RKFW → rockchip-img；zip → rockchip-zip；
+    bzip2 → tar；其他試 raw-disk-img（MBR／GPT 的磁碟映像，
     .xz／.gz 壓縮的是 raw-disk-img-xz／-gz）；都不是 → tar（Jetson 的 tbz2 等，照舊）。"""
     with open(path, "rb") as f:
         head = f.read(6)
     if head[:4] == b"RKFW":
         return "rockchip-img"
     if head[:4] == b"PK\x03\x04":
-        return "android" if amod().detect(path) else "rockchip-zip"
+        return "rockchip-zip"
     if head[:3] == b"BZh":
         return "tar"
-    if amod().detect(path):
-        return "android"                  # Android image package (sparse/super/boot images; single image or tar): android_img.py
     return rpimod().detect(path) or "tar"
 
 
@@ -822,12 +782,6 @@ def apply_small(c, rel, text):
 
 
 def do_list(out, inventory, archive=None, directory=None, product_version=None, deliverables_dir=None, container=None):
-    if (archive and archive_format(os.path.abspath(archive)) == "android") or (directory and amod().is_android_dir(directory)):
-        an = amod()
-        try:
-            return an.do_list(archive, directory, out, inventory)    # inventory only (phase 1); android-summary.* next to `out`
-        except (an.AndroidError, OSError) as e:
-            raise Fail(f"{os.path.basename(archive or directory)}: {e}")
     rkimg = None
     if archive and archive_format(os.path.abspath(archive)) == "rockchip-img":
         rk = rkmod()

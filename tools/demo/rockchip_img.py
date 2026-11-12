@@ -1107,7 +1107,7 @@ class VirtualTar:
 
     def _walk(self):
         fs, st, root = self.fs, self.stats, self.root
-        pfx = getattr(self, "prefix", PREFIX)          # android_img.py 用同一個走訪器，前綴不同
+        pfx = getattr(self, "prefix", PREFIX)          # 走訪器可以換前綴
         yield tinfo(pfx, tarfile.DIRTYPE, mode=root.mode & 0o7777, mtime=root.mtime, uid=root.uid, gid=root.gid)
         first = {}                       # 一般檔案的 inode → 第一次出現的名稱（之後的寫成硬連結）
         visited = {2}

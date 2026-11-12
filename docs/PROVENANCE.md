@@ -109,24 +109,22 @@
 | `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處 |
 | `tools/cra/xlsx_min.py` | `scripts/cra/xlsx_min.py` | 25fa89a | 原樣 |
 | `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處 |
-| `tools/demo/android_img.py` | `scripts/demo/android_img.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/demo/board-import.sh` | `scripts/demo/board-import.sh` | 25fa89a | 路徑調整 7 處 |
-| `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處 |
+| `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip |
 | `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處 |
 | `tools/demo/jetson_lookup.py` | `scripts/demo/jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | 原樣 |
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
-| `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行 |
-| `tools/demo/tests/test_android_img.py` | `scripts/demo/tests/test_android_img.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_jetson_rootfs.py` | `scripts/demo/tests/test_jetson_rootfs.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 原樣 |
+| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處） |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
 | `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變 |
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處 |
@@ -202,10 +200,9 @@
 | `tools/sbomgate/tests/test_sbomgate.py` | `integration/sbomgate/tests/test_sbomgate.py` | 25fa89a | 刪段 95 行、刪掉 RealEvidence 類與 6 個用到 tests/results、tests/projects（e2e 的真實輸出，不帶）的測試方法 |
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
-| `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處 |
+| `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android |
 | `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處 |
 | `tools/wizard/inputs.example.json` | `scripts/wizard/inputs.example.json` | 25fa89a | 清理 1 行 |
-| `tools/wizard/platforms/android.json` | `scripts/wizard/platforms/android.json` | 25fa89a | 原樣 |
 | `tools/wizard/platforms/jetson.json` | `scripts/wizard/platforms/jetson.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
@@ -231,6 +228,7 @@
 | `scripts/mirror/dt-feeds.sh` | `mirror/euvd.sh`（只有鏡像資料夾裡有 `dt-feeds/` 時才呼叫） | dumpling 的 EUVD 鏡像不會產生 `dt-feeds/`，不會走到 |
 | `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知 |
 | `scripts/cra/csaf_advisory.py` | 沒有程式呼叫（獨立指令） | 不在範圍內 |
+| `scripts/demo/android_img.py`、`scripts/demo/tests/test_android_img.py`、`scripts/wizard/platforms/android.json` | `flash_package.py`（`amod()`）、`cra-scan.py --platform android` | **不在範圍內，沒有帶進來**（C1 決定）。`flash_package.py` 已移除 android 格式的分支；沒有 `--platform android` 範本 |
 | `scripts/demo/board-on-device.sh`、`board-from-network.sh`、`board-test.md` | 在板子上跑的收集腳本；`board_import.py`、`board-import.sh` 只讀它們的輸出檔 | 沒有板子結果檔時，精靈記 `board-import` NOT_RUN |
 | `scripts/pilot/{ci_summary,compare_expected}.py`、`ci-*.sh`、`scripts/e2e/{real-projects,license,firmware,images,projects,summarize,…}.sh`／`.py`、`scripts/ci/`、`scripts/run-*.sh` | sca-center 自己的 CI 與 e2e | 與 dumpling 無關 |
 | `scripts/cra/x86_firmware.py`、`test_x86_firmware.py`、`data/fw-manifest-template.csv`、BIOS 試掃原型 | 歸 C2（D-015） | 帶進來的程式沒有 import 它們 |

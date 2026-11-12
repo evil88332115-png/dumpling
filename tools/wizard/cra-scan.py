@@ -570,7 +570,7 @@ def main():
     ap.add_argument("--board-test", action="append", help="板子檢查結果檔（board-test-*.tar.gz、board-net-*.tar.gz；board-on-device.sh／board-from-network.sh 的產出），可重複；掃描後匯入，不給時互動模式會問")
     ap.add_argument("--tee-source", help="廠商公開原始碼資料夾（OP-TEE／TF-A）；不給時用站台設定 upstream.<組>.public_sources_dir，再不然 public_sources 旁邊的 extract/")
     ap.add_argument("--inputs", help="輸入清單檔（JSON）；不給時用產品設定包裡的 inputs.json")
-    ap.add_argument("--platform", help="沒有清單檔時改用平台範本（tools/wizard/platforms/<名稱>.json：jetson、rockchip、raspberrypi、android；草稿）")
+    ap.add_argument("--platform", help="沒有清單檔時改用平台範本（tools/wizard/platforms/<名稱>.json：jetson、rockchip、raspberrypi；草稿）")
     ap.add_argument("--site-config", help="站台設定檔（JSON）；不給時用環境變數 SCA_WIZARD_CONFIG，再不然 ~/.config/sca-center/wizard.json")
     ap.add_argument("--yes", action="store_true"); ap.add_argument("--plan-only", action="store_true")
     a = ap.parse_args()
