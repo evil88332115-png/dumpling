@@ -208,7 +208,7 @@
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
 
-以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`。
+以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔（*.xz、*.gz、*.bz2、*.zst）解壓後檢查（C0 同意在 M1 修改）。
 
 ### 改動類型說明
 
@@ -226,7 +226,7 @@
 | `scripts/pilot/lib/{djsbom,filescan,licverdict,notice,oscopyright,pkgscan,scio_cancel,scio_chunks,scio_diag,scio_failures,scio_prep}.py`、`scripts/e2e/{djread,licexpr}.py`、`integration/policysync/` | `sca-scan` 的 E 段（DejaCode 授權匯入）與 E2 段（ScanCode.io 檔案層級掃描） | `pilot.env` 沒有 `DEJACODE_URL`／`SCANCODEIO_URL`、或給 `--no-license`、`--no-upload` 時，這些階段記 NOT_RUN（程式碼原有的判斷）。**若 `pilot.env` 設了那些網址，會因為找不到檔案而記 FAIL**；dumpling 的 pipeline 不設它們 |
 | `scripts/e2e/dt-compose.yaml`、`scripts/e2e/dtlib.sh` | 臨時 DT | 由 `pipeline/dt-ephemeral.sh`、`pipeline/dt-compose.yaml` 取代（見上面 pipeline 列） |
 | `scripts/mirror/dt-feeds.sh` | `mirror/euvd.sh`（只有鏡像資料夾裡有 `dt-feeds/` 時才呼叫） | dumpling 的 EUVD 鏡像不會產生 `dt-feeds/`，不會走到 |
-| `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知 |
+| `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知。**沒帶進來（C3 視需要帶回，含約 29 個被刪的寄信測試：test_exploited_vendor 4、test_exploited_watch_grype 11、test_exploited_watch_refresh 14）**；M1／M2 用不到 |
 | `scripts/cra/csaf_advisory.py` | 沒有程式呼叫（獨立指令） | 不在範圍內 |
 | `scripts/demo/board-on-device.sh`、`board-from-network.sh`、`board-test.md` | 在板子上跑的收集腳本；`board_import.py`、`board-import.sh` 只讀它們的輸出檔 | 沒有板子結果檔時，精靈記 `board-import` NOT_RUN |
 | `scripts/pilot/lib/kernel_included_c.py` | 產生 `lib/data/kernel-included-c-*.json` 的工具（`kernel_config.py` 只讀資料檔） | 資料檔有帶；要重新產生才需要它 |
@@ -254,7 +254,7 @@
 
 ### public-check 白名單（`ci/public-allow.txt`）
 
-`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因，共 18 項），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
+`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因：cra 測試 18 項，另 5 項是 `tests/run.d/c1-public-check.sh` 的合成測資），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
 
 | 完整字串 | 用途 |
 |---|---|
