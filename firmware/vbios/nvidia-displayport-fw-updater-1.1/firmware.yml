@@ -1,0 +1,24 @@
+kind: vbios
+vendor: NVIDIA
+model: NVIDIA Graphics Firmware Update Tool for DisplayPort 1.3/1.4 Displays
+firmware_version: "1.1"
+ibv: unknown
+status: ok
+files:
+  - name: NVIDIA_DisplayPort_Firmware_Updater_1.1-x64.exe
+    url: https://us.download.nvidia.com/Windows/uefi/firmware/1.1/NVIDIA_DisplayPort_Firmware_Updater_1.1-x64.exe
+    sha256: c96c319b96b3784c4d212c41aca1ddefd8c0e54ed2de5120e8270d88c26a5161
+    size: 14422952
+    role: package
+license:
+  name: NVIDIA 服務條款（Terms of Service）
+  url: https://www.nvidia.com/en-us/about-nvidia/terms-of-service/
+  note: NVIDIA 官方公開下載頁（https://www.nvidia.com/en-us/drivers/nv-uefi-update-x64/）；只在 CI 下載核對、不重新散布、不執行。
+notes: |
+  Windows 工具（2023-06-26，13.7 MB），不執行，只當資料讀。
+  只讀位元組檢查（python3 -I）：檔內有兩處 PCIR 結構、vendor 0x10DE，前面有 55 AA 標記，
+  但 device id 為 0 且 ROM 標頭的 PCIR 指標為 0，像是範本或殘缺結構，不是可確認的完整 option ROM；
+  實際 vBIOS 映像可能壓縮在檔內。
+  GAP（獨立 vBIOS 映像）：沒有找到官方可合法下載、可直接讀出 vBIOS 版本的檔案。
+  之後用合成的 option ROM 測流程；實際檔案由負責單位提供。
+  不使用 TechPowerUp 等 vBIOS 收藏站（非官方來源）。

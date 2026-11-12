@@ -19,3 +19,6 @@ venv/
 # 本機輸出
 out/
 work/
+# 韌體樣本下載目錄（firmware-fetch.sh --out 的建議位置）與 Windows 執行檔
+firmware-dl/
+*.exe

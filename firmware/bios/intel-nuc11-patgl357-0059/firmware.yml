@@ -1,0 +1,24 @@
+kind: bios
+vendor: Intel NUC（現由 ASUS 提供下載）
+model: Intel NUC 11 Performance Kit（NUC11PAH，BIOS PATGL357）
+firmware_version: "0059"
+ibv: AMI
+status: ok
+files:
+  - name: PATGL357.0059.zip
+    url: https://dlcdnets.asus.com/pub/ASUS/NUC/NUC_11_Performance_Kit/PATGL357.0059.zip
+    sha256: 7ae896df5da8030cf7cd41e89b07116ef3a57bc9cda467440ee4591092b7fae5
+    size: 72080470
+    role: package
+license:
+  name: ASUS 網站使用條款（Terms of Use Notice）
+  url: https://www.asus.com/terms_of_use_notice_privacy_policy/official-site/
+  note: ASUS 官方公開下載頁（見 notes），未見明確散布授權；只在 CI 下載核對、不重新散布、不放進 repo。
+notes: |
+  Tiger Lake、Intel Iris Xe 內顯，之後用來找 Intel GOP／VBT。
+  下載頁（動態頁面，直接下載網址是靜態 CDN 路徑）：https://www.asus.com/supportonly/nuc11pahi7/helpdesk_bios
+  zip 內有 F7 膠囊 PATGL357.0059.CAP（26279936 位元組）、UEFI／Linux 刷新工具、EBU.EXE、Recovery 檔與 release notes。
+  確認為 AMI：CAP 開頭是 AMI 膠囊標記 `_AMIPFAT`（只讀位元組檢查，未解開、未執行）。
+  這份 CAP 內容為 AMI PFAT 封裝，沒有明文字串 `American Megatrends`／`$VBT`；解析 PR 需先解開 PFAT 才找得到。
+  選 ASUS 而非 Intel 下載中心：downloadmirror.intel.com 的網址會被轉成小寫路徑而回 403，無法穩定下載。
+  ASUS 之後若移除舊版，網址會失效，firmware-fetch 會 FAIL，此時換同系列其他版本。
