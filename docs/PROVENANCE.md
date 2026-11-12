@@ -114,7 +114,7 @@
 | `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip |
 | `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處；改 1 行註解（內部 CI 分支名稱） |
 | `tools/demo/jetson_lookup.py` | `scripts/demo/jetson_lookup.py` | 25fa89a | 原樣 |
-| `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | 原樣 |
+| `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | M2 J 軌：`--out-custom` 改為選填（不給就不寫模擬客製版）；其餘原樣 |
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |

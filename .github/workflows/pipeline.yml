@@ -1,0 +1,187 @@
+name: pipeline
+
+# 共用的 build＋scan（reusable workflow）：release.yml 與 dev.yml 都呼叫它，專案與平台由 project.yml 決定，新增專案不用改這裡。
+#   build：ubuntu-24.04-arm 原生編譯（Jetson 約 36 分鐘）→ 打包建置紀錄 → artifact
+#   scan ：ubuntu-24.04 重新下載 BSP 與 rootfs → 組刷機包（核心換成 build 編的）→ 臨時 DT → 精靈掃描 → 分層 → 報告 → 標準答案比對 → artifact
+# 這裡的 job 都只有唯讀權限（D-012）；建 Release 的 job 在 release.yml。
+# 建置不可重現：建置紀錄與刷機包裡的核心必須來自同一次編譯，所以 build 的結果用 artifact 傳給 scan，不重編、不以雜湊當 cache key。
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: "專案名稱（projects/ 底下的資料夾）"
+        type: string
+        required: true
+      version:
+        description: "版本（sources.yml 的版本，例如 v39.2.1-demo1）"
+        type: string
+        required: true
+      stop_after:
+        description: "build｜all（開發時只跑編譯用）"
+        type: string
+        default: all
+      reuse_build_run:
+        description: "開發用：沿用另一個 run 的 build artifact（空白＝重新編譯）；只有 workflow_dispatch 會傳"
+        type: string
+        default: ""
+    outputs:
+      scan_artifact:
+        description: "scan 的結果 artifact 名稱"
+        value: ${{ jobs.scan.outputs.artifact }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DUMPLING_PROJECT_DIR: projects/${{ inputs.project }}
+
+jobs:
+  build:
+    name: build (${{ inputs.project }} ${{ inputs.version }})
+    if: ${{ inputs.reuse_build_run == '' }}
+    # 平台目前都在 arm64 原生編譯；沒有編譯步驟的平台（build.sh 回報 OK／不編譯）也可以在這裡跑，很快
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 路徑
+        run: |
+          # 輸出放 RUNNER_TEMP 底下（路徑不含 ..）；pilot.env 單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾）
+          echo "DUMPLING_OUT_BASE=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+          echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
+
+      - name: 相依套件（Jetson 核心與樹外模組）
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev rsync dwarves cpio kmod device-tree-compiler \
+            python3 python3-yaml xz-utils zstd lz4 libncurses-dev pkg-config perl patch > /dev/null
+          gcc --version | head -1; pahole --version
+
+      - name: 驗證專案設定
+        run: bash pipeline/platform.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: fetch（下載並核對 sha256；只下載、不解開、不執行）
+        run: bash pipeline/platform.sh fetch "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: build
+        run: bash pipeline/platform.sh build "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" | tee "$RUNNER_TEMP/build-line.txt"
+
+      - name: 整理傳給 scan 的檔案（建置紀錄、交付檔、build.json）
+        run: |
+          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
+          mkdir -p "$RUNNER_TEMP/handoff"
+          cp "$o"/BuildRecord-*.tar.gz "$o/build.json" "$RUNNER_TEMP/handoff/"
+          cp "$o/deliver/deliverables.tar" "$o/deliver/kernel.release" "$o/deliver/kernel-subdir" "$RUNNER_TEMP/handoff/"
+          tail -n 40 "$o/work/nvbuild.log" > "$RUNNER_TEMP/handoff/nvbuild-tail.txt"
+          ls -l "$RUNNER_TEMP/handoff"
+          { echo "## build（${{ inputs.project }} ${{ inputs.version }}）"; tail -n 1 "$RUNNER_TEMP/build-line.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: artifact（同一次編譯的建置紀錄與交付檔；只保留 1 天）
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-${{ inputs.project }}-${{ inputs.version }}
+          path: ${{ runner.temp }}/handoff
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  scan:
+    name: scan (${{ inputs.project }} ${{ inputs.version }})
+    needs: build
+    # build 被略過（沿用別的 run 的 artifact）也要跑；build 失敗或被取消就不跑
+    if: ${{ !cancelled() && inputs.stop_after != 'build' && (needs.build.result == 'success' || (inputs.reuse_build_run != '' && needs.build.result == 'skipped')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    outputs:
+      artifact: ${{ steps.names.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 路徑
+        run: |
+          # 輸出放 RUNNER_TEMP 底下（路徑不含 ..）；pilot.env 單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾）
+          echo "DUMPLING_OUT_BASE=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+          echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
+
+      - name: 名稱
+        id: names
+        run: echo "artifact=scan-${{ inputs.project }}-${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: 取得 build 的 artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build-${{ inputs.project }}-${{ inputs.version }}
+          path: ${{ runner.temp }}/handoff
+          run-id: ${{ inputs.reuse_build_run || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
+          # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
+          sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
+          cat "$RUNNER_TEMP/tools/versions.txt"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml zstd lbzip2 > /dev/null
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true && echo "bubblewrap: OK"
+
+      - name: 驗證專案設定
+        run: bash pipeline/platform.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: 放回 build 的檔案
+        run: |
+          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
+          mkdir -p "$o/deliver"
+          cp "$RUNNER_TEMP"/handoff/BuildRecord-*.tar.gz "$RUNNER_TEMP/handoff/build.json" "$o/"
+          cp "$RUNNER_TEMP"/handoff/deliverables.tar "$RUNNER_TEMP"/handoff/kernel.release "$RUNNER_TEMP"/handoff/kernel-subdir "$o/deliver/"
+          cat "$o/build.json"
+
+      - name: fetch（BSP、範例 rootfs、public_sources 重新從 NVIDIA 下載並核對）
+        run: bash pipeline/platform.sh fetch "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: assemble（組刷機包，核心與樹外模組換成 build 編的）
+        run: bash pipeline/platform.sh assemble "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: scan（臨時 DT → 精靈 → 分層 → 報告 → 標準答案比對）
+        env:
+          MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
+          GITHUB_REPOSITORY_INFO: ${{ github.repository }}
+        run: bash pipeline/platform.sh scan "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: 整理結果（報告 zip、SBOM、VEX、xlsx、摘要）
+        if: ${{ always() }}
+        run: |
+          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
+          mkdir -p "$RUNNER_TEMP/result"
+          [ -d "$o/release" ] && cp -r "$o/release/." "$RUNNER_TEMP/result/" || true
+          for f in build.json assemble.json scan.json expected-check.txt; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
+          [ -f "$o/summary.md" ] && cat "$o/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+          ls -l "$RUNNER_TEMP/result"
+
+      - name: 臨時 DT：down
+        if: ${{ always() }}
+        run: bash pipeline/dt-ephemeral.sh down || true
+
+      - name: artifact（Release 附件與摘要；dev 版本只保留 7 天）
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scan-${{ inputs.project }}-${{ inputs.version }}
+          path: ${{ runner.temp }}/result
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn

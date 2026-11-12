@@ -1,6 +1,9 @@
 # NVIDIA 公開下載。網址與 SHA-1 取自 NVIDIA 公布的 release_sha_hashes.txt（2026-10-27、2026-11-04 讀過）；
-# sha256 是 SHA-1 相符後記下的值（來源 tools/demo/jetson.sh）。public_sources.tbz2 NVIDIA 沒有公布整包雜湊：
-# sha256 是首次下載的記錄（2026-11-12）；r39.2.0 的還沒記錄，所以標 gap，fetch 回報 GAP，不會自動接受。
+# sha256 是 SHA-1 相符後記下的值（來源 tools/demo/jetson.sh）。
+# public_sources.tbz2：NVIDIA 沒有公布整包雜湊，sha256 是首次下載的記錄（TOFU，2026-11-12），不是「官方核對」；
+# 包內元件（kernel_src.tbz2 等）的 SHA-1 才是對照 NVIDIA 另外公布的 public_sources_sha.txt（build 步驟核對）。
+# public_sources_sha.txt：NVIDIA 公布的元件 SHA-1 清單；sha256 是 2026-11-12 下載時記錄的值（內容之後若被 NVIDIA 改動，fetch 會失敗而不是默默接受）。
+# 版本的 platform_params.patches：這個版本要套的 patch（patches/ 底下的檔名，依序；格式見 docs/PLATFORM-INTERFACE.md「Jetson 轉接器」）。
 # 下載即表示同意 NVIDIA 的軟體授權協議。size 沒有記錄，省略。
 schema: 1
 releases:
@@ -20,8 +23,12 @@ releases:
         role: rootfs
       - name: public_sources.tbz2
         url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0/sources/public_sources.tbz2
+        sha256: 87d2e31ff55beaf2373e2f288538585995b231fd5745ec21f39a668e36efab2f   # 首次下載記錄 2026-11-12（TOFU）
         role: source
-        gap: 尚未記錄首次下載的 sha256（NVIDIA 沒有公布整包雜湊）；由 CI 首次下載後人工確認再填
+      - name: public_sources_sha.txt
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0/sources/public_sources_sha.txt
+        sha256: 13dcd8e4b2920dd9f0d9a981d7d3a912d333b38ddeb768dfc07f8776c601ee54
+        role: source
   v39.2.1-demo1:
     platform_params:
       l4t_release: "39.2.1"
@@ -38,5 +45,9 @@ releases:
         role: rootfs
       - name: public_sources.tbz2
         url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/sources/public_sources.tbz2
-        sha256: 8346f0371649a92c42293b2d4a7bf3d69e4dd1de23009e1463ea910994a81371
+        sha256: 8346f0371649a92c42293b2d4a7bf3d69e4dd1de23009e1463ea910994a81371   # 首次下載記錄 2026-11-12（TOFU）
+        role: source
+      - name: public_sources_sha.txt
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/sources/public_sources_sha.txt
+        sha256: 23f9aef5857e2d2c4c7b779f05e332aa5af639ae4e9943ffa0c289c8a9dda61b
         role: source

@@ -1,0 +1,122 @@
+name: dev
+
+# 開發版：開發分支 push（dev/**）、每日排程、手動觸發 → 對每個專案的最新版本跑同一套 build／scan（pipeline.yml），不發正式 Release。
+# 結果只放 Actions artifact（短期保存）。另外，在 main 或 dev/** 分支上跑完時，把最新的開發版 SBOM 與 release-meta.json 發到
+# 每個專案一個「滾動的 pre-release」（tag dev/<專案>，每次覆蓋附件），給每日監控讀（D-029）。其他分支（例如功能分支上的手動測試）不發布。
+# 專案與平台由 projects/<專案>/project.yml 決定；新增專案不用改這個 workflow。
+on:
+  push:
+    branches: ["dev/**"]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "只跑這個專案（空白＝所有專案）"
+        required: false
+        default: ""
+        type: string
+      stop_after:
+        description: "build｜all（開發用）"
+        required: false
+        default: all
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: 專案清單
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: project-info --matrix
+        id: m
+        env:
+          ONLY: ${{ inputs.project }}
+        run: |
+          if [ -n "$ONLY" ]; then m=$(python3 -I pipeline/project-info.py --matrix "$ONLY"); else m=$(python3 -I pipeline/project-info.py --matrix); fi
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          echo "$m"
+
+  pipeline:
+    name: ${{ matrix.project }} ${{ matrix.version }}
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      project: ${{ matrix.project }}
+      version: ${{ matrix.version }}
+      stop_after: ${{ inputs.stop_after || 'all' }}
+
+  publish:
+    name: 發布 dev/${{ matrix.project }}
+    needs: [matrix, pipeline]
+    # 只在 main 或 dev/** 分支發布；其他分支只留 artifact
+    if: ${{ !cancelled() && needs.pipeline.result == 'success' && (inputs.stop_after || 'all') == 'all' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 取得 scan 的結果
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scan-${{ matrix.project }}-${{ matrix.version }}
+          path: ${{ runner.temp }}/result
+      - name: 滾動 pre-release dev/${{ matrix.project }}（覆蓋附件）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT: ${{ matrix.project }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          tag="dev/$PROJECT"
+          cd "$RUNNER_TEMP/result"
+          python3 -I "$GITHUB_WORKSPACE/pipeline/release-meta.py" --project "$PROJECT" --version "$VERSION" --tag "$tag" \
+            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --out release-meta.json
+          # 只發 SBOM（完整與分層）、layers.json、release-meta.json；報告與 VEX 留在 artifact
+          files=(release-meta.json)
+          for f in "sbom-$PROJECT-$VERSION.cdx.json" "sbom-$PROJECT-$VERSION-bsp.cdx.json" "sbom-$PROJECT-$VERSION-os.cdx.json" layers.json; do
+            [ -f "$f" ] && files+=("$f")
+          done
+          [ -f "sbom-$PROJECT-$VERSION.cdx.json" ] || { echo "publish: FAIL（沒有 sbom-$PROJECT-$VERSION.cdx.json）"; exit 1; }
+          notes="開發版（status 見 release-meta.json）的最新 SBOM。每次 dev 流程跑完覆蓋，供每日監控讀取；不是正式出貨版本。commit $GITHUB_SHA，run $GITHUB_RUN_ID。"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"
+            # 舊版本留下的附件（檔名不同）刪掉，只留這次的
+            for a in $(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
+              keep=0; for f in "${files[@]}"; do [ "$a" = "$f" ] && keep=1; done
+              [ $keep = 1 ] || gh release delete-asset "$tag" "$a" --yes --repo "$GITHUB_REPOSITORY"
+            done
+            gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" --title "$tag（滾動的開發版）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "publish: OK（$tag，${#files[@]} 個附件）"

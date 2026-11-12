@@ -3,6 +3,7 @@
 
 用法：python3 -I pipeline/project-info.py <專案>/<版本>      （tag 格式）
       python3 -I pipeline/project-info.py --dir <專案資料夾> <版本>
+      python3 -I pipeline/project-info.py --matrix [<專案名>]    （dev.yml 用：印 JSON 陣列 [{"project","version"}…]；每個專案取 sources.yml 的最後一個版本）
 tag 格式錯、專案不存在、版本不在 sources.yml、欄位驗證失敗 → 不印 KEY=VALUE，印 "project-info: FAIL（…）" 並以 1 結束。
 """
 import os
@@ -33,9 +34,30 @@ def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
             ("PROJECT_DIR", _rel(project_dir))]
 
 
+def matrix(root, only=None):
+    """每個專案取 sources.yml 裡最後一個版本（dev.yml 的建置矩陣）。壞掉的專案不略過：丟 ConfigError。"""
+    base = os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(root, "projects"))
+    out = []
+    for name in sorted(os.listdir(base)):
+        pdir = os.path.join(base, name)
+        if not os.path.isdir(pdir) or os.path.islink(pdir) or not pc.PROJECT_RE.match(name):
+            continue
+        if only and name != only:
+            continue
+        project, sources = pc.load_project_all(pdir)
+        out.append({"project": name, "version": list(sources["releases"])[-1]})
+    if only and not out:
+        raise pc.ConfigError("專案 %s 不存在" % only)
+    return out
+
+
 def main(argv):
     root = os.path.normpath(os.path.join(HERE, ".."))
     try:
+        if argv and argv[0] == "--matrix" and len(argv) <= 2:
+            import json
+            print(json.dumps(matrix(root, argv[1] if len(argv) == 2 else None)))
+            return 0
         if len(argv) == 1:
             name, version = pc.parse_tag(argv[0])
             pdir = os.path.join(os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(root, "projects")), name)
