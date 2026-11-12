@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "manufacturer": {
+    "name": "",
+    "address": "",
+    "email": "",
+    "website": ""
+  },
+  "vulnerability_contact": {
+    "contact": "",
+    "cvd_policy_url": ""
+  },
+  "sbom": {
+    "availability": ""
+  },
+  "technical_documentation": {
+    "production_monitoring": "",
+    "secure_update_distribution": "",
+    "standards": ""
+  },
+  "risk_assessment": {
+    "method": "",
+    "part_i_1_and_part_ii": ""
+  }
+}
