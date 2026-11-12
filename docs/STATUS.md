@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:47 -0500（C1）
+最後更新：2026-11-12 10:48 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -25,7 +25,7 @@
 
 - 目前在做：M1 完成、等 C0 合併（PR #9 已轉正式）；M2 試驗（`wp1/m2-spike`）進行中
 - 分支／PR／commit：
-  - `wp1/m1-tools`：bd95a8c（fb1ac02 之後只有 PROVENANCE 文件修正；V2 修正已併入：public-check f7830fc、F 的 8ae599b、C1 的 fb1ac02；tools/ 全部、PROVENANCE C1 節、白名單、public-check 掃壓縮檔、provenance-check、c1-tools／c1-pipeline／c1-public-check、tests.yml 裝 bubblewrap、臨時 DT＋dt-smoke 用 `sca-scan --sbom`）；PR #9（**正式 PR，等 C0 合併**；說明附逐檔對照 196 檔（實際比對：相同 56、有修改或自寫 140）、資料來源表、給 C0 的決定事項）
+  - `wp1/m1-tools`：bd95a8c（fb1ac02 之後只有 PROVENANCE 文件修正；V2 修正已併入：public-check f7830fc、F 的 8ae599b、C1 的 fb1ac02；tools/ 全部、PROVENANCE C1 節、白名單、public-check 掃壓縮檔、provenance-check、c1-tools／c1-pipeline／c1-public-check、tests.yml 裝 bubblewrap、臨時 DT＋dt-smoke 用 `sca-scan --sbom`）；PR #9（**正式 PR，C0 審查通過，CI 綠燈後背景合併；合併前不要再推送 `wp1/m1-tools`**；說明附逐檔對照 196 檔（實際比對：相同 56、有修改或自寫 140）、資料來源表、給 C0 的決定事項）
   - `wp1/m1-tools-pilot`（b210000）已 fast-forward 併入 m1-tools；`wp1/m1-dt` 已併入；PR #6 已關
   - 來源：sca-center 25fa89a
 - 代理：
@@ -49,7 +49,8 @@
   - Rockchip 分割區外的開機程式：以原始磁區為準
 - 卡住／等決定：
   - 等使用者（C0 轉問）：PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
-  - 請 C0 決定：public-check 對非壓縮的二進位檔（.pdf .png .bin）不掃、巢狀封存只解一層，是否改成反向規則（ci/ 是 WP0）
+  - （已定）public-check 反向規則（沒掃到的二進位檔不在放行清單就算無法檢查）：C0 同意，由 C0 下一批 PR 做，不放 M2
+  - （已定）上游部署預設路徑保留；alert_mail.py 留給 C3（C0 交接事項）
   - （已定）假交付物命名符合 D-023；`prefilled_from.by` 保留
   - 已處理：alert_mail.py 沒帶（PROVENANCE 標「C3 視需要帶回」）；D-023（形狀參考內部觀察的合成測資可收）已套用；上限註解的「實測」精確數量改成估計
   - M1 合併前本機 pre-push hook 不掃壓縮檔：改了 *.xz 等要手動跑 worktree 裡的新版 public-check
