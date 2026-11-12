@@ -22,7 +22,7 @@
 | `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
 | `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處、清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
 | `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M2 分層）**：新增 `--os-responsibility`；SBOM 元件帶 `dumpling:layer` 時才動作（沒有時輸出不變）：漏洞列加 `layer`／`layer_todo`／`layer_basis`、host-tool 元件的比對結果移出產品清單、整體狀態（ATTENTION）與依日期的出貨關卡只看我們的待辦（OS 層在 customer／upstream-vendor 時不算）、沒給 os_responsibility 標 GAP 並全部列入待辦、風險評估多一節「Layers」（通知客戶、unknown、host tools）、`summary.json` 與 `vulnerability-rows.json` 多 `layers`；發行閘門（vex_export）不變 |
-| `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣 |
+| `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣（C4 在檔尾追加 11 筆，見「C4 其他平台」節） |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
 | `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：內部主機名稱改成「本機」（1 行） |
 | `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述 |
