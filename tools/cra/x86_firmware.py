@@ -1697,7 +1697,8 @@ def components(inv):
                             *([prop("sca-center:uefi-compressed-sections",
                                     ", ".join(f"{k}={v}" for k, v in sorted(b["uefi"]["compressed"].items())))]
                               if b["uefi"]["compressed"] else []),
-                            *[prop("sca-center:gap", x) for x in b["gaps"]]]}
+                            *[prop("sca-center:gap", x) for x in b["gaps"]],
+                            *([prop("sca-center:uefi-gfx-search", uefi_gfx_summary(b["uefi_gfx"]))] if b.get("uefi_gfx") else [])]}
         if b.get("declared_version"):
             c["version"] = b["declared_version"]
             c["properties"].append(prop("sca-center:version-basis", "version list (declared by the BIOS team)"))
@@ -1745,6 +1746,7 @@ def components(inv):
                                          *[prop("sca-center:found-in", w) for w in u.get("cbfs_files", [])]]}, "intel"))
             sub.append(ref)
         cbfs_components(b, img, comps, sub)
+        uefi_gfx_components(b, img, comps, sub)
         deps[img] = sub
     intel_gfx_components(inv, comps, deps)
     return comps, deps
@@ -1774,6 +1776,10 @@ def intel_gfx_collect(roms, data, label, store):
 def intel_gfx_components(inv, comps, deps):
     """Intel legacy VBIOS → 元件。ROM 所在的檔案同時是 BIOS 映像時，掛在那個 BIOS 映像底下。"""
     parents = {loc: f"{REF}bios:{b['sha256'][:16]}" for b in inv["bios"] for loc in b["locations"]}
+
+    def parent_of(loc):      # 從 BIOS 映像解開的內容，位置是 `<映像的位置>!uefi/<模組>`（UEFI_GFX_SEP）：前綴要接分隔符，a.bin 不是 a.bin2 的前綴
+        hit = [p for p in parents if loc == p or loc.startswith(p + UEFI_GFX_SEP)]
+        return parents[max(hit, key=len)] if hit else None
     for v in inv.get("intel_vbios", ()):
         ref = f"{REF}vbios-intel:{v['sha256'][:16]}"
         c = {"type": "firmware", "bom-ref": ref, "name": "Intel legacy VBIOS (option ROM)", "manufacturer": {"name": "Intel Corporation"},
@@ -1803,8 +1809,9 @@ def intel_gfx_components(inv, comps, deps):
             c["properties"].append(prop("sca-center:note", f"option ROM start is ambiguous ({v['start_note']}); the offset and hash may be wrong"))
         comps.append(assessed(c, "intel"))
         for loc in v["locations"]:
-            if loc in parents:
-                deps.setdefault(parents[loc], []).append(ref)
+            par = parent_of(loc)
+            if par and ref not in deps.get(par, ()):
+                deps.setdefault(par, []).append(ref)
 
 
 def intel_gfx_status(inv):
@@ -1831,6 +1838,120 @@ def intel_gfx_markdown(inv):
                  + "、".join(e(x) for x in v["locations"]) + " |")
     L.append("\n版本只有 Intel 公告無法機器比對的身分資訊（NOT_ASSESSED）；格式只對一份公開樣本核對過。")
     return L
+
+
+UEFI_GFX_SEP = "!uefi/"                 # 從 BIOS 映像的 UEFI 內容解開的位置：`<映像的位置>!uefi/<FFS GUID 或 UI 名稱>`（fname() 取最後一段）
+MAX_GFX_NOTES = 8                       # 每個映像逐一列出「PCIR 沒有變成 ROM」等 option ROM 說明的上限
+
+
+def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
+    """BIOS 映像 b（bios_image() 的結果，之後會變成 inv["bios"] 的一項）的 UEFI 內容裡找 Intel GOP 驅動、獨立 VBT、legacy VBIOS
+    （走訪在 uefi_gfx.py，用 C1 的 uefi_image.py 解開 FV／LZMA）。結果放 b["uefi_gfx"]，缺口（沒解開、沒走訪）加進 b["gaps"]；
+    legacy VBIOS 進 intel_vb（位置是 `<label>!uefi/<模組>`）。沒有未壓縮的 firmware volume 的 UEFI／coreboot 映像：記「沒有搜尋」。"""
+    if not b["uefi"]["volumes"]:
+        if "uefi" in b["evidence"] or "cbfs" in b["evidence"]:
+            why = ("Intel GOP / VBT / legacy VBIOS inside UEFI firmware volumes: not searched (no uncompressed UEFI firmware volume with FFS files "
+                   "was found in the image; compressed containers such as CBFS payloads are not unpacked for this search)")
+            b["uefi_gfx"] = {"performed": False, "complete": False, "reason": why, "gaps": [why], "gop": [], "vbt": [], "stats": {}}
+            b["gaps"].append(why)
+        return
+    notes = []
+
+    def find_roms(body, module):
+        lab = label + UEFI_GFX_SEP + module
+        try:
+            roms = option_roms(body, budget, notes if len(notes) < MAX_GFX_NOTES else None)
+        except OverBudget as e:
+            intel_gfx_collect(getattr(e, "partial", []), body, lab, intel_vb)
+            raise
+        except PARSE_ERRORS as e:
+            if len(notes) < MAX_GFX_NOTES:
+                notes.append(f"{module}: option ROM parse failed ({type(e).__name__})")
+            return
+        intel_gfx_collect(roms, body, lab, intel_vb)
+
+    g = load_sibling("uefi_gfx").scan(data, find_roms, budget, (OverBudget,))
+    b["uefi_gfx"] = g
+    b["gaps"] += g["gaps"]
+    if g["stopped"] and g["stopped"].startswith("stopped early"):
+        partial.append((label, f"UEFI 顯示韌體走訪：{g['stopped']}"))
+    if notes:
+        g["rom_notes"] = notes[:MAX_GFX_NOTES]
+        b["gaps"].append(f"{len(g['rom_notes'])} option ROM notes inside UEFI content (see fw-inventory.json uefi_gfx.rom_notes); "
+                         "an Intel legacy VBIOS next to them may be missing or uncertain")
+
+
+def uefi_gfx_summary(g):
+    if not g["performed"]:
+        return "not performed"
+    s = g["stats"]
+    return (f"{'complete' if g['complete'] else 'incomplete (not found does not mean absent)'}: {s['fvs']} firmware volumes, {s['ffs_files']} FFS files, "
+            f"{s['decompressed_total']} bytes decompressed, {s['undecoded']} parts not decoded; "
+            f"{len(g['gop'])} GOP driver(s), {len(g['vbt'])} standalone VBT(s)")
+
+
+def uefi_gfx_where(w):
+    return (f"UEFI module {w['module']}" + (f" ({w['ui_name']})" if w.get("ui_name") else "")
+            + f", offset 0x{w['offset']:x} in the section content")
+
+
+def uefi_gfx_components(b, img, comps, sub):
+    """b["uefi_gfx"] 的 GOP 驅動與獨立 VBT → 元件，掛在 BIOS 映像底下（legacy VBIOS 在 intel_gfx_components）。"""
+    g = b.get("uefi_gfx") or {}
+    for it in g.get("gop", ()):
+        ref = f"{img}:uefi-gop:{it['sha256'][:12]}"
+        w0 = it["found"][0]
+        c = {"type": "firmware", "bom-ref": ref, "name": "Intel GOP driver", "manufacturer": {"name": "Intel Corporation"}, "hashes": hlist(it),
+             "properties": [prop("bsi:component:filename", w0.get("ui_name") or w0["module"]),
+                            *[prop(k, x) for k, x in zip(BSI_FLAGS, FIRMWARE_IMAGE)],
+                            prop("sca-center:pe-machine", it["machine"]), prop("sca-center:pe-subsystem", it["subsystem_name"]),
+                            prop("sca-center:size", it["size"]),
+                            *[prop("sca-center:found-in", uefi_gfx_where(w)) for w in it["found"]]]}
+        if it["version"]:
+            c["version"] = it["version"]
+            c["properties"].append(prop("sca-center:version-basis", it["version_basis"] + "; checked against one public sample only"))
+        else:
+            c["properties"].append(prop("sca-center:gap", f"version not read: {it['version_note']}"))
+        comps.append(assessed(c, "intel"))
+        sub.append(ref)
+    for it in g.get("vbt", ()):
+        ref = f"{img}:uefi-vbt:{it['sha256'][:12]}"
+        w0 = it["found"][0]
+        c = {"type": "firmware", "bom-ref": ref, "name": "Intel VBT (Video BIOS Table)", "version": it["version"],
+             "manufacturer": {"name": "Intel Corporation"}, "hashes": hlist(it),
+             "properties": [prop("bsi:component:filename", w0.get("ui_name") or w0["module"]),
+                            *[prop(k, x) for k, x in zip(BSI_FLAGS, FIRMWARE_IMAGE)],
+                            prop("sca-center:version-basis", f"$VBT header version {it['version_raw']} (x100) of '{it['signature']}'"),
+                            prop("sca-center:vbt-signature", it["signature"]), prop("sca-center:vbt-size", it["vbt_size"]),
+                            *([prop("sca-center:vbt-bdb-version", f"{it['bdb_version']} ({it['bdb_version_raw']} x100)")] if it["bdb_version"] else []),
+                            *[prop("sca-center:found-in", uefi_gfx_where(w)) for w in it["found"]]]}
+        comps.append(assessed(c, "vbt"))
+        sub.append(ref)
+
+
+def uefi_gfx_status(b):
+    g = b.get("uefi_gfx")
+    if g and not g["complete"]:
+        return [f"{b['file']}：UEFI 內的 Intel GOP／VBT／legacy VBIOS 搜尋不完整（GAP，沒找到不代表不存在；原因見 SBOM 的 sca-center:gap）"]
+    return []
+
+
+def uefi_gfx_markdown(b):
+    g = b.get("uefi_gfx")
+    if not g:
+        return []
+    e = md_esc
+    L = ["", "### UEFI 內的 Intel 顯示韌體（GOP／VBT／legacy VBIOS）", "",
+         e(uefi_gfx_summary(g)) + "。legacy VBIOS 另列在「Intel legacy VBIOS」一節。", ""]
+    if g["gop"] or g["vbt"]:
+        L += ["| 元件 | 版本 | SHA-256 | 位置 |", "|---|---|---|---|"]
+        L += [f"| Intel GOP driver | {e(it['version'] or '找不到')} | `{it['sha256']}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
+              for it in g["gop"]]
+        L += [f"| {e(it['signature'])} | {it['version']} | `{it['sha256']}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
+              for it in g["vbt"]]
+    else:
+        L.append("沒有找到 Intel GOP 驅動或獨立 VBT" + ("（走訪完整，已解開的內容裡沒有）。" if g["complete"] else "（走訪不完整，不代表不存在）。"))
+    return L + [f"- GAP：{e(x)}" for x in g["gaps"]]
 
 
 def bom(comps, deps):
@@ -1916,7 +2037,10 @@ def inventory(paths, manifest=None, budget=None):
                 b["ibv_hint"] = sorted(b["ibv_hint"] + ["AMI"])      # AMI BIOS Guard 封裝本身就是 AMI 的線索
         if b:
             h = hashes(data)
-            e = bios.setdefault(h["sha256"], {"file": label, "locations": [], "size": len(data), **h, **b})
+            e = bios.get(h["sha256"])
+            if e is None:
+                e = bios[h["sha256"]] = {"file": label, "locations": [], "size": len(data), **h, **b}
+                uefi_gfx_search(e, label, data, budget, intel_vb, partial)     # 同一個映像（雜湊相同）只走訪一次
             if label not in e["locations"]:               # 同一個映像（雜湊相同）在多個檔案出現：一個元件、記所有來源
                 e["locations"].append(label)
     inv = {"schema": "sca-center-fw-inventory/1",
@@ -1973,6 +2097,7 @@ def status_of(inv):
             att.append(f"{b['file']}：有不同版本的 FTPR manifest，ME 版本要確認（{b['me_conflict']}）")
         if b.get("platform") == "amd":
             att.append(f"{b['file']}：AMD 平台，AMD microcode 不支援（GAP，不是沒有 microcode）")
+        att += uefi_gfx_status(b)
         n = sum(b.get("uefi", {}).get("compressed", {}).values())
         g = sum(b.get("uefi", {}).get("guided_other", {}).values())
         if n:                              # 工具知道自己略過了內容：不能顯示完整，至少 ATTENTION
@@ -2117,6 +2242,7 @@ def markdown(inv):
         L += [f"- 走訪說明：{e(x)}" for x in u["notes"]]
         if b.get("cbfs"):
             L += cbfs_markdown(b["cbfs"])
+        L += uefi_gfx_markdown(b)
         if b["gaps"] or b["incomplete"]:
             L += ["", "### 缺口與不完整", ""] + [f"- GAP：{e(x)}" for x in b["gaps"]] + [f"- 不完整：{e(x)}" for x in b["incomplete"]]
         L.append("")
