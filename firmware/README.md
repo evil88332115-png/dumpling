@@ -25,7 +25,21 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `files[]` | `name`（只能是檔名）、`url`（https）、`sha256`（小寫 64 位十六進位）、`size`（位元組）、`role`（`image` 映像／`source` 原始碼／`package` 套件或更新包） |
 | `license` | `name`、`url`、`note`：條款名稱、網址、一句說明（本專案只在 CI 下載、不重新散布） |
 | `notes` | 挑選理由與限制 |
-| `expected` | 選填；給之後解析 PR 用的預期值，只寫已知的，不猜 |
+| `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
+| `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
+
+### `expected` 的鍵
+
+| 鍵 | 內容 | 比對規則 |
+|---|---|---|
+| `intel_me` | ME 版本字串 | 映像的 ME 版本相同，且 SBOM 有同版本的 `Intel CSE firmware` 元件 |
+| `microcode` | `[{cpuid, platform_mask, revision}]` | 映像有同 cpuid、同 platform、同 revision 的微碼（十六進位不分大小寫），SBOM 也有；沒有該 cpuid／platform＝MISSING，revision 不同＝MISMATCH；映像多出來的微碼不比 |
+| `fsp` | 版本字串清單 | 每個版本都要在映像的 FSP 找得到；多出來的版本不比 |
+| `coreboot_version`、`dasharo_version` | 字串 | 與 CBFS `revision` 讀到的相同 |
+| `coreboot_revision`、`edk2_revision` | git 修訂（縮寫即可） | 一方是另一方的前綴就算相符（至少 7 碼）；edk2 取 coreboot config 的 `CONFIG_EDK2_TAG_OR_REV` |
+| `coreboot_build_date` | `YYYY-MM-DD` | 與 CBFS `build_info` 的建置日期（UTC）相同 |
+
+每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 
 ## 樣本與挑選理由
 

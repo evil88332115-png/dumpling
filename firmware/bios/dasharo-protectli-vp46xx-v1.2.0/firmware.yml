@@ -36,5 +36,9 @@ expected:
     - {cpuid: "000A0660", platform_mask: "0x80", revision: "0xF8"}
     - {cpuid: "000A0661", platform_mask: "0x80", revision: "0xF8"}
   fsp: ["9.0.123.32", "9.2.123.32"]
+  # 以下四項依據：2026-11-11 公開範例試掃（CBFS 的 revision／build_info 檔），git 修訂與提供的 coreboot 原始碼包相符
+  coreboot_version: protectli_vault_jsl_v0.9.2
   coreboot_revision: add9d7206e30
+  dasharo_version: v1.2.0
+  coreboot_build_date: "2024-03-13"
   edk2_revision: 2a15268b36cc

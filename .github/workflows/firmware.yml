@@ -4,8 +4,10 @@ on:
   pull_request:
     paths:
       - 'firmware/**'
-      - 'pipeline/firmware-fetch.sh'
-      - 'pipeline/lib/firmware_fetch.py'
+      - 'pipeline/firmware-*.sh'
+      - 'pipeline/firmware-expect.py'
+      - 'pipeline/lib/firmware_*.py'
+      - 'tools/cra/**'
       - '.github/workflows/firmware.yml'
   workflow_dispatch:
 
@@ -36,7 +38,7 @@ jobs:
       - name: 下載全部樣本並核對 sha256／大小
         run: |
           pipeline/firmware-fetch.sh firmware/*/*/firmware.yml --out "$RUNNER_TEMP/firmware-dl" | tee "$RUNNER_TEMP/fetch.log"
-      - name: 摘要
+      - name: 摘要（下載）
         if: always()
         run: |
           {
@@ -45,3 +47,27 @@ jobs:
             cut -f2- "$RUNNER_TEMP/fetch.log" 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # 解析 BIOS 樣本（只讀、不執行下載檔）→ SBOM，再核對 firmware.yml 的 expected。
+      # ATTENTION／GAP（firmware-bios.sh 退出碼 2）不算失敗；FAIL、expected 的 MISMATCH／MISSING、沒有可解析的檔案才會讓這步失敗。
+      # 每一步輸出的狀態行才是結果；這個 job 綠燈不代表韌體安全。
+      - name: 解析 BIOS 樣本並核對 expected
+        run: |
+          rc=0
+          pipeline/firmware-ci.sh "$RUNNER_TEMP/firmware-dl" "$RUNNER_TEMP/firmware-work" "$RUNNER_TEMP/firmware-out" "$RUNNER_TEMP/firmware-summary.md" || rc=$?
+          {
+            echo
+            echo '### BIOS 解析與 expected 比對'
+            echo
+            cat "$RUNNER_TEMP/firmware-summary.md"
+            echo
+            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。這不是整體通過或安全的結論。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: 上傳 SBOM 與解析結果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-sbom
+          path: ${{ runner.temp }}/firmware-out
+          if-no-files-found: warn
+          retention-days: 14
