@@ -114,13 +114,14 @@ def fsp_blob(rev=(9, 0, 123, 32), ctype=2, image_id=b"$CMLFSP$", base=0xFF76B000
     d[0:4] = b"_FVH"
     h = 0x94
     d[h:h + 4] = b"FSPH"
-    struct.pack_into("<I", d, h + 4, 0x48)
+    struct.pack_into("<I", d, h + 4, 0x50 if ext else 0x48)       # ExtendedImageRevision（+0x4C）只在 header ≥ 0x50 時存在
     d[h + 10], d[h + 11] = 0x21, 4
     struct.pack_into("<I", d, h + 12, (rev[0] << 24) | (rev[1] << 16) | (rev[2] << 8) | rev[3])
     d[h + 16:h + 24] = image_id
     struct.pack_into("<II", d, h + 24, total, base)
     struct.pack_into("<HH", d, h + 32, 0, (ctype << 12) | 3)
-    struct.pack_into("<H", d, h + 0x44, ext)
+    struct.pack_into("<I", d, h + 0x44, 0x1E2)                   # FspSiliconInitEntryOffset（真實 FSP-S 是非 0）
+    struct.pack_into("<H", d, h + 0x4C, ext)
     return bytes(d)
 
 
@@ -754,7 +755,7 @@ def test_scan_does_not_hash_rejected_candidates(monkeypatch):
 
 
 def test_fsp_extended_image_revision_noted():
-    plain = cb.parse_fsph(fsp_blob())
+    plain = cb.parse_fsph(fsp_blob())                # header 0x48、+0x44 是非 0 的 silicon-init 入口：不能誤讀成擴充版本
     assert plain["extended_image_revision"] is None
     ext = cb.parse_fsph(fsp_blob(ext=0x0102))
     assert ext["extended_image_revision"] == "0x0102" and ext["revision"] == "9.0.123.32"

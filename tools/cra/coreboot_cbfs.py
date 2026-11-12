@@ -619,7 +619,7 @@ def parse_config(raw):
 
 def parse_fsph(d):
     """解壓後的 FSP 檔案 → dict 或 None。`FSPH` 要在前 FSP_SEARCH bytes 內，欄位要合理（找到第一個合理的）。"""
-    d = bytes(d[:FSP_SEARCH + 0x48])
+    d = bytes(d[:FSP_SEARCH + 0x50])
     p = 0
     while True:
         i = d.find(b"FSPH", p, FSP_SEARCH + 4)
@@ -633,9 +633,10 @@ def parse_fsph(d):
         comp_attr = struct.unpack_from("<H", d, i + 34)[0]
         if not 0x20 <= hl <= 0x200 or not iid or not all(32 <= c < 127 for c in iid) or not 1 <= comp_attr >> 12 <= 4:
             continue
-        # ExtendedImageRevision（+0x44，u16；較新的 FSP header 才有）：非 0 時 revision／build 的高位元組在這裡，
-        # 只用 ImageRevision 算出的版本會偏低。怎麼合併依 header 版本而定，這裡不猜，只記原始值（呼叫端加說明）
-        ext = struct.unpack_from("<H", d, i + 0x44)[0] if hl >= 0x48 and i + 0x46 <= len(d) else None
+        # ExtendedImageRevision（+0x4C，u16；header 長度至少 0x50 的較新 FSP 才有。+0x44 是 FspSiliconInitEntryOffset、
+        # +0x48 是 FspMultiPhaseSiInitEntryOffset——依 coreboot src/drivers/intel/fsp2_0/include/fsp/info_header.h）：
+        # 非 0 時 revision／build 的高位元組在這裡，只用 ImageRevision 算出的版本會偏低。怎麼合併不猜，只記原始值（呼叫端加說明）
+        ext = struct.unpack_from("<H", d, i + 0x4C)[0] if hl >= 0x50 and i + 0x4E <= len(d) else None
         return {"extended_image_revision": f"0x{ext:04x}" if ext else None, "offset_in_file": i, "header_length": hl, "spec_version": f"{spec >> 4}.{spec & 15}", "header_revision": hrev,
                 "revision": f"{rev >> 24}.{(rev >> 16) & 255}.{(rev >> 8) & 255}.{rev & 255}", "image_id": iid.decode("ascii").strip(),
                 "image_size": size, "image_base": f"0x{base:08x}", "component_attribute": f"0x{comp_attr:04x}",

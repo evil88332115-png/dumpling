@@ -311,3 +311,23 @@ def test_gop_driver_truncated_and_big_inputs_do_not_crash():
     for n in range(0, len(good), 97):
         iv.gop_driver(good[:n])                                                                         # 任何截斷都不丟例外
     assert iv.pe_info(b"MZ" + b"\0" * (iv.MAX_PE)) is None                                             # 超過上限不解析
+
+
+def test_banner_search_is_linear_on_crafted_rom():
+    """滿是 "Intel(R)"、沒有 "SVGA BIOS" 的 ROM：舊的 regex 有 128 倍放大；現在要很快。"""
+    import time
+    import intel_vbios as iv
+    rom = b"Intel(R)" * (2 << 20)                      # 16 MiB
+    t = time.monotonic()
+    assert iv.find_banner(rom) is None
+    rom2 = (b"Intel(R)" * 200 + b"SVGA BIOS") * 2000   # 很多結尾，但中間都太長或不是可列印字元以外的情況
+    iv.find_banner(rom2)
+    assert time.monotonic() - t < 2.0
+
+
+def test_banner_found_and_bounds():
+    import intel_vbios as iv
+    assert iv.find_banner(b"xx Intel(R) ICL Mobile/Desktop PCI Accelerated SVGA BIOS\0") == b"Intel(R) ICL Mobile/Desktop PCI Accelerated SVGA BIOS"
+    assert iv.find_banner(b"Intel(R)SVGA BIOS") is None                       # 中間至少 1 個字元
+    assert iv.find_banner(b"Intel(R) " + b"a" * 200 + b" SVGA BIOS") is None   # 中間超過 MAX_TEXT
+    assert iv.find_banner(b"Intel(R) a\x01b SVGA BIOS") is None                # 中間有不可列印字元

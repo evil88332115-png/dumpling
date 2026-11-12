@@ -91,7 +91,7 @@ CBFS 結構壞掉、壓縮解不開、超過上限、payload segment 範圍超�
 ## 還沒做或不確定
 
 - **LZ4 沒有真實樣本**：Dasharo 的 CBFS 全是 LZMA。LZ4 解碼器只用測試自組的 frame 驗證（含惡意輸入與隨機輸入），尚未對真實 coreboot LZ4 CBFS 核對。
-- FSP 的 `ExtendedImageRevision`（HeaderRevision ≥ 4 的欄位）沒有讀，版本只用 `ImageRevision`；ComponentAttribute 的 bit 0／1（build／release type）依 EAS 的描述，未在多個樣本上核對。
+- FSP 的 `ExtendedImageRevision`（+0x4C，header 長度 ≥ 0x50 才有；+0x44／+0x48 是 SiliconInit／MultiPhaseSiInit 入口偏移，依 coreboot `info_header.h`）：非 0 時只記原始值與 note（版本可能偏低），不猜怎麼合併；版本仍只用 `ImageRevision`。Dasharo 的 FSP header 長度是 0x48，沒有這個欄位；ComponentAttribute 的 bit 0／1（build／release type）依 EAS 的描述，未在多個樣本上核對。
 - VBT 版本寫成 header 版本 ÷ 100（`100` → `1.00`），依 Linux i915／coreboot 的結構註解（「decimal」）與 i915 的用法；原始值另記在 property。
 - edk2 `CONFIG_EDK2_TAG_OR_REV` 是上游 tag（如 `edk2-stable202402`）時，目前仍不填 version（GAP），只記 property。
 - 沒有 `config` 時 payload 的身分（edk2 或其他）不知道，只記 `sca-center:note`。

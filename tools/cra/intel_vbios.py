@@ -43,7 +43,8 @@ GOP_NAME_WINDOW = 0x200                # 驅動名稱之後找版本字串的範
 EFI_SUBSYSTEMS = {10: "EFI application", 11: "EFI boot service driver", 12: "EFI runtime driver", 13: "EFI ROM"}
 PE_MACHINES = {0x8664: "x64", 0x14C: "ia32", 0xAA64: "arm64"}
 
-BANNER_RE = re.compile(rb"Intel\(R\)[ -~]{1,%d}?SVGA BIOS" % MAX_TEXT)
+BANNER_HEAD, BANNER_TAIL = b"Intel(R)", b"SVGA BIOS"
+MAX_BANNER_TAILS = 1024          # 最多看幾個 "SVGA BIOS"（構造的 ROM 可以塞滿）
 BUILD_RE = re.compile(rb"Build Number:[ \t]*(\d{1,6})[ \t]+PC[ \t]+(\d{1,3}\.\d{1,3})[ \t]+(\d{2}/\d{2}/\d{4}[ \t]+\d{2}:\d{2}:\d{2})")
 BUILD_PREFIX = b"Build Number:"
 GOP_VERSION_RE = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6}){0,3}")
@@ -76,15 +77,33 @@ def _text(b):
     return b.decode("ascii", "replace")
 
 
+def find_banner(rom):
+    """`Intel(R) … SVGA BIOS`（中間 1～MAX_TEXT 個可列印 ASCII）→ bytes 或 None。
+    先找結尾的 "SVGA BIOS"，再往前最多 MAX_TEXT＋8 bytes 找 "Intel(R)"：工作量是線性的。
+    （用 regex `Intel\(R\)[ -~]{1,128}?SVGA BIOS` 對滿是 "Intel(R)" 的構造 ROM 會有 128 倍放大。）"""
+    j, seen = rom.find(BANNER_TAIL), 0
+    while j >= 0 and seen < MAX_BANNER_TAILS:
+        seen += 1
+        lo = max(0, j - MAX_TEXT - len(BANNER_HEAD))
+        i = rom.find(BANNER_HEAD, lo, j)
+        while i >= 0:
+            mid = rom[i + len(BANNER_HEAD):j]
+            if 1 <= len(mid) <= MAX_TEXT and all(0x20 <= c <= 0x7E for c in mid):
+                return rom[i:j + len(BANNER_TAIL)]
+            i = rom.find(BANNER_HEAD, i + 1, j)
+        j = rom.find(BANNER_TAIL, j + 1)
+    return None
+
+
 def legacy_info(rom):
     """Intel legacy VBIOS 的 ROM 位元組 → dict：
     banner（橫幅或 None）、version（`建置編號 PC 版本` 或 None）、build_number、pc_version、build_time（原樣的日期時間字串）、
     version_note（version 是 None 的原因，否則 None）、vbt（內嵌的 VBT：{offset, signature, version, bdb_version, vbt_size}，沒有則 None）。
     Build Number 行有多個、內容不同 → version 是 None（分不出來，不猜）。"""
     rom = bytes(rom)
-    m = BANNER_RE.search(rom)
+    banner = find_banner(rom)
     builds = {mm.groups() for mm in BUILD_RE.finditer(rom)}
-    r = {"banner": _text(m.group(0)) if m else None, "version": None, "build_number": None, "pc_version": None, "build_time": None,
+    r = {"banner": _text(banner) if banner else None, "version": None, "build_number": None, "pc_version": None, "build_time": None,
          "version_note": None, "vbt": None}
     if len(builds) == 1:
         num, pc, when = next(iter(builds))
