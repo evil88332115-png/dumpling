@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 18:02 -0500（C0）
+最後更新：2026-11-13 07:05 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -94,11 +94,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6 轉接器（C0 指示不等 M2 合併，從 origin/wp1/m2 開分支）。已完成三個 platform.yml、三個示範專案、build／assemble、Rockchip raw-sectors（Radxa 實測兩個區段與官方 deb、rootfs 一致）；scan.sh 等 C1 的 platform_scan.py、build.mode none 的 workflow、scan-flash-package 的 generic／--arch、FILE_ROLES metadata
-- 分支／PR／commit：`wp7/adapters`（最後 commit eae76d2，從 origin/wp1/m2）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
+- 目前在做：M6 轉接器。完成：三個 platform.yml、三個示範專案、build／assemble、Rockchip raw-sectors（Radxa 實測一致）、sbom_augment（原始磁區元件、OMV 原始碼併入）、支援期資料表追加平台 EOL 11 筆（D-033）。scan.sh 等 C1 的 platform_scan.py 等介面
+- 分支／PR／commit：`wp7/adapters`（最後 commit 8e4ced9，從 origin/wp1/m2）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
 - 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；任務：審查 raw_sectors.py、_shared/disk_image.py 與測試；分支 wp7/adapters；狀態：進行中）
-- CI：無；本機背景工作：AI NAS 示範專案的 fetch＋assemble 實測（輸出 $AGENT_TMP/out/ai-nas-demo/，紀錄 $AGENT_TMP/out/ai-nas.log）
-- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；wp7/adapters 上述內容與 26 項單元測試（tests/run.d/c4-wp7.sh）
-- 下一步：scan.sh（三平台；ai-nas 另掃 OMV 原始碼併進產品 SBOM，元件標來源與 commit、合併 dependencies、原始碼與正式 deb 是否相同標 NOT_ASSESSED）；C1 的 M2 介面推上來後併進來接上；隨 M6 交平台 OS EOL 資料（D-033）
-- 卡住／等決定：等 C1（platform_scan.py、workflow 的 build.mode none／handoff、scan-flash-package generic 與 --arch、FILE_ROLES metadata）
+- CI：無；本機背景工作：無（實測輸出留在 $AGENT_TMP/out/ 與 radxa-out/，驗證代理結束後清掉）
+- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；wp7/adapters 上述內容與 33 項單元測試（tests/run.d/c4-wp7.sh）；PROVENANCE 加 C4 節
+- 下一步：scan.sh（三平台；ai-nas 另掃 OMV 原始碼併進產品 SBOM；rockchip 把 raw-sectors 元件併進 SBOM；rpi-connect 在摘要標「對外連線服務」）；C1 的 M2 介面推上來後併進來接上；FILE_ROLES metadata 出來後補官方清單檔
+- 卡住／等決定：等 C1（platform_scan.py、workflow 的 build.mode none／handoff、scan-flash-package generic 與 --arch、FILE_ROLES metadata）；等 C0 決定磁區 U-Boot 要不要給 CPE（目前不給、標 NOT_ASSESSED）
 <!-- END C4 -->
