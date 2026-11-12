@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 13:43 -0500（C0）
+最後更新：2026-11-12 13:43 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -23,7 +23,7 @@
 
 - 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
 - 分支／PR／commit：
-  - `wp1/m2`：M2 整合分支，4bc43b6（main cd62514＋P 軌＋gpu-firmware 空對照表＋L 軌）
+  - `wp1/m2`：M2 整合分支，54dbf48（main b6d341a（含 C2 M3）＋P 軌＋gpu-firmware 空對照表＋L 軌；併 main 無衝突）
   - `wp1/m2-layers`：L 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-jetson`：J 軌（從 wp1/m2 fdabd22 開）
