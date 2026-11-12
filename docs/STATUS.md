@@ -43,7 +43,7 @@
 - 預定 PR（D-014，一個可測的功能一個 PR）：
   1. `wp3/firmware-samples`：樣本清單＋下載並核對 sha256（`pipeline/firmware-fetch.sh`、`tests/run.d/c2-firmware.sh`、`firmware.yml` workflow）
   2a. `wp3/bios-sbom`：複製 x86_firmware.py（D-015）→ `tools/cra/`；Intel ME／微碼、vBIOS 標 NOT_ASSESSED、讀不到版本標 GAP、確定的才填 CPE；`pipeline/firmware-bios.sh`；`tests/run.d/c2-x86-firmware.sh`
-  2b. BIOS 成品端 UEFI 解開（需要 C1 的 uefi_image.py，已請 C0 協調）＋CBFS／FSP（BIOS 試掃原型）
+  2b. BIOS 成品端 UEFI 解開（D-016：等 C1 M1 合併後用 `tools/cra/uefi_image.py`，不正式化 fv_walk.py）＋CBFS／FSP（BIOS 試掃原型）
   3. `wp4/vbios`：獨立 vBIOS＋BIOS 內 Intel GOP／VBT／legacy VBIOS，公告比對 NOT_ASSESSED
   4. `wp3/firmware-dt`：firmware workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
 - 代理：
@@ -51,7 +51,7 @@
   - 代理 B（寫程式，Sonnet 5.5 high）：PR 2a，分支 `wp3/bios-sbom`，狀態：進行中
 - CI：無（等代理開 PR）
 - 下一步：兩個 PR 綠燈後通知 C0 派驗證代理；PR 1 合併後，PR 2a 之後的 PR 加上真實樣本的 CI 驗收（Dasharo ME 14.0.47.1558、微碼 0xF8）
-- 卡住／等決定：uefi_image.py 誰複製（D-015(3)，已問 C0：等 C1，或由 C2 代為複製）
+- 卡住／等決定：PR 2b 等 C1 M1（uefi_image.py，D-016）；其他無
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
