@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:24 -0500（C2）
+最後更新：2026-11-12 09:26 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -51,25 +51,25 @@
 
 - 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
 - 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX）
-- **整合分支 `wp3/m3` 7e40fe7**（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
+- **整合分支 `wp3/m3` 0a176e0**（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
   - coreboot CBFS（FMAP、LZMA／LZ4、coreboot 版本／config、FSP、VBT、SELF payload）＋預驗修正 0f28182（ReDoS、掃描雜湊放大、解壓失敗計量、FSP ExtendedImageRevision）
   - AMI PFAT 解封裝＋預驗修正（清單數字欄位崩潰、MAX_TOTAL 跨巢狀、檔名截短）；fetch 測試補強、run.d venv 快取、firmware.yml pipefail 修正（綠 run 43229479139／故意 sha256 不符紅 run 43229520867）
   - 真實樣本 CI 驗收 `pipeline/firmware-expect.py`（綠 run 43231626732：Dasharo 11 項 OK、NUC 1 項 OK；改錯 ME 版本紅 run 43231826497）
   - vBIOS：NVIDIA DP 更新工具**沒有完整 vBIOS**（只有 3 組 GPU 家族 GOP 範本，佔位版本字串）；合成獨立 vBIOS（`tools/cra/tests/synthetic_vbios.py`）端到端產 SBOM；Intel legacy VBIOS 辨識（NUC 樣本 `Build Number: 1003 PC 14.34`）；`intel_vbt.py` 共用；`gop_driver()`（GOP 版本只讀得到 build 1070）待接 FV 走訪
   - 本機 c2 測試 279 passed、0 skip；Dasharo 16 個元件不變。CI：8688cd4 的 tests 43232541990／firmware 43232547319 綠；4183a96 的 tests 43233831760、firmware 43233837796 已觸發
   - 供應商 SBOM 品質檢查（a2ed40f，已併入）：3mdeb Dasharo SBOM 範例 → ATTENTION（10 元件、1 缺版本、5 缺 cpe、sbomqs v2.1.3 分數 4.3 僅供參考）；sbomqs 版本與 sha256 固定在 `pipeline/lib/tools.lock`。CI：firmware 43234922758、tests 43234916860 綠
-- 進行中的分支：`wp3/firmware-dt`（從 m3 開出，worktree `$AGENT_TMP/dumpling-wt-c2-dt`）：韌體 SBOM → DT 的準備（專案名稱規則、SBOM 正規化、expected 兩種格式、report）。C1 介面已定案（`origin/wp1/m1-tools-pilot`）：上傳用 `tools/pilot/sca-scan --sbom`（含 C-grype），順序 up→wait→env→sca-scan→dt-verify verify→down，成功看 status.tsv＋`scan-status-check.py`；M1 合併前只在暫存試接，不改 firmware.yml
+  - 韌體 SBOM → DT 的準備（4781bc5，已併入）：`pipeline/lib/firmware_dt.py` prep／expected／report。專案名稱 `firmware-<kind>[-synthetic]-<slug>`、SBOM 正規化（metadata.component、bom-ref／dependencies 檢查）、expected 兩種（C1 dt-verify 格式＋介面無關的）；report 漏洞欄以 Grype（sca-scan C-grype）為主、DT 只收件留存。暫存試接 C1 pilot 分支：sca-scan A／B／C 階段 OK、C-sbomgate NOT_ASSESSED（firmware 不算套件，預期）、dt-verify 吃得懂 expected。workflow job 只有草稿（`docs/notes/c2-firmware-dt.md`），等 M1
 - M3 剩下要做的（等 C1 M1，C1 估 1～2 小時轉正式 PR）：
   - BIOS 成品端 UEFI FV 解開：用 `tools/cra/uefi_image.py`（D-016）→ 接 Intel GOP（`gop_driver()`）／AMI 映像裡的 VBT／legacy VBIOS
   - NVIDIA gpu-firmware 公告比對：用 C1 的 `tools/pilot/lib/nvidia_bulletins.py`，沒對到標 NOT_ASSESSED
   - 上傳臨時 DT＋Grype（BIOS SBOM、vBIOS SBOM、供應商 SBOM）
 - 代理：
   - 代理 G（寫程式，Sonnet 5.5 medium）：`wp3/supplier-sbom`，狀態：完成
-  - 代理 H（寫程式，Sonnet 5.5 medium）：`wp3/firmware-dt`，狀態：進行中
+  - 代理 H（寫程式，Sonnet 5.5 medium）：`wp3/firmware-dt`，狀態：完成
   - 預驗 `wp3/m3` 4183a96（完成，不通過）：cbfs／pfat 的修正複驗都過；必修 1：我上一輪加的 FSP ExtendedImageRevision 讀錯偏移（+0x44 是 SiliconInit 入口，應為 +0x4C、header ≥ 0x50），Dasharo FSP-S 多出假 note；中等 1：Intel VBIOS 橫幅 regex 128 倍放大。**已在 7e40fe7 修好**（依 coreboot info_header.h 逐欄核對；橫幅改線性搜尋；PROVENANCE 措辭）
   - 預驗代理（驗證，Sonnet 5.5 high）：`wp3/m3` 7e40fe7（複驗 7e40fe7＋預驗供應商 SBOM），狀態：進行中
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
-- 下一步：預驗 m3 結果 → 有問題就修；已問 C0 M1 時程與是否先串 DT 上傳；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
+- 下一步：等預驗 7e40fe7＋供應商 SBOM 的結果；C1 M1 合併後：merge main → 接 firmware.yml 的 firmware-dt job（照草稿）＋uefi_image.py 接 GOP／AMI VBT／legacy VBIOS＋NVIDIA 公告比對 → CI 跑通 → M3 開 PR（附各輪預驗結論）→ 驗證 → 通知 C0
 - 卡住／等決定：UEFI 解開、GOP、公告比對、DT 上傳等 C1 M1。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`dumpling-tmp-c2-pfat`、`dumpling-tmp-c2-verify-cbfs` 被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
