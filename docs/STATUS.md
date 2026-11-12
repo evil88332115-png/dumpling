@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 10:50 -0500（C1）
+最後更新：2026-11-12 10:51 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -85,7 +85,7 @@
   - 代理 J（寫程式，Sonnet 5.5 medium）：`wp3/m3-dt`，firmware.yml 的 firmware-dt job＋本機 Docker 臨時 DT 端到端（三種樣本）＋vBIOS 公告 NOT_ASSESSED 文字，狀態：進行中
   - 代理 K（寫程式，Sonnet 5.5 high）：`wp3/m3-gop`，用 uefi_image.py 的 Scan 子類別走訪 FV（不改 C1 檔）→ Intel GOP／VBT／legacy VBIOS 元件，NUC／Dasharo／OVMF 真樣本，狀態：進行中
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
-- 下一步：等代理 J、K → 併入 wp3/m3；C0 合併 M1 後 merge main → CI 跑通（tests、firmware 含 DT job）→ 預驗 → M3 開 PR（附各輪預驗結論）→ 驗證 → 通知 C0
+- 下一步：等代理 J、K → 併入 wp3/m3；C0 合併 M1 後 merge main → CI 跑通（tests、firmware 含 DT job）→ 預驗 → M3 開 PR（附各輪預驗結論；PR 說明列出依賴的 uefi_image 內部名稱 Scan／scan_bytes／parse_fvs／Stop／MAX_*，C0 已同意子類別做法，代理 K 加契約測試）→ 驗證 → 通知 C0
 - 卡住／等決定：CI 上的 DT／uefi_image 測試要等 M1 進 main。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`（約 22 MB）等被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
