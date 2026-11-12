@@ -25,6 +25,9 @@ files:
     sha256: 590bbf0244e81e689ce325304c45fe20ac2d5ad9682470e3bc84352e2b1970fd
     size: 106544
     role: source
+analyze:
+  # CI 解析前要先從 package 取出的成員（只取這一個一般檔案，不執行任何內容）；沒列的 image／package 直接整檔解析
+  - {from: ovmf_2024.02-2ubuntu0.10_all.deb, member: usr/share/OVMF/OVMF_CODE_4M.fd}
 license:
   name: 各元件開源授權（edk2 主體 BSD-2-Clause-Patent；內含 OpenSSL 等，見套件內 copyright 檔）
   url: https://launchpad.net/ubuntu/+source/edk2/2024.02-2ubuntu0.10
