@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:21 -0500（C1）
+最後更新：2026-11-12 22:23 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -86,10 +86,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：尚未開始（開始條件：C1 的 M2，平台介面與開案範本完成）
-- 分支／PR／commit：—
+- 目前在做：WP7 第一階段（不依賴 M2）：PLAN「開案範本與平台介面」第 3 段的公開示範資料清單與平台研究
+- 分支／PR／commit：`wp7/platform-samples`；PR 尚未開（D-020，里程碑完成才開）；最後 commit 1f329b9
 - 代理：無
-- CI：無
-- 下一步：等 M2
-- 卡住／等決定：無
+- CI：無；本機背景工作：下載並核對 Rockchip（Radxa ROCK 5B rsdk-r6）與 AI NAS（Debian 13 generic amd64 20261111-2659、OMV 8.3.1 ISO）樣本的 sha256（下載後即刪，不解開）
+- 已完成：`docs/platforms-research.md` 初稿；`platform-samples/README.md`；Raspberry Pi OS Lite 2026-10-06 的 `samples.yml`（8 個檔案，跟官方 sha256／dsc／Packages 索引核對相符）
+- 下一步：寫 Rockchip 與 AI NAS 的 `samples.yml`；整理研究文件的 5 個待決定事項給 C0；平台轉接器等 C1 的 M2
+- 卡住／等決定：研究文件「待決定」5 項（待整理給 C0）
 <!-- END C4 -->
