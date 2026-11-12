@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 07:55 -0500（C0）
+最後更新：2026-11-12 07:55 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -19,11 +19,17 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-- 目前在做：尚未開始（開始條件：WP0 完成）
-- 分支／PR／commit：—
-- 代理：無
-- CI：無
-- 下一步：照 PLAN「工作包與對話分工」C1 列；先做 M1（工具複製＋PROVENANCE、臨時 DT 上傳測試 SBOM）
+- 目前在做：M1（PLAN「里程碑」M1、「可以沿用的東西」）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；依 D-014 合成一個 PR
+- 分支／PR／commit：
+  - `wp1/m1-tools`（工具複製＋PROVENANCE＋tests/run.sh；最後要開的 PR）——尚未推送
+  - `wp1/m1-dt`（臨時 DT＋測試 SBOM＋dt-smoke workflow；只用 draft PR 跑 CI，最後併進 `wp1/m1-tools`）——尚未推送
+  - 來源：sca-center `origin/main` 25fa89a
+- 代理：
+  - 寫程式 A：工具清理複製進 `tools/`＋`docs/PROVENANCE.md`＋單元測試，分支 `wp1/m1-tools`，Sonnet 5.5／high，進行中
+  - 寫程式 B：`pipeline/dt-ephemeral.sh`＋`pipeline/dt-compose.yaml`＋`tests/fixtures/sbom/`＋`.github/workflows/dt-smoke.yml`，分支 `wp1/m1-dt`，Sonnet 5.5／medium，進行中
+  - 驗證：尚未開（兩個寫程式代理完成、合併分支後開）
+- CI：無（等代理開 draft PR）
+- 下一步：等 A、B 推送 → 把 `wp1/m1-dt` 併進 `wp1/m1-tools` → 開驗證代理 → 交 C0 合併 → M1 完成通知 C0（C2 的上傳 DT 等這個）
 - 卡住／等決定：無
 <!-- END C1 -->
 
