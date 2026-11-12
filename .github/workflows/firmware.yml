@@ -5,6 +5,8 @@ on:
     paths:
       - 'firmware/**'
       - 'pipeline/firmware-*.sh'
+      - 'pipeline/install-tool.sh'
+      - 'pipeline/lib/tools.lock'
       - 'pipeline/firmware-expect.py'
       - 'pipeline/lib/firmware_*.py'
       - 'tools/cra/**'
@@ -36,6 +38,7 @@ jobs:
       - name: 確認 PyYAML 可用
         run: python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
       - name: 下載全部樣本並核對 sha256／大小
+        id: fetch
         run: |
           pipeline/firmware-fetch.sh firmware/*/*/firmware.yml --out "$RUNNER_TEMP/firmware-dl" | tee "$RUNNER_TEMP/fetch.log"
       - name: 摘要（下載）
@@ -63,6 +66,38 @@ jobs:
             echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。這不是整體通過或安全的結論。_'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
+      # 供應商 SBOM（kind: sbom）的品質檢查：sbomqs 版本與 sha256 固定在 pipeline/lib/tools.lock，核對後才安裝。
+      # SBOM 檔案只當資料讀取。只有 FAIL（基本檢查失敗）讓這步失敗；ATTENTION／GAP 不算失敗，sbomqs 分數不影響狀態。
+      - name: 安裝固定版本的 sbomqs
+        if: always() && steps.fetch.conclusion == 'success'
+        run: |
+          exe=$(pipeline/install-tool.sh sbomqs "$RUNNER_TEMP/bin")
+          echo "SBOMQS=$exe" >> "$GITHUB_ENV"
+          "$exe" version 2>&1 | grep -E 'GitVersion|GitCommit'
+      - name: 供應商 SBOM 品質檢查
+        if: always() && steps.fetch.conclusion == 'success'
+        run: |
+          rc=0
+          pipeline/firmware-sbom-check.sh "$RUNNER_TEMP"/firmware-dl/sbom/*/*.sbom.json --out "$RUNNER_TEMP/sbom-check" | tee "$RUNNER_TEMP/sbom-check.log" || rc=$?
+          {
+            echo
+            echo '### 供應商 SBOM 品質檢查'
+            echo
+            echo '| 狀態 | 檔案 | 說明 |'
+            echo '|---|---|---|'
+            awk -F'\t' '{ gsub(/\|/, "\\|", $4); print "| " $2 " | " $3 " | " $4 " |" }' "$RUNNER_TEMP/sbom-check.log"
+            echo
+            echo '_狀態只反映基本檢查（版本、purl／cpe）；sbomqs 分數僅供參考、沒有設門檻；漏洞比對 NOT_RUN。這不是整體通過或安全的結論。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: 上傳供應商 SBOM 品質檢查結果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-sbom-check
+          path: ${{ runner.temp }}/sbom-check
+          if-no-files-found: warn
+          retention-days: 14
       - name: 上傳 SBOM 與解析結果
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

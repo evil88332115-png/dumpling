@@ -252,6 +252,22 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(st, "FAIL")
         self.assertIn("重複", msg)
 
+    def test_kind_sbom_accepted_and_fetched_under_sbom_dir(self):
+        self.write(manifest_text().replace("kind: bios", "kind: sbom").replace("role: image", "role: sbom"))
+        st, _, _ = self.run_one()
+        self.assertEqual(st, "OK")
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "sbom", "slug", "a.bin")))
+
+    def test_role_sbom_only_with_kind_sbom(self):
+        self.write(manifest_text().replace("role: image", "role: sbom"))          # bios + sbom
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("role: sbom", msg)
+        self.write(manifest_text().replace("kind: bios", "kind: sbom"))           # sbom + image
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("role: sbom", msg)
+
     def test_kind_escape_fails_and_creates_nothing_outside(self):
         for kind in ("../../x", "bios/../..", "/tmp", "firmware", ""):
             with self.subTest(kind=kind):
@@ -267,7 +283,7 @@ class RepoManifestsTest(unittest.TestCase):
     def test_all_manifests_valid(self):
         import yaml
         paths = glob.glob(os.path.join(ROOT, "firmware", "*", "*", "firmware.yml"))
-        self.assertGreaterEqual(len(paths), 4)
+        self.assertGreaterEqual(len(paths), 6)
         for p in paths:
             with open(p, encoding="utf-8") as fh:
                 doc = yaml.safe_load(fh)

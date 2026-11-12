@@ -1,0 +1,20 @@
+kind: sbom
+vendor: NovaCustom／3mdeb（Dasharo）
+model: NovaCustom NS5x TGL（Dasharo 供應商 SBOM 範例）
+firmware_version: v1.6.0
+ibv: coreboot+edk2
+status: ok
+files:
+  - name: novacustom_ns5x_tgl_v1.6.0.sbom.json
+    url: https://dl.3mdeb.com/open-source-firmware/Dasharo/novacustom_ns5x_tgl/uefi/v1.6.0/novacustom_ns5x_tgl_v1.6.0.sbom.json
+    sha256: 5c42344d09932c809b5968552842e0ff540a749c11f0e199ed0858d6e76a44ae
+    size: 9940
+    role: sbom
+license:
+  name: 未聲明
+  url: https://docs.dasharo.com/
+  note: 檔案沒有授權欄位、Dasharo 文件站未見明確聲明；只在 CI 下載讀取、不重新散布。
+notes: |
+  PLAN B 段「第二條路」的公開韌體 SBOM 範例：3mdeb 每個 Dasharo 版本旁附的 CycloneDX 1.4 SBOM（10 個元件）。
+  用途是驗證供應商 SBOM 的品質檢查（firmware-sbom-check.sh），不是這個型號的掃描結果。
+  部分元件沒有 CPE 或版本，品質檢查預期回 ATTENTION。
