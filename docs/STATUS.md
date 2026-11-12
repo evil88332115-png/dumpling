@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 11:26 -0500（C2）
+最後更新：2026-11-12 11:28 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -22,17 +22,18 @@
 
 - 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
 - 分支／PR／commit：
-  - `wp1/m2`：M2 整合分支（從 main 0e706cb 開）；子分支做完併進來；M2 完成後開一個 PR（D-020）
-  - `wp1/m2-platform`：P 軌（從 0e706cb 開）
+  - `wp1/m2`：M2 整合分支，dbb7263（main cd62514＋P 軌）；子分支做完併進來；M2 完成後開一個 PR（D-020）
+  - `wp1/m2-layers`：L 軌（從 wp1/m2 dbb7263 開）
+  - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-spike`：試驗分支（不合併）
   - M1 的 worktree 與子分支（m1-dt、m1-fix、m1-tools-pilot、m1-tools）已清掉
 - 代理：
   - 寫程式 S（M2 試驗）：`wp1/m2-spike`，`.github/workflows/m2-spike.yml` 量測 arm runner 清理、L4T 下載＋快取、原生編譯核心＋樹外模組；Sonnet 5.5／high；進行中（build run 43246860803）
-  - 寫程式 P（平台介面與開案範本）：`wp1/m2-platform`；project.yml（含 OS 歸屬欄位）、sources.yml（files[] 沿用 firmware.yml）、templates/project/、pipeline/new-project.sh、pipeline/platforms/ 四步介面＋原始磁區掛點、dispatcher、project-info、pipeline/lib/fetch_verify.py（從 firmware_fetch 抽出，行為與簽名不變，不改 C2 的檔）、Jetson 轉接器骨架、projects/orin-nano-demo/、docs/PLATFORM-INTERFACE.md；另：scan-flash-package.sh 平台改由明確參數傳入、沒給就 GAP；Sonnet 5.5／medium；進行中
-  - 預定 L（依層分開 bsp／os／host-tool、P1 只放 bsp、DT 分兩段）：S 完成空出名額後開，high
+  - 寫程式 P（平台介面與開案範本）：完成，CI run 43256946338 綠燈。契約見 `docs/PLATFORM-INTERFACE.md`：`pipeline/platform.sh <validate|fetch|build|assemble|scan|raw-sectors> <專案資料夾> <版本>`，結束碼 OK 0／FAIL 1／GAP 3／NOT_RUN 4／用法 64；project.yml 的 `os_responsibility: ours|customer|upstream-vendor`；sources.yml 是 `releases.<版本>.files[]`（gap、sha1、commit＋repo）；platform.yml 的 `layers`（bsp 套件名稱清單、host-tool 路徑、default os）；`pipeline/lib/project_config.py` 的 `classify_package`／`classify_path`；fetch_verify.py 簽名同 firmware_fetch；scan-flash-package.sh 改成明確 `--platform`、沒給就 GAP。待確認見該文件第 8 節（r39.2.0 public_sources.tbz2 的 sha256 尚未記錄＝gap）
+  - 寫程式 L（依層分開）：`wp1/m2-layers`；分層模組（套件名稱／路徑／own_software → bsp、host-tool、os、unknown）、cra_report／report_package 加「層」欄位、P1 判斷表只放 bsp（os_responsibility=ours 時含 os；沒給時 GAP＋保守）、host-tool 不進漏洞清單、SBOM 依層拆成兩個 DT 專案、Jetson fixture 各層數量當標準答案起點；Sonnet 5.5／high；進行中
   - 預定 J（Jetson build／assemble／scan、release.yml、dev.yml、sboms/、patch 版）：依 S 的結果決定 job 拆法
 - CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
-- 下一步：S 回報 → 寫進下面的 M2 設計備忘、決定 J 的 job 拆法 → 開 L → P 完成併入 wp1/m2 → 開 J
+- 下一步：S 回報 → 寫進 M2 設計備忘、決定 J 的 job 拆法 → 開 J（Jetson build／assemble／scan、dev.yml、release.yml、sboms/、patch 版）→ L、J 併入 wp1/m2 → 驗證 → PR
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
