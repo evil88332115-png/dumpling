@@ -37,7 +37,7 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 | bsp | EEPROM 開機程式的**更新檔**（`rpi-eeprom` 套件內的 `pieeprom-*.bin`，推論） | rootfs 的套件；板子上**實際**在跑的 EEPROM 版本不在映像裡 → NOT_ASSESSED（現有 `not_in_image`） |
 | bsp | 板子上的無線網路／藍牙晶片韌體（`firmware-brcm80211`、`bluez-firmware`） | 套件名稱清單（下面） |
 | bsp | 板子專屬的系統套件、工具與相機堆疊 | 套件名稱清單（下面） |
-| os | 其他所有套件：Debian 官方套件，以及 Raspberry Pi 重新打包的一般程式（版本含 `+rpt` 也一樣，例如 `alsa-utils 1.2.14-1+rpt1`、`bluez 5.82-1.1+rpt2`、`cloud-init …+rpt20`、USB 網卡用的 `firmware-atheros`／`firmware-realtek`…） | 不在清單裡的一律 os |
+| os | 其他所有套件：Debian 官方套件，以及 Raspberry Pi 重新打包的一般程式（版本含 `+rpt` 也一樣，例如 `alsa-utils 1.2.14-1+rpt1`、`bluez 5.82-1.1+rpt2`、`cloud-init …+rpt20`、USB 網卡用的 `firmware-atheros`／`firmware-realtek`…；`rpi-connect*` 也是 os，但要加註「對外連線服務」） | 不在清單裡的一律 os |
 | host-tool | `rpi-imager` 等燒錄工具（不在板子上執行，不在映像裡） | 不列 |
 
 **bsp 套件名稱清單（轉接器實作時放進平台設定；依 2026-10-06 Lite 映像的 `.info` 整理）**
@@ -50,8 +50,13 @@ EEPROM 套件 `rpi-eeprom 28.33-1`（取自官方 `.info` 套件清單）。核�
 | 開機韌體與 bootloader | `raspi-firmware`、`rpi-eeprom`、`rpieepromab`、`librpieepromab0`、`rpifwcrypto`、`librpifwcrypto0`、`rpi-update` |
 | 板上無線網路／藍牙韌體 | `firmware-brcm80211`、`bluez-firmware` |
 | 板子專屬的系統設定 | `raspberrypi-sys-mods`、`raspberrypi-net-mods`、`raspberrypi-archive-keyring`、`rpi-cloud-init-mods`、`rpi-systemd-config`、`rpi-swap`、`rpi-loop-utils`、`rpi-usb-gadget`、`rpi-keyboard-config`、`rpi-keyboard-fw-update`、`userconf-pi` |
-| 板子專屬的工具 | `raspi-config`、`raspi-config-core`、`raspi-utils*`（`-core`、`-dt`、`-eeprom`、`-otp`）、`raspinfo`、`python3-rpi-lgpio`、`rpi-connect*` |
-| 相機堆疊（Raspberry Pi 版，含 Pi 的 ISP 模組） | `libcamera0.*`、`libcamera-ipa`、`rpicam-apps*`、`librpicam-app*` |
+| 板子專屬的工具 | `raspi-config`、`raspi-config-core`、`raspi-utils*`（`-core`、`-dt`、`-eeprom`、`-otp`）、`raspinfo`、`python3-rpi-lgpio` |
+| 相機堆疊（Raspberry Pi 版，含 Pi 的 ISP 模組；驅動板子上的 ISP 硬體） | `libcamera0.*`、`libcamera-ipa`、`rpicam-apps*`、`librpicam-app*` |
+
+判斷原則（D-027）：跟板子硬體綁在一起的才算 bsp。
+
+**另外要特別注意（不影響分層）**：`rpi-connect*`（官方遠端連線服務，例如 `rpi-connect-lite`）歸 **os**（不依賴特定硬體），
+但它是**對外連線服務**，轉接器要在報告裡把它標成要特別注意的項目。分層只決定待辦歸誰，不代表它不重要。
 
 **韌體檢查**
 - `start*.elf`／`fixup*.dat`／`bootcode.bin`：閉源，只有廠商發行說明、沒有安全公告可比對 → **GAP**（現有行為，保留）。
