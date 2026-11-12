@@ -124,7 +124,7 @@
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處） |
+| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行） |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
 | `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變 |
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處 |
@@ -200,8 +200,8 @@
 | `tools/sbomgate/tests/test_sbomgate.py` | `integration/sbomgate/tests/test_sbomgate.py` | 25fa89a | 刪段 95 行、刪掉 RealEvidence 類與 6 個用到 tests/results、tests/projects（e2e 的真實輸出，不帶）的測試方法 |
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
-| `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android |
-| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處 |
+| `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android；「取最新工具」改為取 HEAD 或 `--tools-rev` 的說明 |
+| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
 | `tools/wizard/inputs.example.json` | `scripts/wizard/inputs.example.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/jetson.json` | `scripts/wizard/platforms/jetson.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
@@ -250,7 +250,7 @@
 | `tools/cra/tests/test_security_testing.py`、`test_cra_report.py` | 測試資料裡板子網路掃描的 IP（私有 IP） | `192.0.2.20`、`192.0.2.2`（文件用網段） |
 | `tools/cra/tests/test_no_vuln_data.py` | 一個四段式套件版本字串（開頭是 10，後面接 cuda 標記）被私有 IP 規則誤判 | 把開頭的 10 改成 11 |
 | `tools/wizard/**` 與 `tools/cra/tests/*` | 產品代號（`product-a`、`product-b`、`product-c` 是中性代稱，分別對應三個不公開的廠商產品名）出現在測試用的假刷機包名稱、`platforms/*.json` 的 `note` | `product-a` 等；不影響邏輯 |
-| `wizard/cra-scan.py` | **未改**（路徑除外）。注意：它在掃描前用 `git archive origin/main` 取「最新工具」放到 `<輸出>/wt/` 再執行 `wt/tools/…`，也就是跑的是遠端 main 的版本，不是目前 checkout。CI 上要用目前 checkout 時需另外處理（C1 決定） | — |
+| `tools/wizard/cra-scan.py` | **行為修改**（sca-center 原版：掃描前 `git fetch origin`，對 `origin/main` 做 `git archive` 放到 `<輸出>/wt/` 再執行 `wt/tools/…`，也就是跑遠端 main，在 CI 的 tag 或分支 checkout 上不是正在測的那個 commit）。dumpling：新增 `resolve_tools_rev()`／`extract_tools()`，預設對目前 checkout 的 `HEAD` 做 `git archive`（保留「從 git 取乾淨副本」，沒 commit 的修改不會混進去），`--tools-rev <rev>` 或環境變數 `DUMPLING_TOOLS_REV` 可指定其他版本（寫成 `origin/…` 才會 fetch）；實際用的完整 commit hash、要求的版本、工作目錄是否有沒 commit 的修改，寫進 `<輸出>/tools-version.json`，commit 也經 `SCA_CENTER_COMMIT` 進掃描的 `provenance.json`（原有機制）。測試：`tools/demo/tests/test_wizard_plan.py` 的 `test_tools_rev_*` | 預設 `HEAD`；找不到版本就停止並說明 |
 
 ### public-check 白名單（`ci/public-allow.txt`）
 

@@ -1,7 +1,7 @@
 # CRA 掃描精靈（tools/wizard/cra-scan.py）
 
 互動式前端：輸入刷機包與 SourceCode 資料夾，自動完成核對 MD5、安全解開原始碼、找核心／UEFI／樹外模組／建置紀錄、
-列計畫請你確認、取最新工具（對 `origin/main` 做 archive）、掃描、套用規則產生 CRA 文件、整理報告。
+列計畫請你確認、取工具（對目前 checkout 的 HEAD 做 `git archive`，乾淨副本；`--tools-rev` 可指定其他版本）、掃描、套用規則產生 CRA 文件、整理報告。
 
 ## 站台設定（只放本機，不進版本庫）
 
@@ -17,7 +17,7 @@ cp tools/wizard/wizard.example.json ~/.config/sca-center/wizard.json   # 然後�
 
 | 鍵 | 意義 | 預設 |
 |---|---|---|
-| `repo` | sca-center 的 checkout；每次掃描對它的 `origin/main` 做 archive 取最新工具 | 這個腳本所在的 checkout |
+| `repo` | 工具的 git checkout；每次掃描對它的 `HEAD`（預設）或 `--tools-rev`／`DUMPLING_TOOLS_REV` 指定的版本做 `git archive`，取乾淨副本（沒 commit 的修改不會混進去）。實際用的 commit 寫進 `<輸出>/tools-version.json` | 這個腳本所在的 checkout |
 | `root` | 精靈的工作根目錄 | `~/cra-scan` |
 | `outroot` | 每次掃描的輸出資料夾放這裡（每次新資料夾，舊的不動） | `<root>/輸出` |
 | `python` | 跑 `cra_report.py`、`report_package.py` 的 Python | 目前這個 Python |
@@ -78,4 +78,4 @@ python3 -I tools/wizard/cra-scan.py --site-config /path/to/wizard.json
 | A0 上游基準 | `plan.json` 的 `upstream_bsp`、`upstream_source` | 掃描後跑 `upstream_baseline.py artifacts`（刷機包對 BSP）與 `source`（sources/ 對 public_sources），輸出 `<rootfs>/upstream-baseline-{artifacts,source}.{json,md}`（`cra_report.py` 找 `<scan>/../`）；各 3600 秒上限，耗時記在 `wizard-steps.json` | GAP／FAIL 只印一行並記入 `wizard-steps.json`，不中止 |
 | 板子檢查結果 | `--board-test <board-test-*.tar.gz｜board-net-*.tar.gz>`（可重複；互動模式問「有板子檢查結果檔嗎？」） | 掃描後 `board-import.sh --result <rootfs> --no-cra <檔案…>`（`SCA_PYTHON` 用站台設定的 python），在 CRA 步驟之前；檔案內容由 `board_import.py` 驗證 | 沒給 → `board-import` 記 NOT_RUN，對外服務欄維持「不明」；輸入清單的 `board_test`（kind＝board_test）依此判斷 found／missing |
 
-A-provenance 的 sca-center commit：精靈跑的是 `git archive`（沒有 `.git`），所以把「取最新工具」那個 commit 以環境變數 `SCA_CENTER_COMMIT`（40 位十六進位）告訴掃描；`provenance.json` 記 `from: wizard-archive`、`dirty: false`。有 `.git` 或部署資料夾時以它們為準，這個變數不會蓋過。
+A-provenance 的 sca-center commit：精靈跑的是 `git archive`（沒有 `.git`），所以把「取工具」那個 commit 以環境變數 `SCA_CENTER_COMMIT`（40 位十六進位）告訴掃描；`provenance.json` 記 `from: wizard-archive`、`dirty: false`。有 `.git` 或部署資料夾時以它們為準，這個變數不會蓋過。

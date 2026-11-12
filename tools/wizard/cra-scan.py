@@ -7,7 +7,7 @@
   （非互動、測試用：--archive A --source S [--name N --version V --config C --role both|manufacturer|supplier --yes --plan-only]）
 
 流程：核對 MD5 → 安全解開原始碼（不執行裡面任何東西）→ 自動找核心原始碼、UEFI、NVIDIA 樹外模組、核心建置紀錄
-     → 列出計畫請你確認 → 取最新工具（origin/main）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
+     → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
 輸出：<站台設定的 outroot>/<產品>-<版本>-<日期時間>/（每次新資料夾，舊的不動）
 """
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, tarfile, zipfile, zlib, datetime
@@ -560,8 +560,45 @@ def run(cmd, log, env=None, cwd=None):
     return r.returncode
 
 
+class ToolsRevError(Exception):
+    pass
+
+
+def resolve_tools_rev(repo, rev):
+    """工具版本：預設是 repo 目前 checkout 的 HEAD（CI 上就是正在測的那個 commit），可用 --tools-rev 或 DUMPLING_TOOLS_REV 指定其他版本
+    （例如 origin/main：這種遠端分支會先 fetch）。回傳 (完整 commit hash, 寫進輸出的說明 dict)。
+    說明 dict 會存成 <輸出>/tools-version.json：實際用的 commit、要求的版本、工作目錄有沒有沒 commit 的修改（有也不會帶進去）。"""
+    rev = (rev or "HEAD").strip()
+    if not rev or rev.startswith("-") or not re.fullmatch(r"[A-Za-z0-9._/~^@{}+-]+", rev):
+        raise ToolsRevError(f"工具版本的寫法不對：{rev!r}（接受 commit、分支、tag 或 HEAD）")
+    git = ["git", "-C", str(repo)]
+    if rev.startswith("origin/"):
+        subprocess.run(git + ["fetch", "-q", "origin"], check=False)
+    r = subprocess.run(git + ["rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"], capture_output=True, text=True)
+    commit = r.stdout.strip()
+    if r.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+        raise ToolsRevError(f"在 {repo} 找不到工具版本 {rev}（不是 git checkout，或沒有這個 commit）")
+    st = subprocess.run(git + ["status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True)
+    return commit, {"requested": rev, "commit": commit, "source": "git archive", "repo_checkout": str(repo),
+                    "worktree_dirty": bool(st.stdout.strip()),
+                    "note": "工具是 git archive <commit> 取出的乾淨副本，工作目錄裡沒 commit 的修改不會混進去"}
+
+
+def extract_tools(repo, commit, dest):
+    """git archive <commit> 解開到 dest（乾淨副本，不含 .git 與沒 commit 的修改）。"""
+    dest = Path(dest)
+    dest.mkdir()
+    p1 = subprocess.Popen(["git", "-C", str(repo), "archive", commit], stdout=subprocess.PIPE)
+    t = subprocess.run(["tar", "-x", "-C", str(dest)], stdin=p1.stdout)
+    p1.stdout.close()
+    if p1.wait() != 0 or t.returncode != 0:
+        raise ToolsRevError(f"git archive {commit} 或解開失敗")
+
+
 def main():
     ap = argparse.ArgumentParser(description="CRA 掃描精靈")
+    ap.add_argument("--tools-rev", help="掃描用的工具版本（commit、分支或 tag）；不給時用環境變數 DUMPLING_TOOLS_REV，再不然目前 checkout 的 HEAD。"
+                                        "實際用的 commit 寫進 <輸出>/tools-version.json 與報告的 provenance")
     ap.add_argument("--archive"); ap.add_argument("--source"); ap.add_argument("--name"); ap.add_argument("--version")
     ap.add_argument("--rootfs"); ap.add_argument("--config"); ap.add_argument("--role", choices=["both", "manufacturer", "supplier"])
     ap.add_argument("--generic-rules", choices=["yes", "no"]); ap.add_argument("--build-record")
@@ -769,13 +806,15 @@ def main():
     if not pe or not pe.is_file():
         sys.exit("錯誤：沒有掃描設定檔（PILOT_ENV）。請在站台設定檔設定 pilot_env（指向存在的 pilot.env），或先設定環境變數 PILOT_ENV；"
                  + (f"目前指向 {pe}，但檔案不存在。" if pe else "目前兩者都沒有設定。"))
-    say("\n== 1. 取最新工具 ==")
-    subprocess.run(["git", "-C", str(REPO), "fetch", "-q", "origin"], check=False)
-    commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "origin/main"], capture_output=True, text=True).stdout.strip()
-    (OUT / "wt").mkdir()
-    p1 = subprocess.Popen(["git", "-C", str(REPO), "archive", commit], stdout=subprocess.PIPE)
-    subprocess.run(["tar", "-x", "-C", str(OUT / "wt")], stdin=p1.stdout, check=True); p1.wait()
-    say(f"  sca-center {commit[:12]}")
+    say("\n== 1. 取工具 ==")
+    try:
+        commit, tools_info = resolve_tools_rev(REPO, a.tools_rev or os.environ.get("DUMPLING_TOOLS_REV") or "HEAD")
+        extract_tools(REPO, commit, OUT / "wt")
+    except ToolsRevError as e:
+        sys.exit(f"錯誤：{e}")
+    (OUT / "tools-version.json").write_text(json.dumps(tools_info, ensure_ascii=False, indent=1), encoding="utf-8")
+    say(f"  工具版本 {commit[:12]}（要求的版本：{tools_info['requested']}）"
+        + ("；注意：工作目錄有沒 commit 的修改，沒有帶進來（只用 commit 裡的內容）" if tools_info["worktree_dirty"] else ""))
 
     say("\n== 2. 產品設定 ==")
     mcfg = OUT / "cra-project/CRA/Config"

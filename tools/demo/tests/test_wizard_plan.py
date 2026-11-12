@@ -507,3 +507,84 @@ def test_extract_uefi_defines_folder_symlink_escape(tmp_path):
     (d2 / "uefi" / "nvidia-config" / "p").symlink_to(outside)
     got, notes = w.extract_uefi_defines(d2, tmp_path / "x")
     assert got == []
+
+
+# ---------- 工具版本：預設目前 checkout 的 HEAD，可覆寫，commit 寫進輸出 ----------
+
+def _git(repo, *args):
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t",
+           "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env, check=True).stdout.strip()
+
+
+@pytest.fixture
+def toolrepo(tmp_path):
+    """兩個 commit 的小 repo：v1 → v2（HEAD）；另有一個遠端 origin/main 停在 v1 之前沒有的內容（模擬「遠端 main 跟正在測的不同」）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "work")
+    (repo / "tool.txt").write_text("v1\n")
+    _git(repo, "add", "."); _git(repo, "commit", "-q", "-m", "v1")
+    v1 = _git(repo, "rev-parse", "HEAD")
+    (repo / "tool.txt").write_text("v2\n")
+    _git(repo, "commit", "-q", "-am", "v2")
+    v2 = _git(repo, "rev-parse", "HEAD")
+    # 假的遠端 main：另一條線上的 commit
+    _git(repo, "checkout", "-q", "-b", "other", v1)
+    (repo / "tool.txt").write_text("main-only\n")
+    _git(repo, "commit", "-q", "-am", "remote main")
+    remote_main = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", "refs/remotes/origin/main", remote_main)
+    _git(repo, "checkout", "-q", "work")
+    return repo, v1, v2, remote_main
+
+
+def test_tools_rev_defaults_to_checked_out_head_not_remote_main(toolrepo, tmp_path):
+    repo, v1, v2, remote_main = toolrepo
+    w = _load_wizard()
+    commit, info = w.resolve_tools_rev(repo, None)
+    assert commit == v2 != remote_main and info["requested"] == "HEAD" and info["commit"] == v2 and info["worktree_dirty"] is False
+    w.extract_tools(repo, commit, tmp_path / "wt")
+    assert (tmp_path / "wt" / "tool.txt").read_text() == "v2\n"           # 不是 origin/main 的內容
+    assert not (tmp_path / "wt" / ".git").exists()
+
+
+def test_tools_rev_override_and_dirty_worktree_is_not_included(toolrepo, tmp_path):
+    repo, v1, v2, remote_main = toolrepo
+    w = _load_wizard()
+    (repo / "tool.txt").write_text("uncommitted\n")                        # 工作目錄的修改：不可混進去
+    (repo / "untracked.txt").write_text("x\n")
+    commit, info = w.resolve_tools_rev(repo, "HEAD")
+    assert commit == v2 and info["worktree_dirty"] is True
+    w.extract_tools(repo, commit, tmp_path / "wt")
+    assert (tmp_path / "wt" / "tool.txt").read_text() == "v2\n" and not (tmp_path / "wt" / "untracked.txt").exists()
+    # 覆寫：commit hash、分支名
+    assert w.resolve_tools_rev(repo, v1)[0] == v1
+    assert w.resolve_tools_rev(repo, "other")[0] == remote_main
+    assert w.resolve_tools_rev(repo, "HEAD~1")[0] == v1
+
+
+@pytest.mark.parametrize("bad", ["no-such-rev", "--output=x", "a b", "", "$(id)"])
+def test_tools_rev_bad_values(toolrepo, bad):
+    repo = toolrepo[0]
+    w = _load_wizard()
+    if bad == "":
+        assert w.resolve_tools_rev(repo, bad)[0] == toolrepo[2]            # 空字串當作預設的 HEAD
+        return
+    with pytest.raises(w.ToolsRevError):
+        w.resolve_tools_rev(repo, bad)
+
+
+def test_tools_rev_not_a_git_checkout(tmp_path):
+    w = _load_wizard()
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    with pytest.raises(w.ToolsRevError):
+        w.resolve_tools_rev(plain, "HEAD")
+
+
+def test_tools_rev_option_and_env_are_wired():
+    s = open(WIZ, encoding="utf-8").read()
+    assert '"--tools-rev"' in s and 'os.environ.get("DUMPLING_TOOLS_REV")' in s and 'or "HEAD")' in s
+    body = s.split("== 1. 取工具 ==", 1)[1].split("== 2. 產品設定 ==", 1)[0]
+    assert "tools-version.json" in body and 'rev-parse", "origin/main"' not in s
