@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 00:06 +0800（C4）
+最後更新：2026-11-12 11:08 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -56,7 +56,7 @@
 
 - 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
 - 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX）
-- **整合分支 `wp3/m3` 7640632**（已 merge main 0e706cb＝M1；c2 測試 283 passed）（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
+- **整合分支 `wp3/m3` c2c5142**（已 merge main cd62514＝M1＋D-023～D-028；c2 測試 320 passed；CI tests 43255179664、firmware 43255187063 已觸發）（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
   - coreboot CBFS（FMAP、LZMA／LZ4、coreboot 版本／config、FSP、VBT、SELF payload）＋預驗修正 0f28182（ReDoS、掃描雜湊放大、解壓失敗計量、FSP ExtendedImageRevision）
   - AMI PFAT 解封裝＋預驗修正（清單數字欄位崩潰、MAX_TOTAL 跨巢狀、檔名截短）；fetch 測試補強、run.d venv 快取、firmware.yml pipefail 修正（綠 run 43229479139／故意 sha256 不符紅 run 43229520867）
   - 真實樣本 CI 驗收 `pipeline/firmware-expect.py`（綠 run 43231626732：Dasharo 11 項 OK、NUC 1 項 OK；改錯 ME 版本紅 run 43231826497）
@@ -75,7 +75,8 @@
   - 預驗 `wp3/m3` 7e40fe7（完成，**通過**）：FSP 偏移（依 info_header.h 逐欄核對、Dasharo 與 4183a96 diff 只少了假 property）、find_banner（20 萬組隨機對照舊 regex 0 不一致、16 MiB 構造 <0.07 秒）、供應商 SBOM（sbomqs sha256 與 release 一致、sha 改錯不解開、不連外）。建議 B1～B8（Markdown 注入、巢狀過深靜默截斷、佔位值、記憶體放大等）交代理 I
   - 代理 I（寫程式，Sonnet 5.5 high）：`wp3/sbom-check-hardening` 7b67b1b，狀態：完成（已快轉併入 m3）。Markdown 注入共用 `md_safe`、巢狀過深 ATTENTION、佔位值當缺、上限 16 MiB＋物件數估計、O_NOFOLLOW、sbomqs 版本對 tools.lock、無樣本 NOT_RUN、用法錯誤 64。CI tests 43239787867（c2-firmware 143、c2-x86-firmware 283，0 skip）、firmware 43239795302 綠
   - 代理 J（寫程式，Sonnet 5.5 medium）：`wp3/m3-dt`，firmware.yml 的 firmware-dt job＋本機 Docker 臨時 DT 端到端（三種樣本）＋vBIOS 公告 NOT_ASSESSED 文字，狀態：進行中
-  - 代理 K（寫程式，Sonnet 5.5 high）：`wp3/m3-gop`，用 uefi_image.py 的 Scan 子類別走訪 FV（不改 C1 檔）→ Intel GOP／VBT／legacy VBIOS 元件，NUC／Dasharo／OVMF 真樣本，狀態：進行中
+  - 代理 K（寫程式，Sonnet 5.5 high）：`wp3/m3-gop` 24d3eb5，狀態：完成（已併入 m3）。`tools/cra/uefi_gfx.py`（uefi_image.Scan 子類別）＋契約測試 `test_uefi_image_contract.py`。NUC：GOP build 1070（FFS A0327FE0-…）、legacy VBIOS 1003 PC 14.34、獨立 VBT 3 份（$VBT TIGERLAKE、BDB 2.43），掛在 BIOS 映像下；走訪不完整（EFI 標準壓縮解不開 30 處）→ gap、ATTENTION。Dasharo、OVMF 無誤判
+  - 代理 L（寫程式，Sonnet 5.5 medium）：`wp3/m3-expect`，firmware-expect.py 加 GOP／legacy VBIOS 鍵、NUC expected，狀態：進行中
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
 - 下一步：等代理 J、K → 併入 wp3/m3；CI 跑通（tests、firmware 含 DT job）→ 預驗 → M3 開 PR（附各輪預驗結論；PR 說明列出依賴的 uefi_image 內部名稱 Scan／scan_bytes／parse_fvs／Stop／MAX_*，C0 已同意子類別做法，代理 K 加契約測試）→ 驗證 → 通知 C0
 - 之後（M3 以外）：C1 M2 合併後，把 `pipeline/lib/firmware_fetch.py` 改成 import 共用的 `pipeline/lib/fetch_verify.py`（C0 會通知）；D-028 之後二進位測資要登記在 `ci/public-binary-allow.txt`（wp3/m3 目前沒有二進位檔，合成 ROM 都在測試裡當場產生）
