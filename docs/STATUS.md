@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:17 -0500（C0）
+最後更新：2026-11-12 08:22 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -52,7 +52,7 @@
   - （已完成：代理 A／B、PR #7 驗證代理；PR #8 由 C0 驗證）
 - CI：無進行中
 - 下一步：等代理 C、D 完成 → 我檢查並整合到 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／DT 上傳；M3 完成開一個 PR、派驗證代理、通知 C0
-- 卡住／等決定：UEFI 解開、GOP、DT 上傳、NVIDIA 公告比對都等 C1 M1（PR #9）。規則：不用 `gh pr update-branch`，一律 `git merge origin/main`；ASSESS_NOTES 維持英文（C0 同意）
+- 卡住／等決定：UEFI 解開、GOP、DT 上傳、NVIDIA 公告比對都等 C1 M1（PR #9）。規則：不用 `gh pr update-branch`，一律 `git merge origin/main`；ASSESS_NOTES 維持英文（C0 同意）；D-021：合併前不必是最新分支，只有 PR 顯示衝突才 merge main
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
