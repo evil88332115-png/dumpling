@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 MAX_INSPECT = 1 << 30                  # 去重後送進辨識的位元組總量上限
+MAX_REPROBE = 32 << 20                 # 重複的內容（含 PCIR）重跑 option ROM 搜尋以記新位置的總量上限
 MAX_FOUND = 256                        # 各種元件各自最多記幾份（不同雜湊）
 MAX_LOCATIONS = 32                     # 同一份內容最多記幾個位置
 MAX_UNDECODED_SHOWN = 3                # gap 文字裡列幾個沒解開的原因
@@ -64,6 +65,11 @@ def digests(b):
     return {"sha256": hashlib.sha256(b).hexdigest(), "sha512": hashlib.sha512(b).hexdigest()}
 
 
+class Hits(list):
+    """一塊內容找到的 GOP／VBT（table, 雜湊, 內容, offset）；probed＝跑過 option ROM 搜尋。"""
+    probed = False
+
+
 def make_scan_class(ui, state):
     """ui＝uefi_image 模組。回傳 Scan 的子類別；state＝scan() 的共用狀態（結果、去重集合、回呼）。"""
 
@@ -82,7 +88,7 @@ def scan(data, find_roms=None, budget=None, soft=()):
     soft：視為「提早停止、結果不完整」而不是失敗的例外型別（x86_firmware.OverBudget）。永遠回傳，不丟例外。"""
     r = {"performed": False, "reason": None, "complete": False, "gop": [], "vbt": [], "gaps": [],
          "stats": {"fvs": 0, "ffs_files": 0, "decompressed_total": 0, "inspected_bytes": 0, "inspected_blocks": 0, "duplicate_blocks": 0,
-                   "rom_probes": 0, "undecoded": 0, "notes": 0},
+                   "rom_probes": 0, "reprobed_bytes": 0, "undecoded": 0, "notes": 0},
          "undecoded": [], "notes": [], "stopped": None}
     try:
         ui = _sibling("uefi_image")
@@ -91,7 +97,7 @@ def scan(data, find_roms=None, budget=None, soft=()):
         r["reason"] = f"{e}; the Intel GOP / VBT / legacy VBIOS search inside UEFI firmware volumes was not performed"
         r["gaps"].append(r["reason"])
         return r
-    seen, gops, vbts = set(), {}, {}
+    seen, gops, vbts = {}, {}, {}
 
     def record(table, key, entry, where):
         e = table.get(key)
@@ -110,10 +116,20 @@ def scan(data, find_roms=None, budget=None, soft=()):
         if n == 0:
             return
         key = (n, hashlib.blake2b(body, digest_size=16).digest())
-        if key in seen:
+        mod = clean(module or "?")
+        if key in seen:                       # 重複的內容不再辨識，但上次找到的東西要記這個新位置（備份 FV、同一個檔案放在兩處）
             r["stats"]["duplicate_blocks"] += 1
+            for table, hkey, entry, off in seen[key]:
+                record(table, hkey, entry, {"module": mod, "offset": off})
+            if find_roms is not None and seen[key].probed:        # option ROM 的位置：重跑一次，但重跑的總量有上限（big 重複內容不放大）
+                if r["stats"]["reprobed_bytes"] + n <= MAX_REPROBE:
+                    r["stats"]["reprobed_bytes"] += n
+                    find_roms(body, mod)
+                elif not state.get("reprobe_gap"):
+                    state["reprobe_gap"] = True
+                    r["gaps"].append("some duplicated content with option ROM markers was not searched again; their extra locations may be missing")
             return
-        seen.add(key)
+        hits = seen[key] = Hits()
         if r["stats"]["inspected_bytes"] + n > MAX_INSPECT:
             if not state.get("capped"):
                 state["capped"] = True
@@ -121,22 +137,26 @@ def scan(data, find_roms=None, budget=None, soft=()):
             return
         r["stats"]["inspected_bytes"] += n
         r["stats"]["inspected_blocks"] += 1
-        mod = clean(module or "?")
         # 內容可能前面有 16 bytes 的子類型 GUID（FREEFORM_SUBTYPE_GUID section）：兩種起點都試，辨識函式自己檢查開頭
         for off in (0, SUBTYPE_GUID_LEN):
             if body[off:off + 2] == b"MZ":
                 pe = body[off:]
                 g = ig.gop_driver(pe)
                 if g is not None:
-                    record(gops, hashlib.sha256(pe).hexdigest(), {**g, **digests(pe)}, {"module": mod, "offset": off})
+                    hk, ent = hashlib.sha256(pe).hexdigest(), {**g, **digests(pe)}
+                    hits.append((gops, hk, ent, off))
+                    record(gops, hk, ent, {"module": mod, "offset": off})
                 break
         if b"$VBT " in body:
             for vo, v in vbt_mod.find_vbt(body):
                 if vo in (0, SUBTYPE_GUID_LEN):          # 內容就是 VBT（獨立檔案）；嵌在別的內容裡（例如 legacy VBIOS）的不另列
                     raw = bytes(body[vo:vo + v["vbt_size"]])
-                    record(vbts, hashlib.sha256(raw).hexdigest(), {**v, **digests(raw)}, {"module": mod, "offset": vo})
+                    hk, ent = hashlib.sha256(raw).hexdigest(), {**v, **digests(raw)}
+                    hits.append((vbts, hk, ent, vo))
+                    record(vbts, hk, ent, {"module": mod, "offset": vo})
         if find_roms is not None and b"PCIR" in body:
             r["stats"]["rom_probes"] += 1
+            hits.probed = True
             find_roms(body, mod)
 
     state = {"inspect": inspect}

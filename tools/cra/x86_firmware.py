@@ -37,7 +37,7 @@ vBIOS（NVIDIA；例如更新包裡 nvflash 加內嵌 ROM 的 .exe，或直接�
   只有其他類型（例如 0xE0 NVIDIA 韌體）的是燒錄工具自帶的映像：列在 other_roms（裝置 ID、雜湊、found_at 的檔案與位置），不是產品元件、不進 SBOM。
 - Intel legacy VBIOS（vendor 0x8086、PCIR class code 0x03xxxx、有 x86 影像；細節與樣本依據見 intel_vbios.py）：列在 inv["intel_vbios"]，
   version＝ROM 裡 `Build Number: <n> PC <x.y> …` 行的「n PC x.y」（沒有或格式不符 → 版本 GAP），橫幅、建置時間、內嵌 VBT 另記；
-  SBOM 元件掛在所在的 BIOS 映像底下（檔案本身是 BIOS 映像時）。UEFI GOP 驅動的辨識函式在 intel_vbios.gop_driver()，還沒接到 BIOS 映像走訪。
+  SBOM 元件掛在所在的 BIOS 映像底下（檔案本身是 BIOS 映像時）。UEFI GOP 驅動的辨識函式在 intel_vbios.gop_driver()，由 BIOS 映像的 UEFI 走訪呼叫（見下面「UEFI 內的 Intel 顯示韌體」）。
 - 版本：ROM 範圍內第一個 `XX.XX.XX.XX.XX`（十六進位）字串。ROM 範圍外的不算（nvflash 自己的表格也有同格式的字串）。
 - 同一個 ROM（雜湊相同）在多個檔案出現時記一次、列出所有位置；不同板型的 ROM 各自一個元件。BIOS 映像也一樣依雜湊去重。
 
@@ -70,6 +70,10 @@ BIOS（Intel 平台的完整 SPI 映像）：
   SELF payload（身分與雜湊，不展開裡面的 firmware volume）。每個 CBFS 區域（RO、RW_A…）分開記，相同內容只記一次、列出所有位置。
   CBFS 結構壞掉、壓縮解不開、超過解壓縮上限 → 記在 incomplete（ATTENTION），不影響其他部分。沒有 CBFS（例如 OVMF）時什麼都不加。
   microcode 在 `cpu_microcode_blob.bin` 裡時加 found-in（不重複產元件）。
+- UEFI 內的 Intel 顯示韌體（uefi_gfx.py，走訪靠 C1 的 uefi_image.py：FV／FFS／section、LZMA、嵌套 FV 都會解開）：映像有未壓縮的 firmware volume 時，
+  找 Intel GOP 驅動（intel_vbios.gop_driver）、獨立 VBT（intel_vbt）、legacy VBIOS option ROM（掛在 `<映像位置>!uefi/<FFS GUID>` 位置）；
+  結果在 bios[].uefi_gfx，SBOM 元件掛在 BIOS 映像底下。沒解開的部分（EFI 標準壓縮等）、FV 結構警告、coreboot CBFS、上限、走訪失敗、uefi_image.py 載入不了
+  → 記 sca-center:gap 與狀態 ATTENTION（沒找到不代表不存在）。細節與依賴的 uefi_image 內部名稱見 docs/notes/c2-vbios.md。
 - IBV 線索：BIOS 區域裡未壓縮的字串（AMI：American Megatrends、ALASKA；Insyde：InsydeH2O；Phoenix）。只是線索，以版本清單為準。
 - UEFI 壓縮統計（**不解壓**，見 FvStats）：走未壓縮的 firmware volume／FFS 檔案／section，依壓縮方式計數（efi-standard、lzma、
   lzma-f86、brotli、tiano-custom，其他需要處理的 GUID-defined 依 GUID），記在 uefi 與 GAP（「N 個壓縮 section 沒有解析」）。
@@ -1871,6 +1875,10 @@ def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
         intel_gfx_collect(roms, body, lab, intel_vb)
 
     g = load_sibling("uefi_gfx").scan(data, find_roms, budget, (OverBudget,))
+    if b.get("cbfs"):      # coreboot：CBFS 的檔案（例如壓縮的 edk2 payload）不在這次走訪裡，沒找到不能說不存在
+        g["gaps"].append("coreboot CBFS found: files inside the CBFS (for example a compressed UEFI payload) were not unpacked for this search; "
+                         "the Intel GOP / VBT / legacy VBIOS search is incomplete (not found does not mean absent)")
+        g["complete"] = False
     b["uefi_gfx"] = g
     b["gaps"] += g["gaps"]
     if g["stopped"] and g["stopped"].startswith("stopped early"):
@@ -1885,8 +1893,9 @@ def uefi_gfx_summary(g):
     if not g["performed"]:
         return "not performed"
     s = g["stats"]
-    return (f"{'complete' if g['complete'] else 'incomplete (not found does not mean absent)'}: {s['fvs']} firmware volumes, {s['ffs_files']} FFS files, "
-            f"{s['decompressed_total']} bytes decompressed, {s['undecoded']} parts not decoded; "
+    return (f"{'complete (all firmware volumes found were decoded)' if g['complete'] else 'incomplete (not found does not mean absent)'}: "
+            f"{s['fvs']} firmware volumes, {s['ffs_files']} FFS files, {s['decompressed_total']} bytes decompressed, {s['undecoded']} parts not decoded, "
+            f"{s.get('outside_fv_nonblank_bytes', 0)} bytes outside firmware volumes searched only as raw blocks; "
             f"{len(g['gop'])} GOP driver(s), {len(g['vbt'])} standalone VBT(s)")
 
 
@@ -1950,7 +1959,7 @@ def uefi_gfx_markdown(b):
         L += [f"| {e(it['signature'])} | {it['version']} | `{it['sha256']}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
               for it in g["vbt"]]
     else:
-        L.append("沒有找到 Intel GOP 驅動或獨立 VBT" + ("（走訪完整，已解開的內容裡沒有）。" if g["complete"] else "（走訪不完整，不代表不存在）。"))
+        L.append("沒有找到 Intel GOP 驅動或獨立 VBT" + ("（找到的 firmware volume 都解開了，裡面沒有；FV 以外的位元組只當原始內容掃）。" if g["complete"] else "（走訪不完整，不代表不存在）。"))
     return L + [f"- GAP：{e(x)}" for x in g["gaps"]]
 
 
