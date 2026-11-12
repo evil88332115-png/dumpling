@@ -18,7 +18,7 @@ case $JR in
     BSP_SHA256=1626626cd827de0e350b8802033b9da653c69b2290accedb9e5d01f49607e099
     RFS=Tegra_Linux_Sample-Root-Filesystem_R39.2.0_aarch64.tbz2;  RFS_SHA1=94b2b42f6fe2667af10f28a33900d25a4a4eea47
     RFS_SHA256=3e3e4c110dc911efcaee44fffe405d355341f4d5a169b2516bf4330f846d2037
-    SRC_SHA256=PENDING;;
+    SRC_SHA256=87d2e31ff55beaf2373e2f288538585995b231fd5745ec21f39a668e36efab2f;;   # 首次下載記錄（2026-11-12，NVIDIA 沒有公布整包雜湊）
   *) echo "版本只接受 39.2.1 或 39.2.0：$JR" >&2; return 64 2> /dev/null || exit 64;;
 esac
 SRC=public_sources.tbz2
