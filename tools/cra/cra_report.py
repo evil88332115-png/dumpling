@@ -4170,7 +4170,8 @@ def layer_of_row(r, idx):
         return _pick_layer(idx["purl"][pk]), "purl"
     if (r.get("name"), r.get("version")) in idx["nv"]:
         return _pick_layer(idx["nv"][(r["name"], r["version"])]), "name-version"
-    names = [n for n in [r.get("mapped_from")] + list(r.get("installed_as") or [])
+    # mapped_from 是「名稱 版本」（C-kernel-l4t-map），套件索引只認名稱
+    names = [n for n in [str(r.get("mapped_from") or "").partition(" ")[0]] + list(r.get("installed_as") or [])
              + [((r.get("deb_python") or {}).get("owner") or {}).get("name")] if n]
     found = set().union(*(idx["deb"].get(n, set()) for n in names)) if names else set()
     if found:

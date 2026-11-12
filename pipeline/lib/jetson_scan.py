@@ -118,7 +118,7 @@ def sbom_layer_counts(path):
 def run_summary(w):
     p = run_paths(w)
     st = read_status_tsv(os.path.join(p["scan"], "status.tsv"))
-    kc = read_json(os.path.join(p["scan"], "kernel-config.json"), {}) or {}
+    kc = read_json(os.path.join(p["scan"], "scan", "kernel-config.json"), {}) or {}      # sca-scan 的輸出資料夾是 rootfs/scan，裡面的 scan/ 才有各階段的 JSON
     br = ((kc.get("kernel") or {}).get("build_record") or {})
     src = read_json(os.path.join(p["rootfs"], "upstream-baseline-source.json"), {}) or {}
     art = read_json(os.path.join(p["rootfs"], "upstream-baseline-artifacts.json"), {}) or {}

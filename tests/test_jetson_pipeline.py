@@ -425,7 +425,7 @@ class ScanHelpers(Tmp):
         w = self.p("w0")
         rows = {"schema": "sca-center-vulnerability-rows/1", "row_count": 1, "rows": [{"id": "CVE-1", "tier": "p1", "layer": "bsp"}]}
         for rel, content in (("scan/rootfs/scan/status.tsv", "stage\tstatus\tdetail\nC-kernel-boot\tOK\tsame\n"),
-                             ("scan/rootfs/scan/kernel-config.json", json.dumps({"kernel": {"build_record": {"status": "OK"}}})),
+                             ("scan/rootfs/scan/scan/kernel-config.json", json.dumps({"kernel": {"build_record": {"status": "OK"}}})),
                              ("scan/rootfs/upstream-baseline-source.json", json.dumps({"status": "ATTENTION", "totals": {"modified": 1, "ours_only": 0, "same": 9, "upstream_only": 0},
                                                                                        "components": [{"modified": [{"path": "kernel/kernel-noble/net/x.c"}]}]})),
                              ("cra-project/CRA/Reports/vulnerability-rows.json", json.dumps(rows)),
