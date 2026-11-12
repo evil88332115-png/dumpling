@@ -118,7 +118,7 @@
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP |
+| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP；**行為修改（M2 J 軌）**：`--platform generic`（沒有定義開機鏈：任何映像格式的開機程式分類走 `bootloader_coverage.py --not-assessed generic`，NOT_ASSESSED；空值仍是 GAP）、`--arch <arm64|amd64>`／環境變數 `SCA_ARCH`（`docker import --platform linux/<arch>`，預設 arm64，其他值結束碼 64）|
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
@@ -210,8 +210,10 @@
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
+| `tests/expected/orin-nano-demo/v39.2.0-demo1.json` | （dumpling 自己寫的） | — | 新增（M2 J 軌）：標準答案，2026-11-12 第一次在 CI 跑通後訂定（見 `docs/JETSON.md`） |
+| `tests/expected/orin-nano-demo/v39.2.1-demo1.json` | （dumpling 自己寫的） | — | 新增（M2 J 軌）：標準答案（套 patch 的版本），同上 |
 
-以下是 dumpling 自己寫的（不是複製）：`pipeline/lib/layers.py`、`pipeline/sbom-layers.py`、`tests/test_layers.py`、`tests/run.d/c1-m2-layers.sh`（M2 分層，見 `docs/LAYERS.md`）、`pipeline/lib/{safe_extract,jetson_build,jetson_assemble,jetson_scan}.py`、`pipeline/{check-expected,release-meta}.py`、`pipeline/platforms/jetson/*.sh`、`tests/test_jetson_pipeline.py`、`tests/run.d/c1-m2-jetson.sh`、`.github/workflows/{pipeline,release,dev}.yml`（M2 J 軌，見 `docs/JETSON.md`；`safe_extract.py` 取自 M2 試驗分支的 `m2_safe_extract.py`）、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
+以下是 dumpling 自己寫的（不是複製）：`pipeline/lib/layers.py`、`pipeline/sbom-layers.py`、`tests/test_layers.py`、`tests/run.d/c1-m2-layers.sh`（M2 分層，見 `docs/LAYERS.md`）、`pipeline/lib/{safe_extract,jetson_build,jetson_assemble,jetson_scan,platform_scan}.py`、`pipeline/{check-expected,release-meta}.py`、`pipeline/platforms/jetson/*.sh`、`tests/test_jetson_pipeline.py`、`tests/test_platform_plan.py`、`tests/test_platform_scan.py`、`tests/run.d/c1-m2-jetson.sh`、`tests/expected/orin-nano-demo/v39.2.0-demo1.json`、`tests/expected/orin-nano-demo/v39.2.1-demo1.json`（標準答案，M2 J 軌）、`.github/workflows/{pipeline,release,dev}.yml`（M2 J 軌，見 `docs/JETSON.md`；`safe_extract.py` 取自 M2 試驗分支的 `m2_safe_extract.py`）、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
 
 ### 改動類型說明
 

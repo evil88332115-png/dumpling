@@ -66,7 +66,7 @@ pyl jetson_scan.py inputs --src "$proj/CRA/Config" --dst "$out/cra-config" --rel
 pyl jetson_scan.py site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
   --grype-cache "$out/grype-db" --upstream-set "jetson-r$rel" --public-sources "$out/downloads/public_sources.tbz2" --bsp "$out/downloads/$bsp" \
   --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
-export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS=""
+export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
   local tee=(); [ -d "$out/tee-source" ] && tee=(--tee-source "$out/tee-source")

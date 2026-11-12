@@ -490,6 +490,31 @@ class Scripts(Tmp):
         p = self.plat("validate", proj, "v39.2.0-demo1")
         self.assertEqual(p.returncode, 0, p.stdout)
 
+    def test_scan_flash_package_platform_generic_and_arch_arguments(self):
+        """--platform generic 與 --arch／SCA_ARCH 的參數處理（不跑 Docker）：合法值過了參數檢查（之後因為沒給 --archive 才結束碼 64），不合法的值在參數檢查就被拒絕。"""
+        sfp = os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh")
+
+        def rc(*args, env=None):
+            p = run(["bash", sfp, *args], env=env)
+            return p.returncode, p.stderr
+        for args, env in ((["--platform", "generic"], None), (["--platform", "generic", "--arch", "amd64"], None), (["--arch", "arm64"], None),
+                          ([], {"SCA_ARCH": "amd64"}), ([], {"SCA_PLATFORM": "generic"})):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertNotIn("只接受", err, (args, env))             # 沒有被參數檢查擋下來，而是後面「需要 --archive」
+            self.assertIn("需要 --archive", err)
+        for args, env, word in ((["--platform", "bogus"], None, "--platform"), (["--arch", "riscv64"], None, "--arch"), (["--arch", ""], None, "--arch"),
+                                ([], {"SCA_ARCH": "x86"}, "--arch"), ([], {"SCA_ARCH": "ARM64"}, "--arch")):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertIn("只接受", err)
+            self.assertIn(word, err)
+        self.assertEqual(rc("--arch")[0], 64)                                     # 缺值
+        src = open(sfp, encoding="utf-8").read()
+        self.assertIn('docker import --platform "linux/$ARCH"', src)               # 架構參數真的用在 docker import
+        self.assertNotIn("linux/arm64", src.split("set -uo pipefail", 1)[1])        # 預設值 arm64 在變數裡，不寫死在 import
+        self.assertIn('[ "$PLATFORM" != generic ] || na=(--not-assessed generic)', src)   # generic 走 --not-assessed generic（NOT_ASSESSED，不是 GAP）
+
     def test_scan_flash_package_rejects_unknown_platform(self):
         p = run(["bash", os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh"), "--platform", "bogus"])
         self.assertEqual(p.returncode, 64, p.stderr)

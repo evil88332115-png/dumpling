@@ -83,6 +83,24 @@ class Plan(unittest.TestCase):
             mut(cfg)
             self.assertTrue(pc.validate_platform_config(cfg, "example"), mut)
 
+    def test_dispatcher_passes_arch_to_the_adapter(self):
+        """platform.sh 把 platform.yml 的 arch 放進 DUMPLING_ARCH（沒寫是 arm64）；scan 的 docker import 用它。"""
+        for arch, want in (("amd64", "amd64"), (None, "arm64")):
+            plats = os.path.join(self.tmp, "plats-%s" % arch)
+            shutil.copytree(os.path.join(ROOT, "pipeline", "platforms", "example"), os.path.join(plats, "archp"))
+            y = os.path.join(plats, "archp", "platform.yml")
+            t = open(y, encoding="utf-8").read().replace("platform: example", "platform: archp")
+            t = "\n".join(l for l in t.splitlines() if not l.startswith("arch:"))
+            if arch:
+                t += "\narch: %s\n" % arch
+            open(y, "w", encoding="utf-8").write(t)
+            open(os.path.join(plats, "archp", "build.sh"), "w").write('#!/usr/bin/env bash\necho "arch=$DUMPLING_ARCH"\necho "build: OK（測試）"\n')
+            d = self.project("plan-arch-%s" % (arch or "default"), "archp")
+            env = dict(os.environ, DUMPLING_PLATFORMS_DIR=plats, DUMPLING_OUT_BASE=os.path.join(self.tmp, "out"))
+            r = subprocess.run(["bash", os.path.join(ROOT, "pipeline", "platform.sh"), "build", d, "v39.2.1-demo1"], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("arch=%s" % want, r.stdout)
+
     def test_matrix_unchanged(self):
         r = subprocess.run([sys.executable, "-I", INFO, "--matrix"], capture_output=True, text=True)
         self.assertIn({"project": "orin-nano-demo", "version": "v39.2.1-demo1"}, json.loads(r.stdout))
