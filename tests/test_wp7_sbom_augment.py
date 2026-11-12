@@ -85,9 +85,16 @@ class AugmentTest(unittest.TestCase):
         bl31 = [s for s in itb["components"] if "BL31" in s["name"]][0]
         self.assertEqual(props(bl31)["dumpling:tf-a-describe"], "v2.3-964-g8319968f5")
         ub = [s for s in itb["components"] if s["name"] == "U-Boot"][0]
-        self.assertEqual(props(ub)["dumpling:advisory-check"], "NOT_ASSESSED")
-        self.assertNotIn("cpe", ub)
+        pu = props(ub)
+        self.assertEqual(ub["cpe"], "cpe:2.3:a:denx:u-boot:2017.09:*:*:*:*:*:*:*")          # D-034：版本以磁區讀出的為準
+        self.assertEqual((pu["dumpling:advisory-check"], pu["dumpling:vendor-branch"], pu["dumpling:vendor-commit"]),
+                         ("ATTENTION", "rk2410", "39cd993"))
+        self.assertIn("候選", pu["dumpling:advisory-note"])
         self.assertNotIn("purl", ub)
+        spl = [s for s in idb["components"] if s["name"] == "U-Boot SPL"][0]
+        self.assertEqual(spl["cpe"], "cpe:2.3:a:denx:u-boot:2017.09:*:*:*:*:*:*:*")
+        self.assertNotIn("cpe", ddr)
+        self.assertNotIn("cpe", idb)                                   # 區段本身不給，避免同一份 U-Boot 比對兩次
         self.assertEqual(len([s for s in itb["components"]]), 2)          # git describe 不是另一個元件
         root = [x for x in d["dependencies"] if x["ref"] == "root-1"][0]
         self.assertEqual(root["dependsOn"], [idb["bom-ref"], itb["bom-ref"]])
@@ -107,6 +114,16 @@ class AugmentTest(unittest.TestCase):
         self.assertNotIn("version", c)
         self.assertEqual(props(c)["dumpling:version-status"], "GAP")
         self.assertEqual(props(c)["dumpling:raw-sectors:corroboration-status"], "GAP")
+
+    def test_uboot_version_without_year_month_gets_no_cpe(self):
+        base = self.path("in.json", bom([]))
+        raw = self.path("raw.json", self.raw([self.region(versions=[{"component": "U-Boot", "version": "vendor-build"}])]))
+        out = self.path("out.json")
+        rc, line = self.run_aug("raw-sectors", base, raw, out)
+        self.assertEqual(rc, 3, line)
+        ub = rj(out)["components"][0]["components"][0]
+        self.assertNotIn("cpe", ub)
+        self.assertEqual(props(ub)["dumpling:advisory-check"], "GAP")
 
     def test_raw_sectors_twice_fails(self):
         base = self.path("in.json", bom([]))

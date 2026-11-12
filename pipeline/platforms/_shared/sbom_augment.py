@@ -10,7 +10,10 @@ raw-sectors（Rockchip）：raw_sectors.py 清點出的每個區段 → 一個 t
   - 版本讀不到 → 不填 version，property `dumpling:version-status` = GAP（不猜）。
   - 閉源成品（Rockchip DDR 初始化、rkbin 的 TF-A BL31）→ `dumpling:closed-source` = true、`dumpling:advisory-check` = GAP
     （沒有可機器比對的安全公告）。
-  - U-Boot（廠商分支）不給 CPE／purl：`dumpling:advisory-check` = NOT_ASSESSED（不拿上游版本號去套漏洞資料）。
+  - U-Boot 與 U-Boot SPL（廠商分支，D-034）：給上游的 CPE `cpe:2.3:a:denx:u-boot:<YYYY.MM>`，版本以磁區讀出的為準；
+    `dumpling:vendor-branch`、`dumpling:vendor-commit` 記廠商分支與 commit；`dumpling:advisory-check` = ATTENTION 並註明
+    上游 CVE 比對結果只是候選（廠商可能已回移修補），比對到的 CVE 進待人審（不設 VEX 判定，就是 untriaged），發行閘門照算。
+    版本字串讀不出 YYYY.MM → 不給 CPE，`dumpling:advisory-check` = GAP。
   - 每個元件都有 `dumpling:origin` = raw-sectors、起始 LBA、磁區數、佐證結果（一致／不一致／找不到）。
 merge-source（AI NAS 的 OpenMediaVault 原始碼）：
   - 映像的元件（含子元件）都加 `dumpling:origin` = image（已經有的不改）。
@@ -36,6 +39,10 @@ LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 CLOSED = {"Rockchip DDR init": "Rockchip DDR 初始化（rkbin 成品，閉源）",
           "TF-A BL31 (Rockchip rkbin)": "TF-A BL31（Rockchip rkbin 成品，閉源）"}
+UBOOT = ("U-Boot", "U-Boot SPL")
+# 廠商分支的版本字串：<分支>-<YYYY.MM>-<修訂>-<commit>[-g<另一個 commit>]，或直接 <YYYY.MM>[...]
+UBOOT_VER_RE = re.compile(r"^(?:(?P<branch>[A-Za-z0-9]+)-)?(?P<ym>20[0-9]{2}\.[0-9]{2})(?:-(?P<rev>[0-9]+))?(?:-(?P<commit>[0-9a-f]{7,40}))?")
+UBOOT_NOTE = "上游 CVE 比對結果是候選：這是廠商分支，廠商可能已回移修補；比對到的 CVE 一律進待人審（D-034）"
 SLOT_NAMES = {"idbloader.img": "Rockchip idbloader（DDR 初始化＋U-Boot SPL）",
               "u-boot.itb": "U-Boot FIT 映像（U-Boot＋TF-A BL31）",
               "trust.img": "Rockchip trust 映像（TF-A／OP-TEE）"}
@@ -160,6 +167,20 @@ def from_raw_sectors(doc, raw):
                 desc = next((x["version"] for x in versions if x.get("component") == "TF-A git describe"), None)
                 if comp.startswith("TF-A") and desc:
                     prop(s, "dumpling:tf-a-describe", desc)
+            elif comp in UBOOT:
+                m = UBOOT_VER_RE.match(ver or "")
+                if m:
+                    s["cpe"] = "cpe:2.3:a:denx:u-boot:%s:*:*:*:*:*:*:*" % m.group("ym")
+                    prop(s, "dumpling:upstream-version", m.group("ym"))
+                    if m.group("branch"):
+                        prop(s, "dumpling:vendor-branch", m.group("branch"))
+                    if m.group("commit"):
+                        prop(s, "dumpling:vendor-commit", m.group("commit"))
+                    prop(s, "dumpling:advisory-check", "ATTENTION")
+                    prop(s, "dumpling:advisory-note", UBOOT_NOTE)
+                else:
+                    prop(s, "dumpling:advisory-check", "GAP")
+                    gaps.append("%s 的版本 %s 讀不出上游版本，沒有給 CPE" % (comp, ver))
             else:
                 prop(s, "dumpling:advisory-check", "NOT_ASSESSED")
             subs.append(s)
