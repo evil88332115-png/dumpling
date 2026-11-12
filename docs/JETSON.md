@@ -1,6 +1,6 @@
 # Jetson 轉接器（M2 J 軌）：編譯、組刷機包、掃描、Release
 
-實作：`pipeline/platforms/jetson/{build,prepare-source,assemble,scan}.sh`、`pipeline/lib/{safe_extract,jetson_build,jetson_assemble,jetson_scan}.py`、
+實作：`pipeline/platforms/jetson/{build,prepare-source,assemble,scan}.sh`、`pipeline/lib/{safe_extract,jetson_build,jetson_assemble,jetson_scan,platform_scan}.py`（`platform_scan.py` 是各平台共用的 scan 後處理，其他平台怎麼呼叫見它的 docstring；`jetson_scan.py` 只剩 Jetson 特有的部分）、
 `pipeline/{check-expected,release-meta}.py`；workflow：`.github/workflows/{pipeline,release,dev}.yml`；測試：`tests/test_jetson_pipeline.py`（`tests/run.d/c1-m2-jetson.sh`）。
 介面與結束碼見 `docs/PLATFORM-INTERFACE.md`，分層見 `docs/LAYERS.md`。
 
@@ -9,9 +9,10 @@
 ```
 tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
   info        project-info.py <tag>（驗證格式、專案與版本存在）
-  pipeline    pipeline.yml（reusable；dev.yml 也呼叫它）
-    build  (ubuntu-24.04-arm)  fetch → prepare-source → nvbuild.sh → pack-build-record.sh → artifact（1 天）
-    scan   (ubuntu-24.04)      artifact → fetch（重新下載 BSP／rootfs）→ assemble → scan → artifact（7 天）
+  pipeline    pipeline.yml（reusable；dev.yml 也呼叫它；與平台無關，欄位來自 platform.yml）
+    plan                       project-info.py 讀 platform.yml：build.mode／runner／apt、scan.runner／apt、arch
+    build  (arm64 runner)      build.mode＝compile 才跑：fetch → prepare-source → nvbuild.sh → pack-build-record.sh → 整個 $DUMPLING_OUT/handoff/ 上傳成 artifact（1 天）
+    scan   (amd64 runner)      handoff 放回同一個路徑 → fetch（重新下載 BSP／rootfs）→ assemble → scan → artifact（7 天）
   release     只有這個 job 有 contents: write；手動觸發只建 draft（不建 git tag），tag push 才發正式 Release
 ```
 
@@ -70,6 +71,11 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 - `workflow_dispatch` 的 `stop_after=build` 只編譯；`reuse_build_run=<run id>` 沿用另一個 run 的 build artifact（artifact 只保留 1 天；開發除錯用，Release 的草稿會因此不是「同一個 run 編的」，見 `release-meta.json` 的 `workflow_run` 與 build.json）。
 - `dev/<專案>` 滾動 pre-release 會建立 git tag `dev/<專案>`（`gh release create` 的行為）；不會觸發 `release.yml`（tag 樣式 `*/v*` 要求第二段以 v 開頭；專案名稱以 v 開頭時 `info` job 會因找不到專案立刻失敗，無害）。
 
+## 6b. build → scan 的交接（handoff）
+
+`build.sh` 把交給 scan 的東西全放在 `$DUMPLING_OUT/handoff/`：`BuildRecord-<專案>-<版本>.tar.gz`、`deliverables.tar.zst`（Image、.ko、dtb、核心建置設定）、`kernel.release`、`kernel-subdir`、`build.json`、`nvbuild-tail.txt`、`build-summary.md`。
+workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指名個別檔案**（契約見 `docs/PLATFORM-INTERFACE.md`）；`assemble.sh`／`scan.sh` 從 `handoff/` 讀。
+
 ## 7. 待確認（已採最保守做法，不阻擋）
 
 1. **`public_sources.tbz2` 的整包 sha256 是首次下載記錄（TOFU）**：NVIDIA 沒有公布整包雜湊。若 NVIDIA 之後更新檔案，fetch 會因 sha256 不符而失敗（預期行為），要人工確認後才改 `sources.yml`。
@@ -101,4 +107,8 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 - 第一次實跑發現並修掉的問題：(1) assemble 寫 tar 時，PAX 格式的長路徑成員帶著舊的 `path` 標頭，改名後仍寫回沒有 `Linux_for_Tegra/rootfs/` 前綴的舊路徑（rootfs 少了 18,431 個檔案）——`jetson_assemble.py` 清掉讀進來的 `pax_headers`，並有測試；
   (2) 映像裡沒有核心的 `.config` 與 `Makefile`（NVIDIA 的 headers 套件沒有掃描要的頂層檔案）→ `C-kernel-config` GAP，建置紀錄沒被採用——assemble 把 CI 的建置設定放進 `usr/lib/modules/<版本>/build/`；
   (3) Syft 的檔案紀錄讓 unknown 變成 9 萬多個——用 dpkg `.list` 的擁有者分層（見 `docs/LAYERS.md`）；(4) l4t 核心對應列的 `mapped_from` 是「名稱 版本」，原本找不到層。
-- Release 步驟的 403：跑了一個多小時的 run，最後的 `release` job 呼叫 GitHub API 回 `403 Resource not accessible by integration`，同樣的步驟在新的 run 裡成功。見第 9 節。
+- Release 步驟的 403：第一次兩個完整的 run（build＋scan 共約 1.5 小時），最後的 `release` job 呼叫 GitHub API（列出 release）回 `403 Resource not accessible by integration`；同一個 job 重跑也一樣。同樣的步驟在新的 run（沿用 scan artifact）和獨立探測 workflow（包含 62 分鐘之後才呼叫）都成功，原因沒查出來（排除了 token 過期、事件類型、權限設定）；之後的完整 run 見第 9 節。
+
+## 9. 最終驗證（handoff 版本的 workflow）
+
+（跑完後補：兩個版本各一次完整的 `release.yml` 手動觸發 run 的結果與 draft Release 附件。）
