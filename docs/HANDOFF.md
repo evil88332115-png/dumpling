@@ -48,7 +48,7 @@
 - commit 信箱已設成 GitHub noreply（D-011，repo config，worktree 共用）。不要改。
 - commit 訊息結尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`；PR 說明結尾加 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`。
 - **pre-push hook**：`$REPO_MAIN/.git/hooks/pre-push`（worktree 共用）會在推送前跑 `ci/public-check.sh`，並加上本機禁用字清單 `~/.config/dumpling/forbidden.txt`。被擋就改內容，**不要用 `--no-verify`**。hook 不見了就重裝：`cp ci/pre-push.hook "$REPO_MAIN/.git/hooks/pre-push"`。
-- 合併條件（D-010）：CI 的 `public-check`、`unit-tests` 綠燈＋分支是最新（`gh pr update-branch <PR>`）＋獨立驗證代理在 PR 留言「驗證：通過」。合併由 C0 做（squash），**一定要指定作者信箱**：`gh pr merge <PR> --squash --author-email 287638252+evil88332115-png@users.noreply.github.com`。不要在網頁按合併：網頁合併會把帳號主信箱寫成 commit 作者（D-013）。
+- 合併條件（D-010）：CI 的 `public-check`、`unit-tests` 綠燈（不要求分支是最新，D-021；PR 有衝突時才更新分支：在 worktree 裡 `git fetch origin && git merge origin/main` 再推送；**不要用 `gh pr update-branch` 或網頁的 Update branch**，GitHub 端的 merge commit 作者可能是帳號主信箱，見 D-019）＋獨立驗證代理在 PR 留言「驗證：通過」。合併由 C0 做（squash，驗證通過後可用 `--auto` 讓 CI 綠燈時自動合併，D-021），**一定要指定作者信箱**：`gh pr merge <PR> --squash --author-email 287638252+evil88332115-png@users.noreply.github.com`。不要在網頁按合併：網頁合併會把帳號主信箱寫成 commit 作者（D-013）。
 
 ### 公開資料
 - 只用公開 BSP、公開 BIOS／vBIOS 檔；不放任何公司資料、內部 IP、主機名、本機路徑、個人信箱。
@@ -59,7 +59,8 @@
 ### 代理
 - 每個對話（C0–C4）可以自己開 Sonnet 5.5 代理，同時最多 3 個：最多 2 個寫程式（做彼此不相關的部分）、1 個驗證；寫程式和驗證的代理一律分開。全部對話合計最多 8 個。代理本身不再開代理。
 - 開代理前看 `uptime`：負載超過 6 先不開。開了就寫進 STATUS 自己那節。
-- 代理的工作不能只存在代理裡：一開始就開分支、儘早推 WIP commit、開 draft PR。代理中斷了，新的代理從分支和 STATUS 接手。
+- 代理的工作不能只存在代理裡：一開始就開分支、儘早推 WIP commit 到分支（不開 draft PR，D-020）。代理中斷了，新的代理從分支和 STATUS 接手。
+- 做的過程中要跑 CI，用 `gh workflow run <workflow> --ref <分支>` 手動觸發；**里程碑做完才開一個 PR**（D-020）。
 - 驗證代理的結論寫在 PR 留言（開頭「驗證：通過」或「驗證：不通過」）。
 
 ### 長時間工作
