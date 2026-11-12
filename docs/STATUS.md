@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 11:58 -0500（C1）
+最後更新：2026-11-12 12:13 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -22,8 +22,8 @@
 
 - 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
 - 分支／PR／commit：
-  - `wp1/m2`：M2 整合分支，fdabd22（main cd62514＋P 軌＋gpu-firmware 公告空對照表）；子分支做完併進來；M2 完成後開一個 PR（D-020）
-  - `wp1/m2-layers`：L 軌（從 wp1/m2 dbb7263 開）
+  - `wp1/m2`：M2 整合分支，4bc43b6（main cd62514＋P 軌＋gpu-firmware 空對照表＋L 軌）
+  - `wp1/m2-layers`：L 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-jetson`：J 軌（從 wp1/m2 fdabd22 開）
   - `wp1/m2-spike`：試驗分支（4b8b7b8，不合併；量測在 `docs/m2-spike-results.md`），worktree 已移除
@@ -31,8 +31,8 @@
 - 代理：
   - 寫程式 S（M2 試驗）：完成。arm runner 單一 job 約 36 分鐘原生編完核心＋全部樹外模組（nvbuild.sh，make -j4），磁碟峰值約 8 GiB、RAM 約 3 GiB；run 43242393210（清理）、43246860803／43254234938（編譯＋傳檔）
   - 寫程式 P（平台介面與開案範本）：完成，CI run 43256946338 綠燈。契約見 `docs/PLATFORM-INTERFACE.md`：`pipeline/platform.sh <validate|fetch|build|assemble|scan|raw-sectors> <專案資料夾> <版本>`，結束碼 OK 0／FAIL 1／GAP 3／NOT_RUN 4／用法 64；project.yml 的 `os_responsibility: ours|customer|upstream-vendor`；sources.yml 是 `releases.<版本>.files[]`（gap、sha1、commit＋repo）；platform.yml 的 `layers`（bsp 套件名稱清單、host-tool 路徑、default os）；`pipeline/lib/project_config.py` 的 `classify_package`／`classify_path`；fetch_verify.py 簽名同 firmware_fetch；scan-flash-package.sh 改成明確 `--platform`、沒給就 GAP。待確認見該文件第 8 節（r39.2.0 public_sources.tbz2 的 sha256 尚未記錄＝gap）
-  - 寫程式 L（依層分開）：`wp1/m2-layers`；分層模組（套件名稱／路徑／own_software → bsp、host-tool、os、unknown）、cra_report／report_package 加「層」欄位、P1 判斷表只放 bsp（os_responsibility=ours 時含 os；沒給時 GAP＋保守）、host-tool 不進漏洞清單、SBOM 依層拆成兩個 DT 專案、Jetson fixture 各層數量當標準答案起點；Sonnet 5.5／high；進行中
-  - 寫程式 J（Jetson build／assemble／scan、release.yml、dev.yml、patch 版、標準答案測試）：`wp1/m2-jetson`；Sonnet 5.5／high；進行中。手動觸發只建 draft Release，測完刪 draft；不建 git tag
+  - 寫程式 L（依層分開）：完成，CI run 43265323496 綠燈。契約 `docs/LAYERS.md`：`pipeline/sbom-layers.py split <sbom> <平台> <專案資料夾> <輸出>` → sbom.bsp（bsp＋unknown）／os／host-tool（不上傳）／product＋layers.json（scan_plan）；cra_report `--os-responsibility`、漏洞列加 layer／layer_todo；P1 判斷表 customer／upstream-vendor 只放 bsp＋unknown、ours 含 os、沒給全部＋GAP；host-tool 不進清單；DT 兩個平行專案 `<名稱>-bsp`／`-os`；SBOM 沒有分層屬性時輸出與原本一致。Jetson fixture：bsp 1537、os 1975、unknown 339、host-tool 0
+  - 寫程式 J（Jetson build／assemble／scan、release.yml、dev.yml、patch 版、標準答案測試、接上分層）：`wp1/m2-jetson`；Sonnet 5.5／high；進行中。手動觸發只建 draft Release，測完刪 draft；不建 git tag
 - CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
 - 下一步：L、J 完成 → 併入 wp1/m2 → 整合分層（J 的 scan 呼叫 L 的拆分工具）→ 兩個版本 release.yml（draft）全程跑通 → 驗證 → PR → 通知 C0（正式 tag 由 C0 問使用者）
 - M2 設計備忘：
@@ -53,6 +53,7 @@
   - C2 依賴 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（路徑與檔名；`wp1/m2` fdabd22 新增的空表，M2 合併後生效；C2 在檔不存在時印 GAP）
   - C2 依賴臨時 DT 介面：`pipeline/dt-ephemeral.sh up|wait|env|down`、`tools/pilot/sca-scan --sbom`、`pipeline/scan-status-check.py`（預設 11 個必要階段）、`pipeline/dt-verify.py verify`
 - 卡住／等決定：
+  - 待 PM／使用者決定（已告知 C0；都先採最保守做法，見 `docs/LAYERS.md` 第 8 節）：339 個沒路徑的 Go／Python／Java 元件目前歸 unknown＝BSP 待辦；`nvidia-igx-*` 等非 `nvidia-l4t-*` 的 NVIDIA 套件歸 os；VEX 發行閘門不分層；DT 平行專案 vs parent／child；host-tool 是否另開 DT 專案
   - 等使用者（C0 轉問）：M1 PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
   - （已定）public-check 反向規則：D-028（C0 做）；上游部署預設路徑保留；alert_mail.py 留給 C3
 <!-- END C1 -->
