@@ -154,7 +154,7 @@ Action: {{ policy.p3.action }}
 
 ### 8.7 Operating system kernel ({{ counts.kernel }})
 
-{{ text.kernel_section }}{{ text.nvidia_section }}{{ text.distro_section }}{{ text.vex_section }}{{ text.exploitation_section }}
+{{ text.kernel_section }}{{ text.nvidia_section }}{{ text.distro_section }}{{ text.vex_section }}{{ text.exploitation_section }}{{ text.layer_section }}
 
 ## 9. Security testing (Annex I Part II point (3))
 

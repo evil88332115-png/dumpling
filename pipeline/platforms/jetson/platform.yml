@@ -7,10 +7,23 @@ build:
 raw_sectors:
   enabled: false           # Jetson 沒有分割區外的原始磁區要清點
 # 分層規則（D-027）：用套件名稱（不含版本）與路徑樣式，fnmatch 語法；不看版本字尾。其餘一律是 os。
+# 路徑樣式比的是元件在映像裡的路徑（去掉開頭的 /）：rootfs 映像是 usr/lib/modules/…，BSP 資料夾是 Linux_for_Tegra/…。
+# 非套件的元件（核心、樹外模組、device tree、開機程式、閉源韌體）靠路徑判斷；路徑沒有任何規則對到的標 unknown（不默默歸成 os）。
 layers:
   bsp:
     packages:
       - "nvidia-l4t-*"       # L4T 使用者空間套件（驅動、函式庫、工具）：裝在 rootfs 但屬於 BSP
+    paths:                   # 核心、樹外模組、device tree、開機程式（J 軌依實際 BSP 內容再補）
+      - "usr/lib/modules/*"  # rootfs：核心（in-tree）與樹外模組（nvidia-oot、nvgpu…），Syft 的 linux-kernel-module 元件
+      - "lib/modules/*"
+      - "boot/*"             # rootfs：核心映像、device tree、initrd
+      - "Linux_for_Tegra/kernel/*"
+      - "Linux_for_Tegra/rootfs/usr/lib/modules/*"
+      - "Linux_for_Tegra/rootfs/boot/*"
+      - "Linux_for_Tegra/bootloader/*.bin"   # UEFI、OP-TEE／TF-A、MB1／MB2、BPMP、SPE 等映像
+      - "Linux_for_Tegra/bootloader/*.dtb"
+      - "Linux_for_Tegra/bootloader/*.dtbo"
+      - "Linux_for_Tegra/bootloader/*.img"
   host-tool:
     paths:                   # 主機端刷機工具：不在板子上執行，不進產品漏洞清單（J 軌依實際 BSP 內容再補）
       - "Linux_for_Tegra/flash.sh"

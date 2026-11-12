@@ -155,6 +155,9 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
   own_software: []  interfaces: […]  platform_params: {}
 ```
 - 分層規則**只用套件名稱清單與路徑樣式，不看版本字尾**（例如不以 `+rpt` 判斷）。套件樣式：小寫英數與 `+ . - _`，可含 `* ? []`，不含 `/`。路徑樣式：相對路徑、不含 `..`；`*` 也比對 `/`。套件先比 `bsp`、再比 `host-tool`，都不符合是 `os`。
+- **分層的完整規則見 `docs/LAYERS.md`**。補充（向後相容的擴充）：`layers.os.paths`（選用，只有 `paths`）可明確宣告哪些路徑是 OS；路徑樣式比的是元件在映像裡的路徑
+  （rootfs 映像是 `usr/lib/modules/…`，BSP 資料夾是 `Linux_for_Tegra/…`，兩種都列）。`default: os` 只用在**發行版套件**（deb／rpm／apk 的名稱）；非套件元件的路徑沒有任何規則
+  對到時是 `unknown`，不會默默歸成 os。SBOM 的拆分與標記用 `pipeline/sbom-layers.py`（J 軌的 scan 步驟呼叫，見 `docs/LAYERS.md` 第 6 節）。
 - `os_responsibility` **不在平台設定裡**（由專案的角色決定）；`project_defaults` 放它會驗證失敗。
 
 **L 軌用的讀取函式**（`pipeline/lib/project_config.py`，`python3 -I` 下 `sys.path.insert(0, "pipeline/lib")`）：

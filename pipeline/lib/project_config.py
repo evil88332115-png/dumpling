@@ -285,11 +285,12 @@ def validate_platform_config(doc, name=None):
         errs.append("缺 layers")
     else:
         for k in layers:
-            if k not in ("bsp", "host-tool", "default"):
+            if k not in ("bsp", "os", "host-tool", "default"):
                 errs.append("layers 不認得的鍵 " + str(k))
         if layers.get("default", "os") != "os":
             errs.append("layers.default 目前只能是 os")
-        for layer in ("bsp", "host-tool"):
+        # os 的規則是選用：分層模組（layers.py）用它明確宣告「這些路徑／套件是 OS」；沒列的非套件元件標 unknown，不默默歸成 os
+        for layer in ("bsp", "os", "host-tool"):
             body = layers.get(layer)
             if body is None:
                 continue
@@ -297,9 +298,10 @@ def validate_platform_config(doc, name=None):
                 errs.append("layers.%s 必須是 mapping" % layer)
                 continue
             for k in body:
-                if k not in ("packages", "paths"):
+                # os 只有 paths：套件沒列在 bsp／host-tool 的本來就是 os（D-027）
+                if k not in (("paths",) if layer == "os" else ("packages", "paths")):
                     errs.append("layers.%s 不認得的鍵 %s" % (layer, k))
-            _validate_patterns(body.get("packages"), "layers.%s.packages" % layer, "package", errs)
+            _validate_patterns(body.get("packages") if layer != "os" else None, "layers.%s.packages" % layer, "package", errs)
             _validate_patterns(body.get("paths"), "layers.%s.paths" % layer, "path", errs)
     pd = doc.get("project_defaults")
     if pd is not None:
