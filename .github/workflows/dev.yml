@@ -68,8 +68,8 @@ jobs:
   publish:
     name: 發布 dev/${{ matrix.project }}
     needs: [matrix, pipeline]
-    # 只在 main 或 dev/** 分支發布；其他分支只留 artifact
-    if: ${{ !cancelled() && needs.pipeline.result == 'success' && (inputs.stop_after || 'all') == 'all' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/')) }}
+    # main 或 dev/** 分支：更新滾動的 pre-release（公開）；其他分支（例如功能分支上的手動測試）只建 draft（不公開、不建 git tag）
+    if: ${{ !cancelled() && needs.pipeline.result == 'success' && (inputs.stop_after || 'all') == 'all' }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,15 +108,23 @@ jobs:
           done
           [ -f "sbom-$PROJECT-$VERSION.cdx.json" ] || { echo "publish: FAIL（沒有 sbom-$PROJECT-$VERSION.cdx.json）"; exit 1; }
           notes="開發版（status 見 release-meta.json）的最新 SBOM。每次 dev 流程跑完覆蓋，供每日監控讀取；不是正式出貨版本。commit $GITHUB_SHA，run $GITHUB_RUN_ID。"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"
-            # 舊版本留下的附件（檔名不同）刪掉，只留這次的
-            for a in $(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
-              keep=0; for f in "${files[@]}"; do [ "$a" = "$f" ] && keep=1; done
-              [ $keep = 1 ] || gh release delete-asset "$tag" "$a" --yes --repo "$GITHUB_REPOSITORY"
-            done
-            gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          if [ "$GITHUB_REF" = refs/heads/main ] || [[ "$GITHUB_REF" == refs/heads/dev/* ]]; then
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"
+              # 舊版本留下的附件（檔名不同）刪掉，只留這次的
+              for a in $(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
+                keep=0; for f in "${files[@]}"; do [ "$a" = "$f" ] && keep=1; done
+                [ $keep = 1 ] || gh release delete-asset "$tag" "$a" --yes --repo "$GITHUB_REPOSITORY"
+              done
+              gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            else
+              gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" --title "$tag（滾動的開發版）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+            fi
+            echo "publish: OK（滾動 pre-release $tag，${#files[@]} 個附件）"
           else
-            gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" --title "$tag（滾動的開發版）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+            for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$tag\") | .id"); do
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
+            done
+            gh release create "$tag" "${files[@]}" --draft --target "$GITHUB_SHA" --title "$tag（草稿，非 main／dev 分支）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+            echo "publish: OK（draft $tag；$GITHUB_REF 不是 main 或 dev/**，不更新公開的滾動 pre-release）"
           fi
-          echo "publish: OK（$tag，${#files[@]} 個附件）"

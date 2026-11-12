@@ -128,9 +128,25 @@ dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…�
 平台設定 `raw_sectors.enabled: true` 時必須提供 `raw-sectors.sh`；`false`（預設）時 dispatcher 回報 `raw-sectors: OK（此平台不適用）`。
 轉接器的 `assemble.sh` 或 `scan.sh` 自己呼叫 `bash "$DUMPLING_ROOT/pipeline/platform.sh" raw-sectors "$1" "$2"`。建議輸出 `$DUMPLING_OUT/raw-sectors.json`：`{"schema": 1, "platform": …, "regions": [{"start_lba": …, "sectors": …, "sha256": …, "identity": …}]}`；與 rootfs 套件不符或找不到標 GAP，不用套件版本猜磁區版本。
 
-### Jetson 骨架（J 軌要接的）
+### Jetson 轉接器（M2 J 軌；細節見 `docs/JETSON.md`）
 
-`pipeline/platforms/jetson/`：`fetch` 用共用的（`projects/orin-nano-demo/sources.yml` 的 BSP、範例 rootfs、`public_sources.tbz2`）；`build.sh`、`assemble.sh`、`scan.sh` 目前只印 `<步驟>: NOT_RUN（J 軌實作）` 並以 4 結束，J 軌直接覆寫這三個檔。`platform.yml` 的分層規則已填 Jetson 的。r39.2.0 的 `public_sources.tbz2` 還沒有首次下載的 sha256，所以標 `gap`；CI 首次下載並人工確認後再填。
+`pipeline/platforms/jetson/`：`fetch` 用共用的（`projects/orin-nano-demo/sources.yml` 的 BSP、範例 rootfs、`public_sources.tbz2`、NVIDIA 公布的 `public_sources_sha.txt`）；
+`build.sh`（原生編核心與樹外模組，只在 aarch64）、`assemble.sh`（組刷機包）、`scan.sh`（臨時 DT＋精靈＋分層＋標準答案比對）已實作，`prepare-source.sh` 是 build 與 assemble 共用的內部腳本。
+
+Jetson 的 `sources.yml` `platform_params`：
+
+| 鍵 | 型別 | 意思 |
+|---|---|---|
+| `l4t_release` | 字串（必填） | Jetson Linux 版本（例如 `"39.2.1"`）；scan 用它設定精靈的 `upstream_set`（`jetson-r39.2.1`）與 `inputs.json` 的版本字樣 |
+| `patches` | 清單（選填） | **這個版本要套的 patch**，依序套在 `projects/<專案>/patches/` 的檔案。項目是檔名字串（套在核心樹 `kernel/kernel-noble`，`patch -p1`），或 `{file: 檔名, dir: 原始碼根底下的相對資料夾}`。只收檔名、不含路徑；`--dry-run --fuzz=0` 乾淨才套，套不上 = build FAIL。沒列在任何版本的 patch 不會套用（build 警告）。同一個專案的不同版本可以套不同的 patch（例如 `v39.2.0-demo1` 不套、`v39.2.1-demo1` 套 `0001-…`） |
+
+- `build` 輸出 `$DUMPLING_OUT/BuildRecord-<專案>-<版本>.tar.gz`、`deliver/`（Image、.ko、dtb）、`build.json`；建置不可重現，所以建置紀錄與刷機包必須來自同一次編譯（workflow 用 artifact 傳給 scan，不重編、不以雜湊當 cache key）。UEFI 未自編（D-002）。
+- `scan` 的環境變數：`PILOT_ENV`（pilot.env 的路徑，放在單獨的資料夾）。輸出 `$DUMPLING_OUT/release/`（Release 附件，檔名一律 ASCII，另有 `manifest.tsv`：檔名 TAB 顯示名稱）、`scan.json`（標準答案比對用的摘要）、`summary.md`。
+  結束碼：OK 0；GAP 3（沒有標準答案、分層有 GAP；結果照樣產生）；FAIL 1（含標準答案不符）。
+- **標準答案**：`tests/expected/<專案>/<版本>.json`，格式與規則見 `pipeline/check-expected.py` 的說明；沒有檔案 = GAP，不是通過。
+- **Release 附件命名**（機器可讀，給每日監控讀）：`sbom-<專案>-<版本>.cdx.json`（完整、標好層）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、`layers.json`、`release-meta.json`
+  （`project`、`version`、`tag`、`status`、`platform`、`os_responsibility`、`commit`、`built_at`、`workflow_run`；由 `pipeline/release-meta.py` 產生）。
+  已出貨版本的 SBOM 不提交進 repo（D-029）：Release 就是正式來源；開發版發到每個專案一個滾動的 pre-release `dev/<專案>`（只在 `main` 或 `dev/**` 分支發布）。
 
 ## 6. platform.yml
 
@@ -176,6 +192,6 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 
 - 欄位名稱（`os_responsibility`、`company_role` 的值、`project_defaults`、`raw_sectors`）是 C1 依 D-027 自訂的，C0／PM 若要改名請告知。
 - `company_role` 目前三值（`manufacturer`、`supplier`、`both`）沿用精靈的 `--role`；若開案資訊表還有 importer／distributor 角色要再加。
-- `sources.yml` 的 `commit` 封存檔 clone 核對目前只在 fetch 實作；`public_sources.tbz2`（NVIDIA 沒公布整包雜湊）的 r39.2.0 sha256 待首次下載後填。
+- `sources.yml` 的 `commit` 封存檔 clone 核對目前只在 fetch 實作；`public_sources.tbz2`（NVIDIA 沒公布整包雜湊）的 sha256 是首次下載記錄（TOFU，2026-11-12），不是官方核對；元件 SHA-1 才對 NVIDIA 公布值。
 - `fetch_verify.py` 是 `firmware_fetch.py` 的超集（`size` 可為 None、`fetch_one` 先檢查 https）；`firmware_fetch.py` 改成 import 它由 C0 與 C2 協調。
-- `projects/orin-nano-demo/CRA/Config/inputs.json` 是精靈範本原樣（`upstream_set` 為 r39.2.0）；兩個版本各自的 upstream_set 由 J 軌處理。
+- `projects/orin-nano-demo/CRA/Config/inputs.json` 是精靈範本原樣（`upstream_set` 為 r39.2.0）；scan 步驟依 `platform_params.l4t_release` 在複本裡改成該版本（原檔不動）。

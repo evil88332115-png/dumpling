@@ -111,12 +111,12 @@ jobs:
             [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
             args+=("$f#$label")
           done < manifest.tsv
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            is_draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
-            if [ "$is_draft" != true ]; then echo "release: FAIL（$TAG 已經有正式 Release，不覆蓋）"; exit 1; fi
-            gh release upload "$TAG" "${args[@]}" --clobber --repo "$GITHUB_REPOSITORY"
-            echo "release: OK（更新既有 draft $TAG，${#args[@]} 個附件）"
-          elif [ "$EVENT" = push ]; then
+          # 先清掉同名的舊草稿（手動觸發的測試草稿；草稿用 tag 名稱查不到，所以用 API 依 id 刪）
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id"); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
+          done
+          if [ "$EVENT" = push ]; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then echo "release: FAIL（$TAG 已經有正式 Release，不覆蓋）"; exit 1; fi
             gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
             echo "release: OK（正式 Release $TAG，${#args[@]} 個附件）"
           else
