@@ -186,7 +186,7 @@ def process(path, out_root, downloader=curl_download):
     return ("OK" if ok else "FAIL"), model, "；".join(msgs)
 
 
-def main(argv=None):
+def main(argv=None, downloader=curl_download):
     ap = argparse.ArgumentParser(description="下載韌體樣本並核對 sha256")
     ap.add_argument("manifests", nargs="+")
     ap.add_argument("--out", required=True)
@@ -196,7 +196,7 @@ def main(argv=None):
         return 1
     failed = False
     for m in args.manifests:
-        status, model, msg = process(m, args.out)
+        status, model, msg = process(m, args.out, downloader)
         print("FIRMWARE-FETCH\t%s\t%s\t%s" % (status, model, msg.replace("\t", " ").replace("\n", " ")), flush=True)
         failed = failed or status == "FAIL"
     return 1 if failed else 0

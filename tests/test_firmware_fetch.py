@@ -142,17 +142,125 @@ class FetchTest(unittest.TestCase):
         self.write(manifest_text(sha_="0" * 64))
         import io
         import contextlib
-        old = ff.curl_download
         buf = io.StringIO()
-        try:
-            ff.process.__defaults__ = (fake_download(DATA),)
-            with contextlib.redirect_stdout(buf):
-                rc = ff.main([self.mf, "--out", self.out])
-        finally:
-            ff.process.__defaults__ = (old,)
+        with contextlib.redirect_stdout(buf):
+            rc = ff.main([self.mf, "--out", self.out], downloader=fake_download(DATA))
         self.assertEqual(rc, 1)
         parts = buf.getvalue().rstrip("\n").split("\t")
         self.assertEqual(parts[:3], ["FIRMWARE-FETCH", "FAIL", "M1"])
+
+    def test_main_ok_exit_code_zero(self):
+        self.write(manifest_text())
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ff.main([self.mf, "--out", self.out], downloader=fake_download(DATA))
+        self.assertEqual(rc, 0)
+        self.assertTrue(buf.getvalue().startswith("FIRMWARE-FETCH\tOK\tM1\t"))
+
+    def test_curl_command_pins_https_and_size_cap(self):
+        import unittest.mock as mock
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append(cmd)
+            return mock.Mock(returncode=0, stderr="")
+        with mock.patch.object(ff.subprocess, "run", fake_run):
+            self.assertIsNone(ff.curl_download("https://example.com/x.bin", "/dest/x.part", 1234))
+        cmd = seen[0]
+        self.assertEqual(cmd[0], "curl")
+        i = cmd.index("--proto")
+        self.assertEqual(cmd[i + 1], "=https")
+        i = cmd.index("--proto-redir")
+        self.assertEqual(cmd[i + 1], "=https")
+        i = cmd.index("--max-filesize")
+        self.assertEqual(cmd[i + 1], "1234")
+        self.assertIn("--fail", cmd)
+        self.assertEqual(cmd[-2:], ["--", "https://example.com/x.bin"])      # URL 在 -- 之後，不會被當成選項
+
+    def test_curl_failure_message_has_exit_code(self):
+        import unittest.mock as mock
+        with mock.patch.object(ff.subprocess, "run", lambda cmd, **kw: mock.Mock(returncode=63, stderr="too big")):
+            msg = ff.curl_download("https://example.com/x.bin", "/dest/x.part", 1)
+        self.assertIn("63", msg)
+
+    def test_existing_wrong_file_is_replaced(self):
+        self.write(manifest_text())
+        os.makedirs(self.dest())
+        final = os.path.join(self.dest(), "a.bin")
+        with open(final, "wb") as fh:
+            fh.write(b"corrupt")
+        st, _, _ = self.run_one()
+        self.assertEqual(st, "OK")
+        with open(final, "rb") as fh:
+            self.assertEqual(fh.read(), DATA)
+        self.assertEqual(os.listdir(self.dest()), ["a.bin"])
+
+    def test_directory_in_the_way_of_output_file_fails(self):
+        self.write(manifest_text())
+        os.makedirs(os.path.join(self.dest(), "a.bin"))
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("拒絕", msg)
+        self.assertTrue(os.path.isdir(os.path.join(self.dest(), "a.bin")))
+
+    def test_directory_in_the_way_of_part_file_fails(self):
+        self.write(manifest_text())
+        os.makedirs(os.path.join(self.dest(), ".a.bin.part"))
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("拒絕", msg)
+
+    def test_file_in_the_way_of_output_directory_fails(self):
+        self.write(manifest_text())
+        os.makedirs(self.out)
+        with open(os.path.join(self.out, "bios"), "wb") as fh:          # 應該是資料夾的位置是個檔案
+            fh.write(b"x")
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("輸出目錄", msg)
+
+    def test_symlinked_output_directory_fails(self):
+        self.write(manifest_text())
+        victim = os.path.join(self.tmp.name, "victim_dir")
+        os.makedirs(victim)
+        os.makedirs(os.path.join(self.out, "bios"))
+        os.symlink(victim, os.path.join(self.out, "bios", "slug"))
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("symlink", msg)
+        self.assertEqual(os.listdir(victim), [])
+
+    def test_malicious_file_names_fail_and_download_nothing(self):
+        for bad in ("a/b", ".hid", "..", "../a.bin", "-rf", "a b", "a\\b", "/abs"):
+            with self.subTest(name=bad):
+                self.write(manifest_text().replace("name: a.bin", 'name: "%s"' % bad.replace("\\", "\\\\")))
+                st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+                self.assertEqual(st, "FAIL")
+                self.assertIn("name 不合法", msg)
+
+    def test_duplicate_file_names_fail(self):
+        extra = """  - name: a.bin
+    url: https://example.com/b.bin
+    sha256: %s
+    size: %d
+    role: image
+""" % (sha(DATA), len(DATA))
+        self.write(manifest_text(extra=extra))
+        st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("重複", msg)
+
+    def test_kind_escape_fails_and_creates_nothing_outside(self):
+        for kind in ("../../x", "bios/../..", "/tmp", "firmware", ""):
+            with self.subTest(kind=kind):
+                self.write(manifest_text().replace("kind: bios", 'kind: "%s"' % kind))
+                st, _, msg = ff.process(self.mf, self.out, lambda u, d, m: self.fail("不該下載"))
+                self.assertEqual(st, "FAIL")
+                self.assertIn("kind", msg)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "x")))
 
 
 class RepoManifestsTest(unittest.TestCase):
