@@ -62,3 +62,60 @@ jobs:
           name: m2res-cleanup-${{ matrix.runner }}
           path: ${{ runner.temp }}/m2res
           retention-days: 7
+
+  download:
+    name: download (arm)
+    if: ${{ inputs.stage == 'download' || inputs.stage == 'inspect' || inputs.stage == 'build' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      DL: ${{ github.workspace }}/../m2dl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 版本資訊（檔名與雜湊）
+        id: meta
+        run: |
+          . tools/spike/m2-release.sh "${{ inputs.release }}"
+          {
+            echo "bsp=$BSP"; echo "bsp_sha256=$BSP_SHA256"
+            echo "rfs=$RFS"; echo "rfs_sha256=$RFS_SHA256"
+            echo "src=$SRC"; echo "src_sha256=$SRC_SHA256"
+          } >> "$GITHUB_OUTPUT"
+          mkdir -p "$DL"; echo "dl=$(readlink -f "$DL")" >> "$GITHUB_OUTPUT"
+          df -B1 / | tail -1
+      - name: 快取還原／儲存 BSP
+        id: c_bsp
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.meta.outputs.dl }}/${{ steps.meta.outputs.bsp }}
+          key: m2spike-v1-${{ steps.meta.outputs.bsp }}-${{ steps.meta.outputs.bsp_sha256 }}
+      - name: 快取還原／儲存 範例 rootfs
+        id: c_rfs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.meta.outputs.dl }}/${{ steps.meta.outputs.rfs }}
+          key: m2spike-v1-${{ steps.meta.outputs.rfs }}-${{ steps.meta.outputs.rfs_sha256 }}
+      - name: 快取還原／儲存 公開原始碼
+        id: c_src
+        if: ${{ steps.meta.outputs.src_sha256 != 'PENDING' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.meta.outputs.dl }}/${{ steps.meta.outputs.src }}
+          key: m2spike-v1-${{ steps.meta.outputs.src }}-${{ steps.meta.outputs.src_sha256 }}
+      - name: 下載＋核對（快取有的就只核對 SHA-256）
+        run: |
+          echo "cache-hit bsp=${{ steps.c_bsp.outputs.cache-hit }} rootfs=${{ steps.c_rfs.outputs.cache-hit }} src=${{ steps.c_src.outputs.cache-hit }}"
+          bash tools/spike/m2-download.sh "${{ inputs.release }}" "${{ steps.meta.outputs.dl }}"
+      - name: 摘要
+        if: ${{ always() }}
+        run: |
+          . tools/spike/m2-lib.sh
+          { echo "## download (arm) ${{ inputs.release }}"; report_md; echo; echo '```'; cat "$RES/downloads.tsv" 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: m2res-download
+          path: ${{ runner.temp }}/m2res
+          retention-days: 7
