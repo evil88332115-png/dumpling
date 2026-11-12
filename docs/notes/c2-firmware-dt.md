@@ -79,12 +79,12 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 
 環境：Docker 臨時 DT（OSV: PyPI,npm,Ubuntu；KEV；NVD 關閉）。Syft／Grype 用主機上同版本的 `/opt/sca-tools`（沒有 sudo，沒跑 `install-tools.sh`）。
 `RUNNER_TEMP` 要放在家目錄底下：sca-scan 的沙箱探測會在 `RUNNER_TEMP` 放假憑證檔並要求它被遮蔽，放在其他位置會得到 `B-sandbox=FAIL`（本機環境問題，runner 上的 `_temp` 在家目錄內）。
-時間：`up` 約 20 秒、`wait` 363～378 秒（三次）、五個樣本的 sca-scan＋verify 約 41 秒（沙箱失敗那次）到 671 秒（含 Grype 資料庫更新與 Grype 比對）。
+時間：`up` 約 20 秒、`wait` 363～378 秒（四次）、四個樣本的 sca-scan＋verify 合計約 670 秒（含 Grype 資料庫更新與比對；整個端到端約 1068 秒）。
 
 | 樣本 | 元件（不同身分） | DT 元件數 | 上傳 | Grype | verify | report |
 |---|---|---|---|---|---|---|
-| Protectli VP46xx（BIOS） | 16（14） | 14 | OK | OK（0） | 元件數依下方修正後見最後一欄註 | ATTENTION（見註） |
-| NUC11 PATGL357（BIOS） | 3 | 3 | OK | OK（0） | 通過 | ATTENTION |
+| Protectli VP46xx（BIOS） | 16（14） | 14 | OK | OK（0） | 通過（修正身分後；修正前預期 16 實際 14 → FAIL） | ATTENTION |
+| NUC11 PATGL357（BIOS，合併 wp3/m3 後的新 SBOM） | 8（6） | 6 | OK | OK（0） | 通過（合併前 3 個元件、3＝3） | ATTENTION |
 | Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
 | 合成 NVIDIA vBIOS | 1 | 1 | OK | OK（0） | 通過 | ATTENTION（NVIDIA 公告對照：NOT_ASSESSED） |
 | Dasharo NS5x 供應商 SBOM | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
@@ -94,6 +94,7 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
   代價：DT 看不到同版本不同映像的第二份，SBOM 原檔仍保留兩份。
 - **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
   這是上游檔案不符合 CycloneDX schema，我們不改元件內容，所以這個樣本在 DT 裡是 FAIL（Grype 仍比對了 36 筆，DT 完全沒有資料）。處理方式待 C2 決定（見回報）。
+- `firmware-dt.sh` 遇到 `--result` 已有舊結果會標 FAIL（sca-scan 不接受非空輸出資料夾，舊的 status.tsv 也不能混進 report）；第三次本機執行重用資料夾時差點被舊結果騙成「OK」，所以加了這個檢查。
 - 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
 
 ## 仍未驗證
