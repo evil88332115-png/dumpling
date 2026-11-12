@@ -19,5 +19,6 @@
 | `tools/cra/tests/data/cyclonedx-1.6.1/`（README.md、bom-1.6.schema.json、jsf-0.82.schema.json、spdx.schema.json） | `scripts/cra/tests/data/cyclonedx-1.6.1/` | 25fa89a | 三個 schema 是 CycloneDX 官方檔案，bom 與 spdx 原樣複製；jsf-0.82.schema.json 只改了 `$comment` 裡作者的個人信箱（公開檢查不允許個人信箱；不影響驗證，SHA-256 與原檔的差異見該目錄 README.md）；README 只改了「用來驗證」那句的檔名參照。C1 之後的 cra 測試共用這個位置 |
 | `tools/cra/tests/cdx_schema.py` | `scripts/cra/tests/test_firmware_bom.py` 約第 422–434 行（`SCHEMA_DIR`、`cdx_validator`） | 25fa89a | 只抽出這兩段，其餘 `test_firmware_bom.py` 歸 C1，不複製 |
 | `tools/cra/tests/conftest.py` | `scripts/cra/tests/conftest.py` 與 `integration/conftest.py`（概念） | 25fa89a | 不複製 `integration/`。改寫成等效的最小版：環境變數 `DUMPLING_REQUIRE_TEST_DATA=1` 時任何 skip 都視為失敗（原本是 `SCA_REQUIRE_TEST_DATA`） |
+| `tools/cra/coreboot_cbfs.py`、`tools/cra/tests/test_coreboot_cbfs.py` | BIOS 試掃原型（未進 sca-center git）：CBFS 列表／讀取、SELF payload 展開、FSP header 讀取四支評估用腳本 | 無（原型不在 git） | **依原型重寫，不是複製。** 沿用的做法：CBFS 檔頭（`LARCHIVE`、big endian 欄位、壓縮屬性 tag 0x42435a4c）、LZMA（alone 格式）、SELF segment 表（`>4sIIQII`）、`FSPH` header 欄位位置。新增：FMAP 定位、區域分開記、邊界與上限檢查、LZ4 解碼器、`revision`／`build_info`／`config`／`vbt.bin` 解析、SBOM 元件。測試資料全部是測試自己組的假資料 |
 
 以下是 dumpling 自己寫的（不是複製）：`pipeline/firmware-bios.sh`、`tools/cra/tests/test_x86_firmware_sbom.py`、`tools/cra/tests/requirements.txt`、`tests/run.d/c2-x86-firmware.sh`。

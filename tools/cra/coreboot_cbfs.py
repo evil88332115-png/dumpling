@@ -359,6 +359,8 @@ def entry_at(data, pos, end):
             a, n = pos + ao, 0
             while a + 8 <= pos + off and n < MAX_ATTRS:
                 tag, alen = struct.unpack_from(">II", data, a)
+                if tag in (0, 0xFFFFFFFF):          # CBFS_FILE_ATTR_TAG_UNUSED／UNUSED2：屬性串列結束（後面是填充）
+                    break
                 if alen < 8 or a + alen > pos + off:
                     e["attr_note"] = "malformed attribute list"
                     break
@@ -384,11 +386,12 @@ def find_header(data, frm, end, start):
     return None, True
 
 
-def walk(data, start, end, budget=None, resync=True, file_cap=MAX_FILES):
+def walk(data, start, end, budget=None, resync=True, file_cap=None):
     """區域 [start, end) 的 CBFS 檔案。→ (檔案 list, 空檔案數, 問題 list, 實際走到的結尾)。
     resync：檔頭壞掉或下一個位置不是檔頭時，往後找下一個對齊的 `LARCHIVE`（FMAP 區域）；False 時在那裡結束（掃描模式）。"""
     files, empty, problems = [], 0, []
     pos, covered = start, start
+    file_cap = MAX_FILES if file_cap is None else file_cap
     while pos + CBFS_HEADER <= end:
         if budget is not None and (len(files) + empty) % 256 == 0:
             budget.check()
@@ -426,12 +429,16 @@ def walk(data, start, end, budget=None, resync=True, file_cap=MAX_FILES):
 
 def scan_regions(data, lo, hi, budget=None):
     """沒有 FMAP：掃 `LARCHIVE`。→ ([區域], [問題])。"""
-    regions, problems, p, tried = [], [], lo, 0
+    regions, problems, p, tried, seen = [], [], lo, 0, 0
     while True:
         i = data.find(CBFS_MAGIC, p, hi)
         if i < 0:
             break
         p = i + 1
+        seen += 1
+        if seen > MAX_RESYNC:
+            problems.append(f"more than {MAX_RESYNC} LARCHIVE strings; the rest of the image was not scanned")
+            break
         if i % 16 or (regions and i < regions[-1]["offset"] + regions[-1]["size"]):
             continue
         tried += 1
@@ -489,8 +496,12 @@ def fmap_regions(data, fm, start, budget=None):
 class Reader:
     """要讀的檔案：解壓一次、總量上限、相同內容共用結果。"""
 
-    def __init__(self, data, max_total=MAX_TOTAL_OUT, max_file=MAX_FILE_OUT, max_text=MAX_TEXT_OUT):
-        self.data, self.total_left, self.max_file, self.max_text = data, max_total, max_file, max_text
+    def __init__(self, data, max_total=None, max_file=None, max_text=None):
+        self.data = data
+        self.max_total = MAX_TOTAL_OUT if max_total is None else max_total
+        self.total_left = self.max_total
+        self.max_file = MAX_FILE_OUT if max_file is None else max_file
+        self.max_text = MAX_TEXT_OUT if max_text is None else max_text
         self.cache = {}
 
     def stored(self, f):
@@ -672,7 +683,7 @@ def merge(items, key, make, location):
     return it
 
 
-def analyze(data, lo=0, hi=None, budget=None, max_total=MAX_TOTAL_OUT, max_file=MAX_FILE_OUT):
+def analyze(data, lo=0, hi=None, budget=None, max_total=None, max_file=None, max_text=None):
     """data[lo:hi] 裡的 CBFS。沒有 CBFS → None。offset 都是 data 裡的絕對位置。
 
     {"method": "fmap"|"scan", "fmap": {...}|None,
@@ -706,7 +717,7 @@ def analyze(data, lo=0, hi=None, budget=None, max_total=MAX_TOTAL_OUT, max_file=
             problems.append("FMAP has no CBFS area; scanned for LARCHIVE instead")
     if not regions:
         return None
-    reader = Reader(data, max_total, max_file)
+    reader = Reader(data, max_total, max_file, max_text)
     r = {"method": method, "fmap": fm_out, "regions": [], "coreboot": [], "payloads": [], "fsp": [], "vbt": [], "microcode_files": [],
          "incomplete": [], "gaps": []}
     inc = r["incomplete"]
@@ -828,6 +839,6 @@ def analyze(data, lo=0, hi=None, budget=None, max_total=MAX_TOTAL_OUT, max_file=
         r["gaps"].append("CBFS found but no 'revision'/'build_info' with COREBOOT_VERSION: coreboot version not read")
     if r["payloads"]:
         r["gaps"].append("coreboot payload (SELF) contents, for example edk2 firmware volumes, are not expanded here; only the payload identity is read")
-    r["limits"] = {"max_file_out": reader.max_file, "max_text_out": reader.max_text, "max_total_out": max_total,
-                   "decompressed_total": max_total - reader.total_left}
+    r["limits"] = {"max_file_out": reader.max_file, "max_text_out": reader.max_text, "max_total_out": reader.max_total,
+                   "decompressed_total": reader.max_total - reader.total_left}
     return r

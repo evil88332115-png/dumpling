@@ -1920,7 +1920,7 @@ def markdown(inv):
     e = md_esc
     L = ["# x86 韌體清點（BIOS 元件版本）", "",
          f"- 狀態：**{inv.get('status', '')}**；{e(inv.get('detail', ''))}",
-         "- 只讀解析（不執行、不解壓）；結構化資料見 `fw-inventory.json`、SBOM 見 `fw.cdx.json`。"
+         "- 只讀解析（不執行）；UEFI 壓縮 section 不解壓，coreboot CBFS 的 revision／config／FSP／VBT 只在記憶體內解壓讀取；結構化資料見 `fw-inventory.json`、SBOM 見 `fw.cdx.json`。"
          "版本以 BIOS／顯卡團隊的版本清單為準，這裡是映像裡讀得到的部分。", ""]
     L += ["## ME（CSME／TXE／SPS）狀態總覽", ""]
     for st in ("found", "no-me-region", "unknown"):
