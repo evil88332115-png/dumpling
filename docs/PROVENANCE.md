@@ -75,7 +75,7 @@
 | `tools/cra/tests/test_image_check.py` | `scripts/cra/tests/test_image_check.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_image_check_modules.py` | `scripts/cra/tests/test_image_check_modules.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_initrd_coverage.py` | `scripts/cra/tests/test_initrd_coverage.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試；註解：移除上游私有 repo 的編號與內部部署描述；`consumer158()` 不再用 `git show` 讀上游另一個分支的 vex_export（dumpling 沒有那個分支，原本就回 None），直接回 None，測試行為不變 |
 | `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（廠商信箱、免費信箱各改成已登記在 `ci/public-allow.txt` 的同網域信箱，判定只看網域）；libnvinfer 版本字串維持原值（登記在白名單，見「public-check 白名單」） |
 | `tools/cra/tests/test_nvidia_distro.py` | `scripts/cra/tests/test_nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_own_software.py` | `scripts/cra/tests/test_own_software.py` | 25fa89a | 原樣 |
@@ -164,8 +164,8 @@
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
-| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述；HTML 結尾的已知限制說明拿掉指向上游內部文件的參照（dumpling 沒有那份文件），其餘文字不變 |
+| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述；metadata 的 network.note 拿掉指向上游內部文件的參照，其餘文字不變 |
 | `tools/pilot/tests/conftest.py` | `scripts/pilot/tests/conftest.py` | 25fa89a | 重寫（比照 D-017）：原檔載入 sca-center 的 `integration/conftest.py`，改成載入 `tools/cra/tests/conftest.py`（`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗）；沒有帶 `integration/` |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |

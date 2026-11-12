@@ -1207,7 +1207,7 @@ tools={k[5:]:m.pop(k) for k in list(m) if k.startswith("tool_")}
 m["tools"]=tools
 m["network"]={"sbom_resolution_online":m.get("network_resolve")=="1",
               "data_sources_online":True,
-              "note":"試行版使用線上資料源（Grype DB、DT 的 NVD／OSV／EPSS／KEV、govulncheck 的 vuln.go.dev），不是離線鏡像（docs/decisions/0002）"}
+              "note":"試行版使用線上資料源（Grype DB、DT 的 NVD／OSV／EPSS／KEV、govulncheck 的 vuln.go.dev），不是離線鏡像"}
 json.dump(m,open(sys.argv[1],"w"),ensure_ascii=False,indent=1,sort_keys=True)
 PY
 secret_scan(){  # 輸出資料夾中出現秘密的檔案直接刪除（不是遮蔽），並記 FAIL。秘密由 leakscan.py 從檔案讀，不出現在指令列

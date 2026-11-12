@@ -772,23 +772,11 @@ def test_accepted_unread_initramfs_withholds_all_blocks(tmp_path):
 # ---------- 新版消費端：modules_softdep、所有目錄的檔依檔名排序、/run 的同名檔 ----------
 
 def consumer158():
-    """新版 vex_export（modules_softdep、install_block）：目前的 vex_export 已經有就用它；否則從另一個分支讀（git show，
-    不複製進 repo）；都沒有 → None（呼叫端測舊版消費端的行為）。"""
+    """新版 vex_export（modules_softdep、install_block）：目前的 vex_export 已經有就用它；沒有 → None（呼叫端測舊版消費端的行為）。
+    （上游另一個分支上的版本不在 dumpling 裡，不再去讀。）"""
     if hasattr(vx, "SOFTDEP_HEADER"):
         return vx
-    r = subprocess.run(["git", "-C", str(HERE), "show", "origin/cra/k2-modprobe-fnmatch:tools/cra/vex_export.py"],
-                       capture_output=True, timeout=30)
-    if r.returncode != 0:
-        return None
-    d = Path(os.environ.get("TMPDIR", "/tmp")) / f"vex158-{os.getpid()}"
-    d.mkdir(exist_ok=True)
-    f = d / "vex_export.py"
-    f.write_bytes(r.stdout)
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("vex_export_158", f)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    return None
 
 
 def test_modules_softdep_round_trip_with_pr158_consumer(tmp_path, monkeypatch):

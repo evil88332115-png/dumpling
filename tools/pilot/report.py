@@ -947,7 +947,7 @@ def render(rep):
     p.append("<p class='muted'>沙箱：不可信的程式在 bwrap 內執行，家目錄與 GitHub runner 目錄以 tmpfs 遮蔽、/run 遮蔽；"
              "連網的步驟（govulncheck、--allow-network-resolve）可以連到主機 127.0.0.1 上沒有驗證的服務，bwrap 無法依目的地過濾。</p>")
     p.append("<p class='muted'>試行版的已知限制：資料源為線上版本（非離線鏡像）；沒有片段比對、韌體分析、SSVC、VEX 轉換；準確度只以 tests/expected 與已知答案映像驗收"
-             "（docs/decisions/0002-pilot-scope.md）。</p></main></body></html>")
+             "。</p></main></body></html>")
     return "".join(p)
 
 
