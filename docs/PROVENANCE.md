@@ -159,6 +159,7 @@
 | `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的空對照表（vBIOS；沒有已審核的列，所有 gpu-firmware 公告都列為待審）；格式同 `nvidia-bulletins.json` |
 | `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh` |
 | `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
@@ -290,6 +291,7 @@
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `/path/to/work/.sca-scan-work.…/image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
 | `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
 | `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 手寫的空對照表（沒有任何公告資料） | 合成 |
 | `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：改成只引用公開資料的說法，不含內部映像的套件版本字串與內部 CI 執行編號（無公開依據的部分改標為推論） |
 | `tools/pilot/lib/*.md`、`README.md` 等說明文件 | 手寫的說明 | 合成。內部 CI 的執行編號與代號已改成中性說法（「Jetson R39.2.1 示範映像」「示範掃描」） |
 | `tools/wizard/platforms/{jetson,rockchip,raspberrypi}.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例（要檢查的輸入清單：刷機包、原始碼、建置紀錄、上游基準、板子檢查…） | 合成。`note` 欄原本寫「依某產品演練整理」，已改成「某平台的範本」 |
