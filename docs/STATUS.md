@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 12:14 -0500（C0）
+最後更新：2026-11-12 12:31 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -82,11 +82,11 @@
   - 預驗 `wp3/m3` 4183a96（完成，不通過）：cbfs／pfat 的修正複驗都過；必修 1：我上一輪加的 FSP ExtendedImageRevision 讀錯偏移（+0x44 是 SiliconInit 入口，應為 +0x4C、header ≥ 0x50），Dasharo FSP-S 多出假 note；中等 1：Intel VBIOS 橫幅 regex 128 倍放大。**已在 7e40fe7 修好**（依 coreboot info_header.h 逐欄核對；橫幅改線性搜尋；PROVENANCE 措辭）
   - 預驗 `wp3/m3` 7e40fe7（完成，**通過**）：FSP 偏移（依 info_header.h 逐欄核對、Dasharo 與 4183a96 diff 只少了假 property）、find_banner（20 萬組隨機對照舊 regex 0 不一致、16 MiB 構造 <0.07 秒）、供應商 SBOM（sbomqs sha256 與 release 一致、sha 改錯不解開、不連外）。建議 B1～B8（Markdown 注入、巢狀過深靜默截斷、佔位值、記憶體放大等）交代理 I
   - 代理 I（寫程式，Sonnet 5.5 high）：`wp3/sbom-check-hardening` 7b67b1b，狀態：完成（已快轉併入 m3）。Markdown 注入共用 `md_safe`、巢狀過深 ATTENTION、佔位值當缺、上限 16 MiB＋物件數估計、O_NOFOLLOW、sbomqs 版本對 tools.lock、無樣本 NOT_RUN、用法錯誤 64。CI tests 43239787867（c2-firmware 143、c2-x86-firmware 283，0 skip）、firmware 43239795302 綠
-  - 代理 J（寫程式，Sonnet 5.5 medium）：`wp3/m3-dt` e4cadcf，firmware-dt job＋`pipeline/firmware-dt.sh`。本機真臨時 DT（5.2.0）端到端：Protectli 16 元件→DT 14（DT 合併不看雜湊，expected 身分改成不含 sha256）、NUC 8→6、OVMF 1、合成 vBIOS 1：上傳／Grype／verify 都過，ATTENTION；11 個必要階段全 OK；wait 約 6 分鐘，整體約 18 分鐘。**Dasharo NS5x 供應商 SBOM 被 DT 拒收（http=400，CycloneDX 1.4 schema 不符）** → 決定：樣本 firmware.yml 宣告預期拒收，只放行這一種，供應商修好時 MISMATCH。Actions 首跑 43263224765。狀態：修改中
+  - 代理 J（寫程式，Sonnet 5.5 medium）：`wp3/m3-dt` 0f18fc7，狀態：完成（已併入 m3）。firmware-dt job＋`pipeline/firmware-dt.sh`；Actions run 43266687645 綠（約 18 分鐘，wait 257 秒）：Protectli 16→DT 14、NUC 8→6、OVMF 1、合成 vBIOS 1 皆 ATTENTION；供應商 SBOM DT 拒收（http=400，schema 不符）→ `expected_dt: {upload: rejected}` 宣告，只放行這一種，上傳成功反而 MISMATCH；sbom-check 加「DT 可能拒收」提示；NVIDIA gpu-firmware 沒有表時 GAP
   - 代理 K（寫程式，Sonnet 5.5 high）：`wp3/m3-gop` 24d3eb5，狀態：完成（已併入 m3）。`tools/cra/uefi_gfx.py`（uefi_image.Scan 子類別）＋契約測試 `test_uefi_image_contract.py`。NUC：GOP build 1070（FFS A0327FE0-…）、legacy VBIOS 1003 PC 14.34、獨立 VBT 3 份（$VBT TIGERLAKE、BDB 2.43），掛在 BIOS 映像下；走訪不完整（EFI 標準壓縮解不開 30 處）→ gap、ATTENTION。Dasharo、OVMF 無誤判
   - 代理 L（寫程式，Sonnet 5.5 medium）：`wp3/m3-expect` bb59fb2，狀態：完成（已併入 m3）。firmware-expect 新鍵 `intel_gop`、`intel_legacy_vbios`；NUC expected 加 GOP 1070（release notes 佐證 17.0.1070）；legacy VBIOS 1003 PC 14.34 release notes 沒有佐證，只寫註解；VBT 版本是表頭格式版本，不比對。三樣本 Dasharo 11 OK、NUC 2 OK；故意改錯 → MISMATCH
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
-- 下一步：等代理 J、K → 併入 wp3/m3；CI 跑通（tests、firmware 含 DT job）→ 預驗 → M3 開 PR（附各輪預驗結論；PR 說明列出依賴的 uefi_image 內部名稱 Scan／scan_bytes／parse_fvs／Stop／MAX_*，C0 已同意子類別做法，代理 K 加契約測試）→ 驗證 → 通知 C0
+- 下一步：CI 綠 → 開 M3 PR（說明已備好：DT 結果表、依賴的 uefi_image 名稱、各輪預驗、紅綠 run）→ 獨立驗證 → 通知 C0
 - 之後（M3 以外）：C1 M2 合併後，把 `pipeline/lib/firmware_fetch.py` 改成 import 共用的 `pipeline/lib/fetch_verify.py`（C0 會通知）；D-028 之後二進位測資要登記在 `ci/public-binary-allow.txt`（wp3/m3 目前沒有二進位檔，合成 ROM 都在測試裡當場產生）
 - 等 C1 M2：gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（wp1/m2 fdabd22）。M2 前 CI 印 GAP（沒有表、不跑 candidates，不借 Jetson 表）；M2 後自動用它 → ATTENTION（公告全列待審）。不擋 M3
 - 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`（約 22 MB）等被安全檢查擋下沒刪，要使用者手動刪
