@@ -1,6 +1,7 @@
 name: m2-probe
 # 暫時的探測（M2 J 軌開發用，完成後刪除）：只讀 BSP 與範例 rootfs 的 tar 成員清單與核心 deb 的內容清單，不解開、不執行。
 on:
+  workflow_dispatch:
   push:
     paths: [".github/workflows/m2-probe.yml"]
     branches: ["wp1/m2-jetson"]
