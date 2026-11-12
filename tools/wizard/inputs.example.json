@@ -1,0 +1,124 @@
+{
+ "schema": 1,
+ "platform": "jetson",
+ "draft": false,
+ "upstream_set": "jetson-r39.2.0",
+ "note": "Jetson Orin Nano（Jetson Linux r39.2.0）的範本；換 Jetson Linux 版本時，upstream_set 與第 5–7 項的版本要跟著改。",
+ "inputs": [
+  {
+   "id": "flash_package",
+   "label": "刷機包（.tbz2 ＋ .md5）",
+   "provider": "RD",
+   "required": true,
+   "kind": "flash_package",
+   "locate": {
+    "plan": "archive",
+    "companion": ".md5"
+   },
+   "affects": "沒有就無法掃描"
+  },
+  {
+   "id": "source_archive",
+   "label": "原始碼壓縮檔（核心、樹外模組、UEFI；＋ .md5）",
+   "provider": "RD",
+   "required": true,
+   "kind": "source_archive",
+   "locate": {
+    "plan": "source_archive",
+    "companion": ".md5"
+   },
+   "affects": "核心、樹外模組、UEFI 原始碼比對不能做，相關列標 GAP"
+  },
+  {
+   "id": "build_record",
+   "label": "核心建置紀錄 BuildRecord-<刷機包>.tar.gz（出貨那次建置，含 6 個樹外模組資料夾與 .ko）",
+   "provider": "RD",
+   "required": true,
+   "kind": "build_record",
+   "locate": {
+    "plan": "build_record"
+   },
+   "affects": "核心判斷不了的一律當成受影響（路線 B）"
+  },
+  {
+   "id": "extra_deliverables",
+   "label": "另外交付的韌體（例如 capsule .Cap）",
+   "provider": "RD",
+   "required": false,
+   "kind": "extra_deliverable",
+   "locate": {
+    "plan": "extra_deliverables"
+   },
+   "affects": "沒給的韌體檔不會被掃描與列入報告"
+  },
+  {
+   "id": "upstream_source",
+   "label": "NVIDIA Jetson Linux r39.2.0 public_sources.tbz2",
+   "provider": "CRA掃描",
+   "required": true,
+   "kind": "upstream_source",
+   "locate": {
+    "upstream": "public_sources"
+   },
+   "affects": "A0 原始碼對照上游基準做不了，自訂修改與上游差異不明"
+  },
+  {
+   "id": "upstream_uefi",
+   "label": "NVIDIA edk2-nvidia（r39.2.0 對應版本）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "upstream_uefi",
+   "locate": {
+    "manual": true
+   },
+   "affects": "UEFI 與上游的差異不明",
+   "note": "尚未下載；找不到就標 GAP"
+  },
+  {
+   "id": "upstream_bsp",
+   "label": "NVIDIA Jetson_Linux_R39.2.0_aarch64.tbz2（BSP）",
+   "provider": "CRA掃描",
+   "required": true,
+   "kind": "upstream_bsp",
+   "locate": {
+    "upstream": "bsp"
+   },
+   "affects": "A0 成品對照上游基準做不了，rootfs／韌體差異不明"
+  },
+  {
+   "id": "vendor_bulletin",
+   "label": "NVIDIA 安全公告（CSAF）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "vendor_bulletin",
+   "locate": {
+    "manual": true
+   },
+   "affects": "廠商公告對應的弱點可能漏判",
+   "note": "每日鏡像，掃描前請確認鏡像日期"
+  },
+  {
+   "id": "board_test",
+   "label": "實機測試（板上＋從網路，需要已刷機的板子）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "board_test",
+   "locate": {
+    "manual": true
+   },
+   "affects": "對外服務欄顯示「不明」，不是「否」",
+   "note": "掃描時不一定有板子；沒有就標 不明"
+  },
+  {
+   "id": "product_config",
+   "label": "產品設定包（CRA/Config，含 config.json）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "product_config",
+   "locate": {
+    "plan": "config"
+   },
+   "affects": "沒有就改套通用規則或不套規則，未評估的列較多"
+  }
+ ]
+}

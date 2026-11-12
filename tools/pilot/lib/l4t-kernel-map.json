@@ -1,0 +1,40 @@
+{
+ "schema": "sca-center-l4t-kernel-map/1",
+ "note": "Jetson Linux（L4T）版本 → 對應的 Canonical 核心原始碼套件，只供弱點比對（lib/l4t_kernel.py，sca-scan 的 C-kernel-l4t-map）。鍵是 nvidia-l4t-kernel 版本裡的 L4T 版本（6.8.12-tegra-39.2.1-… 的 39.2.1）。component 原樣加進給 Grype／DT 的 SBOM 副本；purl 要是 pkg:deb/ubuntu/…，名稱、版本要和 name、version 一致，qualifiers 要有 arch=source 與 distro=（不符 → FAIL）。version、purl、modules_kernel_version、evidence、checked 是空的或含 TODO（不分大小寫）時視為未對應（C-kernel-l4t-map GAP）。modules_kernel_version（必填）：SBOM 有核心模組時，/usr/lib/modules/<版本>/ 要有這個目錄才套用（中間的數字是 Ubuntu ABI）。不涵蓋 NVIDIA 的 out-of-tree 模組（nvgpu、nvethernetrm、linux-nv-oot）與 NVIDIA SAUCE 修改。新增 L4T 版本時照同樣格式加一項，並寫出處與核對紀錄。",
+ "releases": {
+  "39.2.0": {
+   "component": {
+    "type": "library",
+    "name": "linux-nvidia-tegra",
+    "version": "6.8.0-1021.21",
+    "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+    "properties": [
+     {"name": "syft:package:type", "value": "deb"},
+     {"name": "syft:package:metadataType", "value": "dpkg-db-entry"},
+     {"name": "syft:metadata:source", "value": "linux-nvidia-tegra"},
+     {"name": "syft:metadata:sourceVersion", "value": "6.8.0-1021.21"}
+    ]
+   },
+   "modules_kernel_version": "6.8.12-1021-tegra",
+   "evidence": "gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble 的 tag jetson_39.2.0、jetson_39.2.1、jetson_39.2_GA 都指向同一個 commit 78272943bba3（2026-05-08；GitLab API repository/tags 讀回），所以 39.2.0 的核心原始碼和 39.2.1 相同，對應的 Canonical 核心同為 linux-nvidia-tegra 6.8.0-1021.21（出處見 39.2.1 那一項）。",
+   "checked": "2026-11-02：tag 指向的 commit 由 GitLab API 核對（公開資料）；modules_kernel_version 的 ABI 1021 和 39.2.1 相同（推論，未另外取得 39.2.0 的套件核對）"
+  },
+  "39.2.1": {
+   "component": {
+    "type": "library",
+    "name": "linux-nvidia-tegra",
+    "version": "6.8.0-1021.21",
+    "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+    "properties": [
+     {"name": "syft:package:type", "value": "deb"},
+     {"name": "syft:package:metadataType", "value": "dpkg-db-entry"},
+     {"name": "syft:metadata:source", "value": "linux-nvidia-tegra"},
+     {"name": "syft:metadata:sourceVersion", "value": "6.8.0-1021.21"}
+    ]
+   },
+   "modules_kernel_version": "6.8.12-1021-tegra",
+   "evidence": "gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble tag jetson_39.2.1 → commit 78272943bba3（branch l4t/l4t-r39.2.1-Ubuntu-nvidia-tegra-6.8.0-1021.21）；debian.nvidia-tegra/changelog 第一筆 linux-nvidia-tegra (6.8.0-1021.21) noble（2026-03-25）；Makefile 6.8.12；NVIDIA 在上面另加 41 個 commit（18 個 NVIDIA SAUCE，沒有和 CVE 相關的）。模組目錄 6.8.12-1021-tegra 的 1021 是 Ubuntu ABI，和 6.8.0-1021.21 相同。",
+   "checked": "2026-11-02：公開資料核對（上面的 GitLab tag 與 changelog）；比對行為：Grype 與 DT 對這個 purl 會比對到 Ubuntu 的核心資料（CVE-2025-22022 要 1022.22 才修，所以有報；CVE-2025-21756 在 1008.8 已修，所以沒有報）"
+  }
+ }
+}

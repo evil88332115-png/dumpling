@@ -48,6 +48,14 @@ jobs:
           files=$(git ls-files 'ci/*.sh' 'ci/*.hook' 'pipeline/*.sh' 'pipeline/**/*.sh')
           shellcheck $files
           echo "shellcheck: OK（$(echo "$files" | wc -w) 個檔）"
+      - name: 單元測試需要的沙箱（bubblewrap；Ubuntu 24.04 預設限制非特權 user namespace）
+        run: |
+          sudo apt-get install -y -qq bubblewrap > /dev/null
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true
+          echo "bubblewrap: OK（$(bwrap --version)）"
       - name: 單元測試
         run: |
           if [ -x tests/run.sh ]; then

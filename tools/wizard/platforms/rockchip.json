@@ -1,0 +1,100 @@
+{
+ "schema": 1,
+ "platform": "rockchip",
+ "draft": true,
+ "note": "草稿：RK3588／Debian 12 的範本，欄位待實際使用再修。",
+ "inputs": [
+  {
+   "id": "flash_package",
+   "label": "刷機包（update.img 或 zip）",
+   "provider": "RD",
+   "required": true,
+   "kind": "flash_package",
+   "locate": {
+    "plan": "archive",
+    "companion": ".md5"
+   },
+   "affects": "沒有就無法掃描"
+  },
+  {
+   "id": "source_archive",
+   "label": "原始碼壓縮檔（核心、U-Boot、樹外驅動）",
+   "provider": "RD",
+   "required": true,
+   "kind": "source_archive",
+   "locate": {
+    "plan": "source_archive",
+    "companion": ".md5"
+   },
+   "affects": "核心與開機程式原始碼比對不能做，相關列標 GAP"
+  },
+  {
+   "id": "build_record",
+   "label": "核心建置紀錄（出貨那次建置的 .config、.cmd、modules、System.map）",
+   "provider": "RD",
+   "required": true,
+   "kind": "build_record",
+   "locate": {
+    "plan": "build_record"
+   },
+   "affects": "核心判斷不了的一律當成受影響（路線 B）"
+  },
+  {
+   "id": "extra_deliverables",
+   "label": "另外交付的韌體",
+   "provider": "RD",
+   "required": false,
+   "kind": "extra_deliverable",
+   "locate": {
+    "plan": "extra_deliverables"
+   },
+   "affects": "沒給的韌體檔不會被掃描"
+  },
+  {
+   "id": "upstream_source",
+   "label": "Rockchip／Linux 上游原始碼基準",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "upstream_source",
+   "locate": {
+    "manual": true
+   },
+   "affects": "上游差異不明",
+   "note": "找不到就標 GAP；Rockchip 可能沒有公開的上游基準"
+  },
+  {
+   "id": "upstream_bsp",
+   "label": "Rockchip SDK／BSP 上游基準",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "upstream_bsp",
+   "locate": {
+    "manual": true
+   },
+   "affects": "成品與上游的差異不明",
+   "note": "找不到就標 GAP"
+  },
+  {
+   "id": "board_test",
+   "label": "實機測試（需要已刷機的板子）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "board_test",
+   "locate": {
+    "manual": true
+   },
+   "affects": "對外服務欄顯示「不明」"
+  },
+  {
+   "id": "product_config",
+   "label": "產品設定包（CRA/Config，含 config.json）",
+   "provider": "CRA掃描",
+   "required": false,
+   "kind": "product_config",
+   "locate": {
+    "plan": "config"
+   },
+   "affects": "沒有就改套通用規則或不套規則，未評估的列較多"
+  }
+ ]
+}
