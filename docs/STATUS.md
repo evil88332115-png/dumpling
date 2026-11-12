@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:17 -0500（C1）
+最後更新：2026-11-12 08:17 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -37,24 +37,22 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-- 目前在做：B 段。已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX），main 4700739。進行中：PR 2c（coreboot CBFS／FSP／VBT）、PR 3a（AMI PFAT 解封裝）
-- 分支／PR／commit：
-  - `wp3/coreboot-cbfs`（PR 2c，worktree `$AGENT_TMP/dumpling-wt-c2-cbfs`，PR 尚未開）
-  - `wp3/ami-pfat`（PR 3a，從 main 4700739 開出，worktree `$AGENT_TMP/dumpling-wt-c2-pfat`，PR 尚未開）
-- 預定 PR（D-014）：
-  - ✅ #7 樣本清單＋下載核對；✅ #8 x86_firmware → CycloneDX（NOT_ASSESSED、GAP、CSME CPE）
-  - 2c. `wp3/coreboot-cbfs`：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分 → SBOM
-  - 3a. `wp3/ami-pfat`：AMI PFAT 解封裝（Intel NUC BIOS 能讀 ME／微碼）；併入 #7、#8 驗證建議（fetch 測試補強、run.d venv 快取）
-  - 2b. BIOS 成品端 UEFI 解開（D-016：等 C1 M1 合併後用 `tools/cra/uefi_image.py`）
-  - 3b. `wp4/vbios`：Intel GOP（要 uefi_image）／VBT／legacy VBIOS、獨立 vBIOS（合成 option ROM）、NVIDIA gpu-firmware 公告比對 NOT_ASSESSED
-  - 4. `wp3/firmware-dt`：firmware workflow 上傳臨時 DT＋Grype、真實樣本對 expected 的 CI 驗收、供應商 SBOM 匯入（等 C1 M1）
+- 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。依 D-020，做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
+- 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX），main 4700739
+- 分支（最後整合成 `wp3/m3` 開一個 PR）：
+  - `wp3/coreboot-cbfs`：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分（worktree `$AGENT_TMP/dumpling-wt-c2-cbfs`）
+  - `wp3/ami-pfat`：AMI PFAT 解封裝（NUC BIOS 讀 ME／微碼）＋ #7、#8 驗證建議（fetch 測試補強、run.d venv 快取）（worktree `$AGENT_TMP/dumpling-wt-c2-pfat`）
+- M3 剩下要做的（等 C1 M1 合併）：
+  - BIOS 成品端 UEFI 解開：用 `tools/cra/uefi_image.py`（D-016）
+  - vBIOS：Intel GOP（要 uefi_image）／VBT／legacy VBIOS；獨立 vBIOS 用合成 option ROM；NVIDIA gpu-firmware 公告比對用 C1 的 `tools/pilot/lib/nvidia_bulletins.py`，沒對到標 NOT_ASSESSED
+  - 上傳臨時 DT＋Grype（C1 的 DT 工具）；firmware workflow 對真實樣本的 expected 做 CI 驗收；供應商 SBOM 匯入
 - 代理：
-  - 代理 A（寫程式）：PR #7，完成；代理 B（寫程式）：PR #8，完成；PR #7 驗證代理：完成（通過）；PR #8 由 C0 驗證：通過
-  - 代理 C（寫程式，Sonnet 5.5 high）：PR 2c，分支 `wp3/coreboot-cbfs`，狀態：進行中
-  - 代理 D（寫程式，Sonnet 5.5 high）：PR 3a，分支 `wp3/ami-pfat`，狀態：進行中
+  - 代理 C（寫程式，Sonnet 5.5 high）：`wp3/coreboot-cbfs`，狀態：進行中
+  - 代理 D（寫程式，Sonnet 5.5 high）：`wp3/ami-pfat`，狀態：進行中
+  - （已完成：代理 A／B、PR #7 驗證代理；PR #8 由 C0 驗證）
 - CI：無進行中
-- 下一步：2c、3a 開 PR、綠燈後派驗證代理（一次一個）→ 通知 C0；C1 M1 合併後做 2b、3b
-- 卡住／等決定：2b、3b 的 GOP 部分等 C1 M1（uefi_image.py）。規則提醒：不用 `gh pr update-branch`，一律 `git merge origin/main`
+- 下一步：等代理 C、D 完成 → 我檢查並整合到 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／DT 上傳；M3 完成開一個 PR、派驗證代理、通知 C0
+- 卡住／等決定：UEFI 解開、GOP、DT 上傳、NVIDIA 公告比對都等 C1 M1（PR #9）。規則：不用 `gh pr update-branch`，一律 `git merge origin/main`；ASSESS_NOTES 維持英文（C0 同意）
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
