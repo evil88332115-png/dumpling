@@ -3,6 +3,6 @@
 # 收到 <專案資料夾> <版本>，環境變數見 pipeline/platform.sh。最後一行 assemble: OK｜GAP｜FAIL（…）。
 set -uo pipefail
 root=${DUMPLING_ROOT:?}; out=${DUMPLING_OUT:?}
-rm -f "$out/work/disk.img"
+rm -f "$out/work/disk.img" "$out/assemble.json"   # 失敗時不留上一次的結果
 exec python3 -I "$root/pipeline/platforms/_shared/disk_image.py" prepare "$1" "$2" \
   --downloads "$out/downloads" --work "$out/work" --json "$out/assemble.json"

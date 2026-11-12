@@ -15,7 +15,9 @@
   （外部資料依 FIT 的 data-offset／data-size 取出、重算 sha256 對照 FIT 記載的值）、以固定樣式找到的版本字串。
   版本字串只取版本欄位（例如 TF-A 的 git describe），不收建置者名稱等其他文字。
 - 佐證：同一個槽位的檔案在 (1) sources.yml 的官方 u-boot 套件（.deb）、(2) 映像 rootfs 的 /usr/lib/u-boot/<板子>/ 裡；
-  逐位元組相同記「一致」，不同記「不一致」，找不到記「找不到」。**不拿套件版本推磁區裡的版本**；有區段沒有任何一個「一致」→ GAP。
+  逐位元組相同記「一致」，不同記「不一致」，找不到記「找不到」。**不拿套件版本推磁區裡的版本**。
+- GAP 的條件：區段沒有任何「一致」、來源互相矛盾（有「不一致」）、FIT 有映像的雜湊不符或無法驗證、身分認不出來、
+  第一個槽位之前有身分不明的資料、來源有某槽位的檔案但磁區全零、第一個分割區之前沒有任何非零磁區或區域太大沒有清點。
 - 映像與套件是不可信資料：只讀（os.pread、記憶體內解 ar／tar），不掛載、不解到磁碟、不執行。所有長度都有上限。
 """
 import argparse
@@ -30,14 +32,18 @@ import struct
 import sys
 import tarfile
 import gzip
+import zlib
 
 SECTOR = 512
-GPT_END_LBA = 34                       # LBA 0 保護 MBR、1 GPT 表頭、2–33 分割區陣列（128 項 × 128 bytes）
+GPT_END_LBA = 34                       # 預設：LBA 0 保護 MBR、1 GPT 表頭、2–33 分割區陣列（128 項 × 128 bytes）；實際依 GPT 表頭計算
 MAX_PRE_PARTITION = 64 << 20           # 第一個分割區之前最多讀 64 MiB
 MAX_REGION = 16 << 20                  # 一個區段最多 16 MiB
 DEFAULT_SLOTS = (("idbloader.img", 64), ("u-boot.itb", 16384), ("trust.img", 24576))
-DEB_MAX = 256 << 20
-DEB_MEMBER_MAX = 64 << 20
+DEB_MAX = 64 << 20                     # .deb 檔的上限（目前的 u-boot-rk2410 約 18 MB）
+DEB_MEMBER_MAX = DEB_MAX
+TAR_UNPACKED_MAX = 512 << 20           # data.tar 解開後的上限（u-boot-rk2410 實測 90 MB：一個套件包了幾十塊板子）
+DEB_AR_MAX_MEMBERS = 16
+TAR_MAX_MEMBERS = 50000
 TAR_FILE_MAX = 32 << 20
 FDT_MAX_NODES = 2000
 FDT_MAX_DEPTH = 16
@@ -58,6 +64,13 @@ VERSION_PATTERNS = (
 
 class RawError(Exception):
     pass
+
+
+class UsageError(Exception):
+    pass
+
+
+DEB_ERRORS = (RawError, OSError, tarfile.TarError, lzma.LZMAError, EOFError, zlib.error, ValueError, struct.error)
 
 
 def load_rpi_img(root):
@@ -93,7 +106,7 @@ def parse_fdt(buf):
         raise RawError("FDT 區塊超出 totalsize")
     strings = buf[off_strings:off_strings + size_strings]
     o, end = off_struct, off_struct + size_struct
-    path, nodes, count = [], {}, 0
+    path, nodes, count, ended = [], {}, 0, False
 
     def cstr(b, i, limit):
         j = b.find(b"\0", i, limit)
@@ -135,9 +148,14 @@ def parse_fdt(buf):
         elif tok == 4:                                 # NOP
             continue
         elif tok == 9:                                 # END
+            ended = True
             break
         else:
             raise RawError("FDT 不認得的 token %d" % tok)
+    if not ended:
+        raise RawError("FDT 沒有 END（截斷）")
+    if path:
+        raise RawError("FDT 有節點沒有關閉")
     return total, nodes
 
 
@@ -159,42 +177,54 @@ def fit_images(buf):
     # 外部資料的起點：上游 U-Boot 是 FDT 大小進位到 4 bytes；Rockchip 的 U-Boot 2017.09 實測是進位到 512 bytes。
     # 兩種都試，以 FIT 記載的雜湊確認是哪一種（記在 data_base），不寫死、不猜。
     bases = (("upstream-4", (total + 3) & ~3), ("block-512", (total + 511) & ~511))
+    cache = {}
+
+    def sha(start, size):
+        k = (start, size)
+        if k not in cache:
+            cache[k] = hashlib.sha256(buf[start:start + size]).hexdigest()
+        return cache[k]
+
+    hashes = {}
+    for hp in nodes:
+        parts = hp.split("/")
+        if len(parts) == 3 and parts[0] == "images" and parts[2].startswith("hash"):
+            algo, val = _text(nodes[hp].get("algo")), nodes[hp].get("value")
+            if algo == "sha256" and val is not None and len(val) == 32:
+                hashes.setdefault(parts[1], val.hex())
     for path in sorted(nodes):
         parts = path.split("/")
         if len(parts) == 2 and parts[0] == "images":
             props = nodes[path]
-            want = None
-            for hp in sorted(nodes):
-                if hp.startswith(path + "/hash"):
-                    algo, val = _text(nodes[hp].get("algo")), nodes[hp].get("value")
-                    if algo == "sha256" and val is not None and len(val) == 32:
-                        want = val.hex()
-            base_used = None
+            want = hashes.get(parts[1])
+            base_used, digest, size_out = None, None, None
             if "data" in props:
-                data, where = props["data"], "embedded"
+                where, digest, size_out = "embedded", hashlib.sha256(props["data"]).hexdigest(), len(props["data"])
             else:
                 off, size = _u32(props.get("data-offset")), _u32(props.get("data-size"))
                 pos = _u32(props.get("data-position"))
-                data, where = None, "missing"
+                where = "missing"
                 if size is not None and pos is not None:
-                    data = buf[pos:pos + size] if pos + size <= len(buf) else None
-                    where, base_used = ("external", "data-position") if data is not None else ("out-of-range", None)
+                    if pos + size <= len(buf):
+                        where, base_used, digest, size_out = "external", "data-position", sha(pos, size), size
+                    else:
+                        where = "out-of-range"
                 elif size is not None and off is not None:
-                    where = "out-of-range"
-                    for label, base in bases:
-                        start = base + off
-                        if start + size > len(buf):
-                            continue
-                        cand = buf[start:start + size]
-                        if data is None or (want and hashlib.sha256(cand).hexdigest() == want):
-                            data, where, base_used = cand, "external", label
-                        if want and hashlib.sha256(cand).hexdigest() == want:
-                            break
+                    cands = [(label, base + off) for label, base in bases if base + off + size <= len(buf)]
+                    if not cands:
+                        where = "out-of-range"
+                    elif want:
+                        hit = next((c for c in cands if sha(c[1], size) == want), None)
+                        label, start = hit or cands[0]
+                        where, base_used, digest, size_out = "external", label, sha(start, size), size
+                    elif len({sha(st, size) for _l, st in cands}) == 1:
+                        where, base_used, digest, size_out = "external", "+".join(l for l, _s in cands), sha(cands[0][1], size), size
+                    else:
+                        # 沒有 sha256 可以確認、兩種起點的內容又不同：不選（不猜）
+                        where = "ambiguous"
             img = {"name": parts[1], "description": _text(props.get("description")), "type": _text(props.get("type")),
                    "arch": _text(props.get("arch")), "compression": _text(props.get("compression")),
-                   "data": where, "size": len(data) if data is not None else None,
-                   "sha256": hashlib.sha256(data).hexdigest() if data is not None else None, "data_base": base_used,
-                   "fit_hash": None}
+                   "data": where, "size": size_out, "sha256": digest, "data_base": base_used, "fit_hash": None}
             if want:
                 img["fit_hash"] = {"algo": "sha256", "value": want, "matches": (img["sha256"] == want) if img["sha256"] else None}
             out["images"].append(img)
@@ -234,6 +264,10 @@ def _ar_members(b):
         raise RawError("不是 ar（.deb）")
     o, out = 8, {}
     while o + 60 <= len(b):
+        if len(out) >= DEB_AR_MAX_MEMBERS:
+            raise RawError("ar 成員超過 %d 個" % DEB_AR_MAX_MEMBERS)
+        if b[o + 58:o + 60] != b"`\n":
+            raise RawError("ar 成員標頭格式錯")
         name = b[o:o + 16].decode("ascii", "replace").strip().rstrip("/")
         try:
             size = int(b[o + 48:o + 58].decode("ascii").strip())
@@ -248,16 +282,27 @@ def _ar_members(b):
 
 def _open_tar(name, data):
     if name.endswith(".xz"):
-        raw = lzma.LZMADecompressor().decompress(data, max_length=DEB_MAX)
+        d = lzma.LZMADecompressor()
+        raw = d.decompress(data, max_length=TAR_UNPACKED_MAX + 1)
+        if len(raw) <= TAR_UNPACKED_MAX and not d.eof:
+            raise RawError("%s 的 xz 串流不完整（截斷）" % name)
     elif name.endswith(".gz"):
-        raw = gzip.GzipFile(fileobj=io.BytesIO(data)).read(DEB_MAX + 1)
+        raw = gzip.GzipFile(fileobj=io.BytesIO(data)).read(TAR_UNPACKED_MAX + 1)
     elif name.endswith(".tar"):
         raw = data
     else:
         raise RawError("%s 的壓縮格式不支援（只讀 xz／gz／未壓縮）" % name)
-    if len(raw) > DEB_MAX:
+    if len(raw) > TAR_UNPACKED_MAX:
         raise RawError("data.tar 解開後太大")
     return tarfile.open(fileobj=io.BytesIO(raw), mode="r:")
+
+
+def _members(t):
+    """逐個迭代 tar 成員（不用 getmembers 一次載入），數量有上限。"""
+    for i, m in enumerate(t):
+        if i >= TAR_MAX_MEMBERS:
+            raise RawError("tar 成員超過 %d 個" % TAR_MAX_MEMBERS)
+        yield m
 
 
 def deb_files(path, board, wanted):
@@ -270,7 +315,7 @@ def deb_files(path, board, wanted):
     ctrl = next((k for k in mem if k.startswith("control.tar")), None)
     if ctrl:
         with _open_tar(ctrl, mem[ctrl]) as t:
-            for m in t.getmembers():
+            for m in _members(t):
                 if m.isfile() and m.name.lstrip("./") == "control" and m.size < 65536:
                     for line in t.extractfile(m).read().decode("utf-8", "replace").splitlines():
                         k, _, v = line.partition(":")
@@ -280,7 +325,7 @@ def deb_files(path, board, wanted):
     files = {}
     if data:
         with _open_tar(data, mem[data]) as t:
-            for m in t.getmembers():
+            for m in _members(t):
                 n = m.name.lstrip("./")
                 for w in wanted:
                     if n == "usr/lib/u-boot/%s/%s" % (board, w) and m.isfile() and m.size <= TAR_FILE_MAX:
@@ -319,16 +364,26 @@ def rootfs_files(rpi, im, board, wanted):
 
 # ---------------------------------------------------------------- 清點
 
-def regions_of(fd, first_lba, slots):
-    """GPT 之後、第一個分割區之前的非零磁區 → 依槽位分組的區段 [(槽位名或 None, 起始 LBA, 磁區數)]。"""
-    if first_lba <= GPT_END_LBA:
+def gpt_end_lba(fd):
+    """GPT 分割區陣列結束之後的第一個 LBA（依主要 GPT 表頭；rpi_img 已核對過表頭與陣列的 CRC）。"""
+    h = pread_exact(fd, 92, SECTOR)
+    ent_lba, num, esz = struct.unpack("<Q", h[72:80])[0], struct.unpack("<I", h[80:84])[0], struct.unpack("<I", h[84:88])[0]
+    if not (2 <= ent_lba <= 1 << 20 and 0 < num <= 1024 and 128 <= esz <= 4096):
+        raise RawError("GPT 表頭的分割區陣列欄位不合理")
+    return max(GPT_END_LBA, ent_lba + -(-(num * esz) // SECTOR))
+
+
+def regions_of(fd, first_lba, slots, start_lba=GPT_END_LBA):
+    """GPT 之後、第一個分割區之前的非零磁區 → 依槽位分組的區段 [(槽位名或 None, 起始 LBA, 磁區數)]。
+    區域超過上限 → RawError（呼叫端當 GAP：沒有清點）。"""
+    if first_lba <= start_lba:
         return []
-    if (first_lba - GPT_END_LBA) * SECTOR > MAX_PRE_PARTITION:
-        raise RawError("第一個分割區之前的區域超過 %d MiB，不讀" % (MAX_PRE_PARTITION >> 20))
-    pre = pread_exact(fd, (first_lba - GPT_END_LBA) * SECTOR, GPT_END_LBA * SECTOR)
-    nz = [lba for lba in range(GPT_END_LBA, first_lba)
-          if any(pre[(lba - GPT_END_LBA) * SECTOR:(lba - GPT_END_LBA + 1) * SECTOR])]
-    slots = sorted([s for s in slots if GPT_END_LBA <= s[1] < first_lba], key=lambda s: s[1])
+    if (first_lba - start_lba) * SECTOR > MAX_PRE_PARTITION:
+        raise RawError("第一個分割區之前的區域超過 %d MiB，沒有清點" % (MAX_PRE_PARTITION >> 20))
+    pre = pread_exact(fd, (first_lba - start_lba) * SECTOR, start_lba * SECTOR)
+    nz = [lba for lba in range(start_lba, first_lba)
+          if any(pre[(lba - start_lba) * SECTOR:(lba - start_lba + 1) * SECTOR])]
+    slots = sorted([s for s in slots if start_lba <= s[1] < first_lba], key=lambda s: s[1])
     groups = {}
     for lba in nz:
         owner = None
@@ -350,10 +405,10 @@ def inventory(a, root):
     for s in a.slot or []:
         name, _, lba = s.partition("=")
         if not re.match(r"^[A-Za-z0-9._-]{1,64}$", name) or not lba.isdigit():
-            raise ValueError("--slot 要寫成 <檔名>=<LBA>")
+            raise UsageError("--slot 要寫成 <檔名>=<LBA>")
         slots = [x for x in slots if x[0] != name] + [(name, int(lba))]
     if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", a.board):
-        raise ValueError("--board 不合法")
+        raise UsageError("--board 不合法")
     if not os.path.isfile(a.image) or os.path.islink(a.image):
         raise RawError("映像不是一般檔案")
     im = rpi.RpiImage(a.image)
@@ -371,18 +426,33 @@ def inventory(a, root):
                 files, info = deb_files(d, a.board, wanted)
                 sources.append({"source": "package", "file": os.path.basename(d), "package": info["package"],
                                 "version": info["version"], "files": files, "error": None})
-            except (RawError, OSError, tarfile.TarError, lzma.LZMAError, EOFError) as e:
-                sources.append({"source": "package", "file": os.path.basename(d), "files": {}, "error": str(e)})
+            except DEB_ERRORS as e:
+                why = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
+                sources.append({"source": "package", "file": os.path.basename(d), "files": {}, "error": "%s: %s" % (type(e).__name__, why[:200])})
         try:
             files, err = rootfs_files(rpi, im, a.board, wanted)
         except Exception as e:      # noqa: BLE001  ext4 解析錯誤：記下來當 GAP，不中斷
             files, err = {}, "%s: %s" % (type(e).__name__, e)
         sources.append({"source": "rootfs", "file": "/usr/lib/u-boot/%s/" % a.board, "files": files, "error": err})
 
-        regions, gaps = [], []
-        for name, start, n in regions_of(im.fd, first, slots):
+        regions, gaps, notes = [], [], []
+        gpt_end = gpt_end_lba(im.fd)
+        outside = [s for s in slots if not gpt_end <= s[1] < first]
+        if outside:
+            notes.append("槽位不在 GPT 與第一個分割區之間，沒有清點：%s" % "、".join("%s（LBA %d）" % s for s in outside))
+        try:
+            found = regions_of(im.fd, first, slots, gpt_end)
+        except RawError as e:
+            found = None
+            gaps.append(str(e))
+        if found == [] and first <= gpt_end:
+            gaps.append("第一個分割區緊接在 GPT 之後，沒有放開機程式的原始磁區（開機程式可能在別處，例如 SPI flash：映像裡沒有，不推測）")
+        elif found == []:
+            gaps.append("第一個分割區之前沒有任何非零磁區（開機程式可能在別處，例如 SPI flash：映像裡沒有，不推測）")
+        for name, start, n in found or []:
             if n * SECTOR > MAX_REGION:
-                raise RawError("LBA %d 的區段超過 %d MiB" % (start, MAX_REGION >> 20))
+                gaps.append("LBA %d 的區段超過 %d MiB，沒有清點" % (start, MAX_REGION >> 20))
+                continue
             buf = pread_exact(im.fd, n * SECTOR, start * SECTOR)
             r = {"slot": name, "start_lba": start, "sectors": n, "sha256": hashlib.sha256(buf).hexdigest(),
                  "identity": identify(buf), "corroboration": []}
@@ -395,9 +465,12 @@ def inventory(a, root):
                 else:
                     # 檔案結尾可能是全零的磁區（非零區段比檔案短）：直接讀槽位起算、檔案長度的原始位元組比對；
                     # 區段的非零資料超出檔案長度 → 不一致（磁區裡有檔案以外的東西）
-                    raw = pread_exact(im.fd, len(f), start * SECTOR) if len(f) <= MAX_REGION else b""
+                    try:
+                        raw = pread_exact(im.fd, len(f), start * SECTOR) if len(f) <= MAX_REGION else b""
+                    except RawError:
+                        raw = b""                      # 映像在檔案長度內就結束 → 不一致
                     tail = buf[len(f):] if len(buf) > len(f) else b""
-                    state = "一致" if raw == f and not any(tail) else "不一致"
+                    state = "一致" if f and raw == f and not any(tail) else "不一致"
                 r["corroboration"].append({"source": s["source"], "file": s["file"], "package": s.get("package"),
                                            "version": s.get("version"), "state": state,
                                            "sha256": hashlib.sha256(f).hexdigest() if f is not None else None})
@@ -409,13 +482,26 @@ def inventory(a, root):
             fit = r["identity"].get("fit")
             if fit and any(i["fit_hash"] and i["fit_hash"]["matches"] is False for i in fit["images"]):
                 why.append("FIT 裡有映像的雜湊跟 FIT 記載的不符")
+            if fit:
+                unv = [i["name"] for i in fit["images"] if not (i["fit_hash"] and i["fit_hash"]["matches"] is True)
+                       and not (i["fit_hash"] and i["fit_hash"]["matches"] is False)]
+                if unv:
+                    why.append("FIT 裡有映像的雜湊無法驗證（%s）" % "、".join(unv[:8]))
+                if not fit["images"]:
+                    why.append("FIT 裡沒有任何映像")
             if not any(c["state"] == "一致" for c in r["corroboration"]):
                 why.append("沒有任何佐證來源一致")
+            elif any(c["state"] == "不一致" for c in r["corroboration"]):
+                why.append("佐證來源互相矛盾（有一致也有不一致）")
             if why:
                 gaps.append("LBA %d（%s）：%s" % (start, name or "未知", "；".join(why)))
             regions.append(r)
-        if not regions:
-            gaps.append("第一個分割區之前沒有任何非零磁區（開機程式可能在別處，例如 SPI flash：映像裡沒有，不推測）")
+        # 反向檢查：佐證來源裡有這個槽位的檔案，磁區卻是全零（例如開機程式被清掉、或放在別處）
+        have = {r["slot"] for r in regions if r["slot"]}
+        for name, lba in slots:
+            srcs = [s["source"] + " " + s["file"] for s in sources if name in s["files"]]
+            if srcs and name not in have and gpt_end <= lba < first:
+                gaps.append("槽位 %s（LBA %d）在 %s 有檔案，磁區卻是全零" % (name, lba, "、".join(srcs)))
         doc = {"schema": 1, "platform": a.platform, "board": a.board, "image": os.path.basename(a.image),
                "partition_table": {"scheme": t["scheme"], "first_partition_lba": first,
                                    "partitions": [{k: p.get(k) for k in ("index", "name", "type_name", "start_lba", "sectors", "fs_kind")}
@@ -424,6 +510,7 @@ def inventory(a, root):
                "slots_source": "板子廠商 u-boot 套件 setup.sh 的寫入位置（只讀文字，沒有執行）",
                "regions": regions,
                "sources": [{k: v for k, v in s.items() if k != "files"} | {"found": sorted(s["files"])} for s in sources],
+               "gpt_entries_end_lba": gpt_end, "notes": notes,
                "status": "GAP" if gaps else "OK", "gaps": gaps,
                "note": "以原始磁區為準；套件只當佐證，不拿套件版本推磁區裡的版本（D-027）。閉源成品（DDR 初始化、TF-A BL31）的安全公告比對不在這一步。"}
     finally:
@@ -457,17 +544,19 @@ def main(argv=None):
     root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
     try:
         doc = inventory(a, root)
-    except ValueError as e:
+    except UsageError as e:
         print("raw-sectors: FAIL（%s）" % e)
         return USAGE
     except Exception as e:      # noqa: BLE001  分割區表、讀檔錯誤：FAIL 並寫原因，不猜
-        print("raw-sectors: FAIL（%s: %s）" % (type(e).__name__, str(e)[:200]))
+        why = ("%s（%s）" % (e.strerror, os.path.basename(e.filename or ""))) if isinstance(e, OSError) and e.strerror else str(e)[:200]
+        print("raw-sectors: FAIL（%s: %s）" % (type(e).__name__, why))
         return FAIL
     n = len(doc["regions"])
     if doc["status"] == "OK":
-        print("raw-sectors: OK（%d 個區段，都有佐證一致）" % n)
+        print("raw-sectors: OK（%d 個區段，都有佐證一致、沒有矛盾）" % n)
         return OK
-    print("raw-sectors: GAP（%d 個區段；%s）" % (n, "；".join(doc["gaps"])[:300]))
+    msg = "；".join(doc["gaps"])
+    print("raw-sectors: GAP（%d 個區段；%s）" % (n, msg if len(msg) <= 300 else msg[:297] + "…"))
     return GAP
 
 

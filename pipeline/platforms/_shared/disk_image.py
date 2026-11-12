@@ -21,8 +21,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import lzma
 import sys
-import tarfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -57,8 +57,83 @@ def release(proj, ver):
     return rel
 
 
+TAR_META_MAX = 1 << 20          # GNU longname／longlink、PAX 標頭的內容上限
+TAR_MAX_MEMBERS = 100000
+TAR_TOTAL_MAX = MAX_IMAGE + (4 << 30)   # 整個 tar（解壓後）的總量上限，包含略過的成員
+
+
+def _tar_num(field):
+    """tar 標頭的數字欄位：八進位文字，或 base-256（最高位元設 1）。"""
+    if field and field[0] & 0x80:
+        if field[0] != 0x80:
+            raise PrepError("tar 的 base-256 數字是負數或太大")
+        v = 0
+        for b in field[1:]:
+            v = (v << 8) | b
+        return v
+    t = field.split(b"\0", 1)[0].strip(b" ")
+    if not t:
+        return 0
+    if not all(48 <= c <= 55 for c in t):
+        raise PrepError("tar 標頭的數字欄位格式錯")
+    return int(t, 8)
+
+
+def _pax(data):
+    """PAX 擴充標頭（"<長度> <鍵>=<值>\n" 的串接）→ dict。格式錯 → PrepError。"""
+    out, o = {}, 0
+    while o < len(data):
+        sp = data.find(b" ", o, o + 21)
+        if sp < 0:
+            raise PrepError("PAX 標頭格式錯")
+        try:
+            n = int(data[o:sp])
+        except ValueError:
+            raise PrepError("PAX 標頭的長度格式錯")
+        if n <= sp - o or o + n > len(data) or data[o + n - 1:o + n] != b"\n":
+            raise PrepError("PAX 標頭的長度不對")
+        k, eq, v = data[sp + 1:o + n - 1].partition(b"=")
+        if not eq:
+            raise PrepError("PAX 紀錄沒有 =")
+        out[k.decode("utf-8", "replace")] = v
+        o += n
+    return out
+
+
+class _Counted:
+    """包住解壓串流：計算總讀取量，超過上限就停。"""
+
+    def __init__(self, f, limit):
+        self.f, self.n, self.limit = f, 0, limit
+
+    def read(self, n):
+        b = self.f.read(n)
+        self.n += len(b)
+        if self.n > self.limit:
+            raise PrepError("tar 解壓後超過總量上限 %d bytes" % self.limit)
+        return b
+
+    def exact(self, n):
+        out = bytearray()
+        while len(out) < n:
+            b = self.read(min(n - len(out), 4 << 20))
+            if not b:
+                raise PrepError("tar 在成員中間結束（截斷）")
+            out += b
+        return bytes(out)
+
+    def skip(self, n):
+        while n > 0:
+            b = self.read(min(n, 4 << 20))
+            if not b:
+                raise PrepError("tar 在成員中間結束（截斷）")
+            n -= len(b)
+
+
 def extract_member(src, member, out, max_bytes=MAX_IMAGE):
-    """串流讀 .tar.xz，只把名稱等於 member 的一般檔案寫到 out。→ (bytes, sha256, 其他成員清單)。"""
+    """串流讀 .tar.xz，只把名稱等於 member 的一般檔案寫到 out。→ (bytes, sha256, 其他成員清單)。
+    不用 tarfile：自己讀 512 bytes 的標頭（ustar／GNU／PAX），longname 與 PAX 內容有上限，整個 tar 的解壓總量有上限，
+    並且一路讀到 tar 結尾與 xz 串流結尾（xz 的完整性檢查才會做完；尾端截斷或垃圾 → 錯誤）。"""
     d = os.path.dirname(os.path.abspath(out))
     others, found = [], None
     try:
@@ -67,42 +142,93 @@ def extract_member(src, member, out, max_bytes=MAX_IMAGE):
         raise PrepError("無法建立 %s（%s）；檔案不能已經存在" % (os.path.basename(out), e.strerror))
     ok = False
     try:
-        with tarfile.open(src, mode="r|xz") as t, os.fdopen(fd, "wb") as dst:
-            for m in t:
-                name = m.name[2:] if m.name.startswith("./") else m.name
-                if name != member:
+        with lzma.open(src, "rb") as xf, os.fdopen(fd, "wb") as dst:
+            t = _Counted(xf, TAR_TOTAL_MAX)
+            longname, pax, members, zeros = None, {}, 0, 0
+            while True:
+                hdr = t.read(512)
+                if len(hdr) == 0:
+                    raise PrepError("tar 沒有結尾的兩個空區塊（截斷）")
+                if len(hdr) < 512:
+                    hdr += t.exact(512 - len(hdr))
+                if hdr == b"\0" * 512:
+                    zeros += 1
+                    if zeros == 2:
+                        break
+                    continue
+                if zeros:
+                    raise PrepError("tar 的空區塊後面又有資料")
+                members += 1
+                if members > TAR_MAX_MEMBERS:
+                    raise PrepError("tar 成員超過 %d 個" % TAR_MAX_MEMBERS)
+                chk = _tar_num(hdr[148:156])
+                if chk != sum(hdr[:148]) + 8 * 32 + sum(hdr[156:]):
+                    raise PrepError("tar 標頭的檢查碼不符")
+                typ = hdr[156:157]
+                size = _tar_num(hdr[124:136])
+                padded = (size + 511) & ~511
+                if typ in (b"L", b"K", b"x", b"g"):
+                    if size > TAR_META_MAX:
+                        raise PrepError("tar 的 longname／PAX 標頭太大（%d bytes）" % size)
+                    data = t.exact(padded)[:size]
+                    if typ == b"L":
+                        longname = data.split(b"\0", 1)[0]
+                    elif typ == b"x":
+                        pax = _pax(data)
+                    continue
+                name = hdr[0:100].split(b"\0", 1)[0]
+                if hdr[257:262] == b"ustar" and hdr[345:500].strip(b"\0"):
+                    name = hdr[345:500].split(b"\0", 1)[0] + b"/" + name
+                if longname is not None:
+                    name = longname
+                if "path" in pax:
+                    name = pax["path"]
+                if "size" in pax:
+                    try:
+                        size = int(pax["size"])
+                    except ValueError:
+                        raise PrepError("PAX 的 size 格式錯")
+                    padded = (size + 511) & ~511
+                longname, pax = None, {}
+                n = name.decode("utf-8", "replace")
+                n = n[2:] if n.startswith("./") else n
+                if n != member:
                     if len(others) < 200:
-                        others.append({"name": m.name[:200], "size": m.size, "type": m.type.decode("ascii", "replace")})
+                        others.append({"name": n[:200], "size": size, "type": typ.decode("ascii", "replace")})
+                    t.skip(padded)
                     continue
                 if found is not None:
                     raise PrepError("tar 裡有兩個 %s" % member)
-                if not m.isreg():
+                if typ not in (b"0", b"\0"):
                     raise PrepError("%s 不是一般檔案" % member)
-                if m.size > max_bytes:
-                    raise PrepError("%s 的大小 %d 超過上限 %d" % (member, m.size, max_bytes))
+                if size > max_bytes:
+                    raise PrepError("%s 的大小 %d 超過上限 %d" % (member, size, max_bytes))
                 st = os.statvfs(d)
-                if st.f_bavail * st.f_frsize < m.size + MIN_FREE_AFTER:
-                    raise PrepError("%s 的剩餘空間不夠解出 %d bytes" % (d, m.size))
-                f = t.extractfile(m)
-                h, n = hashlib.sha256(), 0
-                while True:
-                    b = f.read(4 << 20)
+                if st.f_bavail * st.f_frsize < size + MIN_FREE_AFTER:
+                    raise PrepError("剩餘空間不夠解出 %d bytes" % size)
+                h, left = hashlib.sha256(), size
+                while left > 0:
+                    b = t.read(min(left, 4 << 20))
                     if not b:
-                        break
-                    n += len(b)
-                    if n > m.size:
-                        raise PrepError("%s 的內容比標頭的大小長" % member)
+                        raise PrepError("%s 讀不完整（截斷）" % member)
                     h.update(b)
                     dst.write(b)
-                if n != m.size:
-                    raise PrepError("%s 讀不完整" % member)
-                found = (n, h.hexdigest())
+                    left -= len(b)
+                t.skip(padded - size)
+                found = (size, h.hexdigest())
+            # tar 結尾之後（通常是補齊的零）一路讀到 xz 串流結尾：xz 的檢查碼與尾端完整性在這時才驗證
+            while True:
+                b = t.read(4 << 20)
+                if not b:
+                    break
+                if any(b):
+                    raise PrepError("tar 結尾之後有非零資料")
         if found is None:
             raise PrepError("tar 裡沒有 %s" % member)
         ok = True
         return found[0], found[1], others
-    except (tarfile.TarError, OSError, EOFError) as e:
-        raise PrepError("解開失敗：%s: %s" % (type(e).__name__, e))
+    except (lzma.LZMAError, OSError, EOFError) as e:
+        raise PrepError("解開失敗：%s" % type(e).__name__)
     finally:
         if not ok:
             try:
@@ -127,7 +253,8 @@ def prepare(proj, ver, downloads, work, jpath):
         raise PrepError("%s 不在 downloads（先執行 fetch）" % name)
     os.makedirs(work, exist_ok=True)
     out = os.path.join(work, "disk.img")
-    doc = {"schema": 1, "image_file": name, "image_sha256": entry.get("sha256"), "disk_image": out}
+    base = os.path.dirname(os.path.abspath(jpath))
+    doc = {"schema": 1, "image_file": name, "image_sha256": entry.get("sha256")}
     if name.endswith((".img.xz", ".img.gz")):
         rpi = _load("dumpling_rpi_img", os.path.join(ROOT, "tools", "demo", "rpi_img.py"))
         try:
@@ -142,14 +269,31 @@ def prepare(proj, ver, downloads, work, jpath):
                    other_members=others)
     elif name.endswith(".img"):
         out = src
-        doc.update(method="未壓縮，直接使用", disk_image=out, disk_bytes=os.path.getsize(src), disk_sha256=entry.get("sha256"))
+        doc.update(method="未壓縮，直接使用", disk_bytes=os.path.getsize(src), disk_sha256=entry.get("sha256"))
     else:
         raise PrepError("不認得的映像格式：%s" % name)
+    rel = os.path.relpath(os.path.abspath(out), base)
+    if rel.startswith(".."):
+        raise PrepError("磁碟映像不在輸出資料夾底下")
+    doc["disk_image"] = rel                       # 相對於 assemble.json 所在的資料夾（不寫絕對路徑）
     with open(jpath + ".part", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
         f.write("\n")
     os.replace(jpath + ".part", jpath)
     return OK, "%s → %s（%d bytes）" % (name, os.path.basename(out), doc["disk_bytes"]), doc
+
+
+def disk_path(jpath):
+    """assemble.json 記的磁碟映像（相對路徑）→ 絕對路徑；不能跳出 assemble.json 所在的資料夾、必須是一般檔案。"""
+    with open(jpath, encoding="utf-8") as f:
+        doc = json.load(f)
+    rel = doc.get("disk_image")
+    if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split(os.sep):
+        raise PrepError("assemble.json 的 disk_image 不合法")
+    p = os.path.join(os.path.dirname(os.path.abspath(jpath)), rel)
+    if not os.path.isfile(p) or os.path.islink(p):
+        raise PrepError("assemble.json 記的磁碟映像不存在（先執行 assemble）")
+    return p
 
 
 def main(argv=None):
@@ -159,6 +303,8 @@ def main(argv=None):
     p.add_argument("proj"); p.add_argument("ver"); p.add_argument("key")
     f = sub.add_parser("files")
     f.add_argument("proj"); f.add_argument("ver"); f.add_argument("--role")
+    k = sub.add_parser("disk")
+    k.add_argument("json")
     r = sub.add_parser("prepare")
     r.add_argument("proj"); r.add_argument("ver")
     r.add_argument("--downloads", required=True); r.add_argument("--work", required=True); r.add_argument("--json", required=True)
@@ -182,12 +328,19 @@ def main(argv=None):
                 if a.role is None or e.get("role") == a.role:
                     print("%s\t%s" % (e.get("role"), e.get("name")))
             return OK
+        if a.cmd == "disk":
+            print(disk_path(a.json))
+            return OK
         rc, msg, _doc = prepare(a.proj, a.ver, a.downloads, a.work, a.json)
         print("assemble: %s（%s）" % ({OK: "OK", GAP: "GAP"}[rc], msg))
         return rc
     except Exception as e:      # noqa: BLE001  設定錯誤、讀檔錯誤：FAIL 並寫原因
         tag = "assemble" if a.cmd == "prepare" else "disk_image"
-        print("%s: FAIL（%s: %s）" % (tag, type(e).__name__, str(e)[:300]))
+        if isinstance(e, OSError):          # 不印完整路徑（可能含家目錄名稱）
+            why = "%s（%s）" % (e.strerror or type(e).__name__, os.path.basename(e.filename or ""))
+        else:
+            why = str(e)[:300]
+        print("%s: FAIL（%s: %s）" % (tag, type(e).__name__, why))
         return FAIL
 
 

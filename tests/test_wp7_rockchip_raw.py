@@ -307,6 +307,110 @@ class RawSectorsTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("不是 ar", [x for x in doc["sources"] if x["file"] == "junk.deb"][0]["error"])
 
+    # ---- 驗證代理指出的缺口（GAP 不能變成 OK）
+    def test_slot_zero_but_package_has_file_is_gap(self):
+        self.disk(payloads=[(64, self.idb)])                     # u-boot.itb 的磁區全零
+        rc, line, _doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 3, line)
+        self.assertIn("磁區卻是全零", line)
+
+    def test_fit_without_sha256_is_gap(self):
+        self.fit = self.fit.replace(b"sha256\0", b"crc32\0\0")    # 每個 hash 節點的 algo 都改掉：沒有 sha256 可以驗證
+        self.disk()
+        rc, line, doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 3, line)
+        self.assertIn("無法驗證", line)
+        self.assertTrue(all(i["fit_hash"] is None for i in doc["regions"][1]["identity"]["fit"]["images"]))
+
+    def test_fit_data_out_of_range_is_gap(self):
+        cut = self.fit[:len(self.fit) - 1500]                    # 外部資料被截掉一段（超過一個磁區）
+        self.fit = cut
+        self.disk()
+        rc, line, doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 3, line)
+        self.assertIn("out-of-range", {i["data"] for i in doc["regions"][1]["identity"]["fit"]["images"]})
+
+    def test_contradicting_sources_is_gap(self):
+        self.disk()
+        other = bytearray(self.idb); other[200] ^= 1
+        rc, line, _doc = self.inv("--deb", self.deb(), "--deb", self.deb({"idbloader.img": bytes(other), "u-boot.itb": self.fit}, "b.deb"))
+        self.assertEqual(rc, 3, line)
+        self.assertIn("互相矛盾", line)
+
+    def test_bad_gzip_deb_is_source_error_not_fail(self):
+        self.disk()
+        bio = io.BytesIO()
+        with tarfile.open(fileobj=bio, mode="w:gz") as t:
+            ti = tarfile.TarInfo("./usr/lib/u-boot/test-board/idbloader.img"); ti.size = len(self.idb); t.addfile(ti, io.BytesIO(self.idb))
+        gz = bytearray(bio.getvalue()); gz[15] ^= 0xFF
+        out = bytearray(b"!<arch>\n")
+        for name, body in (("debian-binary", b"2.0\n"), ("data.tar.gz", bytes(gz))):
+            out += ("%-16s%-12s%-6s%-6s%-8s%-10d`\n" % (name, "0", "0", "0", "100644", len(body))).encode() + body + (b"\n" if len(body) % 2 else b"")
+        bad = os.path.join(self.tmp, "bad.deb"); wb(bad, bytes(out))
+        rc, line, doc = self.inv("--deb", bad, "--deb", self.deb())
+        self.assertEqual(rc, 0, line)
+        self.assertTrue([x for x in doc["sources"] if x["file"] == "bad.deb"][0]["error"])
+
+    def test_truncated_xz_in_deb_is_source_error(self):
+        self.disk()
+        good = self.deb()
+        b = rb(good)
+        # 把 data.tar.xz 尾端剪掉 30 bytes（ar 標頭的大小一起改）
+        i = b.index(b"data.tar.xz")
+        size = int(b[i + 48:i + 58])
+        body = b[i + 60:i + 60 + size][:-30]
+        hdr = ("%-16s%-12s%-6s%-6s%-8s%-10d`\n" % ("data.tar.xz", "0", "0", "0", "100644", len(body))).encode()
+        trunc = os.path.join(self.tmp, "trunc.deb"); wb(trunc, b[:i] + hdr + body + (b"\n" if len(body) % 2 else b""))
+        rc, line, doc = self.inv("--deb", trunc)
+        self.assertEqual(rc, 3, line)
+        self.assertIn("RawError", [x for x in doc["sources"] if x["file"] == "trunc.deb"][0]["error"])
+
+    def test_too_many_ar_members_is_source_error(self):
+        self.disk()
+        out = bytearray(b"!<arch>\n")
+        for k in range(40):
+            out += ("%-16s%-12s%-6s%-6s%-8s%-10d`\n" % ("m%d" % k, "0", "0", "0", "100644", 0)).encode()
+        many = os.path.join(self.tmp, "many.deb"); wb(many, bytes(out))
+        _rc, _line, doc = self.inv("--deb", many, "--deb", self.deb())
+        self.assertIn("成員超過", [x for x in doc["sources"] if x["file"] == "many.deb"][0]["error"])
+
+    def test_fdt_without_end_is_unparsed(self):
+        fit = bytearray(self.fit)
+        off_struct, size_struct = struct.unpack(">I", fit[8:12])[0], struct.unpack(">I", fit[36:40])[0]
+        struct.pack_into(">I", fit, off_struct + size_struct - 4, 4)          # END 改成 NOP
+        self.fit = bytes(fit)
+        self.disk()
+        rc, _line, doc = self.inv("--deb", self.deb())
+        self.assertEqual(rc, 3)
+        self.assertEqual(doc["regions"][1]["identity"]["kind"], "fdt-unparsed")
+
+    def test_package_file_longer_than_image_is_inconsistent(self):
+        self.disk()
+        big = self.fit + os.urandom(SECTOR * 1100)              # 比映像剩下的長
+        rc, _line, doc = self.inv("--deb", self.deb({"idbloader.img": self.idb, "u-boot.itb": big}))
+        self.assertEqual(rc, 3)
+        self.assertEqual([c["state"] for c in doc["regions"][1]["corroboration"] if c["source"] == "package"], ["不一致"])
+
+    @unittest.skipUnless(shutil.which("mkfs.ext4"), "需要 mkfs.ext4（e2fsprogs）")
+    def test_rootfs_files_are_corroboration(self):
+        tree = os.path.join(self.tmp, "tree")
+        b = os.path.join(tree, "usr", "lib", "u-boot", "test-board")
+        os.makedirs(b); os.makedirs(os.path.join(tree, "etc"))
+        wb(os.path.join(b, "idbloader.img"), self.idb)
+        wb(os.path.join(b, "u-boot.itb"), self.fit)
+        os.symlink("/etc/passwd", os.path.join(b, "trust.img"))           # 符號連結不跟
+        ext = os.path.join(self.tmp, "root.ext4")
+        subprocess.run(["mkfs.ext4", "-q", "-F", "-d", tree, ext, "4M"], check=True, capture_output=True)
+        e = rb(ext)
+        nsec = len(e) // SECTOR
+        self.disk(payloads=[(64, self.idb), (256, self.fit), (1024, e)], parts=((1024, nsec, "rootfs"),))
+        gpt_disk(self.img, 1024 + nsec + 40, [(1024, nsec, "rootfs")], [(64, self.idb), (256, self.fit), (1024, e)])
+        rc, line, doc = self.inv()
+        self.assertEqual(rc, 0, line)
+        for r in doc["regions"]:
+            self.assertEqual([c["state"] for c in r["corroboration"] if c["source"] == "rootfs"], ["一致"])
+        self.assertEqual([x for x in doc["sources"] if x["source"] == "rootfs"][0]["found"], ["idbloader.img", "u-boot.itb"])
+
 
 class DiskImageTest(unittest.TestCase):
     def setUp(self):
@@ -405,6 +509,106 @@ class DiskImageTest(unittest.TestCase):
         rc, line, _img = self.prepare()
         self.assertEqual(rc, 1)
         self.assertIn("role: image", line)
+
+    def raw_tar(self, name, blocks):
+        """自己組 tar 區塊（測試 longname／PAX 的大小上限），再壓成 xz。"""
+        p = os.path.join(self.dl, name)
+        wb(p, lzma.compress(b"".join(blocks) + b"\0" * 1024))
+        return p
+
+    def hdr(self, name, size, typ=b"0"):
+        h = bytearray(512)
+        h[0:len(name)] = name
+        h[100:108] = b"0000644\0"; h[108:116] = b"0000000\0"; h[116:124] = b"0000000\0"
+        h[124:136] = b"%011o\0" % size
+        h[136:148] = b"00000000000\0"
+        h[156:157] = typ
+        h[257:263] = b"ustar\0"; h[263:265] = b"00"
+        h[148:156] = b" " * 8
+        h[148:156] = b"%06o\0 " % sum(h)
+        return bytes(h)
+
+    def test_longname_size_bomb_is_rejected(self):
+        self.raw_tar("bomb.tar.xz", [self.hdr(b"././@LongLink", 1500 << 20, b"L")])
+        self.sources("bomb.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("longname", line)
+        self.assertFalse(os.path.exists(img))
+
+    def test_pax_path_names_member(self):
+        body = b"z" * 700
+        rec = b"path=disk.raw\n"
+        rec = b"%d %s" % (len(rec) + 3, rec)
+        assert int(rec.split(b" ")[0]) == len(rec)
+        pad = lambda b: b + b"\0" * (-len(b) % 512)
+        self.raw_tar("pax.tar.xz", [self.hdr(b"PaxHeader", len(rec), b"x"), pad(rec),
+                                     self.hdr(b"something-else", len(body)), pad(body)])
+        self.sources("pax.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 0, line)
+        self.assertEqual(rb(img), body)
+
+    def test_bad_checksum_fails(self):
+        h = bytearray(self.hdr(b"disk.raw", 10)); h[0] = ord("x")
+        self.raw_tar("chk.tar.xz", [bytes(h), b"a" * 10 + b"\0" * 502])
+        self.sources("chk.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("檢查碼", line)
+
+    def test_truncated_xz_fails(self):
+        p = self.tarxz("img.tar.xz", [self.ti("disk.raw", os.urandom(4000))])
+        wb(p, rb(p)[:-20])
+        self.sources("img.tar.xz")
+        rc, line, img = self.prepare()
+        self.assertEqual(rc, 1, line)
+        self.assertFalse(os.path.exists(img))
+
+    def test_trailing_garbage_after_tar_fails(self):
+        blocks = [self.hdr(b"disk.raw", 10), b"a" * 10 + b"\0" * 502, b"\0" * 1024, b"GARBAGE"]
+        wb(os.path.join(self.dl, "g.tar.xz"), lzma.compress(b"".join(blocks)))
+        self.sources("g.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1, line)
+
+    def test_hardlink_member_fails(self):
+        self.tarxz("img.tar.xz", [self.ti("other", b"x"), self.ti("disk.raw", typ=tarfile.LNKTYPE, link="other")])
+        self.sources("img.tar.xz")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 1)
+        self.assertIn("不是一般檔案", line)
+
+    def test_uncompressed_img_and_disk_path(self):
+        wb(os.path.join(self.dl, "a.img"), b"\0" * 4096)
+        self.sources("a.img")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 0, line)
+        j = os.path.join(self.tmp, "assemble.json")
+        self.assertEqual(rj(j)["disk_image"], os.path.relpath(os.path.join(self.dl, "a.img"), self.tmp))
+        p = subprocess.run([sys.executable, "-I", DISK, "disk", j], capture_output=True, text=True)
+        self.assertEqual(p.stdout.strip(), os.path.join(self.dl, "a.img"))
+
+    def test_assemble_json_has_no_absolute_path(self):
+        self.tarxz("img.tar.xz", [self.ti("disk.raw", b"x" * 100)])
+        self.sources("img.tar.xz")
+        self.assertEqual(self.prepare()[0], 0)
+        text = rb(os.path.join(self.tmp, "assemble.json")).decode()
+        self.assertNotIn(self.tmp, text)
+        self.assertEqual(rj(os.path.join(self.tmp, "assemble.json"))["disk_image"], "work/disk.img")
+
+    def test_disk_path_rejects_escape(self):
+        j = os.path.join(self.tmp, "assemble.json")
+        wb(j, json.dumps({"disk_image": "../etc/passwd"}).encode())
+        p = subprocess.run([sys.executable, "-I", DISK, "disk", j], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 1)
+
+    def test_gap_entry_is_gap(self):
+        with open(os.path.join(self.proj, "sources.yml"), "w", encoding="utf-8") as f:
+            f.write("schema: 1\nreleases:\n  v1.0.0-t:\n    platform_params: {image: a.img.xz}\n    files:\n"
+                    "      - {name: a.img.xz, url: 'https://example.com/x', role: image, gap: 還沒有雜湊}\n")
+        rc, line, _img = self.prepare()
+        self.assertEqual(rc, 3, line)
 
     def test_param_and_files(self):
         self.sources("a.img.xz", "      uboot_board: rock-5b\n")
