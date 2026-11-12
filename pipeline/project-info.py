@@ -14,6 +14,12 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 import project_config as pc  # noqa: E402
 
 
+def _rel(path):
+    root = os.path.normpath(os.path.join(HERE, ".."))
+    ap = os.path.abspath(path)
+    return os.path.relpath(ap, root) if ap.startswith(root + os.sep) else path
+
+
 def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
     project, sources = pc.load_project_all(project_dir, platforms_dir)
     if version not in sources["releases"]:
@@ -24,7 +30,7 @@ def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
     return [("PROJECT", name), ("VERSION", version), ("TAG", name + "/" + version),
             ("PLATFORM", project["platform"]), ("STATUS", project["status"]),
             ("OS_RESPONSIBILITY", project["os_responsibility"]), ("COMPANY_ROLE", project["company_role"]),
-            ("PROJECT_DIR", project_dir)]
+            ("PROJECT_DIR", _rel(project_dir))]
 
 
 def main(argv):

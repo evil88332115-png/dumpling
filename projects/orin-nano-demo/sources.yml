@@ -1,0 +1,42 @@
+# NVIDIA 公開下載。網址與 SHA-1 取自 NVIDIA 公布的 release_sha_hashes.txt（2026-10-27、2026-11-04 讀過）；
+# sha256 是 SHA-1 相符後記下的值（來源 tools/demo/jetson.sh）。public_sources.tbz2 NVIDIA 沒有公布整包雜湊：
+# sha256 是首次下載的記錄（2026-11-12）；r39.2.0 的還沒記錄，所以標 gap，fetch 回報 GAP，不會自動接受。
+# 下載即表示同意 NVIDIA 的軟體授權協議。size 沒有記錄，省略。
+schema: 1
+releases:
+  v39.2.0-demo1:
+    platform_params:
+      l4t_release: "39.2.0"
+    files:
+      - name: Jetson_Linux_R39.2.0_aarch64.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0/release/Jetson_Linux_R39.2.0_aarch64.tbz2
+        sha1: 346043847d47793669f3f1d86d8d1a3b50c3dbb6
+        sha256: 1626626cd827de0e350b8802033b9da653c69b2290accedb9e5d01f49607e099
+        role: bsp
+      - name: Tegra_Linux_Sample-Root-Filesystem_R39.2.0_aarch64.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0/release/Tegra_Linux_Sample-Root-Filesystem_R39.2.0_aarch64.tbz2
+        sha1: 94b2b42f6fe2667af10f28a33900d25a4a4eea47
+        sha256: 3e3e4c110dc911efcaee44fffe405d355341f4d5a169b2516bf4330f846d2037
+        role: rootfs
+      - name: public_sources.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.0/sources/public_sources.tbz2
+        role: source
+        gap: 尚未記錄首次下載的 sha256（NVIDIA 沒有公布整包雜湊）；由 CI 首次下載後人工確認再填
+  v39.2.1-demo1:
+    platform_params:
+      l4t_release: "39.2.1"
+    files:
+      - name: Jetson_Linux_R39.2.1_aarch64.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/release/Jetson_Linux_R39.2.1_aarch64.tbz2
+        sha1: 8fe9a3ac9a98550b6077df450441599141ba47fb
+        sha256: 2e5619088ba88e85dab25247f033d70659b6f676ff835176a07766dcb0fdbe6b
+        role: bsp
+      - name: Tegra_Linux_Sample-Root-Filesystem_R39.2.1_aarch64.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/release/Tegra_Linux_Sample-Root-Filesystem_R39.2.1_aarch64.tbz2
+        sha1: 9a991a4f94b09304d10a73c89da7d5feae11c303
+        sha256: 58a6485b56c6d6b5ee8478e902eed0ed4984fd73135b88b76aeaa5c1f44be66e
+        role: rootfs
+      - name: public_sources.tbz2
+        url: https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/sources/public_sources.tbz2
+        sha256: 8346f0371649a92c42293b2d4a7bf3d69e4dd1de23009e1463ea910994a81371
+        role: source
