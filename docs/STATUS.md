@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 12:59 -0500（C2）
+最後更新：2026-11-12 13:00 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -62,7 +62,7 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-- 目前在做：**M3 PR #14 已開（wp3/m3 2eb1d00），等 C0 派驗證**。M3＝（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
+- 目前在做：**M3 PR #14 已開（wp3/m3 2eb1d00），C0 已派驗證代理；驗證期間不推 wp3/m3**。M3＝（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
 - 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX）
 - **整合分支 `wp3/m3` 061ca75**（含 main cd62514、GOP 走訪、expect 新鍵；c2c5142 的 tests CI 43255179664 紅：新檔沒登記 PROVENANCE → 061ca75 補登，本機 c1-tools 3114 passed；重跑 tests 43258583501、firmware 43258591599）（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
   - coreboot CBFS（FMAP、LZMA／LZ4、coreboot 版本／config、FSP、VBT、SELF payload）＋預驗修正 0f28182（ReDoS、掃描雜湊放大、解壓失敗計量、FSP ExtendedImageRevision）
@@ -86,7 +86,7 @@
   - 代理 K（寫程式，Sonnet 5.5 high）：`wp3/m3-gop` 24d3eb5，狀態：完成（已併入 m3）。`tools/cra/uefi_gfx.py`（uefi_image.Scan 子類別）＋契約測試 `test_uefi_image_contract.py`。NUC：GOP build 1070（FFS A0327FE0-…）、legacy VBIOS 1003 PC 14.34、獨立 VBT 3 份（$VBT TIGERLAKE、BDB 2.43），掛在 BIOS 映像下；走訪不完整（EFI 標準壓縮解不開 30 處）→ gap、ATTENTION。Dasharo、OVMF 無誤判
   - 代理 L（寫程式，Sonnet 5.5 medium）：`wp3/m3-expect` bb59fb2，狀態：完成（已併入 m3）。firmware-expect 新鍵 `intel_gop`、`intel_legacy_vbios`；NUC expected 加 GOP 1070（release notes 佐證 17.0.1070）；legacy VBIOS 1003 PC 14.34 release notes 沒有佐證，只寫註解；VBT 版本是表頭格式版本，不比對。三樣本 Dasharo 11 OK、NUC 2 OK；故意改錯 → MISMATCH
   - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
-- 下一步：等 C0 派的驗證代理在 PR #14 留言；不通過就修；通過後 C0 合併。之後：M2 合併後把 firmware_fetch.py 改成 import fetch_verify.py
+- 下一步：等 PR #14 驗證留言；不通過就修；通過後 C0 合併。之後：(1) 供應商 SBOM 上傳前最小正規化（頂層多出的欄位→metadata.properties、只有 url 的 license→元件 properties，不刪不猜；記錄每筆搬移與原檔 sha256；用 CycloneDX 1.4 官方 schema 驗證；做完拿掉 expected_dt）；(2) M2 合併後 firmware_fetch.py 改 import fetch_verify.py。C0 同意 expected_dt（條件：只放行拒收、狀態不可變 OK、PR 已知限制寫明供應商 SBOM 尚未進 DT——已補）
 - 之後（M3 以外）：C1 M2 合併後，把 `pipeline/lib/firmware_fetch.py` 改成 import 共用的 `pipeline/lib/fetch_verify.py`（C0 會通知）；D-028 之後二進位測資要登記在 `ci/public-binary-allow.txt`（wp3/m3 目前沒有二進位檔，合成 ROM 都在測試裡當場產生）
 - 等 C1 M2：gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（wp1/m2 fdabd22）。M2 前 CI 印 GAP（沒有表、不跑 candidates，不借 Jetson 表）；M2 後自動用它 → ATTENTION（公告全列待審）。不擋 M3
 - 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`（約 22 MB）等被安全檢查擋下沒刪，要使用者手動刪
