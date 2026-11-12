@@ -23,7 +23,7 @@ fail() { echo "build: FAIL（$*）"; exit 1; }
 t_start=$(date +%s)
 
 [ "$(uname -m)" = aarch64 ] || { echo "build: NOT_RUN（只在 aarch64 主機原生編譯；這台是 $(uname -m)）"; exit 4; }
-for c in rsync make gcc bc bison flex pahole perl tar sha256sum patch; do
+for c in rsync make gcc bc bison flex pahole perl tar sha256sum patch zstd; do
   command -v "$c" > /dev/null || fail "缺少 $c（apt 相依見 docs/JETSON.md）"
 done
 [ -f "$dl/public_sources.tbz2" ] || fail "沒有 $dl/public_sources.tbz2（先執行 fetch）"
@@ -71,7 +71,7 @@ D=$out/deliver
   for f in arch/arm64/boot/Image modules.order modules.builtin modules.builtin.modinfo include/config/kernel.release; do
     [ -f "kernel/$kname/$f" ] && echo "./kernel/$kname/$f"
   done >> "$D/files.list"
-  tar -cf "$D/deliverables.tar" -T "$D/files.list" ) || fail "整理交付檔失敗"
+  tar -cf - -T "$D/files.list" | zstd -3 -T0 -q -o "$D/deliverables.tar.zst" ) || fail "整理交付檔失敗"
 nko=$(grep -c '\.ko$' "$D/files.list" || true); ndtb=$(grep -c '\.dtbo\?$' "$D/files.list" || true)
 cp "$K/arch/arm64/boot/Image" "$D/Image"
 printf '%s\n' "$krel" > "$D/kernel.release"

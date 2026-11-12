@@ -24,7 +24,7 @@ dl=$out/downloads work=$out/assemble
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 t0=$(date +%s)
 
-for f in "$out/deliver/deliverables.tar" "$out/deliver/kernel.release" "$out/deliver/kernel-subdir" "$out/build.json"; do
+for f in "$out/deliver/kernel.release" "$out/deliver/kernel-subdir" "$out/build.json"; do
   [ -f "$f" ] || fail "缺少 build 的輸出 $f"
 done
 bsp='' rfs=''
@@ -38,7 +38,12 @@ rm -rf "$work" "$out/FlashPackage" "$out/SourceCode" "$out/tee-source"
 mkdir -p "$work" "$out/FlashPackage" "$out/SourceCode" || fail "無法建立資料夾"
 
 # 1. CI 的交付檔（我們自己的 build 輸出，仍用安全解壓）
-pyl safe_extract.py "$out/deliver/deliverables.tar" "$work/deliver" > /dev/null || fail "解開 deliverables.tar 被拒絕或失敗"
+if [ -f "$out/deliver/deliverables.tar.zst" ]; then
+  zstd -d -q -c "$out/deliver/deliverables.tar.zst" > "$work/deliverables.tar" || fail "解壓 deliverables.tar.zst 失敗"
+elif [ -f "$out/deliver/deliverables.tar" ]; then cp "$out/deliver/deliverables.tar" "$work/deliverables.tar"
+else fail "缺少 build 的輸出 deliver/deliverables.tar.zst"; fi
+pyl safe_extract.py "$work/deliverables.tar" "$work/deliver" > /dev/null || fail "解開 deliverables 被拒絕或失敗"
+rm -f "$work/deliverables.tar"
 
 # 2. 範例 rootfs ＋ BSP 的 NVIDIA 套件合併成 rootfs tar（只讀 tar／deb 結構，不執行任何東西）；不要模擬客製版
 python3 -I "$root/tools/demo/jetson_rootfs.py" --bsp "$dl/$bsp" --rootfs "$dl/$rfs" --work "$work" \

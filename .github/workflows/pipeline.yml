@@ -79,7 +79,7 @@ jobs:
           o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
           mkdir -p "$RUNNER_TEMP/handoff"
           cp "$o"/BuildRecord-*.tar.gz "$o/build.json" "$RUNNER_TEMP/handoff/"
-          cp "$o/deliver/deliverables.tar" "$o/deliver/kernel.release" "$o/deliver/kernel-subdir" "$RUNNER_TEMP/handoff/"
+          cp "$o"/deliver/deliverables.tar* "$o/deliver/kernel.release" "$o/deliver/kernel-subdir" "$RUNNER_TEMP/handoff/"
           tail -n 40 "$o/work/nvbuild.log" > "$RUNNER_TEMP/handoff/nvbuild-tail.txt"
           ls -l "$RUNNER_TEMP/handoff"
           { echo "## build（${{ inputs.project }} ${{ inputs.version }}）"; tail -n 1 "$RUNNER_TEMP/build-line.txt"; } >> "$GITHUB_STEP_SUMMARY"
@@ -147,7 +147,7 @@ jobs:
           o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
           mkdir -p "$o/deliver"
           cp "$RUNNER_TEMP"/handoff/BuildRecord-*.tar.gz "$RUNNER_TEMP/handoff/build.json" "$o/"
-          cp "$RUNNER_TEMP"/handoff/deliverables.tar "$RUNNER_TEMP"/handoff/kernel.release "$RUNNER_TEMP"/handoff/kernel-subdir "$o/deliver/"
+          cp "$RUNNER_TEMP"/handoff/deliverables.tar* "$RUNNER_TEMP"/handoff/kernel.release "$RUNNER_TEMP"/handoff/kernel-subdir "$o/deliver/"
           cat "$o/build.json"
 
       - name: fetch（BSP、範例 rootfs、public_sources 重新從 NVIDIA 下載並核對）

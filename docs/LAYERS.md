@@ -176,10 +176,11 @@ CI 實際跑出來的分層數字見 `docs/JETSON.md` 與 `tests/expected/orin-n
 1. **unknown 339 個**（Go／Python／Java）現在全列入 BSP 待辦。它們在乾淨的 Ubuntu rootfs 幾乎都是 Ubuntu 套件帶進來的；要歸 os 需要
    「這個語言套件屬於哪個 deb」的資料（pkgdb 的 dpkg 檔案歸屬）。建議 J 軌用 pkgdb 補路徑或擁有者；cra_report 已能用「擁有它的 deb」
    （`deb_python.owner`）找層，只是 SBOM 端的標記要有路徑才行。或由 PM 決定是否在 platform.yml 用 `layers.os.paths` 宣告 rootfs 裡 Ubuntu 的路徑。
-2. **`nvidia-igx-*`**（2 個）、`libdrm-tegra0` 等不是 `nvidia-l4t-*` 的 NVIDIA／Tegra 套件現在歸 os（D-027 只用名稱清單）。是否算 BSP 由 PM 決定。
+2. **NVIDIA 套件**（D-030 已處理）：`nvidia-igx-*` 加進 bsp 清單；`libdrm-tegra0`、`libcurl4t64` 是 Ubuntu 套件，維持 os。以後 NVIDIA 在 BSP 裡出現新的套件系列，要重讀 BSP 的 deb 清單更新 `platform.yml`。
 3. **發行閘門（`vex.gate`）不分層**：OS 層在 customer 時，未評估的 KEV 仍會讓發行閘門 BLOCKED／ATTENTION。這是否符合「OS 由客戶負責」需要 PM／法務決定。
 4. **兩個 DT 專案 vs. 專案階層（parent／child）**：見第 5 節。
 5. **host-tool 是否另開 DT 專案**：現在不上傳。
-6. **`platform.yml` 的 BSP 路徑樣式**（`Linux_for_Tegra/bootloader/*.bin` 等）是依 NVIDIA 公開 BSP 的慣例寫的，還沒對真實 BSP 資料夾的 SBOM 驗證；J 軌有實際內容後補。
+6. **`platform.yml` 的路徑樣式**已對過公開 R39.2.1 BSP 的成員清單（2026-11-12）補了 `bootloader/*.fip|*.deb`、`nv_tegra/l4t_deb_packages/*`、host-tool 的腳本與簽署工具；
+   但精靈的 Syft 只掃 rootfs（刷機包資料夾本身的 `Linux_for_Tegra/…` 檔案不在 SBOM 裡，由 cra_report 的 flash-inventory 另外加進產品 SBOM），所以 host-tool 在 Jetson 實跑的 SBOM 是 0 個。
 7. 風險評估範本是專案自己的複本時（`CRA/templates/risk-assessment.md`）沒有 `{{ text.layer_section }}`，Layers 一節不會出現在文件裡（cra_report 會記警告；
    `summary.json`、`vulnerability-rows.json`、報告包的工作表照樣有）。
