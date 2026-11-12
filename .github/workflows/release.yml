@@ -8,7 +8,6 @@ name: release
 on:
   push:
     tags: ["*/v*"]
-    branches: ["wp1/m2-jetson"]   # 暫時：讓 workflow 登錄（info 會因為不是 tag 立刻失敗）；登錄完成後移除
   workflow_dispatch:
     inputs:
       tag:
