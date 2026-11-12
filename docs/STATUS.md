@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 06:57 +0800（C4）
+最後更新：2026-11-12 18:01 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -68,7 +68,7 @@
   - DT 結果（Actions）：Protectli 16→DT 14、NUC 8→6、OVMF 1、合成 vBIOS 1，都 ATTENTION；供應商 SBOM 被 DT 拒收（schema 不符），以 `expected_dt` 宣告，只放行 DT 的「BOM 不符 schema」400
   - 驗證：第一次不通過（issuecomment-6832127582：只看 http=400 太寬）→ 8f02635 修正（錨定 DT 回應開頭＋6 個反例），C0 複核後合併
 - 分支 `wp3/supplier-normalize` 8a960c0（worktree `$AGENT_TMP/dumpling-wt-c2-norm`，從 main b6d341a；已併 `origin/wp1/m2` 54dbf48）
-  - 8a960c0：firmware_fetch 刪掉自己的下載核對函式，改 import fetch_verify（名稱照舊匯出、`main(downloader=…)` 不變；清單仍要求 size）；新測試：共用函式身分、缺 size 仍 FAIL、`python3 -I` 從別的目錄執行。本機 c2-firmware 238、c2-x86-firmware 325、c1-m2-layers／c1-m2-platform／c1-pipeline／c1-public-check 都 OK。CI tests 43323859797、firmware 43323866206 跑中
+  - 8a960c0：firmware_fetch 刪掉自己的下載核對函式，改 import fetch_verify（名稱照舊匯出、`main(downloader=…)` 不變；清單仍要求 size）；新測試：共用函式身分、缺 size 仍 FAIL、`python3 -I` 從別的目錄執行。本機 c2-firmware 238、c2-x86-firmware 325、c1-m2-layers／c1-m2-platform／c1-pipeline／c1-public-check／c1-tools（3146）／c0-public-check-binary 都 OK。CI tests 43323859797、firmware 43323866206 綠：五個真樣本全 ATTENTION；NVIDIA「有表」路徑實跑 `C-nvidia-bulletins-db ATTENTION`（gpu-firmware 表 1 筆待人審 5674），不再印 GAP
 - 代理：
   - 代理 M（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` 84ea369，狀態：完成。`pipeline/lib/firmware_sbom_normalize.py`（1.4～1.6；頂層多出欄位→`dumpling:supplier-extra:*`、只有 url 的 license→`dumpling:supplier-license-url`；normalize.json 記每筆原 JSON Pointer＋值 sha256；上限；先規劃後套用）、CycloneDX 1.4 官方 schema（tag 1.4）、樣本拿掉 expected_dt。本機真 DT：Dasharo NS5x **DT 收下**，10 元件，verify 5 項 OK；原檔 1.4 schema 2 錯→副本 0 錯
   - 我補 38db74c：報告的 OK 太寬（Grype 36 筆、purl 全 pkg:generic、沒有評估標記仍標 OK）→ `attention_reasons()`，三種都 ATTENTION；用真 DT 結果重跑 report 確認。CI tests 43289059136、firmware 43289066571 已觸發
@@ -76,7 +76,7 @@
   - 代理 N（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` dd54722，狀態：完成。假 OK 路徑都堵住：比對數只認 int≥0；dt-verify 必要檢查缺／NOT_RUN／未知→GAP；任何 sca-scan 階段 FAIL→FAIL（expected_dt 放行規則不變），其他非 OK 階段→ATTENTION；vuln-assessment 只認 NONE、供應商 SBOM 自帶 dumpling: 標記不採信；purl 格式嚴格；缺 version 列入；型別錯→prep FAIL；重複鍵偵測→ATTENTION＋紀錄；代理字元先序列化再寫檔。CI tests 43294331473、firmware 43294338722 綠，五個真樣本全 ATTENTION（無 OK、無 FAIL）；c2-firmware 235、c2-x86-firmware 325
   - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
 - 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
-- 下一步：等 C1 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 確認 NVIDIA「有表」路徑在 CI 印 ATTENTION → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（韌體 C-sbomgate 一定 NOT_ASSESSED、沒有工具寫 vuln-assessment=NONE、C-mirror-freshness 在 CI NOT_RUN）——保守、符合原則，不放寬
+- 下一步：等 C1 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（韌體 C-sbomgate 一定 NOT_ASSESSED、沒有工具寫 vuln-assessment=NONE、C-mirror-freshness 在 CI NOT_RUN）——保守、符合原則，不放寬
 - 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`、`-c1files`、`-dt`、`-gop`、`-expect`、`-norm`、`-norm2`、`-verify-norm` 被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
