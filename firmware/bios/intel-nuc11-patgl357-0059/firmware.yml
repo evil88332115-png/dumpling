@@ -21,7 +21,9 @@ notes: |
   確認為 AMI：CAP 開頭是 AMI 膠囊標記 `_AMIPFAT`（只讀位元組檢查，未解開、未執行）。
   這份 CAP 內容為 AMI PFAT 封裝，沒有明文字串 `American Megatrends`／`$VBT`；需先解開 PFAT（tools/cra/ami_pfat.py）。
   解開後是 BIOS 區域更新（FV 與 NVRAM 區段），沒有 flash descriptor、沒有 ME 區域；release notes 的 ME 15.0.56.2834 在映像裡找不到，
-  所以不寫進 expected。release notes 另列 Integrated Graphics GOP UEFI Driver 17.0.1070（尚未從映像核對，之後 GOP／VBT 的 PR 再確認）。
+  所以不寫進 expected。release notes 列 Integrated Graphics GOP UEFI Driver 17.0.1070，映像裡的 GOP 驅動讀到 build 1070（已核對，寫進 expected）。
+  映像裡的 legacy VBIOS 讀到 `Build Number: 1003 PC 14.34`，但 release notes 沒有任何 VBIOS／1003／14.34 字樣，沒有獨立佐證，所以不寫進 expected。
+  VBT 的 version 是 $VBT 表頭的格式版本（1.00），不是發行版本，不比對。
   選 ASUS 而非 Intel 下載中心：downloadmirror.intel.com 的網址會被轉成小寫路徑而回 403，無法穩定下載。
   ASUS 之後若移除舊版，網址會失效，firmware-fetch 會 FAIL，此時換同系列其他版本。
 expected:
@@ -30,3 +32,7 @@ expected:
   # 映像裡另有 000806C2／revision 0x16，release notes 沒列，沒有獨立佐證，不寫。
   microcode:
     - {cpuid: "000806C1", platform_mask: "0x80", revision: "0xBE"}
+  # GOP：映像解開後讀到驅動 build 編號 1070（只有 build 編號，工具讀不到完整版本），
+  # 與 release notes 的 "Integrated Graphics GOP UEFI Driver: 17.0.1070" 的最後一段一致才寫進來。
+  intel_gop: "1070"
+  # legacy VBIOS：映像讀到 "1003 PC 14.34"，但 release notes 查無獨立佐證（pdftotext 全文無 VBIOS／1003／14.34），不寫 intel_legacy_vbios。
