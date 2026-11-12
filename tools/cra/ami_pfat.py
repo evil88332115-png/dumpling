@@ -76,6 +76,14 @@ def find(data, limit=SEARCH_LIMIT):
     return m.start() - 8
 
 
+DIGITS = re.compile(r"[0-9]{1,9}")
+
+
+def _nm(name):
+    """錯誤訊息裡的檔名（截短：名稱來自不可信輸入，可以很長）。"""
+    return repr(name[:60]) + ("…" if len(name) > 60 else "")
+
+
 def _parse_header(data, p):
     """→ (標頭總長, flags, [(旗標, 參數, block 數, 名稱)], flash 順序索引 list 或 None)。"""
     if len(data) - p < HDR_LEN:
@@ -105,13 +113,15 @@ def _parse_header(data, p):
             continue
         info, sep, name = line.partition(";")
         parts = info.split()
-        if not sep or len(parts) != 3 or not name or not parts[0].isdigit() or not parts[2].isdigit():
+        # 數字欄位只接 ASCII 數字、最多 9 位：str.isdigit() 對上標數字（²）也是 True，int() 卻會丟 ValueError；
+        # 超長的數字字串 int() 也會丟 ValueError（Python 的整數字串轉換上限）
+        if not sep or len(parts) != 3 or not name or not DIGITS.fullmatch(parts[0]) or not DIGITS.fullmatch(parts[2]):
             raise PfatError(f"檔案清單的行格式不對：{line[:60]!r}")
         files.append((int(parts[0]), parts[1], int(parts[2]), name))
+        if len(files) > MAX_FILES:
+            raise PfatError(f"宣告的檔案數太多（超過 {MAX_FILES}）")
     if not files:
         raise PfatError("封裝標頭沒有列出任何檔案")
-    if len(files) > MAX_FILES:
-        raise PfatError(f"宣告的檔案數太多（{len(files)}）")
     if order is not None and len(order) != len(files):
         raise PfatError(f"flash 順序索引數（{len(order)}）和檔案數（{len(files)}）不符")
     total = sum(f[2] for f in files)
@@ -145,15 +155,17 @@ def _signature_len(data, off, marker, end, cached):
     raise PfatError(f"簽章區格式不認得（標頭 0x{kind:X}），也推不出長度")
 
 
-def parse(data, offset=None, depth=0, budget=None):
-    """解一個 PFAT 封裝。→ dict（見 unwrap）。不合格式時丟 PfatError。"""
+def parse(data, offset=None, depth=0, budget=None, acc=None):
+    """解一個 PFAT 封裝。→ dict（見 unwrap）。不合格式時丟 PfatError。
+    acc：[已組回的位元組數]，巢狀共用，讓 MAX_TOTAL 是整次解封裝（含巢狀）的總量。"""
+    acc = [0] if acc is None else acc
     p = find(data) if offset is None else offset
     if p is None:
         raise PfatError("沒有 PFAT 標記")
     size, flags, files, order = _parse_header(data, p)
     pos = p + size
     n_total = sum(f[2] for f in files)
-    out_files, notes, marker, sig_len, sig_bits, built = [], [], None, 0, set(), 0
+    out_files, notes, marker, sig_len, sig_bits = [], [], None, 0, set()
     first = None
     for fi, (fflags, param, count, name) in enumerate(files):
         chunks, size_sum, n_sig = [], 0, 0
@@ -161,7 +173,7 @@ def parse(data, offset=None, depth=0, budget=None):
             if budget is not None:
                 budget.check()
             if len(data) - pos < BG_HDR_LEN:
-                raise PfatError(f"檔案 {name!r} 的第 {bi + 1}/{count} 個 block header 被截斷")
+                raise PfatError(f"檔案 {_nm(name)} 的第 {bi + 1}/{count} 個 block header 被截斷")
             (vmaj, vmin) = struct.unpack_from("<HH", data, pos)
             plat = data[pos + 4:pos + 20]
             attrs, smaj, smin, ssize, dsize, bsvn, ecsvn, vendor = struct.unpack_from("<IHHIIIII", data, pos + 20)
@@ -171,20 +183,20 @@ def parse(data, offset=None, depth=0, budget=None):
                                              "bios_svn": bsvn, "ec_svn": ecsvn, "platform_id": plat.rstrip(b"\x00").decode("ascii", "replace")
                                              if all(32 <= c < 127 or c == 0 for c in plat) else plat.hex()}
             elif hdr_marker != marker:
-                raise PfatError(f"檔案 {name!r} 的第 {bi + 1}/{count} 個 block 的 BIOS Guard 版本／平台 ID 和第一個 block 不同（欄位矛盾）")
+                raise PfatError(f"檔案 {_nm(name)} 的第 {bi + 1}/{count} 個 block 的 BIOS Guard 版本／平台 ID 和第一個 block 不同（欄位矛盾）")
             if ssize > MAX_SCRIPT or ssize > len(data) - pos - BG_HDR_LEN:
-                raise PfatError(f"檔案 {name!r} 的第 {bi + 1}/{count} 個 block 的 script 長度（{ssize}）超出檔案或上限")
+                raise PfatError(f"檔案 {_nm(name)} 的第 {bi + 1}/{count} 個 block 的 script 長度（{ssize}）超出檔案或上限")
             doff = pos + BG_HDR_LEN + ssize
             if dsize > len(data) - doff:
-                raise PfatError(f"檔案 {name!r} 的第 {bi + 1}/{count} 個 block 的資料長度（{dsize}）超出檔案（截斷或長度矛盾）")
-            if size_sum + dsize > MAX_IMAGE or built + dsize > MAX_TOTAL:
-                raise PfatError(f"檔案 {name!r} 組回來的大小超過上限")
+                raise PfatError(f"檔案 {_nm(name)} 的第 {bi + 1}/{count} 個 block 的資料長度（{dsize}）超出檔案（截斷或長度矛盾）")
+            if size_sum + dsize > MAX_IMAGE or acc[0] + dsize > MAX_TOTAL:
+                raise PfatError(f"檔案 {_nm(name)} 組回來的大小超過上限")
             sn = _script_note(data[pos + BG_HDR_LEN:doff])
             if sn and sn not in notes:
                 notes.append(sn)
             chunks.append(data[doff:doff + dsize])
             size_sum += dsize
-            built += dsize
+            acc[0] += dsize
             pos = doff + dsize
             if attrs & 1:                          # SFAM：後面接簽章區
                 slen, bits = _signature_len(data, pos, marker, len(data), sig_len)
@@ -192,7 +204,7 @@ def parse(data, offset=None, depth=0, budget=None):
                 if bits:
                     sig_bits.add(bits)
                 if slen > len(data) - pos:
-                    raise PfatError(f"檔案 {name!r} 的第 {bi + 1}/{count} 個 block 的簽章區超出檔案")
+                    raise PfatError(f"檔案 {_nm(name)} 的第 {bi + 1}/{count} 個 block 的簽章區超出檔案")
                 pos += slen
                 n_sig += 1
         out_files.append({"name": name, "flags": fflags, "param": param, "blocks": count, "signed_blocks": n_sig,
@@ -210,7 +222,7 @@ def parse(data, offset=None, depth=0, budget=None):
             result["unparsed"].append(f"{label}：巢狀 PFAT 超過深度上限 {MAX_DEPTH}，沒有解開")
             continue
         try:
-            sub = parse(blob, None, depth + 1, budget)
+            sub = parse(blob, None, depth + 1, budget, acc)
         except PfatError as e:
             result["unparsed"].append(f"{label}：巢狀 PFAT 解不開（{e}）")
             continue
@@ -254,7 +266,7 @@ def unwrap(data, budget=None):
     except PfatError as e:
         base["error"] = str(e)
         return base
-    except (struct.error, IndexError, OverflowError, MemoryError) as e:     # 有檢查邊界，不該發生；發生就當格式錯誤
+    except (ValueError, struct.error, IndexError, OverflowError, MemoryError) as e:   # 有檢查邊界，不該發生；發生就當格式錯誤
         base["error"] = f"解析失敗（{type(e).__name__}）"
         return base
     imgs = images(r)

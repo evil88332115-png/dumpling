@@ -190,7 +190,7 @@ def test_huge_header_size_and_block_count():
     assert "標頭長度" in ap.unwrap(bytes(raw))["error"]
     struct.pack_into("<I", raw, 0, 5)
     assert "標頭長度" in ap.unwrap(bytes(raw))["error"]
-    pf = ap.unwrap(pfat([("A", [b"a" * 16])], counts=[10 ** 9]))
+    pf = ap.unwrap(pfat([("A", [b"a" * 16])], counts=[10 ** 9 - 1]))   # 9 位數（10 位數以上先被清單格式擋下）
     assert not pf["ok"] and "block 數" in pf["error"]
     pf = ap.unwrap(pfat([("A", [b"a" * 16])], counts=[ap.MAX_BLOCKS]))
     assert not pf["ok"]                                            # 宣告的 block 比檔案放得下的多
@@ -427,3 +427,50 @@ def test_cli_with_isolated_python_loads_the_module_and_outputs(tmp_path):
     doc = json.loads((out / "fw.cdx.json").read_text(encoding="utf-8"))
     assert not list(cdx_validator().iter_errors(doc))
     assert any(p["name"] == "dumpling:unwrapped-from" for c in doc["components"] for p in c.get("properties", []))
+
+
+# ---------- 預驗回報：清單數字欄位、跨巢狀總量、長檔名 ----------
+
+def raw_pfat(lines, blocks):
+    """直接給標頭文字行（測試格式錯誤用）。"""
+    text = ("\r\n".join(["AMI_BIOS_GUARD_FLASH_CONFIGURATIONS"] + lines) + "\r\n").encode()
+    head = struct.pack("<II", ap.HDR_LEN + len(text), 0xACDE) + ap.TAG + b"c" + text
+    return head + b"".join(block(d) for d in blocks)
+
+
+@pytest.mark.parametrize("line", ["0 /A ²;a", "² /A 1;a", "1 /A " + "9" * 5000 + ";a", "1 /A 1234567890;a", "１ /A 1;a"])
+def test_non_ascii_or_overlong_numbers_are_format_errors(line):
+    """str.isdigit() 對上標數字是 True、int() 卻丟 ValueError；超長數字 int() 也丟。都要變成 ok=False，不能崩潰。"""
+    r = ap.unwrap(raw_pfat([line], [b"A" * 64]))
+    assert r["ok"] is False and "行格式不對" in r["error"]
+
+
+def test_bad_number_goes_to_partial_through_inventory(tmp_path):
+    f = tmp_path / "bad.cap"
+    f.write_bytes(raw_pfat(["² /A 1;a"], [b"A" * 64]))
+    out = tmp_path / "out"
+    p = subprocess.run([sys.executable, "-I", str(TOOL), "inventory", "--in", str(f), "--out", str(out)], capture_output=True, text=True)
+    assert p.returncode in (0, 2), p.stderr
+    inv = json.loads((out / "fw-inventory.json").read_text(encoding="utf-8"))
+    assert any("PFAT" in str(x) for x in inv["partial"])
+
+
+def test_too_many_files_rejected_while_parsing():
+    lines = [f"1 /F{i} 1;f{i}" for i in range(ap.MAX_FILES + 5)]
+    r = ap.unwrap(raw_pfat(lines, [b"x" * 16] * (ap.MAX_FILES + 5)))
+    assert r["ok"] is False and "檔案數太多" in r["error"]
+
+
+def test_max_total_counts_across_nesting(monkeypatch):
+    inner = pfat([("IN", [b"i" * 300])])
+    outer = pfat([("OUT", [inner])])
+    assert ap.unwrap(outer)["ok"] is True
+    monkeypatch.setattr(ap, "MAX_TOTAL", len(inner) + 100)        # 外層組回 len(inner)，內層再 300：合計超過
+    r = ap.parse(outer)
+    assert r["nested"] == [] and any("超過上限" in u for u in r["unparsed"])
+
+
+def test_long_file_name_is_truncated_in_errors():
+    name = "N" * 100000
+    r = ap.unwrap(pfat([(name, [b"z" * 64])], counts=[2]))
+    assert r["ok"] is False and len(r["error"]) < 400
