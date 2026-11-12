@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 07:55 -0500（C1）
+最後更新：2026-11-12 07:57 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,18 +36,22 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-- 目前在做：B 段「公開樣本」——挑 BIOS／vBIOS 公開樣本（網址＋sha256＋授權），寫 `firmware/*/firmware.yml` 與下載核對腳本（PR 1／4）
-- 分支／PR／commit：`wp3/firmware-samples`（剛從 main f39fbfe 開出，尚無 commit、尚無 PR）
+- 目前在做：B 段。PR 1（公開樣本＋下載核對）與 PR 2a（x86_firmware 解析→CycloneDX）同時進行，各一個寫程式代理
+- 分支／PR／commit：
+  - `wp3/firmware-samples`（PR 1，draft 尚未開；worktree `$AGENT_TMP/dumpling-wt-c2-samples`）
+  - `wp3/bios-sbom`（PR 2a，從 main 3f1c260 開出；worktree `$AGENT_TMP/dumpling-wt-c2-bios-sbom`）
 - 預定 PR（D-014，一個可測的功能一個 PR）：
-  1. `wp3/firmware-samples`：樣本清單＋下載並核對 sha256（`pipeline/firmware-fetch.sh`）
-  2. `wp3/bios-sbom`：BIOS 解析→CycloneDX（x86_firmware.py 複製＋LZMA FV、CBFS、FSP、purl／CPE、Intel 部分 NOT_ASSESSED）
+  1. `wp3/firmware-samples`：樣本清單＋下載並核對 sha256（`pipeline/firmware-fetch.sh`、`tests/run.d/c2-firmware.sh`、`firmware.yml` workflow）
+  2a. `wp3/bios-sbom`：複製 x86_firmware.py（D-015）→ `tools/cra/`；Intel ME／微碼、vBIOS 標 NOT_ASSESSED、讀不到版本標 GAP、確定的才填 CPE；`pipeline/firmware-bios.sh`；`tests/run.d/c2-x86-firmware.sh`
+  2b. BIOS 成品端 UEFI 解開（需要 C1 的 uefi_image.py，已請 C0 協調）＋CBFS／FSP（BIOS 試掃原型）
   3. `wp4/vbios`：獨立 vBIOS＋BIOS 內 Intel GOP／VBT／legacy VBIOS，公告比對 NOT_ASSESSED
-  4. `wp3/firmware-dt`：firmware.yml workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
+  4. `wp3/firmware-dt`：firmware workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
 - 代理：
-  - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1 樣本清單＋firmware-fetch＋tests/run.sh＋firmware.yml workflow，分支 `wp3/firmware-samples`，狀態：進行中
-- CI：無
-- 下一步：等代理 A 開 draft PR；同時研究 PR 2（BIOS 解析）的範圍；等 C0 回覆工具複製分工
-- 卡住／等決定：工具複製分工（已問 C0）
+  - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1，分支 `wp3/firmware-samples`，狀態：進行中
+  - 代理 B（寫程式，Sonnet 5.5 high）：PR 2a，分支 `wp3/bios-sbom`，狀態：進行中
+- CI：無（等代理開 PR）
+- 下一步：兩個 PR 綠燈後通知 C0 派驗證代理；PR 1 合併後，PR 2a 之後的 PR 加上真實樣本的 CI 驗收（Dasharo ME 14.0.47.1558、微碼 0xF8）
+- 卡住／等決定：uefi_image.py 誰複製（D-015(3)，已問 C0：等 C1，或由 C2 代為複製）
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
