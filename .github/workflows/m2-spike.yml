@@ -119,3 +119,35 @@ jobs:
           name: m2res-download
           path: ${{ runner.temp }}/m2res
           retention-days: 7
+
+  inspect:
+    name: inspect (arm)
+    needs: download
+    if: ${{ inputs.stage == 'inspect' || inputs.stage == 'build' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 版本資訊
+        id: meta
+        run: |
+          . tools/spike/m2-release.sh "${{ inputs.release }}"
+          echo "src=$SRC" >> "$GITHUB_OUTPUT"; echo "src_sha256=$SRC_SHA256" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/dl"
+      - name: 快取還原 公開原始碼
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dl/${{ steps.meta.outputs.src }}
+          key: m2spike-v1-${{ steps.meta.outputs.src }}-${{ steps.meta.outputs.src_sha256 }}
+          fail-on-cache-miss: true
+      - name: 核對
+        run: bash tools/spike/m2-download.sh "${{ inputs.release }}" "$RUNNER_TEMP/dl" src
+      - name: 解開並檢視
+        run: bash tools/spike/m2-inspect.sh "$RUNNER_TEMP/dl" "$RUNNER_TEMP/w"
+      - name: 摘要
+        if: ${{ always() }}
+        run: |
+          . tools/spike/m2-lib.sh
+          { echo "## inspect (arm) ${{ inputs.release }}"; report_md; } | tee -a "$GITHUB_STEP_SUMMARY"

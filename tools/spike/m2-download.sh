@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # M2 spike 第 2 件：下載＋核對。用法：m2-download.sh <版本> <目的資料夾>
+# 第 3 個參數 src 只處理 public_sources.tbz2（預設 all）。
 # 目的資料夾裡已經有檔案（例如從 actions/cache 還原）就不重下載，只核對 SHA-256（來源記為 cache）。
 # 下載的檔案是不可信資料：只算雜湊、不解開、不執行。
 set -uo pipefail
@@ -30,10 +31,12 @@ fetch() {  # <檔名> <網址> <NVIDIA SHA-1 或空> <寫死的 SHA-256>
 }
 nv_sha1() { awk -v f="$1" '{n=$2; sub(/^\*/,"",n); sub(/^\.\//,"",n); if(n==f) print $1}' "$D/release_sha_hashes.txt"; }
 
-pub=$(nv_sha1 "$BSP"); [ "$pub" = "$BSP_SHA1" ] || { echo "NVIDIA 公布的 $BSP SHA-1（${pub:-無}）和寫死的不同"; fail=1; }
-pub=$(nv_sha1 "$RFS"); [ "$pub" = "$RFS_SHA1" ] || { echo "NVIDIA 公布的 $RFS SHA-1（${pub:-無}）和寫死的不同"; fail=1; }
-timed "dl-bsp" fetch "$BSP" "$REL/release/$BSP" "$BSP_SHA1" "$BSP_SHA256"
-timed "dl-rootfs" fetch "$RFS" "$REL/release/$RFS" "$RFS_SHA1" "$RFS_SHA256"
+if [ "${3:-all}" = all ]; then
+  pub=$(nv_sha1 "$BSP"); [ "$pub" = "$BSP_SHA1" ] || { echo "NVIDIA 公布的 $BSP SHA-1（${pub:-無}）和寫死的不同"; fail=1; }
+  pub=$(nv_sha1 "$RFS"); [ "$pub" = "$RFS_SHA1" ] || { echo "NVIDIA 公布的 $RFS SHA-1（${pub:-無}）和寫死的不同"; fail=1; }
+  timed "dl-bsp" fetch "$BSP" "$REL/release/$BSP" "$BSP_SHA1" "$BSP_SHA256"
+  timed "dl-rootfs" fetch "$RFS" "$REL/release/$RFS" "$RFS_SHA1" "$RFS_SHA256"
+fi
 timed "dl-public_sources" fetch "$SRC" "$REL/sources/$SRC" "" "$SRC_SHA256"
 echo "== 下載資料夾"; ls -l "$D"; du -sb "$D"
 snap_df "下載後"
