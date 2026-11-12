@@ -6,7 +6,7 @@ name: dev
 # 專案與平台由 projects/<專案>/project.yml 決定；新增專案不用改這個 workflow。
 on:
   push:
-    branches: ["dev/**", "wp1/m2-jetson"]   # 暫時：讓 workflow 登錄（登錄後立刻取消那次 run）；登錄完成後移除 wp1/m2-jetson
+    branches: ["dev/**"]
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
