@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 18:21 -0500（C0）
+最後更新：2026-11-13 07:23 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -94,11 +94,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6 轉接器。完成：三個 platform.yml、三個示範專案、build／assemble、Rockchip raw-sectors（Radxa 實測一致）、sbom_augment（原始磁區元件、OMV 原始碼併入）、支援期資料表追加平台 EOL 11 筆（D-033）。scan.sh 等 C1 的 platform_scan.py 等介面
-- 分支／PR／commit：`wp7/adapters`（最後 commit 8e4ced9，從 origin/wp1/m2）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
-- 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；任務：審查 raw_sectors.py、_shared/disk_image.py 與測試；分支 wp7/adapters；狀態：進行中）
-- CI：無；本機背景工作：無（實測輸出留在 $AGENT_TMP/out/ 與 radxa-out/，驗證代理結束後清掉）
-- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；wp7/adapters 上述內容與 33 項單元測試（tests/run.d/c4-wp7.sh）；PROVENANCE 加 C4 節
-- 下一步：scan.sh（三平台；ai-nas 另掃 OMV 原始碼併進產品 SBOM；rockchip 把 raw-sectors 元件併進 SBOM；rpi-connect 在摘要標「對外連線服務」）；C1 的 M2 介面推上來後併進來接上；FILE_ROLES metadata 出來後補官方清單檔
-- 卡住／等決定：等 C1（platform_scan.py、workflow 的 build.mode none／handoff、scan-flash-package generic 與 --arch、FILE_ROLES metadata）；等 C0 決定磁區 U-Boot 要不要給 CPE（目前不給、標 NOT_ASSESSED）
+- 目前在做：M6 轉接器。三個平台的 validate／fetch／build／assemble 完成並實測（Radxa、Debian 真實映像）；Rockchip raw-sectors（磁區與官方 deb、rootfs 逐位元組一致）；scan.sh（共用 _shared/scan-disk.sh）已寫好，正在 CI 跑第一次端對端（dev.yml，rpi-lite-demo）
+- 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
+- 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；審查 raw_sectors.py、disk_image.py：兩輪，第一輪 3 嚴重 7 中、第二輪 2 嚴重 1 中，都已修並加測試；狀態：完成）
+- CI：tests.yml（wp7/adapters，手動觸發）；dev.yml run 43327912121（rpi-lite-demo 端對端）
+- 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
+- 下一步：看 dev 端對端結果並修；接著跑 rock-5b-demo、ai-nas-demo；第一次跑通後記錄標準答案（tests/expected/<專案>/<版本>.json）；驗證「新增第四個專案不改 workflow」；M6 完成開 PR
+- 卡住／等決定：無
 <!-- END C4 -->
