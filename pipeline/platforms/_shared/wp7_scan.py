@@ -63,6 +63,8 @@ class Wp7Hooks(ps.Hooks):
                                               for r in rs.get("regions") or []]}
         if self.x.get("source"):
             out["app_source"] = self.x["source"]
+        if self.x.get("kernel_source") is not None:
+            out["kernel_source"] = self.x["kernel_source"]
         return out
 
     def scan_tail(self, ctx):
@@ -93,6 +95,14 @@ class Wp7Hooks(ps.Hooks):
             for g in rs.get("gaps") or []:
                 L.append("- GAP：%s" % g)
             L.append("- 閉源成品（DDR 初始化、TF-A BL31）沒有可機器比對的安全公告：GAP。U-Boot 給上游 CPE，比對結果是候選、進待人審（D-034）。")
+        ks = self.x.get("kernel_source")
+        if ks is not None:
+            L += ["", "## 核心原始碼（D-035）", "",
+                  "- 狀態 **%s**：%s；Debian 版本 `%s`，映像裡核心套件的版本 `%s`。" % (
+                      ks["status"], ks["basis"], ks.get("debian_version"), "、".join(ks.get("image_versions") or []) or "沒有找到"),
+                  "- OS 層的套件比對以 Grype 的 Debian 發行版資料為準（已考慮 Debian 的修補）；原始碼判斷只是佐證。"]
+            if ks.get("reason"):
+                L.append("- 原因：%s" % ks["reason"])
         src = self.x.get("source")
         if src:
             L += ["", "## NAS 應用的原始碼", "",
@@ -113,6 +123,30 @@ class Wp7Hooks(ps.Hooks):
         return L
 
 
+DEB_KERNEL_RE = __import__("re").compile(r"^linux-image-[0-9][^ ]*\+deb[0-9]+-[a-z0-9-]+$")
+
+
+def kernel_source(ks_path, sbom_path):
+    """kernel-source.json ＋ 映像 SBOM 裡 Debian 核心套件的版本 → 核心原始碼判斷的狀態（D-035）。
+    OK：套好 Debian 修補、版本與映像的套件相同；PARTIAL：只有上游（修補沒套上）；GAP：版本對不上或映像裡找不到核心套件。"""
+    ks = ps.read_json(ks_path)
+    if not isinstance(ks, dict):
+        return {"status": "GAP", "basis": None, "reason": "kernel-source.json 讀不了"}
+    doc = ps.read_json(sbom_path) or {}
+    vers = sorted({str(c.get("version")) for c in doc.get("components") or [] if DEB_KERNEL_RE.match(str(c.get("name") or ""))})
+    out = {"basis": ks.get("basis"), "debian_version": ks.get("debian_version"), "patches_applied": ks.get("patches_applied"),
+           "patches_total": ks.get("patches_total"), "image_versions": vers, "reason": ks.get("reason")}
+    if ks.get("status") != "OK":
+        out["status"] = "PARTIAL"
+    elif not vers:
+        out.update(status="GAP", reason="映像的 SBOM 裡找不到 Debian 核心套件（linux-image-*+debN-*），沒辦法核對原始碼版本")
+    elif vers != [ks.get("debian_version")]:
+        out.update(status="GAP", reason="原始碼版本 %s 與映像裡核心套件的版本 %s 不同" % (ks.get("debian_version"), "、".join(vers)))
+    else:
+        out["status"] = "OK"
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -130,6 +164,7 @@ def main(argv=None):
     c.add_argument("--run", action="append", required=True, help="<名稱後綴>=<精靈輸出資料夾>（完整掃描的後綴是空字串）")
     c.add_argument("--raw-sectors", default=None)
     c.add_argument("--source-json", default=None, help="OMV 原始碼合併的摘要（repo、commit、line）")
+    c.add_argument("--kernel-source-json", default=None, help="assemble 的 kernel-source.json（Debian 核心原始碼，D-035）")
     c.add_argument("--official", action="store_true")
     a = ap.parse_args(argv)
     try:
@@ -148,7 +183,9 @@ def main(argv=None):
             x = {"assemble_path": a.assemble_json,
                  "raw_sectors": ps.read_json(a.raw_sectors) if a.raw_sectors else None, "raw_sectors_path": a.raw_sectors,
                  "source": ps.read_json(a.source_json) if a.source_json else None,
-                 "services": services(os.path.join(a.layers, "sbom.product.cdx.json"))}
+                 "services": services(os.path.join(a.layers, "sbom.product.cdx.json")),
+                 "kernel_source": kernel_source(a.kernel_source_json, os.path.join(a.layers, "sbom.product.cdx.json"))
+                 if a.kernel_source_json else None}
             ps.collect(a, Wp7Hooks(x))
             print("wp7_scan: OK（附件）")
     except (OSError, ValueError) as e:

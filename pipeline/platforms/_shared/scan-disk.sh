@@ -32,6 +32,18 @@ if [ "$augment" = raw-sectors ] && [ ! -f "$out/raw-sectors.json" ]; then fail "
 ksrc=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_source_file) || fail "sources.yml 沒有 platform_params.kernel_source_file（精靈需要核心原始碼壓縮檔）"
 python3 -I "$here/disk_image.py" files "$proj" "$ver" --role source | cut -f2 | grep -qxF -- "$ksrc" || fail "kernel_source_file（$ksrc）不是 sources.yml 裡 role: source 的檔案"
 if [ ! -f "$out/downloads/$ksrc" ] || [ -L "$out/downloads/$ksrc" ]; then fail "downloads/ 沒有 $ksrc（先執行 fetch）"; fi
+srcpath=$out/downloads/$ksrc; ksjson=()
+# AI NAS（D-035）：assemble 套好 Debian 修補的原始碼優先；套不上（GAP）就用上游 orig，scan.json 與報告標 PARTIAL
+if [ -f "$out/kernel-source.json" ]; then
+  ksjson=(--kernel-source-json "$out/kernel-source.json")
+  ka=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["archive"] if d.get("status")=="OK" and d.get("archive") else "")' "$out/kernel-source.json") \
+    || fail "kernel-source.json 讀不了"
+  if [ -n "$ka" ]; then
+    [[ $ka =~ ^[A-Za-z0-9._-]+$ ]] || fail "kernel-source.json 的 archive 不合法"
+    [ -f "$out/work/$ka" ] || fail "沒有 work/$ka（先執行 assemble）"
+    srcpath=$out/work/$ka
+  fi
+fi
 if [ "$augment" = app-source ]; then
   arepo=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_repo) || fail "sources.yml 沒有 platform_params.app_repo"
   acommit=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_commit) || fail "sources.yml 沒有 platform_params.app_commit"
@@ -71,7 +83,7 @@ python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$roo
 export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
-  python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$out/downloads/$ksrc" \
+  python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$srcpath" \
     --name "$DUMPLING_PROJECT$suffix" --version "$ver" --rootfs rootfs --config "$out/cra-config" --role "$crole" --yes \
     --platform "$parg" "$@" > "$out/wizard$suffix.log" 2>&1
   local rc=$?
@@ -142,7 +154,7 @@ runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 srcargs=(); [ -n "$srcjson" ] && srcargs=(--source-json "$srcjson")
 python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
-  --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} \
+  --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} ${ksjson[@]+"${ksjson[@]}"} \
   ${srcargs[@]+"${srcargs[@]}"} ${official[@]+"${official[@]}"} || fail "收集結果失敗"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json
 state=OK; msg=""
@@ -154,6 +166,8 @@ else
 fi
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP"; fi
 if [ "$arc" = 3 ]; then state=GAP; msg="$msg；補充元件有 GAP（$augment）"; fi
+kst=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print((d.get("kernel_source") or {}).get("status") or "")' "$out/scan.json" 2> /dev/null)
+case $kst in ""|OK) ;; *) state=GAP; msg="$msg；核心原始碼判斷 $kst（見 scan.json 的 kernel_source）";; esac
 {
   echo "## scan（$DUMPLING_PROJECT $ver，平台 $DUMPLING_PLATFORM）"
   echo "- 狀態：$state（$msg）"
@@ -164,6 +178,6 @@ if d.get("external_services"): print("- 對外連線服務 %s"%", ".join(h["name
 print("- 漏洞 %s"%d.get("vulnerabilities"))' "$out/scan.json"
 } > "$out/summary.md"
 # 解開的大檔用完就刪（磁碟映像可能好幾 GB；官方映像的壓縮檔留在 downloads/）
-rm -f "$out/work/disk.img"
+rm -f "$out/work/disk.img" "$out/work/kernel-source.tar.gz"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
 [ "$state" = OK ] && exit 0 || exit 3
