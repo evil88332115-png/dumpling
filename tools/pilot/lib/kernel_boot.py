@@ -4,7 +4,7 @@
 Jetson（Linux_for_Tegra）刷機包可能同時有 <pkg>/kernel/Image（燒進 A_kernel 分割區，通常是 RD 自己編的）和
 <pkg>/rootfs/boot/Image（rootfs 裡的，常是 NVIDIA 原廠的），而 rootfs/boot/extlinux/extlinux.conf 的 LINUX 指向 /boot/Image。
 實際開機的是哪一顆，只有在板子上才能確認（cat /proc/version、uname -v）；也和 UEFI 的開機模式有關，從檔案無法證明。
-product-a V39.2.0.2 的板子實測（board-test 的 os.txt）跑的是 kernel/Image：燒錄流程會裝 kernel/Image。所以預設不推翻 K1：
+廠商 Jetson 刷機包的板子實測（board-test 的 os.txt）跑的是 kernel/Image：燒錄流程會裝 kernel/Image。所以預設不推翻 K1：
 K1（C-kernel-config）照舊用 kernel/Image 與核心建置紀錄；這個檢查只並列兩顆核心的證據：
 
 用法：python3 -I kernel_boot.py --from <刷機包 tbz2｜資料夾> --prefix <rootfs 在刷機包裡的路徑>
@@ -194,7 +194,7 @@ def evaluate(imgs, diff_fn, board_text=None, build_shas=None):
            "build_record": None, "limitations": [
                "The kernel that actually boots can only be confirmed on a board (cat /proc/version or uname -v); files cannot prove it.",
                "With the default UEFI L4TLauncher boot mode a board boots the kernel named by extlinux.conf; flashing is expected to install "
-               "kernel/Image there (evidence: product-a V39.2.0.2 board runs kernel/Image), but the UEFI boot mode may be changed; confirm per product."]}
+               "kernel/Image there (evidence: a board flashed from a vendor Jetson flash package runs kernel/Image), but the UEFI boot mode may be changed; confirm per product."]}
     if fl is None or rf is None:
         rec["status"] = "NOT_RUN"
         rec["detail"] = ("the package has " + ("only kernel/Image" if fl is not None else "only rootfs/boot/Image" if rf is not None else "no Image")
@@ -274,7 +274,7 @@ def evaluate(imgs, diff_fn, board_text=None, build_shas=None):
             st, attention = "ATTENTION", True
             if b and not b.get("parsed"):
                 notes.append("the board file was given but has no uname line: " + b["reason"])
-            notes.append("informational: the flash process is expected to install kernel/Image (board evidence from product-a V39.2.0.2), but this "
+            notes.append("informational: the flash process is expected to install kernel/Image (board evidence from a vendor Jetson flash package), but this "
                          "must be confirmed per product on a board (cat /proc/version); UEFI boot mode cannot be proven from files; "
                          "K1 keeps using kernel/Image and the build record")
         st = "ATTENTION" if attention else st

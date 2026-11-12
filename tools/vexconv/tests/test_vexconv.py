@@ -5,9 +5,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import vexconv as vc
 
-# 上游 schema 由 scripts/ci/fetch-test-data.sh 取得（SCA_TEST_DATA/verify/{cdx,ovx}）；CI 設 SCA_REQUIRE_TEST_DATA=1，缺資料就失敗，不靜默跳過
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("SCA_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
-if not os.path.exists(f"{V}/cdx/schema/bom-1.5.schema.json") and os.environ.get("SCA_REQUIRE_TEST_DATA", "").strip() in ("", "0"):
+# 上游 schema 由 scripts/ci/fetch-test-data.sh 取得（DUMPLING_TEST_DATA/verify/{cdx,ovx}）；CI 設 DUMPLING_REQUIRE_TEST_DATA=1，缺資料就失敗，不靜默跳過
+V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
+if not os.path.exists(f"{V}/cdx/schema/bom-1.5.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"):
     pytest.skip("上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）", allow_module_level=True)
 CDX_SCHEMA = json.load(open(f"{V}/cdx/schema/bom-1.5.schema.json"))
 OV_SCHEMA = json.load(open(f"{V}/ovx/openvex_json_schema.json"))

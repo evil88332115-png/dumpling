@@ -1887,8 +1887,8 @@ def test_flash_package_image_gz_without_ikconfig_compares_decompressed_md5(tmp_p
 
 
 # ---- 第四輪：沒有的設定算 n；只差工具鏈的設定 ----
-# 形狀取自實測：公開版 R39.2.0 的原廠核心原始差 9 項、正規化後 4 項（AS_VERSION、LD_VERSION、CC_VERSION_TEXT、
-# GCC_PLUGINS，全是工具鏈）；product-a 原始差 266 項、正規化後 35 項（含非工具鏈的設定）。
+# 合成資料：公開版原廠核心與重新產生的 headers 設定只差工具鏈項目（AS_VERSION、LD_VERSION、CC_VERSION_TEXT、
+# GCC_PLUGINS）；另一種是原始差異很多、正規化後仍有非工具鏈的設定。
 
 TC_UBUNTU = ('CONFIG_CC_VERSION_TEXT="aarch64-linux-gnu-gcc (Ubuntu 13.2.0-23ubuntu4) 13.2.0"\nCONFIG_GCC_VERSION=130200\n'
              "CONFIG_AS_VERSION=24200\nCONFIG_LD_VERSION=24200\nCONFIG_GCC_PLUGINS=y\n")
@@ -1898,7 +1898,7 @@ NOT_SET_ONLY_IN_IMAGE = "# CONFIG_GCC_PLUGIN_LATENT_ENTROPY is not set\n# CONFIG
     f"# CONFIG_PAD{i} is not set\n" for i in range(3))
 HEADERS_PUB = CONFIG + TC_UBUNTU
 IMAGE_PUB = CONFIG + TC_CROSSTOOL + NOT_SET_ONLY_IN_IMAGE
-IMAGE_product-a = (CONFIG_ON + TC_CROSSTOOL + "".join(f"CONFIG_VENDOR{i}=y\n" for i in range(30))
+IMAGE_PRODUCT_A = (CONFIG_ON + TC_CROSSTOOL + "".join(f"CONFIG_VENDOR{i}=y\n" for i in range(30))
               + "".join(f"# CONFIG_MISSING{i} is not set\n" for i in range(231)))
 
 
@@ -1964,9 +1964,9 @@ def test_public_stock_kernel_differs_only_in_toolchain(tmp_path):
     assert mm["sources"]["config_check"]["result"] == "same_except_toolchain" and mm["sources"]["config_sha256"] == k["config_sha256"]
 
 
-def test_product-a_shape_differs_after_normalisation(tmp_path):
+def test_product_a_shape_differs_after_normalisation(tmp_path):
     """product-a：原始 266 項、正規化後 35 項（含非工具鏈）→ differs、ATTENTION；數字都用正規化後的。"""
-    rc, out = run_pkg(tmp_path, pub_members(fake_image(IMAGE_product-a)))
+    rc, out = run_pkg(tmp_path, pub_members(fake_image(IMAGE_PRODUCT_A)))
     c = out["kernel"]["config_check"]
     assert out["status"] == "ATTENTION" and c["result"] == "differs"
     assert c["raw_differences_total"] == 266 and c["differences_total"] == 35 and c["toolchain_differences_total"] == 4
@@ -2296,7 +2296,7 @@ def test_build_record_gap_falls_back_to_makefile(tmp_path, case):
 
 
 def test_build_record_link_stage_artifacts_without_cmd_are_exempt(tmp_path):
-    """vmlinux.o／vmlinux.a／init/version-timestamp.o／.vmlinux.export.o 沒有 .cmd（product-c 5.15 的紀錄）：採用紀錄，證據列出豁免項，
+    """vmlinux.o／vmlinux.a／init/version-timestamp.o／.vmlinux.export.o 沒有 .cmd（5.15 核心的建置紀錄）：採用紀錄，證據列出豁免項，
     其他物件的判定不變；這些產物不產生任何來源檔判定。"""
     full = br_run(tmp_path, write_record_tar(tmp_path / "f.tar.gz", record_members(), "w:gz"))[2]
     m = record_members(link=False, drop=("init/version-timestamp.o",))

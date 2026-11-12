@@ -194,7 +194,7 @@ def test_canvas_validation():
 
 
 def test_package_parts_consistent_and_libreoffice_opens_if_present(tmp_path):
-    """結構檢查一定跑：每個部件是合法 XML，關聯與 content types 對得上。有 LibreOffice 才多轉一次 PDF（不用 skip：CI 的 SCA_REQUIRE_TEST_DATA=1 不允許 skip）。"""
+    """結構檢查一定跑：每個部件是合法 XML，關聯與 content types 對得上。有 LibreOffice 才多轉一次 PDF（不用 skip：CI 的 DUMPLING_REQUIRE_TEST_DATA=1 不允許 skip）。"""
     p = write(tmp_path, ROWS)
     with zipfile.ZipFile(p) as z:
         names = set(z.namelist())

@@ -14,7 +14,7 @@ STATUS_ONE_LINE = re.compile(r"^status\(\)\s*\{.*\}")
 
 
 def shell_files():
-    for base in ("scripts", "deploy"):
+    for base in ("tools", "deploy"):
         for f in sorted((ROOT / base).rglob("*")):
             if f.is_file() and (f.suffix == ".sh" or f.name == "sca-scan") and "/tests/" not in str(f):
                 yield f

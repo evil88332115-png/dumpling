@@ -461,10 +461,10 @@ def test_rules_add_is_safe(tmp_path):
     assert r.returncode == 1 and "不是 JSON" in r.stdout and p.read_text(encoding="utf-8") == "{broken"
 
 
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("SCA_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
+V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
 
 
-@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("SCA_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
+@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
                     reason="上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）")
 def test_rule_statements_pass_official_schemas():
     jsonschema = pytest.importorskip("jsonschema")

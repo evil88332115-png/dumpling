@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import flash_package as fp  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-SCRIPT = os.path.join(REPO, "scripts", "demo", "scan-flash-package.sh")
+SCRIPT = os.path.join(REPO, "tools", "demo", "scan-flash-package.sh")
 TOP = "product-a_OrinNano/Linux_for_Tegra"
 NV_REL = b"# R39 (release), REVISION: 2.1, GCID: 12345678, BOARD: generic, EABI: aarch64, DATE: Mon Jan 1 00:00:00 UTC 2026\n"
 STATUS = (b"Package: libc6\nStatus: install ok installed\nArchitecture: arm64\nVersion: 2.39-0ubuntu8\n\n"
@@ -269,7 +269,7 @@ def test_corrupt_archive_fails(tmp_path, monkeypatch, parallel):
 
 def load_cra():
     import importlib.util
-    spec = importlib.util.spec_from_file_location("cra_report", os.path.join(REPO, "scripts", "cra", "cra_report.py"))
+    spec = importlib.util.spec_from_file_location("cra_report", os.path.join(REPO, "tools", "cra", "cra_report.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -467,8 +467,8 @@ def ownsw_function(tmp_path, fake):
     fn = re.search(r"^ownsw_step\(\)\{.*?^\}$", text, re.M | re.S).group(0)
     st_fn = re.search(r"^status\(\)\{.*$", text, re.M).group(0)
     root = tmp_path / "root"
-    (root / "scripts" / "cra").mkdir(parents=True)
-    (root / "scripts" / "cra" / "own_software.py").write_text(
+    (root / "tools" / "cra").mkdir(parents=True)
+    (root / "tools" / "cra" / "own_software.py").write_text(
         "import sys\nif '--configured' in sys.argv: sys.exit(0)\n" + fake)
     out = tmp_path / "out"
     (out / "v" / "logs").mkdir(parents=True)

@@ -7,7 +7,7 @@ import subprocess
 
 from pilot_fixtures import ALL_OK, PILOT, ROOT, assert_no_conclusion, dfind, gmatch, make_out, run_report
 
-from test_pilot_compare_and_scripts import EXPECTED, judge, npm_lodash_matches
+
 from test_pilot_lock_sandbox import bwrap_args
 
 LIB = PILOT / "lib"
@@ -111,32 +111,10 @@ def stages_with_sources(status, detail="弱點資料源不完整（NVD）：…"
         ("D-dt-data-sources", status, detail), ("D-dt-findings", "GAP" if status != "OK" else "OK", "讀取完成")]
 
 
-def test_compare_dt_gap_when_sources_incomplete_even_if_missing(tmp_path):
-    # 資料源完整時這是 FAIL（見 test_dt_judged_separately_and_extra_is_attention）；不完整 → GAP，Grype 不受影響
-    f = [dfind("CVE-2021-23337", "lodash", "4.17.15", "pkg:npm/lodash@4.17.15")]
-    out = make_out(tmp_path, stages_with_sources("GAP"), grype=npm_lodash_matches(), findings=f)
-    rep, _ = run_report(out)
-    assert rep["vulnerabilities"]["tools_run"]["dt_complete"] is True          # 讀取本身完成
-    assert rep["vulnerabilities"]["tools_run"]["dt_sources_complete"] is False
-    r = judge(out, "x", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-dt-x"][0] == "GAP" and "D-dt-data-sources=GAP" in r["expect-dt-x"][1]
-    assert r["expect-grype-x"][0] == "OK"
 
 
-def test_compare_dt_all_found_but_sources_incomplete_is_gap(tmp_path):
-    exp = json.loads((EXPECTED / "npm-lodash.json").read_text(encoding="utf-8"))
-    f = [dfind(a["id"], c["name"], c["version"], c["purl"], source="GITHUB") for c in exp["components"] for a in c["advisories"]]
-    out = make_out(tmp_path, stages_with_sources("GAP"), grype=npm_lodash_matches(), findings=f)
-    run_report(out)
-    assert judge(out, "x", expected=EXPECTED / "npm-lodash.json")["expect-dt-x"][0] == "GAP"
 
 
-def test_compare_dt_without_sources_stage_is_gap(tmp_path):
-    stages = [s for s in ALL_OK if s[0] != "D-dt-data-sources"]
-    out = make_out(tmp_path, stages, grype=npm_lodash_matches(), findings=[])
-    run_report(out)
-    r = judge(out, "x", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-dt-x"][0] == "GAP" and "狀態未知" in r["expect-dt-x"][1]
 
 
 def php_matches(version):
@@ -144,27 +122,6 @@ def php_matches(version):
             gmatch("CVE-2026-109619", "php-cli", version, f"pkg:generic/php-cli@{version}", "binary")]
 
 
-def test_compare_image_dt_sources_incomplete(tmp_path):
-    must = ["CVE-2026-109618", "CVE-2026-109619"]
-    # 8.4.26：DT 沒比對到 → 以前是 ATTENTION，資料源不完整時 GAP
-    out = make_out(tmp_path / "a", stages_with_sources("GAP") + [("B-php-runtime", "OK", "")], grype=php_matches("8.4.26"), findings=[])
-    run_report(out)
-    r = judge(out, "p26", must=must)
-    assert r["expect-grype-p26"][0] == "OK" and r["expect-dt-p26"][0] == "GAP"
-    # 8.4.27：DT 沒出現 → 以前是 OK（run 39947311999 的假 OK），資料源不完整時 GAP
-    out = make_out(tmp_path / "b", stages_with_sources("GAP") + [("B-php-runtime", "OK", "")], grype=[], findings=[])
-    run_report(out)
-    r = judge(out, "p27", mustnot=must)
-    assert r["expect-grype-p27"][0] == "OK" and r["expect-dt-p27"][0] == "GAP"
-    # 「不可有」出現仍是 FAIL，不因資料源不完整而放寬
-    out = make_out(tmp_path / "c", stages_with_sources("GAP") + [("B-php-runtime", "OK", "")], grype=[],
-                   findings=[dfind("CVE-2026-109618", "php-cli", "8.4.27", "pkg:generic/php-cli@8.4.27")])
-    run_report(out)
-    assert judge(out, "p27c", mustnot=must)["expect-dt-p27c"][0] == "FAIL"
-    # 資料源完整時維持原判定
-    out = make_out(tmp_path / "d", ALL_OK + [("B-php-runtime", "OK", "")], grype=[], findings=[])
-    run_report(out)
-    assert judge(out, "p27d", mustnot=must)["expect-dt-p27d"][0] == "OK"
 
 
 def test_report_homepage_lists_data_sources(tmp_path):
@@ -210,41 +167,10 @@ def run_prep(tmp_path, doc):
     return r, json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else None, json.loads(summ.read_text(encoding="utf-8")) if summ.exists() else None
 
 
-def test_scio_prep_removes_files_and_too_long_and_prunes_deps(tmp_path):
-    doc = syft_like_sbom()
-    r, out, s = run_prep(tmp_path, doc)
-    assert r.returncode == 0
-    st, d = r.stdout.strip().split("\t")
-    assert st == "GAP" and "type=file 元件 2" in d and "library 1 個" in d and "帶 purl 1 個" in d   # 帶 purl 的套件被移除 → GAP
-    assert "這些元件不會出現在 ScanCode.io 與 DejaCode，授權未判定" in d
-    names = [c["name"] for c in out["components"]]
-    assert names == ["libc6", "debian", "php", "x"]                                 # 攤平、移除 file 與過長
-    assert all("components" not in c for c in out["components"])
-    assert out["dependencies"] == [{"ref": "app", "dependsOn": ["child"]}]
-    assert s["removed_too_long"][0]["why"] == ["purl name 120 字元（上限 100）"]
-    assert json.loads((tmp_path / "in.json").read_text(encoding="utf-8")) == doc   # 原始 SBOM 不動
 
 
-def test_scio_prep_only_files_removed_is_ok(tmp_path):
-    doc = syft_like_sbom()
-    doc["components"] = [c for c in doc["components"] if c["bom-ref"] != "long"]
-    r, _, s = run_prep(tmp_path, doc)
-    assert r.stdout.startswith("OK\t") and s["components_in"] == 6 and s["components_out"] == 4
 
 
-def test_scio_prep_removed_non_file_without_purl_is_gap(tmp_path):
-    # 第七次審查：只有 type=file 的移除算 OK；沒有 purl 的非 file 元件被移除也是 GAP，並列出類型與數量
-    doc = {"components": [{"bom-ref": "f", "type": "file", "name": "/x"},
-                          {"bom-ref": "os", "type": "operating-system", "name": "o" * 101},
-                          {"bom-ref": "a", "type": "application", "name": "a" * 120, "version": "1"},
-                          {"bom-ref": "v", "type": "library", "name": "ok", "version": "v" * 101},
-                          {"bom-ref": "k", "type": "library", "name": "keep", "version": "1"}]}
-    r, out, s = run_prep(tmp_path, doc)
-    st, d = r.stdout.strip().split("\t")
-    assert st == "GAP"
-    assert "application 1 個、library 1 個、operating-system 1 個" in d and "沒有 purl 3 個" in d
-    assert "這些元件不會出現在 ScanCode.io 與 DejaCode，授權未判定" in d
-    assert [c["name"] for c in out["components"]] == ["keep"]
 
 
 def test_report_license_chain(tmp_path):
@@ -283,29 +209,10 @@ def test_sandbox_does_not_tmpfs_system_dirs(tmp_path):
     assert "不以 tmpfs 遮蔽系統資料夾 /etc" in err and "不以 tmpfs 遮蔽系統資料夾 /usr" in err
 
 
-def test_scio_prep_unchanged_cdxgen_sbom(tmp_path):
-    doc = {"bomFormat": "CycloneDX", "components": [{"bom-ref": "pkg:npm/lodash@4.17.15", "type": "library", "name": "lodash",
-                                                     "version": "4.17.15", "purl": "pkg:npm/lodash@4.17.15"}]}
-    r, out, s = run_prep(tmp_path, doc)
-    assert r.stdout.startswith("OK\t沒有需要轉換") and out["components"] == doc["components"]
 
 
-def test_scio_prep_purl_split():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("scio_prep", LIB / "scio_prep.py")
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    assert m.split_purl("pkg:npm/%40babel/core@7.0.0?a=b#sub/p") == {"type": "npm", "namespace": "%40babel", "name": "core",
-                                                                    "version": "7.0.0", "qualifiers": "a=b", "subpath": "sub/p"}
-    assert m.split_purl("pkg:generic/zlib")["version"] == ""
-    assert m.too_long({"name": "a" * 101}) == ["name 101 字元（上限 100）"]
 
 
-def test_scio_prep_bad_input(tmp_path):
-    (tmp_path / "in.json").write_text("[]", encoding="utf-8")
-    r = subprocess.run(["python3", "-I", str(LIB / "scio_prep.py"), str(tmp_path / "in.json"), str(tmp_path / "o"), str(tmp_path / "s")],
-                       capture_output=True, text=True)
-    assert r.returncode == 3 and r.stdout.startswith("FAIL")
 
 
 TRACEBACK = """Traceback (most recent call last):
@@ -319,24 +226,8 @@ django.db.utils.DataError: value too long for type character varying(100)
 """
 
 
-def test_scio_diag_summarizes_traceback(tmp_path):
-    run = tmp_path / "run.json"
-    run.write_text(json.dumps({"task_exitcode": 1, "task_output": TRACEBACK + "\n"}), encoding="utf-8")
-    msgs = tmp_path / "m.json"
-    msgs.write_text(json.dumps({"count": 1, "results": [{"severity": "error", "description": "value too long", "model": "DiscoveredPackage"}]}), encoding="utf-8")
-    r = subprocess.run(["python3", "-I", str(LIB / "scio_diag.py"), str(run), str(msgs)], capture_output=True, text=True, check=True)
-    line = r.stdout.strip()
-    assert "task_exitcode=1" in line and "django.db.utils.DataError: value too long for type character varying(100)" in line
-    assert "utils.py:105 _execute" in line and "專案訊息 error 1 則" in line and "\t" not in line
 
 
-def test_scio_diag_empty_and_missing(tmp_path):
-    run = tmp_path / "run.json"
-    run.write_text(json.dumps({"task_exitcode": 1, "task_output": ""}), encoding="utf-8")
-    r = subprocess.run(["python3", "-I", str(LIB / "scio_diag.py"), str(run), str(tmp_path / "none.json")], capture_output=True, text=True, check=True)
-    assert "task_output 是空的" in r.stdout
-    r = subprocess.run(["python3", "-I", str(LIB / "scio_diag.py"), str(tmp_path / "none.json")], capture_output=True, text=True, check=True)
-    assert "讀不到 run 詳細資料" in r.stdout
 
 
 def test_sandbox_hides_real_path_behind_symlinked_conf(tmp_path):

@@ -13,7 +13,6 @@ from pilot_fixtures import ALL_OK, PILOT, ROOT, load_module, make_out, run_repor
 lock = load_module("pilot_lockcheck", PILOT / "lib" / "lockcheck.py")
 strip = load_module("pilot_strip_versions", PILOT / "lib" / "strip_versions.py")
 leak = load_module("pilot_leakscan", PILOT / "lib" / "leakscan.py")
-cmp = load_module("pilot_compare_expected2", PILOT / "compare_expected.py")
 SBOMGATE = ROOT / "tools" / "sbomgate" / "sbomgate.py"
 
 
@@ -427,11 +426,6 @@ def test_sandbox_probe_reports_home_credentials_as_checked():
     assert "getent passwd" in t
 
 
-def test_e2e_scripts_rebind_work_and_hide_secrets():
-    rp = (ROOT / "tools" / "e2e" / "real-projects.sh").read_text(encoding="utf-8")
-    assert 'SBX_RO=("$WORK" "$OUT" "${TOOLCHAINS[@]}")' in rp and 'SBX_HIDE=("$SECRETS")' in rp
-    lic = (ROOT / "tools" / "e2e" / "license.sh").read_text(encoding="utf-8")
-    assert 'SBX_HIDE=("$SECRETS")' in lic and "sbx_toolchain_roots" in lic
 
 
 def test_sca_scan_hides_whole_pilot_env_folder():
@@ -441,13 +435,6 @@ def test_sca_scan_hides_whole_pilot_env_folder():
 
 # ---------- compare_expected：預期 0 筆 ----------
 
-@pytest.mark.parametrize("stages,want", [(ALL_OK, "OK"), ([s for s in ALL_OK if s[0] != "C-sbomgate"] + [("C-sbomgate", "GAP", "")], "GAP")])
-def test_expected_zero_findings_with_incomplete_scan_is_gap(tmp_path, stages, want):
-    exp = {"project": "z", "components": [{"name": "a", "version": "1", "purl": "pkg:npm/a@1", "advisories": []}]}
-    out = make_out(tmp_path, stages, grype=[], findings=[])
-    rep, _ = run_report(out)
-    res = {s: t for s, t, _ in cmp.compare_project(rep, exp, "z")}
-    assert res["expect-grype-z"] == want
 
 
 # ---------- 2026-10-23 實機回歸（petclinic 163 → 19）：工具鏈與元件數檢查 ----------
@@ -470,9 +457,6 @@ def test_toolchain_roots_include_maven_home_and_java_home(tmp_path):
     assert str(mh) in lines and str(jh) in lines        # mvn 需要 boot／lib／conf：要掛整個 Maven 目錄，不能只掛 bin
 
 
-def test_callers_put_toolchain_roots_in_sbx_ro():
-    for f in ("tools/e2e/real-projects.sh", "tools/e2e/license.sh", "tools/pilot/sca-scan"):
-        assert "sbx_toolchain_roots" in (ROOT / f).read_text(encoding="utf-8"), f
 
 
 def _st(path, rows):
@@ -483,21 +467,6 @@ def _st(path, rows):
 REGRESS = ROOT / "tools" / "e2e" / "cdxgen_regression.py"
 
 
-def test_cdxgen_regression_baseline_is_max_of_recent_healthy_runs(tmp_path):
-    res = tmp_path / "results"
-    _st(res / "round8-actions-20261020-run50" / "status.tsv", [("B-cdxgen-petclinic", "OK", "999 components")])   # 太舊（不在最近 3 輪）
-    _st(res / "round8-actions-20261022-run100" / "status.tsv", [("B-sandbox", "OK", ""), ("B-cdxgen-petclinic", "OK", "163 components"),
-                                                                ("B-cdxgen-rich", "OK", "40 components")])
-    _st(res / "round8-actions-20261022-run110" / "status.tsv", [("B-sandbox", "OK", ""), ("B-cdxgen-petclinic", "OK", "150 components")])
-    # 最新一輪缺 java（B-toolchain FAIL）→ 不當作基準
-    _st(res / "round8-actions-20261023-run200-a1" / "status.tsv", [("B-sandbox", "OK", ""), ("B-toolchain-petclinic", "FAIL", "缺 java"),
-                                                                   ("B-cdxgen-petclinic", "OK", "19 components")])
-    cur = tmp_path / "cur.tsv"
-    _st(cur, [("B-cdxgen-petclinic", "OK", "70 components"), ("B-cdxgen-rich", "OK", "39 components"), ("B-cdxgen-new", "OK", "1 components")])
-    r = subprocess.run([sys.executable, "-I", str(REGRESS), str(res), str(cur), "petclinic", "rich", "new"], capture_output=True, text=True)
-    lines = [l.split("\t") for l in r.stdout.splitlines()]
-    assert [l[:2] for l in lines] == [["B-cdxgen-regression-petclinic", "ATTENTION"]], r.stdout + r.stderr
-    assert "163" in lines[0][2] and "run100" in lines[0][2] and "999" not in lines[0][2]
 
 
 def test_cdxgen_regression_ignores_runs_with_failed_sandbox(tmp_path):
@@ -509,27 +478,10 @@ def test_cdxgen_regression_ignores_runs_with_failed_sandbox(tmp_path):
     assert r.stdout == ""
 
 
-def test_cdxgen_regression_on_committed_results(tmp_path):
-    """已提交的 round8 結果：petclinic 163 個元件；19 個要被標出。"""
-    st = tmp_path / "st.tsv"
-    _st(st, [("B-cdxgen-petclinic", "OK", "19 components")])
-    r = subprocess.run([sys.executable, "-I", str(REGRESS), str(ROOT / "tests" / "results"), str(st), "petclinic"], capture_output=True, text=True)
-    assert r.stdout.startswith("B-cdxgen-regression-petclinic\tATTENTION"), r.stdout + r.stderr
 
 
-def test_real_projects_checks_maven_toolchain():
-    t = (ROOT / "tools" / "e2e" / "real-projects.sh").read_text(encoding="utf-8")
-    assert 'status "B-toolchain-$p" FAIL' in t and "cdxgen_regression.py" in t
-    assert "apt-get install -y -qq openjdk" not in (ROOT / "tools" / "e2e" / "install-tools.sh").read_text(encoding="utf-8")   # 不再用 apt 裝（版本不固定）
-    for wf in ("e2e-real-projects.yml", "e2e-license.yml"):
-        y = (ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
-        assert "actions/setup-java@v4" in y and 'java-version: "17.0.20+8"' in y and "distribution: temurin" in y, wf
-        assert "install-maven.sh" in y and "3.10.0" in y, wf
 
 
-def test_install_maven_verifies_official_sha512(tmp_path):
-    t = (ROOT / "tools" / "e2e" / "install-maven.sh").read_text(encoding="utf-8")
-    assert "archive.apache.org/dist/maven/maven-3" in t and ".sha512" in t and "sha512sum" in t and "MAVEN_SHA512" in t
 
 
 def test_sandbox_hides_maven_and_gradle_global_configs_with_valid_stubs(tmp_path):
@@ -583,43 +535,16 @@ def _fake_maven(tmp_path, good=True, pinned=None, gha=False):
     return r, h
 
 
-def test_install_maven_ok_and_records_sha512(tmp_path):
-    r, h = _fake_maven(tmp_path)
-    assert r.returncode == 0, r.stderr
-    assert r.stdout.strip().endswith("/dest/apache-maven-3.10.0/bin")
-    assert h in (tmp_path / "rec.txt").read_text(encoding="utf-8")
 
 
-def test_install_maven_rejects_bad_sha512(tmp_path):
-    r, _ = _fake_maven(tmp_path, good=False)
-    assert r.returncode != 0 and "sha512 不符" in r.stderr
-    assert not (tmp_path / "dest").exists()
 
 
-def test_install_maven_rejects_mismatch_with_pinned(tmp_path):
-    r, _ = _fake_maven(tmp_path, pinned="f" * 128)
-    assert r.returncode != 0 and "MAVEN_SHA512" in r.stderr
 
 
 MAVEN_3_10_0_SHA512 = "908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa"
 
 
-def test_install_maven_requires_pin_on_github_actions(tmp_path):
-    r, _ = _fake_maven(tmp_path, gha=True)
-    assert r.returncode != 0 and "必須設定 MAVEN_SHA512" in r.stderr
-    assert not (tmp_path / "dest").exists()
 
 
-def test_install_maven_github_actions_with_matching_pin_ok(tmp_path):
-    r, h = _fake_maven(tmp_path, gha=True, pinned="same")
-    assert r.returncode == 0, r.stderr
-    assert "等於固定值 MAVEN_SHA512" in (tmp_path / "rec.txt").read_text(encoding="utf-8")
 
 
-def test_workflows_pin_maven_sha512():
-    # sandbox-5 run 39957420985 的 versions.txt 取得的官方 sha512；兩個 workflow 與 deploy/versions.md 都要是這個值
-    for wf in ("e2e-real-projects.yml", "e2e-license.yml"):
-        y = (ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
-        assert f"MAVEN_SHA512: {MAVEN_3_10_0_SHA512}" in y, wf
-    v = (ROOT / "deploy" / "versions.md").read_text(encoding="utf-8")
-    assert MAVEN_3_10_0_SHA512 in v and "39957420985" in v

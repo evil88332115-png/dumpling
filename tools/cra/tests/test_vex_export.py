@@ -355,10 +355,10 @@ def test_output_is_deterministic_and_order_independent():
     assert c[0]["serialNumber"] != a[0]["serialNumber"]
 
 
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("SCA_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
+V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
 
 
-@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("SCA_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
+@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
                     reason="上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）")
 def test_official_schemas():
     jsonschema = pytest.importorskip("jsonschema")

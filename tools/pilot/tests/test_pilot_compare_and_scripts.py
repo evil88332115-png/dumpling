@@ -6,144 +6,38 @@ import pytest
 
 from pilot_fixtures import ALL_OK, PILOT, ROOT, dfind, gmatch, load_module, make_out, run_report
 
-cmp = load_module("pilot_compare_expected", PILOT / "compare_expected.py")
 EXPECTED = ROOT / "tests" / "expected"
 PY = "pkg:pypi/requests@2.19.0"
 
 
-def judge(out, name, **kw):
-    rep = json.loads((out / "report.json").read_text(encoding="utf-8"))
-    if "expected" in kw:
-        res = cmp.compare_project(rep, json.loads(kw["expected"].read_text(encoding="utf-8")), name)
-    else:
-        res = cmp.compare_image(rep, kw.get("must", []), kw.get("mustnot", []), name)
-    return {s: (t, d) for s, t, d in res + cmp.check_html(str(out), rep, name)}
 
 
-def npm_lodash_matches():
-    exp = json.loads((EXPECTED / "npm-lodash.json").read_text(encoding="utf-8"))
-    out = []
-    for c in exp["components"]:
-        for a in c["advisories"]:
-            out.append(gmatch(a["id"], c["name"], c["version"], c["purl"], "npm", related=a["aliases"]))
-    return out
 
 
-def test_expected_all_found_is_ok(tmp_path):
-    out = make_out(tmp_path, ALL_OK, grype=npm_lodash_matches(), findings=[])
-    run_report(out)
-    r = judge(out, "npm-lodash", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-grype-npm-lodash"][0] == "OK", r
-    assert r["expect-report-npm-lodash"][0] == "OK"
 
 
-def test_expected_missing_with_complete_scan_is_fail(tmp_path):
-    out = make_out(tmp_path, ALL_OK, grype=npm_lodash_matches()[1:], findings=[])
-    run_report(out)
-    r = judge(out, "npm-lodash", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-grype-npm-lodash"][0] == "FAIL"
-    assert "缺 1" in r["expect-grype-npm-lodash"][1]
 
 
-def test_expected_missing_but_scan_flagged_gap_is_gap(tmp_path):
-    stages = [s for s in ALL_OK if s[0] != "C-sbomgate"] + [("C-sbomgate", "GAP", "PARTIAL")]
-    out = make_out(tmp_path, stages, grype=npm_lodash_matches()[1:], findings=[])
-    run_report(out)
-    assert judge(out, "x", expected=EXPECTED / "npm-lodash.json")["expect-grype-x"][0] == "GAP"
 
 
-def test_dt_judged_separately_and_extra_is_attention(tmp_path):
-    f = [dfind("CVE-2021-23337", "lodash", "4.17.15", "pkg:npm/lodash@4.17.15")]   # 別名對到 GHSA-35jh-r3h4-6jhm；其他缺
-    f.append(dfind("CVE-2099-0001", "lodash", "4.17.15", "pkg:npm/lodash@4.17.15"))
-    out = make_out(tmp_path, ALL_OK, grype=npm_lodash_matches(), findings=f)
-    run_report(out)
-    r = judge(out, "x", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-grype-x"][0] == "OK"
-    assert r["expect-dt-x"][0] == "FAIL" and "找到 1" in r["expect-dt-x"][1] and "CVE-2099-0001" in r["expect-dt-x"][1]
 
 
-def test_tool_not_run_is_not_run(tmp_path):
-    out = make_out(tmp_path, ALL_OK)
-    run_report(out)
-    r = judge(out, "x", expected=EXPECTED / "npm-lodash.json")
-    assert r["expect-grype-x"][0] == "NOT_RUN" and r["expect-dt-x"][0] == "NOT_RUN"
 
 
-def test_unpinned_lower_bound_behaviour(tmp_path):
-    gate = {"sbom": {"status": "OK"}, "vulnerability_analysis": {"status": "NOT_ASSESSED", "reasons": [], "notes": []},
-            "component_details": [{"name": "requests", "version": "2.0", "purl": "pkg:pypi/requests@2.0", "class": "VERSION_FROM_RANGE", "why": ""}]}
-    grype = [gmatch("GHSA-x84v-xcm2-53pg", "requests", "2.0", "pkg:pypi/requests@2.0", "python")]
-    # 正確：sbomgate 判版本未知 → 比對被排除，C-sbomgate 不是 OK
-    out = make_out(tmp_path / "a", [("C-sbomgate", "NOT_ASSESSED", "")], grype=grype, gate=gate)
-    run_report(out)
-    assert judge(out, "u", expected=EXPECTED / "python-requests-unpinned.json")["expect-behavior-u"][0] == "OK"
-    # 錯誤：範圍下限被當成實際版本比對（沒有 sbomgate 判定）
-    out = make_out(tmp_path / "b", ALL_OK, grype=grype)
-    run_report(out)
-    r = judge(out, "u", expected=EXPECTED / "python-requests-unpinned.json")
-    assert r["expect-behavior-u"][0] == "FAIL" and "範圍下限" in r["expect-behavior-u"][1]
 
 
-def test_go_reachability_module_level_not_extra(tmp_path):
-    k = "pkg:golang/golang.org/x/text@v0.3.6"
-    grype = [gmatch("GHSA-ppp9-7jff-5vj2", "golang.org/x/text", "v0.3.6", k, "go-module", related=["CVE-2021-38561"]),
-             gmatch("GHSA-69ch-w2m2-3vjp", "golang.org/x/text", "v0.3.6", k, "go-module", related=["CVE-2022-32149"]),
-             gmatch("GO-2026-5970", "golang.org/x/text", "v0.3.6", k, "go-module")]
-    gv = [{"config": {}}, {"finding": {"osv": "GO-2021-0113", "trace": [{"module": "golang.org/x/text", "package": "p", "function": "Parse"}]}},
-          {"finding": {"osv": "GO-2022-1059", "trace": [{"module": "golang.org/x/text", "package": "p"}]}}]
-    out = make_out(tmp_path, ALL_OK, grype=grype, govuln=gv)
-    run_report(out)
-    r = judge(out, "g", expected=EXPECTED / "go-reachability.json")
-    assert r["expect-grype-g"][0] == "OK" and "不適用" in r["expect-grype-g"][1]
-    assert r["expect-govulncheck-g"][0] == "OK"
 
 
-def test_go_reachability_wrong_level_fails(tmp_path):
-    gv = [{"config": {}}, {"finding": {"osv": "GO-2021-0113", "trace": [{"module": "golang.org/x/text"}]}}]
-    out = make_out(tmp_path, ALL_OK, grype=[], govuln=gv)
-    run_report(out)
-    assert judge(out, "g", expected=EXPECTED / "go-reachability.json")["expect-govulncheck-g"][0] == "FAIL"
 
 
-def test_license_mix_is_not_run_in_pilot(tmp_path):
-    out = make_out(tmp_path, ALL_OK, grype=[])
-    run_report(out)
-    assert judge(out, "l", expected=EXPECTED / "license-mix.json")["expect-license-l"][0] == "NOT_RUN"
 
 
-@pytest.mark.parametrize("php,mustnot_present,expect", [("OK", False, "OK"), ("GAP", False, "GAP"), ("OK", True, "FAIL")])
-def test_image_must_not_requires_capability(tmp_path, php, mustnot_present, expect):
-    g = [gmatch("CVE-2026-109618", "php-cli", "8.4.27", "pkg:generic/php-cli@8.4.27", "binary")] if mustnot_present else []
-    out = make_out(tmp_path, ALL_OK + [("B-php-runtime", php, "")], grype=g, findings=[])
-    run_report(out)
-    r = judge(out, "p", mustnot=["CVE-2026-109618", "CVE-2026-109619"])
-    assert r["expect-grype-p"][0] == expect
 
 
-def test_image_must_missing_grype_fail_dt_attention(tmp_path):
-    g = [gmatch("GHSA-w8hw-w9fx-j79w", "php-cli", "8.4.26", "pkg:generic/php-cli@8.4.26", "binary", related=["CVE-2026-109618"]),
-         gmatch("CVE-2026-109619", "php-cli", "8.4.26", "pkg:generic/php-cli@8.4.26", "binary")]
-    out = make_out(tmp_path, ALL_OK + [("B-php-runtime", "OK", "")], grype=g, findings=[])
-    run_report(out)
-    r = judge(out, "p", must=["CVE-2026-109618", "CVE-2026-109619"])
-    assert r["expect-grype-p"][0] == "OK"          # 以別名比對
-    assert r["expect-dt-p"][0] == "ATTENTION"      # DT 沒比對到：並列，不以 Grype 補
 
 
-def test_check_html_flags_conclusion_words(tmp_path):
-    out = make_out(tmp_path, ALL_OK, grype=[])
-    rep, _ = run_report(out)
-    (out / "report.html").write_text("<html>沒有弱點</html>", encoding="utf-8")
-    assert cmp.check_html(str(out), rep, "h")[0][1] == "FAIL"
 
 
-def test_cli_prints_tsv(tmp_path, capsys):
-    out = make_out(tmp_path, ALL_OK, grype=npm_lodash_matches(), findings=[])
-    run_report(out)
-    capsys.readouterr()   # 丟掉 report.py 自己印的摘要
-    assert cmp.main(["--report", str(out / "report.json"), "--expected", str(EXPECTED / "npm-lodash.json"), "--name", "n"]) == 0
-    lines = [l.split("\t") for l in capsys.readouterr().out.strip().splitlines()]
-    assert all(len(l) == 3 for l in lines) and lines[0][0] == "expect-grype-n"
 
 
 # ---------- 殼層：共用函式（real-projects.sh 搬出來的）與 sca-scan 參數 ----------
@@ -155,10 +49,6 @@ def bash(script, *args):
 LIB = str(PILOT / "lib" / "common.sh")
 
 
-def test_lib_govuln_count_on_real_output():
-    f = ROOT / "tests" / "results" / "round1-raw-20261022" / "govulncheck-reachable.json"
-    r = bash(f'. "{LIB}"; govuln_count "$1"', str(f))
-    assert r.stdout.strip() == "4", r.stderr
 
 
 def test_lib_govuln_count_without_config_is_x(tmp_path):
@@ -167,11 +57,6 @@ def test_lib_govuln_count_without_config_is_x(tmp_path):
     assert bash(f'. "{LIB}"; govuln_count "$1"', str(f)).stdout.strip() == "x"
 
 
-def test_lib_dt_workflow_status_on_real_output():
-    f = ROOT / "tests" / "results" / "round6-dt-20261022" / "b" / "workflow-runs.json"
-    tok = "01a1624e-4248-7d8d-8b01-cf6f0f56aba2"
-    out = bash(f'. "{LIB}"; dt_workflow_status "$1" "$2"', str(f), tok).stdout.strip()
-    assert "import-bom=COMPLETED" in out and "vuln-analysis=COMPLETED" in out and "analyze-project=COMPLETED" in out
 
 
 def test_lib_sbom_status(tmp_path):
@@ -346,8 +231,7 @@ def test_sca_scan_refuses_non_empty_out(tmp_path):
     assert r.returncode == 64 and "不是空的" in r.stderr
 
 
-@pytest.mark.parametrize("path", ["tools/pilot/sca-scan", "tools/pilot/ci-scan-check.sh", "tools/pilot/lib/common.sh",
-                                  "tools/e2e/real-projects.sh", "tools/e2e/sandbox.sh"])
+@pytest.mark.parametrize("path", ["tools/pilot/sca-scan", "tools/pilot/lib/common.sh", "tools/e2e/sandbox.sh"])
 def test_shell_syntax(path):
     assert subprocess.run(["bash", "-n", str(ROOT / path)], capture_output=True).returncode == 0
 
@@ -359,10 +243,10 @@ def test_sandbox_hide_is_backward_compatible():
     ro = [out[i + 1] for i, x in enumerate(out) if x == "--ro-bind" and "/sbx-stubs." not in out[i + 1]]   # 替代檔是自動遮蔽的設定檔
     assert "--tmpfs" in out and "/" in ro and not any(r.startswith(("/tmp/", "/opt/")) for r in ro if r not in ("/", "/run/systemd/resolve"))
     s2 = f'''. "{ROOT}/tools/e2e/sandbox.sh"; bwrap(){{ printf '%s\\n' "$@"; }}; SBX_HIDE=("$1" "$2" /nonexistent); sbx -- true'''
-    out2 = bash(s2, str(ROOT / "scripts"), str(ROOT / "CLAUDE.md")).stdout.splitlines()
-    i = out2.index(str(ROOT / "scripts"))
+    out2 = bash(s2, str(ROOT / "tools"), str(ROOT / "README.md")).stdout.splitlines()
+    i = out2.index(str(ROOT / "tools"))
     assert out2[i - 1] == "--tmpfs"
-    j = out2.index(str(ROOT / "CLAUDE.md"))
+    j = out2.index(str(ROOT / "README.md"))
     assert out2[j - 2] == "--ro-bind" and "/sbx-stubs." in out2[j - 1] and out2[j - 1].endswith("/empty")
     assert "/nonexistent" not in out2
 
@@ -375,20 +259,6 @@ def test_lib_runlog(tmp_path):
     assert f[0] == "lab" and f[3] == "3"
 
 
-def test_svc_image_reads_one_service_from_compose_json(tmp_path):
-    """backup.sh／restore.sh 記錄與比對映像：`config --images <服務>` 會連相依服務一起列、順序不固定（pilot-run/12），改讀 JSON。"""
-    fake = tmp_path / "bin"; fake.mkdir()
-    cfg = {"services": {"dt-db": {"image": "postgres:17"}, "dt-apiserver": {"image": "apiserver:5.2.0", "depends_on": {"dt-db": {}}}}}
-    (fake / "docker").write_text("#!/bin/sh\ncase \"$*\" in *'config --format json'*) cat \"$CFG\";; *) exit 9;; esac\n")
-    (fake / "docker").chmod(0o755)
-    (tmp_path / "cfg.json").write_text(json.dumps(cfg))
-    env = {"PATH": f"{fake}:/usr/bin:/bin", "CFG": str(tmp_path / "cfg.json"), "PILOT_STATE_DIR": str(tmp_path / "state")}
-    sh = f'. "{ROOT}/deploy/pilot/lib.sh"; svc_image dt-apiserver; svc_image dt-db; echo "[$(svc_image nope)]"'
-    out = subprocess.run(["bash", "-c", sh], env=env, capture_output=True, text=True, check=True).stdout.split()
-    assert out == ["apiserver:5.2.0", "postgres:17", "[]"]
-    for f in ("backup.sh", "restore.sh"):
-        s = (ROOT / "deploy" / "pilot" / f).read_text(encoding="utf-8")
-        assert 'config --images "$s"' not in s and 'svc_image "$s"' in s, f
 
 
 def test_sca_scan_dt_feeds_wiring():

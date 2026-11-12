@@ -11,8 +11,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import supplier_package as sp  # noqa: E402
 import vex_export as vx  # noqa: E402
-from test_csaf_advisory import CFG, csaf_validator, gen  # noqa: E402
-from test_csaf_advisory import vex as csaf_vex  # noqa: E402
 from test_vex_export import PBOM, row  # noqa: E402
 from test_vex_rules import assess, doc, gate, rule  # noqa: E402
 
@@ -66,17 +64,6 @@ def test_gate_does_not_complain_about_rule_rows_without_response():
     assert g["open_affected"]["by_response"] == {"none": 3}
 
 
-def test_csaf_categories_for_exploitable_without_response(tmp_path):
-    _, _, cdx = exported()
-    comps = [("liba", "1.0"), ("libb", "1.0"), ("libc", "1.0")]
-    st, detail, summ, out = gen(tmp_path, cfg=CFG, old=[], new=cdx["vulnerabilities"], sbom=comps, untriaged=0)
-    csaf = json.loads((out / "csaf.json").read_text(encoding="utf-8"))
-    rem = {v["cve"]: v["remediations"][0] for v in csaf["vulnerabilities"]}
-    assert rem["CVE-2026-0001"]["category"] == "none_available" and "future release" in rem["CVE-2026-0001"]["details"]
-    assert rem["CVE-2026-0002"]["category"] == "no_fix_planned"
-    assert "distribution" in rem["CVE-2026-0002"]["details"] and "supplier" not in rem["CVE-2026-0002"]["details"].lower()
-    assert rem["CVE-2026-0003"]["category"] == "none_available"
-    assert not list(csaf_validator().iter_errors(csaf))
 
 
 # ---------- 客戶的 vulnerability-status.md ----------
@@ -162,20 +149,3 @@ def test_customer_fix_for_python_module_with_ambiguous_or_unknown_owner():
     assert sp.customer_fix(none).startswith("Installed by a distribution package; the upstream PyPI fix 13.0.0 may not apply")
 
 
-def test_legacy_responses_follow_fix_state_in_csaf_and_openvex(tmp_path):
-    rows = [row("CVE-2026-0011", "liba", "1.0", fix_state="not-fixed", fix_versions=[]),
-            row("CVE-2026-0012", "libb", "1.0", fix_state="wont-fix", fix_versions=[])]
-    d = doc(rule("R2", response=("can_not_fix",), detail="No fix yet for {component}.", fix_state=["not-fixed"]),
-            rule("R7", response=("will_not_fix",), detail="Distribution marked {component} will not fix.", fix_state=["wont-fix"]))
-    vx.check_rules(d)
-    allr, _, _ = assess(rows, vx.effective_rules(d), ctx={"kernel_fix_all": {}})
-    cdx, _ = vx.cdx_vex(allr, PBOM, {"finished": "2026-11-02T02:43:55Z", "name": "img"}, {"name": "P"}, "ATTENTION")
-    assert all(v["analysis"]["response"] in (["can_not_fix"], ["will_not_fix"]) for v in cdx["vulnerabilities"])     # 舊設定檔照常
-    ov = vx.openvex(cdx, "Example Co.", vx.purl_by_bomlink(PBOM))
-    assert all("can_not_fix" not in s["action_statement"] and "will_not_fix" not in s["action_statement"] for s in ov["statements"])
-    st, detail, summ, out = gen(tmp_path, cfg=CFG, old=[], new=cdx["vulnerabilities"], sbom=[("liba", "1.0"), ("libb", "1.0")], untriaged=0)
-    csaf = json.loads((out / "csaf.json").read_text(encoding="utf-8"))
-    rem = {v["cve"]: v["remediations"][0] for v in csaf["vulnerabilities"]}
-    assert rem["CVE-2026-0011"]["category"] == "none_available" and rem["CVE-2026-0012"]["category"] == "no_fix_planned"
-    assert "supplier" not in json.dumps(rem).lower()
-    assert not list(csaf_validator().iter_errors(csaf))

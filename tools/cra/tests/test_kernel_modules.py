@@ -490,7 +490,7 @@ def test_board_import_kernel_modules_args(tmp_path):
 
 
 def test_board_on_device_collects_lsmod_and_modules_disabled():
-    t = (HERE.parents[2] / "scripts" / "demo" / "board-on-device.sh").read_text(encoding="utf-8")
+    t = (HERE.parents[2] / "tools" / "demo" / "board-on-device.sh").read_text(encoding="utf-8")
     assert "run lsmod lsmod.txt cat /proc/modules" in t and "kernel.modules_disabled" in t
     import board_import
     assert "lsmod.txt" in board_import.BOARD_FILES and "lsmod.txt" not in board_import.EXPECTED_BOARD
@@ -696,7 +696,7 @@ def test_kernel_config_collector_has_no_hooks():
 
 # ---------- board-import.sh 挑 Python（H2） ----------
 
-COMMON = HERE.parents[2] / "scripts" / "pilot" / "lib" / "common.sh"
+COMMON = HERE.parents[2] / "tools" / "pilot" / "lib" / "common.sh"
 
 
 # 自架 runner 的 setup-python 是動態連結 libpython，靠 LD_LIBRARY_PATH 才找得到；假的 python 用 sys.executable，所以要把它帶進去

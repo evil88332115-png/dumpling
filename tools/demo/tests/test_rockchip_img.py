@@ -21,7 +21,7 @@ import flash_package as fp  # noqa: E402
 
 rk = fp.rkmod()
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-SCRIPT = os.path.join(REPO, "scripts", "demo", "scan-flash-package.sh")
+SCRIPT = os.path.join(REPO, "tools", "demo", "scan-flash-package.sh")
 MKE2FS = shutil.which("mke2fs") or next((p for p in ("/sbin/mke2fs", "/usr/sbin/mke2fs") if os.path.exists(p)), None)
 need_mke2fs = pytest.mark.skipif(MKE2FS is None, reason="沒有 mke2fs（e2fsprogs）")
 STATUS = b"Package: libc6\nStatus: install ok installed\nArchitecture: arm64\nVersion: 2.36-9+deb12u7\n\n"
@@ -308,7 +308,7 @@ def test_kernel_from_fit_reaches_kernel_config(tmp_path, comp, external):
     build(tmp_path / "update.img", std_parts(ext4_image(tmp_path), kernel=data, compression=comp, external=external))
     mem, _ = vt_members(str(tmp_path / "update.img"))
     assert mem["kernel/Image"][1] == want
-    kc = fp.importlib.util.spec_from_file_location("kc_test", os.path.join(REPO, "scripts", "pilot", "lib", "kernel_config.py"))
+    kc = fp.importlib.util.spec_from_file_location("kc_test", os.path.join(REPO, "tools", "pilot", "lib", "kernel_config.py"))
     m = fp.importlib.util.module_from_spec(kc)
     kc.loader.exec_module(m)
     col, src = m.collect(str(tmp_path / "update.img"), prefix="rootfs", images=True)

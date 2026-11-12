@@ -441,7 +441,7 @@ def test_xlsx_col_names():
 
 
 def test_xlsx_opens_in_libreoffice(tmp_path):
-    """有 LibreOffice 時再用它把 xlsx 轉 CSV 讀回來；沒有時只做自己的讀回（不用 skip：CI 的 SCA_REQUIRE_TEST_DATA=1 不允許 skip）。"""
+    """有 LibreOffice 時再用它把 xlsx 轉 CSV 讀回來；沒有時只做自己的讀回（不用 skip：CI 的 DUMPLING_REQUIRE_TEST_DATA=1 不允許 skip）。"""
     p = project(tmp_path, MIX)
     out = tmp_path / "out"
     rp.build(p, out, allow_tmp=True)

@@ -58,7 +58,7 @@ NVIDIA：C-nvidia-bulletins（tools/pilot/lib/nvidia_bulletins.py match）只評
   一個套件的寫「(personal)」），組的鍵也不寫：用網域的 sha256 前 8 碼（likely:vendor-xxxxxxxx），分組照樣用網域。不寫姓名與信箱。
 不可信的輸入：Maintainer 是 pkgdb 每一個段落的 Maintainer 加上 SBOM 的 publisher 合起來（任何一個地址不是發行版的就不算發行版的）；
   解析最多 MAINT_SCAN 個字、最多 MAINT_ADDRS 個地址（線性時間，不回溯）；超過的當作「不只是發行版的」（maintainer_too_long，至少可能）。
-已知的限制（啟發式，只用 product-a 與 product-b 調整過）：
+已知的限制（啟發式，只用兩個廠商映像調整過）：
   - HEX_HASH 與 UPSTREAM_OK 會放過看起來像雜湊或上游字的廠商標記（例如 1.0+abc1234-1、+test.rockchip）；
   - 每個 + 或 ~ 標記只看第一段字母（例如 1.0+dfsg1rk1-1 只看 dfsg）；
   - 修訂號與上游標記的允許清單是啟發式，換別的發行版或廠商時要再對一次。

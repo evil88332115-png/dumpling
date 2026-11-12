@@ -1306,7 +1306,7 @@ def test_project_template_without_kernel_section_keeps_kernel_rows_in_main_table
 
 
 def test_kernelcheck_load_error_is_clean_fail(tmp_path, monkeypatch):
-    lib = tmp_path / "scripts" / "pilot" / "lib"
+    lib = tmp_path / "tools" / "pilot" / "lib"
     lib.mkdir(parents=True)
     (lib / "kernelcheck.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
     monkeypatch.setattr(cr, "ROOT", tmp_path)
