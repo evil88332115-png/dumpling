@@ -415,7 +415,7 @@ def test_xlsx_not_assessed_is_explicit(tmp_path):
 def test_xlsx_language_check_catches_forbidden_word(tmp_path):
     d_ = tmp_path / "pk"
     d_.mkdir()
-    bad = [dict(XROWS[1], fix="Grype says upgrade; will be included in the next image /home" "/x/y 中文")]
+    bad = [dict(XROWS[1], fix="Grype says upgrade; will be included in the next image /mnt/x/y 中文")]
     sp.vulnerabilities_xlsx(d_ / "vulnerabilities.xlsx", SUMM, [dict(bad[0], fix_state=None)], CTX)
     found = sp.language_check(d_)
     assert found["status"] == "GAP"

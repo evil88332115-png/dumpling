@@ -12,7 +12,7 @@
              "description": "公司在這個產品的角色（預設 manufacturer）。supplier：客戶用自己的品牌賣、客戶是製造商 [法務]；不產生 user-information.md 與 technical-documentation.md，另外產生 CRA/Reports/supplier-package/"},
     "supplier": {
       "type": "object", "x-report": false,
-      "description": "role 是 supplier 時的資料包欄位（handoff 分支 文件/供應商資料包規格.md 第 3 節）。空的欄位在資料包標 TO BE COMPLETED。客戶名稱只放產品的設定檔，不放 repo",
+      "description": "role 是 supplier 時的資料包欄位（專案文件「供應商資料包規格」第 3 節）。空的欄位在資料包標 TO BE COMPLETED。客戶名稱只放產品的設定檔，不放 repo",
       "properties": {
         "customer": {"type": "object", "properties": {"name": {"type": "string", "description": "客戶（終端產品的製造商）名稱"}}},
         "contract_reference": {"type": "string", "description": "供貨合約的編號或名稱"},

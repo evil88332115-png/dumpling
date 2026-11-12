@@ -25,7 +25,7 @@ def gmatch(cve, purl, name, version, sev="Medium", nvd_score=None, vector=NET, k
     if epss is not None:
         v["epss"] = [{"cve": cve, "epss": epss, "percentile": 0.5, "date": "2026-11-01"}]
     related = [{"id": cve, "namespace": "nvd:cpe", "severity": "High",
-                "cvss": [{"source": "nvd@" "nist.gov", "type": "Primary", "version": "3.1", "vector": vector,
+                "cvss": [{"source": "nvd@nist.gov", "type": "Primary", "version": "3.1", "vector": vector,
                           "metrics": {"baseScore": nvd_score}}] if nvd_score is not None else []}] if rel else []
     return {"vulnerability": v, "relatedVulnerabilities": related,
             "artifact": {"name": name, "version": version, "type": "deb", "purl": purl}}
@@ -49,7 +49,7 @@ def test_exposed_service_grype_only_cve_is_must_assess_p3(tmp_path):
     x = by["CVE-2026-7001"]
     assert (x["tier"], x["assessed"], x["component"], x["found_by"]) == ("p3", False, "iperf3", "grype only")
     assert x["dt_findings"]["total"] == 0
-    assert x["why"] == ["exposed, CVSS 7.5 (Grype nvd@" "nist.gov v3.1) AV:N: /usr/bin/iperf3 (tcp/5201 on 0.0.0.0)"]
+    assert x["why"] == ["exposed, CVSS 7.5 (Grype nvd@nist.gov v3.1) AV:N: /usr/bin/iperf3 (tcp/5201 on 0.0.0.0)"]
     assert s["counts"]["grype_only_advisories"] == 1 and s["counts"]["rows"] == 2
     t = (reports / "risk-assessment.md").read_text(encoding="utf-8")
     row = next(ln for ln in t.split("### 8.6 P3")[1].splitlines() if "CVE-2026-7001" in ln)
@@ -236,7 +236,7 @@ def test_ids_compared_case_insensitively():
 
 
 def test_version_unknown_components_are_gap_not_rows(tmp_path):
-    """CLAUDE.md 規則 13：sbomgate 排除的比對（requests >=2.0 當成 2.0：VERSION_FROM_RANGE；沒有版本：NO_VERSION）不成列、不做弱點比對；
+    """專案規則 13：sbomgate 排除的比對（requests >=2.0 當成 2.0：VERSION_FROM_RANGE；沒有版本：NO_VERSION）不成列、不做弱點比對；
     資料狀態 GAP、交叉核對與閘門逐一點名。沒有 sbomgate 時，artifact 沒有版本的比對也一樣（NO_VERSION）。"""
     gm = [_pm("GHSA-j8r2-6x86-q33q", "pkg:pypi/requests@2.0", "requests", "2.0", rel=["CVE-2023-32681"]),
           _pm("CVE-2026-8888", "pkg:deb/ubuntu/libnover", "libnover", "", typ="deb"),
@@ -253,11 +253,11 @@ def test_version_unknown_components_are_gap_not_rows(tmp_path):
     assert not any("| requests" in ln or "| libnover" in ln or "| nover" in ln for ln in md.splitlines())
     d = s["documents"]["risk-assessment"]
     assert d["status"] == "GAP"
-    why = next(x for x in d["detail"] if "CLAUDE.md rule 13" in x)
+    why = next(x for x in d["detail"] if "project rule 13" in x)
     assert ("GHSA-j8r2-6x86-q33q (CVE-2023-32681) on requests 2.0 (VERSION_FROM_RANGE)" in why and "CVE-2026-8888 on libnover (NO_VERSION)" in why
             and "CVE-2026-8889 on nover (NO_VERSION)" in why)
     g = s["vex"]["gate"]
-    assert g["verdict"] == "GAP" and sum("version unknown, CLAUDE.md rule 13" in x for x in g["not_assessed"]) == 3
+    assert g["verdict"] == "GAP" and sum("version unknown, project rule 13" in x for x in g["not_assessed"]) == 3
     assert "not listed as rows (GAP)" in _cross(md)
 
 
@@ -357,7 +357,7 @@ def test_exposed_server_binary_of_same_source_is_its_own_row(tmp_path):
     m = s["exploitation"]["must_assess"]
     assert m["rows"] == 1 and [(x["component"], x.get("found_by"), x["tier"], x["assessed"]) for x in m["list"]] == [
         ("isc-dhcp-server", "grype only", "p3", False)]
-    assert m["list"][0]["why"] == ["exposed, CVSS 9.8 (Grype nvd@" "nist.gov v3.1) AV:N: /usr/sbin/dhcpd (udp/67 on 0.0.0.0)"]
+    assert m["list"][0]["why"] == ["exposed, CVSS 9.8 (Grype nvd@nist.gov v3.1) AV:N: /usr/sbin/dhcpd (udp/67 on 0.0.0.0)"]
     md = (rep / "risk-assessment.md").read_text(encoding="utf-8")
     assert "| isc-dhcp-server (found only by Grype) |" in md and "also found by Grype" not in md
 

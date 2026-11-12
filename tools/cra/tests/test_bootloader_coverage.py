@@ -23,7 +23,7 @@ import flash_package as fp  # noqa: E402
 
 VER = "ACME_Board_R40.1.0"
 JOINED = VER + "-3"
-BUILD_PREFIX = "/home" "/builder/ws/sources/uefi"
+BUILD_PREFIX = "/home/builder/ws/sources/uefi"
 
 
 def w(p, text):
@@ -235,7 +235,7 @@ def test_check_image_version_only_and_nothing_readable(tmp_path):
 
 def test_embedded_path_handling(tmp_path):
     t = make_tree(tmp_path / "t")
-    ps = ["/x/y/edk2/../../etc/passwd.c", "/home" "/u/Build/Foo/DEBUG/AutoGen.c", "/a/b/edk2/MdePkg/Library/BaseLib/LShiftU64.c"]
+    ps = ["/x/y/edk2/../../etc/passwd.c", "/home/u/Build/Foo/DEBUG/AutoGen.c", "/a/b/edk2/MdePkg/Library/BaseLib/LShiftU64.c"]
     matched, missing, other, _ = bc.embedded_paths(["see " + p for p in ps], str(t))
     assert matched == ["edk2/MdePkg/Library/BaseLib/LShiftU64.c"] and missing == [] and other == 2     # 含 ".." 的路徑與建置輸出的路徑不在元件資料夾下
 

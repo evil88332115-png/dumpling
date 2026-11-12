@@ -12,7 +12,7 @@
 沒有 CPE 就 0 筆；而且比對用的是 CPE 裡的版本，不是元件的 version 欄。所以 load() 要求 CPE 的版本和元件的 version 相同，
 不同就丟掉 CPE（元件仍留在 SBOM，標 GAP：不比對）。uefi_source.py 本來就只在版本確定時才給 CPE。
 
-規則（CLAUDE.md）：版本未知的函式庫（沒有版本檔、版本檔互相矛盾、submodule 沒取出）不比對、列 GAP／NOT_ASSESSED，不顯示成沒有弱點；
+規則（專案規則）：版本未知的函式庫（沒有版本檔、版本檔互相矛盾、submodule 沒取出）不比對、列 GAP／NOT_ASSESSED，不顯示成沒有弱點；
 找不到或讀不到 uefi-source 的輸出 → GAP；Grype 沒跑、失敗或資料庫過期 → GAP（比對結果「沒有」不等於安全）。
 """
 import argparse

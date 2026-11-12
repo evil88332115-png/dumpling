@@ -125,7 +125,7 @@ MODULE_ZH = {"built-in": "內建於核心", "module, loaded on the tested board"
              "unknown": "不明"}
 NOT_AFFECTED_FIX = "—（不受影響）"
 # 把內部部門名稱換成報告用的角色名稱（待確認事項、設定警告等從別的檔案來的文字也要換）
-ROLE_WORDS = [(re.compile(r"內部窗口（PM）"), "PM"), (re.compile(r"內部窗口"), "PM"), (re.compile(r"軟體部門（[^）]*）"), "CRA掃描"),
+ROLE_WORDS = [(re.compile(r"專案負責人（PM）"), "PM"), (re.compile(r"專案負責人"), "PM"), (re.compile(r"軟體部門（[^）]*）"), "CRA掃描"),
               (re.compile(r"軟體部門"), "CRA掃描"), (re.compile(r"產品工程師"), "RD")]
 # 掃描階段代號 → 一句白話（放在原文前面，原文的英文不動）
 STAGE_WORDS = [("C-sbomgate", "SBOM 完整度"), ("B-sbom-", "SBOM 產生"), ("B-toolchain", "建置工具"),
@@ -949,7 +949,7 @@ def stage_prefix(text):
 
 def confirmation_sheet(csv_path):
     """編號改成「確-01…」（避免和 P1判斷表的 Q1… 撞號；原 csv／md 在內部存檔，可對照）；[vuln:…]、[input:…] 內部鍵拿掉；
-    部門名稱換成角色名稱（軟體部門→CRA掃描、產品工程師→RD、內部窗口→PM）；有掃描階段代號的格子前面加一句白話。
+    部門名稱換成角色名稱（軟體部門→CRA掃描、產品工程師→RD、專案負責人→PM）；有掃描階段代號的格子前面加一句白話。
     「要問誰」只有 CRA掃描的題目（掃描自己的待辦）不放進這張表，編號依剩下的題目重排。"""
     with open(csv_path, encoding="utf-8-sig", newline="") as f:
         data = list(csv.reader(f))

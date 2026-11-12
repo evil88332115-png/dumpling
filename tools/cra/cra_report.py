@@ -36,7 +36,7 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
   格式錯 → FAIL）、scan/ubuntu-status.json（tools/pilot/lib/ubuntu_status.py，Ubuntu CVE Tracker 的狀態）與 meta.json 的映像雜湊；
   另標記可能誤報 distro_no_range_upstream_excludes（vex_export.upstream_exclusion_flags，只標記）。
   dt/analysis.json（有的話；tools/e2e/dtread.py readback）補上 DT findings API 沒有的 justification／response／details。
-  confirmation-items.csv／.md（待確認事項表，tools/cra/confirm_items.py：工具判斷不了、直接問產品工程師、經內部窗口（PM）問法務／主管的事，從這次已有的資料列出；
+  confirmation-items.csv／.md（待確認事項表，tools/cra/confirm_items.py：工具判斷不了、直接問產品工程師、經專案負責人（PM）問法務／主管的事，從這次已有的資料列出；
   --pkgdb 或 <scan>/../pkgdb 給沒有修補的套件找出是誰帶進來的；summary.json 的 confirmation_items）。
   沒有漏洞資料的套件（tools/cra/no_vuln_data.py：廠商自己建置、發行版的漏洞資料可能不認得的 deb 套件，0 列不代表沒有漏洞）：
   風險評估 8.1 節的小節、summary.json 的 packages_without_vuln_data（NOT_ASSESSED 的數量與訊號）、待確認事項表每組一筆；不改層級與狀態。
@@ -45,7 +45,7 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
 
-判定（CLAUDE.md 驗收原則：缺資料不可顯示為安全）：
+判定（專案驗收原則：缺資料不可顯示為安全）：
   - config.json 不存在、不是 JSON、必填欄位缺少或型別不符、範本有不認得的 placeholder → FAIL，不寫 Markdown（只寫 summary.json）。
   - 選填欄位缺少 → 文件內顯示 TO BE COMPLETED，該文件至少 GAP。
   - 風險評估：沒有 DT findings 或 SBOM 為空 → NOT_ASSESSED；status.tsv 缺、DT 資料源／KEV／OSV 涵蓋／弱點分析／findings、
@@ -823,7 +823,7 @@ def attach_grype_binaries(attach):
 
 def grype_version_unknown(gate):
     """scan/sbomgate.json 的 excluded_matches 中版本未知的元件（VERSION_FROM_RANGE、NO_VERSION、UNIDENTIFIABLE；不含 SELF_NO_VERSION，
-    那些由 drop_self_matches 處理）→ {(編號大寫, purl 或名稱): 原因}。CLAUDE.md 規則 13：版本來自範圍下限或不知道的元件不做弱點比對。"""
+    那些由 drop_self_matches 處理）→ {(編號大寫, purl 或名稱): 原因}。專案規則 13：版本來自範圍下限或不知道的元件不做弱點比對。"""
     out = {}
     for x in (gate.get("excluded_matches") or []) if isinstance(gate, dict) else []:
         if isinstance(x, dict) and isinstance(x.get("id"), str) and x.get("excluded_reason") not in (None, "SELF_NO_VERSION"):
@@ -1869,7 +1869,7 @@ def grype_component(a):
 
 def grype_only_rows(grype, rows, pol, gidx, have_grype, srcmap=None, kmap=None, kev_more=None, sev=None, epss_more=None,
                     dpy=None, version_unknown=None, services=None, dt_same=None):
-    """Grype 有、DT 沒有的比對（交叉核對的同一個判斷：grype_coverage，同一個元件上沒有共同編號的 DT 列）也成為風險表的列（CLAUDE.md：不同工具的結果並列保留，不靜默丟掉）。
+    """Grype 有、DT 沒有的比對（交叉核對的同一個判斷：grype_coverage，同一個元件上沒有共同編號的 DT 列）也成為風險表的列（專案規則：不同工具的結果並列保留，不靜默丟掉）。
     每筆比對轉成 DT finding 的形狀（source GRYPE，vulnId＝Grype 的主編號，aliases＝relatedVulnerabilities，沒有 DT 分析），交給 build_rows
     另外建列（不和 DT 的 finding 一起建：DT 的列逐字不變；usn 不用），所以分組（CVE 或最小的編號 × purl 的完整名稱 × 版本）、
     KEV（kev_more＝Grype 的 knownExploited）、修補狀態（gidx）、installed_as／mapped_from、嚴重度的來源順序和 DT 的列相同。
@@ -1878,7 +1878,7 @@ def grype_only_rows(grype, rows, pol, gidx, have_grype, srcmap=None, kmap=None, 
     元件以 Grype artifact 的 purl 識別（Grype 讀的就是同一份 SBOM，所以和 SBOM 元件、VEX 的 bom-ref 對得上）。
     標記：found_by＝"grype only"、sources＝["grype"]、grype_namespaces、grype_matches（比對筆數）；n_findings＝0（不是 DT 的 finding）。
     和現有的列（例如 NVIDIA 公告的列）同一個（編號、元件、版本）的不另加（那一列已經在表上；這一列另外的 CVE 由呼叫端點名，g_norow）。
-    版本未知的元件（CLAUDE.md 規則 13）不成列、不做弱點比對：sbomgate 排除的比對（version_unknown＝grype_version_unknown：
+    版本未知的元件（專案規則 13）不成列、不做弱點比對：sbomgate 排除的比對（version_unknown＝grype_version_unknown：
     VERSION_FROM_RANGE、NO_VERSION…；沒有 sbomgate.json 時是 sbom_version_unknown，鍵 ("*", purl)），以及 artifact 沒有版本的比對
     （NO_VERSION）；呼叫端標 GAP 並點名。
     回傳 (新的列, 不能成列的比對 [{"id", "cves", "package"}]：artifact 沒有 purl 也沒有名稱,
@@ -2121,8 +2121,8 @@ deb_key = functools.cmp_to_key(deb_vercmp)
 # ---------- 沒有 Grype 修補狀態的 Ubuntu 列：依 Ubuntu CVE Tracker（scan/ubuntu-status.json）推出修補狀態 ----------
 
 # Tracker 的狀態 → 修補狀態。not-affected 不在這裡（證據規則 U1 有自己的版本規則）；needs-triage、DNE、沒有、conflict、認得以外的 → 不推。
-# deferred 和 Grype 一樣當 not-fixed（Ubuntu 延後、之後還可能修；2026-11-06 product-a 實測：Grype 有修補狀態、Tracker 是 deferred 的 88 列
-# 全是 not-fixed）：同一個 Tracker 狀態在 Grype 的列與這裡推出的列套同一條規則
+# deferred 和 Grype 一樣當 not-fixed（Ubuntu CVE Tracker 的 deferred 是「暫緩處理」，之後還可能修；公開依據：Ubuntu CVE Tracker 對狀態的定義）：
+# 同一個 Tracker 狀態在 Grype 的列與這裡推出的列套同一條規則
 TRACKER_FIX = {"released": "fixed", "needed": "not-fixed", "pending": "not-fixed", "in-progress": "not-fixed",
                "deferred": "not-fixed", "ignored": "wont-fix"}
 KERNEL_SRC = re.compile(r"^linux($|-)")
@@ -2546,7 +2546,7 @@ def _read_config_json(project, rel, schema, list_key, what):
 def load_exploitation_evidence(project, today):
     """CRA/Config/exploitation-evidence.json → (證據清單（cve 轉大寫）, {file, sha256, count} 或 None)。
     每筆：cve（CVE-…，只收 ASCII 數字）、source（例如 customer report、vendor advisory）、date（YYYY-MM-DD，最多晚於 today＝報告日 UTC 一天）、
-    owner（負責人或職務，不可是佔位字）、note（理由：證據寫了什麼、在哪裡；CLAUDE.md「人工判斷要記理由」）都必填。
+    owner（負責人或職務，不可是佔位字）、note（理由：證據寫了什麼、在哪裡；專案規則「人工判斷要記理由」）都必填。
     不認得的鍵、同一個 CVE、同一個來源、同一天兩筆 → Fail（和其他設定錯誤一樣，不產生文件）。"""
     doc, raw = _read_config_json(project, EVIDENCE_REL, EVIDENCE_SCHEMA, "evidence", "被利用證據檔")
     if doc is None:
@@ -4127,7 +4127,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         bom_reasons.append("no readable SBOM (sbom/sbom.cdx.json) in the scan output")
     elif not pkgs:
         bom_st = "NOT_ASSESSED"
-        bom_reasons.append("the SBOM has 0 package components (CLAUDE.md rule 12: not shown as 'no vulnerabilities')")
+        bom_reasons.append("the SBOM has 0 package components (project rule 12: not shown as 'no vulnerabilities')")
     else:
         bom_st = "OK"
     bom_stages = sorted(k for k in (status or {}) if k.startswith("B-sbom") or k in ("C-sbomgate", "C-upload-sbom", "B-toolchain", "B-npm-no-lockfile"))
@@ -4201,7 +4201,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 同一個元件的判斷要知道 Ubuntu 打包的 Python 模組的擁有者（deb_python_index；下面 apply_deb_python 也用同一份）
     pyres = pyver_mod().by_path(pyver_mod().load(Path(pkgdb) / "python-versions.json")) if pkgdb is not None else {}
     dpy, dpy_notes = deb_python_index(pkgs, pyres)
-    # 版本未知的元件（sbomgate 排除的比對；CLAUDE.md 規則 13）不成列，標 GAP
+    # 版本未知的元件（sbomgate 排除的比對；專案規則 13）不成列，標 GAP
     gvu = grype_version_unknown(gate_doc)
     if not isinstance(gate_doc, dict) and have_grype and isinstance(findings, list):
         # 沒有（或讀不到）scan/sbomgate.json：直接以 SBOM 分類（同一份規則），鍵是 ("*", purl)：這個元件上的每一筆比對
@@ -4526,7 +4526,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                       "from Grype) and are tiered, assessed and given VEX statements like every other row.")
         if g_unknown:
             cross += (f" {plural(len(g_unknown), 'Grype match', 'Grype matches')} without a counterpart {verb(len(g_unknown), 'is', 'are')} on "
-                      "components whose version is unknown (sbomgate: version from a range or no version; CLAUDE.md rule 13): not "
+                      "components whose version is unknown (sbomgate: version from a range or no version; project rule 13): not "
                       "matched as vulnerabilities and not listed as rows (GAP): " + "; ".join(gvu_text[:10]) + ("; …" if len(gvu_text) > 10 else "") + ".")
         if g_unlisted:
             cross += (f" {plural(len(g_unlisted), 'Grype match', 'Grype matches')} without a counterpart could not be listed as "
@@ -4555,10 +4555,10 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                            + (f"; {plural(len(g_norow), 'CVE')} of them {verb(len(g_norow), 'is', 'are')} in no row: "
                               f"{', '.join(g_norow[:10])}{', …' if len(g_norow) > 10 else ''}" if g_norow else ""))
             if g_unknown:
-                # CLAUDE.md 規則 13：版本未知 → 不做弱點比對，列為 GAP（不可顯示為沒有弱點）
+                # 專案規則 13：版本未知 → 不做弱點比對，列為 GAP（不可顯示為沒有弱點）
                 risk_st = worst([risk_st, "GAP"])
                 reasons.append(f"{plural(len(g_unknown), 'Grype match', 'Grype matches')} on components with an unknown version (version from a "
-                               f"range or no version; CLAUDE.md rule 13) {verb(len(g_unknown), 'was', 'were')} not matched as vulnerabilities "
+                               f"range or no version; project rule 13) {verb(len(g_unknown), 'was', 'were')} not matched as vulnerabilities "
                                f"(GAP): {'; '.join(gvu_text[:10])}{'; …' if len(gvu_text) > 10 else ''}")
             if g_unlisted:
                 reasons.append(f"{plural(len(g_unlisted), 'Grype match', 'Grype matches')} without a counterpart in Dependency-Track "
@@ -4619,7 +4619,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     ta, tk, tm = tally(rows), tally(krows), tally(mrows)
     if euvd_used:
         # EUVD 的列另一行（不設 kev，KEV 的計數不變；沒有 EUVD 時 8.2 不變）。EUVD 不能用時寫 not available 與原因，不寫 0
-        # （CLAUDE.md：缺資料不可寫成沒有）；原因只由 euvd_unavailable_reason 產生
+        # （專案規則：缺資料不可寫成沒有）；原因只由 euvd_unavailable_reason 產生
         for x, rs in ((ta, rows), (tk, krows), (tm, mrows)):
             x["euvd_open"] = sum(1 for r in rs if euvd_hit(r) and r["tier"] in OPEN_TIERS) if euvd_map is not None else euvd_na
             x["distro_fixed_euvd"] = sum(1 for r in rs if euvd_hit(r) and r["tier"] == "distro_fixed") if euvd_map is not None else euvd_na
@@ -4794,8 +4794,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     #   - KEV 列只靠發行版紀錄移出 P1–P3：要人確認 → 擋（gate() 看 KEV 列的判定是不是只有自動來源）
     unassessed = [f"{d['id']}" + (f" ({'/'.join(d['cves'])})" if d.get("cves") else "") + f" on {d['package']} (product itself, no version)"
                   for d in sorted(self_dropped or [], key=lambda d: (d["id"], d["package"]))] if have_grype else []
-    # 版本未知的元件上的 Grype 比對（CLAUDE.md 規則 13）：沒有比對、沒有列，也沒有評估
-    unassessed += [f"{t} – version unknown, CLAUDE.md rule 13" for t in gvu_text]
+    # 版本未知的元件上的 Grype 比對（專案規則 13）：沒有比對、沒有列，也沒有評估
+    unassessed += [f"{t} – version unknown, project rule 13" for t in gvu_text]
     vgate = vx.gate(vrows, vconf, risk_st, gu_text if have_grype and isinstance(findings, list) else 0, isinstance(findings, list),
                     grype_checked=grype_checked, not_assessed=unassessed,
                     rules_without_author=(rules_info or {}).get("without_author") or (),
@@ -5220,7 +5220,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         summary["missing_fields"] = sorted({m for x in docs.values() for m in x["missing_fields"]})
     elif any(out.glob("supplier-package")) or any(out.glob(".supplier-package.*")):
         spmod().remove(out)       # 上一次是 supplier：刪掉舊的資料包（沒有時不載入模組）
-    # 待確認事項表（confirm_items.py）：工具判斷不了、直接問產品工程師、經內部窗口（PM）問法務／主管的事，從這次已有的資料列出
+    # 待確認事項表（confirm_items.py）：工具判斷不了、直接問產品工程師、經專案負責人（PM）問法務／主管的事，從這次已有的資料列出
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()

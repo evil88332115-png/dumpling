@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sbomgate：SBOM 與 Grype 結果的閘門（CLAUDE.md 規則 11–13）。
+"""sbomgate：SBOM 與 Grype 結果的閘門（專案規則 11–13）。
 
 讀 CycloneDX SBOM、Grype JSON、（選用）清單檔，分層回報：
   sbom 層：OK / EMPTY / INCOMPLETE
