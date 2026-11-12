@@ -112,6 +112,18 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           cd "$RUNNER_TEMP/result"
+          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：重試 3 次，仍失敗就印出回應標頭與本文當診斷
+          ghx() {
+            local n=0
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then
+                echo "---- 診斷：$*"; gh api -i "repos/$GITHUB_REPOSITORY/releases?per_page=1" 2>&1 | head -30
+                return 1
+              fi
+              sleep 20
+            done
+          }
           [ -s manifest.tsv ] || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
           args=()
           while IFS=$'\t' read -r f label; do
@@ -119,14 +131,15 @@ jobs:
             args+=("$f#$label")
           done < manifest.tsv
           # 先清掉同名的舊草稿（手動觸發的測試草稿；草稿用 tag 名稱查不到，所以用 API 依 id 刪）
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id"); do
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
+          ids=$(ghx gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id") || exit 1
+          for id in $ids; do
+            ghx gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
           done
           if [ "$EVENT" = push ]; then
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then echo "release: FAIL（$TAG 已經有正式 Release，不覆蓋）"; exit 1; fi
-            gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            ghx gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
             echo "release: OK（正式 Release $TAG，${#args[@]} 個附件）"
           else
-            gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG（手動觸發的草稿）" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            ghx gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG（手動觸發的草稿）" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
             echo "release: OK（draft $TAG，${#args[@]} 個附件；手動觸發不發正式 Release、不建 git tag）"
           fi
