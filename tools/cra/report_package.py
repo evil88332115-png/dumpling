@@ -105,6 +105,8 @@ WIDTHS = [16, 34, 30, 20, 18, 22, 18, 24, 12, 26, 10, 12, 44, 18, 12, 36, 10, 24
 # 清單用的精簡欄位（完整漏洞清單、排除後剩下的）；第一欄「初判」＝結果－短理由
 LIST_HEADER = ["初判", "CVE", "元件", "版本", "嚴重度（分數）", "已被積極利用", "對外服務", "修補版本", "要做什麼", "誰處理", "依據與備註", "判定者", "判定日期"]
 LIST_WIDTHS = [34, 18, 22, 18, 12, 10, 10, 24, 30, 12, 70, 18, 12]
+LIST_HEADER_L = ["層"] + LIST_HEADER
+LIST_WIDTHS_L = [16] + LIST_WIDTHS
 LIST_LEGEND = "初判＝結果－理由；「暫當受影響」是判斷不了時的保守做法，不是已確認受影響。"
 # 規則代號 → 初判（短標籤）；長的結論文字留在 RULES（規則說明用）
 SHORT = {
@@ -132,6 +134,46 @@ STAGE_WORDS = [("C-sbomgate", "SBOM 完整度"), ("B-sbom-", "SBOM 產生"), ("B
                ("B-npm-no-lockfile", "npm 專案沒有鎖定檔"), ("NOT_ASSESSED", "未評估")]
 UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 NOT_RUN = "NOT_RUN"
+
+# ---- 分層（cra_report 在 vulnerability-rows.json 加的 layers 區塊與每列的 layer／layer_todo；沒有 layers 區塊時下面全部不動作）----
+LAYER_ZH = {"bsp": "BSP", "os": "OS", "unknown": "unknown（層未定）", "host-tool": "主機端工具"}
+LAYER_RANK = {"bsp": 0, "unknown": 1, "os": 2, "host-tool": 3}
+P1_LAYER_CHOICES = ("bsp", "unknown", "os")
+RESP_ZH = {
+    "ours": "OS 層也是我們的待辦（os_responsibility: ours）：P1 判斷表含 OS 層的 P1。",
+    "customer": "OS 層由客戶負責（os_responsibility: customer）：照掃、分開列在「範例 rootfs（給客戶參考）」；已被利用（KEV 等）的列在"
+                "「通知客戶」；不進 P1 判斷表與我們的待辦。",
+    "upstream-vendor": "OS 層由上游 OS 廠商負責（os_responsibility: upstream-vendor）：照掃、分開列在「OS層（上游廠商負責）」；"
+                       "我們只通知客戶，已被利用（KEV 等）的列在「通知客戶」；不進 P1 判斷表與我們的待辦。",
+    None: "GAP：沒有 os_responsibility，不預設；所有層都列入我們的待辦（最保守），P1 判斷表含所有層。",
+}
+OS_SHEET = {"customer": "範例 rootfs（給客戶參考）", "upstream-vendor": "OS層（上游廠商負責）"}
+NOTIFY_SHEET = "通知客戶"
+LAYER_SHEET = "分層摘要"
+
+
+def layer_info(doc):
+    """doc 有分層資料（cra_report 的 layers 區塊）→ 那個區塊；沒有 → None。"""
+    ly = doc.get("layers")
+    return ly if isinstance(ly, dict) and ly.get("active") else None
+
+
+def is_todo(r):
+    return r.get("layer_todo", True)
+
+
+def row_layer_zh(r):
+    return LAYER_ZH.get(r.get("layer"), str(r.get("layer") or "—"))
+
+
+def not_ours_os(doc):
+    """OS 層、不是我們的待辦的列（customer／upstream-vendor）。"""
+    return [r for r in doc["rows"] if r.get("layer") == "os" and not is_todo(r)]
+
+
+def notify_rows(doc):
+    """要通知客戶的列：OS 層不是我們的待辦、已被利用、還沒判定為不受影響（cra_report 的 notify_customer 同一個條件）。"""
+    return [r for r in not_ours_os(doc) if r.get("exploited") and r["tier"] in ("p1", "p2", "p3", "distro_fixed")]
 
 
 class PackageError(Exception):
@@ -471,6 +513,11 @@ def sort_key(r):
 
 
 def status_line(doc):
+    note = doc.get("_layer_note")
+    return _status_line(doc) + (f"；{note}" if note else "")
+
+
+def _status_line(doc):
     st = doc.get("vulnerability_data_status")
     if not doc.get("have_findings"):
         return "NOT_ASSESSED：這次掃描沒有弱點資料（Dependency-Track 的 findings 不存在），沒有資料不代表沒有弱點"
@@ -862,17 +909,66 @@ def finish_dashboard(cv, doc, d, r, h2, note, assessed):
     return cv
 
 
+def _sheet_rows(rows, fix_all, conf, layered):
+    return [([row_layer_zh(r)] if layered else []) + list_row(r, fix_all, conf) for r in rows]
+
+
 def list_sheets(doc, fix_all, conf):
-    """→ (完整漏洞清單：全部的列, 排除後剩下的：還要處理的列＋未分類)。兩張同樣的欄位，依 sort_key 排。"""
-    allr = sorted(doc["rows"], key=sort_key)
-    op = [r for r in allr if r["tier"] in OPEN_TIERS or r["tier"] not in TIER_CLASS]
-    full, rest = [list_row(r, fix_all, conf) for r in allr], [list_row(r, fix_all, conf) for r in op]
+    """→ (完整漏洞清單：全部的列, 排除後剩下的：還要處理的列＋未分類)。兩張同樣的欄位，依 sort_key 排。
+    分層（doc 有 layers 區塊）時：多一欄「層」，依層排（BSP、unknown、OS），「排除後剩下的」只放我們的待辦
+    （OS 層在 customer／upstream-vendor 時另放在它自己的工作表，見 layer_sheets；完整漏洞清單仍有全部的列）。"""
+    layered = layer_info(doc) is not None
+    key = (lambda r: (LAYER_RANK.get(r.get("layer"), 9), sort_key(r))) if layered else sort_key
+    allr = sorted(doc["rows"], key=key)
+    op = [r for r in allr if (r["tier"] in OPEN_TIERS or r["tier"] not in TIER_CLASS) and (not layered or is_todo(r))]
+    full, rest = _sheet_rows(allr, fix_all, conf, layered), _sheet_rows(op, fix_all, conf, layered)
+    head, widths = (LIST_HEADER_L, LIST_WIDTHS_L) if layered else (LIST_HEADER, LIST_WIDTHS)
     if not doc.get("have_findings"):
-        full = rest = [["NOT_ASSESSED－沒有弱點資料", "", "", "", "", "", "", "", "重新掃描", SW, "清單是空的是因為沒有資料，不是沒有弱點", "", ""]]
+        full = rest = [(["—"] if layered else []) + ["NOT_ASSESSED－沒有弱點資料", "", "", "", "", "", "", "", "重新掃描", SW, "清單是空的是因為沒有資料，不是沒有弱點", "", ""]]
     note = exposure_note(doc)
-    top = [[LIST_LEGEND]] + ([[note]] if note else []) + [[]]
-    return (Sheet("完整漏洞清單", LIST_HEADER, full, widths=LIST_WIDTHS, top=top, top_nowrap=True),
-            Sheet("排除後剩下的", LIST_HEADER, rest, widths=LIST_WIDTHS, top=top, top_nowrap=True))
+    top = [[LIST_LEGEND]] + ([[note]] if note else []) + ([["層：" + RESP_ZH[layer_info(doc).get("os_responsibility")]]] if layered else []) + [[]]
+    return (Sheet("完整漏洞清單", head, full, widths=widths, top=top, top_nowrap=True),
+            Sheet("排除後剩下的", head, rest, widths=widths, top=top, top_nowrap=True))
+
+
+def layer_sheets(doc, fix_all, conf):
+    """分層時多出來的工作表（依序）：OS 層的清單（customer／upstream-vendor）、通知客戶、分層摘要。沒有分層 → []。"""
+    ly = layer_info(doc)
+    if ly is None:
+        return []
+    resp = ly.get("os_responsibility")
+    out = []
+    top = [["層：" + RESP_ZH[resp]], []]
+    if resp in OS_SHEET:
+        rows = sorted((r for r in not_ours_os(doc) if r["tier"] in OPEN_TIERS or r["tier"] not in TIER_CLASS), key=sort_key)
+        body = _sheet_rows(rows, fix_all, conf, True) or [["OS", "（OS 層沒有還要處理的列）"] + [""] * (len(LIST_HEADER_L) - 2)]
+        out.append(Sheet(OS_SHEET[resp], LIST_HEADER_L, body, widths=LIST_WIDTHS_L, top=top, top_nowrap=True))
+        nr = sorted(notify_rows(doc), key=sort_key)
+        nbody = _sheet_rows(nr, fix_all, conf, True) or [["OS", "（OS 層沒有已被利用的項目）"] + [""] * (len(LIST_HEADER_L) - 2)]
+        out.append(Sheet(NOTIFY_SHEET, LIST_HEADER_L, nbody, widths=LIST_WIDTHS_L, top=[["OS 層已被利用（KEV、EUVD、人工證據）的列：要通知客戶，不是我們的修補待辦。"], []],
+                         top_nowrap=True))
+    out.append(layer_summary_sheet(doc, ly))
+    return out
+
+
+def layer_summary_sheet(doc, ly):
+    """各層的元件數與列數、規則說明、unknown 與主機端工具（只記數量與身分）。"""
+    resp = ly.get("os_responsibility")
+    comps, rows_n = ly.get("components") or {}, ly.get("rows") or {}
+    body = []
+    for l in ("bsp", "os", "unknown"):
+        rs = [r for r in doc["rows"] if r.get("layer") == l]
+        body.append([LAYER_ZH[l], comps.get(l, 0), len(rs), sum(1 for r in rs if r["tier"] == "p1"),
+                     sum(1 for r in rs if r["tier"] in OPEN_TIERS), sum(1 for r in rs if r["tier"] in OPEN_TIERS and is_todo(r))])
+    h = ly.get("host_tool") or {}
+    body.append([LAYER_ZH["host-tool"] + "（不在產品上執行，不進漏洞清單與 P1）", comps.get("host-tool", 0), 0, 0, 0, 0])
+    top = [["分層：" + RESP_ZH[resp]],
+           ["unknown＝判斷不了層（沒有發行版套件身分、也沒有路徑），不猜成 OS，一律列入我們的待辦；共 "
+            f"{(ly.get('unknown') or {}).get('components', 0)} 個元件（{', '.join(f'{k} {v}' for k, v in ((ly.get('unknown') or {}).get('by_purl_type') or {}).items()) or '—'}）。"],
+           [f"主機端工具：{h.get('count', 0)} 個元件；它們的 DT 比對 {h.get('findings_not_listed', 0)} 筆、Grype 比對 {h.get('grype_matches_not_listed', 0)} 筆不在產品漏洞清單。"
+            + ("身分：" + "；".join(f"{x.get('name')} {x.get('version') or ''}".strip() for x in (h.get("components") or [])[:20]) if h.get("count") else "")],
+           []]
+    return Sheet(LAYER_SHEET, ["層", "元件數", "漏洞列數", "立即處理（P1）", "還要處理的列", "其中我們的待辦"], body, widths=[44, 10, 10, 14, 14, 16], top=top, top_nowrap=True)
 
 
 def rules_sheet(doc, fix_all):
@@ -901,12 +997,25 @@ def rules_sheet(doc, fix_all):
     return Sheet("規則說明", ["規則代號", "初判", "分類", "結論", "要做什麼", "誰處理", "依據的一句話", "本次列數"], rows, widths=[12, 34, 22, 52, 36, 26, 40, 10], top=top)
 
 
-def p1_sheet(doc, fix_all):
-    p1 = [r for r in doc["rows"] if r["tier"] == "p1"]
+def p1_sheet(doc, fix_all, p1_layers=None):
+    """P1 判斷表。分層時預設只放我們的待辦（bsp、unknown；os 只有 os_responsibility 是 ours 或沒給時）；p1_layers（層的集合）可覆寫。
+    OS 層不是我們的待辦的 P1 不在這張表，列在 漏洞清單.xlsx 的 OS 層工作表與「通知客戶」。"""
+    ly = layer_info(doc)
+    p1_all = [r for r in doc["rows"] if r["tier"] == "p1"]
+    if ly is None:
+        p1, left = p1_all, []
+    elif p1_layers is not None:
+        p1 = [r for r in p1_all if r.get("layer") in p1_layers]
+        left = [r for r in p1_all if r.get("layer") not in p1_layers]
+    else:
+        p1 = [r for r in p1_all if is_todo(r)]
+        left = [r for r in p1_all if not is_todo(r)]
     by = collections.defaultdict(list)
     for r in p1:
         by[r["id"]].append(r)
     head = ["編號", "CVE", "元件與版本", "修補版本", "被利用證據", "初判", "回答", "決定", "填寫人", "日期"]
+    if ly is not None:
+        head.insert(3, "層")
     rows = []
     for i, cve in enumerate(sorted(by), 1):
         xs = sorted(by[cve], key=lambda r: (str(r.get("component")), str(r.get("version"))))
@@ -914,11 +1023,25 @@ def p1_sheet(doc, fix_all):
         ft = [fix_text(r, fix_all) for r in xs]
         fixes = ft[0] if len(set(ft)) == 1 else "；".join(f"{r.get('component')} {r.get('version') or ''}：{t}".replace("  ", " ") for r, t in zip(xs, ft))
         ev = "；".join(dict.fromkeys(e for r in xs for e in (exploit_text(r).split("；") if exploit_text(r) else [])))
-        rows.append([f"Q{i}", cve, comps, fixes, ev or "（沒有證據文字）", "", "", "", "", ""])
+        x = [f"Q{i}", cve, comps, fixes, ev or "（沒有證據文字）", "", "", "", "", ""]
+        if ly is not None:
+            x.insert(3, "、".join(dict.fromkeys(row_layer_zh(r) for r in xs)))
+        rows.append(x)
     if not rows:
         rows = [["", "（沒有立即處理的項目）" if doc.get("have_findings") else "NOT_ASSESSED：沒有弱點資料，不能當成沒有 P1",
-                 "", "", "", "", "", "", "", ""]]
-    return Sheet("P1 判斷表", head, rows, widths=[8, 18, 44, 36, 36, 20, 30, 16, 12, 12])
+                 "", "", "", "", "", "", "", ""] + ([""] if ly is not None else [])]
+    widths = [8, 18, 44, 36, 36, 20, 30, 16, 12, 12]
+    top = []
+    if ly is not None:
+        widths.insert(3, 16)
+        if p1_layers is not None:
+            scope = "指定的層（" + "、".join(LAYER_ZH[l] for l in P1_LAYER_CHOICES if l in p1_layers) + "）"
+        else:
+            scope = "BSP、層未定（unknown）" + ("、OS" if ly.get("os_responsibility") in (None, "ours") else "")
+        top = [["這張表放的是我們的待辦：" + scope],
+               [f"另有 {len(left)} 列 P1 不在這張表（OS 層不是我們的待辦：列在漏洞清單.xlsx 的「{NOTIFY_SHEET}」與 OS 層工作表）。" if left else
+                "沒有被排除在這張表之外的 P1。"], []]
+    return Sheet("P1 判斷表", head, rows, widths=widths, top=top, top_nowrap=True)
 
 
 def suggestion_sheet(doc):
@@ -999,7 +1122,8 @@ def sha256(p):
     return h.hexdigest()
 
 
-def build(project, out, supplier_project=None, name=None, version=None, allow_tmp=False, previous=None, diff_grype_db=None, inputs_check=None):
+def build(project, out, supplier_project=None, name=None, version=None, allow_tmp=False, previous=None, diff_grype_db=None, inputs_check=None,
+          p1_layers=None):
     """→ (退出碼, 訊息列表)。0＝完整；2＝有缺的輸入（GAP，記在未產生的項目.md）；PackageError＝失敗，沒有留下半成品。"""
     project = Path(project)
     reports = project / "CRA" / "Reports"
@@ -1044,8 +1168,15 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
         for d in (pm, rd, arch):
             d.mkdir()
         full, rest = list_sheets(doc, fix_all, conf)
-        write_xlsx(pm / "漏洞清單.xlsx", [dashboard_sheet(doc, fix_all, label), full, rest, rules_sheet(doc, fix_all)])
-        write_xlsx(rd / "P1判斷表.xlsx", [p1_sheet(doc, fix_all)] + ([suggestion_sheet(doc)] if suggestion_sheet(doc) else []))
+        ddoc = doc
+        if layer_info(doc) is not None:
+            # 總覽放我們的待辦的數字（OS 層不是我們的待辦時另有工作表）；其他工作表仍有全部的列
+            nlay = sum(1 for r in doc["rows"] if not is_todo(r))
+            ddoc = dict(doc, rows=[r for r in doc["rows"] if is_todo(r)],
+                        _layer_note=(f"總覽只含我們的待辦（另有 {nlay} 列在 OS 層，不是我們的待辦，見「{OS_SHEET.get(layer_info(doc).get('os_responsibility'), LAYER_SHEET)}」）"
+                                     if nlay else "分層：所有列都是我們的待辦"))
+        write_xlsx(pm / "漏洞清單.xlsx", [dashboard_sheet(ddoc, fix_all, label), full, rest, *layer_sheets(doc, fix_all, conf), rules_sheet(doc, fix_all)])
+        write_xlsx(rd / "P1判斷表.xlsx", [p1_sheet(doc, fix_all, p1_layers)] + ([suggestion_sheet(doc)] if suggestion_sheet(doc) else []))
         moved = {ROWS_FILE}
 
         def need(rel, dst, what):
@@ -1117,6 +1248,12 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
                 shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
         raise
     tc = tier_counts(doc["rows"])
+    ly = layer_info(doc)
+    if ly is not None:
+        lc = collections.Counter(r.get("layer") for r in doc["rows"])
+        msgs.insert(0, "分層：" + "、".join(f"{LAYER_ZH[l]} {lc[l]} 列" for l in ("bsp", "unknown", "os")) + f"（我們的待辦 {sum(1 for r in doc['rows'] if is_todo(r))} 列；"
+                    f"os_responsibility {ly.get('os_responsibility') or '未給（GAP，不預設，全部列入待辦）'}；P1 判斷表"
+                    + (f"只含 {'、'.join(x for x in P1_LAYER_CHOICES if x in p1_layers)}" if p1_layers is not None else "預設只含我們的待辦") + "）")
     msgs.insert(0, "；".join(f"{c} {a} 列（{b} 個 CVE）" for c, (a, b) in tc.items() if c != T_OTHER or a) + f"；{status_line(doc)}")
     st = doc.get("vulnerability_data_status")
     if not doc.get("have_findings"):
@@ -1153,6 +1290,8 @@ def main(argv=None):
     ap.add_argument("--previous", help="（選用）同一產品前一份報告的資料夾；給了就產生和它的差異（內部存檔＋客戶資料包的英文版）")
     ap.add_argument("--diff-grype-db", help="（選用，要有 --previous）這一次用的 vulnerability.db，唯讀，用來核對發行版狀態")
     ap.add_argument("--inputs-check", help="（選用）精靈產生的 inputs-check.json；缺少的必要輸入會在報告標 GAP，檔案放內部存檔")
+    ap.add_argument("--p1-layers", help="（選用，只在報告有分層時）P1 判斷表放哪幾層的 P1，逗號分隔：bsp,unknown,os；預設只放我們的待辦"
+                                        "（bsp、unknown，OS 層只有 os_responsibility 是 ours 或沒給時）")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -1160,9 +1299,15 @@ def main(argv=None):
     if a.diff_grype_db and not a.previous:
         print("FAIL\t--diff-grype-db 要和 --previous 一起給", file=sys.stderr)
         return 64
+    p1_layers = None
+    if a.p1_layers is not None:
+        p1_layers = set(x.strip() for x in a.p1_layers.split(",") if x.strip())
+        if not p1_layers or not p1_layers <= set(P1_LAYER_CHOICES):
+            print(f"FAIL\t--p1-layers 只能是 {','.join(P1_LAYER_CHOICES)}（逗號分隔）", file=sys.stderr)
+            return 64
     try:
         code, msgs = build(a.project, a.out, a.supplier_project, a.name, a.version, previous=a.previous,
-                           diff_grype_db=a.diff_grype_db, inputs_check=a.inputs_check)
+                           diff_grype_db=a.diff_grype_db, inputs_check=a.inputs_check, p1_layers=p1_layers)
     except PackageError as e:
         print(f"FAIL\t{e}", file=sys.stderr)
         return 1
