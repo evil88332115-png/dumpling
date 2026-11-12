@@ -110,7 +110,7 @@ echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
-  --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" "${runargs[@]}" "${official[@]}" \
+  --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]}" \
   || fail "收集結果失敗"
 cp "$out/wizard.log" "$out/release/" 2> /dev/null; rm -f "$out/release/wizard.log"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json
@@ -121,11 +121,18 @@ if [ -f "$exp" ]; then
 else
   state=GAP; msg="沒有標準答案 tests/expected/$DUMPLING_PROJECT/$ver.json，沒有比對"
 fi
+# workflow 前面步驟（validate、fetch、build、assemble…）的結果：有 GAP 或 FAIL 整體就不是 OK（pipeline/run-step.sh 寫的 pipeline-steps.tsv）
+sp=$(python3 -I "$root/pipeline/lib/step_rows.py" status "$out/pipeline-steps.tsv" 2> /dev/null || echo GAP)
+case $sp in
+  OK) ;;
+  *) state=GAP; msg="$msg；流程步驟的整體狀態是 $sp（見 pipeline-steps.tsv）";;
+esac
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi
 {
   echo "## scan（$DUMPLING_PROJECT $ver）"
   echo "- 狀態：$state（$msg）"
   python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print("- 核心 %s；建置紀錄 %s；C-kernel-boot %s；元件 %s；上游比對 %s"%(d["kernel_release"],d["build_record_status"],d["kernel_boot"],d["components"],d["upstream_source"]));print("- 漏洞 %s"%d["vulnerabilities"])' "$out/scan.json"
+  [ ! -f "$out/steps-summary.md" ] || { echo; cat "$out/steps-summary.md"; }
 } > "$out/summary.md"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
 [ "$state" = OK ] && exit 0 || exit 3

@@ -192,6 +192,21 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
 | `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
 
+**步驟的結束碼規則與紀錄**（`pipeline/run-step.sh <步驟> <專案資料夾> <版本>`，workflow 所有 `platform.sh` 呼叫的唯一入口；`--record <專案資料夾> <版本> <步驟> <狀態> <結束碼> <說明>` 只記一列）：
+
+| 結束碼 | 狀態 | 行為 |
+|---|---|---|
+| 0 | OK | 繼續 |
+| 3 | GAP | 印 `::warning::`，繼續（結果照樣產生，但整體狀態不是 OK） |
+| 4 | NOT_RUN | 印 `::notice::`，繼續（不能當成成功；照實列出） |
+| 1、64 或其他 | FAIL | job 失敗 |
+
+每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
+scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
+`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `result`（`OK`｜`GAP`｜`FAIL`；有 FAIL 是 FAIL、有 GAP 至少 GAP；
+`status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
+Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
+
 **build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
 workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。
 build 若寫 `handoff/build-summary.md`，workflow 把它放進 step summary（沒有就用 build 步驟的最後一行）。`build.mode: none` 的平台沒有 handoff。

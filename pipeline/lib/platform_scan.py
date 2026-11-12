@@ -19,14 +19,18 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
                return ["## 建置", "", "- …"]
 
        # args 要有：out、project、version、layers（sbom-layers.py 的輸出資料夾；沒分層給 None）、build_json、assemble_json（沒有就給 None）、
-       #            scan_json、run（["<後綴>=<資料夾>", …]）、official（bool）
+       #            scan_json、run（["<後綴>=<資料夾>", …]）、official（bool）；
+       #            選用：steps（pipeline-steps.tsv 的路徑，pipeline/run-step.sh 寫的各步驟結果）、steps_md（把步驟表另存成 Markdown 的路徑，給 summary.md 用）
        ps.collect(args, MyHooks())
 
    不需要的 hook 不用寫（預設都是空的）。`collect` 的輸出（都在 `args.out`）：
    - `sbom-<專案>-<版本>.cdx.json`（`layers/sbom.product.cdx.json`）、`-bsp`／`-os` 分層 SBOM、`layers.json`（有分層時）
    - 每個 run：`report-<專案>-<版本><後綴>.zip`、`vex-…`、`vuln-list-….xlsx`、`p1-table-….xlsx`（檔名、來源路徑、顯示名稱由 `Hooks.report_files` 決定）
    - `scan-summary-<專案>-<版本>.json`（＝scan.json，標準答案比對用，見 `pipeline/check-expected.py`）、`notes.md`、`manifest.tsv`（檔名 TAB 顯示名稱）
-3. 標準答案（`tests/expected/<專案>/<版本>.json`）的路徑是 scan.json 的點分路徑；平台特有欄位由 hook 放進去。
+3. **步驟紀錄**：給 `args.steps` 時，`collect` 把每個 workflow 步驟的結果（OK｜GAP｜NOT_RUN｜FAIL）放進 scan.json 的 `pipeline_steps`、`pipeline_status`
+   （有 FAIL → FAIL；有 GAP → GAP；其他 OK；檔案不存在 → GAP）、notes.md 的「流程步驟」表，並寫 `args.steps_md`。整體狀態有 GAP 或 FAIL 時不是 OK——
+   平台的 scan 沒有去讀 raw-sectors.json 之類的檔案，GAP 也不會消失。呼叫端（scan.sh）據此至少回報 GAP。
+4. 標準答案（`tests/expected/<專案>/<版本>.json`）的路徑是 scan.json 的點分路徑；平台特有欄位由 hook 放進去。
 
 規則：缺的項目在 scan.json 記 null，**不推測**，標準答案比對會因此失敗而不是通過；附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元），中文名稱放在 manifest 的顯示標籤。
 """
@@ -39,6 +43,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import step_rows  # noqa: E402
 
 LAYER_PROP = "dumpling:layer"
 DETAIL_STAGES = ("C-kernel-boot", "C-kernel-config", "C-kernel-cve-list", "A-md5", "C-nvidia-bulletins")
@@ -244,6 +249,11 @@ def collect(a, hooks=None):
     scan.update(hooks.scan_mid(ctx))
     scan["runs"] = runs
     scan.update(hooks.scan_tail(ctx))
+    steps_path = getattr(a, "steps", None)
+    srows = step_rows.read_rows(steps_path) if steps_path else None
+    if steps_path:
+        scan["pipeline_steps"] = srows
+        scan["pipeline_status"] = step_rows.overall(srows)
     scan["vulnerabilities"] = {("full" if k == "" else k.lstrip("-")): v.get("vulnerabilities") for k, v in runs.items()}
     with open(a.scan_json, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=1)
@@ -262,6 +272,13 @@ def collect(a, hooks=None):
         v = v or {}
         L.append("| %s | %s | %s | %s |" % ({"full": "完整（全部層）"}.get(k, k), v.get("rows_total"), v.get("cves_total"), v.get("p1_rows")))
     L += hooks.notes_after_vulnerabilities(ctx)
+    if steps_path:
+        L += ["", "## 流程步驟（workflow 每一步的結果；整體狀態 **%s**）" % scan["pipeline_status"], ""]
+        L += step_rows.markdown_table(srows) if srows is not None else ["（沒有 pipeline-steps.tsv：不能當成沒問題，整體狀態 GAP）"]
+        sm = getattr(a, "steps_md", None)
+        if sm:
+            with open(sm, "w", encoding="utf-8") as f:
+                f.write("\n".join(["### 流程步驟（整體狀態 %s）" % scan["pipeline_status"], ""] + (step_rows.markdown_table(srows) if srows is not None else ["（沒有 pipeline-steps.tsv）"])) + "\n")
     L += ["", "## 附件", "",
           "- 檔名固定、機器可讀：`sbom-<專案>-<版本>.cdx.json`（完整，標好層；分層加 `-bsp`／`-os`）、`layers.json`、`release-meta.json`。",
           "- `report-*.zip`：報告包（漏洞清單、P1 判斷表、SBOM、VEX、內部存檔）；`vuln-list-*.xlsx`＝漏洞清單、`p1-table-*.xlsx`＝P1 判斷表、`vex-*.cdx.json`＝VEX。"]

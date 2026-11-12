@@ -164,6 +164,8 @@ def main(argv=None):
     c.add_argument("--build-record", default=None)
     c.add_argument("--project-dir", default=None, help="專案資料夾（讀 sources.yml，把下載檔的 sha256 與依據寫進建置紀錄摘要）")
     c.add_argument("--official", action="store_true")
+    c.add_argument("--steps", default=None, help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）")
+    c.add_argument("--steps-md", default=None, help="把步驟表另存成 Markdown（給 summary.md）")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "site-config":

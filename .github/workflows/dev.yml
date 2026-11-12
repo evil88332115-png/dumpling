@@ -118,7 +118,7 @@ jobs:
           tag="dev/$PROJECT"
           cd "$RUNNER_TEMP/result"
           python3 -I "$GITHUB_WORKSPACE/pipeline/release-meta.py" --project "$PROJECT" --version "$VERSION" --tag "$tag" \
-            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --out release-meta.json
+            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps pipeline-steps.tsv --out release-meta.json
           # 只發 SBOM（完整與分層）、layers.json、release-meta.json；報告與 VEX 留在 artifact
           files=(release-meta.json)
           for f in "sbom-$PROJECT-$VERSION.cdx.json" "sbom-$PROJECT-$VERSION-bsp.cdx.json" "sbom-$PROJECT-$VERSION-os.cdx.json" layers.json; do

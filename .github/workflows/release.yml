@@ -103,7 +103,7 @@ jobs:
           TAG: ${{ needs.info.outputs.tag }}
         run: |
           python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$TAG" \
-            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --out "$RUNNER_TEMP/result/release-meta.json"
+            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps "$RUNNER_TEMP/result/pipeline-steps.tsv" --out "$RUNNER_TEMP/result/release-meta.json"
           printf 'release-meta.json\trelease-meta.json\n' >> "$RUNNER_TEMP/result/manifest.tsv"
       - name: 建立 Release（手動觸發只建 draft；tag push 才發正式 Release）
         env:
