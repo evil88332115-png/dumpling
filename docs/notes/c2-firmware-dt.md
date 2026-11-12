@@ -60,10 +60,10 @@ D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿�
 不在必要清單內，也不能要求。本機實測四個上傳成功的樣本，11 個必要階段全部 OK。
 
 供應商 SBOM 被 DT 拒收（`expected_dt`）：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
-report 的判斷：宣告 rejected 且 `D-dt-upload` 是 `http=400` → 狀態照實標 FAIL，說明寫「與 firmware.yml 宣告的 expected_dt 一致」，不讓 job 失敗；
+report 的判斷：宣告 rejected 且 `D-dt-upload` 是 DT 的「BOM 不符 schema」回應（`BOM_INVALID_RE`：說明開頭必須是 `http=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"`，DT 5.2.0 實測）→ 狀態照實標 FAIL，說明寫「與 firmware.yml 宣告的 expected_dt 一致」，不讓 job 失敗；
 同時 dt-verify 的「弱點分析完成」「元件數」FAIL 是同一個原因，合併成一則說明、不另外計算。**只放行「上傳被拒」這一種**：上傳之前的必要階段（A-source、B-sandbox、B-sandbox-secrets、
 B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、F-secret-scan）不是 OK、sca-scan 有別的 FAIL 階段、Grype FAIL、dt-verify 有別項 FAIL，都照常 FAIL 並註明「不放行」。
-宣告了卻上傳成功＝MISMATCH（job 失敗，供應商可能修好了）；沒宣告卻被拒收＝一般 FAIL；宣告了但失敗不是 http=400＝一般 FAIL。
+宣告了卻上傳成功＝MISMATCH（job 失敗，供應商可能修好了）；沒宣告卻被拒收＝一般 FAIL；宣告了但失敗不是這種拒收＝一般 FAIL，**其他 400 也是**（例如 `projectName must not be blank`，那是 dumpling 自己的參數錯誤；PR #14 驗證時發現只看 http=400 會被放行，已改成比對回應開頭）。宣告了卻沒有上傳結果（NOT_RUN／GAP，例如沒有 PILOT_ENV）＝狀態照實，但 report 以 1 結束，與沒宣告的樣本一致。DT 改了訊息時會比對不到，被拒收的樣本變成一般 FAIL（安全的方向），屆時依新回應更新 `BOM_INVALID_RE`。
 `firmware-dt.sh` 對有宣告的樣本，sca-scan 結束碼 1、必要階段不是 OK、dt-verify 失敗三步只記 `FIRMWARE-DT-STEP EXPECTED`，是否放行交給 report。
 `firmware-sbom-check` 另會提示「DT 可能拒收（schema 不符）」：license 物件沒有 id 也沒有 name、頂層有 CycloneDX 沒有的欄位（寫死的欄位聯集清單，不是 schema 檔，沒提示不代表合格）。
 

@@ -316,9 +316,12 @@ class ReportTests(Base):
         self.assertTrue(out.startswith("FIRMWARE-DT\tGAP\t"), out)
 
     # ---- expected_dt（樣本宣告 DT 會拒收）：宣告／沒宣告 × 拒收／成功
+    # DT 5.2.0 的實際回應（Actions run 43266687645 的 status.tsv；sca-scan 只留回應的前 200 bytes）
+    REAL_400 = ('http=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed","errors":'
+                '["/components/0/licenses/18/license: must be valid to one and only one schema, but 0 are valid","/compo')
     ED = 'expected_dt:\n  upload: rejected\n  reason: "供應商 SBOM 不符 schema"\n'
     PRE = [(x, "OK", "x") for x in fd.REJECT_PRE_OK if x != "D-dt-project"]
-    REJ = PRE + [("D-dt-project", "OK", "x"), ("D-dt-upload", "FAIL", 'http=400 {"title":"The uploaded BOM is invalid"}'),
+    REJ = PRE + [("D-dt-project", "OK", "x"), ("D-dt-upload", "FAIL", REAL_400),
                  ("D-dt-bom-processing", "NOT_RUN", "上傳失敗"), ("D-dt-vuln-analysis", "NOT_RUN", "上傳失敗")]
     REJ_SUMM = {"components": 0, "findings_total": 0, "checks": [
         {"name": "專案存在", "status": "OK", "detail": ""}, {"name": "弱點分析完成", "status": "FAIL", "detail": ""},
@@ -385,7 +388,44 @@ class ReportTests(Base):
         o, dt = self.rej_case(True, rows, self.REJ_SUMM, "d9")
         rc, out, _ = self.run_report([o], dt)
         self.assertEqual(rc, 1)
-        self.assertIn("不是 http=400", out)
+        self.assertIn("不是 DT 的「BOM 不符 schema」拒收", out)
+
+    def test_declared_other_400_is_not_a_rejection(self):
+        # 驗證代理重現的情形：400 但原因是 dumpling 自己的參數錯誤，不能當成宣告的拒收放行
+        others = ('http=400 {"title":"projectName must not be blank"}',
+                  'http=400 {"status":400,"title":"Bad Request","detail":"The uploaded BOM is invalid"}',   # 字串出現在別的欄位
+                  'http=400 x{"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"}',
+                  'http=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failedX"}',
+                  'http=4000 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"}',
+                  'http=400 ')
+        for i, d in enumerate(others):
+            rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", "FAIL", d) for r in self.REJ]
+            o, dt = self.rej_case(True, rows, self.REJ_SUMM, "o%d" % i)
+            rc, out, _ = self.run_report([o], dt)
+            self.assertEqual(rc, 1, d)
+            self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), out)
+            self.assertNotIn("一致", out, d)
+            self.assertIn("不是 DT 的「BOM 不符 schema」拒收", out)
+            o, dt = self.rej_case(False, rows, self.REJ_SUMM, "n%d" % i)                 # 沒宣告：一般 FAIL，不說「DT 拒收」
+            rc, out, _ = self.run_report([o], dt)
+            self.assertEqual(rc, 1, d)
+            self.assertNotIn("BOM 不符 schema）；firmware.yml 沒有宣告", out)
+
+    def test_declared_without_upload_result_fails(self):
+        # 宣告了 expected_dt 卻沒有上傳結果（例如沒有 PILOT_ENV）：狀態照實 NOT_RUN／GAP，但 report 以 1 結束（與沒宣告的樣本一致）
+        nr = [r for r in self.PRE] + [(x, "NOT_RUN", "沒有 PILOT_ENV") for x in ("D-dt-project", "D-dt-upload", "D-dt-bom-processing", "D-dt-vuln-analysis")]
+        o, dt = self.rej_case(True, nr, None, "u1")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tNOT_RUN\t"), out)
+        self.assertIn("沒有上傳結果可核對宣告", out)
+        info, o2 = self.prep(bom(comp("a", "r1")), slug="sup-u2", out="p-u2", kind="sbom", version="firmware_version: 1.0\n" + self.ED)
+        os.makedirs(os.path.join(self.tmp, "empty-dt"))
+        rc, out, _ = self.run_report([o2], os.path.join(self.tmp, "empty-dt"))      # 完全沒有這個樣本的 DT 結果
+        self.assertEqual(rc, 1)
+        self.assertIn("沒有上傳結果可核對宣告", out)
+        o, dt = self.rej_case(False, nr, None, "u3")                                   # 沒宣告：report 本身不因 NOT_RUN 失敗（由 firmware-dt.sh 的必要階段檢查擋）
+        self.assertEqual(self.run_report([o], dt)[0], 0)
 
     def test_expected_dt_validation(self):
         for bad in ("expected_dt: yes\n", "expected_dt:\n  upload: accepted\n  reason: x\n",

@@ -192,7 +192,7 @@ while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; *) shift;; esac; done
 mkdir -p "$out/scan"; echo '{"matches": []}' > "$out/scan/grype.json"
 { printf 'stage\\tstatus\\tdetail\\n'
   for s in A-source B-sandbox B-sandbox-secrets B-sbom-provided C-grype C-upload-sbom D-dt-project F-secret-scan; do printf '%s\\tOK\\tx\\n' $s; done
-  printf 'D-dt-upload\\tFAIL\\thttp=400 {}\\nD-dt-bom-processing\\tNOT_RUN\\tx\\nD-dt-vuln-analysis\\tNOT_RUN\\tx\\n'; } > "$out/status.tsv"
+  printf 'D-dt-upload\\tFAIL\\thttp=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed","errors":[]}\\nD-dt-bom-processing\\tNOT_RUN\\tx\\nD-dt-vuln-analysis\\tNOT_RUN\\tx\\n'; } > "$out/status.tsv"
 exit 1
 """, 0o755)
         self.w("repo/pipeline/scan-status-check.py", "import sys\nprint('必要階段不是 OK')\nsys.exit(1)\n")

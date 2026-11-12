@@ -37,6 +37,10 @@ STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL", "MISMATCH")
 # firmware.yml 的 expected_dt：樣本自己宣告 DT 的預期結果（目前只有 upload: rejected＝DT 會拒收這份 SBOM，例如供應商 SBOM 不符 CycloneDX schema）
 EXPECTED_DT_KEYS = ("upload", "reason")
 # 宣告 rejected 且真的被拒收時，上傳之前的這些階段仍要是 OK（其餘階段都在上傳之後，被拒收就不會有結果）
+# DT 對「BOM 不符 schema」的 400 回應開頭（DT 5.2.0 實測：sca-scan 的 D-dt-upload 說明是「http=400 」加回應的前 200 bytes）。
+# 只有這個開頭才算 expected_dt 的拒收；其他 400（例如 projectName must not be blank，是 dumpling 自己的參數錯誤）一律一般 FAIL。
+# DT 改了訊息時，這裡會比對不到 → 被拒收的樣本變成一般 FAIL（安全的方向），屆時依新回應更新。
+BOM_INVALID_RE = re.compile(r'^http=400 \{"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"[,}]')
 REJECT_PRE_OK = ("A-source", "B-sandbox", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "C-upload-sbom", "D-dt-project", "F-secret-scan")
 # 被拒收的直接後果：dt-verify 這兩項（沒有上傳成功就沒有分析、沒有元件）；名稱取自 C1 的 dt-verify.py
 REJECT_VERIFY_NAMES = ("弱點分析完成", "元件數")
@@ -392,7 +396,7 @@ def sample_result(info, dt_dir, wait_rc):
     """回傳 dict：dt_components, dt_findings, upload, grype, grype_matches, status, notes。"""
     s = info["summary"]
     r = {"upload": "NOT_RUN", "dt_components": "-", "dt_findings": "-", "grype": "NOT_RUN", "grype_matches": "-",
-         "notes": [], "verify_fail": [], "accepted": False}
+         "notes": [], "verify_fail": [], "accepted": False, "unverified_declaration": False}
     exp_dt = info.get("expected_dt")
     rejected = False
     sd = os.path.join(dt_dir, info["project_name"]) if dt_dir else None
@@ -414,12 +418,13 @@ def sample_result(info, dt_dir, wait_rc):
     if rows is None and summ is None and r["upload"] != "FAIL":
         r["notes"].append("沒有 DT 結果")
         r["status"] = "NOT_RUN"
+        _unverified_declaration(r, exp_dt)
         return r
     if rows is not None:
         r["upload"] = _worst([rows[x][0] if x in rows else "NOT_RUN" for x in UPLOAD_STAGES])
         fails = [k for k, v in rows.items() if v[0] == "FAIL"]
         up = rows.get("D-dt-upload", ("NOT_RUN", ""))
-        rejected = up[0] == "FAIL" and up[1].startswith("http=400")        # DT 的 schema 驗證不過＝400 "The uploaded BOM is invalid"
+        rejected = up[0] == "FAIL" and bool(BOM_INVALID_RE.match(up[1]))   # 只認 DT 的「BOM 無效、schema 不符」；其他 400 是一般 FAIL
         if exp_dt and rejected:
             fails = [k for k in fails if k != "D-dt-upload"]              # 已宣告的拒收，不重複報 sca-scan 的這一列
         if fails:
@@ -466,7 +471,7 @@ def sample_result(info, dt_dir, wait_rc):
             r["notes"].append("上傳之前的必要階段不是 OK：" + "、".join(_cell(x, 60) for x in pre))
         extra = bool(pre or others or r["verify_fail"] or r["grype"] == "FAIL")
         r["accepted"] = not extra
-        r["notes"].insert(0, "DT 拒收上傳（http=400），%s：%s" % (
+        r["notes"].insert(0, "DT 拒收上傳（http=400，BOM 不符 schema），%s：%s" % (
             "與 firmware.yml 宣告的 expected_dt 一致" if not extra else "firmware.yml 有宣告 expected_dt，但還有其他失敗，不放行",
             _cell(exp_dt["reason"], 400)))
         st = "FAIL"
@@ -476,9 +481,9 @@ def sample_result(info, dt_dir, wait_rc):
     elif r["upload"] == "FAIL" or r["verify_fail"] or r["grype"] == "FAIL":
         st = "FAIL"
         if rejected:
-            r["notes"].append("DT 拒收上傳（http=400）；firmware.yml 沒有宣告 expected_dt")
+            r["notes"].append("DT 拒收上傳（http=400，BOM 不符 schema）；firmware.yml 沒有宣告 expected_dt")
         elif exp_dt:
-            r["notes"].append("firmware.yml 宣告 expected_dt: rejected，但上傳失敗不是 http=400 的拒收")
+            r["notes"].append("firmware.yml 宣告 expected_dt: rejected，但上傳失敗不是 DT 的「BOM 不符 schema」拒收（http=400 且回應為 The uploaded BOM is invalid／Schema validation failed）")
     elif wait_rc == 3 or "GAP" in (r["upload"], r["grype"]):
         st = "GAP"
     elif summ is None or rows is None or r["upload"] != "OK" or r["grype"] != "OK":
@@ -490,7 +495,17 @@ def sample_result(info, dt_dir, wait_rc):
     if wait_rc == 3:
         r["notes"].append("dt-ephemeral wait 結束碼 3（資料不完整）：0 筆漏洞不能當成沒有漏洞")
     r["status"] = st
+    if st in ("NOT_RUN", "GAP"):
+        _unverified_declaration(r, exp_dt)
     return r
+
+
+def _unverified_declaration(r, exp_dt):
+    """宣告了 expected_dt，但沒有上傳結果可以核對（NOT_RUN／GAP）：狀態照實，但 report 以 1 結束。
+    與沒宣告的樣本一致（沒宣告時 firmware-dt.sh 的必要階段檢查會失敗）；宣告不能讓「沒跑」變成 job 綠燈。"""
+    if exp_dt:
+        r["unverified_declaration"] = True
+        r["notes"].append("firmware.yml 宣告 expected_dt，但沒有上傳結果可核對宣告（狀態 %s）；視為失敗" % r["status"])
 
 
 def vbios_assessment(root=None):
@@ -580,7 +595,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         md.append("")
     with open(os.path.join(out, "firmware-dt.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
-    return lines, any(r["status"] in ("FAIL", "MISMATCH") and not r["accepted"] for _, r in rows)
+    return lines, any((r["status"] in ("FAIL", "MISMATCH") and not r["accepted"]) or r["unverified_declaration"] for _, r in rows)
 
 
 def main(argv=None):
