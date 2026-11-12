@@ -441,7 +441,7 @@ class ScanHelpers(Tmp):
         json.dump({"kernel_release": "6.8.12-ci", "image_sha256": "a" * 64, "build_record_sha256": "b" * 64, "patches": []}, open(self.p("build.json"), "w"))
         json.dump({"package_sha256": "c" * 64}, open(self.p("assemble.json"), "w"))
         args = js.argparse.Namespace(out=self.p("rel"), project="p", version="v1", layers=lay, build_json=self.p("build.json"), assemble_json=self.p("assemble.json"),
-                                     scan_json=self.p("scan.json"), run=["=" + w], build_record="/x/BuildRecord-p-v1.tar.gz", sources_files=[], official=False)
+                                     scan_json=self.p("scan.json"), run=["=" + w], build_record="/x/BuildRecord-p-v1.tar.gz", project_dir=os.path.join(ROOT, "projects", "orin-nano-demo"), official=False)
         scan = js.collect(args)
         self.assertEqual(scan["build_record_status"], "OK")
         self.assertEqual(scan["kernel_boot"], "OK")

@@ -212,8 +212,19 @@ def collect(a):
     add(manifest, out, "scan-summary-%s-%s.json" % (proj, ver), "掃描摘要（標準答案比對用）")
     # --- 建置紀錄的雜湊摘要 ---
     src_files = []
-    for f in a.sources_files:
-        src_files.append(f)
+    if a.project_dir:
+        import project_config as pc
+        rel = pc.load_sources(os.path.join(a.project_dir, "sources.yml"))["releases"].get(ver) or {}
+        for f in rel.get("files", []):
+            if f.get("gap"):
+                basis = "GAP：沒有可核對的雜湊"
+            elif f.get("sha1"):
+                basis = "sha256 固定在 sources.yml；SHA-1 對照 NVIDIA 公布的 release_sha_hashes.txt"
+            elif f["name"] == "public_sources.tbz2":
+                basis = "首次下載記錄（TOFU），NVIDIA 沒有公布整包雜湊"
+            else:
+                basis = "sha256 固定在 sources.yml"
+            src_files.append({"name": f["name"], "role": f.get("role"), "sha256": f.get("sha256"), "basis": basis})
     brs = {"schema": 1, "project": proj, "version": ver, "kernel_release": build.get("kernel_release"), "image_sha256": build.get("image_sha256"),
            "build_record_file": os.path.basename(a.build_record) if a.build_record else None,
            "build_record_sha256": build.get("build_record_sha256"),
@@ -230,17 +241,30 @@ def collect(a):
         json.dump(brs, f, ensure_ascii=False, indent=1)
     add(manifest, out, bname, "建置紀錄雜湊摘要")
     # --- notes.md ---
+    us = scan["upstream_source"] or {}
+    cb = scan["components"]
     L = ["# %s %s" % (proj, ver), "",
-         "由 GitHub Actions 自動建置與掃描（%s）。" % ("正式 Release" if a.official else "手動觸發的草稿"), "",
-         "- 核心：%s；Image SHA-256 `%s`（建置不可重現，同一份原始碼編兩次會不同）" % (build.get("kernel_release"), build.get("image_sha256")),
-         "- 建置紀錄：狀態 **%s**（CI 自編，與刷機包的核心和模組身分相符時為 OK）；C-kernel-boot **%s**" % (scan["build_record_status"], scan["kernel_boot"]),
-         "- UEFI 未自編（使用 BSP 內建，D-002）",
-         "- 上游比對（原始碼）：%s" % json.dumps(scan["upstream_source"], ensure_ascii=False),
-         "- 元件 %s 個（bsp %s、os %s、unknown %s）" % (scan["components"]["total"], scan["components"]["bsp"], scan["components"]["os"], scan["components"]["unknown"]),
-         "- 漏洞：%s" % json.dumps(scan["vulnerabilities"], ensure_ascii=False),
-         "- public_sources.tbz2 的整包雜湊依據是**首次下載記錄（TOFU）**，不是 NVIDIA 公布的值；元件的 SHA-1 才是對照 NVIDIA 公布值。",
-         "- 附件的檔名固定：`sbom-<專案>-<版本>.cdx.json`（分層加 `-bsp`／`-os`）、`release-meta.json`。",
-         "", "缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED；沒有整體 PASS。"]
+         "由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), "",
+         "## 建置", "",
+         "- 核心 `%s`；Image SHA-256 `%s`（建置不可重現：同一份原始碼編兩次，Image 的 SHA-256 不同）" % (build.get("kernel_release"), build.get("image_sha256")),
+         "- 建置紀錄（CI 自編）狀態：**%s**（OK＝與刷機包的核心和模組身分相符）；C-kernel-boot（刷機包有兩顆核心？）：**%s**" % (scan["build_record_status"], scan["kernel_boot"]),
+         "- UEFI 未自編，使用 BSP 內建（D-002）",
+         "- patch：%s" % ("、".join(x.get("file", "?") for x in (build.get("patches") or [])) or "無"),
+         "- 上游比對（原始碼 vs NVIDIA public_sources）：狀態 %s，**%s 個檔案被修改**%s；只有我們有 %s、只有 NVIDIA 有 %s（NOT_ASSESSED 的元件不算相同）" % (
+             us.get("status"), us.get("modified"), ("（" + "、".join(us.get("modified_files") or []) + "）") if us.get("modified_files") else "", us.get("ours_only"), us.get("upstream_only")),
+         "- 上游比對（成品 vs NVIDIA BSP）：%s" % json.dumps(scan["upstream_artifacts"], ensure_ascii=False),
+         "", "## 元件與分層", "",
+         "元件 %s 個：bsp %s、os %s、unknown %s、host-tool %s（unknown 的原因見 `layers.json`）。" % (cb["total"], cb["bsp"], cb["os"], cb["unknown"], cb["host_tool"]),
+         "", "## 漏洞（資料庫會變動；各份報告的數字）", "", "| 報告 | 列數 | CVE 數 | P1 判斷表列數 |", "|---|---:|---:|---:|"]
+    for k, v in sorted(scan["vulnerabilities"].items()):
+        v = v or {}
+        L.append("| %s | %s | %s | %s |" % ({"full": "完整（全部層）"}.get(k, k), v.get("rows_total"), v.get("cves_total"), v.get("p1_rows")))
+    L += ["", "## 雜湊的依據", "",
+          "- `public_sources.tbz2` 的整包雜湊依據是**首次下載記錄（TOFU，2026-11-12）**，不是 NVIDIA 公布的值；包內元件的 SHA-1 才是對照 NVIDIA 公布的 `public_sources_sha.txt`（`build-record-*.json`）。",
+          "", "## 附件", "",
+          "- 檔名固定、機器可讀：`sbom-<專案>-<版本>.cdx.json`（完整，標好層；分層加 `-bsp`／`-os`）、`layers.json`、`release-meta.json`。",
+          "- `report-*.zip`：報告包（漏洞清單、P1 判斷表、SBOM、VEX、內部存檔）；`vuln-list-*.xlsx`＝漏洞清單、`p1-table-*.xlsx`＝P1 判斷表、`vex-*.cdx.json`＝VEX。",
+          "- `build-record-*.json`：建置紀錄的雜湊摘要；`scan-summary-*.json`：標準答案比對用的掃描摘要。"]
     with open(os.path.join(out, "notes.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
     with open(os.path.join(out, "manifest.tsv"), "w", encoding="utf-8") as f:
@@ -266,7 +290,7 @@ def main(argv=None):
         c.add_argument("--" + k, required=True)
     c.add_argument("--run", action="append", required=True, help="<名稱後綴>=<精靈輸出資料夾>（完整掃描的後綴是空字串）")
     c.add_argument("--build-record", default=None)
-    c.add_argument("--sources-files", nargs="*", default=[], type=json.loads, help="JSON 物件：{name, sha256, basis}")
+    c.add_argument("--project-dir", default=None, help="專案資料夾（讀 sources.yml，把下載檔的 sha256 與依據寫進建置紀錄摘要）")
     c.add_argument("--official", action="store_true")
     a = ap.parse_args(argv)
     try:
