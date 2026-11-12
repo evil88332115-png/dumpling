@@ -82,6 +82,17 @@ if [ -d "$OUT" ]; then
   ( cd "$OUT" && find . \( -name Image -path '*/arch/arm64/boot/*' -o -name '*.dtb' -o -name '*.ko' -o -name .config -o -name System.map -o -name Module.symvers -o -name 'modules.*' -o -name '.*.cmd' -o -name 'utsversion.h' -o -name compile.h -o -name kernel.release \) -type f ) > "$RES/deliver.list"
   echo "交付與紀錄檔：$(wc -l < "$RES/deliver.list") 個，$(cd "$OUT" && xargs -a "$RES/deliver.list" -d '\n' du -cb 2>/dev/null | tail -1 | cut -f1) bytes"
   est deliverables "-T '$RES/deliver.list'"
+  tar -tzf "$RES/BuildRecord-spike.tar.gz" | sort | sha256sum | cut -d' ' -f1 > "$RES/buildrecord.listsha"
+  echo "BuildRecord 檔案清單 sha256：$(cat "$RES/buildrecord.listsha")（$(tar -tzf "$RES/BuildRecord-spike.tar.gz" | wc -l) 個）"
+  # 傳給下一個 job 的檔案（HANDOFF 有設才做）：交付與紀錄檔（走 artifact）、整個輸出資料夾（走 cache）
+  if [ -n "${HANDOFF:-}" ]; then
+    mkdir -p "$HANDOFF"
+    timed handoff-tar-deliverables sh -c "tar -C '$OUT' -cf - -T '$RES/deliver.list' | zstd -3 -T0 -q -o '$HANDOFF/deliverables.tar.zst'"
+    timed handoff-tar-everything sh -c "tar -C '$OUT' -cf - . | zstd -3 -T0 -q -o '$HANDOFF/everything.tar.zst'"
+    cp "$RES/buildrecord.listsha" "$HANDOFF/"
+    sha256sum "$K/arch/arm64/boot/Image" | cut -d' ' -f1 > "$HANDOFF/image.sha256"
+    ls -l "$HANDOFF"
+  fi
 fi
 snap_df 編譯後
 sampler_stop

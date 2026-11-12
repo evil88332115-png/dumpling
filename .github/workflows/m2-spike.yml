@@ -185,7 +185,24 @@ jobs:
       - name: 核對
         run: bash tools/spike/m2-download.sh "${{ inputs.release }}" "${{ steps.meta.outputs.dl }}" src
       - name: 編譯（原生 aarch64）
+        env:
+          HANDOFF: ${{ runner.temp }}/handoff
         run: bash tools/spike/m2-build.sh "${{ steps.meta.outputs.dl }}" "$RUNNER_TEMP/w"
+      - name: 傳給下一個 job（artifact）交付與紀錄檔
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: m2-handoff-deliverables
+          path: |
+            ${{ runner.temp }}/handoff/deliverables.tar.zst
+            ${{ runner.temp }}/handoff/buildrecord.listsha
+            ${{ runner.temp }}/handoff/image.sha256
+          compression-level: 0
+          retention-days: 1
+      - name: 傳給下一個 job（cache）整個輸出資料夾
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/handoff/everything.tar.zst
+          key: m2spike-handoff-${{ github.run_id }}
       - name: 摘要
         if: ${{ always() }}
         run: |
@@ -197,3 +214,32 @@ jobs:
           name: m2res-build
           path: ${{ runner.temp }}/m2res
           retention-days: 7
+
+  handoff:
+    name: handoff (arm)
+    needs: build
+    if: ${{ inputs.stage == 'build' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: artifact 還原
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: m2-handoff-deliverables
+          path: ${{ runner.temp }}/h-art
+      - name: cache 還原
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/handoff/everything.tar.zst
+          key: m2spike-handoff-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: 解開、驗證、重新打包
+        run: bash tools/spike/m2-handoff-check.sh "$RUNNER_TEMP/h-art" "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/w"
+      - name: 摘要
+        if: ${{ always() }}
+        run: |
+          . tools/spike/m2-lib.sh
+          { echo "## handoff (arm)"; report_md; } | tee -a "$GITHUB_STEP_SUMMARY"
