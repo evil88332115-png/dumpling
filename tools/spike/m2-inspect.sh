@@ -50,4 +50,11 @@ for f in nvbuild.sh nvcommon_build.sh kernel_src_build_env.sh; do [ -f "$K/$f" ]
 echo "== kernel_src/kernel 內容"; find "$K/kernel" -maxdepth 2 | head -40
 echo "== oot Makefile"; [ -f "$W/x/kernel_oot_modules_src/Makefile" ] && show "$W/x/kernel_oot_modules_src/Makefile"
 echo "== oot 各元件頂層"; find "$W/x/kernel_oot_modules_src" -maxdepth 2 -mindepth 2 | head -60
+# 把要讀的腳本與 Makefile 複製出來（日誌顯示會吃掉部分行，改用小型 artifact 取回）
+mkdir -p "$RES/inspect"
+cp "$S"/nv_public_src_build.sh "$S"/nv_public_src_build_tos.sh "$RES/inspect/" 2> /dev/null || true
+cp "$K"/*.sh "$RES/inspect/" 2> /dev/null || true
+cp "$W/x/kernel_oot_modules_src/Makefile" "$RES/inspect/oot-Makefile" 2> /dev/null || true
+find "$W/x" -maxdepth 4 -not -path '*/.git/*' \( -type d -o -type f -name 'Makefile' -o -name 'Kconfig' -o -name '*defconfig' \) 2> /dev/null | head -400 | sed "s|^$W/||" > "$RES/inspect/tree.txt"
+find "$K/kernel" -maxdepth 3 -type f \( -name 'Makefile' -o -name 'tegra*defconfig' -o -name 'defconfig' \) 2> /dev/null | sed "s|^$W/||" > "$RES/inspect/kernel-files.txt"
 snap_df 解開後
