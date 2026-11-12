@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:09 -0500（C2）
+最後更新：2026-11-12 08:10 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -32,8 +32,8 @@
 - CI：#6、#9 的 tests／dt-smoke（`gh pr checks 6`、`gh pr checks 9`）
 - 下一步：等 A、B 推送 → 把 `wp1/m1-dt` 併進 `wp1/m1-tools` → 開驗證代理 → 交 C0 合併 → M1 完成通知 C0（C2 的上傳 DT 等這個）
 - 卡住／等決定：
-  - 等 C2 的 PR 2a（`wp3/bios-sbom`）合併：M1 的 cra 測試要用它的 `cdx_schema.py`、CycloneDX schema、`conftest.py`（D-017，C0 決定先合併 2a）
-  - 等 C0 修 `ci/public-patterns.txt`：`/media/` 規則誤擋核心路徑 `drivers/media/`，`tools/pilot/lib/data/kernel-included-c-6.{1,8}.json` 暫未推
+  - 等 C2 的 PR 2a（`wp3/bios-sbom`）合併：M1 的 cra 測試要用它的 `cdx_schema.py`、CycloneDX schema、`conftest.py`（D-017，C0 決定先合併 2a；2a＝PR #8，C0 驗證中，合併後 A merge main）
+  - （已解決）`/media/` 規則誤擋 `drivers/media/`：C0 已修（D-018，main 631646e），A merge main 後補推 `kernel-included-c-6.{1,8}.json`
 <!-- END C1 -->
 
 <!-- BEGIN C2 -->
