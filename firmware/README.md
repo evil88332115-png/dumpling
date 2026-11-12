@@ -72,3 +72,22 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 
 sbomqs 分數與各類別存在 `--out`（`<檔名>.sbomqs.json`、`sbom-check.md`），分數只寫在說明裡當參考，**不決定狀態**（門檻是政策問題，尚未決定）。
 漏洞比對這一步未做：說明固定寫 `漏洞比對：NOT_RUN（上傳 DT 待臨時 DT 工具）`。
+
+## 上傳臨時 DT 前的整理與報告（`pipeline/lib/firmware_dt.py`）
+
+    python3 -I pipeline/lib/firmware_dt.py prep     --sbom fw.cdx.json --sample firmware/bios/<slug>/firmware.yml --out prep/<slug>
+    python3 -I pipeline/lib/firmware_dt.py expected --prep prep/<slug>
+    python3 -I pipeline/lib/firmware_dt.py report   --prep prep/* [--dt-result <資料夾>] --out <資料夾>
+
+`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
+`report` 產出 `firmware-dt.md`，每個樣本一行 `FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL<TAB>…`（沒有 DT 結果＝NOT_RUN；有 FAIL 以 1 結束）。
+流程與接 workflow 的草稿見 `docs/notes/c2-firmware-dt.md`。
+
+### DT 專案名稱與版本
+
+| 項目 | 規則 |
+|---|---|
+| 名稱 | `firmware-<kind>-<slug>`；合成樣本為 `firmware-<kind>-synthetic-<slug>`。`slug` 取 `firmware.yml` 所在資料夾名稱；只含英數字與 `. _ -`，最長 100 字元（和 `sca-scan --name` 的過濾一致，不需要被改寫；不用 `/`，因為 sca-scan 會把它換成 `-`） |
+| 版本 | `firmware_version`，不合規字元換成 `_`（和 `sca-scan --version` 接受的字元一致：英數字開頭，英數字與空白 `. _ + ~ ( ) -`，最長 100）；沒有版本寫 `unknown` |
+| 合成判定 | 命令列 `--synthetic`、`firmware.yml` 的 `status` 不是 `ok`（沒有真實檔案）、或元件的來源檔名含 `synthetic`，任一成立 |
+| `metadata.component` | `type: firmware`、`name` 取 `model`、`version` 取專案版本、`bom-ref: dumpling:fw-root:<slug>`，附 `dumpling:sample-kind`／`sample-slug`／`synthetic` property；原本的 `metadata.component` 會被取代（舊值記在 `dt-project.json`） |
