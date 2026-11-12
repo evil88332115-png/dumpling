@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 07:53 -0500（C2）
+最後更新：2026-11-12 07:54 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -37,9 +37,10 @@
   2. `wp3/bios-sbom`：BIOS 解析→CycloneDX（x86_firmware.py 複製＋LZMA FV、CBFS、FSP、purl／CPE、Intel 部分 NOT_ASSESSED）
   3. `wp4/vbios`：獨立 vBIOS＋BIOS 內 Intel GOP／VBT／legacy VBIOS，公告比對 NOT_ASSESSED
   4. `wp3/firmware-dt`：firmware.yml workflow 上傳臨時 DT＋Grype、供應商 SBOM 匯入（等 C1 M1）
-- 代理：無
+- 代理：
+  - 代理 A（寫程式，Sonnet 5.5 medium）：PR 1 樣本清單＋firmware-fetch＋tests/run.sh＋firmware.yml workflow，分支 `wp3/firmware-samples`，狀態：進行中
 - CI：無
-- 下一步：問 C0 工具複製的分工（x86_firmware.py 等韌體工具由誰複製、tools/ 的目錄結構、PROVENANCE.md 與 tests/run.sh 誰建）；同時開始挑樣本
+- 下一步：等代理 A 開 draft PR；同時研究 PR 2（BIOS 解析）的範圍；等 C0 回覆工具複製分工
 - 卡住／等決定：工具複製分工（已問 C0）
 <!-- END C2 -->
 
