@@ -88,6 +88,7 @@ FP=$ROOT/tools/demo/flash_package.py
 usage(){ sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
 
+PLATFORM=${SCA_PLATFORM:-}
 ARCHIVE= SRCDIR= MD5= RFS= PREFIX= NAME= VERSION= OUT= PCONF= LICENSE=0 KEEP=0 NOUP=0 COMPANY= NOCOMP=0 MANUF= RESCAN= IC_NOTE= EVOUT= PROV_MD5= PROV_ST= DECFROM= UEFISRC= UEFIDSC=() TEESRC= EXTRAS=() DTVEX=${DT_VEX_WRITEBACK:-0} DTPROD=${DT_PRODUCT_COMPONENTS:-0}
 while [ $# -gt 0 ]; do case $1 in
   --archive) optval "$@"; ARCHIVE=$2; shift 2;;
