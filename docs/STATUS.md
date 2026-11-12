@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:42 +0800（C4）
+最後更新：2026-11-12 22:43 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -92,7 +92,7 @@
 ## C4 其他平台（WP7）
 
 - 目前在做：WP7 第一階段（不依賴 M2）完成：公開示範資料清單與平台研究（含 D-025、D-026）
-- 分支／PR／commit：`wp7/platform-samples`；PR 尚未開（D-020，M6 完成才開）；最後 commit 3e93fed
+- 分支／PR／commit：`wp7/platform-samples`；PR 尚未開（D-020，M6 完成才開）；最後 commit 1489d48
 - 代理：無
 - CI：無；本機背景工作：無（下載的樣本與解開的檔案都已刪除）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單：Raspberry Pi OS Lite 2026-10-06、Radxa ROCK 5B rsdk-r6、Debian 13 generic amd64 20261111-2659＋OMV 8.6.1-1 原始碼、TrueNAS 25.10.8（只做研究）。所有檔案實際下載核對，跟官方公布的雜湊相符；TrueNAS .update 簽章已驗證
