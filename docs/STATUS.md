@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:08 -0500（C1）
+最後更新：2026-11-12 09:08 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -46,27 +46,24 @@
 ## C2 韌體（WP3＋WP4）
 
 - 目前在做：M3（BIOS、vBIOS 各至少一個樣本產出 SBOM 並進 DT）。D-020：做到 M3 才開**一個** PR；過程只推分支，CI 用 `gh workflow run` 手動觸發
-- 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX），main 4700739
-- 分支（M3 時整合成一個 PR）：
-  - **`wp3/m3` 8688cd4：整合分支**＝coreboot-cbfs＋ami-pfat＋firmware-expect＋預驗修正（0f28182）。本機 c2 測試 236 passed＋c2-firmware OK。CI：e5be2ab 時 tests 43230179222、firmware 43230187065 綠；8688cd4 的 tests 43232541990、firmware 43232547319 進行中
-  - `wp3/coreboot-cbfs` b71b10e（已併入 m3）：CBFS（FMAP、LZMA／LZ4）、coreboot 版本／config、FSP、VBT、SELF payload 身分。手動 CI run 43228476529 綠燈。Dasharo：元件 7→16，coreboot `protectli_vault_jsl_v0.9.2`／add9d7206e30／Dasharo v1.2.0、FSP 9.0.123.32＋9.2.123.32、VBT 1.00（BDB 2.28）、edk2 payload purl（完整 40 碼 commit）
-  - `wp3/ami-pfat` 42e9bc0（已併入 m3）：AMI PFAT 解封裝＋fetch 測試補強＋run.d venv 快取。CI run 43228597744、firmware run 43228603247 綠燈。NUC：21 檔 29 block、AMI、微碼 2 份（000806C1/0x80 rev 0xBE 與 release notes 相符）；**CAP 只更新 BIOS 區域，沒有 ME**；組回映像是依封裝順序串接，不是 SPI 位址對應
-  - `wp3/firmware-expect` c2deea6（已併入 m3，分支已刪本機）：firmware workflow 對真實樣本跑 firmware-bios.sh＋`pipeline/firmware-expect.py`。綠 run 43231626732（Dasharo 11 項 OK、NUC 1 項 OK、OVMF 無 expected）；改錯 ME 版本的紅燈證明 run 43231826497
-  - `wp4/vbios`（從 b71b10e 開出，worktree `$AGENT_TMP/dumpling-wt-c2-vbios`）：NVIDIA 更新工具是否含 vBIOS、合成獨立 vBIOS、Intel legacy VBIOS／GOP 版本讀法、VBT 解析共用模組
-- M3 剩下要做的（等 C1 M1，PR #9 目前 draft、CI 紅）：
-  - BIOS 成品端 UEFI 解開：用 `tools/cra/uefi_image.py`（D-016）→ 接 Intel GOP／VBT（NUC 的 GOP 在主要 FV 的 LZMA 裡，VBT 在 FV_BB_AFTER_MEMORY_WRAPPER）
+- 已合併：PR #7（樣本清單＋下載核對）、PR #8（x86_firmware → CycloneDX）
+- **整合分支 `wp3/m3` 4183a96**（worktree `$AGENT_TMP/dumpling-wt-c2-m3`），已含：
+  - coreboot CBFS（FMAP、LZMA／LZ4、coreboot 版本／config、FSP、VBT、SELF payload）＋預驗修正 0f28182（ReDoS、掃描雜湊放大、解壓失敗計量、FSP ExtendedImageRevision）
+  - AMI PFAT 解封裝＋預驗修正（清單數字欄位崩潰、MAX_TOTAL 跨巢狀、檔名截短）；fetch 測試補強、run.d venv 快取、firmware.yml pipefail 修正（綠 run 43229479139／故意 sha256 不符紅 run 43229520867）
+  - 真實樣本 CI 驗收 `pipeline/firmware-expect.py`（綠 run 43231626732：Dasharo 11 項 OK、NUC 1 項 OK；改錯 ME 版本紅 run 43231826497）
+  - vBIOS：NVIDIA DP 更新工具**沒有完整 vBIOS**（只有 3 組 GPU 家族 GOP 範本，佔位版本字串）；合成獨立 vBIOS（`tools/cra/tests/synthetic_vbios.py`）端到端產 SBOM；Intel legacy VBIOS 辨識（NUC 樣本 `Build Number: 1003 PC 14.34`）；`intel_vbt.py` 共用；`gop_driver()`（GOP 版本只讀得到 build 1070）待接 FV 走訪
+  - 本機 c2 測試 279 passed、0 skip；Dasharo 16 個元件不變。CI：8688cd4 的 tests 43232541990／firmware 43232547319 綠；4183a96 的 tests 43233831760、firmware 43233837796 已觸發
+- 進行中的分支：`wp3/supplier-sbom`（從 m3 開出，worktree `$AGENT_TMP/dumpling-wt-c2-supsbom`）：供應商 SBOM 品質檢查（3mdeb Dasharo SBOM 範例、固定版本 sbomqs、`pipeline/firmware-sbom-check.sh`）
+- M3 剩下要做的（等 C1 M1，PR #9 仍是 draft）：
+  - BIOS 成品端 UEFI FV 解開：用 `tools/cra/uefi_image.py`（D-016）→ 接 Intel GOP（`gop_driver()`）／AMI 映像裡的 VBT／legacy VBIOS
   - NVIDIA gpu-firmware 公告比對：用 C1 的 `tools/pilot/lib/nvidia_bulletins.py`，沒對到標 NOT_ASSESSED
-  - 上傳臨時 DT＋Grype（C1 的 DT 工具；C0：排在 BIOS／vBIOS 之後）；firmware workflow 對 expected 的 CI 驗收；供應商 SBOM 匯入
-  - ✅ firmware.yml 的 `| tee` pipefail 已修（42e9bc0，`defaults: run: shell: bash`）：正常 run 43229479139 綠、sha256 故意不符 run 43229520867 紅（暫時分支已刪）
+  - 上傳臨時 DT＋Grype（BIOS SBOM、vBIOS SBOM、供應商 SBOM）
 - 代理：
-  - 代理 F（寫程式，Sonnet 5.5 medium）：`wp3/firmware-expect`，狀態：完成
-  - 代理 E（寫程式，Sonnet 5.5 high）：`wp4/vbios`，狀態：進行中
-  - 預驗 `wp3/coreboot-cbfs` b71b10e：**不通過**（完成）。嚴重 2：(1) revision 檔 `#define` regex 平方時間（ReDoS）；(2) 沒有 FMAP 時每個 LARCHIVE 候選都對宣告長度算 sha256（候選數×檔案大小）。建議：解壓失敗的工作量不計總量、FSP ExtendedImageRevision 沒讀等。**已由 C2 在 `wp3/m3` 修好（0f28182）**：regex 改線性＋單行上限、掃描候選先不算雜湊、解壓前先扣宣告大小、ExtendedImageRevision 非 0 記 note；回歸測試 4 組。等驗證名額空出來複驗
-  - 預驗代理（驗證，Sonnet 5.5 high）：預驗 `wp3/ami-pfat` 42e9bc0，狀態：進行中
-  - （已完成：代理 A、B、C、D，PR #7 驗證代理；PR #8 由 C0 驗證）
-- CI：見上面各分支 run
-- 下一步：預驗 cbfs（進行中）→ 預驗 pfat；代理 E、F 完成後併入 `wp3/m3`；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
-- 卡住／等決定：UEFI 解開、GOP、公告比對、DT 上傳等 C1 M1。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`（約 65 MB）、`dumpling-tmp-c2-pfat`（空的）被安全檢查擋下沒刪，要使用者手動刪
+  - 代理 G（寫程式，Sonnet 5.5 medium）：`wp3/supplier-sbom`，狀態：進行中
+  - 預驗代理（驗證，Sonnet 5.5 high）：`wp3/m3` 4183a96（複驗兩個修正＋vBIOS 部分），狀態：進行中
+  - 已完成：代理 A～F；預驗 cbfs（不通過→已修）、預驗 pfat（不通過→已修）
+- 下一步：預驗 m3 結果 → 有問題就修；代理 G 完成併入 m3；C1 M1 合併後做 UEFI／GOP／公告比對／DT 上傳；M3 開 PR、驗證、通知 C0
+- 卡住／等決定：UEFI 解開、GOP、公告比對、DT 上傳等 C1 M1。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`dumpling-tmp-c2-pfat`、`dumpling-tmp-c2-verify-cbfs` 被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
