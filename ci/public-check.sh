@@ -7,6 +7,7 @@
 #     只套用在通用規則與檔案裡的信箱，**不套用在本機禁用字與 commit 信箱**
 #   - 壓縮檔與封存檔（.xz .gz .bz2 .zst .tar 及 .tgz 等，不分大小寫）：解壓後（每個最多 PUBLIC_CHECK_ZLIMIT 位元組，
 #     預設 64 MB）套用上面同一組檢查；.zip .7z 等不支援的格式、解不開、太大、缺工具一律算命中
+#   - 其他二進位檔（圖片、PDF、韌體等）預設算「無法檢查」，確定要公開的登記在 ci/public-binary-allow.txt（路徑＋sha256＋原因）
 #   - 白名單以完整字串比對（前後不能緊接 [A-Za-z0-9._%+@-]），不會放行「包含」白名單字串的更長信箱或路徑
 # 用法：ci/public-check.sh [--rev REV] [--range RANGE] [--patterns FILE] [--private FILE] [--allow FILE]
 # 輸出：命中的每一行，最後一行是 "public-check: OK" 或 "public-check: FAIL（N 筆）"。
@@ -122,9 +123,38 @@ zscan() {
 }
 c_zerr() { cat "$tmp/zerr"; }
 
+# 其他二進位檔（git grep -I 看不到內容，也不是上面處理的壓縮檔）：預設算「無法檢查」。
+# 確定要公開的，登記在 ci/public-binary-allow.txt：「路徑<TAB>sha256<TAB>原因」；內容一改 sha256 就不符，要重新審查。
+binallowf="$(dirname "$allowf")/public-binary-allow.txt"
+declare -A text_files=() bin_allow=()
+while IFS= read -r -d '' tp; do text_files["${tp#"$rev":}"]=1; done < <(git grep -I -l -z -e '' "$rev" -- . 2>/dev/null)
+if [ -f "$binallowf" ]; then
+  while IFS=$'\t' read -r bp bs _; do
+    case $bp in ''|'#'*) continue ;; esac
+    bin_allow["$bp"]=$bs
+  done < "$binallowf"
+fi
+: > "$tmp/binerr"
+while IFS= read -r -d '' bp; do
+  [ -n "${text_files[$bp]:-}" ] && continue
+  case ${bp,,} in
+    *.xz|*.txz|*.lzma|*.gz|*.tgz|*.bz2|*.tbz|*.tbz2|*.zst|*.tzst|*.tar|*.zip|*.jar|*.7z|*.rar|*.lz4|*.lz|*.z|*.cpio|*.iso) continue ;;
+  esac
+  [ "$(git cat-file -s "$rev:$bp")" -eq 0 ] && continue
+  bsum=$(git cat-file blob "$rev:$bp" | sha256sum | cut -d' ' -f1)
+  if [ "${bin_allow[$bp]:-}" = "$bsum" ]; then continue; fi
+  if [ -n "${bin_allow[$bp]:-}" ]; then
+    printf '%s: 無法檢查（二進位檔；ci/public-binary-allow.txt 登記的 sha256 與內容不符，內容改過要重新審查）\n' "$bp" >> "$tmp/binerr"
+  else
+    printf '%s: 無法檢查（二進位檔，未在 ci/public-binary-allow.txt 登記）\n' "$bp" >> "$tmp/binerr"
+  fi
+done < <(git ls-tree -r -z --name-only "$rev")
+c_binerr() { cat "$tmp/binerr"; }
+
 run "通用規則（本機路徑、私有 IP）" c_generic
 run "檔案裡的信箱（只允許 noreply／example）" c_email
 run "壓縮檔：無法檢查" c_zerr
+run "二進位檔：無法檢查" c_binerr
 run "壓縮檔：通用規則（本機路徑、私有 IP）" zscan generic
 run "壓縮檔：信箱（只允許 noreply／example）" zscan email
 if [ -n "$range" ]; then
