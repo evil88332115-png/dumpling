@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:45 -0500（C2）
+最後更新：2026-11-12 08:47 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -23,7 +23,7 @@
 
 - 目前在做：M1（PLAN「里程碑」M1）——工具複製＋PROVENANCE、臨時 DT＋上傳測試 SBOM；D-020：M1 完成後一個 PR（#9 轉正式）
 - 分支／PR／commit：
-  - `wp1/m1-tools`：bd7fa1b（tools/ 全部初步清理完、PROVENANCE C1 節、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`；已併入 `wp1/m1-dt`）；PR #9（draft）
+  - `wp1/m1-tools`：5c9aa33（含 D-022 白名單 `ci/public-allow.txt` 18 項；拆字串已改回；tools/ 全部初步清理完、PROVENANCE C1 節、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`；已併入 `wp1/m1-dt`）；PR #9（draft）
   - `wp1/m1-tools-pilot`：從 bd7fa1b 開，pilot／demo／mirror／wizard／e2e 的收尾，做完由 C1 merge 回 `wp1/m1-tools`
   - `wp1/m1-dt`：62107c1（臨時 DT，已併入 m1-tools；PR #6 已關）
   - 來源：sca-center 25fa89a
