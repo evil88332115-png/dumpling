@@ -103,16 +103,16 @@ jobs:
           VERSION: ${{ matrix.version }}
         run: |
           set -euo pipefail
-          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：重試 3 次，仍失敗就印出回應標頭與本文當診斷
+          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：每 30 秒重試、最多 8 次，仍失敗就印出回應標頭與本文當診斷
           ghx() {
             local n=0
             until "$@"; do
               n=$((n+1))
-              if [ "$n" -ge 3 ]; then
+              if [ "$n" -ge 8 ]; then
                 echo "---- 診斷：$*"; gh api -i "repos/$GITHUB_REPOSITORY/releases?per_page=1" 2>&1 | head -30
                 return 1
               fi
-              sleep 20
+              sleep 30
             done
           }
           tag="dev/$PROJECT"
