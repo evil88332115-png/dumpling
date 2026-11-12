@@ -103,15 +103,28 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 | NUC11 PATGL357（BIOS，合併 wp3/m3 後的新 SBOM） | 8（6） | 6 | OK | OK（0） | 通過（合併前 3 個元件、3＝3） | ATTENTION |
 | Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
 | 合成 NVIDIA vBIOS | 1 | 1 | OK | OK（0） | 通過 | ATTENTION（NVIDIA 公告對照：NOT_ASSESSED） |
-| Dasharo NS5x 供應商 SBOM | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
+| Dasharo NS5x 供應商 SBOM（原檔直接上傳；現已改成上傳正規化副本，見後一節） | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
 
 發現：
 - **DT 的元件合併規則不含雜湊**：Protectli 有兩組只有 sha256 不同、其他欄位相同的 FSP-M 映像，DT 合併成一個（16 → 14）。原本 `expected` 的身分含 sha256，預期 16，verify 因此 FAIL；已改成 group／name／version／purl／cpe（含測試）。
   代價：DT 看不到同版本不同映像的第二份，SBOM 原檔仍保留兩份。
 - **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**（C2 決定：不改檔、不蓋成 GAP，由樣本宣告 `expected_dt: rejected`，見上方；宣告後 report 仍標 FAIL 但不讓 job 失敗）：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
-  這是上游檔案不符合 CycloneDX schema，我們不改元件內容，所以這個樣本在 DT 裡是 FAIL（Grype 仍比對了 36 筆，DT 完全沒有資料）。處理方式待 C2 決定（見回報）。
+  這是上游檔案不符合 CycloneDX schema。當時決定不改檔、以 `expected_dt` 宣告；之後 C0 同意改成上傳前的最小格式正規化（見 `docs/notes/c2-supplier-sbom.md`），這個樣本現在上傳成功。
 - `firmware-dt.sh` 遇到 `--result` 已有舊結果會標 FAIL（sca-scan 不接受非空輸出資料夾，舊的 status.tsv 也不能混進 report）；第三次本機執行重用資料夾時差點被舊結果騙成「OK」，所以加了這個檢查。
 - 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
+
+## 正規化後的本機端到端（2026-11-12，同一版 DT 5.2.0、Grype 0.121.0；`wp3/supplier-normalize`）
+
+`firmware-fetch` → `firmware-ci.sh`（只跑 Ubuntu OVMF）→ `dt-ephemeral.sh up／wait／env` → `firmware-dt.sh`（OVMF＋Dasharo NS5x 供應商 SBOM）→ `down`（trap）。`wait` 363 秒，兩個樣本的 sca-scan＋verify 共 29 秒（Grype 資料庫是快取的）。
+
+| 樣本 | 元件 | DT 元件數 | 上傳 | Grype | verify | report |
+|---|---|---|---|---|---|---|
+| Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
+| Dasharo NS5x 供應商 SBOM（正規化副本） | 10 | **10** | **OK（DT 收下）** | OK（36 筆） | 通過（5 項檢查全 OK；11 個必要階段全 OK） | OK（說明：已正規化 3 處） |
+
+- 正規化 3 處：`/platform`、`/firmware_version`、`/components/0/licenses/18`；`normalize.json` 在 `<結果>/firmware-sbom-…/normalize.json`。原檔 SHA-256 不變（`5c42344d…6a44ae`）。
+- 樣本已沒有 `expected_dt`；之前（原檔直接上傳）同一個樣本是 http=400、report FAIL。
+- 注意 report 的狀態是 OK，但這份 SBOM 的 purl 全是 `pkg:generic/…`（DT 的 OSV 不比對）、5 個元件沒有 cpe、沒有 `dumpling:vuln-assessment` 標記：DT 漏洞數 0 不代表沒有漏洞，漏洞比對的依據是 Grype（36 筆）。report 的 OK 判斷只看 purl 有沒有、版本 GAP、NOT_ASSESSED（既有邏輯，這次沒改）。
 
 ## Actions 實測（run 43266687645，commit bcfef21，workflow_dispatch）
 
@@ -122,6 +135,7 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 
 ## 仍未驗證
 
+- 正規化後的 Actions 實測（上面的本機端到端不是 Actions）；workflow「小型結果」步驟的 `cp` 迴圈用本機結果資料夾原樣跑過，normalize.json 有進 `out/<專案名>/`，但沒有在 Actions 上跑過。
 - NVIDIA 公告步驟「有表」那條路只在本機實測（Actions 上目前走「沒有表」→ GAP）。
 - `wait` 結束碼 3（GAP）路徑只有單元測試，沒有在真的 DT 上製造。
 - `expected_dt` 加入後，含宣告樣本的完整端到端沒有重跑（report／腳本的判斷用假工具的單元測試覆蓋，並用第四次真 DT 的結果資料夾重跑 report 核對過：宣告的樣本 rc=0、狀態 FAIL 加「與宣告一致」）。
