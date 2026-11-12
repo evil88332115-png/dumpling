@@ -277,15 +277,40 @@ class ReportTests(Base):
 
     def test_ok_and_attention(self):
         info, o = self.prep(bom(comp("a", "r1", purl="pkg:github/a/b@1", va="NONE"), comp("b", "r2", purl="pkg:github/a/c@1", va="NONE")))
-        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": [{}, {}, {}]})
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []})
         rc, out, md = self.run_report([o], dt)
         self.assertEqual(rc, 0)
         self.assertTrue(out.startswith("FIRMWARE-DT\tOK\t"), out)
+        self.assertIn("OK（0 筆）", md)
+        # Grype 有比對結果就不能是 OK（需要人審）
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": [{}, {}, {}]}, root="dt-g")
+        rc, out, md = self.run_report([o], dt)
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertIn("Grype 有 3 筆比對結果", out)
         self.assertIn("OK（3 筆）", md)
+        # DT 有漏洞也不能是 OK
+        dt = self.dt_sample(info, self.GOOD, dict(self.SUMM, findings_total=2), {"matches": []}, root="dt-f")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertIn("DT 有 2 筆比對結果", out)
         info2, o2 = self.prep(bom(comp("a", "r1"), comp("b", "r2")), slug="other", out="prep2")
         dt = self.dt_sample(info2, self.GOOD, self.SUMM, {"matches": []}, root="dt2")
         rc, out, _ = self.run_report([o2], dt)
         self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+
+    def test_supplier_like_sbom_is_not_ok(self):
+        # 供應商 SBOM：沒有 dumpling:vuln-assessment 標記、purl 是 pkg:generic → 不能是 OK
+        cs = [comp("a", "r1", purl="pkg:generic/a@1"), comp("b", "r2", purl="pkg:github/a/c@1")]
+        for c in cs:
+            c["properties"] = [x for x in c["properties"] if x["name"] != "dumpling:vuln-assessment"]
+        info, o = self.prep(bom(*cs), slug="sup-like", out="p-sl")
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-sl")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertIn("pkg:generic 的元件 1 個", out)
+        self.assertIn("沒有 dumpling:vuln-assessment 標記的元件 2 個", out)
 
     def test_fail_cases(self):
         info, o = self.prep(bom(comp("a", "r1")))

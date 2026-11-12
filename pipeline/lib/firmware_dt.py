@@ -164,6 +164,8 @@ def summarize(comps):
         if c.get("purl"):
             s["with_purl"] += 1
             t = purl_type(c["purl"])
+            if t == "generic":
+                s["generic_purl"] = s.get("generic_purl", 0) + 1
             if t:
                 types.add(t)
         if c.get("cpe"):
@@ -511,10 +513,10 @@ def sample_result(info, dt_dir, wait_rc):
         st = "GAP"
     elif summ is None or rows is None or r["upload"] != "OK" or r["grype"] != "OK":
         st = "NOT_RUN" if r["upload"] == "NOT_RUN" else "GAP"
-    elif s.get("version_gap") or s["with_purl"] < s["components"] or s["vuln_assessment"].get("NOT_ASSESSED"):
-        st = "ATTENTION"
     else:
-        st = "OK"
+        why = attention_reasons(s, r)
+        st = "ATTENTION" if why else "OK"
+        r["notes"].extend(why)
     if wait_rc == 3:
         r["notes"].append("dt-ephemeral wait 結束碼 3（資料不完整）：0 筆漏洞不能當成沒有漏洞")
     r["status"] = st
@@ -535,6 +537,32 @@ def _normalize_note(info):
     if isinstance(un, int) and un > 0:
         out += "；另有 %d 處已知違規無法正規化（見 normalize.json；欄位原樣保留）" % un
     return out
+
+
+def attention_reasons(s, r):
+    """上傳與驗證都完成後，還需要人看的原因（空清單＝OK；OK 也不代表安全）。
+    除了版本 GAP、沒有 purl、NOT_ASSESSED 之外，下面幾種也不能是 OK：
+      - Grype 或 DT 有任何比對結果：有比對結果就要人審，不能顯示 OK（供應商 SBOM 的 Grype 36 筆曾因此被標 OK）。
+      - 元件沒有 dumpling:vuln-assessment 標記（供應商 SBOM 不是 dumpling 產的，不知道它的元件有沒有評估過）。
+      - purl 是 pkg:generic：DT 與 OSV 沒有 generic 的漏洞資料，等於沒有 purl。"""
+    why = []
+    if s.get("version_gap"):
+        why.append("版本 GAP %d 個" % s["version_gap"])
+    if s["with_purl"] < s["components"]:
+        why.append("沒有 purl 的元件 %d 個" % (s["components"] - s["with_purl"]))
+    if s.get("generic_purl"):
+        why.append("purl 是 pkg:generic 的元件 %d 個（DT／OSV 沒有 generic 的漏洞資料）" % s["generic_purl"])
+    if s["vuln_assessment"].get("NOT_ASSESSED"):
+        why.append("NOT_ASSESSED 元件 %d 個" % s["vuln_assessment"]["NOT_ASSESSED"])
+    if s["vuln_assessment"].get("(未標)"):
+        why.append("沒有 dumpling:vuln-assessment 標記的元件 %d 個（不是 dumpling 產的 SBOM，評估狀態不明）" % s["vuln_assessment"]["(未標)"])
+    for label, v in (("Grype", r.get("grype_matches")), ("DT", r.get("dt_findings"))):
+        if isinstance(v, bool) or not isinstance(v, int):
+            if label == "DT" and v not in ("-", None):
+                why.append("DT 漏洞數讀不到（%s）" % _cell(v, 40))
+        elif v > 0:
+            why.append("%s 有 %d 筆比對結果，需要人審" % (label, v))
+    return why
 
 
 def _unverified_declaration(r, exp_dt):

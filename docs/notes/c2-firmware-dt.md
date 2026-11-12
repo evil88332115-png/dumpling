@@ -38,7 +38,7 @@ report 讀的結果資料夾（`--dt-result`）：
   - GAP：`wait` 結束碼 3、上傳或 Grype 階段 GAP（含 C-grype NOT_RUN，例如 Grype 資料庫不可用）、或結果不齊全。
   - NOT_RUN：沒有 DT 結果（上傳那三個階段都沒跑）。
   - ATTENTION：上傳與驗證完成，但仍有元件版本 GAP、沒有 purl、或 NOT_ASSESSED（實際樣本幾乎都是這個）。
-  - OK：完成且每個元件都有 purl、沒有版本 GAP、沒有 NOT_ASSESSED。**OK 不代表安全**，報告沒有整體 PASS。
+  - OK：完成，而且以下都沒有（`attention_reasons()`）：版本 GAP、沒有 purl 的元件、purl 是 `pkg:generic` 的元件（DT／OSV 沒有 generic 的漏洞資料）、NOT_ASSESSED、沒有 `dumpling:vuln-assessment` 標記的元件（供應商 SBOM 不是 dumpling 產的，評估狀態不明）、Grype 或 DT 有任何比對結果（要人審）。**OK 不代表安全**，報告沒有整體 PASS。（正規化後的供應商 SBOM 曾在 Grype 36 筆、purl 全是 pkg:generic 的情況下被標成 OK，所以加了後三項。）
 - sca-scan 的 `C-sbomgate` 對韌體會是 `NOT_ASSESSED`（sbomgate 只把 library／framework 算成套件，firmware 列為忽略類型）。這是預期，不是失敗。
 - `expected.json`：`components` 用「不同身分的元件數」（group、name、version、purl、cpe、sha256 都相同的元件 DT 會合併；實際 DT 合併規則尚未用真 DT 確認，若 verify 的元件數不符先看這點）。
   `min_findings_total: 0`、`min_findings_by_purl_type: {}`；`informational_purl_types` 放 SBOM 裡出現的 purl 類型（只記錄，verify 不拿它當條件）。
