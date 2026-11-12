@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Intel 內顯的 vBIOS 子元件辨識：legacy VBIOS option ROM、UEFI GOP 驅動（PE32+）。只依賴標準函式庫，只讀、不執行。
 
-x86_firmware.py 在 option ROM 掃描結果裡呼叫 legacy_info()；GOP 驅動的辨識（gop_driver）已經寫好、用測試資料測過，
-但還沒有接到 BIOS 映像的走訪上（要等 uefi_image.py 把 AMI 映像的 FV 解開，見 docs/notes/c2-vbios.md「接線介面」）。
+x86_firmware.py 在 option ROM 掃描結果裡呼叫 legacy_info()；GOP 驅動的辨識（gop_driver）由 uefi_gfx.py 在 BIOS 映像的 UEFI FV 走訪時呼叫
+（走訪靠 uefi_image.py，見 docs/notes/c2-vbios.md「接線」）。
 
 輸入是不可信資料：所有長度都對資料長度與上限檢查；字串一律限制長度與字元集；不寫磁碟、不執行。
 

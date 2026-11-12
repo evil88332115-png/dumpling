@@ -1,6 +1,6 @@
 # C2：vBIOS（NVIDIA 工具判定、合成 ROM、Intel legacy VBIOS 與 GOP 驅動）（分支 wp4/vbios）
 
-M3 的 vBIOS 部分，不含「UEFI FV 解開」（那要等 C1 的 `uefi_image.py`）。只讀、不執行、不寫磁碟；輸入視為不可信。
+M3 的 vBIOS 部分；BIOS 映像的 UEFI FV 走訪靠 C1 的 `uefi_image.py`（見「接線」一節）。只讀、不執行、不寫磁碟；輸入視為不可信。
 這份是工作紀錄，不是驗證結論（驗證代理與 CI 的結果另記）。數字都是 2026-11-12 對公開樣本量的，樣本本身不進 repo。
 
 ## 檔案
@@ -10,7 +10,9 @@ M3 的 vBIOS 部分，不含「UEFI FV 解開」（那要等 C1 的 `uefi_image.
 | `tools/cra/intel_vbt.py` | 新模組：`parse_vbt()`（從 `coreboot_cbfs.py` 搬來，行為不變）、`find_vbt()`（在一塊資料裡找 `$VBT` 並過標頭檢查） |
 | `tools/cra/intel_vbios.py` | 新模組：Intel legacy VBIOS 辨識（`is_legacy_vbios`、`legacy_info`）、UEFI GOP 驅動辨識（`gop_driver`、`pe_info`） |
 | `tools/cra/coreboot_cbfs.py` | `parse_vbt` 改成從 `intel_vbt` 取得（同名匯出，既有測試不變） |
-| `tools/cra/x86_firmware.py` | 加 Intel legacy VBIOS 的收集／元件／狀態／markdown（見「x86_firmware 的改動」） |
+| `tools/cra/x86_firmware.py` | 加 Intel legacy VBIOS 的收集／元件／狀態／markdown（見「x86_firmware 的改動」），以及 UEFI 顯示韌體的接線（`uefi_gfx_*`） |
+| `tools/cra/uefi_gfx.py` | 新模組：`Scan` 子類別走訪 FV，找 GOP 驅動、獨立 VBT、含 `PCIR` 的內容（見「接線」） |
+| `tools/cra/tests/test_uefi_gfx.py`、`test_uefi_image_contract.py` | 合成 FV 測試；對 C1 uefi_image 介面的契約測試 |
 | `tools/cra/tests/synthetic_vbios.py` | 合成 NVIDIA option ROM 的產生器（函式與 CLI） |
 | `tools/cra/tests/test_vbios_synthetic.py`、`test_vbios_intel.py` | 測試（假資料，不含真實映像的位元組）；已加進 `tests/run.d/c2-x86-firmware.sh` |
 | `firmware/vbios/*/firmware.yml`、`firmware/README.md` | NVIDIA 工具的判定寫進 notes；獨立 vBIOS 維持 GAP，註明 CI 用合成 ROM |
@@ -98,17 +100,74 @@ FFS 檔案裡 4 個 FREEFORM_SUBTYPE_GUID（section type 0x18）section：
 - `intel_vbios.gop_driver()` 因此回傳 `version="1070"`（只有 build 編號），`version_basis` 寫明；完整的 `17.0.1070` 只能靠 release notes（版本清單）。
 - 辨識規則：EFI subsystem 的 PE（10～13）＋UTF-16 的 `Intel(R) GOP Driver\0`（2 bytes 對齊）；名稱後 0x200 bytes 內第一個非空字串必須只有數字與點（最多 4 段），否則 version 為 None（附原因）。**只對這份樣本核對過**。
 
-## 接線介面（等 uefi_image.py）
+## 接線：BIOS 映像的 UEFI 內容裡找 GOP、VBT、legacy VBIOS（`uefi_gfx.py`，分支 wp3/m3-gop）
 
-C1 的 `uefi_image.py` 進來後，在 BIOS 映像走訪到 FFS 檔案／section 時：
+走訪靠 C1 的 `tools/cra/uefi_image.py`（專案決定 D-016：不改、不複製）。`tools/cra/uefi_gfx.py` 定義 `uefi_image.Scan` 的子類別，覆寫 `scan_bytes`：
+`uefi_image.parse_fvs()` 解開 FV／FFS／section（GUID-defined LZMA、CRC32、壓縮 section、嵌套 FV）後，**每一塊葉節點內容**（PE32 等 section 的內容、
+LZMA 解開後不是 section 串的內容、FV 以外的位元組）都會呼叫 `sc.scan_bytes(data, module)`；子類別**不呼叫 super**（那是函式庫指紋掃描，用不到），改成：
 
-1. 每個 PE32（section type 0x10）或 FREEFORM_SUBTYPE_GUID（0x18）section 的內容 `body`：`intel_vbios.gop_driver(body)`，非 None 就是 Intel GOP 驅動。
-   SBOM 元件建議：name `Intel GOP driver`、version＝`version`（None 時省略並標 GAP）、manufacturer Intel Corporation、hashes＝`body` 的 SHA-256／SHA-512、
-   `sca-center:version-basis`＝`version_basis`、`sca-center:found-in`＝FV／FFS GUID／section 序號、`assessed(c, "intel")`（跟 ME／微碼同一句 NOT_ASSESSED 說明）。
-2. 同一批 section 內容跑 `option_roms(body)`，結果交給 `x86_firmware.intel_gfx_collect(roms, body, label, store)`（`store` 是 `inventory()` 裡的 `intel_vb`）。
-   `label` 要能對回 BIOS 映像：現在 `intel_gfx_components()` 用 label 完全相同才掛到 BIOS 映像底下；解開的子內容的 label 若是 `<映像 label>!…`，
-   要把 `parents` 的比對改成前綴比對（接線時一起改）。
-3. VBT：`intel_vbt.find_vbt(body)` 或對已知的 VBT 檔案 `parse_vbt()`；GOP 用的 VBT 在 `FV_BB_AFTER_MEMORY_WRAPPER` 解開後（見 c2-ami-pfat.md）。
+1. `intel_vbios.gop_driver(pe)`：內容開頭是 `MZ`，或前面有 16 bytes 子類型 GUID（FREEFORM_SUBTYPE_GUID section，樣本就是這樣）時從 offset 16 起算。
+2. `intel_vbt.find_vbt(body)`：只收 offset 0（或 16）的，也就是內容本身就是 VBT 的獨立檔案；嵌在別的內容裡的（legacy VBIOS 內的 `$VBT ICELAKE`）不另列。
+   雜湊只涵蓋 `vbt_size` 個 bytes。
+3. 內容含 `PCIR` 才呼叫 `x86_firmware.option_roms(body)` → `intel_gfx_collect(roms, body, label, store)`，label＝`<映像的位置>!uefi/<FFS GUID 或 UI 名稱>`（`UEFI_GFX_SEP`）。
+
+`x86_firmware.inventory()` 只在 `bios_image()` 之後、同一個映像（雜湊相同）第一次出現時呼叫 `uefi_gfx_search()`（`uefi["volumes"]` > 0 才走訪），結果放 `bios[].uefi_gfx`，
+缺口加進 `bios[].gaps`（SBOM 的 `sca-center:gap`）。`intel_gfx_components()` 的 parents 改成前綴比對（`loc == 映像位置` 或 `loc` 以 `映像位置 + "!uefi/"` 開頭，多個符合取最長），
+所以 `a.bin` 不是 `a.bin2!uefi/…` 的父。
+
+SBOM 元件（全部掛在 BIOS 映像底下，每個元件都有 `dumpling:vuln-assessment`＝NOT_ASSESSED 與 note、`dumpling:version-status`）：
+
+| 元件 | version | 依據（`sca-center:version-basis`） | 備註 |
+|---|---|---|---|
+| `Intel GOP driver` | `gop_driver()` 的 version（build 編號，例如 `1070`）；None 時省略並標 `sca-center:gap` 與 GAP | PE 裡 `Intel(R) GOP Driver` 之後的 UTF-16 數字字串（只對一份樣本核對） | hashes SHA-256／SHA-512（PE 內容）；`sca-center:found-in`＝FFS GUID（與 UI 名稱）＋section 內容裡的 offset |
+| `Intel VBT (Video BIOS Table)` | VBT header version（`1.00`） | `$VBT` header 的 version 欄位（×100）與 signature | 與 coreboot 的 VBT 元件同名同格式；BDB 版本、大小另記 |
+| `Intel legacy VBIOS (option ROM)` | `Build Number: <n> PC <x.y>` | 同前（既有元件） | 同一個 ROM 的所有位置都記（整檔掃描與 FV 走訪各一） |
+
+**位置資訊的限制**：`scan_bytes` 只給 `module`（FFS 檔的 GUID；FFS 內 UI section 在內容之前時是 UI 名稱）與內容，**拿不到 FV offset 與 section 位置**
+（要改 C1 的檔才有）。所以 found-in 只寫「FFS GUID、UI 名稱（walk 結束後用 `sc.modules` 的 guid→ui_name 對回，同一個 GUID 有兩個名稱時不寫）、在 section 內容裡的 offset」。
+
+### 完整性與 GAP（不能把沒找到說成不存在）
+
+`result["complete"]` 只有在下面都沒發生時才是 True；不完整時 BIOS 映像元件有 `sca-center:gap`（文字都帶 `not found does not mean absent`）、狀態至少 ATTENTION：
+- `sc.undecoded` 有東西（EFI 標準壓縮 section 不支援、超過 MAX_LAYER／MAX_TOTAL、嵌套比 MAX_DEPTH 深、FV 標頭不一致、FFS 大小不合理…）。
+  例外：**最上層** FV 以外的非空白位元組（descriptor、ME、微碼、NVRAM…）C1 也記成 undecoded，這裡當資訊（`stats.outside_fv_nonblank_bytes`，摘要有寫），不算不完整；
+  巢狀層（LZMA 解開後）FV 以外的位元組照常算不完整。
+- `sc.notes`（結構警告）、`Stop`（MAX_FILES 等）、其他例外、時間上限（`OverBudget`→也記 partial）。
+- 沒有 FV 的 UEFI／coreboot 映像：不走訪，記「not searched」。有 coreboot CBFS 的映像：CBFS 裡的檔案（例如壓縮的 edk2 payload）沒有展開，一律不完整。
+- 去重後累計送進辨識的位元組超過 `MAX_INSPECT`（1 GiB）。
+- `uefi_image.py` 載入不了：記 `not performed`，不是錯誤。
+
+### 放大控制
+
+同一份內容（長度＋BLAKE2b）只辨識一次（重複的內容只補記新位置；有 `PCIR` 的重複內容重跑 ROM 搜尋，總量上限 32 MiB，超過記 gap）；辨識前先用便宜條件擋
+（`MZ` 開頭、`$VBT `、`PCIR`）；辨識函式本身對輸入是線性的（`find_banner`、`find_vbt` 的候選上限、`option_roms` 的既有上限）；
+解壓縮炸彈由 C1 的 MAX_* 擋。測試：raw 內容滿是特徵、重複 FV、深層 LZMA、MAX_INSPECT。
+
+### 依賴 C1 `uefi_image.py` 的內部名稱
+
+C1 改了這些就要跟著改 `uefi_gfx.py`；`tools/cra/tests/test_uefi_image_contract.py`（`tests/run.d/c2-x86-firmware.sh` 的清單裡）會在簽章變動時紅燈，
+訊息寫明「先通知 C2 和 C1」。
+
+| 名稱 | 怎麼用 | 契約測試檢查 |
+|---|---|---|
+| `Scan` | 子類別化、無參數建構 | 是 class、`Scan()` 沒有參數 |
+| `Scan.scan_bytes(self, data, module=None)` | 覆寫；`data` 是 bytes、`module` 是 FFS GUID 字串或 UI 名稱 | `inspect.signature`；真的跑一次合成 FV，確認子類別被呼叫、拿到葉節點內容與 GUID |
+| `parse_fvs(data, sc, depth, where="image")` | `parse_fvs(bytes, sc, 0)` | 前三個參數名稱與順序、其餘有預設值 |
+| `Stop` | `except uefi_image.Stop` | 是 `Exception` 的子類別 |
+| `MAX_DEPTH`／`MAX_LAYER`／`MAX_TOTAL`／`MAX_FILES` | 寫進說明與測試（沒有直接讀值，測試用 `MAX_DEPTH`／`MAX_FILES` 造情境） | 存在、是正整數 |
+| `Scan.undecoded`（list of `{where, reason}`）、`notes`、`modules`（`{guid, ui_name…}`）、`fvs`、`files`、`total`、`parse_errors` | 判斷完整性、統計、UI 名稱對回 | 型別；合成 FV 的 `modules` 有 guid／ui_name |
+| 最上層 FV 以外位元組的 undecoded：`where == "image"`、reason 含 `outside any valid firmware volume` | 不算不完整 | 合成資料驗證；文字改了會變成「不完整」（安全的方向），測試會紅燈提醒 |
+
+## 真樣本結果（2026-11-12，`pipeline/firmware-bios.sh`，秒數與記憶體是整個指令，含啟動）
+
+| 樣本 | 結果 | 秒數／最大記憶體 |
+|---|---|---|
+| Intel NUC 11 PATGL357.0059（zip → AMI PFAT） | `Intel GOP driver` 版本 `1070`（FFS `A0327FE0-1FDA-4E5B-905D-B510C45A61D0`，section 內容 offset 0x10，160000 bytes，SHA-256 `6c23a165…ddb5`，與前面「GOP 檔案裡有什麼」一節相符）；`Intel legacy VBIOS` 版本 `1003 PC 14.34`（SHA-256 `da4b25ad…`，位置：FFS `76646656-…` 與 `A0327FE0-…`，掛在 BIOS 映像下）；獨立 VBT 3 份（`$VBT TIGERLAKE`、1.00、BDB 2.43，大小 9004／8608／8608，三個不同的 FFS，其中一個 UI 名稱 `IntelGopVbt2`）。走訪：25 個 FV、738 個 FFS 檔、解壓 25458170 bytes、去重後辨識 1327 塊（重複 938 塊）。**不完整**：30 個部分沒解開（FSP-S 與尾端資料的 EFI 標準壓縮、一個 FFS 大小不合理、一個 PAD 有內容…）與 27 個結構警告，SBOM 有 `sca-center:gap`，狀態 ATTENTION | 約 3.2 s／約 140 MB |
+| Dasharo Protectli VP46xx v1.2.0（coreboot＋edk2 payload） | 沒有 GOP；VBT 只有既有的 CBFS `vbt.bin` 元件。走訪 4 個 FV（44 個 FFS，沒有壓縮）；CBFS 裡的壓縮 payload 沒展開 → 記**不完整**（不是「沒有 GOP」） | 約 0.5 s／約 58 MB |
+| Ubuntu OVMF 2024.02（`OVMF_CODE_4M.fd`） | 沒有 GOP、VBT、Intel legacy VBIOS；4 個 FV、142 個 FFS，解壓 16122000 bytes，全部解開（走訪完整，已解開的內容裡沒有） | 約 0.35 s／約 79 MB |
+
+`firmware.yml` 的 `expected` 目前沒有 GOP／VBIOS 的欄位（`pipeline/firmware-expect.py` 的 KEYS 只有 intel_me、microcode、fsp、coreboot_*、dasharo_version、edk2_revision），所以沒有加；
+要加就得先擴 `firmware-expect.py`（NUC 的預期值：GOP `1070`、legacy VBIOS `1003 PC 14.34`）。
 
 ## x86_firmware 的改動（之後要跟 `wp3/ami-pfat` 合併）
 
