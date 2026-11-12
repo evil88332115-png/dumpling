@@ -2,13 +2,13 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 07:57 -0500（C0）
+最後更新：2026-11-12 08:05 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：WP0 完成；看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main 281f819（PR #1 README、#2 D-014、#3 共用骨架＋D-015、#4 D-016，均已合併）；status 分支
+- 分支／PR／commit：main c7952d7（PR #1 README、#2 D-014、#3 共用骨架＋D-015、#4 D-016、#5 D-017，均已合併）；status 分支
 - 已完成（WP0）：公開 repo（Apache-2.0，個人信箱外洩後已刪除重建）、docs（PLAN 公開版、DECISIONS、HANDOFF、STATUS 指標、PROVENANCE 骨架）、`status` 分支、CI tests.yml（public-check、unit-tests→tests/run.sh）、pre-push hook、main／status 分支保護、Actions 權限唯讀、fork PR 需核准
 - 代理：無（C0）
 - 代理總數（全部對話）：C1 寫程式 2、C2 寫程式 2，共 4／上限 8；主機負載 1.6
