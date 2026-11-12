@@ -761,6 +761,24 @@ class PlatformConfigTest(unittest.TestCase):
         for name, want in (("openmediavault", "bsp"), ("openmediavault-flashmemory", "bsp"), ("linux-image-amd64", "os")):
             self.assertEqual(self.pc.classify_package(name, nas), want, name)
 
+    def test_new_project_needs_no_workflow_change(self):
+        """M6：新增專案只要 new-project.sh＋填欄位；每個 WP7 平台開一個新專案都通過驗證，project-info 讀得出平台設定。"""
+        tmp = tempfile.mkdtemp(prefix="wp7-newproj-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for plat, resp, arch in (("raspberrypi", "customer", "arm64"), ("rockchip", "customer", "arm64"), ("ai-nas", "ours", "amd64")):
+            name = "fourth-%s" % plat
+            p = subprocess.run(["bash", os.path.join(ROOT, "pipeline", "new-project.sh"), name, "--platform", plat,
+                                "--company-role", "manufacturer", "--os-responsibility", resp, "--product-name", "X", "--brand", "Y",
+                                "--markets", "EU", "--support-until", "2031-12-31", "--projects-dir", tmp],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            d = os.path.join(tmp, name)
+            info = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "project-info.py"), "--dir", d, "v0.1.0-dev1"],
+                                  capture_output=True, text=True)
+            self.assertEqual(info.returncode, 0, info.stdout + info.stderr)
+            kv = dict(l.split("=", 1) for l in info.stdout.splitlines() if "=" in l)
+            self.assertEqual((kv["PLATFORM"], kv["BUILD_MODE"], kv["ARCH"], kv["OS_RESPONSIBILITY"]), (plat, "none", arch, resp))
+
 
 if __name__ == "__main__":
     unittest.main()
