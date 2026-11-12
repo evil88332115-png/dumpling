@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 09:18 -0500（C2）
+最後更新：2026-11-12 09:21 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -37,6 +37,9 @@
   - C0 預審（f9d0cee）完成，#9 issuecomment-6825088823：已對照 bd7fa1b 分派——A：libnvinfer 版本誤改、cra_report 內部實測說法、信箱改保留網域、內部稱呼、c1-tools.sh／tests.yml 改用 Python 3.12；P：殘留 scripts/ 路徑、l4t-kernel-map 等內部實測說法、帶入 kernel_included_c.py、缺檔改 NOT_RUN、拿掉 android
 - CI：tests.yml 在 wp1/m1-tools 手動觸發中（預期 unit-tests 仍因 pilot 37 個失敗 FAIL）；手動觸發（`gh workflow run <wf> --ref <分支>`）；最近 dt-smoke（m1-dt）run 43225729729 綠燈
 - 下一步：A、P 完成 → merge `wp1/m1-tools-pilot` 進 `wp1/m1-tools`、整合 PROVENANCE → tests＋dt-smoke 在 m1-tools 綠燈 → 驗證整個 M1 → #9 轉正式 PR（附逐檔對照、資料來源表）→ 通知 C0
+- M2 設計備忘（C0 轉達，C4 的平台研究）：
+  - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
+  - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
 - 卡住／等決定：
   - V1 的問題修完需要重驗 DT 部分
   - 已告知 C0：alert_mail.py 沒帶（PROVENANCE 已標「C3 視需要帶回」）；3 項「參考內部觀察的合成測試」C0 拿去問使用者；在那之前照 C1 判斷先做（kernel/Image 依據改用公開 BSP）
