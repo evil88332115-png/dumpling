@@ -105,7 +105,7 @@ case $augment in
     echo "$line"
     case $mrc in 0) ;; 3) arc=3;; *) fail "併入原始碼 SBOM 失敗";; esac
     python3 -I -c 'import json,sys;json.dump({"repo":sys.argv[1],"commit":sys.argv[2],"line":sys.argv[3]},open(sys.argv[4],"w"),ensure_ascii=False)' \
-      "$arepo" "$acommit" "$(sed 's/^sbom-augment: //' <<< "$line")" "$out/augment/source.json"
+      "$arepo" "$acommit" "${line#sbom-augment: }" "$out/augment/source.json"
     srcjson=$out/augment/source.json
     sbom1=$out/augment/sbom.cdx.json;;
 esac
