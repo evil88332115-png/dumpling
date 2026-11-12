@@ -1,6 +1,6 @@
 """M2 spike：安全解開不可信的 tar（.tbz2／.tar.*）到全新的資料夾，不執行裡面任何東西。
 
-用法：python3 -I m2_safe_extract.py <壓縮檔> <目的資料夾（不存在或空的）> [--list-only]
+用法：python3 -I m2_safe_extract.py <壓縮檔> <目的資料夾（預設要不存在或是空的）> [--list-only] [--allow-nonempty]
 
 規則（任何一條違反就停止，退出碼 1）：
 - 成員名稱不能是絕對路徑、不能含 `..`
@@ -42,10 +42,11 @@ def check_member(m, dest):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     list_only = "--list-only" in sys.argv
+    allow_nonempty = "--allow-nonempty" in sys.argv
     if len(args) != 2:
         raise SystemExit(__doc__)
     arc, dest = args
-    if os.path.exists(dest) and os.listdir(dest):
+    if os.path.exists(dest) and os.listdir(dest) and not allow_nonempty:
         raise SystemExit(f"目的資料夾不是空的：{dest}")
     os.makedirs(dest, exist_ok=True)
     dest = os.path.realpath(dest)
