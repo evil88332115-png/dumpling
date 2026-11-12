@@ -2,19 +2,18 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:13 -0500（C2）
+最後更新：2026-11-12 08:15 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main 631646e（WP0 的 PR #1–#5、#10 已合併；#10＝D-018 本機路徑規則不誤擋 drivers/media/）；status 分支
-- 代理：
-  - 驗證代理（Sonnet 5.5）：驗 C2 的 PR #8（wp3/bios-sbom），結論貼在 PR 留言，狀態：進行中
-- 代理總數（全部對話）：C1 寫程式 2、C2 寫程式 2＋驗證 1、C0 驗證 1，約 6／上限 8；負載 1.4
+- 分支／PR／commit：main 4700739（C2 的 PR #7 樣本清單、#8 BIOS／vBIOS→CycloneDX 已合併；WP0 的 #1–#5、#10 已合併）；本機累積分支 `wp0/docs-batch-1`（D-019＋HANDOFF 修正，還沒推，等累積成批再開 PR）
+- 代理：PR #8 驗證代理已完成（通過，留言在 PR #8）；目前沒有 C0 代理在跑
+- 代理總數（全部對話）：C1 寫程式 2、C2 寫程式約 2，約 4／上限 8
 - CI：無進行中
-- 下一步：PR #8 驗證通過 → update-branch → 合併 → 通知 C1 merge main（M1 需要 D-017 共用檔）；之後 C2 的 PR #7、C1 的 M1（draft #6、#9 → 正式 PR）
-- 做法（使用者 11-12）：C0 自己的文件改動累積成批再開 PR，決定先用訊息生效
+- 下一步：等 C1 的 M1（A merge main 取得 D-017 共用檔 → 正式 PR）→ C0 派獨立驗證代理 → 合併 → M1；C2 接著做 PR 2b／vBIOS
+- 規則提醒：更新 PR 分支用本機 `git merge origin/main`，不用 `gh pr update-branch`（已通知 C1、C2，D-019 待合併）
 - 卡住／等決定：無
 <!-- END C0 -->
 
