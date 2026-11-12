@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 16:10 -0500（C0）
+最後更新：2026-11-13 05:11 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -93,12 +93,12 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：D-032 的 PLAN 修改提案已完成並推送（C0 指派，不開 PR）；轉接器等 C1 的 M2 P 軌
-- 分支／PR／commit：`wp7/platform-samples`（最後 commit 868f064）、`wp7/cra-survey`（最後 commit 122042c：D-032 的 PLAN 修改提案 `docs/references/cra-plan-proposal.md`，C0 會併進文件批次），兩支都已 merge main cd62514（D-028 反向規則下 public-check 通過；兩支都沒有二進位檔）；PR 都尚未開（D-020）
+- 目前在做：D-032 提案已併進 C0 的文件批次 PR #15（D-033 已決定四個待決事項）；轉接器等 C1 的 M2 P 軌
+- 分支／PR／commit：`wp7/platform-samples`（最後 commit 868f064）、`wp7/cra-survey`（最後 commit 122042c；已併進 PR #15，PR #15 合併後刪除這支分支），兩支都已 merge main cd62514（D-028 反向規則下 public-check 通過；兩支都沒有二進位檔）；PR 都尚未開（D-020）
 - 代理：無執行中（先前研究代理 1 個已完成）
 - CI：無；本機背景工作：無
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單（Raspberry Pi、Radxa ROCK 5B、Debian 13＋OMV、TrueNAS 只研究）；`docs/references/cra-github-survey.md`
 - 發現：`tools/demo/scan-flash-package.sh` 對所有磁碟映像（raw-disk-img*）都套 `--platform raspberrypi` → Rockchip GPT 映像會被誤分類；M2 平台介面要明確傳平台（已寫進研究文件；C0 已轉給 C1，P 軌處理：平台由 project.yml 給定，沒給標 GAP）
-- 下一步：M2 後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml
+- 下一步：M2 P 軌後寫 Raspberry Pi、Rockchip、AI NAS 轉接器與示範專案；samples.yml 搬到 projects/<專案>/sources.yml。另隨 M6 交平台的 OS EOL 資料（Debian 13、Raspberry Pi OS、Radxa rsdk、OMV → support-lifecycle.json，每筆查原始來源，D-033）。PR #15 合併後刪除 wp7/cra-survey（遠端與 worktree）
 - 卡住／等決定：無。等 C1 的 M2 P 軌（平台介面、開案範本）完成後開始寫轉接器；rpi_img.py 讀 Radxa 分割區屆時實測
 <!-- END C4 -->
