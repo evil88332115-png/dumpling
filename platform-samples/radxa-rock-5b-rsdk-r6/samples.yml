@@ -1,0 +1,71 @@
+platform: rockchip
+vendor: Radxa
+model: ROCK 5B（Rockchip RK3588）官方映像 rsdk-r6（Debian 12 bookworm，KDE）
+os_version: rsdk-r6（2026-07-24 發行；Debian 12 bookworm 基底）
+kernel_version: 6.1.84-8（linux-image-6.1.84-8-rk2410；Rockchip BSP 核心）
+bootloader_version: u-boot-rk2410 2017.09-64-39cd993（Rockchip 原廠系 U-Boot 2017.09）
+status: ok
+measured: 2026-11-12（實際下載、算 sha256；下載後刪除，沒有解開）
+files:
+  - name: rock-5b_bookworm_kde_r6.output_512.img.xz
+    url: https://github.com/radxa-build/rock-5b/releases/download/rsdk-r6/rock-5b_bookworm_kde_r6.output_512.img.xz
+    sha256: 76f434fa936e81d587a9697b9514f69c3ed0c4e132e047728bc06023b042224e
+    size: 1432722440
+    role: image
+    version: rsdk-r6
+    license_url: https://github.com/radxa-build/rock-5b/blob/main/LICENSE
+    note: GPT 原始磁碟映像（不是 update.img）；sha512 與 release 的 .sha512sum 相同，sha256 與 GitHub 附件 digest 相同
+  - name: rock-5b_bookworm_kde_r6.manifest
+    url: https://github.com/radxa-build/rock-5b/releases/download/rsdk-r6/rock-5b_bookworm_kde_r6.manifest
+    sha256: 0fdfd533eab82ff32f28c3705bfda06f929db3eda893d505531a155a11009a93
+    size: 50059
+    role: metadata
+    version: rsdk-r6
+    license_url: https://github.com/radxa-build/rock-5b/blob/main/LICENSE
+    note: 映像的套件清單（純文字）；核心與 U-Boot 版本取自這裡；sha512 與 .sha512sum 相同
+  - name: linux-image-6.1.84-8-rk2410_6.1.84-8_arm64.deb
+    url: https://github.com/radxa-pkg/linux-rk2410/releases/download/6.1.84-8/linux-image-6.1.84-8-rk2410_6.1.84-8_arm64.deb
+    sha256: ee81a431cd4d00ad27bc5e9529665acca7ce1614855dda34d130d04dddb3f11e
+    size: 27990828
+    role: package
+    version: 6.1.84-8
+    license_url: https://github.com/radxa/kernel/blob/87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9/COPYING
+    note: 映像裡核心的官方套件（身分比對用）；sha256 與 GitHub 附件 digest 相同
+  - name: u-boot-rk2410_2017.09-64-39cd993_arm64.deb
+    url: https://github.com/radxa-pkg/u-boot-rk2410/releases/download/2017.09-64/u-boot-rk2410_2017.09-64-39cd993_arm64.deb
+    sha256: fb319203ab7d568aac77505504c05698385aea8a0e8f895c226c6bc557a1bce7
+    size: 18453032
+    role: package
+    version: 2017.09-64-39cd993
+    license_url: https://github.com/radxa/u-boot/blob/39cd993e5d6296635438e84f4576b3a9bf76f86e/Licenses/README
+    note: 各板子的 idbloader／u-boot.itb 成品（推論，未解開）；內含 rkbin 的閉源 DDR 初始化與 TF-A（授權 https://github.com/rockchip-linux/rkbin/blob/master/LICENSE）；sha256 與 GitHub 附件 digest 相同
+  - name: radxa-kernel-87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
+    url: https://github.com/radxa/kernel/archive/87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
+    sha256: 5ab041a73216e6a0123b6befc95b1249e75a0aa1cbea636ecc033117c86b11db
+    size: 236847527
+    role: source
+    version: commit 87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9（radxa-pkg/linux-rk2410 tag 6.1.84-8 的 src 子模組；Makefile 6.1.84）
+    license_url: https://github.com/radxa/kernel/blob/87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9/COPYING
+    note: GitHub 動態封存檔的 sha256 可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256
+  - name: radxa-u-boot-39cd993e5d6296635438e84f4576b3a9bf76f86e.tar.gz
+    url: https://github.com/radxa/u-boot/archive/39cd993e5d6296635438e84f4576b3a9bf76f86e.tar.gz
+    sha256: 94b22a1f9c2178a27dfee77e438b780052703879971dc7547fae384697f174c8
+    size: 18569909
+    role: source
+    version: commit 39cd993e5d6296635438e84f4576b3a9bf76f86e（u-boot-rk2410 版本字串 2017.09-64-39cd993 的 commit）
+    license_url: https://github.com/radxa/u-boot/blob/39cd993e5d6296635438e84f4576b3a9bf76f86e/Licenses/README
+    note: GitHub 動態封存檔的 sha256 可能變動；處理方式同上
+gaps:
+  - item: rkbin（DDR 初始化、TF-A BL31、OP-TEE）成品的版本與來源 commit
+    status: GAP
+    note: 打包資料沒有記錄用的是 rockchip-linux/rkbin 的哪個 commit；閉源，只有成品
+  - item: 公開的 Rockchip update.img（RKFW）樣本
+    status: GAP
+    note: 沒有找到可合法、固定網址下載的；RKFW 解析只能用合成測試資料
+license:
+  name: 各元件授權（核心 GPL-2.0；U-Boot GPL-2.0+；rkbin 成品為 Rockchip 專有授權；Debian 套件見各自的 copyright 檔）
+  url: https://github.com/radxa-build/rock-5b/releases/tag/rsdk-r6
+  note: 只在 CI 下載核對，不重新散布。
+notes: |
+  板子廠商自己發行的映像，放在 GitHub Release（網址固定）；核心與 U-Boot 都能對到公開的 commit。
+  映像是 GPT 原始磁碟，開機程式在第一個分割區之前的原始磁區（推論），現有磁碟映像解析不會清點，見 docs/platforms-research.md。

@@ -1,0 +1,88 @@
+platform: ai-nas
+vendor: iXsystems（TrueNAS）
+model: TrueNAS Community Edition（SCALE）25.10.8「Goldeye」，amd64（只做研究與樣本清單，D-026）
+os_version: 25.10.8（2026-11-03 建置；Debian 12 bookworm 基底）
+kernel_version: 6.12.113-production+truenas（linux-image-truenas-production-amd64 6.12.113-production+truenas-1）
+status: ok
+measured: 2026-11-12（實際下載、算 sha256；.update 在本機用 unsquashfs 解開一次確認結構後刪除，沒有執行任何內容）
+files:
+  - name: TrueNAS-SCALE-25.10.8.update
+    url: https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.8/TrueNAS-SCALE-25.10.8.update
+    sha256: c518e5407759686d1ba46512900b887ad4d8f5f7f80e40bc3317bf38b035190d
+    size: 2003349504
+    role: image
+    version: 25.10.8
+    license_url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+    note: 外層是 squashfs（gzip），內有 manifest.json、rootfs.squashfs（xz）、truenas_install/（安裝程式，不執行）；sha256 與官方 .update.sha256 相同
+  - name: TrueNAS-SCALE-25.10.8.update.sig
+    url: https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.8/TrueNAS-SCALE-25.10.8.update.sig
+    sha256: 974a1b071ff9b38b33b737806694e8e728bea1d16845e964f5a4a8486947426c
+    size: 566
+    role: metadata
+    version: 25.10.8
+    license_url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+    note: OpenPGP 分離簽章（RSA 4096、SHA-512，簽章者指紋 C8D62DEF767C1DB0DFF4E6EC358EAA9112CF7946，2026-11-05）；2026-11-12 用官方文件公布的「IX SecTeam」公鑰（keyserver.ubuntu.com，指紋同上）驗證 .update：Good signature（GOODSIG／VALIDSIG）
+  - name: rootfs.mtree
+    url: https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.8/rootfs.mtree
+    sha256: bcb0ac052e68a2513f7a063c5350363edde2dd393a8299f8f0ff986e6f7765d1
+    size: 19676148
+    role: metadata
+    version: 25.10.8
+    license_url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+    note: rootfs 每個檔案的路徑、權限、大小、sha256（mtree 格式）；sha256 與官方 rootfs.mtree.sha256 相同
+  - name: GITMANIFEST
+    url: https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.8/GITMANIFEST
+    sha256: a30ec5411d4403e983ceab3bd7128f7252a6e2fd1b2447045b16b500421e9cff
+    size: 2099
+    role: metadata
+    version: 25.10.8
+    license_url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+    note: 這一版用到的 45 個 truenas/* repo 與 commit（官方提供）；下面的原始碼 tag 都跟它對得上
+  - name: truenas-linux-TS-25.10.8.tar.gz
+    url: https://github.com/truenas/linux/archive/refs/tags/TS-25.10.8.tar.gz
+    sha256: 98796af48005fd423165675149143a425dd07245264a7bac65dadd750d485b99
+    size: 246025550
+    role: source
+    version: tag TS-25.10.8 = commit d586e6d98d58c9f27f01b1cdf73c3bdb1d2c2e25（跟 GITMANIFEST 相同）
+    license_url: https://github.com/truenas/linux/blob/TS-25.10.8/COPYING
+    note: GitHub 動態封存檔的 sha256 可能變動；以 commit SHA 為準，核對失敗時改用 git clone，或標 GAP，不自動接受新的 sha256
+  - name: truenas-middleware-TS-25.10.8.tar.gz
+    url: https://github.com/truenas/middleware/archive/refs/tags/TS-25.10.8.tar.gz
+    sha256: 1c22fd3b928c474d5c5cc896c7065e8c73615c7a825ed0c5d2e6a4b13e5fdd4f
+    size: 4277256
+    role: source
+    version: tag TS-25.10.8 = commit 29ed02b8082f38494b0d2896bada8151f0d59716（中介層 middlewared）
+    license_url: https://github.com/truenas/middleware/blob/TS-25.10.8/LICENSE
+    note: 同上（動態封存檔）
+  - name: truenas-webui-TS-25.10.8.tar.gz
+    url: https://github.com/truenas/webui/archive/refs/tags/TS-25.10.8.tar.gz
+    sha256: 0c66fd89766a018eed721104aff4efb09c27ae4f8fb9c5076612fd342598ced9
+    size: 28452395
+    role: source
+    version: tag TS-25.10.8 = commit e85f786463fd2220c138bc6313eed02d53f97616（網頁介面）
+    license_url: https://github.com/truenas/webui/blob/TS-25.10.8/LICENSE
+    note: 同上（動態封存檔）
+  - name: truenas-build-TS-25.10.8.tar.gz
+    url: https://github.com/truenas/truenas-build/archive/refs/tags/TS-25.10.8.tar.gz
+    sha256: 4f5f48842d351de485a05673b19ec76813872b70bbd883686d28fdb77f0ceac8
+    size: 249631
+    role: source
+    version: tag TS-25.10.8 = commit 453acc8fddacf20c82a509a0177730e9479d49af（建置設定：套件清單與來源）
+    license_url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+    note: 同上（動態封存檔）
+  - name: truenas-apps-36fab4b06a64d6c44e8169ce9bf72550ca686efa.tar.gz
+    url: https://github.com/truenas/apps/archive/36fab4b06a64d6c44e8169ce9bf72550ca686efa.tar.gz
+    sha256: 0a44066c78c3ac1669d83cd531a47671f4f9e86f26439aeb6454062d8b9c8160
+    size: 29090800
+    role: source
+    version: master 的 commit 36fab4b06a64d6c44e8169ce9bf72550ca686efa（2026-11-12）
+    status: NOT_ASSESSED
+    license_url: https://github.com/truenas/apps/blob/36fab4b06a64d6c44e8169ce9bf72550ca686efa/LICENSE
+    note: App 目錄沒有版本 tag、跟 OS 版本分開滾動更新；這個 commit 是查詢當天的 master，跟某台 25.10.8 機器上的目錄是否相同：NOT_ASSESSED。現在不掃
+license:
+  name: 各元件授權（建置與網頁 GPL-3.0；中介層 LGPL-3.0；核心 GPL-2.0；Debian 套件見各自的 copyright 檔；App 目錄 LGPL-3.0，容器映像各自授權）
+  url: https://github.com/truenas/truenas-build/blob/TS-25.10.8/LICENSE
+  note: 只在 CI 下載核對，不重新散布。
+notes: |
+  目前的穩定版是 Goldeye 25.10.8（TrueNAS-26 還是 BETA、TrueNAS-27 是 RC，都不是穩定版；2026-11-12 查）。
+  不用安裝 ISO：理由跟 OMV 一樣，要得到裝好的系統就必須執行安裝程式（D-026）。.update 不需要執行就能取出系統根目錄，見 docs/platforms-research.md。

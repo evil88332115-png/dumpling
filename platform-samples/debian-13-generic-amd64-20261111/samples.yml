@@ -1,0 +1,69 @@
+platform: ai-nas
+vendor: Debian（OS 層）／OpenMediaVault（應用層）
+model: AI NAS 示範：Debian 13 trixie generic amd64 映像＋OpenMediaVault 原始碼（D-025）
+os_version: Debian 13 trixie，雲端映像 20261111-2659（base-files 13.8+deb13u7）
+kernel_version: 6.12.116-1（linux-image-6.12.116+deb13-amd64，來自 debian-security）
+app_version: OpenMediaVault 8.6.1-1（依 debian/changelog 與 Bump version commit）
+status: ok
+measured: 2026-11-12（實際下載、算 sha256；下載後刪除，沒有解開）
+files:
+  - name: debian-13-generic-amd64-20261111-2659.tar.xz
+    url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-generic-amd64-20261111-2659.tar.xz
+    sha256: 1e10629ef3fd2b2707d5fa34637bbfae7350e1ecd4768d04d4b8429aa10b7dbe
+    size: 322982872
+    role: image
+    version: 20261111-2659
+    license_url: https://www.debian.org/legal/licenses/
+    note: tar 裡是原始磁碟映像 disk.raw（推論）；sha512 與同目錄的 SHA512SUMS 相同
+  - name: debian-13-generic-amd64-20261111-2659.json
+    url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-generic-amd64-20261111-2659.json
+    sha256: 740c5266604bc05024836a76032273be988f6f2ee13b6c594d5a80a424aa5e40
+    size: 50844
+    role: metadata
+    version: 20261111-2659
+    license_url: https://www.debian.org/legal/licenses/
+    note: 映像的建置資訊與套件清單；核心版本取自這裡；sha512 與 SHA512SUMS 相同
+  - name: linux_6.12.116-1.dsc
+    url: https://snapshot.debian.org/archive/debian-security/20261108T202647Z/pool/updates/main/l/linux/linux_6.12.116-1.dsc
+    sha256: cef4db7d11833a771e04b844931a86387d5484def787a2a8f2cc6d9050385054
+    size: 290418
+    role: source
+    version: 6.12.116-1
+    license_url: https://www.debian.org/legal/licenses/
+  - name: linux_6.12.116.orig.tar.xz
+    url: https://snapshot.debian.org/archive/debian-security/20261108T202647Z/pool/updates/main/l/linux/linux_6.12.116.orig.tar.xz
+    sha256: 84f07a9eb2779253d11aefb8b6ee1cd2dd9aa80406cad111b04702ca9208d24e
+    size: 151683860
+    role: source
+    version: 6.12.116
+    license_url: https://www.kernel.org/doc/html/latest/process/license-rules.html
+    note: sha256 與 .dsc 的 Checksums-Sha256 相同
+  - name: linux_6.12.116-1.debian.tar.xz
+    url: https://snapshot.debian.org/archive/debian-security/20261108T202647Z/pool/updates/main/l/linux/linux_6.12.116-1.debian.tar.xz
+    sha256: c2cec050ef5c92d0dbd2ed16db52a8ca00403ab4f84ccd5be02387ff169aa617
+    size: 1986608
+    role: source
+    version: 6.12.116-1
+    license_url: https://www.debian.org/legal/licenses/
+    note: Debian 的修補與打包（debian/changelog、debian/patches/）；sha256 與 .dsc 相同
+  - name: openmediavault-9d8530ffa6912ece116bc6c74d0f3d06045b6c26.tar.gz
+    url: https://github.com/openmediavault/openmediavault/archive/9d8530ffa6912ece116bc6c74d0f3d06045b6c26.tar.gz
+    sha256: 3f2b2ba8bb10160397bdfea46503745b814676ee812dc2654b78f648b89275a2
+    size: 8782353
+    role: source
+    version: 8.6.1-1（依 debian/changelog 與 Bump version commit 9d8530ffa6912ece116bc6c74d0f3d06045b6c26，2026-10-30）
+    status: NOT_ASSESSED
+    license_url: https://github.com/openmediavault/openmediavault/blob/9d8530ffa6912ece116bc6c74d0f3d06045b6c26/LICENSE-GPL3
+    note: |
+      OMV 不打 git tag，這個 commit 跟正式發行的 8.6.1-1 deb 是否完全相同：NOT_ASSESSED。
+      GitHub 動態封存檔的 sha256 可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256。
+      內含 deb/openmediavault/workbench/package-lock.json、composer.lock、requirements.txt，給 cdxgen 掃相依套件。
+license:
+  name: 各元件授權（Debian 套件見各自的 copyright 檔；核心 GPL-2.0；OpenMediaVault GPL-3.0）
+  url: https://www.debian.org/legal/licenses/
+  note: 只在 CI 下載核對，不重新散布。
+notes: |
+  OS 層用 Debian 官方雲端映像（cloud.debian.org 長期保留舊版本）；核心原始碼用 snapshot.debian.org 的固定網址
+  （deb.debian.org／security.debian.org 換版後舊檔會被移走）。
+  不用 OpenMediaVault 的安裝 ISO：它是安裝程式，要得到裝好的系統就必須執行它，違反「只解開、不執行」（D-025）。
+  分層寫在 project.yml 的角色裡，不寫死在平台設定；自有品牌的 NAS，OS 層也算我們的待辦。

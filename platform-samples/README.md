@@ -27,4 +27,5 @@ Raspberry Pi、Rockchip、AI NAS 三個平台的公開示範資料：每個樣�
 |---|---|---|
 | `raspberrypi-os-lite-2026-10-06` | Raspberry Pi | 官方最新的 Lite arm64；核心原始碼有 Raspberry Pi apt 的原始碼包（雜湊固定）與 `raspberrypi/linux` tag；官方另附 SBOM |
 | `radxa-rock-5b-rsdk-r6` | Rockchip（RK3588） | 板子廠商自己發行的映像，放在 GitHub Release（網址固定）；核心與 U-Boot 都能對到公開 commit |
-| `debian-13-generic-amd64-20261111` | AI NAS（x86） | Debian 官方雲端映像（舊版本長期保留）；核心原始碼用 snapshot.debian.org 的固定網址；另列 OpenMediaVault ISO 當應用層候選 |
+| `debian-13-generic-amd64-20261111` | AI NAS（x86） | Debian 官方雲端映像（舊版本長期保留）；核心原始碼用 snapshot.debian.org 的固定網址；應用層用 OpenMediaVault 原始碼（固定 commit，D-025），不用安裝 ISO |
+| `truenas-scale-25.10.8` | AI NAS（x86，參考二） | TrueNAS Community Edition 目前的穩定版；只做研究與樣本清單、不寫轉接器（D-026）。用 `.update` 更新檔（squashfs，不執行就能取出 rootfs），不用安裝 ISO；原始碼都有 `TS-25.10.8` tag |
