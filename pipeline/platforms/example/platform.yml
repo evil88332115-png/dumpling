@@ -1,0 +1,23 @@
+# 最小的示範平台：證明「新增平台＝加一個資料夾＋platform.yml」，不用改 dispatcher 或 workflow。
+# 不下載真的東西，只供 tests/run.d/c1-m2-platform.sh 使用。
+schema: 1
+platform: example
+description: 最小示範平台（build 不編譯，assemble 與 scan 只印狀態）
+build:
+  mode: none
+raw_sectors:
+  enabled: true
+layers:
+  bsp:
+    packages: ["example-bsp-*", "example-firmware"]
+  host-tool:
+    paths: ["tools/*"]
+  default: os
+scan:
+  platform_arg: rockchip
+project_defaults:
+  platform_version: Example SoC 1.0
+  bsp_os_source: Example 公開映像
+  kernel_source: Example 公開核心原始碼
+  bootloader: Example 開機程式
+  interfaces: [Ethernet]

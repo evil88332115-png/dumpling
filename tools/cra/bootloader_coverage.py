@@ -36,6 +36,8 @@
       開機程式不在映像裡 → not_in_image 明列沒有涵蓋。
       --not-assessed <平台>（例如 rockchip；不需要 flash-inventory.json）：這個平台沒有定義開機鏈的分類 → 狀態 NOT_ASSESSED、
       說明 "boot chain not defined for this platform"，沒有任何分類與數量；報告因此不會看起來像「沒有開機韌體的問題」。退出碼 2。
+      --unspecified（不需要 flash-inventory.json）：呼叫端沒有指定平台 → 狀態 GAP、說明 "no platform was specified, not guessed"，不分類、
+      不預設成任何平台（平台由 project.yml 明確給定）。退出碼 2。
 
 規則：不寫「沒用」「可移除」；沒有成分層級掃描的項目一律明說 GAP，不顯示安全。建置機器的路徑與使用者名稱只寫在內部的 JSON，
 客戶版文字（customer_text）不含。
@@ -739,6 +741,15 @@ def build_not_assessed(variant, platform):
 
 # ---------------------------------------------------------------- Raspberry Pi（原始磁碟映像）
 
+def build_unspecified(variant):
+    """呼叫端沒有指定平台：不從映像格式推測，開機程式分類標 GAP。"""
+    cov = build_not_assessed(variant, None)
+    cov["status"] = "GAP"
+    cov["platform_unspecified"] = True
+    cov["detail"] = "no platform was specified, not guessed: boot firmware coverage was not classified (pass the platform from project.yml)"
+    return cov
+
+
 RPI_PLATFORM = "raspberrypi"
 RPI_ORDER = ("vendor_firmware", "kernel", "data", "unclassified", "not_firmware", "not_file")
 RPI_CLASS_TEXT = {
@@ -967,7 +978,7 @@ def run_coverage(result, variant, check_path=None, tee_path=None, platform=None)
 
 
 def run_not_assessed(result, variant, platform):
-    cov = build_not_assessed(variant, platform)
+    cov = build_unspecified(variant) if platform is None else build_not_assessed(variant, platform)
     vd = Path(result) / variant
     vd.mkdir(parents=True, exist_ok=True)
     write_json_atomic(vd / "bootloader-coverage.json", cov)
@@ -1011,6 +1022,7 @@ def main(argv=None):
     a.add_argument("--tee", help="tee-source.json to use (default <result>/<variant>/tee-source/tee-source.json); pass the one cra_report.py uses")
     a.add_argument("--not-assessed", metavar="PLATFORM")
     a.add_argument("--platform", choices=[RPI_PLATFORM])
+    a.add_argument("--unspecified", action="store_true", help="no platform given: write a GAP (do not guess)")
     try:
         args = ap.parse_args(argv)
     except SystemExit as e:
@@ -1043,8 +1055,8 @@ def main(argv=None):
             st = "ATTENTION" if any(r["status"] == "ATTENTION" for r in recs) else "GAP" if any(r["status"] == "NOT_ASSESSED" for r in recs) else "OK"
             line(stage, st, f"{len(recs)} extra deliverable(s): " + "; ".join(f"{r['name']}: {r['note']}" for r in recs))
             return 0 if st == "OK" else 2
-        if args.not_assessed:
-            cov = run_not_assessed(args.result, args.variant, args.not_assessed)
+        if args.not_assessed or args.unspecified:
+            cov = run_not_assessed(args.result, args.variant, args.not_assessed or None)
             line(stage, cov["status"], cov["detail"])
             return 2
         cov = run_coverage(args.result, args.variant, args.check, args.tee, args.platform)

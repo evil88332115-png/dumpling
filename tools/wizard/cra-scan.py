@@ -718,7 +718,8 @@ def main():
     plan = {"archive": str(fp), "source_archive": str(sa), "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
             "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
             "stable_git": str(stable) if stable else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
-            "name": name, "version": version, "rootfs": rootfs, "role": role, "extra_deliverables": [str(p) for p in extras]}
+            "name": name, "version": version, "rootfs": rootfs, "role": role, "extra_deliverables": [str(p) for p in extras],
+            "platform": a.platform or None}      # 由呼叫端（project.yml）明確給定；沒給就是 None，不從映像格式推測
     # 輸入清單：--inputs → 設定包裡的 inputs.json → --platform 範本
     mpath = Path(a.inputs).resolve() if a.inputs else (cfg_dir / "inputs.json" if cfg_dir and (cfg_dir / "inputs.json").is_file() else None)
     if not mpath and a.platform:
@@ -849,6 +850,8 @@ def main():
             env["KERNEL_STABLE_GIT"] = str(stable)
     cmd = ["tools/demo/scan-flash-package.sh", "--archive", str(fp), "--rootfs", rootfs, "--name", name, "--version", version,
            "--no-company", "--out", str(OUT / "scan")]
+    if a.platform:      # 平台由呼叫端（project.yml）明確給，原樣傳下去；沒給時 scan-flash-package.sh 對原始磁碟映像標 GAP，不推測
+        cmd += ["--platform", a.platform]
     if cfg_dir:
         cmd += ["--product-config", str(mcfg / "config.json")]
     if kt:

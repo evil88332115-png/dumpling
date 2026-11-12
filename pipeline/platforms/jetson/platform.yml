@@ -1,0 +1,48 @@
+# Jetson（NVIDIA Jetson Linux / L4T）平台設定。欄位說明見 docs/PLATFORM-INTERFACE.md。
+schema: 1
+platform: jetson
+description: NVIDIA Jetson（Jetson Linux r39.x）：公開 BSP、範例 rootfs、public_sources；編核心與樹外模組後組刷機包
+build:
+  mode: compile            # 交叉編譯核心與樹外模組（J 軌實作）
+raw_sectors:
+  enabled: false           # Jetson 沒有分割區外的原始磁區要清點
+# 分層規則（D-027）：用套件名稱（不含版本）與路徑樣式，fnmatch 語法；不看版本字尾。其餘一律是 os。
+# 路徑樣式比的是元件在映像裡的路徑（去掉開頭的 /）：rootfs 映像是 usr/lib/modules/…，BSP 資料夾是 Linux_for_Tegra/…。
+# 非套件的元件（核心、樹外模組、device tree、開機程式、閉源韌體）靠路徑判斷；路徑沒有任何規則對到的標 unknown（不默默歸成 os）。
+layers:
+  bsp:
+    packages:
+      - "nvidia-l4t-*"       # L4T 使用者空間套件（驅動、函式庫、工具）：裝在 rootfs 但屬於 BSP
+    paths:                   # 核心、樹外模組、device tree、開機程式（J 軌依實際 BSP 內容再補）
+      - "usr/lib/modules/*"  # rootfs：核心（in-tree）與樹外模組（nvidia-oot、nvgpu…），Syft 的 linux-kernel-module 元件
+      - "lib/modules/*"
+      - "boot/*"             # rootfs：核心映像、device tree、initrd
+      - "Linux_for_Tegra/kernel/*"
+      - "Linux_for_Tegra/rootfs/usr/lib/modules/*"
+      - "Linux_for_Tegra/rootfs/boot/*"
+      - "Linux_for_Tegra/bootloader/*.bin"   # UEFI、OP-TEE／TF-A、MB1／MB2、BPMP、SPE 等映像
+      - "Linux_for_Tegra/bootloader/*.dtb"
+      - "Linux_for_Tegra/bootloader/*.dtbo"
+      - "Linux_for_Tegra/bootloader/*.img"
+  host-tool:
+    paths:                   # 主機端刷機工具：不在板子上執行，不進產品漏洞清單（J 軌依實際 BSP 內容再補）
+      - "Linux_for_Tegra/flash.sh"
+      - "Linux_for_Tegra/apply_binaries.sh"
+      - "Linux_for_Tegra/tools/*"
+      - "Linux_for_Tegra/nv_tools/*"
+  default: os
+scan:
+  inputs_template: jetson    # tools/wizard/platforms/jetson.json
+  platform_arg: jetson       # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform
+  rootfs: rootfs
+project_defaults:
+  platform_version: Jetson Linux r39.2.x（NVIDIA 公開 BSP）
+  bsp_os_source: NVIDIA Jetson Linux 公開 BSP、公開範例 rootfs 與 public_sources
+  kernel_source: NVIDIA public_sources 的 Linux 核心與樹外模組，加專案 patches/
+  bootloader: NVIDIA 公開 BSP 內建 UEFI（edk2-nvidia）、OP-TEE、MB1／MB2（閉源韌體以 BSP 原樣）
+  own_software: []
+  interfaces:
+    - Ethernet
+    - USB
+    - UART 除錯埠
+  platform_params: {}

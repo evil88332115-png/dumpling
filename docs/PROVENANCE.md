@@ -16,12 +16,12 @@
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾與自架 runner 的工作目錄結構）改成 /path/to/work/.sca-scan-work.…/image.tar（metadata.component.name，僅此一處）、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處 |
+| `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處；**行為修改（M2）**：新增 `--unspecified`（沒指定平台時開機程式分類標 GAP「沒有指定平台，不推測」） |
 | `tools/cra/company.example.json` | `scripts/cra/company.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.example.json` | `scripts/cra/config.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
 | `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處、清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
-| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處（說明文字與路徑字串）；「內部窗口」→「專案負責人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改）；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M2 分層）**：新增 `--os-responsibility`；SBOM 元件帶 `dumpling:layer` 時才動作（沒有時輸出不變）：漏洞列加 `layer`／`layer_todo`／`layer_basis`、host-tool 元件的比對結果移出產品清單、整體狀態（ATTENTION）與依日期的出貨關卡只看我們的待辦（OS 層在 customer／upstream-vendor 時不算）、沒給 os_responsibility 標 GAP 並全部列入待辦、風險評估多一節「Layers」（通知客戶、unknown、host tools）、`summary.json` 與 `vulnerability-rows.json` 多 `layers`；發行閘門（vex_export）不變 |
 | `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣 |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
 | `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：內部主機名稱改成「本機」（1 行） |
@@ -38,20 +38,20 @@
 | `tools/cra/pkg_why.py` | `scripts/cra/pkg_why.py` | 25fa89a | 路徑調整 2 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/py_dpkg_version.py` | `scripts/cra/py_dpkg_version.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_diff.py` | `scripts/cra/report_diff.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
+| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；**行為修改（M2 分層）**：`vulnerability-rows.json` 有 `layers` 區塊時才動作（沒有時輸出不變）：清單多「層」欄並依層排、P1 判斷表預設只放我們的待辦（可用 `--p1-layers` 覆寫）、OS 層（customer／upstream-vendor）另開工作表與「通知客戶」、新增「分層摘要」、總覽只含我們的待辦 |
 | `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣 |
 | `tools/cra/security_findings.py` | `scripts/cra/security_findings.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/support_check.py` | `scripts/cra/support_check.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tee_bundled.py` | `scripts/cra/tee_bundled.py` | 25fa89a | 原樣 |
 | `tools/cra/tee_source.py` | `scripts/cra/tee_source.py` | 25fa89a | 原樣 |
-| `tools/cra/templates/risk-assessment.md` | `scripts/cra/templates/risk-assessment.md` | 25fa89a | 原樣 |
+| `tools/cra/templates/risk-assessment.md` | `scripts/cra/templates/risk-assessment.md` | 25fa89a | **行為修改（M2 分層）**：8.7 節 placeholder 串後面加 `{{ text.layer_section }}`（沒有分層時是空字串，輸出不變） |
 | `tools/cra/templates/sbom.md` | `scripts/cra/templates/sbom.md` | 25fa89a | 原樣 |
 | `tools/cra/templates/technical-documentation.md` | `scripts/cra/templates/technical-documentation.md` | 25fa89a | 原樣 |
 | `tools/cra/templates/user-information.md` | `scripts/cra/templates/user-information.md` | 25fa89a | 原樣 |
 | `tools/cra/tests/data/cyclonedx-1.5/`（bom-1.5.schema.json、README.md） | 不是 sca-center 的檔：CycloneDX/specification 的 `schema/bom-1.5.schema.json`（commit ad83dae2，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。給 vexconv 測試用 |
 | `tools/cra/tests/data/openvex/`（openvex_json_schema.json、README.md） | 不是 sca-center 的檔：openvex/spec 的 `openvex_json_schema.json`（commit 61b5f885，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。取代 sca-center 的 `scripts/ci/fetch-test-data.sh` 連網取得 |
-| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 原樣 |
+| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 新增 `test_unspecified_platform_is_gap_not_guessed`（M2） |
 | `tools/cra/tests/test_bootloader_report.py` | `scripts/cra/tests/test_bootloader_report.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -76,6 +76,7 @@
 | `tools/cra/tests/test_image_check_modules.py` | `scripts/cra/tests/test_image_check_modules.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_initrd_coverage.py` | `scripts/cra/tests/test_initrd_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試；註解：移除上游私有 repo 的編號與內部部署描述；`consumer158()` 不再用 `git show` 讀上游另一個分支的 vex_export（dumpling 沒有那個分支，原本就回 None），直接回 None，測試行為不變 |
+| `tools/cra/tests/test_layers_report.py` | （dumpling 自己寫） | — | 新增（M2 分層）：cra_report／report_package 的分層測試：三種 os_responsibility 與沒給時的 GAP、ATTENTION 與出貨關卡的計算、host-tool 不進產品清單、unknown 當待辦、P1 判斷表與工作表；測資全部合成 |
 | `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（廠商信箱、免費信箱各改成已登記在 `ci/public-allow.txt` 的同網域信箱，判定只看網域）；libnvinfer 版本字串維持原值（登記在白名單，見「public-check 白名單」） |
 | `tools/cra/tests/test_nvidia_distro.py` | `scripts/cra/tests/test_nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_own_software.py` | `scripts/cra/tests/test_own_software.py` | 25fa89a | 原樣 |
@@ -117,7 +118,7 @@
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行 |
+| `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP |
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
@@ -125,7 +126,7 @@
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；新增 `test_platform_is_explicit_and_never_guessed`（M2）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
 | `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -158,6 +159,7 @@
 | `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的空對照表（vBIOS；沒有已審核的列，所有 gpu-firmware 公告都列為待審）；格式同 `nvidia-bulletins.json` |
 | `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh` |
 | `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
@@ -202,14 +204,14 @@
 | `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
 | `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處；平台範本清單去掉 android；「取最新工具」改為取 HEAD 或 `--tools-rev` 的說明 |
-| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
+| `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處；**行為修改（M2）**：`--platform` 原樣傳給 scan-flash-package.sh，並寫進 plan.json；**行為修改**：工具版本改為預設目前 checkout 的 `HEAD`、可用 `--tools-rev`／`DUMPLING_TOOLS_REV` 覆寫，實際 commit 寫進 `<輸出>/tools-version.json`（見「影響邏輯的替換」）；平台說明去掉 android |
 | `tools/wizard/inputs.example.json` | `scripts/wizard/inputs.example.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/jetson.json` | `scripts/wizard/platforms/jetson.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/platforms/raspberrypi.json` | `scripts/wizard/platforms/raspberrypi.json` | 25fa89a | 原樣 |
 | `tools/wizard/platforms/rockchip.json` | `scripts/wizard/platforms/rockchip.json` | 25fa89a | 清理 1 行 |
 | `tools/wizard/wizard.example.json` | `scripts/wizard/wizard.example.json` | 25fa89a | 原樣 |
 
-以下是 dumpling 自己寫的（不是複製）：`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
+以下是 dumpling 自己寫的（不是複製）：`pipeline/lib/layers.py`、`pipeline/sbom-layers.py`、`tests/test_layers.py`、`tests/run.d/c1-m2-layers.sh`（M2 分層，見 `docs/LAYERS.md`）、`ci/provenance-check.sh`、`tests/run.d/c1-tools.sh`、`tests/run.d/c1-public-check.sh`（`ci/public-check.sh` 壓縮檔檢查的測試，測資當場合成）；`ci/public-check.sh` 是 WP0 的檔，M1 加了壓縮檔解壓後檢查（C0 同意在 M1 修改）：涵蓋 .xz、.gz、.bz2、.zst、.tar 及 .tgz 等變體，副檔名不分大小寫；不支援的封存格式（.zip、.7z 等）一律算命中；白名單是完整字串比對。
 
 ### 改動類型說明
 
@@ -289,6 +291,7 @@
 | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `/path/to/work/.sca-scan-work.…/image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
 | `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
 | `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 手寫的空對照表（沒有任何公告資料） | 合成 |
 | `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：改成只引用公開資料的說法，不含內部映像的套件版本字串與內部 CI 執行編號（無公開依據的部分改標為推論） |
 | `tools/pilot/lib/*.md`、`README.md` 等說明文件 | 手寫的說明 | 合成。內部 CI 的執行編號與代號已改成中性說法（「Jetson R39.2.1 示範映像」「示範掃描」） |
 | `tools/wizard/platforms/{jetson,rockchip,raspberrypi}.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例（要檢查的輸入清單：刷機包、原始碼、建置紀錄、上游基準、板子檢查…） | 合成。`note` 欄原本寫「依某產品演練整理」，已改成「某平台的範本」 |

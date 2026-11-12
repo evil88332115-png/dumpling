@@ -1,0 +1,164 @@
+# 分層：報告與 DT 依層分開（M2 L 軌）
+
+PLAN「BSP 掃描範圍」要求：BSP（我們的待辦）、OS（範例 rootfs，給客戶參考）、主機端工具（不進產品漏洞清單）分開；P1 判斷表預設只放 BSP。
+本文件是實作的規則與使用方式。程式：`pipeline/lib/layers.py`（分類）、`pipeline/sbom-layers.py`（標記與拆分）、
+`tools/cra/cra_report.py`、`tools/cra/report_package.py`（報告）。測試：`tests/test_layers.py`（`tests/run.d/c1-m2-layers.sh`）、
+`tools/cra/tests/test_layers_report.py`（`tests/run.d/c1-tools.sh`）。
+
+## 1. 四個層值
+
+| 值 | 意思 | 例（Jetson） |
+|---|---|---|
+| `bsp` | 我們負責、必掃、算待辦 | `nvidia-l4t-*` 套件、核心與樹外模組、device tree、開機映像、我們自己的程式 |
+| `os` | 作業系統層；算不算我們的待辦由專案的 `os_responsibility` 決定 | 範例 rootfs 的 Ubuntu 套件 |
+| `host-tool` | 在開發主機上跑、不在產品上執行；不進產品漏洞清單 | `Linux_for_Tegra/flash.sh`、`tools/*` |
+| `unknown` | **判斷不了**。不猜、不歸成 os；一律當我們的待辦（最保守，不漏報） | 沒有發行版套件身分、也沒有路徑的 Go／Python 套件 |
+
+層寫在 SBOM 每個元件的 property：`dumpling:layer`（值）、`dumpling:layer-basis`（依據：`package-name`、`path`、`own-software`、
+`own-software-list`、`component-type`、`inherited`、`unresolved`）；SBOM 的 metadata 記 `dumpling:os-responsibility`、`dumpling:platform`。
+子元件（元件裡的 `components`）跟著父元件，依據標 `inherited`。cra_report 只讀這些 property（不 import `pipeline/`，兩邊的名稱由測試核對）。
+
+## 2. 判斷規則（`layers.classify_component`，第一個成立的就是答案；**不看版本字尾**，D-027）
+
+1. **我們的軟體**：cra 設定 `sbom.own_software` 產生的元件（bom-ref 以 `sca-center:own:` 開頭），或專案 `project.yml` 的 `own_software`
+   清單對到（含 `/` 的項目比路徑，其餘比元件名稱，fnmatch；不像套件名稱的自由文字項目略過並計數）→ `bsp`。
+2. 型別 `operating-system` → `os`；型別 `firmware` → `bsp`。
+3. **發行版套件**（purl 類型 `deb`／`rpm`／`apk`／`alpm`）：只看套件名稱，用 `classify_package`：`layers.bsp.packages` → `bsp`、
+   `layers.host-tool.packages` → `host-tool`、其餘 `os`（平台的 `default: os`）。
+4. **有路徑的元件**（Syft 的 `syft:location:N:path`、`syft:metadata:path`、CycloneDX `evidence.occurrences[].location`、型別 `file` 的名稱）：
+   路徑去掉開頭的 `/`、`./` 後比平台的 `layers.bsp.paths` → `bsp`、`layers.host-tool.paths` → `host-tool`、`layers.os.paths` → `os`；
+   **沒有任何規則對到 → `unknown`**（`default: os` 只用在發行版套件，不用在路徑）。路徑含 `..` 或 NUL 的不採用。
+   核心、樹外模組、device tree、UEFI、OP-TEE／TF-A、NVIDIA 閉源韌體都在這一條，由平台設定的路徑樣式決定（不寫死在程式裡）。
+5. 其他 → `unknown`。
+
+同一個元件有多個路徑時取最保守的：`bsp` > `unknown` > `os` > `host-tool`（在產品上、我們負責的優先；有一個路徑判斷不了就是 `unknown`，
+不會因為另一個路徑是 host-tool 就當成 host-tool）。
+
+**路徑樣式比的是元件在映像裡的路徑**：rootfs 映像是 `usr/lib/modules/…`、`boot/…`；BSP 資料夾是 `Linux_for_Tegra/…`。平台設定兩種都列
+（`pipeline/platforms/jetson/platform.yml`）。`layers.os` 只有 `paths`（選用）；套件沒列在 bsp／host-tool 的本來就是 os。
+
+### cra_report 自己加的列
+
+cra_report 用 BSP 專屬輸入產生的列直接是 `bsp`（依據 `synthetic:*`）：UEFI／OP-TEE 內建函式庫的列、NVIDIA 安全公告的列、
+廠商核心 CVE 清單（kernel CNA）的列。其他列用元件找層：purl → 名稱＋版本 → 對應來源（`mapped_from`，例如 l4t 核心對應）→ 安裝的二進位套件
+（DT 以原始碼套件比對時）→ 擁有它的 deb（Ubuntu 打包的 Python 模組）；都對不到是 `unknown`。同一列對到多個層時 `bsp` > `unknown` > `os`。
+
+## 3. 三種 `os_responsibility` 的行為
+
+`os_responsibility` 由專案決定（`project.yml`；`cra_report.py --os-responsibility` 可覆寫，SBOM 的 metadata 也記一份）。
+
+| | `ours`（自有品牌 AI NAS） | `customer`（Jetson 範例 rootfs） | `upstream-vendor`（轉售 TrueNAS） | 沒給（**GAP，不預設**） |
+|---|---|---|---|---|
+| OS 層的列算我們的待辦 | 是 | 否 | 否 | 是（最保守） |
+| `P1判斷表.xlsx` | 含 OS 層的 P1 | 只有 bsp＋unknown | 只有 bsp＋unknown | 含所有層 |
+| `漏洞清單.xlsx` | 層欄位、依層排；OS 層在同一份待辦裡 | 另開「範例 rootfs（給客戶參考）」「通知客戶」；「排除後剩下的」只有我們的待辦 | 另開「OS層（上游廠商負責）」「通知客戶」 | 同 ours，加 GAP 說明 |
+| OS 層出現 KEV（EUVD、人工證據同） | 我們的 P1，整體 ATTENTION | **不**讓整體 ATTENTION；列入「通知客戶」 | 同 customer（說明是上游廠商負責、我們只通知客戶） | 我們的 P1，整體 ATTENTION |
+| DT | 一個專案 `<名稱>` | 兩個專案 `<名稱>-bsp`、`<名稱>-os` | 同 customer | 一個專案（全部當待辦） |
+| 風險評估文件狀態 | 看內容 | 看內容（OS 層 P1 不算） | 同 customer | **GAP**（原因寫進 `risk.data_status_detail` 以外的文件理由；不影響漏洞資料狀態） |
+
+沒有任何一個漏洞從報告消失：不算待辦的列仍在風險評估的 P1／P2／P3 表（多一欄 Layer）、`vulnerability-rows.json`、完整漏洞清單與 OS 層工作表。
+
+### ATTENTION／狀態怎麼算（cra_report）
+
+只改「算不算我們的待辦」，不改資料狀態（GAP／NOT_ASSESSED）的判斷：
+
+| 項目 | 規則 |
+|---|---|
+| 有未處理的 P1 → ATTENTION | 只數我們的待辦的 P1；OS 層在 customer／upstream-vendor 時不數，理由文字註明「另有 N 列 P1 在 OS 層，不算在這裡」 |
+| 移出 P1–P3 的 KEV 列（發行版已修補）要人工確認 → ATTENTION | 至少有一列是我們的待辦才 ATTENTION；OS 層不是待辦的列仍列在發行版小節與「通知客戶」 |
+| 分級方式 `exploitation` 的出貨關卡（BLOCKED／必須判斷的範圍） | 只看我們的待辦 |
+| Grype／DT 交叉核對的差異、EUVD 標示被利用但不在表上的 CVE、資料新鮮度、sbomgate | **不分層**（偏保守：這些是資料完整度，不是待辦） |
+| vex_export 的發行閘門（`vex.gate`） | **不分層**（不變）。要不要讓 OS 層的未評估列也擋我們的發行是政策問題，見「待確認」 |
+| 沒給 os_responsibility | 風險評估文件 GAP（`est`）；OS 層全部當待辦 |
+| unknown | 是我們的待辦，不另外讓狀態變差；數量與來源（`golang 235` 這種）寫在 Layers 一節與 `summary.json` |
+
+### host-tool
+
+host-tool 元件上的 DT finding 與 Grype 比對**在列出之前**就移出產品的比對結果（所以不進清單、不進交叉核對、不進 P1，也不會讓狀態變差），
+`summary.json` 的 `layers.host_tool` 記元件身分、移出的 finding／比對筆數與漏洞編號；風險評估 Layers 一節寫「Host tools (not running on the product)」。
+同一個 purl（或名稱＋版本）在別的層也有時不算 host-tool 專用，保守地留在產品清單。
+建議的流程裡 host-tool 根本不會被送去掃描（`sbom-layers.py split` 的 scan_plan 不含它），這一段是 SBOM 沒拆就直接給 cra_report 時的保險。
+產品 SBOM（`Reports/sbom.cdx.json`）仍保留標了 `host-tool` 的元件（不默默刪元件）。
+
+## 4. `pipeline/sbom-layers.py`
+
+```
+python3 -I pipeline/sbom-layers.py tag   <sbom> <平台> <專案資料夾> <輸出sbom>   [--os-responsibility X] [--platforms-dir D]
+python3 -I pipeline/sbom-layers.py split <sbom> <平台> <專案資料夾> <輸出資料夾> [--os-responsibility X] [--platforms-dir D]
+python3 -I pipeline/sbom-layers.py show  <標好層的sbom>
+```
+最後一行 `sbom-layers: OK｜GAP｜FAIL（說明）`；結束碼 OK 0、FAIL 1、GAP 3、用法錯誤 64。輸入可以是 `.json` 或 `.xz`（視為不可信資料，只讀）。
+專案資料夾必須通過 `project_config` 驗證（所以 `os_responsibility` 一定有值；GAP 只會發生在直接用函式庫、沒給值時）。
+
+`split` 的輸出（沒有元件的檔案不產生）：
+
+| 檔案 | 內容 | 用途 |
+|---|---|---|
+| `sbom.bsp.cdx.json` | `bsp`＋`unknown` | DT 專案 `<名稱>-bsp`（unknown 當待辦） |
+| `sbom.os.cdx.json` | `os` | DT 專案 `<名稱>-os` |
+| `sbom.host-tool.cdx.json` | `host-tool` | **不上傳**，只留作記錄 |
+| `sbom.product.cdx.json` | 除了 host-tool 以外全部（每個元件帶層） | `os_responsibility` 是 `ours` 或沒給時的單一專案 |
+| `layers.json` | 各層數量、`unknown` 的來源、`scan_plan`、丟掉的跨層依賴邊數、`gaps` | scan 步驟讀它 |
+
+不變量（測試核對）：`bsp.cdx` 與 `os.cdx` 與 `host-tool.cdx` 的 bom-ref 聯集＝原本、沒有重複；`product.cdx`＝原本扣掉 host-tool；每份的 `dependencies`
+只留兩端都在同一份的邊（不留懸空的 ref），丟掉的邊數記在 `dropped_dependency_edges`（跨層依賴不會讓元件消失，但單看 `-bsp` 專案會缺少「依賴 OS 套件」的邊）。
+輸出是確定的（同樣輸入同樣位元組）。
+
+`layers.json` 的 `scan_plan` 是 scan 步驟要掃的清單：
+
+| os_responsibility | 項目 |
+|---|---|
+| `customer` | `-bsp`（`sbom.bsp.cdx.json`，我們的待辦）、`-os`（`sbom.os.cdx.json`，範例 rootfs 給客戶參考） |
+| `upstream-vendor` | 同上，OS 那項的說明是「上游 OS 廠商負責，我們只通知客戶」 |
+| `ours`、沒給 | 一項，名稱後綴為空（`sbom.product.cdx.json`） |
+
+## 5. DT 怎麼分
+
+- **兩個 DT 專案**（`customer`／`upstream-vendor`）：`<名稱>-bsp`、`<名稱>-os`。理由：DT 的通知、政策、指標都是以專案為單位，分開後 BSP 專案的 KEV 才會
+  通知 RD，OS 專案的 KEV 不會變成我們的待辦；也最符合 PLAN「報告與 DT 分成兩個專案」。用現有 `tools/pilot/sca-scan --sbom <檔> --name <名稱+後綴>`
+  各跑一次，**不用改 sca-scan**。每一份各自得到一份 scan 輸出資料夾與一份報告。
+- `ours`：不分（OS 也是我們的待辦），一個專案、一份報告；層欄位照樣標，P1 判斷表含 OS 層。
+- **host-tool 不上傳 DT**（不是產品的一部分；上傳會讓產品專案出現與產品無關的 KEV）。拆分時留作記錄檔。
+- DT 5.2.0 的專案階層（`PUT /api/v1/project` 的 `parent`）理論上可以讓 `-bsp`、`-os` 掛在 `<名稱>` 底下，但 sca-scan 目前建立專案時不設 parent，
+  且還沒在臨時 DT 驗證，所以先用兩個平行的專案（見「待確認」）。
+
+## 6. 給 J 軌：scan 步驟怎麼呼叫
+
+```bash
+layers="$DUMPLING_OUT/layers"
+python3 -I "$DUMPLING_ROOT/pipeline/sbom-layers.py" split "$sbom" "$DUMPLING_PLATFORM" "$DUMPLING_PROJECT_DIR" "$layers" || rc=$?   # 0 OK、3 GAP
+# 讀 $layers/layers.json 的 scan_plan，每一項依序做（report_package 讀 <專案>/CRA/Reports，所以一項做完再做下一項）：
+#   tools/pilot/sca-scan --sbom "$layers/<sbom>" --name "<專案名><name_suffix>" --version "$DUMPLING_VERSION" --out "$DUMPLING_OUT/scan<name_suffix>" [其餘照原本]
+#   python3 -I tools/cra/cra_report.py --project "$DUMPLING_PROJECT_DIR" --scan "$DUMPLING_OUT/scan<name_suffix>/<sca-scan 輸出>" \
+#       --os-responsibility "$DUMPLING_OS_RESPONSIBILITY"
+#   python3 -I tools/cra/report_package.py --project "$DUMPLING_PROJECT_DIR" --out "$DUMPLING_OUT/report<name_suffix>"
+```
+- `cra_report.py` 不需要 `--os-responsibility`（SBOM 的 metadata 已記），明確傳是保險；傳的值優先。
+- 拆分前的完整 SBOM 還是要留（`sboms/`、Release）：`sbom.product.cdx.json` 是標好層的完整產品 SBOM。
+- `report_package.py --p1-layers bsp,unknown,os` 可改 P1 判斷表放哪幾層（預設只放我們的待辦）。
+- 各項的最終狀態取最差的；`layers.json` 的 `gaps` 非空時 scan 步驟至少回報 GAP。
+
+## 7. Jetson 標準答案（`tests/fixtures/jetson-r39.2.1-base.cdx.json.xz`，Syft 1.55.0，3851 個元件）
+
+| 層 | 元件數 | 組成 |
+|---|---|---|
+| `bsp` | 1537 | `nvidia-l4t-*` deb 69 ＋ 核心與樹外模組（`/usr/lib/modules/…`，linux-kernel-module）1468 |
+| `os` | 1975 | 其他 Ubuntu deb 1974 ＋ OS 元件 1 |
+| `unknown` | 339 | Go 235、Python 101、Java 3（Syft 沒有給路徑，也不是發行版套件） |
+| `host-tool` | 0 | rootfs 映像裡沒有刷機工具 |
+
+測試把這些數字釘死（`tests/test_layers.py` 的 `JETSON_EXPECTED`）：規則或 platform.yml 讓數字變動時，必須確認新歸屬是對的才改。
+真實的 BSP 資料夾掃描（含 `Linux_for_Tegra/`）要等 J 軌有實際內容再補數字。
+
+## 8. 待確認（已採最保守做法，不阻擋）
+
+1. **unknown 339 個**（Go／Python／Java）現在全列入 BSP 待辦。它們在乾淨的 Ubuntu rootfs 幾乎都是 Ubuntu 套件帶進來的；要歸 os 需要
+   「這個語言套件屬於哪個 deb」的資料（pkgdb 的 dpkg 檔案歸屬）。建議 J 軌用 pkgdb 補路徑或擁有者；cra_report 已能用「擁有它的 deb」
+   （`deb_python.owner`）找層，只是 SBOM 端的標記要有路徑才行。或由 PM 決定是否在 platform.yml 用 `layers.os.paths` 宣告 rootfs 裡 Ubuntu 的路徑。
+2. **`nvidia-igx-*`**（2 個）、`libdrm-tegra0` 等不是 `nvidia-l4t-*` 的 NVIDIA／Tegra 套件現在歸 os（D-027 只用名稱清單）。是否算 BSP 由 PM 決定。
+3. **發行閘門（`vex.gate`）不分層**：OS 層在 customer 時，未評估的 KEV 仍會讓發行閘門 BLOCKED／ATTENTION。這是否符合「OS 由客戶負責」需要 PM／法務決定。
+4. **兩個 DT 專案 vs. 專案階層（parent／child）**：見第 5 節。
+5. **host-tool 是否另開 DT 專案**：現在不上傳。
+6. **`platform.yml` 的 BSP 路徑樣式**（`Linux_for_Tegra/bootloader/*.bin` 等）是依 NVIDIA 公開 BSP 的慣例寫的，還沒對真實 BSP 資料夾的 SBOM 驗證；J 軌有實際內容後補。
+7. 風險評估範本是專案自己的複本時（`CRA/templates/risk-assessment.md`）沒有 `{{ text.layer_section }}`，Layers 一節不會出現在文件裡（cra_report 會記警告；
+   `summary.json`、`vulnerability-rows.json`、報告包的工作表照樣有）。
