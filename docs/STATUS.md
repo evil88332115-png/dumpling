@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:56 +0800（C4）
+最後更新：2026-11-12 10:01 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -34,9 +34,10 @@
   - 寫程式 B（臨時 DT）：完成
   - 驗證 V1（m1-dt）：不通過（pipefail）→ P 已修，併入 V2 重驗
   - 寫程式 S（M2 試驗，使用者同意、C0 轉達）：分支 `wp1/m2-spike`（從 2555a66 開，**不合併、不開 PR**），`.github/workflows/m2-spike.yml`（只有 workflow_dispatch）量測 arm runner 磁碟清理、L4T BSP／原始碼下載＋sha256＋actions/cache、原生編譯核心＋樹外模組；結果放分支的 `docs/m2-spike-results.md`，C1 摘要寫進下面的 M2 設計備忘；Sonnet 5.5／high；進行中
-  - 驗證 V2：M1 全部（2555a66），Sonnet 5.5／high，進行中；結論留 PR #9（第一行「驗證：通過／不通過（M1 全部，2555a66）」）
+  - 驗證 V2（M1 全部，2555a66）：完成，**不通過**（PR #9 issuecomment-6827049283）；必須修 3 項：(1) public-check 壓縮檔檢查被非 ASCII 檔名繞過 → C1 已修（f7830fc：-z、不分大小寫、.tgz／.tar、.zip 等算命中、白名單完整字串比對）；(2) PROVENANCE 引用改寫前的內部原值；(3) PROVENANCE 多處與實際不符 → 交給 F；CI（tests、dt-smoke，workflow_dispatch＋pull_request）全綠
+  - 寫程式 F：`wp1/m1-fix`（從 2555a66 開），PROVENANCE 修正（不引用原值、與實際一致）、還原多刪的斷言、scan-status-check 加必要階段、dt-ephemeral 數值參數驗證、註解移除上游私有 repo 編號與內部部署描述；Sonnet 5.5／medium；進行中
 - CI：`wp1/m1-tools` 2555a66：tests run 43239253974、dt-smoke run 43239262833（進行中）；之前 e874441 的 tests：bubblewrap OK、NOT_RUN 0（pilot 修正併入前 37 failed）
-- 下一步：V2 通過＋兩個 run 綠燈 → #9 轉正式 PR（說明附逐檔對照、資料來源表，引用 PROVENANCE）→ 通知 C0、C2（C2 等臨時 DT）→ M1 合併後開 M2
+- 下一步：F 完成 → merge `wp1/m1-fix` 進 `wp1/m1-tools` → tests＋dt-smoke → 驗證 V3（只看 V2 的必須修＋改動）→ #9 轉正式 PR → 通知 C0、C2
 - M2 設計備忘（C0 轉達，C4 的平台研究；試驗結果待 S 回報後補）：
   - `sources.yml` 的 fetch 重用 C2 的 `pipeline/lib/firmware_fetch.py`（curl_download／check_file／fetch_one 通用，validate() 寫死韌體欄位）：M2 新增共用模組、firmware_fetch.py 改呼叫它；`sources.yml` 的 files[] 沿用 firmware.yml 格式（C4 的 samples.yml 已照此格式）。**動 C2 的檔前先通知 C0**
   - 公開 Rockchip 映像是 GPT 原始磁碟（不是 update.img），開機程式在第一個分割區之前：平台介面的 assemble／scan 要留掛點，讓平台自己清點「分割區外的原始磁區」
@@ -45,7 +46,8 @@
   - 角色值要能表示「上游 OS 廠商負責、我們只通知客戶」，例如 `os_responsibility: upstream-vendor`（只轉售 TrueNAS；與 Jetson OS 層「通知客戶」同一概念）
   - bsp／os 分層：平台設定裡的「套件名稱清單」決定，不看版本字尾（同 nvidia-l4t-* 做法）
   - Rockchip 分割區外的開機程式：以原始磁區為準
-- 卡住／等決定：無
+- 卡住／等決定：
+  - 請 C0 決定（V2 的建議）：PR 內歷史 commit（3121fd8、371a696、bd7fa1b 等）仍含內部 CI 執行編號、廠商映像套件版本字串、改寫前的測試常數（禁用字 0 命中；squash 後仍可由 SHA 取得）；`product-a_…/ReleaseNote.pdf` 等交付物命名是否在 D-023 邊界內
   - 已處理：alert_mail.py 沒帶（PROVENANCE 標「C3 視需要帶回」）；D-023（形狀參考內部觀察的合成測資可收）已套用；上限註解的「實測」精確數量改成估計
   - M1 合併前本機 pre-push hook 不掃壓縮檔：改了 *.xz 等要手動跑 worktree 裡的新版 public-check
 <!-- END C1 -->
