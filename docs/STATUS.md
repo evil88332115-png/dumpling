@@ -2,20 +2,20 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 15:01 -0500（C0）
+最後更新：2026-11-12 16:04 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main b6d341a。**M1（#9）、M3（#14）已合併**；文件批次 #13 已合併；本機累積分支 `wp0/docs-batch-3`（D-029、D-030），還沒推，C3 開工前合併
+- 分支／PR／commit：main b6d341a。**M1（#9）、M3（#14）已合併**；文件批次 #13 已合併；本機累積分支 `wp0/docs-batch-3`（D-029～D-032，d5bfa70），還沒推；等 C4 的 CRA 提案一起併入，C3 開工前合併
 - 代理：PR #14 驗證代理已完成（第一輪不通過：expected_dt 只看 http=400；C2 修正 8f02635 由 C0 複驗通過）；目前沒有 C0 代理在跑
 - 各對話：C1 做 M2（wp1/m2：P 平台介面＋開案範本、L 依層分開已完成、J Jetson 編譯＋掃描＋release 進行中）；C2：wp3/supplier-normalize（dd54722）正規化已完成、CI 綠，另修 report 假 OK 路徑；等 M2 合併後加 fetch_verify 再開 PR；C4（WSL）等 M2 的 P 軌
 - CI：無進行中（C0）
 - 下一步：等 C1 的 M2 PR → 驗證 → 合併 → 問使用者何時打第一個正式 tag；M2 合併後開 C3（建議 WSL 那台）、C4 開始寫轉接器
 - 給 C3 的交接：(1) M1 沒帶 `alert_mail.py`（寄信），exploited_* 寄信測試約 29 個已刪，要寄信時由 C3 帶回；(2) GitLab 階段「已被利用」的真實案件一定要用私有 Issue；(3) 每日監控讀 Release 附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`，開發版讀滾動 pre-release `dev/<專案>`（D-029）；watch 自己的狀態檔（防 60 天停用）由 C3 設計；(4) GITLAB-PORT 待辦：DT parent／child 專案在常駐 DT 再評估（D-030）
-- 給 PM／法務的待決定：VEX 發行閘門要不要分層（客戶負責 OS 時，OS 層未評估的 KEV 是否擋發行；目前保守：擋）（D-030）
-- 卡住／等決定：使用者（1）舊 WIP commit 的低敏感內部資訊：接受或刪 repo 重建（C0 建議接受）；（2）C4 CRA 調查的建議採用範圍（C0 建議 A、B 全採用，C 只做文件骨架標 GAP）
+- 給 PM／法務的待決定：VEX 發行閘門要不要分層（客戶負責 OS 時，OS 層未評估的 KEV 是否擋發行；目前保守：擋）（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）
+- 卡住／等決定：使用者已決定 D-031（接受舊 WIP commit）、D-032（CRA 調查採用 A、B 全部＋C 文件骨架）；已請 C4 寫 PLAN 修改提案（推到 wp7/cra-survey，不開 PR）
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
