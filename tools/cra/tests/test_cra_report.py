@@ -1,4 +1,4 @@
-"""cra_report.py 的測試：合成的小型 sca-scan 輸出（形狀取自 round14 Jetson 基礎版的 DT findings 與 Grype 結果）。"""
+"""cra_report.py 的測試：合成的小型 sca-scan 輸出（欄位格式照 DT findings 與 Grype 結果的實際形狀）。"""
 import json
 import lzma
 import os
@@ -649,8 +649,8 @@ def test_missing_grype_file_is_attention(tmp_path):
 # ---------- 公司共用設定 ----------
 
 COMPANY = {"schema_version": 1,
-           "manufacturer": {"name": "Acme Devices Ltd.", "address": "1 Acme Road", "email": "info@" "acme.example", "website": "https://acme.example"},
-           "vulnerability_contact": {"contact": "security@" "acme.example", "cvd_policy_url": "https://acme.example/security"},
+           "manufacturer": {"name": "Acme Devices Ltd.", "address": "1 Acme Road", "email": "info@acme.example", "website": "https://acme.example"},
+           "vulnerability_contact": {"contact": "security@acme.example", "cvd_policy_url": "https://acme.example/security"},
            "sbom": {"availability": "On request"},
            "risk_assessment": {"method": "Likelihood x impact"},
            "vulnerability_policy": {"status": "Approved 2026-11-01", "tiers": {"p2": {"label": "Soon"}}}}
@@ -747,7 +747,7 @@ def test_company_fills_project_gaps(tmp_path):
     proj = make_project(tmp_path / "p", {"schema_version": 1, "manufacturer": {"name": ""}, "product": {"name": "X1"}})
     r, s, reports = run_company(proj, make_scan(tmp_path / "s"), COMPANY)
     ui = (reports / "user-information.md").read_text(encoding="utf-8")
-    assert "Acme Devices Ltd." in ui and "security@" "acme.example" in ui and "https://acme.example/security" in ui
+    assert "Acme Devices Ltd." in ui and "security@acme.example" in ui and "https://acme.example/security" in ui
     assert s["company_config"]["sha256"] and "product.name" not in s["missing_fields"]
     assert "manufacturer.address" not in s["missing_fields"] and "risk_assessment.method" not in s["missing_fields"]
     assert s["policy"]["status"] == "Approved 2026-11-01" and s["policy"]["tiers"]["p2"]["label"] == "Soon"
@@ -819,7 +819,7 @@ def test_bad_types_fail_not_traceback(tmp_path, cfg):
     assert "tiers.p：" not in r.stdout
 
 
-# ---------- GitLab 實測的修正（2026-10-29） ----------
+# ---------- 實際掃描公開專案發現的修正 ----------
 
 def test_self_no_version_grype_match_not_counted(tmp_path):
     """sbomgate 判成 SELF_NO_VERSION（專案本身、沒有版本）的 Grype 比對，交叉核對不算「只有 Grype」。"""
@@ -945,7 +945,7 @@ def test_strip_work_paths_edges(value, expect):
 
 
 def test_cross_check_by_ghsa_when_grype_has_no_cve(tmp_path):
-    """GitLab 實測（filamentphp/demo）：Grype 只給 GHSA、DT 是 CVE＋GHSA 別名——兩邊其實是同一個，不能算成「只有 DT」。"""
+    """實際掃描公開專案（filamentphp/demo）：Grype 只給 GHSA、DT 是 CVE＋GHSA 別名——兩邊其實是同一個，不能算成「只有 DT」。"""
     findings = [finding("commonmark", "2.10.1", "CVE-2026-105830", "GITHUB", "HIGH", [{"ghsaId": "GHSA-3q6v-r5mr-hxv8"}],
                         purl="pkg:composer/league/commonmark@2.10.1")]
     grype = {"matches": [{"vulnerability": {"id": "GHSA-3q6v-r5mr-hxv8", "fix": {"state": "fixed", "versions": ["2.10.2"]}},
@@ -1204,7 +1204,7 @@ def test_kernel_grype_only_rows_listed_like_other_kernel_rows(tmp_path):
 @pytest.mark.parametrize("comp,expect", [
     ({"name": "linux-image-6.8.0-45-generic", "purl": "pkg:deb/ubuntu/linux-image-6.8.0-45-generic@6.8.0-45.45?arch=amd64"}, True),
     ({"name": "linux-modules-6.8.0-45-generic", "purl": "pkg:deb/ubuntu/linux-modules-6.8.0-45-generic@6.8.0-45.45"}, True),
-    ({"name": "kernel-core", "purl": "pkg:rpm/redhat/kernel-core@" "5.14.0-427.el9"}, True),
+    ({"name": "kernel-core", "purl": "pkg:rpm/redhat/kernel-core@5.14.0-427.el9"}, True),
     ({"name": "linux-lts", "purl": "pkg:apk/alpine/linux-lts@6.6.30-r0"}, True),
     ({"name": "linux-kernel", "purl": "pkg:generic/linux-kernel@6.8.12"}, True),
     ({"name": "x", "purl": "pkg:generic/x@1", "cpe": "cpe:2.3:o:linux:linux_kernel:6.8.12:*:*:*:*:*:*:*"}, True),
@@ -1273,7 +1273,7 @@ def test_kernel_fix_all_ignores_versions_not_above_installed():
 def test_kernel_fix_all_not_computed_for_non_deb(tmp_path):
     g, = cr.kernel_fix_all([krow(["5.14.0-500.el9"], ptype="rpm", component="kernel-core", version="5.14.0-427.el9")])
     assert (g["comparable"], g["fix_all_version"], g["rows"]) == (False, None, 1)
-    rpm = "pkg:rpm/redhat/kernel-core@" "5.14.0-427.el9"
+    rpm = "pkg:rpm/redhat/kernel-core@5.14.0-427.el9"
     findings = [finding("kernel-core", "5.14.0-427.el9", "CVE-2025-0301", "NVD", "HIGH", purl=rpm)]
     grype = {"matches": [{"vulnerability": {"id": "CVE-2025-0301", "fix": {"state": "fixed", "versions": ["5.14.0-500.el9"]}},
                           "artifact": {"name": "kernel-core", "version": "5.14.0-427.el9", "type": "rpm", "purl": rpm}}]}
@@ -1472,7 +1472,7 @@ def test_nvidia_debs_do_not_use_ubuntu_priority():
     assert "ubuntu-priority-grype" not in r["severity_detail"]
     trt = DEB.format("libnvinfer10", "10.3.0-1+cuda12.5")
     comps = [{"name": "libnvinfer10", "purl": trt, "publisher": "NVIDIA Corporation"},
-             {"name": "openssl", "purl": DEB.format("openssl", "3.0.13"), "publisher": "Ubuntu Developers <ubuntu-devel-discuss@" "lists.ubuntu.com>"},
+             {"name": "openssl", "purl": DEB.format("openssl", "3.0.13"), "publisher": "Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>"},
              {"name": "x", "purl": "pkg:pypi/x@1", "publisher": "NVIDIA"}]
     nvd = cr.nvidia_debs(comps)
     assert nvd == {trt.split("?", 1)[0]}

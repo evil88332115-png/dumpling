@@ -6,7 +6,7 @@
 
 ## C1 工具（WP1）
 
-來源 commit 一律是 sca-center `25fa89a`（`origin/main`）。`tools/` 以外的 pipeline 檔案是 dumpling 自己寫的（做法參考對應的 sca-center 檔）。總計 192 個複製進來的檔案。
+來源 commit 一律是 sca-center `25fa89a`（`origin/main`）。`pipeline/` 與 `ci/`、`tests/run.d/` 的檔案是 dumpling 自己寫的（做法參考對應的 sca-center 檔）。
 
 | dumpling 路徑 | sca-center 原路徑 | 來源 commit | 清理內容 |
 |---|---|---|---|
@@ -14,34 +14,34 @@
 | `pipeline/dt-ephemeral.sh` | `scripts/e2e/dtlib.sh`（做法參考，重寫） | 25fa89a | 改寫成 up／wait／env／down 四個子指令；狀態檔取代 sca-center 的 status／secret 函式；關 NVD、開 OSV 與 KEV、API key 流程沿用；新增 KEV 與 OSV 鏡像等待與逾時 GAP、`::add-mask::`；驗證代理審查後再改：admin 密碼改用權限 600 的 curl 設定檔（不在 `ps` 看得到的指令列）、`DT_OSV_ECOSYSTEMS` 驗證格式並以 argv 傳進 python（不內插進原始碼）、`down` 只刪有標記檔的狀態資料夾、`up` 設定後讀回確認（NVD 關、OSV 開且生態系一致、KEV 開）、`up` 觸發鏡像回 409 時 `wait` 只接受完成時間在觸發之後的鏡像（讀不到完成時間就在狀態行註明未核對）、`wait: OK` 改為「必要鏡像完成」 |
 | `pipeline/scan-status-check.py` | （dumpling 自己寫） | — | 新增：檢查 `tools/pilot/sca-scan` 的 status.tsv，必要階段都要是 OK 且沒有 FAIL（dt-smoke 用） |
 | `pipeline/dt-verify.py` | `scripts/e2e/dtread.py`（分頁與 X-Total-Count 核對的做法） | 25fa89a | 重寫：專案、元件數、依生態系漏洞數的驗證與摘要；另含直接上傳的後備模式 |
-| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理 1 行（SBOM 內的信箱改成 example.com、產品代號與本機路徑換成中性代稱） |
+| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | 25fa89a | 清理（解壓後單行 JSON）：SBOM 內約 2900 個信箱改成 maintainer@example.com、掃描時的暫存路徑（含 runner 帳號資料夾）改成 /mnt/data/runner/_work/demo/…、一個 package-id 雜湊改了一碼（避免和禁用字清單的偶然子字串相符）；其餘（Syft 1.55.0 對公開 Jetson rootfs 的 CycloneDX）原樣 |
 | `tools/cra/board_import.py` | `scripts/cra/board_import.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/bootloader_coverage.py` | `scripts/cra/bootloader_coverage.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/company.example.json` | `scripts/cra/company.example.json` | 25fa89a | 原樣 |
 | `tools/cra/config.example.json` | `scripts/cra/config.example.json` | 25fa89a | 原樣 |
-| `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處 |
-| `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處 |
-| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處、清理 1 行 |
+| `tools/cra/config.schema.json` | `scripts/cra/config.schema.json` | 25fa89a | 路徑調整 4 處、清理 1 行（其他 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」 |
+| `tools/cra/confirm_items.py` | `scripts/cra/confirm_items.py` | 25fa89a | 路徑調整 4 處、清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
+| `tools/cra/cra_report.py` | `scripts/cra/cra_report.py` | 25fa89a | 路徑調整 42 處、清理 17 行（其他 15、信箱或路徑字串拆成相鄰字串（值不變） 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；「Ubuntu Tracker deferred 當 not-fixed」那段註解原本引用內部某次實測的列數，改成引用 Ubuntu CVE Tracker 對 deferred 的公開定義（判定本身沒改） |
 | `tools/cra/data/support-lifecycle.json` | `scripts/cra/data/support-lifecycle.json` | 25fa89a | 原樣 |
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣 |
-| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、清理 1 行 |
-| `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 1 行 |
-| `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 原樣 |
-| `tools/cra/exploited_watch.py` | `scripts/cra/exploited_watch.py` | 25fa89a | 路徑調整 11 處 |
-| `tools/cra/firmware_bom.py` | `scripts/cra/firmware_bom.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/cra/image_check.py` | `scripts/cra/image_check.py` | 25fa89a | 路徑調整 3 處、清理 1 行 |
+| `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1） |
+| `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/exploited_watch.py` | `scripts/cra/exploited_watch.py` | 25fa89a | 路徑調整 11 處、清理 2 行（其他 2）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/firmware_bom.py` | `scripts/cra/firmware_bom.py` | 25fa89a | 路徑調整 2 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/image_check.py` | `scripts/cra/image_check.py` | 25fa89a | 路徑調整 3 處、清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1） |
 | `tools/cra/initrd_coverage.py` | `scripts/cra/initrd_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/kernel_modules.py` | `scripts/cra/kernel_modules.py` | 25fa89a | 路徑調整 7 處 |
-| `tools/cra/no_vuln_data.py` | `scripts/cra/no_vuln_data.py` | 25fa89a | 路徑調整 1 處、清理 3 行 |
+| `tools/cra/no_vuln_data.py` | `scripts/cra/no_vuln_data.py` | 25fa89a | 路徑調整 1 處、清理 4 行（信箱換成 example／佔位 2、其他 1、去掉產品名或內部實測說明 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/nvidia_distro.py` | `scripts/cra/nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/own_software.py` | `scripts/cra/own_software.py` | 25fa89a | 原樣 |
 | `tools/cra/pkg_why.py` | `scripts/cra/pkg_why.py` | 25fa89a | 路徑調整 2 處 |
 | `tools/cra/py_dpkg_version.py` | `scripts/cra/py_dpkg_version.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_diff.py` | `scripts/cra/report_diff.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼） |
 | `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣 |
 | `tools/cra/security_findings.py` | `scripts/cra/security_findings.py` | 25fa89a | 路徑調整 6 處 |
-| `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 原樣 |
+| `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動 |
 | `tools/cra/support_check.py` | `scripts/cra/support_check.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/tee_bundled.py` | `scripts/cra/tee_bundled.py` | 25fa89a | 原樣 |
 | `tools/cra/tee_source.py` | `scripts/cra/tee_source.py` | 25fa89a | 原樣 |
@@ -49,59 +49,61 @@
 | `tools/cra/templates/sbom.md` | `scripts/cra/templates/sbom.md` | 25fa89a | 原樣 |
 | `tools/cra/templates/technical-documentation.md` | `scripts/cra/templates/technical-documentation.md` | 25fa89a | 原樣 |
 | `tools/cra/templates/user-information.md` | `scripts/cra/templates/user-information.md` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 清理 2 行 |
+| `tools/cra/tests/data/cyclonedx-1.5/`（bom-1.5.schema.json、README.md） | 不是 sca-center 的檔：CycloneDX/specification 的 `schema/bom-1.5.schema.json`（commit ad83dae2，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。給 vexconv 測試用 |
+| `tools/cra/tests/data/openvex/`（openvex_json_schema.json、README.md） | 不是 sca-center 的檔：openvex/spec 的 `openvex_json_schema.json`（commit 61b5f885，Apache-2.0） | — | 官方檔案原樣下載，SHA-256 見 README.md。取代 sca-center 的 `scripts/ci/fetch-test-data.sh` 連網取得 |
+| `tools/cra/tests/test_bootloader_coverage.py` | `scripts/cra/tests/test_bootloader_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_bootloader_report.py` | `scripts/cra/tests/test_bootloader_report.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 原樣 |
+| `tools/cra/tests/test_confirm_items.py` | `scripts/cra/tests/test_confirm_items.py` | 25fa89a | 清理 26 行（其他 26）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改） |
 | `tools/cra/tests/test_cra_deb_python_usn.py` | `scripts/cra/tests/test_cra_deb_python_usn.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_cra_distro.py` | `scripts/cra/tests/test_cra_distro.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/cra/tests/test_cra_euvd.py` | `scripts/cra/tests/test_cra_euvd.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 清理 3 行 |
-| `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行 |
-| `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處、清理 1 行 |
-| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 11 行 |
+| `tools/cra/tests/test_cra_exploitation.py` | `scripts/cra/tests/test_cra_exploitation.py` | 25fa89a | 刪段 7 行、刪 1 個讀 cra/README.md 的文件測試（README 沒帶） |
+| `tools/cra/tests/test_cra_grype_only.py` | `scripts/cra/tests/test_cra_grype_only.py` | 25fa89a | 清理 3 行（其他 2、信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）（斷言同步改） |
+| `tools/cra/tests/test_cra_nvidia.py` | `scripts/cra/tests/test_cra_nvidia.py` | 25fa89a | 路徑調整 2 處 |
+| `tools/cra/tests/test_cra_report.py` | `scripts/cra/tests/test_cra_report.py` | 25fa89a | 路徑調整 1 處、清理 8 行（信箱或路徑字串拆成相鄰字串（值不變） 2、私有 IP／近似 IP 的字串換成文件網段 2、本機路徑換成中性路徑 2、其他 1、路徑 1）、docstring 原本點名內部某次 e2e 的編號，改成中性說明 |
 | `tools/cra/tests/test_cra_ubuntu_tracker_fix.py` | `scripts/cra/tests/test_cra_ubuntu_tracker_fix.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_cra_usn_fix.py` | `scripts/cra/tests/test_cra_usn_fix.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_customer_package_wording.py` | `scripts/cra/tests/test_customer_package_wording.py` | 25fa89a | 清理 2 行 |
-| `tools/cra/tests/test_dashboard_sheet.py` | `scripts/cra/tests/test_dashboard_sheet.py` | 25fa89a | 清理 1 行 |
+| `tools/cra/tests/test_customer_package_wording.py` | `scripts/cra/tests/test_customer_package_wording.py` | 25fa89a | 清理 2 行（本機路徑換成中性路徑 2） |
+| `tools/cra/tests/test_dashboard_sheet.py` | `scripts/cra/tests/test_dashboard_sheet.py` | 25fa89a | 清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、只有路徑調整與環境變數改名 |
 | `tools/cra/tests/test_dt_writeback.py` | `scripts/cra/tests/test_dt_writeback.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_evidence_bundle.py` | `scripts/cra/tests/test_evidence_bundle.py` | 25fa89a | 清理 3 行 |
-| `tools/cra/tests/test_exploited_vendor.py` | `scripts/cra/tests/test_exploited_vendor.py` | 25fa89a | 清理 1 行、刪段 44 行 |
+| `tools/cra/tests/test_evidence_bundle.py` | `scripts/cra/tests/test_evidence_bundle.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 2、本機路徑換成中性路徑 1） |
+| `tools/cra/tests/test_exploited_vendor.py` | `scripts/cra/tests/test_exploited_vendor.py` | 25fa89a | 刪段 44 行、刪 4 個用到 alert_mail.py 的測試；移除 import alert_mail |
 | `tools/cra/tests/test_exploited_watch.py` | `scripts/cra/tests/test_exploited_watch.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/tests/test_exploited_watch_grype.py` | `scripts/cra/tests/test_exploited_watch_grype.py` | 25fa89a | 路徑調整 1 處、刪段 266 行 |
-| `tools/cra/tests/test_exploited_watch_refresh.py` | `scripts/cra/tests/test_exploited_watch_refresh.py` | 25fa89a | 路徑調整 2 處、刪段 323 行 |
-| `tools/cra/tests/test_firmware_bom.py` | `scripts/cra/tests/test_firmware_bom.py` | 25fa89a | 清理 2 行 |
-| `tools/cra/tests/test_image_check.py` | `scripts/cra/tests/test_image_check.py` | 25fa89a | 清理 6 行 |
+| `tools/cra/tests/test_exploited_watch_grype.py` | `scripts/cra/tests/test_exploited_watch_grype.py` | 25fa89a | 路徑調整 1 處、刪段 266 行、刪 11 個用到 alert_mail.py（compose／寄信）或 exploited-watch-daily.sh 的測試與 compose 輔助函式 |
+| `tools/cra/tests/test_exploited_watch_refresh.py` | `scripts/cra/tests/test_exploited_watch_refresh.py` | 25fa89a | 路徑調整 2 處、刪段 323 行、刪 14 個用到 alert_mail.py、每日／備份腳本、deploy/ 安裝腳本的測試 |
+| `tools/cra/tests/test_firmware_bom.py` | `scripts/cra/tests/test_firmware_bom.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 2、新增（資料／說明） 1）、刪段 15 行、schema 驗證改成 import 共用的 cdx_schema.cdx_validator（刪掉自己那份 SCHEMA_DIR／cdx_validator；D-017） |
+| `tools/cra/tests/test_image_check.py` | `scripts/cra/tests/test_image_check.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3） |
 | `tools/cra/tests/test_image_check_modules.py` | `scripts/cra/tests/test_image_check_modules.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_initrd_coverage.py` | `scripts/cra/tests/test_initrd_coverage.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 12 行 |
-| `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 39 行 |
+| `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試 |
+| `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（其他 2）、libnvinfer 版本字串維持原值（拆成相鄰字串，避免被私有 IP 規則誤判，見「暫時拆字串」） |
 | `tools/cra/tests/test_nvidia_distro.py` | `scripts/cra/tests/test_nvidia_distro.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_own_software.py` | `scripts/cra/tests/test_own_software.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_pkg_why.py` | `scripts/cra/tests/test_pkg_why.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_py_dpkg_version.py` | `scripts/cra/tests/test_py_dpkg_version.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_report_diff.py` | `scripts/cra/tests/test_report_diff.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_report_package.py` | `scripts/cra/tests/test_report_package.py` | 25fa89a | 清理 1 行 |
-| `tools/cra/tests/test_runtime_evidence.py` | `scripts/cra/tests/test_runtime_evidence.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/tests/test_security_testing.py` | `scripts/cra/tests/test_security_testing.py` | 25fa89a | 路徑調整 1 處、清理 6 行 |
-| `tools/cra/tests/test_supplier_package.py` | `scripts/cra/tests/test_supplier_package.py` | 25fa89a | 清理 1 行 |
+| `tools/cra/tests/test_report_package.py` | `scripts/cra/tests/test_report_package.py` | 25fa89a | 清理 4 行（其他 3、信箱或路徑字串拆成相鄰字串（值不變） 1）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）（斷言同步改） |
+| `tools/cra/tests/test_runtime_evidence.py` | `scripts/cra/tests/test_runtime_evidence.py` | 25fa89a | 路徑調整 1 處、刪段 34 行、刪 2 個測板子端腳本 board-on-device.sh 的測試（腳本沒帶） |
+| `tools/cra/tests/test_security_testing.py` | `scripts/cra/tests/test_security_testing.py` | 25fa89a | 路徑調整 1 處、清理 6 行（私有 IP／近似 IP 的字串換成文件網段 6） |
+| `tools/cra/tests/test_supplier_package.py` | `scripts/cra/tests/test_supplier_package.py` | 25fa89a | 清理 1 行（其他 1） |
 | `tools/cra/tests/test_support_check.py` | `scripts/cra/tests/test_support_check.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_tee_source.py` | `scripts/cra/tests/test_tee_source.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_uefi_bundled.py` | `scripts/cra/tests/test_uefi_bundled.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_uefi_followup.py` | `scripts/cra/tests/test_uefi_followup.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_uefi_image.py` | `scripts/cra/tests/test_uefi_image.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_uefi_source.py` | `scripts/cra/tests/test_uefi_source.py` | 25fa89a | 路徑調整 1 處、清理 4 行 |
-| `tools/cra/tests/test_upstream_baseline.py` | `scripts/cra/tests/test_upstream_baseline.py` | 25fa89a | 清理 3 行 |
+| `tools/cra/tests/test_uefi_source.py` | `scripts/cra/tests/test_uefi_source.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/cra/tests/test_upstream_baseline.py` | `scripts/cra/tests/test_upstream_baseline.py` | 25fa89a | 清理 3 行（產品代號換成中性代稱 3） |
 | `tools/cra/tests/test_vex_evidence.py` | `scripts/cra/tests/test_vex_evidence.py` | 25fa89a | 原樣 |
-| `tools/cra/tests/test_vex_export.py` | `scripts/cra/tests/test_vex_export.py` | 25fa89a | 清理 2 行 |
-| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行 |
-| `tools/cra/tests/test_vex_rules.py` | `scripts/cra/tests/test_vex_rules.py` | 25fa89a | 清理 2 行 |
+| `tools/cra/tests/test_vex_export.py` | `scripts/cra/tests/test_vex_export.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、CycloneDX 1.6 驗證改用 cdx_validator；OpenVEX schema 改讀 tests/data/openvex/（不再連網取得，也不再 skip） |
+| `tools/cra/tests/test_vex_no_response.py` | `scripts/cra/tests/test_vex_no_response.py` | 25fa89a | 刪段 30 行、刪 2 個用到 csaf_advisory.py 的測試；移除對 test_csaf_advisory 的 import |
+| `tools/cra/tests/test_vex_rules.py` | `scripts/cra/tests/test_vex_rules.py` | 25fa89a | 清理 8 行（其他 4、刪段 4）、刪段 2 行、同 test_vex_export.py：cdx_validator＋tests/data/openvex/ |
 | `tools/cra/tests/test_vex_u1_flag.py` | `scripts/cra/tests/test_vex_u1_flag.py` | 25fa89a | 路徑調整 4 處 |
 | `tools/cra/tests/test_vex_u2.py` | `scripts/cra/tests/test_vex_u2.py` | 25fa89a | 原樣 |
-| `tools/cra/uefi_bundled.py` | `scripts/cra/uefi_bundled.py` | 25fa89a | 原樣 |
+| `tools/cra/uefi_bundled.py` | `scripts/cra/uefi_bundled.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/uefi_dsc.py` | `scripts/cra/uefi_dsc.py` | 25fa89a | 原樣 |
-| `tools/cra/uefi_image.py` | `scripts/cra/uefi_image.py` | 25fa89a | 清理 1 行 |
+| `tools/cra/uefi_image.py` | `scripts/cra/uefi_image.py` | 25fa89a | 清理 1 行（產品代號換成中性代稱 1） |
 | `tools/cra/uefi_source.py` | `scripts/cra/uefi_source.py` | 25fa89a | 路徑調整 8 處 |
-| `tools/cra/upstream_baseline.py` | `scripts/cra/upstream_baseline.py` | 25fa89a | 清理 1 行 |
+| `tools/cra/upstream_baseline.py` | `scripts/cra/upstream_baseline.py` | 25fa89a | 清理 1 行（產品代號換成中性代稱 1） |
 | `tools/cra/vendor-watch.example.json` | `deploy/exploited-watch/vendor-watch.example.json` | 25fa89a | 原樣 |
 | `tools/cra/vex-rules.example.json` | `scripts/cra/vex-rules.example.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處 |
@@ -195,9 +197,9 @@
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處 |
 | `tools/pilot/tests/test_usn_cves.py` | `scripts/pilot/tests/test_usn_cves.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/sbomgate/sbomgate.py` | `integration/sbomgate/sbomgate.py` | 25fa89a | 原樣 |
-| `tools/sbomgate/tests/test_sbomgate.py` | `integration/sbomgate/tests/test_sbomgate.py` | 25fa89a | 原樣 |
-| `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 3 行 |
+| `tools/sbomgate/sbomgate.py` | `integration/sbomgate/sbomgate.py` | 25fa89a | 清理 1 行（信箱或路徑字串拆成相鄰字串（值不變） 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/sbomgate/tests/test_sbomgate.py` | `integration/sbomgate/tests/test_sbomgate.py` | 25fa89a | 刪段 95 行、刪掉 RealEvidence 類與 6 個用到 tests/results、tests/projects（e2e 的真實輸出，不帶）的測試方法 |
+| `tools/vexconv/tests/test_vexconv.py` | `integration/vexconv/tests/test_vexconv.py` | 25fa89a | 清理 7 行（其他 4、刪段 2、路徑 1）、schema 改讀 tools/cra/tests/data/{cyclonedx-1.5,openvex,cyclonedx-1.6.1}（不再連網取得，也不再 skip） |
 | `tools/vexconv/vexconv.py` | `integration/vexconv/vexconv.py` | 25fa89a | 原樣 |
 | `tools/wizard/README.md` | `scripts/wizard/README.md` | 25fa89a | 路徑調整 10 處 |
 | `tools/wizard/cra-scan.py` | `scripts/wizard/cra-scan.py` | 25fa89a | 路徑調整 10 處 |
@@ -252,6 +254,27 @@
 | `tools/wizard/**` 與 `tools/cra/tests/*` | 產品代號（`product-a`、`product-b`、`product-c` 是中性代稱，分別對應三個不公開的廠商產品名）出現在測試用的假刷機包名稱、`platforms/*.json` 的 `note` | `product-a` 等；不影響邏輯 |
 | `wizard/cra-scan.py` | **未改**（路徑除外）。注意：它在掃描前用 `git archive origin/main` 取「最新工具」放到 `<輸出>/wt/` 再執行 `wt/tools/…`，也就是跑的是遠端 main 的版本，不是目前 checkout。CI 上要用目前 checkout 時需另外處理（C1 決定） | — |
 
+### public-check 白名單（`ci/public-allow.txt`）
+
+`tools/cra/` 的測試裡有些完整字串會被 `ci/public-check.sh` 當成個人信箱、本機路徑或私有 IP，但它們是**判定邏輯需要的真實公開網域、映像內部路徑、版本字串**，換掉會改變測試意義。這些登記在 `ci/public-allow.txt`（完整字串＋原因，共 18 項），測試值與 sca-center `25fa89a` 一致。`*.example`、`.invalid`、`.test`、`.localhost` 結尾的信箱由保留 TLD 規則直接放行，不在白名單裡。
+
+| 完整字串 | 用途 |
+|---|---|
+| `nvd@nist.gov` | NVD 在 Grype／DT 資料裡的來源識別字串 |
+| `ubuntu-devel-discuss@lists.ubuntu.com`、`pkg-foo@lists.debian.org`、`a@debian.org`、`b@lists.debian.org`、`chromium@packages.debian.org`、`pkg-openssl-devel@alioth-lists.debian.net`、`pkg-nvidia-devel@lists.alioth.debian.org` | 「維護者是不是發行版」看信箱網域（`DISTRO_DOMAINS`：debian.org、debian.net、ubuntu.com、canonical.com、launchpad.net，含子網域），測試要用真的發行版網域 |
+| `joe@gmail.com` | 免費信箱（`FREEMAIL`）的案例：報告不可印出個人信箱 |
+| `linux-tegra-bugs@nvidia.com` | `BUILTIN_VENDOR_DOMAINS` 是 nvidia.com：廠商網域可以印在報告 |
+| `j@Rock-Chips.COM` | 測網域比對不分大小寫 |
+| `ubuntu@ubuntu.localdomain` | `dh_make` 預設維護者信箱：名稱像 Ubuntu 但網域不是發行版 |
+| `secret@github.com` | 測 git 遠端網址帶帳密要遮蔽，且 github.com/tianocore/edk2 是程式認得的上游 |
+| `/home/x/test/id_rsa`、`/home/nvidia/.netrc` | 映像**內部**路徑：`image_check` 判斷 `/home` 底下的私鑰、.netrc 一律算真的 |
+| `/home/builder/ws/sources/uefi`、`/home/u/Build/Foo/DEBUG/AutoGen.c` | 測建置機器路徑（含使用者名稱）要被偵測、報告不可出現 |
+| `10.3.0.30-1+cuda12.5` | TensorRT（libnvinfer10）的套件版本字串，不是 IP |
+
+為了少登記，三處測試資料不是照原檔：`test_no_vuln_data.py` 裡另一個 gmail 位址與另一個 nvidia.com 位址，改成上表已登記的同網域位址（判定只看網域），`test_supplier_package.py` 的一個 `/home` 底下的假路徑改成 `/mnt` 底下（偵測的本機路徑樣式兩者都有）。
+
+另外已經直接改掉、不需要白名單的：`example.invalid` 的 noreply 信箱 → `example.com`、systemd 樣板單元名稱與 `dh_make` 預設信箱的說明字串（改成佔位文字）、測試資料裡板子網路掃描的兩個私有 IP（換成 192.0.2.x 文件網段）。
+
 ### 資料檔與測試資料的來源
 
 | 檔案 | 來源 | 判定 |
@@ -278,6 +301,8 @@
 - `test_pilot_compare_and_scripts.py`、`test_pilot_lock_sandbox.py`、`test_pilot_sources_scio.py`：移除用到 `compare_expected.py`、`scio_prep.py`、`scio_diag.py`、`real-projects.sh`、`install-maven.sh`、`cdxgen_regression.py`、`tests/results` 的測試函式。
 - `test_exploited_vendor.py`、`test_exploited_watch_grype.py`、`test_exploited_watch_refresh.py`：移除用到 `alert_mail.py`、每日／備份腳本、`deploy/` 安裝腳本的測試函式。
 - `test_vex_no_response.py`：移除兩個用到 `csaf_advisory.py` 的測試函式。
+- `tools/sbomgate/tests/test_sbomgate.py`：移除 `RealEvidence` 類與 6 個測試方法，它們讀 sca-center 的 `tests/results/`（e2e 的真實掃描輸出）、`tests/projects/`（被掃描的開源專案原始碼）和 `tests/expected/`，這些不帶（硬性限制：不帶 `tests/results/`）。其餘 sbomgate 單元測試（合成 SBOM）都保留。
+- `test_runtime_evidence.py`、`test_kernel_modules.py`：移除測板子端腳本 `board-on-device.sh` 的 3 個測試；`test_cra_exploitation.py`：移除讀 `cra/README.md` 的 1 個文件測試。
 - 不帶：`test_alert_mail.py`、`test_csaf_advisory.py`、`test_customer_package_round2.py`、`test_customer_sbom_and_wording.py`（都 import `csaf_advisory`）、`test_gitlab_ci.py`、`test_gitlab_bot.py`、`test_gitlab_runner.py`、`demo/tests/test_board_test.py`、`test_x86_firmware.py`（歸 C2）。
 
 ## C2 韌體工具（WP3＋WP4）

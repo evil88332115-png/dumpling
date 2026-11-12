@@ -3,6 +3,25 @@
 # - 本機禁用字（公司代號等）與 commit 信箱不能用白名單放行。
 # - 不能只寫網域（例如 @gmail.com），少於 6 個字元的項目也會被拒絕。
 # - 每一項都要寫原因；新增項目會出現在 PR diff 裡，由驗證代理與 C0 審查。
-/home/someone/linux	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（假的建置者家目錄）
-/home/builder/linux-6.8/lib/vdso/gettimeofday.c	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（假的建置者家目錄）
-/home/a/src/drv/foo/bar.c	tools/pilot/tests/test_kernel_oot_sections.py 的合成 ELF 字串（假的建置路徑）
+
+nvd@nist.gov	NVD 在 Grype／DT 資料裡的來源識別字串（source 欄位），cra_report 依它判斷資料來源（tools/cra/tests/test_cra_exploitation.py、test_cra_grype_only.py）
+ubuntu-devel-discuss@lists.ubuntu.com	Ubuntu 套件的 Maintainer（發行版網域 ubuntu.com 的子網域），no_vuln_data 的判定依網域（test_cra_report.py、test_exploited_vendor.py）
+pkg-foo@lists.debian.org	發行版維護者信箱的測試資料：lists.debian.org 是 debian.org 的子網域（test_no_vuln_data.py）
+a@debian.org	同上：debian.org 本身（test_no_vuln_data.py）
+b@lists.debian.org	同上：與 a@debian.org 搭配測「多個地址都要是發行版的」（test_no_vuln_data.py）
+chromium@packages.debian.org	同上：另一個 debian.org 子網域（test_no_vuln_data.py）
+pkg-openssl-devel@alioth-lists.debian.net	發行版網域 debian.net（DISTRO_DOMAINS 之一）（test_no_vuln_data.py）
+pkg-nvidia-devel@lists.alioth.debian.org	debian.org 的多層子網域（test_no_vuln_data.py）
+joe@gmail.com	免費信箱（FREEMAIL）的測試案例：報告不可印出個人信箱（test_no_vuln_data.py）
+linux-tegra-bugs@nvidia.com	BUILTIN_VENDOR_DOMAINS 是 nvidia.com：廠商網域可以印在報告（test_no_vuln_data.py）
+j@Rock-Chips.COM	測「網域比對不分大小寫」的廠商網域（test_no_vuln_data.py）
+ubuntu@ubuntu.localdomain	dh_make 預設的維護者信箱：名稱像 Ubuntu 但網域不是發行版的，判定為 distro_name_other_domain（test_no_vuln_data.py）
+secret@github.com	測 git 遠端網址帶帳密時要遮蔽，且 github.com/tianocore/edk2 是程式認得的上游（test_uefi_source.py）
+/home/x/test/id_rsa	映像內部的路徑（不是本機路徑）：image_check 判斷 /home 底下的私鑰一律算真的（test_image_check.py）
+/home/nvidia/.netrc	同上：映像內 /home 底下的 .netrc（test_image_check.py）
+/home/builder/ws/sources/uefi	測 UEFI 映像內嵌的建置路徑前綴會被偵測與遮蔽（test_bootloader_coverage.py）
+/home/u/Build/Foo/DEBUG/AutoGen.c	同上：建置機器的路徑（含使用者名稱）要被偵測，報告不可出現（test_bootloader_coverage.py）
+10.3.0.30-1+cuda12.5	TensorRT（libnvinfer10）的套件版本字串，不是 IP（test_no_vuln_data.py）
+/home/someone/linux	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
+/home/builder/linux-6.8/lib/vdso/gettimeofday.c	tools/pilot/tests/test_kernel_config.py 的合成測試路徑（測試用的假建置路徑）
+/home/a/src/drv/foo/bar.c	tools/pilot/tests/test_kernel_oot_sections.py 的合成 ELF 字串（測試用的假建置路徑）

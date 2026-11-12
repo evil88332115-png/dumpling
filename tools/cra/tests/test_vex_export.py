@@ -355,22 +355,16 @@ def test_output_is_deterministic_and_order_independent():
     assert c[0]["serialNumber"] != a[0]["serialNumber"]
 
 
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
+OV_SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "openvex", "openvex_json_schema.json")
 
 
-@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
-                    reason="上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）")
 def test_official_schemas():
     jsonschema = pytest.importorskip("jsonschema")
-    from referencing import Registry, Resource
-    reg = Registry()
-    for n in ("spdx.schema.json", "jsf-0.82.schema.json", "cryptography-defs.schema.json"):
-        d = json.load(open(f"{V}/cdx/schema/{n}"))
-        reg = reg.with_resource(d.get("$id", n), Resource.from_contents(d)).with_resource(n, Resource.from_contents(d))
+    from cdx_schema import cdx_validator
     cdx, _, ov = build(sample_rows())
-    errs = list(jsonschema.Draft7Validator(json.load(open(f"{V}/cdx/schema/bom-1.6.schema.json")), registry=reg).iter_errors(cdx))
+    errs = list(cdx_validator().iter_errors(cdx))
     assert not errs, [e.message for e in errs[:3]]
-    errs = list(jsonschema.Draft202012Validator(json.load(open(f"{V}/ovx/openvex_json_schema.json")),
+    errs = list(jsonschema.Draft202012Validator(json.load(open(OV_SCHEMA)),
                                                 format_checker=jsonschema.FormatChecker()).iter_errors(ov))
     assert not errs, [e.message for e in errs[:3]]
 

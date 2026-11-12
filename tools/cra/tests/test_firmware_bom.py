@@ -9,6 +9,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from cdx_schema import cdx_validator  # noqa: E402（共用的 CycloneDX 1.6.1 schema 驗證器，tools/cra/tests/cdx_schema.py）
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -417,21 +418,6 @@ def test_xz_memory_limit(monkeypatch):
     monkeypatch.setattr(fb, "LZMA_MEMLIMIT", 1 << 16)
     r = fb.module_info(lzma.compress(elf(MODINFO)), "big.ko.xz")
     assert r["modinfo"] is None and "cannot decompress" in r["modinfo_note"]
-
-
-SCHEMA_DIR = HERE / "data" / "cyclonedx-1.6.1"
-
-
-def cdx_validator():
-    """CycloneDX 1.6.1 官方 schema（tests/data/cyclonedx-1.6.1，來源與 SHA-256 見那裡的 README.md）。"""
-    jsonschema = pytest.importorskip("jsonschema")
-    referencing = pytest.importorskip("referencing")
-    res = {}
-    for n in ("bom-1.6.schema.json", "spdx.schema.json", "jsf-0.82.schema.json"):
-        doc = json.loads((SCHEMA_DIR / n).read_text(encoding="utf-8"))
-        res["http://cyclonedx.org/schema/" + n] = referencing.Resource.from_contents(doc, default_specification=referencing.jsonschema.DRAFT7)
-    reg = referencing.Registry().with_resources(res.items())
-    return jsonschema.Draft7Validator(res["http://cyclonedx.org/schema/bom-1.6.schema.json"].contents, registry=reg)
 
 
 def test_product_sbom_valid_cyclonedx_1_6(tmp_path):

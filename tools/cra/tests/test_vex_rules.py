@@ -461,26 +461,20 @@ def test_rules_add_is_safe(tmp_path):
     assert r.returncode == 1 and "不是 JSON" in r.stdout and p.read_text(encoding="utf-8") == "{broken"
 
 
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
+OV_SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "openvex", "openvex_json_schema.json")
 
 
-@pytest.mark.skipif(not os.path.exists(f"{V}/cdx/schema/bom-1.6.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"),
-                    reason="上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）")
 def test_rule_statements_pass_official_schemas():
     jsonschema = pytest.importorskip("jsonschema")
-    from referencing import Registry, Resource
-    reg = Registry()
-    for n in ("spdx.schema.json", "jsf-0.82.schema.json", "cryptography-defs.schema.json"):
-        d = json.load(open(f"{V}/cdx/schema/{n}"))
-        reg = reg.with_resource(d.get("$id", n), Resource.from_contents(d)).with_resource(n, Resource.from_contents(d))
+    from cdx_schema import cdx_validator
     allr, conf, _ = assess([row("CVE-2026-1", fix_state="fixed", fix_next="3.0.13-0ubuntu3.12"), row("CVE-2026-2", "libssl3t64")],
                            [rule("R3", detail="Fixed in {fix_version}.", rec="Upgrade to {fix_version}.", fix_state=["fixed"]),
                             rule("R9", state="in_triage", response=(), detail="No fix yet.")])
     cdx, _ = vx.cdx_vex(allr, PBOM, {"finished": "2026-11-02T00:00:00Z"}, {"name": "EX"}, "ATTENTION")
     ov = vx.openvex(cdx, "Example Co.", vx.purl_by_bomlink(PBOM))
-    errs = list(jsonschema.Draft7Validator(json.load(open(f"{V}/cdx/schema/bom-1.6.schema.json")), registry=reg).iter_errors(cdx))
+    errs = list(cdx_validator().iter_errors(cdx))
     assert not errs, [e.message for e in errs[:3]]
-    errs = list(jsonschema.Draft202012Validator(json.load(open(f"{V}/ovx/openvex_json_schema.json")),
+    errs = list(jsonschema.Draft202012Validator(json.load(open(OV_SCHEMA)),
                                                 format_checker=jsonschema.FormatChecker()).iter_errors(ov))
     assert not errs, [e.message for e in errs[:3]]
 

@@ -482,7 +482,7 @@ def _entity_ok(e):
 
 
 def version_missing(c):
-    """沒有版本：空的，或用 UNKNOWN 填（核心模組等）。UNKNOWN 不是版本，不算「有版本」（CLAUDE.md：未知版本要標示，不猜）。"""
+    """沒有版本：空的，或用 UNKNOWN 填（核心模組等）。UNKNOWN 不是版本，不算「有版本」（專案規則：未知版本要標示，不猜）。"""
     v = str(c.get("version") or "").strip()
     return not v or v.upper() == "UNKNOWN"
 

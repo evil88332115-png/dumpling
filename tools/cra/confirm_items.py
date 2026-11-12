@@ -2,8 +2,8 @@
 """confirm_items.py：掃描後「要請別人確認的事」的表（待確認事項表），cra_report.py 每次產生文件時一起寫。
 
 軟體部門的 CRA 負責人只做掃描；這張表是出貨前（新版本）用的：掃描負責人和產品工程師直接一起處理，工程師回覆、具名判斷、修好後
-掃描負責人記錄並重掃，完成後把六樣交付交給內部窗口（PM）；只有需要別人（內部窗口／法務／老闆）的問題才經過內部窗口。
-（出貨後，每日監控發現已出貨產品有新的已被積極利用漏洞時不用這張表：掃描負責人 → 內部窗口 → 通知產品工程師修補，並轉給公司指定的人＋法務。）
+掃描負責人記錄並重掃，完成後把六樣交付交給專案負責人（PM）；只有需要別人（專案負責人／法務／核准人）的問題才經過專案負責人。
+（出貨後，每日監控發現已出貨產品有新的已被積極利用漏洞時不用這張表：掃描負責人 → 專案負責人 → 通知產品工程師修補，並轉給公司指定的人＋法務。）
 這份表把要問的事從這次已有的資料列出來
 （不是新的判斷，也不猜事實）；輸入缺少時列一筆「缺少輸入」，不留空白。
 
@@ -17,18 +17,18 @@ cra_report.py 以檔案路徑載入這個模組（build、write、remove），�
   1 被利用或 P1 的漏洞：每個（漏洞編號＋元件）一筆；只有具名的「受影響＋處理方式」判定不列（列還在 P1–P3
     就表示 cra_report 沒有採用不受影響／已修補的判定，照樣列出並寫原因）。
     有修補版本 → 建議升級；沒有修補（not-fixed／wont-fix）的 deb 套件 → 用 pkg_why.py 的依賴資料找出是哪個頂層套件帶進來的，
-    頂層套件不多（FEW_ROOTS 個以內）時問內部窗口產品需不需要那個功能。
+    頂層套件不多（FEW_ROOTS 個以內）時問專案負責人產品需不需要那個功能。
   1b 沒有漏洞資料的套件：no_vuln_data.py 列出的 deb 套件（可能沒有漏洞資料，未評估），每組一筆（很可能的依維護者網域分組，
     可能的合成一組）；問產品工程師版本與上游安全公告。
   2 安全測試：還沒有決定（open）的項目依種類各一筆（預設密碼、映像裡的 SSH 主機金鑰、開機啟動的網路服務、所有人可寫的檔案、
     映像裡的私鑰與帳密）；其他 open 的 high／medium 合成一筆。
-  3 開發工具：SBOM 的 deb 套件有編譯器、除錯器等開發工具（DEV_TOOLS），或除錯符號套件，或 -dev 套件 DEV_MIN 個以上 → 問內部窗口客戶要不要在板子上開發；
+  3 開發工具：SBOM 的 deb 套件有編譯器、除錯器等開發工具（DEV_TOOLS），或除錯符號套件，或 -dev 套件 DEV_MIN 個以上 → 問專案負責人客戶要不要在板子上開發；
     影響是只屬於這些套件的未處理漏洞列數。
   4 作業系統核心：核心沒有評估（8.7 節 not_assessed）；核心有漏洞列而核心設定比對（scan/kernel-config.json）沒有可用的結果；
     沒有用到核心的建置紀錄（kernel-config.json 的 kernel.build_record.status 不是 OK；舊版沒有這個欄位時也算沒有）。
   5 對外服務清單：分級方式 exploitation 卻沒有 CRA/Config/exposed-services.json。
   6 公司與產品資料：summary.json 的 missing_fields（TO BE COMPLETED）依負責人分組，每組一筆（OWNER_RULES）。
-  7 出貨紀錄：報告只讀得到 product.first_placing_on_market；沒有填 → 問內部窗口出貨紀錄。
+  7 出貨紀錄：報告只讀得到 product.first_placing_on_market；沒有填 → 問專案負責人出貨紀錄。
 排序與編號固定（類別順序、類別內依穩定的鍵排序；Q1、Q2…），同樣的輸入重跑結果相同（不寫產生時間）。
 只用標準函式庫。
 """
@@ -45,9 +45,9 @@ COLUMNS = ("編號", "類別", "掃描發現（為什麼要問）", "影響", "�
            "回答", "決定", "填寫人", "日期", "軟體部門後續")
 DECISIONS = "照建議做／不同意（理由寫在回答）／需要再討論"
 CATEGORIES = ("缺少輸入", "被利用或優先處理的漏洞", "沒有漏洞資料的套件", "安全測試", "開發工具", "作業系統核心", "對外服務清單", "公司與產品資料", "出貨紀錄")
-ENG, PM, LEGAL, BOSS, QA, SW = "產品工程師", "內部窗口（PM）", "法務", "老闆／產品主管", "QA／認證", "軟體部門（掃描負責人）"
+ENG, PM, LEGAL, BOSS, QA, SW = "產品工程師", "專案負責人（PM）", "法務", "核准人／產品主管", "QA／認證", "軟體部門（掃描負責人）"
 HUMAN_DEFAULT = ("dt", "annotation")         # vex_export.HUMAN（cra_report 傳進來；單獨測試時用這個）
-FEW_ROOTS = 3                                # 帶進來的頂層套件在這個數量以內 → 問內部窗口要不要那個功能
+FEW_ROOTS = 3                                # 帶進來的頂層套件在這個數量以內 → 問專案負責人要不要那個功能
 LIST_MAX = 8                                 # 一格裡最多列幾個名稱
 DEV_MIN = 10                                 # -dev 套件達到這個數量才算「很多」（只有幾個 -dev 常是執行期套件連帶裝的）
 DEV_TOOLS = re.compile(r"^(build-essential|gcc(-\d+)?|g\+\+(-\d+)?|clang(-\d+)?|gdb|gdbserver|git|cmake|make|strace|ltrace|valgrind"
@@ -69,13 +69,13 @@ OWNER_RULES = (
     ("vulnerability_contact.", "PM＋法務", "弱點通報窗口與 CVD 政策"),
     ("supplier.notification.", "PM＋法務", "給客戶的通知承諾（時數、管道）"),
     ("supplier.contract_reference", "PM＋法務", "合約編號"),
-    ("support.", "老闆／產品主管", "支援期"),
-    ("technical_documentation.support_period_rationale", "老闆／產品主管", "支援期"),
-    ("risk_assessment.expected_use_period", "老闆／產品主管", "支援期"),
-    ("risk_assessment.approval.", "老闆／產品主管", "風險評估的核准與剩餘風險"),
-    ("risk_assessment.residual_risk", "老闆／產品主管", "風險評估的核准與剩餘風險"),
-    ("risk_assessment.method", "老闆／產品主管", "公司的風險評估方法與流程"),
-    ("risk_assessment.part_i_1_and_part_ii", "老闆／產品主管", "公司的風險評估方法與流程"),
+    ("support.", "核准人／產品主管", "支援期"),
+    ("technical_documentation.support_period_rationale", "核准人／產品主管", "支援期"),
+    ("risk_assessment.expected_use_period", "核准人／產品主管", "支援期"),
+    ("risk_assessment.approval.", "核准人／產品主管", "風險評估的核准與剩餘風險"),
+    ("risk_assessment.residual_risk", "核准人／產品主管", "風險評估的核准與剩餘風險"),
+    ("risk_assessment.method", "核准人／產品主管", "公司的風險評估方法與流程"),
+    ("risk_assessment.part_i_1_and_part_ii", "核准人／產品主管", "公司的風險評估方法與流程"),
     ("technical_documentation.standards", "QA／認證", "標準、測試報告與符合性聲明"),
     ("technical_documentation.test_reports", "QA／認證", "標準、測試報告與符合性聲明"),
     ("technical_documentation.eu_declaration_of_conformity_copy", "QA／認證", "標準、測試報告與符合性聲明"),
@@ -94,8 +94,8 @@ OWNER_RULES = (
     ("instructions.", "PM", "產品資料、用途與使用說明"),
     ("", "產品工程師", "產品的技術資料與風險評估內容"),
 )
-OWNER_ORDER = ("PM", "PM＋法務", "老闆／產品主管", "QA／認證", "產品工程師")
-ASK_OF_OWNER = {"PM": PM, "PM＋法務": f"{PM}＋{LEGAL}", "老闆／產品主管": BOSS, "QA／認證": QA, "產品工程師": ENG}
+OWNER_ORDER = ("PM", "PM＋法務", "核准人／產品主管", "QA／認證", "產品工程師")
+ASK_OF_OWNER = {"PM": PM, "PM＋法務": f"{PM}＋{LEGAL}", "核准人／產品主管": BOSS, "QA／認證": QA, "產品工程師": ENG}
 # 公司共用設定可以放的欄位（cra_report.COMPANY_SECTIONS 的報告欄位）：填一次，全部產品共用
 COMPANY_PREFIXES = ("manufacturer.", "vulnerability_contact.", "sbom.availability", "technical_documentation.production_monitoring",
                     "technical_documentation.standards", "technical_documentation.secure_update_distribution", "risk_assessment.method",
@@ -312,7 +312,7 @@ def vuln_items(rows, human, db, db_why, author_missing=author_missing_default, e
                     elif all(db.manual(b) for b in bins) and not any(db.rdeps.get(b) for b in bins):
                         sug += f"{names(bins, 4)} 是直接指定安裝的，沒有別的套件需要它：產品不用的話從映像拿掉，這個漏洞就不在產品裡"
                         ask.append(PM)
-                        extra_q = f"內部窗口：產品需要 {names(bins, 4)} 嗎？"
+                        extra_q = f"專案負責人：產品需要 {names(bins, 4)} 嗎？"
                     elif all(db.manual(b) for b in bins):
                         ups = sorted({u for b in bins for u in db.rdeps.get(b, {})})
                         sug += (f"{names(bins, 4)} 是直接指定安裝的，另外 {names(ups, 4)} 也需要它：要拿掉得先確認這些套件用不用；"
@@ -323,7 +323,7 @@ def vuln_items(rows, human, db, db_why, author_missing=author_missing_default, e
                         sug += (f"{names(bins, 4)} 是被 {names(roots)} 帶進來的：產品不需要 {names(roots)} 的功能的話，"
                                 "可以一起從映像拿掉，這個漏洞就不在產品裡（拿掉前在板子上確認功能）")
                         ask.append(PM)
-                        extra_q = f"內部窗口：產品需要 {names(roots)} 的功能嗎？"
+                        extra_q = f"專案負責人：產品需要 {names(roots)} 的功能嗎？"
                     else:
                         sug += (f"{names(bins, 4)} 被 {len(roots)} 個頂層套件需要（{names(roots, 4)}），不容易拿掉："
                                 "由產品工程師評估緩解方式（關掉相關功能、限制存取）")
@@ -455,7 +455,7 @@ def dev_items(pkgs, rows):
     return [item("開發工具", "dev:tools", "出貨映像裡有開發或除錯用的套件：" + "；".join(parts), impact, (PM,),
                  "客戶需要在板子上開發（編譯程式、除錯）嗎？",
                  "不需要的話，出貨映像不裝開發套件（pkg_why.py rank 有「不裝開發套件」可以少掉多少列的估計）；需要的話另外做開發版映像" + NOT_P1,
-                 "內部窗口決定後回覆掃描負責人；要改映像時掃描負責人和產品工程師一起改，改好後重新掃描")]
+                 "專案負責人決定後回覆掃描負責人；要改映像時掃描負責人和產品工程師一起改，改好後重新掃描")]
 
 
 # ---------- 規則 4：作業系統核心 ----------
@@ -637,8 +637,8 @@ def company_items(missing, schema, role):
         finding = f"文件裡還是 TO BE COMPLETED 的欄位（{len(paths)} 個）：" + "；".join(
             f"{t}：" + "、".join(f"{field_label(p, schema)}（{p}）" for p in topics[t]) for t in sorted(topics))
         impact = "文件是 GAP，不能交給客戶或主管機關" + ("（供應商資料包也是）" if role == "supplier" else "")
-        # 出貨前：產品工程師的欄位直接問；其他人（內部窗口、法務、老闆、QA）的經內部窗口
-        sug = (("產品工程師直接回覆掃描負責人，" if owner == "產品工程師" else "經內部窗口找人回答、交回掃描負責人，")
+        # 出貨前：產品工程師的欄位直接問；其他人（專案負責人、法務、核准人、QA）的經專案負責人
+        sug = (("產品工程師直接回覆掃描負責人，" if owner == "產品工程師" else "經專案負責人找人回答、交回掃描負責人，")
                + "掃描負責人寫進 CRA/Config/config.json"
                + ("；其中公司層級的欄位（" + names(comp, 4) + "）寫進公司共用設定，填一次全部產品共用" if comp else ""))
         q = "請提供這些欄位的內容（不適用的寫 Not applicable 與理由，不要留空）"
@@ -656,7 +656,7 @@ def shipping_items(cfg, role):
                  "報告沒有出貨資料（product.first_placing_on_market 沒填，報告也沒有其他出貨紀錄）",
                  "看不出這一版有沒有出貨、出到哪裡；已出貨版本的被利用漏洞監控（exploited_watch.py）要知道哪些版本出貨了", (PM,),
                  f"這一版要不要出貨？哪個產品、哪個版本、出貨日期、{who}、是不是賣到歐盟？",
-                 "內部窗口提供出貨紀錄；首次上市日寫進 product.first_placing_on_market，已出貨的版本在 DT 加 sca-shipped 標籤",
+                 "專案負責人提供出貨紀錄；首次上市日寫進 product.first_placing_on_market，已出貨的版本在 DT 加 sca-shipped 標籤",
                  "寫進設定與 DT 標籤後重新產生文件")]
 
 
@@ -754,10 +754,10 @@ def md_text(items, product, artifact, role):
              f"掃描對象：{artifact}。這張表由 `cra_report.py` 從這次的掃描與設定產生（`{CSV_NAME}` 是同樣內容，用 Excel 填寫）。", "",
              "## 怎麼用", "",
              "這張表是出貨前（新版本）用的。流程：掃描負責人和產品工程師直接一起處理這張表 → 工程師回覆、具名判斷、修好後 → "
-             "掃描負責人記錄並重掃 → 完成後把六樣交付交給內部窗口（PM）。只有需要別人（內部窗口／法務／老闆）的問題才經過內部窗口。",
+             "掃描負責人記錄並重掃 → 完成後把六樣交付交給專案負責人（PM）。只有需要別人（專案負責人／法務／核准人）的問題才經過專案負責人。",
              "六樣交付：SBOM、漏洞清單、VEX、安全檢查結果、待確認事項表、客戶資料包（ODM 案）。", "",
              "1. 軟體部門的掃描負責人列出事項（這張表），和產品工程師一起逐項處理。「要問誰」是產品工程師的，工程師直接回答；"
-             "寫內部窗口（PM）（例如「內部窗口（PM）＋法務」）、老闆／產品主管或 QA／認證的，由掃描負責人交給內部窗口，內部窗口找人回答後交回。",
+             "寫專案負責人（PM）（例如「專案負責人（PM）＋法務」）、核准人／產品主管或 QA／認證的，由掃描負責人交給專案負責人，專案負責人找人回答後交回。",
              "2. 「要問誰」只是建議，可以換人。回答的人把答案填在「回答」，並填「決定」、「填寫人」、「日期」。",
              f"   「決定」填其中一個：{DECISIONS}。",
              "3. 掃描負責人記下每個決定（具名、日期）：漏洞的判定用 `vex_export.py annotate`，"
@@ -765,8 +765,8 @@ def md_text(items, product, artifact, role):
              "4. 重新掃描後這張表會重新產生：處理好的事項會消失，沒處理的會留著。編號照順序重排，對照時看「掃描發現」開頭方括號裡的鍵"
              "（例如 `[vuln:CVE-…:元件]`），鍵不會變。",
              f"5. 建議做法寫「{NOT_P1}」的是已知、不急的事：照樣要有決定，但排在 2027-12-11（CRA 主要義務開始適用）之前處理，不是現在就要做。", "",
-             "出貨後（已出貨的產品）不用這張表：每日監控發現新的已被積極利用漏洞時，掃描負責人 → 內部窗口（PM）→ "
-             "內部窗口通知產品工程師（修補），並轉給公司指定的人＋法務（要不要通報）。", "",
+             "出貨後（已出貨的產品）不用這張表：每日監控發現新的已被積極利用漏洞時，掃描負責人 → 專案負責人（PM）→ "
+             "專案負責人通知產品工程師（修補），並轉給公司指定的人＋法務（要不要通報）。", "",
              "注意：表裡只有工具從已有資料看得出來、需要人決定的事；沒有列出的不代表沒有問題。"
              f"要不要通報主管機關或通知{who}，不是這張表要決定的事。", ""]
     by = Counter(x["category"] for x in items)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """供應商資料包（計畫總表 #9，對應 S-1、M-6）：config 的 role 是 supplier 時，cra_report.py 呼叫 write() 產生
-CRA/Reports/supplier-package/，給把我們的板子與系統映像整合進自己產品的製造商（客戶）。規格：handoff 分支的 文件/供應商資料包規格.md。
+CRA/Reports/supplier-package/，給把我們的板子與系統映像整合進自己產品的製造商（客戶）。規格：專案文件「供應商資料包規格」。
 
 規則：
 - 正文英文。缺的資料寫 TO BE COMPLETED，不填假值；通知時數、天數也一樣（部門規則：不是法定期限就不訂數字；沒填就不寫建議值）。

@@ -5,18 +5,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import vexconv as vc
 
-# 上游 schema 由 scripts/ci/fetch-test-data.sh 取得（DUMPLING_TEST_DATA/verify/{cdx,ovx}）；CI 設 DUMPLING_REQUIRE_TEST_DATA=1，缺資料就失敗，不靜默跳過
-V = os.environ.get("VERIFY_DIR") or os.path.join(os.environ.get("DUMPLING_TEST_DATA", "/nonexistent-sca-test-data"), "verify")
-if not os.path.exists(f"{V}/cdx/schema/bom-1.5.schema.json") and os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() in ("", "0"):
-    pytest.skip("上游 schema 缺少（見 scripts/ci/fetch-test-data.sh）", allow_module_level=True)
-CDX_SCHEMA = json.load(open(f"{V}/cdx/schema/bom-1.5.schema.json"))
-OV_SCHEMA = json.load(open(f"{V}/ovx/openvex_json_schema.json"))
+# 上游 schema 放在 tools/cra/tests/data/（來源與 SHA-256 見各資料夾的 README.md）；不需要網路
+DATA = os.path.join(os.path.dirname(os.path.dirname(HERE)), "cra", "tests", "data")
+CDX_SCHEMA = json.load(open(f"{DATA}/cyclonedx-1.5/bom-1.5.schema.json"))
+OV_SCHEMA = json.load(open(f"{DATA}/openvex/openvex_json_schema.json"))
 
 def _cdx_validator():
     from referencing import Registry, Resource
     reg = Registry()
     for n in ("spdx.schema.json", "jsf-0.82.schema.json"):
-        d = json.load(open(f"{V}/cdx/schema/{n}"))
+        d = json.load(open(f"{DATA}/cyclonedx-1.6.1/{n}"))
         reg = reg.with_resource(d.get("$id", n), Resource.from_contents(d))
         reg = reg.with_resource(n, Resource.from_contents(d))
     return jsonschema.Draft7Validator(CDX_SCHEMA, registry=reg)

@@ -12,7 +12,7 @@ import no_vuln_data as nvd  # noqa: E402
 from test_cra_report import EXAMPLE, finding, make_project, make_scan, run  # noqa: E402
 
 DEBIAN = "pkg:deb/debian/{}@{}?arch=arm64&distro=debian-12"
-DISTRO_MAINT = "Debian Foo Maintainers <pkg-foo@" "lists.debian.org>"
+DISTRO_MAINT = "Debian Foo Maintainers <pkg-foo@lists.debian.org>"
 
 
 def comp(name, version, publisher=None, purl=None):
@@ -25,13 +25,13 @@ def comp(name, version, publisher=None, purl=None):
 # 發行版的套件（有修訂號、Debian 的維護者）：讓「同一個發行版的其他套件大多有修訂號」成立
 DISTRO = [comp(f"libdistro{i}", f"1.{i}-{i + 1}", DISTRO_MAINT) for i in range(12)]
 VENDOR = [
-    comp("chromium-x11", "132.0.6834.83", "Vendor Dev <dev@" "vendor.example>"),        # 廠商、沒有修訂號、dpkg hold → 很可能
-    comp("libvendor-mpp1", "1.5.0-1", "Other Dev <other@" "vendor.example>"),           # 同一個廠商網域 → 很可能
-    comp("libpersonal1", "1.2-3", "Joe Packager <joe@" "gmail.com>"),                   # 只有維護者不是發行版 → 可能
+    comp("chromium-x11", "132.0.6834.83", "Vendor Dev <dev@vendor.example>"),        # 廠商、沒有修訂號、dpkg hold → 很可能
+    comp("libvendor-mpp1", "1.5.0-1", "Other Dev <other@vendor.example>"),           # 同一個廠商網域 → 很可能
+    comp("libpersonal1", "1.2-3", "Joe Packager <joe@gmail.com>"),                   # 只有維護者不是發行版 → 可能
     comp("libheld1", "2.0-1", DISTRO_MAINT),                                         # 發行版的、有修訂號、但 hold → 可能
-    comp("libmatched1", "0.9", "Vendor Dev <dev@" "vendor.example>"),                   # 廠商的但 Grype 有比對 → 不列
+    comp("libmatched1", "0.9", "Vendor Dev <dev@vendor.example>"),                   # 廠商的但 Grype 有比對 → 不列
 ]
-OPENSSL = comp("openssl", "3.0.15-1~deb12u1", "Debian OpenSSL Team <pkg-openssl-devel@" "alioth-lists.debian.net>")
+OPENSSL = comp("openssl", "3.0.15-1~deb12u1", "Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>")
 FINDINGS = [finding("openssl", "3.0.15-1~deb12u1", "CVE-2025-0003", "NVD", "LOW", purl=DEBIAN.format("openssl", "3.0.15-1~deb12u1"))]
 GRYPE = {"matches": [
     {"vulnerability": {"id": "CVE-2025-0003", "fix": {"state": "fixed", "versions": ["3.0.15-1~deb12u2"]}},
@@ -98,7 +98,7 @@ def test_vendor_package_listed_not_assessed(tmp_path):
     lst = list(csv.reader(io.StringIO((reports / x["file"]).read_bytes().decode("utf-8-sig"))))
     assert lst[0] == list(nvd.LIST_COLUMNS) and len(lst) == 1 + 4 + 1
     assert [r[0] for r in lst[1:]] == ["listed"] * 4 + ["name_only_data"] and lst[-1][1:3] == ["libmatched1", "0.9"]
-    assert "vendor.example" in (reports / x["file"]).read_text(encoding="utf-8-sig") and "dev@" "vendor.example" not in lst[-1]
+    assert "vendor.example" in (reports / x["file"]).read_text(encoding="utf-8-sig") and "dev@vendor.example" not in lst[-1]
     md = (reports / "risk-assessment.md").read_text(encoding="utf-8")
     sec = section_of(md)
     assert "（沒有漏洞資料的套件（未評估））" in md and "Status **NOT_ASSESSED**: 4 Debian/Ubuntu packages (2 likely, 2 possible)" in sec
@@ -109,7 +109,7 @@ def test_vendor_package_listed_not_assessed(tmp_path):
     assert "| libmatched1 " not in sec and "| openssl " not in sec
     assert "| libpersonal1 | 1.2-3 | (personal) | install | possible |" in sec and "gmail.com" not in sec    # 個人網域不寫
     assert "confirm that the distribution's advisories apply): libmatched1 0.9 (all of them in `packages-without-vuln-data.csv`)." in sec
-    assert "Vendor Dev" not in sec and "dev@" "vendor.example" not in sec          # 只寫網域，不寫姓名與信箱
+    assert "Vendor Dev" not in sec and "dev@vendor.example" not in sec          # 只寫網域，不寫姓名與信箱
     assert "probably have no vulnerability data and are NOT ASSESSED" in md.split("## 1.", 1)[0]   # 資料狀態的附註
     # 待確認事項表：每組一筆，問產品工程師
     nv = [i for i in citems(reports) if i["類別"] == "沒有漏洞資料的套件"]
@@ -200,17 +200,17 @@ def test_project_template_without_placeholder_warns(tmp_path):
 def test_unit_signals():
     assert nvd.has_revision("2.36-9+deb12u14") and nvd.has_revision("1:1.2-3") and nvd.has_revision("12.4+deb12u5")
     assert nvd.has_revision("1.0ubuntu2") and not nvd.has_revision("132.0.6834.83") and not nvd.has_revision("1:2.0")
-    assert nvd.domain_of("Jeffy <j@" "Rock-Chips.COM>") == "rock-chips.com" and nvd.domain_of("no mail") is None
+    assert nvd.domain_of("Jeffy <j@Rock-Chips.COM>") == "rock-chips.com" and nvd.domain_of("no mail") is None
     assert nvd.is_distro_domain("lists.debian.org") and nvd.is_distro_domain("ubuntu.com") and not nvd.is_distro_domain("notdebian.org")
     assert not nvd.is_distro_domain("debian.org.evil.example")
 
 
-NV = "NVIDIA Corporation <cudatools@" "nvidia.com>"
+NV = "NVIDIA Corporation <linux-tegra-bugs@nvidia.com>"
 
 
 def test_nvidia_only_jetson_linux_is_covered_by_bulletins(tmp_path):
-    pk = DISTRO + [comp("nvidia-l4t-core", "39.2.1-20251201", "NVIDIA Corporation <linux-tegra-bugs@" "nvidia.com>"),
-                   comp("cuda-cudart-12-6", "12.6.68-1", NV), comp("libnvinfer10", "11.3.0.30-1+cuda12.5", NV)]
+    pk = DISTRO + [comp("nvidia-l4t-core", "39.2.1-20251201", "NVIDIA Corporation <linux-tegra-bugs@nvidia.com>"),
+                   comp("cuda-cudart-12-6", "12.6.68-1", NV), comp("libnvinfer10", "10.3.0.30-1+cuda12.5", NV)]
     r = nvd.classify(pk, nvidia_ok=True, grype={"matches": []})
     # 公告比對只評估 nvidia-l4t-*：CUDA、TensorRT 照樣列出
     assert r["excluded"]["nvidia_bulletins"] == 1 and r["count"] == 2 and r["likely"] == 2
@@ -221,11 +221,11 @@ def test_nvidia_only_jetson_linux_is_covered_by_bulletins(tmp_path):
     r = nvd.classify(pk, nvidia_ok=False, grype={"matches": []})
     assert r["count"] == 3 and "nvidia_bulletins_not_ok" in next(p for p in r["packages"] if p["name"] == "nvidia-l4t-core")["signals"]
     # 發行版打包的 NVIDIA 相關套件（Debian 的 pkg-nvidia 團隊）不是廠商套件：不列
-    deb_nv = comp("nvidia-kernel-support", "535.183.01-1~deb12u1", "Debian NVIDIA Maintainers <pkg-nvidia-devel@" "lists.alioth.debian.org>")
+    deb_nv = comp("nvidia-kernel-support", "535.183.01-1~deb12u1", "Debian NVIDIA Maintainers <pkg-nvidia-devel@lists.alioth.debian.org>")
     r = nvd.classify(DISTRO + [deb_nv], nvdebs={deb_nv["purl"].split("?", 1)[0]}, nvidia_ok=True, grype={"matches": []})
     assert r["count"] == 0 and r["excluded"]["distro_maintained"] == 13
     # cra_report.nvidia_debs 給的 purl（publisher 沒有寫 NVIDIA）也算
-    other = comp("libcudnn9", "9.3.0.75-1", "Packager <p@" "vendor.example>")
+    other = comp("libcudnn9", "9.3.0.75-1", "Packager <p@vendor.example>")
     r = nvd.classify(DISTRO + [other], nvdebs={other["purl"].split("?", 1)[0]}, nvidia_ok=True, grype={"matches": []})
     assert r["packages"][0]["signals"][-1] == "nvidia_not_jetson_linux" and r["packages"][0]["level"] == "likely"
     # 端到端：C-nvidia-bulletins OK 的掃描
@@ -247,14 +247,14 @@ def test_long_untrusted_maintainer_is_fast():
         nvd.domain_of(v)
         nvd.classify(DISTRO + [comp("liblong1", "1.0", v)], grype={"matches": []})
     assert time.monotonic() - t0 < 5
-    assert nvd.domain_of("a" * 70000 + "<x@" "late.example>") is None        # 只解析前 65536 個字
-    assert nvd.domain_of("Jeffy <j@" "Rock-Chips.COM>") == "rock-chips.com" and nvd.domain_of("x@localhost") is None
+    assert nvd.domain_of("a" * 70000 + "<x@late.example>") is None        # 只解析前 65536 個字
+    assert nvd.domain_of("Jeffy <j@Rock-Chips.COM>") == "rock-chips.com" and nvd.domain_of("x@localhost") is None
 
 
 def test_distro_name_with_other_domain():
     # 名稱是 Debian／Ubuntu，但沒有發行版的信箱網域：不管有沒有修訂號都列為「可能」（只有真的發行版網域才算發行版的）
-    pk = DISTRO + [comp("libfake1", "2.0", "Debian Foo Team <team@" "notdebian.example>"),
-                   comp("libfake2", "2.0-1", "Debian Foo Team <team@" "notdebian.example>"),
+    pk = DISTRO + [comp("libfake1", "2.0", "Debian Foo Team <team@notdebian.example>"),
+                   comp("libfake2", "2.0-1", "Debian Foo Team <team@notdebian.example>"),
                    comp("libteam1", "1.0", "Ubuntu Desktop Team")]
     r = nvd.classify(pk, grype={"matches": []})
     assert [(p["name"], p["level"], p["signals"]) for p in r["packages"]] == [
@@ -264,7 +264,7 @@ def test_distro_name_with_other_domain():
     assert r["excluded"]["distro_maintained"] == 12
     # dh_make 的預設值等（審查的重現案例）：每一個都列出，不算發行版的
     for maint, ver in (("Ubuntu <ubuntu@ubuntu>", "1.0"), ("Debian <debian@localhost>", "1.0-1"),
-                       ("Ubuntu <ubuntu@" "ubuntu.localdomain>", "1.0-1")):
+                       ("Ubuntu <ubuntu@ubuntu.localdomain>", "1.0-1")):
         r = nvd.classify(DISTRO + [comp("myapp", ver, maint)], grype={"matches": []})
         assert r["status"] == "NOT_ASSESSED" and [p["name"] for p in r["packages"]] == ["myapp"], maint
         assert r["packages"][0]["level"] == "possible" and r["excluded"]["distro_maintained"] == 12
@@ -272,7 +272,7 @@ def test_distro_name_with_other_domain():
 
 def test_vendor_fork_with_distro_maintainer():
     # 保留 Debian Maintainer 的廠商分支：沒有資料、版本沒有修訂號 → 可能；再加上 hold → 很可能
-    fork = comp("chromium-x11", "132.0.6834.83", "Debian Chromium Team <chromium@" "packages.debian.org>")
+    fork = comp("chromium-x11", "132.0.6834.83", "Debian Chromium Team <chromium@packages.debian.org>")
     r = nvd.classify(DISTRO + [fork], grype={"matches": []})
     assert r["status"] == "NOT_ASSESSED" and [(p["level"], p["signals"], p["maintainer"]) for p in r["packages"]] == [
         ("possible", ["distro_maintainer_no_revision"], "@packages.debian.org")]
@@ -288,12 +288,12 @@ def test_vendor_fork_with_distro_maintainer():
 
 
 def test_same_vendor_domain_needs_two_seeds_or_hold():
-    one = DISTRO + [comp("native1", "3.4", "Joe <joe@" "person.example>"), comp("other1", "1.0-1", "Joe <joe@" "person.example>")]
+    one = DISTRO + [comp("native1", "3.4", "Joe <joe@person.example>"), comp("other1", "1.0-1", "Joe <joe@person.example>")]
     r = nvd.classify(one, grype={"matches": []})
     # 一個沒有 hold 的種子（例如 Debian 個人維護者的原生套件）：不擴散，都只是「可能」，網域不寫
     assert [(p["name"], p["level"], p["maintainer"]) for p in r["packages"]] == [
         ("native1", "possible", "(not shown)"), ("other1", "possible", "(not shown)")]
-    two = one + [comp("native2", "5.6", "Ann <ann@" "person.example>")]
+    two = one + [comp("native2", "5.6", "Ann <ann@person.example>")]
     r = nvd.classify(two, grype={"matches": []})
     # 分組用網域，但沒有在設定檔列出的網域不印出（鍵用雜湊）；列在設定檔的才寫網域
     assert r["likely"] == 3 and [g["key"] for g in r["groups"]][0].startswith("likely:vendor-")
@@ -302,18 +302,18 @@ def test_same_vendor_domain_needs_two_seeds_or_hold():
     assert [g["key"] for g in r["groups"]] == ["likely:person.example"] and {p["maintainer"] for p in r["packages"]} == {"@person.example"}
 
     class DB:
-        pkgs = {"native1": {"Package": "native1", "Maintainer": "Joe <joe@" "person.example>", "Status": "hold ok installed"}}
+        pkgs = {"native1": {"Package": "native1", "Maintainer": "Joe <joe@person.example>", "Status": "hold ok installed"}}
     r = nvd.classify(one, db=DB(), grype={"matches": []})
     assert r["likely"] == 2 and all(p["maintainer"] == "(not shown)" for p in r["packages"])
     assert "person.example" not in json.dumps(nvd.summary(r))
     # 免費信箱不會成為廠商網域
-    free = DISTRO + [comp(f"g{i}", "1.0", "G <g@" "gmail.com>") for i in range(3)]
+    free = DISTRO + [comp(f"g{i}", "1.0", "G <joe@gmail.com>") for i in range(3)]
     r = nvd.classify(free, grype={"matches": []})
     assert r["likely"] == 0 and {p["maintainer"] for p in r["packages"]} == {"(personal)"}
 
 
 def test_known_names_only_from_deb_rows():
-    pk = DISTRO + [comp("libx1", "1.0", "V <v@" "vendor.example>")]
+    pk = DISTRO + [comp("libx1", "1.0", "V <v@vendor.example>")]
     r = nvd.classify(pk, rows=[{"name": "libx1", "component": "libx1", "purl": "pkg:pypi/libx1@1.0", "ptype": "pypi"}], grype={"matches": []})
     assert r["count"] == 1
     r = nvd.classify(pk, rows=[{"name": "libx", "component": "libx", "installed_as": ["libx1"], "purl": "pkg:deb/debian/libx@1.0?arch=source"}],
@@ -322,7 +322,7 @@ def test_known_names_only_from_deb_rows():
 
 
 def test_unit_nvidia_and_origin():
-    pk = DISTRO + [comp("nvidia-l4t-core", "39.2.1-20251201", "NVIDIA Corporation <linux-tegra-bugs@" "nvidia.com>")]
+    pk = DISTRO + [comp("nvidia-l4t-core", "39.2.1-20251201", "NVIDIA Corporation <linux-tegra-bugs@nvidia.com>")]
     r = nvd.classify(pk, nvidia_ok=True, grype={"matches": []})
     assert r["count"] == 0 and r["excluded"]["nvidia_bulletins"] == 1
     r = nvd.classify(pk, nvidia_ok=False, grype={"matches": []})
@@ -333,16 +333,16 @@ def test_unit_nvidia_and_origin():
     r = nvd.classify(DISTRO + [comp("libx", "1.0-1", DISTRO_MAINT)], db=DB(), grype={"matches": []})
     assert r["count"] == 1 and r["packages"][0]["level"] == "likely" and r["packages"][0]["signals"] == ["origin"]
     # 不可信的輸入：控制字元與 | 不會壞掉表格
-    r = nvd.classify(DISTRO + [comp("liby", "1.0", "x|y\n<a@" "b.example>")], grype={"matches": []})
+    r = nvd.classify(DISTRO + [comp("liby", "1.0", "x|y\n<a@b.example>")], grype={"matches": []})
     out = nvd.section(r, lambda h, rows: "\n".join("|".join(map(str, x)) for x in rows))
     assert r["packages"][0]["maintainer"] == "(personal)" and "\n<a@" not in out and "b.example" not in out
     assert json.dumps(nvd.summary(r), sort_keys=True) == json.dumps(nvd.summary(nvd.classify(list(reversed(DISTRO)) + [
-        comp("liby", "1.0", "x|y\n<a@" "b.example>")], grype={"matches": []})), sort_keys=True)
+        comp("liby", "1.0", "x|y\n<a@b.example>")], grype={"matches": []})), sort_keys=True)
     assert EXAMPLE      # 範例設定照常載入（make_project 用）
 
 
 def test_malformed_inputs_do_not_crash(tmp_path, monkeypatch):
-    bad = DISTRO + [dict(comp("libbad1", "1.0", "V <v@" "vendor.example>"), properties=5)]
+    bad = DISTRO + [dict(comp("libbad1", "1.0", "V <v@vendor.example>"), properties=5)]
     r = nvd.classify(bad, rows=[{"name": "x", "purl": "pkg:deb/debian/x@1", "installed_as": 5}],
                      grype={"matches": 5}, vendor_domains=5)
     assert r["status"] == "NOT_ASSESSED"
@@ -368,7 +368,7 @@ def test_malformed_inputs_do_not_crash(tmp_path, monkeypatch):
 
 
 def test_config_domains():
-    cfg = {"manufacturer": {"email": "Contact <cra@" "Maker.example>"},
+    cfg = {"manufacturer": {"email": "Contact <cra@Maker.example>"},
            "sbom": {"vendor_domains": ["bsp.example", " ", 5], "flash_package_supplier": {"name": "V", "url": "https://www.vendor.example/x"}}}
     assert nvd.config_domains(cfg) == ["bsp.example", "maker.example", "vendor.example"]
     assert nvd.config_domains(None) == [] and nvd.config_domains({"sbom": 5}) == []
@@ -411,8 +411,8 @@ def test_vendor_revision_suffix():
 
 def test_origin_does_not_override_vendor_maintainer():
     for ori in ("Debian", " DEBIAN ", "Ubuntu"):
-        db = _DB([{"Package": "libv1", "Maintainer": "V <a@" "vendor.example>", "Origin": ori, "Status": "install ok installed"}])
-        r = nvd.classify(DISTRO + [comp("libv1", "1.0-1", "V <a@" "vendor.example>")], db=db, grype={"matches": []})
+        db = _DB([{"Package": "libv1", "Maintainer": "V <a@vendor.example>", "Origin": ori, "Status": "install ok installed"}])
+        r = nvd.classify(DISTRO + [comp("libv1", "1.0-1", "V <a@vendor.example>")], db=db, grype={"matches": []})
         assert [(p["name"], p["signals"]) for p in r["packages"]] == [("libv1", ["vendor_maintainer"])], ori
     # Origin 寫 Debian、沒有 Maintainer：Origin 不能讓它變成發行版的
     db = _DB([{"Package": "libv2", "Origin": "Debian", "Status": "install ok installed"}])
@@ -421,11 +421,11 @@ def test_origin_does_not_override_vendor_maintainer():
 
 
 def test_every_maintainer_address_counts():
-    both = "Debian Foo <pkg-foo@" "lists.debian.org>, V <v@" "vendor.example.>"
+    both = "Debian Foo <pkg-foo@lists.debian.org>, V <v@vendor.example.>"
     assert nvd.domains_of(both) == ["lists.debian.org", "vendor.example"] and nvd.domain_of(both) == "vendor.example"
     r = nvd.classify(DISTRO + [comp("libmix1", "1.0-1", both)], grype={"matches": []})
     assert [(p["name"], p["signals"]) for p in r["packages"]] == [("libmix1", ["distro_name_other_domain"])]
-    r = nvd.classify(DISTRO + [comp("libok1", "1.0-1", "A <a@" "debian.org>, B <b@" "lists.debian.org>")], grype={"matches": []})
+    r = nvd.classify(DISTRO + [comp("libok1", "1.0-1", "A <a@debian.org>, B <b@lists.debian.org>")], grype={"matches": []})
     assert r["count"] == 0
 
 
@@ -505,7 +505,7 @@ def test_list_file_and_held_vendor_revision_label(tmp_path):
 def test_maintainer_from_every_paragraph_and_sbom_publisher():
     # 同名多架構：一個段落是 Debian 的維護者、另一個是廠商的 → 不是發行版的（兩種段落順序結果一樣）
     deb = {"Package": "libfoo", "Status": "install ok installed", "Maintainer": DISTRO_MAINT, "Version": "1.0-1", "Architecture": "arm64"}
-    ven = {"Package": "libfoo", "Status": "install ok installed", "Maintainer": "V <v@" "vendor.example>", "Version": "1.0-1",
+    ven = {"Package": "libfoo", "Status": "install ok installed", "Maintainer": "V <v@vendor.example>", "Version": "1.0-1",
            "Architecture": "armhf"}
     res = []
     for order in ((deb, ven), (ven, deb)):
@@ -515,13 +515,13 @@ def test_maintainer_from_every_paragraph_and_sbom_publisher():
     assert res[0] == res[1] == [("libfoo", ["vendor_maintainer"])]
     # pkgdb 是 Debian 的、SBOM 的 publisher 是廠商的 → 也算
     db = _pw.PkgDB(_status(deb))
-    r = nvd.classify(DISTRO + [comp("libfoo", "1.0-1", "V <v@" "vendor.example>")], db=db, grype={"matches": []})
+    r = nvd.classify(DISTRO + [comp("libfoo", "1.0-1", "V <v@vendor.example>")], db=db, grype={"matches": []})
     assert [p["name"] for p in r["packages"]] == ["libfoo"]
 
 
 def test_overlong_maintainer_is_not_distro_only():
     import time
-    long = DISTRO_MAINT + ", " + "x" * 70000 + " <v@" "vendor.example>"
+    long = DISTRO_MAINT + ", " + "x" * 70000 + " <v@vendor.example>"
     t0 = time.monotonic()
     r = nvd.classify(DISTRO + [comp("liblong2", "1.0-1", long)], grype={"matches": []})
     assert time.monotonic() - t0 < 5
@@ -556,13 +556,13 @@ def test_part_without_usable_domain_is_not_distro():
     # pkgdb 的 Maintainer 沒有可用的網域、SBOM 的 publisher 是 debian.org：不算發行版的
     db = _pw.PkgDB(_status({"Package": "librk1", "Status": "install ok installed", "Maintainer": "RK <build@localhost>",
                             "Version": "1.0-1", "Architecture": "arm64"}))
-    r = nvd.classify(DISTRO + [comp("librk1", "1.0-1", "A Developer <a@" "debian.org>")], db=db, grype={"matches": []})
+    r = nvd.classify(DISTRO + [comp("librk1", "1.0-1", "A Developer <a@debian.org>")], db=db, grype={"matches": []})
     assert [(p["name"], p["signals"]) for p in r["packages"]] == [("librk1", ["vendor_maintainer"])]
     # 只有名字、非 ASCII 網域的段落也一樣（每一個 Maintainer 都要有可用的發行版網域）
     for bare in ("Just A Name", "X <x@例え.jp>"):
         db = _pw.PkgDB(_status({"Package": "libbare1", "Status": "install ok installed", "Maintainer": bare, "Version": "1.0-1",
                                 "Architecture": "arm64"}))
-        r = nvd.classify(DISTRO + [comp("libbare1", "1.0-1", "B <b@" "lists.debian.org>")], db=db, grype={"matches": []})
+        r = nvd.classify(DISTRO + [comp("libbare1", "1.0-1", "B <b@lists.debian.org>")], db=db, grype={"matches": []})
         assert [p["name"] for p in r["packages"]] == ["libbare1"], bare
 
 

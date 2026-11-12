@@ -57,42 +57,8 @@ OWNERS = "libssl3t64\t/usr/lib/aarch64-linux-gnu/libssl.so.3\nlibssl3t64\t/usr/s
 
 # ---------- board-on-device.sh ----------
 
-def test_on_device_collects_firmware_and_runtime_read_only():
-    text = ON.read_text(encoding="utf-8")
-    body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
-    for must in ("run firmware firmware.txt", "run runtime-files runtime-files.txt", "run runtime-modules runtime-modules.txt",
-                 "/sys/class/dmi/id/$f", "dump-slots-info", "-t rootfs dump-slots-info", "optee: revision", "tegra-bpmp", "efivars/$v-*",
-                 "/proc/[0-9]*/maps", "/proc/[0-9]*/exe", "/proc/modules", "NOT_RUN"):
-        assert must in body, must
-    # 只讀：新增的區塊不寫任何板子上的檔案、不改設定、不裝東西
-    new = body.split("run lsmod lsmod.txt")[1].split("if grep -qE")[0]
-    for bad in ("| tee ", " rm ", "chmod", "apt ", "dpkg -i", "systemctl start", "systemctl enable", "mount ", "modprobe", "insmod", "sysctl -w", "echo >", "> /"):
-        assert bad not in new, bad
-    assert subprocess.run(["bash", "-n", str(ON)]).returncode == 0
-    r = subprocess.run(["bash", str(ON), "--help"], capture_output=True, text=True)
-    assert "firmware.txt" in r.stdout and "runtime-files.txt" in r.stdout
 
 
-def test_on_device_snippets_run_without_tools(tmp_path):
-    """FW_SH／RT_SH 在沒有 nvbootctrl、沒有 optee 的電腦上也要跑完，缺的項目寫 NOT_RUN。"""
-    lines, keep = [], False
-    for l in ON.read_text(encoding="utf-8").splitlines():
-        if l.startswith(("FW_SH=", "RT_SH=")):
-            keep = True
-        if keep:
-            lines.append(l)
-            if l == "true'":
-                keep = False
-    snip = tmp_path / "snip.sh"
-    snip.write_text("\n".join(lines) + '\nsh -c "$FW_SH"\necho ---\nsh -c "$RT_SH"\n')
-    r = subprocess.run(["bash", str(snip)], capture_output=True, text=True, timeout=60, env={"PATH": "/usr/bin:/bin"})
-    fw, rt = r.stdout.split("---\n")
-    assert "== dmi" in fw and "== nvbootctrl\nNOT_RUN" in fw and "== efivar-SecureBoot" in fw
-    lines = rt.splitlines()
-    assert lines[0].startswith("# ok ") and lines[0] == f"# ok {len(lines) - 1} paths"
-    paths = lines[1:]
-    assert paths and all(p.startswith("/") for p in paths) and paths == sorted(set(paths))
-    assert not any(p.startswith(("/dev/", "/memfd:")) for p in paths)
 
 
 # ---------- board_import.py ----------

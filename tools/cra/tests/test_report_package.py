@@ -488,9 +488,9 @@ REAL_ROWS = (
     "Q1,缺少輸入,[input:vuln-data] 漏洞資料不完整（GAP）：C-sbomgate is GAP；UEFI bundled libraries: edk2: NOT_ASSESSED: edk2 itself is not matched,"
     "下面的漏洞事項可能不完整,軟體部門（掃描負責人）,哪個掃描階段沒有完成？,重新掃描,,,,,重新掃描後再產生這張表\n"
     "Q2,被利用或優先處理的漏洞,[vuln:CVE-1:libp] CVE-1 已被利用,影響出貨,產品工程師,受不受影響？,記下判定,,,,,\n"
-    "Q3,公司與產品資料,[fields:x] 欄位未填,文件不完整,內部窗口（PM）、產品工程師,請填,寫進設定檔,,,,,\n"
-    "Q4,公司與產品資料,[fields:y] 法務,法務,內部窗口（PM）＋法務,請確認,x,,,,,\n"
-    "Q5,開發工具,[dev:b] B-toolchain 沒有；B-npm-no-lockfile,x,內部窗口,確認,y,,,,,\n")
+    "Q3,公司與產品資料,[fields:x] 欄位未填,文件不完整,專案負責人（PM）、產品工程師,請填,寫進設定檔,,,,,\n"
+    "Q4,公司與產品資料,[fields:y] 法務,法務,專案負責人（PM）＋法務,請確認,x,,,,,\n"
+    "Q5,開發工具,[dev:b] B-toolchain 沒有；B-npm-no-lockfile,x,專案負責人,確認,y,,,,,\n")
 
 
 def test_confirmation_items_real_format(tmp_path):

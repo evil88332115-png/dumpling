@@ -110,7 +110,7 @@ def bcomp(bom, name):
 
 def test_openssl3_and_upstream_edk2_tag(tmp_path):
     t = edk2(tmp_path / "t", openssl="3", mbedtls="3.3.0")
-    git(t, branch="main", tags=["edk2-stable202411"], origin="https://user:secret@" "github.com/tianocore/edk2.git")
+    git(t, branch="main", tags=["edk2-stable202411"], origin="https://user:secret@github.com/tianocore/edk2.git")
     rc, st, detail, rep, bom = run(t, tmp_path / "o")
     assert (rc, st) == (0, "OK"), detail
     e = comp(rep, "edk2")
@@ -861,10 +861,10 @@ def test_l9_clear_removes_tmp(tmp_path):
 
 
 def test_l10_safe_url():
-    assert us.safe_url("https://user:p@ss@" "host.example/x/y.git") == "https://host.example/x/y.git"
+    assert us.safe_url("https://user:p@ss@host.example/x/y.git") == "https://host.example/x/y.git"
     assert us.safe_url("https://host.example/x.git?private_token=abc#frag") == "https://host.example/x.git"
-    assert us.safe_url("ssh://git@" "host.example:2222/a/b.git") == "ssh://host.example:2222/a/b.git"
-    assert us.safe_url("git@" "host.example:a/b.git") is None and us.safe_url("file:///etc/passwd") is None
+    assert us.safe_url("ssh://git@host.example:2222/a/b.git") == "ssh://host.example:2222/a/b.git"
+    assert us.safe_url("git@host.example:a/b.git") is None and us.safe_url("file:///etc/passwd") is None
     assert us.safe_url("https://host.example/a b") is None
 
 

@@ -134,8 +134,8 @@ def test_nofix_single_reverse_dependency_asks_pm(tmp_path):
     _, s, reports = run(make_project(tmp_path / "p"), scan)
     _, rows = read_csv(reports)
     x = next(x for x in rows if x["類別"] == "被利用或優先處理的漏洞")
-    assert x["要問誰（建議）"] == "產品工程師、內部窗口（PM）"
-    assert "內部窗口：產品需要 foo-viewer 的功能嗎？" in x["要確認的問題"]
+    assert x["要問誰（建議）"] == "產品工程師、專案負責人（PM）"
+    assert "專案負責人：產品需要 foo-viewer 的功能嗎？" in x["要確認的問題"]
     assert "libfoo1 是被 foo-viewer 帶進來的" in x["建議做法"] and "not-fixed" in x["建議做法"]
     assert s["confirmation_items"]["pkgdb"] == "used" and "input:pkgdb" not in keys(s)
 
@@ -150,13 +150,13 @@ def test_nofix_base_package_no_pm_question(tmp_path):
 
 
 def test_nofix_manual_package_cases(tmp_path):
-    # 直接指定安裝、沒有人需要它 → 問內部窗口 要不要這個套件本身
+    # 直接指定安裝、沒有人需要它 → 問專案負責人 要不要這個套件本身
     scan = nofix_scan(tmp_path / "r" / "scan")
     write_pkgdb(tmp_path / "r" / "pkgdb", [pdpkg("libfoo1", source="libfoo")])
     _, _, reports = run(make_project(tmp_path / "p"), scan)
     x = next(x for x in read_csv(reports)[1] if x["類別"] == "被利用或優先處理的漏洞")
-    assert "內部窗口：產品需要 libfoo1 嗎？" in x["要確認的問題"] and "直接指定安裝的，沒有別的套件需要它" in x["建議做法"]
-    # 直接指定安裝、另外有套件需要它 → 不問內部窗口，寫出需要它的套件
+    assert "專案負責人：產品需要 libfoo1 嗎？" in x["要確認的問題"] and "直接指定安裝的，沒有別的套件需要它" in x["建議做法"]
+    # 直接指定安裝、另外有套件需要它 → 不問專案負責人，寫出需要它的套件
     write_pkgdb(tmp_path / "r" / "pkgdb", [pdpkg("libfoo1", source="libfoo"), pdpkg("bar", "libfoo1")])
     _, _, reports = run(make_project(tmp_path / "p2"), scan)
     x = next(x for x in read_csv(reports)[1] if x["類別"] == "被利用或優先處理的漏洞")
@@ -171,7 +171,7 @@ def test_nofix_without_pkgdb_is_missing_input(tmp_path):
     miss = next(x for x in rows if x["類別"] == "缺少輸入" and "pkgdb" in x["掃描發現（為什麼要問）"])
     assert "CVE-2026-0001 libfoo" in miss["掃描發現（為什麼要問）"]
     x = next(x for x in rows if x["類別"] == "被利用或優先處理的漏洞")
-    assert "看不出是哪個套件把它帶進映像" in x["建議做法"] and "內部窗口" not in x["要問誰（建議）"] and "PM" not in x["要問誰（建議）"]
+    assert "看不出是哪個套件把它帶進映像" in x["建議做法"] and "專案負責人" not in x["要問誰（建議）"] and "PM" not in x["要問誰（建議）"]
 
 
 def test_pkgdb_option(tmp_path):
@@ -218,7 +218,7 @@ def test_security_findings_items(tmp_path):
     for x in ("sec:passwords", "sec:host-keys", "sec:services", "sec:world-writable", "sec:secrets", "sec:other", "input:security-tests"):
         assert x in k, x
     rows = {body(x).split("：", 1)[0]: x for x in read_csv(reports)[1] if x["類別"] == "安全測試"}
-    assert rows["映像裡設好的密碼（每台相同的預設密碼）"]["要問誰（建議）"] == "內部窗口（PM）、產品工程師"
+    assert rows["映像裡設好的密碼（每台相同的預設密碼）"]["要問誰（建議）"] == "專案負責人（PM）、產品工程師"
     assert "img:elf:vendor" in rows["其他沒有決定的 high／medium 安全測試項目"]["掃描發現（為什麼要問）"]
     assert not [x for x in rows.values() if "example-config" in x["掃描發現（為什麼要問）"]]      # info 不問
     miss = next(x for x in read_csv(reports)[1] if x["類別"] == "缺少輸入" and "安全測試" in x["掃描發現（為什麼要問）"])
@@ -244,7 +244,7 @@ def test_dev_tools(tmp_path):
     dev = [finding("gcc-13", "13.2-1", "CVE-2026-0300", "NVD", "LOW")]
     _, s, reports = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s", findings=dev, sbom={**SBOM, "components": comps}))
     x = next(x for x in read_csv(reports)[1] if x["類別"] == "開發工具")
-    assert x["要問誰（建議）"] == "內部窗口（PM）" and "gcc-13、gdb" in x["掃描發現（為什麼要問）"] and "未處理漏洞列 1 列" in x["影響"]
+    assert x["要問誰（建議）"] == "專案負責人（PM）" and "gcc-13、gdb" in x["掃描發現（為什麼要問）"] and "未處理漏洞列 1 列" in x["影響"]
     # 沒有開發工具、-dev 不多 → 不問
     _, s, _ = run(make_project(tmp_path / "p2"), make_scan(tmp_path / "s2"))
     assert "dev:tools" not in keys(s)
@@ -269,7 +269,7 @@ def test_kernel_items(tmp_path):
     assert "kernel:config" in k and "kernel:build-record" in k and "kernel:not-assessed" not in k
     x = next(x for x in read_csv(reports)[1] if x["類別"] == "作業系統核心" and "建置紀錄" in x["掃描發現（為什麼要問）"])
     assert all(f in x["建議做法"] for f in (".config", ".*.cmd", "modules.order", "modules.builtin", "System.map"))
-    # 核心的 KEV 列：建議換核心，不問內部窗口
+    # 核心的 KEV 列：建議換核心，不問專案負責人
     kv = next(x for x in read_csv(reports)[1] if body(x).startswith("CVE-2024-1086"))
     assert "核心" in kv["建議做法"] and kv["要問誰（建議）"] == "產品工程師"
     # 舊版 kernel-config.json（沒有 build_record）：設定比對有結果，但還是要建置紀錄
@@ -316,22 +316,22 @@ def test_exposed_services(tmp_path):
 def test_company_fields_grouped_by_owner(tmp_path):
     _, s, reports = run(make_project(tmp_path / "p", MIN_CFG), make_scan(tmp_path / "s"))
     k = keys(s)
-    for o in ("PM", "PM＋法務", "老闆／產品主管", "QA／認證", "產品工程師"):
+    for o in ("PM", "PM＋法務", "核准人／產品主管", "QA／認證", "產品工程師"):
         assert f"fields:{o}" in k, o
     rows = {x["要問誰（建議）"]: x for x in read_csv(reports)[1] if x["類別"] == "公司與產品資料"}
-    assert sorted(rows) == sorted(("內部窗口（PM）", "內部窗口（PM）＋法務", "老闆／產品主管", "QA／認證", "產品工程師"))
+    assert sorted(rows) == sorted(("專案負責人（PM）", "專案負責人（PM）＋法務", "核准人／產品主管", "QA／認證", "產品工程師"))
     # summary.json 的 by_ask 與格子的文字一致（穩定鍵 fields:<代號> 不跟著稱呼改）
     by_ask = s["confirmation_items"]["by_ask"]
-    assert "PM" not in by_ask and "PM＋法務" not in by_ask and "內部窗口（PM）＋法務" in by_ask
+    assert "PM" not in by_ask and "PM＋法務" not in by_ask and "專案負責人（PM）＋法務" in by_ask
     assert set(by_ask) == {x["要問誰（建議）"] for x in read_csv(reports)[1]}
-    assert "vulnerability_contact.contact" in rows["內部窗口（PM）＋法務"]["掃描發現（為什麼要問）"]
-    assert "support.end_date" in rows["老闆／產品主管"]["掃描發現（為什麼要問）"]
+    assert "vulnerability_contact.contact" in rows["專案負責人（PM）＋法務"]["掃描發現（為什麼要問）"]
+    assert "support.end_date" in rows["核准人／產品主管"]["掃描發現（為什麼要問）"]
     assert "technical_documentation.standards" in rows["QA／認證"]["掃描發現（為什麼要問）"]
-    assert "manufacturer.email" in rows["內部窗口（PM）"]["掃描發現（為什麼要問）"] and "公司共用設定" in rows["內部窗口（PM）"]["建議做法"]
-    assert "經內部窗口找人回答、交回掃描負責人" in rows["內部窗口（PM）"]["建議做法"]
-    assert "經內部窗口找人回答" in rows["內部窗口（PM）＋法務"]["建議做法"]
-    # 產品工程師的欄位：直接問，不經內部窗口
-    assert rows["產品工程師"]["建議做法"].startswith("產品工程師直接回覆掃描負責人") and "內部窗口" not in rows["產品工程師"]["建議做法"]
+    assert "manufacturer.email" in rows["專案負責人（PM）"]["掃描發現（為什麼要問）"] and "公司共用設定" in rows["專案負責人（PM）"]["建議做法"]
+    assert "經專案負責人找人回答、交回掃描負責人" in rows["專案負責人（PM）"]["建議做法"]
+    assert "經專案負責人找人回答" in rows["專案負責人（PM）＋法務"]["建議做法"]
+    # 產品工程師的欄位：直接問，不經專案負責人
+    assert rows["產品工程師"]["建議做法"].startswith("產品工程師直接回覆掃描負責人") and "專案負責人" not in rows["產品工程師"]["建議做法"]
     # 每個缺的欄位剛好在一個事項裡
     miss = s["missing_fields"]
     text = " ".join(x["掃描發現（為什麼要問）"] for x in rows.values())
@@ -541,18 +541,18 @@ def test_pm_window_and_not_p1_wording(tmp_path):
     write_json(tmp_path / "r" / "image-check" / "image-check.json", IMG)
     _, _, reports = run(proj, scan)
     md = (reports / "confirmation-items.md").read_text(encoding="utf-8")
-    # 出貨前（這張表）：掃描負責人和產品工程師直接處理，完成後交給內部窗口（PM）；只有需要別人的問題經過內部窗口
+    # 出貨前（這張表）：掃描負責人和產品工程師直接處理，完成後交給專案負責人（PM）；只有需要別人的問題經過專案負責人
     assert ("掃描負責人和產品工程師直接一起處理這張表 → 工程師回覆、具名判斷、修好後 → 掃描負責人記錄並重掃 → "
-            "完成後把六樣交付交給內部窗口（PM）") in md
-    assert "只有需要別人（內部窗口／法務／老闆）的問題才經過內部窗口" in md
+            "完成後把六樣交付交給專案負責人（PM）") in md
+    assert "只有需要別人（專案負責人／法務／核准人）的問題才經過專案負責人" in md
     assert "六樣交付：SBOM、漏洞清單、VEX、安全檢查結果、待確認事項表、客戶資料包（ODM 案）。" in md
     # 出貨後的路徑只寫一句當背景
-    assert "掃描負責人 → 內部窗口（PM）→ 內部窗口通知產品工程師（修補），並轉給公司指定的人＋法務（要不要通報）" in md
-    assert "PM（窗口）" not in md and "回覆交回 PM" not in md and "回覆交回內部窗口" not in md
-    # 產品工程師的事項不經內部窗口
+    assert "掃描負責人 → 專案負責人（PM）→ 專案負責人通知產品工程師（修補），並轉給公司指定的人＋法務（要不要通報）" in md
+    assert "PM（窗口）" not in md and "回覆交回 PM" not in md and "回覆交回專案負責人" not in md
+    # 產品工程師的事項不經專案負責人
     for x in read_csv(reports)[1]:
         if x["要問誰（建議）"] == "產品工程師":
-            assert "內部窗口" not in x["建議做法"] + x["軟體部門後續"], x
+            assert "專案負責人" not in x["建議做法"] + x["軟體部門後續"], x
     for x in read_csv(reports)[1]:
         if x["類別"] in ("安全測試", "開發工具"):
             assert x["建議做法"].endswith("（非 P1：2027-12-11 前處理）"), x

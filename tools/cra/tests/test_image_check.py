@@ -186,7 +186,7 @@ def test_severity_calibration_for_shared_secrets(tmp_path):
     T, Q = "./usr/libexec/installed-tests/glib/cert-tests/key.pem", "./usr/share/qemu-efi-aarch64/PkKek-1-snakeoil.key"
     extra = [("./etc/wpa_supplicant.conf", ex), ("./etc/wpa_supplicant/wpa_supplicant-wlan0.conf", edited), (T, pem), (Q, pem),
              ("./usr/share/vendor-untracked/tests/k.pem", pem),
-             ("./opt/vendor/tests/id_rsa", pem), ("./etc/app/tests/tls.key", pem), ("./home" "/x/test/id_rsa", pem), ("./srv/test-data/k.pem", pem),
+             ("./opt/vendor/tests/id_rsa", pem), ("./etc/app/tests/tls.key", pem), ("./home/x/test/id_rsa", pem), ("./srv/test-data/k.pem", pem),
              ("./var/lib/dpkg/info/libglib2.0-tests.list", b"/usr/libexec/installed-tests/glib/cert-tests/key.pem\n"),
              ("./var/lib/dpkg/info/qemu-efi-aarch64.list", b"/usr/share/qemu-efi-aarch64/PkKek-1-snakeoil.key\n")]
     src = write_tar(tmp_path / "rootfs.tar", rootfs("./") + extra)
@@ -201,7 +201,7 @@ def test_severity_calibration_for_shared_secrets(tmp_path):
     t = " ".join(f["secrets:test-keys"]["evidence"])
     assert f["secrets:test-keys"]["severity"] == "low" and "installed-tests" in t and "PkKek-1-snakeoil" in t
     real = " ".join(f["secrets:private-keys"]["evidence"])
-    for p in ("/etc/ssl/private/ssl-cert-snakeoil.key", "/opt/vendor/tests/id_rsa", "/etc/app/tests/tls.key", "/home" "/x/test/id_rsa",
+    for p in ("/etc/ssl/private/ssl-cert-snakeoil.key", "/opt/vendor/tests/id_rsa", "/etc/app/tests/tls.key", "/home/x/test/id_rsa",
               "/srv/test-data/k.pem", "/usr/share/vendor-untracked/tests/k.pem"):
         assert p in real and p not in t, p
     assert f["secrets:private-keys"]["severity"] == "high" and "info 1" in detail
@@ -259,7 +259,7 @@ def test_findings_from_rootfs_tar(tmp_path):
     # 私鑰與帳密：種類、行號；snakeoil 私鑰、.netrc、AWS 金鑰 ID、Wi-Fi PSK
     sec = {r["path"]: r for r in res["secrets"]["items"]}
     assert sec["/etc/ssl/private/ssl-cert-snakeoil.key"]["type"] == "PKCS#8 private key"
-    assert sec["/home" "/nvidia/.netrc"]["type"] == "netrc with password field" and sec["/opt/vendor/aws.cfg"]["line"] == 1
+    assert sec["/home/nvidia/.netrc"]["type"] == "netrc with password field" and sec["/opt/vendor/aws.cfg"]["line"] == 1
     assert "Wi-Fi" in sec["/etc/NetworkManager/system-connections/wifi.nmconnection"]["type"]
     assert "/etc/ssh/ssh_host_ed25519_key" not in sec and f["secrets:private-keys"]["severity"] == "high"
     # ELF：/opt 的非 PIE、可執行 stack 先列；套件的 PIE 不列

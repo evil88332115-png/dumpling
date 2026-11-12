@@ -13,9 +13,19 @@ if ! bash ci/provenance-check.sh; then
   exit 1
 fi
 
+# 需要 Python 3.12 以上：程式用了 3.12 的語法（例如巢狀同引號的 f-string）。優先 python3.12，沒有才看 python3 的版本。
+py=""
+for c in python3.12 python3; do
+  if command -v "$c" > /dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2> /dev/null; then py=$c; break; fi
+done
+if [ -z "$py" ]; then
+  echo "c1-tools: FAIL（找不到 Python 3.12 以上：tools/ 的程式用了 3.12 的語法；python3 是 $(python3 --version 2>&1)）"
+  exit 1
+fi
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/dumpling-c1-tools.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-python3 -m venv --system-site-packages "$work/venv" || { echo "c1-tools: FAIL（建不起 venv）"; exit 1; }
+"$py" -m venv --system-site-packages "$work/venv" || { echo "c1-tools: FAIL（建不起 venv）"; exit 1; }
 "$work/venv/bin/python" -m pip install -q --disable-pip-version-check -r tools/cra/tests/requirements.txt \
   || { echo "c1-tools: FAIL（裝不起測試套件）"; exit 1; }
 

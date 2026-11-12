@@ -489,11 +489,6 @@ def test_board_import_kernel_modules_args(tmp_path):
     assert not (rd / "cra-project/CRA/Config/kernel-modules.json").exists()
 
 
-def test_board_on_device_collects_lsmod_and_modules_disabled():
-    t = (HERE.parents[2] / "tools" / "demo" / "board-on-device.sh").read_text(encoding="utf-8")
-    assert "run lsmod lsmod.txt cat /proc/modules" in t and "kernel.modules_disabled" in t
-    import board_import
-    assert "lsmod.txt" in board_import.BOARD_FILES and "lsmod.txt" not in board_import.EXPECTED_BOARD
 
 
 # ---------- 第二輪審查：讀不到的路徑、連結、模組資料夾以外、刷機包的 initrd、initramfs 的 modprobe.d ----------

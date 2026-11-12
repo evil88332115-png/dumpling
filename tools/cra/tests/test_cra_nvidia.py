@@ -146,7 +146,7 @@ def cr_plural(*a):
 
 
 def test_single_kernel_row_wording(tmp_path):
-    rpm = "pkg:rpm/redhat/kernel-core@" "5.14.0-427.el9?arch=x86_64"
+    rpm = "pkg:rpm/redhat/kernel-core@5.14.0-427.el9?arch=x86_64"
     r, s, reports = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s", findings=[finding("kernel-core", "5.14.0-427.el9", "CVE-2025-0301",
                                                                                                     "NVD", "HIGH", purl=rpm)],
                                                                  stages={"C-kernel-coverage": "OK", **dict.fromkeys(OK_STAGES, "OK")}))
