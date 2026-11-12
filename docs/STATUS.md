@@ -2,18 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 12:14 -0500（C1）
+最後更新：2026-11-12 12:14 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main cd62514。**M1 已合併**（#9，0e706cb）；#13 文件批次 D-023～D-028 已合併（含公開檢查的二進位檔反向規則、Windows 使用者路徑）；沒有未推送的累積改動
+- 分支／PR／commit：main cd62514（M1 #9、文件批次 #13 已合併）；本機累積分支 `wp0/docs-batch-3`（D-029 M2 試驗實測更正 PLAN＋SBOM 以 Release 附件為準、D-030 依層分開），還沒推，C3 開工前合併
 - 代理：目前沒有 C0 代理在跑
 - 各對話：C1 開工 M2（wp1/m2：P 平台介面＋開案範本進行中、L 依層分開、J Jetson 編譯＋掃描＋release；wp1/m2-spike 量測 runner 限制）；C2 做 M3 最後兩塊（wp3/m3-dt 上傳 DT、wp3/m3-gop），完成後開一個 PR；C4（另一台 WSL2）第一階段完成（wp7/platform-samples、wp7/cra-survey），等 M2 的 P 軌
 - CI：無進行中（C0）
 - 下一步：等 C2 的 M3 PR、C1 的 M2 PR；M2 跑通後開 C3（建議開在 WSL 那台）
-- 給 C3 的交接：M1 沒帶 `alert_mail.py`（每日監控寄信），exploited_* 測試約 29 個寄信相關的已刪；watch.yml 要寄信時由 C3 帶回；GitLab 階段「已被利用」的真實案件一定要用私有 Issue（C4 的 CRA 調查）
+- 給 C3 的交接：(1) M1 沒帶 `alert_mail.py`（寄信），exploited_* 寄信測試約 29 個已刪，要寄信時由 C3 帶回；(2) GitLab 階段「已被利用」的真實案件一定要用私有 Issue；(3) 每日監控讀 Release 附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`，開發版讀滾動 pre-release `dev/<專案>`（D-029）；watch 自己的狀態檔（防 60 天停用）由 C3 設計；(4) GITLAB-PORT 待辦：DT parent／child 專案在常駐 DT 再評估（D-030）
+- 給 PM／法務的待決定：VEX 發行閘門要不要分層（客戶負責 OS 時，OS 層未評估的 KEV 是否擋發行；目前保守：擋）（D-030）
 - 卡住／等決定：使用者（1）舊 WIP commit 的低敏感內部資訊：接受或刪 repo 重建（C0 建議接受）；（2）C4 CRA 調查的建議採用範圍（C0 建議 A、B 全採用，C 只做文件骨架標 GAP）
 <!-- END C0 -->
 
