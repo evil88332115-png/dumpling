@@ -1,0 +1,55 @@
+name: m2-probe
+# 暫時的探測（M2 J 軌開發用，完成後刪除）：只讀 BSP 與範例 rootfs 的 tar 成員清單與核心 deb 的內容清單，不解開、不執行。
+on:
+  push:
+    paths: [".github/workflows/m2-probe.yml"]
+    branches: ["wp1/m2-jetson"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 下載 BSP 並核對
+        run: |
+          mkdir -p "$RUNNER_TEMP/p" && cd "$RUNNER_TEMP/p"
+          curl -fsSL -o bsp.tbz2 https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/release/Jetson_Linux_R39.2.1_aarch64.tbz2
+          echo "2e5619088ba88e85dab25247f033d70659b6f676ff835176a07766dcb0fdbe6b  bsp.tbz2" | sha256sum -c -
+          tar -tvjf bsp.tbz2 > bsp.list
+          wc -l bsp.list
+          echo "== 最上層與 kernel／bootloader／rootfs"
+          awk '{print $6}' bsp.list | grep -E '^Linux_for_Tegra/[^/]+/?$' | head -80
+          echo "== kernel/"; grep -E ' Linux_for_Tegra/kernel/' bsp.list | awk '{print $3, $6}' | head -80
+          echo "== rootfs/"; grep -E ' Linux_for_Tegra/rootfs/' bsp.list | awk '{print $1, $3, $6}' | head -20
+          echo "== deb 清單"; grep -E '\.deb$' bsp.list | awk '{print $3, $6}'
+          echo "== bootloader/ 第一層"; grep -E ' Linux_for_Tegra/bootloader/[^/]+$' bsp.list | awk '{print $3, $6}' | head -80
+      - name: 核心 deb 內容
+        run: |
+          cd "$RUNNER_TEMP/p"
+          mkdir kd
+          tar -xjf bsp.tbz2 -C kd --wildcards 'Linux_for_Tegra/kernel/*.deb' 'Linux_for_Tegra/kernel/Image' 'Linux_for_Tegra/kernel/dtb/*' 2>&1 | tail -3 || true
+          ls -l kd/Linux_for_Tegra/kernel | head -50
+          for d in kd/Linux_for_Tegra/kernel/*.deb; do
+            echo "=== $d"; dpkg-deb -f "$d" Package Version Architecture Depends
+            dpkg-deb -c "$d" | awk '{print $1, $3, $6}' | grep -vE '\.ko$|/kernel/' | head -40
+            echo "ko 數：$(dpkg-deb -c "$d" | grep -c '\.ko')"
+            dpkg-deb -c "$d" | grep -E '\.ko' | awk '{print $6}' | sed -E 's|/[^/]+$||' | sort | uniq -c | sort -rn | head -25
+          done
+          sha256sum kd/Linux_for_Tegra/kernel/Image 2>/dev/null || true
+          file kd/Linux_for_Tegra/kernel/Image 2>/dev/null || true
+          strings -a kd/Linux_for_Tegra/kernel/Image 2>/dev/null | grep -m2 'Linux version' || true
+      - name: 範例 rootfs 的 boot 與 modules
+        run: |
+          cd "$RUNNER_TEMP/p"
+          curl -fsSL -o rfs.tbz2 https://developer.download.nvidia.com/embedded/L4T/r39_Release_v2.1/release/Tegra_Linux_Sample-Root-Filesystem_R39.2.1_aarch64.tbz2
+          echo "58a6485b56c6d6b5ee8478e902eed0ed4984fd73135b88b76aeaa5c1f44be66e  rfs.tbz2" | sha256sum -c -
+          tar -tvjf rfs.tbz2 > rfs.list
+          wc -l rfs.list
+          echo "== boot"; grep -E '^[^ ]+ [^ ]+ +[0-9]+ [^ ]+ [^ ]+ (\./)?boot(/|$)' rfs.list | head -30
+          echo "== modules"; grep -E 'lib/modules' rfs.list | head -20
+          echo "== usr/lib/modules"; grep -E 'usr/lib/modules' rfs.list | head -20
+          echo "== top"; awk '{print $6}' rfs.list | grep -E '^(\./)?[^/]+/?$' | head -40
