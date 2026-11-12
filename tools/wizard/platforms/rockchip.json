@@ -2,7 +2,7 @@
  "schema": 1,
  "platform": "rockchip",
  "draft": true,
- "note": "草稿：依 product-b（RK3588／Debian 12）演練整理，欄位待實際出貨再修。",
+ "note": "草稿：RK3588／Debian 12 的範本，欄位待實際使用再修。",
  "inputs": [
   {
    "id": "flash_package",

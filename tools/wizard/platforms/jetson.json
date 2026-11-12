@@ -3,7 +3,7 @@
  "platform": "jetson",
  "draft": false,
  "upstream_set": "jetson-r39.2.0",
- "note": "依 product-a（Jetson Orin Nano，Jetson Linux r39.2.0）整理；換 Jetson Linux 版本時，upstream_set 與第 5–7 項的版本要跟著改。",
+ "note": "Jetson Orin Nano（Jetson Linux r39.2.0）的範本；換 Jetson Linux 版本時，upstream_set 與第 5–7 項的版本要跟著改。",
  "inputs": [
   {
    "id": "flash_package",

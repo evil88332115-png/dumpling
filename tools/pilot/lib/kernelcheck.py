@@ -17,7 +17,7 @@
 
 為什麼要有這個階段（證據）：Jetson Linux R39.2.1（Ubuntu 24.04 arm64）映像，Syft 1.55.0 的 SBOM 有 nvidia-l4t-kernel 等 deb 套件與
 1468 個 linux-kernel-module（pkg:generic，版本多為 UNKNOWN，位於 /usr/lib/modules/6.8.12-1021-tegra/），但沒有 linux-kernel 元件；
-Grype 與 DT 對核心都是 0 筆，報告看起來像核心沒有弱點（round14 run 40594937149）。
+Grype 與 DT 對核心都是 0 筆，報告看起來像核心沒有弱點（Jetson R39.2.1 示範映像）。
 
 「SBOM 有核心」的判斷（明確列出，不用模糊比對）：
   1. 元件屬性 syft:package:type 是 linux-kernel 或 linux-kernel-module；或元件的 CPE 是 cpe:2.3:o:linux:linux_kernel（其他產生器）。

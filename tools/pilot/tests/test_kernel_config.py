@@ -2,7 +2,7 @@
 scan-flash-package.sh --rescan-from。
 
 紀錄的形狀取自 2026-11-02 的 vulns.git（cve/published/2024/CVE-2024-26600.json：containers.cna.affected[].programFiles）；
-Grype 與核心對應摘要的形狀取自 round14 Jetson R39.2.1 基礎版（run 41376872500）；headers 的配置（/usr/src/linux-headers-<版本>/3rdparty/
+Grype 與核心對應摘要的形狀取自 Jetson R39.2.1 基礎版示範映像；headers 的配置（/usr/src/linux-headers-<版本>/3rdparty/
 canonical/linux-noble/、/lib/modules/<版本>/build 連結）取自 NVIDIA 公開的 nvidia-l4t-kernel-headers 與 nvidia-l4t-kernel 39.2.1。
 """
 import datetime
@@ -1842,8 +1842,8 @@ NOT_SET_ONLY_IN_IMAGE = "# CONFIG_GCC_PLUGIN_LATENT_ENTROPY is not set\n# CONFIG
     f"# CONFIG_PAD{i} is not set\n" for i in range(3))
 HEADERS_PUB = CONFIG + TC_UBUNTU
 IMAGE_PUB = CONFIG + TC_CROSSTOOL + NOT_SET_ONLY_IN_IMAGE
-IMAGE_PRODUCT_A = (CONFIG_ON + TC_CROSSTOOL + "".join(f"CONFIG_VENDOR{i}=y\n" for i in range(30))
-              + "".join(f"# CONFIG_MISSING{i} is not set\n" for i in range(231)))
+IMAGE_VENDOR_REBUILT = (CONFIG_ON + TC_CROSSTOOL + "".join(f"CONFIG_VENDOR{i}=y\n" for i in range(10))
+                        + "".join(f"# CONFIG_MISSING{i} is not set\n" for i in range(100)))   # 合成的數字，不對應任何實際產品
 
 
 def pub_members(image, **kw):
@@ -1908,17 +1908,17 @@ def test_public_stock_kernel_differs_only_in_toolchain(tmp_path):
     assert mm["sources"]["config_check"]["result"] == "same_except_toolchain" and mm["sources"]["config_sha256"] == k["config_sha256"]
 
 
-def test_product_a_shape_differs_after_normalisation(tmp_path):
-    """product-a：原始 266 項、正規化後 35 項（含非工具鏈）→ differs、ATTENTION；數字都用正規化後的。"""
-    rc, out = run_pkg(tmp_path, pub_members(fake_image(IMAGE_PRODUCT_A)))
+def test_vendor_rebuilt_differs_after_normalisation(tmp_path):
+    """廠商重編的核心（合成資料）：原始 115 項、正規化後 15 項（含非工具鏈）→ differs、ATTENTION；數字都用正規化後的。"""
+    rc, out = run_pkg(tmp_path, pub_members(fake_image(IMAGE_VENDOR_REBUILT)))
     c = out["kernel"]["config_check"]
     assert out["status"] == "ATTENTION" and c["result"] == "differs"
-    assert c["raw_differences_total"] == 266 and c["differences_total"] == 35 and c["toolchain_differences_total"] == 4
-    assert out["detail"].startswith("headers .config 和燒錄的核心不同，已改用燒錄核心的內建設定（kernel/Image 的 IKCONFIG；差 35 個設定，例如 CONFIG_FOO_A")
-    assert [d["toolchain"] for d in c["differences"]] == [False] * 31 + [True] * 4         # 非工具鏈的排在前面
+    assert c["raw_differences_total"] == 115 and c["differences_total"] == 15 and c["toolchain_differences_total"] == 4
+    assert out["detail"].startswith("headers .config 和燒錄的核心不同，已改用燒錄核心的內建設定（kernel/Image 的 IKCONFIG；差 15 個設定，例如 CONFIG_FOO_A")
+    assert [d["toolchain"] for d in c["differences"]] == [False] * 11 + [True] * 4         # 非工具鏈的排在前面
     vx = vex_export()
     s = vx.from_kconfig(kernel_row(["CVE-2025-0005"]), {"CVE-2025-0005": {"cve": "CVE-2025-0005", "detail": "x"}}, out)
-    assert "the headers .config differs from it in 35 option(s)" in s["detail"]
+    assert "the headers .config differs from it in 15 option(s)" in s["detail"]
 
 
 @pytest.mark.parametrize("image", [CONFIG.replace('CONFIG_LOCALVERSION="-tegra"', 'CONFIG_LOCALVERSION="-vendor"') + TC_CROSSTOOL,

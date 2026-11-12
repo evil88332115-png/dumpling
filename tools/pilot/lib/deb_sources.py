@@ -6,7 +6,7 @@ stdout 印一行「狀態<TAB>說明」；退出碼 0（讀寫失敗時 1）。
 
 為什麼：Ubuntu／Debian 的漏洞資料（OSV 的 Ubuntu、Debian 生態系）以「原始碼套件」名稱記錄，例如遠端桌面的漏洞記在 freerdp3，
 映像裡裝的卻是 libfreerdp3-3、libfreerdp-client3-3 等二進位套件。DT 用元件的 purl 名稱比對，所以二進位名稱和原始碼名稱不同的套件
-完全比對不到。Jetson R39.2.1 示範（demo-run/4）：Grype 有比對到的 619 個 Ubuntu 套件中，名稱不同的 537 個 DT 只比對到 1 個，
+完全比對不到。Jetson R39.2.1 示範（Jetson R39.2.1 示範映像）：Grype 有比對到的 619 個 Ubuntu 套件中，名稱不同的 537 個 DT 只比對到 1 個，
 名稱相同的 82 個 DT 比對到 80 個；Grype 有、DT 沒有的 6593 筆裡 2441 筆是「Ubuntu 已修補、映像裡的版本還沒升級」。
 Grype 用 Syft 記下的原始碼名稱（purl 的 upstream qualifier）比對，所以沒有這個問題。
 

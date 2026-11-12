@@ -108,16 +108,17 @@
 | `tools/cra/vex-rules.example.json` | `scripts/cra/vex-rules.example.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處 |
 | `tools/cra/xlsx_min.py` | `scripts/cra/xlsx_min.py` | 25fa89a | 原樣 |
-| `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處 |
+| `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處；改寫 CI 分支流程與「已知限制」兩段（原本是 sca-center 的內部 CI 與執行編號，改成中性說明並指向 pipeline/） |
 | `tools/demo/board-import.sh` | `scripts/demo/board-import.sh` | 25fa89a | 路徑調整 7 處 |
 | `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip |
-| `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處 |
+| `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處；改 1 行註解（內部 CI 分支名稱） |
 | `tools/demo/jetson_lookup.py` | `scripts/demo/jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | 原樣 |
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
 | `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行 |
+| `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_jetson_rootfs.py` | `scripts/demo/tests/test_jetson_rootfs.py` | 25fa89a | 原樣 |
@@ -134,65 +135,65 @@
 | `tools/mirror/nvidia-bulletins.sh` | `scripts/mirror/nvidia-bulletins.sh` | 25fa89a | 路徑調整 2 處 |
 | `tools/mirror/osv-distro.sh` | `scripts/mirror/osv-distro.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/ubuntu-cve-status.sh` | `scripts/mirror/ubuntu-cve-status.sh` | 25fa89a | 原樣 |
-| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行 |
+| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行；內部掃描的執行編號改成「示範掃描」、「板子實測」依據說明改成設計預期（5 處） |
 | `tools/pilot/lib/common.sh` | `scripts/pilot/lib/common.sh` | 25fa89a | 路徑調整 4 處 |
 | `tools/pilot/lib/data/kernel-included-c-6.1.json` | `scripts/pilot/lib/data/kernel-included-c-6.1.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/data/kernel-included-c-6.8.json` | `scripts/pilot/lib/data/kernel-included-c-6.8.json` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/deb_sources.py` | `scripts/pilot/lib/deb_sources.py` | 25fa89a | 原樣 |
-| `tools/pilot/lib/distro_recheck.py` | `scripts/pilot/lib/distro_recheck.py` | 25fa89a | 路徑調整 3 處 |
-| `tools/pilot/lib/dtsources.py` | `scripts/pilot/lib/dtsources.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/deb_sources.py` | `scripts/pilot/lib/deb_sources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/lib/distro_recheck.py` | `scripts/pilot/lib/distro_recheck.py` | 25fa89a | 路徑調整 3 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/lib/dtsources.py` | `scripts/pilot/lib/dtsources.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「示範掃描」（1 行） |
 | `tools/pilot/lib/euvd.md` | `scripts/pilot/lib/euvd.md` | 25fa89a | 路徑調整 7 處、清理 1 行 |
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行 |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」） |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
 | `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣 |
-| `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/l4t-kernel-map.json` | `scripts/pilot/lib/l4t-kernel-map.json` | 25fa89a | 原樣 |
+| `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/lib/l4t-kernel-map.json` | `scripts/pilot/lib/l4t-kernel-map.json` | 25fa89a | 清理 2 個 `checked` 欄（原本引用廠商映像與內部 CI 執行編號，見資料來源） |
 | `tools/pilot/lib/l4t_kernel.py` | `scripts/pilot/lib/l4t_kernel.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/leakscan.py` | `scripts/pilot/lib/leakscan.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處 |
+| `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh` |
 | `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
-| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL |
-| `tools/pilot/tests/data/euvd-dt-enisa-golden.json` | `scripts/pilot/tests/data/euvd-dt-enisa-golden.json` | 25fa89a | 原樣 |
+| `tools/pilot/tests/conftest.py` | `scripts/pilot/tests/conftest.py` | 25fa89a | 重寫（比照 D-017）：原檔載入 sca-center 的 `integration/conftest.py`，改成載入 `tools/cra/tests/conftest.py`（`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗）；沒有帶 `integration/` |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/pilot/tests/test_distro_recheck.py` | `scripts/pilot/tests/test_distro_recheck.py` | 25fa89a | 路徑調整 4 處 |
+| `tools/pilot/tests/test_distro_recheck.py` | `scripts/pilot/tests/test_distro_recheck.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新、`mirror-sync.sh` 同步（11 個測試函式與輔助函式）、`deploy` 接線、`fast-check` 預期（見「刪掉的測試」）；註解內部執行編號改成中性 |
 | `tools/pilot/tests/test_kernel_boot.py` | `scripts/pilot/tests/test_kernel_boot.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行 |
+| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；`IMAGE_PRODUCT_A` 改寫成合成的 `IMAGE_VENDOR_REBUILT`（見資料來源）；註解內部執行編號改成中性 |
 | `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_oot_sections.py` | `scripts/pilot/tests/test_kernel_oot_sections.py` | 25fa89a | 原樣（合成 ELF 字串裡的建置路徑登記在 `ci/public-allow.txt`） |
 | `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處 |
-| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處 |
+| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」） |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
 | `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處 |
-| `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_pilot_l4t_kernel.py` | `scripts/pilot/tests/test_pilot_l4t_kernel.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/tests/test_pilot_l4t_kernel.py` | `scripts/pilot/tests/test_pilot_l4t_kernel.py` | 25fa89a | 路徑調整 1 處；刪段：`test_deb_sources_…` 去掉用 `scio_prep.py` 的一半（函式改名），保留 `deb_sources.py` 的檢查 |
 | `tools/pilot/tests/test_pilot_lock_sandbox.py` | `scripts/pilot/tests/test_pilot_lock_sandbox.py` | 25fa89a | 路徑調整 15 處、刪段 75 行 |
 | `tools/pilot/tests/test_pilot_nvd_mirror.py` | `scripts/pilot/tests/test_pilot_nvd_mirror.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_pilot_report.py` | `scripts/pilot/tests/test_pilot_report.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_pilot_sources_scio.py` | `scripts/pilot/tests/test_pilot_sources_scio.py` | 25fa89a | 路徑調整 1 處、清理 1 行、刪段 109 行 |
-| `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行 |
+| `tools/pilot/tests/test_pilot_sources_scio.py` | `scripts/pilot/tests/test_pilot_sources_scio.py` | 25fa89a | 路徑調整 1 處、清理 1 行、刪段 109 行；註解內部執行編號改成中性（2 行） |
+| `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行；`shell_files()` 不再掃 `deploy/`，檔案數門檻 20 → 10（`tools/` 共 14 個 shell 檔） |
 | `tools/pilot/tests/test_pyver_wiring.py` | `scripts/pilot/tests/test_pyver_wiring.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/pilot/tests/test_sca_scan_local_image.py` | `scripts/pilot/tests/test_sca_scan_local_image.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL |
-| `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處 |
+| `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處；`test_script_safety_and_docs` 去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，改名 `test_script_safety` |
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處 |
 | `tools/pilot/tests/test_usn_cves.py` | `scripts/pilot/tests/test_usn_cves.py` | 25fa89a | 路徑調整 1 處 |
@@ -228,6 +229,8 @@
 | `scripts/mirror/dt-feeds.sh` | `mirror/euvd.sh`（只有鏡像資料夾裡有 `dt-feeds/` 時才呼叫） | dumpling 的 EUVD 鏡像不會產生 `dt-feeds/`，不會走到 |
 | `scripts/cra/alert_mail.py`、`exploited-watch-daily.sh`、`exploited-watch-backup.sh` | 每日監控的寄信與排程（公司環境） | `exploited_watch.py` 只是讀它們寫的狀態檔（`--grype-db-update`、`--backup-dir`、`--refresh-status` 都是選用參數，不給就不檢查）。dumpling 的 `watch.yml` 預計直接呼叫 `exploited_watch.py`、用 GitHub Issue 通知 |
 | `scripts/cra/csaf_advisory.py` | 沒有程式呼叫（獨立指令） | 不在範圍內 |
+| `scripts/mirror/ci-run.sh`、`scripts/ci/fast-check.sh`、`scripts/e2e/{install-maven.sh,cdxgen_regression.py,real-projects.sh,license.sh}`、`docs/offline-mirrors.md`、`docs/offline-egress.md` | 只被說明文字與已刪掉的測試引用（sca-center 自己的 CI、鏡像排程與文件） | 帶進來的程式不呼叫它們；對應的測試斷言已刪（見「刪掉的測試」）。`tools/e2e/sandbox.sh`、`tools/pilot/lib/common.sh` 的檔頭說明仍提到 `real-projects.sh`、`license.sh`（只是說明文字） |
+| `scripts/pilot/tests/data/euvd-dt-enisa-golden.json` | `test_euvd_dt_feed.py`（測 `deploy/` 的包裝腳本，整檔不帶） | 孤兒資料檔，不帶。內容是公開 CVE 的小型 EUVD 格式資料，不是內部來源 |
 | `scripts/demo/android_img.py`、`scripts/demo/tests/test_android_img.py`、`scripts/wizard/platforms/android.json` | `flash_package.py`（`amod()`）、`cra-scan.py --platform android` | **不在範圍內，沒有帶進來**（C1 決定）。`flash_package.py` 已移除 android 格式的分支；沒有 `--platform android` 範本 |
 | `scripts/demo/board-on-device.sh`、`board-from-network.sh`、`board-test.md` | 在板子上跑的收集腳本；`board_import.py`、`board-import.sh` 只讀它們的輸出檔 | 沒有板子結果檔時，精靈記 `board-import` NOT_RUN |
 | `scripts/pilot/{ci_summary,compare_expected}.py`、`ci-*.sh`、`scripts/e2e/{real-projects,license,firmware,images,projects,summarize,…}.sh`／`.py`、`scripts/ci/`、`scripts/run-*.sh` | sca-center 自己的 CI 與 e2e | 與 dumpling 無關 |
@@ -243,8 +246,8 @@
 |---|---|---|
 | `tools/demo/scan-flash-package.sh` | `--out` 預設的上層資料夾（`FLASHPKG_RESULTS`）與 `PILOT_ENV` 預設路徑，原本指向公司常駐環境的本機路徑 | `$HOME/sca-results`、`$HOME/.config/sca-scan/pilot.env`（只是預設值；pipeline 一律明確傳） |
 | `tools/cra/exploited_grype.py` | 只有說明字串：`--results-root` 的例子路徑 | `$HOME/sca-results` |
-| `tools/demo/jetson_rootfs.py` | 模擬的客戶應用程式在 dpkg status 的 Maintainer 信箱（`example.invalid` 網域的 noreply）；公開檢查只允許 `@example.com|org|net` | `noreply@example.com`（測試 `test_jetson_rootfs.py` 同步改） |
-| `tools/pilot/lib/kernel_boot.py`、`kernel_config.py`、`tools/demo/scan-flash-package.sh` | 「預設用刷機包的 `kernel/Image`」的證據說明字串（輸出到報告備註與 JSON）原本點名某個廠商產品的板子實測 | 「a board flashed from a vendor Jetson flash package」（中文：廠商 Jetson 刷機包的板子實測）。判定邏輯沒改 |
+| `tools/demo/jetson_rootfs.py` | （已還原，原樣）模擬的客戶應用程式在 dpkg status 的 Maintainer 信箱是 `noreply@example.invalid`；D-022 之後 `.invalid` 結尾的信箱自動放行 | 無（值與 25fa89a 相同；`test_jetson_rootfs.py`、`test_kernel_k1_improve.py` 的 `@example.invalid` 也還原） |
+| `tools/pilot/lib/kernel_boot.py`、`kernel_config.py`、`tools/demo/scan-flash-package.sh`、`tools/pilot/README.md` | 「預設用刷機包的 `kernel/Image`」的依據說明字串（輸出到報告備註與 JSON）原本點名某個廠商產品的板子實測。判定邏輯（預設用 `kernel/Image`、有 `KERNEL_BOARD_OS_TXT` 時以板子的 `uname -v` 為準）沒改 | 改成「燒錄工具的設計預期，沒有用板子驗證」（英文：`a design expectation of the flashing tools, not verified here`） |
 | `tools/cra/image_check.py`、`tools/cra/no_vuln_data.py` | 只有說明字串裡的範例信箱（systemd 樣板單元名稱的範例、`dh_make` 預設信箱），公開檢查會把它們當信箱 | 把網域部分換成佔位文字；`DISTRO_DOMAINS` 等判定用的網域清單沒動 |
 | 全部 `tools/*/tests/*.py` | 測試資料裡的信箱（例如 `@lists.debian.org`、`@nvidia.com`，`no_vuln_data` 的判定依網域）與 `/home/…` 路徑（`image_check` 的映像內路徑）若直接改字會改變測試意義，所以改成「字串拼接」（`"a@" "debian.org"`）：執行時的值與原本完全相同，只是原始碼裡不出現完整信箱／路徑 | 無（值不變） |
 | `tools/cra/tests/test_security_testing.py`、`test_cra_report.py` | 測試資料裡板子網路掃描的 IP（私有 IP） | `192.0.2.20`、`192.0.2.2`（文件用網段） |
@@ -275,27 +278,38 @@
 
 ### 資料檔與測試資料的來源
 
+判定只有三種：**公開**（附來源，可以重現或查證）、**合成**（手寫或程式產生）、**內部**（從公司資料產生；內部的一律不帶，清掉禁用字也不行）。審查日期 2026-11-12，依據是 sca-center 的 git 紀錄、檔案說明與資料內容，並盡量實際重現。
+
+**結論：`tools/pilot`、`tools/demo`、`tools/mirror`、`tools/wizard`、`tools/e2e` 與 `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` 沒有發現來源是內部資料的檔案。** 有幾處註解或欄位提到內部來源（廠商映像、板子實測、內部 CI 的執行編號），已改成中性或公開的說法（見下面「已改寫」）；沒有因為「來源是內部資料」而刪檔案。
+
 | 檔案 | 來源 | 判定 |
 |---|---|---|
-| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「公開 Jetson BSP 加範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物）產生的 CycloneDX；Ubuntu 套件、NVIDIA L4T 套件與核心模組，3851 個元件 | 公開來源的掃描結果。清理內容見上表 |
-| `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | 由 Linux 上游原始碼樹產生（誰被別的檔案 `#include` 的 `.c` 清單） | 公開（上游原始碼推導） |
-| `tools/pilot/lib/nvidia-bulletins.json`、`l4t-kernel-map.json` | NVIDIA 公開安全公告（`NVIDIA/product-security`）與 Jetson Linux 版本對照，人工整理 | 公開來源、人工整理 |
+| `tests/fixtures/jetson-r39.2.1-base.cdx.json.xz` | Syft 1.55.0 對「NVIDIA 公開的 Jetson Linux R39.2.1 BSP 加公開範例 rootfs」組出的映像（`tools/demo/jetson.sh` 的產物，sca-center 的示範掃描）產生的 CycloneDX；3851 個元件（Ubuntu 套件、NVIDIA L4T 套件 `39.2.1-20260806224157`、1468 個核心模組）。裡面的套件版本、模組與維護者都是 NVIDIA、Ubuntu 公開發行的內容 | 公開來源的掃描結果。清理：維護者信箱改成 example.com、掃描暫存路徑（`metadata.component.name`，原本是 runner 的本機路徑）改成 `image.tar`、一個 package-id 雜湊改了一碼。沒有公司產品的元件 |
+| `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
+| `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
+| `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：原本引用「廠商以 L4T 39.2.0 為基礎的映像」的套件版本字串與內部 CI 執行編號，改成公開資料的說法（39.2.0 的 ABI 1021 改標為推論） |
+| `tools/pilot/lib/*.md`、`README.md` 等說明文件 | 手寫的說明 | 合成。內部 CI 的執行編號與代號已改成中性說法（「Jetson R39.2.1 示範映像」「示範掃描」） |
+| `tools/wizard/platforms/{jetson,rockchip,raspberrypi}.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例（要檢查的輸入清單：刷機包、原始碼、建置紀錄、上游基準、板子檢查…） | 合成。`note` 欄原本寫「依某產品演練整理」，已改成「某平台的範本」 |
+| `tools/demo/tests/*.py` 的刷機包、映像、rootfs | 測試用 `tarfile`／程式現組的假檔案：`product-a_OrinNano/Linux_for_Tegra/…` 的結構是 NVIDIA 公開 BSP 的結構，`product-a` 是合成的名稱；Rockchip `update.img`、Raspberry Pi 磁碟映像、ext4／FAT 也都是測試程式組出來的 | 合成 |
+| `tools/pilot/tests/*.py` 的資料 | 測試自己組出來的假 SBOM、Grype／DT 輸出、核心 `.config`、IKCONFIG、Kbuild 樹、OSV zip、公告 Markdown。欄位格式取自公開工具（Syft、Grype、Dependency-Track、NVIDIA／Ubuntu／Debian／OSV 公開資料）的輸出形狀；CVE 編號與套件版本多為公開資料 | 合成 |
+| `tools/pilot/tests/test_kernel_config.py` 的「第四輪」一段 | 原本的 `IMAGE_PRODUCT_A`（30 個 `CONFIG_VENDOR*`、231 個 `MISSING*`，形狀取自某個內部產品映像的實測）**已改寫**：改名 `IMAGE_VENDOR_REBUILT`，數字改成合成的 10 與 100（斷言的差異數同步改為 115／15／11），註明不對應任何實際產品 | 合成（原本的形狀可能來自內部，已不保留） |
+| `kernel_boot.py`／`kernel_config.py`／`scan-flash-package.sh` 的「預設用 `kernel/Image`」 | 原本說明寫「板子實測跑的是 kernel/Image」（內部測試的結論）。**已改寫**：只留「燒錄工具的設計預期，沒有用板子驗證；有板子的 `uname -v`（`KERNEL_BOARD_OS_TXT`）時以它為準」，判定邏輯沒改 | 預設值的依據改成設計預期，不再引用內部實測 |
 | `tools/cra/data/support-lifecycle.json`、`vex-rules.example.json`、`config.example.json`、`company.example.json`、`config.schema.json`、`templates/*.md` | 手寫的範例與範本 | 合成 |
-| `tools/wizard/platforms/*.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例 | 合成（`note` 欄位原本點名公司產品，已換成中性代稱） |
 | `tools/cra/vendor-watch.example.json` | 手寫範例（`deploy/exploited-watch/vendor-watch.example.json`） | 合成 |
-| 各測試檔內的資料（`tools/*/tests/*.py`） | 測試自己用程式組出來的假刷機包、假 rootfs、假 SBOM／Grype／DT 輸出；欄位格式取自公開工具（Syft、Grype、Dependency-Track、NVIDIA／Ubuntu／Debian 公開資料）的實際輸出形狀 | 合成。少數註解寫「形狀取自某次實測」，已改成中性說明；是否曾參考內部產品映像的實測形狀，見下面「待確認」 |
-| `tools/pilot/tests/data/euvd-dt-enisa-golden.json` | 測試用的小型 EUVD／ENISA 格式資料 | 合成（格式取自公開的 EUVD 傾印） |
 
-**待確認（請 C1／使用者判斷，我不猜）**：
-- `test_kernel_config.py` 的「第四輪」一段（`IMAGE_PRODUCT_A`、`TC_*`）：數字（30 個 `CONFIG_VENDOR*`、231 個 `MISSING*`）是測試自己組的，但原本註解說「形狀取自某個內部產品映像的實測」，我已把註解改成「合成資料」；若形狀本身就算內部資料，這段測試要改寫。
-- `test_flash_package.py`、`test_kernel_modules.py`、`test_image_check.py`、`test_firmware_bom.py`、`test_upstream_baseline.py` 的假刷機包以 `product-a_OrinNano/Linux_for_Tegra/…` 命名：檔案結構是 NVIDIA 公開 BSP 的結構，名稱是合成的，內容是測試用 `tarfile` 現組。
-- `kernel_boot.py`／`kernel_config.py` 的預設「優先用 `kernel/Image`」是依據某廠商刷機包的板子實測；已去除產品名，但這個「結論」本身來自內部測試。
+**已移除的資料檔**：`tools/pilot/tests/data/euvd-dt-enisa-golden.json`（唯一使用它的 `test_euvd_dt_feed.py` 測的是 `deploy/` 的包裝腳本，沒有帶進來，所以這個檔案成了沒人用的孤兒；內容本身是公開 CVE 的小型 EUVD 格式資料，不是內部來源）。
+
+**需要 C1／使用者確認的**：
+- `kernel_boot.py` 等把「預設用 `kernel/Image`」的依據改成「燒錄工具的設計預期」：這是我對 NVIDIA 燒錄流程（`apply_binaries.sh`／`flash.sh` 會安裝 `kernel/Image`）的了解，**沒有在公開文件裡逐字查證**；已在說明裡標明「沒有用板子驗證」。如果要引用公開依據，請指定要引的文件。
+- 測試裡以 `product-a_OrinNano` 命名的假刷機包（檔名結構取自廠商交付的格式，例如 `ReleaseNote.pdf`、`SourceCode`、`MCU_V2.zip` 這類交付物名稱）：我判定為合成，因為內容全是測試現組；如果「交付物的命名慣例」本身算內部資訊，需要再改成更通用的名稱。
 
 ### 刪掉的測試
 
 測試所對應的程式或腳本沒有帶進來（見「沒帶進來的相依」），所以整個測試函式移除（「刪段」行數見上表）：
 
 - `test_pilot_ci_summary.py`（`ci_summary.py`）、`test_oscopyright.py`、`test_pilot_license_scan.py`（授權段）、`test_pilot_ubuntu_status_mirror.py`、`test_euvd_dt_feed.py`（測 `deploy/pilot`、`deploy/gitlab-runner` 的包裝腳本）：整檔不帶。
+- `test_distro_recheck.py`（11 個函式）、`test_kernel_config.py`（2 個）、`test_nvidia_bulletins.py`（8 個）：測 `deploy/pilot` 的鏡像更新腳本、`deploy/gitlab-runner/mirror-sync.sh`（常駐環境到 GitLab runner 的鏡像同步）與 `deploy` 安裝腳本接線、`fast-check.sh` 預期的函式整個刪除；`tools/mirror/*.sh` 本身的測試（下載、`--check`、重用、大小上限等）都保留。
+- `test_ubuntu_cve_status.py::test_script_safety_and_docs` 改名 `test_script_safety`，去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，腳本安全項目保留；`test_pilot_utf8_truncation.py` 不再掃 `deploy/`（門檻 20 → 10 個檔）；`test_pilot_l4t_kernel.py` 去掉用 `scio_prep.py` 的一半。
 - `test_pilot_compare_and_scripts.py`、`test_pilot_lock_sandbox.py`、`test_pilot_sources_scio.py`：移除用到 `compare_expected.py`、`scio_prep.py`、`scio_diag.py`、`real-projects.sh`、`install-maven.sh`、`cdxgen_regression.py`、`tests/results` 的測試函式。
 - `test_exploited_vendor.py`、`test_exploited_watch_grype.py`、`test_exploited_watch_refresh.py`：移除用到 `alert_mail.py`、每日／備份腳本、`deploy/` 安裝腳本的測試函式。
 - `test_vex_no_response.py`：移除兩個用到 `csaf_advisory.py` 的測試函式。

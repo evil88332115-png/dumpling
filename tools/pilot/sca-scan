@@ -960,7 +960,7 @@ fi
 E_PKG_STAGES=(E-package-scan-submit E-package-scans E-package-scan-update E-license-sync E-copyrights)
 E_STAGES=(E-scancodeio-prep E-scancodeio-load-sbom E-dejacode-import "${E_PKG_STAGES[@]}" E-dejacode-licenses E-notice)
 # 系統套件版權檔（E-os-copyrights、E-os-license-sync）預設關閉，OS_COPYRIGHTS=1 才做：Jetson 映像的 2032 個版權檔讓 ScanCode.io 的
-# scan_for_files 程序池中止（demo-run/5、6；推測記憶體不足，未查明），開著會讓每次映像掃描 FAIL。關閉時不寫這兩列。
+# scan_for_files 程序池中止（示範掃描；推測記憶體不足，未查明），開著會讓每次映像掃描 FAIL。關閉時不寫這兩列。
 OSCP=0; [ "$MODE" = image ] && [ "${OS_COPYRIGHTS:-0}" = 1 ] && OSCP=1
 [ $OSCP = 1 ] && E_STAGES=(E-scancodeio-prep E-scancodeio-load-sbom E-os-copyrights E-dejacode-import E-os-license-sync "${E_STAGES[@]:3}")   # 只有映像有系統套件，其他模式不寫這一列（同 C-govulncheck 只在 Go 專案）
 if [ -n "$DJ_SKIP" ]; then for s in "${E_STAGES[@]}"; do status "$s" NOT_RUN "$DJ_SKIP"; done
@@ -1087,7 +1087,7 @@ PY
       case $IMP in
         load_sboms|none) msg="load_sboms $SCAN_D";;
         *) # 分批匯入（同步請求，3851 個套件一次送會逾時）：每批的 http、秒數、回應記在 dejacode/import-chunks.tsv
-           # 每批的時間隨產品裡已有的套件數線性增加（每批結束時 DejaCode 重新評估整個產品：reevaluate_products）：demo-run/4 每批 500，
+           # 每批的時間隨產品裡已有的套件數線性增加（每批結束時 DejaCode 重新評估整個產品：reevaluate_products）：示範掃描 每批 500，
            # 新建套件時 267→632 秒、套件已存在時 141→503 秒，每多 500 個產品套件約多 60 秒。批次越大、重新評估的次數越少；
            # 1000 一批照這個斜率估計單批最多約 13 分鐘（gunicorn 與 curl 的上限 30 分鐘），未實測
            ck=${DJ_IMPORT_CHUNK:-1000}

@@ -71,7 +71,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
 - 作業系統核心（`C-kernel-coverage`，只有 `--image`、`--sbom`；`lib/kernelcheck.py`，結果 `scan/kernel-coverage.json`）：SBOM 有核心
   （Syft 的 linux-kernel／linux-kernel-module 元件、`cpe:2.3:o:linux:linux_kernel` 或明確列出的核心套件名稱）但 Grype 對核心 0 筆 → GAP，
   報告弱點節另註「核心的漏洞不在下面的數字裡」；有比對 → OK；沒有核心時不寫這一列（一般容器映像不受影響）。版本依序取 linux-kernel 元件、`/usr/lib/modules/<版本>/`、核心套件。
-  證據：Jetson Linux R39.2.1 映像有 nvidia-l4t-kernel 與 1468 個核心模組、沒有 linux-kernel 元件，Grype 與 DT 對核心都是 0 筆（run 40594937149）。
+  證據：Jetson Linux R39.2.1 映像有 nvidia-l4t-kernel 與 1468 個核心模組、沒有 linux-kernel 元件，Grype 與 DT 對核心都是 0 筆（Jetson R39.2.1 示範映像）。
 - Jetson Linux 的核心（`C-kernel-l4t-map`，只有 `--image`、`--sbom`；`lib/l4t_kernel.py`，對應檔 `lib/l4t-kernel-map.json`，結果 `scan/l4t-kernel-map.json`）：
   L4T 的核心是 NVIDIA 的 deb（nvidia-l4t-kernel），Ubuntu 的弱點資料沒有它；它是從 Canonical 的 noble linux-nvidia-tegra 建的。
   `nvidia-l4t-kernel` 版本裡的 L4T 版本（`6.8.12-tegra-39.2.1-…` → 39.2.1）在對應檔有出處與核對紀錄時，給 Grype、sbomgate、上傳 DT 的副本
@@ -88,7 +88,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   `D-dt-deb-sources`：上傳 DT 的 SBOM 另存一份，替二進位名稱和原始碼名稱不同的 deb 元件補上原始碼套件元件（`lib/deb_sources.py`，`dt/deb-sources.json`）。
   Ubuntu／Debian 的漏洞資料以原始碼套件記錄，不補的話 DT 比對不到（Jetson 示範：名稱不同的 537 個套件 DT 只比對到 1 個）。只給 DT；ScanCode.io／DejaCode 收的 SBOM 不加。
   `D-dt-osv-coverage`：讀 DT 的 OSV 設定（`/api/v2/extension-points/vuln-data-source/extensions/osv/config`），SBOM 的 purl 類型對應的
-  OSV 生態系沒有啟用時記 GAP（例如映像的 deb 套件需要 Debian；run 39947311999 的 DT 沒有啟用，DT 0 筆、Grype 942 筆）。
+  OSV 生態系沒有啟用時記 GAP（例如映像的 deb 套件需要 Debian；示範掃描的 DT 沒有啟用，DT 0 筆、Grype 942 筆）。
   findings 在 vuln-analysis 完成後讀；另外最多等 `DT_POLICY_WAIT_SECONDS`（預設 120）秒讓 analyze-project（政策評估、metrics）完成。
   `D-distro-recheck`（`lib/distro_recheck.py`，`scan/distro-recheck.json`）：DT 也以 NVD 的 CPE 比對 deb 套件，NVD 只知道上游版本，
   不知道發行版已經 backport 修補（Jetson R39.2.1：openssl 3.0.13-0ubuntu3.11 的 CVE-2024-6119，Ubuntu 在 -0ubuntu3.4 修好，卻被列成 P1）。
@@ -119,7 +119,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   （released → fixed、needed／pending／in-progress／deferred → not-fixed、ignored → wont-fix；tools/cra/README.md）。DT findings 裡 Ubuntu
   打包的 Python 模組（dist-packages 的 pypi 元件）也收 SBOM 裡唯一擁有它的 deb 與 (CVE, 它的原始碼套件, 發行版)（`counts.deb_python_owners`）。沒有 Ubuntu 套件上的 CVE 時不寫這一列；
   沒有鏡像、過期、sha256 不符或發行版不在鏡像裡 → NOT_RUN（檔案記原因；U1 不套用，列照樣受影響）。
-  `C-kernel-boot`（`lib/kernel_boot.py`，`scan/kernel-boot.json`，在 C-kernel-config 之前；需要 `--kernel-build-prefix`）：Jetson 刷機包的 `kernel/Image` 和 `rootfs/boot/Image` 不同時並列兩顆核心的 sha256、版本字串（含 `#1 SMP PREEMPT <建置時間>`）、IKCONFIG 差異數與前 10 項、`extlinux.conf` 的 DEFAULT 標籤指向哪裡、核心建置紀錄 BUILD-INFO.txt 的 image sha256 對的是哪一顆；兩顆不同 → ATTENTION（資訊性）。實際開機的核心只能在板子上確認（`uname -v`）；廠商 Jetson 刷機包的板子實測跑 `kernel/Image`（燒錄流程會裝它），所以預設不改 K1。環境變數 `KERNEL_BOARD_OS_TXT`（board-test 的 os.txt）有 uname 那一行時比對：對上 `kernel/Image` → OK；對上 `rootfs/boot/Image` → ATTENTION，C-kernel-config 才改用它的 IKCONFIG（`--prefer-rootfs-image`），核心建置紀錄除非 BUILD-INFO sha256 對得上否則 GAP；兩顆都對不上 → ATTENTION。只有一顆核心 → NOT_RUN（不寫這一列）。
+  `C-kernel-boot`（`lib/kernel_boot.py`，`scan/kernel-boot.json`，在 C-kernel-config 之前；需要 `--kernel-build-prefix`）：Jetson 刷機包的 `kernel/Image` 和 `rootfs/boot/Image` 不同時並列兩顆核心的 sha256、版本字串（含 `#1 SMP PREEMPT <建置時間>`）、IKCONFIG 差異數與前 10 項、`extlinux.conf` 的 DEFAULT 標籤指向哪裡、核心建置紀錄 BUILD-INFO.txt 的 image sha256 對的是哪一顆；兩顆不同 → ATTENTION（資訊性）。實際開機的核心只能在板子上確認（`uname -v`）；預期燒錄流程會裝 `kernel/Image`（燒錄工具的設計預期，沒有用板子驗證；有板子的 `uname -v` 時以它為準），所以預設不改 K1。環境變數 `KERNEL_BOARD_OS_TXT`（board-test 的 os.txt）有 uname 那一行時比對：對上 `kernel/Image` → OK；對上 `rootfs/boot/Image` → ATTENTION，C-kernel-config 才改用它的 IKCONFIG（`--prefer-rootfs-image`），核心建置紀錄除非 BUILD-INFO sha256 對得上否則 GAP；兩顆都對不上 → ATTENTION。只有一顆核心 → NOT_RUN（不寫這一列）。
   `C-kernel-config`（`lib/kernel_config.py`，`scan/kernel-config.json`，放在 D-distro-recheck 之後）：核心元件（C-kernel-l4t-map 加上的
   Canonical 核心等）上的每個 CVE，用 Linux 核心 CNA 紀錄的 programFiles（修補動到的檔案）對照產品核心的 `.config` 與 Makefile／Kbuild
   （映像的 `/usr/lib/modules/<版本>/build` 或 `/usr/src/linux-headers-<版本>*/`），判 not_affected（每個檔案都一定沒編）、affected
@@ -368,12 +368,12 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
     升級：main 上用 `import_from_scan` 建過的套件（DejaCode 整個 dataspace 共用）第一次遇到 `load_sboms` 時，可能因為上面的欄位差異重複建套件或撞唯一鍵；
     `E-dejacode-import` 會記 GAP（讀回數≠唯一 purl 數）或 ATTENTION（匯入有 errors）。既有的試行部署沒有核對過，要清掉 DejaCode 的套件或另開 dataspace 才能確定不受影響。
   - `E-dejacode-import`（`--no-package-scan` 與 load_sboms 失敗時的退回）：`import_from_scan` 是同步請求，ScanCode.io 結果分批送（`lib/scio_chunks.py`，
-    每批 `DJ_IMPORT_CHUNK` 個套件，預設 1000；每批的時間隨產品已有的套件數增加，demo-run/4 每批 500 時 267→632 秒），每批的 http 與秒數記在 `dejacode/import-chunks.tsv`。一次送 3851 個套件時 30 分鐘沒有回應（Jetson 示範 demo-run/1–3）。
+    每批 `DJ_IMPORT_CHUNK` 個套件，預設 1000；每批的時間隨產品已有的套件數增加，示範掃描 每批 500 時 267→632 秒），每批的 http 與秒數記在 `dejacode/import-chunks.tsv`。一次送 3851 個套件時 30 分鐘沒有回應（Jetson 示範 示範掃描–3）。
     試行版的 DejaCode 沒有背景工作（`DEJACODE_ASYNC=False`），`pull_scancodeio_project_data` 也是在請求內同步執行，所以不用它。
-  - `E-os-copyrights`（只有映像；**預設關閉，`OS_COPYRIGHTS=1` 才做**：Jetson 映像的 2032 個版權檔讓 ScanCode.io 的 scan_for_files 程序池中止，demo-run/5、6，原因未查明）：映像裡的 `/usr/share/doc/<套件>/copyright`（Debian／Ubuntu 套件安裝後留下的版權檔，多數是 DEP-5）取出來
+  - `E-os-copyrights`（只有映像；**預設關閉，`OS_COPYRIGHTS=1` 才做**：Jetson 映像的 2032 個版權檔讓 ScanCode.io 的 scan_for_files 程序池中止，示範掃描，原因未查明）：映像裡的 `/usr/share/doc/<套件>/copyright`（Debian／Ubuntu 套件安裝後留下的版權檔，多數是 DEP-5）取出來
     （`lib/oscopyright.py extract`：只讀 docker save 的 tar 結構，處理 whiteout 與符號連結）交給 ScanCode.io `scan_codebase`，結果按套件名稱對回
     load_sbom 的 deb 套件（`scancode/os-copyright-evidence.json`），和逐套件掃描的證據合併給 `E-notice`（`dejacode/copyright-evidence.json`）。
-    上傳的檔名是 `<套件>/debian-copyright.txt`，不讓 ScanCode 當成 Debian 套件中繼資料解析（demo-run/5：2032 個 `copyright` 讓 worker 中止）；單檔上限 512 KB。
+    上傳的檔名是 `<套件>/debian-copyright.txt`，不讓 ScanCode 當成 Debian 套件中繼資料解析（示範掃描：2032 個 `copyright` 讓 worker 中止）；單檔上限 512 KB。
     `E-os-license-sync`：DejaCode 產品套件授權是 unknown 或空白、版權檔掃到授權的，補上產品套件授權（`pkgscan.py sync-os`，`dejacode/os-license-sync.json`）。
     不受 `--no-package-scan`、`--no-files-scan` 影響。為什麼不逐套件下載 deb：整個系統映像上千個 deb 照目前速度要 30 幾個小時，而且 ScanCode.io
     的摘要不把 deb 的 copyright 檔當 key file，DejaCode 只拿到版權人（說明在該檔）。所以 deb 的下載網址預設不改（DejaCode 推的網址多半不存在，

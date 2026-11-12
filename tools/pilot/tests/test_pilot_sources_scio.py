@@ -1,5 +1,5 @@
 """DT 資料源狀態（dtsources.py、compare_expected、報告首頁）與 ScanCode.io 上傳前轉換、失敗摘要（scio_prep.py、scio_diag.py）的測試。
-資料形狀取自 run 39947311999（e2e-pilot）的實機輸出：DT 5.2.0 mirror-runs/latest、Syft 的 php 映像 SBOM、ScanCode.io v38.1.0 load_sbom。"""
+資料形狀取自 sca-center 示範掃描的實機輸出：DT 5.2.0 mirror-runs/latest、Syft 的 php 映像 SBOM、ScanCode.io v38.1.0 load_sbom。"""
 import json
 import os
 import shutil
@@ -60,7 +60,7 @@ def test_dtsources_missing_query_is_gap(tmp_path):
     assert rows["D-dt-data-sources"][0] == "GAP" and "沒有查詢：NVD" in rows["D-dt-data-sources"][1]
 
 
-RUN_OSV_ECOS = ["PyPI", "npm", "Go", "Maven", "crates.io", "Packagist", "RubyGems", "NuGet"]   # run 39947311999 的 DT 設定讀回
+RUN_OSV_ECOS = ["PyPI", "npm", "Go", "Maven", "crates.io", "Packagist", "RubyGems", "NuGet"]   # 示範掃描時 DT 設定讀回的值
 
 
 def run_coverage(tmp_path, code, cfg, purls):

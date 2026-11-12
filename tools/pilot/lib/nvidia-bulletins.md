@@ -169,7 +169,7 @@ Grype 和 DT 都比對不到 NVIDIA 對 Jetson Linux 發的公告：公告的版
 
 - `deploy/pilot/install.sh`（`N-nvbul-mirror`）：鏡像檢查不過就重新下載，把 `<PILOT_NVBUL_MIRROR_DIR>/current` 寫進 `pilot.env`。sca-persistent 的資料夾是 `~/.cache/sca-pilot-ci/nvidia-bulletins`。
 - `deploy/gitlab-runner/install.sh`（`G-nvbul`）與每日的 `sca-nvd-refresh`：更新常駐環境的鏡像，複製到 `/var/lib/sca-gitlab/nvidia-bulletins`，路徑寫進 `/etc/sca-gitlab/pilot.env`。
-- `scripts/ci/fast-check.sh`：常駐環境有鏡像時，R39.2.1 的 `C-nvidia-bulletins` 應該是 OK；沒有鏡像時 GAP 是預期的。
+- `sca-center 的快速檢查腳本（沒有帶進 dumpling）`：常駐環境有鏡像時，R39.2.1 的 `C-nvidia-bulletins` 應該是 OK；沒有鏡像時 GAP 是預期的。
 
 ## 目前的對照表（2026-11-02）
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 在 GitHub Actions runner 安裝 0007 用過的同版本工具（連網環境；不是離線部署）。
+# 在 GitHub Actions runner 安裝固定版本的工具（連網環境；不是離線部署）。
 # 用法：install-tools.sh <bin 目錄> <紀錄檔> [--sbom-only]
 #   --sbom-only  只裝 `tools/pilot/sca-scan --sbom` 需要的：Syft、Grype（固定版本）與 bubblewrap（含放寬 userns 限制）；
 #                不裝 cdxgen、govulncheck、guarddog（dt-smoke 用；原始碼掃描才需要那些）。
-# 版本與 0007（tests/results/round7-real-projects-20261022/versions-and-state.txt）相同；
-# 資料庫（Grype DB、Go vulndb、DT 的 OSV）在這裡是線上最新版，與 0007 的鏡像日期不同。
+# 版本固定在下面的 SYFT／GRYPE／CDXGEN／GOVULNCHECK／GUARDDOG（sca-scan 的 A-tools 以這一行為準，不同就 ATTENTION）；
+# 資料庫（Grype DB、Go vulndb、DT 的 OSV）是線上最新版。
 set -euo pipefail
 BIN=${1:?bin 目錄}; REC=${2:?紀錄檔}; ONLY=${3:-}
 [ -z "$ONLY" ] || [ "$ONLY" = --sbom-only ] || { echo "不認得的參數：$ONLY" >&2; exit 64; }

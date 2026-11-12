@@ -10,7 +10,7 @@
     OSV_DISTRO_MIRROR 讀。--max-age-days 預設 3（環境變數 OSV_DISTRO_MAX_AGE_DAYS；依 SOURCE 的 fetched_utc，與 osv-distro.sh --check 相同）。
 退出碼：0 已判定（OK／GAP／NOT_RUN）；3 輸入錯誤（同時印 FAIL 那一行，不印 traceback）。原始的 findings、Grype、SBOM 檔案一律不改。
 
-為什麼（實例，Jetson R39.2.1 的 Ubuntu 24.04 rootfs，round14 run 41376872500）：DT 以 NVD 的 CPE（cpe:2.3:a:openssl:openssl）比對
+為什麼（實例，Jetson R39.2.1 的 Ubuntu 24.04 rootfs）：DT 以 NVD 的 CPE（cpe:2.3:a:openssl:openssl）比對
 deb 套件 openssl 3.0.13-0ubuntu3.11，回報 CVE-2024-6119（Ubuntu 在 3.0.13-0ubuntu3.4 修好）與 CVE-2026-45447（3.0.13-0ubuntu3.11 修好）。
 NVD 只看上游版本 3.0.13，不知道 Ubuntu 把修補 backport 到 -0ubuntu3.x，所以 CRA 風險評估把它們列成 P1；Grype 用 Ubuntu 的資料比對，
 沒有回報（報告寫 "Fix (Grype): unknown (not matched by Grype)"）。發行版套件上只有 NVD（或 GitHub、非發行版的 OSV）的列，是 P1／P2 誤報的主要來源。

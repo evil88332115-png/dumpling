@@ -45,7 +45,7 @@ GitHub（GHSA）依設計關閉（CLAUDE.md 修正 2），不檢查；EPSS 在 D
 OSV 生態系涵蓋（出處：DT 5.2.0 api/src/main/openapi/openapi.yaml /extension-points/{extension_point_name}/extensions/{extension_name}/config，
 GET 需 SYSTEM_CONFIGURATION 或 SYSTEM_CONFIGURATION_READ，回應 {"config": {...}}；擴充點名稱 vuln-data-source（VulnDataSource.java
 @ExtensionPointSpec）；OSV 設定 vuln-data-source/osv/.../osv-vuln-data-source-config-v1.schema.json 的 enabled、ecosystems）：
-run 39947311999 的 DT 只啟用 PyPI、npm、Go、Maven、crates.io、Packagist、RubyGems、NuGet，映像的 177 個 deb 套件在 DT 沒有 OSV 資料，
+示範掃描的 DT 只啟用 PyPI、npm、Go、Maven、crates.io、Packagist、RubyGems、NuGet，映像的 177 個 deb 套件在 DT 沒有 OSV 資料，
 DT 0 筆、Grype 942 筆，報告上只是並列、沒有標示。purl 類型與 OSV 生態系的對應是本檔自訂（OSV schema 的 defined ecosystems），
 DT 是否真的以 distro 限定詞比對 Debian 等發行版的 OSV 資料未驗證（未核對）；pkg:generic 等沒有 OSV 生態系的類型只能靠 NVD（CPE）。
 """

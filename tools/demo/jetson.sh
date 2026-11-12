@@ -6,7 +6,7 @@
 #
 # 規則：
 # - 下載網址、NVIDIA 公布的 SHA-1（release_sha_hashes.txt，2026-10-27 讀過）寫死；下載的檔案逐一核對，另記 SHA-256。不符就停止。
-#   SHA-256 是 demo-run/1 下載、SHA-1 相符後記下的值，一併寫死。下載即表示同意 NVIDIA 的軟體授權協議（下載頁的說明）；使用者 2026-10-27 同意。
+#   SHA-256 是 示範掃描 下載、SHA-1 相符後記下的值，一併寫死。下載即表示同意 NVIDIA 的軟體授權協議（下載頁的說明）；使用者 2026-10-27 同意。
 # - 下載的檔案是不可信資料：jetson_rootfs.py 只讀 tar／deb 結構，不解開到主機、不執行套件內容、不跑 apply_binaries.sh；
 #   docker import 由 Docker 解開成映像（不啟動容器）。映像是 arm64，這台機器不會執行裡面的程式。
 # - sca-scan 不做逐套件授權掃描與檔案層級掃描（--no-package-scan --no-files-scan）：deb 的下載網址是已知限制（PR 2 的範圍），
@@ -29,7 +29,7 @@ scan_worst(){  # sca-scan 的 status.tsv → 最嚴重的狀態（FAIL > NOT_ASS
     NR>1 && !($2=="NOT_RUN" && ($1 ~ /^E-(package-scan-submit|package-scans|package-scan-update|license-sync|copyrights|files-scan)$/ || (vo && $1 ~ /^E-/))) {
       v=(($2 in r)?r[$2]:5); if(v>m){m=v;w=(($2 in r)?$2:"FAIL")} } END{print (NR<2?"FAIL":w)}' "$1"; }
 
-# 沒指定時：GitHub Actions 的分支名稱含 r39.2.0（e2e-pilot 的 demo-run/vuln-r39.2.0-<N>）→ 39.2.0；其他 39.2.1
+# 沒指定時：GitHub Actions 的分支名稱含 r39.2.0→ 39.2.0；其他 39.2.1
 JR=${JETSON_RELEASE:-}
 [ -z "$JR" ] && [[ "${GITHUB_REF_NAME:-}" == *r39.2.0* ]] && JR=39.2.0
 JR=${JR:-39.2.1}

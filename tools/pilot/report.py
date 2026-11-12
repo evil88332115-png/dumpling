@@ -35,7 +35,7 @@ BINARY_TYPES = {"binary"}
 EPSS_PERCENTILE_HIGH = 0.9      # 「EPSS 高」的門檻：百分位 >= 0.9（只用於摘要表的挑選與標示，排序仍用完整數值）
 ALIAS_KEYS = ("cveId", "ghsaId", "osvId", "snykId", "sonatypeId", "vulnDbId")
 # OSV 的 Ubuntu／Debian 紀錄以 CVE 編號命名（UBUNTU-CVE-2026-1、DEBIAN-CVE-2026-1，upstream 欄位就是那個 CVE），DT 5.2.0 讀進來時
-# 沒有保留別名，和 Grype 的 CVE-2026-1 對不上（fast-run/2：Jetson 的 deb 列 7082 列只有 Grype、7468 列只有 DT、兩邊都有只有 41 列）。
+# 沒有保留別名，和 Grype 的 CVE-2026-1 對不上（Jetson R39.2.1 示範映像：Jetson 的 deb 列 7082 列只有 Grype、7468 列只有 DT、兩邊都有只有 41 列）。
 # 依命名規則取回 CVE 編號當別名；其他前綴（USN-、DSA-、DLA-）不是一對一，不處理。
 DISTRO_CVE_ID = re.compile(r"(?:UBUNTU|DEBIAN)-(CVE-\d{4}-\d+)")
 

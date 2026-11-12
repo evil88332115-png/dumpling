@@ -1,7 +1,7 @@
 """D-distro-recheck（lib/distro_recheck.py）與 tools/mirror/osv-distro.sh。（常駐環境的 deploy 腳本與 mirror-sync 的測試沒有帶進來，見 docs/PROVENANCE.md。）
 
 紀錄的形狀取自 2026-11-02 下載的 OSV 資料桶（Ubuntu/all.zip 的 UBUNTU-CVE-2024-6119、USN-6986-1；Debian/all.zip 的
-DEBIAN-CVE-2024-6119、DSA-*）；DT finding 的形狀取自 round14 Jetson R39.2.1 基礎版（run 41376872500）。
+DEBIAN-CVE-2024-6119、DSA-*）；DT finding 的形狀取自 Jetson R39.2.1 基礎版示範映像。
 """
 import datetime
 import hashlib
@@ -386,7 +386,7 @@ def test_cli_bad_input_exit_3(tmp_path, content, msg):
 
 
 def test_real_jetson_shape_openssl(tmp_path):
-    """round14 R39.2.1 基礎版的三個 openssl 例子（NVD 才有、Grype 沒比對到）都是 distro_fixed；CVE-2026-63076（DT 也有 Ubuntu 紀錄）不動。"""
+    """Jetson R39.2.1 基礎版示範映像的三個 openssl 例子（NVD 才有、Grype 沒比對到）都是 distro_fixed；CVE-2026-63076（DT 也有 Ubuntu 紀錄）不動。"""
     m = make_mirror(tmp_path / "m", ubuntu=UBUNTU + [rec("UBUNTU-CVE-2025-15467", [aff("openssl", "Ubuntu:24.04:LTS", "3.0.13-0ubuntu3.7"),
                                                                                     aff("edk2", "Ubuntu:24.04:LTS")], ["CVE-2025-15467"])])
     fs = [finding("openssl", OSSL, c) for c in ("CVE-2024-6119", "CVE-2026-45447", "CVE-2025-15467")]

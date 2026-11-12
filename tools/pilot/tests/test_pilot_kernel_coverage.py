@@ -1,5 +1,5 @@
 """作業系統核心的比對涵蓋（C-kernel-coverage，lib/kernelcheck.py）、報告弱點節的註記、sca-scan 的接線。
-證據：Jetson Linux R39.2.1 映像（run 40594937149）的 SBOM 有 nvidia-l4t-kernel 與 1468 個 linux-kernel-module、沒有 linux-kernel 元件，
+證據：Jetson Linux R39.2.1 映像（Jetson R39.2.1 示範映像）的 SBOM 有 nvidia-l4t-kernel 與 1468 個 linux-kernel-module、沒有 linux-kernel 元件，
 Grype 與 DT 對核心都是 0 筆，報告卻沒有說。欄位格式取自該次的 Syft 1.55.0 CycloneDX 與 Grype 0.121.0 JSON。"""
 import json
 import subprocess
