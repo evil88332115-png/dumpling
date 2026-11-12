@@ -10,7 +10,7 @@ tool=$1; dest=$2
 lock="$here/lib/tools.lock"
 get() { sed -n "s/^${tool}_$1=//p" "$lock" | head -n1; }
 url=$(get url); sha=$(get sha256); member=$(get member)
-[ -n "$url" ] && [ -n "$sha" ] && [ -n "$member" ] || { echo "tools.lock 沒有 $tool 的 url／sha256／member" >&2; exit 1; }
+if [ -z "$url" ] || [ -z "$sha" ] || [ -z "$member" ]; then echo "tools.lock 沒有 $tool 的 url／sha256／member" >&2; exit 1; fi
 [[ $sha =~ ^[0-9a-f]{64}$ ]] || { echo "tools.lock 的 sha256 格式錯誤" >&2; exit 1; }
 [[ $member =~ ^[A-Za-z0-9._-]+$ ]] || { echo "tools.lock 的 member 不合法" >&2; exit 1; }
 mkdir -p "$dest"
@@ -21,6 +21,6 @@ curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-e
 got=$(sha256sum "$work/pkg.tgz" | cut -d' ' -f1)
 [ "$got" = "$sha" ] || { echo "$tool sha256 不符（實際 $got，預期 $sha）" >&2; exit 1; }
 tar -xzf "$work/pkg.tgz" -C "$work" -- "$member"
-[ -f "$work/$member" ] && [ ! -L "$work/$member" ] || { echo "壓縮檔內的 $member 不是一般檔案" >&2; exit 1; }
+if [ ! -f "$work/$member" ] || [ -L "$work/$member" ]; then echo "壓縮檔內的 $member 不是一般檔案" >&2; exit 1; fi
 install -m 0755 "$work/$member" "$dest/$tool"
 echo "$dest/$tool"
