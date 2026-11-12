@@ -788,7 +788,7 @@ for v in "${VARS[@]}"; do
 
   t0=$(date +%s); sca_args
   # 核心的建置設定與燒錄的核心（IKCONFIG）從刷機包讀（C-kernel-config）：Rockchip 讀 update.img；Jetson 讀刷機包 tbz2／資料夾加 rootfs 前綴，
-  # 才讀得到實際燒錄的 <前綴的上一層>/kernel/Image（預期燒錄流程裝的是 kernel/Image，不是 rootfs 的 /boot/Image；這是燒錄工具的設計預期，沒有用板子驗證）。
+  # 才讀得到實際燒錄的 <前綴的上一層>/kernel/Image（依據公開 L4T BSP：apply_binaries.sh 把 kernel/Image 裝成 rootfs 的 /boot/Image，所以以 kernel/Image 為準，不是刷機包裡 rootfs 原本的 /boot/Image）。
   # 兩顆核心不同時 C-kernel-boot 並列證據（資訊性 ATTENTION）；環境變數 KERNEL_BOARD_OS_TXT（板子 os.txt）可讓它用 uname -v 確認。
   kb=()
   if [ -n "$RKFMT" ]; then kb=(--kernel-build "$RKIMG" --kernel-build-prefix "$prefix")

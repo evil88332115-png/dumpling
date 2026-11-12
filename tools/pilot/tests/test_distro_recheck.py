@@ -526,14 +526,15 @@ def test_sca_scan_wiring():
 # ---------- sudo 重設 PATH ----------
 
 FAKE_TOOL = """#!/bin/sh
-case "$1" in version) echo "Version: $FAKE_VER";; *) exit 9;; esac
+case "$1" in version) echo "Version: $FAKE_VER";; --version) echo "bubblewrap $FAKE_VER";; *) exit 9;; esac
 """
 
 
 def test_sca_scan_path_fallback(tmp_path):
     tools = tmp_path / "tools"
     (tools / "bin").mkdir(parents=True)
-    for t, v in (("grype", "0.121.0"), ("syft", "1.55.0")):
+    # bwrap 也放假的：A-tools 要 grype 與 bwrap 都找得到（CI 的 unit-tests 工作沒有安裝 bubblewrap，不能依賴主機）
+    for t, v in (("grype", "0.121.0"), ("syft", "1.55.0"), ("bwrap", "0.9.0")):
         (tools / "bin" / t).write_text(FAKE_TOOL.replace("$FAKE_VER", v))
         (tools / "bin" / t).chmod(0o755)
     sb = tmp_path / "s.cdx.json"

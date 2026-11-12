@@ -1184,7 +1184,7 @@ def dpkg_status_versions(data):
 
 
 def primary_image(imgs):
-    """K1 判定用的 Image：預設刷機包的 kernel/Image（預期燒錄流程會裝它；這是燒錄工具的設計預期，沒有用板子驗證），沒有時 rootfs 的 /boot/Image。
+    """K1 判定用的 Image：預設刷機包的 kernel/Image（依據公開 L4T BSP：apply_binaries.sh 呼叫 nv_tools/scripts/nv_apply_kernel_files.sh 把 kernel/Image 裝成 rootfs 的 /boot/Image），沒有時 rootfs 的 /boot/Image。
     prefer_rootfs（C-kernel-boot 依板子的 uname -v 判定板子跑的是 rootfs/boot/Image，--prefer-rootfs-image）→ rootfs 的 /boot/Image。"""
     if not imgs:
         return None

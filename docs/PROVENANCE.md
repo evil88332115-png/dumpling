@@ -247,7 +247,7 @@
 | `tools/demo/scan-flash-package.sh` | `--out` 預設的上層資料夾（`FLASHPKG_RESULTS`）與 `PILOT_ENV` 預設路徑，原本指向公司常駐環境的本機路徑 | `$HOME/sca-results`、`$HOME/.config/sca-scan/pilot.env`（只是預設值；pipeline 一律明確傳） |
 | `tools/cra/exploited_grype.py` | 只有說明字串：`--results-root` 的例子路徑 | `$HOME/sca-results` |
 | `tools/demo/jetson_rootfs.py` | （已還原，原樣）模擬的客戶應用程式在 dpkg status 的 Maintainer 信箱是 `noreply@example.invalid`；D-022 之後 `.invalid` 結尾的信箱自動放行 | 無（值與 25fa89a 相同；`test_jetson_rootfs.py`、`test_kernel_k1_improve.py` 的 `@example.invalid` 也還原） |
-| `tools/pilot/lib/kernel_boot.py`、`kernel_config.py`、`tools/demo/scan-flash-package.sh`、`tools/pilot/README.md` | 「預設用刷機包的 `kernel/Image`」的依據說明字串（輸出到報告備註與 JSON）原本點名某個廠商產品的板子實測。判定邏輯（預設用 `kernel/Image`、有 `KERNEL_BOARD_OS_TXT` 時以板子的 `uname -v` 為準）沒改 | 改成「燒錄工具的設計預期，沒有用板子驗證」（英文：`a design expectation of the flashing tools, not verified here`） |
+| `tools/pilot/lib/kernel_boot.py`、`kernel_config.py`、`tools/demo/scan-flash-package.sh`、`tools/pilot/README.md` | 「預設用刷機包的 `kernel/Image`」的依據說明字串（輸出到報告備註與 JSON）原本點名某個廠商產品的板子實測。判定邏輯（預設用 `kernel/Image`、有 `KERNEL_BOARD_OS_TXT` 時以板子的 `uname -v` 為準）沒改 | 改成公開 BSP 的依據（見「資料檔與測試資料的來源」） |
 | `tools/cra/image_check.py`、`tools/cra/no_vuln_data.py` | 只有說明字串裡的範例信箱（systemd 樣板單元名稱的範例、`dh_make` 預設信箱），公開檢查會把它們當信箱 | 把網域部分換成佔位文字；`DISTRO_DOMAINS` 等判定用的網域清單沒動 |
 | 全部 `tools/*/tests/*.py` | 測試資料裡的信箱（例如 `@lists.debian.org`、`@nvidia.com`，`no_vuln_data` 的判定依網域）與 `/home/…` 路徑（`image_check` 的映像內路徑）若直接改字會改變測試意義，所以改成「字串拼接」（`"a@" "debian.org"`）：執行時的值與原本完全相同，只是原始碼裡不出現完整信箱／路徑 | 無（值不變） |
 | `tools/cra/tests/test_security_testing.py`、`test_cra_report.py` | 測試資料裡板子網路掃描的 IP（私有 IP） | `192.0.2.20`、`192.0.2.2`（文件用網段） |
@@ -293,14 +293,14 @@
 | `tools/demo/tests/*.py` 的刷機包、映像、rootfs | 測試用 `tarfile`／程式現組的假檔案：`product-a_OrinNano/Linux_for_Tegra/…` 的結構是 NVIDIA 公開 BSP 的結構，`product-a` 是合成的名稱；Rockchip `update.img`、Raspberry Pi 磁碟映像、ext4／FAT 也都是測試程式組出來的 | 合成 |
 | `tools/pilot/tests/*.py` 的資料 | 測試自己組出來的假 SBOM、Grype／DT 輸出、核心 `.config`、IKCONFIG、Kbuild 樹、OSV zip、公告 Markdown。欄位格式取自公開工具（Syft、Grype、Dependency-Track、NVIDIA／Ubuntu／Debian／OSV 公開資料）的輸出形狀；CVE 編號與套件版本多為公開資料 | 合成 |
 | `tools/pilot/tests/test_kernel_config.py` 的「第四輪」一段 | 原本的 `IMAGE_PRODUCT_A`（30 個 `CONFIG_VENDOR*`、231 個 `MISSING*`，形狀取自某個內部產品映像的實測）**已改寫**：改名 `IMAGE_VENDOR_REBUILT`，數字改成合成的 10 與 100（斷言的差異數同步改為 115／15／11），註明不對應任何實際產品 | 合成（原本的形狀可能來自內部，已不保留） |
-| `kernel_boot.py`／`kernel_config.py`／`scan-flash-package.sh` 的「預設用 `kernel/Image`」 | 原本說明寫「板子實測跑的是 kernel/Image」（內部測試的結論）。**已改寫**：只留「燒錄工具的設計預期，沒有用板子驗證；有板子的 `uname -v`（`KERNEL_BOARD_OS_TXT`）時以它為準」，判定邏輯沒改 | 預設值的依據改成設計預期，不再引用內部實測 |
+| `kernel_boot.py`／`kernel_config.py`／`scan-flash-package.sh`／`pilot/README.md` 的「預設用 `kernel/Image`」 | 原本的依據是內部的板子實測。**已改成公開 BSP 的依據**（已下載 `Jetson_Linux_R39.2.1_aarch64.tbz2`，sha256 `2e561908…` 與 `tools/demo/jetson.sh` 寫死的值相符，2026-11-12 逐項核對）：`Linux_for_Tegra/apply_binaries.sh` 呼叫 `Linux_for_Tegra/nv_tools/scripts/nv_apply_kernel_files.sh`，該腳本第 41–44 行把 `kernel/Image` 以 `install … "${ROOTFS_DIR}/boot/Image"` 裝成 rootfs 的 `/boot/Image`；`Linux_for_Tegra/bootloader/extlinux.conf` 的 `LINUX /boot/Image`。判定邏輯沒改；UEFI 開機模式可改，所以說明仍寫「有板子的 `uname -v` 時以它為準」 | 公開（NVIDIA 公開 BSP 的檔案） |
 | `tools/cra/data/support-lifecycle.json`、`vex-rules.example.json`、`config.example.json`、`company.example.json`、`config.schema.json`、`templates/*.md` | 手寫的範例與範本 | 合成 |
 | `tools/cra/vendor-watch.example.json` | 手寫範例（`deploy/exploited-watch/vendor-watch.example.json`） | 合成 |
 
 **已移除的資料檔**：`tools/pilot/tests/data/euvd-dt-enisa-golden.json`（唯一使用它的 `test_euvd_dt_feed.py` 測的是 `deploy/` 的包裝腳本，沒有帶進來，所以這個檔案成了沒人用的孤兒；內容本身是公開 CVE 的小型 EUVD 格式資料，不是內部來源）。
 
 **需要 C1／使用者確認的**：
-- `kernel_boot.py` 等把「預設用 `kernel/Image`」的依據改成「燒錄工具的設計預期」：這是我對 NVIDIA 燒錄流程（`apply_binaries.sh`／`flash.sh` 會安裝 `kernel/Image`）的了解，**沒有在公開文件裡逐字查證**；已在說明裡標明「沒有用板子驗證」。如果要引用公開依據，請指定要引的文件。
+- （已解決）「預設用 `kernel/Image`」的依據：公開 BSP 看得出來（見上表），不需要再確認。
 - 測試裡以 `product-a_OrinNano` 命名的假刷機包（檔名結構取自廠商交付的格式，例如 `ReleaseNote.pdf`、`SourceCode`、`MCU_V2.zip` 這類交付物名稱）：我判定為合成，因為內容全是測試現組；如果「交付物的命名慣例」本身算內部資訊，需要再改成更通用的名稱。
 
 ### 刪掉的測試
