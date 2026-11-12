@@ -59,9 +59,19 @@ NVIDIA 公告步驟 → 小型 artifact（不含 pilot.env）→ `down`（`if: a
 D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿掉**，在 `firmware-dt.sh` 明列。韌體的 `C-sbomgate` 是 NOT_ASSESSED（sbomgate 只把 library／framework 當套件），
 不在必要清單內，也不能要求。本機實測四個上傳成功的樣本，11 個必要階段全部 OK。
 
+供應商 SBOM 被 DT 拒收（`expected_dt`）：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
+report 的判斷：宣告 rejected 且 `D-dt-upload` 是 `http=400` → 狀態照實標 FAIL，說明寫「與 firmware.yml 宣告的 expected_dt 一致」，不讓 job 失敗；
+同時 dt-verify 的「弱點分析完成」「元件數」FAIL 是同一個原因，合併成一則說明、不另外計算。**只放行「上傳被拒」這一種**：上傳之前的必要階段（A-source、B-sandbox、B-sandbox-secrets、
+B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、F-secret-scan）不是 OK、sca-scan 有別的 FAIL 階段、Grype FAIL、dt-verify 有別項 FAIL，都照常 FAIL 並註明「不放行」。
+宣告了卻上傳成功＝MISMATCH（job 失敗，供應商可能修好了）；沒宣告卻被拒收＝一般 FAIL；宣告了但失敗不是 http=400＝一般 FAIL。
+`firmware-dt.sh` 對有宣告的樣本，sca-scan 結束碼 1、必要階段不是 OK、dt-verify 失敗三步只記 `FIRMWARE-DT-STEP EXPECTED`，是否放行交給 report。
+`firmware-sbom-check` 另會提示「DT 可能拒收（schema 不符）」：license 物件沒有 id 也沒有 name、頂層有 CycloneDX 沒有的欄位（寫死的欄位聯集清單，不是 schema 檔，沒提示不代表合格）。
+
 NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對照：NOT_ASSESSED（…）」，文字用路徑載入 `tools/pilot/lib/nvidia_bulletins.py` 的 `VBIOS_NOT_ASSESSED`（不複製）；
-載入失敗寫 GAP 加原因。workflow 另有一步：`tools/mirror/nvidia-bulletins.sh` 抓公告鏡像 → `nvidia_bulletins.py candidates --group gpu-firmware`，把那一行印進摘要；
-鏡像或工具失敗只記 GAP，不讓 job 失敗。C1 沒有 gpu-firmware 專用的對照表，這裡借用 Jetson 的 `nvidia-bulletins.json`，所以那一行會附「對照表有 N 個公告不在鏡像」（Jetson 的公告，與 vBIOS 無關）。
+載入失敗寫 GAP 加原因。workflow 另有一步：對照表用 gpu-firmware 專用的空表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（C1 M2 提供，不借 Jetson 的表）。
+檔案存在 → 抓公告鏡像（`tools/mirror/nvidia-bulletins.sh`）→ `nvidia_bulletins.py candidates --group gpu-firmware`，把那一行印進摘要；表是空的，鏡像裡的 gpu-firmware 公告全部列為待審（ATTENTION 是誠實的結果）。
+檔案不存在（M2 合併前）→ 不跑 candidates，印 `C-nvidia-bulletins-db GAP 沒有 gpu-firmware 對照表…`。鏡像或工具失敗一樣只記 GAP，不讓 job 失敗。
+本機實測（這一步的 run 區塊原樣執行）：沒有表 → GAP 那一行；從 `origin/wp1/m2` 暫時取出表 → `ATTENTION　有 1 個 GPU 韌體（vBIOS）公告待人工審核（5674）…`（暫時檔已刪、沒有 commit）；鏡像抓不到 → GAP 那一行。
 
 ## 依賴 C1 介面的地方（C1 改了要跟著改）
 
@@ -92,7 +102,7 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 發現：
 - **DT 的元件合併規則不含雜湊**：Protectli 有兩組只有 sha256 不同、其他欄位相同的 FSP-M 映像，DT 合併成一個（16 → 14）。原本 `expected` 的身分含 sha256，預期 16，verify 因此 FAIL；已改成 group／name／version／purl／cpe（含測試）。
   代價：DT 看不到同版本不同映像的第二份，SBOM 原檔仍保留兩份。
-- **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
+- **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**（C2 決定：不改檔、不蓋成 GAP，由樣本宣告 `expected_dt: rejected`，見上方；宣告後 report 仍標 FAIL 但不讓 job 失敗）：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
   這是上游檔案不符合 CycloneDX schema，我們不改元件內容，所以這個樣本在 DT 裡是 FAIL（Grype 仍比對了 36 筆，DT 完全沒有資料）。處理方式待 C2 決定（見回報）。
 - `firmware-dt.sh` 遇到 `--result` 已有舊結果會標 FAIL（sca-scan 不接受非空輸出資料夾，舊的 status.tsv 也不能混進 report）；第三次本機執行重用資料夾時差點被舊結果騙成「OK」，所以加了這個檢查。
 - 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
@@ -102,4 +112,4 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 - `firmware-dt` job 在 GitHub Actions 上的實際執行（Actions 上 `install-tools.sh`、`wait` 時間、artifact）。
 - `wait` 結束碼 3（GAP）路徑只有單元測試，沒有在真的 DT 上製造。
 - NVIDIA 公告步驟在 Actions 上的執行（本機鏡像 4.7 秒、`candidates` 印出 ATTENTION：1 個待審的 gpu-firmware 公告 5674）。
-- 供應商 SBOM 被 DT 拒收的處理方式。
+- `expected_dt` 加入後，含宣告樣本的完整端到端沒有重跑（report／腳本的判斷用假工具的單元測試覆蓋，並用第四次真 DT 的結果資料夾重跑 report 核對過：宣告的樣本 rc=0、狀態 FAIL 加「與宣告一致」）。

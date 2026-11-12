@@ -146,6 +146,35 @@ def _has(v):
     return t != "" and t not in PLACEHOLDERS
 
 
+# CycloneDX 1.2～1.6 頂層欄位的聯集（寫死的清單，不是 schema 檔；各版本不盡相同，所以只是提示）
+CDX_TOP_KEYS = frozenset((
+    "$schema", "bomFormat", "specVersion", "serialNumber", "version", "metadata", "components", "services",
+    "externalReferences", "dependencies", "compositions", "vulnerabilities", "annotations", "formulation",
+    "properties", "signature", "declarations", "definitions"))
+
+
+def dt_schema_hints(doc):
+    """Dependency-Track 上傳會做 CycloneDX schema 驗證，不符就整份拒收（http=400）。這裡只做兩個不需要 schema 檔就能判斷的檢查：
+    license 物件沒有 id 也沒有 name（schema 要求二選一）、頂層有 CycloneDX 沒有的欄位。回傳說明清單（空＝沒看到問題；不代表 schema 合格）。"""
+    hints = []
+    top = sorted(clean(k, 40) for k in doc if isinstance(k, str) and k not in CDX_TOP_KEYS)
+    if top:
+        hints.append("頂層有 CycloneDX 沒有的欄位（%s）" % _names(top))
+    raw = []
+    _walk_cdx(doc.get("components"), raw)
+    bad = []
+    for c in raw:
+        lic = c.get("licenses")
+        if not isinstance(lic, list):
+            continue
+        if any(isinstance(e, dict) and isinstance(e.get("license"), dict)
+               and not _has(e["license"].get("id")) and not _has(e["license"].get("name")) for e in lic):
+            bad.append(clean(c.get("name"), 60) if _has(c.get("name")) else "(無名稱)")
+    if bad:
+        hints.append("%d 個元件的 license 沒有 id 也沒有 name（%s）" % (len(bad), _names(bad)))
+    return ["DT 可能拒收（schema 不符）：" + "；".join(hints)] if hints else []
+
+
 def basic_check(doc):
     """回傳 dict：fmt、spec、count、no_version／no_purl／no_cpe（名稱清單）；格式不認得時 fmt 是 None。"""
     fmt, spec, comps, notes = components_of(doc)
@@ -157,6 +186,7 @@ def basic_check(doc):
         "no_version": [label(c) for c in comps if not _has(c["version"])],
         "no_purl": [label(c) for c in comps if not _has(c["purl"])],
         "no_cpe": [label(c) for c in comps if not _has(c["cpe"])],
+        "dt_hints": dt_schema_hints(doc) if fmt == "CycloneDX" else [],
     }
 
 
@@ -171,7 +201,7 @@ def judge(b):
     nv, np_, nc = len(b["no_version"]), len(b["no_purl"]), len(b["no_cpe"])
     if nv == b["count"]:
         return "GAP", head + "；全部元件都沒有版本（不猜）" + extra
-    parts = list(b["notes"])
+    parts = list(b["notes"]) + list(b.get("dt_hints", []))
     if nv:
         parts.append("%d 個元件缺版本（%s）" % (nv, _names(b["no_version"])))
     if np_:

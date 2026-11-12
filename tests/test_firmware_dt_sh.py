@@ -184,6 +184,39 @@ sys.exit(1 if bad else 0)
         self.assertEqual(rc, 1)
         self.assertIn("FIRMWARE-DT-STEP\tFAIL\tfirmware-bios-good\t結果資料夾已有舊結果", out)
 
+    def test_declared_rejected_sample_does_not_fail_the_script_only_when_report_agrees(self):
+        """假 sca-scan 對宣告 expected_dt 的樣本回 D-dt-upload FAIL（http=400）、結束碼 1，dt-verify 的兩項失敗。"""
+        self.fakes()
+        self.w("repo/tools/pilot/sca-scan", """#!/usr/bin/env bash
+while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; *) shift;; esac; done
+mkdir -p "$out/scan"; echo '{"matches": []}' > "$out/scan/grype.json"
+{ printf 'stage\\tstatus\\tdetail\\n'
+  for s in A-source B-sandbox B-sandbox-secrets B-sbom-provided C-grype C-upload-sbom D-dt-project F-secret-scan; do printf '%s\\tOK\\tx\\n' $s; done
+  printf 'D-dt-upload\\tFAIL\\thttp=400 {}\\nD-dt-bom-processing\\tNOT_RUN\\tx\\nD-dt-vuln-analysis\\tNOT_RUN\\tx\\n'; } > "$out/status.tsv"
+exit 1
+""", 0o755)
+        self.w("repo/pipeline/scan-status-check.py", "import sys\nprint('必要階段不是 OK')\nsys.exit(1)\n")
+        self.w("repo/pipeline/dt-verify.py", """import json, sys
+json.dump({'components': 0, 'findings_total': 0, 'checks': [
+  {'name': '專案存在', 'status': 'OK'}, {'name': '弱點分析完成', 'status': 'FAIL'}, {'name': '元件數', 'status': 'FAIL'}]},
+  open(sys.argv[3] + '/summary.json', 'w'))
+sys.exit(1)
+""")
+        y = self.w("firmware/sbom/sup/firmware.yml", "kind: sbom\nvendor: A\nmodel: M\nstatus: ok\nfirmware_version: 1.0\n"
+                   "expected_dt:\n  upload: rejected\n  reason: 供應商 SBOM 不符 schema\n")
+        s = self.w("in/sup.json", sbom())
+        rc, out, _ = self.run_sh("--work", os.path.join(self.tmp, "w"), "--result", os.path.join(self.tmp, "res"), "--sample", y, s)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("FIRMWARE-DT-STEP\tEXPECTED\tfirmware-sbom-sup\t", out)
+        self.assertIn("FIRMWARE-DT\tFAIL\t", out)
+        self.assertIn("與 firmware.yml 宣告的 expected_dt 一致", out)
+        # 同一份結果但沒有宣告：同樣的 SBOM 與假工具，腳本要失敗
+        y2 = self.w("firmware/sbom/sup2/firmware.yml", "kind: sbom\nvendor: A\nmodel: M\nstatus: ok\nfirmware_version: 1.0\n")
+        s2 = self.w("in/sup2.json", sbom())
+        rc, out, _ = self.run_sh("--work", os.path.join(self.tmp, "w2"), "--result", os.path.join(self.tmp, "res2"), "--sample", y2, s2)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("FIRMWARE-DT-STEP\tFAIL\tfirmware-sbom-sup2\t", out)
+
     def test_prep_failure_is_fail_but_others_continue(self):
         self.fakes()
         w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")

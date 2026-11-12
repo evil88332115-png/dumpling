@@ -27,6 +27,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `notes` | 挑選理由與限制 |
 | `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
 | `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
+| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 不符 CycloneDX schema，DT 回 http=400；dumpling 不修改供應商的檔案）。真的被拒收：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
 
 ### `expected` 的鍵
 

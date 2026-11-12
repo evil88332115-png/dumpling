@@ -315,6 +315,87 @@ class ReportTests(Base):
         rc, out, _ = self.run_report([o], dt)
         self.assertTrue(out.startswith("FIRMWARE-DT\tGAP\t"), out)
 
+    # ---- expected_dt（樣本宣告 DT 會拒收）：宣告／沒宣告 × 拒收／成功
+    ED = 'expected_dt:\n  upload: rejected\n  reason: "供應商 SBOM 不符 schema"\n'
+    PRE = [(x, "OK", "x") for x in fd.REJECT_PRE_OK if x != "D-dt-project"]
+    REJ = PRE + [("D-dt-project", "OK", "x"), ("D-dt-upload", "FAIL", 'http=400 {"title":"The uploaded BOM is invalid"}'),
+                 ("D-dt-bom-processing", "NOT_RUN", "上傳失敗"), ("D-dt-vuln-analysis", "NOT_RUN", "上傳失敗")]
+    REJ_SUMM = {"components": 0, "findings_total": 0, "checks": [
+        {"name": "專案存在", "status": "OK", "detail": ""}, {"name": "弱點分析完成", "status": "FAIL", "detail": ""},
+        {"name": "元件數", "status": "FAIL", "detail": ""}, {"name": "漏洞總數", "status": "OK", "detail": ""}]}
+
+    def rej_case(self, declared, rows, summ, root):
+        info, o = self.prep(bom(comp("a", "r1")), slug="sup-" + root, out="p-" + root, kind="sbom",
+                            version=("firmware_version: 1.0\n" + (self.ED if declared else "")))
+        return o, self.dt_sample(info, rows, summ, {"matches": []}, root=root)
+
+    def test_declared_and_rejected_is_fail_but_accepted(self):
+        o, dt = self.rej_case(True, self.REJ, self.REJ_SUMM, "d1")
+        rc, out, md = self.run_report([o], dt)
+        self.assertEqual(rc, 0)                                     # 與宣告一致：不讓 job 失敗
+        self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), out)  # 狀態照實寫
+        self.assertIn("與 firmware.yml 宣告的 expected_dt 一致", out)
+        self.assertIn("供應商 SBOM 不符 schema", out)
+        self.assertIn("弱點分析完成、元件數", out)                      # 合併成一則說明
+        self.assertNotIn("dt-verify FAIL", out)                       # 不重複報
+        self.assertEqual(out.count("sca-scan FAIL 階段"), 0)
+
+    def test_declared_rejected_with_unrelated_failures_is_not_accepted(self):
+        bad_summ = dict(self.REJ_SUMM, checks=self.REJ_SUMM["checks"] + [{"name": "專案存在2", "status": "FAIL", "detail": ""}])
+        o, dt = self.rej_case(True, self.REJ, bad_summ, "d2")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertIn("專案存在2", out)
+        self.assertIn("不放行", out)
+        rows = [r if r[0] != "C-grype" else ("C-grype", "FAIL", "x") for r in self.REJ]
+        o, dt = self.rej_case(True, rows, self.REJ_SUMM, "d3")
+        self.assertEqual(self.run_report([o], dt)[0], 1)
+        rows = [r for r in self.REJ if r[0] != "B-sandbox"] + [("B-sandbox", "GAP", "x")]       # 上傳之前的必要階段不是 OK
+        o, dt = self.rej_case(True, rows, self.REJ_SUMM, "d4")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertIn("B-sandbox", out)
+        rows = self.REJ + [("C-sbomgate", "FAIL", "x")]                                         # 別的 FAIL 階段
+        o, dt = self.rej_case(True, rows, self.REJ_SUMM, "d5")
+        self.assertEqual(self.run_report([o], dt)[0], 1)
+
+    def test_declared_but_uploaded_ok_is_mismatch(self):
+        o, dt = self.rej_case(True, self.GOOD, self.SUMM, "d6")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tMISMATCH\t"), out)
+        self.assertIn("供應商可能修好了", out)
+
+    def test_not_declared_and_rejected_is_plain_fail(self):
+        o, dt = self.rej_case(False, self.REJ, self.REJ_SUMM, "d7")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), out)
+        self.assertIn("沒有宣告 expected_dt", out)
+        self.assertNotIn("一致", out)
+
+    def test_not_declared_and_ok_is_unchanged(self):
+        o, dt = self.rej_case(False, self.GOOD, self.SUMM, "d8")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+
+    def test_declared_non_400_failure_is_not_a_rejection(self):
+        rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", "FAIL", "http=500 x") for r in self.REJ]
+        o, dt = self.rej_case(True, rows, self.REJ_SUMM, "d9")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1)
+        self.assertIn("不是 http=400", out)
+
+    def test_expected_dt_validation(self):
+        for bad in ("expected_dt: yes\n", "expected_dt:\n  upload: accepted\n  reason: x\n",
+                    "expected_dt:\n  upload: rejected\n", "expected_dt:\n  upload: rejected\n  reason: x\n  extra: 1\n",
+                    "expected_dt:\n  upload: rejected\n  reason: ''\n"):
+            s = self.sample("bad-" + str(abs(hash(bad)) % 1000), kind="sbom", version="firmware_version: 1\n" + bad)
+            b = self.w("in/b.json", bom(comp("a", "r1")))
+            with self.assertRaises(fd.DtError, msg=bad):
+                fd.prep(b, s, os.path.join(self.tmp, "pbad"))
+
     def test_multi_samples_one_line_each(self):
         _, o1 = self.prep(bom(comp("a", "r1")), slug="s1", out="p1")
         _, o2 = self.prep(bom(comp("a", "r1")), slug="s2", out="p2")

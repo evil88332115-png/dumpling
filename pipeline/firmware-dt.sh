@@ -92,12 +92,17 @@ for p in "${preps[@]}"; do
   if [ ! -x "$root/tools/pilot/sca-scan" ]; then
     say "FIRMWARE-DT-STEP	NOT_RUN	$name	沒有 tools/pilot/sca-scan（C1 的工具還沒進這個分支）"; continue
   fi
+  # firmware.yml 宣告 expected_dt（DT 會拒收這份 SBOM）的樣本：sca-scan 結束碼 1、必要階段不是 OK、dt-verify 失敗是預期的後果，
+  # 這三步不單獨讓結束碼變 1；是否真的「只有被拒收這一個原因」由 report 核對 status.tsv 與 summary.json（其他失敗照常 FAIL）。
+  declared=$(python3 -I -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("expected_dt") else 0)' "$p/dt-project.json")
   srcrc=0
   "$root/tools/pilot/sca-scan" --sbom "$p/sbom.cdx.json" --name "$name" --version "$ver" --out "$sd/scan" --no-license \
     > "$sd/sca-scan.log" 2>&1 || srcrc=$?
   tail -3 "$sd/sca-scan.log" >> "$log"
   case $srcrc in
     0|2) ;;           # 2＝沒有 FAIL，但有 NOT_RUN／GAP／ATTENTION
+    1) if [ "$declared" = 1 ]; then say "FIRMWARE-DT-STEP	EXPECTED	$name	sca-scan 結束碼 1（firmware.yml 宣告 expected_dt，交給 report 核對）"
+       else say "FIRMWARE-DT-STEP	FAIL	$name	sca-scan 結束碼 1"; rc=1; fi ;;
     *) say "FIRMWARE-DT-STEP	FAIL	$name	sca-scan 結束碼 $srcrc"; rc=1 ;;
   esac
   if [ -f "$sd/scan/status.tsv" ]; then
@@ -105,6 +110,8 @@ for p in "${preps[@]}"; do
       say "FIRMWARE-DT-STEP	OK	$name	$(cell "$line")"
     elif [ "$wait_rc" = 3 ]; then
       say "FIRMWARE-DT-STEP	GAP	$name	必要階段不是 OK，但 dt-ephemeral wait 結束碼 3（資料不完整）：$(cell "$line")"
+    elif [ "$declared" = 1 ]; then
+      say "FIRMWARE-DT-STEP	EXPECTED	$name	必要階段不是 OK（firmware.yml 宣告 expected_dt，交給 report 核對）：$(cell "$line")"
     else
       say "FIRMWARE-DT-STEP	FAIL	$name	$(cell "$line")"; rc=1
     fi
@@ -115,7 +122,9 @@ for p in "${preps[@]}"; do
   vrc=0
   python3 -I "$root/pipeline/dt-verify.py" verify "$p/expected.json" "$sd" > "$sd/verify.log" 2>&1 || vrc=$?
   tail -3 "$sd/verify.log" >> "$log"
-  [ "$vrc" -eq 0 ] && say "FIRMWARE-DT-STEP	OK	$name	dt-verify 通過" || { say "FIRMWARE-DT-STEP	FAIL	$name	dt-verify 結束碼 $vrc"; rc=1; }
+  if [ "$vrc" -eq 0 ]; then say "FIRMWARE-DT-STEP	OK	$name	dt-verify 通過"
+  elif [ "$declared" = 1 ]; then say "FIRMWARE-DT-STEP	EXPECTED	$name	dt-verify 結束碼 $vrc（firmware.yml 宣告 expected_dt，交給 report 核對）"
+  else say "FIRMWARE-DT-STEP	FAIL	$name	dt-verify 結束碼 $vrc"; rc=1; fi
 done
 
 # report

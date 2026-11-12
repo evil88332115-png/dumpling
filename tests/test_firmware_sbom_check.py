@@ -104,6 +104,24 @@ class StatusTest(Base):
         self.assertEqual((st, rc), ("OK", 0))
         self.assertIn("2 個元件", msg)
 
+    def test_dt_schema_hints(self):
+        ok = sc.judge(sc.basic_check(cdx(comp("a"))))
+        self.assertEqual(ok[0], "OK")
+        self.assertNotIn("DT 可能拒收", ok[1])
+        # license 只有 url（沒有 id 也沒有 name）、頂層有未知欄位
+        bad = cdx(dict(comp("lic"), licenses=[{"license": {"id": "MIT"}}, {"license": {"url": "https://x"}}]))
+        bad["platform"] = "x"
+        st, msg = sc.judge(sc.basic_check(bad))
+        self.assertEqual(st, "ATTENTION")
+        self.assertIn("DT 可能拒收（schema 不符）", msg)
+        self.assertIn("license 沒有 id 也沒有 name（lic）", msg)
+        self.assertIn("platform", msg)
+        # 有 id 或 name、或 expression，不提示；SPDX 不檢查
+        fine = cdx(dict(comp("a"), licenses=[{"license": {"name": "Custom"}}, {"expression": "MIT OR ISC"}]))
+        self.assertNotIn("DT 可能拒收", sc.judge(sc.basic_check(fine))[1])
+        # 提示是說明、不是 schema 驗證：沒有提示也不代表合格
+        self.assertEqual(sc.basic_check(fine)["dt_hints"], [])
+
     def test_missing_cpe_or_purl_is_attention(self):
         st, msg, rc = self.status(cdx(comp("a"), comp("b", cpe=None), comp("c", purl=None)))
         self.assertEqual((st, rc), ("ATTENTION", 0))

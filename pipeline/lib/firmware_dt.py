@@ -8,7 +8,7 @@
            在 prep 資料夾寫 expected.json（給 pipeline/dt-verify.py verify；格式依 C1 目前版本）與
            firmware-dt-expected.json（我們自己的、與 DT 工具介面無關的預期）。
   report   --prep <資料夾>... [--dt-result <資料夾>] --out <資料夾>
-           寫 <out>/firmware-dt.md，每個樣本印一行 FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL<TAB>…
+           寫 <out>/firmware-dt.md，每個樣本印一行 FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL|MISMATCH<TAB>…
 
 規則：不改元件內容、不加猜的 purl／cpe；缺資料、沒跑一律標 GAP／NOT_RUN；不顯示整體 PASS 或「安全」。
 退出碼：0＝完成（report 有 FAIL 以 1 結束）；1＝輸入不合格或有 FAIL；64＝參數錯誤。
@@ -33,7 +33,13 @@ MAX_COMPONENTS = 200000
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")            # sca-scan --name 會把其他字元換成「-」，這裡先保證不需要換
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+~()-]{0,99}$")    # sca-scan --version 接受的字元
 KINDS = ("bios", "vbios", "sbom")
-STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL")
+STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL", "MISMATCH")
+# firmware.yml 的 expected_dt：樣本自己宣告 DT 的預期結果（目前只有 upload: rejected＝DT 會拒收這份 SBOM，例如供應商 SBOM 不符 CycloneDX schema）
+EXPECTED_DT_KEYS = ("upload", "reason")
+# 宣告 rejected 且真的被拒收時，上傳之前的這些階段仍要是 OK（其餘階段都在上傳之後，被拒收就不會有結果）
+REJECT_PRE_OK = ("A-source", "B-sandbox", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "C-upload-sbom", "D-dt-project", "F-secret-scan")
+# 被拒收的直接後果：dt-verify 這兩項（沒有上傳成功就沒有分析、沒有元件）；名稱取自 C1 的 dt-verify.py
+REJECT_VERIFY_NAMES = ("弱點分析完成", "元件數")
 
 
 class DtError(Exception):
@@ -207,6 +213,23 @@ def write_json(path, obj):
         fh.write("\n")
 
 
+def parse_expected_dt(v):
+    """firmware.yml 的 expected_dt：None 或 {upload: rejected, reason: 非空字串}；其他一律 DtError（打錯字不能悄悄放行）。"""
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise DtError("expected_dt 必須是 mapping")
+    for k in v:
+        if k not in EXPECTED_DT_KEYS:
+            raise DtError("expected_dt 有不認得的鍵 %s（可用：%s）" % (k, "、".join(EXPECTED_DT_KEYS)))
+    if v.get("upload") != "rejected":
+        raise DtError("expected_dt.upload 目前只能是 rejected")
+    r = v.get("reason")
+    if not isinstance(r, str) or not r.strip() or len(r) > 600:
+        raise DtError("expected_dt.reason 必須是 1～600 字的依據說明")
+    return {"upload": "rejected", "reason": r.strip()}
+
+
 def prep(sbom_path, sample_path, out, synthetic=False):
     doc, raw = load_json(sbom_path, MAX_BYTES, "SBOM")
     if not isinstance(doc, dict) or doc.get("bomFormat") != "CycloneDX" or not doc.get("specVersion"):
@@ -216,6 +239,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         raise DtError("components 不是陣列")
     sample = load_sample(sample_path)
     kind = sample.get("kind")
+    expected_dt = parse_expected_dt(sample.get("expected_dt"))
     if kind not in KINDS:
         raise DtError("firmware.yml 的 kind 必須是 %s" % "、".join(KINDS))
     slug = safe_slug(os.path.basename(os.path.dirname(os.path.abspath(sample_path))))
@@ -266,7 +290,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         sha = hashlib.sha256(fh.read()).hexdigest()
     info = {
         "project_name": name, "project_version": version, "kind": kind, "slug": slug,
-        "synthetic": is_synth, "synthetic_reasons": synth_reasons,
+        "synthetic": is_synth, "synthetic_reasons": synth_reasons, "expected_dt": expected_dt,
         "firmware_name": fw_name, "firmware_version": sample.get("firmware_version"),
         "sbom_file": "sbom.cdx.json", "sbom_sha256": sha, "input_sbom_sha256": hashlib.sha256(raw).hexdigest(),
         "replaced_metadata_component": ({"name": old.get("name"), "version": old.get("version")} if isinstance(old, dict) else None),
@@ -284,6 +308,7 @@ def load_prep(d):
         raise DtError("dt-project.json 欄位不齊：%s" % os.path.basename(d.rstrip("/")))
     if not NAME_RE.match(str(info["project_name"])) or not VERSION_RE.match(str(info["project_version"])):
         raise DtError("dt-project.json 的名稱或版本不安全")
+    parse_expected_dt(info.get("expected_dt"))
     return info
 
 
@@ -367,7 +392,9 @@ def sample_result(info, dt_dir, wait_rc):
     """回傳 dict：dt_components, dt_findings, upload, grype, grype_matches, status, notes。"""
     s = info["summary"]
     r = {"upload": "NOT_RUN", "dt_components": "-", "dt_findings": "-", "grype": "NOT_RUN", "grype_matches": "-",
-         "notes": [], "verify_fail": []}
+         "notes": [], "verify_fail": [], "accepted": False}
+    exp_dt = info.get("expected_dt")
+    rejected = False
     sd = os.path.join(dt_dir, info["project_name"]) if dt_dir else None
     rows = None
     summ = None
@@ -391,6 +418,10 @@ def sample_result(info, dt_dir, wait_rc):
     if rows is not None:
         r["upload"] = _worst([rows[x][0] if x in rows else "NOT_RUN" for x in UPLOAD_STAGES])
         fails = [k for k, v in rows.items() if v[0] == "FAIL"]
+        up = rows.get("D-dt-upload", ("NOT_RUN", ""))
+        rejected = up[0] == "FAIL" and up[1].startswith("http=400")        # DT 的 schema 驗證不過＝400 "The uploaded BOM is invalid"
+        if exp_dt and rejected:
+            fails = [k for k in fails if k != "D-dt-upload"]              # 已宣告的拒收，不重複報 sca-scan 的這一列
         if fails:
             r["notes"].append("sca-scan FAIL 階段：" + "、".join(_cell(x, 60) for x in sorted(fails)))
         g = rows.get("C-grype", ("NOT_RUN", ""))[0]
@@ -412,6 +443,12 @@ def sample_result(info, dt_dir, wait_rc):
             r["dt_components"] = summ.get("components", "?")
             r["dt_findings"] = summ.get("findings_total", "?")
             bad = [c.get("name") for c in summ.get("checks") or [] if isinstance(c, dict) and c.get("status") == "FAIL"]
+            if exp_dt and rejected:
+                # 拒收的直接後果（沒有上傳成功就沒有分析、沒有元件）：合併成一則說明，不重複報；其他 FAIL（例如專案存在）照報
+                consequence = [x for x in bad if x in REJECT_VERIFY_NAMES]
+                bad = [x for x in bad if x not in REJECT_VERIFY_NAMES]
+                if consequence:
+                    r["notes"].append("dt-verify 的「%s」FAIL 是同一個原因（上傳被拒、DT 沒有分析也沒有元件），不另外計算" % "、".join(consequence))
             nr = [c.get("name") for c in summ.get("checks") or [] if isinstance(c, dict) and c.get("status") == "NOT_RUN"]
             r["verify_fail"] += [_cell(x, 60) for x in bad]
             if nr:
@@ -421,8 +458,27 @@ def sample_result(info, dt_dir, wait_rc):
     else:
         r["notes"].append("沒有 dt-verify 的 summary.json")
     # 狀態
-    if r["upload"] == "FAIL" or r["verify_fail"] or r["grype"] == "FAIL":
+    if exp_dt and rejected:
+        # 宣告 rejected 且真的被拒收：照實標 FAIL，只有「沒有別的失敗」時才算與宣告一致（不讓 job 失敗）
+        pre = [x for x in REJECT_PRE_OK if rows is None or x not in rows or rows[x][0] != "OK"]
+        others = [k for k, v in (rows or {}).items() if v[0] == "FAIL" and k != "D-dt-upload"]
+        if pre:
+            r["notes"].append("上傳之前的必要階段不是 OK：" + "、".join(_cell(x, 60) for x in pre))
+        extra = bool(pre or others or r["verify_fail"] or r["grype"] == "FAIL")
+        r["accepted"] = not extra
+        r["notes"].insert(0, "DT 拒收上傳（http=400），%s：%s" % (
+            "與 firmware.yml 宣告的 expected_dt 一致" if not extra else "firmware.yml 有宣告 expected_dt，但還有其他失敗，不放行",
+            _cell(exp_dt["reason"], 400)))
         st = "FAIL"
+    elif exp_dt and r["upload"] == "OK":
+        st = "MISMATCH"
+        r["notes"].append("MISMATCH：firmware.yml 宣告 DT 會拒收這份 SBOM（expected_dt），但上傳成功；供應商可能修好了，請更新樣本")
+    elif r["upload"] == "FAIL" or r["verify_fail"] or r["grype"] == "FAIL":
+        st = "FAIL"
+        if rejected:
+            r["notes"].append("DT 拒收上傳（http=400）；firmware.yml 沒有宣告 expected_dt")
+        elif exp_dt:
+            r["notes"].append("firmware.yml 宣告 expected_dt: rejected，但上傳失敗不是 http=400 的拒收")
     elif wait_rc == 3 or "GAP" in (r["upload"], r["grype"]):
         st = "GAP"
     elif summ is None or rows is None or r["upload"] != "OK" or r["grype"] != "OK":
@@ -503,6 +559,8 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
            "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。",
+           "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
+           "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
            "- 狀態 OK 只表示：上傳與驗證都完成，且每個元件都有 purl、沒有版本 GAP、沒有 NOT_ASSESSED；ATTENTION 表示完成但仍有元件沒有資料可比對。這份報告沒有整體通過或安全的結論。",
            "", "## 每個樣本的摘要", ""]
@@ -522,7 +580,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         md.append("")
     with open(os.path.join(out, "firmware-dt.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
-    return lines, any(r["status"] == "FAIL" for _, r in rows)
+    return lines, any(r["status"] in ("FAIL", "MISMATCH") and not r["accepted"] for _, r in rows)
 
 
 def main(argv=None):
