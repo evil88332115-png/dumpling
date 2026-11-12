@@ -78,9 +78,12 @@ def _text(b):
 
 
 def find_banner(rom):
-    """`Intel(R) … SVGA BIOS`（中間 1～MAX_TEXT 個可列印 ASCII）→ bytes 或 None。
+    r"""`Intel(R) … SVGA BIOS`（中間 1～MAX_TEXT 個可列印 ASCII）→ bytes 或 None。
     先找結尾的 "SVGA BIOS"，再往前最多 MAX_TEXT＋8 bytes 找 "Intel(R)"：工作量是線性的。
-    （用 regex `Intel\(R\)[ -~]{1,128}?SVGA BIOS` 對滿是 "Intel(R)" 的構造 ROM 會有 128 倍放大。）"""
+    （用 regex `Intel\(R\)[ -~]{1,128}?SVGA BIOS` 對滿是 "Intel(R)" 的構造 ROM 會有 128 倍放大。）
+    副作用：最多只看前 MAX_BANNER_TAILS（1024）個 "SVGA BIOS"。ROM 裡前面若有超過 1024 個「不合格」的 "SVGA BIOS"
+    （前面沒有 "Intel(R)"、中間太長或有不可列印字元），排在後面的真橫幅就不會被找到，回傳 None（banner 為 None）。
+    這是有意的上限：不會出錯、也不會誤認，只是少找到橫幅，呼叫端把它當成「沒有橫幅」。"""
     j, seen = rom.find(BANNER_TAIL), 0
     while j >= 0 and seen < MAX_BANNER_TAILS:
         seen += 1

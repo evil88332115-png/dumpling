@@ -247,6 +247,20 @@ class ReportTests(Base):
         self.assertNotIn("PASS", md)
         self.assertNotIn("安全。", md.replace("沒有整體通過或安全的結論", ""))
 
+    def test_untrusted_text_in_report_is_neutralized_once(self):
+        info, o = self.prep(bom(comp("a", "r1")))
+        rows = [r if r[0] != "D-dt-upload" else ("[evil](http://e)", "FAIL", "x") for r in self.GOOD]
+        summ = dict(self.SUMM, checks=[{"name": "<img src=x>\u202e|檢查", "status": "FAIL", "detail": ""},
+                                      {"name": "[nr](http://e)", "status": "NOT_RUN", "detail": ""}])
+        rc, out, md = self.run_report([o], self.dt_sample(info, rows, summ, {"matches": []}))
+        for text in (out, md):
+            self.assertNotIn("](", text)
+            self.assertNotIn("\u202e", text)
+            self.assertNotRegex(text.replace("|", ""), r"(?<!\\)[<>\[\]]")
+        self.assertIn("\\[evil\\]\\(http\\://e\\)", md)           # 跳脫一次（不是兩次）
+        self.assertNotIn("\\\\[", md)
+        self.assertIn("\\<img src=x\\>", md)
+
     def test_not_run_when_dt_dir_lacks_sample(self):
         _, o = self.prep(bom(comp("a", "r1")))
         os.makedirs(os.path.join(self.tmp, "dt"))

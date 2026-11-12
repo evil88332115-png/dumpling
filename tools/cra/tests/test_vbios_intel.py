@@ -331,3 +331,23 @@ def test_banner_found_and_bounds():
     assert iv.find_banner(b"Intel(R)SVGA BIOS") is None                       # 中間至少 1 個字元
     assert iv.find_banner(b"Intel(R) " + b"a" * 200 + b" SVGA BIOS") is None   # 中間超過 MAX_TEXT
     assert iv.find_banner(b"Intel(R) a\x01b SVGA BIOS") is None                # 中間有不可列印字元
+
+
+def test_banner_tail_limit_side_effect_is_documented_and_harmless():
+    """超過 MAX_BANNER_TAILS 個不合格的 "SVGA BIOS" 之後，真橫幅找不到 → None（不丟例外）；沒超過就找得到。"""
+    import intel_vbios as iv
+    real = b"Intel(R) ICL Mobile/Desktop PCI Accelerated SVGA BIOS"
+    assert iv.find_banner(b"SVGA BIOS\0" * (iv.MAX_BANNER_TAILS - 1) + real) == real
+    assert iv.find_banner(b"SVGA BIOS\0" * (iv.MAX_BANNER_TAILS + 1) + real) is None
+    assert "MAX_BANNER_TAILS" in iv.find_banner.__doc__
+
+
+def test_intel_vbios_module_has_no_invalid_escape_warning():
+    """find_banner 的 docstring 曾有 \\(：編譯時要沒有 SyntaxWarning／DeprecationWarning。"""
+    import warnings
+    import intel_vbios as iv
+    with open(iv.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        compile(src, iv.__file__, "exec")

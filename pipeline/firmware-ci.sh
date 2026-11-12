@@ -18,7 +18,8 @@ mkdir -p "$work" "$art"
   echo '|---|---|---|---|'
 } > "$summary"
 
-cell() { local s=${1//$'\n'/ }; s=${s//|/\\|}; printf '%s' "$s"; }
+# 摘要.md 的儲存格：狀態行與 expected 說明含解析出來的文字，一律經共用的 md_safe（濾控制字元、跳脫 markdown 特殊字元、截短）
+cell() { python3 -I "$here/lib/firmware_mdsafe.py" --limit 600 -- "$1"; }
 
 rc=0
 for m in "${manifests[@]}"; do

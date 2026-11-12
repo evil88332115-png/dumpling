@@ -6,6 +6,7 @@ on:
       - 'firmware/**'
       - 'pipeline/firmware-*.sh'
       - 'pipeline/install-tool.sh'
+      - 'pipeline/check-tool-version.sh'
       - 'pipeline/lib/tools.lock'
       - 'pipeline/firmware-expect.py'
       - 'pipeline/lib/firmware_*.py'
@@ -73,19 +74,35 @@ jobs:
         run: |
           exe=$(pipeline/install-tool.sh sbomqs "$RUNNER_TEMP/bin")
           echo "SBOMQS=$exe" >> "$GITHUB_ENV"
+          # 執行檔回報的版本要等於 tools.lock 的 sbomqs_version（不符就紅燈）
+          pipeline/check-tool-version.sh sbomqs "$exe"
           "$exe" version 2>&1 | grep -E 'GitVersion|GitCommit'
       - name: 供應商 SBOM 品質檢查
         if: always() && steps.fetch.conclusion == 'success'
         run: |
+          # nullglob：沒有 kind: sbom 的樣本時，glob 展開成空，不會把字面的萬用字元當檔名（那會變成假的 FAIL）
+          shopt -s nullglob
+          files=("$RUNNER_TEMP"/firmware-dl/sbom/*/*.sbom.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "FIRMWARE-SBOM	NOT_RUN	-	沒有 kind: sbom 的樣本可檢查"
+            {
+              echo
+              echo '### 供應商 SBOM 品質檢查'
+              echo
+              echo 'NOT_RUN：沒有 kind: sbom 的樣本可檢查。'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           rc=0
-          pipeline/firmware-sbom-check.sh "$RUNNER_TEMP"/firmware-dl/sbom/*/*.sbom.json --out "$RUNNER_TEMP/sbom-check" | tee "$RUNNER_TEMP/sbom-check.log" || rc=$?
+          pipeline/firmware-sbom-check.sh "${files[@]}" --out "$RUNNER_TEMP/sbom-check" | tee "$RUNNER_TEMP/sbom-check.log" || rc=$?
           {
             echo
             echo '### 供應商 SBOM 品質檢查'
             echo
             echo '| 狀態 | 檔案 | 說明 |'
             echo '|---|---|---|'
-            awk -F'\t' '{ gsub(/\|/, "\\|", $4); print "| " $2 " | " $3 " | " $4 " |" }' "$RUNNER_TEMP/sbom-check.log"
+            # 檔名與說明裡的不可信文字已由 firmware_mdsafe 跳脫（| 已是 \|）；這裡再保證每個 | 都有跳脫，且不會跳脫兩次
+            awk -F'\t' '{ gsub(/\\?\|/, "\\|", $3); gsub(/\\?\|/, "\\|", $4); print "| " $2 " | " $3 " | " $4 " |" }' "$RUNNER_TEMP/sbom-check.log"
             echo
             echo '_狀態只反映基本檢查（版本、purl／cpe）；sbomqs 分數僅供參考、沒有設門檻；漏洞比對 NOT_RUN。這不是整體通過或安全的結論。_'
           } >> "$GITHUB_STEP_SUMMARY"

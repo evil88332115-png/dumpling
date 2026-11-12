@@ -323,8 +323,25 @@ def expected(prep_dir):
 
 # ---------- report ----------
 
-def _cell(s):
-    return str(s).replace("\n", " ").replace("|", "\\|")
+def _load_mdsafe():
+    # python3 -I 不把腳本所在資料夾放進 sys.path，用路徑載入同資料夾的共用清理模組
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "firmware_mdsafe", os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware_mdsafe.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MDSAFE = []
+
+
+def _cell(s, limit=300):
+    """寫進 markdown 或狀態行的不可信文字（dt-verify／sca-scan 的檢查名與階段名、錯誤訊息、樣本名…）：一律經共用的 md_safe。
+    只在文字產生時呼叫一次（notes、verify_fail 存的就是清理過的），輸出 markdown 時不要再呼叫，否則會跳脫兩次。"""
+    if not _MDSAFE:
+        _MDSAFE.append(_load_mdsafe())
+    return _MDSAFE[0].md_safe(s, limit)
 
 
 def read_status_tsv(path):
@@ -363,13 +380,13 @@ def sample_result(info, dt_dir, wait_rc):
             try:
                 rows = read_status_tsv(st)
             except DtError as e:
-                r["upload"] = "FAIL"; r["notes"].append(str(e))
+                r["upload"] = "FAIL"; r["notes"].append(_cell(e))
         sj = os.path.join(sd, "summary.json")
         if os.path.isfile(sj):
             try:
                 summ, _ = load_json(sj, MAX_BYTES, "summary.json")
             except DtError as e:
-                r["notes"].append(str(e)); r["verify_fail"].append("summary.json 讀不到")
+                r["notes"].append(_cell(e)); r["verify_fail"].append("summary.json 讀不到")
     if rows is None and summ is None and r["upload"] != "FAIL":
         r["notes"].append("沒有 DT 結果")
         r["status"] = "NOT_RUN"
@@ -378,7 +395,7 @@ def sample_result(info, dt_dir, wait_rc):
         r["upload"] = _worst([rows[x][0] if x in rows else "NOT_RUN" for x in UPLOAD_STAGES])
         fails = [k for k, v in rows.items() if v[0] == "FAIL"]
         if fails:
-            r["notes"].append("sca-scan FAIL 階段：" + "、".join(sorted(fails)))
+            r["notes"].append("sca-scan FAIL 階段：" + "、".join(_cell(x, 60) for x in sorted(fails)))
         g = rows.get("C-grype", ("NOT_RUN", ""))[0]
         r["grype"] = g
         gj = os.path.join(sd, "scan", "scan", "grype.json")   # sca-scan --out 是 <sd>/scan，Grype 結果在它的 scan/grype.json
@@ -390,7 +407,7 @@ def sample_result(info, dt_dir, wait_rc):
                     raise DtError("grype.json 沒有 matches 陣列")
                 r["grype_matches"] = len(m)
             except DtError as e:
-                r["grype"] = "FAIL"; r["notes"].append(str(e))
+                r["grype"] = "FAIL"; r["notes"].append(_cell(e))
     elif r["upload"] != "FAIL":
         r["notes"].append("沒有 scan/status.tsv：上傳狀態未知")
     if summ is not None:
@@ -399,9 +416,9 @@ def sample_result(info, dt_dir, wait_rc):
             r["dt_findings"] = summ.get("findings_total", "?")
             bad = [c.get("name") for c in summ.get("checks") or [] if isinstance(c, dict) and c.get("status") == "FAIL"]
             nr = [c.get("name") for c in summ.get("checks") or [] if isinstance(c, dict) and c.get("status") == "NOT_RUN"]
-            r["verify_fail"] += bad
+            r["verify_fail"] += [_cell(x, 60) for x in bad]
             if nr:
-                r["notes"].append("dt-verify NOT_RUN：" + "、".join(map(str, nr)))
+                r["notes"].append("dt-verify NOT_RUN：" + "、".join(_cell(x, 60) for x in nr))
         else:
             r["verify_fail"].append("summary.json 格式不對")
     else:
@@ -474,9 +491,9 @@ def report(prep_dirs, dt_dir, out):
             s["components"], s["with_purl"], s["with_cpe"],
             "、".join("%s=%d" % kv for kv in sorted(s["vuln_assessment"].items())) or "無", s["version_gap"]))
         for n in res["notes"]:
-            md.append("- " + _cell(n))
+            md.append("- " + n)               # notes／verify_fail 在產生時已經過 _cell
         if res["verify_fail"]:
-            md.append("- dt-verify FAIL：" + _cell("、".join(map(str, res["verify_fail"]))))
+            md.append("- dt-verify FAIL：" + "、".join(res["verify_fail"]))
         md.append("")
     with open(os.path.join(out, "firmware-dt.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
