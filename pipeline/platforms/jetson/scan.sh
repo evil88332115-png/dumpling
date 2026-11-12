@@ -107,7 +107,7 @@ for it in json.load(open(sys.argv[1]))["scan_plan"]: print(it["name_suffix"] + "
 
 # ---------- 4. 收集與標準答案 ----------
 echo "== 收集"
-runargs=(); for r in "${runs[@]}"; do runargs+=(--run "$r"); done
+runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
   --build-json "$out/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" "${runargs[@]}" "${official[@]}" \

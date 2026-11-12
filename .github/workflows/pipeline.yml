@@ -170,6 +170,14 @@ jobs:
           [ -d "$o/release" ] && cp -r "$o/release/." "$RUNNER_TEMP/result/" || true
           for f in build.json assemble.json scan.json expected-check.txt; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
           [ -f "$o/summary.md" ] && cat "$o/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+          # 診斷用（只在 artifact，不進 Release）：精靈輸出裡的小檔（狀態、紀錄、比對結果、報告），不含解開的原始碼與建置紀錄
+          if [ -d "$o/wizard-out" ]; then
+            mkdir -p "$RUNNER_TEMP/result/diag"
+            rsync -a --prune-empty-dirs --max-size=150m --exclude 'src/' --exclude 'buildrecord/' --exclude 'tmp/' --exclude 'wt/' \
+              --exclude '*.tar' --exclude '*.tar.gz' --exclude '*.tbz2' "$o/wizard-out/" "$RUNNER_TEMP/result/diag/wizard-out/" || true
+            for f in layers/layers.json wizard.log wizard-bsp.log wizard-os.log; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/diag/" || true; done
+            du -sh "$RUNNER_TEMP/result/diag" || true
+          fi
           ls -l "$RUNNER_TEMP/result"
 
       - name: 臨時 DT：down
