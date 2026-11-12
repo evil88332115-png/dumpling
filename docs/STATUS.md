@@ -2,17 +2,17 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 07:54 -0500（C2）
+最後更新：2026-11-12 07:55 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：WP0 完成；接下來看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main f39fbfe（PR #1 README、PR #2 D-014 PR 單位，均已合併）；status 分支
+- 分支／PR／commit：main 3f1c260（PR #1 README、#2 D-014、#3 共用骨架＋D-015，均已合併）；status 分支
 - 已完成（WP0）：公開 repo（Apache-2.0，個人信箱外洩後已刪除重建）、docs（PLAN 公開版、DECISIONS D-001～D-013、HANDOFF、STATUS 指標）、`status` 分支、CI tests.yml（public-check、unit-tests，main 綠燈）、pre-push hook（本機禁用字）、main／status 分支保護、Actions 權限唯讀、fork PR 需核准
 - 代理：無
 - CI：無進行中
-- 下一步：等 C1／C2 回報（已通知 D-014 給 dumpling-c9、dumpling-b3 兩個對話，待確認各是哪一個）；C1–C4 的 PR 由 C0 派獨立驗證代理驗證後合併（`gh pr merge --squash --author-email <noreply>`）
+- 下一步：C2 已報到（wp3/firmware-samples），已回覆 D-015 分工；等 C2 PR 1（樣本清單）送驗證；dumpling-c9 等使用者指派角色（預計 C1）。C1–C4 的 PR 由 C0 派獨立驗證代理驗證後合併（`gh pr merge --squash --author-email <noreply>`）
 - 卡住／等決定：無
 <!-- END C0 -->
 
