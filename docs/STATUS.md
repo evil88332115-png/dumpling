@@ -2,18 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 08:10 -0500（C1）
+最後更新：2026-11-12 08:11 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：WP0 完成；看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main c7952d7（PR #1 README、#2 D-014、#3 共用骨架＋D-015、#4 D-016、#5 D-017，均已合併）；status 分支
-- 已完成（WP0）：公開 repo（Apache-2.0，個人信箱外洩後已刪除重建）、docs（PLAN 公開版、DECISIONS、HANDOFF、STATUS 指標、PROVENANCE 骨架）、`status` 分支、CI tests.yml（public-check、unit-tests→tests/run.sh）、pre-push hook、main／status 分支保護、Actions 權限唯讀、fork PR 需核准
-- 代理：無（C0）
-- 代理總數（全部對話）：C1 寫程式 2、C2 寫程式 2，共 4／上限 8；主機負載 1.6
+- 目前在做：看 PR、合併、驗收，回覆 C1–C4
+- 分支／PR／commit：main 631646e（WP0 的 PR #1–#5、#10 已合併；#10＝D-018 本機路徑規則不誤擋 drivers/media/）；status 分支
+- 代理：
+  - 驗證代理（Sonnet 5.5）：驗 C2 的 PR #8（wp3/bios-sbom），結論貼在 PR 留言，狀態：進行中
+- 代理總數（全部對話）：C1 寫程式 2、C2 寫程式 2＋驗證 1、C0 驗證 1，約 6／上限 8；負載 1.4
 - CI：無進行中
-- 下一步：等 C1 的 M1 PR（wp1/m1-tools，含 uefi_image.py）、C2 的 PR 1（wp3/firmware-samples）、PR 2a（wp3/bios-sbom）。各工作包自己的驗證代理留言後，C0 看 diff 與 CI；里程碑 PR（M1 起）C0 另派一個獨立驗證代理。合併用 `gh pr merge --squash --author-email <noreply>`
+- 下一步：PR #8 驗證通過 → update-branch → 合併 → 通知 C1 merge main（M1 需要 D-017 共用檔）；之後 C2 的 PR #7、C1 的 M1（draft #6、#9 → 正式 PR）
+- 做法（使用者 11-12）：C0 自己的文件改動累積成批再開 PR，決定先用訊息生效
 - 卡住／等決定：無
 <!-- END C0 -->
 
