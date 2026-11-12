@@ -30,8 +30,10 @@ echo "元件 SHA-1：相符 $ok、不符 $bad、清單有但包內沒有 $missin
 diff <(sed 's/^[^ ]* \*//' "$D/public_sources_sha.txt" | grep -v '\.sha1sum$' | sort) <(ls "$S" | grep -v '\.sha1sum$' | sort) > /dev/null && echo "包內檔案和清單一致" || echo "包內檔案和清單有差異"
 
 echo "== NVIDIA 附的建置腳本（只讀內容，不執行）"
+# 每行前面加 "| "：避免內容被 Actions 當成工作流程指令（以 :: 或 ## 開頭的行）吃掉
+show() { echo "----- $1"; sed 's/^/| /' "$1"; }
 for f in nv_public_src_build.sh nv_public_src_build_tos.sh; do
-  [ -f "$S/$f" ] && { echo "----- $f"; cat "$S/$f"; }
+  [ -f "$S/$f" ] && show "$S/$f"
 done
 
 # 解開核心與樹外模組元件
@@ -42,4 +44,10 @@ for c in kernel_src.tbz2 kernel_oot_modules_src.tbz2 kernel_nvgpu_src.tbz2 nvidi
   else echo "沒有 $c"; fi
 done
 echo "== 解開後頂層"; ls -la "$W/x"/* | head -80
+K=$W/x/kernel_src
+echo "== kernel_src 建置腳本（只讀內容，不執行）"
+for f in nvbuild.sh nvcommon_build.sh kernel_src_build_env.sh; do [ -f "$K/$f" ] && show "$K/$f"; done
+echo "== kernel_src/kernel 內容"; find "$K/kernel" -maxdepth 2 | head -40
+echo "== oot Makefile"; [ -f "$W/x/kernel_oot_modules_src/Makefile" ] && show "$W/x/kernel_oot_modules_src/Makefile"
+echo "== oot 各元件頂層"; find "$W/x/kernel_oot_modules_src" -maxdepth 2 -mindepth 2 | head -60
 snap_df 解開後
