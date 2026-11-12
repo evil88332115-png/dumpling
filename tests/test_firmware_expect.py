@@ -51,6 +51,20 @@ class CompareTest(unittest.TestCase):
                "dasharo_version": "v1.2.0", "coreboot_build_date": "2024-03-13", "edk2_revision": "2a15268b36cc"}
         self.assertEqual(statuses(exp), ["OK"] * 9)
 
+    def test_gfx_keys(self):
+        sb = {"components": SBOM["components"] + [comp("Intel GOP driver", "1070"), comp("Intel GOP driver", "1071"),
+                                                   comp("Intel legacy VBIOS (option ROM)", "1003 PC 14.34"),
+                                                   comp("Intel VBT (Video BIOS Table)", "1.00")]}
+        ok = {"intel_gop": "1070", "intel_legacy_vbios": "1003 PC 14.34"}
+        self.assertEqual(statuses(ok, INV, sb), ["OK", "OK"])
+        self.assertEqual(statuses({"intel_gop": "1072", "intel_legacy_vbios": "1003 PC 14.35"}, INV, sb), ["MISMATCH", "MISMATCH"])
+        self.assertEqual(statuses(ok), ["MISSING", "MISSING"])           # SBOM 沒有元件
+        nov = {"components": [{"name": "Intel GOP driver"}]}              # 有元件但沒讀到版本
+        self.assertEqual(statuses({"intel_gop": "1070"}, INV, nov), ["MISSING"])
+        self.assertEqual(statuses(ok, None, None), ["NOT_RUN", "NOT_RUN"])
+        with self.assertRaises(fe.FormatError):
+            fe.compare({"intel_vbt": "1.00"}, INV, sb)
+
     def test_mismatch(self):
         r = dict(fe.compare({"intel_me": "14.0.47.1559"}, INV, SBOM))
         self.assertEqual(list(r), ["MISMATCH"])

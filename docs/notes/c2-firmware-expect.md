@@ -25,6 +25,13 @@ Dasharo（`dasharo-protectli-vp46xx-v1.2.0`）新增四項，依據都是「2026
 
 VBT 版本（`1.00`、BDB 2.28）試掃報告沒有記錄，沒有加。NUC 維持一份微碼；OVMF 沒有 expected。OVMF 新增 `analyze` 欄位指定要取出 `usr/share/OVMF/OVMF_CODE_4M.fd`。
 
+## 顯示韌體鍵（intel_gop、intel_legacy_vbios）
+
+- 只比 SBOM 同名元件的 `version`（`Intel GOP driver`、`Intel legacy VBIOS (option ROM)`）。同名元件有多個時，跟 `fsp` 一樣任一個相符就 OK、其餘不比；沒有元件或元件沒讀到版本（GAP）＝MISSING，值不同＝MISMATCH，沒有輸出＝NOT_RUN。
+- GOP 的 version 只有 build 編號（`1070`），不是 release notes 的 `17.0.1070`，expected 要寫 build 編號。
+- 不加 `intel_vbt`：VBT 元件的 version 是 `$VBT` 表頭的格式版本（x100，NUC 樣本三份都是 `1.00`），不是發行版本，比對沒意義。
+- NUC 樣本：寫了 `intel_gop: "1070"`（映像讀到 build 1070，release notes 17.0.1070 佐證）。legacy VBIOS 映像讀到 `1003 PC 14.34`，但 release notes 沒有 VBIOS／1003／14.34 字樣（pdftotext 全文查過），沒有獨立佐證，所以沒寫進 expected。
+
 ## CI 結果（2026-11-12）
 
 - 綠燈：https://github.com/evil88332115-png/dumpling/actions/runs/43231626732

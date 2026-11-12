@@ -38,6 +38,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `coreboot_version`、`dasharo_version` | 字串 | 與 CBFS `revision` 讀到的相同 |
 | `coreboot_revision`、`edk2_revision` | git 修訂（縮寫即可） | 一方是另一方的前綴就算相符（至少 7 碼）；edk2 取 coreboot config 的 `CONFIG_EDK2_TAG_OR_REV` |
 | `coreboot_build_date` | `YYYY-MM-DD` | 與 CBFS `build_info` 的建置日期（UTC）相同 |
+| `intel_gop`、`intel_legacy_vbios` | 字串 | 與 SBOM 的 `Intel GOP driver`／`Intel legacy VBIOS (option ROM)` 元件 version 相同；同名元件多個時任一個相符就 OK；沒有元件或都沒讀到版本＝MISSING。GOP 的 version 只有 build 編號（如 `1070`）。VBT 不提供此鍵（version 是表頭格式版本） |
 
 每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 

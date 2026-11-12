@@ -21,6 +21,9 @@ expected 欄位（都選填，只寫有佐證的）：
   dasharo_version     字串，Dasharo 版本（例如 v1.2.0）
   coreboot_build_date 字串 YYYY-MM-DD，coreboot 建置日期（UTC）
   edk2_revision       字串，coreboot config 的 CONFIG_EDK2_TAG_OR_REV（前綴規則同上）
+  intel_gop           字串，SBOM 裡 `Intel GOP driver` 元件的 version（目前只有 build 編號，例如 1070，不是 17.0.1070）
+  intel_legacy_vbios  字串，SBOM 裡 `Intel legacy VBIOS (option ROM)` 元件的 version（例如 "1003 PC 14.34"）
+  （沒有 intel_vbt：VBT 元件的 version 是 $VBT 表頭的格式版本（x100），不是顯示韌體的發行版本，不拿來比對）
 """
 import argparse
 import json
@@ -33,7 +36,8 @@ except ImportError:
     yaml = None
 
 KEYS = ("intel_me", "microcode", "fsp", "coreboot_version", "coreboot_revision",
-        "dasharo_version", "coreboot_build_date", "edk2_revision")
+        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios")
+GFX_NAMES = {"intel_gop": "Intel GOP driver", "intel_legacy_vbios": "Intel legacy VBIOS (option ROM)"}
 STATUSES = ("OK", "MISMATCH", "MISSING", "NOT_RUN")
 
 
@@ -141,6 +145,9 @@ def compare(exp, inv, sbom):
             if k == "coreboot_build_date" and not (len(v) == 10 and v[4] == "-" and v[7] == "-"):
                 raise FormatError("coreboot_build_date 必須是 YYYY-MM-DD")
             plan.append((k, label, v))
+    for k, label in (("intel_gop", "Intel GOP driver 版本"), ("intel_legacy_vbios", "Intel legacy VBIOS 版本")):
+        if k in exp:
+            plan.append((k, label, scalar(exp[k], k)))
     if inv is None:
         return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）" % (p[1], p[2][3] if p[0] == "microcode" else p[2]))
                 for p in plan]
@@ -188,6 +195,16 @@ def compare(exp, inv, sbom):
                 items.append(result("MISMATCH", label, want, "inventory 有，但 SBOM 沒有對應的 FSP 元件"))
                 continue
             items.append(result("OK", label, want, show(got)))
+        elif key in GFX_NAMES:
+            # 只看 SBOM（GOP／legacy VBIOS 沒有進 inventory 的固定欄位）。映像裡可能有好幾個同名元件（例如多份 GOP），
+            # 跟 fsp 一樣：任一個的 version 相符就 OK，其餘不比。元件在但沒讀到 version（GAP）→ MISSING，不猜。
+            comps = [c for c in sbom_components(sbom) if c.get("name") == GFX_NAMES[key]]
+            got = uniq(str(c.get("version")) for c in comps if c.get("version"))
+            if not got:
+                items.append(result("MISSING", label, want, "（SBOM 裡沒有 %s 元件）" % GFX_NAMES[key] if not comps
+                                    else "（有 %d 個 %s 元件，但都沒讀到版本）" % (len(comps), GFX_NAMES[key])))
+            else:
+                items.append(result("OK" if want in got else "MISMATCH", label, want, show(got)))
         else:
             if key == "edk2_revision":
                 got = uniq(((x.get("config") or {}).get("keys") or {}).get("CONFIG_EDK2_TAG_OR_REV") for x in cb_items(inv, "coreboot"))
