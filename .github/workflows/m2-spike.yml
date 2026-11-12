@@ -1,0 +1,60 @@
+name: m2-spike
+
+# M2 可行性試驗（spike）：只量測，不是正式流程，不合併到 main。
+# 回答：Jetson 的編譯＋掃描能不能在一個 job 的 6 小時、runner 可用磁碟內完成。
+# 結果見 docs/m2-spike-results.md。
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: '要跑哪一段'
+        type: choice
+        default: cleanup
+        options:
+          - cleanup
+          - download
+          - inspect
+          - build
+      release:
+        description: 'Jetson Linux 版本（39.2.1 或 39.2.0）'
+        type: choice
+        default: '39.2.1'
+        options:
+          - '39.2.1'
+          - '39.2.0'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cleanup:
+    name: cleanup (${{ matrix.runner }})
+    if: ${{ inputs.stage == 'cleanup' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 清理量測
+        run: bash tools/spike/m2-cleanup.sh
+      - name: 摘要
+        if: ${{ always() }}
+        run: |
+          . tools/spike/m2-lib.sh
+          { echo "## cleanup ${{ matrix.runner }}"; report_md; echo; echo "### 候選項目（bytes）"; echo '```'; cat "$RES/candidates.tsv" 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: m2res-cleanup-${{ matrix.runner }}
+          path: ${{ runner.temp }}/m2res
+          retention-days: 7
