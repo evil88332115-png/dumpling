@@ -4,5 +4,12 @@ model: 獨立 NVIDIA vBIOS 映像（顯示卡或 mini PC 獨顯）
 status: GAP
 notes: |
   GAP：沒有官方可合法下載、可直接讀出 vBIOS 版本的公開檔案（NVIDIA 不公開發佈消費型 vBIOS 映像；
-  TechPowerUp 等收藏站不是官方來源，不使用）。
-  之後用合成的 option ROM（55 AA、PCIR、vendor 0x10DE）測流程；實際檔案由負責單位提供。
+  TechPowerUp 等收藏站不是官方來源，不使用）。官方的 DisplayPort 韌體更新工具也確認沒有完整 vBIOS
+  （見 firmware/vbios/nvidia-displayport-fw-updater-1.1）。
+  CI 用合成 ROM 測流程，實際檔案由負責單位提供：tools/cra/tests/synthetic_vbios.py 產生合成的 NVIDIA option ROM
+  （legacy x86 影像＋EFI 影像＋NPDE＋`XX.XX.XX.XX.XX` 版本字串＋正確的 checksum；內容是自己組的位元組，
+  裝置 ID 0xFFFE、ROM 裡有 SYNTHETIC 字樣，不是任何真實產品的 vBIOS），
+  tools/cra/tests/test_vbios_synthetic.py 走 pipeline/firmware-bios.sh → SBOM（版本、雜湊、NOT_ASSESSED、通過 CycloneDX schema）。
+  狀態維持 GAP：合成樣本只證明流程可用，不代表任何真實 vBIOS 已經清點。
+  產生檔案：python3 -I tools/cra/tests/synthetic_vbios.py --out synthetic-nvidia-option-rom.rom
+  （輸出檔名請保留 synthetic 字樣，SBOM 的 bsi:component:filename 與 sca-center:found-in 會記輸入檔名，下游看得出是合成的）。

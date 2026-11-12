@@ -34,8 +34,8 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/ubuntu-ovmf-2024.02` | PLAN B 段第一個樣本：edk2 成品（deb 內的 OVMF）加完整原始碼包與 Ubuntu patch，Launchpad 網址長期不變 |
 | `bios/dasharo-protectli-vp46xx-v1.2.0` | coreboot＋edk2，含 Intel ME、FSP、微碼；已有試掃結果可當預期值（`expected`）。附 coreboot、edk2 原始碼封存（GitHub 動態產生，雜湊可能變動，見該檔 notes） |
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
-| `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀檢查看得到 vendor 0x10DE 的 PCIR 結構，但不是可確認的完整 option ROM（見 notes） |
-| `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；之後用合成 option ROM 測流程，實際檔案由負責單位提供 |
+| `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
+| `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 
 ## 第二條路的候選（之後的 PR 才用，這次不下載）
 

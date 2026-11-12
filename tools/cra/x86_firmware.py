@@ -35,6 +35,9 @@ vBIOS（NVIDIA；例如更新包裡 nvflash 加內嵌 ROM 的 .exe，或直接�
   沒有正常結束或開頭不確定的 ROM 每個檔案合計最多 MAX_BROKEN_ROMS 個，超過就不再找，檔案記在 partial（解析到一半，ATTENTION）。
   vendor 0x10DE、而且有 x86（code type 0）或 EFI（3）影像的才算顯卡 vBIOS。
   只有其他類型（例如 0xE0 NVIDIA 韌體）的是燒錄工具自帶的映像：列在 other_roms（裝置 ID、雜湊、found_at 的檔案與位置），不是產品元件、不進 SBOM。
+- Intel legacy VBIOS（vendor 0x8086、PCIR class code 0x03xxxx、有 x86 影像；細節與樣本依據見 intel_vbios.py）：列在 inv["intel_vbios"]，
+  version＝ROM 裡 `Build Number: <n> PC <x.y> …` 行的「n PC x.y」（沒有或格式不符 → 版本 GAP），橫幅、建置時間、內嵌 VBT 另記；
+  SBOM 元件掛在所在的 BIOS 映像底下（檔案本身是 BIOS 映像時）。UEFI GOP 驅動的辨識函式在 intel_vbios.gop_driver()，還沒接到 BIOS 映像走訪。
 - 版本：ROM 範圍內第一個 `XX.XX.XX.XX.XX`（十六進位）字串。ROM 範圍外的不算（nvflash 自己的表格也有同格式的字串）。
 - 同一個 ROM（雜湊相同）在多個檔案出現時記一次、列出所有位置；不同板型的 ROM 各自一個元件。BIOS 映像也一樣依雜湊去重。
 
@@ -1722,7 +1725,91 @@ def components(inv):
             sub.append(ref)
         cbfs_components(b, img, comps, sub)
         deps[img] = sub
+    intel_gfx_components(inv, comps, deps)
     return comps, deps
+
+
+def intel_gfx_collect(roms, data, label, store):
+    """option_roms() 的結果裡的 Intel legacy VBIOS（intel_vbios.is_legacy_vbios）→ store（以 ROM 雜湊為鍵，同一個 ROM 多處出現記所有位置）。"""
+    iv = None
+    for r in roms:
+        if r["vendor"] != "8086":                       # 先用便宜的條件擋掉，不為了沒有 Intel ROM 的檔案載入模組
+            continue
+        iv = iv or load_sibling("intel_vbios")
+        if not iv.is_legacy_vbios(r):
+            continue
+        e = store.get(r["sha256"])
+        if e is None:
+            e = store[r["sha256"]] = {**{k: r.get(k) for k in ("vendor", "device", "class", "length", "images", "terminated", "terminated_note",
+                                                              "sha256", "sha512")},
+                                      **iv.legacy_info(data[r["offset"]:r["offset"] + r["length"]]),
+                                      **({"start_note": r["start_note"]} if r.get("start_note") else {}),
+                                      "locations": [], "found_at": []}
+        if label not in e["locations"]:
+            e["locations"].append(label)
+        e["found_at"].append({"file": label, "offset": r["offset"]})
+
+
+def intel_gfx_components(inv, comps, deps):
+    """Intel legacy VBIOS → 元件。ROM 所在的檔案同時是 BIOS 映像時，掛在那個 BIOS 映像底下。"""
+    parents = {loc: f"{REF}bios:{b['sha256'][:16]}" for b in inv["bios"] for loc in b["locations"]}
+    for v in inv.get("intel_vbios", ()):
+        ref = f"{REF}vbios-intel:{v['sha256'][:16]}"
+        c = {"type": "firmware", "bom-ref": ref, "name": "Intel legacy VBIOS (option ROM)", "manufacturer": {"name": "Intel Corporation"},
+             "hashes": hlist(v),
+             "properties": [prop("bsi:component:filename", fname(v["locations"][0])),
+                            *[prop(k, x) for k, x in zip(BSI_FLAGS, FIRMWARE_IMAGE)],
+                            prop("sca-center:pci-vendor-id", v["vendor"]), prop("sca-center:pci-device-id", v["device"]),
+                            prop("sca-center:rom-images", ", ".join(VBIOS_CODE_TYPES.get(i["code_type"], f"0x{i['code_type']:02x}")
+                                                                   for i in v["images"])),
+                            *([prop("dumpling:vbios-banner", v["banner"])] if v["banner"] else []),
+                            *([prop("dumpling:vbios-build-time", v["build_time"])] if v["build_time"] else []),
+                            *([prop("dumpling:vbios-vbt", f"{v['vbt']['signature']} v{v['vbt']['version']}, BDB {v['vbt']['bdb_version']}, "
+                                                          f"{v['vbt']['vbt_size']} bytes @0x{v['vbt']['offset']:x} in the ROM")]
+                              if v["vbt"] else []),
+                            *[prop("sca-center:found-in", f"{x['file']} @0x{x['offset']:x}") for x in v["found_at"]]]}
+        if v["version"]:
+            c["version"] = v["version"]
+            c["properties"].append(prop("sca-center:version-basis",
+                                        "'Build Number: <n> PC <x.y>' line inside the legacy VBIOS (checked against one public sample only)"))
+        else:
+            c["properties"].append(prop("sca-center:gap", f"version not read: {v['version_note']}"))
+        if v["terminated"] != "last-flag":
+            c["properties"] += [prop("sca-center:rom-terminated", v["terminated"]),
+                                prop("sca-center:incomplete", f"option ROM chain did not end normally ({v['terminated_note']}); "
+                                                              "the hash may cover only part of the ROM")]
+        if v.get("start_note"):
+            c["properties"].append(prop("sca-center:note", f"option ROM start is ambiguous ({v['start_note']}); the offset and hash may be wrong"))
+        comps.append(assessed(c, "intel"))
+        for loc in v["locations"]:
+            if loc in parents:
+                deps.setdefault(parents[loc], []).append(ref)
+
+
+def intel_gfx_status(inv):
+    att = []
+    for v in inv.get("intel_vbios", ()):
+        who = f"Intel legacy VBIOS（{v['device']}）"
+        if not v["version"]:
+            att.append(f"{who}：ROM 裡讀不到版本（{v['version_note']}）")
+        if v["terminated"] != "last-flag":
+            att.append(f"{who}：ROM 鏈沒有正常結束（{v['terminated_note']}），雜湊可能只涵蓋一部分")
+        if v.get("start_note"):
+            att.append(f"{who}：ROM 開頭不確定（{v['start_note']}），offset 與雜湊可能不對")
+    return att
+
+
+def intel_gfx_markdown(inv):
+    if not inv.get("intel_vbios"):
+        return []
+    e = md_esc
+    L = ["", "## Intel legacy VBIOS", "", "| 橫幅 | 版本 | 建置時間 | 內嵌 VBT | 來源 |", "|---|---|---|---|---|"]
+    for v in inv["intel_vbios"]:
+        vbt = f"{v['vbt']['signature']} v{v['vbt']['version']}（BDB {v['vbt']['bdb_version']}）" if v["vbt"] else ""
+        L.append(f"| {e(v['banner'] or '')} | {e(v['version'] or '找不到')} | {e(v['build_time'] or '')} | {e(vbt)} | "
+                 + "、".join(e(x) for x in v["locations"]) + " |")
+    L.append("\n版本只有 Intel 公告無法機器比對的身分資訊（NOT_ASSESSED）；格式只對一份公開樣本核對過。")
+    return L
 
 
 def bom(comps, deps):
@@ -1744,6 +1831,7 @@ def inventory(paths, manifest=None, budget=None):
     gen, skipped = inputs(paths, budget)
     partial = []                        # 讀進來、解析到一半（上限、超時、某一段失敗）的檔案；skipped 是沒有解析或內容沒展開的
     vb, other, bios = {}, {}, {}
+    intel_vb = {}                       # Intel legacy VBIOS（intel_vbios.py）
     for label, data in gen:
         roms, b = [], None
         for stage in ("vBIOS", "BIOS"):     # 兩段分開：BIOS 那段超時或失敗，已找到的 vBIOS 照樣保留
@@ -1765,6 +1853,7 @@ def inventory(paths, manifest=None, budget=None):
                 break
             except PARSE_ERRORS as e:      # 不該發生（都有檢查邊界）；發生就記下來，另一段照跑（只有超過上限才中止）
                 partial.append((label, f"{stage} 解析失敗（{type(e).__name__}）"))
+        intel_gfx_collect(roms, data, label, intel_vb)
         for r in roms:
             if r["vendor"] != f"{NVIDIA_VID:04x}":
                 continue
@@ -1786,6 +1875,7 @@ def inventory(paths, manifest=None, budget=None):
                 e["locations"].append(label)
     inv = {"schema": "sca-center-fw-inventory/1",
            "vbios": sorted(vb.values(), key=lambda x: (x["device"], x["version"] or "", x["sha256"])),
+           "intel_vbios": sorted(intel_vb.values(), key=lambda x: (x["sha256"])),
            "other_roms": [{"vendor": x["vendor"], "device": x["device"], "code_types": [i["code_type"] for i in x["images"]],
                            "length": x["length"], "terminated": x["terminated"],
                            **({"terminated_note": x["terminated_note"]} if x["terminated_note"] else {}),
@@ -1821,7 +1911,7 @@ def status_of(inv):
     n_skipped = len({x["file"] for x in inv["skipped"]})          # 兩邊都以檔案數計（同一個檔案可能有多筆原因）
     n_partial = len({x["file"] for x in inv.get("partial", [])})
     partial_txt = f"{n_partial} 個檔案只解析了一部分" if n_partial else ""
-    if not inv["vbios"] and not inv["bios"]:
+    if not inv["vbios"] and not inv["bios"] and not inv.get("intel_vbios"):
         return "GAP", ("沒有找到 NVIDIA vBIOS 或 BIOS 結構"
                        + (f"（只有其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個，沒有 x86／EFI 影像）" if inv["other_roms"] else "")
                        + (f"；略過 {n_skipped} 個檔案" if n_skipped else "")
@@ -1850,6 +1940,7 @@ def status_of(inv):
             att.append(f"vBIOS {v['device']}：ROM 鏈沒有正常結束（{v['terminated_note']}），雜湊可能只涵蓋一部分")
         if v.get("start_note"):
             att.append(f"vBIOS {v['device']}：ROM 開頭不確定（{v['start_note']}），offset 與雜湊可能不對")
+    att += intel_gfx_status(inv)
     if inv["skipped"]:
         att.append(f"略過 {n_skipped} 個檔案")
     if partial_txt:
@@ -1865,6 +1956,8 @@ def status_of(inv):
         if unk:
             att.append(f"清單填「不知道」{len(unk)} 項")
     detail = f"vBIOS {len(inv['vbios'])} 個、BIOS 映像 {len(inv['bios'])} 個"
+    if inv.get("intel_vbios"):
+        detail += f"、Intel legacy VBIOS {len(inv['intel_vbios'])} 個"
     if inv["other_roms"]:                 # 燒錄工具自帶的其他 NVIDIA 映像：不算產品元件，只列出來
         detail += (f"、其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個（裝置 ID "
                    f"{', '.join(sorted({x['device'] for x in inv['other_roms']}))}，沒有 x86／EFI 影像，不列入 SBOM）")
@@ -1988,6 +2081,7 @@ def markdown(inv):
         L.append("沒有找到 NVIDIA vBIOS。")
     if inv["other_roms"]:
         L.append(f"\n其他內嵌 NVIDIA 映像（燒錄工具自帶，不是產品元件）{len(inv['other_roms'])} 個。")
+    L += intel_gfx_markdown(inv)
     if inv.get("comparison") is not None:
         L += ["", "## 版本清單比對", "", "| 元件 | identifier | 清單 | 映像 | 結果 |", "|---|---|---|---|---|"]
         L += [f"| {c['component']} | {e(c['identifier'] or '')} | {e(c['declared'] or '')} | {e(c['extracted'] or '')} | {c['result']}"
