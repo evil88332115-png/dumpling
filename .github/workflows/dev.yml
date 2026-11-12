@@ -6,7 +6,7 @@ name: dev
 # 專案與平台由 projects/<專案>/project.yml 決定；新增專案不用改這個 workflow。
 on:
   push:
-    branches: ["dev/**"]
+    branches: ["dev/**", "wp1/m2-jetson"]   # 暫時：讓 workflow 登錄（登錄後立刻取消那次 run）；登錄完成後移除 wp1/m2-jetson
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
@@ -20,6 +20,11 @@ on:
         description: "build｜all（開發用）"
         required: false
         default: all
+        type: string
+      reuse_build_run:
+        description: "開發用：沿用另一個 run 的 build artifact（空白＝重新編譯）；只在指定單一專案時有意義"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -64,6 +69,7 @@ jobs:
       project: ${{ matrix.project }}
       version: ${{ matrix.version }}
       stop_after: ${{ inputs.stop_after || 'all' }}
+      reuse_build_run: ${{ inputs.reuse_build_run || '' }}
 
   publish:
     name: 發布 dev/${{ matrix.project }}
