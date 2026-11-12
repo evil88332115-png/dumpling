@@ -19,6 +19,7 @@ on:
           - cleanup
           - download
           - inspect
+          - probe
           - build
       release:
         description: 'Jetson Linux 版本（39.2.1 或 39.2.0）'
@@ -65,7 +66,7 @@ jobs:
 
   download:
     name: download (arm)
-    if: ${{ inputs.stage == 'download' || inputs.stage == 'inspect' || inputs.stage == 'build' }}
+    if: ${{ inputs.stage == 'download' || inputs.stage == 'inspect' || inputs.stage == 'probe' || inputs.stage == 'build' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
@@ -243,3 +244,39 @@ jobs:
         run: |
           . tools/spike/m2-lib.sh
           { echo "## handoff (arm)"; report_md; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  probe:
+    name: probe (arm)
+    needs: download
+    if: ${{ inputs.stage == 'probe' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 版本資訊
+        id: meta
+        run: |
+          . tools/spike/m2-release.sh "${{ inputs.release }}"
+          { echo "bsp=$BSP"; echo "bsp_sha256=$BSP_SHA256"; echo "rfs=$RFS"; echo "rfs_sha256=$RFS_SHA256"; } >> "$GITHUB_OUTPUT"
+          mkdir -p "$GITHUB_WORKSPACE/../m2dl"; echo "dl=$(readlink -f "$GITHUB_WORKSPACE/../m2dl")" >> "$GITHUB_OUTPUT"
+      - name: 快取還原 BSP
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.meta.outputs.dl }}/${{ steps.meta.outputs.bsp }}
+          key: m2spike-v1-${{ steps.meta.outputs.bsp }}-${{ steps.meta.outputs.bsp_sha256 }}
+          fail-on-cache-miss: true
+      - name: 快取還原 範例 rootfs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.meta.outputs.dl }}/${{ steps.meta.outputs.rfs }}
+          key: m2spike-v1-${{ steps.meta.outputs.rfs }}-${{ steps.meta.outputs.rfs_sha256 }}
+          fail-on-cache-miss: true
+      - name: 只讀成員清單（不解開）
+        run: |
+          . tools/spike/m2-lib.sh; init_res
+          for f in "${{ steps.meta.outputs.bsp }}" "${{ steps.meta.outputs.rfs }}"; do
+            timed "stats-$f" sh -c "python3 -I tools/spike/m2_tar_stats.py '${{ steps.meta.outputs.dl }}/$f'"
+          done
+          { echo "## probe (arm) ${{ inputs.release }}"; report_md; } | tee -a "$GITHUB_STEP_SUMMARY"
