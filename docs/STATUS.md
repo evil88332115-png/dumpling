@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 11:53 -0500（C2）
+最後更新：2026-11-12 11:53 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -22,7 +22,7 @@
 
 - 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
 - 分支／PR／commit：
-  - `wp1/m2`：M2 整合分支，dbb7263（main cd62514＋P 軌）；子分支做完併進來；M2 完成後開一個 PR（D-020）
+  - `wp1/m2`：M2 整合分支，fdabd22（main cd62514＋P 軌＋gpu-firmware 公告空對照表）；子分支做完併進來；M2 完成後開一個 PR（D-020）
   - `wp1/m2-layers`：L 軌（從 wp1/m2 dbb7263 開）
   - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
   - `wp1/m2-spike`：試驗分支（不合併）
@@ -46,6 +46,7 @@
   - D-023～D-028 在 PR #13（`wp0/docs-batch-2`），合併中
 - 對外介面約定（改之前先通知對方）：
   - C2 依賴 `tools/cra/uefi_image.py` 的內部名稱：`Scan`（子類別覆寫 `scan_bytes(data, module)` 接 GOP／VBT／legacy VBIOS）、`parse_fvs(data, sc, depth)`、`Stop`、`MAX_*` 常數（C2 有契約測試）
+  - C2 依賴 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（路徑與檔名；`wp1/m2` fdabd22 新增的空表，M2 合併後生效；C2 在檔不存在時印 GAP）
   - C2 依賴臨時 DT 介面：`pipeline/dt-ephemeral.sh up|wait|env|down`、`tools/pilot/sca-scan --sbom`、`pipeline/scan-status-check.py`（預設 11 個必要階段）、`pipeline/dt-verify.py verify`
 - 卡住／等決定：
   - 等使用者（C0 轉問）：M1 PR 內歷史 WIP commit 含內部 CI 執行編號等（禁用字 0 命中）——選項只有接受或刪 repo 重建
