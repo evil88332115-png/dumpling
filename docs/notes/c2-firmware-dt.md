@@ -107,9 +107,15 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 - `firmware-dt.sh` 遇到 `--result` 已有舊結果會標 FAIL（sca-scan 不接受非空輸出資料夾，舊的 status.tsv 也不能混進 report）；第三次本機執行重用資料夾時差點被舊結果騙成「OK」，所以加了這個檢查。
 - 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
 
+## Actions 實測（run 43266687645，commit bcfef21，workflow_dispatch）
+
+兩個 job 都 success（firmware-fetch、firmware-dt）。firmware-dt 各步驟：下載 64 秒、解析 4 秒、安裝工具 7 秒、`up` 32 秒、`wait` 257 秒（結束碼 0）、`env` 0 秒、
+上傳各樣本並驗證 11 分 44 秒、NVIDIA 步驟 0 秒（沒有 gpu-firmware 表 → GAP 那一行）、down 2 秒；整個 job 約 17 分 53 秒。
+五個樣本的 report 行與本機相同（Protectli／NUC／OVMF／合成 vBIOS 為 ATTENTION，Dasharo NS5x 為 FAIL 並註明與宣告一致），`firmware-dt.sh` 退出碼 0。
+前一個 run（43263224765，commit e4cadcf，還沒有 `expected_dt`）因 Dasharo NS5x 的 FAIL 而失敗，符合預期。
+
 ## 仍未驗證
 
-- `firmware-dt` job 在 GitHub Actions 上的實際執行（Actions 上 `install-tools.sh`、`wait` 時間、artifact）。
+- NVIDIA 公告步驟「有表」那條路只在本機實測（Actions 上目前走「沒有表」→ GAP）。
 - `wait` 結束碼 3（GAP）路徑只有單元測試，沒有在真的 DT 上製造。
-- NVIDIA 公告步驟在 Actions 上的執行（本機鏡像 4.7 秒、`candidates` 印出 ATTENTION：1 個待審的 gpu-firmware 公告 5674）。
 - `expected_dt` 加入後，含宣告樣本的完整端到端沒有重跑（report／腳本的判斷用假工具的單元測試覆蓋，並用第四次真 DT 的結果資料夾重跑 report 核對過：宣告的樣本 rc=0、狀態 FAIL 加「與宣告一致」）。
