@@ -45,10 +45,32 @@ CBFS 檔頭（big endian；coreboot src/commonlib/bsd/include/commonlib/bsd/cbfs
 回傳的 dict 見 analyze()。出問題的地方（結構壞掉、解不開、超過上限）寫在 "incomplete"（x86_firmware 會變 ATTENTION），不影響其他部分。
 """
 import hashlib
+import importlib.util
 import lzma
 import re
 import struct
+import sys
 import time
+from pathlib import Path
+
+
+def _sibling(name):
+    """同目錄的模組。python3 -I 不把腳本目錄放進 sys.path，而且這個模組本身常是用檔案路徑載入的（x86_firmware.load_sibling），
+    所以先看已經載入的，沒有就用檔案路徑載入；測試 import 過就共用同一個。"""
+    mod = sys.modules.get(name)
+    if mod is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(name + ".py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return mod
+
+
+parse_vbt = _sibling("intel_vbt").parse_vbt     # VBT 標頭解析搬到 intel_vbt.py（AMI 映像與 Intel legacy VBIOS 共用）
 
 CBFS_MAGIC = b"LARCHIVE"
 FMAP_MAGIC = b"__FMAP__"
@@ -619,23 +641,6 @@ def parse_fsph(d):
                 "image_size": size, "image_base": f"0x{base:08x}", "component_attribute": f"0x{comp_attr:04x}",
                 "type": FSP_TYPES[comp_attr >> 12], "build_type": "release" if comp_attr & 1 else "debug",
                 "release_type": "official" if comp_attr & 2 else "test"}
-
-
-def parse_vbt(d):
-    """解壓後的 vbt.bin → dict 或 None。"""
-    n = len(d)
-    if n < 48 or bytes(d[:4]) != b"$VBT":
-        return None
-    sig = bytes(d[:20]).rstrip(b"\0 ")
-    ver, hsize, vsize, csum, _, bdb = struct.unpack_from("<HHHBBI", d, 20)
-    if hsize < 48 or hsize > n or vsize > n or vsize < hsize or any(c < 32 or c > 126 for c in sig):
-        return None
-    r = {"signature": sig.decode("ascii"), "version": f"{ver // 100}.{ver % 100:02d}", "version_raw": ver, "header_size": hsize,
-         "vbt_size": vsize, "bdb_version": None, "bdb_version_raw": None}
-    if bdb + 22 <= vsize and bytes(d[bdb:bdb + 16]) == b"BIOS_DATA_BLOCK ":
-        bv = struct.unpack_from("<H", d, bdb + 16)[0]
-        r["bdb_version_raw"], r["bdb_version"] = bv, f"{bv // 100}.{bv % 100:02d}"
-    return r
 
 
 def parse_self(raw, total):
