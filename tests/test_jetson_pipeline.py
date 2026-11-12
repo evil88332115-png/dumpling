@@ -238,6 +238,19 @@ class Assemble(Tmp):
         with self.assertRaises(ja.AssembleError):
             ja.assemble(self.bsp, self.rfs, self.deliver, "6.8.12-ci", self.p("o.tar"))
 
+    def test_rootfs_absolute_symlinks_are_kept(self):
+        rfs = self.mktar("abs.tar", [("./etc/fonts/x.conf", b"", {"typ": tarfile.SYMTYPE, "link": "/usr/share/fontconfig/conf.avail/x.conf"}),
+                                     ("./etc/up", b"", {"typ": tarfile.SYMTYPE, "link": "../../x"})])
+        rep = ja.assemble(self.bsp, rfs, self.deliver, "6.8.12-ci", self.p("o.tar"))
+        with tarfile.open(self.p("o.tar")) as t:
+            names = {m.name: m for m in t.getmembers()}
+        self.assertEqual(names["Linux_for_Tegra/rootfs/etc/fonts/x.conf"].linkname, "/usr/share/fontconfig/conf.avail/x.conf")
+        self.assertEqual(rep["rootfs_members"], 2)
+        # 解壓到主機的 safe_extract 仍然拒絕絕對連結
+        a = self.mktar("abs2.tar", [("l", b"", {"typ": tarfile.SYMTYPE, "link": "/etc/passwd"})])
+        with self.assertRaises(se.UnsafeArchive):
+            se.extract(a, self.p("x"))
+
     def test_unsafe_rootfs_member_aborts(self):
         bad = self.mktar("bad.tar", [("./etc/x", b"1"), ("../evil", b"1")])
         with self.assertRaises(ja.AssembleError):

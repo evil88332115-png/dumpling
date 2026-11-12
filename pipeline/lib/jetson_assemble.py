@@ -151,7 +151,8 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
             for m in t:
                 n = norm(m.name)
                 try:
-                    se.check_member(m, dest_probe)
+                    # rootfs 裡的絕對符號連結是正常的（751 個）；這個 tar 不會解開到主機，只是寫進另一個 tar，所以不檢查連結目標
+                    se.check_member(m, dest_probe, allow_symlinks_anywhere=True)
                 except se.UnsafeArchive as e:
                     raise AssembleError("rootfs tar 有不安全的成員：%s" % e)
                 if n == "":

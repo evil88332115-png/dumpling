@@ -29,14 +29,16 @@ def _inside(root, path):
     return p == root or p.startswith(root + os.sep)
 
 
-def check_member(m, dest):
-    """檢查一個 tar 成員；不安全就丟 UnsafeArchive。dest 是已 realpath 的目的資料夾。"""
+def check_member(m, dest, allow_symlinks_anywhere=False):
+    """檢查一個 tar 成員；不安全就丟 UnsafeArchive。dest 是已 realpath 的目的資料夾。
+    allow_symlinks_anywhere：符號連結的目標不檢查（rootfs 裡的絕對連結是正常的）。只給「不會解開到主機」、只是從一個 tar 串流寫到另一個 tar 的用法；
+    名稱、裝置檔、硬連結的檢查照舊。"""
     n = m.name
     if n.startswith("/") or ".." in n.replace("\\", "/").split("/"):
         raise UnsafeArchive("路徑不安全 %r" % n)
     if m.isdev() or m.isfifo():
         raise UnsafeArchive("裝置檔或 FIFO %r" % n)
-    if m.issym():
+    if m.issym() and not allow_symlinks_anywhere:
         t = m.linkname
         full = t if os.path.isabs(t) else os.path.join(os.path.dirname(os.path.join(dest, n)), t)
         if os.path.isabs(t) or not _inside(dest, os.path.normpath(full)):
