@@ -12,4 +12,5 @@ printf "DT_URL=http://127.0.0.1:1\nDT_API_KEY=x\n" > "${TMPDIR:-.}/c1-pipeline.e
 chk_rc 64 env PILOT_ENV="${TMPDIR:-.}/c1-pipeline.env" python3 -I "$root/pipeline/dt-verify.py"
 rm -f "${TMPDIR:-.}/c1-pipeline.env"
 chk python3 -I -c "import json;[json.load(open('$root/tests/fixtures/sbom/'+f)) for f in ('smoke.cdx.json','smoke.expected.json')]"
+if [ "$fail" -eq 0 ]; then echo "c1-pipeline: OK"; else echo "c1-pipeline: FAIL"; fi
 exit "$fail"

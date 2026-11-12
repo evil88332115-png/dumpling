@@ -3,7 +3,8 @@
 # 每個子指令最後印一行狀態；失敗時結束碼不是 0。秘密（密碼、API key）不印出、不寫進 repo。
 #
 #   up    隨機產生密碼、起 compose、改 admin 密碼、建 API key、設定資料源（只開 OSV 與 KEV，關 NVD）。
-#   wait  等 OSV 與 KEV（CISA、ENISA）鏡像完成。逾時或失敗 → 印 GAP／FAIL 並以非 0 結束，不當成「沒有漏洞」。
+#   wait  等 OSV 與 CISA KEV 鏡像完成（必要）。逾時或失敗 → 印 GAP／FAIL 並以非 0 結束，不當成「沒有漏洞」。
+#         ENISA KEV 是選用：必要的完成後最多再等 DT_OPTIONAL_GRACE_MIN（預設 5）分鐘，沒完成或失敗只在狀態行標 GAP。
 #   env   輸出 pilot.env（tools/pilot/sca-scan 讀的 KEY=VALUE），權限 600。
 #   down  關掉並刪除容器與 volume，再刪狀態檔。
 #
@@ -146,28 +147,34 @@ mirror_status() { # $1=vuln-data-sources/osv 等
 cmd_wait() {
   load_state
   mkhdr "X-Api-Key: $DT_API_KEY"
-  local limit=$(( ${DT_WAIT_MIN:-40} * 60 )) t0 now line done_all st s name failed=
+  local limit=$(( ${DT_WAIT_MIN:-40} * 60 )) grace=$(( ${DT_OPTIONAL_GRACE_MIN:-5} * 60 )) t0 now line req_done opt_done st s name failed='' opt_gap='' req_at=''
   t0=$(date +%s)
-  local sources=(vuln-data-sources/osv kev-data-sources/cisa kev-data-sources/enisa)
+  # 必要：OSV（漏洞）＋CISA KEV（PLAN「已知卡點」）。選用：ENISA KEV——未完成或失敗只標 GAP，不判失敗。
+  local required=(vuln-data-sources/osv kev-data-sources/cisa) optional=(kev-data-sources/enisa)
   while :; do
-    done_all=1; line=; failed=
-    for s in "${sources[@]}"; do
+    req_done=1; opt_done=1; line=; failed=; opt_gap=
+    for s in "${required[@]}" "${optional[@]}"; do
       st=$(mirror_status "$s"); name=${s%%-data-sources*}:${s##*/}
       line+="$name=${st%% *} "
+      local is_opt=0; case " ${optional[*]} " in *" $s "*) is_opt=1;; esac
       case ${st%% *} in
         COMPLETED) ;;
-        FAILED) failed+="$name（${st#* }） "; done_all=0;;
-        *) done_all=0;;
+        FAILED) if [ "$is_opt" = 1 ]; then opt_gap+="$name 失敗（${st#* }） "; else failed+="$name（${st#* }） "; req_done=0; fi;;
+        *) if [ "$is_opt" = 1 ]; then opt_done=0; opt_gap+="$name 未完成 "; else req_done=0; fi;;
       esac
     done
     now=$(date +%s)
     if [ -n "$failed" ]; then
       rm -f "$HDR"; echo "dt-ephemeral wait: FAIL（鏡像失敗：$failed；弱點資料不完整，不能當作沒有漏洞）"; return 1
     fi
-    if [ "$done_all" = 1 ]; then
-      rm -f "$HDR"; echo "dt-ephemeral wait: OK（${line}；用時 $(( now - t0 )) 秒；DT 啟動後 $(( now - DT_STARTED_AT )) 秒）"; return 0
-    fi
-    if [ $(( now - t0 )) -ge "$limit" ]; then
+    if [ "$req_done" = 1 ]; then
+      [ -n "$req_at" ] || req_at=$now
+      if [ "$opt_done" = 1 ] || [ $(( now - req_at )) -ge "$grace" ] || [ $(( now - t0 )) -ge "$limit" ]; then
+        rm -f "$HDR"
+        echo "dt-ephemeral wait: OK（${line}；用時 $(( now - t0 )) 秒；DT 啟動後 $(( now - DT_STARTED_AT )) 秒${opt_gap:+；選用資料源 GAP：${opt_gap% }}）"
+        return 0
+      fi
+    elif [ $(( now - t0 )) -ge "$limit" ]; then
       rm -f "$HDR"; echo "dt-ephemeral wait: GAP（${DT_WAIT_MIN:-40} 分鐘內未完成：${line}；弱點資料不完整，不能當作沒有漏洞）"; return 3
     fi
     sleep 15
