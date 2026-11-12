@@ -8,6 +8,7 @@
 #   FlashPackage/<專案>-<版本>-flashpkg.tar(+.md5)  Linux_for_Tegra/ 形式（BSP ＋ rootfs；kernel/Image 與 rootfs/boot/Image 都是 CI 編的那顆）
 #   SourceCode/<專案>-<版本>-source.tar(+.md5)       套好 patch 的原始碼樹（精靈的 SourceCode 輸入；上游比對用）
 #   assemble.json                                    換了什麼、丟了什麼
+#   owners.json                                      {路徑: 擁有它的套件}（rootfs 的 dpkg .list；分層時 Syft 的檔案紀錄靠它找層）
 #
 # 規則：
 # - 下載的檔案是不可信資料：只讀 tar 結構與 deb（ar）的結構，**不解開 BSP 或 rootfs 到主機、不執行任何東西、不跑 apply_binaries.sh 或 flash.sh**
@@ -54,7 +55,7 @@ echo "rootfs：$(tail -1 "$work/prep.txt")"
 krel=$(cat "$out/deliver/kernel.release"); ksub=$(sed 's|^\./||' "$out/deliver/kernel-subdir")
 pkg=$out/FlashPackage/$DUMPLING_PROJECT-$ver-flashpkg.tar
 line=$(pyl jetson_assemble.py --bsp "$dl/$bsp" --rootfs-tar "$work/base.tar" --deliver "$work/deliver" --kernel-release "$krel" \
-  --kernel-subdir "$ksub" --out "$pkg" --report "$out/assemble.json") || fail "$(printf '%s' "$line" | sed 's/^jetson_assemble: FAIL（//; s/）$//')"
+  --kernel-subdir "$ksub" --out "$pkg" --report "$out/assemble.json" --owners-out "$out/owners.json") || fail "$(printf '%s' "$line" | sed 's/^jetson_assemble: FAIL（//; s/）$//')"
 echo "$line"
 rm -f "$work/base.tar"
 ( cd "$out/FlashPackage" && md5sum "$(basename "$pkg")" > "$(basename "$pkg").md5" )

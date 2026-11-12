@@ -4225,7 +4225,8 @@ def layers_summary(rows, vrows, idx, resp, host_info, notify):
 
 
 UNKNOWN_REASON_EN = {"no-path": "no path and not a distribution package", "path-no-rule": "a path that matches no rule",
-                     "inherited": "sub-component of an unknown component", "(not recorded)": "reason not recorded (SBOM was tagged by an older tool)"}
+                     "inherited": "sub-component of an unknown component", "file-unowned": "file record with no owning package and a path that matches no rule",
+                     "(not recorded)": "reason not recorded (SBOM was tagged by an older tool)"}
 
 
 def layer_section(num, summ, rows, notify, table):

@@ -136,6 +136,23 @@ class ClassifyRules(Base):
         self.assertNotIn("dumpling:unknown-reason", props["curl"])
         self.assertEqual(props["nvidia-igx-oobe"]["dumpling:layer"], "bsp")
 
+    def test_file_components_use_the_owning_package(self):
+        """Syft 的檔案紀錄（type=file，沒有 purl）：用 dpkg .list 的擁有者找層；沒有擁有者、路徑也沒規則才是 unknown（原因 file-unowned）。"""
+        owners = {"usr/lib/aarch64-linux-gnu/nvidia/libnvos.so": "nvidia-l4t-core", "usr/bin/ls": "coreutils",
+                  ly.normalize_owner_path("/lib/x86/y.so"): "libfoo"}
+        f = lambda path: {"type": "file", "name": path, "bom-ref": "f" + path}      # noqa: E731
+        self.assertEqual(ly.classify_component(f("/usr/lib/aarch64-linux-gnu/nvidia/libnvos.so"), self.cfg, owners=owners), ("bsp", "file-owner"))
+        self.assertEqual(ly.classify_component(f("/usr/bin/ls"), self.cfg, owners=owners), ("os", "file-owner"))
+        self.assertEqual(ly.classify_component(f("/usr/lib/x86/y.so"), self.cfg, owners=owners), ("os", "file-owner"))      # usrmerge
+        self.assertEqual(ly.classify_component(f("/opt/unowned"), self.cfg, owners=owners), ("unknown", "unresolved"))
+        self.assertEqual(ly.classify_component(f("/usr/bin/ls"), self.cfg), ("unknown", "unresolved"))                   # 沒有 owners：照舊
+        # 擁有者是 os、但路徑在 bsp 的規則裡（rootfs 的 boot/）→ 最保守的 bsp
+        self.assertEqual(ly.classify_component(f("/boot/extlinux/x"), self.cfg, owners={"boot/extlinux/x": "extlinux"}), ("bsp", "file-owner"))
+        self.assertEqual(ly.unknown_reason(f("/opt/unowned")), "file-unowned")
+        _, summary = ly.tag_sbom(sbom(f("/opt/unowned"), f("/usr/bin/ls")), self.cfg, owners=owners)
+        self.assertEqual(summary["unknown_by_reason"], {"file-unowned": 1})
+        self.assertEqual(summary["layers"]["os"], 1)
+
     def test_a_known_path_is_classified_not_unknown(self):
         """路徑對得到規則的（例如 Syft 給了 rootfs 的核心模組路徑）一律歸類，不留在 unknown。"""
         c = comp("m", purl="pkg:maven/m/m@1", props={"syft:metadata:virtualPath": "/usr/lib/modules/6.8.12/updates/x.ko"})
@@ -285,6 +302,22 @@ class FixtureJetson(Base):
         for c in tagged["components"]:
             if ly.component_layer(c) == "os":
                 self.assertTrue(c.get("purl", "").startswith("pkg:deb/") or c["type"] == "operating-system", c["name"])
+
+
+class CliOwners(Base):
+    def test_split_with_owners_file(self):
+        bom = sbom(deb("nvidia-l4t-core"), {"type": "file", "name": "/usr/lib/nv/a.so", "bom-ref": "f1"}, {"type": "file", "name": "/usr/bin/x", "bom-ref": "f2"},
+                   {"type": "file", "name": "/opt/z", "bom-ref": "f3"})
+        src, owners, out = (os.path.join(self.tmp, n) for n in ("in.json", "owners.json", "out"))
+        json.dump(bom, open(src, "w"))
+        json.dump({"/usr/lib/nv/a.so": "nvidia-l4t-core", "/usr/bin/x": "coreutils"}, open(owners, "w"))
+        r = self.run_cli("split", src, "jetson", self.project("customer"), out, "--owners", owners)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        doc = json.load(open(os.path.join(out, "layers.json")))
+        self.assertEqual(doc["components"], {"bsp": 2, "os": 1, "host-tool": 0, "unknown": 1})
+        self.assertEqual(doc["unknown"]["by_reason"], {"file-unowned": 1})
+        bad = self.run_cli("split", src, "jetson", self.project("customer"), out + "2", "--owners", os.path.join(self.tmp, "nope.json"))
+        self.assertEqual(bad.returncode, 1)
 
 
 class Cli(Base):

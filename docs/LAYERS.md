@@ -39,6 +39,10 @@ cra_report 的 `summary.json`（`layers.unknown_by_reason`）、風險評估 Lay
 | `no-path` | 沒有路徑也不是發行版套件（Syft 沒給 `syft:location`／`virtualPath`，例如 Go 執行檔裡的模組、Python 套件） |
 | `path-no-rule` | 有路徑，但 `platform.yml` 沒有任何規則對到 |
 | `inherited` | 子元件，跟著父元件的 unknown |
+| `file-unowned` | 檔案紀錄（`type: file`，Syft 對套件擁有的檔案產生的元件，沒有 purl／CPE）：沒有擁有它的套件，路徑也沒有對到規則 |
+
+**檔案紀錄的層**：`sbom-layers.py split --owners <檔>`（Jetson 由 assemble 步驟從刷機包 rootfs 的 dpkg `.list` 產生 `owners.json`：`{路徑: 套件}`，路徑做 usrmerge 正規化）；
+`type: file` 的元件用擁有它的套件名稱走 `classify_package`（`nvidia-l4t-*` → bsp，其餘 os），再和路徑規則取最保守的（依據 `file-owner`）。沒有 `--owners` 時照舊只看路徑。
 
 SBOM 若帶 Syft 的路徑（`syft:location:N:path`、`virtualPath`），先套平台的路徑規則，對得到的就歸類，判斷不了的才留 unknown。
 

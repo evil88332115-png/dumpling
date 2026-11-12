@@ -89,7 +89,10 @@ def _add_dir(out, name, mode=0o755):
     out.addfile(ti)
 
 
-def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_for_Tegra", kernel_subdir="kernel/kernel-noble"):
+LIST_RE = re.compile(r"^var/lib/dpkg/info/([a-z0-9][a-z0-9+.-]*)(?::[a-z0-9-]+)?\.list$")
+
+
+def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_for_Tegra", kernel_subdir="kernel/kernel-noble", owners_out=None):
     if not REL_RE.match(kernel_release):
         raise AssembleError("kernel_release 格式不合法：%r" % kernel_release[:40])
     image = os.path.join(deliver, kernel_subdir, "arch/arm64/boot/Image")
@@ -105,6 +108,7 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
            "rootfs_members": 0, "nvidia_modules_dropped": 0, "ci_modules_in_tree": 0, "ci_modules_out_of_tree": 0}
     pfx = prefix + "/"
     dest_probe = "/__dest__"
+    owners = {}
     with tarfile.open(out_path, "w", format=tarfile.PAX_FORMAT) as out:
         # ---- BSP ----
         with tarfile.open(bsp, "r|*") as t:
@@ -167,10 +171,17 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
                 new = rp + n
                 if m.isdir():
                     seen_dirs.add(new)
+                lm = LIST_RE.match(n) if m.isreg() and m.size <= (64 << 20) else None
                 m.name = new + ("/" if m.isdir() else "")
                 if m.islnk():
                     m.linkname = rp + norm(m.linkname)
-                if m.isreg():
+                if lm:      # dpkg 的 .list：記下「檔案 → 擁有它的套件」（分層用：Syft 的檔案紀錄靠它找層）；內容照常寫進刷機包
+                    data = t.extractfile(m).read()
+                    for line in data.decode("utf-8", "replace").splitlines():
+                        if line.startswith("/") and line != "/.":
+                            owners.setdefault(line, set()).add(lm.group(1))
+                    out.addfile(m, io.BytesIO(data))
+                elif m.isreg():
                     out.addfile(m, t.extractfile(m))
                 else:
                     out.addfile(m)
@@ -194,6 +205,12 @@ def assemble(bsp, rootfs_tar, deliver, kernel_release, out_path, prefix="Linux_f
             ensure_dirs(base + f)
             _add_file(out, base + f, full)
         rep["modules_meta"] = sorted(meta)
+    if owners_out:
+        # 一個路徑有多個擁有者時用名稱排序的第一個（分層時只用來找層；NVIDIA 與 Ubuntu 同時擁有的路徑很少見，記數量）
+        flat = {k: sorted(v)[0] for k, v in owners.items()}
+        with open(owners_out, "w", encoding="utf-8") as f:
+            json.dump(flat, f, ensure_ascii=False, sort_keys=True)
+        rep["owners"] = {"paths": len(flat), "multi_owner_paths": sum(1 for v in owners.values() if len(v) > 1)}
     rep["package_sha256"] = sha256_path(out_path)
     rep["package_bytes"] = os.path.getsize(out_path)
     return rep
@@ -204,10 +221,11 @@ def main(argv=None):
     for k in ("--bsp", "--rootfs-tar", "--deliver", "--kernel-release", "--out", "--report"):
         ap.add_argument(k, required=True)
     ap.add_argument("--prefix", default="Linux_for_Tegra")
+    ap.add_argument("--owners-out", default=None, help="寫出 {路徑: 擁有它的套件} 的 JSON（取自 rootfs 的 dpkg .list）")
     ap.add_argument("--kernel-subdir", default="kernel/kernel-noble")
     a = ap.parse_args(argv)
     try:
-        rep = assemble(a.bsp, a.rootfs_tar, a.deliver, a.kernel_release, a.out, a.prefix, a.kernel_subdir)
+        rep = assemble(a.bsp, a.rootfs_tar, a.deliver, a.kernel_release, a.out, a.prefix, a.kernel_subdir, a.owners_out)
     except (AssembleError, OSError, tarfile.TarError, EOFError) as e:
         print("jetson_assemble: FAIL（%s）" % (e if isinstance(e, AssembleError) else type(e).__name__))
         return 1

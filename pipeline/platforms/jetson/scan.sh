@@ -88,7 +88,7 @@ sbom0=$w0/scan/rootfs/scan/sbom/sbom.cdx.json
 # ---------- 3. 分層 ----------
 echo "== 分層"
 lrc=0
-python3 -I "$root/pipeline/sbom-layers.py" split "$sbom0" "$DUMPLING_PLATFORM" "$proj" "$out/layers" --os-responsibility "$DUMPLING_OS_RESPONSIBILITY" || lrc=$?
+python3 -I "$root/pipeline/sbom-layers.py" split "$sbom0" "$DUMPLING_PLATFORM" "$proj" "$out/layers" --os-responsibility "$DUMPLING_OS_RESPONSIBILITY" --owners "$out/owners.json" || lrc=$?
 case $lrc in 0|3) ;; *) fail "sbom-layers split 失敗（結束碼 $lrc）";; esac
 runs=("=$w0")
 n=0

@@ -952,7 +952,7 @@ def layer_sheets(doc, fix_all, conf):
 
 
 UNKNOWN_REASON_ZH = {"no-path": "沒有路徑也不是發行版套件", "path-no-rule": "路徑沒有對到任何規則", "inherited": "子元件，跟著父元件",
-                     "(not recorded)": "沒有記錄原因（SBOM 是舊版工具標的層）"}
+                     "file-unowned": "檔案紀錄：沒有擁有它的套件，路徑也沒有對到任何規則", "(not recorded)": "沒有記錄原因（SBOM 是舊版工具標的層）"}
 
 
 def layer_summary_sheet(doc, ly):

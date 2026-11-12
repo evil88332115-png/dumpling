@@ -2,7 +2,7 @@
 """SBOM 依層標記與拆分（J 軌的 scan 步驟呼叫；規則與格式見 docs/LAYERS.md）。
 
 用法（一律 `python3 -I`）：
-  sbom-layers.py tag   <sbom> <平台> <專案資料夾> <輸出sbom>   [--os-responsibility X] [--platforms-dir D]
+  sbom-layers.py tag   <sbom> <平台> <專案資料夾> <輸出sbom>   [--os-responsibility X] [--platforms-dir D] [--owners F]
   sbom-layers.py split <sbom> <平台> <專案資料夾> <輸出資料夾> [--os-responsibility X] [--platforms-dir D]
   sbom-layers.py show  <標好層的sbom>
 
@@ -46,7 +46,7 @@ def parse(argv):
     pos, opts, i = [], {}, 0
     while i < len(argv):
         a = argv[i]
-        if a in ("--os-responsibility", "--platforms-dir"):
+        if a in ("--os-responsibility", "--platforms-dir", "--owners"):
             if i + 1 >= len(argv):
                 raise ValueError("%s 要給值" % a)
             opts[a[2:]] = argv[i + 1]
@@ -95,12 +95,32 @@ def scan_plan(resp, files):
     return [item("", PRODUCT_FILE, "product：bsp＋os（OS 也是我們的待辦）" if resp == "ours" else "product：全部列入待辦（沒有 os_responsibility）")]
 
 
+def load_owners(opts):
+    """--owners <檔>：{路徑: 擁有它的套件名稱} 的 JSON（assemble 步驟從 dpkg 的 .list 產生）；沒給回傳 None。"""
+    f = opts.get("owners")
+    if not f:
+        return None
+    try:
+        with open(f, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        raise ly.LayerError("--owners 讀不了或不是 JSON")
+    if not isinstance(d, dict):
+        raise ly.LayerError("--owners 必須是物件")
+    out = {}
+    for k, v in d.items():
+        q = ly.normalize_owner_path(k)
+        if q and isinstance(v, str):
+            out[q] = v
+    return out
+
+
 def cmd_tag(pos, opts):
     if len(pos) != 4:
         return usage("tag 需要 4 個位置參數")
     sbom, platform, project_dir, out = pos
     config, own, resp = setup(platform, project_dir, opts)
-    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"])
+    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts))
     write_json(out, ly.dumps(tagged))
     return report("tag", summary, resp)
 
@@ -120,7 +140,7 @@ def cmd_split(pos, opts):
         return usage("split 需要 4 個位置參數")
     sbom, platform, project_dir, outdir = pos
     config, own, resp = setup(platform, project_dir, opts)
-    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"])
+    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts))
     # bsp 檔＝bsp＋unknown（unknown 當我們的待辦）；product 檔＝除了 host-tool 以外全部
     parts, dropped = ly.split_sbom(tagged, {"bsp": "bsp", "unknown": "bsp", "os": "os", "host-tool": "host-tool"})
     product, _ = ly.split_sbom(tagged, {"bsp": "product", "unknown": "product", "os": "product"})

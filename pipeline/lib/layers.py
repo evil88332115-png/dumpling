@@ -42,7 +42,8 @@ PLATFORM_PROP = "dumpling:platform"
 PART_PROP = "dumpling:layer-part"
 REASON_PROP = "dumpling:unknown-reason"
 # unknown 判斷不了的原因（D-030）：沒有路徑也不是發行版套件｜有路徑但沒有任何規則對到
-UNKNOWN_REASONS = {"no-path": "沒有路徑也不是發行版套件", "path-no-rule": "路徑沒有對到任何規則", "inherited": "子元件，跟著父元件"}
+UNKNOWN_REASONS = {"no-path": "沒有路徑也不是發行版套件", "path-no-rule": "路徑沒有對到任何規則", "inherited": "子元件，跟著父元件",
+                   "file-unowned": "檔案紀錄：沒有擁有它的套件，路徑也沒有對到任何規則"}
 
 LAYERS = ("bsp", "os", "host-tool", "unknown")
 # 同一個東西對到多個層時的優先順序（最保守：在產品上的、我們負責的優先；host-tool 最後，只有完全沒有別的證據才算）
@@ -183,8 +184,18 @@ def pick(layers):
     return "unknown"
 
 
-def classify_component(c, config, own=((), (), 0)):
-    """→ (層, 依據)。依據：own-software｜own-software-list｜component-type｜package-name｜path｜unresolved。"""
+def normalize_owner_path(p):
+    """dpkg .list 的路徑 → 相對路徑，usrmerge（/bin、/sbin、/lib、/lib64 → /usr/…）；不合法回傳 None。"""
+    q = _clean_path(p)
+    if q and q.split("/", 1)[0] in ("bin", "sbin", "lib", "lib32", "lib64", "libx32"):
+        q = "usr/" + q
+    return q
+
+
+def classify_component(c, config, own=((), (), 0), owners=None):
+    """→ (層, 依據)。依據：own-software｜own-software-list｜component-type｜package-name｜file-owner｜path｜unresolved。
+    owners：{相對路徑: 擁有它的套件名稱}（dpkg 的 .list）；型別 file 的元件（Syft 的檔案紀錄，沒有 purl）用它找擁有的套件，
+    再用 classify_package 決定層（擁有者與路徑規則都有結果時取最保守的）。"""
     props = _props(c)
     ref = c.get("bom-ref") if isinstance(c.get("bom-ref"), str) else ""
     if ref.startswith(OWN_REF_PREFIX) or props.get("sca-center:source", "").startswith(OWN_SOURCE_PREFIX):
@@ -202,6 +213,11 @@ def classify_component(c, config, own=((), (), 0)):
     ptype, pname = purl_type_name(c.get("purl"))
     if ptype in DISTRO_PURL_TYPES and pname:
         return pc.classify_package(pname, config), "package-name"
+    if typ == "file" and owners and paths:
+        pk = {owners[p] for p in paths if p in owners}
+        if pk:
+            found = {pc.classify_package(n, config) for n in pk} | {l for l in (path_layer(p, config) for p in paths) if l}
+            return pick(found), "file-owner"
     if paths:
         found = {path_layer(p, config) or "unknown" for p in paths}
         return pick(found), ("path" if found != {"unknown"} else "unresolved")
@@ -223,11 +239,13 @@ def _set_props(c, **kv):
 
 
 def unknown_reason(c):
-    """unknown 元件為什麼判斷不了：有路徑但沒有規則對到 → path-no-rule；沒有路徑（也不是發行版套件）→ no-path。"""
+    """unknown 元件為什麼判斷不了：檔案紀錄（type=file）→ file-unowned；有路徑但沒有規則對到 → path-no-rule；沒有路徑（也不是發行版套件）→ no-path。"""
+    if c.get("type") == "file":
+        return "file-unowned"
     return "path-no-rule" if component_paths(c) else "no-path"
 
 
-def _tag_tree(c, layer, basis, config, own, counts):
+def _tag_tree(c, layer, basis, config, own, counts, owners=None):
     if layer == "unknown" and basis != "inherited":
         _set_props(c, **{LAYER_PROP: layer, BASIS_PROP: basis, REASON_PROP: unknown_reason(c)})
     else:
@@ -242,15 +260,15 @@ def _tag_tree(c, layer, basis, config, own, counts):
         counts["unknown_by_reason"][r] = counts["unknown_by_reason"].get(r, 0) + 1
     for ch in c.get("components") or []:
         if isinstance(ch, dict):
-            _tag_tree(ch, layer, "inherited", config, own, counts)
+            _tag_tree(ch, layer, "inherited", config, own, counts, owners)
 
 
 def new_counts():
     return {"layers": dict.fromkeys(LAYERS, 0), "basis": {}, "unknown_by_purl_type": {}, "unknown_by_reason": {}}
 
 
-def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None):
-    """標每個元件的層。回傳 (新的 SBOM, 摘要)；不改傳入的 bom。"""
+def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None, owners=None):
+    """標每個元件的層。回傳 (新的 SBOM, 摘要)；不改傳入的 bom。owners：見 classify_component。"""
     if os_responsibility is not None and os_responsibility not in pc.OS_RESPONSIBILITIES:
         raise LayerError("os_responsibility 必須是 %s" % "／".join(pc.OS_RESPONSIBILITIES))
     b = copy.deepcopy(bom)
@@ -258,8 +276,8 @@ def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None
     for c in b.get("components") or []:
         if not isinstance(c, dict):
             continue
-        layer, basis = classify_component(c, config, own)
-        _tag_tree(c, layer, basis, config, own, counts)
+        layer, basis = classify_component(c, config, own, owners)
+        _tag_tree(c, layer, basis, config, own, counts, owners)
     m = b.setdefault("metadata", {})
     if not isinstance(m, dict):
         raise LayerError("metadata 格式不對")

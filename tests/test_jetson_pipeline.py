@@ -224,6 +224,19 @@ class Assemble(Tmp):
         self.assertEqual(names["Linux_for_Tegra/rootfs/bin/hl"].linkname, "Linux_for_Tegra/rootfs/etc/os-release")
         self.assertIn("Linux_for_Tegra/flash.sh", data)
 
+    def test_owners_from_dpkg_lists(self):
+        rfs = self.mktar("own.tar", [("./var/lib/dpkg/info/nvidia-l4t-core.list", b"/.\n/usr\n/usr/lib/nv/a.so\n/lib/b.so\n"),
+                                     ("./var/lib/dpkg/info/libfoo:arm64.list", b"/usr/lib/f.so\n"), ("./var/lib/dpkg/info/other.md5sums", b"x")])
+        out = self.p("own.json")
+        rep = ja.assemble(self.bsp, rfs, self.deliver, "6.8.12-ci", self.p("o.tar"), owners_out=out)
+        d = json.load(open(out))
+        self.assertEqual(d["/usr/lib/nv/a.so"], "nvidia-l4t-core")
+        self.assertEqual(d["/usr/lib/f.so"], "libfoo")
+        self.assertNotIn("/.", d)
+        self.assertEqual(rep["owners"]["paths"], 4)
+        with tarfile.open(self.p("o.tar")) as t:     # .list 照常寫進刷機包
+            self.assertIn("Linux_for_Tegra/rootfs/var/lib/dpkg/info/libfoo:arm64.list", t.getnames())
+
     def test_dirs_exist_for_every_file(self):
         rep, names, data = self.run_it()
         dirs = {n.rstrip("/") for n, m in names.items() if m.isdir()}
