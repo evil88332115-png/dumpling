@@ -62,6 +62,11 @@ BIOS（Intel 平台的完整 SPI 映像）：
   這個規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
   認不出來，沒有其他結構時是 GAP；構造的情況：AMD 映像裡剛好有一份 checksum 對的 Intel 格式 microcode → platform 不是 amd，
   沒有 microcode 的 Intel BIOS 區域檔在 0x20000 剛好是 0x55AA55AA → 誤判 AMD；兩種都是 ATTENTION。
+- coreboot 類映像（例如 Dasharo）的 CBFS（見 coreboot_cbfs.py）：找到 FMAP（或 `LARCHIVE`）的 CBFS 區域時，讀 `revision`／`build_info`
+  （coreboot 版本、git 修訂、建置時間）、`config`（關鍵設定欄位與雜湊）、FSP（`FSPH` 標頭的 ImageRevision、M／S 類型）、`vbt.bin`（`$VBT` 版本）、
+  SELF payload（身分與雜湊，不展開裡面的 firmware volume）。每個 CBFS 區域（RO、RW_A…）分開記，相同內容只記一次、列出所有位置。
+  CBFS 結構壞掉、壓縮解不開、超過解壓縮上限 → 記在 incomplete（ATTENTION），不影響其他部分。沒有 CBFS（例如 OVMF）時什麼都不加。
+  microcode 在 `cpu_microcode_blob.bin` 裡時加 found-in（不重複產元件）。
 - IBV 線索：BIOS 區域裡未壓縮的字串（AMI：American Megatrends、ALASKA；Insyde：InsydeH2O；Phoenix）。只是線索，以版本清單為準。
 - UEFI 壓縮統計（**不解壓**，見 FvStats）：走未壓縮的 firmware volume／FFS 檔案／section，依壓縮方式計數（efi-standard、lzma、
   lzma-f86、brotli、tiano-custom，其他需要處理的 GUID-defined 依 GUID），記在 uefi 與 GAP（「N 個壓縮 section 沒有解析」）。
@@ -96,6 +101,7 @@ ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台、有
 import argparse
 import csv
 import hashlib
+import importlib.util
 import io
 import json
 import lzma
@@ -170,6 +176,28 @@ STANDARD_COMPRESSION = "efi-standard"  # EFI_COMPRESSION_SECTION 的 Compression
 
 class Fail(Exception):
     pass
+
+
+def load_sibling(name):
+    """同目錄的模組（coreboot_cbfs）。python3 -I 不把腳本目錄放進 sys.path，所以用檔案路徑載入；測試 import 過就共用同一個。"""
+    mod = sys.modules.get(name)
+    if mod is None:
+        path = Path(__file__).resolve().with_name(name + ".py")
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[name] = mod
+            spec.loader.exec_module(mod)
+        except (OSError, ImportError, AttributeError) as e:
+            sys.modules.pop(name, None)
+            raise Fail(f"找不到或載入不了 {name}.py（{type(e).__name__}）")
+    return mod
+
+
+def cbfs_where(loc):
+    """CBFS 檔案位置的文字（found-in 用）。"""
+    reg = loc["role"] + (f" [{loc['region']}]" if loc["region"] != loc["role"] else "")
+    return f"CBFS {reg}: {loc['file']} @0x{loc['offset']:x}"
 
 
 class OverBudget(Exception):
@@ -1247,6 +1275,11 @@ def bios_image(data, budget=None):
             mc.append(u)
             by_off[u["offset"]] = u
     fit_offs = {e["offset"] for e in fit["microcode"] if e["valid"]}
+    try:
+        cbfs = load_sibling("coreboot_cbfs").analyze(data, lo, hi, budget)
+        cbfs_err = None
+    except PARSE_ERRORS as e:             # 有檢查邊界，不該發生；發生就記下來，其他部分照跑
+        cbfs, cbfs_err = None, f"CBFS parse failed ({type(e).__name__})"
     seen, ucodes = {}, []
     # 同一個 microcode 在映像裡可能有兩份（例如備援），記一次；任一份在 FIT 就算 in_fit（fit_offset 是 FIT 指到的那份）。
     # FIT 沒找到或不能用 → in_fit 是 None（不知道），不是 False
@@ -1259,18 +1292,23 @@ def bios_image(data, budget=None):
         if x["offset"] in fit_offs:
             u["in_fit"] = True
             u.setdefault("fit_offset", x["offset"])
+        for l in (cbfs["microcode_files"] if cbfs else ()):     # microcode 在 CBFS 的 cpu_microcode_blob.bin 裡：加 found-in（不另產元件）
+            w = cbfs_where(l)
+            if l["offset"] <= x["offset"] < l["offset"] + l["length"] and w not in u.setdefault("cbfs_files", []):
+                u["cbfs_files"].append(w)
     amd = [] if regs is not None or ucodes else amd_markers(data, budget)     # 有 Intel descriptor 或 Intel microcode：不是 AMD
     uefi = uefi_stats(data, lo, hi, budget)
     ibv = ibv_hints(data[lo:hi] if bios_r else data)
     evidence = [k for k, v in (("descriptor", regs is not None), ("me", mi["me"] or mi["status"] == "unknown" or mi["loose"]),
-                               ("microcode", ucodes or mc_note), ("fit", fit["status"] == "found"), ("uefi", uefi["volumes"] or uefi["incomplete"]),
+                               ("microcode", ucodes or mc_note), ("fit", fit["status"] == "found"), ("uefi", uefi["volumes"] or uefi["incomplete"]), ("cbfs", cbfs or cbfs_err),
                                ("amd", amd)) if v]
     if not evidence:
         return None                    # microcode 沒找完也要記下來（不能變成「沒有 BIOS 結構」）
     incomplete = ([f"region beyond the end of the file (truncated image?): {x}" for x in beyond] + ([mc_note] if mc_note else [])
                   + [f"ME: {x}" for x in mi["incomplete"]]
-                  + fit.pop("incomplete") + uefi.pop("incomplete"))
-    gaps = []
+                  + fit.pop("incomplete") + uefi.pop("incomplete")
+                  + ([cbfs_err] if cbfs_err else []) + [f"CBFS: {x}" for x in (cbfs["incomplete"] if cbfs else ())])
+    gaps = list(cbfs["gaps"]) if cbfs else []
     if amd:
         gaps.append("AMD platform recognised (" + "; ".join(amd[:2]) + "): AMD microcode (PSP directories) is not supported; "
                     "the microcode list is not complete (this is not 'no microcode')")
@@ -1283,7 +1321,7 @@ def bios_image(data, budget=None):
         gaps.append(f"{n_other} GUID-defined UEFI sections that need processing (unknown GUID) not parsed")
     return {"descriptor": regs is not None, "descriptor_note": why, "regions": regs or [], "me": mi["me"], "me_status": mi["status"],
             "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd,
-            "uefi": uefi, "ibv_hint": ibv, "incomplete": incomplete, "gaps": gaps, "evidence": evidence}
+            "uefi": uefi, "cbfs": cbfs, "ibv_hint": ibv, "incomplete": incomplete, "gaps": gaps, "evidence": evidence}
 
 
 # ---------- 版本清單 ----------
@@ -1440,6 +1478,12 @@ NOT_ASSESSED = "NOT_ASSESSED"
 ASSESS_NOTES = {
     "intel": "Intel advisories cannot be matched by machine; manual cross-check against Intel advisories is required",
     "nvidia-vbios": "vBIOS vulnerabilities are communicated by NVIDIA through partner notifications; this tool only confirms version and hash",
+    "coreboot": "NVD has almost no coreboot data (its CPE and version forms do not match coreboot or vendor forks such as Dasharo); "
+                "no vulnerability matching is possible, and no finding would not mean no vulnerability",
+    "edk2-payload": "the edk2 version is not known (only the build configuration's git revision of the vendor fork was read), so vulnerability "
+                    "matching by version is not possible",
+    "vbt": "Intel advisories cannot be matched by machine; manual cross-check against Intel advisories is required "
+           "(the VBT is a display configuration data table, not executable code)",
     "image": "no vulnerability matching at this level; this tool only reports the parsed structure, versions and hashes",
 }
 # Intel CSME 的 CPE。查證：NVD CPE API（https://services.nvd.nist.gov/rest/json/cpes/2.0）2026-11-12，
@@ -1477,6 +1521,117 @@ def in_fit_basis(b, u):
     if u["in_fit"] is False:
         return f"no FIT type 0x01 entry points at this microcode (FIT at file offset 0x{f['offset']:x})"
     return f"FIT {f['status']}" + (f": {f['note']}" if f["note"] else "")
+
+
+# coreboot 的 purl：只有確定上游時才填，而且 commit 必須是從映像讀到的完整 40 碼。
+# Dasharo 的 coreboot 是 github.com/Dasharo/coreboot 的 fork；revision 檔有 DASHARO_VERSION 才算 Dasharo。短碼（例如 12 碼）不填。
+# edk2：config 的 CONFIG_EDK2_REPOSITORY 是 https://github.com/Dasharo/edk2 而且 CONFIG_EDK2_TAG_OR_REV 是完整 40 碼才填。
+FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
+DASHARO_EDK2_URL = re.compile(r"https://github\.com/dasharo/edk2(?:\.git)?/?", re.I)
+
+
+def coreboot_purl(it):
+    """→ (purl 或 None, 沒填的原因或 None)。"""
+    rev, dasharo = it.get("git_revision"), it.get("dasharo_version")
+    if not rev:
+        return None, None
+    if not dasharo:
+        return None, "purl omitted: the upstream of this coreboot build cannot be determined from the image"
+    if not FULL_COMMIT.fullmatch(rev):
+        return None, f"purl omitted: the git revision in the image is abbreviated ({len(rev)} characters), not a full 40-character commit"
+    return f"pkg:github/dasharo/coreboot@{rev}", None
+
+
+def edk2_purl(keys):
+    rev, repo = keys.get("CONFIG_EDK2_TAG_OR_REV"), keys.get("CONFIG_EDK2_REPOSITORY")
+    if rev and repo and DASHARO_EDK2_URL.fullmatch(repo) and FULL_COMMIT.fullmatch(rev):
+        return f"pkg:github/dasharo/edk2@{rev}"
+    return None
+
+
+def cbfs_components(b, img, comps, sub):
+    """b["cbfs"]（coreboot_cbfs.analyze 的結果）→ coreboot、payload、FSP、VBT 元件，都掛在 BIOS 映像底下。"""
+    cb = b.get("cbfs")
+    if not cb:
+        return
+    where = lambda it: [prop("sca-center:found-in", cbfs_where(l)) for l in it["locations"]]
+    for n, it in enumerate(cb["coreboot"]):
+        cfg = it["config"]
+        ref = f"{img}:coreboot:{n}:{(it['hash'] or {'sha256': 'nohash'})['sha256'][:12]}"
+        c = {"type": "firmware", "bom-ref": ref, "name": "coreboot", "properties": [
+            prop("sca-center:cbfs-evidence", ", ".join(it["evidence_files"]) or "bootblock/romstage only")]}
+        if it["hash"]:
+            c["hashes"] = hlist(it["hash"])
+            c["properties"].append(prop("sca-center:hash-basis", "CBFS file(s): " + ", ".join(it["evidence_files"])))
+        if it["version"]:
+            c["version"] = it["version"]
+            c["properties"].append(prop("sca-center:version-basis", f"COREBOOT_VERSION in the CBFS file '{it['version_basis']}'"))
+        for k, v in (("git-revision", it["git_revision"]), ("dasharo-version", it["dasharo_version"]), ("extra-version", it["extra_version"]),
+                     ("build", it["build"]), ("build-time", it["build_time"]), ("dmi-date", it["dmi_date"]),
+                     ("mainboard-vendor", it["mainboard_vendor"]), ("mainboard-part", it["mainboard_part"])):
+            if v:
+                c["properties"].append(prop(f"sca-center:coreboot-{k}", v))
+        purl, why = coreboot_purl(it)
+        if purl:
+            c["purl"] = purl
+        if why:
+            c["properties"].append(prop("sca-center:note", why))
+        if cfg:
+            c["properties"] += [prop("sca-center:coreboot-config-sha256", cfg["sha256"]), prop("sca-center:coreboot-config-size", cfg["size"])]
+            c["properties"] += [prop("sca-center:coreboot-config", f"{k}={v}") for k, v in sorted(cfg["keys"].items())]
+            if cfg["soc"]:
+                c["properties"].append(prop("sca-center:coreboot-config-soc", ", ".join(x[len("CONFIG_"):] for x in cfg["soc"])
+                                            + (f" (and {cfg['soc_total'] - len(cfg['soc'])} more)" if cfg["soc_total"] > len(cfg["soc"]) else "")))
+        c["properties"] += where(it)
+        comps.append(assessed(c, "coreboot"))
+        sub.append(ref)
+    for it in cb["payloads"]:
+        cfg = it["config"]
+        keys = cfg["keys"] if cfg else {}
+        pl = cfg["payload"] if cfg else []
+        edk2 = "CONFIG_PAYLOAD_EDK2" in pl
+        ref = f"{img}:payload:{it['hash']['sha256'][:12]}"
+        name = "edk2 payload" if edk2 else (f"coreboot payload ({pl[0][len('CONFIG_PAYLOAD_'):].lower()})" if len(pl) == 1 else "coreboot payload")
+        c = {"type": "firmware", "bom-ref": ref, "name": name, "hashes": hlist(it["hash"]),
+             "properties": [prop("sca-center:payload-file", it["file"]), prop("sca-center:payload-format", "SELF"),
+                            prop("sca-center:payload-size", it["length"]),
+                            *([prop("sca-center:payload-entry", it["entry"])] if it["entry"] else []),
+                            *[prop("sca-center:payload-segment", f"{x['type']} {x['compression']} offset={x['offset']} load={x['load_address']} "
+                                                                 f"length={x['length']} memory={x['memory_length']}") for x in it["segments"]],
+                            *[prop("sca-center:coreboot-config", f"{k}={keys[k]}") for k in sorted(keys) if k.startswith("CONFIG_EDK2")],
+                            *[prop("sca-center:coreboot-config", f"{k}=y") for k in pl]]}
+        if cfg and it.get("config_source") == "other CBFS region":
+            c["properties"].append(prop("sca-center:note", "build config taken from another CBFS region (this payload's region has no 'config')"))
+        if not cfg:
+            c["properties"].append(prop("sca-center:note", "no CBFS 'config' file: the payload's identity (edk2 or other) is not known"))
+        purl = edk2_purl(keys) if edk2 else None
+        if purl:
+            c["purl"] = purl
+        c["properties"] += where(it)
+        comps.append(assessed(c, "edk2-payload" if edk2 else "image"))
+        sub.append(ref)
+    for it in cb["fsp"]:
+        ref = f"{img}:fsp:{it['hash']['sha256'][:12]}"
+        c = {"type": "firmware", "bom-ref": ref, "name": f"Intel FSP-{it['type']} ({it['image_id']})", "version": it["revision"],
+             "manufacturer": {"name": "Intel Corporation"}, "hashes": hlist(it["hash"]),
+             "properties": [prop("sca-center:version-basis", "FSP_INFO_HEADER ImageRevision (FSPH)"), prop("sca-center:fsp-type", it["type"]),
+                            prop("sca-center:fsp-image-id", it["image_id"]), prop("sca-center:fsp-spec-version", it["spec_version"]),
+                            prop("sca-center:fsp-header-revision", it["header_revision"]), prop("sca-center:fsp-image-base", it["image_base"]),
+                            prop("sca-center:fsp-image-size", it["image_size"]), prop("sca-center:fsp-component-attribute", it["component_attribute"]),
+                            prop("sca-center:fsp-build", f"{it['build_type']}, {it['release_type']}"), prop("sca-center:cbfs-file", it["file"]),
+                            prop("sca-center:cbfs-stored-sha256", it["stored_sha256"]), *where(it)]}
+        comps.append(assessed(c, "intel"))
+        sub.append(ref)
+    for it in cb["vbt"]:
+        ref = f"{img}:vbt:{it['hash']['sha256'][:12]}"
+        c = {"type": "firmware", "bom-ref": ref, "name": "Intel VBT (Video BIOS Table)", "version": it["version"],
+             "manufacturer": {"name": "Intel Corporation"}, "hashes": hlist(it["hash"]),
+             "properties": [prop("sca-center:version-basis", f"$VBT header version {it['version_raw']} (x100) of '{it['signature']}'"),
+                            prop("sca-center:vbt-signature", it["signature"]), prop("sca-center:vbt-size", it["vbt_size"]),
+                            *([prop("sca-center:vbt-bdb-version", f"{it['bdb_version']} ({it['bdb_version_raw']} x100)")] if it["bdb_version"] else []),
+                            prop("sca-center:cbfs-file", it["file"]), prop("sca-center:cbfs-stored-sha256", it["stored_sha256"]), *where(it)]}
+        comps.append(assessed(c, "vbt"))
+        sub.append(ref)
 
 
 def components(inv):
@@ -1562,8 +1717,10 @@ def components(inv):
                                          prop("sca-center:build-date", u["date"]), prop("sca-center:offset", f"0x{u['offset']:x}"),
                                          prop("sca-center:in-fit", in_fit_text(u)), prop("sca-center:in-fit-basis", in_fit_basis(b, u)),
                                          *[prop("sca-center:extended-signature", f"{x['cpuid']} {x['platform_id']}")
-                                           for x in u["extended_signatures"]]]}, "intel"))
+                                           for x in u["extended_signatures"]],
+                                         *[prop("sca-center:found-in", w) for w in u.get("cbfs_files", [])]]}, "intel"))
             sub.append(ref)
+        cbfs_components(b, img, comps, sub)
         deps[img] = sub
     return comps, deps
 
@@ -1726,6 +1883,38 @@ def md_esc(x):
 ME_STATUS_TEXT = {"found": "found（找到）", "no-me-region": "no-me-region（沒有 ME 區域）", "unknown": "unknown（有 ME 區域，版本拿不到）"}
 
 
+def cbfs_markdown(cb):
+    """### CBFS（coreboot）：區域、版本、payload、FSP、VBT。"""
+    e = md_esc
+    f = cb["fmap"]
+    L = ["", "### CBFS（coreboot）", "",
+         f"找到方式：{cb['method']}" + (f"（FMAP `{e(f['name'])}` 版本 {f['version']}，{f['areas']} 個區域，file offset 0x{f['offset']:x}）" if f else "（沒有可用的 FMAP，掃 `LARCHIVE`）"), "",
+         "| 區域 | 角色 | offset | 大小 | 檔案數（空的） |", "|---|---|---|---|---|"]
+    L += [f"| {e(r['name'])} | {e(r['role'])} | 0x{r['offset']:x} | 0x{r['size']:x} | {r['entries'] - r['empty']}（{r['empty']}） |" for r in cb["regions"]]
+    where = lambda it: "、".join(e(cbfs_where(l)) for l in it["locations"])
+    if cb["coreboot"]:
+        L += ["", "| coreboot 版本 | git 修訂 | Dasharo | 建置時間 | 主機板 | 位置 |", "|---|---|---|---|---|---|"]
+        L += [f"| {e(it['version'] or '找不到')} | {e(it['git_revision'] or '')} | {e(it['dasharo_version'] or '')} | {e(it['build_time'] or '')} | "
+              f"{e(' '.join(x for x in (it['mainboard_vendor'], it['mainboard_part']) if x))} | {where(it)} |" for it in cb["coreboot"]]
+    for it in cb["coreboot"]:
+        if it["config"]:
+            k = it["config"]["keys"]
+            L.append(f"\nconfig（SHA-256 `{it['config']['sha256']}`，{it['config']['size']} bytes）："
+                     + e("、".join(f"{a}={b}" for a, b in sorted(k.items()))) + f"；payload {e(', '.join(it['config']['payload']))}")
+    if cb["payloads"]:
+        L += ["", "| payload | 大小 | segment | SHA-256 | 位置 |", "|---|---|---|---|---|"]
+        L += [f"| {e(it['file'])} | {it['length']} | " + e(", ".join(f"{x['type']}/{x['compression']}" for x in it["segments"]))
+              + f" | `{it['hash']['sha256']}` | {where(it)} |" for it in cb["payloads"]]
+    if cb["fsp"]:
+        L += ["", "| FSP | ImageId | 版本 | spec | ImageBase | SHA-256 | 位置 |", "|---|---|---|---|---|---|---|"]
+        L += [f"| {it['type']} | {e(it['image_id'])} | {it['revision']} | {it['spec_version']} | {it['image_base']} | `{it['hash']['sha256'][:16]}…` | {where(it)} |"
+              for it in cb["fsp"]]
+    if cb["vbt"]:
+        L += ["", "| VBT | 版本 | BDB 版本 | 大小 | 位置 |", "|---|---|---|---|---|"]
+        L += [f"| {e(it['signature'])} | {it['version']} | {it['bdb_version'] or ''} | {it['vbt_size']} | {where(it)} |" for it in cb["vbt"]]
+    return L
+
+
 def markdown(inv):
     """fw-inventory.md：給人看的 BIOS 元件版本（與 vBIOS 摘要）。內容和 fw-inventory.json 相同來源，以 JSON 為準。"""
     e = md_esc
@@ -1783,6 +1972,8 @@ def markdown(inv):
         else:
             L.append("沒有壓縮的 section" + ("（也沒有找到 firmware volume）" if not u["volumes"] else "") + "。")
         L += [f"- 走訪說明：{e(x)}" for x in u["notes"]]
+        if b.get("cbfs"):
+            L += cbfs_markdown(b["cbfs"])
         if b["gaps"] or b["incomplete"]:
             L += ["", "### 缺口與不完整", ""] + [f"- GAP：{e(x)}" for x in b["gaps"]] + [f"- 不完整：{e(x)}" for x in b["incomplete"]]
         L.append("")
