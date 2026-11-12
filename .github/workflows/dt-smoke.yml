@@ -1,0 +1,106 @@
+name: dt-smoke
+
+# 臨時 Dependency-Track 冒煙測試（M1）：開臨時 DT（只開 OSV 與 KEV）→ 上傳測試 SBOM → 用 DT API 驗證專案、元件數、漏洞數。
+# 公開資料、無秘密：密碼與 API key 每次隨機產生，只存在 runner 暫存資料夾，並以 ::add-mask:: 遮蔽。
+on:
+  pull_request:
+    paths:
+      - "pipeline/**"
+      - "tools/pilot/**"
+      - "tools/e2e/**"
+      - "tests/fixtures/sbom/**"
+      - ".github/workflows/dt-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dt-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dt-smoke:
+    name: dt-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DT_OSV_ECOSYSTEMS: PyPI,npm,Ubuntu
+      DT_WAIT_MIN: "60"
+      PILOT_ENV: ${{ runner.temp }}/pilot.env
+      RESULT_DIR: ${{ runner.temp }}/dt-smoke-result
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安裝工具（Syft、Grype；固定版本）
+        run: |
+          if [ -x tools/e2e/install-tools.sh ]; then
+            bash tools/e2e/install-tools.sh
+          else
+            echo "安裝工具: NOT_RUN（tools/e2e/install-tools.sh 還沒整合；上傳改用 pipeline/dt-verify.py 的後備模式）"
+          fi
+
+      - name: 臨時 DT：up
+        id: up
+        run: |
+          date +%s > "$RUNNER_TEMP/t-up"
+          bash pipeline/dt-ephemeral.sh up | tee "$RUNNER_TEMP/line-up"
+
+      - name: 臨時 DT：wait（OSV、KEV 鏡像）
+        id: wait
+        run: |
+          s=$(date +%s)
+          rc=0; bash pipeline/dt-ephemeral.sh wait | tee "$RUNNER_TEMP/line-wait" || rc=$?
+          echo "wait 用時 $(( $(date +%s) - s )) 秒" | tee -a "$RUNNER_TEMP/line-wait"
+          exit "$rc"
+
+      - name: 臨時 DT：env（pilot.env）
+        run: bash pipeline/dt-ephemeral.sh env "$PILOT_ENV" | tee "$RUNNER_TEMP/line-env"
+
+      - name: 上傳測試 SBOM
+        run: |
+          mkdir -p "$RESULT_DIR"
+          if [ -x tools/pilot/sca-scan ]; then
+            tools/pilot/sca-scan --sbom tests/fixtures/sbom/smoke.cdx.json --name dumpling-dt-smoke --version 1.0.0 \
+              --out "$RESULT_DIR/scan" --no-license 2>&1 | tee "$RUNNER_TEMP/line-upload" | tail -40
+            echo "上傳: tools/pilot/sca-scan --sbom" >> "$RUNNER_TEMP/line-upload"
+          else
+            python3 -I pipeline/dt-verify.py upload tests/fixtures/sbom/smoke.cdx.json dumpling-dt-smoke 1.0.0 | tee "$RUNNER_TEMP/line-upload"
+            echo "上傳: pipeline/dt-verify.py 後備模式（sca-scan 尚未整合）" >> "$RUNNER_TEMP/line-upload"
+          fi
+
+      - name: 驗證（專案、元件數、漏洞數）
+        run: |
+          python3 -I pipeline/dt-verify.py verify tests/fixtures/sbom/smoke.expected.json "$RESULT_DIR"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## dt-smoke"
+            for step in up wait env upload; do
+              if [ -s "$RUNNER_TEMP/line-$step" ]; then echo "- $step: $(grep -E '^(dt-ephemeral|上傳|wait 用時)' "$RUNNER_TEMP/line-$step" | tr '\n' ' ')"
+              else echo "- $step: NOT_RUN"; fi
+            done
+            echo
+            if [ -s "$RESULT_DIR/summary.md" ]; then cat "$RESULT_DIR/summary.md"; else echo "驗證：NOT_RUN（沒有跑到驗證步驟）"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RESULT_DIR/out"
+          for f in summary.json summary.md; do [ -f "$RESULT_DIR/$f" ] && cp "$RESULT_DIR/$f" "$RESULT_DIR/out/"; done
+          for step in up wait env; do [ -f "$RUNNER_TEMP/line-$step" ] && cp "$RUNNER_TEMP/line-$step" "$RESULT_DIR/out/line-$step.txt"; done
+          true
+
+      - name: 小型結果（短期保存）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dt-smoke-summary
+          path: ${{ runner.temp }}/dt-smoke-result/out
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: 臨時 DT：down
+        if: always()
+        run: bash pipeline/dt-ephemeral.sh down
