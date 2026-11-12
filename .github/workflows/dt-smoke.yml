@@ -1,0 +1,134 @@
+name: dt-smoke
+
+# 臨時 Dependency-Track 冒煙測試（M1）：開臨時 DT（只開 OSV 與 KEV）→ 上傳測試 SBOM → 用 DT API 驗證專案、元件數、漏洞數。
+# 公開資料、無秘密：密碼與 API key 每次隨機產生，只存在 runner 暫存資料夾，並以 ::add-mask:: 遮蔽。
+on:
+  pull_request:
+    paths:
+      - "pipeline/**"
+      - "tools/pilot/**"
+      - "tools/e2e/**"
+      - "tests/fixtures/sbom/**"
+      - ".github/workflows/dt-smoke.yml"
+  workflow_dispatch:
+    inputs:
+      wait_min:
+        description: "wait 的上限分鐘數（預設 60；填 0 用來驗證 wait 逾時會讓 job 失敗）"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dt-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dt-smoke:
+    name: dt-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # 明確指定 shell：GitHub 預設的 `bash -e {0}` 沒有 pipefail，`cmd | tee` 會吃掉 cmd 的結束碼。
+    # `shell: bash` 等同 `bash --noprofile --norc -eo pipefail {0}`。
+    defaults:
+      run:
+        shell: bash
+    env:
+      DT_OSV_ECOSYSTEMS: PyPI,npm,Ubuntu
+      DT_WAIT_MIN: ${{ inputs.wait_min || '60' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 路徑
+        run: |
+          # pilot.env 單獨放一個資料夾：sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾，不能是 RUNNER_TEMP 本身
+          echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
+          echo "RESULT_DIR=$RUNNER_TEMP/dt-smoke-result" >> "$GITHUB_ENV"
+
+      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）
+        run: |
+          if [ -x tools/pilot/sca-scan ]; then
+            mkdir -p "$RUNNER_TEMP/tools"
+            bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
+            # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
+            sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
+            cat "$RUNNER_TEMP/tools/versions.txt"
+          else
+            echo "安裝工具: NOT_RUN（沒有 tools/pilot/sca-scan；上傳改用 pipeline/dt-verify.py 的後備模式）"
+          fi
+
+      - name: 臨時 DT：up
+        id: up
+        run: |
+          date +%s > "$RUNNER_TEMP/t-up"
+          bash pipeline/dt-ephemeral.sh up | tee "$RUNNER_TEMP/line-up"
+
+      - name: 臨時 DT：wait（OSV、KEV 鏡像）
+        id: wait
+        run: |
+          s=$(date +%s)
+          rc=0; bash pipeline/dt-ephemeral.sh wait | tee "$RUNNER_TEMP/line-wait" || rc=$?
+          echo "wait 用時 $(( $(date +%s) - s )) 秒" | tee -a "$RUNNER_TEMP/line-wait"
+          exit "$rc"
+
+      - name: 臨時 DT：env（pilot.env）
+        run: |
+          mkdir -p "$(dirname "$PILOT_ENV")"
+          bash pipeline/dt-ephemeral.sh env "$PILOT_ENV" | tee "$RUNNER_TEMP/line-env"
+
+      - name: 上傳測試 SBOM
+        env:
+          MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度（沒有那個狀態檔）
+        run: |
+          mkdir -p "$RESULT_DIR"
+          if [ -x tools/pilot/sca-scan ]; then
+            # sca-scan 失敗（有 FAIL 階段、必要階段不是 OK）就讓 job 失敗，不改走後備模式；後備只在沒有 sca-scan 時使用。
+            # 退出碼：0 全 OK；2 沒有 FAIL 但有 NOT_RUN／GAP／ATTENTION（例如不做授權匯入）；1 有 FAIL；64 參數錯誤。
+            rc=0
+            tools/pilot/sca-scan --sbom tests/fixtures/sbom/smoke.cdx.json --name dumpling-dt-smoke --version 1.0.0 \
+              --out "$RESULT_DIR/scan" --no-license > "$RUNNER_TEMP/sca-scan.log" 2>&1 || rc=$?
+            tail -60 "$RUNNER_TEMP/sca-scan.log"
+            echo "---- status.tsv ----"; cat "$RESULT_DIR/scan/status.tsv"
+            case $rc in 0|2) ;; *) echo "sca-scan 結束碼 $rc"; exit 1;; esac
+            python3 -I pipeline/scan-status-check.py "$RESULT_DIR/scan/status.tsv" | tee -a "$RUNNER_TEMP/line-upload"
+          else
+            python3 -I pipeline/dt-verify.py upload tests/fixtures/sbom/smoke.cdx.json dumpling-dt-smoke 1.0.0 | tee "$RUNNER_TEMP/line-upload"
+            echo "上傳: pipeline/dt-verify.py 後備模式（沒有 tools/pilot/sca-scan）" >> "$RUNNER_TEMP/line-upload"
+          fi
+
+      - name: 驗證（專案、元件數、漏洞數）
+        run: |
+          python3 -I pipeline/dt-verify.py verify tests/fixtures/sbom/smoke.expected.json "$RESULT_DIR"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## dt-smoke"
+            for step in up wait env upload; do
+              if [ -s "$RUNNER_TEMP/line-$step" ]; then echo "- $step: $(grep -E '^(dt-ephemeral|上傳|wait 用時)' "$RUNNER_TEMP/line-$step" | tr '\n' ' ')"
+              else echo "- $step: NOT_RUN"; fi
+            done
+            echo
+            if [ -s "$RESULT_DIR/summary.md" ]; then cat "$RESULT_DIR/summary.md"; else echo "驗證：NOT_RUN（沒有跑到驗證步驟）"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RESULT_DIR/out"
+          for f in summary.json summary.md scan/status.tsv; do [ -f "$RESULT_DIR/$f" ] && cp "$RESULT_DIR/$f" "$RESULT_DIR/out/$(basename "$f")"; done
+          for step in up wait env; do [ -f "$RUNNER_TEMP/line-$step" ] && cp "$RUNNER_TEMP/line-$step" "$RESULT_DIR/out/line-$step.txt"; done
+          true
+
+      - name: 小型結果（短期保存）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dt-smoke-summary
+          path: ${{ runner.temp }}/dt-smoke-result/out
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: 臨時 DT：down
+        if: always()
+        run: bash pipeline/dt-ephemeral.sh down

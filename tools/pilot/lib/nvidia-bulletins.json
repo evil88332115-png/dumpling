@@ -1,0 +1,1417 @@
+{
+ "schema": "sca-nvidia-bulletins-table/1",
+ "about": "NVIDIA 安全公告（Jetson Linux／IGX）的人工對照表；tools/pilot/lib/nvidia_bulletins.py match 只用 reviewed=true 的列產生發現。流程與欄位說明見 nvidia-bulletins.md。",
+ "reviewed_until": null,
+ "prefilled_from": {
+  "mirror_commit": "6e340ebe15f405497868dcbdfb326c6d00d62b86",
+  "mirror_fetched_utc": "2026-11-02T00:52:56Z",
+  "by": "Claude（candidates --draft 加人工補註）",
+  "at": "2026-11-02"
+ },
+ "bulletins": [
+  {
+   "id": "5321",
+   "year": "2022",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson TX1, Jetson TX2 Series (including Jetson TX2 NX), and Jetson Nano (including Jetson Nano 2GB) - March 2022",
+   "initial_release_date": "2022-03-08T00:00:00Z",
+   "current_release_date": "2022-03-08T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2022/5321/5321.md",
+   "cves": {
+    "CVE-2021-34401": {
+     "severity": "HIGH",
+     "cvss_v3_score": 8.8,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-284",
+     "description": "NVIDIA Linux kernel distributions contain a vulnerability in nvmap NVGPU_IOCTL_CHANNEL_SET_ERROR_NOTIFIER, where improper access control may lead to code execution, compromised integrity, or denial of service. The scope impact may extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2021-34401",
+      "https://www.cve.org/CVERecord?id=CVE-2021-34401"
+     ]
+    },
+    "CVE-2021-4034": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.8,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson sample file system contains a vulnerability related in polkit's pkexec utility which can lead to local privilege escalation, causing impact to data confidentiality, data integrity, and service availability.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2021-4034",
+      "https://www.cve.org/CVERecord?id=CVE-2021-4034"
+     ]
+    },
+    "CVE-2022-21819": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-732",
+     "description": "NVIDIA distributions of Jetson Linux contain a vulnerability where an error in the IOMMU configuration may allow an unprivileged attacker with physical access to the board direct read/write access to the entire system address space through the PCI bus. Such an attack could result in denial of service, code execution, escalation of privileges, and impact to data integrity and confidentiality. The scope impact may extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-21819",
+      "https://www.cve.org/CVERecord?id=CVE-2022-21819"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5343",
+   "year": "2022",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson TX1, Jetson TX2 Series (including Jetson TX2 NX) - April 2022",
+   "initial_release_date": "2022-04-26T00:00:00Z",
+   "current_release_date": "2022-05-26T00:00:00Z",
+   "revision": "2.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2022/5343/5343.md",
+   "cves": {
+    "CVE-2022-28195": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5.7,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:C/C:L/I:L/A:L",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in the Cboot ext4_read_file function, where insufficient validation of untrusted data may allow a highly privileged local attacker to cause a integer overflow, which may lead to code execution, escalation of privileges, limited denial of service, and some impact to confidentiality and integrity. The scope of impact can extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-28195",
+      "https://www.cve.org/CVERecord?id=CVE-2022-28195"
+     ]
+    },
+    "CVE-2022-28193": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:U/C:L/I:H/A:L",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in the Cboot module tegrabl_cbo.c, where insufficient validation of untrusted data may allow a local attacker with elevated privileges to cause a memory buffer overflow, which may lead to code execution, loss of integrity, limited denial of service, and some impact to confidentiality.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-28193",
+      "https://www.cve.org/CVERecord?id=CVE-2022-28193"
+     ]
+    },
+    "CVE-2022-28194": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:U/C:L/I:H/A:L",
+     "cwe": "CWE-119",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in the Cboot module tegrabl_cbo.c, where, if TFTP is enabled, a local attacker with elevated privileges can cause a memory buffer overflow, which may lead to code execution, loss of Integrity, limited denial of service, and some impact to confidentiality.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-28194",
+      "https://www.cve.org/CVERecord?id=CVE-2022-28194"
+     ]
+    },
+    "CVE-2022-28197": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:C/C:L/I:L/A:L",
+     "cwe": "CWE-190",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in the Cboot ext4_mount function, where Insufficient validation of untrusted data may allow a highly privileged local attacker to cause an integer overflow. This difficult- to-exploit vulnerability may lead to code execution, escalation of privileges, limited denial of service, and some impact to confidentiality and integrity. The scope of impact can extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-28197",
+      "https://www.cve.org/CVERecord?id=CVE-2022-28197"
+     ]
+    },
+    "CVE-2022-28196": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 4.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:C/C:N/I:L/A:L",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in the Cboot blob_decompress function, where insufficient validation of untrusted data may allow a local attacker  with elevated privileges to cause a memory buffer overflow, which may lead to code execution, limited loss of Integrity, and limited denial of service. The scope of impact can extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-28196",
+      "https://www.cve.org/CVERecord?id=CVE-2022-28196"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5417",
+   "year": "2022",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson TX1, Jetson TX2 Series (including Jetson TX2 NX), and Jetson Nano (including Jetson Nano 2GB) - November 2022",
+   "initial_release_date": "2022-11-30T00:00:00Z",
+   "current_release_date": "2022-11-30T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2022/5417/5417.md",
+   "cves": {
+    "CVE-2022-42269": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.9,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:N",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Trusted OS contains a vulnerability in an SMC call handler, where failure to validate untrusted input may allow a highly privileged local attacker to cause information disclosure and compromise integrity. The scope of the impact can extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-42269",
+      "https://www.cve.org/CVERecord?id=CVE-2022-42269"
+     ]
+    },
+    "CVE-2022-42270": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.8,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+     "cwe": "CWE-121",
+     "description": "NVIDIA distributions of Linux contain a vulnerability in nvdla_emu_task_submit, where unvalidated input may allow a local attacker to cause stack-based buffer overflow in kernel code, which may lead to escalation of privileges, compromised integrity and confidentiality, and denial of service.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-42270",
+      "https://www.cve.org/CVERecord?id=CVE-2022-42270"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5442",
+   "year": "2023",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson AGX Orin Series - January 2023",
+   "initial_release_date": "2023-01-25T00:00:00Z",
+   "current_release_date": "2023-01-25T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2023/5442/5442.md",
+   "cves": {
+    "CVE-2022-42270": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.8,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+     "cwe": "CWE-121",
+     "description": "NVIDIA distributions of Linux contain a vulnerability in nvdla_emu_task_submit, where unvalidated input may allow a local attacker to cause stack-based buffer overflow in kernel code, which may lead to escalation of privileges, compromised data integrity and confidentiality, and denial of service.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2022-42270",
+      "https://www.cve.org/CVERecord?id=CVE-2022-42270"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5466",
+   "year": "2023",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson TX1, Jetson TX2 Series (including Jetson TX2 NX), and Jetson Nano (including Jetson Nano 2GB) - June 2023",
+   "initial_release_date": "2023-06-23T00:00:00Z",
+   "current_release_date": "2023-06-23T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2023/5466/5466.md",
+   "cves": {
+    "CVE-2023-25518": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.1,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-923",
+     "description": "NVIDIA Jetson contains a vulnerability in CBoot, where the PCIe controller is initialized without IOMMU, which may allow an attacker with physical access to the target device to read and write to arbitrary memory. A successful exploit of this vulnerability may lead to code execution, denial of service, information disclosure, and loss of integrity. ",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2023-25518",
+      "https://www.cve.org/CVERecord?id=CVE-2023-25518"
+     ]
+    },
+    "CVE-2023-25520": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 4.4,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:U/C:N/I:N/A:H",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson Linux Driver Package contains a vulnerability in nvbootctrl, where a privileged local attacker can configure invalid settings, resulting in denial of service.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2023-25520",
+      "https://www.cve.org/CVERecord?id=CVE-2023-25520"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5555",
+   "year": "2024",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson TX1, Jetson TX2 Series (including Jetson TX2 NX), and Jetson Nano (including Jetson Nano 2GB) - July 2024",
+   "initial_release_date": "2024-07-23T00:00:00Z",
+   "current_release_date": "2024-07-23T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2024/5555/5555.md",
+   "cves": {
+    "CVE-2024-0108": {
+     "severity": "HIGH",
+     "cvss_v3_score": 8.7,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:L",
+     "cwe": "CWE-755",
+     "description": "NVIDIA Jetson Linux contains a vulnerability in NvGPU where error handling paths in GPU MMU mapping code fail to clean up a failed mapping attempt. A successful exploit of this vulnerability may lead to denial of service, code execution, and escalation of privileges.\n\n*CWE Info*<b>Improper Handling of Exceptional Conditions</b><hr/>The product does not handle or incorrectly handles an exceptional condition.\n************************",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-0108",
+      "https://www.cve.org/CVERecord?id=CVE-2024-0108"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5611",
+   "year": "2025",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Orin Series and NVIDIA IGX Orin - February 2025",
+   "initial_release_date": "2025-02-11T00:00:00Z",
+   "current_release_date": "2025-02-11T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2025/5611/5611.md",
+   "cves": {
+    "CVE-2024-0112": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.5,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-20",
+     "description": "NVIDIA Jetson AGX Orin™ and NVIDIA IGX Orin software contain a vulnerability where an attacker can cause an improper input validation issue by escalating certain permissions to a limited degree. A successful exploit of this vulnerability might lead to code execution, denial of service, data corruption, information disclosure, or escalation of privilege.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-0112",
+      "https://www.cve.org/CVERecord?id=CVE-2024-0112"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5617",
+   "year": "2025",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Orin Series and IGX Orin - February 2025",
+   "initial_release_date": "2025-02-25T00:00:00Z",
+   "current_release_date": "2025-03-14T00:00:00Z",
+   "revision": "1.1.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2025/5617/5617.md",
+   "cves": {
+    "CVE-2024-0148": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-447",
+     "description": "NVIDIA Jetson Linux and IGX OS image contains a vulnerability in the UEFI firmware RCM boot mode, where an unprivileged attacker with physical access to the device could load untrusted code. A successful exploit might lead to code execution, escalation of privileges, data tampering, denial of service, and information disclosure. The scope of the impacts can extend to other components.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-0148",
+      "https://www.cve.org/CVERecord?id=CVE-2024-0148"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5662",
+   "year": "2025",
+   "title": "Security Bulletin: NVIDIA Jetson AGX Orin Series and IGX Orin - July 2025",
+   "initial_release_date": "2025-07-15T00:00:00Z",
+   "current_release_date": "2025-07-15T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2025/5662/5662.md",
+   "cves": {
+    "CVE-2025-23270": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.1,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-392",
+     "description": "NVIDIA Jetson Linux contains a vulnerability in UEFI Management mode, where an unprivileged local attacker may cause exposure of sensitive information via a side channel vulnerability. A successful exploit of this vulnerability might lead to code execution, data tampering, denial of service, and information disclosure.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-23270",
+      "https://www.cve.org/CVERecord?id=CVE-2025-23270"
+     ]
+    },
+    "CVE-2025-23269": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 4.7,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:H/I:N/A:N",
+     "cwe": "CWE-1423",
+     "description": "NVIDIA Jetson Linux contains a vulnerability in the kernel where an attacker may cause an exposure of sensitive information due to a shared microarchitectural predictor state that influences transient execution. A successful exploit of this vulnerability may lead to information disclosure.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-23269",
+      "https://www.cve.org/CVERecord?id=CVE-2025-23269"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5716",
+   "year": "2025",
+   "title": "Security Bulletin: NVIDIA Jetson Xavier, Orin, Thor, and IGX Orin Devices - October 2025",
+   "initial_release_date": "2025-10-14T00:00:00Z",
+   "current_release_date": "2025-10-14T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2025/5716/5716.md",
+   "cves": {
+    "CVE-2025-33182": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:N/I:H/A:L",
+     "cwe": "CWE-862",
+     "description": "NVIDIA Jetson Linux contains a vulnerability in UEFI, where improper authentication may allow a privileged user to cause corruption of the Linux Device Tree. A successful exploitation of this vulnerability might lead to data tampering, denial of service.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-33182",
+      "https://www.cve.org/CVERecord?id=CVE-2025-33182"
+     ]
+    },
+    "CVE-2025-33177": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5.5,
+     "cvss_v3_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+     "cwe": "CWE-400",
+     "description": "NVIDIA Jetson Linux and IGX OS contain a vulnerability in NvMap, where improper tracking of memory allocations could allow a local attacker to cause memory overallocation. A successful exploitation of this vulnerability might lead to denial of service.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-33177",
+      "https://www.cve.org/CVERecord?id=CVE-2025-33177"
+     ]
+    }
+   }
+  },
+  {
+   "id": "5797",
+   "year": "2026",
+   "title": "Security Bulletin: NVIDIA Jetson and IGX Devices - March 2026",
+   "initial_release_date": "2026-03-31T00:00:00Z",
+   "current_release_date": "2026-03-31T00:00:00Z",
+   "revision": "1.0.0",
+   "url": "https://github.com/NVIDIA/product-security/blob/main/2026/5797/5797.md",
+   "cves": {
+    "CVE-2026-24148": {
+     "severity": "HIGH",
+     "cvss_v3_score": 8.3,
+     "cvss_v3_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L",
+     "cwe": "CWE-1188",
+     "description": "NVIDIA Jetson for JetPack contains a vulnerability in the system initialization logic, where an unprivileged attacker could cause the initialization of a resource with an insecure default. A successful exploit of this vulnerability might lead to information disclosure of encrypted data, data tampering, and partial denial of service across devices sharing the same machine ID.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-24148",
+      "https://www.cve.org/CVERecord?id=CVE-2026-24148"
+     ]
+    },
+    "CVE-2026-24154": {
+     "severity": "HIGH",
+     "cvss_v3_score": 7.6,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+     "cwe": "CWE-78",
+     "description": "NVIDIA Jetson Linux has vulnerability in initrd, where an unprivileged attacker with physical access coul inject incorrect command line arguments. A successful exploit of this vulnerability might lead to code execution, escalation of privileges, denial of service, data tampering, and information disclosure.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-24154",
+      "https://www.cve.org/CVERecord?id=CVE-2026-24154"
+     ]
+    },
+    "CVE-2026-24153": {
+     "severity": "MEDIUM",
+     "cvss_v3_score": 5.2,
+     "cvss_v3_vector": "CVSS:3.1/AV:P/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
+     "cwe": "CWE-501",
+     "description": "NVIDIA Jetson Linux has a vulnerability in initrd, where the nvluks trusted application is not disabled. A successful exploit of this vulnerability might lead to information disclosure.",
+     "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-24153",
+      "https://www.cve.org/CVERecord?id=CVE-2026-24153"
+     ]
+    }
+   }
+  }
+ ],
+ "not_applicable": [
+  {
+   "bulletin": "5560",
+   "title": "Security Bulletin: NVIDIA CV-CUDA - August 2024",
+   "current_release_date": "2024-08-07T00:00:00Z",
+   "reason": "預填（未審核）：CV-CUDA 的公告，只是把 Jetson 列為平台；修正在 CV-CUDA 自己的版本，不是 Jetson Linux 版本，不放進 rows",
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null
+  },
+  {
+   "bulletin": "5596",
+   "title": "Security Bulletin: NVIDIA nvJPEG2000 - February 2025",
+   "current_release_date": "2025-02-11T00:00:00Z",
+   "reason": "預填（未審核）：nvJPEG2000 的公告，只是把 Jetson 列為平台；修正在 nvJPEG2000 自己的版本，不是 Jetson Linux 版本，不放進 rows",
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null
+  },
+  {
+   "bulletin": "5661",
+   "title": "Security Bulletin: NVIDIA CUDA Toolkit - September 2025",
+   "current_release_date": "2025-09-23T00:00:00Z",
+   "reason": "預填（未審核）：CUDA Toolkit 的公告，只是把 Jetson 列為平台；修正在 CUDA Toolkit 自己的版本，不是 Jetson Linux 版本，不放進 rows",
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null
+  },
+  {
+   "bulletin": "5910",
+   "title": "Security Bulletin: NVIDIA® CUDA Toolkit - November 2026",
+   "current_release_date": "2026-11-03T00:00:00Z",
+   "reason": "預填（未審核）：CUDA Toolkit 的 nvJPEG 公告（CVE-2026-65160），只是把 Jetson、Linux for Tegra 列為平台；修正在 CUDA Toolkit 13.4 U1 與 nvJPEG 26.07 自己的版本，不是 Jetson Linux 版本，不放進 rows。產品映像裝了 CUDA 的 nvJPEG（libnvjpeg）時，這張表不會判斷，要另外對 CUDA／nvJPEG 的版本確認（鏡像 commit 7ed82859）",
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null
+  }
+ ],
+ "rows": [
+  {
+   "bulletin": "5321",
+   "cve": "CVE-2021-34401",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX1, Jetson TX2 series, Jetson TX2 NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All 32.x versions prior to 32.7.1",
+   "fixed_text": "32.7.1",
+   "affected_below": "32.7.1",
+   "affected_max": null,
+   "fixed_in": "32.7.1",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2022/5321/5321.md",
+    "row": "| CVE-2021-34401 | Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX1, Jetson TX2 series, Jetson TX2 NX | Jetson Linux | All 32.x versions prior to 32.7.1 | 32.7.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「nvmap」"
+  },
+  {
+   "bulletin": "5321",
+   "cve": "CVE-2021-34401",
+   "line": "32",
+   "product_text": "Jetson Nano, Jetson Nano 2GB",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All 32.x versions prior to 32.7.1",
+   "fixed_text": "32.7.1",
+   "affected_below": "32.7.1",
+   "affected_max": null,
+   "fixed_in": "32.7.1",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2022/5321/5321.md",
+    "row": "| CVE-2021-34401 | Jetson Nano, Jetson Nano 2GB | Jetson Linux | All 32.x versions prior to 32.7.1 | 32.7.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「nvmap」"
+  },
+  {
+   "bulletin": "5321",
+   "cve": "CVE-2021-4034",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX1, Jetson TX2 series, Jetson TX2 NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All 32.x versions prior to 32.7.1",
+   "fixed_text": "32.7.1",
+   "affected_below": "32.7.1",
+   "affected_max": null,
+   "fixed_in": "32.7.1",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2022/5321/5321.md",
+    "row": "| CVE-2021-4034 | Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX1, Jetson TX2 series, Jetson TX2 NX | Jetson Linux | All 32.x versions prior to 32.7.1 | 32.7.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5321",
+   "cve": "CVE-2021-4034",
+   "line": "32",
+   "product_text": "Jetson Nano, Jetson Nano 2GB",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All 32.x versions prior to 32.7.1",
+   "fixed_text": "32.7.1",
+   "affected_below": "32.7.1",
+   "affected_max": null,
+   "fixed_in": "32.7.1",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2022/5321/5321.md",
+    "row": "| CVE-2021-4034 | Jetson Nano, Jetson Nano 2GB | Jetson Linux | All 32.x versions prior to 32.7.1 | 32.7.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5321",
+   "cve": "CVE-2022-21819",
+   "line": "32",
+   "product_text": "Jetson Nano, Jetson Nano 2GB",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All 32.x versions prior to 32.7.1",
+   "fixed_text": "32.7.1",
+   "affected_below": "32.7.1",
+   "affected_max": null,
+   "fixed_in": "32.7.1",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2022/5321/5321.md",
+    "row": "| CVE-2022-21819 | Jetson Nano, Jetson Nano 2GB | Jetson Linux | All 32.x versions prior to 32.7.1 | 32.7.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5343",
+   "cve": "CVE-2022-28195",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.2",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.2",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2022/5343/5343.md",
+    "row": "| CVE-2022-28195 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「Cboot」"
+  },
+  {
+   "bulletin": "5343",
+   "cve": "CVE-2022-28193",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.2",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.2",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2022/5343/5343.md",
+    "row": "| CVE-2022-28193 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「Cboot」"
+  },
+  {
+   "bulletin": "5343",
+   "cve": "CVE-2022-28194",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.2",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.2",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2022/5343/5343.md",
+    "row": "| CVE-2022-28194 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「Cboot」"
+  },
+  {
+   "bulletin": "5343",
+   "cve": "CVE-2022-28197",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.2",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.2",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2022/5343/5343.md",
+    "row": "| CVE-2022-28197 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「Cboot」"
+  },
+  {
+   "bulletin": "5343",
+   "cve": "CVE-2022-28196",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson TX2 series, Jetson Xavier NX, Jetson TX2 NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.2",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.2",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2022/5343/5343.md",
+    "row": "| CVE-2022-28196 | Jetson AGX Xavier series, Jetson TX2 series, Jetson Xavier NX, Jetson TX2 NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「Cboot」"
+  },
+  {
+   "bulletin": "5417",
+   "cve": "CVE-2022-42269",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.3",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.3",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2022/5417/5417.md",
+    "row": "| CVE-2022-42269 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.3 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5417",
+   "cve": "CVE-2022-42270",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series and Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.2",
+   "fixed_text": "32.7.3",
+   "affected_below": "32.7.2",
+   "affected_max": null,
+   "fixed_in": "32.7.3",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2022/5417/5417.md",
+    "row": "| CVE-2022-42270 | Jetson AGX Xavier series and Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.2 | 32.7.3 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「kernel」"
+  },
+  {
+   "bulletin": "5442",
+   "cve": "CVE-2022-42270",
+   "line": "35",
+   "product_text": "NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson AGX Orin Series",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "Versions 35.1 and 34.1.1",
+   "fixed_text": "35.2.1",
+   "affected_below": null,
+   "affected_max": null,
+   "fixed_in": "35.2.1",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2023/5442/5442.md",
+    "row": "| CVE-2022-42270 | NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson AGX Orin Series | Jetson Linux(35) | Versions 35.1 and 34.1.1 | 35.2.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；受影響版本無法判讀，affected_below／affected_max 留空；元件推測自描述中的「kernel」"
+  },
+  {
+   "bulletin": "5442",
+   "cve": "CVE-2022-42270",
+   "line": "32",
+   "product_text": "NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson AGX Orin Series",
+   "platform_text": "Jetson Linux(32)",
+   "affected_text": "32.7.2 and prior releases",
+   "fixed_text": "32.7.3",
+   "affected_below": null,
+   "affected_max": "32.7.2",
+   "fixed_in": "32.7.3",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2023/5442/5442.md",
+    "row": "| CVE-2022-42270 | NVIDIA Jetson AGX Xavier Series, Jetson Xavier NX, Jetson AGX Orin Series | Jetson Linux(32) | 32.7.2 and prior releases | 32.7.3 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；元件推測自描述中的「kernel」"
+  },
+  {
+   "bulletin": "5466",
+   "cve": "CVE-2023-25518",
+   "line": "32",
+   "product_text": "Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.4",
+   "fixed_text": "32.7.4",
+   "affected_below": "32.7.4",
+   "affected_max": null,
+   "fixed_in": "32.7.4",
+   "component": "bootloader",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2023/5466/5466.md",
+    "row": "| CVE-2023-25518 | Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.4 | 32.7.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；元件推測自描述中的「CBoot」"
+  },
+  {
+   "bulletin": "5466",
+   "cve": "CVE-2023-25520",
+   "line": "32",
+   "product_text": "Jetson TX2 series, Jetson TX2 NX, Jetson AGX Xavier series, Jetson Xavier NX",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 32.7.4",
+   "fixed_text": "32.7.4",
+   "affected_below": "32.7.4",
+   "affected_max": null,
+   "fixed_in": "32.7.4",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2023/5466/5466.md",
+    "row": "| CVE-2023-25520 | Jetson TX2 series, Jetson TX2 NX, Jetson AGX Xavier series, Jetson Xavier NX | Jetson Linux | All versions prior to 32.7.4 | 32.7.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5555",
+   "cve": "CVE-2024-0108",
+   "line": "32",
+   "product_text": "NVIDIA Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX2 series, Jetson TX2 NX, Jetson TX1, Jetson Nano series",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to and including 32.7.4",
+   "fixed_text": "32.7.5",
+   "affected_below": null,
+   "affected_max": "32.7.4",
+   "fixed_in": "32.7.5",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2024/5555/5555.md",
+    "row": "| CVE-2024-0108 | NVIDIA Jetson AGX Xavier series, Jetson Xavier NX, Jetson TX2 series, Jetson TX2 NX, Jetson TX1, Jetson Nano series | Jetson Linux | All versions prior to and including 32.7.4 | 32.7.5 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；版本線推測自 version_text；描述沒有寫元件"
+  },
+  {
+   "bulletin": "5611",
+   "cve": "CVE-2024-0112",
+   "line": "36",
+   "product_text": "Jeton AGX Orin series (including Jetson Orin NX series, Jetson Orin Nano series)",
+   "platform_text": "Jetson Linux-36",
+   "affected_text": "All versions prior to 36.4",
+   "fixed_text": "36.4.3",
+   "affected_below": "36.4",
+   "affected_max": null,
+   "fixed_in": "36.4.3",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2025/5611/5611.md",
+    "row": "| CVE-2024-0112 | Jeton AGX Orin series (including Jetson Orin NX series, Jetson Orin Nano series) | Jetson Linux-36 | All versions prior to 36.4 | 36.4.3 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；描述沒有寫是哪個元件（「improper input validation … escalating certain permissions」），where_it_lives 未知；受影響寫「prior to 36.4」、修正寫 36.4.3：36.4～36.4.2 是否受影響公告沒寫（match 會列為需原廠確認）"
+  },
+  {
+   "bulletin": "5611",
+   "cve": "CVE-2024-0112",
+   "line": "35",
+   "product_text": "Jeton AGX Orin series (including Jetson Orin NX series, Jetson Orin Nano series)",
+   "platform_text": "Jetson Linux-35",
+   "affected_text": "All versions prior to 35.6",
+   "fixed_text": "35.6",
+   "affected_below": "35.6",
+   "affected_max": null,
+   "fixed_in": "35.6",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2025/5611/5611.md",
+    "row": "| CVE-2024-0112 | Jeton AGX Orin series (including Jetson Orin NX series, Jetson Orin Nano series) | Jetson Linux-35 | All versions prior to 35.6 | 35.6 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；描述沒有寫是哪個元件（「improper input validation … escalating certain permissions」），where_it_lives 未知；產品欄原文拼成「Jeton」"
+  },
+  {
+   "bulletin": "5611",
+   "cve": "CVE-2024-0112",
+   "line": "IGX",
+   "product_text": "IGX Orin",
+   "platform_text": "IGX OS",
+   "affected_text": "All versions prior to IGX 1.1",
+   "fixed_text": "IGX 1.1",
+   "affected_below": "1.1",
+   "affected_max": null,
+   "fixed_in": "1.1",
+   "component": "未寫明",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2025/5611/5611.md",
+    "row": "| CVE-2024-0112 | IGX Orin | IGX OS | All versions prior to IGX 1.1 | IGX 1.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；描述沒有寫是哪個元件（「improper input validation … escalating certain permissions」），where_it_lives 未知；IGX OS 的列：match 不和 Jetson Linux 版本比較，只用來知道這個 CVE 列了哪些平台"
+  },
+  {
+   "bulletin": "5617",
+   "cve": "CVE-2024-0148",
+   "line": "IGX",
+   "product_text": "IGX Orin",
+   "platform_text": "IGX OS",
+   "affected_text": "All versions prior to IGX 1.1",
+   "fixed_text": "IGX 1.1",
+   "affected_below": "1.1",
+   "affected_max": null,
+   "fixed_in": "1.1",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5617/5617.md",
+    "row": "| CVE-2024-0148 | IGX Orin | IGX OS | All versions prior to IGX 1.1 | IGX 1.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI 的 RCM 開機模式；UEFI 在 QSPI flash，rootfs SBOM 看不到；IGX OS 的列：match 不和 Jetson Linux 版本比較，只用來知道這個 CVE 列了哪些平台"
+  },
+  {
+   "bulletin": "5617",
+   "cve": "CVE-2024-0148",
+   "line": "36",
+   "product_text": "Jetson AGX Orin Series (rel36)",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 36.4.3",
+   "fixed_text": "36.4.3",
+   "affected_below": "36.4.3",
+   "affected_max": null,
+   "fixed_in": "36.4.3",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5617/5617.md",
+    "row": "| CVE-2024-0148 | Jetson AGX Orin Series (rel36) | Jetson Linux | All versions prior to 36.4.3 | 36.4.3 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI 的 RCM 開機模式；UEFI 在 QSPI flash，rootfs SBOM 看不到；平台欄只寫「Jetson Linux」，版本線取自產品欄「(rel36)」"
+  },
+  {
+   "bulletin": "5617",
+   "cve": "CVE-2024-0148",
+   "line": "35",
+   "product_text": "Jetson AGX Orin Series (rel35)",
+   "platform_text": "Jetson Linux",
+   "affected_text": "All versions prior to 35.6",
+   "fixed_text": "35.6.1",
+   "affected_below": "35.6",
+   "affected_max": null,
+   "fixed_in": "35.6.1",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5617/5617.md",
+    "row": "| CVE-2024-0148 | Jetson AGX Orin Series (rel35) | Jetson Linux | All versions prior to 35.6 | 35.6.1 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI 的 RCM 開機模式；UEFI 在 QSPI flash，rootfs SBOM 看不到；受影響寫「prior to 35.6」、修正寫 35.6.1：35.6.0 是否受影響公告沒寫；平台欄只寫「Jetson Linux」，版本線取自產品欄「(rel35)」"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23270",
+   "line": "35",
+   "product_text": "NVIDIA Jetson Orin Series",
+   "platform_text": "Jetson Linux(JP5)",
+   "affected_text": "All versions prior to JP5.x: 35.6.2",
+   "fixed_text": "35.6.2",
+   "affected_below": "35.6.2",
+   "affected_max": null,
+   "fixed_in": "35.6.2",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23270 | NVIDIA Jetson Orin Series | Jetson Linux(JP5) | All versions prior to JP5.x: 35.6.2 | 35.6.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI Management mode；UEFI 在 QSPI flash，rootfs SBOM 看不到；平台欄寫「Jetson Linux(JP5)」：JetPack 5 對應 Jetson Linux 35"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23270",
+   "line": "36",
+   "product_text": "NVIDIA Jetson Orin Series",
+   "platform_text": "Jetson Linux(JP6)",
+   "affected_text": "All versions prior to JP6.x: 36.4.4",
+   "fixed_text": "36.4.4",
+   "affected_below": "36.4.4",
+   "affected_max": null,
+   "fixed_in": "36.4.4",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23270 | NVIDIA Jetson Orin Series | Jetson Linux(JP6) | All versions prior to JP6.x: 36.4.4 | 36.4.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI Management mode；UEFI 在 QSPI flash，rootfs SBOM 看不到；平台欄寫「Jetson Linux(JP6)」：JetPack 6 對應 Jetson Linux 36"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23270",
+   "line": "35",
+   "product_text": "Jetson Xavier Series",
+   "platform_text": "Jetson Linux(JP5)",
+   "affected_text": "All versions prior to JP5.x: 35.6.2",
+   "fixed_text": "35.6.2",
+   "affected_below": "35.6.2",
+   "affected_max": null,
+   "fixed_in": "35.6.2",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23270 | Jetson Xavier Series | Jetson Linux(JP5) | All versions prior to JP5.x: 35.6.2 | 35.6.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI Management mode；UEFI 在 QSPI flash，rootfs SBOM 看不到；平台欄寫「Jetson Linux(JP5)」：JetPack 5 對應 Jetson Linux 35"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23270",
+   "line": "IGX",
+   "product_text": "IGX Orin",
+   "platform_text": "IGX OS",
+   "affected_text": "All versions prior to IGX 1.1.2",
+   "fixed_text": "IGX 1.1.2",
+   "affected_below": "1.1.2",
+   "affected_max": null,
+   "fixed_in": "1.1.2",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23270 | IGX Orin | IGX OS | All versions prior to IGX 1.1.2 | IGX 1.1.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI Management mode；UEFI 在 QSPI flash，rootfs SBOM 看不到；IGX OS 的列：match 不和 Jetson Linux 版本比較，只用來知道這個 CVE 列了哪些平台"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23269",
+   "line": "35",
+   "product_text": "NVIDIA Jetson Orin Series",
+   "platform_text": "Jetson Linux(JP5)",
+   "affected_text": "All versions prior to JP5.x: 35.6.2",
+   "fixed_text": "35.6.2",
+   "affected_below": "35.6.2",
+   "affected_max": null,
+   "fixed_in": "35.6.2",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23269 | NVIDIA Jetson Orin Series | Jetson Linux(JP5) | All versions prior to JP5.x: 35.6.2 | 35.6.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；核心（微架構預測器狀態）；rootfs 的 nvidia-l4t-kernel；平台欄寫「Jetson Linux(JP5)」：JetPack 5 對應 Jetson Linux 35"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23269",
+   "line": "36",
+   "product_text": "NVIDIA Jetson Orin Series",
+   "platform_text": "Jetson Linux(JP6)",
+   "affected_text": "All versions prior to JP6.x: 36.4.4",
+   "fixed_text": "36.4.4",
+   "affected_below": "36.4.4",
+   "affected_max": null,
+   "fixed_in": "36.4.4",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23269 | NVIDIA Jetson Orin Series | Jetson Linux(JP6) | All versions prior to JP6.x: 36.4.4 | 36.4.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；核心（微架構預測器狀態）；rootfs 的 nvidia-l4t-kernel；平台欄寫「Jetson Linux(JP6)」：JetPack 6 對應 Jetson Linux 36"
+  },
+  {
+   "bulletin": "5662",
+   "cve": "CVE-2025-23269",
+   "line": "35",
+   "product_text": "Jetson Xavier Series",
+   "platform_text": "Jetson Linux(JP5)",
+   "affected_text": "All versions prior to JP5.x: 35.6.2",
+   "fixed_text": "35.6.2",
+   "affected_below": "35.6.2",
+   "affected_max": null,
+   "fixed_in": "35.6.2",
+   "component": "kernel",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5662/5662.md",
+    "row": "| CVE-2025-23269 | Jetson Xavier Series | Jetson Linux(JP5) | All versions prior to JP5.x: 35.6.2 | 35.6.2 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；核心（微架構預測器狀態）；rootfs 的 nvidia-l4t-kernel；平台欄寫「Jetson Linux(JP5)」：JetPack 5 對應 Jetson Linux 35"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33182",
+   "line": "35",
+   "product_text": "Jetson Xavier Series",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "35.6.2 and earlier",
+   "fixed_text": "35.6.3 and newer",
+   "affected_below": null,
+   "affected_max": "35.6.2",
+   "fixed_in": "35.6.3",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33182 | Jetson Xavier Series | Jetson Linux(35) | 35.6.2 and earlier | 35.6.3 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI（Device Tree 驗證）；UEFI 在 QSPI flash，rootfs SBOM 看不到"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33182",
+   "line": "35",
+   "product_text": "Jetson Orin Series (including Orin NX and Orin Nano)",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "35.6.2 and earlier",
+   "fixed_text": "35.6.3 and newer",
+   "affected_below": null,
+   "affected_max": "35.6.2",
+   "fixed_in": "35.6.3",
+   "component": "UEFI",
+   "where_it_lives": "flash",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33182 | Jetson Orin Series (including Orin NX and Orin Nano) | Jetson Linux(35) | 35.6.2 and earlier | 35.6.3 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；UEFI（Device Tree 驗證）；UEFI 在 QSPI flash，rootfs SBOM 看不到"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33177",
+   "line": "35",
+   "product_text": "Jetson Xavier Series",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "35.6.2 and earlier",
+   "fixed_text": "35.6.3 and newer",
+   "affected_below": null,
+   "affected_max": "35.6.2",
+   "fixed_in": "35.6.3",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33177 | Jetson Xavier Series | Jetson Linux(35) | 35.6.2 and earlier | 35.6.3 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；NvMap 是核心驅動；36 以後可能是 out-of-tree 模組（nvidia-l4t-kernel-oot-modules），待確認"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33177",
+   "line": "35",
+   "product_text": "Jetson Orin Series (including Orin NX and Orin Nano)",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "35.6.2 and earlier",
+   "fixed_text": "35.6.3 and newer",
+   "affected_below": null,
+   "affected_max": "35.6.2",
+   "fixed_in": "35.6.3",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33177 | Jetson Orin Series (including Orin NX and Orin Nano) | Jetson Linux(35) | 35.6.2 and earlier | 35.6.3 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；NvMap 是核心驅動；36 以後可能是 out-of-tree 模組（nvidia-l4t-kernel-oot-modules），待確認"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33177",
+   "line": "36",
+   "product_text": "Jetson Orin Series (including Orin NX and Orin Nano)",
+   "platform_text": "Jetson Linux(36)",
+   "affected_text": "36.4.4 and earlier",
+   "fixed_text": "36.4.6 and newer",
+   "affected_below": null,
+   "affected_max": "36.4.4",
+   "fixed_in": "36.4.6",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33177 | Jetson Orin Series (including Orin NX and Orin Nano) | Jetson Linux(36) | 36.4.4 and earlier | 36.4.6 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；NvMap 是核心驅動；36 以後可能是 out-of-tree 模組（nvidia-l4t-kernel-oot-modules），待確認；受影響寫「36.4.4 and earlier」、修正寫「36.4.6 and newer」：36.4.5 公告沒寫"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33177",
+   "line": "38",
+   "product_text": "Jetson Thor Series",
+   "platform_text": "Jetson Linux(38)",
+   "affected_text": "38.2.1 and earlier",
+   "fixed_text": "38.2.2 and newer",
+   "affected_below": null,
+   "affected_max": "38.2.1",
+   "fixed_in": "38.2.2",
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33177 | Jetson Thor Series | Jetson Linux(38) | 38.2.1 and earlier | 38.2.2 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；NvMap 是核心驅動；36 以後可能是 out-of-tree 模組（nvidia-l4t-kernel-oot-modules），待確認；受影響寫「38.2.1 and earlier」、修正寫「38.2.2 and newer」"
+  },
+  {
+   "bulletin": "5716",
+   "cve": "CVE-2025-33177",
+   "line": "IGX",
+   "product_text": "IGX Orin",
+   "platform_text": "IGX OS",
+   "affected_text": "IGX 1.1.2 and earlier",
+   "fixed_text": "Kernel SRU 1035 and newer",
+   "affected_below": null,
+   "affected_max": "1.1.2",
+   "fixed_in": null,
+   "component": "NvMap（核心驅動）",
+   "where_it_lives": "nvidia-l4t-kernel",
+   "source": {
+    "file": "2025/5716/5716.md",
+    "row": "| CVE-2025-33177 | IGX Orin | IGX OS | IGX 1.1.2 and earlier | Kernel SRU 1035 and newer |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；NvMap 是核心驅動；36 以後可能是 out-of-tree 模組（nvidia-l4t-kernel-oot-modules），待確認；修正版本寫「Kernel SRU 1035 and newer」，不是 IGX OS 版本，無法比較；IGX OS 的列：match 不和 Jetson Linux 版本比較，只用來知道這個 CVE 列了哪些平台"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24148",
+   "line": "35",
+   "product_text": "Jetson Xavier Series and Jetson Orin Series",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "All versions prior to 35.6.4",
+   "fixed_text": "35.6.4",
+   "affected_below": "35.6.4",
+   "affected_max": null,
+   "fixed_in": "35.6.4",
+   "component": "system init",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24148 | Jetson Xavier Series and Jetson Orin Series | Jetson Linux(35) | All versions prior to 35.6.4 | 35.6.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；「system initialization logic」與 machine ID 有關；是哪個套件（nvidia-l4t-init？firstboot？）公告沒寫，待確認"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24148",
+   "line": "36",
+   "product_text": "Jetson Xavier Series and Jetson Orin Series",
+   "platform_text": "Jetson Linux(36)",
+   "affected_text": "All versions prior to 36.5",
+   "fixed_text": "36.5",
+   "affected_below": "36.5",
+   "affected_max": null,
+   "fixed_in": "36.5",
+   "component": "system init",
+   "where_it_lives": "unknown",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24148 | Jetson Xavier Series and Jetson Orin Series | Jetson Linux(36) | All versions prior to 36.5 | 36.5 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；「system initialization logic」與 machine ID 有關；是哪個套件（nvidia-l4t-init？firstboot？）公告沒寫，待確認"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24154",
+   "line": "35",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "All versions prior to 35.6.4",
+   "fixed_text": "35.6.4",
+   "affected_below": "35.6.4",
+   "affected_max": null,
+   "fixed_in": "35.6.4",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24154 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(35) | All versions prior to 35.6.4 | 35.6.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd；rootfs 的 /boot/initrd 來自 nvidia-l4t-initrd，但裝置也可能從 flash 的 kernel 分割區開機，待確認"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24154",
+   "line": "36",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(36)",
+   "affected_text": "All versions prior to 36.5",
+   "fixed_text": "36.5",
+   "affected_below": "36.5",
+   "affected_max": null,
+   "fixed_in": "36.5",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24154 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(36) | All versions prior to 36.5 | 36.5 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd；rootfs 的 /boot/initrd 來自 nvidia-l4t-initrd，但裝置也可能從 flash 的 kernel 分割區開機，待確認"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24154",
+   "line": "38",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(38)",
+   "affected_text": "38.2",
+   "fixed_text": "38.4",
+   "affected_below": null,
+   "affected_max": "38.2",
+   "fixed_in": "38.4",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24154 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(38) | 38.2 | 38.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd；rootfs 的 /boot/initrd 來自 nvidia-l4t-initrd，但裝置也可能從 flash 的 kernel 分割區開機，待確認；受影響只寫「38.2」、修正寫 38.4：38.2.x 與 38.3 是否受影響公告沒寫"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24153",
+   "line": "35",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(35)",
+   "affected_text": "All versions prior to 35.6.4",
+   "fixed_text": "35.6.4",
+   "affected_below": "35.6.4",
+   "affected_max": null,
+   "fixed_in": "35.6.4",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24153 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(35) | All versions prior to 35.6.4 | 35.6.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd 沒有停用 nvluks trusted application；TA 本身在 flash 的 OP-TEE 映像，待確認以哪個為準"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24153",
+   "line": "36",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(36)",
+   "affected_text": "All versions prior to 36.5",
+   "fixed_text": "36.5",
+   "affected_below": "36.5",
+   "affected_max": null,
+   "fixed_in": "36.5",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24153 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(36) | All versions prior to 36.5 | 36.5 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd 沒有停用 nvluks trusted application；TA 本身在 flash 的 OP-TEE 映像，待確認以哪個為準"
+  },
+  {
+   "bulletin": "5797",
+   "cve": "CVE-2026-24153",
+   "line": "38",
+   "product_text": "Jetson Xavier Series, Jetson Orin Series and Jetson Thor",
+   "platform_text": "Jetson Linux(38)",
+   "affected_text": "38.2",
+   "fixed_text": "38.4",
+   "affected_below": null,
+   "affected_max": "38.2",
+   "fixed_in": "38.4",
+   "component": "initrd",
+   "where_it_lives": "nvidia-l4t-initrd",
+   "source": {
+    "file": "2026/5797/5797.md",
+    "row": "| CVE-2026-24153 | Jetson Xavier Series, Jetson Orin Series and Jetson Thor | Jetson Linux(38) | 38.2 | 38.4 |"
+   },
+   "reviewed": false,
+   "reviewed_by": null,
+   "reviewed_at": null,
+   "note": "預填（2026-11-02，Claude 由公告鏡像 commit 6e340ebe 的 Markdown 表格與 CSAF 產生），尚未人工審核；核對原文後才能改 reviewed=true；initrd 沒有停用 nvluks trusted application；TA 本身在 flash 的 OP-TEE 映像，待確認以哪個為準；受影響只寫「38.2」、修正寫 38.4：38.2.x 與 38.3 是否受影響公告沒寫"
+  }
+ ]
+}

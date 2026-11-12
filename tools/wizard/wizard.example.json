@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to ~/.config/sca-center/wizard.json and edit. Keys starting with _ are ignored. All keys are optional.",
+  "repo": "/path/to/sca-center-checkout",
+  "root": "/path/to/wizard-work-root",
+  "outroot": "/path/to/wizard-work-root/output",
+  "python": "/path/to/tools/bin/python3",
+  "tools_bin": "/path/to/tools/bin",
+  "pilot_env": "/path/to/scan-env/pilot.env",
+  "grype_seed": "/path/to/grype-db-seed",
+  "grype_cache": "/path/to/wizard-work-root/grype-db",
+  "stable_git": {"6.8": "/path/to/linux-stable-6.8-clone"},
+  "rules_template": "/path/to/vex-rules.json",
+  "upstream": {"jetson-r39.2.0": {"public_sources": "/path/to/public_sources.tbz2", "bsp": "/path/to/Jetson_Linux_R39.2.0_aarch64.tbz2"}}
+}
