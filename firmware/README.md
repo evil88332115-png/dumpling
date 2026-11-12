@@ -1,6 +1,6 @@
 # 韌體公開樣本清單
 
-每個樣本一個資料夾，內有一個 `firmware.yml`：`firmware/bios/<型號 slug>/`、`firmware/vbios/<型號 slug>/`。
+每個樣本一個資料夾，內有一個 `firmware.yml`：`firmware/bios/<型號 slug>/`、`firmware/vbios/<型號 slug>/`、`firmware/sbom/<slug>/`。
 **二進位檔不進 git**。`pipeline/firmware-fetch.sh` 從官方網址下載並核對 sha256 與大小；
 CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載，這就是「網址仍可用」的驗證。
 下載的檔案一律當不可信資料：只下載，不解開、不執行。
@@ -17,15 +17,31 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 
 | 欄位 | 說明 |
 |---|---|
-| `kind` | `bios` 或 `vbios` |
+| `kind` | `bios`、`vbios` 或 `sbom`（供應商提供的 SBOM；只能搭 `role: sbom`） |
 | `vendor`、`model` | 廠商與型號 |
 | `firmware_version` | 版本（`status: ok` 必填） |
 | `ibv` | 韌體核心廠商：`AMI`、`coreboot+edk2`、`edk2`…；不知道寫 `unknown` |
 | `status` | `ok`（可下載）或 `GAP`（沒有合法可下載的檔案；不下載，印 GAP） |
-| `files[]` | `name`（只能是檔名）、`url`（https）、`sha256`（小寫 64 位十六進位）、`size`（位元組）、`role`（`image` 映像／`source` 原始碼／`package` 套件或更新包） |
+| `files[]` | `name`（只能是檔名）、`url`（https）、`sha256`（小寫 64 位十六進位）、`size`（位元組）、`role`（`image` 映像／`source` 原始碼／`package` 套件或更新包／`sbom` 供應商 SBOM） |
 | `license` | `name`、`url`、`note`：條款名稱、網址、一句說明（本專案只在 CI 下載、不重新散布） |
 | `notes` | 挑選理由與限制 |
-| `expected` | 選填；給之後解析 PR 用的預期值，只寫已知的，不猜 |
+| `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
+| `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
+| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 不符 CycloneDX schema，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的檔案）。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
+
+### `expected` 的鍵
+
+| 鍵 | 內容 | 比對規則 |
+|---|---|---|
+| `intel_me` | ME 版本字串 | 映像的 ME 版本相同，且 SBOM 有同版本的 `Intel CSE firmware` 元件 |
+| `microcode` | `[{cpuid, platform_mask, revision}]` | 映像有同 cpuid、同 platform、同 revision 的微碼（十六進位不分大小寫），SBOM 也有；沒有該 cpuid／platform＝MISSING，revision 不同＝MISMATCH；映像多出來的微碼不比 |
+| `fsp` | 版本字串清單 | 每個版本都要在映像的 FSP 找得到；多出來的版本不比 |
+| `coreboot_version`、`dasharo_version` | 字串 | 與 CBFS `revision` 讀到的相同 |
+| `coreboot_revision`、`edk2_revision` | git 修訂（縮寫即可） | 一方是另一方的前綴就算相符（至少 7 碼）；edk2 取 coreboot config 的 `CONFIG_EDK2_TAG_OR_REV` |
+| `coreboot_build_date` | `YYYY-MM-DD` | 與 CBFS `build_info` 的建置日期（UTC）相同 |
+| `intel_gop`、`intel_legacy_vbios` | 字串 | 與 SBOM 的 `Intel GOP driver`／`Intel legacy VBIOS (option ROM)` 元件 version 相同；同名元件多個時任一個相符就 OK；沒有元件或都沒讀到版本＝MISSING。GOP 的 version 只有 build 編號（如 `1070`）。VBT 不提供此鍵（version 是表頭格式版本） |
+
+每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 
 ## 樣本與挑選理由
 
@@ -34,13 +50,46 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/ubuntu-ovmf-2024.02` | PLAN B 段第一個樣本：edk2 成品（deb 內的 OVMF）加完整原始碼包與 Ubuntu patch，Launchpad 網址長期不變 |
 | `bios/dasharo-protectli-vp46xx-v1.2.0` | coreboot＋edk2，含 Intel ME、FSP、微碼；已有試掃結果可當預期值（`expected`）。附 coreboot、edk2 原始碼封存（GitHub 動態產生，雜湊可能變動，見該檔 notes） |
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
-| `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀檢查看得到 vendor 0x10DE 的 PCIR 結構，但不是可確認的完整 option ROM（見 notes） |
-| `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；之後用合成 option ROM 測流程，實際檔案由負責單位提供 |
+| `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
+| `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 
-## 第二條路的候選（之後的 PR 才用，這次不下載）
+## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
 
-公開的韌體 SBOM 範例：3mdeb 的 Dasharo 每個版本旁都放 CycloneDX 1.4 SBOM，
-例如 `https://dl.3mdeb.com/open-source-firmware/Dasharo/novacustom_ns5x_tgl/uefi/v1.6.0/novacustom_ns5x_tgl_v1.6.0.sbom.json`
-（9940 位元組、10 個元件、sha256 `5c42344d09932c809b5968552842e0ff540a749c11f0e199ed0858d6e76a44ae`，2026-11-12 量測）。
-授權：檔案本身沒有授權欄位，Dasharo 文件站未見明確聲明，使用前要向 3mdeb 確認或只在 CI 讀取、不散布。
+樣本 `sbom/dasharo-novacustom-ns5x-tgl-v1.6.0`：3mdeb 的 Dasharo 每個版本旁都放 CycloneDX 1.4 SBOM
+（9940 位元組、10 個元件、sha256 `5c42344d…6a44ae`，2026-11-12 量測）。
+授權：檔案沒有授權欄位、Dasharo 文件站未見明確聲明；只在 CI 下載讀取、不重新散布。
 其他候選：CycloneDX `bom-examples` 倉庫（CC0-1.0，非韌體專用）。
+
+    pipeline/install-tool.sh sbomqs "$dir/bin"        # 版本與 sha256 固定在 pipeline/lib/tools.lock，核對後才安裝
+    SBOMQS="$dir/bin/sbomqs" pipeline/firmware-sbom-check.sh firmware-dl/sbom/*/*.sbom.json --out sbom-check
+
+每個 SBOM 印一行 `FIRMWARE-SBOM<TAB>OK|ATTENTION|GAP|FAIL<TAB><檔名><TAB>說明`，有 FAIL 以 1 結束：
+
+| 狀態 | 條件 |
+|---|---|
+| FAIL | 讀不到、超過 50 MiB、不是合法 JSON、不是 CycloneDX／SPDX JSON |
+| GAP | 沒有元件，或全部元件都沒有版本（讀不到版本不猜） |
+| ATTENTION | 有元件缺版本，或缺 purl／cpe（說明列數量與前幾個名稱） |
+| OK | 以上都沒有；不代表安全 |
+
+sbomqs 分數與各類別存在 `--out`（`<檔名>.sbomqs.json`、`sbom-check.md`），分數只寫在說明裡當參考，**不決定狀態**（門檻是政策問題，尚未決定）。
+漏洞比對這一步未做：說明固定寫 `漏洞比對：NOT_RUN（上傳 DT 待臨時 DT 工具）`。
+
+## 上傳臨時 DT 前的整理與報告（`pipeline/lib/firmware_dt.py`）
+
+    python3 -I pipeline/lib/firmware_dt.py prep     --sbom fw.cdx.json --sample firmware/bios/<slug>/firmware.yml --out prep/<slug>
+    python3 -I pipeline/lib/firmware_dt.py expected --prep prep/<slug>
+    python3 -I pipeline/lib/firmware_dt.py report   --prep prep/* [--dt-result <資料夾>] --out <資料夾>
+
+`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
+`report` 產出 `firmware-dt.md`，每個樣本一行 `FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL<TAB>…`（沒有 DT 結果＝NOT_RUN；有 FAIL 以 1 結束）。
+流程與接 workflow 的草稿見 `docs/notes/c2-firmware-dt.md`。
+
+### DT 專案名稱與版本
+
+| 項目 | 規則 |
+|---|---|
+| 名稱 | `firmware-<kind>-<slug>`；合成樣本為 `firmware-<kind>-synthetic-<slug>`。`slug` 取 `firmware.yml` 所在資料夾名稱；只含英數字與 `. _ -`，最長 100 字元（和 `sca-scan --name` 的過濾一致，不需要被改寫；不用 `/`，因為 sca-scan 會把它換成 `-`） |
+| 版本 | `firmware_version`，不合規字元換成 `_`（和 `sca-scan --version` 接受的字元一致：英數字開頭，英數字與空白 `. _ + ~ ( ) -`，最長 100）；沒有版本寫 `unknown` |
+| 合成判定 | 命令列 `--synthetic`、`firmware.yml` 的 `status` 不是 `ok`（沒有真實檔案）、或元件的來源檔名含 `synthetic`，任一成立 |
+| `metadata.component` | `type: firmware`、`name` 取 `model`、`version` 取專案版本、`bom-ref: dumpling:fw-root:<slug>`，附 `dumpling:sample-kind`／`sample-slug`／`synthetic` property；原本的 `metadata.component` 會被取代（舊值記在 `dt-project.json`） |

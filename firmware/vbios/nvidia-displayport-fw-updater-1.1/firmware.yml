@@ -16,9 +16,21 @@ license:
   note: NVIDIA 官方公開下載頁（https://www.nvidia.com/en-us/drivers/nv-uefi-update-x64/）；只在 CI 下載核對、不重新散布、不執行。
 notes: |
   Windows 工具（2023-06-26，13.7 MB），不執行，只當資料讀。
-  只讀位元組檢查（python3 -I）：檔內有兩處 PCIR 結構、vendor 0x10DE，前面有 55 AA 標記，
-  但 device id 為 0 且 ROM 標頭的 PCIR 指標為 0，像是範本或殘缺結構，不是可確認的完整 option ROM；
-  實際 vBIOS 映像可能壓縮在檔內。
+  結論：**檔內沒有可確認的完整 vBIOS 映像**，這個樣本不能當 vBIOS 版本讀取的樣本。
+  內嵌的是 NVIDIA GPU 的 UEFI（GOP）驅動範本：只有 EFI 影像、沒有 legacy x86 影像，版本是 `xx.xx.xx.xx.xx` 佔位字串（工具更新時才填入）。
+  只讀分析（python3 -I、只用標準庫；2026-11-12）檢查了：
+  - PE32+ x64，6 個區段，檔尾 10152 位元組是 PE 的 security 目錄（數位簽章）。資源只有圖示、對話框、字串表、快捷鍵表、版本資訊、manifest，沒有自訂資源或 RCDATA。
+    內容是以 nvflash 為基礎的更新工具：OpenSSL 1.0.2l、nvflash 的 Windows 核心驅動（一個內嵌的 x64 PE，存取實體記憶體用）等工具自己的元件。
+  - 全檔找 zlib／gzip／xz／lzma-alone／bzip2 的簽章並試解（有輸出上限）：只有 2 個 zlib 區塊，在資源區（圖示），解開全是 0。
+    沒有 7z／cab／zip／rar／LZ4／zstd 的簽章。
+  - 全檔找 `55 AA` 並檢查 0x18 的 PCIR 指標：指到有效 `PCIR` 的只有 3 個，在 .data 裡連續排列。三個都是 EFI 影像（code type 3、
+    EFI 簽章 0x0EF1、x64、壓縮類型 1＝EFI 標準壓縮／Tiano），PCIR 的 vendor 與 device 都是 0，長度 0x84、0x8C、0x88 個 512 bytes。
+    用暫存裡自寫的 Tiano 解壓縮（不進 repo）解開後是 PE32+ x64 EFI 驅動，UTF-16 字串有 `nvgop-gp1xx`／`nvgop-gm2xx`／`nvgop-gmxxx`、
+    `NVIDIA GPU UEFI Driver`、`NVIDIA Graphics Display Controller (xx.xx.xx.xx.xx)`，也就是三組 GPU 家族的 GOP 範本。
+  - 之前看到的「PCIR vendor 0x10DE、device 0、指標 0」兩處：是工具資料裡的結構範本（一處在 .rdata，一處在 .data），指標是 0，
+    後面接的不是 ROM 內容。其他 `PCIR`、`NPDS`、`RGIS` 字串是 nvflash 解析 ROM 時比對簽章用的常數（在程式碼裡）。
+  - 全檔沒有 `XX.XX.XX.XX.XX`（十六進位）格式的版本字串（x86_firmware 讀 vBIOS 版本的格式）。
+  - 另外對 6743 個「長度欄位像 Tiano 壓縮串流標頭」的位置全部試解，解出 PE 或 option ROM 的只有上面那 3 個。
   GAP（獨立 vBIOS 映像）：沒有找到官方可合法下載、可直接讀出 vBIOS 版本的檔案。
-  之後用合成的 option ROM 測流程；實際檔案由負責單位提供。
+  CI 用合成的 option ROM 測流程（見 firmware/vbios/standalone-nvidia-option-rom）；實際檔案由負責單位提供。
   不使用 TechPowerUp 等 vBIOS 收藏站（非官方來源）。
