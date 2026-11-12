@@ -26,12 +26,13 @@ for f in files:
             shas.append(m.group(1))
     for sha in shas[:6]:
         tried += 1
-        if tried > 400:
+        if tried > 300:
             sys.exit(0)
         try:
             u = f"https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id={sha}"
-            data = urllib.request.urlopen(u, timeout=30).read()
+            data = urllib.request.urlopen(urllib.request.Request(u, headers={'User-Agent': 'curl/8.5.0'}), timeout=30).read()
         except Exception as e:
+            print('fetch-fail', sha[:12], e)
             continue
         pth = os.path.join(out, f"{d['cveMetadata']['cveId']}-{sha[:12]}.patch")
         open(pth, "wb").write(data)

@@ -12,6 +12,9 @@
       「<目錄>TAB<檔案路徑>TAB<sha256>」。patches 不存在或是空清單 = 這個版本沒有 patch。
       patches 的項目：字串（檔名；套在核心樹 kernel/kernel-noble）或 {file: 檔名, dir: 原始碼根底下的相對資料夾}。
       patches/ 底下有 .patch 檔沒被任何版本列出 → 只警告（stderr），不失敗。
+
+  files <專案資料夾> <版本>
+      印出 sources.yml 該版本每個檔案的「role<TAB>name」（assemble 用它找 BSP 與範例 rootfs 的檔名）。
 """
 import hashlib
 import json
@@ -157,13 +160,21 @@ def main(argv):
                 res = check_components(f.read(), argv[2], req)
             print(json.dumps(res))
             return 0
+        if cmd == "files" and len(argv) == 3:
+            sources = pc.load_sources(os.path.join(argv[1], "sources.yml"))
+            rel = sources["releases"].get(argv[2])
+            if rel is None:
+                raise BuildError("sources.yml 沒有版本 %s" % argv[2])
+            for f in rel["files"]:
+                print("%s\t%s" % (f.get("role", ""), f["name"]))
+            return 0
         if cmd == "patches" and len(argv) == 3:
             for d, p, h in release_patches(argv[1], argv[2]):
                 print("%s\t%s\t%s" % (d, p, h))
             for f in unlisted_patches(argv[1]):
                 print("警告：patches/%s 沒有被任何版本列出，不會套用" % f, file=sys.stderr)
             return 0
-    except BuildError as e:
+    except (BuildError, pc.ConfigError) as e:
         print("jetson_build: FAIL（%s）" % e)
         return 1
     except OSError as e:
