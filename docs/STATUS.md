@@ -2,20 +2,20 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:39 +0800（C2）
+最後更新：2026-11-13 23:39 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：M2（#40）與文件批次（#41）已合併；驗證 C1 的 [WP1] 小 PR #42；正式 tag 等使用者
-- 分支／PR／commit：main ec5b786。已合併：**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批從 main 開 `wp0/docs-batch-5`（還沒開）
+- 分支／PR／commit：main ec5b786。已合併：**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；自然時機再開 PR）
 - 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 PR #42（head a475ec1，不讀 PR 說明與留言），worktree `$AGENT_TMP/dumpling-wt-c0-verify-f42`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-f42/report.md`
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M2 #40 已合併。**推正式 tag 被 C1 的權限擋下，等使用者**（自己推，或放行 C1；C0 不代推）。tag 後 C1 用本機草稿附件核對正式 Release 再刪 wp1/m2-pr-draft。**PR #42**（wp1/m2-followup a475ec1：C1 建議 1、2、5＋C0 驗證建議 1）已開；C1 的驗證代理與 C0 的獨立驗證代理都在跑
-  - C2（第二台）：wp3/cse-layout-size dc7589a（CSE layout Size 0x60，公開樣本 Dasharo NovaCustom NUC BOX ARL v0.9.2，ME 18.1.18.2724）預驗中，C0 用私有檔本機複核中。wp3/fw-advisory 複驗不通過 3 項、修正中；D-051 補上限 30（a3cf183）。supplier-normalize 等 M2
+  - C2（第二台）：cse-layout-size 40bdd2f（D-053）預驗通過、**C0 私有檔複核通過**（3/3 found，表尾非 0 的兩份帶 ATTENTION）；收尾只動測試與文件後開 PR，C0 派獨立驗證。fw-advisory 7ebeacc（已併 main）CI 綠就開 PR（複驗到 d8a20ec 不通過 2 處文字、7ebeacc 已修、作者自看），C0 派獨立驗證整個 PR。supplier-normalize 已併 main（1322c67）排預驗
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
-  - C4（第二台）：三平台差異核對完成、標準答案定案（403fae7；rpi 90、rock 99、ai-nas 76 項，最後一輪 run rpi 43419144284、rock 43413770363、ai-nas 43416974360，併入 61d7c6f）；驗證代理只拿原始資料。#27 已由 C0 決定（D-049：lgpio 維持 os）。下一步：M2 合併後併 main 重跑，核對 rock／rpi 的 -os 項目（852b6d3 影響），再開 M6 PR
+  - C4（第二台）：wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
   2. M2 合併後：使用者決定合併後馬上打 tag（D-052），**等使用者自己推或放行 C1**；文件批次 #41 已合併；C2／C3／C4 已通知
