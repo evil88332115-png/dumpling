@@ -109,3 +109,62 @@ def test_kernel_stage_level_rules():
     assert cr.kernel_stage_level("C-kernel-config", "NOT_ASSESSED", {}) == "GAP"
     assert cr.kernel_stage_keys({"C-kernel-not-judged-b": 1, "C-kernel-config": 1, "C-kernel-not-judged-a": 1, "C-kernel-boot": 1}) == \
         ["C-kernel-config", "C-kernel-not-judged-a", "C-kernel-not-judged-b"]
+
+
+# ---------- 其他沒人消費的列（PR #42 C0 驗證應修 2 的盤點）----------
+
+@pytest.mark.parametrize("stages,lv", [({"C-pyver": "GAP"}, "GAP"), ({"B-php-runtime": "GAP"}, "GAP"), ({"B-php-runtime": "ATTENTION"}, "ATTENTION")])
+def test_pyver_and_php_runtime_are_conditional_stages(tmp_path, stages, lv):
+    base = _risk(_report(tmp_path / "b")[1])[0]
+    st, detail = _risk(_report(tmp_path / "a", stages)[1])
+    k, v = next(iter(stages.items()))
+    assert f"{k} is {v}" in detail and st == cr.worst([base, lv])
+
+
+def _flash_report(tmp_path, flash_rows, list_json=True, sbom=None, variant="rootfs_no_gui"):
+    """刷機包的結果資料夾：<res>/list.json、<res>/status.tsv（刷機包層），<res>/<rootfs>/scan（sca-scan 的輸出）。"""
+    from test_cra_report import SBOM
+    res = tmp_path / "res"
+    findings = [f for f in FINDINGS if not f["vulnerability"].get("isKev") and (f["vulnerability"].get("epssPercentile") or 0) < 0.9]
+    scan = make_scan(res / variant / "scan", findings=findings, sbom=sbom or SBOM)
+    if list_json:
+        (res / "list.json").write_text(json.dumps({"rootfs": [{"variant": variant, "prefix": f"x/{variant}"}]}), encoding="utf-8")
+    (res / "status.tsv").write_text("stage\tstatus\tdetail\n" + "".join(f"{k}\t{v}\tdetail of {k}\n" for k, v in flash_rows.items()), encoding="utf-8")
+    r, s, reports = run(make_project(tmp_path / "p", json.loads(json.dumps(EXAMPLE))), scan)
+    assert s is not None, r.stdout + r.stderr
+    return s, reports
+
+
+@pytest.mark.parametrize("rows,expect", [
+    ({"B-initrd-coverage-rootfs_no_gui": "GAP"}, {"B-initrd-coverage-rootfs_no_gui is GAP (flash package scan): the product SBOM may be incomplete": "GAP"}),
+    ({"B-initrd-coverage-rootfs_no_gui": "NOT_RUN"}, {"B-initrd-coverage-rootfs_no_gui is NOT_RUN (flash package scan): the product SBOM may be incomplete": "GAP"}),
+    ({"B-rootfs-tar-rootfs_no_gui": "ATTENTION"}, {"B-rootfs-tar-rootfs_no_gui is ATTENTION (flash package scan)": "ATTENTION"}),
+    ({"B-uefi-binary": "GAP"}, {"B-uefi-binary is GAP (flash package scan): the product SBOM may be incomplete": "GAP"}),
+    ({"B-uefi-binary": "ATTENTION"}, {"B-uefi-binary is ATTENTION (flash package scan)": "ATTENTION"}),
+])
+def test_flash_package_rows_reach_the_risk_status(tmp_path, rows, expect):
+    base = _risk(_flash_report(tmp_path / "b", {})[0])[0]
+    s, reports = _flash_report(tmp_path / "a", rows)
+    st, detail = _risk(s)
+    (reason, lv), = expect.items()
+    assert reason in detail and st == cr.worst([base, lv])
+    assert next(iter(rows)) in (reports / "risk-assessment.md").read_text(encoding="utf-8")
+
+
+def test_flash_package_rows_ok_info_other_rootfs_and_non_flash_scans_do_nothing(tmp_path):
+    base = _risk(_flash_report(tmp_path / "b", {})[0])
+    rows = {"B-initrd-coverage-rootfs_no_gui": "INFO", "B-rootfs-tar-rootfs_no_gui": "OK", "B-uefi-binary": "OK",
+            "B-initrd-coverage-rootfs_gui": "GAP", "B-image-check-rootfs_no_gui": "GAP"}          # 別的 rootfs、不在清單的列：不看
+    assert _risk(_flash_report(tmp_path / "a", rows)[0]) == base
+    # 沒有 list.json（不是刷機包的掃描）：<res>/status.tsv 不讀
+    assert not any("flash package scan" in x for x in _risk(_flash_report(tmp_path / "c", {"B-uefi-binary": "GAP"}, list_json=False)[0])[1])
+
+
+def test_os_layer_report_skips_bsp_only_flash_rows(tmp_path):
+    """分層的 -os 報告（SBOM 沒有 bsp／unknown 元件，customer）：initrd 與 UEFI 映像是 BSP 的事，不算進這份；rootfs-tar 照算。"""
+    from test_layers_report import _layered_sbom
+    s, _ = _flash_report(tmp_path, {"B-initrd-coverage-rootfs_no_gui": "GAP", "B-uefi-binary": "GAP", "B-rootfs-tar-rootfs_no_gui": "ATTENTION"},
+                         sbom=_layered_sbom())
+    detail = _risk(s)[1]
+    assert not any(x.startswith(("B-initrd-coverage", "B-uefi-binary")) for x in detail)
+    assert "B-rootfs-tar-rootfs_no_gui is ATTENTION (flash package scan)" in detail
