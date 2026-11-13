@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:51 +0800（C0）
+最後更新：2026-11-13 23:51 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -57,7 +57,9 @@
 - 本機背景工作：沒有
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從 cc7d101 打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1` 並推送——C1 的推送被權限機制擋下，等使用者自己推或放行（本機與遠端都還沒有 tag）。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 run 編號與結果 → 刪 `wp1/m2-pr-draft`（draft Release 由 release.yml 自動刪）
-  2. **[WP1] 小 PR #42**（wp1/m2-followup＝c645966）：驗證**通過**（應修 0、建議 5，已貼留言）；建議 1、2、4 在 c645966 修了（文件 NOT_RUN 新規則、scan-status-check 列出沒能執行的步驟、平台腳本不要自稱不適用），3、5 不改。等 CI 與 C0 合併。給 C4 的提醒（已請 C0 轉）：wp7 合併 main 時不要用舊的 pipeline.yml 蓋掉「不適用：」那一列
+  2. **[WP1] 小 PR #42**（wp1/m2-followup＝**cbcbcc5**）：C1 驗證通過（建議 1、2、4 在 c645966 修）；**C0 驗證對 a475ec1「不通過」**，應修 1（「不適用」只看文字，步驟輸出可繞過）在 cbcbcc5 改成 pipeline-steps.tsv 第 5 欄 `recorded`（只有 run-step.sh --record 寫）。已告訴 C0 新 HEAD，等 C0 看 diff 與 CI
+  2b. **下一個 [WP1] PR（C0 驗證應修 2，#42 合併後從 main 開）**：掃描層「該跑卻沒跑」的核心階段（C-kernel-cve-list／config／module-map 在沒有 CNA 鏡像時 NOT_RUN，不在 cra_report RISK_STAGES／COND_STAGES）至少讓 report_status 變 GAP；D-044 的「不適用，核心在 <報告> 判定」NOT_RUN 不降級；Jetson 標準答案不變；盤點沒有程式消費的刷機包層狀態列（B-uefi-binary、B-initrd-coverage、B-image-check、A-md5 等）決定哪些進整體狀態
+  2c. 給 C4 的提醒（已請 C0 轉）：wp7 合併 main 時不要用舊的 pipeline.yml 蓋掉「不適用：」那一列
   3. M7 待辦加上 C0 驗證建議 2–8（-os 8.7 節寫明核心在 -bsp 判定、LAYERS.md 註明各層加總≠完整、check-expected 下限檢查的測試、patch 修的 CVE 在 patched 版仍 P3 的說明、Release 說明步驟表少 pipeline-scan、SBOM 的上游維護者信箱、test_layers_report.py 單獨執行缺 sys.path）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
