@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 19:21 +0800（C1）
+最後更新：2026-11-13 19:22 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,7 +12,7 @@
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1：**搬家準備完成、已停下**。wp1/m2 f11bfdb（全推，本機完整測試 OK）；PR 草稿在 wp1/m2-pr-draft d3efdc8（不合併，開 PR 後刪）。驗收 run 在 f11bfdb 上跑：release v39.2.0 43399785656、v39.2.1 43399800268、tests 43399813005。下一步見 C1 節：檢查 draft → 新的獨立驗證 → 併 main → 開 M2 PR
+  - C1（第二台）：第三輪獨立驗證「不通過」1 項應修（-os 報告重複算 bsp：OP-TEE 內建 Mbed TLS 11 列、刷機包韌體 441 元件），852b6d3 已修（`layers.bsp_inputs_not_applicable`，有 unknown 照舊）。新驗收 run：release 43416140192（v39.2.0）、43416151433（v39.2.1）、tests 43416163311（約 80 分鐘）；綠燈後 C1 核對 draft、派驗證代理驗這個修正，再開 M2 PR。影響已轉告 C4（M2 後併 main 重跑時核對 -os 標準答案）
   - C2：**搬家準備完成、已停下**（C2 節 f48ffb2）。D-042 CSME 完成（wp3/csme-new 61e8ef7）；AMD（wp3/amd-psp ebac3e9）應修已修、**還沒複驗**；新 C2 先照 D-047 改歧義規則（需校驗佐證）與拿掉 sys._getframe，再複驗，兩半合成一個 PR（開之前請 sca-center 用私有檔本機驗）；D-043 接在後面；supplier-normalize（8a960c0）等 M2；公開樣本在第二台要照各分支 firmware.yml 重新下載
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：D-048 收到；wt-c4-cra-survey 已清。rpi dev run 43410313151 OK（D-038、D-044 生效），rpi 標準答案 84 項（1abab06）；rock、ai-nas 在 8729785 上做最後一輪，之後跑 rpi，再派驗證代理做差異核對（只給原始資料）；M6 PR 草稿已備
