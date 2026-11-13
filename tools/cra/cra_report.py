@@ -4277,7 +4277,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                         "dt/deb-sources.json", "scan/sbomgate.json", "scan/l4t-kernel-map.json",
                                         "scan/nvidia-bulletins.json", "scan/distro-recheck.json", "scan/kernel-config.json",
                                         "dt/analysis.json", "scan/usn-cves.json", "scan/ubuntu-priority.json",
-                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json")}
+                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json", "scan/kernel-versions.json")}
     findings, bom, grype, meta = (load_json(paths[k]) for k in ("dt/findings.json", "sbom/sbom.cdx.json", "scan/grype.json", "meta.json"))
     findings = merge_readback(findings, load_json(paths["dt/analysis.json"]))
     # 分層（SBOM 的元件帶 dumpling:layer 時才動作；沒有時 layers_on 是 False，下面所有分層的程式都不改任何輸出）
@@ -4554,6 +4554,13 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                          "（backport）的列照舊留在 P1–P3；要分開列請在 {{ text.nvidia_section }} 後面加上 {{ text.distro_section }}"]
     # VEX：每一列的判定（DT 的人工分析 ＞ vex-annotations.json ＞ 發行版已修補 ＞ 核心設定 ＞ NVIDIA 推定），表格的 VEX status 欄用
     kcfg = load_json(paths["scan/kernel-config.json"])
+    # 映像另有出貨但沒判定的核心（scan/kernel-versions.json 的 not_judged）：K1／K2 的排除只對判定過的核心成立，不套用到整個產品
+    # （vex_export.with_scope 標 scope_incomplete；kconfig_usable、module_map_of、runtime_evidence 看到就不採用）。沒有檔案或 not_judged 為空 → 原樣
+    kvers_doc = load_json(paths["scan/kernel-versions.json"])
+    kcfg = vx.kernel_with_scope(kcfg, kvers_doc)
+    if vx.kernel_scope_of(kvers_doc) is not None:
+        warnings = list(warnings) + ["核心：映像出貨的核心 " + "、".join(vx.kernel_scope_of(kvers_doc)["not_judged"]) + " 沒有判定；"
+                                     "核心設定比對（K1）與模組對應（K2）的排除不套用到整個產品（沒有排除任何核心的列）"]
     # 刷機包有兩顆不同的核心（scan/kernel-boot.json，C-kernel-boot）：資訊性 ATTENTION／GAP 進設定警告（報告包的警告區也會顯示）
     kboot = load_json(paths["scan/kernel-boot.json"])
     if isinstance(kboot, dict) and kboot.get("schema") == "sca-center-kernel-boot/1" and kboot.get("status") in ("ATTENTION", "GAP"):
@@ -4579,7 +4586,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 生效日和報告日（UTC）比；Debian 版本比較用 deb_vercmp
     rctx.update(image_ids=sorted({x for x in (vx.norm_image(meta.get(k)) for k in ("digest", "image_id", "content_sha256", "version")) if x}),
                 today=now[:10], kernel_modules=kmods, kernel_modules_info=kmods_info,
-                module_map=load_json(paths["scan/kernel-module-map.json"]), module_map_sha256=hashes.get("scan/kernel-module-map.json"),
+                module_map=vx.kernel_with_scope(load_json(paths["scan/kernel-module-map.json"]), kvers_doc), module_map_sha256=hashes.get("scan/kernel-module-map.json"),
                 ubuntu_status=ustatus_doc, vercmp=deb_vercmp)
     # NVIDIA 公告的 CVE 其實是發行版套件的（nvidia_distro.py）：依 Grype DB（唯讀）判斷；沒有資料庫 → 不查，維持原狀並記在 summary
     nvd_info = {"checked": False, "reason": "no NVIDIA bulletin", "remapped": {}}
@@ -5497,7 +5504,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()
-        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, status=status, expl=expl, svc_info=svc_info,
+        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, status=status, expl=expl, svc_info=svc_info,
                           missing_fields=summary["missing_fields"], cfg=cfg, role=role, have_findings=isinstance(findings, list),
                           risk_st=risk_st, risk_reasons=reasons, bom_st=bom_st, bom_reasons=bom_reasons, human=vx.HUMAN,
                           author_missing=vx.author_missing, schema=SCHEMA, db=pdb, no_vuln=nvd)

@@ -65,6 +65,19 @@ def test_plan_only(site):
     assert not (dirs[0] / "scan").exists()      # --plan-only 不掃描
 
 
+def test_no_source_is_gap_not_cwd(site):
+    # 沒給 --source：不去目前資料夾找（即使那裡剛好有原始碼壓縮檔），核心原始碼標 GAP，其他照跑
+    tmp, flash, src, out, cfg, stable = site
+    shutil.copy(src / "widget_source.tar.gz", tmp / "widget_source.tar.gz")
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp), **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}
+    r = subprocess.run([sys.executable, "-I", WIZ, "--site-config", str(cfg), "--archive", str(flash), "--generic-rules", "no", "--yes",
+                        "--plan-only"], capture_output=True, text=True, env=env, cwd=str(tmp))
+    assert r.returncode == 0, r.stdout + r.stderr
+    plan = json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))
+    assert plan["source_archive"] is None and plan["kernel_source"] is None and plan["kernel_version"] is None
+    assert "沒有指定原始碼" in plan["source_note"] and "沒有指定原始碼" in r.stdout
+
+
 def test_env_var_config_and_no_stable(site):
     tmp, flash, src, out, cfg, _ = site
     c = json.loads(cfg.read_text())
