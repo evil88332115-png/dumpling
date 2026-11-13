@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:15 -0500（C0）
+最後更新：2026-11-13 04:17 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -38,29 +38,45 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-- 目前在做：M2（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含 C1 額外的平台介面與開案範本、依層分開）。M1 已合併（main 0e706cb，PR #9）
-- 分支／PR／commit：
-  - `wp1/m2`：M2 整合分支，1bbcf69＝J 併入＋main 26a6377（之前：6b70949，main b6d341a（含 C2 M3）＋P、L、K 軌＋gpu-firmware 空對照表＋rpi_img 依內容選 boot 分割區＋PROVENANCE 修正＋cra-scan 沒給 --source 時標 GAP）＋kernel-cve.sh clone 重試＋K 第二輪＋kernel-cve.sh 上游連不上時沿用 48 小時內的上一份鏡像（ATTENTION；sca-scan 記 C-kernel-cve-mirror）；CI tests run 43343147526（d12bf41 綠燈）
-  - `wp1/m2-layers`：L 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
-  - `wp1/m2-platform`：P 軌，已 fast-forward 併入 wp1/m2，worktree 已移除
-  - `wp1/m2-jetson`：J 軌，已 fast-forward 併入 wp1/m2（3e0190e），worktree 已移除；之後併了 main 26a6377（M4 每日監控），沒有衝突
-  - `wp1/m2-spike`：試驗分支（4b8b7b8，不合併；量測在 `docs/m2-spike-results.md`），worktree 已移除
-  - M1 的 worktree 與子分支（m1-dt、m1-fix、m1-tools-pilot、m1-tools）已清掉
-- 代理：
-  - 寫程式 S（M2 試驗）：完成。arm runner 單一 job 約 36 分鐘原生編完核心＋全部樹外模組（nvbuild.sh，make -j4），磁碟峰值約 8 GiB、RAM 約 3 GiB；run 43242393210（清理）、43246860803／43254234938（編譯＋傳檔）
-  - 寫程式 P（平台介面與開案範本）：完成，CI run 43256946338 綠燈。契約見 `docs/PLATFORM-INTERFACE.md`：`pipeline/platform.sh <validate|fetch|build|assemble|scan|raw-sectors> <專案資料夾> <版本>`，結束碼 OK 0／FAIL 1／GAP 3／NOT_RUN 4／用法 64；project.yml 的 `os_responsibility: ours|customer|upstream-vendor`；sources.yml 是 `releases.<版本>.files[]`（gap、sha1、commit＋repo）；platform.yml 的 `layers`（bsp 套件名稱清單、host-tool 路徑、default os）；`pipeline/lib/project_config.py` 的 `classify_package`／`classify_path`；fetch_verify.py 簽名同 firmware_fetch；scan-flash-package.sh 改成明確 `--platform`、沒給就 GAP。待確認見該文件第 8 節（r39.2.0 public_sources.tbz2 的 sha256 尚未記錄＝gap）
-  - 寫程式 L（依層分開）：完成，CI run 43265323496 綠燈。契約 `docs/LAYERS.md`：`pipeline/sbom-layers.py split <sbom> <平台> <專案資料夾> <輸出>` → sbom.bsp（bsp＋unknown）／os／host-tool（不上傳）／product＋layers.json（scan_plan）；cra_report `--os-responsibility`、漏洞列加 layer／layer_todo；P1 判斷表 customer／upstream-vendor 只放 bsp＋unknown、ours 含 os、沒給全部＋GAP；host-tool 不進清單；DT 兩個平行專案 `<名稱>-bsp`／`-os`；SBOM 沒有分層屬性時輸出與原本一致。Jetson fixture：bsp 1537、os 1975、unknown 339、host-tool 0
-  - 寫程式 J（Jetson build／assemble／scan、release.yml、dev.yml、patch 版、標準答案測試、接上分層）：`wp1/m2-jetson`；Sonnet 5.5／high；**完成**（3e0190e）。兩個版本的完整 run 都綠燈，各 19 個附件的 draft，標準答案 23 項都符合；v39.2.1 上游被修改的檔案 1、v39.2.0 是 0；build record OK、C-kernel-boot OK；兩版 bsp 報告 diff 合理（+33／−22 列，只有元件版本變動）；cache 還原實測 OK；draft 測完已刪。未實測：runner 上的 fallback（ATTENTION）、main／dev/** 的滾動 pre-release。另記：Release POST 偶發 403（已加重試）。手動觸發只建 draft Release，測完刪 draft；不建 git tag。追加（C4 經 C0 提出，2026-11-12）：pipeline.yml 通用化（build.mode none 略過 build、交接只走 $DUMPLING_OUT/handoff/、build.apt／build.runner／scan.apt 由 plan job 讀）、scan-flash-package.sh 加 --platform generic 與 --arch（platform.yml arch，預設 arm64）、通用部分抽成 pipeline/lib/platform_scan.py；scan.runner（選填，預設 amd64，不隨 arch）；sources.yml role 加 metadata（官方清單／說明檔，只核對不掃描）；sha1 改由 fetch_one 核對；每步結束碼統一走 pipeline/run-step.sh（3 GAP／4 NOT_RUN 繼續），結果寫進 pipeline-steps.tsv 並列進摘要與 release-meta；（凍結例外，擋 C4）scan.tools: sbom-only|full（full＝install-tools.sh 完整模式，含 cdxgen／govulncheck／guarddog）；（凍結例外，擋 C4）kernel-cve 鏡像 actions/cache＋共用 pipeline/lib/mirrors.sh，退回時 pipeline-steps ATTENTION、Release 說明標示（不擋正式發佈，同 D-033）
-  - 寫程式 K（核心版本參數，C4 經 C0 提出的第 6 件）：完成，已 fast-forward 併入 wp1/m2（d12bf41），worktree 已移除。三支入口加可重複的 `--kernel-version`／SCA_KERNEL_VERSIONS；`scan/kernel-versions.json`（shipped／requested／judged／not_judged）；未判定的出貨核心各列 GAP；指定多顆先標 GAP；有未判定的出貨核心時 K1／K2 的排除不採用（tools/cra/vex_export.py `kernel_with_scope`，VEX／報告／P1 表／runtime_evidence 都擋）；核心清單在判定工具讀映像的同一趟列出。本機全測 OK。逐一判定與合併在 M7（D-036）
-  - 寫程式 K 第二輪（凍結例外，C3 需要）：完成，已 fast-forward 併入 wp1/m2（2cf0f23），worktree 已移除。kernel-versions.json schema `sca-center-kernel-versions/2`：shipped 每顆帶 upstream_version／upstream_basis（source-makefile／platform-param／source-makefile+platform-param）／upstream_note；Makefile 由 kernel_config.py `--source-tree-version` 讀；kernel_versions.py `--upstream-version <出貨>=<X.Y.Z>`；讀取端 /1、/2 都收。本機全測 OK。待做（J 併入後由我做）：Release 附件 `kernel-versions-<專案>-<版本>.json`（列進 release-meta）、platform_params.kernel_upstream_version 傳成 --upstream-version；release-meta.json 加 report_status（cra_report summary.json 整體 status，分層列每份）、release_gate（vex.gate），讀不到填 NOT_RUN，Release 說明開頭印出（C4 提、C0 轉，決定放 M2）；J 的 result 改名 pipeline_result；Release 說明開頭順序 report_status、release_gate、pipeline_result；status 仍是生命週期，文件寫清楚
-- CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
-- M7 待辦（M2 合併後；判斷邏輯，一起驗證）：D-035 排除依據類型；D-036 逐顆核心判定與合併；D-039 核心可利用性三層判斷（從 sca-center 同步，PROVENANCE 更新來源 commit）與精靈以掃描版本覆寫 version／identification
-- M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M2 之後
-- 我自己：release-meta.json 加 report_status／release_gate／pipeline_result（result 改名）／reports／kernel_versions、Release 說明開頭依序印出；附件 kernel-versions-<專案>-<版本>.json（dev 也發）；platform_params.kernel_upstream_version → `project-info.py --kernel-args` → 精靈 `--kernel-upstream-version` → sca-scan → kernel_versions.py `--upstream-version`。已推 wp1/m2 9f1d2f0；已通知 C0 轉 C3、C4。**驗收 run 全部綠燈**：release.yml v39.2.0 43375548090、v39.2.1 43375551920（從新的 build，draft，各 20 個附件），tests.yml 43375594174。兩份 draft：標準答案 23/23、build record OK、C-kernel-boot OK、上游被修改的檔案 v39.2.1＝1（inet_connection_sock.c）／v39.2.0＝0、kernel-versions 附件 schema /2（upstream 6.8.12，source-makefile）；report_status／release_gate 都是 GAP（NVD 沒開，已知），pipeline_result OK
-  - C4 回報、C0 轉（2026-11-13）：scan.sh 讀 scan_plan 用 TAB 分隔，ours 的空後綴被吃掉。修法：`jetson_scan.py plan`（platform_scan.scan_plan_lines，格式驗證）每行用 0x1F 分隔；collect 同一後綴出現兩次取後面那次（ours 的產品 SBOM 重跑），kernel-versions 仍取完整掃描；LAYERS.md 加說明；測試 7 個（含舊寫法的反證）。本機全測 OK，已推 wp1/m2 7dd351c（CI tests 43386540818）；PROVENANCE 補 6 列 M2 的改動、JETSON.md 加 M2 驗收 run（58b4ff0，本機）
-  - C4 回報、C0 轉（2026-11-13，D-044）：分層的核心問題。(1) 分層重跑的 -os 也跑核心階段（Jetson：三列多餘的 GAP；rpi：CNA 退回產生約 2700 列）→ M2 修：`--kernel-in-other-report <報告>`（精靈→scan-flash-package.sh→sca-scan），這一層沒有核心時三個核心階段 NOT_RUN「不適用」，不退回 CNA；沒給時行為不變。(2) Grype 用發行版資料比對不在發行版核心序列上的核心（rpi 1:6.18.50-1+rpt1 比 Debian 6.12.x）會漏報 → M2 只做防護：kernelcheck 對 epoch≥1、+rpt／+rpi、purl upstream 不是發行版核心原始碼（linux-upstream；Debian 的非 linux／linux-signed-*）、平台明確宣告（sources.yml platform_params.kernel_not_distro）的核心記 C-kernel-coverage GAP；真正修法（上游版本對 CNA、kernel_cna_rows 補 Grype 沒有的）在 M7。Jetson 不受 (2) 影響（比對對象是 C-kernel-l4t-map 對應的 Canonical linux-nvidia-tegra）。寫程式 KS（Sonnet／high，`wp1/m2-kscope`）進行中；驗證代理在驗 7dd351c
-  - 2026-11-13 續：KS 完成並併入（ac8cd5c；`--kernel-in-other-report`、kernelcheck 四條 OR 規則＋`tools/pilot/lib/data/distro-kernel-sources.json`、`platform_params.kernel_not_distro`／platform.yml `scan.kernel_not_distro`）。第一輪獨立驗證（7dd351c）：5／6 PASS、第 6 項附缺口；應修 1（間歇性測試）已修、應修 2（scan.platform_arg／rootfs 沒人讀 → 改成真的傳 DUMPLING_SCAN_PLATFORM_ARG、驗證收緊）、應修 3（文件兩處）已修；建議 6、9、10 已修，其餘寫進 JETSON.md 已知限制。C0 轉來：orin-nano-demo 的 config 是範本虛構值、user-information 因此 OK → config 只留必填（208f4ff）；沒宣告自有軟體 → B-own-software GAP、`sbom.own_software_none_reason` 明確宣告 → OK、scan.json `own_software`（7a70d0b）；缺口 24：scan.json 的 p1_rows 依 layer_todo（23ff7a5；P1 判斷表本身是對的，C4 已更正）
-- 下一步：本機全測 → 推 wp1/m2 → 重跑兩個 Jetson release.yml → 第二輪獨立驗證（KS、自有軟體、p1_rows、platform_arg、防護會不會漏抓）→ 併最新 main → PR（附 D-020 逐檔對照表、資料來源表、驗收 run、驗證留言、凍結例外清單）→ 通知 C0
+> **D-045：C1 搬到第二台電腦（2026-11-13）。** 這一節寫到新對話不用問就能接手；路徑一律用 `local.env` 的變數（`$REPO_MAIN`、`$AGENT_TMP`、`$SCA_CENTER`、`$HEAVY_LOCK`）。
+> 第一台的 worktree 與暫存在使用者確認第二台接上之前不刪。
+
+- 目前在做：**M2 收尾**（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含平台介面與開案範本、依層分開）。M2 的程式與文件都做完了，**正在跑最後一輪驗收 run**。M1 已合併（PR #9）
+- 分支與 commit：
+  - **`wp1/m2`＝f11bfdb**（已推）：M2 整合分支，含 J、P、L、K、KS 各軌與之後的修正；base 是 main 26a6377。本機完整測試（`tests/run.sh`）在 61d7c6f＋f11bfdb 上 10 組全部 OK
+  - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：`pr-draft/` 放 PR 說明草稿（head.md、mid.md 凍結例外、datasrc.md 資料來源）與逐檔對照表腳本 `m2table.py`（用法見該分支的 README）；開完 PR 後刪掉這個分支
+  - `wp1/m2-kscope`＝b671488：KS 軌，已併入 wp1/m2（ac8cd5c），不用再動
+  - 其他 M2 子分支（m2-layers、m2-platform、m2-jetson、m2-kernels*、m2-spike）都已併入或不合併，不用再動
+- **正在跑的 GitHub Actions（都在 f11bfdb；第二台的 C1 接著看結果）**：
+  - release.yml `orin-nano-demo/v39.2.0-demo1`：run **43399785656**（從新的 build；手動觸發只建 draft；約 75–90 分鐘）
+  - release.yml `orin-nano-demo/v39.2.1-demo1`：run **43399800268**
+  - tests.yml：run **43399813005**
+  - 查：`gh run view <id> -R evil88332115-png/dumpling --json status,conclusion`；kernel-cve 鏡像連不上 git.kernel.org（間歇）而失敗時，重跑那個 run
+  - 前一輪 be36327 的兩個 release run（43394028388、43394040313）是我取消的（C0 決定改 vex-rules 後要重訂標準答案）；那輪 tests 43394051461 綠燈
+- 本機背景工作：沒有（完整測試已跑完；代理都已結束）
+- **下一步（照順序）**：
+  1. 兩個 release run 綠燈後，檢查兩份 draft（`gh release view/download orin-nano-demo/<版本>`）：附件 20 個（每份報告 zip／SBOM／VEX／漏洞清單／P1 判斷表 ×3＋layers.json、build-record、scan-summary、kernel-versions、release-meta）；`python3.10 -I pipeline/check-expected.py tests/expected/orin-nano-demo/<版本>.json scan-summary-*.json` 24 項（scan.sh 已在 CI 比對，失敗會讓 run 失敗）；
+     release-meta 的 report_status／release_gate（預期 GAP，NVD 沒開）、pipeline_result OK；-os 報告包 `報告/內部存檔/scan-status.tsv` 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage 仍 OK（Jetson 不是 off-series）；scan-summary 的 `own_software` 是 GAP；報告 summary.json 的 documents.user-information 不是 OK；
+     上游被修改的檔案 v39.2.1＝1（inet_connection_sock.c）、v39.2.0＝0；build_record_status 與 kernel_boot OK；兩版 diff 合理（上一輪 bsp +33／−22 列、只有元件版本變動）。
+     **vex-rules 拿掉 R1～R5 之後 accepted 會變少、P1 可能變**：記下前後數字（上一輪 9f1d2f0：bsp p1_rows 10、accepted 2990），bsp.p1_rows 範圍 1–40 不符就依實際值重訂並寫理由
+  2. 請一個**新的**獨立驗證代理（Sonnet、high，只給程式與 draft，不給結論）驗這一輪的 draft 與 61d7c6f、f11bfdb 的改動；前兩輪驗證報告的結論已處理（見下面「驗證」）
+  3. 併最新 main（`git fetch && git merge origin/main`；不 rebase、不 force-push）→ 本機完整測試 → 推
+  4. 開 M2 PR（D-020 一個 PR，C0 合併）：說明用 `wp1/m2-pr-draft` 的草稿；`m2table.py` 在併 main 之後重新產生逐檔對照表；補「驗收 run」（上面三個 run 的結果）與「驗證」（第三輪的留言連結：把驗證報告貼成 PR 留言）；最後一行 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
+  5. 通知 C0（C0 會另派自己的驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者）。刪掉這輪的 draft Release 與 `wp1/m2-pr-draft`
+- 驗證（這輪之前）：
+  - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
+  - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
+- 凍結例外（D-036 之後吸收進 M2 的契約修改，PR 說明 `mid.md` 有表）：scan.tools；kernel-cve 鏡像 cache 與退回；kernel-versions.json schema /2 與 Release 附件；platform_params.kernel_upstream_version；release-meta 的 report_status／release_gate／reports／kernel_versions（result 改名 pipeline_result）；scan_plan 用 0x1F 分隔與 collect 同後綴取後面那次；
+  分層報告的核心不適用（`--kernel-in-other-report`，只給 -os）與核心不在發行版序列上的防護（kernelcheck 四條 OR 規則、`tools/pilot/lib/data/distro-kernel-sources.json`、`platform_params.kernel_not_distro`／platform.yml `scan.kernel_not_distro`；D-044）；沒宣告自有軟體 → B-own-software GAP（`sbom.own_software_none_reason`；scan.json `own_software`）；scan.json p1_rows 依 layer_todo；scan.platform_arg 傳到工具（`DUMPLING_SCAN_PLATFORM_ARG`）；
+  orin-nano-demo 的 config.json 只留必填、vex-rules.json 只留 K1／K2／U1（C0 決定）
+- M7 待辦（M2 合併後；判斷邏輯一起驗證）：D-035 排除依據類型；D-036 逐顆核心判定與合併；D-038 出貨的 /boot/config-* 優先（C4 缺口 23）；D-039 核心可利用性三層判斷（從 sca-center 同步，PROVENANCE 更新來源 commit）與精靈以掃描版本覆寫 version／identification；
+  D-044 真正的修法：上游版本對核心 CNA、cra_report `kernel_cna_rows` 補 Grype 沒有的 CVE、「核心覆蓋 OK」的判斷條件（C4 缺口 22）；new-project.sh 不帶範本值（config.json、vex-rules.json；同 D-033 的文件骨架）；C4 缺口 7（OMV 原始碼相依依 dumpling:origin=source 歸層）、20（x86 映像的分割區訊息）；sbx-stubs 測試殘留
+- M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M7
+- 對外約定（給 C4，已通知）：分層重跑只對 -os 給 `--kernel-in-other-report <專案>-bsp`（-bsp 給了 sca-scan 以 exit 64 拒絕）；scan 腳本用 `DUMPLING_SCAN_PLATFORM_ARG`；platform_arg 只能是 jetson／raspberrypi／rockchip／generic，scan.rootfs 只能是 rootfs；
+  標準答案的 Jetson 驗收項目（build_record_status、kernel_boot、upstream_source.modified）只對 platform: jetson 的專案要求（6a87c15）
+- 工作習慣（對話記憶不跨機器）：推上去的 commit 永久公開，內部原值連暫時都不能進 commit；推送前 `ci/public-check.sh --rev HEAD --private ~/.config/dumpling/forbidden.txt`；完整測試 `source ~/.config/dumpling/local.env && flock "$HEAVY_LOCK" env PYTHON=python3.12 tests/run.sh`（venv 不要放進 PATH）；
+  tools/ 的 pytest 要從 repo 根目錄給資料夾（`python -m pytest tools/cra -k …`，`tools/cra/tests/conftest.py` 設路徑；給單一檔案路徑會 import 失敗）；tests/ 底下的 unittest 用 `python3.10 tests/<檔>.py`；改 `tools/` 的檔要在 PROVENANCE 那一列補 M2 的說明（`ci/provenance-check.sh`）；
+  STATUS 用 `ci/status-update.sh C1 <檔>`（timeout 給 280 秒，150 秒曾逾時）；代理：Sonnet，medium 或 high（不可信的解析與判斷用 high），寫程式與驗證分開，最多 2 個寫程式＋1 個驗證
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
