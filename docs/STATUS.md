@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:01 +0800（C1）
+最後更新：2026-11-14 05:18 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -280,12 +280,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M8**（`wp2/art14` e4771a9，已併 main b56cff4）：B1 第 14 條範本讀 project.yml 的銷售市場／產品名稱／公司角色（14eb277）；B2 每日支援期限與 EOL 檢查 support.py，接在每日監控 real 那一輪（e4771a9）。CI 跑中＋自己的預驗代理在看，綠了開 PR 通知 C0。**PR #61**（wp5/gitlab-notes 8c10027：GitLab release-meta 補 --notes＋兩邊參數比對測試）CI 綠，已通知 C0
+- 目前在做：**M8 PR #69**（wp2/art14 a1a9528，已併 main 5abdfa2）：B1 第 14 條演練讀 project.yml（D-055）＋B2 每日支援期限與 EOL 檢查（support.py，stateless plan、support-period 標籤）。自己的預驗代理：應修 3、建議 7，已修。CI 綠（tests 43506810194、演練 43506814750）；real dry_run 43509399437 跑中。等 C0 派驗證，驗證期間不推。PR #61 已合併（main 5abdfa2）
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32（每日監控架構）、#47（M5 GitLab 範本與搬移清單）、#49（M2 之後的每日監控：mirrors.sh、核心 CVE 鏡像 cache、release-meta 欄位、公開 Issue 防 @提及／連結／HTML 實體注入）
 - M8 B1（第 14 條通報）：`wp2/art14` e66f499（worktree `$AGENT_TMP/dumpling-wt-c3-art14`，177 個測試，GitHub 演練兩次全綠），等 M7 的欄位再開 M8 PR
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
-- 代理（D-048）：1 個驗證代理（Sonnet）預驗 M8 的 B1／B2
+- 代理（D-048）：目前沒有代理在跑
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：第一次真實基準等正式 Release（使用者還沒推 tag）
 <!-- END C3 -->
