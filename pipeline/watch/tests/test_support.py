@@ -207,6 +207,49 @@ class TestRun(Base):
         self.assertTrue(any(r[0] == "p2" and r[1] == "FAIL" for r in res["rows"]))
         self.assertTrue(any("90 天提醒" in t for t in self.titles(plan)), self.titles(plan))      # p1（剩 48 天）照樣開提醒
 
+    def test_unquoted_yaml_date(self):
+        # support_until: 2027-01-31（沒加引號）→ YAML 讀成 date；project_config 接受，support.py 也要能用（預驗應修 2）
+        d = self.project(until="2027-01-31")
+        y = open(os.path.join(d, "project.yml"), encoding="utf-8").read().replace('support_until: "2027-01-31"', "support_until: 2027-01-31")
+        open(os.path.join(d, "project.yml"), "w", encoding="utf-8").write(y)
+        rc, res, plan, out = self.run_support()
+        self.assertEqual(rc, 0, out)                       # 提醒不是 ATTENTION
+        self.assertTrue(any("2027-01-31" in t and "提醒" in t for t in self.titles(plan)), self.titles(plan))
+
+    def test_one_project_crash_does_not_stop_others(self):
+        self.project(name="p1", until="2027-01-31")
+        self.project(name="p2", until="2027-01-31")
+        orig = support.product_deadline
+        def boom(su, today):
+            if boom.n == 0:
+                boom.n += 1
+                raise RuntimeError("x")
+            return orig(su, today)
+        boom.n = 0
+        support.product_deadline = boom
+        try:
+            rc, res, plan, out = self.run_support()
+        finally:
+            support.product_deadline = orig
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(r[0] == "p1" and r[1] == "FAIL" and "RuntimeError" in r[2] for r in res["rows"]), res["rows"])
+        self.assertEqual(len(self.titles(plan)), 1)       # p2 照樣開
+
+    def test_component_issue_once_per_project(self):
+        # 同一個元件問題在兩個 Release：一個 Issue，列出兩個版本（舊 Release 不各開一堆，預驗建議 9）
+        self.project(until="2031-12-31")
+        self.release(version="v1.0.0")
+        self.release(version="v1.1.0", comps=(("debian", "12.7"),))
+        rc, res, plan, _ = self.run_support()
+        t = self.titles(plan)
+        self.assertEqual(len(t), 1, t)
+        body = plan["actions"][0]["body"]
+        self.assertIn("p1/v1.0.0", body)
+        self.assertIn("p1/v1.1.0", body)
+        self.release(version="v1.2.0", comps=(("debian", "12.8"),))
+        rc, res, plan2, _ = self.run_support()
+        self.assertEqual(plan2["actions"][0]["key"], plan["actions"][0]["key"])     # 新版本有同樣問題不重開
+
     def test_bad_table_fails(self):
         with open(self.table, "w") as f:
             f.write("{}")
@@ -248,6 +291,34 @@ class TestApplyStateless(Base):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(run(), 0)
         self.assertEqual(len([i for i in gh.issues.values() if "support-period" in issues.label_names(i)]), 1)   # 關掉的也不重開
+
+    def test_support_issue_not_counted_as_watch_issue(self):
+        # 預驗應修 1：支援期限的 Issue 不能被 read-state 算成監控 Issue（沒有狀態 Issue 時會擋住第一次基準）
+        self.project(until="2027-01-31")
+        self.run_support()
+        plan_p = os.path.join(self.dir, "out", "plan.json")
+        gh = FakeGitHub()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(issues.main(["apply", "--repo", REPO, "--plan", plan_p, "--mode", "real"], api=gh), 0)
+        iss = list(gh.issues.values())
+        self.assertEqual(len(iss), 1)
+        self.assertTrue(iss[0]["body"].startswith("<!-- dumpling-support key="))
+        self.assertNotIn("dumpling-watch", issues.label_names(iss[0]))
+        st = os.path.join(self.dir, "state")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(issues.main(["read-state", "--repo", REPO, "--mode", "real", "--out", st], api=gh), 0)
+        base = json.load(open(os.path.join(st, "state-base.json")))
+        self.assertEqual(base["watch_keys"], [])
+        state, _, first = match.load_state(st)
+        self.assertTrue(first)                            # 照樣可以建立第一次基準
+
+    def test_stateless_only_open(self):
+        p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "stateless": True, "state_base": None, "state": None,
+             "actions": [{"op": "comment", "key": "a" * 64, "body": "x"}], "status": "OK", "detail": ""}
+        path = os.path.join(self.dir, "plan.json")
+        json.dump(p, open(path, "w"))
+        with self.assertRaises(issues.Fail):
+            issues.load_plan(path)
 
     def test_stateless_with_state_rejected(self):
         p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "stateless": True, "state_base": None, "state": {"schema": 1},

@@ -474,6 +474,23 @@ class TestProjectInfo(Base):
         self.assertIn("- 產品名稱與版本：Demo Box 1 v1.0.0", i["body"])
         self.assertEqual(art14.parse_marker(i["body"])[0], base_key)    # 改名不會讓同一個命中重開
 
+    def test_product_name_sanitized(self):
+        evil = "@everyone &commat;x [a](https://evil.example) ![i](https://evil.example/a.png) #1"
+        rc, out = self.open_with(self.make_project(name=evil))
+        self.assertEqual(rc, 0, out)
+        i = self.gh.issues[1]
+        import match
+        self.assertEqual(match.unsafe_actions([{"title": i["title"], "body": i["body"]}]), [])
+        self.assertIn(match.md_text(evil), i["body"])
+        self.assertIn(match.md_title(evil), i["title"])
+
+    def test_guard_rejects_unsanitized(self):
+        with self.assertRaises(art14.Fail):
+            art14.guard_text([("內文", "演練 [x](https://evil.example)")], True)
+        with self.assertRaises(art14.Fail):
+            art14.guard_text([("標題", "演練 @everyone")], True)
+        art14.guard_text([("標題", "演練 [x](y)")], True)       # 標題不是 Markdown：連結不算
+
     def test_supplier_note(self):
         rc, _ = self.open_with(self.make_project(role="supplier"))
         self.assertEqual(rc, 0)

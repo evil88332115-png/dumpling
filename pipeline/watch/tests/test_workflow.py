@@ -118,6 +118,7 @@ class WatchWorkflow(unittest.TestCase):
         notify = re.search(r"(?ms)^  notify:\n(.*)", self.round).group(1)
         self.assertIn("needs.compute.outputs.has_support_plan == 'true'", notify.split("steps:")[0])
         sup = re.search(r"(?ms)- name: 套用支援期限的 Issue\n(.*?)(?=^      - |\Z)", notify).group(1)
+        self.assertIn("if: ${{ !cancelled() && needs.compute.outputs.has_support_plan == 'true' }}", sup)   # 每日監控的 apply 失敗也照樣套用
         self.assertRegex(sup, r"DRY:\s*\$\{\{\s*inputs\.dry_run\s*\}\}")
         self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', sup)
         self.assertRegex(sup, r'issues\.py apply [^\n]*support/plan\.json[^\n]*"\$\{d\[@\]\}"')

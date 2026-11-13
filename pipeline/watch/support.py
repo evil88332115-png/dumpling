@@ -150,16 +150,14 @@ def run(a):
         actions.append({"op": "open", "key": key, "title": title, "body": body, "labels": [LABEL] + labels})
 
     run_line = [f"執行紀錄：{a.run_url}"] if a.run_url else []
-    for name, d, proj, err in load_projects(a.projects_dir):
-        seen_projects.add(name)
-        if err:
-            sts.append("FAIL")
-            rows.append((name, "FAIL", f"project.yml 不合格：{err}"))
-            continue
-        if proj.get("status") not in ("shipped", "development"):
-            continue
+    t = match.md_text            # 資料表與 project.yml 的值寫進 Issue 前一律淨化
+
+    def check_one(name, d, proj):
         pname = proj.get("product_name") if proj.get("product_name") not in (None, "", "TO BE COMPLETED") else name
-        su = proj.get("support_until") if proj.get("support_until") not in (None, "", "TO BE COMPLETED") else None
+        su = proj.get("support_until")
+        if isinstance(su, datetime.date):          # 沒加引號的 YAML 日期：project_config 接受，讀進來是 date（M8 預驗應修 2）
+            su = su.isoformat()
+        su = su if isinstance(su, str) and su not in ("", "TO BE COMPLETED") else None
         # 1. 產品支援期限
         st, days, thr = product_deadline(su, today)
         if st == "NOT_ASSESSED":
@@ -169,7 +167,7 @@ def run(a):
             sts.append("ATTENTION")
             rows.append((name, "EOL", f"支援期已結束（{su}，已過 {-days} 天）：報告的支援期一節標 GAP「支援期已結束」"))
             act(key_of(name, "eol", su), f"[支援期限][ATTENTION] {match.md_title(pname)}：支援期已結束（{su}）",
-                "\n".join([f"**{match.md_text(pname)}**（專案 {match.md_code(name)}，{proj['status']}）的支援期限 {su} 已經過了（{-days} 天）。", "",
+                "\n".join([f"**{t(pname)}**（專案 {match.md_code(name)}，{t(proj['status'])}）的支援期限 {su} 已經過了（{-days} 天）。", "",
                            "- 狀態：EOL。報告的支援期一節標 GAP「支援期已結束」。",
                            "- 要人處理：確認是否延長支援（改 project.yml 的 support_until，config.json 的 support.end_date 跟著改），"
                            "或依產品的支援政策公告停止支援。", "", *run_line]), ["attention"])
@@ -177,14 +175,16 @@ def run(a):
             rows.append((name, "OK", f"支援期限 {su}，剩 {days} 天" + (f"（{thr} 天提醒）" if thr else "")))
             if thr:
                 act(key_of(name, f"due-{thr}", su), f"[支援期限] {match.md_title(pname)}：支援期 {su} 結束，剩 {days} 天（{thr} 天提醒）",
-                    "\n".join([f"**{match.md_text(pname)}**（專案 {match.md_code(name)}，{proj['status']}）的支援期限是 {su}，剩 {days} 天。", "",
-                               f"- 提醒：期限前 {'／'.join(str(t) for t in reversed(THRESHOLDS))} 天各開一次（這是 {thr} 天的那一次）。",
+                    "\n".join([f"**{t(pname)}**（專案 {match.md_code(name)}，{t(proj['status'])}）的支援期限是 {su}，剩 {days} 天。", "",
+                               f"- 提醒：期限前 {'／'.join(str(x) for x in reversed(THRESHOLDS))} 天各開一次（這是 {thr} 天的那一次）。",
                                "- 要人處理：確認是否延長支援，或準備停止支援的公告。", "", *run_line]), [])
         cfg = check_config(read_config(d), su)
-        # 2. 元件的維護期（每個 Release）
+        pend = cfg["support"].get("end_date")
+        # 2. 元件的維護期：每個 Release 都比，同一個元件問題在同一個專案只開一個 Issue（列出受影響的版本；新版本有同樣問題不重開）
         rels = boms.get(name, [])
         if not rels:
             notes.append(f"{name}：沒有可讀的 Release SBOM（每日監控收集到的），元件的維護期沒有比對")
+        groups = {}
         for ver, tag, bom, missing in rels:
             if missing:
                 sts.append("NOT_ASSESSED")
@@ -193,19 +193,21 @@ def run(a):
             sts.append(res["status"])
             rows.append((f"{name}@{ver}", res["status"], "；".join(res["reasons"]) or "元件都維護到產品支援期結束或更晚"))
             for x in res["entries"]:
-                if x["informational"] or x["verdict"] not in ISSUE_VERDICTS:
-                    continue
-                vz = VERDICT_ZH[x["verdict"]]
-                act(key_of(name, ver, x["id"], x["verdict"], x["end"], cfg["support"].get("end_date")),
-                    f"[支援期限][ATTENTION] {match.md_title(pname)} {match.md_title(ver)}：{match.md_title(x['name'])} {vz}",
-                    "\n".join([f"**{match.md_text(pname)} {match.md_text(ver)}**（Release {match.md_code(tag)}）裡的 **{match.md_text(x['name'])}**：{vz}。", "",
-                               f"- 產品支援期限：{cfg['support'].get('end_date') or '—'}（project.yml 的 support_until）",
-                               f"- 元件的維護期：{(x['end'] or '沒有公開') + '（' + match.md_text(x['phase']) + '）' if x['phase'] else '—'}",
-                               f"- SBOM 裡對到的：{'、'.join(match.md_code(m) for m in x['matched'])}",
-                               f"- 資料表來源（查核 {x['checked']}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
-                               *([f"- 涵蓋範圍：{match.md_text(x['coverage'])}"] if x.get("coverage") else []),
-                               f"- 要人處理：{VERDICT_TODO[x['verdict']]}。",
-                               "", *run_line]), ["attention"])
+                if not x["informational"] and x["verdict"] in ISSUE_VERDICTS:
+                    g = groups.setdefault((x["id"], x["verdict"], x["end"]), {"x": x, "rels": []})
+                    g["rels"].append((ver, tag, x["matched"]))
+        for (eid, verdict, end), g in sorted(groups.items(), key=lambda kv: kv[0][0]):
+            x, vz = g["x"], VERDICT_ZH[verdict]
+            act(key_of(name, "component", eid, verdict, end, pend),
+                f"[支援期限][ATTENTION] {match.md_title(pname)}：{match.md_title(x['name'])} {vz}",
+                "\n".join([f"**{t(pname)}**（專案 {match.md_code(name)}）的 **{t(x['name'])}**：{vz}。", "",
+                           f"- 產品支援期限：{t(pend or '—')}（project.yml 的 support_until）",
+                           f"- 元件的維護期：{t(x['end'] or '沒有公開') + '（' + t(x['phase']) + '）' if x['phase'] else '—'}",
+                           "- 受影響的 Release（這次比對到的）：",
+                           *[f"  - {match.md_code(tag)}：{'、'.join(match.md_code(m) for m in matched)}" for _, tag, matched in g["rels"][:20]],
+                           f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
+                           *([f"- 涵蓋範圍：{t(x['coverage'])}"] if x.get("coverage") else []),
+                           f"- 要人處理：{VERDICT_TODO[verdict]}。", "", *run_line]), ["attention"])
         # 3. 我們自己的 OS
         if proj.get("os_responsibility") == "ours":
             os_ = proj.get("os") if isinstance(proj.get("os"), dict) else {}
@@ -213,28 +215,44 @@ def run(a):
             if dist in (None, "", "TO BE COMPLETED") or rel in (None, "", "TO BE COMPLETED"):
                 sts.append("NOT_ASSESSED")
                 rows.append((f"{name}（OS）", "NOT_ASSESSED", "os.distro／os.release 還沒填"))
-            else:
-                res = sc.check({"components": [{"type": "operating-system", "name": dist, "version": str(rel)}]}, cfg, table, table_sha, today)
-                hit = [x for x in res["entries"] if not x["informational"]]
-                if not hit:
-                    sts.append("ATTENTION")
-                    rows.append((f"{name}（OS）", "ATTENTION", f"{dist} {rel} 不在資料表：維護期不明（不推估）"))
-                    act(key_of(name, "os-missing", dist, rel), f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(dist)} {match.md_title(rel)} 不在資料表",
-                        "\n".join([f"**{match.md_text(pname)}** 的 OS（project.yml 的 os：{match.md_code(dist)} {match.md_code(rel)}）不在 "
-                                   f"{match.md_code('tools/cra/data/support-lifecycle.json')}，維護期不明。工具不推估日期。", "",
-                                   "- 要人處理：在資料表加這個版本（附來源網址與查核日期；沒有公開資料就寫 null）。", "", *run_line]), ["attention"])
-                else:
-                    sts.append(res["status"])
-                    rows.append((f"{name}（OS）", res["status"], "；".join(res["reasons"]) or "OS 維護到產品支援期結束或更晚"))
-                    for x in hit:
-                        if x["verdict"] in ISSUE_VERDICTS:
-                            vz = VERDICT_ZH[x["verdict"]]
-                            act(key_of(name, "os", x["id"], x["verdict"], x["end"], cfg["support"].get("end_date")),
-                                f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(x['name'])} {vz}",
-                                "\n".join([f"**{match.md_text(pname)}** 的 OS {match.md_code(dist)} {match.md_code(rel)}（{match.md_text(x['name'])}）：{vz}。", "",
-                                           f"- 產品支援期限：{cfg['support'].get('end_date') or '—'}；OS 的維護期：{x['end'] or '沒有公開'}",
-                                           f"- 資料表來源（查核 {x['checked']}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
-                                           f"- 要人處理：{VERDICT_TODO[x['verdict']]}。", "", *run_line]), ["attention"])
+                return
+            res = sc.check({"components": [{"type": "operating-system", "name": dist, "version": str(rel)}]}, cfg, table, table_sha, today)
+            hit = [x for x in res["entries"] if not x["informational"]]
+            if not hit:
+                sts.append("ATTENTION")
+                rows.append((f"{name}（OS）", "ATTENTION", f"{dist} {rel} 不在資料表：維護期不明（不推估）"))
+                act(key_of(name, "os-missing", dist, rel), f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(dist)} {match.md_title(rel)} 不在資料表",
+                    "\n".join([f"**{t(pname)}** 的 OS（project.yml 的 os：{match.md_code(dist)} {match.md_code(rel)}）不在 "
+                               f"{match.md_code('tools/cra/data/support-lifecycle.json')}，維護期不明。工具不推估日期。", "",
+                               "- 要人處理：在資料表加這個版本（附來源網址與查核日期；沒有公開資料就寫 null）。", "", *run_line]), ["attention"])
+                return
+            sts.append(res["status"])
+            rows.append((f"{name}（OS）", res["status"], "；".join(res["reasons"]) or "OS 維護到產品支援期結束或更晚"))
+            for x in hit:
+                if x["verdict"] in ISSUE_VERDICTS:
+                    vz = VERDICT_ZH[x["verdict"]]
+                    act(key_of(name, "os", x["id"], x["verdict"], x["end"], pend),
+                        f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(x['name'])} {vz}",
+                        "\n".join([f"**{t(pname)}** 的 OS {match.md_code(dist)} {match.md_code(rel)}（{t(x['name'])}）：{vz}。", "",
+                                   f"- 產品支援期限：{t(pend or '—')}；OS 的維護期：{t(x['end'] or '沒有公開')}",
+                                   f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
+                                   f"- 要人處理：{VERDICT_TODO[x['verdict']]}。", "", *run_line]), ["attention"])
+
+    for name, d, proj, err in load_projects(a.projects_dir):
+        seen_projects.add(name)
+        if err:
+            sts.append("FAIL")
+            rows.append((name, "FAIL", f"project.yml 不合格：{err}"))
+            continue
+        if proj.get("status") not in ("shipped", "development"):
+            continue
+        n_act = len(actions)
+        try:
+            check_one(name, d, proj)
+        except Exception as e:     # 一個專案出錯不擋其他專案；這個專案記 FAIL，它這次的 Issue 動作不送出
+            del actions[n_act:]
+            sts.append("FAIL")
+            rows.append((name, "FAIL", f"檢查時出錯：{type(e).__name__}: {match._plain(str(e), 200)}"))
     for name in sorted(set(boms) - seen_projects):
         notes.append(f"{name}：有 Release 但 projects/ 裡沒有這個專案，沒有支援期限可比")
     notes += [f"Release 問題（每日監控另外處理）：{x}" for x in inv_problems[:10]]
@@ -252,7 +270,7 @@ def run(a):
         act(key_of("table", *sorted(f"{e['id']}@{e['checked']}" for e, _ in stale)),
             f"[支援期限] 資料表有 {len(stale)} 筆要重新查核",
             "\n".join([f"{match.md_code('tools/cra/data/support-lifecycle.json')} 有 {len(stale)} 筆的查核日期過期或不合理：", "",
-                       *[f"- **{match.md_text(e['name'])}**（{match.md_code(e['id'])}）：{why}；來源 {'；'.join(match.md_code(u) for u in e['sources'])}"
+                       *[f"- **{match.md_text(e['name'])}**（{match.md_code(e['id'])}）：{match.md_text(why)}；來源 {'；'.join(match.md_code(u) for u in e['sources'])}"
                          for e, why in stale],
                        "", "- 要人處理：重新查核來源，更新 end 與 checked（沒有公開資料就寫 null）。", "", *run_line]), [])
     status = worst(sts)
@@ -301,7 +319,8 @@ def main(argv=None):
         bad = match.unsafe_actions(actions)
         if bad:
             raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）")
-    except (Fail, match.Fail) as e:
+    except Exception as e:      # Fail 以外的例外也要留下 result.json 與一行結果（不讓 traceback 吞掉輸出）
+        e = e if isinstance(e, (Fail, match.Fail)) else f"{type(e).__name__}: {match._plain(str(e), 300)}"
         print(f"SUPPORT\tFAIL\t{e}")
         with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
             json.dump({"status": "FAIL", "detail": str(e)}, f, ensure_ascii=False, indent=1)

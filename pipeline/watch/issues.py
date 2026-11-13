@@ -36,6 +36,10 @@ WRITE_GAP = 1.0
 MAX_WAIT = 60
 RETRIES = 3
 MARK_RE = re.compile(r"<!-- dumpling-watch key=([0-9a-f]{64}) mode=(real|drill) -->")
+# 支援期限檢查（support.py，stateless plan）的 Issue：自己的標記與標籤，不是監控 Issue——
+# 不能讓 read-state 算進 watch_keys（沒有狀態 Issue 時會擋住第一次基準，M8 預驗應修 1）
+SUPPORT_MARK_RE = re.compile(r"<!-- dumpling-support key=([0-9a-f]{64}) mode=(real|drill) -->")
+SUPPORT_LABEL = "support-period"
 STATE_MARK_RE = re.compile(r"<!-- dumpling-watch-state mode=(real|drill) schema=1 -->")
 KEY_RE = re.compile(r"[0-9a-f]{64}")
 REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
@@ -178,14 +182,14 @@ class Api:
 
 
 # ---------- 標記、狀態 ----------
-def parse_marker(body):
+def parse_marker(body, mark_re=MARK_RE):
     """第一行必須完全符合標記；回傳 (key, mode) 或 None。"""
     if not isinstance(body, str):
         return None
     lines = body.splitlines()
     if not lines:
         return None
-    m = MARK_RE.fullmatch(lines[0])
+    m = mark_re.fullmatch(lines[0])
     return (m.group(1), m.group(2)) if m else None
 
 
@@ -203,13 +207,14 @@ def _note(problems, msg):
         problems.append(msg)
 
 
-def watch_index(api, repo, problems):
-    """回傳 {key: [{number,state,mode}, …]}（依編號排序）。標記不合的 Issue 記 problem、不納入。"""
+def watch_index(api, repo, problems, label="dumpling-watch", mark_re=MARK_RE):
+    """回傳 {key: [{number,state,mode}, …]}（依編號排序）。標記不合的 Issue 記 problem、不納入。
+    預設是監控 Issue（dumpling-watch）；支援期限的 Issue 用 label=support-period、mark_re=SUPPORT_MARK_RE。"""
     idx = {}
-    for i in list_issues(api, repo, "dumpling-watch"):
-        mk = parse_marker(i.get("body"))
+    for i in list_issues(api, repo, label):
+        mk = parse_marker(i.get("body"), mark_re)
         if not mk:
-            _note(problems, f"Issue #{i.get('number')} 有 dumpling-watch 標籤但第一行標記不合法，略過")
+            _note(problems, f"Issue #{i.get('number')} 有 {label} 標籤但第一行標記不合法，略過")
             continue
         idx.setdefault(mk[0], []).append({"number": i["number"], "state": i.get("state"), "mode": mk[1]})
     for key, lst in idx.items():
@@ -326,11 +331,15 @@ def load_plan(path, want_mode=None):
         bad("state")
     if plan.get("state") is None and plan.get("state_base") is not None:
         bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
-    # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）
+    # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）；
+    # Issue 用 dumpling-support 標記與 support-period 標籤（不是監控 Issue）
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
-    if plan.get("stateless") and plan.get("state") is not None:
-        bad("stateless 的 plan 不能帶 state")
+    if plan.get("stateless"):
+        if plan.get("state") is not None:
+            bad("stateless 的 plan 不能帶 state")
+        if any(not isinstance(a, dict) or a.get("op") != "open" for a in plan.get("actions") or []):
+            bad("stateless 的 plan 只能有 open")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -432,11 +441,12 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
         too_big, state_body = str(e), None
     texts = [] if no_state else [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
     prepared = []
+    mark_name, base_label, mark_re = ("dumpling-support", SUPPORT_LABEL, SUPPORT_MARK_RE) if stateless else ("dumpling-watch", "dumpling-watch", MARK_RE)
     for n, a in enumerate(plan["actions"]):
         a = dict(a)
         if a["op"] != "comment":
-            a["body"] = f"<!-- dumpling-watch key={a['key']} mode={mode} -->\n{a['body']}"
-            names = list(a["labels"]) + ["dumpling-watch"] + (["drill"] if mode == "drill" else [])
+            a["body"] = f"<!-- {mark_name} key={a['key']} mode={mode} -->\n{a['body']}"
+            names = list(a["labels"]) + [base_label] + (["drill"] if mode == "drill" else [])
             a["labels"] = list(dict.fromkeys(names))
             texts.append((f"actions[{n}].title", a["title"]))
             texts.append((f"actions[{n}].labels", "\n".join(a["labels"])))
@@ -453,7 +463,7 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
             r = {"op": op, "key": key}
             results.append(r)
             if op in ("open", "open_if_closed"):
-                idx = watch_index(api, repo, problems)  # 開之前再列一次
+                idx = watch_index(api, repo, problems, base_label, mark_re)  # 開之前再列一次
                 ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])
                 if key in created:
                     ent = {"number": None, "state": "open"}

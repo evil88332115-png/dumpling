@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib")   # project_config（只在有 --project 時才 import）
 import issues  # noqa: E402
+import match  # noqa: E402（md_text／md_title／unsafe_markdown：寫進公開 Issue 的外部字串）
 import publiccheck  # noqa: E402
 
 Fail = issues.Fail
@@ -286,14 +287,15 @@ def render_issue(m, drill=True):
     kind, mode = m["kind"], "drill" if drill else "real"
     key = issue_key(kind, mode, m["key_parts"])
     inc = kind == "incident"
-    head = ("[演練] " if drill else "") + ("第 14 條通報（嚴重事件）：" if inc else "第 14 條通報：") + f"{m['product']} {m['version']} {m['id']}"
+    # 產品名稱來自 project.yml（任意字串，不像命中檔的 product 有白名單）：標題用 md_title、內文用 md_text（M8 預驗應修 3）
+    head = ("[演練] " if drill else "") + ("第 14 條通報（嚴重事件）：" if inc else "第 14 條通報：") + f"{match.md_title(m['product'])} {m['version']} {m['id']}"
     if "markets" not in m:
         apply_project(m, None)
     L = [f"<!-- dumpling-art14 key={key} kind={kind} mode={mode} -->"]
     if drill:
         L.append(DRILL_LINE)
     L += ["", "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握。不在公開 Issue 放任何機密。", "",
-          "## 預填欄位（工具帶入，請核對）", f"- 產品名稱與版本：{m['product']} {m['version']}"]
+          "## 預填欄位（工具帶入，請核對）", f"- 產品名稱與版本：{match.md_text(m['product'])} {m['version']}"]
     if inc:
         L += [f"- 事件代號：{m['incident_id']}", f"- 事件說明：{m['description']}",
               f"- 嚴重度（對產品安全的影響）：{m['severity'] + '（來源：' + m['severity_source'] + '）' if m['severity'] and m['severity_source'] else '待填'}"]
@@ -460,6 +462,10 @@ def guard_text(texts, drill):
             if "演練" not in t:
                 raise Fail(f"{name}沒有「演練」字樣（演練的內容一定要有），不寫")
     issues.public_check(texts)
+    # 最後一道：沒淨化的 @提及、連結、圖片、HTML 實體（標題不是 Markdown，只算 @ 與實體）
+    bad = [(name, x) for name, t in texts for x in match.unsafe_markdown(t) if "標題" not in name or x[0] in "@＠&"]
+    if bad:
+        raise Fail(f"{bad[0][0]}有沒淨化的 Markdown（{bad[0][1]!r}），不寫")
 
 
 def trusted_author(issue):
