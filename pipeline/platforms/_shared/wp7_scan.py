@@ -55,7 +55,7 @@ class Wp7Hooks(ps.Hooks):
         sm = ps.read_json(os.path.join(paths["reports"], "summary.json"), {}) or {}
         gate = ((sm.get("vex") or {}).get("gate") or {}) if isinstance(sm, dict) else {}
         return {"bootloader_coverage": bc.get("status") if isinstance(bc, dict) else None,
-                "own_software": own_software_summary(os.path.join(paths["rootfs"], "own-software", "own-software.json")),
+                "own_software_detail": own_software_summary(os.path.join(paths["rootfs"], "own-software", "own-software.json")),
                 "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status"),
                 "kernel_versions": kv,
                 "report_status": sm.get("status") if isinstance(sm, dict) else None,
@@ -115,7 +115,7 @@ class Wp7Hooks(ps.Hooks):
                                                          "documents": v.get("documents"), "missing_fields": v.get("missing_fields")}
                 for k, v in ctx["runs"].items()}
         out = {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
-               "report_rows": counts, "product_status": prod, "own_software": ctx["main_run"].get("own_software")}
+               "report_rows": counts, "product_status": prod, "own_software_detail": ctx["main_run"].get("own_software_detail")}
         # D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 的 kernel-versions.json（/2：shipped 每筆帶 upstream_version）應該一致；不一致是 bug
         ku = self.x.get("kernel_upstream")
         if ku is not None:
@@ -220,7 +220,8 @@ class Wp7Hooks(ps.Hooks):
 
 
 def own_software_summary(path):
-    """CRA 設定 sbom.own_software 的結果（tools/cra/own_software.py 的 own-software.json）→ 狀態、各樣式、算了雜湊的檔案數。
+    """CRA 設定 sbom.own_software 的明細（tools/cra/own_software.py 的 own-software.json）→ 狀態、各樣式、算了雜湊的檔案數。
+    scan.json 的 own_software（狀態字串）是 C1 的 platform_scan 從 B-own-software 那一列讀的；這裡放 own_software_detail。
     沒有這個檔（設定沒有 own_software，或步驟沒跑）→ None，不推測。"""
     d = ps.read_json(path)
     if not isinstance(d, dict):

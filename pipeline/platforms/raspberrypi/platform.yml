@@ -63,6 +63,8 @@ scan:
   inputs_template: raspberrypi   # tools/wizard/platforms/raspberrypi.json
   platform_arg: raspberrypi      # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform（平台由 project.yml 明確給定）
   rootfs: rootfs
+  # Raspberry Pi OS 每一版的核心都是 raspberrypi/linux 建的（套件的原始碼套件名稱是 linux，像 Debian 的），平台預設宣告；sources.yml 的值優先（D-044）
+  kernel_not_distro: "Raspberry Pi OS 的核心是 raspberrypi/linux 建的，不是 Debian 的 linux"
 project_defaults:
   platform_version: Raspberry Pi OS Lite（arm64，Debian 系）
   bsp_os_source: Raspberry Pi OS 官方映像（downloads.raspberrypi.com）與 Raspberry Pi apt 套件庫

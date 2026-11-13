@@ -5,6 +5,7 @@ releases:
     platform_params:
       kernel_release: 6.18.50+rpt-rpi-2712
       kernel_upstream_version: 6.18.50
+      kernel_not_distro: "Raspberry Pi 的核心（raspberrypi/linux，套件版本 1:6.18.50-1+rpt1）：原始碼套件名稱是 linux，但不是 Debian 的 linux"
       kernel_source_file: raspberrypi-linux-stable_20260911.tar.gz
       upstream_release: '2026-10-06'
       image: 2026-10-06-raspios-trixie-arm64-lite.img.xz

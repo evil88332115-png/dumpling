@@ -24,9 +24,14 @@ for c in docker syft grype bwrap git python3 curl; do command -v "$c" > /dev/nul
 img=$(python3 -I "$here/disk_image.py" disk "$out/assemble.json" 2> /dev/null) || fail "assemble.json 沒有可用的磁碟映像（先執行 assemble）"
 info=$(python3 -I "$root/pipeline/project-info.py" --dir "$proj" "$ver") || fail "project-info 失敗"
 crole=$(sed -n 's/^COMPANY_ROLE=//p' <<< "$info")
-parg=$(python3 -I -c 'import sys;sys.path.insert(0,sys.argv[1]);import project_config as p
+# 精靈的 --platform：platform.sh 匯出的 DUMPLING_SCAN_PLATFORM_ARG（platform.yml 的 scan.platform_arg，沒寫是平台名稱；C1 驗證過只能是
+# jetson｜raspberrypi｜rockchip｜generic）。單獨執行這支、沒有那個變數時，照樣從 platform.yml 讀
+parg=${DUMPLING_SCAN_PLATFORM_ARG:-}
+if [ -z "$parg" ]; then
+  parg=$(python3 -I -c 'import sys;sys.path.insert(0,sys.argv[1]);import project_config as p
 print((p.load_platform_config(sys.argv[2]).get("scan") or {}).get("platform_arg") or sys.argv[2])' "$root/pipeline/lib" "$DUMPLING_PLATFORM") \
-  || fail "讀不到平台設定"
+    || fail "讀不到平台設定"
+fi
 if [ "$augment" = raw-sectors ] && [ ! -f "$out/raw-sectors.json" ]; then fail "沒有 raw-sectors.json（先執行 assemble）"; fi
 # 精靈要一份原始碼壓縮檔（核心判斷、上游比對）：sources.yml 的 platform_params.kernel_source_file，必須是 fetch 核對過的 role: source
 ksrc=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_source_file) || fail "sources.yml 沒有 platform_params.kernel_source_file（精靈需要核心原始碼壓縮檔）"
@@ -229,10 +234,13 @@ while IFS=$'\x1f' read -r suffix sfile; do
   cp "$out/layers/$sfile" "$src/scan/rootfs/scan/sbom/sbom.cdx.json" || fail "放不進分層 SBOM $sfile"
   echo "== 分層重跑 ${suffix:-（單一專案）}：$sfile"
   # D-038 的核心 CVE 清單（KERNEL_CVES）只屬於有核心的那一份：-os（OS 層，SBOM 裡沒有核心）重跑時不帶，否則核心的列會在 OS 報告重複出現
+  # D-044：有後綴的分層重跑告訴 sca-scan 核心在 <專案>-bsp 那份報告（-os 的 SBOM 沒有核心 → 三個核心階段 NOT_RUN「不適用」，不退回 CNA；
+  # -bsp 有核心，這個選項不生效）。完整掃描與 ours 那次（後綴是空字串）不傳。同 Jetson 的 scan.sh
+  lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")
   if [ "$suffix" = -os ]; then
-    wl=$( (unset KERNEL_CVES; wiz "$suffix" --rescan-from "$src/scan") | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+    wl=$( (unset KERNEL_CVES; wiz "$suffix" "${lk[@]}" --rescan-from "$src/scan") | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
   else
-    wl=$(wiz "$suffix" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+    wl=$(wiz "$suffix" ${lk[@]+"${lk[@]}"} --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
   fi
   if [ -z "$wl" ] || [ ! -d "$wl/報告" ]; then fail "分層 $suffix 沒有報告包"; fi
   runs+=("$suffix=$wl")

@@ -276,11 +276,28 @@
    "equals": "GAP",
    "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未評估的列"
   },
-  "own_software.status": {
-   "equals": "GAP",
-   "reason": "CRA 設定 sbom.own_software 的結果（B-own-software）（adapter-gaps.md 第 21 項，C0 決定）：OMV 安裝後的路徑（固定 commit 的 debian/openmediavault.install）；示範映像是 Debian 官方雲端映像、沒有裝 OMV，所以四個樣式都對不到：GAP 是正確的結果（分析的映像裡沒有我們的軟體）"
+  "vulnerabilities.full.layers.os": {
+   "min": 300,
+   "max": 2500,
+   "reason": "Debian 322 個套件與核心的列；2026-11-13 是 821。os 層整段消失（例如分層壞掉）會被這項抓到"
   },
-  "own_software.patterns": {
+  "runs..stages.D-dt-findings": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：與 D-dt-data-sources 同源（CI 的臨時 DT 照設計關閉 NVD）"
+  },
+  "runs..stages.C-dt-feeds": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：同上"
+  },
+  "own_software": {
+   "equals": "GAP",
+   "reason": "B-own-software 的狀態（C1 的 platform_scan，完整掃描那次）（adapter-gaps.md 第 21 項，C0 決定）：OMV 安裝後的路徑（固定 commit 的 debian/openmediavault.install）；示範映像是 Debian 官方雲端映像、沒有裝 OMV，所以四個樣式都對不到：GAP 是正確的結果（分析的映像裡沒有我們的軟體）"
+  },
+  "own_software_detail.status": {
+   "equals": "GAP",
+   "reason": "own-software.json 的整體狀態（C4 的明細欄位）"
+  },
+  "own_software_detail.patterns": {
    "equals": [
     {
      "pattern": "usr/sbin/omv-*",
@@ -305,22 +322,14 @@
    ],
    "reason": "設定的樣式與各自的結果；範本的虛構路徑（example-agent 等）不能再出現"
   },
-  "own_software.files": {
+  "own_software_detail.files": {
    "equals": 0,
    "reason": "沒有任何檔案被當成自有軟體算雜湊"
   },
-  "vulnerabilities.full.layers.os": {
-   "min": 300,
-   "max": 2500,
-   "reason": "Debian 322 個套件與核心的列；2026-11-13 是 821。os 層整段消失（例如分層壞掉）會被這項抓到"
-  },
-  "runs..stages.D-dt-findings": {
-   "equals": "GAP",
-   "reason": "固定是 GAP：與 D-dt-data-sources 同源（CI 的臨時 DT 照設計關閉 NVD）"
-  },
-  "runs..stages.C-dt-feeds": {
-   "equals": "GAP",
-   "reason": "固定是 GAP：同上"
+  "vulnerabilities.full.p1_rows": {
+   "min": 1,
+   "max": 50,
+   "reason": "ours：OS 層的 P1 也是我們的待辦，p1_rows 要算進去（缺口 24，C1 23ff7a5）。2026-11-13 是 4（CVE-2022-2663、CVE-2022-3435、CVE-2026-46242 在 linux-kernel，CVE-2026-123158 在 openssh，KEV＋EUVD），全在 os 層；0 表示 OS 又沒算進去。P1 依 KEV／EPSS 變動，用範圍"
   }
  }
 }

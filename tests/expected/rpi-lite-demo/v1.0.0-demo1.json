@@ -205,6 +205,10 @@
   "product_status.full.release_gate": {
    "equals": "GAP",
    "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未判定或待決定的列"
+  },
+  "own_software": {
+   "equals": "OK",
+   "reason": "config 寫 own_software: [] 加 own_software_none_reason「示範專案只用官方映像，沒有自有軟體」（C1 在 M2 定的宣告方式；製造商宣告，掃描沒有驗證）"
   }
  }
 }

@@ -183,7 +183,7 @@ class DocumentStatusTest(unittest.TestCase):
         paths = {"rootfs": os.path.join(tmp, "r"), "scan": os.path.join(tmp, "s"), "reports": rep}
         r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
         self.assertEqual(r["documents"], {"user-information": "GAP", "sbom": "OK"})
-        self.assertEqual((r["missing_fields"], r["report_status"], r["release_gate"], r["own_software"]), (2, "GAP", "GAP", None))
+        self.assertEqual((r["missing_fields"], r["report_status"], r["release_gate"], r["own_software_detail"]), (2, "GAP", "GAP", None))
         os.remove(os.path.join(rep, "summary.json"))
         r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
         self.assertEqual((r["documents"], r["missing_fields"]), (None, None))     # 讀不到：null，不推測

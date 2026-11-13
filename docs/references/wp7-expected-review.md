@@ -129,7 +129,7 @@ dthelper、libmraa*（Radxa 發行、可能和硬體存取有關）目前歸 os�
 | 輕 | cdxgen 版本沒有固定，元件數依賴它 | reason 註明 |
 | 輕 | kernel_versions.shipped 整句 equals | check-expected 不支援清單索引，保留整筆，reason 註明 |
 | 漏項 | 沒釘 os 層的漏洞列、D-dt-findings、C-dt-feeds | 加 vulnerabilities.full.layers.os（300–2500）與兩個 GAP |
-| 漏項（不屬標準答案） | ours 時 p1_rows 0、P1 判斷表沒有 OS 的 4 個 P1；notes 仍寫「分層之前」 | 缺口 24；notes 的修正（894debd）在這次 run 之後，下一次 run 生效 |
+| 漏項（不屬標準答案） | ours 時 p1_rows 0、P1 判斷表沒有 OS 的 4 個 P1；notes 仍寫「分層之前」 | p1_rows 是缺口 24（C1 已修）。**P1 判斷表沒有 OS 的列這一點是錯的**：C4 事後讀兩份 xlsx，都有 Q1～Q4 四列（含 OS）。notes 的修正（894debd）在這次 run 之後，下一次 run 生效 |
 
 追加核對（同一個代理）：缺口 21 的 own_software 四個樣式在固定 commit 都有對應的檔案（omv-*、183 個 .inc、16 個 .py、3 個 .php），出處 openmediavault.install 相符；GAP／matched 0 是正確結果。
 

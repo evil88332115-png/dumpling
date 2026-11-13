@@ -299,6 +299,10 @@
   "kernel_upstream_crosscheck.c1_basis": {
    "equals": "source-makefile+platform-param",
    "reason": "C1 的依據：原始碼 Makefile 與 sources.yml 的 kernel_upstream_version 一致"
+  },
+  "own_software": {
+   "equals": "OK",
+   "reason": "config 寫 own_software: [] 加 own_software_none_reason「示範專案只用官方映像，沒有自有軟體」（C1 在 M2 定的宣告方式；製造商宣告，掃描沒有驗證）"
   }
  }
 }
