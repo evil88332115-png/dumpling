@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 03:17 -0500（C2）
+最後更新：2026-11-13 03:18 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -43,7 +43,8 @@
 - 我自己：release-meta.json 加 report_status／release_gate／pipeline_result（result 改名）／reports／kernel_versions、Release 說明開頭依序印出；附件 kernel-versions-<專案>-<版本>.json（dev 也發）；platform_params.kernel_upstream_version → `project-info.py --kernel-args` → 精靈 `--kernel-upstream-version` → sca-scan → kernel_versions.py `--upstream-version`。已推 wp1/m2 9f1d2f0；已通知 C0 轉 C3、C4。**驗收 run 全部綠燈**：release.yml v39.2.0 43375548090、v39.2.1 43375551920（從新的 build，draft，各 20 個附件），tests.yml 43375594174。兩份 draft：標準答案 23/23、build record OK、C-kernel-boot OK、上游被修改的檔案 v39.2.1＝1（inet_connection_sock.c）／v39.2.0＝0、kernel-versions 附件 schema /2（upstream 6.8.12，source-makefile）；report_status／release_gate 都是 GAP（NVD 沒開，已知），pipeline_result OK
   - C4 回報、C0 轉（2026-11-13）：scan.sh 讀 scan_plan 用 TAB 分隔，ours 的空後綴被吃掉。修法：`jetson_scan.py plan`（platform_scan.scan_plan_lines，格式驗證）每行用 0x1F 分隔；collect 同一後綴出現兩次取後面那次（ours 的產品 SBOM 重跑），kernel-versions 仍取完整掃描；LAYERS.md 加說明；測試 7 個（含舊寫法的反證）。本機全測 OK，已推 wp1/m2 7dd351c（CI tests 43386540818）；PROVENANCE 補 6 列 M2 的改動、JETSON.md 加 M2 驗收 run（58b4ff0，本機）
   - C4 回報、C0 轉（2026-11-13，D-044）：分層的核心問題。(1) 分層重跑的 -os 也跑核心階段（Jetson：三列多餘的 GAP；rpi：CNA 退回產生約 2700 列）→ M2 修：`--kernel-in-other-report <報告>`（精靈→scan-flash-package.sh→sca-scan），這一層沒有核心時三個核心階段 NOT_RUN「不適用」，不退回 CNA；沒給時行為不變。(2) Grype 用發行版資料比對不在發行版核心序列上的核心（rpi 1:6.18.50-1+rpt1 比 Debian 6.12.x）會漏報 → M2 只做防護：kernelcheck 對 epoch≥1、+rpt／+rpi、purl upstream 不是發行版核心原始碼（linux-upstream；Debian 的非 linux／linux-signed-*）、平台明確宣告（sources.yml platform_params.kernel_not_distro）的核心記 C-kernel-coverage GAP；真正修法（上游版本對 CNA、kernel_cna_rows 補 Grype 沒有的）在 M7。Jetson 不受 (2) 影響（比對對象是 C-kernel-l4t-map 對應的 Canonical linux-nvidia-tegra）。寫程式 KS（Sonnet／high，`wp1/m2-kscope`）進行中；驗證代理在驗 7dd351c
-- 下一步：KS 完成 → 併入 wp1/m2 → 重跑兩個 Jetson release.yml → 獨立驗證（含 7dd351c 與 KS，特別是防護會不會漏抓）→ 併最新 main → PR（附 D-020 逐檔對照表、資料來源表、驗收 run、驗證留言、凍結例外清單）→ 通知 C0（正式 tag 由 C0 問使用者）
+  - 2026-11-13 續：KS 完成並併入（ac8cd5c；`--kernel-in-other-report`、kernelcheck 四條 OR 規則＋`tools/pilot/lib/data/distro-kernel-sources.json`、`platform_params.kernel_not_distro`／platform.yml `scan.kernel_not_distro`）。第一輪獨立驗證（7dd351c）：5／6 PASS、第 6 項附缺口；應修 1（間歇性測試）已修、應修 2（scan.platform_arg／rootfs 沒人讀 → 改成真的傳 DUMPLING_SCAN_PLATFORM_ARG、驗證收緊）、應修 3（文件兩處）已修；建議 6、9、10 已修，其餘寫進 JETSON.md 已知限制。C0 轉來：orin-nano-demo 的 config 是範本虛構值、user-information 因此 OK → config 只留必填（208f4ff）；沒宣告自有軟體 → B-own-software GAP、`sbom.own_software_none_reason` 明確宣告 → OK、scan.json `own_software`（7a70d0b）；缺口 24：scan.json 的 p1_rows 依 layer_todo（23ff7a5；P1 判斷表本身是對的，C4 已更正）
+- 下一步：本機全測 → 推 wp1/m2 → 重跑兩個 Jetson release.yml → 第二輪獨立驗證（KS、自有軟體、p1_rows、platform_arg、防護會不會漏抓）→ 併最新 main → PR（附 D-020 逐檔對照表、資料來源表、驗收 run、驗證留言、凍結例外清單）→ 通知 C0
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
