@@ -175,6 +175,7 @@ layers:                        # 分層規則（D-027）：套件名稱（不含
 scan:                          # 選填
   runner: amd64                # 選填：scan job 的 runner amd64｜arm64（預設 amd64 → ubuntu-24.04）
   apt: [zstd]                  # 選填：scan job 額外的 apt 套件
+  tools: sbom-only             # 選填：sbom-only（預設）｜full（見下表）
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
   platform_arg: jetson         # 傳給掃描工具的 --platform
   rootfs: rootfs
@@ -182,7 +183,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
 ```
-**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`ARCH`）：
+**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`SCAN_TOOLS`、`ARCH`）：
 
 | 欄位 | 預設 | 作用 |
 |---|---|---|
@@ -191,6 +192,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | `build.runner` | `arm64` | build job 的 runner：`arm64`＝`ubuntu-24.04-arm`、`amd64`＝`ubuntu-24.04` |
 | `build.apt` | `[]` | build job 的 apt 相依 |
 | `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
+| `scan.tools` | `sbom-only` | scan job 裝哪套掃描工具：`sbom-only`＝Syft、Grype、bubblewrap（`install-tools.sh --sbom-only`）；`full`＝`install-tools.sh` 不帶旗標（Syft、Grype、cdxgen、govulncheck、guarddog、bubblewrap，版本都固定在 `install-tools.sh`）。**不分項**：git／dir 模式的 sca-scan（A-tools）檢查整套工具的版本，只裝一部分會回 ATTENTION 或 FAIL。`full` 裝在 `/opt/dumpling-tools`（沙箱只遮蔽家目錄與 runner 目錄），guarddog 在 `/usr/local/bin` 是符號連結指向 `/opt` 底下的 venv；裝完用家目錄遮蔽的 bwrap 確認每個工具看得到。其他值：`project-info.py`／`platform.sh validate` 結束碼 64。實作 `pipeline/install-scan-tools.sh` |
 | `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
 
 **步驟的結束碼規則與紀錄**（`pipeline/run-step.sh <步驟> <專案資料夾> <版本>`，workflow 所有 `platform.sh` 呼叫的唯一入口；`--record <專案資料夾> <版本> <步驟> <狀態> <結束碼> <說明>` 只記一列）：

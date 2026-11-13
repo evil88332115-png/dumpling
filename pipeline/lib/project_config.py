@@ -43,6 +43,7 @@ LAYERS = ("bsp", "host-tool", "os")
 BUILD_MODES = ("compile", "none")
 ARCHES = ("arm64", "amd64")                                  # 目標映像的架構（platform.yml 的 arch）與 runner 架構（build.runner、scan.runner）
 RUNNER_LABELS = {"arm64": "ubuntu-24.04-arm", "amd64": "ubuntu-24.04"}
+SCAN_TOOLS = ("sbom-only", "full")                            # scan.tools：sbom-only＝Syft、Grype、bwrap；full＝install-tools.sh 不帶旗標（再加 cdxgen、govulncheck、guarddog）
 APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")          # apt 套件名稱（Debian Policy 5.6.1）；進 workflow 的指令列，所以限制字元
 
 PROJECT_STRING_FIELDS = ("product_name", "brand", "platform_version", "bsp_os_source", "kernel_source", "bootloader")
@@ -274,10 +275,11 @@ def _validate_apt(v, label, errs):
 
 def platform_plan(config):
     """platform.yml（驗證過的 dict）→ workflow 需要的規劃值：build_mode、build_runner（runner 標籤）、build_apt、scan_runner、scan_apt、arch。
-    預設：arch＝arm64；build.runner＝arm64；scan.runner＝amd64（scan 只匯入與讀映像、不執行目標平台的程式，所以不跟著 arch）。"""
+    預設：arch＝arm64；build.runner＝arm64；scan.tools＝sbom-only；scan.runner＝amd64（scan 只匯入與讀映像、不執行目標平台的程式，所以不跟著 arch）。"""
     b, sc = config.get("build") or {}, config.get("scan") or {}
     return {"build_mode": b["mode"], "build_runner": RUNNER_LABELS[b.get("runner", "arm64")], "build_apt": list(b.get("apt") or []),
-            "scan_runner": RUNNER_LABELS[sc.get("runner", "amd64")], "scan_apt": list(sc.get("apt") or []), "arch": config.get("arch", "arm64")}
+            "scan_runner": RUNNER_LABELS[sc.get("runner", "amd64")], "scan_apt": list(sc.get("apt") or []), "scan_tools": sc.get("tools", "sbom-only"),
+            "arch": config.get("arch", "arm64")}
 
 
 def validate_platform_config(doc, name=None):
@@ -355,9 +357,11 @@ def validate_platform_config(doc, name=None):
             errs.append("scan 必須是 mapping")
         else:
             for k in scan:
-                if k not in ("inputs_template", "platform_arg", "rootfs", "apt", "runner"):
+                if k not in ("inputs_template", "platform_arg", "rootfs", "apt", "runner", "tools"):
                     errs.append("scan 不認得的鍵 %s" % k)
             _validate_apt(scan.get("apt"), "scan.apt", errs)
+            if "tools" in scan and scan["tools"] not in SCAN_TOOLS:
+                errs.append("scan.tools 必須是 %s" % "／".join(SCAN_TOOLS))
             if "runner" in scan and scan["runner"] not in ARCHES:
                 errs.append("scan.runner 必須是 %s" % "／".join(ARCHES))
             for k in ("inputs_template", "platform_arg", "rootfs"):

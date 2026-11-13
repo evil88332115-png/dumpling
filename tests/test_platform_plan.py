@@ -64,7 +64,7 @@ class Plan(unittest.TestCase):
         self.assertEqual(pc.validate_platform_config(cfg, "example"), [])
         plan = pc.platform_plan(cfg)
         self.assertEqual(plan, {"build_mode": "compile", "build_runner": "ubuntu-24.04", "build_apt": ["make", "gcc"],
-                                "scan_runner": "ubuntu-24.04", "scan_apt": ["zstd"], "arch": "amd64"})
+                                "scan_runner": "ubuntu-24.04", "scan_apt": ["zstd"], "scan_tools": "sbom-only", "arch": "amd64"})
         cfg["arch"] = "arm64"
         cfg["scan"]["runner"] = "arm64"
         self.assertEqual(pc.platform_plan(cfg)["scan_runner"], "ubuntu-24.04-arm")        # 只有明確寫才換；不看 arch
@@ -100,6 +100,54 @@ class Plan(unittest.TestCase):
             r = subprocess.run(["bash", os.path.join(ROOT, "pipeline", "platform.sh"), "build", d, "v39.2.1-demo1"], capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("arch=%s" % want, r.stdout)
+
+    def platforms_with_scan_tools(self, value):
+        plats = os.path.join(self.tmp, "plats-tools-%s" % value)
+        shutil.copytree(os.path.join(ROOT, "pipeline", "platforms", "example"), os.path.join(plats, "toolp"))
+        y = os.path.join(plats, "toolp", "platform.yml")
+        t = open(y, encoding="utf-8").read().replace("platform: example", "platform: toolp")
+        if value is not None:
+            t = t.replace("scan:\n", "scan:\n  tools: %s\n" % value, 1)
+        open(y, "w", encoding="utf-8").write(t)
+        return plats
+
+    def test_scan_tools_default_full_and_invalid(self):
+        """scan.tools：不寫＝sbom-only（Jetson 不設，行為不變）；sbom-only／full 都接受；其他值結束碼 64（project-info 與 platform.sh validate）。"""
+        _, kv = info("orin-nano-demo/v39.2.1-demo1")
+        self.assertEqual(kv["SCAN_TOOLS"], "sbom-only")
+        self.assertNotIn("tools", pc.load_platform_config("jetson").get("scan", {}))
+        for value, want in ((None, "sbom-only"), ("sbom-only", "sbom-only"), ("full", "full")):
+            plats = self.platforms_with_scan_tools(value)
+            d = self.project("plan-tools-%s" % (value or "default").replace("-", ""), "toolp")
+            r, kv = info("--dir", d, "v39.2.1-demo1", env={"DUMPLING_PLATFORMS_DIR": plats})
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertEqual(kv["SCAN_TOOLS"], want)
+        for bad in ("minimal", "FULL", "[syft]", "'full; rm'"):
+            plats = self.platforms_with_scan_tools(bad.replace("'", "q").replace("[", "l").replace("]", "r").replace(" ", "_").replace(";", "s"))
+            y = os.path.join(plats, "toolp", "platform.yml")
+            t = open(y, encoding="utf-8").read()
+            import re
+            t = re.sub(r"  tools: .*\n", "  tools: %s\n" % bad, t, count=1)
+            open(y, "w", encoding="utf-8").write(t)
+            d = self.project("plan-tools-bad%d" % abs(hash(bad) % 1000), "toolp")
+            r, _ = info("--dir", d, "v39.2.1-demo1", env={"DUMPLING_PLATFORMS_DIR": plats})
+            self.assertEqual(r.returncode, 64, (bad, r.stdout))
+            self.assertIn("scan.tools", r.stdout)
+            v = subprocess.run(["bash", os.path.join(ROOT, "pipeline", "platform.sh"), "validate", d, "v39.2.1-demo1"], capture_output=True, text=True,
+                               env=dict(os.environ, DUMPLING_PLATFORMS_DIR=plats))
+            self.assertEqual(v.returncode, 64, (bad, v.stdout))
+            self.assertRegex(v.stdout.strip(), r"^validate: FAIL（.*scan\.tools")
+
+    def test_install_script_rejects_a_bad_mode_and_missing_argument(self):
+        sh = os.path.join(ROOT, "pipeline", "install-scan-tools.sh")
+        for args in (["minimal", "/tmp/x"], [], ["FULL", "/tmp/x"]):
+            r = subprocess.run(["bash", sh, *args], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 64, args)
+        r = subprocess.run(["bash", sh, "full"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 64)
+        t = open(os.path.join(ROOT, ".github", "workflows", "pipeline.yml"), encoding="utf-8").read()
+        self.assertIn("pipeline/install-scan-tools.sh", t)
+        self.assertIn("SCAN_TOOLS: ${{ steps.p.outputs.SCAN_TOOLS }}", t)
 
     def test_matrix_unchanged(self):
         r = subprocess.run([sys.executable, "-I", INFO, "--matrix"], capture_output=True, text=True)

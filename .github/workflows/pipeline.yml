@@ -52,6 +52,7 @@ jobs:
       BUILD_APT: ${{ steps.p.outputs.BUILD_APT }}
       SCAN_RUNNER: ${{ steps.p.outputs.SCAN_RUNNER }}
       SCAN_APT: ${{ steps.p.outputs.SCAN_APT }}
+      SCAN_TOOLS: ${{ steps.p.outputs.SCAN_TOOLS }}
       ARCH: ${{ steps.p.outputs.ARCH }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,7 +66,7 @@ jobs:
         run: |
           # 值只含安全字元（project-info.py 驗證過 apt 套件名稱與 runner 標籤），可直接寫進 GITHUB_OUTPUT
           python3 -I pipeline/project-info.py --dir "projects/$PROJECT" "$VERSION" | tee info.txt
-          grep -E '^(BUILD_MODE|BUILD_RUNNER|BUILD_APT|SCAN_RUNNER|SCAN_APT|ARCH)=' info.txt >> "$GITHUB_OUTPUT"
+          grep -E '^(BUILD_MODE|BUILD_RUNNER|BUILD_APT|SCAN_RUNNER|SCAN_APT|SCAN_TOOLS|ARCH)=' info.txt >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ inputs.project }} ${{ inputs.version }})
@@ -163,17 +164,16 @@ jobs:
         run: |
           bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" build NOT_RUN 4 "build.mode: $BUILD_MODE"
 
-      - name: 安裝工具（Syft、Grype 固定版本；bubblewrap）與 platform.yml 的 scan.apt
+      - name: 安裝掃描工具（platform.yml 的 scan.tools）與 scan.apt
         env:
           SCAN_APT: ${{ needs.plan.outputs.SCAN_APT }}
+          SCAN_TOOLS: ${{ needs.plan.outputs.SCAN_TOOLS }}
         run: |
           # install-tools.sh 目前只裝 linux_amd64 的 Syft／Grype：scan.runner＝arm64 還不支援
           [ "$(uname -m)" = x86_64 ] || { echo "scan: FAIL（scan.runner 不是 amd64：tools/e2e/install-tools.sh 只有 amd64 的 Syft／Grype）"; exit 1; }
           mkdir -p "$RUNNER_TEMP/tools"
-          bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
-          # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
-          sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
-          cat "$RUNNER_TEMP/tools/versions.txt"
+          # sbom-only（預設）：Syft、Grype、bubblewrap；full：再加 cdxgen、govulncheck、guarddog（版本都固定在 install-tools.sh）。見 pipeline/install-scan-tools.sh
+          bash pipeline/install-scan-tools.sh "$SCAN_TOOLS" "$RUNNER_TEMP/tools/versions.txt"
           sudo apt-get update -qq
           # shellcheck disable=SC2086 — scan.apt 的套件名稱已由 project_config 驗證
           sudo apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml $SCAN_APT > /dev/null

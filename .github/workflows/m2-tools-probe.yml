@@ -1,0 +1,25 @@
+name: m2-tools-probe
+# 暫時（驗證 scan.tools: full 的安裝與沙箱可見性後刪除）
+on:
+  push:
+    paths: [".github/workflows/m2-tools-probe.yml"]
+    branches: ["wp1/m2-jetson"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends bubblewrap > /dev/null
+          bash pipeline/install-scan-tools.sh full "$RUNNER_TEMP/tools/versions.txt"
+          ls -l /usr/local/bin | grep -E "syft|grype|cdxgen|govulncheck|guarddog"
