@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 21:16 -0500（C1）
+最後更新：2026-11-13 10:40 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -86,12 +86,15 @@
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：尚未開始（開始條件：C1 的 M2）
-- 分支／PR／commit：—
+- 目前在做：M4（PLAN「E. 監控與通知」）設計與骨架。架構（C3 提案，已通知 C0）：每日監控不開 DT（exploited_watch.py 以 DT 專案 UUID 為比對鍵，臨時 DT 每天 UUID 不同會每天全算新的），改 Grype＋CISA KEV＋EUVD＋廠商層級，import 既有 exploited_grype／euvd／exploited_vendor 函式
+- 分支／PR／commit：`wp2/watch`（worktree `$AGENT_TMP/dumpling-wt-c3-watch`，從 main dd7664e）；PR 未開（M4 完成才開，D-020）
+- M4 拆分：4a 收集 Release（release-meta＋bsp／os SBOM，跳過 draft；`--from-dir` 讀合成 Release）／4b 比對／4c 狀態檔（鍵＝專案、版本、層、CVE、purl；第一次只建基準；`watch-state` 分支每日提交防 60 天停用，待查官方文件）／4d 開 Issue（標籤 kev、shipped／development、vendor-level、layer-os、drill；內文標記去重）／4e watch.yml（D-012 權限）／4f 合成 KEV 演練／4g M2 合併後接真 Release＋真實基準
+- M5 拆分：5a GITLAB-PORT 對照（已被利用真實案件用 confidential Issue）／5b 待辦：DT parent-child（D-030）、簽章與來源證明 GitLab 方案（D-032／D-033 A2，查官方文件）／5c gitlab/.gitlab-ci.yml（官方 CI schema 離線檢查；release／dev 等 M2 定案）／5d 搬移檢查清單
+- 等 M2：4a 接真 Release、4g 真實基準、5c 的 release／dev 段
 - 代理：無
 - CI：無
-- 下一步：等 M2
-- 卡住／等決定：無
+- 下一步：查 60 天停用規則與 exploited_grype 可重用程度 → 寫 4b／4c；4a、4d 派代理
+- 卡住／等決定：無（alert_mail.py：GitHub 階段不帶，M5 視 GitLab 寄信需要再帶）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
