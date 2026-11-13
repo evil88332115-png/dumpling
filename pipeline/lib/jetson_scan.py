@@ -129,7 +129,7 @@ class JetsonHooks(Hooks):
                 "- patch：%s" % ("、".join(x.get("file", "?") for x in (build.get("patches") or [])) or "無"),
                 "- 上游比對（原始碼 vs NVIDIA public_sources）：狀態 %s，**%s 個檔案被修改**%s；只有我們有 %s、只有 NVIDIA 有 %s（NOT_ASSESSED 的元件不算相同）" % (
                     us.get("status"), us.get("modified"), ("（" + "、".join(us.get("modified_files") or []) + "）") if us.get("modified_files") else "", us.get("ours_only"), us.get("upstream_only")),
-                "- 上游比對（成品 vs NVIDIA BSP）：%s" % json.dumps(scan["upstream_artifacts"], ensure_ascii=False)]
+                "- 上游比對（成品 vs NVIDIA BSP）：%s" % (("狀態 %s，%s" % (ua.get("status"), ua.get("detail") or "沒有說明")) if (ua := scan["upstream_artifacts"]) else "NOT_RUN（沒有結果）")]
 
     def notes_after_vulnerabilities(self, ctx):
         return ["", "## 雜湊的依據", "",

@@ -516,5 +516,22 @@ class ScanHelpers(Tmp):
         self.assertTrue(os.path.isfile(self.p("rel", "notes.md")))
 
 
+
+class NotesBuild(unittest.TestCase):
+    """Release 說明「建置」一節：成品上游比對寫成文字（不印 JSON 字典）；沒有結果是 NOT_RUN。"""
+
+    def lines(self, ua):
+        scan = {"upstream_source": {"status": "OK", "modified": 0}, "upstream_artifacts": ua, "build_record_status": "OK", "kernel_boot": "OK"}
+        return js.JetsonHooks().notes_build({"scan": scan, "build": {"kernel_release": "k", "image_sha256": "0" * 64}})
+
+    def test_upstream_artifacts_is_text(self):
+        line = self.lines({"status": "OK", "detail": "62 個檔案相同"})[-1]
+        self.assertEqual(line, "- 上游比對（成品 vs NVIDIA BSP）：狀態 OK，62 個檔案相同")
+        self.assertNotIn("{", line)
+
+    def test_upstream_artifacts_missing_is_not_run(self):
+        self.assertEqual(self.lines(None)[-1], "- 上游比對（成品 vs NVIDIA BSP）：NOT_RUN（沒有結果）")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,7 @@
 #         [--out <資料夾>]（預設 $HOME/sca-results/<name>-<version>-<UTC 時間>；FLASHPKG_RESULTS 改上層資料夾）
 #         [--product-config <config.json>]（產品的 CRA 設定；沒有時產生只有產品名稱與版本的最小設定，其他欄位標 TO BE COMPLETED）
 #         [--uefi-source <UEFI 原始碼樹>]（公司自建 UEFI 的原始碼：tools/cra/uefi_source.py 讀 edk2 版本與內建的 OpenSSL／Mbed TLS 版本 →
-#           <rootfs>/uefi-source/，再用離線的 Grype 資料庫比對（tools/cra/uefi_bundled.py grype）；cra_report.py 把這些函式庫併進產品 SBOM、
+#           <rootfs>/uefi-source/，sca-scan 更新 Grype 資料庫之後再用離線的資料庫比對（tools/cra/uefi_bundled.py grype）；cra_report.py 把這些函式庫併進產品 SBOM、
 #           比對結果成為風險表的列「OpenSSL x.y.z (bundled in UEFI)」。B-uefi-source-*、B-uefi-grype-*；版本不明／讀不到 → GAP。沒給時不執行）
 #           給了 --uefi-source 又有 --archive／--dir 時另做 B-uefi-binary：刷機包裡每個 uefi_*.bin 的版本字串與內嵌除錯來源路徑對照這份原始碼樹
 #           （bootloader_coverage.py uefi-check；MATCH＝與用這份原始碼建置一致，不是逐位元相同；<結果>/uefi-binary-check.json；
@@ -26,8 +26,8 @@
 #           [--uefi-platform-dsc <樹內的平台 DSC>]（可重複；例如 edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc）：沒有它，Mbed TLS／OpenSSL 的 absent 不成立（字串可能被去光，要 DSC 佐證）
 #           同一步也把映像解開找內建的 OpenSSL／Mbed TLS（uefi_image.py），結果在該檔的 libraries，cra_report 據此判 UB1／UB2）
 #         [--tee-source <廠商公開原始碼資料夾>]（tos-optee_<soc>.img 的 OP-TEE 與 TF-A 是廠商用公開原始碼建的：tools/cra/tee_source.py 唯讀讀 TF-A、OP-TEE、
-#           OP-TEE 內建 Mbed TLS 的版本（版本檔矛盾／讀不到 → 版本未知 → GAP、不給 CPE）→ <rootfs>/tee-source/，再用離線的 Grype 資料庫比對
-#           （tools/cra/tee_bundled.py grype）；cra_report.py 併進產品 SBOM、風險表的列「Mbed TLS x.y.z (bundled in OP-TEE)」。
+#           OP-TEE 內建 Mbed TLS 的版本（版本檔矛盾／讀不到 → 版本未知 → GAP、不給 CPE）→ <rootfs>/tee-source/，sca-scan 更新 Grype 資料庫之後
+#           再用離線的資料庫比對（tools/cra/tee_bundled.py grype）；cra_report.py 併進產品 SBOM、風險表的列「Mbed TLS x.y.z (bundled in OP-TEE)」。
 #           有 --archive／--dir 時同時對照刷機包的 tos-optee 映像（版本字串；與用這份原始碼建置一致，不是逐位元相同）。B-tee-source-*、B-tee-grype-*。沒給時不執行）
 #         [--extra-deliverable <檔案>]（可重複；不在刷機包裡、另外交付給客戶的韌體，例如 bootloader capsule：記名稱、大小、sha256／512、可讀的版本字串、
 #           配對的刷機包，併進產品 SBOM；版本與刷機包不同 → ATTENTION，讀不到版本 → GAP；只收一般檔案、不掃描。B-extra-deliverable）
@@ -406,8 +406,8 @@ ownsw_step(){
   status "B-own-software-$v" "$s" "$d$([ "$s" = FAIL ] || echo "；GAP 與版本未知的明細在 $v/logs/own-software.txt")"
 }
 uefisrc_step(){
-  # UEFI 原始碼樹（--uefi-source）→ <rootfs>/uefi-source/（uefi_source.py：edk2、內建 OpenSSL／Mbed TLS 的版本與 CPE）→ 離線 Grype（uefi_bundled.py grype）。
-  # 第二個參數 reuse：--rescan-from 沒給樹時，沿用上一次的 uefi-source.cdx.json／uefi-source.json，只用現在的資料庫重新比對。
+  # UEFI 原始碼樹（--uefi-source）→ <rootfs>/uefi-source/（uefi_source.py：edk2、內建 OpenSSL／Mbed TLS 的版本與 CPE）→ 離線 Grype（uefigrype_step，sca-scan 之後）。
+  # 第二個參數 reuse：--rescan-from 沒給樹時，沿用上一次的 uefi-source.cdx.json／uefi-source.json，之後 uefigrype_step 用現在的資料庫重新比對。
   # 沒給 --uefi-source（也不是 reuse）→ 什麼都不做（不寫狀態列、不建資料夾，結果和沒有這一步時相同）
   local v=$1 mode=${2:-} U=$OUT/$1/uefi-source r s d x lim=${UEFISRC_TIMEOUT:-3600}
   if [ "$mode" = reuse ]; then
@@ -427,6 +427,11 @@ uefisrc_step(){
     status "B-uefi-source-$v" "$s" "$d"
     uefibin_step "$v"
   fi
+}
+uefigrype_step(){
+  # UEFI 內建函式庫的離線 Grype 比對（uefi_bundled.py grype）。在 sca-scan 之後跑：Grype 資料庫是 sca-scan 更新的（GRYPE_DB_UPDATE），
+  # 排在前面時全新的機器（例如 CI）還沒有資料庫，比對一定 NOT_RUN。沒有 <rootfs>/uefi-source/uefi-source.cdx.json → 什麼都不做
+  local v=$1 U=$OUT/$1/uefi-source r s d x
   [ -s "$U/uefi-source.cdx.json" ] || return 0
   r=$(timeout --foreground -k 30 600 python3 -I "$ROOT/tools/cra/uefi_bundled.py" grype --dir "$U" --max-age-days "${GRYPE_DB_MAX_AGE_DAYS:-1}" 2> "$OUT/$v/logs/uefi-grype.err"); x=$?
   r=$(grep -m1 $'^B-uefi-grype\t' <<< "$r")
@@ -434,8 +439,8 @@ uefisrc_step(){
   IFS=$'\t' read -r _ s d <<< "$r"; status "B-uefi-grype-$v" "$s" "$d"
 }
 teesrc_step(){
-  # 廠商公開原始碼（--tee-source）→ <rootfs>/tee-source/（tee_source.py：TF-A、OP-TEE、內建 Mbed TLS 的版本與 CPE；有刷機包時對照 tos-optee 映像）→ 離線 Grype（tee_bundled.py grype）。
-  # 第二個參數 reuse：--rescan-from 沒給樹時沿用上一次的 tee-source，只用現在的資料庫重新比對。沒給 --tee-source（也不是 reuse）→ 不呼叫這個函式
+  # 廠商公開原始碼（--tee-source）→ <rootfs>/tee-source/（tee_source.py：TF-A、OP-TEE、內建 Mbed TLS 的版本與 CPE；有刷機包時對照 tos-optee 映像）→ 離線 Grype（teegrype_step，sca-scan 之後）。
+  # 第二個參數 reuse：--rescan-from 沒給樹時沿用上一次的 tee-source，之後 teegrype_step 用現在的資料庫重新比對。沒給 --tee-source（也不是 reuse）→ 不呼叫這個函式
   local v=$1 mode=${2:-} T=$OUT/$1/tee-source r s d x lim=${TEESRC_TIMEOUT:-3600} ia=()
   if [ "$mode" = reuse ]; then
     mkdir -p "$T" && cp -- "$RESCAN/$v/tee-source/tee-source.cdx.json" "$RESCAN/$v/tee-source/tee-source.json" "$T/" 2> /dev/null \
@@ -452,6 +457,16 @@ teesrc_step(){
     case "$s:$x" in OK:0|ATTENTION:2|GAP:2|FAIL:*) ;; *) d="tee_source.py 印出 ${s:-（沒有狀態）} 但 exit $x：${d}"; s=FAIL;; esac
     status "B-tee-source-$v" "$s" "$d"
   fi
+}
+bundled_grype_not_run(){
+  # 讀了原始碼樹（有 uefi-source／tee-source 的 SBOM）卻沒走到比對時，B-uefi-grype／B-tee-grype 照樣寫 NOT_RUN（不讓這一項悄悄消失）
+  local v=$1 why=$2
+  [ ! -s "$OUT/$v/uefi-source/uefi-source.cdx.json" ] || status "B-uefi-grype-$v" NOT_RUN "$why"
+  [ ! -s "$OUT/$v/tee-source/tee-source.cdx.json" ] || status "B-tee-grype-$v" NOT_RUN "$why"
+}
+teegrype_step(){
+  # OP-TEE／TF-A／內建 Mbed TLS 的離線 Grype 比對（tee_bundled.py grype）。同 uefigrype_step：在 sca-scan 更新資料庫之後跑
+  local v=$1 T=$OUT/$1/tee-source r s d x
   [ -s "$T/tee-source.cdx.json" ] || return 0
   r=$(timeout --foreground -k 30 600 python3 -I "$ROOT/tools/cra/tee_bundled.py" grype --dir "$T" --max-age-days "${GRYPE_DB_MAX_AGE_DAYS:-1}" 2> "$OUT/$v/logs/tee-grype.err"); x=$?
   r=$(grep -m1 $'^B-tee-grype\t' <<< "$r")
@@ -774,6 +789,7 @@ else:
       "${kb[@]+"${kb[@]}"}" > "$D/logs/sca-scan.txt" 2>&1; x=$?
     s=$(scan_worst "$D/scan/status.tsv"); case $x in 0|2) ;; *) s=FAIL;; esac
     status "C-scan-$v" "$s" "sca-scan --sbom exit=$x；DT $NAME @ $VERSION ($v)；$(( $(date +%s)-t0 )) 秒；非 OK 階段：$(awk -F'\t' -v vo="$((1-LICENSE))" 'NR>1 && $2!="OK" && !(vo=="1" && $2=="NOT_RUN" && $1 ~ /^E-/){printf "%s=%s ", $1, $2}' "$D/scan/status.tsv" 2>/dev/null)"
+    uefigrype_step "$v"; teegrype_step "$v"   # sca-scan 更新了 Grype 資料庫之後才比對
     coverage_step "$v"
     cra_step "$v"
     pkgwhy_step "$v"
@@ -883,7 +899,8 @@ for v in "${VARS[@]}"; do
   if [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     IID[$v]=$iid; PENDING_TAG=; status "B-import-$v" OK "$tag → $iid（$(docker image inspect --format '{{.Architecture}} {{.Size}} bytes' "$iid" 2>/dev/null)）；暫存 tar 已刪"
   else docker image rm -f "$tag" > /dev/null 2>&1; PENDING_TAG=
-    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"; continue; fi
+    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"
+    bundled_grype_not_run "$v" "docker import 失敗，sca-scan 沒有執行（Grype 資料庫不可用）：沒有比對"; continue; fi
 
   t0=$(date +%s); sca_args
   # 核心的建置設定與燒錄的核心（IKCONFIG）從刷機包讀（C-kernel-config）：Rockchip 讀 update.img；Jetson 讀刷機包 tbz2／資料夾加 rootfs 前綴，
@@ -901,6 +918,7 @@ for v in "${VARS[@]}"; do
     || status "Z-cleanup-image-$v" ATTENTION "刪除映像 $iid 失敗：請手動 docker image rm $iid"
   else status "Z-cleanup-image-$v" INFO "--keep-image：保留 $tag（$iid）"; unset "IID[$v]"; fi
 
+  uefigrype_step "$v"; teegrype_step "$v"   # sca-scan 更新了 Grype 資料庫之後才比對
   coverage_step "$v"
   cra_step "$v"
   pkgwhy_step "$v"

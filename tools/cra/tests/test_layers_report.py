@@ -414,3 +414,78 @@ def test_l4t_kernel_map_rows_with_name_and_version_resolve_to_the_kernel_package
            "mapped_from": "nvidia-l4t-kernel 6.8.12-tegra-39.2.1"}
     assert cr.layer_of_row(row, idx) == ("bsp", "owner-package")
     assert cr.layer_of_row(dict(row, mapped_from=None), idx) == ("unknown", "unmatched")       # 沒有對應來源：不猜
+
+
+# ------------------------------------------------------------ BSP 專屬的附加輸入在沒有 BSP 元件的分層報告不適用
+
+def _layered_sbom(*layers):
+    """test_cra_report.SBOM 的元件依序標上層（其餘標 os）；給 bsp 時多一個 bsp 元件。"""
+    from test_cra_report import SBOM
+    b = json.loads(json.dumps(SBOM))
+    for c in cr.flatten(b["components"]):          # 巢狀元件也要標，沒標的算 unknown
+        c.setdefault("properties", []).append({"name": "dumpling:layer", "value": "os"})
+    b["metadata"]["properties"] = [{"name": "dumpling:os-responsibility", "value": "customer"}]
+    if "bsp" in layers:
+        b["components"].append(comp(BSP, V[BSP], "bsp"))
+    if "unknown" in layers:
+        b["components"].append(comp(UNK + "-x", "1", "unknown", "pkg:pypi/x@1"))
+    return b
+
+
+def _tee_layer_report(tmp_path, *layers, explicit=False):
+    from test_cra_report import MIN_CFG
+    from test_tee_source import grype_json, make_tee, put_grype
+    t = make_tee(tmp_path)
+    put_grype(t, grype_json())
+    proj = make_project(tmp_path / "p", MIN_CFG)
+    scan_ = make_scan(tmp_path / "res" / "scan", sbom=_layered_sbom(*layers))
+    extra = ()
+    if explicit:
+        extra = ("--tee-source", str(t))
+    else:
+        import os
+        os.replace(t, scan_.parent / "tee-source")      # 自動帶入（<scan>/../tee-source）
+    r, s, rep = run(proj, scan_, *extra)
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    return s, rep, json.loads((rep / "sbom.cdx.json").read_text(encoding="utf-8")), rows_of(rep)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_os_only_layer_report_skips_the_bsp_tee_libraries(tmp_path, explicit):
+    s, rep, pb, rows = _tee_layer_report(tmp_path, explicit=explicit)
+    assert not any(r["id"] == "CVE-2099-0101" for r in rows["rows"])            # 沒有 bsp 層的 Mbed TLS 列（在 bsp 報告）
+    assert not {"OP-TEE", "TF-A", "Mbed TLS"} & {c["name"] for c in pb["components"]}
+    assert "tee_source" not in s["product_sbom"]                                # 它的狀態不算進這份
+    assert s["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["tee-source"]
+    assert rows["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["tee-source"]
+    assert not [r for r in rows["rows"] if r["layer"] == "bsp"]                  # 合成的掃描結果裡對不到元件的列是 unknown（不猜），bsp 一列都沒有
+
+
+@pytest.mark.parametrize("layers", [("bsp",), ("unknown",)])
+def test_layer_report_with_bsp_or_unknown_components_keeps_the_tee_libraries(tmp_path, layers):
+    s, rep, pb, rows = _tee_layer_report(tmp_path, *layers)
+    row = next(r for r in rows["rows"] if r["id"] == "CVE-2099-0101")
+    assert row["layer"] == "bsp" and row["layer_basis"] == "synthetic:bundled-library"
+    assert {"OP-TEE", "TF-A", "Mbed TLS"} <= {c["name"] for c in pb["components"]}
+    assert s["product_sbom"]["tee_source"]["rows"] == 1
+    assert "bsp_inputs_not_applicable" not in s["layers"]
+
+
+def test_os_only_layer_report_skips_the_flash_firmware(tmp_path):
+    from test_firmware_bom import flash_result
+    proj, scan_ = flash_result(tmp_path, sbom=_layered_sbom())
+    r, s, rep = run(proj, scan_)
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    pb = json.loads((rep / "sbom.cdx.json").read_text(encoding="utf-8"))
+    assert not {"mb1_t234_prod.bin", "NVIDIA Jetson Linux", "nvgpu"} & {c["name"] for c in pb["components"]}
+    assert {next(p["value"] for p in c["properties"] if p["name"] == "dumpling:layer") for c in pb["components"]} == {"os"}
+    fw = s["product_sbom"]["flash_firmware"]
+    assert fw["layer_not_applicable"] is True and "BSP layer's report" in fw["absent"]
+    assert s["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["flash-firmware"]
+    assert "BSP layer's report" in (rep / "sbom.md").read_text(encoding="utf-8")
+    # 同一個刷機包、分層 SBOM 有 bsp 元件 → 照舊加進去
+    proj2, scan2 = flash_result(tmp_path / "b", sbom=_layered_sbom("bsp"))
+    r2, s2, rep2 = run(proj2, scan2)
+    pb2 = json.loads((rep2 / "sbom.cdx.json").read_text(encoding="utf-8"))
+    assert {"mb1_t234_prod.bin", "NVIDIA Jetson Linux"} <= {c["name"] for c in pb2["components"]}
+    assert s2["product_sbom"]["flash_firmware"]["components"] == 9 and "bsp_inputs_not_applicable" not in s2["layers"]
