@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:39 -0500（C1）
+最後更新：2026-11-13 11:42 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -87,18 +87,22 @@
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：M4 預驗中＋M5 第一版（並行）。M4 契約 `docs/WATCH.md`
-- M4 架構（C0 同意）：每日不開 DT；Grype（exploited_grype.prepare／extract 原樣重用）＋CISA KEV＋EUVD＋核心 CNA（kernel_cna_version.py 原樣呼叫；上游版本取自 Release 附件 `kernel-versions-<專案>-<版本>.json`，只接受 schema /2）＋廠商層級；DT（OSV）、NVIDIA 公告、核心 .config 判定每天 NOT_RUN，每次都列出。狀態放在 `watch-state` Issue（任何 job 都沒有 contents: write）。D-040：只開 KEV／廠商層級 Issue、超過 20 個併成一個彙總、標「示範專案（公開 BSP）」＋demo 標籤、排程 real 預設 dry_run（repo 變數 `WATCH_REAL_ISSUES=on` 才開）、不開 art14 Issue
-- 分支／PR／commit：`wp2/watch` 0e09d77（worktree `$AGENT_TMP/dumpling-wt-c3-watch`）；`wp5/gitlab`（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`，從 main dd7664e）；PR 都未開（D-020）。**watch.yml 暫時有 push 觸發（登錄用），開 PR 前拿掉**
+- 目前在做：**M4 PR #28 已開，等 C0 派驗證與合併**；M5 第一版完成，等 M2 合併後核對指令再開 PR
+- M4 架構（C0 同意）：每日不開 DT；Grype（exploited_grype 原樣重用）＋CISA KEV＋EUVD＋核心 CNA（kernel_cna_version.py；附件 `kernel-versions-<專案>-<版本>.json` schema /2）＋廠商層級；DT（OSV）、NVIDIA 公告、核心 .config 判定每天 NOT_RUN 並列出。狀態放在 `watch-state` Issue，沒有任何 job 有 contents: write。D-040：只開 KEV／廠商層級 Issue、超過 20 個併成彙總、示範專案字樣＋demo 標籤、排程 real 預設 dry_run（`WATCH_REAL_ISSUES` 由 C0 設）、不開 art14。降級連續 2 次開健康 Issue（watch-health）
+- 分支／PR／commit：
+  - `wp2/watch` c0a4a4f → **PR #28**（worktree `$AGENT_TMP/dumpling-wt-c3-watch`）；暫時的 push 觸發已拿掉
+  - `wp5/gitlab` b0079fc（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`）；PR 未開（M5 完成才開）
 - 代理：
-  - 寫程式 collect.py（Sonnet high）：完成、已併入
-  - 寫程式 issues.py（Sonnet medium）：完成、已併入
-  - 寫程式 M5 第一版（GITLAB-PORT＋gitlab/.gitlab-ci.yml＋schema 檢查；Sonnet medium）：`wp5/gitlab` fb6463a，完成（待辦 T-01～T-13 在 GITLAB-PORT）
-  - 驗證 M4 預驗（Sonnet high）：`wp2/watch` e38d27a＋0e09d77，進行中
-- CI：real＋dry_run（M2 之前）run 43357443361 綠：收集 GAP、比對 GAP（不建空的基準、不產生 plan）、notify 跳過、keepalive OK；四個資料源都 OK。演練 run 43356137493 **全綠**（drill-1 建基準 0 個 → drill-2 合成 KEV 開 2 個（正式版 bsp＋開發版 product 各一）→ drill-3 0 個 → close-drill 換成 *-done 標籤）；tests run 43356141325 綠。演練 Issue #17–#21 已關閉
-- 防 60 天停用：官方沒有定義 activity；keepalive 每天讀 state＋enable；**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`，M4 合併後開始算）
-- 下一步（C0：M4 不等 M2）：預驗通過 → 併 origin/main → 拿掉暫時的 push 觸發 → 開 M4 PR。M2 合併後另做：手動 `mode=real` 建第一次真實基準、回報排程打開會開哪些 Issue（WATCH_REAL_ISSUES 由 C0 設）。M5 另開 PR
-- 等 M2（不在 M4 PR 裡）：真 Release 的收集、核心 CNA（kernel_cna_version.py 與 kernel-versions 附件在 M2）、real 第一次基準
+  - 寫程式 collect.py、issues.py：完成、已併入
+  - 寫程式 M5 第一版（GITLAB-PORT＋gitlab/.gitlab-ci.yml＋官方 CI schema 收進 repo，MIT＋Apache-2.0，D-0xx C0 同意）：完成，b0079fc；tests run 43358540701 綠（b0079fc 前一版；最新版待重跑）
+  - 驗證 M4 預驗（Sonnet high）：第一輪不通過 → c4cfac6 修正 → 複驗通過；複驗的 3 個建議也已修正（PR 前）
+  - 目前沒有代理在跑。上限照 D-041：每個對話最多 4 個（寫程式 3、驗證 1），C3＋C4 合計 8，負載超過 12 不開
+- CI：PR head c0a4a4f：演練 run 43359678945 綠、tests run 43359682637 綠；real＋dry_run（M2 之前）run 43357443361 綠（GAP、notify 跳過）
+- 防 60 天停用：官方沒有定義 activity；keepalive 每天讀 state＋enable；**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`；M4 合併後開始算）
+- 下一步：
+  - M4：PR #28 驗證 → C0 合併
+  - M2 合併後（不在 PR #28）：併 main → 每日監控改用 M2 的 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像那天，報告與 Issue 寫出那行 ATTENTION）→ 手動 `mode=real` 建立第一次真實基準 → 回報「打開的話會開哪些 Issue」給 C0
+  - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 派驗證 → 開 PR
 - 卡住／等決定：無
 <!-- END C3 -->
 
