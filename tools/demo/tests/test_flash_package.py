@@ -975,7 +975,8 @@ def test_tool_commit_keeps_commit_when_status_times_out(monkeypatch, tmp_path):
 
 
 def test_script_uefi_source_runs_before_import_and_is_optional(tmp_path):
-    """--uefi-source：docker import 之前 uefi_source.py 讀樹（B-uefi-source）、再用 grype 比對（B-uefi-grype；這裡沒有 grype 資料庫 → NOT_RUN，不是 OK）。
+    """--uefi-source：docker import 之前 uefi_source.py 讀樹（B-uefi-source）。Grype 比對（B-uefi-grype）在 sca-scan 更新資料庫之後才跑
+    （test_bundled_grype_order.py）；這裡的 docker import 是假的、一定失敗，沒有走到 sca-scan，所以沒有比對，也沒有 grype-run.json。
     沒給時不執行、不寫狀態列、不建資料夾；樹不是資料夾 → 退出碼 64。"""
     tree = tmp_path / "uefi"
     ossl = tree / "CryptoPkg" / "Library" / "OpensslLib" / "openssl"
@@ -993,9 +994,10 @@ def test_script_uefi_source_runs_before_import_and_is_optional(tmp_path):
     p = run_script(tmp_path, *base, "--out", str(tmp_path / "r1"), "--uefi-source", str(tree))
     st = (tmp_path / "r1" / "status.tsv").read_text()
     assert re.search(r"^B-uefi-source-rootfs_no_gui\tGAP\t.*OpenSSL 3\.4\.1", st, re.M), st + p.stderr     # edk2 版本不明 → GAP
-    assert re.search(r"^B-uefi-grype-rootfs_no_gui\t(NOT_RUN|OK|GAP)\t", st, re.M) and st.index("B-uefi-source") < st.index("B-import-rootfs_no_gui")
+    assert "B-uefi-grype" not in st and st.index("B-uefi-source") < st.index("B-import-rootfs_no_gui")
+    assert re.search(r"^B-import-rootfs_no_gui\tFAIL\t", st, re.M), st
     d = tmp_path / "r1" / "rootfs_no_gui" / "uefi-source"
-    assert (d / "uefi-source.cdx.json").is_file() and json.loads((d / "grype-run.json").read_text())["status"] in ("NOT_RUN", "OK", "GAP", "FAIL")
+    assert (d / "uefi-source.cdx.json").is_file() and not (d / "grype-run.json").exists()
     p = run_script(tmp_path, *base, "--out", str(tmp_path / "r2"), "--uefi-source", str(tmp_path / "nope"))
     assert p.returncode == 64
 
