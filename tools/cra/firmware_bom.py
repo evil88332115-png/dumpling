@@ -251,6 +251,16 @@ def pick_rootfs(listdoc, variant, prefix=None):
                   else f"{variant} appears {len(m)} times in list.json ({', '.join(str(r.get('prefix')) for r in m)})")
 
 
+def platform_of(rfs):
+    """list.json 的一個 rootfs 項目 → "jetson"（有 L4T 判斷：tar 刷機包）｜"other"（l4t.status 是 INFO：flash_package.py 對 Rockchip update.img 與原始磁碟映像
+    寫「不是 NVIDIA Jetson，沒有 L4T 版本」）｜None（沒有項目或沒有 l4t 欄位：不知道，不猜）。sbom.md 第 6 節的 BSP 說明依這個寫，
+    只有 jetson 才出現 Jetson Linux (L4T) 與 NVIDIA 公開 BSP 的文字。"""
+    l4t = _d(_d(rfs).get("l4t"))
+    if _s(l4t.get("release")) or l4t.get("status") in ("OK", "GAP", "ATTENTION"):
+        return "jetson"
+    return "other" if l4t.get("status") == "INFO" else None
+
+
 def build(inventory, listdoc, variant, prefix=None, supplier_cfg=None, spec="1.6", firmware_patterns=()):
     """→ (元件清單, 依賴 {ref: [子 ref]}, 頂層 ref 清單, info)。info 給 sbom.md 與 summary.json。"""
     supplier = entity(supplier_cfg)
@@ -264,7 +274,8 @@ def build(inventory, listdoc, variant, prefix=None, supplier_cfg=None, spec="1.6
         info["notes"].append(why)
     rel = _d(_d(rfs).get("l4t"))
     l4t = _s(rel.get("release"))
-    if rfs and not l4t:
+    info["platform"] = platform_of(rfs)
+    if rfs and not l4t and info["platform"] == "jetson":      # 非 Jetson 沒有 L4T：不是「判斷不了」，也不該出現在 sbom.md 的備註裡
         info["notes"].append(f"L4T release not determined ({_s(rel.get('status')) or 'no data'}: {_s(rel.get('detail')) or ''})".rstrip(": "))
     prefix = prefix or _s(_d(rfs).get("prefix"))
     info["prefix"] = prefix
@@ -402,7 +413,8 @@ def build(inventory, listdoc, variant, prefix=None, supplier_cfg=None, spec="1.6
         {"source": "Kernel image and device trees (`kernel/`)", "count": len(kern)},
         {"source": f"Kernel modules in `lib/modules/*/updates/` ({prefix or variant})", "count": len(mods),
          "no_modinfo": sum(1 for c in mods if any(p["name"] == "sca-center:modinfo" for p in c["properties"]))},
-        {"source": "Jetson Linux (L4T) release", "count": 1 if l4t else 0, "detail": l4t or "not determined"},
+        *([{"source": "Jetson Linux (L4T) release", "count": 1 if l4t else 0, "detail": l4t or "not determined"}]
+          if info["platform"] == "jetson" else []),
         {"source": "MCU firmware and other deliverables next to the archive", "count": len(mcu)},
     ] + ([{"source": "Firmware delivered separately from the flash package (extra deliverables)", "count": len(extra)}] if ex is not None else [])
     info["skipped"] = {k: v for k, v in skipped.items() if v}
@@ -613,7 +625,8 @@ def firmware_text(info, table):
         out += ["", f"{info['duplicates']} duplicate path(s) in the inventory: the last entry was used."]
     out += ["", ("Supplier of these components (who delivered the flash package): " + info["supplier"]) if info.get("supplier") else
             "Supplier of these components: **TO BE COMPLETED** (configuration `sbom.flash_package_supplier`: who delivered the flash package).",
-            "", "The creator of individual flash files is not stated: it is known only after comparing the files with NVIDIA's public BSP. "
+            "", "The creator of individual flash files is not stated: it is known only after comparing the files with "
+            + ("NVIDIA's public BSP" if info.get("platform") == "jetson" else "the BSP or image published by the vendor of this platform") + ". "
             "Versions of flash files are their file modification times (BSI TR-03183-2 5.2.2, no version assigned by the creator); "
             "kernel module versions come from `modinfo`."]
     if not info.get("inventory_has_sha512"):
@@ -623,8 +636,8 @@ def firmware_text(info, table):
     return "\n".join(out)
 
 
-def tr_text(tr, table, show=10):
-    """sbom.md 第 7 節。"""
+def tr_text(tr, table, show=10, platform=None):
+    """sbom.md 第 7 節。platform：firmware_text 的 info["platform"]；只有 "jetson" 才在說明裡舉 Jetson Linux 版本元件當邏輯元件的例子。"""
     if tr.get("status") == "NOT_ASSESSED":
         return f"**Status: NOT_ASSESSED** ({tr.get('reason')})."
     out = [f"**Status: {tr['status']}** (reported only; does not block release). Checked against BSI TR-03183-2 version {tr['tr_version']}, "
@@ -632,8 +645,9 @@ def tr_text(tr, table, show=10):
            f"(file entries from the scanner's file catalogue not counted: {tr['file_components_not_counted']}).", "",
            "SBOM itself:", "",
            table(["Field", "Present", "Value"], [[r["field"], "yes" if r["ok"] else "**no**", r.get("value") or ""] for r in tr["sbom"]]),
-           "", "Required fields for each component (file-level fields are not counted for logical components such as the "
-           "Jetson Linux release, TR-03183-2 3.2.2; whether the scanner's package components are logical components is not decided "
+           "", "Required fields for each component (file-level fields are not counted for logical components such as "
+           + ("the Jetson Linux release" if platform == "jetson" else "a platform release component without files of its own")
+           + ", TR-03183-2 3.2.2; whether the scanner's package components are logical components is not decided "
            "by this tool):", "",
            table(["Field", "Components with the field", "Coverage", "Missing (examples)"],
                  [[f["field"], f"{f['have']} / {f['total']}", pct(f["have"], f["total"]),

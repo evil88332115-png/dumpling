@@ -19,7 +19,7 @@
      → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
 輸出：<站台設定的 outroot>/<產品>-<版本>-<日期時間>/（每次新資料夾，舊的不動）
 """
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, tarfile, zipfile, zlib, datetime
+import argparse, hashlib, json, lzma, os, re, shutil, subprocess, sys, tarfile, zipfile, zlib, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -285,6 +285,198 @@ def merge_step_status(out, steps, inputs_check_name="inputs-check.json"):
         d["inputs"].append({"id": "step:" + st["id"], "label": st["label"], "provider": "", "required": False, "kind": "step", "status": status,
                             "path": None, "affects": st.get("affects", ""), "note": st.get("note", ""), "step_status": s0})
     f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+# ---- 設定包的版本與刷機包識別：精靈覆寫，設定包不要寫死 ----
+_VER_LIKE = re.compile(r"^[Vv]?\d+(\.\d+)+")
+_IDENT = re.compile(r"^(Flash package )([^\s,(]+)(?: \(MD5 ([0-9a-fA-F]{32})\))?(,.*)?$", re.S)
+_ARCHIVE_NAME = re.compile(r"[\w.+\-]+\.(?:tbz2|tar\.bz2|tar\.gz|tgz|tar\.xz|zip|7z)(?![\w.])")
+_IMAGE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
+_REL_TOKEN = re.compile(r"\bV\d+(?:\.\d+)+(?:_\w+)?")
+
+
+def override_pack_version(cfg_path, plan_version):
+    """config.json 的 product.version 改成精靈的計畫版本。規則：設定包的值結尾若有括號後綴（例如 " (rootfs)"）且後綴本身不是版本號，
+    就保留後綴 → "<計畫版本> (<後綴>)"；否則直接用 "<計畫版本>"。回傳 (舊值, 新值)；已相同 → None；沒有 product → ValueError。
+    dumpling（D-039「設定檔不寫死版本」、D-055 (3)「版本以 Release tag 為準」）：product.version 沒有寫 → 直接填入計畫版本，回傳 (None, 新值)；
+    有寫但不是字串 → ValueError（不猜）。"""
+    c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+    prod = c.get("product") if isinstance(c, dict) else None
+    if not isinstance(prod, dict):
+        raise ValueError("config.json 沒有 product")
+    if prod.get("version") is None:
+        prod["version"] = plan_version
+        Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return None, plan_version
+    if not isinstance(prod.get("version"), str):
+        raise ValueError("product.version 不是字串")
+    old = prod["version"]
+    base = old.strip()
+    suffix = ""
+    while True:          # 尾端連續的非版本括號後綴（例如 "(rootfs)(gui)"）都保留
+        m = re.fullmatch(r"(.*?)\s*(\([^()]+\))", base)
+        if not m or _VER_LIKE.match(m.group(2)[1:-1].strip()):
+            break
+        base, suffix = m.group(1).rstrip(), m.group(2) + suffix
+    new = f"{plan_version} {suffix}" if suffix else plan_version
+    if new == old:
+        return None
+    prod["version"] = new
+    Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return old, new
+
+
+def fill_pack_support_end(cfg_path, support_until):
+    """dumpling（D-055 (2)）：support.end_date（YYYY-MM）由 project.yml 的 support_until（YYYY-MM-DD；platform.sh 給的 DUMPLING_SUPPORT_UNTIL）產生。
+    config.json 沒有 support.end_date 時填入 → (None, 新值)；已有而且同月 → None；已有但不同月 → ValueError（project_config 的一致性檢查也會擋）；
+    support_until 沒給或格式不對 → None（不猜）。"""
+    if not (isinstance(support_until, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", support_until)):
+        return None
+    want = support_until[:7]
+    c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+    if not isinstance(c, dict):
+        raise ValueError("config.json 不是 JSON 物件")
+    sup = c.get("support")
+    if sup is not None and not isinstance(sup, dict):
+        raise ValueError("support 不是物件")
+    cur = (sup or {}).get("end_date")
+    if cur == want:
+        return None
+    if cur not in (None, "", "TO BE COMPLETED"):
+        raise ValueError(f"support.end_date {cur} 與 project.yml 的 support_until {support_until} 月份不同")
+    c["support"] = dict(sup or {}, end_date=want)          # "support": null 也當成沒有
+    Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return cur, want
+
+
+def override_pack_identification(cfg_path, src_file, src_md5):
+    """config.json 的 product.identification 開頭若是 "Flash package <檔名> (MD5 <md5>)"，換成這次掃描的刷機包（provenance 的 source.file／md5），
+    句子其餘部分不動。回傳 (狀態, 說明)：OVERRIDDEN(舊, 新)／FILLED(None, 新)／SAME／UNRECOGNISED／NO_PROVENANCE／NO_MD5（沒有可用的新 MD5：不改，不沿用舊 MD5）。格式認不得不猜，不改。
+    dumpling（D-039）：product.identification 沒有寫、而且有這次刷機包的檔名與 MD5 → 填入 "Flash package <檔名> (MD5 <md5>)"（FILLED）。"""
+    if not src_file:
+        return "NO_PROVENANCE", "scan/provenance.json 沒有刷機包檔名"
+    c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+    prod = c.get("product") if isinstance(c, dict) else None
+    old = prod.get("identification") if isinstance(prod, dict) else None
+    md5_ok = isinstance(src_md5, str) and re.fullmatch(r"[0-9a-fA-F]{32}", src_md5)
+    if isinstance(prod, dict) and old is None and md5_ok:
+        prod["identification"] = f"Flash package {src_file} (MD5 {src_md5})"
+        Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return "FILLED", (None, prod["identification"])
+    m = _IDENT.match(old) if isinstance(old, str) else None
+    if not m:
+        return "UNRECOGNISED", old
+    if not (isinstance(src_md5, str) and re.fullmatch(r"[0-9a-fA-F]{32}", src_md5)):
+        return "NO_MD5", old
+    new = m.group(1) + src_file + f" (MD5 {src_md5})" + (m.group(4) or "")
+    if new == old:
+        return "SAME", old
+    prod["identification"] = new
+    Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return "OVERRIDDEN", (old, new)
+
+
+def read_scan_image_ids(scan_dir):
+    """掃描資料夾的 meta.json（或 meta.json.xz）→ 正規化（去 sha256: 前綴、小寫）的 digest、image_id、content_sha256 集合；讀不到 → None。"""
+    for n in ("meta.json", "meta.json.xz"):
+        p = Path(scan_dir) / n
+        if p.is_file() and not p.is_symlink():
+            try:
+                raw = p.read_bytes() if n.endswith(".json") else lzma.decompress(p.read_bytes())
+                m = json.loads(raw.decode("utf-8"))
+            except (OSError, ValueError, lzma.LZMAError):
+                return None
+            if not isinstance(m, dict):
+                return None
+            ids = {x.group(1) for k in ("digest", "image_id", "content_sha256")
+                   for x in [_IMAGE.match(str(m.get(k) or "").strip().lower())] if x}
+            return ids or None
+    return None
+
+
+def stale_pack_files(cfg_dir, archive_name, plan_version, image_ids):
+    """設定包裡其他會記錄來源的檔案是否屬於別的版本（只警告，不改）。回傳 (警告列表, 沒比對的說明列表)。
+    kernel-modules.json：source 提到的刷機包檔名和這次不同；image_sha256（正規化後）不在這次掃描映像的識別值裡
+      （image_ids 為 None 或空＝讀不到掃描的映像識別，記「沒比對」）。
+    exposed-services.json：只看 source；其中和計畫版本同形（同樣段數）的版本號，彼此都不是對方的前綴才警告
+      （V2.0.0.1 與 V2.0.0.1_a 視為同一版；「Linux V5.10」這類段數不同的不是產品版本，不抓）。"""
+    warn, notes = [], []
+    km = Path(cfg_dir) / "kernel-modules.json"
+    if km.is_file():
+        try:
+            d = json.loads(km.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = None
+        if isinstance(d, dict):
+            names = set(_ARCHIVE_NAME.findall(str(d.get("source", ""))))
+            if archive_name and names and archive_name not in names:
+                warn.append(f"kernel-modules.json 的 source 提到的刷機包是 {', '.join(sorted(names))}，這次掃描的是 {archive_name}")
+            sha = d.get("image_sha256")
+            if isinstance(sha, str) and sha.strip():
+                x = _IMAGE.match(sha.strip().lower())
+                if not image_ids:
+                    notes.append("kernel-modules.json 的 image_sha256 沒比對：讀不到掃描的映像識別（meta.json）")
+                elif not x or x.group(1) not in image_ids:
+                    warn.append("kernel-modules.json 的 image_sha256 和這次掃描的映像不同")
+    es = Path(cfg_dir) / "exposed-services.json"
+    if es.is_file():
+        try:
+            d = json.loads(es.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = None
+        pv = (plan_version or "").strip()
+        if isinstance(d, dict) and _REL_TOKEN.fullmatch(pv):
+            nseg = pv.split("_")[0].count(".")
+            other = {t for t in _REL_TOKEN.findall(str(d.get("source", "")))
+                     if t.split("_")[0].count(".") == nseg and not t.startswith(pv) and not pv.startswith(t)}
+            if other:
+                warn.append(f"exposed-services.json 的 source 提到的版本是 {', '.join(sorted(other))}，這次的版本是 {pv}")
+    return warn, notes
+
+
+def post_scan_pack_checks(mcfg, out, scan_dir, version, pack_steps, plan_steps, steps, labels, say=print):
+    """掃描後對輸出資料夾裡的設定包複本做：刷機包識別覆寫（依 <out>/scan/provenance.json）、過期檔案檢查；
+    把 pack_steps（含掃描前的版本覆寫）連同其他步驟寫進 <out>/inputs-check.json。"""
+    prov = {}
+    try:
+        prov = json.loads((Path(out) / "scan" / "provenance.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    psrc = prov.get("source") if isinstance(prov, dict) and isinstance(prov.get("source"), dict) else {}
+    try:
+        st_, info = override_pack_identification(mcfg / "config.json", psrc.get("file"), psrc.get("md5"))
+    except (OSError, ValueError) as e:
+        st_, info = "UNRECOGNISED", f"config.json 讀不了（{type(e).__name__}）"
+    if st_ == "FILLED":
+        say(f"  設定包沒有 product.identification，填入這次掃描的刷機包：{info[1]}")
+        pack_steps.append({"id": "pack-identification-override", "label": "設定包刷機包識別由這次掃描的刷機包填入", "status": "OK",
+                           "note": f"（沒有）→ {info[1]}", "affects": "SBOM、VEX、客戶資料包與報告的產品識別"})
+    elif st_ == "OVERRIDDEN":
+        say(f"  覆寫設定包刷機包識別：{info[0]} → {info[1]}")
+        pack_steps.append({"id": "pack-identification-override", "label": "設定包刷機包識別改用這次掃描的刷機包", "status": "OK",
+                           "note": f"{info[0]} → {info[1]}", "affects": "SBOM、VEX、客戶資料包與報告的產品識別"})
+    elif st_ in ("UNRECOGNISED", "NO_PROVENANCE", "NO_MD5"):
+        msg = (f"設定包 config.json 的 product.identification 格式認不得（{info}），沒有覆寫。請自行改成這次掃描的刷機包 "
+               f"{psrc.get('file') or '?'}（MD5 {psrc.get('md5') or '?'}）" if st_ == "UNRECOGNISED" else
+               f"scan/provenance.json 沒有可用的 MD5，設定包的刷機包識別沒有覆寫（不沿用舊 MD5）。請自行把 identification 改成這次的刷機包 {psrc.get('file') or '?'}"
+               if st_ == "NO_MD5" else
+               f"{info}，設定包的刷機包識別沒有覆寫，請確認 identification 是這次的刷機包")
+        say("  ATTENTION：" + msg)
+        pack_steps.append({"id": "pack-identification-override", "label": "設定包刷機包識別", "status": "ATTENTION", "note": msg,
+                           "affects": "SBOM、VEX、客戶資料包與報告的產品識別可能是舊版"})
+    stale, nocmp = stale_pack_files(mcfg, psrc.get("file"), version, read_scan_image_ids(scan_dir))
+    for msg in nocmp:
+        say("  NOT_RUN：" + msg)
+        pack_steps.append({"id": "pack-stale-imagehash", "label": "設定包 image_sha256 比對", "status": "NOT_RUN", "note": msg,
+                           "affects": "kernel-modules.json 是否屬於這次的映像沒有檢查"})
+    for msg in stale:
+        say("  ATTENTION：設定包檔案可能是別的版本：" + msg)
+    if stale:
+        pack_steps.append({"id": "pack-stale-files", "label": "設定包其他檔案是否屬於這個版本", "status": "ATTENTION",
+                           "note": "；".join(stale), "affects": "核心模組、對外服務的判斷可能依據舊版；結果未改，請重新收集或確認"})
+    if pack_steps:
+        merge_step_status(out, plan_steps + [{"id": k, "label": labels[k][0], "status": v["status"], "note": v["detail"], "affects": labels[k][1]}
+                                             for k, v in steps.items() if k in labels] + pack_steps)
 
 
 def step_line(log, prefix):
@@ -924,6 +1116,35 @@ def main():
     if cfg_dir:
         shutil.copytree(cfg_dir, mcfg)
         say(f"  複製設定包：{cfg_dir}")
+        pack_steps = []
+        try:
+            ov = override_pack_version(mcfg / "config.json", version)
+        except (OSError, ValueError) as e:
+            ov = None
+            msg = f"設定包 config.json 讀不了或沒有 product.version（{type(e).__name__}: {e}），版本沒有覆寫，請自行確認"
+            say("  ATTENTION：" + msg)
+            pack_steps.append({"id": "pack-version-override", "label": "設定包版本", "status": "ATTENTION", "note": msg,
+                               "affects": "SBOM、VEX、客戶資料包與報告用的版本可能是舊版"})
+        try:
+            se = fill_pack_support_end(mcfg / "config.json", os.environ.get("DUMPLING_SUPPORT_UNTIL"))
+        except (OSError, ValueError) as e:
+            se = None
+            msg = f"設定包的 support.end_date 沒有由 project.yml 的 support_until 產生（{type(e).__name__}: {e}）"
+            say("  ATTENTION：" + msg)
+            pack_steps.append({"id": "pack-support-end", "label": "設定包支援期限", "status": "ATTENTION", "note": msg,
+                               "affects": "支援期限文件與 support_check"})
+        if se:
+            say(f"  設定包的 support.end_date 由 project.yml 產生：{se[0] or '（沒有）'} → {se[1]}")
+            pack_steps.append({"id": "pack-support-end", "label": "設定包支援期限由 project.yml 的 support_until 產生", "status": "OK",
+                               "note": f"{se[0] or '（沒有）'} → {se[1]}", "affects": "支援期限文件與 support_check"})
+        if ov and ov[0] is None:
+            say(f"  設定包沒有 product.version，填入精靈的計畫版本：{ov[1]}")
+            pack_steps.append({"id": "pack-version-override", "label": "設定包版本由精靈的計畫版本填入", "status": "OK",
+                               "note": f"（沒有）→ {ov[1]}", "affects": "SBOM、VEX、客戶資料包與報告用的版本"})
+        elif ov:
+            say(f"  覆寫設定包版本：{ov[0]} → {ov[1]}")
+            pack_steps.append({"id": "pack-version-override", "label": "設定包版本改用精靈的計畫版本", "status": "OK",
+                               "note": f"{ov[0]} → {ov[1]}", "affects": "SBOM、VEX、客戶資料包與報告用的版本"})
 
     say("\n== 3、4. 掃描（約 10–15 分鐘）==")
     env = dict(os.environ)
@@ -1073,6 +1294,8 @@ def main():
                 d = keep
             (mcfg / "vex-rules.json").write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
             say(f"  套用通用處理規則 {len(keep)} 條（來源 {RULES_TEMPLATE}）")
+    if cfg_dir:
+        post_scan_pack_checks(mcfg, OUT, scan_dir, version, pack_steps, plan_steps, steps, labels, say)
     projects = []
     if role in ("both", "manufacturer"):
         projects.append(("製造商", OUT / "cra-project"))

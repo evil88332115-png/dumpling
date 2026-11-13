@@ -1,13 +1,14 @@
-"""firmware-ci.sh 摘要表的「微碼公告比對」欄：fw-inventory.json → 一行文字（每個 BIOS 映像各一段）。
+"""firmware-ci.sh 摘要表的「公告比對」欄：fw-inventory.json → 一行文字（每個 BIOS 映像各一段，有 NVIDIA vBIOS 時再加一段）。
 
 用法：python3 -I firmware_advisory_cell.py <fw-inventory.json>
-只讀 fw-inventory.json 的 advisory 與 bios[]（x86_firmware.py 的輸出）；文字裡有映像檔名（不可信資料），
+只讀 fw-inventory.json 的 advisory、bios[]、vbios[]、vbios_advisory（x86_firmware.py 的輸出）；文字裡有映像檔名（不可信資料），
 由呼叫端（firmware-ci.sh）再經 firmware_mdsafe 跳脫。不判斷任何漏洞：這一欄只是比對結果的計數與沒有比對的原因。
 """
 import json
 import sys
 
 ORDER = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")
+VBIOS_ORDER = ("affected", "fixed", "NOT_ASSESSED")
 AMD_NO_MATCH = "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）"
 MAX_IMAGES = 20
 NO_MATCH = "（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）"           # 沒有可比對的 Intel 微碼時也要寫明（和 ME、其他元件的說法一致）
@@ -38,7 +39,28 @@ def image_text(b):
     return "沒有 Intel 微碼" + NO_MATCH
 
 
+def vbios_text(inv):
+    """NVIDIA vBIOS 的一段：個數與各結果的計數（對照表不能用時寫 GAP）。沒有 vBIOS → None（BIOS 樣本的欄位維持原樣）。"""
+    vb = inv.get("vbios") or []
+    if not vb:
+        return None
+    va = inv.get("vbios_advisory") or {}
+    c = {}
+    for v in vb:
+        m = (v.get("advisory") or {}).get("match", "NOT_ASSESSED")
+        c[m] = c.get(m, 0) + 1
+    counts = "、".join([f"{k} {c[k]}" for k in VBIOS_ORDER if k in c] + [f"{k} {n}" for k, n in sorted(c.items()) if k not in VBIOS_ORDER])
+    gap = "對照表 GAP，" if va.get("status") == "GAP" else ""
+    return f"NVIDIA vBIOS {len(vb)} 個：{gap}{counts}（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；fixed 與 affected 只是對照表的比對，不代表沒有其他漏洞）"
+
+
 def cell(inv):
+    text = bios_cell(inv)
+    vt = vbios_text(inv)
+    return text if vt is None else text + "；" + vt
+
+
+def bios_cell(inv):
     adv = inv.get("advisory") or {}
     bios = inv.get("bios") or []
     prefix = "資料表 GAP：" if adv.get("status") == "GAP" else ""

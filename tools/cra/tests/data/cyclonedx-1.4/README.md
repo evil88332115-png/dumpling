@@ -3,7 +3,9 @@
 測試（`cdx_schema.py` 的 `cdx_validator_14()`）用來驗證供應商 SBOM（CycloneDX 1.4）經 `pipeline/lib/firmware_sbom_normalize.py` 正規化後的副本。
 官方檔案，**除 jsf-0.82.schema.json 外未修改**（見下）：
 https://raw.githubusercontent.com/CycloneDX/specification/1.4/schema/<檔名>
-（tag `1.4`，annotated tag 物件 043b2cf1abc229c5c736888c4ade8d979687f7df；2026-11-12 下載）
+（tag `1.4`，annotated tag 物件 043b2cf1abc229c5c736888c4ade8d979687f7df，指向的 commit 是 ccbf7b5781ef534cd62616e3c4221004c7c82a66；`git ls-remote https://github.com/CycloneDX/specification 'refs/tags/1.4*'` 的 `refs/tags/1.4^{}` 那一列；2026-11-12 下載）
+
+該 commit 的 `schema/` 下三個檔案的 SHA-256 與下表相同（jsf 是官方原檔的值，見下）。
 
 授權 Apache-2.0（CycloneDX/specification）。依據：`bom-1.4.schema.json` 與 `jsf-0.82.schema.json` 的 `$comment` 都寫 published under the terms of the Apache License 2.0；`spdx.schema.json` 檔內沒有授權標示，隨同一個 repo 的 Apache-2.0（授權檔：https://raw.githubusercontent.com/CycloneDX/specification/1.4/LICENSE）。
 

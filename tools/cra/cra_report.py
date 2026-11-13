@@ -1333,11 +1333,13 @@ def flash_firmware(scan, cfg, spec, inventory=None):
     if isinstance(rt, dict) and isinstance(rt.get("prefix"), str):
         prefix = rt["prefix"]
     inv = load_json(inv_p)
+    plat = fwmod().platform_of(fwmod().pick_rootfs(lst, variant, prefix)[0])     # list.json 的 l4t 欄位：jetson｜other｜None（不知道）
     if not isinstance(inv, dict):
         why = "missing" if not inv_p.exists() else "not readable"
         return None, None, None, {"absent": f"**Flash firmware missing from the SBOM:** the flash package inventory (`{inv_p.name}`) is {why}. "
-                                  "Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware are not in "
-                                  "the product SBOM.", "flash_package": True, "status": "ATTENTION"}
+                                  + ("Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware" if plat == "jetson" else
+                                     "Boot and flash firmware, the platform release information, kernel modules and MCU firmware")
+                                  + " are not in the product SBOM.", "flash_package": True, "status": "ATTENTION", "platform": plat}
     try:     # 清點檔是不可信資料：格式怪異時不讓整份 CRA 文件失敗
         comps, deps, top, info = fw.build(inv, lst if isinstance(lst, dict) else None, variant, prefix,
                                           (cfg.get("sbom") or {}).get("flash_package_supplier"), spec,
@@ -5199,7 +5201,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     if bsp_na and (fwc or not fw_info.get("absent")):
         # 分層、這份沒有 BSP 元件（見 bsp_na）：刷機包韌體屬於 bsp 層，不加進這份的產品 SBOM
         bsp_na_skipped.append("flash-firmware")
-        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True}
+        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True, "platform": fw_info.get("platform")}
     # 產品自有軟體（設定 sbom.own_software；own_software.py）：沒有設定時 own_info 是 None，下面全部照舊
     owc, owt, own_info, fwc = own_software(scan, cfg, b.get("specVersion"), fwc, fw_info, own_software_file) if b else (None, None, None, fwc)
     if own_info is None and ownmod().configured(cfg):
@@ -5253,11 +5255,14 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         else bool(cfg["sbom"]["tools_scope_note"])
     scope_txt = spmod().TOOLS_SCOPE_NOTE if scope_note else ""
     ctx.update({"text.sbom_scope": ("\n\n" + scope_txt) if scope_txt else ""})
+    # 第 6 節標題：只有 Jetson 的刷機包才寫 Jetson Linux 版本；其他平台（或不知道平台）寫中性的標題（adapter-gaps #25）
+    ctx.update({"text.sbom_firmware_title": "Flash firmware, Jetson Linux release and kernel modules" if fw_info.get("platform") == "jetson"
+                else "Flash firmware and kernel modules"})
     ctx.update({"text.sbom_firmware": fwmod().firmware_text(fw_info, table) + ("\n\n### Scope of the SBOM\n\n" + scope_txt if scope_txt else "") + ("\n\n" + ownmod().text(own_info, table) if own_info else "")
                                                                                 + ("\n\n" + uefimod().text(uefi_info, table) if uefi_info else "")
                                                                                 + ("\n\n" + teemod().text(tee_info, table) if tee_info else "")
                                                                                 + ("\n\n### Boot firmware coverage\n\n" + bootmod().customer_text(boot_cov) if boot_cov else ""),
-                "text.sbom_tr03183": fwmod().tr_text(tr, table),
+                "text.sbom_tr03183": fwmod().tr_text(tr, table, platform=fw_info.get("platform")),
                 "bom.firmware_status": fw_info.get("status") or "not applicable", "bom.tr03183_status": tr["status"]})
     pbom_text = json.dumps(pbom, ensure_ascii=False, separators=(",", ":")) + "\n" if pbom else None
     # 板子執行中使用的證據（runtime_evidence.py）：只加欄位與 VEX 說明的一句話，不改 tier、不改 VEX 狀態。
@@ -5399,6 +5404,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 缺的欄位不只看實際用的範本：內建範本引用的欄位（專案範本少引用時也算缺）、Annex I 的逐項表、技術文件檢查清單的 config 欄位
     extra_missing = {"risk-assessment": set(annex_missing),
                      "technical-documentation": {src for _, _, src in TECHDOC_ITEMS if not src.startswith("doc:") and isinstance(ctx.get(src), Missing)}}
+    # sbom.md 第 6 節的「Supplier … TO BE COMPLETED」是 firmware_text 直接寫的字，不是 Missing 值：不另外算進去，summary.json 的 missing_fields
+    # 就少一個（adapter-gaps #25）。刷機包的韌體有併進來（fw_info 沒有 absent）、設定沒有可用的 sbom.flash_package_supplier、範本也用了 text.sbom_firmware
+    # 才算（-os 報告沒有 BSP 元件、不是刷機包的掃描、清點檔缺少時，第 6 節不會有這一行）
+    if "sbom" in active_docs and not fw_info.get("absent") and not fw_info.get("supplier") and "text.sbom_firmware" in sb_ph:
+        extra_missing["sbom"] = {"sbom.flash_package_supplier"}
     # security-findings.md 沒有範本；先放進 docs，技術文件的檢查清單（第 6 項）要用它的狀態
     docs[SEC_DOC[0]] = {"file": SEC_DOC[1], "status": sec_st, "detail": sec["reasons"], "template": "none (generated)", "missing_fields": []}
     for name, fn in active_docs.items():

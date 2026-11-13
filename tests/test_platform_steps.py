@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
@@ -22,6 +23,10 @@ class Tmp(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dumpling-steps-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        patcher = mock.patch.dict(os.environ)       # collect 沒給 steps 時會讀 $DUMPLING_OUT/pipeline-steps.tsv：測試自己決定要不要設
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("DUMPLING_OUT", None)
 
     def p(self, *a):
         return os.path.join(self.tmp, *a)
@@ -67,6 +72,13 @@ class RunStep(Tmp):
         self.assertEqual([(x["step"], x["status"], x["detail"]) for x in self.rows()][-1], ("pipeline-scan", "NOT_RUN", "scan: 結果說明"))
         self.assertEqual(sr.overall(self.rows()), "GAP")
         self.assertTrue(self.rows()[0].get("recorded") and not self.rows()[-1].get("recorded"))
+
+    def test_platform_sh_exports_support_until(self):
+        """platform.sh 把 project.yml 的 support_until 匯出成 DUMPLING_SUPPORT_UNTIL 給轉接器與精靈（D-055 (2)）。"""
+        open(os.path.join(self.plats, "steps", "scan.sh"), "w").write('#!/usr/bin/env bash\necho "scan: support=[$DUMPLING_SUPPORT_UNTIL]"\n')
+        r = self.run_step("scan", self.proj, "v39.2.1-demo1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.rows()[-1]["detail"], "scan: support=[2031-12-31]")       # orin-nano-demo 的 support_until
 
     def test_step_output_cannot_claim_not_applicable(self):
         """一般執行的步驟最後一行印「不適用…」並結束碼 4：照樣算沒能執行（GAP）。只有 --record 記的列（recorded）能算不適用。"""
@@ -619,3 +631,138 @@ class ScanPlanReading(Tmp):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotesFollowReleaseMeta(Tmp):
+    """adapter-gaps #26：notes.md 開頭的 pipeline_result 與 release-meta.json 一致。
+    原因有兩個：(1) 平台的收集腳本沒有 --steps（C4 的 wp7_scan.py collect 沒有這個參數）→ notes 寫 NOT_RUN；
+    (2) scan 步驟產生 notes.md 時，它自己的那一列還沒寫（run-step.sh 在步驟結束後才記）→ 與完整紀錄算出來的不同。"""
+
+    def wizard(self):
+        d = self.p("w0")
+        for rel, content in (("scan/rootfs/scan/status.tsv", "stage\tstatus\tdetail\n"),
+                             ("cra-project/CRA/Reports/vulnerability-rows.json", json.dumps({"rows": []})),
+                             ("cra-project/CRA/Reports/summary.json", json.dumps({"status": "GAP", "vex": {"gate": {"verdict": "OK"}}})),
+                             ("報告/交給PM/VEX/vex.cdx.json", "{}")):
+            os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+            open(os.path.join(d, rel), "w", encoding="utf-8").write(content)
+        return d
+
+    def ns(self, **kw):
+        a = dict(out=self.p("rel"), project="p", version="v1", layers=None, build_json=None, assemble_json=None, scan_json=self.p("scan.json"),
+                 run=["=" + self.wizard()], official=False)
+        a.update(kw)
+        return argparse.Namespace(**a)
+
+    def head(self):
+        return open(self.p("rel", "notes.md"), encoding="utf-8").read().split("\n")[2]
+
+    def meta(self, steps, notes=None):
+        out = self.p("m.json")
+        extra = ["--notes", notes] if notes else []
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                            "--commit", "a" * 40, "--run-id", "1", "--steps", steps, *extra, "--out", out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return json.load(open(out)), r.stdout
+
+    def test_collect_without_steps_argument_reads_dumpling_out(self):
+        """C4 的收集腳本的 Namespace 沒有 steps 屬性：用 $DUMPLING_OUT/pipeline-steps.tsv（platform.sh 替每個轉接器設定）。"""
+        out = self.p("out")
+        os.makedirs(out)
+        sr.append_row(os.path.join(out, "pipeline-steps.tsv"), "assemble", "GAP", 3, "assemble: GAP（x）")
+        ps.collect(self.ns())
+        self.assertIn("NOT_RUN", self.head())                                      # 沒有 DUMPLING_OUT：和以前一樣（單元測試、手動呼叫）
+        with mock.patch.dict(os.environ, {"DUMPLING_OUT": out}):
+            scan = ps.collect(self.ns())
+        self.assertEqual(self.head(), "**report_status GAP**｜**release_gate OK**｜**pipeline_result GAP**")
+        self.assertEqual(scan["pipeline_status"], "GAP")
+        # 有 DUMPLING_OUT 卻沒有紀錄檔：和 release-meta 一樣是 GAP（不是 NOT_RUN）
+        with mock.patch.dict(os.environ, {"DUMPLING_OUT": self.p("nowhere")}):
+            ps.collect(self.ns())
+        self.assertIn("**pipeline_result GAP**", self.head())
+        # 明確給的 steps 優先於環境變數（Jetson 的 scan.sh 照舊傳 --steps）
+        ok = self.p("ok.tsv")
+        sr.append_row(ok, "validate", "OK", 0, "ok")
+        with mock.patch.dict(os.environ, {"DUMPLING_OUT": out}):
+            ps.collect(self.ns(steps=ok))
+        self.assertIn("**pipeline_result OK**", self.head())
+
+    def test_scan_own_row_is_missing_at_collect_time_and_release_meta_fixes_notes(self):
+        f = self.p("steps.tsv")
+        sr.append_row(f, "validate", "OK", 0, "validate: OK")
+        sr.append_row(f, "assemble", "OK", 0, "assemble: OK")
+        ps.collect(self.ns(steps=f))
+        notes = self.p("rel", "notes.md")
+        self.assertIn("**pipeline_result OK**", self.head())
+        sr.append_row(f, "scan", "GAP", 3, "scan: GAP（沒有標準答案）")             # run-step.sh 在 scan 結束後才記
+        d, out = self.meta(f)
+        self.assertEqual(d["pipeline_result"], "GAP")                               # release-meta 看得到 scan 的列
+        self.assertIn("**pipeline_result OK**", self.head())                        # notes.md 看不到：不一致
+        d, out = self.meta(f, notes)
+        self.assertIn("已與這個檔一致（重寫了）", out)
+        self.assertIn("**pipeline_result GAP**", self.head())
+        text = open(notes, encoding="utf-8").read()
+        self.assertIn("| pipeline-scan | GAP | 3 | scan: GAP（沒有標準答案） |", text)
+        self.assertIn("整體狀態 **GAP**", text)
+        self.assertEqual(text.count("## 流程步驟"), 1)
+        self.assertRegex(text, r"\| pipeline-scan[^\n]*\n\n## 附件")                   # 流程步驟一節和後面的「附件」之間仍隔一行
+        self.assertIn(self.head(), "**report_status GAP**｜**release_gate OK**｜**pipeline_result %s**" % d["pipeline_result"])
+        d2, out2 = self.meta(f, notes)                                              # 再跑一次：不變
+        self.assertIn("本來就一致", out2)
+        self.assertEqual(open(notes, encoding="utf-8").read(), text)
+
+    def test_refresh_equals_a_fresh_collect_with_the_same_rows(self):
+        f = self.p("steps.tsv")
+        sr.append_row(f, "validate", "OK", 0, "validate: OK")
+        ps.collect(self.ns(steps=f, out=self.p("a")))
+        sr.append_row(f, "scan", "FAIL", 1, "scan: FAIL（x）")
+        ps.collect(self.ns(steps=f, out=self.p("b")))                               # 有完整紀錄時 collect 直接寫的
+        ps.refresh_notes(self.p("a", "notes.md"), sr.read_rows(f))                  # 之前寫的，再用完整紀錄重寫
+        self.assertEqual(open(self.p("a", "notes.md"), encoding="utf-8").read(), open(self.p("b", "notes.md"), encoding="utf-8").read())
+
+    def test_notes_without_steps_section_gets_one_and_foreign_notes_are_left_alone(self):
+        ps.collect(self.ns(out=self.p("rel")))                                      # 沒有步驟紀錄：NOT_RUN、沒有流程步驟那一節
+        notes = self.p("rel", "notes.md")
+        self.assertNotIn("## 流程步驟", open(notes, encoding="utf-8").read())
+        f = self.p("steps.tsv")
+        sr.append_row(f, "scan", "OK", 0, "scan: OK")
+        self.assertTrue(ps.refresh_notes(notes, sr.read_rows(f)))
+        text = open(notes, encoding="utf-8").read()
+        self.assertIn("**pipeline_result OK**", text)
+        self.assertRegex(text, r"## 流程步驟[^\n]*\n\n\| 步驟[^\n]*\n[^\n]*\n\| pipeline-scan[^\n]*\n\n## 附件")
+        other = self.p("other.md")
+        open(other, "w", encoding="utf-8").write("# 別的文件\n\n沒有那一行\n")
+        self.assertIsNone(ps.refresh_notes(other, sr.read_rows(f)))
+        self.assertEqual(open(other, encoding="utf-8").read(), "# 別的文件\n\n沒有那一行\n")
+
+    def test_release_meta_notes_option_needs_steps(self):
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                            "--commit", "a" * 40, "--run-id", "1", "--notes", self.p("n.md"), "--out", self.p("m.json")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 64, r.stdout)
+        self.assertFalse(os.path.exists(self.p("m.json")))
+
+    def test_release_workflow_passes_notes_to_release_meta(self):
+        t = open(os.path.join(ROOT, ".github", "workflows", "release.yml"), encoding="utf-8").read()
+        call = t.split("pipeline/release-meta.py", 1)[1].split("manifest.tsv", 1)[0]
+        self.assertIn('--notes "$RUNNER_TEMP/result/notes.md"', call)
+        self.assertIn("--steps", call)
+
+
+class ReleaseMetaTag(Tmp):
+    """D-055 (3)：版本以 Release tag 為準。給了 tag（不是 dev/ 開頭）卻和 <專案>/<版本> 不一致 → FAIL。"""
+
+    def run_meta(self, *extra):
+        return subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                               "--commit", "a" * 40, "--run-id", "1", *extra, "--out", self.p("m.json")], capture_output=True, text=True)
+
+    def test_tag_must_match_project_and_version(self):
+        self.assertEqual(self.run_meta().returncode, 0)                                                    # 沒給 tag：<專案>/<版本>
+        self.assertEqual(self.run_meta("--tag", "orin-nano-demo/v39.2.1-demo1").returncode, 0)
+        self.assertEqual(json.load(open(self.p("m.json")))["tag"], "orin-nano-demo/v39.2.1-demo1")
+        self.assertEqual(self.run_meta("--tag", "dev/orin-nano-demo").returncode, 0)                       # 滾動 pre-release 的 tag
+        os.remove(self.p("m.json"))
+        for bad in ("orin-nano-demo/v39.2.0-demo1", "other/v39.2.1-demo1", "orin-nano-demo", "v39.2.1-demo1"):
+            r = self.run_meta("--tag", bad)
+            self.assertEqual(r.returncode, 1, bad)
+            self.assertIn("版本以 Release tag 為準", r.stdout)
+            self.assertFalse(os.path.exists(self.p("m.json")), bad)                                         # 不寫檔

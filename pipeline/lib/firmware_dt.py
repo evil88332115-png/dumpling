@@ -304,7 +304,7 @@ def classify_vs(values):
 
 
 AM_KEY = "dumpling:advisory-match"
-AM_VALUES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")     # x86_firmware.py 會寫的值
+AM_VALUES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED", "affected", "fixed")     # x86_firmware.py 會寫的值（微碼；後兩個是 NVIDIA vBIOS）
 
 
 def classify_am(values):
@@ -484,6 +484,22 @@ def dup_notes(dups):
     return out
 
 
+def renamed_count(norm):
+    """正規化紀錄裡「供應商自帶的 dumpling: 開頭 property 被改名」的筆數。"""
+    nm = _norm_mod()
+    return sum(1 for c in norm["changes"] if c.get("rule") == nm.RULE_RESERVED)
+
+
+def supplier_props_text(n, left=0):
+    """供應商自帶 dumpling: 開頭的 property 的說明（固定文字加數字；`*`、`_` 的名稱放在行內程式碼裡，不被渲染成斜體）。
+    n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數。"""
+    ns = ("那是我們自己的命名空間：`dumpling:normalized-*`、`dumpling:supplier-*` 是正規化的紀錄，`dumpling:vuln-assessment` 等是評估標記；供應商可以自己塞")
+    if left > 0:
+        return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：%d 個已改名成 `supplier:dumpling:…`、%d 個超過變更筆數上限沒有改名"
+                "（上傳副本仍帶有 dumpling: 開頭的供應商 property；原名、位置與值的 SHA-256 見 normalize.json，沒改名的另見 unnormalized）（%s）" % (n, n - left, left, ns))
+    return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個（%s，所以上傳副本已改名成 `supplier:dumpling:…`，原名、位置與值的 SHA-256 見 normalize.json）" % (n, ns))
+
+
 def dup_text(n):
     return ("輸入 SBOM 有 %d 個重複鍵（JSON 解析時後值取代前值，上傳的副本只剩後值；明細見 normalize.json 的 notes 或 dt-project.json 的 duplicate_keys）" % n)
 
@@ -552,6 +568,10 @@ def prep(sbom_path, sample_path, out, synthetic=False):
     # 供應商 SBOM（kind: sbom）上傳前的最小格式正規化：只改上傳用的副本，原檔不動；規則與紀錄格式見 firmware_sbom_normalize.py。
     # 其他 kind（本工具自己產的 SBOM）不處理；舊的 normalize.json 不能留著混進這次的 artifact。
     input_sha = hashlib.sha256(raw).hexdigest()
+    # 摘要要在正規化之前算：正規化會把供應商自帶的 dumpling: 開頭的 property 改名（元件 dict 與原檔共用，改名後就數不到了）。
+    # kind: sbom（供應商 SBOM）自帶的 dumpling: 標記不採信（trust_markers=False）：供應商可以自己塞，一律當作沒標
+    summary = summarize(comps, trust_markers=(kind != "sbom"))
+    summary["duplicate_keys"] = dups.total
     norm = None
     if kind == "sbom":
         nm = _norm_mod()
@@ -561,9 +581,9 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         norm["original_shape"] = {"metadata": nm.key_state(doc, "metadata"),
                                   "metadata.properties": nm.key_state(doc.get("metadata"), "properties")}
         norm["notes"] = list(norm.get("notes") or []) + dup_notes(dups)
-    # 供應商 SBOM（kind: sbom）自帶的 dumpling: 標記不採信（trust_markers=False）：供應商可以自己塞，一律當作沒標
-    summary = summarize(comps, trust_markers=(kind != "sbom"))
-    summary["duplicate_keys"] = dups.total
+    if norm:
+        summary["supplier_dumpling_props"] = renamed_count(norm) + norm["reserved_not_renamed"]     # 全部（已改名加沒改名）
+        summary["supplier_dumpling_props_left"] = norm["reserved_not_renamed"]
     # 先把所有要寫的檔案序列化完（失敗就什麼都不寫，不會留下只有一半的輸出），全部成功才寫檔。
     sbom_text = dumps_json(out_doc, "上傳用 SBOM")
     sbom_sha = hashlib.sha256(sbom_text.encode("utf-8")).hexdigest()
@@ -574,7 +594,8 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "firmware_name": fw_name, "firmware_version": sample.get("firmware_version"),
         "sbom_file": "sbom.cdx.json", "sbom_sha256": sbom_sha, "input_sbom_sha256": input_sha,
         "normalize": ({"file": "normalize.json", "applied": norm["applied"], "changes": len(norm["changes"]),
-                       "unnormalized": len(norm["unnormalized"])} if norm else None),
+                       "unnormalized": norm["unnormalized_total"], "renamed": renamed_count(norm),
+                       "not_renamed": norm["reserved_not_renamed"]} if norm else None),
         "duplicate_keys": ({"count": dups.total, "listed": len(dups.events),
                             "events": [{k: ev[k] for k in ("object_index", "pointer", "key_json", "dropped_value_sha256")} for ev in dups.events[:MAX_DUP_NOTES]]}
                            if dups.total else None),
@@ -685,24 +706,47 @@ def _sev(st):
 EMPTY_STAGE = "(空的階段名稱)"
 
 
-def read_status_tsv(path):
-    """stage → (status, detail)。同一個階段出現多列時留「最嚴重」的那一列（不是最後一列：前面的 FAIL 不能被後面的 OK 蓋掉）。"""
+def read_status_tsv_checked(path):
+    """(rows, anomalies)。rows：stage → (status, detail)，同一個階段出現多列時留「最嚴重」的那一列（不是最後一列：前面的 FAIL 不能被後面的 OK 蓋掉）。
+    anomalies：{"duplicates": {階段: 列數（>= 2）}, "empty_rows": 階段名稱是空的或只有空白的列數}。這兩種在 sca-scan 的正常輸出不會出現（每個階段一列、都有名稱），
+    出現就代表檔案被改過或工具有 bug；即使採最嚴重那一列後狀態是 OK，report 也不能當作沒看到（見 stage_anomaly_notes）。"""
     raw = _read_limited(path, MAX_BYTES, "status.tsv").decode("utf-8", "replace")
-    rows = {}
+    rows, count, empty = {}, {}, 0
     try:
         for r in csv.DictReader(raw.splitlines(), delimiter="\t", quoting=csv.QUOTE_NONE):
             stage = r.get("stage")
             if stage is None:
                 continue
-            if stage == "":                 # 階段名稱是空的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
+            if not stage.strip():           # 階段名稱是空的（或只有空白）的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
                 stage = EMPTY_STAGE
+                empty += 1
+            else:
+                count[stage] = count.get(stage, 0) + 1
             new = (r.get("status") or "", r.get("detail") or "")       # 不 strip：" OK" 不是 OK（scan-status-check.py 也是完全相等才算）
             old = rows.get(stage)
             if old is None or _sev(new[0]) >= _sev(old[0]):
                 rows[stage] = new
     except csv.Error as e:
         raise DtError("status.tsv 格式不對（%s）" % type(e).__name__)
-    return rows
+    return rows, {"duplicates": {k: n for k, n in count.items() if n > 1}, "empty_rows": empty}
+
+
+def read_status_tsv(path):
+    return read_status_tsv_checked(path)[0]
+
+
+def stage_anomaly_notes(an):
+    """status.tsv 的重複列與空名稱列 → 說明文字（沒有就回空清單）。階段名稱是不可信文字，經 _cell。
+    判定：這兩種不改變各階段的狀態（仍取最嚴重的一列），但狀態是 OK 時降成 ATTENTION（attention_reasons）；其他狀態只加這則說明。
+    理由：sca-scan 每個階段只寫一列，重複列或沒有名稱的列代表檔案被改過或寫檔有 bug，有人看過之前不能顯示 OK。"""
+    out = []
+    dups = sorted((an or {}).get("duplicates", {}).items())
+    if dups:
+        out.append("status.tsv 有重複列：%s（同一階段多列時 report 只採最嚴重的一列；`scan-status-check.py` 是後值蓋前值，兩邊可能不一致）" % "、".join(
+            "階段 %s %d 列" % (_cell(k, 60), n) for k, n in dups[:20]) + ("…另 %d 個階段" % (len(dups) - 20) if len(dups) > 20 else ""))
+    if (an or {}).get("empty_rows"):
+        out.append("status.tsv 有 %d 列的階段名稱是空的或只有空白（當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))
+    return out
 
 
 def _worst(sts):
@@ -774,7 +818,7 @@ def sample_result(info, dt_dir, wait_rc):
     """回傳 dict：dt_components, dt_findings, upload, grype, grype_matches, status, notes。"""
     s = info["summary"]
     r = {"upload": "NOT_RUN", "dt_components": "-", "dt_findings": "-", "grype": "NOT_RUN", "grype_matches": "-",
-         "notes": [], "verify_fail": [], "verify_gap": [], "stage_attention": [], "missing_stages": [], "accepted": False, "unverified_declaration": False}
+         "notes": [], "verify_fail": [], "verify_gap": [], "stage_attention": [], "status_anomalies": [], "missing_stages": [], "accepted": False, "unverified_declaration": False}
     exp_dt = info.get("expected_dt")
     rejected = False
     sd = os.path.join(dt_dir, info["project_name"]) if dt_dir else None
@@ -785,7 +829,8 @@ def sample_result(info, dt_dir, wait_rc):
         st = os.path.join(sd, "scan", "status.tsv")
         if os.path.lexists(st):        # 存在但不是一般檔案（資料夾、斷掉的符號連結…）也當作讀不到，不當成「沒有」
             try:
-                rows = read_status_tsv(st)
+                rows, anomalies = read_status_tsv_checked(st)
+                r["status_anomalies"] = stage_anomaly_notes(anomalies)
             except DtError as e:
                 r["upload"] = "FAIL"; r["notes"].append(_cell(e))
         sj = os.path.join(sd, "summary.json")
@@ -889,10 +934,12 @@ def sample_result(info, dt_dir, wait_rc):
         why = attention_reasons(s, r)
         st = "ATTENTION" if why else "OK"
         r["notes"].extend(why)
+        r["status_anomalies"] = []          # 已經在 attention_reasons 裡
     if wait_rc == 3:
         r["notes"].append("dt-ephemeral wait 結束碼 3（資料不完整）：0 筆漏洞不能當成沒有漏洞")
     elif wait_rc is not None and wait_rc != 0:
         r["notes"].append("dt-ephemeral wait 結束碼 %d（只認 0＝完成、3＝資料不完整）：看不懂的結束碼不能當成完成" % wait_rc)
+    r["notes"].extend(r["status_anomalies"])      # 沒走到 attention_reasons 的狀態（FAIL、GAP…）：重複列與空名稱列也不能靜默
     r["status"] = st
     if st in ("NOT_RUN", "GAP"):
         _unverified_declaration(r, exp_dt)
@@ -913,6 +960,12 @@ def _normalize_note(info):
     return out
 
 
+def _left_count(s):
+    """沒改名的供應商 dumpling: property 個數（不超過全部個數；讀不到當 0）。"""
+    n, left = s.get("supplier_dumpling_props"), s.get("supplier_dumpling_props_left")
+    return left if _is_count(left) and _is_count(n) and left <= n else 0
+
+
 def _dup_count(s):
     n = s.get("duplicate_keys", 0) if isinstance(s, dict) else 0
     return n if _is_count(n) else 0
@@ -926,7 +979,7 @@ def attention_reasons(s, r):
         供應商 SBOM（kind: sbom）自帶的 dumpling: 標記不採信，一律當作沒標。
       - dumpling:version-status 只認完全相同的 OK／GAP；沒有 version 又沒有 GAP 標記的元件也要列出。
       - purl 是 pkg:generic：DT 與 OSV 沒有 generic 的漏洞資料，等於沒有 purl；格式不合的 purl 視同沒有。
-      - sca-scan 其他階段（DT 資料源、sbomgate、EUVD…）不是 OK；SBOM 有重複鍵。"""
+      - sca-scan 其他階段（DT 資料源、sbomgate、EUVD…）不是 OK；SBOM 有重複鍵；status.tsv 有重複列或空名稱列。"""
     why = []
     if s.get("version_gap"):
         why.append("版本 GAP %d 個" % s["version_gap"])
@@ -958,6 +1011,9 @@ def attention_reasons(s, r):
         lst = r["stage_attention"]
         why.append("sca-scan 其他階段不是 OK（%d 個，OK 之前都要有人看過）：%s%s" % (
             len(lst), "、".join(lst[:20]), "…另 %d 個" % (len(lst) - 20) if len(lst) > 20 else ""))
+    why.extend(r.get("status_anomalies") or [])
+    if _is_count(s.get("supplier_dumpling_props")) and s["supplier_dumpling_props"] > 0:
+        why.append(supplier_props_text(s["supplier_dumpling_props"], _left_count(s)))
     if _dup_count(s):
         why.append(dup_text(_dup_count(s)))
     return why
@@ -1013,6 +1069,9 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         s = info["summary"]
         if _dup_count(s) and dup_text(_dup_count(s)) not in res["notes"]:
             res["notes"].append(dup_text(_dup_count(s)))      # 狀態不是 ATTENTION／OK 時 attention_reasons 沒跑到，這裡補上，重複鍵不能靜默
+        sp = s.get("supplier_dumpling_props")
+        if _is_count(sp) and sp > 0 and supplier_props_text(sp, _left_count(s)) not in res["notes"]:
+            res["notes"].append(supplier_props_text(sp, _left_count(s)))      # 同上：不是 ATTENTION／OK 的狀態也不能靜默
         rows.append((info, res))
         va = "、".join("%s=%d" % (_cell(k, 40), v) for k, v in sorted(s["vuln_assessment"].items()))
         detail = "DT 專案 %s@%s；元件 %d（purl %d、cpe %d）；上傳 %s；DT 元件 %s；漏洞 %s；Grype %s（%s）；NOT_ASSESSED 與版本 GAP：%s／%d" % (
@@ -1041,12 +1100,15 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
     md += ["", "## 怎麼讀", "",
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
-           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。",
+           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。"
+           "NVIDIA vBIOS 元件另有 `advisory-match`：用 vBIOS 版本與 option ROM 的 PCI 裝置 ID 查 repo 內的 NVIDIA 公告對照表（尚未經負責人確認時一律 NOT_ASSESSED）（affected／fixed／NOT_ASSESSED）；"
+           "NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是合作夥伴通知），所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；版本是佔位字串或裝置 ID 讀不到也是 NOT_ASSESSED。"
+           "affected、fixed 只是對照表裡已審核的列的比對結果，fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
            "- 狀態 OK 只表示：sca-scan 的 11 個必要階段（`REQUIRED_STAGES`）每一列都在，上傳與驗證都完成（dt-verify 的「專案存在」「弱點分析完成」「元件數」「漏洞總數」都在而且是 OK），每個元件都有 purl（不是 pkg:generic）、"
-           "沒有版本缺漏、`dumpling:vuln-assessment` 都完全等於 NONE，Grype 與 DT 的比對數讀得到而且是 0，sca-scan 其他階段都是 OK（授權、核心設定那幾個預期的 NOT_RUN 除外），輸入 SBOM 沒有重複鍵。"
+           "沒有版本缺漏、`dumpling:vuln-assessment` 都完全等於 NONE，Grype 與 DT 的比對數讀得到而且是 0，sca-scan 其他階段都是 OK（授權、核心設定那幾個預期的 NOT_RUN 除外），status.tsv 沒有重複列或空名稱列，輸入 SBOM 沒有重複鍵。"
            "ATTENTION 表示完成但仍有需要人看的原因（逐項列在說明裡）；GAP 表示資料不完整；FAIL 表示有階段或檢查失敗。這份報告沒有整體通過或安全的結論。",
            "", "## 每個樣本的摘要", ""]
     for info, res in rows:

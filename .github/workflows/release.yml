@@ -104,7 +104,7 @@ jobs:
           VERSION: ${{ needs.info.outputs.version }}
           TAG: ${{ needs.info.outputs.tag }}
         run: |
-          python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$TAG" \
+          python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$TAG" --notes "$RUNNER_TEMP/result/notes.md" \
             --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps "$RUNNER_TEMP/result/pipeline-steps.tsv" \
             --scan-summary "$RUNNER_TEMP/result/scan-summary-$PROJECT-$VERSION.json" --out "$RUNNER_TEMP/result/release-meta.json"
           printf 'release-meta.json\trelease-meta.json\n' >> "$RUNNER_TEMP/result/manifest.tsv"

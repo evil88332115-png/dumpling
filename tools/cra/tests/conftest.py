@@ -32,3 +32,24 @@ def pytest_make_collect_report(collector):   # 模組層級 skip / importorskip
     rep = out.get_result()
     if _STRICT and rep.skipped:
         out.force_result(_fail(rep, "collect"))
+
+
+# NVIDIA vBIOS 的公告比對（x86_firmware.vbios_advisory_section）預設用牆上時鐘判斷對照表過期。測試不能隨時間變動：
+# 沒有明確傳 now（inventory 的 vbios_now）的測試一律用這個固定時間（對照表的 mirror.fetched_utc 是 2026-11-13，這個時間之後 90 天內不算過期）。
+# 只影響測試；正式執行（沒有這個 fixture）仍用現在時間。
+import datetime  # noqa: E402
+
+FIXED_VBIOS_NOW = datetime.datetime(2026, 11, 14, tzinfo=datetime.timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_vbios_clock(monkeypatch):
+    import sys
+    xf = sys.modules.get("x86_firmware")
+    if xf is None or not hasattr(xf, "vbios_advisory_section"):
+        yield
+        return
+    orig = xf.vbios_advisory_section
+    monkeypatch.setattr(xf, "vbios_advisory_section",
+                        lambda inv, advisory=None, now=None: orig(inv, advisory, now if now is not None else FIXED_VBIOS_NOW))
+    yield

@@ -1,6 +1,8 @@
 """firmware_mdsafe（不可信文字進 markdown 前的共用清理）的單元測試。"""
+import html
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -12,11 +14,27 @@ ms = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ms)
 
 
+def _watch_match():
+    """載入 C3 的 pipeline/watch/match.py（只在測試用；它會改 sys.path，載入後還原）。"""
+    path = os.path.join(ROOT, "pipeline", "watch", "match.py")
+    saved = list(sys.path)
+    try:
+        sp = importlib.util.spec_from_file_location("watch_match_for_mdsafe_test", path)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+    finally:
+        sys.path[:] = saved
+
+
 class MdSafeTest(unittest.TestCase):
     def test_every_special_char_escaped(self):
         for ch in ms.SPECIAL:
             with self.subTest(ch=ch):
                 self.assertEqual(ms.md_safe("a%sb" % ch), "a\\%sb" % ch)
+        self.assertNotIn("&", ms.SPECIAL)           # & 不加反斜線，改成 &amp;（見下面的實體測試）
 
     def test_link_image_html_neutralized(self):
         out = ms.md_safe("[click](https://evil.example/x) ![i](http://e/x.png) <img src=x onerror=alert(1)> <a href=//e>x</a>", 500)
@@ -32,6 +50,78 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("www.evil.example"), "www\\.evil.example")
         self.assertEqual(ms.md_safe("foowww.bar"), "foowww.bar")          # 單字中間的 www 不是自動連結
         self.assertEqual(ms.md_safe("1.2.3 pkg:generic/a@1.0"), "1.2.3 pkg:generic/a@1.0")   # 一般版本與 purl 不被改動
+
+    def test_scheme_colon_escaped_whatever_precedes_it(self):
+        # 前面緊接 [A-Za-z0-9+.-] 時，渲染器仍會把 scheme:// 連結起來，所以不看前面的字元
+        for raw in ("1.https://evil.example/x", "x-https://evil.example/x", "a+https://evil.example/x", "name.http://evil.example",
+                    "-ftp://evil.example", "9https://e/x", "https://e", "file:///etc/x", "a://b", "x:://y"):
+            with self.subTest(raw=raw):
+                out = ms.md_safe(raw, 200)
+                self.assertNotRegex(out, r"(?<!\\):(?=//)")                    # 每個 :// 的冒號前都有反斜線
+                self.assertEqual(out.replace("\\:", ":"), raw)
+        self.assertEqual(ms.md_safe("1.https://evil.example/x", 200), "1.https\\://evil.example/x")
+        self.assertEqual(ms.md_safe("a:b c:d"), "a:b c:d")                       # 沒有 // 的冒號不動
+        self.assertEqual(ms.md_safe("pkg:generic/a@1.0"), "pkg:generic/a@1.0")
+        try:
+            from markdown_it import MarkdownIt
+        except ImportError:
+            return
+        try:
+            md = MarkdownIt("gfm-like", {"linkify": True})            # 需要 linkify-it-py（runner 的 apt 套件沒有）
+            md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        except Exception:
+            return
+        for raw in ("1.https://evil.example/x", "-ftp://evil.example", "x-https://evil.example/x"):
+            self.assertNotIn("<a ", md.render(ms.md_safe(raw, 200)), raw)
+
+    def test_html_entities_do_not_decode(self):
+        # &lt; &#64; &#x40; &commat; 渲染時會解碼成 < @ @ @，繞過後面的跳脫：& 一律換成 &amp;，渲染結果是字面的實體文字
+        for raw in ("&lt;", "&#64;", "&#x40;", "&#X40;", "&commat;", "&amp;", "&#91;", "&lbrack;", "&#0;", "&", "&&", "A&B", "R&D;", "&lt"):
+            with self.subTest(raw=raw):
+                out = ms.md_safe(raw, 100)
+                self.assertEqual(out, raw.replace("&", "&amp;").replace("#", "\\#"))
+                self.assertEqual(re.sub(r"\\(.)", r"\1", html.unescape(out)), raw)     # 解碼實體再去反斜線，得回原文（不是 <、@ 本身）
+                self.assertNotRegex(out, r"&(?!amp;)")                    # 沒有未編碼的 &
+        out = ms.md_safe("&#64;user &#x5b;x&#x5d;&#40;http://e&#41; &lt;img src=x&gt;", 200)
+        self.assertEqual(html.unescape(out).count("@"), 0)                # 解碼一次後仍沒有 @、<、[ 這些字元
+        self.assertNotRegex(html.unescape(out), r"[<>]|(?<!\\)\[")
+
+    def test_at_sign_defanged_unless_inside_word(self):
+        z = ms.ZWSP
+        self.assertEqual(ms.md_safe("@user"), "@" + z + "user")
+        self.assertEqual(ms.md_safe("x @org/team (@u2)"), "x @" + z + "org/team \\(@" + z + "u2\\)")
+        self.assertEqual(ms.md_safe("＠user"), "＠" + z + "user")            # 全形
+        self.assertEqual(ms.md_safe("@@u"), "@" + z + "@" + z + "u")
+        self.assertEqual(ms.md_safe("\\@u"), "\\\\@" + z + "u")                # 反斜線不是英數字
+        self.assertEqual(ms.md_safe("_@u"), "\\_@" + z + "u")                  # 底線也處理（比 \w 嚴）
+        self.assertEqual(ms.md_safe("é@u"), "é@" + z + "u")
+        self.assertEqual(ms.md_safe("&@u"), "&amp;@" + z + "u")
+        self.assertEqual(ms.md_safe("@types/node"), "@" + z + "types/node")
+        self.assertEqual(ms.md_safe("npm:@scope/pkg"), "npm:@" + z + "scope/pkg")
+        # 前面是 ASCII 英數字：purl、版本、email 形式，不是提及，原樣保留
+        for keep in ("pkg:generic/a@1.0", "name@host", "x9@y", "Z@q"):
+            self.assertEqual(ms.md_safe(keep), keep)
+        # 輸入裡的零寬空白會被濾掉，不能拿來假裝已經處理過
+        self.assertNotIn("@user", ms.md_safe("@" + z + "user"))                       # 零寬空白被濾成空白：「@ user」不是提及
+        self.assertEqual(ms.md_safe(" " + z + "@user"), "@" + z + "user")
+        # 實體加 @ 的組合：&#64; 本身不再解碼，字面的 @ 另外處理
+        self.assertEqual(ms.md_safe("&#64;user"), "&amp;\\#64;user")
+
+    def test_agrees_with_watch_unsafe_markdown(self):
+        """C3（pipeline/watch/match.py）的 unsafe_markdown 是同一類風險的最後一道檢查；這裡的輸出不能被它挑出問題。
+        match.py 的 md_text 與 md_safe 的差別（`#`、`@`、`$`）見 firmware_mdsafe.py 檔頭，這裡只核對共同的風險。"""
+        w = _watch_match()
+        if w is None:
+            self.skipTest("載入不到 pipeline/watch/match.py")
+        samples = ["@user", "x @org/team", "＠u", "&lt;b&gt;", "&#64;user", "&#x40;user", "&commat;user", "&amp;", "[a](http://e/x)", "![i](http://e/x.png)",
+                   "\\[a](b)", "a_@u", "&", "R&D", "<a href=x>@u</a>", "https://e/x @u [x](y)", "pkg:generic/a@1.0", "&#64;&#64;"]
+        for t in samples:
+            with self.subTest(t=t):
+                out = ms.md_safe(t, 300)
+                self.assertEqual(w.unsafe_markdown(out), [], out)
+        # 對照：md_text（C3 的純文字跳脫）對 & 的結果與這裡一樣
+        for t in ("&lt;", "A&B", "&amp;"):
+            self.assertEqual(ms.md_safe(t), w.md_text(t).replace("\\", ""), t)
 
     def test_c_category_and_line_separators_removed(self):
         raw = "a\x00b\x07c\x1bd\x7fe\x85f‮g​h i j﻿kl\ud800m\tn\no\rp"
@@ -63,6 +153,22 @@ class MdSafeTest(unittest.TestCase):
                                capture_output=True, env=env)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(r.stdout.decode("utf-8"), ms.md_safe("中文 [a](b) |x\nz", 30))
+
+    def test_cli_used_by_summary_scripts_defangs_mentions_and_entities(self):
+        # firmware-ci.sh、firmware-dt.sh 的 cell() 就是這個呼叫（--limit N -- 文字）
+        for script, limit in (("firmware-ci.sh", "600"), ("firmware-dt.sh", "300")):
+            with open(os.path.join(ROOT, "pipeline", script), encoding="utf-8") as fh:
+                self.assertIn('firmware_mdsafe.py" --limit %s -- "$1"' % limit, fh.read(), script)
+        raw = "ok @evil &#64;evil &lt;img&gt; a@b.c pkg:generic/x@1.0 | x"
+        r = subprocess.run([sys.executable, "-I", PATH, "--limit", "600", "--", raw], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout.decode("utf-8")
+        self.assertEqual(out, ms.md_safe(raw, 600))
+        self.assertIn("@\u200bevil", out)
+        self.assertNotIn("&#64;", out)
+        self.assertNotIn("&lt;", out)
+        self.assertIn("a@b.c pkg:generic/x@1.0", out)
+        self.assertIn("\\|", out)
 
     def test_cli_usage_error_is_64(self):
         r = subprocess.run([sys.executable, "-I", PATH], capture_output=True)

@@ -97,5 +97,87 @@ class Generic(unittest.TestCase):
             self.assertIn(need, ps.__doc__)
 
 
+class ProductVersionVsTag(Generic):
+    """D-055 (3)：精靈覆寫後的 product.version 要和 Release tag 的版本一致，不一致 → collect 在輸出寫完之後丟 ProductVersionMismatch（各平台收集腳本都當 FAIL）。"""
+
+    def with_config(self, name, version, supplier_version=False, **prod):
+        d = self.run_dir(name, [])
+        if version is not False:
+            prod["version"] = version
+        w(os.path.join(d, "cra-project", "CRA", "Config", "config.json"), json.dumps({"product": dict({"name": "X"}, **prod)}))
+        if supplier_version is not False:
+            w(os.path.join(d, "supplier", "cra-project", "CRA", "Config", "config.json"), json.dumps({"product": {"name": "X", "version": supplier_version}}))
+        return d
+
+    def test_matching_version_and_suffix_is_ok(self):
+        for v in ("v1", "v1 (rootfs)", "v1 (rootfs)(gui)", " v1 "):
+            scan = ps.collect(self.args(run=["=" + self.with_config("w", v)]))
+            self.assertEqual(scan["product_version_check"]["status"], "OK", v)
+            self.assertEqual(scan["product_version_check"]["tag_version"], "v1")
+
+    def test_mismatch_fails_after_everything_is_written(self):
+        d = self.with_config("w0", "v0.9", supplier_version="v1")
+        with self.assertRaises(ps.ProductVersionMismatch) as cm:
+            ps.collect(self.args(run=["=" + d]))
+        self.assertIsInstance(cm.exception, ValueError)                  # 各平台的收集腳本都 catch (OSError, ValueError) → FAIL、結束碼 1
+        self.assertIn("'v0.9'", str(cm.exception))
+        self.assertIn("'v1'", str(cm.exception))
+        sc = json.load(open(self.p("scan.json")))                          # 附件與 scan.json 都寫了，可以查
+        self.assertEqual(sc["product_version_check"]["status"], "FAIL")
+        self.assertEqual([(c["role"], c["status"]) for c in sc["product_version_check"]["checked"]], [("manufacturer", "MISMATCH"), ("supplier", "OK")])
+        self.assertTrue(os.path.isfile(self.p("rel", "notes.md")) and os.path.isfile(self.p("rel", "manifest.tsv")))
+
+    def test_supplier_copy_and_every_layer_run_are_checked(self):
+        ok = self.with_config("w0", "v1", supplier_version="v1")
+        stale = self.with_config("w1", "v1", supplier_version="V0.5.0.1_a (rootfs)")
+        with self.assertRaises(ps.ProductVersionMismatch) as cm:
+            ps.collect(self.args(run=["=" + ok, "-bsp=" + stale]))
+        self.assertIn("bsp 報告（supplier）", str(cm.exception))
+        # ours：同一個後綴出現兩次，報告取後面那次——核對的也是後面那次
+        ps.collect(self.args(run=["=" + self.with_config("a", "v0"), "=" + self.with_config("b", "v1")]))
+
+    def test_not_set_and_not_found_do_not_block(self):
+        scan = ps.collect(self.args(run=["=" + self.with_config("w0", False)]))             # 設定包沒有 product.version：精靈沒有東西可覆寫
+        self.assertEqual(scan["product_version_check"]["status"], "NOT_SET")
+        scan = ps.collect(self.args(run=["=" + self.run_dir("w1", [])]))                    # 沒有設定檔（沒有跑到報告）
+        self.assertEqual((scan["product_version_check"]["status"], scan["product_version_check"]["checked"]), ("NOT_RUN", []))
+        d = self.with_config("w2", "")
+        self.assertEqual(ps.collect(self.args(run=["=" + d]))["product_version_check"]["status"], "NOT_SET")
+
+    def test_unreadable_config_or_non_string_version_fails(self):
+        for content in ("{not json", json.dumps([1]), json.dumps({"product": "x"}), json.dumps({"product": {"version": 1.5}})):
+            d = self.run_dir("w", [])
+            w(os.path.join(d, "cra-project", "CRA", "Config", "config.json"), content)
+            with self.assertRaises(ps.ProductVersionMismatch, msg=content):
+                ps.collect(self.args(run=["=" + d]))
+
+    def test_jetson_scan_cli_turns_the_mismatch_into_exit_1(self):
+        """scan.sh 看的是 jetson_scan.py collect 的結束碼（C4 的收集腳本一樣 catch ValueError）：版本不一致 → 1，不是 traceback。"""
+        from unittest import mock
+        import io
+        import jetson_scan as js
+        argv = ["collect", "--out", self.p("rel"), "--project", "p", "--version", "v1", "--layers", self.p("l"), "--build-json", self.p("b"),
+                "--assemble-json", self.p("a"), "--scan-json", self.p("s"), "--run", "=" + self.p("w")]
+        with mock.patch.object(js, "collect", side_effect=ps.ProductVersionMismatch("版本與 Release tag 不一致")), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(js.main(argv), 1)
+        self.assertIn("jetson_scan: FAIL（版本與 Release tag 不一致）", out.getvalue())
+
+    def test_version_base_matches_what_the_wizard_keeps(self):
+        """精靈 override_pack_version 保留非版本號的括號後綴；核對時要把同樣的後綴去掉才對得上 tag。"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cra_scan_wizard", os.path.join(ROOT, "tools", "wizard", "cra-scan.py"))
+        wiz = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wiz)
+        for n, old in enumerate(("V1.0.0.1_a", "V1.0.0.1_a (rootfs)", "V1 (rootfs)(gui)  ", "1.0 (2.0.1)", "TO BE COMPLETED", "x (a (b))")):
+            for tag in ("v39.2.1-demo1", "V2.0", "1.0.1"):
+                f = self.p("c%d.json" % n)
+                w(f, json.dumps({"product": {"name": "X", "version": old}}))
+                wiz.override_pack_version(f, tag)
+                self.assertEqual(ps.product_version_status(f, tag)[0], "OK", (old, tag, json.load(open(f))["product"]["version"]))
+        self.assertEqual(ps.version_base("1.0 (2.0.1)"), "1.0 (2.0.1)")
+        self.assertEqual(ps.version_base("v1 (rootfs)(gui)"), "v1")
+        self.assertEqual(ps.product_version_status(self.p("nope.json"), "v1"), ("NOT_FOUND", None))
+
+
 if __name__ == "__main__":
     unittest.main()
