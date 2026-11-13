@@ -56,22 +56,23 @@ mirror_row() {  # <來源名> <成功與否> ：依 <out>/<名>.result 記 OK／
   local n=$1 ok=$2 last
   if [ "$ok" = 0 ] && [ -f "$out/$n.result" ]; then
     last=$(head -n 1 "$out/$n.result")
-    case $last in
-      ATTENTION*) row "$n" ATTENTION "$last"; echo "::warning::鏡像 $n 用了舊資料頂替：$(printf '%s' "$last" | cut -c1-200)" ;;
-      *) row "$n" OK "$last" ;;
-    esac
+    case $last in ATTENTION*) row "$n" ATTENTION "$last" ;; *) row "$n" OK "$last" ;; esac      # ::warning:: 由 mirror 印
   else
     rm -rf "${out:?}/$n" "$out/$n.result"
-    row "$n" GAP "tools/mirror/$n.sh 失敗（試了 ${MIRRORS_TRIES:-3} 次）：$(tail -n 1 "$out/$n.log" 2>/dev/null)"
+    row "$n" GAP "tools/mirror/$n.sh 失敗：$(tail -n 1 "$out/$n.log" 2>/dev/null)"
   fi
 }
 export MIRRORS_DIR="$out"
 unset MIRRORS_STEPS
+# mirror 的進度（第幾次失敗、OK／ATTENTION）直接印在 log；鏡像腳本自己的輸出在 <out>/<名>.log
 if [ "$euvd" = 1 ]; then
-  mirror euvd.sh euvd > "$out/euvd.mirror.log" 2>&1; mirror_row euvd $?
+  mirror euvd.sh euvd; mirror_row euvd $?
 else row euvd NOT_RUN "--no-euvd"; fi
+# 核心 CVE：kernel-cve.sh 自己會重試 clone（KERNEL_CVE_GIT_TRIES，預設 3 次、每次最多 KERNEL_CVE_GIT_TIMEOUT=900 秒），
+# mirror 再整支重試 3 次會疊成兩個多小時、超過 compute job 的上限 → 每日監控預設只讓 mirror 試 1 次（WATCH_KCVE_MIRROR_TRIES 可改）。
+# 上游連不上時有 $KCVE_CACHE_DIR 就用 48 小時內的上一份頂替（ATTENTION），不用一直重試。
 if [ "$kcve" = 1 ]; then
-  mirror_kernel_cve kernel-cve > "$out/kernel-cve.mirror.log" 2>&1; mirror_row kernel-cve $?
+  MIRRORS_TRIES=${WATCH_KCVE_MIRROR_TRIES:-1} mirror_kernel_cve kernel-cve; mirror_row kernel-cve $?
 else row kernel-cve NOT_RUN "--no-kernel-cve"; fi
 
 # Grype DB

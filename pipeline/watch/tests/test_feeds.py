@@ -43,13 +43,15 @@ class Feeds(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.w, ignore_errors=True)
 
-    def run_feeds(self, kcve="ok", cache=None, extra=()):
+    def run_feeds(self, kcve="ok", cache=None, extra=(), env_extra=None):
         out = os.path.join(self.w, "out")
         env = dict(os.environ, MIRRORS_SCRIPT_DIR=self.stubs, MIRRORS_TRIES="1", MIRRORS_RETRY_DELAY="0", STUB_KCVE=kcve, STUB_LOG=self.log,
                    CISA_KEV_URL="https://127.0.0.1:9/kev.json", PATH=self.bin + os.pathsep + os.environ.get("PATH", ""))
         env.pop("KCVE_CACHE_DIR", None)
         if cache:
             env["KCVE_CACHE_DIR"] = cache
+        env.pop("WATCH_KCVE_MIRROR_TRIES", None)
+        env.update(env_extra or {})
         r = subprocess.run(["bash", FEEDS, out, *extra], env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         rows = {}
@@ -92,6 +94,17 @@ class Feeds(unittest.TestCase):
         os.makedirs(cache)
         self.run_feeds(cache=cache)
         self.assertIn("FB= RE=", open(self.log).read())
+
+    def test_kernel_cve_mirror_tried_once_by_default(self):
+        # kernel-cve.sh 自己重試 clone：mirror 不再整支重試 3 次（會超過 compute job 的上限）
+        _, rows, stdout = self.run_feeds(kcve="fail", env_extra={"MIRRORS_TRIES": "3"})
+        self.assertEqual(rows["kernel-cve"][0], "GAP")
+        self.assertEqual(open(self.log).read().count("FB="), 1)
+        self.assertIn("鏡像 kernel-cve 第 1 次失敗", stdout)       # mirror 的進度印在 log（不再導到檔案）
+
+    def test_kernel_cve_mirror_tries_override(self):
+        self.run_feeds(kcve="fail", env_extra={"WATCH_KCVE_MIRROR_TRIES": "2"})
+        self.assertEqual(open(self.log).read().count("FB="), 2)
 
     def test_drill_flags(self):
         _, rows, _ = self.run_feeds(extra=("--no-kernel-cve", "--no-euvd"))

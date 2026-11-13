@@ -34,7 +34,8 @@ permissions:
 jobs:
   compute:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # 核心 CVE clone 最壞約 47 分鐘（3 次 × 900 秒＋等待）、Grype DB 最多 15 分鐘、Grype 比對合計上限 25 分鐘，加上其他步驟
+    timeout-minutes: 150
     permissions:
       contents: read
       issues: read

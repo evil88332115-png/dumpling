@@ -45,7 +45,7 @@ watch.yml（每天）
 ### 3.0 `pipeline/watch/feeds.sh`（資料源）
 
 - CISA KEV：官方 feed，檢查是陣列、至少 1000 筆。Grype DB：`grype db update`。
-- EUVD、核心 CVE：**經過 `pipeline/lib/mirrors.sh`**（跟 Release 掃描同一份規則，不另寫）：最多試 3 次；失敗刪掉不完整的資料夾 → feeds.tsv 記 GAP，match.py 看不到資料夾 → EUVD GAP／核心 CNA NOT_RUN。
+- EUVD、核心 CVE：**經過 `pipeline/lib/mirrors.sh`**（跟 Release 掃描同一份規則，不另寫）：EUVD 最多試 3 次；核心 CVE 只讓 mirror 試 1 次（`WATCH_KCVE_MIRROR_TRIES` 可改），因為 kernel-cve.sh 自己會重試 clone 3 次、每次最多 900 秒，兩層疊起來會超過 compute job 的上限（150 分鐘）；失敗刪掉不完整的資料夾 → feeds.tsv 記 GAP，match.py 看不到資料夾 → EUVD GAP／核心 CNA NOT_RUN。
 - 核心 CVE 用 `mirror_kernel_cve`：有 `KCVE_CACHE_DIR`（actions/cache 還原的上一份）時，上游沒變就沿用；git.kernel.org 連不上就用 48 小時內的上一份頂替，鏡像腳本最後一行是 ATTENTION、SOURCE 寫 `fallback=yes`。
 - **用了舊資料頂替時**：feeds.tsv 記 ATTENTION、`::warning::`；match.py 讀 `<名>.result`／SOURCE，把「核心 CVE 鏡像（Linux 核心 CNA）用了舊資料頂替：…：這段時間新增的核心 CVE 不在清單裡」列進報告的「需注意」（整輪 ATTENTION），並附在這次每個要開的 Issue 與留言最後。訊息裡的絕對路徑換成 `<路徑>`（runner 的暫存路徑不進公開 Issue）。不擋第一次基準（資料最多 48 小時舊；超過就 FAIL → 核心 CNA NOT_RUN，照降級規則處理）。
 - 演練不下載 EUVD 與核心 CVE（`--no-euvd --no-kernel-cve`），也不碰 cache。
