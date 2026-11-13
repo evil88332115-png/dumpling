@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:18 +0800（C0）
+最後更新：2026-11-14 00:18 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -270,7 +270,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M5 PR #47**：C0 的獨立驗證（ac2ee95）不通過 1 項（對照表漏 dt-smoke、watch 演練、workflow_dispatch 輸入）＋3 項建議 → 已修在 7a15b39，CI 綠（43459391758），等 C0 看 diff 合併。**監控 PR #49 已開**（wp2/watch-m2 02681bc；演練 43450669290、real dry_run 43457313091、tests 43457318568 都綠；real 第一次卡在核心 CVE clone → mirror 只試 1 次、compute 150 分鐘）。T-14（scan.sh 改連既有 DT）C0 排給 C1、M7 之後
+- 目前在做：**M5 已合併（PR #47，main e5d6e5d）**，worktree 已移除；T-14〜T-22 由 C0 記進待辦。**監控 PR #49**（wp2/watch-m2 02681bc）C0 已派獨立驗證，驗證中不推。之後（D-040）：有正式 Release → 手動 baseline → 排程 dry_run 一天 → 回報會開哪些 Issue → C0 設 WATCH_REAL_ISSUES=on。M8 等 M7
 - 架構（已合併）：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；D-040（只開 KEV／廠商層級、超過 20 個併成彙總、示範專案＋demo、排程 real 預設 dry_run、不開 art14）
 - 分支／PR／commit：
   - PR #32 已合併（main 26a6377），worktree 已移除
