@@ -1,0 +1,122 @@
+{
+ "schema": 1,
+ "project": "rock-5b-demo",
+ "version": "v1.0.0-demo1",
+ "note": "C4 的標準答案（2026-11-13，dev run 43354620546、commit 2a50091）。不是直接存第一次的輸出：逐項核對過（見 PR 的核對紀錄），元件數對過官方 manifest。元件數、雜湊、狀態用 equals（固定輸入不會變）；漏洞數與 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "checks": {
+  "platform": {
+   "equals": "rockchip",
+   "reason": "平台由 project.yml 明確給定（不從映像格式推）"
+  },
+  "os_responsibility": {
+   "equals": "customer",
+   "reason": "示範專案：OS 層由客戶負責（照掃、分開列）"
+  },
+  "image.sha256": {
+   "equals": "76f434fa936e81d587a9697b9514f69c3ed0c4e132e047728bc06023b042224e",
+   "reason": "sources.yml 固定的官方映像；與 GitHub 附件 digest、官方 sha512sum 相同"
+  },
+  "image.disk_sha256": {
+   "equals": "d93a788919c5645dc9fbd1498b4264c2e83d67b6daec3d7151be1af217d4f690",
+   "reason": "解開後的磁碟映像（本機與 CI 各解一次都相同）"
+  },
+  "components.total": {
+   "equals": 126696,
+   "reason": "固定輸入（映像、Syft 1.55.0）下的元件數"
+  },
+  "components.bsp": {
+   "equals": 15211,
+   "reason": "bsp 套件名稱清單（D-027，依官方 manifest 整理）＋核心模組路徑＋原始磁區的 firmware 元件"
+  },
+  "components.os": {
+   "equals": 111454,
+   "reason": "其餘 Debian 套件與它們擁有的檔案（owners.json），加 dpkg 資料庫檔（var/lib/dpkg/*）"
+  },
+  "components.unknown": {
+   "equals": 31,
+   "reason": "pypi 30、maven 1：deb 帶進來的語言套件沒查擁有者（adapter-gaps.md 第 12 項），保守列我們的待辦"
+  },
+  "components.deb_bsp": {
+   "equals": 48,
+   "reason": "bsp 的 deb 套件數"
+  },
+  "components.deb_os": {
+   "equals": 1781,
+   "reason": "os 的 deb 套件數；48＋1781＝1829，與官方 manifest（rock-5b_bookworm_kde_r6.manifest）的套件數相同"
+  },
+  "raw_sectors.status": {
+   "equals": "OK",
+   "reason": "LBA 64 的 idbloader 與 LBA 16384 的 u-boot.itb 都與官方 u-boot-rk2410 deb 和 rootfs 的同名檔逐位元組一致；FIT 5 個映像的 sha256 與 FIT 記載的相符"
+  },
+  "kernel_versions.judged": {
+   "equals": [
+    "6.1.84-8-rk2410"
+   ],
+   "reason": "D-036：只有一顆核心，指定並判定它"
+  },
+  "kernel_versions.not_judged": {
+   "equals": [],
+   "reason": "映像沒有其他核心"
+  },
+  "kernel_upstream.status": {
+   "equals": "OK",
+   "reason": "D-038：上游版本 6.1.84 有兩個獨立來源互相印證，且有實際出貨的 config"
+  },
+  "kernel_upstream.upstream_verified": {
+   "equals": true,
+   "reason": "映像模組資料夾 6.1.84-8-rk2410 與 radxa/kernel@87ba2c6 的 Makefile 都是 6.1.84"
+  },
+  "kernel_upstream.sources.source_makefile.version": {
+   "equals": "6.1.84",
+   "reason": "sources.yml 固定的核心原始碼（commit 87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9）"
+  },
+  "kernel_upstream.shipped_config.sha256": {
+   "equals": "cedfaa402b3cd683e5f1243dd182b031b24c2bffae56bdcb9f53884d00c0f167",
+   "reason": "映像 /boot/config-6.1.84-8-rk2410（依 .config 排除的依據：shipped-config）"
+  },
+  "kernel_upstream.cna.cves": {
+   "min": 8000,
+   "max": 12000,
+   "reason": "依上游 6.1.84 的 CNA 版本範圍列出的候選（affected＋unknown）。2026-11-13 第一次記錄是 8943 個，vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11）；數字隨 vulns.git 更新，所以用範圍。清單是候選、全部進待人審（D-038）"
+  },
+  "runs..stages.C-kernel-cve-list": {
+   "equals": "OK",
+   "reason": "核心 CVE 清單由 KERNEL_CVES 明確給（D-038），不是 Grype／DT"
+  },
+  "runs..stages.C-kernel-config": {
+   "equals": "OK",
+   "reason": "依實際出貨的 .config 判定"
+  },
+  "runs..stages.C-kernel-module-map": {
+   "equals": "OK",
+   "reason": "核心 CVE 對應到模組"
+  },
+  "runs..stages.C-kernel-coverage": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：Grype 對廠商核心（原始碼套件 linux-rk2410）沒有比對，核心的 CVE 改由 CNA 清單提供"
+  },
+  "bootloader_coverage": {
+   "equals": "NOT_ASSESSED",
+   "reason": "Rockchip 沒有定義開機鏈分類；開機程式的身分由 raw-sectors 另外提供（adapter-gaps.md 第 3 項）"
+  },
+  "external_services": {
+   "equals": [],
+   "reason": "這個映像沒有清單裡的對外連線服務"
+  },
+  "vulnerabilities.bsp.cves_total": {
+   "min": 8500,
+   "max": 13000,
+   "reason": "大宗是核心 CNA 候選（約 8943）＋U-Boot 上游 CVE 候選 48（D-034）＋少數 Python 套件；隨資料庫變動"
+  },
+  "vulnerabilities.bsp.tiers.accepted": {
+   "min": 3000,
+   "max": 5000,
+   "reason": "依出貨 .config 判定沒編進核心而排除的核心 CVE（VEX not_affected／code_not_present）；2026-11-13 是 3627"
+  },
+  "vulnerabilities.os.cves_total": {
+   "min": 2000,
+   "max": 4500,
+   "reason": "Debian 12 bookworm 的 KDE 桌面映像套件；2026-11-13 是 2812；隨 Grype 資料庫變動。OS 報告不含核心的列（核心只屬於 bsp）"
+  }
+ }
+}
