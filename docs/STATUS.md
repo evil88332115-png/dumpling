@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:35 +0800（C0）
+最後更新：2026-11-13 22:38 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -57,8 +57,9 @@
 - **下一步（照順序）**：
   1. 第四輪獨立驗證（Sonnet、high，背景代理；驗 852b6d3、078710d、c08de27＋draft6，不給結論）完成後：報告 `$AGENT_TMP/dumpling-tmp-c1/verify4/report.md` 做公開資料掃描後貼成 PR #40 留言；有應修就在 wp1/m2 修、推、通知 C0
   2. 看 PR #40 的 CI（tests 43443865429 等）綠燈
-  3. C0 另派驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者
-  4. 兩份驗證都過、正式 tag 之前：刪 draft Release（orin-nano-demo/v39.2.0-demo1、v39.2.1-demo1）與 `wp1/m2-pr-draft`（PR 說明各段在 `$AGENT_TMP/dumpling-tmp-c1/pr/`，body.md 是組好的）
+  3. **wp1/m2 停在 1e18ed9，不推新 commit**（C0 用 --match-head-commit 1e18ed9 合併；真的要推先告訴 C0）。C0 的驗證代理在驗 1e18ed9＋兩份 draft
+  4. **D-052（使用者決定）**：兩份驗證都過、CI 綠、C0 合併後**馬上**由 C1 推 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`（從合併後的 main）。release.yml 在 tag push 時建正式 Release 之前會自動刪同名 draft（第 136–140 行），已告知 C0；本機 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 有兩份 draft 的完整附件，用來和正式 Release 核對（附件數、標準答案 24 項、各層列數）。release workflow 綠、核對過後才刪 `wp1/m2-pr-draft`
+  5. VEX 發行閘門暫不分層（D-052 (2)，接受 D-030 (3)）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
   - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
