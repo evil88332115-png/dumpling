@@ -7,7 +7,7 @@
 為什麼：廠商的核心套件（例如 Radxa 的 linux-image-6.1.84-8-rk2410，原始碼套件 linux-rk2410）不在發行版的弱點資料裡，
 Grype 對核心是 0 筆；kernel_cna_version.py 也不把 `6.1.84-8-rk2410` 當成上游版本（像發行版的 ABI 版本號，不猜）。
 所以由專案在 sources.yml 給上游版本（platform_params.kernel_upstream_version），這裡用兩個**獨立**的來源核對，兩者都相同才 OK：
-  1. 映像 rootfs 的 /usr/lib/modules/<release>/ 存在，而且 <release> 是 `<上游版本>-…`（或等於上游版本）。
+  1. 映像 rootfs 的 /usr/lib/modules/<release>/ 存在，而且 <release> 是 `<上游版本>-…`、`<上游版本>+…`、`<上游版本>~…`（或等於上游版本）。
   2. sources.yml 固定的核心原始碼裡最上層 Makefile 的 VERSION.PATCHLEVEL.SUBLEVEL。
 不一致 → GAP，訊息同時列出兩個值。另外記錄映像 /boot/config-<release> 是否存在（實際出貨的 .config；沒有就是沒有，
 不拿原始碼的 defconfig 代替 —— defconfig 不是出貨的設定）。依它排除的 CVE，依據類型是 shipped-config（不是建置紀錄）。
@@ -26,6 +26,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 OK, FAIL, GAP, USAGE = 0, 1, 3, 64
 VER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 REL_RE = re.compile(r"^[0-9][A-Za-z0-9.+_~-]{0,80}$")
+REL_UP_RE = re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)(?:[-+~].*)?$")
 MAKEFILE_MAX = 1 << 20
 CONFIG_MAX = 8 << 20
 TAR_SCAN_MAX = 200000          # 找 Makefile 時最多看幾個成員
@@ -110,7 +111,10 @@ def check(a):
         if a.release not in dirs:
             doc["gaps"].append("映像的 /usr/lib/modules 沒有 %s（有：%s）" % (a.release, "、".join(dirs) or "無"))
         else:
-            up = a.release if VER_RE.match(a.release) else (a.release.split("-", 1)[0] if "-" in a.release else None)
+            # 模組資料夾名稱開頭的 X.Y.Z，後面接 -（Radxa 的 6.1.84-8-rk2410）、+（Raspberry Pi 的 6.18.50+rpt-rpi-2712）或 ~ 才算；
+            # 只切 "-" 會把 6.18.50+rpt-rpi-2712 讀成 6.18.50+rpt
+            m = REL_UP_RE.match(a.release)
+            up = m.group(1) if m else None
             im["upstream_from_release"] = up
             im["match"] = up == a.upstream
         doc["shipped_config"] = cfg

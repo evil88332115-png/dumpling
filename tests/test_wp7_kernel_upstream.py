@@ -66,6 +66,20 @@ class KernelUpstreamTest(unittest.TestCase):
         self.assertEqual(doc["shipped_config"]["path"], "/boot/config-" + REL)
         self.assertEqual(doc["config_basis"], "shipped-config")
 
+    def test_plus_suffix_release_like_raspberry_pi(self):
+        # Raspberry Pi 的模組資料夾是 6.18.50+rpt-rpi-2712：上游版本取開頭的 X.Y.Z（只切 "-" 會讀成 6.18.50+rpt）
+        rel = "6.1.84+rpt-rpi-2712"
+        rc, line, doc = self.run_ku(self.image(modules=(rel,), config=False), self.source(), release=rel)
+        self.assertEqual(doc["sources"]["image_modules"]["upstream_from_release"], "6.1.84")
+        self.assertTrue(doc["upstream_verified"], line)
+        self.assertEqual(rc, 3)                 # 只因為這個合成映像沒有 /boot/config-<release>
+
+    def test_release_without_separator_is_not_read_as_upstream(self):
+        rc, _line, doc = self.run_ku(self.image(modules=("6.1.84rc1",), config=False), self.source(), release="6.1.84rc1")
+        self.assertIsNone(doc["sources"]["image_modules"]["upstream_from_release"])
+        self.assertFalse(doc["upstream_verified"])
+        self.assertEqual(rc, 3)
+
     def test_makefile_mismatch_is_gap_and_lists_both_values(self):
         rc, line, doc = self.run_ku(self.image(), self.source(sub="85"))
         self.assertEqual(rc, 3, line)
