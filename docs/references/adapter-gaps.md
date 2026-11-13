@@ -21,7 +21,7 @@ C4 寫轉接器時發現、但沒有擋住 M6 的缺口。擋住的已經直接�
 | 14 | 「完整」報告的範圍 | 完整（全部層）那份是補充元件（原始磁區的開機程式、NAS 應用原始碼）與分層之前的掃描：不含開機程式、沒有層欄位，但報告與 notes 把它跟分層報告並列 | notes 加一句說明；標準答案不釘完整報告的漏洞數 | 完整報告改用補充後的 SBOM 重跑，或在 Release 不列為一般報告 |
 | 15 | 對外連線服務清單 | 只有 Raspberry Pi 定義了清單（rpi-connect）；Rockchip、AI NAS 的映像有 ssh、avahi、samba 等服務，沒有評估 | scan.json 的 external_services 記 NOT_ASSESSED（不寫成「沒有」） | 依平台定義清單，或改用板子實測（board-test）的對外埠 |
 | 16 | D-038 的候選說明沒有進交付報告 | D-038 要求報告註明「廠商核心、依上游版本列出的候選，廠商可能已回移修補」；目前只在 notes.md 與 kernel-upstream JSON，交付的 CRA 報告（risk-assessment.md、kernel-vulnerabilities.md）只寫「CVE from an explicit list (KERNEL_CVES)」 | notes 與 scan.json 有寫 | cra_report 對 KERNEL_CVES 來源的核心列加「候選、廠商可能已回移修補」說明（C1，M7） |
-| 17 | Radxa 發行、可能和硬體存取有關的套件 | dthelper（device tree 輔助工具）、libmraa2／libmraa-dev（板子 I/O 函式庫）目前歸 os | 未確認，照現行清單 | 確認用途後決定是否加進 rockchip 的 bsp 清單（D-027 的原則：跟板子硬體綁在一起才算 bsp）；改了要重訂標準答案 |
+| 17 | Radxa 發行、和硬體存取有關的套件 | dthelper（device tree overlay 工具）、libmraa2／libmraa-dev（GPIO／I2C／SPI 函式庫）原本歸 os | **已處理**：C0 決定歸 bsp（D-027 的原則），加進 rockchip 的 bsp 清單、重訂標準答案 | — |
 
 ## 已在 M2 處理（C4 回報、C1 實作）
 

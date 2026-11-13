@@ -785,7 +785,7 @@ class PlatformConfigTest(unittest.TestCase):
         for name, want in (("linux-image-6.1.84-8-rk2410", "bsp"), ("u-boot-rk2410", "bsp"), ("u-boot-menu", "os"),
                            ("radxa-firmware", "bsp"), ("radxa-sddm-theme", "os"), ("rtkit", "os"), ("task-kde-desktop", "os"),
                            ("librockchip-mpp1", "bsp"), ("linux-base", "os"), ("rtl8852bu-dkms", "bsp"), ("rtw89-dkms", "bsp"),
-                           ("firmware-realtek", "os")):
+                           ("firmware-realtek", "os"), ("dthelper", "bsp"), ("libmraa2", "bsp"), ("libmraa-dev", "bsp")):
             self.assertEqual(self.pc.classify_package(name, rk), want, name)
         for plat in ("raspberrypi", "rockchip", "ai-nas"):        # dpkg 自己的資料庫檔歸 os（不屬於任何套件）
             self.assertEqual(self.pc.classify_path("var/lib/dpkg/info/bash.list", self.pc.load_platform_config(plat)), "os", plat)

@@ -50,6 +50,10 @@ layers:
       - "rtk-btusb-dkms"
       - "rtl8852bu-dkms"
       - "rtw89-dkms"
+      # 板子廠商維護的硬體存取工具與函式庫（C0 決定，D-027 的原則：板子專屬的套件算 bsp）
+      - "dthelper"             # Radxa 的 device tree overlay 工具
+      - "libmraa2"             # Radxa 維護的 GPIO／I2C／SPI 硬體存取函式庫
+      - "libmraa-dev"
     paths:
       - "usr/lib/modules/*"
       - "lib/modules/*"
