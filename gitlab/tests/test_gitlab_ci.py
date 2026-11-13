@@ -400,7 +400,63 @@ class CiFile(unittest.TestCase):
         self.assertIn('[ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"', c)
         self.assertIn('[ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"', c)
         self.assertIn('install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"', c)
-        self.assertIn("test -f watch-out/plan.json", self.lines_of("watch:notify"))
+        self.assertIn("[ -f watch-out/plan.json ]", self.lines_of("watch:notify"))
+
+    def test_t23_support_check_wiring(self):
+        # T-23：support.py 在 collect 之後、比對之前；不加 --demo；失敗不擋（狀態寫檔，不 exit）；artifact 帶出去
+        c = self.lines_of("watch:compute")
+        i_col, i_sup, i_match = c.index("pipeline/watch/collect.py"), c.index("pipeline/watch/support.py"), c.index("pipeline/watch/match.py")
+        self.assertLess(i_col, i_sup)
+        self.assertLess(i_sup, i_match)
+        sup_item = [it for it in self.items_of("watch:compute") if "support.py" in it][0]
+        self.assertNotIn("--demo", sup_item)
+        self.assertIn('--inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json"', sup_item)
+        self.assertNotRegex(sup_item, r"\bexit\b")                 # 這一項不會讓 compute 失敗
+        paths = self.jobs["watch:compute"]["artifacts"]["paths"]
+        for f in ("plan.json", "report.md", "result.json", "status"):
+            self.assertIn("watch-out-support/" + f, paths)
+
+    def run_notify(self, files, watch_rc=0, support_rc=0):
+        """實際執行 watch:notify 的最後一項（假的 python3：記錄呼叫、依 plan 回傳結束碼）。"""
+        import os
+        import subprocess
+        import tempfile
+        item = [it for it in self.items_of("watch:notify") if "watch-out-support" in it][0]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "bin").mkdir()
+            (d / "bin" / "python3").write_text('#!/bin/sh\necho "$*" >> "$LOG"\ncase "$*" in *watch-out-support/plan.json*) exit "$SUP_RC" ;; *) exit "$WATCH_RC" ;; esac\n')
+            (d / "bin" / "python3").chmod(0o755)
+            for rel, text in files.items():
+                (d / rel).parent.mkdir(parents=True, exist_ok=True)
+                (d / rel).write_text(text)
+            env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), WATCH_RC=str(watch_rc), SUP_RC=str(support_rc),
+                       WATCH_GITLAB_TOKEN="t", CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
+            r = subprocess.run(["bash", "-c", item], cwd=d, env=env, capture_output=True, text=True)
+            log = (d / "log").read_text().splitlines() if (d / "log").exists() else []
+        return r.returncode, log, r.stdout
+
+    def test_t23_notify_applies_both_and_reports_support_fail(self):
+        both = {"watch-out/plan.json": "{}", "watch-out-support/plan.json": "{}", "watch-out-support/status": "ATTENTION\n"}
+        rc, log, _ = self.run_notify(both)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(log), 2)
+        self.assertTrue(all("--mode real" in x and "--confidential" in x for x in log))
+        # 每日監控的 apply 失敗：支援期限照樣套用，job 用每日監控的結束碼
+        rc, log, _ = self.run_notify(both, watch_rc=1)
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(log), 2)
+        # 支援期限 FAIL：兩份 plan 都套用完才變紅
+        rc, log, out = self.run_notify(dict(both, **{"watch-out-support/status": "FAIL\n"}))
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(log), 2)
+        self.assertIn("support: FAIL", out)
+        # 沒有任何 plan、狀態 OK：不動 Issue、綠燈；狀態檔不見（compute 沒跑到那一步）：紅
+        self.assertEqual(self.run_notify({"watch-out-support/status": "OK\n"})[:2], (0, []))
+        self.assertEqual(self.run_notify({})[0], 1)
+        # 只有支援期限的 plan
+        rc, log, _ = self.run_notify({"watch-out-support/plan.json": "{}", "watch-out-support/status": "ATTENTION\n"})
+        self.assertEqual((rc, len(log)), (0, 1))
 
     def test_firmware_sbom_check_like_github(self):
         txt = self.lines_of("firmware:fetch")
