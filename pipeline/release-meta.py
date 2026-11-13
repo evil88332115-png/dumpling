@@ -7,7 +7,7 @@
 - status：**生命週期**（project.yml 的 shipped｜development），不是掃描結論。
 - report_status：**產品結論**，報告（cra_report summary.json）的整體狀態；分層時每份報告各一個（reports），這裡取最差的那份。
 - release_gate：VEX 發行閘門（summary.json 的 vex.gate.verdict），同樣取最差的那份。
-- pipeline_result：workflow 流程步驟的結果（--steps；FAIL > GAP > ATTENTION > OK，檔案不存在是 GAP，沒給是 NOT_RUN），不是產品結論。
+- pipeline_result：workflow 流程步驟的結果（--steps；FAIL > GAP（含沒能執行的 NOT_RUN：不是 run-step.sh --record 記的「不適用」那種）> ATTENTION > OK，檔案不存在是 GAP，沒給是 NOT_RUN），不是產品結論。
 另有 reports（[{report: full｜bsp｜os…, report_status, release_gate}]）、kernel_versions（Release 附件 kernel-versions-<專案>-<版本>.json 的檔名或 null）、
 steps（每個 workflow 步驟）、attention（用了舊資料頂替的說明，有才放）。值的範圍：OK｜ATTENTION｜NOT_RUN｜GAP｜NOT_ASSESSED｜FAIL。
 tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev/<專案>）。專案或版本不合法 → 不寫檔、結束碼 1。
@@ -70,7 +70,7 @@ def main(argv=None):
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--built-at")
     ap.add_argument("--tag")
-    ap.add_argument("--steps", help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）：寫進 steps，整體結果寫進 pipeline_result（有 FAIL／GAP／ATTENTION 不是 OK）")
+    ap.add_argument("--steps", help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）：寫進 steps，整體結果寫進 pipeline_result（有 FAIL／GAP／ATTENTION 或沒能執行的 NOT_RUN 不是 OK；規則在 lib/step_rows.py）")
     ap.add_argument("--scan-summary", help="scan-summary-<專案>-<版本>.json（platform_scan.collect 寫的 scan.json）：產品結論 report_status、release_gate、reports、kernel_versions；"
                                            "沒給、不存在或讀不到 → NOT_RUN")
     ap.add_argument("--out", required=True)

@@ -68,7 +68,7 @@ jobs:
             echo
             cat "$RUNNER_TEMP/firmware-summary.md"
             echo
-            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。這不是整體通過或安全的結論。_'
+            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。微碼公告比對（離線，用 repo 內的 Intel 發佈資料表）列的是候選公告，不是確定受影響；up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞。這不是整體通過或安全的結論。_'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
       # 供應商 SBOM（kind: sbom）的品質檢查：sbomqs 版本與 sha256 固定在 pipeline/lib/tools.lock，核對後才安裝。

@@ -276,6 +276,20 @@ def classify_vs(values):
     return "OK" if all(v == "OK" for v in values) else OTHER
 
 
+AM_KEY = "dumpling:advisory-match"
+AM_VALUES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")     # x86_firmware.py 會寫的值
+
+
+def classify_am(values):
+    """dumpling:advisory-match 的值 → None（沒標）｜AM_VALUES 之一｜(多個值)｜(不認得的值)。只用來計數顯示，不影響 OK／ATTENTION；
+    不認得的值（含非字串、供應商或舊工具亂填）不原樣進報告。"""
+    if not values:
+        return None
+    if len(set(values)) != 1:
+        return "(多個值)"
+    return values[0] if values[0] in AM_VALUES else "(不認得的值)"
+
+
 def _nonblank(v):
     return isinstance(v, str) and v.strip() != ""
 
@@ -302,7 +316,7 @@ def summarize(comps, trust_markers=True):
     check_component_types(comps)
     s = {"components": 0, "with_purl": 0, "bad_purl": 0, "with_cpe": 0, "distinct_identities": 0,
          "vuln_assessment": {}, "version_status": {}, "version_gap": 0, "version_status_other": 0,
-         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "trust_markers": bool(trust_markers), "supplier_markers": 0}
+         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "advisory_match": {}, "trust_markers": bool(trust_markers), "supplier_markers": 0}
     ids, types = set(), set()
     for c in comps:
         s["components"] += 1
@@ -319,11 +333,14 @@ def summarize(comps, trust_markers=True):
         if _nonblank(c.get("cpe")):
             s["with_cpe"] += 1
         ids.add(identity(c))
-        va, vs = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY)
+        va, vs, am = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY), _prop_values(c, AM_KEY)
         if not trust_markers:
-            if va or vs:
+            if va or vs or am:
                 s["supplier_markers"] += 1
-            va, vs = [], []
+            va, vs, am = [], [], []
+        al = classify_am(am)
+        if al is not None:
+            s["advisory_match"][al] = s["advisory_match"].get(al, 0) + 1
         vl = classify_va(va)
         s["vuln_assessment"][vl] = s["vuln_assessment"].get(vl, 0) + 1
         sl = classify_vs(vs)
@@ -986,7 +1003,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
     md += ["", "## 怎麼讀", "",
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
-           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。",
+           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
@@ -1001,6 +1018,9 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         md.append("- 元件 %d，有 purl %d，有 cpe %d，vuln-assessment：%s，version-status GAP %d" % (
             s["components"], s["with_purl"], s["with_cpe"],
             "、".join("%s=%d" % (_cell(k, 40), v) for k, v in sorted(s["vuln_assessment"].items())) or "無", s["version_gap"]))
+        if s.get("advisory_match"):
+            md.append("- 公告比對（dumpling:advisory-match）：%s；候選不是確定受影響，沒有任何一項代表沒有漏洞" % "、".join(
+                "%s=%d" % (k if k in AM_VALUES else _cell(k, 40), v) for k, v in sorted(s["advisory_match"].items()) if _is_count(v)))      # 固定值原樣（不加反斜線），其餘經 _cell
         if res.get("nvidia"):
             md.append("- " + res["nvidia"])   # 文字取自 C1 的 nvidia_bulletins.py，已經過 _cell
         for n in res["notes"]:
