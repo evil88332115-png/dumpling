@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 03:59 +0800（C0）
+最後更新：2026-11-14 04:07 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -193,7 +193,7 @@
 > - 驗證：複驗 3d270fe：**不通過**。比對規則 OK（18000 次 fuzz 沒有誤判成 fixed），3 項應修都在文字或測試：workflow 註解寫「判定不適用」與現況矛盾；輸出與文件還有「不適用」；確認後有測試吃牆上時鐘
 > - 寫程式（nvvbios 第四輪）：**完成 91a5be2**（workflow 註解照實寫；「不適用」措辭全部拿掉；conftest 固定時間；terminated 缺鍵 fail-closed；Table.confirmed；確認後要改的 6 個測試寫進 notes；1140 passed；CI tests 43490925483、firmware 43490929895）
 > - 驗證：第三次複驗 91a5be2：**通過**（2 處文字：「人工審核過的」、測試標題的歷史口吻；建議：有未審核的列也算未確認）
-> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0），等 C0 派驗證。**5674 的初審意見要由負責人確認**（已請 C0 轉給使用者）
+> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0）；C0 的獨立驗證：**通過**，unit-tests 綠就合併。後續 2 項（報告的「對照表」行要算進 unreviewed_rows；md_esc／firmware_mdsafe 跳脫 @，或把 bulletin 欄限成數字）→ supplier-followup 和 #59 都合併後，從 main 另開小 PR。**5674 的初審意見要由負責人確認**（C0 已問使用者，等回覆）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
