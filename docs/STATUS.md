@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 06:24 +0800（C0）
+最後更新：2026-11-14 06:25 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,7 +36,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M7b 第一項 PR #73**（https://github.com/evil88332115-png/dumpling/pull/73，wp1/m7b＝e4e5f6e，worktree `$AGENT_TMP/dumpling-wt-c1-m7b`）：product_version_check 加上和 tag 無關的來源（Hooks.independent_version；Jetson：tag → sources.yml l4t_release → 必須等於完整掃描 scan/list.json 的 rootfs L4T 版本；三來源不一致 → FAIL；缺資料 GAP；其他平台 GAP，C0 同意並轉告 C4；l4t_release 受 D-046 約束）。本機 tools 3994、tests/ OK；驗收 run 43514612075、43514616540 進行中；C0 派獨立驗證。M7b 其餘項目在這之後。正式 tag 等使用者，要打在 b56cff4 或更新的 main 上
+- 目前在做：**M7b 第一項 PR #73**（https://github.com/evil88332115-png/dumpling/pull/73，wp1/m7b＝8146f65，worktree `$AGENT_TMP/dumpling-wt-c1-m7b`）：product_version_check 加上和 tag 無關的來源（Hooks.independent_version；Jetson：tag → sources.yml l4t_release → 必須等於完整掃描 scan/list.json 的 rootfs L4T 版本；三來源不一致 → FAIL；缺資料 GAP；其他平台 GAP，C0 同意並轉告 C4；l4t_release 受 D-046 約束）。本機 tools 3994、tests/ OK；驗收 run 43514612075、43514616540 進行中；C0 獨立驗證通過（無應修），三點小修在 8146f65（notes 照實寫、l4t_release 格式／fullmatch／islink 測試、文件措辭）；等 draft 核對與 CI → C0 合併。**M7b 待辦新增**：product_version_check 的 GAP 要不要讓整體狀態降級（C0 傾向要，D-043；在狀態結構化一項提案）、jetson_scan 取完整掃描的 a.run[0] 退路。M7b 其餘項目在這之後。正式 tag 等使用者，要打在 b56cff4 或更新的 main 上
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
