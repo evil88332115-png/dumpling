@@ -680,8 +680,8 @@ def two_readings_image(extra_pointer=None):
     a, b = psp_blob(1, (1, 1, 1, 1), 0x300), psp_blob(1, (2, 2, 2, 2), 0x300)
     put(img, 0x50000, a)
     put(img, 0x51000, b)
-    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x50000))]))          # 檔案座標：基底 0 → 0x50000（a）
-    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x50000))]))          # 視窗座標：基底 0x1000 → 0x51000（b）
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))     # 檔案座標：基底 0 → 0x50000（a）
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))     # 視窗座標：基底 0x1000 → 0x51000（b）
     put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))               # 第二種 cookie：讓 x86_firmware 認得這是 AMD 平台（EFS 不在固定位置）
     efs(img, new_psp=0x30000, at=0x21000, extra=extra_pointer)
     return img
@@ -898,3 +898,206 @@ def test_microcode_container_size_checks_and_date_range(monkeypatch):
     # patch 的 patch_id／equivalence id 為 0 或全 1 不算
     for kw in ({"pid": 0}, {"pid": 0xFFFFFFFF}, {"equiv": 0}, {"equiv": 0xFFFF}):
         assert run_ucode(patch(**kw))["microcode"] == []
+
+
+# ---------- 複驗補的案例：同一位置用不同基底讀、順序無關、AGESA 的位置比對、APOB 條件 ----------
+
+def norm(r):
+    """結果的摘要（與處理順序無關的部分）。"""
+    return (sorted((d["kind"], d["offset"], d["base"], d["ambiguous"], d["checksum_ok"]) for d in r["directories"]),
+            sorted((p["type"], p["version"]) for p in r["psp_firmware"]),
+            sorted((p["type"], p["version"]) for p in r["ambiguous"]["psp_firmware"]),
+            sorted(m["patch_id"] for m in r["microcode"]), sorted(codes(r)))
+
+
+def same_offset_two_bases_image():
+    """EFS 在 0x21000（視窗開頭 0x1000）。psp_directory=0x50000：視窗讀法 0x51000、檔案讀法 0x50000，兩邊都有目錄（歧義）；
+    new_psp=0x4F000：只有視窗讀法（0x50000）有目錄 → 不歧義的邊，但 0x50000 也被用基底 0 讀過。條目位址（模式 1，相對視窗）依基底讀到不同的位置。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x60000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x61000, psp_blob(1, (2, 2, 2, 2), 0x300))
+    put(img, 0x50000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x60000, mode=1)], info=1 << 29))
+    put(img, 0x51000, directory(b"$PSP", []))
+    efs(img, at=0x21000, psp=0x50000, new_psp=0x4F000)
+    return img
+
+
+def test_same_offset_reached_with_different_bases_is_ambiguous_and_never_in_the_sbom():
+    r = run(same_offset_two_bases_image())
+    k = {(d["offset"], d["base"]): d for d in r["directories"]}
+    assert sorted(k) == [(0x50000, 0), (0x50000, 0x1000), (0x51000, 0x1000)] and all(d["ambiguous"] for d in k.values())
+    assert k[(0x50000, 0)]["other_bases"] == ["0x1000"] and k[(0x50000, 0x1000)]["other_bases"] == ["0x0"]
+    assert r["psp_firmware"] == []                                                     # 以前：不歧義的那條路徑沿用第一次讀的基底，把 01.01.01.01 放進 SBOM
+    assert sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["01.01.01.01", "02.02.02.02"]
+    assert any("other window bases" in p["text"] for p in r["problems"] if p["code"] == "dir-ambiguous")
+    md = "\n".join(ap.markdown_lines(r, str))
+    assert "視窗開頭 0x0" in md and "視窗開頭 0x1000" in md
+
+
+def test_results_do_not_depend_on_the_order_of_pointers_or_efs(monkeypatch):
+    # 兩個 EFS：基底 0 的在 0x20000，基底 0x1000 的在 0x21000（結構互不重疊）
+    two = two_readings_image()
+    efs(two, new_psp=0x30000, at=EFS)
+    third = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(third, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(third, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))
+    put(third, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))
+    efs(third, new_psp=0x30000)
+    efs(third, new_psp=0x30000, at=0x21000)
+    images = [same_offset_two_bases_image(), two_readings_image(), two, third, bytearray(good_image())]
+    before = [norm(run(i)) for i in images]
+    monkeypatch.setattr(ap, "EFS_POINTERS", tuple(reversed(ap.EFS_POINTERS)))
+    real = ap.find_efs
+    monkeypatch.setattr(ap, "find_efs", lambda ctx: list(reversed(real(ctx))))
+    after = [norm(run(i)) for i in images]
+    assert before == after
+    assert any(b[0] and any(d[3] for d in b[0]) for b in before) and any(b[0] and not any(d[3] for d in b[0]) for b in before)
+
+
+def test_combo_entry_that_reads_both_ways_makes_its_children_ambiguous_under_a_definite_parent():
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    a, b = psp_blob(1, (1, 1, 1, 1), 0x300), psp_blob(1, (2, 2, 2, 2), 0x300)
+    put(img, 0x50000, a)
+    put(img, 0x51000, b)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))      # 檔案讀法
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))      # 視窗讀法
+    put(img, 0x71000, combo(b"2PSP", [(0xBC0A0000, 0x30000)]))                                              # 視窗讀法 0x71000；檔案讀法 0x70000 沒有目錄
+    efs(img, new_psp=0x70000, at=0x21000)
+    r = run(img)
+    k = {d["offset"]: d for d in r["directories"]}
+    assert sorted(k) == [0x30000, 0x31000, 0x71000] and k[0x71000]["ambiguous"] is False
+    assert k[0x30000]["ambiguous"] and k[0x31000]["ambiguous"]                  # 父目錄確定，但這條 combo 項目的指標有兩種讀法
+    assert r["psp_firmware"] == [] and sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["01.01.01.01", "02.02.02.02"]
+    assert sorted(k[0x71000]["entries"][0]["children"]) == [0x30000, 0x31000]
+
+
+def test_ambiguous_contents_are_listed_even_when_a_definite_directory_has_the_same_blob():
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x4F000, mode=1)], info=1 << 29))
+    efs(img, new_psp=0x30000)
+    efs(img, new_psp=0x30000, at=0x21000)
+    r = run(img)
+    k = {d["offset"]: d for d in r["directories"]}
+    assert k[0x30000]["ambiguous"] is False and k[0x31000]["ambiguous"] is True
+    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"] and [p["version"] for p in r["ambiguous"]["psp_firmware"]] == ["01.01.01.01"]
+    assert [x["directory"] for x in r["psp_firmware"][0]["locations"]] == ["PSP directory L1 @0x30000"]
+    assert [x["directory"] for x in r["ambiguous"]["psp_firmware"][0]["locations"]] == ["PSP directory L1 @0x31000"]
+
+
+def test_slot_header_and_directory_addresses_use_only_the_directorys_own_base():
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x55000, directory(b"$PL2", []))          # 視窗讀法的 pl2_location 0x54000 → 0x55000
+    put(img, 0x54000, directory(b"$PL2", []))          # 檔案讀法 → 0x54000
+    put(img, 0x53000, ish_bytes(0x54000))
+    put(img, 0x51000, directory(b"$PSP", [psp_ent(0x48, size=0, addr=0x52000, mode=1)], info=1 << 29))     # 視窗：0x1000 + 0x52000 = 0x53000
+    efs(img, new_psp=0x50000, at=0x21000)
+    r = run(img)
+    assert sorted(d["offset"] for d in r["directories"]) == [0x51000, 0x55000] and "pointer-ambiguous" not in codes(r)
+    assert all(not d["ambiguous"] for d in r["directories"])
+
+
+def test_agesa_positions_not_counts_decide_whether_the_walk_covered_every_marker():
+    import lzma
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 8
+
+    def build(files):
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x80000, fv(files))
+        return run(img)["agesa"]
+    pe = ffs(0x07, secs(sec(0x10, M)), k=0)
+    ui = ffs(0x07, secs(sec(0x15, M)), k=1)
+    comp = ffs(0x07, secs(guided(LZMA, lzma.compress(secs(sec(0x10, M)), format=lzma.FORMAT_ALONE))), k=2)
+    assert build([pe])["complete"] is True and build([pe, comp])["complete"] is True and build([comp])["complete"] is True
+    for files in ([pe, ui], [ui, comp], [pe, ui, comp]):
+        ag = build(files)
+        assert ag["complete"] is False and any("not seen in the decoded UEFI content" in p for p in ag["problems"]), len(files)
+        assert any(f["where"] == "image (raw bytes)" for x in ag["values"] for f in x["found"])
+    # 兩份原始、都有被搜尋的同樣內容（備份）：不算漏
+    pe2 = ffs(0x07, secs(sec(0x10, M)), k=3)
+    assert build([pe, pe2])["complete"] is True
+
+
+def test_apob_exemption_needs_type_0x61_size_0_and_a_nonzero_destination():
+    def kinds(*ents):
+        img = good_image()
+        put(img, 0x40000, directory(b"$BHD", list(ents)))
+        return [e["kind"] for e in dirs_by_kind(run(img))["bios"]["entries"]]
+    assert kinds(bhd_ent(0x61, 0, 0, dest=0xA200000)) == ["dest-only"]
+    assert kinds(bhd_ent(0x61, 0, 0, dest=0), bhd_ent(0x61, 0, 0)) == ["empty", "empty"]
+    assert kinds(bhd_ent(0x63, 0, 0, dest=0xA200000), bhd_ent(0x60, 0, 0, dest=0xA200000), bhd_ent(0x66, 0, 0, dest=0xA200000)) == ["empty"] * 3
+    assert kinds(bhd_ent(0x61, 0x104, phys(0x43000), dest=0xA200000)) == ["blob"]                                  # 有資料的 APOB 照一般條目處理
+
+
+def test_agesa_tag_is_at_most_four_characters():
+    ok = run(agesa_image(b"AGESA!V1234\x00abc"))["agesa"]
+    assert [(x["tag"], x["value"]) for x in ok["values"]] == [("AGESA!V1234", "abc")]
+    bad = run(agesa_image(b"AGESA!V12345\x00abc"))["agesa"]
+    assert bad["values"] == [] and any("no NUL or space after the tag" in p for p in bad["problems"])
+
+
+def test_efs_is_found_at_every_offset_of_its_window_class():
+    def with_efs(size, at):
+        img = bytearray(b"\xff" * size)
+        put(img, at, b"\xaa\x55\xaa\x55" + b"\x00" * 0x3C)
+        return [e["offset"] for e in run(img)["efs"]]
+    for size, offsets in ((4 << 20, ap.EFS_OFFSETS_4), (8 << 20, ap.EFS_OFFSETS_8), (16 << 20, ap.EFS_OFFSETS_16)):
+        for o in offsets:
+            assert with_efs(size, o) == [o], (size, hex(o))
+    assert ap.EFS_OFFSETS_4 == (0x3A0000, 0x320000, 0x220000, 0x020000) and ap.EFS_OFFSETS_8 == (0x7A0000, 0x720000, 0x620000, 0x420000, 0x020000)
+    assert ap.EFS_OFFSETS_16 == (0xFA0000, 0xF20000, 0xE20000, 0xC20000, 0x820000, 0x020000)
+
+
+def test_directory_tables_that_partly_overlap_are_reported():
+    img = good_image()
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x31000))] * 4))       # 表 0x30000–0x30050
+    put(img, 0x30040, directory(b"$PL2", []))
+    put(img, 0x40000, directory(b"$BHD", []))
+    efs(img, new_psp=0x30000, bios0=phys(0x40000), extra={0x2C: phys(0x30040)})
+    r = run(img)
+    assert any(p["code"] == "entry-overlap" and p["where"] == "directory tables" for p in r["problems"])
+
+
+def test_parse_ucode_direct_range_and_container_checks():
+    data = bytes(b"\x00" * 0x100)
+    ctx = ap.Ctx(data, None)
+    assert ap.parse_ucode(ctx, {"offset": 0xF0, "size": 0x100}) == ([], "the entry extends past the end of the file")
+    assert ap.parse_ucode(ctx, {"offset": -4, "size": 0x10})[1] == "the entry extends past the end of the file"
+    cont = b"DMA\x00" + struct.pack("<II", 0, 32) + b"\x00" * 64                       # 等價表 32 bytes，但項目只有 40 bytes
+    ctx = ap.Ctx(cont, None)
+    assert "equivalence table is not valid" in ap.parse_ucode(ctx, {"offset": 0, "size": 40})[1]
+
+
+def test_every_efs_directory_pointer_field_is_read():
+    boot = psp_blob(1, (1, 2, 3, 4), 0x300)
+    for off in (0x10, 0x14, 0x2C):                       # PSP 目錄指標：psp_directory、new_psp_directory、psp_bak_directory
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x31000, boot)
+        put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=phys(0x31000))]))
+        efs(img, extra={off: phys(0x30000)})
+        assert [p["version"] for p in run(img)["psp_firmware"]] == ["04.03.02.01"], hex(off)
+    for off in (0x18, 0x1C, 0x20, 0x28):                 # BIOS 目錄指標：bios0–bios3
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x41000, patch())
+        put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x66, 0xC80, phys(0x41000))]))
+        efs(img, extra={off: phys(0x40000)})
+        assert [m["patch_id"] for m in run(img)["microcode"]] == ["0x0800820d"], hex(off)
+
+
+def test_agesa_decompressed_raw_fallback_content_does_not_cover_an_unsearched_copy(monkeypatch):
+    import lzma
+    payload = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 8                     # 不是 section 串（開頭三個 byte 當 size 太大）：解壓縮後整塊當原始內容送進搜尋
+    comp = ffs(0x07, secs(guided(LZMA, lzma.compress(payload, format=lzma.FORMAT_ALONE))), k=2)
+    ui = ffs(0x07, secs(sec(0x15, payload)), k=1)                                       # 同樣的位元組在 UI section 裡：沒有被搜尋
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([ui, comp]))
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and any("not seen in the decoded UEFI content" in p for p in ag["problems"])
+    # 有標記的不同內容太多（超過 MAX_AGESA_LEAVES）：位置沒辦法全部換算 → 不完整
+    monkeypatch.setattr(ap, "MAX_AGESA_LEAVES", 1)
+    M = lambda n: b"AGESA!V9\x00ComboAM4v2PI 9.9.9.%d\x00" % n + b"\x00" * 8             # noqa: E731
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, M(1))), k=0), ffs(0x07, secs(sec(0x10, M(2))), k=1)]))
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and any("distinct UEFI contents with AGESA markers" in p for p in ag["problems"])

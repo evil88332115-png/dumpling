@@ -75,6 +75,8 @@ MAX_AGESA_VALUES = 16                  # 不同的 AGESA 值最多記幾個
 MAX_AGESA_LOCATIONS = 8                # 每個值最多記幾個位置
 MAX_AGESA_INSPECT = 1 << 30            # 走訪 firmware volume 時去重後送進搜尋的位元組總量
 AGESA_VALUE_LEN = 64                   # AGESA 標記後面讀的字串長度上限
+MAX_AGESA_LEAVES = 256                 # 有標記、要換算位置的走訪內容（去重後）最多幾塊
+MAX_AGESA_OCCURRENCES = 64             # 同一塊內容在原始位元組裡最多找幾個出現位置
 AGESA_MARK = b"AGESA!V"
 
 EFS_SIG = b"\xaa\x55\xaa\x55"
@@ -142,8 +144,8 @@ class Ctx:
 
     def __init__(self, data, budget):
         self.data, self.n, self.budget = data, len(data), budget
-        self.dirs, self.by_off, self.problems, self.counts = [], {}, [], {}
-        self.edges = []                 # (上一層目錄位置或 None＝EFS, 目錄位置, 這條邊是不是歧義的指標)
+        self.dirs, self.by_key, self.problems, self.counts = [], {}, [], {}
+        self.edges = []                 # (上一層目錄的 (位置, 基底) 或 None＝EFS, 這一層的 (位置, 基底), 這條邊是不是歧義的指標)
         self.entries_total = 0
         self.hash_left = MAX_HASH_TOTAL
         self.hashed = {}
@@ -278,7 +280,8 @@ def follow(ctx, value, bases, via, depth, stack):
     """指標值（EFS 或 combo 項目）→ 驗證目錄 cookie 後解析。bases＝可用的基底清單（視窗開頭、0）。
     兩個基底在不同位置都看到目錄 cookie → 不判斷哪個才是硬體實際使用的：兩邊都解析，邊標成歧義（pointer-ambiguous）；只有一個 → 正常；都沒有 → pointer-unresolved。"""
     cands = []
-    for base, w in bases:
+    for base, _ in bases:
+        w = window_size(ctx.n, base)             # 視窗大小只由基底決定（同一個基底的讀法不能因為是從哪個 EFS 來的而不同）
         off = to_offset(value, base, w)
         if cookie_at(ctx, off) and off not in [c[0] for c in cands]:
             cands.append((off, base, w))
@@ -302,11 +305,12 @@ def follow(ctx, value, bases, via, depth, stack):
 
 def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
     d = ctx.data
-    ctx.edges.append((stack[-1] if stack else None, off, amb))
-    if off in stack:
+    key = (off, base)                   # 同一個位置用不同基底讀是不同的紀錄（內容可能完全不同）
+    ctx.edges.append((stack[-1] if stack else None, key, amb))
+    if key in stack:
         ctx.problem("dir-loop", f"0x{off:x}", f"{via}: directory at 0x{off:x} points back into the path that led to it (loop); not followed again")
         return None
-    done = ctx.by_off.get(off)
+    done = ctx.by_key.get(key)
     if done is not None:
         if via not in done["reached_via"] and len(done["reached_via"]) < 8:
             done["reached_via"].append(via)
@@ -325,7 +329,7 @@ def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
     rec = {"kind": kind, "cookie": cookie.decode("ascii"), "offset": off, "base": base, "window_size": w, "reached_via": [via],
            "num_entries": num, "checksum": f"0x{u32(d, off + 4):08x}", "checksum_ok": None, "parsed": False, "trusted": False, "entries": [],
            "address_mode": None, "size": None, "ambiguous": True}      # ambiguous：mark_ambiguous() 確認有不歧義的路徑到得了才改成 False
-    ctx.by_off[off] = rec
+    ctx.by_key[key] = rec
     ctx.dirs.append(rec)
     where = f"{KIND_TEXT[kind]} @0x{off:x}"
     if kind.startswith("combo"):
@@ -360,7 +364,7 @@ def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
             if addr in (0, (1 << 64) - 1, 0xFFFFFFFF):
                 continue
             # combo 的項目和 EFS 的指標一樣有兩種解讀
-            chs = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (off,))
+            chs = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (key,))
             ent["child"] = chs[0]["offset"] if len(chs) == 1 else None
             ent["children"] = [c["offset"] for c in chs]
         else:
@@ -401,9 +405,9 @@ def entry(ctx, rec, i, e, where, depth, stack):
         ent["kind"] = "unresolved"
         ctx.problem("ish-size", where_e, f"{where_e}: A/B recovery entry with size 0x{size:x} (expected 0 or 0x{ISH_ENTRY_SIZE:x}, the slot header entry sizes); not interpreted")
         return ent
-    if size == 0 and bios and typ == APOB_TYPE and ent["dest"] is not None:
+    if size == 0 and bios and typ == APOB_TYPE and dest not in (0, (1 << 64) - 1):
         # APOB（AGESA 開機時寫入記憶體的資料）只有 destination：coreboot util/amdfwtool/amdfwtool.c 要求 APOB 一定要有 destination（"APOB destination not provided"），
-        # source／size 可以是 0。有 destination 的 size 0 APOB 不當成「沒有資料」的缺口。
+        # source／size 可以是 0（coreboot 的條件是 `!dest`，所以 destination 是 0 也不算有）。有 destination 的 size 0 APOB 不當成「沒有資料」的缺口。
         ent["kind"] = "dest-only"
         return ent
     if size == 0 and not ish:
@@ -435,7 +439,7 @@ def entry(ctx, rec, i, e, where, depth, stack):
         return ent
     if cookie_at(ctx, off) and size >= 16:
         ent["kind"] = "directory-pointer"   # 解出的位置是另一個目錄：往下走（不是韌體條目）
-        ch = parse_dir(ctx, off, rec["base"], rec["window_size"], where_e, depth + 1, stack + (rec["offset"],))
+        ch = parse_dir(ctx, off, rec["base"], rec["window_size"], where_e, depth + 1, stack + ((rec["offset"], rec["base"]),))
         ent["child"] = None if ch is None else ch["offset"]
         return ent
     if typ in POINTER_TYPES.get(kind, ()):
@@ -470,7 +474,7 @@ def ish_entry(ctx, rec, ent, off, where_e, depth, stack):
         ctx.problem("ish-checksum", where_e, f"{where_e}: image slot header checksum 0x{cks:08x} does not match the computed 0x{calc:08x}; its L2 directory location is not used")
         return ent
     if pl2 not in NO_POINTER:
-        chs = follow(ctx, pl2, [(rec["base"], rec["window_size"])], f"{where_e} slot header pl2_location", depth + 1, stack + (rec["offset"],))
+        chs = follow(ctx, pl2, [(rec["base"], rec["window_size"])], f"{where_e} slot header pl2_location", depth + 1, stack + ((rec["offset"], rec["base"]),))
         ent["child"] = chs[0]["offset"] if chs else None
     return ent
 
@@ -620,32 +624,42 @@ def collect_contents(ctx, amd):
     uc_key = lambda x: (x["equiv_id"], x["patch_id"])                    # noqa: E731
     amd["psp_firmware"] = sorted(psp_d.values(), key=psp_key)
     amd["microcode"] = sorted(ucode_d, key=uc_key)
-    # 只有歧義的目錄（兩種解讀都成立）才到得了的項目：列在 inventory，不進 SBOM。同一份內容（雜湊相同）在不歧義的目錄也有的，以不歧義的為準
-    amd["ambiguous"] = {"psp_firmware": sorted((v for k, v in psp_amb.items() if k not in psp_d), key=psp_key),
-                        "microcode": sorted((m for k, m in seen_u_amb.items() if k not in seen_d), key=uc_key)}
+    # 歧義目錄裡讀到的項目：列在 inventory，不進 SBOM；不和確定目錄裡的同一份內容去重（兩邊各自照實列出）
+    amd["ambiguous"] = {"psp_firmware": sorted(psp_amb.values(), key=psp_key), "microcode": sorted(ucode_amb, key=uc_key)}
 
 
 def mark_ambiguous(ctx):
-    """從 EFS 出發只走不歧義的邊（單一解讀的指標），到得了的目錄是確定的；其餘（只經由歧義的指標，或經由歧義目錄的子目錄才到得了）標成 ambiguous，
-    並為每個記一筆 dir-ambiguous。"""
+    """歧義＝硬體實際用哪一種讀法不確定。只有同時滿足下列條件的目錄是確定的：
+    (1) 從 EFS 出發只走不歧義的邊（單一解讀的指標）到得了（子目錄要看自己那條邊，也要看上一層是不是確定的）；
+    (2) 同一個位置只用一種基底讀過（不同基底到達的同一個位置，內容和位址解讀都可能不同，每一種都標成歧義）。
+    結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關。其餘標 ambiguous 並各記一筆 dir-ambiguous。"""
+    bases_at = {}
+    for r in ctx.dirs:
+        bases_at.setdefault(r["offset"], set()).add(r["base"])
+    multi = {o for o, b in bases_at.items() if len(b) > 1}
     definite, queue = set(), [c for p, c, amb in ctx.edges if p is None and not amb]
     children = {}
     for p, c, amb in ctx.edges:
         if p is not None and not amb:
             children.setdefault(p, []).append(c)
     while queue:
-        o = queue.pop()
-        if o in definite:
+        k = queue.pop()
+        if k in definite or k[0] in multi:
             continue
-        definite.add(o)
-        queue += children.get(o, [])
+        definite.add(k)
+        queue += children.get(k, [])
     for r in ctx.dirs:
-        r["ambiguous"] = r["offset"] not in definite
+        k = (r["offset"], r["base"])
+        r["ambiguous"] = k not in definite
+        if r["offset"] in multi:
+            r["other_bases"] = sorted(f"0x{b:x}" for b in bases_at[r["offset"]] if b != r["base"])
         if r["ambiguous"]:
-            w = f"{KIND_TEXT[r['kind']]} @0x{r['offset']:x}"
-            ctx.problem("dir-ambiguous", w, f"{w}: reachable only through a pointer that reads as a directory two ways"
-                        + (f" (other reading{'s' if len(r.get('readings', [])) > 1 else ''}: {', '.join(r['readings'])})" if r.get("readings") else " (it is below such a directory)")
-                        + f"; its {r['num_entries']} entries, versions and microcode are listed but not used for the SBOM")
+            w = f"{KIND_TEXT[r['kind']]} @0x{r['offset']:x} (read with window base 0x{r['base']:x})"
+            why = (f"the same offset was reached with other window bases ({', '.join(r['other_bases'])}) and its entries read differently depending on the base"
+                   if r["offset"] in multi else
+                   f"reachable only through a pointer that reads as a directory two ways (other reading{'s' if len(r.get('readings', [])) > 1 else ''}: {', '.join(r['readings'])})"
+                   if r.get("readings") else "it is below such a directory")
+            ctx.problem("dir-ambiguous", w, f"{w}: {why}; its {r['num_entries']} entries, versions and microcode are listed but not used for the SBOM")
 
 
 # ---------- 範圍重疊 ----------
@@ -701,7 +715,7 @@ def _sibling(name):
 
 
 def read_agesa(buf, pos):
-    """pos 是 `AGESA!V` 的位置 → (tag, value, status)。tag＝`V` 加 1–4 個英數字（例如 V9）；tag 後面一定要接一個 NUL 或空白當分隔，
+    """pos 是 `AGESA!V` 的位置 → (tag, value, status, end)；end＝標記這一段（到字串結尾，或到讀不下去的地方）之後的位置。tag＝`V` 加 1–4 個英數字（例如 V9）；tag 後面一定要接一個 NUL 或空白當分隔，
     value＝接著最多 AGESA_VALUE_LEN 個可列印 ASCII（去頭尾空白）。status：
       ok         正常
       truncated  字串在長度上限被截斷（value 只是前綴，不能當完整版本）
@@ -713,15 +727,31 @@ def read_agesa(buf, pos):
         j += 1
     tag = "V" + bytes(buf[i:j]).decode("ascii")
     if j == i or j >= len(buf) or buf[j] not in (0, 0x20):
-        return tag, None, "nosep"
+        return tag, None, "nosep", j
     j += 1
     k = j
     while k < len(buf) and k - j < AGESA_VALUE_LEN and 0x20 <= buf[k] < 0x7F:
         k += 1
     value = bytes(buf[j:k]).decode("ascii").strip()
     if not value:
-        return tag, None, "empty"
-    return tag, value, ("truncated" if k - j == AGESA_VALUE_LEN and k < len(buf) and 0x20 <= buf[k] < 0x7F else "ok")
+        return tag, None, "empty", k
+    return tag, value, ("truncated" if k - j == AGESA_VALUE_LEN and k < len(buf) and 0x20 <= buf[k] < 0x7F else "ok"), k
+
+
+def raw_origin(frame):
+    """scan_bytes 的呼叫端（uefi_image 的 parse_sections／guid_defined／parse_ffs…）送進來的內容，是不是從原始位元組直接切出來的（不是解壓縮來的）。
+    解壓縮來的：呼叫端是 guid_defined 而且手上有 `out`（LZMA 解開的內容），或呼叫端的 `where` 路徑已經在解壓縮層裡（含 `>lzma`）。
+    看不出來（沒有 frame 或沒有 where）→ 當成不是（不拿來換算位置），搜尋就會因為對不上而標為不完整：失敗的方向是保守的。"""
+    try:
+        loc = frame.f_locals
+        where = loc.get("where")
+        if not isinstance(where, str) or ">lzma" in where or "lzma[" in where:
+            return False
+        if frame.f_code.co_name == "guid_defined" and "out" in loc:
+            return False
+        return True
+    except Exception:       # noqa: BLE001
+        return False
 
 
 def agesa_search(data, budget=None, soft=()):
@@ -733,6 +763,8 @@ def agesa_search(data, budget=None, soft=()):
     table, st = {}, r["stats"]
     seen_problems = set()
     walk_counts, raw_counts, raw_locs = {}, {}, {}
+    leaves = {}                            # 走訪時「原始位元組直接切出來」的內容（不是解壓縮來的）裡有標記的：{(長度, 雜湊): {buf, scans, positions}}
+    raw_pos = []                           # 原始位元組裡的標記：[(位置, key)]
     state = {"capped": False, "raw_capped": False, "inspect_capped": False}
 
     def note(text):
@@ -740,7 +772,7 @@ def agesa_search(data, budget=None, soft=()):
             seen_problems.add(text)
             r["problems"].append(text)
 
-    def scan(buf, where, counts, count_key, locs=None):
+    def scan(buf, where, counts, count_key, locs=None, found_pos=None):
         """在 buf 找標記；每個標記用 (tag, value, status) 計數。回傳 False＝超過標記總數上限。"""
         pos = buf.find(AGESA_MARK)
         while pos >= 0:
@@ -750,11 +782,14 @@ def agesa_search(data, budget=None, soft=()):
                     note(f"more than {MAX_AGESA_MARKERS} AGESA markers; the rest are not read")
                 return False
             st[count_key] += 1
-            tag, value, status = read_agesa(buf, pos)
+            tag, value, status, end = read_agesa(buf, pos)
             key = (tag, value, status)
             counts[key] = counts.get(key, 0) + 1
             if locs is not None:
                 locs.setdefault(key, []).append(pos)
+                raw_pos.append((pos, key))
+            elif found_pos is not None:
+                found_pos.append(pos)
             if count_key == "markers":
                 if status in ("nosep", "empty"):
                     note(f"AGESA marker without a readable version string ({'no NUL or space after the tag' if status == 'nosep' else 'nothing after the separator'}) in {where}; not used")
@@ -775,7 +810,7 @@ def agesa_search(data, budget=None, soft=()):
             pos = buf.find(AGESA_MARK, pos + 1)
         return True
 
-    def walk_inspect(buf, module):
+    def walk_inspect(buf, module, raw_origin):
         n = len(buf)
         if n == 0:
             return
@@ -787,7 +822,17 @@ def agesa_search(data, budget=None, soft=()):
                 note(f"more than {MAX_AGESA_INSPECT} bytes of UEFI content; the rest was not searched")
             return
         st["inspected_bytes"] += n
-        scan(buf, "uefi:" + (module or "?"), walk_counts, "markers")
+        found = []
+        scan(buf, "uefi:" + (module or "?"), walk_counts, "markers", None, found)
+        if found and raw_origin:                # 這塊內容是原始位元組直接切出來的：記下來，之後用內容在原始位元組裡的位置換算標記的位置
+            k = (n, hashlib.blake2b(buf, digest_size=16).digest())
+            e = leaves.get(k)
+            if e is None and len(leaves) < MAX_AGESA_LEAVES:
+                e = leaves[k] = {"buf": bytes(buf), "scans": 0, "positions": found}
+            if e is not None:
+                e["scans"] += 1
+            else:
+                state["leaves_capped"] = True
 
     complete = True
     try:
@@ -801,7 +846,6 @@ def agesa_search(data, budget=None, soft=()):
         ui = _sibling("uefi_image")
     except ImportError as e:
         note(f"{e}; compressed UEFI content was not searched for AGESA strings (only the raw bytes were)")
-        walk_counts.update(raw_counts)
         for key, n in raw_counts.items():                  # 只有原始位元組：把它們當成結果
             tag, value, status = key
             if value is not None:
@@ -813,7 +857,7 @@ def agesa_search(data, budget=None, soft=()):
 
     class AgesaScan(ui.Scan):
         def scan_bytes(self, buf, module=None):           # 覆寫：不做函式庫指紋，只找 AGESA（和 uefi_gfx.py 同樣的做法）
-            walk_inspect(buf, module)
+            walk_inspect(buf, module, raw_origin(sys._getframe(1)))
 
     sc = AgesaScan()
     r["walk"] = True
@@ -844,14 +888,30 @@ def agesa_search(data, budget=None, soft=()):
         complete = False
     if state["capped"] or state["inspect_capped"]:
         complete = False
-    # 原始位元組裡的標記，走訪看到的內容裡沒有（數量比較）：沒被搜尋到的地方有標記
-    missed = {k: n - walk_counts.get(k, 0) for k, n in raw_counts.items() if n > walk_counts.get(k, 0)}
+    # 原始位元組裡的每個標記，要有「同一個位置」被走訪搜尋過：走訪搜尋的內容若是原始位元組直接切出來的（不是解壓縮來的），就在原始位元組裡找這塊內容出現的位置，
+    # 標記的位置＝內容的位置＋標記在內容裡的位置。同一塊內容被搜尋了 k 次（原始來源）就只算前 k 個出現位置有被搜尋，所以解壓縮出來的同樣內容、
+    # 或另一個沒被搜尋的同樣內容（例如 UI section 裡的複本）都不能替別的位置抵銷。
+    covered = set()
+    for e in leaves.values():
+        start = data.find(e["buf"])
+        occ = 0
+        while start >= 0 and occ < min(e["scans"], MAX_AGESA_OCCURRENCES):
+            covered.update(start + p for p in e["positions"])
+            occ += 1
+            start = data.find(e["buf"], start + 1)
+    if state.get("leaves_capped"):
+        complete = False
+        note(f"more than {MAX_AGESA_LEAVES} distinct UEFI contents with AGESA markers; their positions were not all checked")
+    missed = {}
+    for pos, key in raw_pos:
+        if pos not in covered:
+            missed.setdefault(key, []).append(pos)
     if missed:
         complete = False
-        note(f"{sum(missed.values())} AGESA marker(s) in the raw image bytes were not seen in the decoded UEFI content (for example inside a UI section, free space "
-             "or a deleted file); they are listed with the location 'image' and the search is not complete")
+        note(f"{sum(len(v) for v in missed.values())} AGESA marker(s) in the raw image bytes were not seen in the decoded UEFI content (for example inside a UI section, free space "
+             "or a deleted file); they are listed with the location 'image (raw bytes)' and the search is not complete")
         if not state["capped"]:
-            for key, n in missed.items():
+            for key, poss in missed.items():
                 tag, value, status = key
                 if value is None:
                     continue
@@ -860,8 +920,8 @@ def agesa_search(data, budget=None, soft=()):
                     if len(table) >= MAX_AGESA_VALUES:
                         continue
                     e = table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": 0, "found": [], "truncated": status == "truncated"}
-                e["count"] += n
-                for o in raw_locs[key][:MAX_AGESA_LOCATIONS]:
+                e["count"] += len(poss)
+                for o in poss[:MAX_AGESA_LOCATIONS]:
                     if len(e["found"]) < MAX_AGESA_LOCATIONS:
                         e["found"].append({"where": "image (raw bytes)", "offset": o})
     return finish(r, table, complete)
@@ -994,8 +1054,8 @@ def markdown_lines(amd, e):
     for r in amd["directories"]:
         flag = "" if r["trusted"] else ("（checksum 不符，條目不採用）" if r["parsed"] else "（沒有解析）")
         if r["ambiguous"]:
-            flag += "（**歧義**：只經由兩種解讀都成立的指標到得了，" + (f"另一種解讀在 {e(', '.join(r['readings']))}；" if r.get("readings") else "它在這樣的目錄底下；") + "工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）"
-        L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}` @0x{r['offset']:x}{flag}", "",
+            flag += "（**歧義**：只經由兩種解讀都成立的指標到得了，" + (f"另一種解讀在 {e(', '.join(r['readings']))}；" if r.get("readings") else f"同一個位置也用視窗開頭 {e(', '.join(r['other_bases']))} 讀過；" if r.get("other_bases") else "它在這樣的目錄底下；") + "工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）"
+        L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}` @0x{r['offset']:x}（視窗開頭 0x{r['base']:x}）{flag}", "",
               f"{r['num_entries']} 項；checksum {r['checksum']}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
         if r["kind"].startswith("combo"):
             if r["entries"]:
