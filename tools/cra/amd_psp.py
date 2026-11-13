@@ -57,6 +57,9 @@ EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）或「�
   （目錄階段沒走完時所有紀錄都不採用也不拒絕）。
   指標的那一組只作用在那一個指標的邊（同一個目錄若也從別的單一讀法的指標到得了，仍然確定）；同一個位置不同基底的那一組作用在紀錄本身。
   確定的目錄＝從 EFS 出發只走通過的邊到得了的；被採用讀法的子目錄沿用它的基底、確定；被拒絕讀法底下只能經由它到得了的子目錄跟著不採用，經由歧義的讀法才到得了的子目錄是歧義。
+  目錄自己的校驗（checksum 相符、完整解析）是「確定」往下傳的條件：沒通過的目錄狀態是 untrusted，只經由它到得了的子目錄是 untrusted-path（dir-untrusted-path），都不進 SBOM；
+  同一個子目錄另外也能從通過校驗的路徑到得了時照常確定。
+  前提：規則假設映像沒被改過（結構證據只能判斷哪一種讀法和映像自己一致，不能防止刻意偽造）；PSP 版本是映像自己宣告的欄位，只有目錄 checksum 的自我一致性校驗，沒有簽章驗證。
   結果只取決於走訪到的紀錄與邊（走訪依深度逐層、同層依（位置，基底）排序），和 EFS、指標的處理順序無關。
 
 ## 上限與放大控制（見 MAX_*）
@@ -143,6 +146,8 @@ ISH_TYPES = (0x48, 0x4A)               # RECOVERYAB_A／B：位址指到 Image S
 ISH_LEN = 0x20
 ISH_ENTRY_SIZE = 0x100                 # coreboot 寫的是 BLOB_ALIGNMENT（0x100）；實際映像也有 0。其他大小不解讀（ish-size）
 APOB_TYPE = 0x61
+PSP_BASIS = ("PSP firmware header (amd_fw_header) +0x60; fw_type and size_total agree with the directory entry. The version is a field the image declares about itself: "
+            "the only check is the directory checksum (self-consistency, no signature verification), and the directory reading was chosen by structural checks that assume the image was not tampered with")
 PSP_HDR_LEN = 0x100                    # amd_fw_header
 PSP_VERSION_AT, PSP_SIZE_AT, PSP_TYPE_AT = 0x60, 0x6C, 0x7C
 
@@ -363,10 +368,10 @@ def parse_dir(ctx, off, base, w):
     rec = {"kind": kind, "cookie": cookie.decode("ascii"), "offset": off, "base": base, "window_size": w, "reached_via": [],
            "num_entries": num, "checksum": f"0x{u32(d, off + 4):08x}", "checksum_ok": None, "parsed": False, "trusted": False, "entries": [],
            "address_mode": None, "size": None, "checksum_calc": None, "unparsed": None, "complete": False,
-           "status": "ambiguous", "ambiguous": True, "rejected": False}
+           "status": "ambiguous", "ambiguous": True, "rejected": False, "untrusted": False}
     # unparsed：("evidence"｜"limit", 原因)——表超出檔案是結構上的證據；項目數／總數上限是工具的限制（不是證據）。
     # complete：這個紀錄的解析走完了（沒有被超時之類的例外打斷）。status／ambiguous／rejected：resolve_readings() 決定
-    # （adopted＝確定、ambiguous＝GAP、rejected＝另一種讀法才採用）；沒走到那一步時維持 ambiguous。
+    # （adopted＝確定、untrusted＝自己的校驗沒通過、untrusted-path＝只經由校驗沒通過的上層目錄找到、ambiguous＝GAP、rejected＝另一種讀法才採用）；沒走到那一步時維持 ambiguous。
     ctx.by_key[key] = rec
     ctx.dirs.append(rec)
     where = f"{KIND_TEXT[kind]} @0x{off:x}"
@@ -658,7 +663,7 @@ def collect_contents(ctx, amd):
             if v is None:
                 unversioned.setdefault((ent["type"], ent["type_name"]), []).append(ent["where"])
                 return
-            ent["version"], ent["version_basis"] = v, "PSP firmware header (amd_fw_header) +0x60; fw_type and size_total agree with the directory entry"
+            ent["version"], ent["version_basis"] = v, PSP_BASIS
             ent["sha256"], ent["sha512"] = digests(ctx, ent["offset"], ent["size"])
             key = (ent["type"], ent["subprogram"], v, ent["sha256"] or f"{ent['offset']}:{ent['size']}")
             p = psp.setdefault(key, {"type": ent["type"], "type_name": ent["type_name"], "subprogram": ent["subprogram"], "version": v,
@@ -686,7 +691,7 @@ def collect_contents(ctx, amd):
                     m["locations"].append(loc)
 
     for rec in sorted(ctx.dirs, key=lambda r: (r["offset"], r["base"])):       # 位置清單的順序不依賴 ctx.dirs 的順序
-        if not rec["trusted"] or rec["rejected"] or rec["kind"].startswith("combo"):
+        if not rec["trusted"] or rec["rejected"] or rec["status"] == "untrusted-path" or rec["kind"].startswith("combo"):
             continue
         for ent in rec["entries"]:
             if ent["kind"] != "blob" or ent["offset"] is None:
@@ -873,23 +878,38 @@ def decide(ctx, force):
         if c in recs:
             kids.setdefault(p, []).append((c, g))
             incoming.setdefault(c, []).append((p, g))
-    definite, queue, seen_parents = set(), [None], set()
-    while queue:
-        p = queue.pop()
-        if p in seen_parents:
-            continue
-        seen_parents.add(p)
-        for c, g in kids.get(p, []):
-            if edge_ok(c, g) and c not in definite:
-                definite.add(c)
-                queue.append(c)
+    def reach(trusted_only):
+        out, queue, seen_parents = set(), [None], set()
+        while queue:
+            p = queue.pop()
+            if p in seen_parents:
+                continue
+            seen_parents.add(p)
+            for c, g in kids.get(p, []):
+                if edge_ok(c, g) and c not in out and (not trusted_only or recs[c]["trusted"]):
+                    out.add(c)
+                    queue.append(c)
+        return out
+    loose = reach(False)                  # 只看讀法的取捨、不看目錄自己的校驗
+    definite = reach(True)                # 而且每一層都通過自己的校驗（checksum 相符、完整解析）：「確定」只沿著這樣的目錄往下傳
+    origin = {k: {k} for k in loose - definite if not recs[k]["trusted"]}       # 只經由校驗沒通過的目錄找到的目錄：是哪些目錄擋住的
+    changed = True
+    while changed:
+        changed = False
+        for k in sorted(loose - definite):
+            if k in origin:
+                continue
+            o = set().union(*[origin[p] for p, g in incoming.get(k, []) if p in origin])
+            if o:
+                origin[k] = o
+                changed = True
     rejected = {k for k in recs if off_state(k) == "rejected"}
     changed = True
     while changed:
         changed = False
         for k in recs:
             inc = incoming.get(k)
-            if k in rejected or k in definite or not inc:
+            if k in rejected or k in loose or not inc:
                 continue
             if all((g is not None and k in pv[g]["rejected"]) or (p is not None and p in rejected) for p, g in inc):
                 rejected.add(k)
@@ -901,7 +921,11 @@ def decide(ctx, force):
     for o, ks in sorted(off_groups.items()):
         for k in sorted(ks):
             members.setdefault(k, []).append(("offset", frozenset(ks), ov[o], None))
-    return {"definite": definite, "rejected": rejected, "ptr": ptr, "pv": pv, "off_groups": off_groups, "ov": ov, "off_state": off_state, "members": members, "state": state}
+    return {"definite": definite, "loose": loose, "origin": origin, "rejected": rejected, "ptr": ptr, "pv": pv, "off_groups": off_groups, "ov": ov, "off_state": off_state, "members": members, "state": state}
+
+
+def untrusted_reason(rec):
+    return ("checksum " + rec["checksum"] + " does not match the computed 0x%08x" % rec["checksum_calc"]) if rec["parsed"] and not rec["checksum_ok"] else "the directory table was not fully parsed"
 
 
 def apply_status(ctx, R):
@@ -919,8 +943,10 @@ def apply_status(ctx, R):
             parts.append("could not be fully checked: " + "; ".join(unk[:FAIL_SHOWN]))
         return "; ".join(parts) or "passes the structure checks"
     for k, r in sorted(recs.items()):
-        r["status"] = "adopted" if k in R["definite"] else "rejected" if k in R["rejected"] else "ambiguous"
+        r["status"] = ("adopted" if k in R["definite"] else "untrusted" if k in R["loose"] and not r["trusted"] else "untrusted-path" if k in R["loose"]
+                       else "rejected" if k in R["rejected"] else "ambiguous")
         r["ambiguous"], r["rejected"] = r["status"] == "ambiguous", r["status"] == "rejected"
+        r["untrusted"] = r["status"] in ("untrusted", "untrusted-path")
         if k[0] in R["off_groups"]:
             r["other_bases"] = sorted(f"0x{o[1]:x}" for o in R["off_groups"][k[0]] if o != k)
         if k in R["members"]:
@@ -939,6 +965,12 @@ def apply_status(ctx, R):
             else:
                 r["rejected_because"] = ["reached only through readings that are not used"]
                 ctx.problem("reading-rejected", w, f"{w}: not used, it is reached only through readings that are not used (see the reading-rejected entries above it)")
+        elif r["status"] == "untrusted-path":
+            src = [f"{KIND_TEXT[recs[o]['kind']]} @0x{o[0]:x} ({untrusted_reason(recs[o])})" for o in sorted(R["origin"].get(k, ()))]
+            r["untrusted_because"] = "found only through a directory that failed validation: " + "; ".join(src[:FAIL_SHOWN]) + (f"; and {len(src) - FAIL_SHOWN} more" if len(src) > FAIL_SHOWN else "")
+            ctx.problem("dir-untrusted-path", w, f"{w}: {r['untrusted_because']}; its {r['num_entries']} entries, versions and microcode are listed but not used for the SBOM")
+        elif r["status"] == "untrusted":
+            r["untrusted_because"] = untrusted_reason(r)
         elif r["status"] == "ambiguous":
             if R["off_state"](k) == "contested":
                 v = R["ov"][k[0]]
@@ -1201,7 +1233,7 @@ GAP_TEXT = {
     "efs-limit": "EFS limit", "efs-pointer-unparsed": "EFS pointers present but not parsed", "pointer-unresolved": "pointers that do not resolve to a directory",
     "pointer-ambiguous": "pointers readable as a directory in two ways that cannot be told apart", "dir-ambiguous": "directories reachable only through readings that cannot be told apart",
     "reading-rejected": "directory readings not used (another reading of the same pointer or offset passes the structure checks)",
-    "reading-equivalent": "pointer or offset readings with identical contents (all used)", "dir-loop": "directory loops", "dir-limit": "directory limits reached",
+    "reading-equivalent": "pointer or offset readings with identical contents (all used)", "dir-untrusted-path": "directories found only through a directory whose checksum or parse failed", "dir-loop": "directory loops", "dir-limit": "directory limits reached",
     "dir-too-many-entries": "directories with too many entries", "dir-truncated": "directories running past the end of the file",
     "dir-checksum": "directory checksum mismatches", "type-unknown": "entries of unknown type", "entry-address": "entries whose address cannot be resolved",
     "entry-size": "entries too large", "entry-range": "entries outside the file", "entry-overlap": "overlapping ranges", "version-unverified": "entries without a version",
@@ -1210,7 +1242,7 @@ GAP_TEXT = {
     "ucode-unrecognised": "microcode entries not understood", "ucode-cpuid": "microcode without CPUID", "ucode-limit": "microcode limit", "hash-limit": "hash limit",
     "ish-checksum": "image slot header checksum mismatches", "ish-size": "A/B recovery entries with an unexpected size",
 }
-ATTENTION_CODES = ("dir-checksum", "pointer-ambiguous", "dir-ambiguous", "reading-rejected", "ish-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit", "entry-error", "internal-error")
+ATTENTION_CODES = ("dir-checksum", "pointer-ambiguous", "dir-ambiguous", "reading-rejected", "dir-untrusted-path", "ish-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit", "entry-error", "internal-error")
 
 
 def summarize(problems, counts):
@@ -1312,7 +1344,7 @@ def analyze(data, budget=None, soft=()):
     if len(full) > 1:
         amd["attention"].append("more than one AGESA string: " + ", ".join(f"{x['tag']} {x['value']}" for x in full))
     amd["stats"] = {"efs": len(amd["efs"]), "directories": len(ctx.dirs), "entries": ctx.entries_total,
-                    "directories_ambiguous": sum(1 for r in ctx.dirs if r["ambiguous"]), "directories_rejected": sum(1 for r in ctx.dirs if r["rejected"]),
+                    "directories_ambiguous": sum(1 for r in ctx.dirs if r["ambiguous"]), "directories_rejected": sum(1 for r in ctx.dirs if r["rejected"]), "directories_untrusted": sum(1 for r in ctx.dirs if r["untrusted"]),
                     "psp_firmware": len(amd["psp_firmware"]), "microcode": len(amd["microcode"]), "agesa_values": len(full),
                     "problems": dict(counts), "hashed_bytes": MAX_HASH_TOTAL - ctx.hash_left}
     return amd
@@ -1327,7 +1359,8 @@ def summary_text(amd):
 
 def markdown_lines(amd, e):
     """fw-inventory.md 的 AMD 區段（e＝呼叫端的 md_esc，不可信字串都要過它）。"""
-    L = ["", "### AMD PSP／BIOS 目錄、微碼與 AGESA", "", "- " + e(summary_text(amd)), ""]
+    L = ["", "### AMD PSP／BIOS 目錄、微碼與 AGESA", "", "- " + e(summary_text(amd)),
+         "- 解讀依據：目錄的結構檢查只能判斷哪一種讀法和映像自己一致，不能防止刻意偽造的映像；PSP 版本是映像自己宣告的欄位，只有目錄 checksum 的自我一致性校驗，沒有簽章驗證。", ""]
     if amd["efs"]:
         L += ["| EFS 位置 | 視窗 | 指標 |", "|---|---|---|"]
         L += [f"| 0x{x['offset']:x} | 0x{x['window_base']:x}（{x['window_size'] >> 20} MiB） | "
@@ -1335,7 +1368,9 @@ def markdown_lines(amd, e):
         L.append("")
     for r in amd["directories"]:
         flag = "" if r["trusted"] else ("（checksum 不符，條目不採用）" if r["parsed"] else "（沒有解析）")
-        if r["rejected"]:
+        if r["status"] == "untrusted-path":
+            flag += "（**經由未通過校驗的上層目錄找到，不採用**：" + e(r.get("untrusted_because", "")) + "。條目與版本只列出，不進 SBOM）"
+        elif r["rejected"]:
             flag += ("（**未採用**：" + e("；".join(r.get("rejected_because", [])[:3])) + (f"；改用 {e('、'.join(r['used_instead']))}" if r.get("used_instead") else "")
                      + "。條目與版本只列出，不進 SBOM）")
         elif r["ambiguous"]:

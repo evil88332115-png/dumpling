@@ -20,7 +20,7 @@ notes: |
   下載頁（動態頁面，直接下載網址是靜態 CDN 路徑）：https://www.asus.com/motherboards-components/motherboards/prime/prime-b550m-a/helpdesk_bios/
   zip 內有 PRIME-B550M-A-ASUS-3404.CAP（33558528 位元組＝4 KiB 標頭＋兩個 16 MiB 視窗）和 BIOSRenamer.exe（只當資料讀，不執行）。
   結構（amd_psp.py 讀到的）：CAP 標頭讓 EFS 不在固定位置（0x21000、0x1021000，各視窗位移 0x1000）；兩個 EFS 各指向一個 combo 目錄（2PSP／2BHD），
-  combo 再指到多個 L1 目錄（$PSP、$BHD）；較新的世代有 L1 的 0x40／0x70 指標項目指到 L2 目錄（$PL2、$BL2）。共 17 個目錄、244 個目錄項目、
+  combo 再指到多個 L1 目錄（$PSP、$BHD）；較新的世代有 L1 的 0x40／0x70 指標項目指到 L2 目錄（$PL2、$BL2）。採用的目錄共 17 個、244 個目錄項目（工具摘要的 19 個目錄、271 個項目是另含 2 個未採用的讀法——0x131000、0x15a000 各有一個基底 0 的讀法——的口徑）、
   19 份 AMD 微碼（BIOS 目錄 type 0x66）、AGESA 字串 `AGESA!V9` + `ComboAM4v2PI 1.2.0.B`。第二個 EFS 的一個指標在視窗座標與檔案偏移兩種讀法下都指到目錄，
   同一個位置因此被兩種視窗基底讀過；每一組競爭的讀法用自己的結構檢查決定（目錄 checksum、條目與子目錄指標是否解得出來、目錄表是否落在自己的條目裡）：這個樣本的每一組都是恰好一種通過，
   採用它、另一種標「未採用」（19 個目錄紀錄中 17 個採用、2 個未採用，78 個 PSP 版本進 SBOM）。

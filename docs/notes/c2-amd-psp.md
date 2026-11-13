@@ -40,6 +40,9 @@
      條目只列在 `amd.ambiguous`、不進 SBOM。沒有任何一種被採用時，沒通過的也不標「未採用」（沒有讀法可以改用）。
    - **全域保險**：碰到目錄數／深度／項目數／項目總數／EFS 數上限（`dir-limit`、`dir-too-many-entries`、`efs-limit`）、發現目錄循環（`dir-loop`）、或比較內容時雜湊上限用完（`hash-limit`），所有競爭的讀法一律維持歧義
      （不去判斷哪一組「牽涉到」）。目錄階段沒走完（超時或例外）時不做任何採用或拒絕：所有紀錄維持歧義。
+   - **目錄自己的校驗**：目錄的 `trusted`（checksum 相符、完整解析）不是競爭的讀法的一部分，而是「確定」往下傳的條件：checksum 不符或沒有完整解析的目錄狀態是 `untrusted`（不是 adopted），
+     「確定」只沿著通過校驗的目錄往下傳；只能經由 `untrusted` 目錄（或它底下）到得了的子目錄，即使自己的 checksum 通過，也是 `untrusted-path`（記 `dir-untrusted-path`，附依據：經由哪個上層目錄、為什麼沒通過），
+     不進 SBOM。同一個子目錄另外也能從通過校驗的路徑到得了時，照常確定。競爭的讀法的規則不變（checksum 不符仍是證據）。
    - **作用範圍**：指標那一組只作用在那一個指標的邊（同一個目錄若也從別的、單一讀法的指標到得了，仍然確定）；同一位置不同基底那一組作用在紀錄本身。確定的目錄＝從 EFS 出發只走
      「通過的邊」（單一讀法的指標，或指標的讀法被採用的那一邊）到得了的；子目錄沿用被採用那一讀法的基底。被拒絕的讀法底下、只能經由它到得了的子目錄跟著標 `rejected`
      （`reading-rejected`，說明「只經由不採用的讀法到得」；只有進來的邊全都被拒絕才算，有一條來自歧義的就是歧義）；經由歧義的讀法才到得了的子目錄是歧義。
@@ -82,7 +85,8 @@
 |---|---|---|
 | `no-directory` | 沒有任何可解析的目錄 | GAP |
 | `efs-no-pointer`、`pointer-unresolved` | EFS／combo／項目的指標沒有指到目錄 cookie | GAP |
-| `dir-checksum` | checksum 不符：條目照列但**不用於**版本、雜湊、微碼 | ATTENTION |
+| `dir-checksum` | checksum 不符：條目照列但**不用於**版本、雜湊、微碼；這個目錄不算確定（`untrusted`），只經由它到得了的子目錄也不採用（`dir-untrusted-path`） | ATTENTION |
+| `dir-untrusted-path` | 目錄自己的校驗通過，但只能經由校驗沒通過（checksum 不符或沒有完整解析）的上層目錄找到：不採用（`untrusted-path`），條目與版本只列在目錄清單，不進 SBOM；同一個目錄另外也能從通過校驗的路徑到得了時照常確定 | ATTENTION |
 | `dir-too-many-entries`、`dir-truncated`、`dir-limit` | 項目數超過上限、項目表超出檔案、目錄數／深度／項目總數超過上限：該目錄的條目不解析 | GAP（`dir-limit` ATTENTION） |
 | `dir-loop` | 目錄圖上有循環（一個目錄的指標回到能走到它的目錄）：不重複走；所有競爭的讀法維持歧義 | ATTENTION |
 | `type-unknown` | type 不在公開清單：照列位置與大小，不解讀 | GAP |
@@ -123,7 +127,7 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
 
 2026-11-13 的解析結果（`python3 -I x86_firmware.py inventory --in PRIME-B550M-A-ASUS-3404.CAP`，約 2.5 秒）：
 
-- 2 個 EFS（視窗位移 0x1000）→ 19 個目錄紀錄（17 個位置：2 個 combo PSP、1 個 combo BIOS、5 個 L1 PSP、2 個 L2 PSP、5 個 L1 BIOS、2 個 L2 BIOS；0x131000 與 0x15a000 各有兩種基底的讀法），
+- 2 個 EFS（視窗位移 0x1000）→ 19 個目錄紀錄、271 個目錄項目（這是工具摘要的口徑，含 2 個未採用的讀法；採用的 17 個目錄共 244 個項目）（17 個位置：2 個 combo PSP、1 個 combo BIOS、5 個 L1 PSP、2 個 L2 PSP、5 個 L1 BIOS、2 個 L2 BIOS；0x131000 與 0x15a000 各有兩種基底的讀法），
   checksum 全部相符。
 - **競爭的讀法與結果**（規則見流程第 5 點）：19 個紀錄中 17 個採用、2 個不採用、0 個歧義。
   - 第二個 EFS 的 `new_psp_directory`（0x131000）讀成視窗座標是 0x1132000（combo，基底 0x1001000），讀成檔案偏移是 0x131000（基底 0）。基底 0 的讀法裡，combo 的三個項目（指標 0xff2a9000、0xff2a9000、0xff159000）
@@ -155,7 +159,7 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
 - PSP 韌體條目的標頭版本（bootloader、SMU、ABL…）：沒有找到可對照的公開來源；顯示的是欄位原值，不是公告用的名稱。
 - 其他 17 份微碼 patch（不在上述 linux-firmware 版本裡）。
 - equivalence id 對應的 CPUID：映像裡的微碼沒有等價表。
-- 目錄結構（17 個目錄、244 項）：這是解析結果，不是別人公布的值。
+- 目錄結構（採用的 17 個目錄、244 項；工具摘要的 19 個、271 項含 2 個未採用的讀法）：這是解析結果，不是別人公布的值。
 
 ## 另外做過的只讀驗證（不在樣本清單、不在 CI）
 
@@ -186,6 +190,9 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
   **`complete` 的語意**：只代表「走訪沒有回報沒解開的部分（含 FV 以外的非空白位元組）、沒有結構警告、沒有碰到標記數／內容量／不同值數的上限、沒有被超時或例外打斷、有解出 FV，而且原始位元組裡沒有 AGESA 標記」。
   uefi_image 本來就不掃的位置不在保證範圍內：FV 標頭與 extended header、GUID-defined section 的標頭到 DataOffset 之間、RAW section 裡的 LZMA 串流（不會被當容器解開）；
   這些位置裡的標記搜尋不到也不會讓 `complete` 變 False。這一塊要等正式的回呼介面（M7）才能補。
+- **採用規則的兩個前提（D-050）**：
+  - 規則假設映像沒被改過：結構證據（checksum、位址與範圍、指標、目錄表與條目的關係）只能判斷哪一種讀法和映像自己一致，不能防止刻意偽造、讓錯誤的讀法也自我一致的映像。
+  - PSP 版本是映像自己宣告的欄位（`amd_fw_header` +0x60），只有自我一致性的校驗（目錄 checksum），沒有簽章驗證。這一點寫在 SBOM 元件的 `sca-center:version-basis` 與 fw-inventory.md 的「解讀依據」。
 - **競爭的讀法的兩個取捨**：
   - 被拒絕的讀法和被採用的讀法各有子目錄、落在同一個位置但不同基底，而且兩邊都通過結構檢查、內容不同時，被採用那一邊的子目錄也會標歧義（同一位置的不同基底讀法是一組競爭的讀法；
     被拒絕那邊的子目錄不會替另一邊背書）。結果是保守的：少採用，不多採用。

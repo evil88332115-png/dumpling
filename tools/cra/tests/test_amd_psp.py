@@ -1987,3 +1987,110 @@ def test_agesa_incomplete_when_the_walk_is_interrupted_fails_or_finds_no_firmwar
     monkeypatch.undo()
     ag = run(bytearray(b"\xff" * SIZE))["agesa"]                                                     # 沒有 FV，原始位元組也沒有標記
     assert ag["complete"] is False and any("no UEFI firmware volume" in p for p in ag["problems"]) and ag["values"] == []
+
+
+# ---------- 自己的校驗沒通過的目錄：不算確定，也不替子目錄背書 ----------
+
+def bad_l1_image():
+    """good_image：L1 $PSP（0x30000）的 checksum 壞一個位元；它的 0x40 指標指到 L2（0x34000，自己的 checksum 正確，條目是 SMU2 版本 03.02.01.00）。"""
+    img = good_image()
+    img[0x30004] ^= 1
+    return img
+
+
+def test_a_directory_with_a_bad_checksum_is_not_definite_and_does_not_vouch_for_its_subdirectory(tmp_path):
+    img = bad_l1_image()
+    r = run(img)
+    s = {d["offset"]: d for d in r["directories"]}
+    assert s[0x30000]["status"] == "untrusted" and s[0x30000]["trusted"] is False and s[0x30000]["ambiguous"] is False and s[0x30000]["untrusted"] is True
+    assert s[0x34000]["status"] == "untrusted-path" and s[0x34000]["checksum_ok"] is True
+    assert "found only through a directory that failed validation" in s[0x34000]["untrusted_because"] and "PSP directory L1 @0x30000" in s[0x34000]["untrusted_because"]
+    assert s[0x40000]["status"] == "adopted"                                                     # 另一條路（BIOS 目錄）不受影響
+    assert r["psp_firmware"] == [] and r["ambiguous"]["psp_firmware"] == []                       # L1 的條目沒採用、L2 的版本也沒進任何清單
+    assert "dir-untrusted-path" in codes(r) and "dir-checksum" in codes(r)
+    assert any("failed" in a for a in r["attention"]) and any(g.startswith("AMD: directories found only through") for g in r["gaps"])
+    assert [m["patch_id"] for m in r["microcode"]]                                               # BIOS 目錄的微碼照常確定
+    md = "\n".join(ap.markdown_lines(r, str))
+    assert "經由未通過校驗的上層目錄找到" in md and "checksum 不符，條目不採用" in md and "解讀依據" in md and "沒有簽章驗證" in md
+    p = tmp_path / "ut.bin"
+    p.write_bytes(bytes(img))
+    inv = xf.inventory([p])
+    comps, _ = xf.components(inv)
+    assert not [c for c in comps if c["name"].startswith("AMD PSP firmware")]
+    good = xf.components(xf.inventory([_write(tmp_path / "g.bin", good_image())]))[0]
+    basis = [q["value"] for c in good if c["name"].startswith("AMD PSP firmware") for q in c["properties"] if q["name"] == "sca-center:version-basis"]
+    assert basis and all("no signature verification" in b and "assume the image was not tampered with" in b for b in basis)
+
+
+def _write(path, img):
+    path.write_bytes(bytes(img))
+    return path
+
+
+def test_the_same_subdirectory_reached_by_a_trusted_path_too_is_definite():
+    img = bad_l1_image()
+    put(img, 0x36000, directory(b"$PSP", [psp_ent(0x40, size=0x400, addr=phys(0x34000))]))          # 另一個（checksum 正確的）L1 也指到同一個 L2
+    efs(img, new_psp=0x30000, psp=0x36000)
+    r = run(img)
+    s = {d["offset"]: d["status"] for d in r["directories"]}
+    assert s[0x30000] == "untrusted" and s[0x36000] == "adopted" and s[0x34000] == "adopted"
+    assert [p["version"] for p in r["psp_firmware"]] == ["00.01.02.03"] and "dir-untrusted-path" not in codes(r)
+
+
+def test_untrusted_status_propagates_over_several_levels_and_below_a_bad_combo():
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x50000, psp_blob(8, (9, 9, 9, 9), 0x300))
+    put(img, 0x36000, directory(b"$PL2", [psp_ent(8, size=0x300, addr=phys(0x50000))]))                                    # L3：自己的 checksum 正確
+    put(img, 0x35000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x36000))]))                                # L2 → L3
+    put(img, 0x34000, directory(b"$PSP", [psp_ent(0x40, size=0x400, addr=phys(0x35000))]))                                # L1 → L2
+    c = bytearray(combo(b"2PSP", [(0xBC0A0000, phys(0x34000))]))
+    c[4] ^= 1                                                                                                             # combo 的 checksum 壞
+    put(img, 0x30000, bytes(c))
+    efs(img, new_psp=0x30000)
+    r = run(img)
+    s = {d["offset"]: d for d in r["directories"]}
+    assert s[0x30000]["status"] == "untrusted" and [s[o]["status"] for o in (0x34000, 0x35000, 0x36000)] == ["untrusted-path"] * 3
+    assert all("2PSP" not in s[o]["untrusted_because"] and "PSP combo directory @0x30000" in s[o]["untrusted_because"] for o in (0x34000, 0x35000, 0x36000))
+    assert r["psp_firmware"] == [] and sum(1 for p in r["problems"] if p["code"] == "dir-untrusted-path") == 3
+    # 對照：combo 的 checksum 正確 → 全部確定
+    c = combo(b"2PSP", [(0xBC0A0000, phys(0x34000))])
+    put(img, 0x30000, c)
+    r = run(img)
+    assert {d["status"] for d in r["directories"]} == {"adopted"} and [p["version"] for p in r["psp_firmware"]] == ["09.09.09.09"]
+
+
+def test_a_directory_that_was_not_fully_parsed_is_untrusted_too(monkeypatch):
+    monkeypatch.setattr(ap, "MAX_DIR_ENTRIES", 0)                                                       # 任何有項目的目錄都超過上限：條目沒解析（限制）
+    r = run(good_image())
+    s = {d["offset"]: d for d in r["directories"]}
+    assert s[0x30000]["status"] == "untrusted" and s[0x30000]["parsed"] is False and "not fully parsed" in s[0x30000]["untrusted_because"]
+    assert r["psp_firmware"] == []
+
+
+def untrusted_images():
+    two = bad_l1_image()
+    put(two, 0x36000, directory(b"$PSP", [psp_ent(0x40, size=0x400, addr=phys(0x34000))]))
+    efs(two, new_psp=0x30000, psp=0x36000)
+    return [bad_l1_image(), two, readings_image([one(0x50000)], [one(0x50000)], bad_a=True), loop_image()]
+
+
+def test_untrusted_states_do_not_depend_on_the_processing_order(monkeypatch):
+    images = untrusted_images() + [rand_image(s) for s in range(30)]
+    base = [strict_json(run(i)) for i in images]
+    monkeypatch.setattr(ap, "EFS_POINTERS", tuple(reversed(ap.EFS_POINTERS)))
+    real_find = ap.find_efs
+    monkeypatch.setattr(ap, "find_efs", lambda ctx: list(reversed(real_find(ctx))))
+    real = ap.resolve_readings
+    rng = random.Random(11)
+
+    def shuffled(ctx):
+        rng.shuffle(ctx.edges)
+        rng.shuffle(ctx.groups)
+        items = list(ctx.by_key.items())
+        rng.shuffle(items)
+        ctx.by_key = dict(items)
+        real(ctx)
+    monkeypatch.setattr(ap, "resolve_readings", shuffled)
+    assert [strict_json(run(i)) for i in images] == base
+    kinds = {d["status"] for b in images for d in run(b)["directories"]}
+    assert {"untrusted", "untrusted-path", "adopted", "rejected"} <= kinds

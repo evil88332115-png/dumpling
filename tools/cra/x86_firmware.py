@@ -74,7 +74,7 @@ BIOS（Intel 平台的完整 SPI 映像）：
   PSP 韌體標頭（fw_type 與 size_total 和目錄項目相符）通過才讀版本，BIOS 目錄 type 0x66 的 AMD 微碼列 patch level、日期、equivalence id
   （前面有 `DMA\\0` container 的等價表才對出 CPUID，沒有就不猜），AGESA 字串（`AGESA!V<n>` 後面的字串，整個映像與解開的 firmware volume 都找，不同值全部列出並 ATTENTION）。
   看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、壓縮或 size 0 的條目、slot header checksum 不符、
-  Promontory 指標、AGESA 搜尋不完整或字串被截斷）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符的目錄不採用它的條目；
+  Promontory 指標、AGESA 搜尋不完整或字串被截斷）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符（或沒有完整解析）的目錄不採用它的條目，只經由它到得了的子目錄也不採用（untrusted-path）；
   指標在兩種座標解讀下都指到目錄（或同一個位置被不同基底讀到）時，兩邊都列出並各自做結構檢查：只有結構上的正面證據（checksum 不符、位址或範圍超出檔案、指標沒指到目錄…）才算不通過；
   每一種都完整檢查過而且恰好一邊通過就採用它、另一邊標「未採用」（rejected，附證據）；兩邊都通過而內容相同 → 都採用；都通過但內容不同、都沒通過、有任何一邊無法判斷（工具的限制：上限、不解的 address mode、超時…）、
   或碰到上限／循環／超時 → 全部維持歧義，不判斷哪個是硬體實際使用的，只經由它到得了的目錄的條目、版本、微碼（amd.ambiguous）不進 SBOM。
@@ -1722,7 +1722,7 @@ def amd_components(b, img, comps, sub):
         ref = f"{img}:amd-psp:{p['type']:02x}:{p['subprogram']:02x}:{(p['sha256'] or 'nohash')[:12]}:{n}"
         c = {"type": "firmware", "bom-ref": ref, "name": f"AMD PSP firmware {p['type_name'] or ''} (type 0x{p['type']:02x}, subprogram {p['subprogram']})".replace("  ", " "),
              "version": p["version"], "manufacturer": AMD_VENDOR,
-             "properties": [prop("sca-center:version-basis", "PSP firmware header (amd_fw_header) version field at +0x60; fw_type and size_total agree with the directory entry"),
+             "properties": [prop("sca-center:version-basis", "PSP firmware header (amd_fw_header) version field at +0x60; fw_type and size_total agree with the directory entry. The version is a field the image declares about itself: the only check is the directory checksum (self-consistency, no signature verification), and the directory reading was chosen by structural checks that assume the image was not tampered with"),
                             prop("sca-center:amd-psp-type", f"0x{p['type']:02x}"), prop("sca-center:amd-psp-subprogram", p["subprogram"]),
                             prop("sca-center:size", p["size"]), *[prop("sca-center:found-in", amd_where(x)) for x in p["locations"]]]}
         if p["sha256"]:
