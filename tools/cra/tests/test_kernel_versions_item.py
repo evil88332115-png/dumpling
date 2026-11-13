@@ -10,11 +10,11 @@ from test_cra_report import kernel_scan, make_project, run, write_json  # noqa: 
 from test_confirm_items import keys, read_csv  # noqa: E402
 
 A, B = "6.1.118", "6.1.120"          # 合成的核心版本
-SCHEMA = "sca-center-kernel-versions/1"
+SCHEMA = "sca-center-kernel-versions/2"
 
 
 def doc(shipped, requested, judged, not_judged):
-    return {"schema": SCHEMA, "shipped": shipped, "requested": requested, "judged": judged, "not_judged": not_judged}
+    return {"schema": SCHEMA, "shipped": None if shipped is None else [{"version": v, "upstream_version": None, "upstream_basis": None, "upstream_note": "x"} for v in shipped], "requested": requested, "judged": judged, "not_judged": not_judged}
 
 
 def test_item_lists_not_judged_kernels():
@@ -53,3 +53,9 @@ def test_report_reads_the_file(tmp_path):
     write_json(scan / "scan" / "kernel-versions.json", doc([A], [], [A], []))
     _, s2, _ = run(make_project(tmp_path / "p2"), scan)
     assert keys(s2) == keys(s0)
+
+
+def test_schema_v1_file_is_still_read():
+    d = dict(doc([A, B], [A], [A], [{"version": B, "reason": "x", "shipped": True}]), schema="sca-center-kernel-versions/1", shipped=[A, B])
+    x = ci.kernel_versions_items(d)
+    assert len(x) == 1 and "2 顆" in x[0]["finding"] and B in x[0]["finding"]

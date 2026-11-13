@@ -863,6 +863,14 @@ kernel_versions_finish(){
   fi
   if [ "$KSHIP_OK" = 1 ]; then for v in "${KSHIP[@]+"${KSHIP[@]}"}"; do pa+=(--shipped "$v"); done; else pa+=(--shipped-unknown); fi
   for v in "${KVERS[@]+"${KVERS[@]}"}"; do pa+=(--requested "$v"); done
+  # 每顆出貨核心的上游版本：只認核心原始碼（環境變數 KERNEL_SOURCE_DIR，scan-flash-package.sh 的 --kernel-source）最上層 Makefile 的 X.Y.Z，
+  # 由 kernel_versions.py 逐顆比對出貨版本字串；沒有原始碼 → upstream_version 是 null（不從版本字串推測）
+  if [ -n "${KERNEL_SOURCE_DIR:-}" ]; then
+    r=$(timeout 60 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --source-tree-version "$(readlink -m -- "$KERNEL_SOURCE_DIR")" 2>&1)
+    line=$(printf '%s\n' "$r" | grep -m1 $'^KERNEL-TREE-VERSION\t'); local ts tt
+    if [ -n "$line" ]; then IFS=$'\t' read -r _ ts tt <<< "$line"; else ts=GAP; tt="kernel_config.py --source-tree-version 失敗或逾時"; fi
+    if [ "$ts" = OK ]; then pa+=(--source-version "$tt"); else pa+=(--source-gap "$tt"); fi
+  fi
   r=$(timeout 300 python3 -I "$ROOT/tools/pilot/lib/kernel_versions.py" "${pa[@]}" 2>&1); local rc=$?
   if [ $rc -ne 0 ]; then
     rm -f "$KVF"; status C-kernel-versions FAIL "kernel_versions.py 失敗：$(printf '%s\n' "$r" | tail -1)（映像出貨的核心有沒有判定不明）"
@@ -902,6 +910,11 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
 fi
 [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && kernel_versions_prepare
+# CNA 鏡像是沿用的舊資料（tools/mirror/kernel-cve.sh 的 KERNEL_CVE_FALLBACK_FROM：上游連不上）：結果照用，但報告要看得到
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ -n "$KERNEL_CVE_MIRROR" ] && [ -f "$KERNEL_CVE_MIRROR/SOURCE" ] \
+   && grep -qx 'fallback=yes' "$KERNEL_CVE_MIRROR/SOURCE"; then
+  status C-kernel-cve-mirror ATTENTION "$(sed -n 's/^fallback_note=//p' "$KERNEL_CVE_MIRROR/SOURCE" | head -1)"
+fi
 if [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
 elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")

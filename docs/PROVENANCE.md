@@ -151,12 +151,12 @@
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心）；`--source-tree-version`（只讀原始碼樹最上層 Makefile 的 X.Y.Z，沿用 `tree_version`） |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
 | `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：新增 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
 | `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：映像出貨的核心哪些有判定（`scan/kernel-versions.json`：shipped、requested、judged、not_judged 與原因）；sca-scan 的 `--kernel-version` 用 |
+| `tools/pilot/lib/kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：映像出貨的核心哪些有判定（`scan/kernel-versions.json`：shipped、requested、judged、not_judged 與原因）；sca-scan 的 `--kernel-version` 用；schema `sca-center-kernel-versions/2`：`shipped` 每筆帶上游版本（`upstream_version`／`upstream_basis`／`upstream_note`，只認原始碼 Makefile，可用 `--upstream-version` 加平台設定的值核對） |
 | `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
 | `tools/pilot/lib/l4t-kernel-map.json` | `scripts/pilot/lib/l4t-kernel-map.json` | 25fa89a | 清理 2 個 `checked` 欄（原本引用廠商映像與內部 CI 執行編號，見資料來源） |
 | `tools/pilot/lib/l4t_kernel.py` | `scripts/pilot/lib/l4t_kernel.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |

@@ -28,6 +28,11 @@ A, B = "6.1.118", "6.1.120"          # 合成的核心版本
 NOTE_MULTI = "多顆核心逐一判定還沒實作（M2 之後）"
 
 
+def names(doc):
+    """檔案內容的 shipped（schema /2：物件清單）→ 版本清單；null 維持 None。"""
+    return None if doc["shipped"] is None else [x["version"] for x in doc["shipped"]]
+
+
 def sub(tmp_path, name):
     d = tmp_path / name
     d.mkdir()
@@ -42,9 +47,9 @@ def two_kernels():
 
 def test_plan_rules():
     p = kvmod.plan([A], [])                                  # 1 顆、沒指定：照舊判定它
-    assert (p["shipped"], p["requested"], p["judged"], p["not_judged"]) == ([A], [], [A], [])
+    assert (names(p), p["requested"], p["judged"], p["not_judged"]) == ([A], [], [A], [])
     p = kvmod.plan([B, A], [])                               # 多顆、沒指定：都不判定（不猜）
-    assert p["shipped"] == [A, B] and p["judged"] == [] and [x["version"] for x in p["not_judged"]] == [A, B]
+    assert names(p) == [A, B] and p["judged"] == [] and [x["version"] for x in p["not_judged"]] == [A, B]
     assert {x["reason"] for x in p["not_judged"]} == {"沒有指定 --kernel-version"}
     p = kvmod.plan([A, B], [A])                              # 指定 1 顆：判定它，另一顆 not_judged
     assert p["judged"] == [A] and p["not_judged"] == [{"version": B, "reason": kvmod.REASON_OTHER_GIVEN, "shipped": True}]
@@ -195,6 +200,8 @@ import os, subprocess, sys
 a = sys.argv[1:]
 NAME = os.path.basename(sys.argv[0])
 REAL = [sys.executable, "-I", os.environ["REAL_KERNEL_CONFIG"]]
+if "--source-tree-version" in a:                  # 讀原始碼樹的版本：借真的
+    os.execv(sys.executable, REAL + a)
 if "--list-kernel-versions" in a:                 # 另外讀一次映像
     with open(os.environ["FAKE_LOG"], "a") as f:
         f.write("LIST\\n")
@@ -215,7 +222,7 @@ def block_text():
     return SRC[i:SRC.index("# ---- C-euvd", i)]
 
 
-def kernel_run(tmp_path, members, kvers=(), fake_status="OK", kcve_via_grype=True):
+def kernel_run(tmp_path, members, kvers=(), fake_status="OK", source_dir=None):
     """sca-scan 的核心區段（C-kernel-config、C-kernel-module-map 與核心出貨清單）在 bash 裡執行；判定工具是假的。"""
     root = tmp_path / "root"
     lib = root / "tools" / "pilot" / "lib"
@@ -235,6 +242,7 @@ def kernel_run(tmp_path, members, kvers=(), fake_status="OK", kcve_via_grype=Tru
 ROOT={root}; OUT={out}; ST=$OUT/status.tsv; printf 'stage\\tstatus\\tdetail\\n' > "$ST"
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
 MODE=sbom; SBOM_OK=1; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=; KERNEL_CVES=; SCA_KERNEL_VERSIONS=
+{'KERNEL_SOURCE_DIR=' + str(source_dir) if source_dir else 'unset KERNEL_SOURCE_DIR'}
 KVERS=({kv})
 {block_text()}
 echo done
@@ -258,7 +266,7 @@ def test_one_kernel_unchanged(tmp_path):
     assert not any(k.startswith("C-kernel-not-judged") for k in rows) and "C-kernel-versions" not in rows
     assert "--kernel-version" not in log                                  # 沒指定：不加參數，和以前相同
     assert "LIST" not in log and log.count("--also-list-kernel-versions") == 2     # 出貨的核心由判定工具讀映像的同一趟印出，不另外讀映像
-    assert doc["shipped"] == [A] and doc["requested"] == [] and doc["judged"] == [A] and doc["not_judged"] == []
+    assert names(doc) == [A] and doc["requested"] == [] and doc["judged"] == [A] and doc["not_judged"] == []
     # 指定的就是那一顆：判定它，工具收到 --kernel-version
     rows, doc, log, p = kernel_run(sub(tmp_path, "g"), tkc.rootfs_members(kver=A), [A])
     assert rows["C-kernel-config"][0] == "OK" and doc["judged"] == [A] and doc["not_judged"] == []
@@ -268,7 +276,7 @@ def test_one_kernel_unchanged(tmp_path):
 def test_two_kernels_nothing_given(tmp_path):
     # 真的工具遇到多顆核心沒指定會 GAP（不猜）；假的工具回 OK 時，區段也要把兩個階段至少升到 GAP
     rows, doc, log, p = kernel_run(tmp_path, two_kernels())
-    assert doc["shipped"] == [A, B] and doc["requested"] == [] and doc["judged"] == []
+    assert names(doc) == [A, B] and doc["requested"] == [] and doc["judged"] == []
     assert [x["version"] for x in doc["not_judged"]] == [A, B] and {x["reason"] for x in doc["not_judged"]} == {"沒有指定 --kernel-version"}
     for v in (A, B):
         st, detail = rows[f"C-kernel-not-judged-{v}"]
@@ -284,7 +292,7 @@ def test_two_kernels_nothing_given(tmp_path):
 
 def test_two_kernels_one_given(tmp_path):
     rows, doc, log, p = kernel_run(tmp_path, two_kernels(), [A])
-    assert doc["shipped"] == [A, B] and doc["requested"] == [A] and doc["judged"] == [A]
+    assert names(doc) == [A, B] and doc["requested"] == [A] and doc["judged"] == [A]
     assert "LIST" not in log
     assert doc["not_judged"] == [{"version": B, "reason": kvmod.REASON_OTHER_GIVEN, "shipped": True}]
     assert log.count(f"--kernel-version {A}") == 2 and B not in log        # 指定的那顆交給工具
@@ -297,7 +305,7 @@ def test_two_kernels_one_given(tmp_path):
 def test_two_kernels_two_given_judges_none(tmp_path):
     rows, doc, log, p = kernel_run(tmp_path, two_kernels(), [A, B])
     assert log == "LIST\n"                                                 # 判定工具一次都沒執行；沒有別的工具讀映像，只補讀這一次出貨的核心
-    assert doc["shipped"] == [A, B]
+    assert names(doc) == [A, B]
     assert doc["requested"] == [A, B] and doc["judged"] == []
     assert [x["version"] for x in doc["not_judged"]] == [A, B] and {x["reason"] for x in doc["not_judged"]} == {NOTE_MULTI}
     for stage in ("C-kernel-config", "C-kernel-module-map"):
@@ -385,3 +393,111 @@ def test_also_list_kernel_versions_in_the_same_pass(tmp_path):
     p = subprocess.run([sys.executable, "-I", str(tkc.LIB), "--probe-kernel-version", "--also-list-kernel-versions", "--from", str(src)],
                        capture_output=True, text=True, timeout=60)
     assert want in p.stdout.splitlines() and any(l.startswith("KERNEL-VERSION\tGAP") for l in p.stdout.splitlines())
+
+
+# ---------- 上游版本（schema /2 的 shipped 物件） ----------
+
+def up(version, source, param=None):
+    return kvmod.upstream_of(version, source, param)
+
+
+def test_upstream_from_source_makefile():
+    x = up("6.8.12-1021-tegra", ("OK", "6.8.12"))
+    assert x == {"version": "6.8.12-1021-tegra", "upstream_version": "6.8.12", "upstream_basis": "source-makefile",
+                 "upstream_note": "原始碼 Makefile 是 6.8.12，與出貨核心 6.8.12-1021-tegra 相符"}
+    for v in ("6.8.12", "6.8.12+rpt-rpi-2712", "6.8.12-v8"):
+        assert up(v, ("OK", "6.8.12"))["upstream_version"] == "6.8.12"
+    for v in ("6.8.120", "6.8.1", "6.8.12.1", "6.8.12_x", "16.8.12", "6.1.0-rpi"):         # 前綴要接 -、+ 或結尾
+        x = up(v, ("OK", "6.8.12"))
+        assert x["upstream_version"] is None and x["upstream_basis"] is None
+        assert f"原始碼 Makefile 是 6.8.12，出貨核心 {v} 不是它編的" == x["upstream_note"]
+
+
+def test_upstream_never_guessed_from_the_version_string():
+    x = up("6.8.12-1021-tegra", None)
+    assert x["upstream_version"] is None and x["upstream_basis"] is None and x["upstream_note"] == "沒有核心原始碼（--kernel-source），不推測上游版本"
+    x = up("6.8.12-1021-tegra", ("GAP", "原始碼樹最上層的 Makefile 讀不到"))
+    assert x["upstream_version"] is None and "Makefile 讀不到" in x["upstream_note"] and "不推測" in x["upstream_note"]
+
+
+def test_upstream_platform_param():
+    mk = ("OK", "6.8.12")
+    x = up("6.8.12-1021-tegra", mk, "6.8.12")                      # 一致
+    assert (x["upstream_version"], x["upstream_basis"]) == ("6.8.12", "source-makefile+platform-param")
+    x = up("6.8.12-1021-tegra", mk, "6.8.13")                      # 不一致：都不採用，note 寫兩個值
+    assert x["upstream_version"] is None and x["upstream_basis"] is None and "6.8.12" in x["upstream_note"] and "6.8.13" in x["upstream_note"]
+    x = up("6.8.12-1021-tegra", None, "6.8.12")                    # 沒有原始碼：填給的值
+    assert (x["upstream_version"], x["upstream_basis"]) == ("6.8.12", "platform-param") and "沒有原始碼可核對" in x["upstream_note"]
+    x = up("6.1.0-rpi", mk, "6.1.0")                               # Makefile 不是這顆核心的：同樣沒有可核對的原始碼
+    assert (x["upstream_version"], x["upstream_basis"]) == ("6.1.0", "platform-param")
+    assert "沒有原始碼可核對" in x["upstream_note"] and "6.8.12" in x["upstream_note"]
+    x = up("6.1.0-rpi", mk, None)
+    assert x["upstream_version"] is None
+
+
+def test_plan_compares_each_shipped_kernel_separately():
+    p = kvmod.plan(["6.8.12-v8", "6.1.0-rpi"], [], ("OK", "6.8.12"))
+    by = {x["version"]: x for x in p["shipped"]}
+    assert by["6.8.12-v8"]["upstream_version"] == "6.8.12" and by["6.8.12-v8"]["upstream_basis"] == "source-makefile"
+    assert by["6.1.0-rpi"]["upstream_version"] is None and "6.8.12" in by["6.1.0-rpi"]["upstream_note"] and "6.1.0-rpi" in by["6.1.0-rpi"]["upstream_note"]
+    assert p["schema"] == "sca-center-kernel-versions/2" and set(by["6.1.0-rpi"]) == {"version", "upstream_version", "upstream_basis", "upstream_note"}
+    assert kvmod.plan(None, [A, B])["shipped"] is None                                    # 讀不出來：維持 null
+
+
+def test_cli_upstream_arguments(tmp_path):
+    p, doc = run_kv(tmp_path, "--shipped", "6.8.12-v8", "--shipped", "6.1.0-rpi", "--source-version", "6.8.12",
+                    "--upstream-version", "6.1.0-rpi=6.1.0", "--upstream-version", "6.8.12-v8=6.8.12", "--upstream-version", "9.9.9-x=9.9.9")
+    assert p.returncode == 0, p.stdout
+    by = {x["version"]: x for x in doc["shipped"]}
+    assert by["6.8.12-v8"]["upstream_basis"] == "source-makefile+platform-param"
+    assert by["6.1.0-rpi"]["upstream_basis"] == "platform-param" and by["6.1.0-rpi"]["upstream_version"] == "6.1.0"
+    assert "KERNEL-UPSTREAM-PARAM-UNUSED\t9.9.9-x" in p.stdout
+    p, doc = run_kv(tmp_path, "--shipped", A, "--source-gap", "原始碼樹最上層的 Makefile 讀不到")
+    assert doc["shipped"][0]["upstream_version"] is None and "讀不到" in doc["shipped"][0]["upstream_note"]
+    p, doc = run_kv(tmp_path, "--shipped", A)
+    assert doc["shipped"][0]["upstream_note"] == "沒有核心原始碼（--kernel-source），不推測上游版本"
+    for bad in (["--source-version", "6.8"], ["--source-version", "6.8.12", "--source-gap", "x"], ["--upstream-version", "6.8.12"],
+                ["--upstream-version", f"{A}=6.8"], ["--upstream-version", f"{A}=6.8.12", "--upstream-version", f"{A}=6.8.13"]):
+        p, _ = run_kv(tmp_path, "--shipped", A, *bad)
+        assert p.returncode == 3 and p.stdout.startswith("KERNEL-VERSIONS-ERROR"), bad
+
+
+def test_source_tree_version_tool(tmp_path):
+    def tree_ver(root):
+        p = subprocess.run([sys.executable, "-I", str(tkc.LIB), "--source-tree-version", str(root)], capture_output=True, text=True, timeout=60)
+        return p.returncode, p.stdout.strip().split("\t")
+    t = sub(tmp_path, "t")
+    (t / "Makefile").write_text("# SPDX\nVERSION = 6\nPATCHLEVEL = 8\nSUBLEVEL = 12\nEXTRAVERSION =\nNAME = x\n")
+    assert tree_ver(t) == (0, ["KERNEL-TREE-VERSION", "OK", "6.8.12"])
+    t2 = sub(tmp_path, "t2")
+    (t2 / "Makefile").write_text("VERSION = 6\nPATCHLEVEL = 8\n")                      # 沒有 SUBLEVEL：讀不出 X.Y.Z
+    assert tree_ver(t2)[1][:2] == ["KERNEL-TREE-VERSION", "GAP"]
+    assert tree_ver(sub(tmp_path, "t3"))[1][:2] == ["KERNEL-TREE-VERSION", "GAP"]          # 沒有 Makefile
+    t4 = sub(tmp_path, "t4")
+    (t4 / "Makefile").symlink_to(t / "Makefile")                                          # 符號連結不跟隨
+    assert tree_ver(t4)[1][:2] == ["KERNEL-TREE-VERSION", "GAP"]
+
+
+MAKEFILE = "VERSION = 6\nPATCHLEVEL = 1\nSUBLEVEL = 118\nEXTRAVERSION =\n"
+
+
+def test_sca_scan_fills_upstream_per_kernel(tmp_path):
+    members = tkc.rootfs_members(kver="6.1.118-v8") + [("usr/lib/modules/6.1.0-rpi/kernel/x.ko", b"x", None)]
+    tree = sub(tmp_path, "tree")
+    (tree / "Makefile").write_text(MAKEFILE)
+    rows, doc, log, p = kernel_run(sub(tmp_path, "a"), members, source_dir=tree)
+    by = {x["version"]: x for x in doc["shipped"]}
+    assert by["6.1.118-v8"]["upstream_version"] == "6.1.118" and by["6.1.118-v8"]["upstream_basis"] == "source-makefile"
+    assert by["6.1.0-rpi"]["upstream_version"] is None and "原始碼 Makefile 是 6.1.118，出貨核心 6.1.0-rpi 不是它編的" == by["6.1.0-rpi"]["upstream_note"]
+    # 沒有 --kernel-source：全部 null，不推測
+    rows, doc, log, p = kernel_run(sub(tmp_path, "b"), members)
+    assert all(x["upstream_version"] is None and x["upstream_note"] == "沒有核心原始碼（--kernel-source），不推測上游版本" for x in doc["shipped"])
+    # 原始碼讀不出版本：null，note 寫原因
+    (tree / "Makefile").write_text("nothing\n")
+    rows, doc, log, p = kernel_run(sub(tmp_path, "c"), members, source_dir=tree)
+    assert all(x["upstream_version"] is None and "讀不出" in x["upstream_note"] for x in doc["shipped"])
+    # 一顆核心的映像（Jetson 型）：除了 shipped 的物件形式，其他欄位與狀態和以前相同
+    (tree / "Makefile").write_text(MAKEFILE)
+    rows, doc, log, p = kernel_run(sub(tmp_path, "d"), tkc.rootfs_members(kver="6.1.118-v8"), source_dir=tree)
+    assert doc["judged"] == ["6.1.118-v8"] and doc["not_judged"] == [] and doc["shipped"][0]["upstream_version"] == "6.1.118"
+    assert rows["C-kernel-config"][0] == "OK" and not any(k.startswith("C-kernel-not-judged") for k in rows)

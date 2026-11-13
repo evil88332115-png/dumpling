@@ -571,13 +571,13 @@ def kconfig_toolchain_only(kcfg):
     return None
 
 
-KVERS_SCHEMA = "sca-center-kernel-versions/1"
+KVERS_SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2")      # /2：shipped 是物件清單；not_judged 兩版相同，舊檔照樣讀
 
 
 def kernel_scope_of(kvers):
     """scan/kernel-versions.json（sca-scan 的 --kernel-version）→ {"judged": [版本], "not_judged": [版本]}；沒有檔案、格式不對、
     或沒有「出貨但沒判定」的核心 → None（沒有範圍限制，輸出和以前相同）。"""
-    if not isinstance(kvers, dict) or kvers.get("schema") != KVERS_SCHEMA:
+    if not isinstance(kvers, dict) or kvers.get("schema") not in KVERS_SCHEMAS:
         return None
     nj = [x["version"] for x in kvers.get("not_judged") or []
           if isinstance(x, dict) and isinstance(x.get("version"), str) and x.get("shipped") is not False]

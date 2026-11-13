@@ -17,11 +17,11 @@ from test_vex_export import kcfg, ra, row  # noqa: E402
 from test_vex_rules import krow  # noqa: E402
 
 A, B = "6.8.12-1021-tegra", "6.8.12-1099-tegra"          # 合成的核心版本
-SCHEMA = "sca-center-kernel-versions/1"
+SCHEMA = "sca-center-kernel-versions/2"
 
 
 def kv(judged, not_judged, shipped=None):
-    return {"schema": SCHEMA, "shipped": shipped or sorted(judged + not_judged), "requested": judged, "judged": judged,
+    return {"schema": SCHEMA, "shipped": [{"version": v, "upstream_version": None, "upstream_basis": None, "upstream_note": "x"} for v in (shipped or sorted(judged + not_judged))], "requested": judged, "judged": judged,
             "not_judged": [{"version": v, "reason": "x", "shipped": True} for v in not_judged]}
 
 
@@ -32,6 +32,7 @@ def test_scope_of_and_with_scope():
     assert vx.kernel_scope_of(None) is None and vx.kernel_scope_of({}) is None and vx.kernel_scope_of(kv([A], [])) is None
     assert vx.kernel_scope_of(dict(PARTIAL, schema="other/1")) is None
     assert vx.kernel_scope_of(PARTIAL) == {"judged": [A], "not_judged": [B]}
+    assert vx.kernel_scope_of(dict(PARTIAL, schema="sca-center-kernel-versions/1", shipped=[A, B])) == {"judged": [A], "not_judged": [B]}      # 舊檔照樣讀
     # 指定了但映像沒有的核心不算「出貨但沒判定」
     assert vx.kernel_scope_of({"schema": SCHEMA, "judged": [], "not_judged": [{"version": "9.9", "shipped": False}]}) is None
     assert vx.kernel_with_scope(KCFG, None) is KCFG and vx.kernel_with_scope(KCFG, kv([A], [])) is KCFG       # 沒有限制：原樣
