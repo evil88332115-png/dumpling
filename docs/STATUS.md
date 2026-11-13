@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:03 +0800（C1）
+最後更新：2026-11-13 23:05 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -148,7 +148,7 @@
 >   - 建議：revert 註記；cpe-basis 改成列舉值（listed／inferred）；註解邊界；補測試
 >   - 已交回寫程式代理（第三輪）：**完成 d8a20ec**。AMD 元件都有 advisory-match=NOT_ASSESSED，報告照實寫「已解析 N 份」；06-be-00/19 已納入（散文對照 30 個 key、0 個 GAP，AZB 加註）；cpe-basis 改成 listed／inferred；633 passed，四個樣本的 expected 全 OK
 >   - CI tests 43447781681、firmware 43447786318
->   - **下一步**：cse 預驗結束後，派新的驗證代理複驗 d8a20ec
+> - 驗證（Sonnet 5.5，effort high，新代理）：複驗 wp3/fw-advisory d8a20ec，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv3/`，狀態：**進行中**
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
@@ -162,7 +162,12 @@
 >   - Size 逐值列舉 0x40／0x48／0x58／0x60；+0x58 之後要全 0，否則 GAP
 >   - 其他 7 個樣本改動前後逐位元相同；本機 221 passed
 >   - CI tests 43443071116、firmware 43443076668 **綠**
-> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/cse-layout-size dc7589a，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse/`，狀態：**進行中**（C0 同時用私有檔在本機跑 dc7589a，會給去識別化的結論；預驗通過就開 PR）
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/cse-layout-size dc7589a，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse/`，狀態：**完成：驗證通過**（dc7589a）
+>   - 應修是公開文字：4 處「以前…現在」
+>   - 建議：微碼出處要寫到正確小節；license.url 改指 release notes 頁；補測試（0x44～0x54、ELog 非 0、BP 落在表內）
+>   - C0 私有檔複核：CSME 18.1 那份 found；19.0、21.x 那兩份因為表尾非 0 而 GAP
+>   - → **D-053**：表尾非 0 時，CRC 相符、BP 全過、RBEP＝NFTP（或有 FTPR）三項都成立才採用，並記 ATTENTION 列原始值，用合成測試
+> - 寫程式（同一個 cse 代理，第二輪）：文字修正＋建議＋D-053，狀態：**進行中**。完成後再預驗，新的 HEAD 先給 C0 用私有檔複核，再開 PR
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
