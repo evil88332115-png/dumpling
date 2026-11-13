@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:29 +0800（C0）
+最後更新：2026-11-14 00:29 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -68,7 +68,7 @@
   分層報告的核心不適用（`--kernel-in-other-report`，只給 -os）與核心不在發行版序列上的防護（kernelcheck 四條 OR 規則、`tools/pilot/lib/data/distro-kernel-sources.json`、`platform_params.kernel_not_distro`／platform.yml `scan.kernel_not_distro`；D-044）；沒宣告自有軟體 → B-own-software GAP（`sbom.own_software_none_reason`；scan.json `own_software`）；scan.json p1_rows 依 layer_todo；scan.platform_arg 傳到工具（`DUMPLING_SCAN_PLATFORM_ARG`）；
   orin-nano-demo 的 config.json 只留必填、vex-rules.json 只留 K1／K2／U1（C0 決定）
 - M7 待辦（M2 合併後；判斷邏輯一起驗證）：D-035 排除依據類型；D-036 逐顆核心判定與合併；D-038 出貨的 /boot/config-* 優先（C4 缺口 23）；D-039 核心可利用性三層判斷（從 sca-center 同步，PROVENANCE 更新來源 commit）與精靈以掃描版本覆寫 version／identification；
-  D-044 真正的修法：上游版本對核心 CNA、cra_report `kernel_cna_rows` 補 Grype 沒有的 CVE、「核心覆蓋 OK」的判斷條件（C4 缺口 22）；new-project.sh 不帶範本值（config.json、vex-rules.json；同 D-033 的文件骨架）；C4 缺口 7（OMV 原始碼相依依 dumpling:origin=source 歸層）、20（x86 映像的分割區訊息）；sbx-stubs 測試殘留；PR #40 第四輪驗證建議 3（-os sbom.md 的開機韌體一節仍寫 OP-TEE 已掃）、4（略過清單也列在風險評估 Layers 一節）、6（Release 附件說明寫明附件 SBOM 與報告包內 SBOM 的差別；標準答案加「-os 只有 os 層」）；-bsp＋-os 比完整多的 Python deb／PyPI 合併列（fonttools、pip、wheel）；C0 驗證建議 2–8（見下一步 3）；#50 排出的：B-bootloader-coverage 要不要進發行閘門（決策點）、A-source ATTENTION（身分不符 vs 沒釘 digest 要結構化）、sca-scan meta.json 宣告欄位與刷機包層 run-params.json、C-dt-feeds／C-mirror-freshness 對說明文字的依賴
+  D-044 真正的修法：上游版本對核心 CNA、cra_report `kernel_cna_rows` 補 Grype 沒有的 CVE、「核心覆蓋 OK」的判斷條件（C4 缺口 22）；new-project.sh 不帶範本值（config.json、vex-rules.json；同 D-033 的文件骨架）；C4 缺口 7（OMV 原始碼相依依 dumpling:origin=source 歸層）、20（x86 映像的分割區訊息）；sbx-stubs 測試殘留；PR #40 第四輪驗證建議 3（-os sbom.md 的開機韌體一節仍寫 OP-TEE 已掃）、4（略過清單也列在風險評估 Layers 一節）、6（Release 附件說明寫明附件 SBOM 與報告包內 SBOM 的差別；標準答案加「-os 只有 os 層」）；-bsp＋-os 比完整多的 Python deb／PyPI 合併列（fonttools、pip、wheel）；C0 驗證建議 2–8（見下一步 3）；#50 排出的：B-bootloader-coverage 照 D-054（wp0/docs-batch-5）——不是 OK 時進 report_status（GAP，寫明「閉源韌體以廠商公告為準」、列入待人審）、不擋 VEX 發行閘門，最終做法等 PM／法務在 M7 前與分層閘門一起確認、A-source ATTENTION（身分不符 vs 沒釘 digest 要結構化）、sca-scan meta.json 宣告欄位與刷機包層 run-params.json、C-dt-feeds／C-mirror-freshness 對說明文字的依賴
 - M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M7
 - 對外約定（給 C4，已通知）：分層重跑只對 -os 給 `--kernel-in-other-report <專案>-bsp`（-bsp 給了 sca-scan 以 exit 64 拒絕）；scan 腳本用 `DUMPLING_SCAN_PLATFORM_ARG`；platform_arg 只能是 jetson／raspberrypi／rockchip／generic，scan.rootfs 只能是 rootfs；
   標準答案的 Jetson 驗收項目（build_record_status、kernel_boot、upstream_source.modified）只對 platform: jetson 的專案要求（6a87c15）
