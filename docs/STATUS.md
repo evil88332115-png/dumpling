@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:43 +0800（C0）
+最後更新：2026-11-14 05:49 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -280,12 +280,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M8 收完**（#69＋後續 #71 已合併，main 80acfd3；worktree 都已移除）。GitLab 待辦 T-15～T-23（加 T-05）的優先順序已整理給 C0（`$AGENT_TMP/dumpling-tmp-c3/gitlab-todo-priority.md`）：P1 T-21／T-20／T-19 小 PR、P2 T-05 GitLab 後端、P3 T-23＋T-10、T-16、T-12；等 C0 決定
+- 目前在做：GitLab 待辦（C0 同意的順序）。**PR #72**（wp5/gitlab-p1 bde322c）：T-21 release 先驗再傳、T-17 手動試跑不寫入（DUMPLING_RELEASE_DRY_RUN=1）、T-20 NOT_RUN exit 3、T-19 MR 去重；CI 跑中。**T-05**（collect.py／issues.py 的 GitLab 後端，只用假 API 測）：寫程式代理在 `wp5/gitlab-t05` 做
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32（每日監控架構）、#47（M5 GitLab 範本）、#49（M2 之後的每日監控）、#61（GitLab release-meta --notes）、#69（M8：第 14 條演練＋支援期限／EOL）、#71（M8 後續）
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
-- 代理（D-048）：目前沒有代理在跑
+- 代理（D-048）：1 個寫程式代理（Sonnet，T-05）；驗證代理之後再開
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：第一次真實基準等正式 Release（使用者推 tag）；T-14（C1，M7 之後）；GitLab 待辦先做哪些等 C0
 <!-- END C3 -->
