@@ -29,12 +29,15 @@ projects/<專案名>/             一個產品一個資料夾
 ```
 pipeline/new-project.sh <專案名> --platform <平台> --company-role <manufacturer|supplier|both> \
     --os-responsibility <ours|customer|upstream-vendor> [--product-name …] [--brand …] [--version v0.1.0-dev1] \
-    [--markets EU] [--support-until YYYY-MM-DD] [--status development|shipped]
+    [--markets DE,FR,…|EU-ALL|UNKNOWN] [--support-until YYYY-MM-DD] [--status development|shipped] \
+    [--os-distro debian --os-release 13]        # 只在 --os-responsibility ours 時用
 ```
 1. 跑上面的指令（專案名只能用小寫英數與連字號）；會從 `templates/project/` 與平台的 `project_defaults` 產生專案，
-   `CRA/Config/` 的三個檔從平台預設值帶入（`config.json`←`tools/cra/config.example.json`、`inputs.json`←`scan.inputs_template`
-   指到的精靈範本、`vex-rules.json`←`tools/cra/vex-rules.example.json`）。不覆寫已存在的專案。
-   **`config.json` 帶入的是範本的虛構值（Example Co.、example.com、example-agent…），一定要換成真實值或刪掉**：留著的話，讀 config 的 CRA 文件（例如 user-information）會被判成完整（OK）。刪掉的欄位在文件裡標 TO BE COMPLETED、文件至少 GAP（M7 會改成開案時就不帶範本值）。產品自有軟體列在 `sbom.own_software`；真的沒有時寫 `"own_software": []` 加 `"own_software_none_reason": "<理由>"`（B-own-software 記 OK，說明寫理由）；兩個都沒寫 → B-own-software 與 SBOM 文件 GAP（沒有宣告自有軟體）。
+   `CRA/Config/` 的三個檔**不帶範本值**（D-055）：
+   - `config.json` 只有 `tools/cra/config.schema.json` 的必填欄位（`schema_version`、`manufacturer.name`、`product.name`）。`product.name` 來自 `--product-name`（沒給用專案名）；`manufacturer.name` 來自 `--brand`，沒給是 `TO BE COMPLETED`；有給 `--support-until` 時另寫 `support.end_date`（YYYY-MM）。其他欄位都不寫，CRA 文件在這些欄位標 `TO BE COMPLETED`、文件至少 GAP（D-033 (4)）。`tools/cra/config.example.json` 只當結構參考，**不要整份複製**（它的值是虛構的 Example Co.、example.com…，留著會讓文件被判成完整）。產品自有軟體列在 `sbom.own_software`；真的沒有時寫 `"own_software": []` 加 `"own_software_none_reason": "<理由>"`（B-own-software 記 OK，說明寫理由）；兩個都沒寫 → B-own-software 與 SBOM 文件 GAP（沒有宣告自有軟體）。
+   - `vex-rules.json` 是空規則（`{"schema": "sca-center-vex-rules/1", "rules": []}`）；要批次規則時自己寫（具名作者、真實日期與理由、規則審過的映像雜湊），範例見 `tools/cra/vex-rules.example.json`。
+   - `inputs.json` 取自 `scan.inputs_template` 指到的精靈範本。
+   不覆寫已存在的專案。`--markets EU`（舊值）會被拒絕，請用 `EU-ALL`。
 2. 把 `project.yml`、`sources.yml` 裡值是 `TO BE COMPLETED` 的地方填完；`python3 -I pipeline/lib/project_config.py validate projects/<專案名>` 會列出還沒填的欄位。`status` 改成 `shipped` 之前不能有待填欄位。
 3. 推上去。dev／release workflow 讀 `project.yml` 的 `platform`，打 tag `<專案>/<版本>` 就走 release。
 
@@ -46,7 +49,7 @@ pipeline/new-project.sh <專案名> --platform <平台> --company-role <manufact
 | `product_name` | 字串 | 產品名稱 |
 | `brand` | 字串 | 品牌或客戶 |
 | `company_role` | `manufacturer`｜`supplier`｜`both` | 公司角色 |
-| `markets` | 字串清單（不可空） | 銷售市場 |
+| `markets` | 字串清單（不可空）：會員國代碼，或單獨一個 `EU-ALL`／`UNKNOWN`，見 3.1 | 銷售市場 |
 | `platform` | 字串，必須有 `pipeline/platforms/<platform>/platform.yml` | 平台 |
 | `platform_version` | 字串 | 平台與版本 |
 | `bsp_os_source` | 字串 | BSP／OS 來源 |
@@ -54,15 +57,59 @@ pipeline/new-project.sh <專案名> --platform <平台> --company-role <manufact
 | `bootloader` | 字串 | 開機程式 |
 | `own_software` | 字串清單（可空 `[]`） | 自有軟體 |
 | `interfaces` | 字串清單（不可空） | 對外介面 |
-| `support_until` | `YYYY-MM-DD` | 支援期限 |
+| `support_until` | `YYYY-MM-DD`；**以它為準**，見 3.2 | 支援期限 |
 | `status` | `development`｜`shipped` | 狀態 |
 | `os_responsibility` | `ours`｜`customer`｜`upstream-vendor` | OS 層歸誰 |
+| `os`（選填；`ours` 時 shipped 必填） | mapping：`distro`、`release`，見 3.3 | 我們自己的 OS |
 
 `os_responsibility`（D-025、D-027）**由專案的角色與交付方式決定，不寫死在平台設定**。分層邏輯（L 軌）依它處理 `os` 層：
 - `ours`：OS 層也是我們的待辦（例如自有品牌的 AI NAS），P1 判斷表含 OS 層。
 - `customer`：OS 由客戶負責（例如 Jetson 範例 rootfs）：照掃、分開列，出現 KEV 時通知客戶，不進我們的修補待辦。
 - `upstream-vendor`：上游 OS 廠商負責（例如只轉售 TrueNAS）：我們只通知客戶。
 個別產品用哪一種由 PM 與法務判斷；資料模型支援三種。dispatcher 會把值放進環境變數 `DUMPLING_OS_RESPONSIBILITY`，`project-info.py` 也會輸出。
+
+### 3.1 markets（銷售市場，D-055）
+
+值是 ISO 3166-1 alpha-2 **大寫**代碼的清單，只收歐盟 27 個會員國（希臘是 `GR`，**不收**歐盟慣用的 `EL`；程式常數 `project_config.EU_MEMBER_CODES`）：
+
+`AT` 奧地利、`BE` 比利時、`BG` 保加利亞、`HR` 克羅埃西亞、`CY` 賽普勒斯、`CZ` 捷克、`DK` 丹麥、`EE` 愛沙尼亞、`FI` 芬蘭、`FR` 法國、`DE` 德國、`GR` 希臘、`HU` 匈牙利、`IE` 愛爾蘭、`IT` 義大利、`LV` 拉脫維亞、`LT` 立陶宛、`LU` 盧森堡、`MT` 馬爾他、`NL` 荷蘭、`PL` 波蘭、`PT` 葡萄牙、`RO` 羅馬尼亞、`SK` 斯洛伐克、`SI` 斯洛維尼亞、`ES` 西班牙、`SE` 瑞典。
+
+保留值（都必須**單獨**一個，不可和會員國代碼或彼此混在同一個清單）：
+- `EU-ALL`：全歐盟上市。不展開成 27 國。
+- `UNKNOWN`：**明確表示不知道**。允許（包含 `status: shipped`），但下游要標 GAP，不能當成「已填」。
+- `TO BE COMPLETED`：**還沒填**（單獨一個）。和 `UNKNOWN` 不同：它是待填欄位，`status: shipped` 時是錯誤。
+
+其他值（`EU-27`、小寫 `de`、`EL`、重複的代碼）一律是錯誤。
+
+**舊值 `EU`**：驗證時把 `EU` 當成 `EU-ALL` 並發警告；**只在讀進來的資料結構裡遷移，不改寫 `project.yml`、不自動展開成 27 國**。請手動把檔案改成 `EU-ALL` 或列出會員國。`EU` 和其他值混用仍是錯誤。
+
+**下游怎麼讀**（`load_project`／`load_project_all` 回傳的 dict）：
+- `project["markets"]`：遷移後的清單（舊值 `EU` 已是 `["EU-ALL"]`）。
+- `project["_markets_unknown"]`：`markets` 是 `["UNKNOWN"]` 時為 `True`。報告與第 14 條通報範本看到 `True` 要標 GAP（寫明「銷售市場不明，早期預警不能依會員國通知」），不可省略不提；`project-info.py` 同時輸出 `MARKETS_UNKNOWN=true|false`，並在 stderr 印一行 `GAP`。
+- `project["_warnings"]`：警告字串清單（舊值 `EU` 已遷移、`config.json` 讀不了等）；`project-info.py` 與 `project_config.py validate` 把它印成 `WARN`。
+- `project["_todo"]`：待填欄位清單（含 `markets` 是 `TO BE COMPLETED` 時）。
+- 只想要警告而不拋例外的程式用 `check_project(doc)` → `(錯誤, 待填, 警告, 遷移後的 doc)`；`validate_project(doc)` 維持回傳 `(錯誤, 待填)`。
+
+### 3.2 support_until 與產品名稱：以 project.yml 為準（D-055）
+
+- `support_until` 在 `project.yml` 必填（`status: shipped` 時不可是 `TO BE COMPLETED`）。`CRA/Config/config.json` 的 `support.end_date`（YYYY-MM）由它產生：`new-project.sh` 開案時寫入 `support_until` 的年月。
+- `product_name` 同理：`new-project.sh` 把它寫進 `config.json` 的 `product.name`。
+- **一致性檢查**（`load_project` 做，所以 `platform.sh validate`、`project-info.py`、`sbom-layers.py`、`release-meta.py` 都會擋）：兩邊**都有值**（非缺、非空、非 `TO BE COMPLETED`）又不一致 → FAIL。`support_until` 比月份（`2031-12-31` 對 `2031-12`）；`product_name` 要完全相同。名稱用 FAIL 不用警告：名稱會原樣寫進 CRA 文件，警告在 CI 日誌裡沒人看，不一致的文件會被發出去；修法只是改 `config.json` 一行。任一邊沒填就不比（文件欄位標 `TO BE COMPLETED`）。
+- 要改支援期限或名稱：改 `project.yml`，再把 `config.json` 改成一致。
+
+### 3.3 os（我們自己的 OS，D-055）
+
+`os_responsibility: ours`（例如 AI NAS）時用，放在 `project.yml` 的 `os:` 底下：
+
+```yaml
+os:
+  distro: debian      # /etc/os-release 的 ID：小寫英數與 . _ -
+  release: "13"       # /etc/os-release 的 VERSION_ID：一律是字串，要加引號（13 不加引號是數字，會被拒）
+```
+- `ours`：`status: shipped` 時兩個都必填（非空、格式合格）；`development` 時可以是 `TO BE COMPLETED`，也可以整個 `os:` 省略（記成待填 `os.distro`、`os.release`）。
+- 其他歸屬（`customer`、`upstream-vendor`）：可省略；有寫就照上面格式驗證。
+- `os` 下不認得的鍵是錯誤。`new-project.sh` 在 `ours` 時產生 `os:` 區塊（`--os-distro`、`--os-release`，沒給是 `TO BE COMPLETED`）。
+- 下游（M8 的 OS 支援期限檢查）讀 `project["os"]["distro"]`、`project["os"]["release"]`。
 
 ## 4. sources.yml
 

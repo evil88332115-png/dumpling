@@ -4,7 +4,7 @@ schema: 1
 product_name: ${product_name}
 brand: ${brand}                       # 品牌或客戶
 company_role: ${company_role}         # manufacturer｜supplier｜both
-markets: ${markets}                   # 銷售市場
+markets: ${markets}                   # 銷售市場：會員國代碼（ISO 3166-1 alpha-2，希臘 GR）清單，或單獨一個 EU-ALL（全歐盟）、UNKNOWN（明確不知道）
 platform: ${platform}
 platform_version: ${platform_version} # 平台與版本
 bsp_os_source: ${bsp_os_source}       # BSP／OS 來源
@@ -16,3 +16,4 @@ support_until: ${support_until}       # 支援期限 YYYY-MM-DD
 status: ${status}                     # development｜shipped
 # OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
 os_responsibility: ${os_responsibility}
+${os_block}

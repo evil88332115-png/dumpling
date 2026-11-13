@@ -4,7 +4,7 @@ schema: 1
 product_name: "Orin Nano Demo"
 brand: "dumpling public demo (not a real manufacturer)"   # 品牌或客戶（公開示範專案，不是真實產品）
 company_role: "manufacturer"         # manufacturer｜supplier｜both
-markets: ["EU"]                   # 銷售市場
+markets: ["EU-ALL"]                # 銷售市場
 platform: "jetson"
 platform_version: "Jetson Linux r39.2.x（NVIDIA 公開 BSP）" # 平台與版本
 bsp_os_source: "NVIDIA Jetson Linux 公開 BSP、公開範例 rootfs 與 public_sources"       # BSP／OS 來源
