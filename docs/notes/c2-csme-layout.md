@@ -23,7 +23,7 @@ coreboot `util/cbfstool/ifwitool.c`（BPDT、子分割區目錄、類型表）�
   +0x14 checksum(u32)、+0x18 data(offset,size)、+0x20…+0x44 BP1…BP5(offset,size)、+0x48 temp pages、+0x50 external error log；全是 u32，offset 相對區域開頭。
   **Size 從 +0x10 起算**：表的總長是 0x10＋Size。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog）；公開真樣本（Meteor Lake 兩個版本）是 0x58（表總長 0x68，+0x58 起 16 bytes 全 0）。
   **checksum 是 CRC-32**，範圍＝d[+0x10:+0x14] ＋ 4 個 0（checksum 欄位本身不入算）＋ d[+0x18:+0x10+Size]（MEAnalyzer 的驗證程式碼；
-  兩個真樣本的 stored 值都相符：0x7123699e、0xa0827eb3）。**這一版先前的說法「算法沒查到」是錯的，已更正。**
+  登記的樣本 v1.0.1 與同系列 v1.0.0（btg_provisioned.rom）的 stored 值都是 0x7123699e，計算結果相符）。**這一版先前的說法「算法沒查到」是錯的，已更正。**
   本模組認 Size 0x40、0x48、0x58；CRC 不符 → GAP；Size 是其他值 → 不認（none，維持原結果）。
   0x40、0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。樣本讀到 data=(0x3A2000,0xA4000)、
   BP1=(0x1000,0x3A1000)、BP3=(0x446000,0x441000)，兩個 BP 的起點確實是 BPDT 簽章。另外一律檢查「每個非空 BPn 都真的指到 BPDT、範圍不重疊、不超出區域、不壓到表本身」。
