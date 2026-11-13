@@ -155,7 +155,7 @@ def purl_type(purl):
 
 def summarize(comps):
     s = {"components": 0, "with_purl": 0, "with_cpe": 0, "distinct_identities": 0,
-         "vuln_assessment": {}, "version_status": {}, "version_gap": 0, "no_version": 0, "purl_types": []}
+         "vuln_assessment": {}, "version_status": {}, "version_gap": 0, "no_version": 0, "purl_types": [], "advisory_match": {}}
     ids, types = set(), set()
     for c in comps:
         s["components"] += 1
@@ -172,6 +172,9 @@ def summarize(comps):
         p = _props(c)
         va = p.get("dumpling:vuln-assessment", "(未標)")
         s["vuln_assessment"][va] = s["vuln_assessment"].get(va, 0) + 1
+        am = p.get("dumpling:advisory-match")
+        if am is not None:
+            s["advisory_match"][am] = s["advisory_match"].get(am, 0) + 1
         vs = p.get("dumpling:version-status")
         if vs is not None:
             s["version_status"][vs] = s["version_status"].get(vs, 0) + 1
@@ -573,7 +576,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
     md += ["", "## 怎麼讀", "",
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
-           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。",
+           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
@@ -586,6 +589,8 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         md.append("- 元件 %d，有 purl %d，有 cpe %d，vuln-assessment：%s，version-status GAP %d" % (
             s["components"], s["with_purl"], s["with_cpe"],
             "、".join("%s=%d" % kv for kv in sorted(s["vuln_assessment"].items())) or "無", s["version_gap"]))
+        if s.get("advisory_match"):
+            md.append("- 公告比對（dumpling:advisory-match，Intel 微碼與 ME）：%s；候選不是確定受影響，沒有任何一項代表沒有漏洞" % "、".join("%s=%d" % kv for kv in sorted(s["advisory_match"].items())))
         if res.get("nvidia"):
             md.append("- " + res["nvidia"])   # 文字取自 C1 的 nvidia_bulletins.py，已經過 _cell
         for n in res["notes"]:

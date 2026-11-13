@@ -244,6 +244,28 @@ class ReportTests(Base):
     GOOD = [("D-dt-project", "OK", "x"), ("D-dt-upload", "OK", "x"), ("D-dt-bom-processing", "OK", "x"), ("C-grype", "OK", "3 matches")]
     SUMM = {"components": 2, "findings_total": 0, "checks": [{"name": "專案存在", "status": "OK", "detail": ""}]}
 
+    def test_csme_cpe_and_advisory_properties_pass_through_prep(self):
+        """prep 不加、不改、不拿掉 cpe 與 dumpling:advisory-*：Intel CSME 的 CPE（來源已查證）原樣上傳，並統計 advisory-match。"""
+        cpe = "cpe:2.3:o:intel:converged_security_management_engine_firmware:14.0.47:*:*:*:*:*:*:*"
+        me = comp("Intel CSE firmware", "r1", version="14.0.47.1558", cpe=cpe)
+        me["properties"] += [{"name": "dumpling:advisory-match", "value": "NOT_ASSESSED"}, {"name": "dumpling:cpe-note", "value": "NVD incomplete"}]
+        uc = comp("Intel CPU microcode 000806EC", "r2", version="0xF8")
+        uc["properties"] += [{"name": "dumpling:advisory-match", "value": "affected-candidate"},
+                             {"name": "dumpling:advisory-candidates", "value": "INTEL-SA-00898"}]
+        doc = bom(me, uc)
+        before = copy.deepcopy(doc["components"])
+        info, o = self.prep(doc)
+        out = json.load(open(os.path.join(o, "sbom.cdx.json"), encoding="utf-8"))
+        self.assertEqual(out["components"], before)
+        self.assertEqual(out["components"][0]["cpe"], cpe)
+        self.assertEqual(info["summary"]["with_cpe"], 1)
+        self.assertEqual(info["summary"]["advisory_match"], {"NOT_ASSESSED": 1, "affected-candidate": 1})
+        self.assertEqual(info["summary"]["vuln_assessment"], {"NOT_ASSESSED": 2})          # 候選公告不改變漏洞比對狀態
+        rc, _, md = self.run_report([o])
+        self.assertIn("公告比對", md)
+        self.assertIn("affected-candidate=1", md)
+        self.assertIn("沒有任何一項代表沒有漏洞", md)
+
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))
         rc, out, md = self.run_report([o])

@@ -54,8 +54,11 @@ BIOS（Intel 平台的完整 SPI 映像）：
   （CSME 12 以後：$FPT 在 +0x1000、沒有 FTPR 那一項）；都拿不到但有表頭像真的 `$FPT`、FTPR 的 `$CPD` 或候選數用完 → unknown；
   只有雜散的標記仍是 no-me-region。有兩個以上版本不同的 FTPR manifest（例如 capsule 裡兩個 ME 映像）時報第一個，
   me_conflict 列出全部、ATTENTION。沒有 ME 區域的檔案裡零散的 `$MN2`
-  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；family 是 CSME 時 SBOM 的 ME 元件才有 cpe（見 CSME_CPE），其他情況不填。
+  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；SBOM 的 ME 元件的 cpe：清單寫明 CSME，或映像讀不出 family 但 major 版本 ≥ 11（NVD 的 o 類 CPE 只有 CSME 有這些版本）才帶，版本只放前三段（見 CSME_CPE、csme_cpe_info）；清單寫 ME／TXE／SPS、版本不是三段以上的數字、major < 11 且 family 不明時不填，原因在 dumpling:cpe-gap。
   格式依 me_cleaner、MEAnalyzer 的結構定義（只讀它們的原始碼核對欄位位置，沒有用它們的程式）。
+- 公告比對（fw_advisory.py，離線）：每份 Intel 微碼對 tools/cra/data/intel-microcode-releases.json（Intel 公開的微碼發佈說明，由 intel_ucode_releases.py 產生）
+  比對，結果記在 inv["bios"][i]["microcode"][j]["advisory"]、SBOM 的 dumpling:advisory-* property 與 fw-inventory.md 的「公告比對」一節；
+  規則與限制見 fw_advisory.py 檔頭與 docs/notes/c2-firmware-advisory.md。結果是候選，不是漏洞判定；dumpling:vuln-assessment 仍是 NOT_ASSESSED。
 - CPU microcode：Intel microcode header（header version 1、loader revision 1、BCD 日期、CPUID、platform id、大小），
   先檢查 header 欄位再算整份 checksum（為 0 才算）；每個（CPUID、platform id）一列；extended signature table 的 CPUID 另外記。
   全檔掃描照舊（找 FIT 沒列的備援或 OS／UEFI 階段才載入的）；另外讀 FIT（見 fit_table）：每份 microcode 記 in_fit

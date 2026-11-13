@@ -6,6 +6,7 @@
 # stdout 只有一行：FIRMWARE-BIOS<TAB>OK|ATTENTION|GAP|FAIL<TAB>說明（沿用 x86_firmware.py 的狀態，不顯示整體 PASS 或「安全」）。
 # 退出碼：0＝OK；2＝ATTENTION 或 GAP；1＝FAIL；64＝參數錯誤。
 # 狀態只代表解析的結果；每個元件的漏洞比對狀態是 NOT_ASSESSED（SBOM 的 dumpling:vuln-assessment property）。
+# Intel 微碼另外離線比對 tools/cra/data/intel-microcode-releases.json（dumpling:advisory-* property、fw-inventory.md 的「公告比對」）：候選公告不是確定受影響，資料表讀不到時狀態 ATTENTION。
 set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

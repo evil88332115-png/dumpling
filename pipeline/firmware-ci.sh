@@ -14,8 +14,8 @@ if [ $# -gt 0 ]; then manifests=("$@"); else manifests=("$root"/firmware/bios/*/
 mkdir -p "$work" "$art"
 
 {
-  echo '| 樣本 | firmware-bios 狀態行 | 元件數 | expected 比對 |'
-  echo '|---|---|---|---|'
+  echo '| 樣本 | firmware-bios 狀態行 | 元件數 | expected 比對 | 微碼公告比對（候選不是確定受影響） |'
+  echo '|---|---|---|---|---|'
 } > "$summary"
 
 # 摘要.md 的儲存格：狀態行與 expected 說明含解析出來的文字，一律經共用的 md_safe（濾控制字元、跳脫 markdown 特殊字元、截短）
@@ -30,11 +30,11 @@ for m in "${manifests[@]}"; do
   out="$art/$slug"; mkdir -p "$out"
   if ! mapfile -t inputs < <(python3 -I "$here/lib/firmware_plan.py" "$m" --dl "$dl" --work "$work"); then
     echo "FIRMWARE-CI	FAIL	$slug	輸入準備失敗"
-    echo "| $slug | FAIL（輸入準備失敗） | - | NOT_RUN |" >> "$summary"; rc=1; continue
+    echo "| $slug | FAIL（輸入準備失敗） | - | NOT_RUN | - |" >> "$summary"; rc=1; continue
   fi
   if [ ${#inputs[@]} -eq 0 ]; then
     echo "FIRMWARE-CI	NOT_RUN	$slug	沒有 role: image／package 的檔案"
-    echo "| $slug | NOT_RUN（沒有可解析的檔案） | - | NOT_RUN |" >> "$summary"; rc=1; continue
+    echo "| $slug | NOT_RUN（沒有可解析的檔案） | - | NOT_RUN | - |" >> "$summary"; rc=1; continue
   fi
   line=$("$here/firmware-bios.sh" "${inputs[@]}" --out "$out"); brc=$?
   printf '%s\n' "$line"
@@ -47,7 +47,12 @@ for m in "${manifests[@]}"; do
   [ -n "$est" ] || est=$(grep -P '^FIRMWARE-EXPECT\tERROR\t' "$out/expect.log" | cut -f4)
   [ "$erc" -eq 0 ] || est="${est:-expect 失敗}（exit $erc）"
   [ "$erc" -eq 0 ] && flag="" || flag="**不符**："
-  echo "| $slug | $(cell "${line#FIRMWARE-BIOS$'\t'}") | $count | $flag$(cell "$est") |" >> "$summary"
+  adv=$(python3 -I -c 'import json,sys
+a=json.load(open(sys.argv[1])).get("advisory") or {}
+c=a.get("counts") or {}
+t="、".join("%s %d" % (k, c[k]) for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c)
+print(("資料表 GAP：" if a.get("status") == "GAP" else "") + (t or "沒有微碼"))' "$out/fw-inventory.json" 2>/dev/null || echo "-")
+  echo "| $slug | $(cell "${line#FIRMWARE-BIOS$'\t'}") | $count | $flag$(cell "$est") | $(cell "$adv") |" >> "$summary"
   # 不符的明細也寫進摘要，方便不點進 log 就看到
   if [ "$erc" -ne 0 ]; then
     { echo; echo "<details open><summary>$slug 不符明細</summary>"; echo; echo '```'

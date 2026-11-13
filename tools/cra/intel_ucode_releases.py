@@ -49,6 +49,7 @@ FMS_PI = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{2})-([0-9a-fA-F]{2})/([0-9a
 REV = re.compile(r"^[0-9a-fA-F]{8}$")
 SA_ID = re.compile(r"(?:INTEL-SA-)+(\d{4,6})|(?<![A-Za-z0-9])SA(\d{5})(?![0-9])", re.I)
 SA_NA = re.compile(r"\[INTEL-SA-NA\]", re.I)
+URL_PAREN = re.compile(r"\(https?://[^)\s]*\)")
 SA_URL = re.compile(r"/advisory/(intel-sa-\d{4,6})\.html", re.I)
 SECTIONS = {"purpose": "purpose", "functional updates": "purpose", "new platforms": "new", "updated platforms": "updated",
             "removed platforms": "removed", "new disclosures updated in prior releases": "disclosed", "change history": "history"}
@@ -89,7 +90,7 @@ def security_bullet(text):
     else:
         return None
     ids = []
-    for m in SA_ID.finditer(t):
+    for m in SA_ID.finditer(URL_PAREN.sub("()", t)):        # 編號只取連結文字與一般文字；網址另外拿來核對
         sa = norm_sa(m.group(1) or m.group(2))
         if sa not in ids:
             ids.append(sa)
