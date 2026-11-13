@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 04:42 +0800（C0）
+最後更新：2026-11-14 04:44 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,7 +36,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M7a PR #58**（https://github.com/evil88332115-png/dumpling/pull/58，wp1/m7a＝b515e76，worktree `$AGENT_TMP/dumpling-wt-c1-m7a`）：驗收 run（f1eeb17，重新編譯）release 43489995288、43490013212、tests 43490031261 **都綠**，draft7 核對通過、已補進 PR 說明，**等 C0 合併**；我的驗證**通過**（建議 2、3、5 部分在 b515e76 修，已貼留言）；已請 C0 轉告 C4 改 wp7 的 `--markets EU` 測試。正式 tag 等使用者，從最新 main 打
+- 目前在做：**M7a2**（C2 validate_table 的 vBIOS 欄位）：2026-11-14 已把 6 點提議送給 C2 確認（commit_date 兩種格式、mirror_info 缺少 → GAP／格式錯 → InputError、vbios 列欄位檢查、非 vbios 列不得有 vbios_*／pci_*、subsystem 欄位、契約測試），**等 C2 回覆才動手**。M7a PR #58 **已合併為 main b56cff4**（draft7 核對通過，C0 確認）。正式 tag 等使用者，要打在 b56cff4 或更新的 main 上
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
@@ -57,7 +57,7 @@
 - 本機背景工作：無
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
-  2. **M7a #58**：驗收 run 都綠；draft7 核對通過（標準答案兩版 24 項、tests/expected 沒改；missing_fields -os 55→52、完整／-bsp 55→53（少 product.version／identification／support.end_date，多 #25 補算的 sbom.flash_package_supplier）；設定包版本 v39.2.x-demo1、識別＝刷機包檔名＋MD5、支援期限 2031-12；product_version_check OK；notes 與 release-meta 一致；sbom.md 第 6 節 436／438 元件、-os 不適用）→ 已補進 PR 說明、已通知 C0 → **等 C0 合併**。兩個代理的子分支 wp1/m7a-fields、wp1/m7a-report 已併入 wp1/m7a，合併後刪
+  2. **M7a #58 已合併（main b56cff4）**。子分支 worktree（m7a-fields、m7a-report）已移除；**刪除分支 wp1/m7a-fields、wp1/m7a-report（本機與遠端）被權限機制擋下，等使用者處理**
      之後：M7a2（C2 validate_table，介面已確認，見對外介面約定）→ **M7b（第一項，C0 指定）：「版本＝tag」加和 tag 無關的獨立來源**——現在 tag 同時餵精靈 --version 與 collect 的核對，tag 打錯或掃錯版本抓不到（C0 驗證實測 tag v2.1、實際掃 v2.0 → OK）；用 Jetson 掃描讀到的 BSP 版本字串（nv_tegra_release 等）／sources.yml 的版本段落／刷機包檔名，定義和 tag 的對應規則（例 v39.2.1-demo1 ↔ BSP 39.2.1），對不上 FAIL → M7b → M7c → M7d（含 adapter-gaps #7）→ M7e（同步 sca-center #221）；M7f 從 M7b 後平行（A2 要列新增 permissions 與固定 SHA 的 action）。M7c–e 若要改 Jetson 標準答案，先跟 C0 說明原因與數字
   3. 移除 worktree：scannr、followup 已移除；`dumpling-wt-c1-m2` 留到 tag 核對完
 - 驗證（這輪之前）：
