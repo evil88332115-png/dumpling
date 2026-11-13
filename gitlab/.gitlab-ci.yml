@@ -54,15 +54,16 @@ workflow:
 
 .rules-tag-release:
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+    # 真的 tag push 才發 Release：在 tag ref 上從網頁或 API 手動建的 pipeline 也有 CI_COMMIT_TAG，不能因此發正式 Release（#72 驗證應修 2）
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
     # T-17：手動試跑 release（代替 GitHub 的「只建 draft Release」；GitLab 沒有 draft Release）。網頁或 API 建立 pipeline 時帶
     # DUMPLING_RELEASE_DRY_RUN=1 與 DUMPLING_RELEASE_TAG=<專案>/<版本>：跑 build、scan，publish 只驗證，不上傳 Package、不建 Release、不開 Issue。
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_RELEASE_DRY_RUN == "1" && $DUMPLING_RELEASE_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
 
-# 只有真的 tag 才跑（簽章會寫進透明紀錄，試跑不能跑）
+# 只有真的 tag push、而且不是試跑才跑（簽章會寫進透明紀錄；規則就排除試跑，不只靠腳本裡的檢查）
 .rules-tag-only:
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/ && $DUMPLING_RELEASE_DRY_RUN != "1"'
 
 .rules-dev:
   rules:
@@ -298,7 +299,9 @@ release:sign:
   extends: [.rules-tag-only]
   needs: ["release:publish"]
   tags: [dumpling]
-  allow_failure: true
+  # NOT_RUN（沒開簽章、試跑）是結束碼 3、允許失敗；真的簽章失敗是失敗（#72 驗證建議；官方 allow_failure:exit_codes）
+  allow_failure:
+    exit_codes: [3]
   interruptible: false
   id_tokens:
     SIGSTORE_ID_TOKEN:
@@ -306,9 +309,9 @@ release:sign:
   script:
     - !reference [.setup, script]
     - |
-      test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 0; }
+      test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 3; }
     - |
-      [ "${DUMPLING_RELEASE_DRY_RUN:-0}" != 1 ] || { echo "sign: NOT_RUN（試跑不簽章：簽章會寫進透明紀錄）"; exit 0; }
+      [ "${DUMPLING_RELEASE_DRY_RUN:-0}" != 1 ] || { echo "sign: NOT_RUN（試跑不簽章：簽章會寫進透明紀錄）"; exit 3; }
     # cosign 執行檔要固定版本與 sha256：進 pipeline/lib/tools.lock（待辦 T-09，M7 的 A2 一併處理）
     - bash pipeline/install-tool.sh cosign "$DUMPLING_OUT_BASE/bin"
     - |

@@ -176,3 +176,11 @@ def job_when(job, ctx):
                 pass        # 官方：tag、排程、手動 pipeline 的 changes 一律成立
             return r.get("when", job.get("when", "on_success"))
     return "never"
+
+
+def pipeline_when(doc, ctx):
+    """workflow:rules → 這條 pipeline 會不會建立（第一條符合的規則的 when；都不符合 → never）。"""
+    for r in (doc.get("workflow") or {}).get("rules") or []:
+        if "if" not in r or rule_matches(r["if"], ctx):
+            return r.get("when", "always")
+    return "never"

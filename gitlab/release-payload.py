@@ -8,6 +8,8 @@ manifest.tsv 每行「檔名<TAB>標籤」（與 GitHub 版 release.yml 的 mani
 所有輸入都當不可信資料：檔名只允許安全字元，不含路徑。
 --files-dir：每個附件都要是這個資料夾裡的一般檔案（不是連結、不是資料夾），而且不重複。gitlab/release-publish.sh 先用它驗完全部，
 驗過才上傳（GITLAB-PORT T-21：驗不過時一個檔都不上傳）。
+--list-out：把驗過的附件檔名一行一個寫出來（每行都以換行結尾）。release-publish.sh 只照這份清單上傳，不自己再解析 manifest
+（#72 驗證應修 1：最後一行沒有換行、孤立的 \r 在 bash 與 Python 的切行結果不同）。manifest 裡出現 \r 一律拒絕。
 """
 import argparse
 import json
@@ -69,11 +71,15 @@ def main(argv=None):
     ap.add_argument("--project-id", required=True)
     ap.add_argument("--notes")
     ap.add_argument("--files-dir", help="附件所在的資料夾：每個附件都要存在而且是一般檔案")
+    ap.add_argument("--list-out", help="驗過的附件檔名清單（一行一個，給 release-publish.sh 上傳用）")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     try:
-        with open(a.manifest, encoding="utf-8") as fh:
-            lines = fh.readlines()
+        with open(a.manifest, encoding="utf-8", newline="") as fh:      # 不做換行轉換：\r 要原樣看到
+            text = fh.read()
+        if "\r" in text:
+            raise ValueError("manifest 有 \\r（CR）：只接受 \\n 換行")
+        lines = text.split("\n")
         notes = ""
         if a.notes:
             try:
@@ -87,6 +93,9 @@ def main(argv=None):
         return 1
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
+    if a.list_out:
+        with open(a.list_out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("".join(l["direct_asset_path"].lstrip("/") + "\n" for l in payload["assets"]["links"]))
     print("release-payload: OK（%d 個附件）" % len(payload["assets"]["links"]))
     return 0
 

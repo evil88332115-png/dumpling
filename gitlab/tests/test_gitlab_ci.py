@@ -61,6 +61,21 @@ class CiFile(unittest.TestCase):
         cls.text = gitlabci.CI_FILE.read_text(encoding="utf-8")
         cls.vars = cls.doc.get("variables", {})
 
+    def items_of(self, job):
+        """job 展開後的 script 項目清單（每個 - 一項）。"""
+        out = []
+        def flat(items):
+            for it in items:
+                if isinstance(it, list) and len(it) == 2 and all(isinstance(x, str) for x in it):
+                    flat(self.doc[it[0]][it[1]])
+                elif isinstance(it, list):
+                    flat(it)
+                else:
+                    out.append(str(it))
+        for k in ("before_script", "script", "after_script"):
+            flat(self.jobs[job].get(k, []))
+        return out
+
     def lines_of(self, job):
         """job 展開後的 script 文字（!reference 先展開成其內容）。"""
         out = []
@@ -178,8 +193,24 @@ class CiFile(unittest.TestCase):
             if "/releases" in t or "release-publish.sh" in t:
                 for x in j["rules"]:
                     self.assertTrue("CI_COMMIT_TAG" in x.get("if", "") or '$DUMPLING_RELEASE_DRY_RUN == "1"' in x.get("if", ""), (n, x))
-        # 簽章（寫進透明紀錄）只在真的 tag 跑
-        self.assertEqual([x["if"] for x in self.jobs["release:sign"]["rules"]], [self.jobs["release:build"]["rules"][0]["if"]])
+        # 簽章（寫進透明紀錄）只在真的 tag push、不是試跑時跑：規則與腳本兩道都要有（#72 驗證）
+        sign = self.jobs["release:sign"]
+        tag_push = self.ctx(CI_PIPELINE_SOURCE="push", CI_COMMIT_TAG="orin-nano-demo/v39.2.0-demo1")
+        self.assertEqual(gitlabci.job_when(sign, tag_push), "on_success")
+        self.assertEqual(gitlabci.job_when(sign, dict(tag_push, DUMPLING_RELEASE_DRY_RUN="1")), "never")
+        self.assertIn('[ "${DUMPLING_RELEASE_DRY_RUN:-0}" != 1 ] || { echo "sign: NOT_RUN（試跑不簽章', self.lines_of("release:sign"))
+
+    def test_manual_pipeline_on_tag_ref_does_not_release(self):
+        # #72 驗證應修 2：在 tag ref 上從網頁／API 手動建 pipeline（CI_COMMIT_TAG 有值）、沒帶 DRY_RUN → release 的 job 一個都不跑
+        for src in ("web", "api"):
+            ctx = self.ctx(CI_PIPELINE_SOURCE=src, CI_COMMIT_TAG="orin-nano-demo/v39.2.0-demo1")
+            for n in ("release:build", "release:scan", "release:publish", "release:sign"):
+                self.assertEqual(gitlabci.job_when(self.jobs[n], ctx), "never", (src, n))
+            # 帶了 DRY_RUN＋DUMPLING_RELEASE_TAG：只有試跑（不簽）
+            dry = dict(ctx, DUMPLING_RELEASE_DRY_RUN="1", DUMPLING_RELEASE_TAG="orin-nano-demo/v39.2.0-demo1")
+            for n in ("release:build", "release:scan", "release:publish"):
+                self.assertEqual(gitlabci.job_when(self.jobs[n], dry), "on_success", (src, n))
+            self.assertEqual(gitlabci.job_when(self.jobs["release:sign"], dry), "never")
 
     def ctx(self, **kw):
         base = {"CI_DEFAULT_BRANCH": "main", "CI_API_V4_URL": "https://gitlab.example.com/api/v4"}
@@ -219,18 +250,27 @@ class CiFile(unittest.TestCase):
             self.assertEqual(gitlabci.job_when(self.jobs[n], dict(push, CI_OPEN_MERGE_REQUESTS="g/p!1")), "never", n)
             self.assertEqual(gitlabci.job_when(self.jobs[n], push), "on_success", n)
             self.assertEqual(gitlabci.job_when(self.jobs[n], self.ctx(CI_PIPELINE_SOURCE="merge_request_event")), "on_success", n)
-        # dev 的 build／scan 不受影響（只在 branch pipeline 跑）
-        self.assertEqual(gitlabci.job_when(self.jobs["dev:build"], dict(push, CI_OPEN_MERGE_REQUESTS="g/p!1")), "on_success")
+        # dev 的 build／scan 不受影響（只在 branch pipeline 跑）：整條 branch pipeline 照樣建立（never 不能放在 workflow:rules；#72 驗證）
+        mr_open = dict(push, CI_OPEN_MERGE_REQUESTS="g/p!1")
+        self.assertNotEqual(gitlabci.pipeline_when(self.doc, mr_open), "never")
+        self.assertNotIn("CI_OPEN_MERGE_REQUESTS", json.dumps(self.doc["workflow"]))
+        self.assertEqual(gitlabci.job_when(self.jobs["dev:build"], mr_open), "on_success")
 
     def test_t20_not_run_exit_3(self):
-        j = self.jobs["dev:publish"]
-        self.assertEqual(j["allow_failure"], {"exit_codes": [3]})
-        self.assertIn("exit 3", self.lines_of("dev:publish"))
-        for n in ("dev:publish", "firmware:dt", "watch:compute", "watch:notify"):
-            t = self.lines_of(n)
-            for line in t.splitlines():
-                if "NOT_RUN" in line and "exit" in line:
-                    self.assertIn("exit 3", line, (n, line))
+        for n in ("dev:publish", "release:sign"):
+            self.assertEqual(self.jobs[n]["allow_failure"], {"exit_codes": [3]}, n)
+        # 每一個印 NOT_RUN 的地方，之後的第一個 exit 一定是 3（exit 可能在同一項，也可能在下一項，例如 echo 與 - exit 分開寫；#72 驗證）
+        for n in ("dev:publish", "firmware:dt", "watch:compute", "watch:notify", "release:sign"):
+            items = self.items_of(n)
+            seen = 0
+            for k, it in enumerate(items):
+                for m in re.finditer("NOT_RUN", it):
+                    after = it[m.end():] + "\n" + (items[k + 1] if k + 1 < len(items) else "")
+                    e = re.search(r"\bexit\s+(\d+)", after)
+                    self.assertIsNotNone(e, (n, it))
+                    self.assertEqual(e.group(1), "3", (n, it[:120]))
+                    seen += 1
+            self.assertGreater(seen, 0, n)
 
     def test_dev_and_firmware_rules(self):
         for n in ("dev:build", "dev:scan"):
@@ -418,7 +458,10 @@ class ReleasePublish(unittest.TestCase):
         self.res, self.bin, self.log = d / "result", d / "bin", d / "curl.log"
         self.res.mkdir()
         self.bin.mkdir()
-        (self.bin / "curl").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CURL_LOG"\n')
+        # 假 curl：記錄每次呼叫。FAIL_UPLOAD=1 時，上傳回 HTTP 錯誤：有 --fail 才回非 0（同真的 curl：沒有 --fail 時 HTTP 4xx／5xx 也是 0）
+        (self.bin / "curl").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CURL_LOG"\n'
+                                       'case " $* " in *" --upload-file "*) if [ "${FAIL_UPLOAD:-}" = 1 ]; then '
+                                       'case " $* " in *" --fail "*) exit 22 ;; esac; fi ;; esac\nexit 0\n')
         (self.bin / "curl").chmod(0o755)
         for f in ("sbom-p-v1.cdx.json", "release-meta.json", "notes.md"):
             (self.res / f).write_text("{}")
@@ -459,6 +502,39 @@ class ReleasePublish(unittest.TestCase):
             rc, out, calls = self.run_pub()
             self.assertNotEqual(rc, 0, name)
             self.assertEqual(calls, [], name)
+
+    def test_manifest_without_trailing_newline_uploads_everything(self):
+        # #72 驗證應修 1：最後一行沒有換行時，以前 bash 的 while read 會漏掉那一行（Release 卻掛著它的連結）
+        for manifest, n in (("sbom-p-v1.cdx.json\tSBOM\nrelease-meta.json\tmeta", 2), ("sbom-p-v1.cdx.json\tSBOM", 1)):
+            (self.res / "manifest.tsv").write_text(manifest)
+            if self.log.exists():
+                self.log.unlink()
+            rc, out, calls = self.run_pub()
+            self.assertEqual(rc, 0, out)
+            ups = [c for c in calls if "--upload-file" in c]
+            self.assertEqual(len(ups), n, calls)
+            self.assertTrue(calls[-1].endswith("/projects/12/releases"))
+            rel = json.load(open(Path(self.td.name) / "release.json"))
+            self.assertEqual(len(rel["assets"]["links"]), n)
+
+    def test_cr_in_manifest_uploads_nothing(self):
+        for manifest in ("sbom-p-v1.cdx.json\tSBOM\rrelease-meta.json\tmeta\n", "sbom-p-v1.cdx.json\tSBOM\r\n"):
+            (self.res / "manifest.tsv").write_bytes(manifest.encode())
+            if self.log.exists():
+                self.log.unlink()
+            rc, out, calls = self.run_pub()
+            self.assertNotEqual(rc, 0, repr(manifest))
+            self.assertEqual(calls, [], repr(manifest))
+
+    def test_upload_http_error_stops_before_release(self):
+        # 上傳回 HTTP 錯誤：curl --fail 讓腳本停下，不建 Release（拿掉 --fail 這個測試會失敗）
+        rc, out, calls = self.run_pub(FAIL_UPLOAD="1")
+        self.assertNotEqual(rc, 0, out)
+        self.assertFalse([c for c in calls if c.endswith("/releases")], calls)
+        pub = (HERE.parent / "release-publish.sh").read_text(encoding="utf-8")
+        for line in pub.splitlines():
+            if line.strip().startswith("curl "):
+                self.assertIn("--fail", line)
 
     def test_bad_tag_or_url_uploads_nothing(self):
         for env in ({"CI_API_V4_URL": "http://gitlab.example.com/api/v4"}, {"CI_PROJECT_ID": "1;x"}):
