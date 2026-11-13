@@ -90,7 +90,7 @@ class Base(unittest.TestCase):
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
                                grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=kw.get("demo", False),
-                               allow_baseline=kw.get("allow_baseline", True))
+                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999")
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
@@ -223,7 +223,7 @@ class T(Base):
         out = os.path.join(self.w, "out-empty")
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode="real",
                                kev_overlay=None, max_new_issues=20, run_url=None, grype=None, grype_total_timeout=100, vendor_config=None,
-                               now=NOW1, demo=True, allow_baseline=True)
+                               now=NOW1, demo=True, allow_baseline=True, prev_schedule=None, run_id=None)
         st, _ = match.run(a)
         self.assertEqual(st, "GAP")
         self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
@@ -309,7 +309,7 @@ class T(Base):
         st, _ = match.run(argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds,
                                              out=os.path.join(self.w, "o"), mode="real", kev_overlay=None, max_new_issues=20, run_url=None,
                                              grype=None, grype_total_timeout=100, vendor_config=None, now=NOW1, demo=False,
-                                             allow_baseline=True))
+                                             allow_baseline=True, prev_schedule=None, run_id=None))
         self.assertEqual(st, "GAP")
 
     def test_baseline_needs_explicit_allow(self):
@@ -318,11 +318,24 @@ class T(Base):
         json.dump({"dateReleased": NOW1, "vulnerabilities": [{"cveID": "CVE-2021-44228"}]}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode="real",
                                kev_overlay=None, max_new_issues=20, run_url=None, grype=None, grype_total_timeout=100, vendor_config=None,
-                               now=NOW1, demo=True, allow_baseline=False)
+                               now=NOW1, demo=True, allow_baseline=False, prev_schedule=None, run_id=None)
         st, detail = match.run(a)
         self.assertEqual(st, "GAP")
         self.assertIn("baseline=true", detail)
-        self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
+        # #32 驗證 F4：real 時只開「還沒有基準」的提醒（state 是 null，不寫狀態）
+        plan = json.load(open(os.path.join(out, "plan.json")))
+        self.assertIsNone(plan["state"])
+        self.assertIsNone(plan["state_base"])
+        self.assertEqual([(x["op"], x["key"]) for x in plan["actions"]], [("open", match.issue_key("real", "no-baseline"))])
+        self.assertIn("watch-health", plan["actions"][0]["labels"])
+        # 提醒 Issue 存在時，下一次還是「沒有基準」，不會變成「沒有狀態卻有監控 Issue」的 FAIL
+        json.dump({"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 1,
+                   "watch_keys": [match.issue_key("real", "no-baseline")]}, open(os.path.join(self.state, "state-base.json"), "w"))
+        st, _ = match.run(a)
+        self.assertEqual(st, "GAP")
+        # 之後建立基準：在提醒 Issue 留言
+        _, _, plan = self.run_once(NOW1)
+        self.assertIn(("comment", match.issue_key("real", "no-baseline")), [(x["op"], x["key"]) for x in plan["actions"]])
 
     def test_baseline_fails_when_euvd_unavailable(self):
         """PR #28 應修 1：第一次建基準時 EUVD 不能用 → FAIL。"""
@@ -365,6 +378,87 @@ class T(Base):
         finally:
             match.STATE_WARN_CHARS = old
         self.assertTrue(any("接近上限" in x["title"] for x in plan["actions"] if x["op"] == "open_if_closed"))
+
+    def test_size_warning_is_attention_and_throttled(self):
+        """#32 驗證 F1：大小警告讓整輪 ATTENTION，而且 7 天才提醒一次。"""
+        self.run_once(NOW1)
+        orig = match.state_size
+        match.state_size = lambda st: 50000
+        try:
+            st, _, p2 = self.run_once(NOW2)
+            _, _, p3 = self.run_once(NOW3)
+            _, _, p9 = self.run_once("2026-11-19T01:00:00Z")
+        finally:
+            match.state_size = orig
+        self.assertEqual(st, "ATTENTION")
+        self.assertEqual(p2["status"], "ATTENTION")
+        warn = lambda p: [x for x in p["actions"] if "接近上限" in x.get("title", "")]
+        self.assertEqual(len(warn(p2)), 1)
+        self.assertEqual(warn(p3), [])                       # 隔天不再留言
+        self.assertEqual(len(warn(p9)), 1)                   # 7 天後再提醒
+
+    def test_pruned_group_reappears_with_open_if_closed(self):
+        """#32 驗證 F2：修剪過的群組再出現 → open_if_closed（舊 Issue 已關閉時會開新的，不會被「已有 Issue」跳過）。"""
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        _, _, p2 = self.run_once(NOW2)
+        key = [x for x in p2["actions"] if x["op"] == "open"][0]["key"]
+        saved = self.grype
+        self.grype = saved[:1]
+        self.run_once(NOW3)                                   # 消失
+        _, _, pp = self.run_once("2027-06-01T01:00:00Z")     # 181 天以上：修剪
+        self.assertIn(key, pp["state"]["dumpling"]["pruned_keys"])
+        self.grype = saved                                    # 再出現
+        _, _, p = self.run_once("2027-06-02T01:00:00Z")
+        acts = [x for x in nohealth(p) if x["key"] == key]
+        self.assertEqual([x["op"] for x in acts], ["open_if_closed"])
+        self.assertNotIn(key, p["state"]["dumpling"]["pruned_keys"])
+
+    def test_baseline_fails_when_grype_db_stale(self):
+        """#32 驗證 F3：Grype DB 過期不拿來建基準。"""
+        match.mods()["eg"].db_status = lambda *a, **k: {"status": "GAP", "usable": True, "built": "x", "detail": "stale"}
+        with self.assertRaises(match.Fail) as cm:
+            self.run_once(NOW1)
+        self.assertIn("Grype DB", str(cm.exception))
+
+    def test_baseline_fails_when_l4t_map_gap(self):
+        eg = match.mods()["eg"]
+        inner = eg.prepare
+
+        def prep(*a, **k):
+            info, ctx = inner(*a, **k)
+            info["kernel_map"] = {"status": "GAP", "detail": "L4T 39.9 不在對應檔"}
+            return info, ctx
+        eg.prepare = prep
+        with self.assertRaises(match.Fail) as cm:
+            self.run_once(NOW1)
+        self.assertIn("L4T", str(cm.exception))
+
+    def test_prev_schedule_cancelled_is_degraded(self):
+        """C0／#32 驗證 F6：上一次排程被取消 → 報告 GAP，連續 2 次開健康 Issue。"""
+        pv = os.path.join(self.w, "prev.json")
+        json.dump({"runs": [{"id": 999, "status": "in_progress", "conclusion": None, "created_at": NOW3},
+                            {"id": 5, "status": "completed", "conclusion": "cancelled", "created_at": "2026-11-11T01:17:00Z"}]}, open(pv, "w"))
+        self.run_once(NOW1)
+        self.run_once(NOW2, prev=pv)
+        _, _, plan = self.run_once(NOW3, prev=pv)
+        res = json.load(open(os.path.join(self.w, "out-" + NOW3[:10], "result.json")))
+        self.assertTrue(any("cancelled" in g for g in res["gaps"]))
+        h = [x for x in plan["actions"] if x["key"] == HEALTH_KEY]
+        self.assertEqual(len(h), 1)
+        self.assertIn("cancelled", h[0]["body"])
+
+    def test_prev_schedule_too_old_and_ok(self):
+        self.assertTrue(match.prev_schedule_check(None, None, match.parse_now(NOW3)) == ([], None))
+        pv = os.path.join(self.w, "prev2.json")
+        json.dump({"runs": [{"id": 7, "status": "completed", "conclusion": "success", "created_at": "2026-11-10T01:17:00Z"}]}, open(pv, "w"))
+        bad, _ = match.prev_schedule_check(pv, "1", match.parse_now(NOW3))
+        self.assertTrue(any("36 小時" in x for x in bad))
+        bad, _ = match.prev_schedule_check(pv, "1", match.parse_now("2026-11-10T20:00:00Z"))
+        self.assertEqual(bad, [])
+        json.dump({"error": "API 失敗"}, open(pv, "w"))
+        bad, _ = match.prev_schedule_check(pv, "1", match.parse_now(NOW3))
+        self.assertTrue(bad)
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)

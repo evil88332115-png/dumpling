@@ -26,7 +26,7 @@
 
 ```
 watch.yml（每天）
-  compute（contents: read、issues: read）
+  compute（contents: read、issues: read、actions: read：查上一次排程 run 的結果）
     feeds.sh            → $W/feeds/（CISA KEV、EUVD 鏡像、核心 CNA 鏡像、Grype DB）
     collect.py          → $W/inventory.json＋$W/releases/<n>/…（Release 附件）
     issues.py read-state→ $W/state.json＋$W/state-base.json（狀態 Issue 的內容與樂觀鎖資訊）
@@ -77,7 +77,12 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 - **第一次（state.json 不存在且 `state-base.json` 說沒有任何監控 Issue）只建基準**：所有比對記 `baseline: true`，不開 Issue。
   - 要人明確指定：`--allow-baseline`（watch.yml 手動觸發 `mode=real`＋`baseline=true`；drill 一律給）。沒有指定 → GAP、不產生 plan。
     狀態 Issue 與監控 Issue 都不見時（例如誤刪）不會悄悄重建基準。
-  - 條件：全部 SBOM 的 Grype 都跑完、CISA KEV 是 OK、EUVD 是 OK（real）、Release 沒有 problem、核心 CNA 沒有 NOT_RUN、廠商層級有跑；
+  - 有可監控的 Release 卻沒有基準（real）：plan 的 `state` 是 `null`，只開一個固定的「還沒有基準」提醒 Issue（標籤 `watch-health`，op `open`：
+    已經有就不重複），issues.py 不寫狀態。這個提醒 Issue 不算「監控 Issue」（不會讓下一次變成「沒有狀態卻有監控 Issue」的 FAIL）；
+    建立基準那一輪會在它底下留言。排程綠燈但 GAP 時，看這個 Issue 或 Step Summary。
+  - 條件：全部 SBOM 的 Grype 都跑完、Grype DB 是 OK（過期的 DB 建出的基準，DB 更新後既有命中會被當成新的）、
+    L4T 核心對應不是 GAP／FAIL（擋下的理由：對應失敗時核心元件沒有比對，基準會漏掉核心的 KEV，之後對應修好時那些既有命中會一次變成新的）、
+    CISA KEV 是 OK、EUVD 是 OK（real）、Release 沒有 problem、核心 CNA 沒有 NOT_RUN、廠商層級有跑；
     任何一項不成立 → FAIL、不寫狀態（基準不完整會讓下一次把既有的命中當成新的）。核心 CNA 因為 Release 沒有附件而 GAP 不擋（那是資料不存在，不是沒跑）。
 - **還沒有狀態、也沒有任何可監控的 SBOM**（例如 M2 之前只有 draft 或舊格式 Release）→ GAP（結束碼 3），不建空的基準、不產生 plan.json；
   workflow 的 compute 輸出 `has_plan=false`，notify 跳過。M2 之前排程每天是 GAP，不是 FAIL（不亮紅燈）。演練一定要有 plan，沒有就失敗。
@@ -88,7 +93,8 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
 - 降級（只在 real；核心 CNA 缺附件、schema 不符、upstream_version 為 null 也算）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
-  、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release
+  、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release、
+  **上一次排程 run 被取消／失敗／逾時或超過 36 小時沒有排程**（compute 用 `actions: read` 查 watch.yml 的排程 run；keepalive 也印出最近 3 次）
   → 連續 2 次就在固定的健康 Issue（標籤 `watch-health`）開／留言，沒恢復時每 7 天提醒一次；連續 2 次正常才留言「恢復」。報告與 Step Summary 每次都列。
 - 已有 Issue 的群組的事件（新增元件、再出現）一次超過 `--max-new-issues` 個 → 併成一個彙總 Issue，不逐一開。
 - 已知窗口：降級要連續 2 次才開健康 Issue，第一天只在 Step Summary（結束碼 2 視為成功）；排程 dry_run 期間狀態不寫入，連續次數不會累積。
@@ -147,7 +153,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
   （Step Summary 與 artifact 裡的報告會有 runner 的暫存路徑，例如 Grype NOT_RUN 的原因；那不寫進 Issue。）
 - 修剪：消失超過 180 天的比對（`matches`、`vendor_matches`）與沒有剩下任何比對、開出超過 180 天的群組紀錄，從狀態移除；被修剪的比對之後再出現算新的（開新 Issue，偏保守）。
   10 年保存是 GitLab 階段的內部儲存，不靠公開 Issue。
-- 大小：編碼後超過約 45000 字元 → ATTENTION，並在健康 Issue 留言「接近上限」。超過 60000 字元 → `apply` 照樣執行 Issue 動作（新的 KEV、彙總 Issue 開得出來），
+- 修剪過的群組之後再出現：用 `open_if_closed`（舊 Issue 已關閉就開新的、開著就留言），不會被「已有 Issue」跳過；群組鍵記在 `dumpling.pruned_keys`。
+- 大小：編碼後超過約 45000 字元 → 整輪 ATTENTION，並在健康 Issue 留言「接近上限」（7 天一次，不每天留言）。超過 60000 字元 → `apply` 照樣執行 Issue 動作（新的 KEV、彙總 Issue 開得出來），
   **狀態不寫**，最後明確 FAIL（下一輪從舊狀態重算：open 因標記跳過，不重複開；留言可能重複）。分段存放是之後的待辦。
 - `runs` 只留最近 30 次。
 - GitLab 階段：狀態 Issue 一定設成 confidential（寫在 GITLAB-PORT）。
@@ -170,6 +177,10 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8）。
 
 ## 6. 演練（drill，公開 repo 只做演練）
+
+- concurrency 依 ref 分組（`watch-<ref>`）：分支上的手動演練不會取消 main 的排程。同一個 ref 上同時觸發兩次時，排隊中的那個會被新的取消（GitHub 的規則）；
+  排程那一輪如果被取消，下一輪會在報告與健康 Issue 記下來。
+- 三輪都給 `--allow-baseline`（drill 的狀態與 real 完全分開）：dry_run 時每一輪都從頭建基準、不寫狀態，只驗證「算得出 plan」。
 
 - `watch.yml` 手動觸發 `mode=drill`：inventory 用 `tests/fixtures/watch/drill/`（合成 Release：合成的 SBOM，元件是公開套件的真實版本），
   KEV 用合成的 KEV 檔（`--kev-overlay`：把指定 CVE 加進 CISA KEV 清單），狀態用 `watch-state-drill`，跟真實狀態完全分開。

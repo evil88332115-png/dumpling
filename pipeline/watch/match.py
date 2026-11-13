@@ -165,7 +165,10 @@ def load_state(state_dir):
     if not os.path.exists(sp):
         if base.get("issue") is not None:
             raise Fail("狀態 Issue 存在，但 state.json 沒有產生（解碼失敗？）：不重建基準")
-        if int(base.get("watch_issues") or 0) > 0:
+        n = int(base.get("watch_issues") or 0)
+        if isinstance(base.get("watch_keys"), list):      # 「還沒有基準」的提醒 Issue 不算監控 Issue（它是在沒有狀態時開的）
+            n = len(set(base["watch_keys"]) - {issue_key(m, "no-baseline") for m in ("real", "drill")})
+        if n > 0:
             raise Fail(f"沒有狀態 Issue，卻已有 {base['watch_issues']} 個監控 Issue：不能重新建立基準（會吞掉新的命中），請先找回狀態 Issue")
         return {"schema": 1, "matches": {}, "runs": []}, base, True
     st = read_json(sp, "state.json")
@@ -323,8 +326,11 @@ def prune_state(st, now):
     mode = (st.get("dumpling") or {}).get("mode") or "real"
     live = {kev_group_key(mode, e) for e in (st.get("matches") or {}).values() if isinstance(e, dict) and "project_uuid" in e} | \
         {vendor_group_key(mode, e) for e in (st.get("vendor_matches") or {}).values() if isinstance(e, dict) and "vendor" in e}
+    pk = (st.get("dumpling") or {}).setdefault("pruned_keys", []) if st.get("dumpling") is not None else []
     for k in [k for k, r in iss.items() if k not in live and old((r or {}).get("opened_at"))]:
         del iss[k]
+        if k not in pk:
+            pk.append(k)          # 這個群組有過 Issue（可能已關閉）：之後再出現用 open_if_closed，不會被「已有 Issue」跳過（#32 驗證 F2）
         n3 += 1
     return f"比對 {n1}、廠商層級 {n2}、群組紀錄 {n3}（消失或開出超過 {PRUNE_DAYS} 天）" if n1 or n2 or n3 else ""
 
@@ -472,10 +478,14 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         title = f"[廠商層級] {e['cve']}（{e.get('vendor')}）可能影響 {e.get('project')} {e.get('version')}"
         pending.append((gk, "vendor", title, vendor_body(mode, e, p, run_url, now), labels_for(p, "vendor"), e))
     actions, opened = [], 0
+    pruned_keys = dd.setdefault("pruned_keys", [])
     if len(pending) <= max_new:
         for gk, kind, title, body, labels, e in pending:
-            actions.append({"op": "open", "key": gk, "title": title, "body": body, "labels": labels})
+            op = "open_if_closed" if gk in pruned_keys else "open"     # 修剪過的群組：舊 Issue 可能已關閉，關閉的就開新的
+            actions.append({"op": op, "key": gk, "title": title, "body": body, "labels": labels})
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts}
+            if gk in pruned_keys:
+                pruned_keys.remove(gk)
             opened += 1
     rest = pending if len(pending) > max_new else []
     if rest:        # 超過上限：全部併成一個彙總 Issue（不一筆一個，D-040）
@@ -490,8 +500,10 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
                         "labels": ["kev", "summary"]})
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
+            if gk in pruned_keys:
+                pruned_keys.remove(gk)
     comments = 0
-    just_opened = {x["key"] for x in actions if x["op"] == "open"} | {gk for gk, *_ in rest}
+    just_opened = {gk for gk, *_ in pending}
 
     def target(gk):
         r = iss.get(gk)
@@ -539,6 +551,40 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
                             "可能已修補、元件移除，或 KEV 清單改變。Issue 不會自動關閉，請負責人確認後關閉。", "reopen_if_closed": False})
             comments += 1
     return actions, {"opened": opened, "summary": len(rest), "comments": comments}
+
+
+PREV_MAX_HOURS = 36         # 上一次排程超過這麼久 → 算沒跑（每天一次，多留 12 小時）
+BAD_CONCLUSIONS = ("cancelled", "failure", "timed_out", "startup_failure", "action_required", "stale")
+
+
+def prev_schedule_check(path, run_id, now):
+    """watch-round 的 compute 查到的 watch.yml 最近幾次排程 run（GitHub API）→ (降級說明清單, 說明)。
+    上一次排程（不算這一次）被取消、失敗、逾時，或超過 PREV_MAX_HOURS 小時沒有排程 → 降級（報告＋健康 Issue），不能沒有紀錄。"""
+    if not path:
+        return [], None
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return [f"上一次排程的結果讀不到（{type(e).__name__}）"], None
+    if not isinstance(doc, dict) or doc.get("error"):
+        return [f"上一次排程的結果：{str((doc or {}).get('error') or '格式不對')[:120]}"], None
+    runs = [r for r in doc.get("runs") or [] if isinstance(r, dict) and str(r.get("id")) != str(run_id or "")]
+    if not runs:
+        return [], "還沒有排程 run（第一次）"
+    runs.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    last = runs[0]
+    out = []
+    note = f"上一次排程 run {last.get('id')}：{last.get('status')}／{last.get('conclusion') or '-'}（{last.get('created_at')}）"
+    if last.get("status") == "completed" and last.get("conclusion") in BAD_CONCLUSIONS:
+        out.append(f"上一次排程 run {last.get('id')} 是 {last.get('conclusion')}（{last.get('created_at')}）：那一輪沒有完成監控")
+    try:
+        t = datetime.datetime.strptime(str(last.get("created_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+        if (now - t).total_seconds() > PREV_MAX_HOURS * 3600:
+            out.append(f"上一次排程是 {last.get('created_at')}，超過 {PREV_MAX_HOURS} 小時：排程可能被停用或沒有觸發")
+    except ValueError:
+        out.append("上一次排程的時間讀不懂")
+    return out, note
 
 
 HEALTH_AFTER_RUNS = 2       # 連續幾次降級才通知
@@ -613,14 +659,36 @@ def run(a, kernel_runner=None):
                   "第一次建立基準請手動觸發 mode=real、baseline=true；如果之前已經建過基準，請先找回狀態 Issue")
         with open(os.path.join(a.out, "report.md"), "w", encoding="utf-8") as f:
             f.write(f"# 每日監控（{a.mode}）：GAP\n\n{detail}\n")
+        wrote_plan = False
+        if a.mode == "real":
+            # 有可監控的 Release 卻沒有基準：排程每天綠燈但什麼都沒監控 → 在固定的「沒有基準」健康 Issue 留下紀錄（#32 驗證 F4）。
+            # plan 的 state 是 null：issues.py 只執行這個動作、不寫狀態（不會因此變成「已有狀態」）。op 是 open：已經有（含已關閉）就不重複。
+            act = {"op": "open", "key": issue_key(a.mode, "no-baseline"), "title": "[監控降級] 每日監控還沒有基準，沒有在監控",
+                   "body": detail + f"\n\n可監控的 SBOM：{len(projs)} 份（{', '.join(sorted({p['tag'] or '?' for p in projs}))[:300]}）。"
+                   + "建立基準後這個 Issue 可以關閉。" + (f"\n\n執行紀錄：{a.run_url}" if a.run_url else ""), "labels": ["watch-health"]}
+            if a.demo:
+                mark_demo([act])
+            probs = publiccheck.check_text(act["title"] + "\n" + act["body"])
+            if probs:
+                raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{probs[0]}）")
+            plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url, "state_base": None,
+                    "state": None, "actions": [act], "status": "GAP", "detail": detail}
+            with open(os.path.join(a.out, "plan.json"), "w", encoding="utf-8") as f:
+                json.dump(plan, f, ensure_ascii=False, indent=1)
+            wrote_plan = True
         with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
-            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": False}, f, ensure_ascii=False, indent=1)
+            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": wrote_plan}, f, ensure_ascii=False, indent=1)
         return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
     serious = [f"Release 問題：{x}"[:300] for x in inv_problems]     # 降級：連續發生要通知人（健康 Issue）
     if not projs:
         serious.append("沒有任何可監控的 Release／SBOM（已有狀態）")
+    ps_bad, ps_note = prev_schedule_check(a.prev_schedule, a.run_id, now)
+    serious += ps_bad
+    gaps += ps_bad
+    if ps_note:
+        notes.append(ps_note)
     try:
         cisa, cisa_path = load_cisa(eg, a.feeds, a.kev_overlay, work, now)
         if cisa["status"] != "OK":
@@ -730,6 +798,11 @@ def run(a, kernel_runner=None):
                 why.append(f"{len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）")
             if cisa["status"] != "OK":
                 why.append(f"CISA KEV 不是 OK（{cisa['status']}）")
+            if db["status"] != "OK":
+                why.append(f"Grype DB 不是 OK（{db['status']}：過期的 DB 建出的基準，DB 更新後既有命中會被當成新的）")
+            kmap_bad = [u for u, r in per.items() if r.get("kernel_map") in ("GAP", "FAIL")]
+            if kmap_bad:
+                why.append(f"{len(kmap_bad)} 份 SBOM 的 L4T 核心對應是 GAP／FAIL（核心元件沒有比對，基準會漏掉核心的 KEV）")
             if eix["status"] != "OK" and a.mode == "real":      # 演練刻意不下載 EUVD
                 why.append(f"EUVD 不是 OK（{eix['status']}）")
             if inv_problems:
@@ -742,7 +815,12 @@ def run(a, kernel_runner=None):
             if why:
                 raise Fail("第一次執行要建立基準，但沒有完整跑完：" + "；".join(why) + "。基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
         coverage = list(NOT_RUN_DAILY)
+        nb_key = issue_key(a.mode, "no-baseline")
+        nb_actions = [{"op": "comment", "key": nb_key, "reopen_if_closed": False,
+                       "body": f"已建立基準（{utc(now)}，{len(projs)} 份 SBOM）。每日監控開始比對，這個 Issue 可以關閉。"}] \
+            if first and nb_key in (sbase.get("watch_keys") or []) else []
         actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
+        actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
         if a.demo:
@@ -752,24 +830,25 @@ def run(a, kernel_runner=None):
     gaps += inv_problems and [f"Release 有問題（不比對）：{x}" for x in inv_problems]
     if not projs:
         gaps.append("沒有可監控的 Release／SBOM")
+    pruned = prune_state(state, now)
+    if pruned:
+        notes.append(f"修剪狀態：{pruned}")
+    size = state_size(sanitize_state(state))
+    if size > STATE_WARN_CHARS:      # 先處理大小再算整輪狀態（#32 驗證 F1）
+        msg = f"狀態編碼後約 {size} 字元，接近狀態 Issue 的上限 {STATE_MAX_CHARS}（超過時狀態寫不進去，issues.py apply 會 FAIL）"
+        attn.append(msg)
+        dd = state.setdefault("dumpling", {})
+        last = dd.get("size_warned_at")
+        if not first and a.mode == "real" and (not last or (now - parse_now(last)).days >= HEALTH_REPEAT_DAYS):
+            dd["size_warned_at"] = utc(now)        # 跟降級提醒一樣 7 天一次，不每天留言
+            act = {"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 狀態接近上限",
+                   "body": msg + "。請處理：修剪已消失很久的比對，或改成分段存放（WATCH.md 3.5 已知限制）。", "labels": ["watch-health"]}
+            actions.append(mark_demo([act])[0] if a.demo else act)
     status = "ATTENTION" if (stats["opened"] or stats["summary"] or attn or gaps) else "OK"
     detail = (f"{'第一次執行：建立基準，' if first else ''}{len(projs)} 份 SBOM；KEV 比對 {len(matches)} 筆（新 {len(new)}、再出現 {len(back)}、消失 {len(gone)}）；"
               f"開 Issue {stats['opened']}、彙總 {stats['summary']}、留言 {stats['comments']}；GAP {len(gaps)}、需注意 {len(attn)}")
     state.setdefault("runs", []).append({"at": utc(now), "status": status, "run_url": a.run_url, "mode": a.mode, "detail": detail[:300]})
-    pruned = prune_state(state, now)
-    if pruned:
-        notes.append(f"修剪狀態：{pruned}")
     clean = sanitize_state(state)
-    size = state_size(clean)
-    if size > STATE_WARN_CHARS:
-        msg = f"狀態編碼後約 {size} 字元，接近狀態 Issue 的上限 {STATE_MAX_CHARS}（超過時狀態寫不進去，issues.py apply 會 FAIL）"
-        attn.append(msg)
-        if not first and a.mode == "real":
-            # 先寫進健康 Issue：health_actions 已經算過，這裡補一個留言動作
-            actions.append({"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 狀態接近上限",
-                            "body": msg + "。請處理：修剪已消失很久的比對，或改成分段存放（GITLAB-PORT／WATCH.md 已知限制）。", "labels": ["watch-health"]})
-            if a.demo:
-                mark_demo(actions[-1:])
     plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url,
             "state_base": None if sbase.get("issue") is None else {k: sbase.get(k) for k in ("issue", "updated_at", "body_sha256")},
             "state": clean, "actions": actions, "status": status, "detail": detail}
@@ -824,6 +903,8 @@ def main(argv=None):
     ap.add_argument("--vendor-config", default=os.path.join(HERE, "vendor-watch.json"))
     ap.add_argument("--now")
     ap.add_argument("--demo", action="store_true", help="公開 repo：Issue 標明「示範專案（公開 BSP）」並加 demo 標籤（D-040）")
+    ap.add_argument("--prev-schedule", help="watch.yml 最近幾次排程 run 的 JSON（workflow 用 actions: read 查）：上一次被取消或沒跑 → 降級")
+    ap.add_argument("--run-id", help="這一次的 run id（從 --prev-schedule 排除）")
     ap.add_argument("--allow-baseline", action="store_true",
                     help="還沒有狀態時，允許建立第一次的基準（要人明確指定；沒給時回 GAP、不產生 plan）")
     try:

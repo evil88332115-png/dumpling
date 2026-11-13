@@ -38,6 +38,7 @@ jobs:
     permissions:
       contents: read
       issues: read
+      actions: read
     outputs:
       has_plan: ${{ steps.match.outputs.has_plan }}
     steps:
@@ -69,6 +70,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ inputs.mode }}
         run: python3 -I pipeline/watch/issues.py read-state --repo "$GITHUB_REPOSITORY" --mode "$MODE" --out "$RUNNER_TEMP/w/state"
+      - name: 上一次排程的結果（real；被取消或沒跑要留下紀錄）
+        if: inputs.mode == 'real'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml/runs?event=schedule&branch=main&per_page=5" \
+            --jq '{runs: [.workflow_runs[] | {id, status, conclusion, created_at}]}' > "$RUNNER_TEMP/w/prev-schedule.json" \
+            || echo '{"error": "查不到上一次排程（API 失敗）"}' > "$RUNNER_TEMP/w/prev-schedule.json"
       - name: 比對
         id: match
         env:
@@ -81,6 +90,7 @@ jobs:
           ov=()
           if [ "$OVERLAY" = true ]; then ov=(--kev-overlay tests/fixtures/watch/drill-kev-overlay.json); fi
           if [ "$ALLOW_BASELINE" = true ]; then ov+=(--allow-baseline); fi
+          if [ -f "$RUNNER_TEMP/w/prev-schedule.json" ]; then ov+=(--prev-schedule "$RUNNER_TEMP/w/prev-schedule.json" --run-id "$GITHUB_RUN_ID"); fi
           set +e
           python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
             --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}"
