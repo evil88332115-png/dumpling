@@ -154,7 +154,7 @@ def load_inventory(path, base):
                           "html_url": r.get("html_url"), "sbom": os.path.join(base, rel), "sha256": s.get("sha256"),
                           "report_status": r.get("report_status") or "NOT_RUN", "release_gate": r.get("release_gate") or "NOT_RUN",
                           "pipeline_result": r.get("pipeline_result") or "NOT_RUN",
-                          "report_status_layers": r.get("report_status_layers") or [],
+                          "reports": r.get("reports") or [], "meta_attention": r.get("attention") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
                           and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None})
     return inv, projs, problems
@@ -372,13 +372,17 @@ def pinfo_of(projs, uuid):
 
 
 def release_results(p):
-    """Release 的結論（release-meta；缺少時 NOT_RUN）。status 是生命週期，這三個才是掃描與發行的結論。"""
+    """Release 的結論（release-meta；缺少時 NOT_RUN）。status 是生命週期，這幾個才是掃描與發行的結論。"""
     if not p:
         return "報告狀態 NOT_RUN（找不到 Release 資訊）"
-    lay = "、".join(f"{x['layer']} {x['status']}" for x in p.get("report_status_layers") or [])
-    return (f"報告狀態（report_status）{p.get('report_status') or 'NOT_RUN'}" + (f"（{lay}）" if lay else "") +
-            f"；發行閘門（release_gate）{p.get('release_gate') or 'NOT_RUN'}；流程結果 {p.get('pipeline_result') or 'NOT_RUN'}"
-            "（取自 Release 的 release-meta.json；生命週期 shipped／development 不是掃描結論）")
+    reps = "、".join(f"{x['report']} 報告 {x['report_status']}／閘門 {x['release_gate']}" for x in p.get("reports") or [])
+    out = (f"報告狀態（report_status）{p.get('report_status') or 'NOT_RUN'}；發行閘門（release_gate）{p.get('release_gate') or 'NOT_RUN'}"
+           + (f"（各報告：{reps}）" if reps else "（各報告：release-meta 沒有 reports）")
+           + f"；流程結果（pipeline_result）{p.get('pipeline_result') or 'NOT_RUN'}"
+           "（取自 Release 的 release-meta.json；生命週期 shipped／development 不是掃描結論）")
+    if p.get("meta_attention"):
+        out += "；Release 建置時用了舊資料頂替：" + "；".join(p["meta_attention"])
+    return out
 
 
 def layer_note(p):

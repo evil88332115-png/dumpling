@@ -470,31 +470,31 @@ def _date(s):
 
 # ---------------------------------------------------------------- release-meta 的結論欄位
 
-RESULT_VALUES = ("OK", "ATTENTION", "GAP", "FAIL")
+RESULT_VALUES = ("OK", "ATTENTION", "NOT_RUN", "GAP", "NOT_ASSESSED", "FAIL")     # C1 的 release-meta（wp1/m2 9f1d2f0）
+REPORT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+CTRL_RE = re.compile(r"[\x00-\x1f\x7f<>]")
 
 
 def _result(v):
-    """report_status／release_gate／pipeline_result 的值：只接受 OK／ATTENTION／GAP／FAIL，其他（缺少、型別不對、別的字）一律 NOT_RUN。"""
+    """report_status／release_gate／pipeline_result 的值：六種合法值照原值；其他（缺少、型別不對、別的字）一律 NOT_RUN。"""
     return v if isinstance(v, str) and v in RESULT_VALUES else "NOT_RUN"
 
 
 def meta_results(meta):
-    """release-meta 的結論欄位（C1 在 M2 新增；status 是生命週期 development／shipped，不是掃描結論）。
-    report_status：字串（整體＝最差那一份報告），或 {"status"／"overall": …, "layers": [{layer, status}]}；
-      另接受頂層的 report_status_layers（[{layer, status}]）。layers 只收 layer 是簡單字串、status 合法的項目。
-    release_gate：vex.gate 的值。pipeline_result：流程步驟的整體結果（舊名 result，C1 改名前兩個都讀）。"""
-    rs = meta.get("report_status")
-    layers = meta.get("report_status_layers")
-    if isinstance(rs, dict):
-        layers = rs.get("layers", layers)
-        rs = rs.get("overall", rs.get("status"))
-    lay = []
-    for x in layers if isinstance(layers, list) else []:
-        if isinstance(x, dict) and isinstance(x.get("layer"), str) and re.fullmatch(r"[a-z][a-z0-9-]{0,19}", x["layer"]):
-            lay.append({"layer": x["layer"], "status": _result(x.get("status"))})
-    pr = meta.get("pipeline_result", meta.get("result"))
-    return {"report_status": _result(rs), "report_status_layers": lay[:10], "release_gate": _result(meta.get("release_gate")),
-            "pipeline_result": _result(pr)}
+    """release-meta 的結論欄位（C1 在 M2 新增；`status` 是生命週期 development／shipped，不是掃描結論）。只讀 C1 的實際格式：
+    report_status（字串，最差那一份報告）、release_gate（字串，vex.gate）、pipeline_result（字串，流程步驟的結果，不是產品結論）、
+    reports（[{report, report_status, release_gate}]，每份報告一筆；report 是 full／bsp／os…）、
+    attention（字串清單，用了舊資料頂替的說明，例如核心 CVE 鏡像上游連不上；有才有）。其他形狀一律 NOT_RUN／略過。"""
+    reps = []
+    for r in meta.get("reports") if isinstance(meta.get("reports"), list) else []:
+        if isinstance(r, dict) and isinstance(r.get("report"), str) and REPORT_NAME_RE.fullmatch(r["report"]):
+            reps.append({"report": r["report"], "report_status": _result(r.get("report_status")), "release_gate": _result(r.get("release_gate"))})
+    att = []
+    for x in meta.get("attention") if isinstance(meta.get("attention"), list) else []:
+        if isinstance(x, str) and x.strip():
+            att.append(CTRL_RE.sub(" ", x).strip()[:300])
+    return {"report_status": _result(meta.get("report_status")), "release_gate": _result(meta.get("release_gate")),
+            "pipeline_result": _result(meta.get("pipeline_result")), "reports": reps[:10], "attention": att[:5]}
 
 
 # ---------------------------------------------------------------- 單一 Release
@@ -506,7 +506,7 @@ def collect_release(source, rel, kind, project, tagver, out, n):
          "status": None, "platform": None, "os_responsibility": None, "commit": None,
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
          "sboms": {}, "kernel_versions": None, "scan_summary": None, "layers": None, "problems": [],
-         "report_status": "NOT_RUN", "report_status_layers": [], "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN"}
+         "report_status": "NOT_RUN", "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN", "reports": [], "attention": []}
     probs = e["problems"]
     reldir = os.path.join(out, "releases", str(n))
     relpath = "releases/%d" % n
@@ -578,7 +578,18 @@ def collect_release(source, rel, kind, project, tagver, out, n):
     # 3. 其他附件
     s = grab("layers.json", _json_ok)
     e["layers"] = s["file"] if s else None
-    s = grab("kernel-versions-%s-%s.json" % (project, version), _json_ok)  # 選填
+    # kernel-versions：release-meta 的 kernel_versions 欄位是附件檔名或 null（C1）；只接受規則檔名，不用欄位值當路徑
+    kvname = "kernel-versions-%s-%s.json" % (project, version)
+    kvmeta = meta.get("kernel_versions")
+    s = None
+    if kvmeta is None:
+        pass                                     # Release 沒有附核心版本（match 標 GAP）
+    elif kvmeta != kvname:
+        probs.append("release-meta 的 kernel_versions 不是規則檔名 %s：不讀" % kvname)
+    else:
+        s = grab(kvname, _json_ok)
+        if s is None and kvname not in assets:
+            probs.append("release-meta 列了 %s，但 Release 沒有這個附件" % kvname)
     e["kernel_versions"] = s["file"] if s else None
     s = grab("scan-summary-%s-%s.json" % (project, version), _json_ok)  # 選填
     e["scan_summary"] = s["file"] if s else None

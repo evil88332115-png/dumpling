@@ -30,7 +30,8 @@ def j(o):
 def meta(project="p", version="v1", tag=None, status="shipped", **over):
     m = {"schema": 1, "project": project, "version": version, "tag": tag or "%s/%s" % (project, version),
          "status": status, "platform": "jetson", "os_responsibility": "customer", "commit": HEX,
-         "built_at": "2026-11-13T02:33:37Z", "workflow_run": "1", "steps": [], "result": "OK"}
+         "built_at": "2026-11-13T02:33:37Z", "workflow_run": "1", "steps": [], "pipeline_result": "OK",
+         "report_status": "OK", "release_gate": "OK", "reports": [], "kernel_versions": None}
     m.update(over)
     return m
 
@@ -263,7 +264,7 @@ class TestGitHub(Base):
 
     def test_dev_kernel_versions_uses_meta_version(self):
         w = World()
-        f = files("p", "dev-abc", tag="dev/p", status="development")
+        f = files("p", "dev-abc", tag="dev/p", status="development", kernel_versions="kernel-versions-p-dev-abc.json")
         f["kernel-versions-p-dev-abc.json"] = j({"k": 1})
         f["scan-summary-p-dev-abc.json"] = j({"s": 1})
         f["kernel-versions.json"] = j({"old": 1})  # 舊名不收
@@ -274,6 +275,25 @@ class TestGitHub(Base):
         self.assertEqual(r["kernel_versions"], "releases/0/kernel-versions-p-dev-abc.json")
         self.assertEqual(r["scan_summary"], "releases/0/scan-summary-p-dev-abc.json")
         self.assertFalse(os.path.exists(os.path.join(self.out, "releases/0/kernel-versions.json")))
+
+    def test_kernel_versions_follows_meta_field(self):
+        """release-meta 的 kernel_versions 是 null → 不讀附件；不是規則檔名 → problem、不讀；列了但沒有附件 → problem。"""
+        w = World()
+        f = files(kernel_versions=None)
+        f["kernel-versions-p-v1.json"] = j({"k": 1})
+        w.add("p/v1", f)
+        _, _, inv = self.repo(w)
+        self.assertEqual((inv["releases"][0]["kernel_versions"], inv["releases"][0]["problems"]), (None, []))
+        w = World()
+        f = files(kernel_versions="../evil.json")
+        w.add("p/v1", f)
+        _, _, inv = self.repo(w)
+        self.assertIsNone(inv["releases"][0]["kernel_versions"])
+        self.assertTrue(any("規則檔名" in x for x in inv["releases"][0]["problems"]))
+        w = World()
+        w.add("p/v1", files(kernel_versions="kernel-versions-p-v1.json"))
+        _, _, inv = self.repo(w)
+        self.assertTrue(any("沒有這個附件" in x for x in inv["releases"][0]["problems"]))
 
     def test_optional_absent_is_fine(self):
         w = World()
@@ -817,20 +837,28 @@ if __name__ == "__main__":
 
 
 class TestMetaResults(unittest.TestCase):
-    """release-meta 的 report_status／release_gate／pipeline_result（C1 在 M2 新增）：只接受 OK／ATTENTION／GAP／FAIL，其他一律 NOT_RUN。"""
+    """release-meta 的結論欄位（C1 wp1/m2 9f1d2f0 的實際格式）：六種合法值照原值，其他一律 NOT_RUN；只讀 reports，不讀舊格式。"""
 
-    def test_values(self):
-        r = collect.meta_results({"report_status": "ATTENTION", "release_gate": "FAIL", "pipeline_result": "OK"})
-        self.assertEqual((r["report_status"], r["release_gate"], r["pipeline_result"]), ("ATTENTION", "FAIL", "OK"))
+    def test_values_kept_as_is(self):
+        for v in collect.RESULT_VALUES:
+            r = collect.meta_results({"report_status": v, "release_gate": v, "pipeline_result": v})
+            self.assertEqual((r["report_status"], r["release_gate"], r["pipeline_result"]), (v, v, v))
+
+    def test_not_assessed_not_converted(self):
+        self.assertEqual(collect.meta_results({"release_gate": "NOT_ASSESSED"})["release_gate"], "NOT_ASSESSED")
 
     def test_missing_or_bad_is_not_run(self):
         r = collect.meta_results({"report_status": "SAFE", "release_gate": 1})
         self.assertEqual((r["report_status"], r["release_gate"], r["pipeline_result"]), ("NOT_RUN", "NOT_RUN", "NOT_RUN"))
 
-    def test_old_result_name_and_layers(self):
-        r = collect.meta_results({"result": "GAP", "report_status": {"overall": "GAP",
-                                  "layers": [{"layer": "bsp", "status": "GAP"}, {"layer": "os", "status": "weird"}, {"layer": "../x", "status": "OK"}]}})
-        self.assertEqual(r["pipeline_result"], "GAP")
-        self.assertEqual(r["report_status"], "GAP")
-        self.assertEqual(r["report_status_layers"], [{"layer": "bsp", "status": "GAP"}, {"layer": "os", "status": "NOT_RUN"}])
+    def test_old_shapes_not_read(self):
+        r = collect.meta_results({"result": "GAP", "report_status": {"overall": "GAP"}, "report_status_layers": [{"layer": "bsp", "status": "GAP"}]})
+        self.assertEqual((r["report_status"], r["pipeline_result"], r["reports"]), ("NOT_RUN", "NOT_RUN", []))
 
+    def test_reports_and_attention(self):
+        r = collect.meta_results({"report_status": "GAP", "reports": [
+            {"report": "bsp", "report_status": "GAP", "release_gate": "FAIL"}, {"report": "os", "report_status": "weird", "release_gate": "OK"},
+            {"report": "../x", "report_status": "OK", "release_gate": "OK"}], "attention": ["kernel-cve 沿用舊鏡像 <x>", 3]})
+        self.assertEqual(r["reports"], [{"report": "bsp", "report_status": "GAP", "release_gate": "FAIL"},
+                                        {"report": "os", "report_status": "NOT_RUN", "release_gate": "OK"}])
+        self.assertEqual(r["attention"], ["kernel-cve 沿用舊鏡像  x"])

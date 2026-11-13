@@ -462,15 +462,21 @@ class T(Base):
         self.assertTrue(bad)
 
     def test_issue_shows_release_results(self):
-        self.inventory["releases"][0].update(report_status="ATTENTION", release_gate="FAIL")
+        self.inventory["releases"][0].update(report_status="ATTENTION", release_gate="NOT_ASSESSED",
+                                             reports=[{"report": "bsp", "report_status": "ATTENTION", "release_gate": "NOT_ASSESSED"},
+                                                      {"report": "os", "report_status": "OK", "release_gate": "OK"}],
+                                             attention=["核心 CVE 鏡像上游連不上，沿用 30 小時前的鏡像"])
         json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
         self.run_once(NOW1)
         self.kev.append("CVE-2018-18074")
         _, _, plan = self.run_once(NOW2)
         body = [x for x in plan["actions"] if x["op"] == "open"][0]["body"]
         self.assertIn("報告狀態（report_status）ATTENTION", body)
-        self.assertIn("發行閘門（release_gate）FAIL", body)
-        self.assertIn("流程結果 NOT_RUN", body)
+        self.assertIn("發行閘門（release_gate）NOT_ASSESSED", body)
+        self.assertIn("bsp 報告 ATTENTION／閘門 NOT_ASSESSED", body)
+        self.assertIn("os 報告 OK／閘門 OK", body)
+        self.assertIn("流程結果（pipeline_result）NOT_RUN", body)
+        self.assertIn("沿用 30 小時前的鏡像", body)
 
     def test_issue_release_results_missing_is_not_run(self):
         self.run_once(NOW1)

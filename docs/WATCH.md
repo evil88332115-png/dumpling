@@ -51,7 +51,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   - 其他 tag → 列進 `skipped`（附原因）
 - `--from-dir`：讀 `<資料夾>/*/release-meta.json`（合成 Release，演練與測試用）；同一個資料夾裡的附件檔名規則和真的一樣。
 - 每個 Release 下載：`release-meta.json`（必要）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、整份 `sbom-<專案>-<版本>.cdx.json`、
-  `layers.json`、`kernel-versions-<專案>-<版本>.json`（選填，C1 在 M2 提供；只接受 schema `sca-center-kernel-versions/2`，其他版本 → 核心 CNA 標 GAP、寫明 schema 不符：shipped 每顆核心有 `upstream_version`（對不上是 null）、`upstream_basis`、`upstream_note`；null 或沒有附件 → 核心 CNA 標 GAP，Issue／報告寫 upstream_note）、`scan-summary-<專案>-<版本>.json`（選填）。
+  `layers.json`、`kernel-versions-<專案>-<版本>.json`（C1 在 M2 提供，見下；只接受 schema `sca-center-kernel-versions/2`，其他版本 → 核心 CNA 標 GAP、寫明 schema 不符：shipped 每顆核心有 `upstream_version`（對不上是 null）、`upstream_basis`、`upstream_note`；null 或沒有附件 → 核心 CNA 標 GAP，Issue／報告寫 upstream_note）、`scan-summary-<專案>-<版本>.json`（選填）。
   - 有分層 SBOM 就用 bsp＋os；沒有分層 SBOM 只有整份 → 層記 `product`。
   - 附件是不可信資料：檔名照規則組出，不用 API 回的檔名當路徑；大小上限；不跟隨連結；JSON 解析失敗算該 Release 的問題（不讓整次失敗）。
   - release-meta 的 `project`、`version` 要跟 tag 一致（dev 版 tag 是 `dev/<專案>`），`status` 只能是 `shipped`／`development`，不一致 → 該 Release 記 problem、不比對。
@@ -69,10 +69,13 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
  "skipped": [{"tag": "…", "why": "…"}]}
 ```
   - 路徑都是相對 `<out>` 的相對路徑（不寫絕對路徑，狀態 Issue 是公開的）。
-  - 每個 Release 另有 release-meta 的結論欄位（C1 在 M2 新增；`status` 是生命週期 development／shipped，**不是掃描結論**）：
-    `report_status`（報告整體狀態，最差那一份；分層的另有 `report_status_layers: [{layer, status}]`）、`release_gate`（vex.gate）、
-    `pipeline_result`（流程步驟的整體結果；C1 改名前也讀舊名 `result`）。值只接受 OK／ATTENTION／GAP／FAIL，缺少或其他值一律 `NOT_RUN`。
-    每個 KEV／廠商層級 Issue 與報告的各 SBOM 表都列出來。report_status 是字串還是物件，M2 合併時依 C1 的實際格式再核對一次。
+  - 每個 Release 另有 release-meta 的結論欄位（C1 wp1/m2 9f1d2f0 的實際格式；`status` 是生命週期 development／shipped，**不是掃描結論**）：
+    `report_status`（字串：最差那一份報告）、`release_gate`（字串：vex.gate）、`pipeline_result`（字串：流程步驟的結果，不是產品結論）、
+    `reports`（`[{report, report_status, release_gate}]`，每份報告一筆，report 是 full／bsp／os…）、`attention`（字串清單：用了舊資料頂替的說明，有才有）。
+    值的範圍 OK｜ATTENTION｜NOT_RUN｜GAP｜NOT_ASSESSED｜FAIL，**照原值顯示、不轉換**；缺少或其他形狀一律 `NOT_RUN`。沒有其他讀法（舊名 `result` 已拿掉）。
+    每個 KEV／廠商層級 Issue 列「Release 的結論」一行（含每份報告的狀態與 attention），報告的各 SBOM 表也列。
+  - `kernel-versions-<專案>-<版本>.json`：照 release-meta 的 `kernel_versions` 欄位（附件檔名或 null）。null → 不讀（核心 CNA 標 GAP）；
+    不是規則檔名 → problem、不讀；列了但 Release 沒有這個附件 → problem。開發版 `dev/<專案>` 也有這個附件。
   - status：API 失敗 → FAIL；有 Release 有 problem → GAP；否則 OK。stdout 一行 `WATCH-COLLECT<TAB>狀態<TAB>說明`；結束碼 OK 0、FAIL 1、GAP 3、用法 64。
 
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
