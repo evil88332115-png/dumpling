@@ -1,5 +1,6 @@
 name: watch-round
 # 每日監控的一輪（docs/WATCH.md 第 3 節）：compute（只讀）→ notify（只有 issues: write）。由 watch.yml 呼叫，不單獨觸發。
+# 公開 repo 一律 --demo：Issue 標明「示範專案（公開 BSP）」、加 demo 標籤（D-040）。
 on:
   workflow_call:
     inputs:
@@ -72,7 +73,7 @@ jobs:
           if [ "$OVERLAY" = true ]; then ov=(--kev-overlay tests/fixtures/watch/drill-kev-overlay.json); fi
           set +e
           python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
-            --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" "${ov[@]}"
+            --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}"
           rc=$?
           set -e
           if [ -f "$RUNNER_TEMP/w/out/report.md" ]; then cat "$RUNNER_TEMP/w/out/report.md" >> "$GITHUB_STEP_SUMMARY"; fi

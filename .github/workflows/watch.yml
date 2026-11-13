@@ -37,7 +37,8 @@ jobs:
     with:
       mode: real
       round: real
-      dry_run: ${{ inputs.dry_run == true }}
+      # D-040：排程的 real 預設只算不寫，C0 看過第一次真實基準後把 repo 變數 WATCH_REAL_ISSUES 設成 on 才開 Issue；手動觸發照輸入
+      dry_run: ${{ (github.event_name == 'schedule' && vars.WATCH_REAL_ISSUES != 'on') || inputs.dry_run == true }}
 
   drill-1-baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'drill'

@@ -79,7 +79,7 @@ class Base(unittest.TestCase):
         out = os.path.join(self.w, "out-" + now[:10])
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
-                               grype=None, grype_total_timeout=100, vendor_config=None, now=now)
+                               grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=kw.get("demo", False))
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
@@ -140,8 +140,18 @@ class T(Base):
         self.kev += [m["vulnerability"]["id"] for m in extra]
         _, _, plan = self.run_once(NOW2, max_new=2)
         opens = [x for x in plan["actions"] if x["op"] == "open"]
-        self.assertEqual(len(opens), 3)
-        self.assertIn("彙總", opens[-1]["title"])
+        self.assertEqual(len(opens), 1)                         # 超過上限：只有一個彙總 Issue
+        self.assertIn("彙總", opens[0]["title"])
+        self.assertIn("5 個新的命中群組", opens[0]["title"])
+
+    def test_demo_marking(self):
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2, demo=True)
+        o = [x for x in plan["actions"] if x["op"] == "open"][0]
+        self.assertTrue(o["title"].startswith("[示範專案（公開 BSP）]"))
+        self.assertIn("demo", o["labels"])
+        self.assertIn("不是真的出貨產品", o["body"])
 
     def test_kernel_cna(self):
         kv = os.path.join(self.inv, "releases", "0", "kernel-versions-demo-v1.json")

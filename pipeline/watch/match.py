@@ -4,7 +4,7 @@
 用法：
   python3 -I pipeline/watch/match.py --inventory <W/inventory.json> --state-dir <W/state> --feeds <W/feeds> --out <W/out>
         [--mode real|drill] [--kev-overlay <合成 KEV.json>（只限 drill）] [--max-new-issues 20] [--run-url <網址>]
-        [--grype <執行檔>] [--grype-total-timeout 1500] [--vendor-config <vendor-watch.json>] [--now <UTC ISO>]
+        [--grype <執行檔>] [--grype-total-timeout 1500] [--vendor-config <vendor-watch.json>] [--now <UTC ISO>] [--demo]
   --state-dir：issues.py read-state 的輸出（state-base.json 必要；state.json 有狀態 Issue 時才有）。
   --feeds：feeds.sh 的輸出：cisa-kev.json（CISA KEV）、euvd/（EUVD 鏡像，index.tsv）、kernel-cve/（kernel-cve.sh 的輸出）。
     Grype DB 用環境變數 GRYPE_DB_CACHE_DIR（同 exploited_grype.grype_env）。
@@ -21,7 +21,9 @@
   - 沒有狀態、也沒有任何監控 Issue → 第一次：所有比對記 baseline，不開 Issue（全部 SBOM 的 Grype 都跑完、CISA KEV 可用才建，否則 FAIL）。沒有狀態、卻有監控 Issue → FAIL（不重建基準）。
   - 之後：新的比對群組（專案、監控版本、層、CVE）→ open；再出現 → open_if_closed（原 Issue 開著就留言）；
     群組全部消失 → comment（不自動關閉）。廠商層級：（專案、監控版本、層、CVE、廠商）一個 Issue；baseline 不開。
-  - 一次最多開 --max-new-issues 個，其餘併成一個彙總 Issue（那些群組之後的事件都留言在彙總 Issue）。
+  - 一次新增超過 --max-new-issues（預設 20）個群組 → 全部併成一個彙總 Issue（ATTENTION；那些群組之後的事件都留言在彙總 Issue，D-040）。
+  - 只開「已遭利用（KEV／EUVD）」與「廠商層級」兩種 Issue；一般 CVE 候選（核心 CNA 上千筆、U-Boot 候選）不開（D-040）。
+  - --demo（公開 repo）：標題與內文寫明「示範專案（公開 BSP）」、加 demo 標籤；不開 art14 Issue（第 14 條只做演練）。
 輸出：stdout 一行 WATCH-MATCH<TAB>OK|ATTENTION|FAIL<TAB>說明；<out>/plan.json、report.md、result.json。
 退出碼：OK 0、FAIL 1、ATTENTION 2、用法 64。FAIL 時不寫 plan.json（notify 不會動任何東西）。
 """
@@ -366,6 +368,21 @@ def vendor_body(mode, e, p, run_url, now):
     return "\n".join(lines)
 
 
+DEMO_TITLE = "[示範專案（公開 BSP）]"
+DEMO_BANNER = ("> **示範專案（公開 BSP）**：dumpling 公開 repo 的示範專案，以公開 BSP／公開資料建置；release-meta 的 shipped／development "
+               "只是示範狀態，**不是真的出貨產品**。CRA 第 14 條通報在公開 repo 只做演練（art14-drill），這裡不開 art14 Issue。")
+
+
+def mark_demo(actions):
+    """公開 repo（D-040）：Issue 標題與內文寫明示範專案，加 demo 標籤；留言也加一行。"""
+    for x in actions:
+        if x["op"] in ("open", "open_if_closed"):
+            x["title"] = f"{DEMO_TITLE} {x['title']}"
+            x["labels"] = list(x.get("labels") or []) + ["demo"]
+        x["body"] = DEMO_BANNER + "\n\n" + x["body"]
+    return actions
+
+
 def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, run_url, now, max_new):
     """→ (actions, 統計)。在 state["dumpling"]["issues"] 記下每個群組對應的 Issue（或彙總 Issue）。"""
     dd = state.setdefault("dumpling", {})
@@ -399,18 +416,21 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         title = f"[廠商層級] {e['cve']}（{e.get('vendor')}）可能影響 {e.get('project')} {e.get('version')}"
         pending.append((gk, "vendor", title, vendor_body(mode, e, p, run_url, now), labels_for(p, "vendor"), e))
     actions, opened = [], 0
-    for gk, kind, title, body, labels, e in pending[:max_new]:
-        actions.append({"op": "open", "key": gk, "title": title, "body": body, "labels": labels})
-        iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts}
-        opened += 1
-    rest = pending[max_new:]
-    if rest:
+    if len(pending) <= max_new:
+        for gk, kind, title, body, labels, e in pending:
+            actions.append({"op": "open", "key": gk, "title": title, "body": body, "labels": labels})
+            iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts}
+            opened += 1
+    rest = pending if len(pending) > max_new else []
+    if rest:        # 超過上限：全部併成一個彙總 Issue（不一筆一個，D-040）
         sk = issue_key(mode, "summary", ts[:10], str(len(rest)), rest[0][0])
-        body = [f"這次執行有 {len(pending)} 個新的命中群組，超過一次最多開 {max_new} 個 Issue 的上限；其餘 {len(rest)} 個列在這裡。", "",
+        body = [f"這次執行有 {len(rest)} 個新的命中群組，超過一次 {max_new} 個的上限，全部列在這個彙總 Issue（ATTENTION），不逐一開 Issue。", "",
                 "| 種類 | 標題 |", "|---|---|"] + [f"| {k} | {md_cell(t)} |" for _, k, t, _, _, _ in rest] + ["", ART14_NOTE]
         if mode == "drill":
             body.insert(0, "> **演練（合成資料）**\n")
-        actions.append({"op": "open", "key": sk, "title": f"[KEV] 彙總：{len(rest)} 個命中群組（{ts[:10]}）", "body": "\n".join(body),
+        if run_url:
+            body += ["", f"執行紀錄：{run_url}"]
+        actions.append({"op": "open", "key": sk, "title": f"[KEV] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
                         "labels": ["kev", "summary"]})
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
@@ -552,6 +572,8 @@ def run(a, kernel_runner=None):
             attn.append(f"廠商層級 NOT_RUN（{type(e).__name__}）")
         coverage = list(NOT_RUN_DAILY)
         actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
+        if a.demo:
+            mark_demo(actions)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     gaps += inv_problems and [f"Release 有問題（不比對）：{x}" for x in inv_problems]
@@ -615,6 +637,7 @@ def main(argv=None):
     ap.add_argument("--grype-total-timeout", type=float, default=GRYPE_TOTAL)
     ap.add_argument("--vendor-config", default=os.path.join(HERE, "vendor-watch.json"))
     ap.add_argument("--now")
+    ap.add_argument("--demo", action="store_true", help="公開 repo：Issue 標明「示範專案（公開 BSP）」並加 demo 標籤（D-040）")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
