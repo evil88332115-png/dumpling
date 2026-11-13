@@ -234,9 +234,9 @@ while IFS=$'\x1f' read -r suffix sfile; do
   cp "$out/layers/$sfile" "$src/scan/rootfs/scan/sbom/sbom.cdx.json" || fail "放不進分層 SBOM $sfile"
   echo "== 分層重跑 ${suffix:-（單一專案）}：$sfile"
   # D-038 的核心 CVE 清單（KERNEL_CVES）只屬於有核心的那一份：-os（OS 層，SBOM 裡沒有核心）重跑時不帶，否則核心的列會在 OS 報告重複出現
-  # D-044：有後綴的分層重跑告訴 sca-scan 核心在 <專案>-bsp 那份報告（-os 的 SBOM 沒有核心 → 三個核心階段 NOT_RUN「不適用」，不退回 CNA；
-  # -bsp 有核心，這個選項不生效）。完整掃描與 ours 那次（後綴是空字串）不傳。同 Jetson 的 scan.sh
-  lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")
+  # D-044：-os 的重跑告訴 sca-scan 核心在 <專案>-bsp 那份報告（-os 的 SBOM 沒有核心 → 三個核心階段 NOT_RUN「不適用」，不退回 CNA）。
+  # 只對 -os 傳：-bsp 傳了等於指向自己，會把 bsp 該做的核心判定壓掉（C1 61d7c6f 起 sca-scan 以 exit 64 拒絕）；完整掃描與 ours 那次也不傳
+  lk=(); [ "$suffix" != -os ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")
   if [ "$suffix" = -os ]; then
     wl=$( (unset KERNEL_CVES; wiz "$suffix" "${lk[@]}" --rescan-from "$src/scan") | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
   else
