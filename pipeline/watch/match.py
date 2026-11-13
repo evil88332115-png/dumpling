@@ -420,8 +420,9 @@ def _plain(x, limit):
 
 
 def md_text(x, limit=300):
-    """外部字串 → Markdown 純文字：跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
-    s = _plain(x, limit).replace("\\", "\\\\")
+    """外部字串 → Markdown 純文字：& 先換成 &amp;（否則 &commat; 之類的 HTML 實體渲染時會解碼成 @、[ 等），
+    再跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
+    s = _plain(x, limit).replace("&", "&amp;").replace("\\", "\\\\")
     s = re.sub(r"([\[\]()!<>`|*_~])", r"\\\1", s)
     return re.sub(r"([@#＠＃])", "\\1" + ZWSP, s)
 
@@ -441,18 +442,26 @@ def md_code(x, limit=300):
 
 
 def md_title(x, limit=200):
-    """Issue 標題裡的外部字串：去控制字元，@ 與 # 後面插零寬空白（標題不解讀 Markdown 跳脫，所以不加反斜線）。"""
-    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, _plain(x, limit))
+    """Issue 標題裡的外部字串：去控制字元，@ # & 後面插零寬空白（標題不解讀 Markdown 跳脫，所以不加反斜線；
+    & 也不換成 &amp;，不然標題會照字面顯示 &amp;。& 後面有零寬空白就不會被當成 HTML 實體）。"""
+    return re.sub(r"([@#＠＃&＆])", "\\1" + ZWSP, _plain(x, limit))
 
 
 _CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1", re.S)
-_UNSAFE = (re.compile(r"(?<![\\\w])[@＠](?!\u200b)[A-Za-z0-9_-]"), re.compile(r"(?<!\\)\]\("), re.compile(r"(?<!\\)!\[(?!\\)"))
+_UNSAFE = (re.compile(r"(?<![\\\w])[@＠](?!\u200b)[A-Za-z0-9_-]"), re.compile(r"(?<!\\)\]\("), re.compile(r"(?<!\\)!\[(?!\\)"),
+           re.compile(r"&(?!amp;)(?:[A-Za-z][A-Za-z0-9]*;|#)"))       # HTML 實體（md_text 自己產生的 &amp; 除外）
 
 
 def unsafe_markdown(text):
-    """最後一道檢查：行內程式碼以外，還有沒有沒淨化的 @提及、](連結、![圖片。回傳找到的片段（空＝沒有）。"""
+    """最後一道檢查：行內程式碼以外，還有沒有沒淨化的 @提及、](連結、![圖片、HTML 實體（&name; 與 &#）。回傳找到的片段（空＝沒有）。"""
     t = _CODE_SPAN.sub(" ", text)
     return [m.group(0) for rx in _UNSAFE for m in rx.finditer(t)][:3]
+
+
+def unsafe_actions(actions):
+    """所有動作的 unsafe_markdown 結果。標題不是 Markdown（] ( ! 照字面顯示），只算 @提及 與 HTML 實體。"""
+    return [x for act in actions for x in unsafe_markdown(act.get("body", ""))
+            + [y for y in unsafe_markdown(act.get("title", "")) if y[0] in "@＠&"]]
 
 
 def kev_group_key(mode, e):
@@ -505,7 +514,7 @@ def kev_body(mode, entries, p, coverage, run_url, now):
         lines.append("")
     lines += [f"**{md_text(e0['cve'])}** 在已遭利用清單（KEV）上，比對到 **{md_text(e0['project'])} {md_text(e0['version'])}**（{p['layer'] if p else '?'} 層）。", ""]
     if p:
-        lines += [f"- Release：{p.get('tag') or '?'}（{p.get('html_url') or '—'}）、Release 版本 {p.get('release_version') or '?'}",
+        lines += [f"- Release：{md_code(p.get('tag'))}（{md_code(p.get('html_url'))}）、Release 版本 {md_text(p.get('release_version') or '?')}",
                   f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
                   f"- Release 的結論：{release_results(p)}"]
     lines += [f"- 第一次偵測：{min(x.get('cve_first_detected') or x['first_detected'] for x in entries)}（這次執行 {utc(now)}）", "",
@@ -531,7 +540,7 @@ def vendor_body(mode, e, p, run_url, now):
               f"- KEV 加入日期：{md_text(e.get('date_added') or '?')}；來源：{md_text(e.get('source') or '?')}",
               f"- 第一次偵測：{md_text(e.get('first_detected'))}（這次執行 {utc(now)}）"]
     if p:
-        lines += [f"- Release：{p.get('tag') or '?'}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
+        lines += [f"- Release：{md_code(p.get('tag'))}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
                   f"- Release 的結論：{release_results(p)}"]
     lines += ["", "要人工確認：KEV 的受影響產品是不是在這個專案裡（廠商可能有很多產品）。", "", ART14_NOTE]
     if run_url:
@@ -779,13 +788,16 @@ def run(a, kernel_runner=None):
             # 有可監控的 Release 卻沒有基準：排程每天綠燈但什麼都沒監控 → 在固定的「沒有基準」健康 Issue 留下紀錄（#32 驗證 F4）。
             # plan 的 state 是 null：issues.py 只執行這個動作、不寫狀態（不會因此變成「已有狀態」）。op 是 open：已經有（含已關閉）就不重複。
             act = {"op": "open", "key": issue_key(a.mode, "no-baseline"), "title": "[監控降級] 每日監控還沒有基準，沒有在監控",
-                   "body": detail + f"\n\n可監控的 SBOM：{len(projs)} 份（{', '.join(sorted({p['tag'] or '?' for p in projs}))[:300]}）。"
+                   "body": detail + f"\n\n可監控的 SBOM：{len(projs)} 份（{', '.join(md_code(t) for t in sorted({p['tag'] or '?' for p in projs})[:20])}）。"
                    + "建立基準後這個 Issue 可以關閉。" + (f"\n\n執行紀錄：{a.run_url}" if a.run_url else ""), "labels": ["watch-health"]}
             if a.demo:
                 mark_demo([act])
             probs = publiccheck.check_text(act["title"] + "\n" + act["body"])
             if probs:
                 raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{probs[0]}）")
+            bad = unsafe_actions([act])
+            if bad:
+                raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
             plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url, "state_base": None,
                     "state": None, "actions": [act], "status": "GAP", "detail": detail}
             with open(os.path.join(a.out, "plan.json"), "w", encoding="utf-8") as f:
@@ -981,7 +993,7 @@ def run(a, kernel_runner=None):
     if probs:
         raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{len(probs)} 筆，例如 {probs[0]}）：不產生 plan.json")
     # 最後一道：外部字串都應該經過 md_text／md_code／md_title；還有沒淨化的 @提及、連結、圖片就不產生 plan（程式漏了某個欄位）
-    bad = [x for act in actions for x in unsafe_markdown(act.get("body", "")) + [y for y in unsafe_markdown(act.get("title", "")) if "@" in y or "＠" in y]]
+    bad = unsafe_actions(actions)
     if bad:
         raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
     result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
@@ -1003,7 +1015,7 @@ def render_report(mode, detail, status, per, gaps, attn, notes, coverage, action
     L += ["## 各 SBOM", "", "| 專案鍵 | Release | 報告狀態 | 發行閘門 | Grype | 已遭利用 | 版本未知 | 核心 CNA | 說明 |",
           "|---|---|---|---|---|---|---|---|---|"]
     for r in per.values():
-        L.append(f"| {md_cell(r['uuid'])} | {md_cell(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
+        L.append(f"| {md_cell(r['uuid'])} | {md_code(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
                  f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or '不適用'} | {md_cell(r['why'])} |")
     L += ["", "## 每日沒有涵蓋的項目", ""] + [f"- {x}：{y}" for x, y in coverage]
     for title, xs in (("GAP", gaps), ("需注意", attn), ("說明", notes)):

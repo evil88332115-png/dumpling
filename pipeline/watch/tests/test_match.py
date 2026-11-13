@@ -1,6 +1,7 @@
 """match.py：基準、新的命中、不重複、消失、核心 CNA、公開檢查。Grype 以假結果替換（不跑真的 Grype）。合成資料。"""
 import argparse
 import hashlib
+import html
 import json
 import os
 import shutil
@@ -572,6 +573,8 @@ class FeedFallback(Base):
         self.assertFalse(any("舊資料頂替" in x for x in res["attention"]))
 
 
+ENTITIES = ["&commat;everyone", "&#64;everyone", "&#x40;everyone", "&lbrack;x&rbrack;(https://evil.example)",
+            "&excl;&lbrack;i&rbrack;(https://evil.example/a.png)"]
 EVIL = "@everyone @someuser [x](https://evil.example) ![i](https://evil.example/a.png) #1 `tick`"
 
 
@@ -586,7 +589,9 @@ class Injection(Base):
                 self.assertNotIn("](https://evil", t.replace("\\]\\(", ""), field)
                 self.assertNotRegex(t, r"(?<!\\)!\[(?!\\)", field)
                 self.assertNotRegex(t, r"#\d", field)
+                self.assertNotRegex(t, r"&(?!amp;)(?:[A-Za-z][A-Za-z0-9]*;|#)", field)
             self.assertEqual(match.unsafe_markdown(x["body"]), [], x["body"])
+            self.assertEqual(match.unsafe_actions([x]), [], x)
 
     def test_component_sources_and_meta_attention(self):
         self.inventory["releases"][0]["attention"] = ["@octocat [x](https://evil.example) ![i](https://evil.example/a.png)"]
@@ -623,6 +628,52 @@ class Injection(Base):
             self.assertEqual(match.unsafe_markdown("前文 " + match.md_text(raw)), [], raw)
             self.assertEqual(match.unsafe_markdown("前文 " + match.md_code(raw)), [], raw)
         self.assertEqual(match.unsafe_markdown("purl ` pkg:maven/a/b@1.0 `"), [])   # 行內程式碼裡的 @ 不算
+
+    def test_html_entities_not_decoded(self):
+        # 具名實體與數字實體：GitHub 渲染時會解碼（&commat; → @、&lbrack; → [），所以 & 要先變成 &amp;（#49 複驗應修）
+        for raw in ENTITIES:
+            self.assertTrue(match.unsafe_markdown("前文 " + raw), raw)                 # 沒淨化的抓得到
+            self.assertTrue(match.unsafe_actions([{"title": "x " + raw, "body": ""}]), raw)
+            for fn in (match.md_text, match.md_code):
+                out = fn(raw)
+                self.assertEqual(match.unsafe_markdown("前文 " + out), [], (fn.__name__, out))
+            out = match.md_text(raw)
+            self.assertTrue(out.startswith("&amp;"), out)
+            dec = html.unescape(out)                                                  # 渲染時解碼一層之後：還是原本的字面，不會變成 @ 或連結
+            self.assertNotIn("@everyone", dec)
+            self.assertNotRegex(dec, r"(?<!\\)\]\(")
+            t = match.md_title(raw)
+            self.assertEqual(match.unsafe_actions([{"title": t, "body": ""}]), [], t)
+            self.assertEqual(html.unescape(t), t, t)                                  # 標題：& 後面插零寬空白，不是實體
+        self.assertEqual(match.md_text("a & b"), "a &amp; b")
+        self.assertEqual(match.unsafe_markdown("R&D、a & b、&amp;commat;"), [])       # 單獨的 & 與 &amp; 不算
+
+    def test_entities_from_external_fields(self):
+        # 外部資料進得來的欄位：KEV 的廠商／產品／來源、release-meta 的 attention、tag、html_url
+        e = {"cve": "CVE-2024-0001", "kev_vendor": "&commat;everyone", "kev_product": "&lbrack;x&rbrack;(https://evil.example)",
+             "project": "demo", "version": "v1", "vendor": "acme", "watch_via": ["&#64;x"], "component_count": 1,
+             "date_added": "2024-01-01", "source": "&excl;&lbrack;i&rbrack;(https://evil.example/a.png)", "first_detected": NOW1}
+        p = {"layer": "bsp", "status": "shipped", "tag": "&commat;everyone/v1", "html_url": "&lbrack;x&rbrack;(https://evil.example)",
+             "release_version": "&commat;x", "gaps": ["&commat;bob &lbrack;x&rbrack;(https://evil.example)"]}
+        for body in (match.vendor_body("real", e, p, None, match.parse_now(NOW1)),
+                     match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
+                                              "component": "&commat;c", "purl": "p", "basis": "b", "sources": ["&#64;s"]}], p, [], None,
+                                    match.parse_now(NOW1))):
+            self.assertEqual(match.unsafe_markdown(body), [], body)
+            self.assertIn(match.md_code("&commat;everyone/v1"), body)                 # tag 放進行內程式碼
+        self.assertIn(match.md_code("&lbrack;x&rbrack;(https://evil.example)"), body)  # html_url 也是
+
+    def test_meta_attention_entities_end_to_end(self):
+        self.inventory["releases"][0]["attention"] = ENTITIES
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1)
+        self.grype.append({"vulnerability": {"id": "CVE-2018-18074"}, "relatedVulnerabilities": [],
+                           "artifact": {"name": "&commat;everyone", "version": "1.0.0", "purl": "pkg:npm/x@1.0.0", "type": "npm"}})
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2, demo=True)
+        self.assertTrue([x for x in nohealth(plan) if x["op"] == "open"])
+        self.assertTrue(any("&amp;commat;" in x["body"] for x in plan["actions"]))   # attention 有寫進 Issue，而且是跳脫過的
+        self.assert_safe(plan)
 
     def test_md_code_keeps_text_copyable(self):
         self.assertEqual(match.md_code("pkg:npm/%40types/node@1.0.0"), "` pkg:npm/%40types/node@1.0.0 `")

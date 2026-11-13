@@ -201,9 +201,9 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 只開兩種 Issue：已遭利用（KEV／EUVD）、廠商層級。一般 CVE 候選（核心 CNA 的上千筆、D-034 的 U-Boot 候選）不開。
   一次新增超過 20 個群組 → 全部併成一個彙總 Issue：標題 `[KEV][ATTENTION] 彙總：…`、加 `attention` 標籤，內文也寫 ATTENTION（已有 Issue 的群組事件太多時的彙總也一樣）。
 - **外部字串不能變成通知或連結**：元件名、purl、KEV 的廠商／產品、release-meta 的 attention、kernel-versions 的說明、鏡像訊息都是外部資料。
-  識別字（元件、purl、依據、來源、廠商）放進行內程式碼（`match.md_code`：原樣可複製，裡面的 `@`、連結、圖片都不解讀；反引號用更長的分隔符號）；
-  其他文字用 `match.md_text`（跳脫 `\ [ ] ( ) ! < > ` | * _ ~`，`@`、`#` 後面插零寬空白，不會通知 `@types` 這類組織、不會連到別的 Issue）；
-  標題用 `match.md_title`。產生 plan 前最後再檢查一次（`unsafe_markdown`）：行內程式碼以外還有沒淨化的 `@提及`、`](` 連結或 `![` 圖片就 FAIL、不產生 plan。
+  識別字（元件、purl、依據、來源、廠商、Release 的 tag 與網址）放進行內程式碼（`match.md_code`：原樣可複製，裡面的 `@`、連結、圖片都不解讀；反引號用更長的分隔符號）；
+  其他文字用 `match.md_text`（`&` 先換成 `&amp;`，不讓 `&commat;`、`&lbrack;` 這類 HTML 實體渲染成 `@`、`[`；再跳脫 `\ [ ] ( ) ! < > ` | * _ ~`，`@`、`#` 後面插零寬空白，不會通知 `@types` 這類組織、不會連到別的 Issue）；
+  標題用 `match.md_title`（`@`、`#`、`&` 後面插零寬空白；標題照字面顯示，不換成 `&amp;`）。產生 plan 前最後再檢查一次（`unsafe_markdown`）：行內程式碼以外還有沒淨化的 `@提及`、`](` 連結、`![` 圖片或 HTML 實體（`&名稱;`、`&#`；`&amp;` 除外）就 FAIL、不產生 plan。
 - 第一次建立基準前，先看那次 dry_run 的報告有沒有 ATTENTION（例如核心 CVE 用了 48 小時內的舊資料頂替）：基準不會擋它，但之後補進的那段時間的命中會被當成新的。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8）。
