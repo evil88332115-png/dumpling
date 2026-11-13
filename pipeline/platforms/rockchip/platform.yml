@@ -51,6 +51,9 @@ layers:
       - "lib/modules/*"
       - "boot/*"
       - "usr/lib/u-boot/*"
+  os:
+    paths:                   # dpkg 自己的資料庫（/var/lib/dpkg/info/*.list、*.md5sums、status…）：不屬於任何套件，是 OS 套件管理的中繼資料
+      - "var/lib/dpkg/*"
   default: os
 scan:
   inputs_template: rockchip      # tools/wizard/platforms/rockchip.json

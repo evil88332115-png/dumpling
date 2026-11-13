@@ -786,6 +786,8 @@ class PlatformConfigTest(unittest.TestCase):
                            ("radxa-firmware", "bsp"), ("radxa-sddm-theme", "os"), ("rtkit", "os"), ("task-kde-desktop", "os"),
                            ("librockchip-mpp1", "bsp"), ("linux-base", "os")):
             self.assertEqual(self.pc.classify_package(name, rk), want, name)
+        for plat in ("raspberrypi", "rockchip", "ai-nas"):        # dpkg 自己的資料庫檔歸 os（不屬於任何套件）
+            self.assertEqual(self.pc.classify_path("var/lib/dpkg/info/bash.list", self.pc.load_platform_config(plat)), "os", plat)
         nas = self.pc.load_platform_config("ai-nas")
         for name, want in (("openmediavault", "bsp"), ("openmediavault-flashmemory", "bsp"), ("linux-image-amd64", "os")):
             self.assertEqual(self.pc.classify_package(name, nas), want, name)

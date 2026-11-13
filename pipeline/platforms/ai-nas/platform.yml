@@ -17,6 +17,7 @@ layers:
       - "openmediavault-*"
   os:
     paths:
+      - "var/lib/dpkg/*"       # dpkg 自己的資料庫：不屬於任何套件，是 OS 套件管理的中繼資料
       - "usr/lib/modules/*"
       - "lib/modules/*"
       - "boot/*"
