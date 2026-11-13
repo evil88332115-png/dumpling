@@ -403,6 +403,19 @@ class ProductConclusions(Tmp):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return json.load(open(out))
 
+    def test_same_suffix_twice_keeps_the_rescan_as_the_report(self):
+        """os_responsibility: ours：完整掃描之後用產品 SBOM 重跑一次，後綴都是空字串 → 報告只有一份（重跑那次），kernel-versions 取完整掃描。"""
+        kv = {"schema": "sca-center-kernel-versions/2", "shipped": []}
+        runs = ["=" + self.wizard_dir("full", {"status": "ATTENTION", "vex": {"gate": {"verdict": "ATTENTION"}}}, kv),
+                "=" + self.wizard_dir("product", {"status": "OK", "vex": {"gate": {"verdict": "OK"}}})]
+        scan = self.collect(runs)
+        self.assertEqual([(r["report"], r["report_status"], r["release_gate"]) for r in scan["reports"]], [("full", "OK", "OK")])
+        self.assertEqual(scan["kernel_versions_file"], "kernel-versions-p-v1.json")
+        with open(self.p("rel", "manifest.tsv"), encoding="utf-8") as fh:
+            names = [line.split("\t")[0] for line in fh.read().splitlines()]
+        self.assertEqual(names.count("report-p-v1.zip"), 1, names)
+        self.assertEqual(len(names), len(set(names)), names)
+
     def test_layered_reports_take_the_worst(self):
         kv = {"schema": "sca-center-kernel-versions/2", "shipped": []}
         runs = ["=" + self.wizard_dir("full", {"status": "ATTENTION", "vex": {"gate": {"verdict": "OK"}}}, kv),
@@ -460,6 +473,72 @@ class ProductConclusions(Tmp):
             s = open(os.path.join(ROOT, ".github", "workflows", wf), encoding="utf-8").read()
             self.assertIn("--scan-summary", s, wf)
         self.assertIn('"kernel-versions-$PROJECT-$VERSION.json"', open(os.path.join(ROOT, ".github", "workflows", "dev.yml"), encoding="utf-8").read())
+
+
+class ScanPlanReading(Tmp):
+    """scan.sh 讀 layers.json 的 scan_plan：分隔字元是 0x1F（TAB 是 IFS 空白字元，ours 的空後綴會被吃掉，檔名跑進 suffix）。"""
+    JS = os.path.join(ROOT, "pipeline", "lib", "jetson_scan.py")
+
+    def layers(self, plan):
+        f = self.p("layers.json")
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump({"scan_plan": plan}, fh)
+        return f
+
+    def read_line(self):
+        with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
+            scan = fh.read()
+        m = re.search(r"^while (IFS=\S+ read -r suffix sfile); do$", scan, re.M)
+        self.assertIsNotNone(m, "scan.sh 找不到讀 scan_plan 的 while 迴圈")
+        self.assertIn("jetson_scan.py plan --layers-json", scan)
+        return m.group(1)
+
+    def shell_read(self, plan):
+        """用 scan.sh 裡那一行 read 讀 jetson_scan.py plan 的輸出，回傳 [(suffix, sfile), …]。"""
+        script = ('plan=$(python3 -I "$1" plan --layers-json "$2") || exit 1\n'
+                  'while %s; do [ -n "$sfile" ] || continue; printf "[%%s][%%s]\\n" "$suffix" "$sfile"; done <<< "$plan"\n' % self.read_line())
+        r = subprocess.run(["bash", "-c", script, "x", self.JS, self.layers(plan)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return re.findall(r"^\[(.*?)\]\[(.*?)\]$", r.stdout, re.M)
+
+    @staticmethod
+    def item(suffix, sbom):
+        return {"name_suffix": suffix, "sbom": sbom, "report_role": "x"}
+
+    def test_ours_empty_suffix_survives(self):
+        self.assertEqual(self.shell_read([self.item("", "sbom.product.cdx.json")]), [("", "sbom.product.cdx.json")])
+
+    def test_customer_two_layers(self):
+        plan = [self.item("-bsp", "sbom.bsp.cdx.json"), self.item("-os", "sbom.os.cdx.json")]
+        self.assertEqual(self.shell_read(plan), [("-bsp", "sbom.bsp.cdx.json"), ("-os", "sbom.os.cdx.json")])
+
+    def test_empty_plan_runs_nothing(self):
+        self.assertEqual(self.shell_read([]), [])
+
+    def test_tab_would_have_eaten_the_empty_suffix(self):
+        """反證：舊寫法（TAB）把 ours 的檔名讀進 suffix。"""
+        r = subprocess.run(["bash", "-c", "IFS=$'\\t' read -r suffix sfile <<< $'\\tsbom.product.cdx.json'; printf '[%s][%s]' \"$suffix\" \"$sfile\""],
+                           capture_output=True, text=True)
+        self.assertEqual(r.stdout, "[sbom.product.cdx.json][]")
+
+    def test_bad_values_fail(self):
+        for plan in ([self.item("-a b", "sbom.bsp.cdx.json")], [self.item("-bsp", "../sbom.bsp.cdx.json")],
+                     [self.item("-bsp", "sbom.bsp.cdx.json"), self.item("-bsp", "sbom.os.cdx.json")],
+                     [self.item("-x\x1f", "sbom.bsp.cdx.json")], [{"sbom": "sbom.bsp.cdx.json"}]):
+            r = subprocess.run([sys.executable, "-I", self.JS, "plan", "--layers-json", self.layers(plan)], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, (plan, r.stdout))
+            self.assertIn("jetson_scan: FAIL", r.stdout)
+        r = subprocess.run([sys.executable, "-I", self.JS, "plan", "--layers-json", self.p("missing.json")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+
+    def test_real_sbom_layers_plan_for_ours(self):
+        """sbom-layers.py 真正產生的 ours 計畫（後綴空字串）照樣讀得到。"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sbom_layers", os.path.join(ROOT, "pipeline", "sbom-layers.py"))
+        sl = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sl)
+        plan = sl.scan_plan("ours", {"bsp": "sbom.bsp.cdx.json", "os": "sbom.os.cdx.json"})
+        self.assertEqual(self.shell_read(plan), [("", "sbom.product.cdx.json")])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 子命令：
   site-config  寫精靈的站台設定檔（SCA_WIZARD_CONFIG）
   inputs       複製專案的 CRA/Config，並把 inputs.json 的 upstream_set／版本字樣換成這個版本
+  plan         印 layers.json 的 scan_plan（每行「後綴 0x1F SBOM 檔名」，後綴可以是空字串）
   collect      收集各次精靈執行的結果 → Release 附件（ASCII 檔名＋中文標籤）、scan.json（標準答案比對用的摘要）、notes.md、manifest.tsv
 
 平台無關的部分（讀精靈的輸出、報告包、scan.json、notes.md、manifest）在 `pipeline/lib/platform_scan.py`（那裡的 docstring 說明其他平台怎麼呼叫）；
@@ -23,6 +24,7 @@ sys.path.insert(0, HERE)
 from platform_scan import (Hooks, add, newest_dir, read_json, read_status_tsv, run_paths, site_config, sbom_layer_counts, vuln_metrics,  # noqa: E402,F401
                            zip_dir)
 from platform_scan import collect as _collect  # noqa: E402
+from platform_scan import scan_plan_lines  # noqa: E402
 from platform_scan import run_summary as _run_summary  # noqa: E402
 
 # ---------------------------------------------------------------- Jetson 特有：inputs.json
@@ -157,6 +159,8 @@ def main(argv=None):
     n = sub.add_parser("newest")
     n.add_argument("--root", required=True)
     n.add_argument("--prefix", required=True)
+    pl = sub.add_parser("plan")
+    pl.add_argument("--layers-json", required=True)
     c = sub.add_parser("collect")
     for k in ("out", "project", "version", "layers", "build-json", "assemble-json", "scan-json"):
         c.add_argument("--" + k, required=True)
@@ -179,6 +183,9 @@ def main(argv=None):
             if not d:
                 raise ValueError("%s 底下沒有 %s* 資料夾" % (a.root, a.prefix))
             print(d)
+        elif a.cmd == "plan":
+            for line in scan_plan_lines(a.layers_json):
+                print(line)
         else:
             collect(a)
             print("jetson_scan: OK（附件 %s）" % a.out)
