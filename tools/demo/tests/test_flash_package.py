@@ -995,7 +995,7 @@ def test_script_uefi_source_runs_before_import_and_is_optional(tmp_path):
     p = run_script(tmp_path, *base, "--out", str(tmp_path / "r1"), "--uefi-source", str(tree))
     st = (tmp_path / "r1" / "status.tsv").read_text()
     assert re.search(r"^B-uefi-source-rootfs_no_gui\tGAP\t.*OpenSSL 3\.4\.1", st, re.M), st + p.stderr     # edk2 版本不明 → GAP
-    assert re.search(r"^B-uefi-grype-rootfs_no_gui\tNOT_RUN\tdocker import 失敗，sca-scan 沒有執行（Grype 資料庫不可用）", st, re.M), st
+    assert re.search(r"^B-uefi-grype-rootfs_no_gui\tNOT_RUN\tdocker import 失敗，sca-scan 沒有執行，沒有更新 Grype 資料庫：不比對", st, re.M), st
     assert "B-tee-grype" not in st                      # 沒給 --tee-source：不寫這一列
     assert st.index("B-uefi-source") < st.index("B-import-rootfs_no_gui") < st.index("B-uefi-grype-rootfs_no_gui")
     assert re.search(r"^B-import-rootfs_no_gui\tFAIL\t", st, re.M), st

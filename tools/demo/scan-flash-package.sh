@@ -900,7 +900,7 @@ for v in "${VARS[@]}"; do
     IID[$v]=$iid; PENDING_TAG=; status "B-import-$v" OK "$tag → $iid（$(docker image inspect --format '{{.Architecture}} {{.Size}} bytes' "$iid" 2>/dev/null)）；暫存 tar 已刪"
   else docker image rm -f "$tag" > /dev/null 2>&1; PENDING_TAG=
     status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"
-    bundled_grype_not_run "$v" "docker import 失敗，sca-scan 沒有執行（Grype 資料庫不可用）：沒有比對"; continue; fi
+    bundled_grype_not_run "$v" "docker import 失敗，sca-scan 沒有執行，沒有更新 Grype 資料庫：不比對"; continue; fi
 
   t0=$(date +%s); sca_args
   # 核心的建置設定與燒錄的核心（IKCONFIG）從刷機包讀（C-kernel-config）：Rockchip 讀 update.img；Jetson 讀刷機包 tbz2／資料夾加 rootfs 前綴，
