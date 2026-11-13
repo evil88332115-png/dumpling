@@ -70,7 +70,8 @@ def test_untagged_sbom_changes_nothing(tmp_path):
     assert all("layer" not in x for x in rows_of(rep1)["rows"])
     ra = rep1.joinpath("risk-assessment.md").read_text(encoding="utf-8")
     assert "Layers (BSP" not in ra and "| Layer |" not in ra and "text.layer_section" not in ra and "{{" not in ra
-    norm = lambda t: re.sub(r"\d{4}-\d\d-\d\dT[\d:]+Z", "T", t)                       # noqa: E731
+    # 時間與 VEX 檔的 SHA-256 不比：沒有掃描時間的情境 VEX 用現在時間（vex_export.doc_timestamp），跨秒時 SHA 就不同
+    norm = lambda t: re.sub(r"SHA-256 [0-9a-f]{12,64}", "SHA-256 H", re.sub(r"\d{4}-\d\d-\d\dT[\d:]+Z", "T", t))   # noqa: E731
     assert norm(ra) == norm(rep2.joinpath("risk-assessment.md").read_text(encoding="utf-8"))
     assert s1["status"] == s2["status"] and s1["counts"] == s2["counts"]
     assert not any("text.layer_section" in w for w in s1["config_warnings"])
@@ -308,6 +309,21 @@ def test_p1_sheet_ours_includes_os(tmp_path):
     cves, sh = p1_cves(out)
     assert cves == ["CVE-1", "CVE-2", "CVE-3"]
     assert "這張表放的是我們的待辦：BSP、層未定（unknown）、OS" in flat(sh)
+
+
+def test_ours_os_p1_reaches_the_p1_sheet_end_to_end(tmp_path):
+    """缺口 24：os_responsibility: ours 時 OS 層的 P1（例如已被利用的 openssh）是我們的待辦，cra_report → report_package 一路下來
+    P1 判斷表一定要列出來（不能只有表頭）；customer 時不在這張表（在漏洞清單的 OS 工作表與「通知客戶」）。"""
+    fs = [fnd(OSP, "CVE-2026-0002", "HIGH", kev=True)]
+    for resp, want in (("ours", ["CVE-2026-0002"]), ("customer", [])):
+        r, s, rep = scenario(tmp_path, fs, resp, name="e-" + resp)
+        assert r.returncode in (0, 2), r.stdout + r.stderr
+        assert [x["layer"] for x in rows_of(rep)["rows"]] == ["os"]
+        out = tmp_path / ("e-" + resp + "-out")
+        code, msgs = rp.build(rep.parent.parent, out, allow_tmp=True)
+        assert code in (0, 2), msgs
+        cves, sh = p1_cves(out)
+        assert cves == want, (resp, cves)
 
 
 def test_p1_sheet_without_responsibility_is_conservative(tmp_path):

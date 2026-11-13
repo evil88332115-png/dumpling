@@ -129,12 +129,12 @@ jobs:
           if [ "$GITHUB_REF" = refs/heads/main ] || [[ "$GITHUB_REF" == refs/heads/dev/* ]]; then
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
               ghx gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"
-              # 舊版本留下的附件（檔名不同）刪掉，只留這次的
+              # 先上傳（同名的覆蓋），成功後才刪舊版本留下的附件（檔名不同）：上傳失敗時舊的附件還在，滾動版不會變空
+              ghx gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
               for a in $(ghx gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
                 keep=0; for f in "${files[@]}"; do [ "$a" = "$f" ] && keep=1; done
                 [ $keep = 1 ] || ghx gh release delete-asset "$tag" "$a" --yes --repo "$GITHUB_REPOSITORY"
               done
-              ghx gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             else
               ghx gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" --title "$tag（滾動的開發版）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
             fi

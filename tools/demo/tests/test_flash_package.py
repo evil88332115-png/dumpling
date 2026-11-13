@@ -388,7 +388,9 @@ def test_script_flow_until_import(tmp_path):
     assert pv["source"] == {"type": "archive", "file": "product-a.tbz2", "bytes": len(data), "md5": h, "sha256": hashlib.sha256(data).hexdigest()}
     assert re.fullmatch(r"[0-9a-f]{40}", pv["sca_center"]["commit"]) and pv["sca_center"]["from"] == "git"
     assert re.search(r"^A-provenance\t(OK|ATTENTION)\t", st, re.M) and "F-evidence" not in st
-    assert "B-own-software" not in st and not (out / "rootfs_gui" / "own-software").exists()   # 沒有 --product-config：不執行
+    # 沒有 --product-config：檢查不悄悄消失，B-own-software 記 GAP（沒有宣告自有軟體），own-software.json 只有宣告的結果
+    assert re.search(r"^B-own-software-rootfs_gui\tGAP\t沒有產品設定：沒有宣告自有軟體", st, re.M), st
+    assert json.loads((out / "rootfs_gui" / "own-software" / "own-software.json").read_text())["declaration"]["kind"] == "undeclared"
 
 
 OWN_CFG = {"schema_version": 1, "manufacturer": {"name": "Example Co."}, "product": {"name": "EX-J100"},
@@ -420,12 +422,25 @@ def test_script_own_software_from_rootfs_tar(tmp_path):
 
 
 def test_script_product_config_without_own_software(tmp_path):
-    """有 --product-config 但沒有 sbom.own_software：不執行、不寫狀態列、不建資料夾。"""
+    """有 --product-config 但沒有列 sbom.own_software：不算雜湊，但 B-own-software 記 GAP（沒有宣告），不可以悄悄消失。"""
     cfg = {k: v for k, v in OWN_CFG.items() if k != "sbom"}
     p, out, st, _ = own_run(tmp_path, cfg)
     assert "B-import-rootfs_no_gui" in st, st + p.stderr
-    assert "B-own-software" not in st and not (out / "rootfs_no_gui" / "own-software").exists()
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t沒有宣告自有軟體（sbom\.own_software）", st, re.M), st
+    doc = json.loads((out / "rootfs_no_gui" / "own-software" / "own-software.json").read_text())
+    assert doc["status"] == "GAP" and doc["declaration"]["kind"] == "undeclared" and "files" not in doc
     assert not (out / "rootfs_no_gui" / "logs" / "own-software.txt").exists()
+
+
+def test_script_product_config_declares_no_own_software(tmp_path):
+    """sbom.own_software: [] 加 own_software_none_reason：明確宣告沒有 → OK，說明寫理由（是宣告，掃描沒有驗證）。"""
+    cfg = dict(OWN_CFG, sbom={"own_software": [], "own_software_none_reason": "Image contains only distribution packages"})
+    p, out, st, _ = own_run(tmp_path, cfg)
+    assert re.search(r"^B-own-software-rootfs_no_gui\tOK\t製造商宣告沒有自有軟體：Image contains only distribution packages（是宣告", st, re.M), st
+    # 空陣列但沒有理由：仍然是沒有宣告
+    cfg2 = dict(OWN_CFG, sbom={"own_software": []})
+    p2, out2, st2, _ = own_run(tmp_path, cfg2, out="res2")
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t", st2, re.M), st2
 
 
 def rescan_prev(tmp_path):

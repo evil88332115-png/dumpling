@@ -64,7 +64,8 @@ class Plan(unittest.TestCase):
         self.assertEqual(pc.validate_platform_config(cfg, "example"), [])
         plan = pc.platform_plan(cfg)
         self.assertEqual(plan, {"build_mode": "compile", "build_runner": "ubuntu-24.04", "build_apt": ["make", "gcc"],
-                                "scan_runner": "ubuntu-24.04", "scan_apt": ["zstd"], "scan_tools": "sbom-only", "arch": "amd64"})
+                                "scan_runner": "ubuntu-24.04", "scan_apt": ["zstd"], "scan_tools": "sbom-only", "arch": "amd64",
+                                "scan_platform_arg": "rockchip"})
         cfg["arch"] = "arm64"
         cfg["scan"]["runner"] = "arm64"
         self.assertEqual(pc.platform_plan(cfg)["scan_runner"], "ubuntu-24.04-arm")        # 只有明確寫才換；不看 arch
@@ -176,6 +177,33 @@ class Roles(unittest.TestCase):
         t = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "assemble.sh"), encoding="utf-8").read()
         self.assertIn("bsp) bsp=$name;; rootfs) rfs=$name;;", t)
 
+
+
+class ScanPlatformArg(unittest.TestCase):
+    """scan.platform_arg 真的會傳到掃描工具（project-info 的 SCAN_PLATFORM_ARG → platform.sh 的 DUMPLING_SCAN_PLATFORM_ARG → scan.sh 的 --platform）；
+    工具不認得的值、rootfs 不是 rootfs → 驗證就失敗（不再是驗證了卻沒人讀的欄位）。"""
+    def cfg(self, **scan):
+        return {"schema": 1, "platform": "my-nas", "description": "x", "build": {"mode": "none"},
+                "layers": {"bsp": {"packages": ["x"]}, "default": "os"}, "scan": scan}
+
+    def test_platform_arg_default_and_override(self):
+        self.assertEqual(pc.platform_plan(self.cfg(platform_arg="generic"))["scan_platform_arg"], "generic")
+        self.assertEqual(pc.platform_plan(dict(self.cfg(), platform="jetson"))["scan_platform_arg"], "jetson")
+
+    def test_values_the_tools_do_not_accept_fail_validation(self):
+        errs = pc.validate_platform_config(self.cfg(), "my-nas")
+        self.assertTrue(any("scan.platform_arg" in e and "my-nas" in e for e in errs), errs)          # 沒寫、平台名稱工具不認得
+        self.assertFalse([e for e in pc.validate_platform_config(self.cfg(platform_arg="generic"), "my-nas") if "platform_arg" in e])
+        self.assertTrue(any("scan.platform_arg" in e for e in pc.validate_platform_config(self.cfg(platform_arg="android"), "my-nas")))
+        self.assertTrue(any("scan.rootfs" in e for e in pc.validate_platform_config(self.cfg(platform_arg="generic", rootfs="sysroot"), "my-nas")))
+        self.assertFalse([e for e in pc.validate_platform_config(self.cfg(platform_arg="generic", rootfs="rootfs"), "my-nas") if "rootfs" in e])
+
+    def test_wired_through_platform_sh_and_jetson_scan(self):
+        sh = open(os.path.join(ROOT, "pipeline", "platform.sh"), encoding="utf-8").read()
+        self.assertIn("DUMPLING_SCAN_PLATFORM_ARG=$sparg", sh)
+        self.assertIn("s/^SCAN_PLATFORM_ARG=//p", sh)
+        scan = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
+        self.assertIn('--platform "${DUMPLING_SCAN_PLATFORM_ARG:-$DUMPLING_PLATFORM}"', scan)
 
 if __name__ == "__main__":
     unittest.main()

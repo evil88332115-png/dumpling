@@ -1423,12 +1423,18 @@ def uefimod():
 
 def own_software(scan, cfg, spec, fwc, fw_info, path=None):
     """設定 sbom.own_software（產品自有軟體）→ own_software.build() 的 (元件, 頂層 ref, info, 刷機包的元件)；
-    沒有設定 → (None, None, None, fwc)：什麼都不做，輸出和沒有這個功能時逐位元組相同。
+    沒有設定 → (None, None, None, fwc)：什麼都不做，輸出和沒有這個功能時逐位元組相同；但 own-software.json 是 own_software.py --declaration
+    寫的宣告結果時，回傳 declaration_info（沒宣告 → GAP，明確宣告沒有 → OK），SBOM 文件照樣標出來。
     path：--own-software（預設 <scan>/../own-software/own-software.json）。同一個檔案已經是刷機包的 kernel 模組（fwc）時不重複列，
     改在那個元件上標記（在複本上改，成功才換掉 fwc；處理失敗時刷機包的元件維持原樣）。"""
-    if not ownmod().configured(cfg):
-        return None, None, None, fwc
     p = Path(path) if path else scan.parent / "own-software" / "own-software.json"
+    if not ownmod().configured(cfg):
+        # 沒有列自有軟體：scan-flash-package.sh（own_software.py --declaration）寫了宣告的結果時才標出來（沒宣告 → GAP；
+        # 明確宣告沒有 → OK 並寫出理由）；沒有那個檔案的流程輸出照舊
+        d = load_json(p) if p.is_file() and not p.is_symlink() else None
+        if isinstance(d, dict) and isinstance(d.get("declaration"), dict):
+            return None, None, ownmod().declaration_info(cfg, p.name), fwc
+        return None, None, None, fwc
     doc = load_json(p)
     fw2 = json.loads(json.dumps(fwc)) if fwc else fwc
     try:     # own-software.json 是不可信資料：格式怪異時不讓整份 CRA 文件失敗

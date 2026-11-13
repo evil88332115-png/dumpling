@@ -106,6 +106,10 @@
   "vulnerabilities.os.p1_rows": {
    "equals": 0,
    "reason": "os 層（customer）不進 P1 判斷表"
+  },
+  "own_software": {
+   "equals": "GAP",
+   "reason": "示範專案的 config 沒有宣告自有軟體（sbom.own_software）：B-own-software 記 GAP，不可以悄悄消失，也不可以是 OK"
   }
  }
 }

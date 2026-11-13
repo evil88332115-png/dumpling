@@ -34,6 +34,7 @@ pipeline/new-project.sh <專案名> --platform <平台> --company-role <manufact
 1. 跑上面的指令（專案名只能用小寫英數與連字號）；會從 `templates/project/` 與平台的 `project_defaults` 產生專案，
    `CRA/Config/` 的三個檔從平台預設值帶入（`config.json`←`tools/cra/config.example.json`、`inputs.json`←`scan.inputs_template`
    指到的精靈範本、`vex-rules.json`←`tools/cra/vex-rules.example.json`）。不覆寫已存在的專案。
+   **`config.json` 帶入的是範本的虛構值（Example Co.、example.com、example-agent…），一定要換成真實值或刪掉**：留著的話，讀 config 的 CRA 文件（例如 user-information）會被判成完整（OK）。刪掉的欄位在文件裡標 TO BE COMPLETED、文件至少 GAP（M7 會改成開案時就不帶範本值）。產品自有軟體列在 `sbom.own_software`；真的沒有時寫 `"own_software": []` 加 `"own_software_none_reason": "<理由>"`（B-own-software 記 OK，說明寫理由）；兩個都沒寫 → B-own-software 與 SBOM 文件 GAP（沒有宣告自有軟體）。
 2. 把 `project.yml`、`sources.yml` 裡值是 `TO BE COMPLETED` 的地方填完；`python3 -I pipeline/lib/project_config.py validate projects/<專案名>` 會列出還沒填的欄位。`status` 改成 `shipped` 之前不能有待填欄位。
 3. 推上去。dev／release workflow 讀 `project.yml` 的 `platform`，打 tag `<專案>/<版本>` 就走 release。
 
@@ -103,6 +104,27 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
   轉給 wizard 時每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`，一路傳到 `kernel_versions.py --upstream-version`：和核心原始碼 Makefile 一致 → `upstream_basis` 是 `source-makefile+platform-param`；
   不一致 → 不採用任何一個（`upstream_version` 是 null，note 寫兩個值）。scan.sh 用 `python3 -I pipeline/project-info.py --kernel-args <專案資料夾> <版本>` 取得這兩種參數（一行一個；沒設定不印），
   格式不對 → 結束碼 1（sources.yml 驗證時就會報錯）。Jetson 的 `scan.sh` 是範例。
+- **分層重跑要告訴 sca-scan 核心在哪份報告**（`--kernel-in-other-report <專案>-bsp`；詳見 `docs/LAYERS.md` §6）。核心永遠在 bsp 層，`-os` 層的 SBOM 沒有核心，
+  但 sca-scan 的核心階段是從**映像**讀核心的，不看分層後的 SBOM：不告訴它，`-os` 報告會對映像裡的核心再判定一遍（Jetson 得 `C-kernel-cve-list`／`C-kernel-config`／`C-kernel-module-map` 三列假的 GAP；
+  Raspberry Pi 型的 CNA 版本比對會「成功」，`-os` 報告多出約 2700 列合成的 linux-kernel 列，標 `synthetic:kernel-cna`）。**平台轉接器對 `scan_plan` 裡後綴不是空的每一項重跑，都要給**
+  `wiz "$suffix" --kernel-in-other-report "$DUMPLING_PROJECT-bsp" --rescan-from …`（wizard `cra-scan.py` 的選項，一路傳到 `scan-flash-package.sh`、`sca-scan`；後兩者另接受環境變數 `SCA_KERNEL_IN_OTHER_REPORT`，命令列優先）。
+  完整掃描和 `ours` 的空後綴重跑（SBOM 是整個產品）不給。給了也只有「SBOM 真的沒有核心」（kernelcheck 的 NOT_RUN）才生效，bsp 層有核心照舊，所以對 bsp 層給是無害的。
+  不能只由「SBOM 沒有核心」推定：單一 SBOM 的廠商核心（不是套件）要走 CNA 版本比對。名稱只接受 `^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$`，否則 exit 64。Jetson 的 `scan.sh` 是範例。
+- **宣告核心不是發行版的核心**（`kernel_not_distro`，選用）。Grype、DT 對 Debian／Ubuntu 套件是用發行版的原始碼套件與版本字串比對；核心若不是發行版建的（廠商 BSP 核心的 deb、Raspberry Pi、Radxa），這個比對不可靠，
+  而且是漏報的方向（例如 `1:6.18.50-1+rpt1` 因為 epoch，被當成比 Debian 6.12.x 的任何修補都新，Debian 修好的 CVE 全算已修好，只剩 Debian 尚未修的）。所以 `C-kernel-coverage` 在這種核心上是 GAP，
+  即使 Grype 對核心有比對；核心 CVE 要改以上游版本對核心 CNA（尚未實作，見 M7）。
+  - 自動判斷（`tools/pilot/lib/kernelcheck.py`，只看 deb 核心套件；規則是**或**：任何一條成立就是，沒有一條能取消另一條，所有成立的原因都寫進 `scan/kernel-coverage.json` 的 `off_series`）：
+    - a. 版本的 epoch ≥ 1（`1:6.18.50-1`；解析成整數，`0:` 等於沒有 epoch，不算）。Debian、Ubuntu 自己的 `linux` 不用 epoch。
+    - b. 版本含已知的廠商後綴 `+rpt`、`+rpi`（不分大小寫，上游部分或 Debian revision 都算），或套件名稱含 `+rpt`、`-rpt-`。清單與理由在 `kernelcheck.py` 的 `VENDOR_LOCAL_SUFFIXES`、`VENDOR_NAME_MARKERS`。
+    - c. 明確宣告：下面的 `kernel_not_distro`。
+    - d. purl 的 `upstream=`（來源套件，先 URL 解碼，`name@version` 取名稱）：`linux-upstream`（核心自己 `make deb-pkg` 的預設來源名稱）一律算；`distro=debian-*` 而且來源不在 Debian 建核心的來源清單（`linux`、`linux-latest`、`linux-signed-amd64`／`-arm64`／`-i386`）也算；
+       `distro=ubuntu-*` **不**看其他 `linux-<flavor>` 來源（`linux-nvidia-tegra`、`linux-raspi`、`linux-aws`… 都是 Canonical 的核心）。清單與出處在 `tools/pilot/lib/data/distro-kernel-sources.json`；檔案讀不到或格式不對 → `C-kernel-coverage` FAIL，不當作沒有問題。
+    - 名稱與版本取 SBOM 元件的欄位與 purl 兩邊（purl 先解碼），任何一邊成立就算。`nvidia-l4t-kernel*`（NVIDIA 的核心套件，經 `C-kernel-l4t-map` 對應 Canonical 核心比對）和 Canonical 的 Tegra 核心不會被標，Jetson 不受影響。
+  - **自動規則抓不到的**（要用 `kernel_not_distro` 宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu（沒有 epoch、沒有 `+rpt`／`+rpi`），而且 purl 沒有 `upstream=`／`distro=` 限定詞，或限定詞也像發行版
+    （例如把來源套件命名成 `linux` 的廠商）；非 deb 的核心（rpm、apk、Yocto 的 `linux-kernel` 元件、沒有套件的廠商核心）；後綴不在清單裡的廠商（例如其他 SoC 廠商的 `+vendor1` 後綴）。這些規則抓得到已知的樣子，抓不到不代表核心是發行版的。
+  - 宣告：`sources.yml` 的 `releases.<版本>.platform_params.kernel_not_distro: "<理由>"`，或 `platform.yml` 的 `scan.kernel_not_distro: "<理由>"`（該平台所有專案、所有版本的預設；版本的值取代平台的預設）。
+    `project-info.py --kernel-args` 轉成 `--kernel-not-distro <理由>`（一行一個參數；理由不能是空的、不能有換行或控制字元、最多 300 位元組，否則 sources.yml／platform.yml 驗證就報錯），
+    wizard → `scan-flash-package.sh` → `sca-scan` 一路傳（後兩者另接受 `SCA_KERNEL_NOT_DISTRO`）。SBOM 有核心時 `C-kernel-coverage` 是 GAP，說明寫出理由；SBOM 沒有核心（例如 `-os` 層）時照舊不寫這一列。Jetson 不設。
 
 ## 5. 平台轉接器
 
@@ -112,7 +134,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 |---|---|
 | `validate` | 驗證 project.yml、sources.yml、平台設定；不做別的 |
 | `fetch` | 共用：讀 sources.yml 下載核對到 `$DUMPLING_OUT/downloads/`。轉接器可提供 `fetch.sh` 覆寫 |
-| `build` | 平台各自（`build.sh`）。不編譯的平台印 `build: OK（不編譯）` |
+| `build` | 平台各自（`build.sh`）。不編譯的平台（`build.mode: none`）整個 build job 略過，scan job 記 `pipeline-build NOT_RUN 4`（不是 OK） |
 | `assemble` | 平台各自（`assemble.sh`）：組產品映像 |
 | `scan` | 平台各自（`scan.sh`）：呼叫共用掃描，只提供平台設定；**平台名稱由 project.yml 明確傳下去**（見下） |
 | `raw-sectors` | 選用掛點，見下 |
@@ -130,7 +152,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…）` 結束；轉接器沒有該步驟的腳本 → `NOT_RUN`（4）。
 轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_ARCH`（platform.yml 的 `arch`，預設 `arm64`）、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
 
-**平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_PLATFORM`（或平台設定 `scan.platform_arg`）原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
+**平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_SCAN_PLATFORM_ARG` 原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`（`pipeline/platform.sh` 匯出：平台設定的 `scan.platform_arg`，沒寫就是平台名稱；必須是工具認得的 jetson／raspberrypi／rockchip／generic，否則平台設定驗證就失敗）。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
 
 ### 選用掛點：raw-sectors
 
@@ -186,9 +208,10 @@ scan:                          # 選填
   runner: amd64                # 選填：scan job 的 runner amd64｜arm64（預設 amd64 → ubuntu-24.04）
   apt: [zstd]                  # 選填：scan job 額外的 apt 套件
   tools: sbom-only             # 選填：sbom-only（預設）｜full（見下表）
+  kernel_not_distro: "<理由>"  # 選填：宣告這個平台的核心不是發行版的核心（見 §4 sources.yml 的 `kernel_not_distro`）；Jetson 不設
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
-  platform_arg: jetson         # 傳給掃描工具的 --platform
-  rootfs: rootfs
+  platform_arg: jetson         # 傳給掃描工具的 --platform（DUMPLING_SCAN_PLATFORM_ARG）；沒寫＝平台名稱；只能是 jetson／raspberrypi／rockchip／generic
+  rootfs: rootfs               # 目前只能是 rootfs（scan.sh 與 platform_scan 固定用這個名稱）；其他值驗證失敗
 project_defaults:              # 選填：new-project.sh 帶入 project.yml／sources.yml 的預設值
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
@@ -203,6 +226,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | `build.apt` | `[]` | build job 的 apt 相依 |
 | `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
 | `scan.tools` | `sbom-only` | scan job 裝哪套掃描工具：`sbom-only`＝Syft、Grype、bubblewrap（`install-tools.sh --sbom-only`）；`full`＝`install-tools.sh` 不帶旗標（Syft、Grype、cdxgen、govulncheck、guarddog、bubblewrap，版本都固定在 `install-tools.sh`）。**不分項**：git／dir 模式的 sca-scan（A-tools）檢查整套工具的版本，只裝一部分會回 ATTENTION 或 FAIL。`full` 裝在 `/opt/dumpling-tools`（沙箱只遮蔽家目錄與 runner 目錄），guarddog 在 `/usr/local/bin` 是符號連結指向 `/opt` 底下的 venv；裝完用家目錄遮蔽的 bwrap 確認每個工具看得到。其他值：`project-info.py`／`platform.sh validate` 結束碼 64。實作 `pipeline/install-scan-tools.sh` |
+| `scan.kernel_not_distro` | （不設） | 理由字串（非空、沒有控制字元、最多 300 位元組）。該平台所有專案、所有版本的預設，宣告核心不是發行版的核心（`C-kernel-coverage` GAP）；`sources.yml` 的 `platform_params.kernel_not_distro` 優先。經 `project-info.py --kernel-args` 轉成精靈的 `--kernel-not-distro`，詳見 §4 sources.yml 的 `kernel_not_distro` |
 | `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
 
 **步驟的結束碼規則與紀錄**（`pipeline/run-step.sh <步驟> <專案資料夾> <版本>`，workflow 所有 `platform.sh` 呼叫的唯一入口；`--record <專案資料夾> <版本> <步驟> <狀態> <結束碼> <說明>` 只記一列）：
@@ -218,7 +242,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
 `platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
 `status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
-Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
+手動觸發（workflow_dispatch）只建 draft；push tag 建正式 Release（`--verify-tag`）。**GAP 不擋正式 Release**：scan 回 3（GAP）時 `run-step.sh` 記一列、以 0 繼續，Release 照樣發，結論寫在 `release-meta.json` 的 `report_status`／`release_gate`／`pipeline_result` 與 Release 說明開頭（D-033：資料缺口照實標示，不靠擋發佈）。只有 FAIL（1、64 或其他）讓 job 失敗、不發 Release。
 
 **ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。
 所有平台的 scan 都 `source pipeline/lib/mirrors.sh`，用 `mirror <tools/mirror 底下的腳本> <資料夾名>`（不要各寫一份）；`mirror_kernel_cve <名>` 會把上一份核心 CVE 鏡像（`$KCVE_CACHE_DIR`）傳給 `kernel-cve.sh` 的 `KERNEL_CVE_REUSE_FROM`（上游 HEAD 沒變就沿用）與 `KERNEL_CVE_FALLBACK_FROM`（上游連不上就退而求其次）。

@@ -43,6 +43,8 @@ LAYERS = ("bsp", "host-tool", "os")
 BUILD_MODES = ("compile", "none")
 ARCHES = ("arm64", "amd64")                                  # 目標映像的架構（platform.yml 的 arch）與 runner 架構（build.runner、scan.runner）
 RUNNER_LABELS = {"arm64": "ubuntu-24.04-arm", "amd64": "ubuntu-24.04"}
+SCAN_PLATFORM_ARGS = ("jetson", "raspberrypi", "rockchip", "generic")   # scan-flash-package.sh／cra-scan.py 的 --platform 認得的值
+SCAN_ROOTFS = "rootfs"                                       # scan.rootfs：scan.sh 與 platform_scan 目前固定用這個名稱（結果在 scan/rootfs/）
 SCAN_TOOLS = ("sbom-only", "full")                            # scan.tools：sbom-only＝Syft、Grype、bwrap；full＝install-tools.sh 不帶旗標（再加 cdxgen、govulncheck、guarddog）
 APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")          # apt 套件名稱（Debian Policy 5.6.1）；進 workflow 的指令列，所以限制字元
 
@@ -204,11 +206,24 @@ KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$")   # 同 t
 KERNEL_UPSTREAM_RE = re.compile(r"^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$")    # 同 tools/pilot/lib/kernel_versions.py 的 UP_RE（X.Y.Z）
 
 
-def kernel_wizard_args(params):
+NOT_DISTRO_MAX_BYTES = 300     # 同 tools/wizard/cra-scan.py 的 --kernel-not-distro
+
+
+def check_not_distro(v, label):
+    """kernel_not_distro 的理由：非空字串、沒有控制字元（換行、tab）、最多 300 位元組。不合法 → ConfigError。"""
+    if not (isinstance(v, str) and v.strip() and v.isprintable() and len(v.encode("utf-8")) <= NOT_DISTRO_MAX_BYTES):
+        raise ConfigError("%s 必須是理由字串（非空、沒有換行或控制字元、最多 %d 位元組）" % (label, NOT_DISTRO_MAX_BYTES))
+    return v
+
+
+def kernel_wizard_args(params, platform_not_distro=None):
     """版本的 platform_params → 精靈（tools/wizard/cra-scan.py）的核心參數清單。
     - kernel_release：字串或字串清單 → 每個一個 `--kernel-version`。
     - kernel_upstream_version：上游版本 X.Y.Z。字串＝只有一顆 kernel_release 時那一顆的；mapping＝{kernel_release: X.Y.Z}（鍵要在 kernel_release 裡）
       → 每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`（kernel_versions.py 和原始碼 Makefile 核對，不一致不採用）。
+    - kernel_not_distro：理由字串 → `--kernel-not-distro <理由>`：宣告這個產品的核心不是發行版（Debian／Ubuntu）的核心，SBOM 有核心時 C-kernel-coverage 是 GAP
+      （發行版資料的比對不可靠）。給版本字串看不出來的平台（例如部分 Radxa 核心）。platform_not_distro 是 platform.yml（scan.kernel_not_distro）的預設，
+      適用該平台所有專案的所有版本；版本的 platform_params.kernel_not_distro 優先（取代它）。兩邊都沒有就不印。
     都沒有 → []。格式不對 → ConfigError。"""
     params = params or {}
     if not isinstance(params, dict):
@@ -231,12 +246,19 @@ def kernel_wizard_args(params):
     for k, v in ups.items():
         if k not in rels or not isinstance(v, str) or not KERNEL_UPSTREAM_RE.match(v):
             raise ConfigError("platform_params.kernel_upstream_version 的鍵要是 kernel_release 裡的核心、值要是 X.Y.Z")
+    nd = params.get("kernel_not_distro")
+    if nd is not None:
+        check_not_distro(nd, "platform_params.kernel_not_distro")
+    elif platform_not_distro is not None:
+        nd = check_not_distro(platform_not_distro, "platform.yml 的 scan.kernel_not_distro")
     out = []
     for r in rels:
         out += ["--kernel-version", r]
     for r in rels:
         if r in ups:
             out += ["--kernel-upstream-version", "%s=%s" % (r, ups[r])]
+    if nd is not None:
+        out += ["--kernel-not-distro", nd]
     return out
 
 
@@ -324,7 +346,9 @@ def platform_plan(config):
     b, sc = config.get("build") or {}, config.get("scan") or {}
     return {"build_mode": b["mode"], "build_runner": RUNNER_LABELS[b.get("runner", "arm64")], "build_apt": list(b.get("apt") or []),
             "scan_runner": RUNNER_LABELS[sc.get("runner", "amd64")], "scan_apt": list(sc.get("apt") or []), "scan_tools": sc.get("tools", "sbom-only"),
-            "arch": config.get("arch", "arm64")}
+            "arch": config.get("arch", "arm64"),
+            # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform：scan.platform_arg，沒寫就是平台名稱（驗證時已確認是工具認得的值）
+            "scan_platform_arg": sc.get("platform_arg") or config.get("platform")}
 
 
 def validate_platform_config(doc, name=None):
@@ -402,16 +426,26 @@ def validate_platform_config(doc, name=None):
             errs.append("scan 必須是 mapping")
         else:
             for k in scan:
-                if k not in ("inputs_template", "platform_arg", "rootfs", "apt", "runner", "tools"):
+                if k not in ("inputs_template", "platform_arg", "rootfs", "apt", "runner", "tools", "kernel_not_distro"):
                     errs.append("scan 不認得的鍵 %s" % k)
             _validate_apt(scan.get("apt"), "scan.apt", errs)
             if "tools" in scan and scan["tools"] not in SCAN_TOOLS:
                 errs.append("scan.tools 必須是 %s" % "／".join(SCAN_TOOLS))
             if "runner" in scan and scan["runner"] not in ARCHES:
                 errs.append("scan.runner 必須是 %s" % "／".join(ARCHES))
+            if "kernel_not_distro" in scan:
+                try:
+                    check_not_distro(scan["kernel_not_distro"], "scan.kernel_not_distro")
+                except ConfigError as e:
+                    errs.append(str(e))
             for k in ("inputs_template", "platform_arg", "rootfs"):
                 if k in scan and not (isinstance(scan[k], str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", scan[k])):
                     errs.append("scan.%s 不合法" % k)
+            parg = scan.get("platform_arg") or doc.get("platform")
+            if isinstance(parg, str) and parg not in SCAN_PLATFORM_ARGS:
+                errs.append("scan.platform_arg（沒寫時是平台名稱 %s）必須是掃描工具認得的 %s" % (parg, "／".join(SCAN_PLATFORM_ARGS)))
+            if "rootfs" in scan and scan["rootfs"] != SCAN_ROOTFS:
+                errs.append("scan.rootfs 目前只能是 %s（scan.sh 與 platform_scan 固定用這個名稱）" % SCAN_ROOTFS)
     return errs
 
 
