@@ -2,17 +2,17 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 01:23 +0800（C1）
+最後更新：2026-11-14 01:24 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：#48 已合併；驗證 C1 的 #50，接著 #49 聚焦複驗；正式 tag 等使用者
 - 分支／PR／commit：main 5b444ab。已合併：**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 fe1ed1d：D-051 補、D-054；自然時機再開 PR）
-- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C1 的 PR #50（060ecbc；下一個：#49 的聚焦複驗 02681bc..9f42c74），worktree `$AGENT_TMP/dumpling-wt-c0-verify-50`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-50/report.md`
+- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C1 的 PR #50（**f45ed46**，舊 head 060ecbc 的那次已停），worktree `$AGENT_TMP/dumpling-wt-c0-verify-50`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-50b/report.md`；下一個：#49 聚焦複驗 02681bc..9f42c74
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：**PR #50**（wp1/scan-not-run 060ecbc：KERNEL_STAGES 不是 OK 降 GAP、D-044 例外靠 meta.json 標記、COND 加 C-pyver／B-php-runtime、刷機包層 B-initrd-coverage／B-rootfs-tar／B-uefi-binary 進來）C1 驗證在跑、C0 驗證排隊。D-054：B-bootloader-coverage 進 report_status 不擋閘門（待 PM）。正式 tag 等使用者
+  - C1（第二台）：**PR #50**（f45ed46）：C1 驗證不通過 1 項已修（沒給 --kernel-build 時不管有沒有核心都寫 NOT_RUN → 改成 KSEEN 才寫）＋建議 2、3；C0 驗證重開在 f45ed46。D-054。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48 已合併。supplier-normalize（58cbff0）重新預驗中，過了開 PR（先併 main）
   - C3（第二台）：M5 #47 已合併（e5d6e5d）。**監控 PR #49**：C0 驗證不通過 3 項 → C3 已修（9f42c74：workflow 真值表測試、skipped Release 降 ATTENTION、md_code／md_text／md_title＋unsafe_markdown 最後檢查、feeds timeout、彙總 attention 標籤），C0 排聚焦複驗（#50 之後）。real Issue 照 D-040：正式 Release → 手動 baseline → 一天 dry_run → C3 回報 → C0 設 WATCH_REAL_ISSUES=on。GitLab 待辦 T-15～T-22 在 GITLAB-PORT。wp2/art14 等 M7
   - C4（第二台）：C0 同意 M6 不等 #50（#50 先合併就再併 main 重跑）；wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
