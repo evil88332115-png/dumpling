@@ -5,6 +5,9 @@ name: art14
 # 權限照 D-012：頂層唯讀；job 只宣告需要的（issues: write）。
 # 手動 action=drill 的驗收：每一步輸出 JSON 結果檔，下一步用 art14.py check 比對，不符 job 就失敗。
 on:
+  # 暫時：只限 wp2/art14 分支的 push，固定跑 action=drill，讓 workflow 在合併前實際跑過一次；開 M8 PR 前拿掉（C0 指示）
+  push:
+    branches: [wp2/art14]
   schedule:
     - cron: '7 * * * *'
   workflow_dispatch:
@@ -30,7 +33,7 @@ jobs:
       contents: read
       issues: write
     env:
-      ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'countdown' }}
+      ACTION: ${{ github.event_name == 'push' && 'drill' || (github.event_name == 'workflow_dispatch' && inputs.action || 'countdown') }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
