@@ -2,19 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 04:42 +0800（C1）
+最後更新：2026-11-14 04:42 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：#60 已合併；#58 等 C1 核對 Jetson 草稿；等 C4 的 M6（重跑等使用者同意）；問使用者 5674、正式 tag 等
-- 分支／PR／commit：main 5cf2eaa。已合併：**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
+- 目前在做：M7a（#58）已合併；等 C1 的 M7a2、C3 的 gitlab-notes／M8、C2 的 advisory-polish、C4 的 M6（重跑等使用者同意）；問使用者 5674、正式 tag 等
+- 分支／PR／commit：main b56cff4。已合併：**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：#40、#42、#50 已合併。**M7a PR #58**（C0 驗證通過；M7b 第一項：版本＝tag 要加獨立來源（BSP 版本字串／sources.yml／刷機包檔名）；GitLab release-meta 沒帶 --notes 轉 C3；wp1/m7a f1eeb17：D-055 欄位、精靈覆寫版本（含 dumpling 在地修改，C0 特別驗）、版本＝tag、new-project 不帶範本值、#25 #26；驗收 run 43489995288、43490013212、tests 43490031261；影響已轉 C3、C4）。M7 拆法（D-056）：M7a 專案欄位∥M7a2 validate_table → M7b 狀態結構化 → M7c VEX 依據 → M7d 逐顆核心 → M7e 可利用性分層；M7f（A1–A3、C1 骨架、文字建議）M7b 後平行。正式 tag 等使用者
+  - C1（第二台）：#40、#42、#50、M7a #58 已合併。下一個 M7a2（validate_table 介面，先和 C2 確認），再 M7b（第一項：版本＝tag 要加獨立來源）。正式 tag 等使用者（打在 b56cff4 或更新的 main）
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
-  - C3（第二台）：M5 #47、監控 #49 已合併。real Issue 照 D-040：等正式 Release → 手動 baseline → 一天 dry_run → C3 回報 → C0 設 WATCH_REAL_ISSUES=on。GitLab 待辦 T-14（C1）、T-15～T-22。wp2/art14 等 M7（先整理需要 M7 的欄位）
+  - C3（第二台）：M5 #47、監控 #49 已合併。M7a 已合併 → 可開工：wp5/gitlab-notes（GitLab release-meta 補 --notes）與 M8（wp2/art14：B1 第 14 條、B2 支援期限）。real Issue 等正式 Release。GitLab 待辦 T-14（C1）、T-15～T-22
   - C4（第二台）：wp7/adapters 已併 main 9f11a90（25d3050）、獨立驗證已做（小修 107ce75）；support-lifecycle 11 筆已在 M6。**最終重跑等使用者同意**（C4 的本機派送腳本被 Claude Code 以「記憶體不足」停掉，依規定要使用者同意才能重啟）。通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
