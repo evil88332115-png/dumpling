@@ -541,6 +541,22 @@ class TestCountdown(Base):
         self.assertEqual(self.gh.writes, [])
 
 
+class TestIndexLag(unittest.TestCase):
+    """依標籤列 Issue 剛關閉後有索引延遲（2026-11-13 實測 #37）：列表回傳了已關閉的 Issue 時不更新它。"""
+
+    def test_closed_issue_in_open_listing_is_skipped(self):
+        orig = art14.issues.list_issues
+        art14.issues.list_issues = lambda api, repo, label, state="all": [
+            {"number": 9, "state": "closed", "body": "x", "author_association": "OWNER", "user": {"login": "a", "type": "User"}}]
+        try:
+            ok, skipped = art14.find_drill_issues(None, "o/r", "open")
+        finally:
+            art14.issues.list_issues = orig
+        self.assertEqual(ok, [])
+        self.assertEqual(skipped[0][0], 9)
+        self.assertIn("已關閉", skipped[0][1])
+
+
 class TestFillAndClose(Base):
     def test_fill_only_drill_issue(self):
         _, _, body, _ = self.drill_body()

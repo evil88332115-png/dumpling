@@ -424,6 +424,10 @@ def find_drill_issues(api, repo, state="open"):
     """回傳 (可處理的 [(issue, marker)], 略過的 [(編號, 原因)])。"""
     ok, skipped = [], []
     for i in issues.list_issues(api, repo, DRILL_LABEL, state):
+        if state == "open" and i.get("state") != "open":
+            # 依標籤列 Issue 剛關閉後有索引延遲，可能還列得到已關閉的（2026-11-13 實測 #37）：不更新已關閉的
+            skipped.append((i["number"], "已關閉（列表索引延遲）"))
+            continue
         if not trusted_author(i):
             skipped.append((i["number"], "作者不是 OWNER／MEMBER／COLLABORATOR"))
             continue
