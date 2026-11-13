@@ -11,6 +11,8 @@ PLAN B 段「第二條路」的前半：下載公開供應商 SBOM → 基本檢
 | `pipeline/lib/firmware_fetch.py` | 接受 `kind: sbom`；`role: sbom` 與 `kind: sbom` 互相綁定（其他規則不變） |
 | `pipeline/lib/tools.lock`、`pipeline/install-tool.sh` | 固定工具的版本、網址、sha256 只寫在 tools.lock；安裝腳本下載後先核對 sha256 才解開，只取一個成員 |
 | `pipeline/firmware-sbom-check.sh`、`pipeline/lib/firmware_sbom_check.py` | 品質檢查 |
+| `pipeline/lib/firmware_sbom_normalize.py` | 上傳 DT 前的最小格式正規化（見下一節）；由 `firmware_dt.py prep` 對 `kind: sbom` 呼叫 |
+| `tests/test_firmware_sbom_normalize.py`、`tools/cra/tests/test_supplier_sbom_schema.py` | 正規化的單元測試（unittest）；正規化後用 CycloneDX 1.4 官方 schema 驗證（pytest，`tools/cra/tests/data/cyclonedx-1.4/`） |
 | `pipeline/lib/firmware_mdsafe.py` | 不可信文字進 markdown／步驟摘要前的共用清理（`md_safe`）；SBOM 檢查、`firmware-ci.sh` 的摘要表、`firmware_dt.py` 的報告都用它 |
 | `pipeline/check-tool-version.sh` | 安裝後核對執行檔回報的版本等於 `tools.lock` 的 `<工具>_version`（目前只認得 sbomqs） |
 | `tests/test_firmware_sbom_check.py`、`tests/test_firmware_mdsafe.py`、`tests/test_firmware_fetch.py` | 單元測試（sbomqs 用假執行檔，不連網） |
@@ -62,9 +64,62 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
 
 注意兩個「檢查」腳本不同：SBOM 檢查的 ATTENTION／GAP 是 0（CI 只在 FAIL 時紅燈，狀態看狀態行），`firmware-bios.sh` 的 ATTENTION／GAP 是 2。argparse 預設的用法錯誤是 2，會和後者的 ATTENTION 混淆，所以 `firmware_sbom_check.py` 覆寫成 64（和 `firmware-bios.sh`、`x86_firmware.py`、`install-tool.sh` 一致）。
 
+## 上傳 DT 前的最小格式正規化（`firmware_sbom_normalize.py`）
+
+DT 5.2.0 把這份供應商 SBOM 拒收（http=400，`Schema validation failed`）。用 CycloneDX 1.4 官方 schema 驗證原檔，錯誤剛好兩個：根物件多出 `platform`、`firmware_version`
+（1.4 起根物件 `additionalProperties: false`），以及 `components[0].licenses[18].license` 只有 `url`（`license` 物件要有 `id` 或 `name`）。
+處理原則：**只改上傳用的副本、原檔不動；不刪資料、不補猜的值、每一筆留紀錄；只處理這兩種已知違規。**
+
+| 規則 | 條件 | 做法 |
+|---|---|---|
+| `top-level-extra-field` | 根物件的鍵不在該 specVersion 的 schema `properties` 裡（表：1.4、1.5、1.6，取自 CycloneDX/specification 各 tag 的 `bom-<版本>.schema.json`） | 搬到 `metadata.properties`，名稱 `dumpling:supplier-extra:<原欄位名>`，值＝字串原值；其他型別是標準 JSON 字串（`sort_keys`、分隔符 `,` `:`、`ensure_ascii=False`） |
+| `license-without-id-or-name` | `components[]`（含巢狀）的 `licenses[]` 項目恰好只有 `license` 一個鍵、`license` 是物件、**沒有 `id` 鍵也沒有 `name` 鍵** | 從 `licenses` 移除該項，元件 `properties` 加 `dumpling:supplier-license-url`（url 為字串時）。license 物件除了 `url` 還有別的欄位（`text` 等）或 `url` 不是字串：整個 license 物件以 JSON 字串存進 `dumpling:supplier-license-entry`（url 為字串時仍另寫 `-url`）。**不把 url 填成 name** |
+
+不處理（照原樣上傳，DT 拒收就照實 FAIL）：其他任何 schema 違規；`id`／`name` 鍵存在但值不合格（`""`、不是 SPDX id）；項目多一個鍵；`licenses` 不是陣列；
+`services`、`metadata.component` 的 licenses；`specVersion` 不是 1.4／1.5／1.6（1.2、1.3 的根物件允許額外欄位；1.7 沒有查證）；`metadata`／`metadata.properties`／元件 `properties` 型別不對（沒有地方放紀錄）。
+**已知違規但無法搬移**（值超過上限、欄位名稱不合格、元件 `properties` 不是陣列…）記在 `unnormalized[]`，欄位原樣留著；report 說「另有 N 處已知違規無法正規化」。
+
+上限（`MAX_*`）：單一值 8 KiB（位元組）、搬移的值合計 256 KiB、變更 2000 筆、元件巢狀 100 層、欄位名稱 100 字元（不含控制字元與單獨代理字元）、`unnormalized` 最多列 200 筆。
+先完整規劃、通過才套用；規劃中出任何例外都整份不處理，文件不動（測試涵蓋超深巢狀、超大欄位、`licenses`／`properties` 型別錯誤等）。
+
+紀錄 `<prep>/normalize.json`（`kind: sbom` 一律寫，沒有變更時 `applied: false`、`changes: []`）：
+
+    {"schema": "firmware-sbom-normalize/1", "input_sha256": "<原檔位元組的 SHA-256>", "spec_version": "1.4",
+     "supported": true, "applied": true,
+     "changes": [{"rule": "top-level-extra-field", "from": "/platform", "to": ["/metadata/properties/1"],
+                  "property": ["dumpling:supplier-extra:platform"], "value_sha256": "<原值標準 JSON 的 SHA-256>"},
+                 {"rule": "license-without-id-or-name", "from": "/components/0/licenses/18", "to": ["/components/0/properties/0"],
+                  "property": ["dumpling:supplier-license-url"], "value_sha256": "…"}],
+     "unnormalized": [{"rule": "…", "at": "<JSON Pointer>", "reason": "…"}], "notes": []}
+
+`from` 是原檔的 JSON Pointer（索引是原檔的，不是移除後的）；`to` 是副本裡新 property 的位置。副本另在 `metadata.properties` 加
+`dumpling:normalized-from-sha256`（原檔 SHA-256，與 `dt-project.json` 的 `input_sbom_sha256` 相同）與 `dumpling:normalized-changes`（筆數，不含這兩個標記本身）。
+沒有變更時不加標記、文件不動。`dt-project.json` 的 `normalize` 欄位記 `{file, applied, changes, unnormalized}`；`firmware-dt.sh` 把 normalize.json 複製到 `<結果>/<專案名>/`，workflow 的小型 artifact 會帶走。
+
+此樣本實際結果（2026-11-12）：3 筆——`/platform`、`/firmware_version`、`/components/0/licenses/18`；元件數不變（10）；原檔 SHA-256 不變（`5c42344d…6a44ae`）。
+副本用官方 1.4 schema 驗證：0 個錯誤（原檔 2 個）。
+
+驗證：`tools/cra/tests/data/cyclonedx-1.4/`（bom、spdx、jsf，CycloneDX/specification tag `1.4`，來源與 SHA-256 見該目錄 README.md）；測試 `tools/cra/tests/test_supplier_sbom_schema.py`
+（`tests/run.d/c2-x86-firmware.sh` 跑）用自組的測資確認：原檔無效、正規化後有效、不認得的違規仍無效、已合格的文件不動；
+真的檔案不進 repo，是手動用同一個驗證器驗過（見上方結果）。**pipeline 執行時不驗證 schema**：DT 上傳本身就會驗證，結果由 report 照實呈現；
+runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
+
+取捨與限制：
+- 副本和原檔不同，DT 裡的 SBOM 不是供應商發布的原樣；差異全部可由 normalize.json 還原（`dumpling:supplier-extra:*` 與 `dumpling:supplier-license-*` 在副本裡）。
+- DT 的授權欄位少了那筆 url-only 的項目；它本來就不是 DT 能辨識的授權（沒有 id 與 name）。
+- `firmware-sbom-check` 檢查的是原檔，仍會提示「DT 可能拒收（schema 不符）」；那是對原檔的陳述，不因副本被正規化而改變。
+- 供應商修好原檔後，副本不會有變更（`changes: []`）；仍被 DT 拒收（別種違規）就是一般 FAIL。
+- **還原時 `metadata`／`metadata.properties` 一律還原成空陣列**：無法從副本區分原檔是「沒有這個鍵」「`null`」還是「空陣列」。內容不會遺失（空陣列沒有資料），但還原後的形狀可能和原檔不同。
+  `normalize.json` 的 `original_shape` 記原本的狀態（`{"metadata": "absent｜null｜object", "metadata.properties": "absent｜null｜array"}`），license 規則的每一筆另有 `component_properties_before`（元件的 `properties` 原本是 `absent｜null｜array`）；
+  要逐位元還原原檔，以這些欄位加上 `input_sha256` 核對為準（原檔本身不動、仍是權威）。
+- **供應商自帶同名的 `dumpling:normalized-*` property**：副本的 `metadata.properties` 會出現兩個同名 property（供應商的與我們加的）。以 `normalize.json` 的 `input_sha256`、`changes` 筆數、各筆 `to` 的位置指標為準
+  （我們加的永遠是 `metadata.properties` 的最後兩個，位置可由 `to` 與 `changes` 筆數推得）；不去除供應商的那兩個（不刪資料）。
+- **供應商 SBOM 有重複 JSON 鍵**：標準庫讀檔時後值會悄悄蓋掉前值，上傳的副本只剩後值。`firmware_dt.py prep` 用 `object_pairs_hook` 偵測，`normalize.json` 的 `notes` 逐筆寫
+  「第幾個完成解析的物件（與位置指標）、鍵、被丟掉的前值的 SHA-256」，report 狀態至少 ATTENTION（見 `docs/notes/c2-firmware-dt.md`）。前值本身不保存（原檔才是權威）。
+
 ## 還沒做
 
-- 上傳 DT、Grype 漏洞比對（待臨時 DT 工具）。
+- 上傳 DT、Grype 漏洞比對：已由 `firmware-dt`（`docs/notes/c2-firmware-dt.md`）做完；這份檢查本身仍是 `漏洞比對：NOT_RUN`。
 - sbomqs 的 sigstore 簽章驗證（目前只固定 sha256）。
 - 其他 `--profile`（ntia、bsi…）未跑；要不要納入是政策問題。
 - email 自動連結沒有中和（只會變成 mailto 連結）；`firmware_mdsafe` 沒有用真正的 markdown 轉換器驗證，測試是字串層級。

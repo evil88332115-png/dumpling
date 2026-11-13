@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Intel CSE 的 IFWI 分割區配置：CSE layout table → BPDT → 主程式分割區的 `$CPD` → `<名稱>.man` 的 `$MN2` manifest。
 
-x86_firmware.py 的 ME 版本原本靠 `$FPT` 分割區表（或名稱是 FTPR 的 `$CPD`）。新世代的 CSE 區域不用 `$FPT` 找主程式：
+x86_firmware.py 的 ME 版本先靠 `$FPT` 分割區表（或名稱是 FTPR 的 `$CPD`），沒有結果時才用這個模組。新世代的 CSE 區域不用 `$FPT` 找主程式：
 區域開頭是 CSE layout table，指到 1～5 個 boot partition（BP1…BP5），每個 boot partition 開頭是 BPDT（Boot Partition Descriptor Table），
 BPDT 的項目指到各子分割區（每個是一個 `$CPD` 目錄）。`$FPT` 只剩在 data partition 裡，不在區域開頭，也不列主程式。
 新世代（例如 CSME 18）沒有 FTPR 那一項：CSE 主程式在 RBEP（BPDT type 1）與 NFTP（type 7）兩個分割區，各自的 manifest 版本相同。
@@ -25,10 +25,18 @@ BPDT 項目裡的 S-BPDT（type 5）不往下追（不會有循環或遞迴）�
 - CSE layout table（區域開頭；MEAnalyzer 的 CSE_Layout_Table_16／17，coreboot cse_layout.h 的 cse_layout）：
   layout 1.7＝+0 ROM bypass 16 bytes、+0x10 Size(u16)、+0x12 Flags(bit 0＝CSE redundancy：BP2 是 BP1 的備份)、+0x14 checksum(u32)、
   +0x18 data(offset,size)、+0x20…+0x44 BP1…BP5(offset,size)、+0x48 temp pages、+0x50 external error log（Size 0x48 以上才有）；欄位都是 u32，offset 相對區域開頭。
-  **Size 從 +0x10 起算**（表的總長是 0x10＋Size）。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog），公開真樣本（兩個版本）是 0x58。
+  **Size 從 +0x10 起算**（表的總長是 0x10＋Size）。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog），公開真樣本是 0x58（Meteor Lake，兩個版本）與
+  0x60（Arrow Lake-U/H FSP 的 Dasharo NovaCustom NUC BOX v0.9.2：表總長 0x70，結構與 CRC 算法同 0x58）。
   **checksum 是 CRC-32**，範圍是 d[+0x10:+0x14] ＋ 4 個 0（checksum 欄位本身不入算）＋ d[+0x18:+0x10+Size]（MEAnalyzer 的驗證程式；
-  兩個真樣本的 stored 值都相符）。本模組認 Size 0x40、0x48、0x58，CRC 不符 → GAP；Size 是其他值 → 不認（none）。
+  三個真樣本的 stored 值都相符）。本模組逐值認 Size 0x40、0x48、0x58、0x60（不用「範圍」或「8 的倍數」之類的規則：Size 決定 CRC 的涵蓋範圍，
+  未知的 Size 沒有依據，CRC 算得對也不代表欄位排列相同）；CRC 不符 → GAP；Size 是其他值（例如 0x5C、0x64、0x68、0x70）→ 不認（none）。
   0x40 與 0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。
+  公開定義（MEAnalyzer、coreboot cse_layout.h）只到 +0x58（external error log 結尾）；Size 0x58 的 +0x58…+0x67 與 Size 0x60 的 +0x58…+0x6F（表尾）沒有公開欄位定義
+  （三個公開真樣本的表尾都是 0）。表尾全為 0：照一般流程，沒有 ATTENTION。表尾不全為 0 時**不解讀它**（不當成 BP 指標），只在下面三項全部成立時才採用版本：
+  (a) 整張表的 CRC-32 相符（範圍照 Size，包含表尾）、(b) BP1…BP5 都通過上面的檢查（指到 BPDT、不重疊、不超出區域、不壓到表本身——BP 落在表內一律 GAP）、
+  (c) 有 FTPR，或 RBEP 與 NFTP 都在而且版本相同。採用時另外回報 attention（代碼 layout-undocumented-fields，文字「layout table 有未公開欄位（+0x58～+0x<尾>），未解讀」
+  與原始值，8 bytes 一組），basis 也帶同一段；任一項不成立 → GAP，原因照實寫。這個情況沒有公開真樣本核對（測試用合成資料）。
+  BP1…BP5 的位置固定在 +0x20…+0x44，不受 Size 影響；external error log 與 temp pages 不讀（值是什麼都不影響結果）。
   layout 1.6＝同樣 16 bytes ROM bypass，+0x10 data(offset,size)、+0x18…+0x3C BP1…BP5(offset,size)、+0x40 u64 checksum，表長 0x48，
   之後到 0x1000 全是 0xFF（MEAnalyzer 也用這個填充當辨識條件之一，因為 1.6 沒有標記）。MEAnalyzer 註解說 checksum 是整張表（不含 ROM bypass）的二補數和；
   唯一的公開樣本（Comet Lake）存的是 0x22，我試過位元組、u32、u64 的加總都湊不成 0，算法沒確認，**不驗證**。
@@ -52,7 +60,10 @@ BPDT_ENTRY = 0x0C
 MAX_BP = 5                             # layout 1.7 最多 5 個 boot partition
 MAX_BPDT_ENTRIES = 48                  # 實際約 5～10 項；coreboot 的類型表到 33
 MAX_CPD_ENTRIES = 256
-LAYOUT_17_SIZES = (0x40, 0x48, 0x58)    # Size 欄位（從 +0x10 起算）：MEAnalyzer 的 0x40／0x48 與公開真樣本的 0x58
+LAYOUT_17_SIZES = (0x40, 0x48, 0x58, 0x60)    # Size 欄位（從 +0x10 起算）：MEAnalyzer 的 0x40／0x48、公開真樣本的 0x58（NovaCustom V540TU）與 0x60（NovaCustom NUC BOX v0.9.2）；
+                                              # 逐值列舉，不用範圍規則：其他值沒有依據（見模組 docstring）
+TAIL_CODE = "layout-undocumented-fields"
+LAYOUT_17_KNOWN = 0x58                        # 公開定義（MEAnalyzer、coreboot）到 +0x58 為止（ELog 結尾）；表內再往後的位元組沒有公開欄位定義
 LAYOUT_16_SIZE = 0x48
 LAYOUT_PAD = 0x1000                      # 1.6 的表後面填 0xFF 到這裡
 MAIN_TYPES = {2: "FTPR", 1: "RBEP", 7: "NFTP"}    # BPDT 類型 → `$CPD` 名稱（ifwitool.c 與 cse_layout.h 的類型表）
@@ -88,9 +99,11 @@ def layout_table(d, base, end):
         if got != want:
             return None, f"CSE layout table at 0x{base:x}: CRC-32 mismatch (stored 0x{want:08x}, computed 0x{got:08x})"
         ver, strict, head = "1.7", True, total
+        tail = bytes(d[base + LAYOUT_17_KNOWN:base + total]) if total > LAYOUT_17_KNOWN else b""
         pairs = [("data", u32(d, base + 0x18), u32(d, base + 0x1C))]
         pairs += [(f"BP{i + 1}", u32(d, base + 0x20 + 8 * i), u32(d, base + 0x24 + 8 * i)) for i in range(MAX_BP)]
     else:
+        tail = b""
         if size < LAYOUT_16_SIZE or not erased(d, base + LAYOUT_16_SIZE, min(LAYOUT_PAD, size) - LAYOUT_16_SIZE):
             return None, None
         ver, strict, head = "1.6", False, LAYOUT_16_SIZE
@@ -112,7 +125,13 @@ def layout_table(d, base, end):
         return (None, why) if strict else (None, None)    # 1.6 沒有標記：矛盾時當作不是 layout table
     if not any(n != "data" for n, _, _ in used):
         return None, None
-    return {"version": ver, "ranges": used}, None
+    return {"version": ver, "ranges": used, "tail": tail if any(tail) else None}, None
+
+
+def tail_attention(tail):
+    """layout 1.7 的表尾（+0x58 到表尾）不全為 0 → ATTENTION（代碼、文字、原始值）。只列原始值，不解讀。"""
+    raw = ", ".join(f"+0x{LAYOUT_17_KNOWN + i:x}: {tail[i:i + 8].hex()}" for i in range(0, len(tail), 8))
+    return {"code": TAIL_CODE, "text": f"layout table 有未公開欄位（+0x{LAYOUT_17_KNOWN:x}～+0x{LAYOUT_17_KNOWN + len(tail) - 1:x}），未解讀；原始值（檔案順序的 bytes，8 bytes 一組）{raw}"}
 
 
 def bpdt_entries(d, lbp, lbp_end):
@@ -200,7 +219,7 @@ def cpd_manifest(d, p, pend, name):
 def find_cse(d, base, end, budget=None):
     """base～end（CSE 區域）的主程式 manifest → dict：
     status＝none（沒有 layout table 也沒有 BPDT：不是這種配置，呼叫端不必理）、
-            found（version、date_raw、offset＝manifest 檔案位置、basis、sources）、
+            found（version、date_raw、offset＝manifest 檔案位置、basis、sources、attention＝[{code, text}]；表尾不全為 0 時才有項目）、
             gap（認得出這種配置，但沒有可用或一致的版本；note 是原因）。"""
     end = min(end, len(d))
     try:
@@ -262,6 +281,8 @@ def _find(d, base, end, budget):
         return {"status": "gap", "note": (f"{how}: no FTPR partition and no {' or '.join(sorted({'RBEP', 'NFTP'} - kinds))} partition ({desc}); "
                                           "RBEP and NFTP must both be present with the same version (copies of one type are not independent), so no version is reported")}
     pick = ftpr or next(c for c in cands if c["name"] == "RBEP")     # 有 FTPR 取它；否則取第一個 RBEP（各份版本都相同）
+    att = [tail_attention(lay["tail"])] if lay and lay.get("tail") else []
+    basis = f"BPDT ({how}): {desc}" + ("" if ftpr else "; no FTPR partition, RBEP and NFTP agree")
+    basis += "".join(f"; ATTENTION {a['code']}: {a['text']}" for a in att)
     return {"status": "found", "version": pick["version"], "date_raw": pick["date_raw"], "offset": pick["offset"],
-            "basis": f"BPDT ({how}): {desc}" + ("" if ftpr else "; no FTPR partition, RBEP and NFTP agree"),
-            "sources": cands, "layout": how}
+            "basis": basis, "sources": cands, "layout": how, "attention": att}

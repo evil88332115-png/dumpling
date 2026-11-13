@@ -34,10 +34,12 @@ permissions:
 jobs:
   compute:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # 核心 CVE clone 最壞約 47 分鐘（3 次 × 900 秒＋等待）、Grype DB 最多 15 分鐘、Grype 比對合計上限 25 分鐘，加上其他步驟
+    timeout-minutes: 150
     permissions:
       contents: read
       issues: read
+      actions: read
     outputs:
       has_plan: ${{ steps.match.outputs.has_plan }}
     steps:
@@ -49,13 +51,55 @@ jobs:
           bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
           sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/grype"
           grype version | head -n 3
+      # 上一份核心 CVE 鏡像：跟 pipeline.yml 同一個 key 前綴與路徑（cache 的版本含路徑），Release 掃描與每日監控互相沿用。
+      # 上游沒變就沿用；git.kernel.org 連不上就用 48 小時內的上一份頂替（ATTENTION，報告與 Issue 會寫出來）。演練不下載核心 CVE。
+      - name: 還原上一份核心 CVE 鏡像（real；有 cache 才有）
+        if: inputs.mode == 'real'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: kernel-cve-mirror-
+      # 資料源自己的逾時：卡住時（例如上游連不上、鏡像腳本沒有整體逾時）這一步失敗但 job 繼續，後面照樣比對、留下報告
+      # （缺的資料源在報告標 GAP／NOT_RUN；CISA KEV 與 EUVD 都沒有就 FAIL）。不完整的鏡像下一步刪掉，不會被讀到。
       - name: 資料源（CISA KEV、EUVD、核心 CNA、Grype DB）
+        id: feeds
+        timeout-minutes: 100
+        continue-on-error: true
         env:
           MODE: ${{ inputs.mode }}
+          KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
         run: |
           extra=()
           if [ "$MODE" = drill ]; then extra=(--no-kernel-cve --no-euvd); fi
           pipeline/watch/feeds.sh "$RUNNER_TEMP/w/feeds" "${extra[@]}"
+      - name: 資料源沒有完成時刪掉不完整的鏡像（沒有 .result 的鏡像不能讀）
+        if: steps.feeds.outcome != 'success'
+        run: |
+          w="$RUNNER_TEMP/w/feeds"; mkdir -p "$w"
+          for n in euvd kernel-cve; do [ -f "$w/$n.result" ] || rm -rf "${w:?}/$n"; done
+          printf 'feeds\tFAIL\t資料源步驟沒有完成（逾時或失敗）：缺的資料源在報告標 GAP／NOT_RUN\n' >> "$w/feeds.tsv"
+          echo "::warning::資料源步驟沒有完成（逾時或失敗），照樣比對並留下報告"
+      - name: 核心 CVE 鏡像是不是這次新抓的（只有新抓的才存 cache，頂替用的舊資料不存回去）
+        id: kcve-fresh
+        if: inputs.mode == 'real' && steps.feeds.outcome == 'success'
+        env:
+          KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
+        run: |
+          export MIRRORS_DIR="$RUNNER_TEMP/w/feeds"
+          . pipeline/lib/mirrors.sh
+          if mirror_is_fresh kernel-cve; then
+            rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kernel-cve" "$KCVE_CACHE_DIR"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"; du -sh "$KCVE_CACHE_DIR"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "核心 CVE 鏡像不是這次新抓的（或沒有）：不存 cache"
+          fi
+      - name: 存核心 CVE 鏡像（cache；新抓的才存，GitHub 會淘汰舊的）
+        if: inputs.mode == 'real' && steps.kcve-fresh.outputs.fresh == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
       - name: 收集 Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,6 +113,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ inputs.mode }}
         run: python3 -I pipeline/watch/issues.py read-state --repo "$GITHUB_REPOSITORY" --mode "$MODE" --out "$RUNNER_TEMP/w/state"
+      - name: 上一次排程的結果（real；被取消或沒跑要留下紀錄）
+        if: inputs.mode == 'real'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml/runs?event=schedule&branch=main&per_page=5" \
+            --jq '{runs: [.workflow_runs[] | {id, status, conclusion, created_at}]}' > "$RUNNER_TEMP/w/prev-schedule.json" \
+            || echo '{"error": "查不到上一次排程（API 失敗）"}' > "$RUNNER_TEMP/w/prev-schedule.json"
       - name: 比對
         id: match
         env:
@@ -81,6 +133,7 @@ jobs:
           ov=()
           if [ "$OVERLAY" = true ]; then ov=(--kev-overlay tests/fixtures/watch/drill-kev-overlay.json); fi
           if [ "$ALLOW_BASELINE" = true ]; then ov+=(--allow-baseline); fi
+          if [ -f "$RUNNER_TEMP/w/prev-schedule.json" ]; then ov+=(--prev-schedule "$RUNNER_TEMP/w/prev-schedule.json" --run-id "$GITHUB_RUN_ID"); fi
           set +e
           python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
             --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}"
