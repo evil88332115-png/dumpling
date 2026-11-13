@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 01:34 +0800（C2）
+最後更新：2026-11-14 01:55 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -186,7 +186,8 @@
 >   - 鏡像 commit 98dc5d70（2026-11-10），gpu-firmware 群組只有 5674（HGX／DGX VBIOS、LS10）→ 判為 not_applicable（C2 代理初審，待負責人確認）；目前沒有可以機器比對的顯卡 vBIOS 公告 → 所有 vBIOS 都是 NOT_ASSESSED（no-row）
 >   - 新模組 `tools/cra/nvidia_vbios_advisory.py`：依版本、PCI vendor／device 比對；鏡像超過 90 天時 fixed 降成 NOT_ASSESSED
 >   - 需要 C1 的介面（之後協調）：validate_table 支援十六進位版本與裝置欄位、表要記鏡像 commit
->   - CI tests 43473936035、firmware 43473941851；C2 正在本機重跑完整測試，下一步派預驗
+>   - C2 在 run.d 清單補上新測試檔 → **3111d52**；本機 931 passed
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/nvidia-vbios-advisory 3111d52，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-nv/`，狀態：**進行中**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
@@ -240,7 +241,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
    - **先通知 C0（sca-center 端要用私有檔在本機驗證）**，再開一個 PR，標題「[WP3] 擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，PR 說明照公開資料規定寫
    - 驗證由 C0 派，C0 合併
 1b. **CSE layout Size 0x60 的支援**（**進行中**，見上方代理）：標準答案用公開可下載的新世代 BIOS 更新檔，要確認 Size 是 0x60、CRC 相符、RBEP 和 NFTP 一致；找不到公開樣本就用合成測試，並在 notes 寫明「沒有公開真樣本核對」。順便評估更大的 Size 值。repo 裡只寫技術理由，不索取私有檔
-2. **supplier-normalize**（**M2 已合併**。C2 已併入 main cc7d101 → **1322c67**：C2 沒改過的檔案一律取 main 的版本，只有 PROVENANCE 和 run.d 是手動合併；755 passed；CI tests 43449745772、firmware 43449751297。預驗（1322c67）：**不通過**，只有兩項文字問題：1.4 schema 的 Apache-2.0 沒寫進 PROVENANCE；notes 有歷史口吻和過時的 OK 列。程式行為 OK。→ 寫程式代理修正**完成 58cbff0**（授權已補；歷史口吻已拿掉；Dasharo 那列改成 ATTENTION；dup_bomb 29.8→0.21 秒；dt-wait.rc 不是 0 就是 GAP；稽核紀錄有測試；252＋516 passed；CI tests 43459809789、firmware 43459815399）→ 再預驗：**不通過**（3 項：和 main dde7467 衝突，要小心 #46 advisory_match 對供應商 SBOM 的採信與跳脫；必要階段缺列仍 OK；locate 記憶體 50MB→約 11GB）→ 寫程式代理修正**完成 24299b2**（merge dd883e3 併入 main dde7467；供應商 SBOM 的 advisory-match 不採信，並經 _cell 跳脫；REQUIRED_STAGES 11 個，缺列就是 GAP；locate 1314→273 MB；279＋644＋49 passed；CI tests 43469023446、firmware 43469029811）→ **第三次預驗進行中**（暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-norm3/`）→ 預驗結束後併入 main 5b444ab（merge-tree 確認沒有衝突）→ 開 PR）：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
+2. **supplier-normalize**（**M2 已合併**。C2 已併入 main cc7d101 → **1322c67**：C2 沒改過的檔案一律取 main 的版本，只有 PROVENANCE 和 run.d 是手動合併；755 passed；CI tests 43449745772、firmware 43449751297。預驗（1322c67）：**不通過**，只有兩項文字問題：1.4 schema 的 Apache-2.0 沒寫進 PROVENANCE；notes 有歷史口吻和過時的 OK 列。程式行為 OK。→ 寫程式代理修正**完成 58cbff0**（授權已補；歷史口吻已拿掉；Dasharo 那列改成 ATTENTION；dup_bomb 29.8→0.21 秒；dt-wait.rc 不是 0 就是 GAP；稽核紀錄有測試；252＋516 passed；CI tests 43459809789、firmware 43459815399）→ 再預驗：**不通過**（3 項：和 main dde7467 衝突，要小心 #46 advisory_match 對供應商 SBOM 的採信與跳脫；必要階段缺列仍 OK；locate 記憶體 50MB→約 11GB）→ 寫程式代理修正**完成 24299b2**（merge dd883e3 併入 main dde7467；供應商 SBOM 的 advisory-match 不採信，並經 _cell 跳脫；REQUIRED_STAGES 11 個，缺列就是 GAP；locate 1314→273 MB；279＋644＋49 passed；CI tests 43469023446、firmware 43469029811）→ 第三次預驗：**通過**（1 項小應修：空階段名稱的列被丟掉）→ C2 修正並併入 main 5b444ab → **9e92cc5**（1031 passed；CI tests 43477455899、firmware 43477460592）→ CI 綠就開 PR（說明在 `$AGENT_TMP/dumpling-tmp-c2/pr-body-norm.md`）：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
 3. **D-043**（排在 D-042 之後）：韌體 SBOM 的公告比對，只用公開資料。順序是 (1) → (2)，每段完成通知 C0
    - (1) 自動比對：
      - NVIDIA vBIOS：用每日鏡像的 NVIDIA product-security CSAF 填 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED
