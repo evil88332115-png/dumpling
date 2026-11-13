@@ -141,3 +141,22 @@ release.yml 手動觸發（run 43365351840，v39.2.0）還原了那份 cache（`
 用本機的 `file://` 來源加一個壞網址跑過真正的 `kernel-cve.sh`＋`mirrors.sh`：最後一行 `ATTENTION …`、`pipeline-steps.tsv` 多一列 `pipeline-kernel-cve-mirror`、整體狀態 ATTENTION、`mirror_is_fresh` 回 false（不會存回 cache）；單元測試涵蓋 OK、ATTENTION、FAIL 三種結果與 collect／release-meta 的整體狀態。
 `dev.yml` 的 `concurrency` 是同一個 ref 後面的 run 取消前面的（`cancel-in-progress`），所以在同一個分支連續手動觸發兩次 dev，第一次會被取消。
 Release 的 403 又出現兩次（run 43346232399 與 43346236827，commit `7f12e63`，重試 8 次加整個 job 重跑都失敗），在 `POST /releases` 回 403，同時間 `GET` 正常；同一個 commit 之後的 commit 重跑就成功，包括對舊 commit 的 run 重跑 Release job。原因仍不明，不是舊 commit 本身（舊 commit 的 run 重跑成功）、不是同時執行（單獨重跑也失敗）。
+
+### M2 驗收 run（commit `9f1d2f0`，2026-11-13）
+
+release-meta 的產品結論欄位、`kernel-versions` 附件、平台設定的核心上游版本加進來之後，兩個版本各做一次完整的 `release.yml` 手動觸發（從新的 build，不沿用 artifact；只建 draft）：
+
+| | `v39.2.0-demo1` | `v39.2.1-demo1` |
+|---|---|---|
+| run | 43375548090 | 43375551920 |
+| build job／scan job／整個 run | 33／40／74 分鐘 | 32／51／86 分鐘 |
+| 附件 | 20 個（上面 19 個加 `kernel-versions-*.json`） | 20 個 |
+| 標準答案 | 23 項符合 | 23 項符合 |
+| 建置紀錄、C-kernel-boot | OK、OK | OK、OK |
+| 上游比對（原始碼）被修改的檔案 | 0 | 1（`kernel/kernel-noble/net/ipv4/inet_connection_sock.c`，patch 版的那個 patch） |
+| `release-meta.json` 的 report_status／release_gate／pipeline_result | GAP／GAP／OK | GAP／GAP／OK |
+| `kernel-versions-*.json` | schema `/2`，出貨核心 1 顆，上游版本 6.8.12（`source-makefile`） | 同左 |
+
+- report_status 與 release_gate 是 GAP：臨時 DT 關了 NVD（M1 的設計），cra_report 對沒有 NVD 的評分記 GAP；這是產品結論，和 workflow 步驟（pipeline_result OK）分開。
+- 核心 CVE 鏡像：`wp1/m2` 還沒有自己的 cache（actions/cache 只還原同一個分支和預設分支的），兩個 run 都重新抓，成功後存成 `kernel-cve-mirror-<run>-1`。
+- 之後的 `7dd351c`（scan_plan 改用 0x1F 分隔、collect 對同一後綴取後面那次）只影響 `os_responsibility: ours` 的路徑；這個專案是 customer，`-bsp`／`-os` 兩項的讀法與輸出不變，所以沒有重跑。

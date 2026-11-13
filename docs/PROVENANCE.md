@@ -113,13 +113,13 @@
 | `tools/cra/xlsx_min.py` | `scripts/cra/xlsx_min.py` | 25fa89a | 原樣 |
 | `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處；改寫 CI 分支流程與「已知限制」兩段（原本是 sca-center 的內部 CI 與執行編號，改成中性說明並指向 pipeline/） |
 | `tools/demo/board-import.sh` | `scripts/demo/board-import.sh` | 25fa89a | 路徑調整 7 處 |
-| `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip |
+| `tools/demo/flash_package.py` | `scripts/demo/flash_package.py` | 25fa89a | 路徑調整 9 處；**移除 Android 支援**（不在範圍內）：刪掉 `amod()`、`android` 格式的偵測與讀取分支（`archive_format`、`open_stream`、`open_source`、`do_list`）；zip 一律視為 rockchip-zip；**行為修改（M2）**：boot 分割區選不出來時，ATTENTION 的說明帶上 `rpi_img` 的 `boot_why`（原本固定寫「沒有 FAT 的 boot 分割區」） |
 | `tools/demo/jetson.sh` | `scripts/demo/jetson.sh` | 25fa89a | 路徑調整 4 處；改 1 行註解（內部 CI 分支名稱） |
 | `tools/demo/jetson_lookup.py` | `scripts/demo/jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/jetson_rootfs.py` | `scripts/demo/jetson_rootfs.py` | 25fa89a | M2 J 軌：`--out-custom` 改為選填（不給就不寫模擬客製版）；其餘原樣 |
 | `tools/demo/pack-build-record.sh` | `scripts/demo/pack-build-record.sh` | 25fa89a | 原樣 |
 | `tools/demo/rockchip_img.py` | `scripts/demo/rockchip_img.py` | 25fa89a | 路徑調整 1 處；改 1 行註解（原本提到 `android_img.py`）。`ANDROID!` 開機映像標頭的辨識是 Rockchip 分割區內容的判斷，保留 |
-| `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/demo/rpi_img.py` | `scripts/demo/rpi_img.py` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：boot 分割區依內容選、不依順序（`_pick_boot`：FAT 根目錄或 `boot/` 有核心、`extlinux/`、`EFI/` 或 Raspberry Pi 韌體才算有開機檔；多個有開機檔時只在恰好一個是 EFI system 分割區時選它，否則不猜、`boot_why` 寫原因；只有 `config.txt` 不算）。原本固定取第一個 FAT，Radxa 等映像的第一個 FAT 是小的 config 分割區；只有一個 FAT 的映像（Raspberry Pi OS）結果不變 |
 | `tools/demo/scan-flash-package.sh` | `scripts/demo/scan-flash-package.sh` | 25fa89a | 路徑調整 42 處、清理 7 行；**行為修改（M2）**：新增 `--platform`／`SCA_PLATFORM`，原始磁碟映像不再固定當成 raspberrypi，沒給平台標 GAP；**行為修改（M2 J 軌）**：`--platform generic`（沒有定義開機鏈：任何映像格式的開機程式分類走 `bootloader_coverage.py --not-assessed generic`，NOT_ASSESSED；空值仍是 GAP）、`--arch <arm64|amd64>`／環境變數 `SCA_ARCH`（`docker import --platform linux/<arch>`，預設 arm64，其他值結束碼 64）|
 | `tools/demo/tests/conftest.py` | `scripts/pilot/tests/conftest.py`（做法） | 25fa89a | 新寫（同 `tools/pilot/tests/conftest.py`）：以路徑載入 `tools/cra/tests/conftest.py` 的 hook，`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗 |
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -128,7 +128,7 @@
 | `tools/demo/tests/test_kernel_version_args.py` | （dumpling 自己寫） | — | 新增（M2）：`scan-flash-package.sh` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（可重複、環境變數、不合法 exit 64、原樣交給 sca-scan；用假的 sca-scan 看收到的參數）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，只轉給 sca-scan；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（可重複，格式不對 exit 64），原樣轉給 sca-scan |
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
-| `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
+| `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣；新增（M2）4 個 boot 分割區選擇的測試（依內容不依順序、韌體與 `boot/` 子目錄、多個都像時不猜、只有一個 FAT 沒有開機檔仍用它；合成的映像） |
 | `tools/demo/tests/test_wizard_kernel_version.py` | （dumpling 自己寫） | — | 新增（M2）：`cra-scan.py` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（plan.json 的 `kernel_versions`、不合法 exit 64、掃描指令原樣傳給 scan-flash-package.sh）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，原樣傳給 scan-flash-package.sh，plan.json 多一個 `kernel_versions`；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（平台設定的上游版本，可重複，格式不對或同一顆兩個值 exit 64），原樣傳給 scan-flash-package.sh，plan.json 多一個 `kernel_upstream_versions` |
 | `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；新增 `test_platform_is_explicit_and_never_guessed`（M2）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
@@ -136,7 +136,7 @@
 | `tools/e2e/sandbox.sh` | `scripts/e2e/sandbox.sh` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/mirror/euvd.sh` | `scripts/mirror/euvd.sh` | 25fa89a | 路徑調整 3 處 |
 | `tools/mirror/grype-db.sh` | `scripts/mirror/grype-db.sh` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/mirror/kernel-cve.sh` | `scripts/mirror/kernel-cve.sh` | 25fa89a | 路徑調整 1 處 |
+| `tools/mirror/kernel-cve.sh` | `scripts/mirror/kernel-cve.sh` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：clone 失敗時重試（`KERNEL_CVE_GIT_TRIES` 預設 3、`KERNEL_CVE_GIT_RETRY_DELAY` 30 秒起加倍、傳輸 60 秒低於 1 KB/s 放棄這一次）；上游連不上時可沿用 `KERNEL_CVE_FALLBACK_FROM` 的上一份鏡像（要通過 `--check`、sha256 與 SOURCE 相符、不是符號連結、`fetched_utc` 在 `KERNEL_CVE_FALLBACK_MAX_HOURS` 預設 48 小時內），SOURCE 另寫 `fallback=yes`／`fallback_utc`／`fallback_note`，最後一行印 ATTENTION（結束碼 0）；沒設定時行為不變 |
 | `tools/mirror/nvidia-bulletins.sh` | `scripts/mirror/nvidia-bulletins.sh` | 25fa89a | 路徑調整 2 處 |
 | `tools/mirror/osv-distro.sh` | `scripts/mirror/osv-distro.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/ubuntu-cve-status.sh` | `scripts/mirror/ubuntu-cve-status.sh` | 25fa89a | 原樣 |
@@ -172,7 +172,7 @@
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
 | `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述；HTML 結尾的已知限制說明拿掉指向上游內部文件的參照（dumpling 沒有那份文件），其餘文字不變 |
-| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述；metadata 的 network.note 拿掉指向上游內部文件的參照，其餘文字不變；**行為修改（M2）**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`（出貨但沒判定的核心記 `C-kernel-not-judged-<版本>`、寫 `scan/kernel-versions.json`，指定 2 顆以上一顆都不判定；沒指定而且只有 1 顆核心時行為不變）；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（只用於 --image、--sbom，轉成 kernel_versions.py `--upstream-version`，和原始碼 Makefile 核對；沒給時行為不變） |
+| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述；metadata 的 network.note 拿掉指向上游內部文件的參照，其餘文字不變；**行為修改（M2）**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`（出貨但沒判定的核心記 `C-kernel-not-judged-<版本>`、寫 `scan/kernel-versions.json`，指定 2 顆以上一顆都不判定；沒指定而且只有 1 顆核心時行為不變）；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（只用於 --image、--sbom，轉成 kernel_versions.py `--upstream-version`，和原始碼 Makefile 核對；沒給時行為不變）；**行為修改（M2）**：CNA 鏡像的 SOURCE 有 `fallback=yes`（kernel-cve.sh 沿用舊鏡像）時記 `C-kernel-cve-mirror` ATTENTION，說明取 `fallback_note`；沒有時不記 |
 | `tools/pilot/tests/conftest.py` | `scripts/pilot/tests/conftest.py` | 25fa89a | 重寫（比照 D-017）：原檔載入 sca-center 的 `integration/conftest.py`，改成載入 `tools/cra/tests/conftest.py`（`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗）；沒有帶 `integration/` |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |
@@ -180,7 +180,7 @@
 | `tools/pilot/tests/test_kernel_boot.py` | `scripts/pilot/tests/test_kernel_boot.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述；新增（M2）2 個 `tools/mirror/kernel-cve.sh` 的測試（clone 失敗重試、上游連不上時沿用上一份鏡像並標 ATTENTION；假的 git 與合成的鏡像） |
 | `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
