@@ -555,12 +555,13 @@ def test_naive_now_and_naive_fetched_do_not_raise(tmp_path):
     assert m(t, vb(), now=datetime.datetime(2026, 11, 14))["match"] == "fixed"                         # 沒有時區的 now 當成 UTC
     assert t.stale(datetime.datetime(2027, 6, 1)) is True
     d = doc(row(vbios_fixed_in="94.04.00.00.01"))
-    d["mirror"]["fetched_utc"] = "2026-11-13T16:52:04"                                                 # 沒有時區：讀不到，當成過期
-    t = nva.load(write(tmp_path, d, "naive.json"))
-    assert t.mirror_fetched is None and m(t, vb())["reason"] == "table-stale"
-    for bad in ("2026-11-13", "yesterday", 12, None, "9999-99-99T00:00:00Z"):
+    # 沒有時區或讀不到的 fetched_utc 是格式錯誤：C1 的 validate_table 擋下 → table-invalid（M7a2 與 C1 約定；原本當成過期 table-stale）
+    for bad in ("2026-11-13T16:52:04", "2026-11-13", "yesterday", 12, None, "9999-99-99T00:00:00Z"):
         d["mirror"]["fetched_utc"] = bad
-        assert m(nva.load(write(tmp_path, d, "b.json")), vb())["reason"] == "table-stale"
+        with pytest.raises(nva.TableError) as ei:
+            nva.load(write(tmp_path, d, "b.json"))
+        assert ei.value.reason == "table-invalid" and "fetched_utc" in ei.value.detail
+        assert m(ei.value, vb())["match"] == "NOT_ASSESSED"
 
 
 def test_note_texts_for_stale_gap_and_fixed(tmp_path):

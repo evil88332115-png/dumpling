@@ -97,6 +97,14 @@ Grype 和 DT 都比對不到 NVIDIA 對 Jetson Linux 發的公告：公告的版
 - `bulletins`：公告的標題、日期、網址，以及每個 CVE 的嚴重度、CVSS、CWE 和描述（從 CSAF 原文複製）。
 - `not_applicable`：判定不適用的公告（`reason`；`reviewed=false` 表示還沒有人確認，`candidates` 會列出）。
 - `rows`：見下表。
+- `mirror`（選用）：表是對哪一份公告鏡像審核的，記錄鏡像的時間點，和 `reviewed_until` 分開記。
+  - 有寫 `mirror` 時，`commit`、`commit_date`、`fetched_utc` 三個鍵都必填。
+  - 格式：`commit` 是 40 位小寫十六進位；`commit_date` 是 `YYYY-MM-DD` 或帶時區的 ISO 8601；`fetched_utc` 是帶時區的 ISO 8601；其他鍵（例如 `note`）照收。
+  - 帶時區的 ISO 8601 只收一種寫法：`YYYY-MM-DDTHH:MM:SS`，秒後面可以加 3 或 6 位小數，時區寫 `Z` 或 `±HH:MM`。
+  - 沒寫或 `null`：`mirror_info()` 回 GAP，不算錯誤。
+  - 格式不對：`validate_table` 擋下。
+  - 過期或時間在未來：屬於時間判斷，由呼叫端決定（例如 C2 的 table-stale）。
+- 公告編號（`bulletins[].id`、`not_applicable[].bulletin`）只收數字（1–8 位），避免把 `@`、Markdown 之類的字元帶進報告。
 
 每一列是「一個 CVE × 一個版本線 × 公告表格的一行」：
 
@@ -115,6 +123,21 @@ Grype 和 DT 都比對不到 NVIDIA 對 Jetson Linux 發的公告：公告的版
 | `note` | 原文的空隙、推測的依據 |
 
 版本比較用點分整數：35.6.2 < 35.6.4 < 36.5，36.5 等於 36.5.0。
+
+### vBIOS 列（`line` 是 `vbios`）
+
+`nvidia-bulletins-gpu-firmware.json` 用的列，比對在 `tools/cra/nvidia_vbios_advisory.py`。`validate_table` 檢查以下規則：
+- 版本只寫在 `vbios_affected_below`、`vbios_affected_max`、`vbios_fixed_in`，不能用 `fixed_in`、`affected_below`、`affected_max`。
+- 版本格式是 option ROM 的 `XX.XX.XX.XX.XX`：1–5 段，每段兩位十六進位，大小寫都收。只要不是 `null` 就檢查，未審核的列也一樣。
+- 已審核的列另外要符合：
+  - `pci_vendor` 是 4 位小寫十六進位；`pci_devices` 是非空的 4 位小寫十六進位清單。草稿列可以是 `null`。
+  - 至少要有一個 `vbios_*` 版本。
+  - `vbios_affected_below` 和 `vbios_affected_max` 只能寫一個。
+  - `vbios_fixed_in` 不能低於 `vbios_affected_below`，也不能不高於 `vbios_affected_max`。比較前把版本補到 5 段：上界補 FF，其他補 00。
+- 「`pci_vendor` 必須是 `10de`」由比對端檢查。
+- 不是 vBIOS 的列不能有非 `null` 的 `vbios_*`、`pci_*` 欄位，避免欄位被靜靜忽略。
+- `candidates --draft` 產生的草稿列用的是 `fixed_in` 這類通用欄位。把 `line` 改成 `vbios` 時，要同時把版本搬到 `vbios_*`，否則 `validate_table` 會擋下。
+- 所有格式檢查都比對整個字串：結尾多一個換行也不算符合。
 
 ## 判定規則
 
