@@ -38,7 +38,10 @@ D-dt-data-sources／C-dt-feeds／D-dt-findings（NVD 照設計關閉）、D-dt-k
 
 ## rpi-lite-demo v1.0.0-demo1（Raspberry Pi OS Lite 2026-10-06）
 
-（待補：最新一次執行完成後核對）
+- 依據的執行：dev run 43419144284（commit 1abab06，已併入 wp1/m2 61d7c6f），2026-11-13；標準答案 90 項。驗證代理的獨立核對見本檔最後。
+- 先前找到並修好的問題：-os 重跑退回 CNA、OS 報告多 2700 列核心（缺口 18，D-044）；C4 的 D-038 核對把 6.18.50+rpt-rpi-2712 讀成 6.18.50+rpt（b907181）。
+- 已知、刻意不釘的：bsp 報告的核心列數（缺口 19：CNA 候選 2700 個約 2507 個沒有成列，M7），只釘下限 1。
+- C4 自己核對：633 個 deb 與官方 SBOM／.info 相同；出貨的 /boot/config 與官方 linux-image deb 相同（8914d802…），C-kernel-config 讀的 linux-headers .config 只差 CONFIG_BUILD_SALT 與空的 CONFIG_SYSTEM_TRUSTED_KEYS 兩行。
 
 ## ai-nas-demo v1.0.0-demo1（Debian 13＋OpenMediaVault）
 
@@ -135,3 +138,25 @@ dthelper、libmraa*（Radxa 發行、可能和硬體存取有關）目前歸 os�
 
 未確認：映像與官方 SHA512SUMS 的關係（本機沒有 SHA512SUMS）、/boot/config 是否真的在磁碟上（只從 SBOM 的檔案紀錄看到）、4 個 P1 的 EPSS／KEV、B-sbom-provided 寫 27219 與 27220 差 1 的原因。
 own_software 三項與各文件狀態要等下一次 CI。
+
+### 三個專案的差異核對（2026-11-13，最後一輪）
+
+驗證代理（Sonnet 5.5，只讀，沒有連網）只拿原始資料（scan.json、release-meta.json、pipeline-steps.tsv、各次精靈輸出、官方清單、官方 Raspberry Pi 核心 deb），
+不看 C4 的結論。範圍：rpi 全部（84 項）、rock 自 8c44f9e 起的變更、ai-nas 自 894debd 起的變更、三個專案的 config.json 與 vex-rules.json。
+結論：**rock 可以定案；rpi、ai-nas 需要修改（小幅）**。值都重算吻合（rpi 633 個 deb 三邊相同、分層加總、CNA 2700 與 vulns.git commit、出貨 config 與官方 deb；
+rock 的 accepted 3627 全來自 kconfig、拿掉 R1～R5 不影響；ai-nas p1_rows 4 都在 os 層、P1 判斷表 Q1～Q4）；沒有任何文件因範本值判成 OK（user-information 都是 GAP）。
+
+| 嚴重度 | 專案 | 發現 | 處理（C4 先打開原檔核對過） |
+|---|---|---|---|
+| 中（漏項） | rpi | 沒有任何漏洞數範圍、bsp 核心列沒有下限 | 加 vulnerabilities.bsp／os.cves_total、bsp.p1_rows 的範圍、report_rows.bsp.kernel_rows ≥ 1（共 90 項） |
+| 中 | rpi | C-kernel-config 的 reason 把「沒編進 0」寫得像判定結果：kernel-config.json 的 limitations 寫 6.18 沒有 #include .c 清單；GAP 的直接原因是 Pi 4 核心未判定 | reason 改寫；補釘 C-kernel-module-map GAP |
+| 中 | ai-nas | C-kernel-coverage 釘 OK 等於把已知不完整（缺口 22）釘成正常 | 改成 in [OK, GAP]，reason 寫明 |
+| 中 | ai-nas | reason 說 cdxgen 版本沒有固定：tools/e2e/install-tools.sh 固定 12.8.7 | reason 改正 |
+| 輕 | rpi／rock | cna.cves 上限 12000 蓋到 6.1 系列；accepted 上限 12000 比候選總數大 | 收到 6000／6500 |
+| 輕 | 三個 | vex-rules 的 $comment 說 R1～R5 會判成 accepted：實際是 set exploitable／in_triage | 改寫；註明 U1 是 Ubuntu 規則、這裡不生效 |
+| 輕 | 三個 | missing_fields 少算 flash_package_supplier、sbom.md 有 Jetson 文字；notes.md 與 release-meta 的 pipeline_result 不一致；lgpio 的層 | 缺口 25、26、27 |
+| 輕 | rpi | external_services LISTED 容易讀成只有這一個服務；unknown 是已知錯分層；Makefile 與 apt 原始碼包同不同 commit 沒評估 | reason 補上 |
+| 輕 | 三個 | note 的 run 編號是舊的 | 改成最後一輪 |
+
+C4 另外核對：rpi 的核心 CVE 除了 4 個 linux-image-*，也掛在 4 個 linux-base-*（8×332 列），併進缺口 19。
+未確認：DECISIONS.md 的 D-034 以後在 main 還沒有（代理只看到 D-033）；orin 的 accepted 2990；v8 核心的 config；cdxgen 在 CI 實際的版本；ai-nas 6.12.116 的 CNA 候選數。

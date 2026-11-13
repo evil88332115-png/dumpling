@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "ai-nas-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43386797521，跑的 commit 是 5bd67f0）。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43416974360，跑的 commit 是 1abab06（第一版依 43386797521／5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "ai-nas",
@@ -30,11 +30,11 @@
   },
   "components.total": {
    "equals": 27220,
-   "reason": "固定輸入（映像、Syft 1.55.0、OMV commit 9d8530ff 的 cdxgen 結果）下的元件數。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 版本沒有固定，見 components.bsp）"
+   "reason": "固定輸入（映像、Syft 1.55.0、OMV commit 9d8530ff 的 cdxgen 結果）下的元件數。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 固定 12.8.7，見 components.bsp）"
   },
   "components.bsp": {
    "equals": 2,
-   "reason": "(1) OMV 應用本身：根元件 openmediavault 8.6.1-1（type application，own_software 對到；purl 改成 pkg:generic/openmediavault@8.6.1-1，cdxgen 原本的 pkg:npm/openmediavault-workbench@0.0.0 留在 dumpling:source-root-purl）；(2) 它的子元件 cdxgen-src（版本 latest，cdxgen 自己塞的占位元件，沒有相依邊，不是真實套件）。雲端映像沒有裝 OMV 的 deb（deb_bsp 是 null）。cdxgen 的版本沒有固定（npm 全域安裝），占位元件隨 cdxgen 升級消失時這一項會變成 1"
+   "reason": "(1) OMV 應用本身：根元件 openmediavault 8.6.1-1（type application，own_software 對到；purl 改成 pkg:generic/openmediavault@8.6.1-1，cdxgen 原本的 pkg:npm/openmediavault-workbench@0.0.0 留在 dumpling:source-root-purl）；(2) 它的子元件 cdxgen-src（版本 latest，cdxgen 自己塞的占位元件，沒有相依邊，不是真實套件）。雲端映像沒有裝 OMV 的 deb（deb_bsp 是 null）。cdxgen 固定 12.8.7（tools/e2e/install-tools.sh），傳遞相依可能浮動；占位元件 cdxgen-src 隨 cdxgen 升級消失時這一項會變成 1"
   },
   "components.os": {
    "equals": 25493,
@@ -42,7 +42,7 @@
   },
   "components.unknown": {
    "equals": 1725,
-   "reason": "OMV 原始碼掃到的第三方相依 1691 個（npm 1679、pypi 5、composer 4、github 3；沒有路徑或路徑沒有規則，缺口 7）＋映像裡 deb 帶進來的語言套件 34 個（pypi 33、maven 1，缺口 12）；ours 時都算我們的待辦。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 版本沒有固定，見 components.bsp）"
+   "reason": "OMV 原始碼掃到的第三方相依 1691 個（npm 1679、pypi 5、composer 4、github 3；沒有路徑或路徑沒有規則，缺口 7）＋映像裡 deb 帶進來的語言套件 34 個（pypi 33、maven 1，缺口 12）；ours 時都算我們的待辦。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 固定 12.8.7，見 components.bsp）"
   },
   "components.host_tool": {
    "equals": 0,
@@ -175,8 +175,11 @@
    "reason": "x86 沒有定義開機鏈（platform_arg generic，缺口 3）；不是 OK"
   },
   "runs..stages.C-kernel-coverage": {
-   "equals": "OK",
-   "reason": "核心有比對：428 列都來自 linux-kernel 元件（pkg:generic/linux-kernel@6.12.116+deb13-amd64），是 Grype 依 NVD 的上游版本範圍比對，不是 Debian 發行版資料（沒有考慮 Debian 的回移修補，可能有誤報；Debian 的核心 deb 本身沒有列，缺口 22）。OK 只代表有做核心比對，不代表完整"
+   "in": [
+    "OK",
+    "GAP"
+   ],
+   "reason": "已知不完整（缺口 22，M7）：OK 只代表有做核心比對。2026-11-13 是 OK，428 列都來自 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，沒有用 Debian 安全追蹤，也沒有用 CNA 清單；Debian 的核心 deb 沒有列。M7 改成依發行版資料或 CNA 之後可能變 GAP，所以兩個都允許，但不允許 NOT_RUN 或 FAIL"
   },
   "runs..stages.C-kernel-config": {
    "equals": "GAP",

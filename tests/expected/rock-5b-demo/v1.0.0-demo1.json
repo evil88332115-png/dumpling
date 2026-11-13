@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-13；依據的 CI 是 dev run 43378104334，跑的 commit 是 eacb60d）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-13；依據的 CI 是 dev run 43413770363，跑的 commit 是 8729785（已併入 wp1/m2 61d7c6f）；之前定案的 72 項依據 43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -236,8 +236,8 @@
   },
   "vulnerabilities.bsp.tiers.accepted": {
    "min": 3000,
-   "max": 12000,
-   "reason": "依出貨 .config 判定沒編進核心而排除的核心 CVE（VEX not_affected／code_not_present）；2026-11-13 是 3627"
+   "max": 6500,
+   "reason": "依出貨 .config 判定沒編進核心而排除的核心 CVE（VEX not_affected／code_not_present）；2026-11-13 是 3627；全部來自 kconfig（accepted_by_vex kconfig 3627、rule 0）。上限 6500：核心候選才 8943，全被判 accepted 時抓得到"
   },
   "vulnerabilities.os.cves_total": {
    "min": 2000,

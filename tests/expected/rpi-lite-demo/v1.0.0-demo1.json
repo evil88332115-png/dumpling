@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rpi-lite-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43410313151，跑的 commit 是 b907181）。不是直接存輸出：逐項核對過（官方 SBOM／.info 的 633 個套件；核心 config 與官方 deb 核對）。核心：D-044 修好後 OS 報告沒有核心列；D-038 的 CNA 清單（2700）有產生、也用在 .config 判定，但交付報告的核心列仍只有 Grype 對 Debian 資料比對到的 332 個 CVE（×4 個核心套件＝1328 列），CNA 候選沒有成列（缺口 19，C1／sca-center 的報告端）：bsp 的核心列數先不釘，修好後再釘「bsp 核心候選 ≥ CNA 清單」。C-grype-db 不釘。元件數、雜湊、狀態用 equals；漏洞數用範圍。",
+ "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43419144284，跑的 commit 是 1abab06（已併入 wp1/m2 61d7c6f））。不是直接存輸出：逐項核對過（官方 SBOM／.info 的 633 個套件；核心 config 與官方 deb 核對；驗證代理獨立核對，見 docs/references/wp7-expected-review.md）。核心：D-044 修好後 OS 報告沒有核心列；D-038 的 CNA 清單（2700）有產生、也用在 .config 判定，但交付報告的核心列仍只有 Grype 對 Debian 資料比對到的 332 個 CVE（×4 個核心套件＝1328 列），CNA 候選沒有成列（缺口 19，C1／sca-center 的報告端）：bsp 的核心列數先不釘，修好後再釘「bsp 核心候選 ≥ CNA 清單」。C-grype-db 不釘。元件數、雜湊、狀態用 equals；漏洞數用範圍。",
  "checks": {
   "platform": {
    "equals": "raspberrypi",
@@ -38,7 +38,7 @@
   },
   "components.unknown": {
    "equals": 319,
-   "reason": "pypi 220、golang 98（rpi-connect 執行檔內嵌的 Go 模組）、maven 1：deb 帶進來的語言套件沒查擁有者（adapter-gaps.md 第 12 項），保守列我們的待辦"
+   "reason": "pypi 220、golang 98（rpi-connect 執行檔內嵌的 Go 模組）、maven 1：deb 帶進來的語言套件沒查擁有者（adapter-gaps.md 第 12 項），保守列我們的待辦。缺口 12 修好後會變 0（bsp／os 的數字同時變），要一起改"
   },
   "components.host_tool": {
    "equals": 0,
@@ -58,11 +58,11 @@
   },
   "unknown_by_purl_type.pypi": {
    "equals": 220,
-   "reason": "deb 帶進來的 Python 套件（缺口 12）"
+   "reason": "deb 帶進來的 Python 套件（缺口 12）。缺口 12 修好後會變 0（bsp／os 的數字同時變），要一起改"
   },
   "unknown_by_purl_type.golang": {
    "equals": 98,
-   "reason": "rpi-connect／rpi-connectd 執行檔內嵌的 Go 模組（缺口 12）"
+   "reason": "rpi-connect／rpi-connectd 執行檔內嵌的 Go 模組（缺口 12）。缺口 12 修好後會變 0（bsp／os 的數字同時變），要一起改"
   },
   "layers_gaps": {
    "equals": [],
@@ -70,7 +70,7 @@
   },
   "external_services.status": {
    "equals": "LISTED",
-   "reason": "Raspberry Pi 有定義對外連線服務清單（rpi-connect*，D-027）"
+   "reason": "Raspberry Pi 有定義對外連線服務清單（rpi-connect*，D-027）。只含平台清單（rpi-connect*）；其他開機服務（avahi、rsync、ssh）與對外連線（apt、NTP）沒有評估"
   },
   "external_services.items": {
    "equals": [
@@ -132,11 +132,11 @@
   },
   "runs..stages.C-kernel-config": {
    "equals": "GAP",
-   "reason": "固定是 GAP：依出貨 .config 判定 CNA 候選＋Grype 的核心 CVE（2026-11-13 共 2839 個：有編 1324、無法判斷 1515、沒編進 0）；無法判斷的多半是 CNA 紀錄沒有修補的檔案清單"
+   "reason": "固定是 GAP：(1) Pi 4 的核心 6.18.50+rpt-rpi-v8 出貨但沒有判定（D-036）；(2) 6.18 沒有「被 #include 的 .c」清單（工具目前只有 6.1、6.8），所以沒有任何 CVE 會被判成沒編進核心——「沒編進 0」是工具的限制，不是判定結果。2026-11-13：CNA 候選＋Grype 共 2839 個 CVE，有編 1324、無法判斷 1515（undetermined 1249、header_or_non_source 186、no_cna_record 80）"
   },
   "runs.-bsp.stages.C-kernel-config": {
    "equals": "GAP",
-   "reason": "同上"
+   "reason": "同完整掃描：(1) Pi 4 的核心 6.18.50+rpt-rpi-v8 出貨但沒有判定（D-036）；(2) 6.18 沒有「被 #include 的 .c」清單（工具目前只有 6.1、6.8），所以沒有任何 CVE 會被判成沒編進核心——「沒編進 0」是工具的限制，不是判定結果。2026-11-13：CNA 候選＋Grype 共 2839 個 CVE，有編 1324、無法判斷 1515（undetermined 1249、header_or_non_source 186、no_cna_record 80）"
   },
   "runs..stages.D-dt-data-sources": {
    "equals": "GAP",
@@ -323,7 +323,7 @@
   },
   "kernel_upstream.status": {
    "equals": "OK",
-   "reason": "D-038 兩個來源一致：映像模組資料夾 6.18.50+rpt-rpi-2712（開頭的 6.18.50）與核心原始碼 raspberrypi-linux-stable_20260911 的 Makefile；出貨 config 存在"
+   "reason": "D-038 兩個來源一致：映像模組資料夾 6.18.50+rpt-rpi-2712（開頭的 6.18.50）與核心原始碼 raspberrypi-linux-stable_20260911 的 Makefile；出貨 config 存在。Makefile 取自 GitHub raspberrypi/linux 的 stable_20260911 tag；它和 apt 原始碼包是不是同一個 commit：NOT_ASSESSED（sources.yml）"
   },
   "kernel_upstream.upstream_verified": {
    "equals": true,
@@ -351,8 +351,8 @@
   },
   "kernel_upstream.cna.cves": {
    "min": 2000,
-   "max": 12000,
-   "reason": "依上游 6.18.50 的 CNA 版本範圍列出的候選（affected＋unknown）；2026-11-13 是 2700 個，vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11、18225 筆紀錄）；核心 CVE 每月增加，上限放寬"
+   "max": 6000,
+   "reason": "依上游 6.18.50 的 CNA 版本範圍列出的候選（affected＋unknown）；2026-11-13 是 2700 個，vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11、18225 筆紀錄）；核心 CVE 每月增加，上限放寬；上限 6000：比 6.1.84 的清單（rock，8943）小，上游版本誤判成舊的系列時抓得到"
   },
   "kernel_upstream_crosscheck.agree": {
    "equals": true,
@@ -377,6 +377,33 @@
   "runs.-bsp.stages.C-kernel-cve-list": {
    "equals": "OK",
    "reason": "同上"
+  },
+  "runs..stages.C-kernel-module-map": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：Pi 4 的核心未判定；6.18 的模組對應沒有可判成不適用的依據（module 0、not_built 0、unknown 3177）"
+  },
+  "runs.-bsp.stages.C-kernel-module-map": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：Pi 4 的核心未判定；6.18 的模組對應沒有可判成不適用的依據（module 0、not_built 0、unknown 3177）"
+  },
+  "report_rows.bsp.kernel_rows": {
+   "min": 1,
+   "reason": "bsp 報告要有核心的列（整段消失會被抓到）。不釘上限、也不釘 equals：2026-11-13 是 1328 列＝Grype 用 Debian 資料比對到的 332 個 CVE × 4 個核心套件，另外同樣 332 個 CVE 又掛在 4 個 linux-base-* 套件（is_kernel false）；上游 6.18.50 的 CNA 候選 2700 個裡約 2507 個沒有成列（缺口 19，M7）。修好後改成「≥ CNA 清單」"
+  },
+  "vulnerabilities.bsp.cves_total": {
+   "min": 150,
+   "max": 1500,
+   "reason": "bsp 報告的 CVE 數；2026-11-13 是 398（缺口 19 修好後會到 2700 以上，到時要重訂）"
+  },
+  "vulnerabilities.os.cves_total": {
+   "min": 200,
+   "max": 1800,
+   "reason": "Raspberry Pi OS Lite（Debian 13）586 個 deb 的 CVE；2026-11-13 是 635"
+  },
+  "vulnerabilities.bsp.p1_rows": {
+   "min": 1,
+   "max": 60,
+   "reason": "bsp＋unknown 層的 P1 判斷表列數；2026-11-13 是 3。0 表示 P1 判斷表或分層壞了"
   }
  }
 }
