@@ -134,12 +134,22 @@ class MdSafeRenderTests(RenderCase):
         "https://evil.example", "ftp://u:p@evil.example/x", "https://u@evil.example", "mailto:@everyone", "a​@​example.com", "~~x~~", "**b** _i_ $x$",
         "pkg:generic/zlib@1.2.11", "pkg:deb/ubuntu/zlib1g@1:1.2.11.dfsg-2ubuntu9?arch=amd64", "pkg:deb/u/zlib@1.2.11.p", "pkg:npm/%40scope/x@1.2.3",
         "name@host", "foo.bar@1.2.3.4.5", "pkg:rpm/fedora/openssl@3.0.7-1.fc37",
+        # xmpp:／mailto: 後面的 名稱@網域/資源：網域不含 `.` 也會被 cmark-gfm 連結（只加反斜線擋不住，要靠零寬空白）
+        "xmpp:a@/.a", "xmpp:a@-/.a", "xmpp:1@a/.a", "xmpp:a@_/.a", "xmpp:a@b/c.d", "mailto:a@/.a", "MAILTO:a@-/.a", "XMPP:a/b@c/.d",
+        # 網域掃描與同一串 email 字元的邊角
+        "a@_.1@a", "a@-.a", "aa@_.a", "a@b_c.d", "a@b-c.d", "x@y.z@Z", "x@y.z-@Z",
+        "x@y.z" + "1" * 252 + "@Z", "x@y.z" + "1" * 253 + "@Z", "x@y.z" + "1" * 300 + "@Z",
     ]
 
     def test_samples_in_every_context(self):
         for raw in self.SAMPLES:
-            out = ms.md_safe(raw, 200)
+            out = ms.md_safe(raw, 1000)
             self.check(out, ms.plain(raw), label=repr(raw))
+
+    def test_unprotected_xmpp_forms_are_really_linked(self):
+        """對照：xmpp:a@/.a 這類形式在 cmark-gfm 沒處理時會連結（上面的「沒有連結」不是偵測器壞掉）。IDN email 只有 markdown-it 的 fuzzy_email 會連結，cmark-gfm 不會，所以不在檢查範圍。"""
+        for raw in ("xmpp:a@/.a", "xmpp:a@-/.a", "xmpp:1@a/.a", "xmpp:a@_/.a", "x@y.z" + "1" * 300 + "@Z"):
+            self.assertTrue(link_problems(self.R["cmark-gfm"]("x %s y\n" % raw)), raw)
 
     def test_seeded_random_strings(self):
         tok = ["\\", "[", "]", "(", ")", "<", ">", "!", "*", "_", "#", "~", "|", "`", "&", "$", "@", "＠", ":", "/", ".", "-", "+", " ", "a", "Z", "9", "é",
@@ -246,6 +256,15 @@ class VbiosReportRenderTests(RenderCase):
                 continue                                                      # md_esc 不跳脫 ~（只會變成刪除線 <del>，不是連結或標籤）；md_safe 才跳脫
             out = xf.md_esc(raw)
             self.check(out, None, label=repr(raw))
+
+    def test_md_esc_strips_control_characters_and_escapes_tilde(self):
+        import x86_firmware as xf
+        out = xf.md_esc("a\u202eb\ud800c\x00d \u200b~~x~~ e")
+        self.assertEqual(out, "a b c d \\~\\~x\\~\\~ e")
+        self.assertNotIn("\u202e", out)
+        self.assertNotIn("\ud800", out)
+        out.encode("utf-8")                                                   # 單獨代理字元不能留著（寫檔會 UnicodeEncodeError）
+        self.check(out, None, label="md_esc controls")
 
     def test_hostile_table_fields_in_vbios_section(self):
         import x86_firmware as xf

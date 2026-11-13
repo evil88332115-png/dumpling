@@ -12,8 +12,9 @@ md_safe(s, limit) 依序做：
      `@` 後面接的字元（英數字、`-`、`_`、後面接英數字的 `.`）構成一個含 `.`、只有一個 `@`、最後一個字元是英文字母的網域形式時，也在 `@` 後面插零寬空白（連結的網域部分會斷掉）；
      其他不會被連結的形式（`pkg:generic/zlib@1.2.11`、`name@host`、`x9@y` 這種 purl 與版本字串）原樣保留，可以原樣複製。
      網域最後一個字元是字母的 purl（例如版本 `1.2.11.dfsg`）符合 email 形式，會有一個看不見的零寬空白（複製時會帶著）：不插的話渲染器會連結它。
-  4b. `mailto:`、`xmpp:`（不分大小寫）的冒號加反斜線：markdown-it 的 linkify 認得 `mailto:` 後面接 `名稱@主機` 的形式（不要求網域有 `.`），
-     `xmpp:` 與 `mailto:` 前綴也是 cmark-gfm email 自動連結往回掃時會吃進連結的前綴。
+  4b. `mailto:`、`xmpp:`（不分大小寫）的冒號加反斜線，冒號後面再插一個零寬空白：markdown-it 的 linkify 認得 `mailto:` 後面接 `名稱@主機` 的形式（不要求網域有 `.`）；
+     cmark-gfm 的 email 自動連結往回掃時，會把 `mailto:`、`xmpp:` 前綴吃進連結，而且 `xmpp:` 後面的 `名稱@網域/資源` 可以沒有 `.`（`xmpp:a@/.a` 會連結）；
+     cmark-gfm 先合併文字節點再做 autolink，所以只加反斜線擋不住，要靠零寬空白讓前綴與名稱接不起來。
   5. 把 markdown 特殊字元 \\ [ ] ( ) < > ! * _ # ~ | ` $ 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時仍能讀出原字元）。
   6. 把會被 GitHub 自動變成連結的裸網址開頭 `scheme://` 與 `www.` 也在 `:`／`.` 前加反斜線。`://` 的 `:` 一律跳脫，不判斷前面的字元
      （`1.https://x`、`x-https://x`、`-ftp://x` 渲染器仍會連結，前面接的字元不能當作不是網址的理由）。
@@ -30,6 +31,7 @@ md_safe(s, limit) 依序做：
   - md_title（Issue 標題，標題不解讀 Markdown）沒有對應：這個模組的輸出只放進表格、清單、狀態行，不放進標題。
 這裡不直接 import match.py：這個模組要能在 `python3 -I` 下單獨當指令用（shell 腳本呼叫），而 match.py 很大，載入時會改 sys.path、依賴 tools/cra。
 改由測試核對：tests/test_firmware_mdsafe.py 載入 match.py，用它的 unsafe_markdown 檢查 md_safe 的輸出，兩邊的規則不一致時測試會失敗。
+時間：所有掃描都是單次線性（`@` 的判斷、網域掃描、同一串 email 字元裡有沒有更早的 `@`），沒有回看上限。
 可見內容判斷：is_blank(s)＝每個字元都是空白、C 類（控制、格式、零寬）、Mn／Me（組合記號、變體選擇符），或是會顯示成空白的字元（Hangul filler U+115F／U+1160／U+3164／U+FFA0、U+2800）；
 給「名稱只有看不見的字元要算空名稱」用（plain() 只換掉 C 類，Hangul filler 是 Lo 類，濾不掉）。
 也可以當指令用：`python3 -I firmware_mdsafe.py [--limit N] [--] <文字>`（給 shell 腳本，印出清理後的一行）。
@@ -45,7 +47,6 @@ _AT = re.compile(r"[@＠]")
 _ALNUM = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 _DOMAIN_RUN = re.compile(r"(?:[A-Za-z0-9_-]|\.(?=[A-Za-z0-9]))*")      # cmark-gfm 的 email 自動連結往 @ 後面掃的字元集（`.` 後面要接英數字；到下一個 @ 為止）
 _LOCAL_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._+@-")      # email 名稱部分的字元（含 @：找同一串裡有沒有更早的 @）
-_LOOKBACK = 256                                                                                      # 往前最多看這麼多字元（不讓長字串變成 O(n²)）
 _MAILTO = re.compile(r"(?i)(mailto|xmpp):")
 _SCHEME = re.compile(r":(?=//)")        # 只要 `:` 後面接 `//` 一律跳脫：不看前面是什麼（`1.https://x`、`-ftp://x` 前面是 [A-Za-z0-9+.-] 也會被渲染器連結）
 _WWW = re.compile(r"(?<![A-Za-z0-9])(www)(?=\.)", re.IGNORECASE)
@@ -58,25 +59,33 @@ def plain(s):
     return " ".join(s.split())
 
 
-def _email_like(t, i):
-    """t[i] 是 ASCII @：後面是不是會被連結成 email 的網域形式。
-    @ 後面的字元（見 _DOMAIN_RUN，到下一個 @ 為止：下一個 @ 也會被處理）最後一個字元是英文字母，而且含 `.`；同一串 email 字元裡前面已經出現過 @ 時不要求 `.`
+def _earlier_at(t):
+    """每個位置：同一串 email 字元（_LOCAL_CHARS）裡，前面有沒有 @。一次線性掃過，不設回看上限（有上限的話，`x@y.z` 接 253 個以上的 `1` 再接 `@Z` 就繞得過去）。"""
+    out, has = [], False
+    for ch in t:
+        out.append(has)
+        has = (has or ch == "@") if ch in _LOCAL_CHARS else False
+    return out
+
+
+def _email_like(t, i, after_at):
+    """t[i] 是 ASCII @：後面是不是會被連結成 email 的網域形式。after_at＝同一串 email 字元裡前面是否已有 @（見 _earlier_at）。
+    @ 後面的字元（見 _DOMAIN_RUN，到下一個 @ 為止：下一個 @ 也會被處理）最後一個字元是英文字母，而且含 `.`；前面已經出現過 @ 時不要求 `.`
     （cmark-gfm 處理過前一個 @ 之後，`.` 的計數沒有歸零：`x@y.z@Z`、`x@y.z-@Z` 會連結 `y.z@Z`，空白隔開的 `x@y.z @Z` 不會，實測）。
-    markdown-it 的 linkify 另外會在 `-`、`_` 之前截斷網域（`a@example.com_1` 連結 `a@example.com`），所以每個 `-`、`_` 之前的前綴也檢查一次。"""
-    run = _DOMAIN_RUN.match(t, i + 1).group()
-    j = i
-    while j > 0 and i - j < _LOOKBACK and t[j - 1] in _LOCAL_CHARS:
-        j -= 1
-    after_at = "@" in t[j:i]
-    cuts = [len(run)] + [k for k, ch in enumerate(run) if ch in "-_"]
-    for k in cuts:
-        cand = run[:k].rstrip("-_")
-        if cand and cand[-1].isalpha() and ("." in cand or after_at):
+    markdown-it 的 linkify 另外會在 `-`、`_` 之前截斷網域（`a@example.com_1` 連結 `a@example.com`）：
+    所以「字母後面接 `-`、`_` 或網域結尾」的每個位置都當成可能的結尾。一次掃過網域，時間與長度成正比。"""
+    j = _DOMAIN_RUN.match(t, i + 1).end()
+    seen_dot = False
+    for k in range(i + 1, j):
+        c = t[k]
+        if c == ".":
+            seen_dot = True
+        elif c.isalpha() and (k + 1 == j or t[k + 1] in "-_") and (seen_dot or after_at):      # 網域只有 ASCII 英數字、`-`、`_`、`.`
             return True
     return False
 
 
-def _defang_at(t, i):
+def _defang_at(t, i, earlier):
     """t[i] 是 @ 或 ＠：回傳 (前面要不要插零寬空白, 後面要不要插)。
     email 形式（見 _email_like）：前後都插。只插後面時，markdown-it 的 linkify 會把 `a@<零寬>b.com` 當成 IDN 網域連結；
     前面也隔開，名稱與網域都接不起來；零寬空白不是英數字，cmark-gfm 往回掃時也停在這裡。
@@ -84,7 +93,7 @@ def _defang_at(t, i):
     前面是 ASCII 英數字、也不是 email 形式的 @（`pkg:generic/zlib@1.2.11`、`name@host`）：不動，purl 與版本字串才能原樣複製。
     ＠（全形）沒有渲染器當 email；前面不是 ASCII 英數字時照提及處理，否則不動。"""
     prev_alnum = i > 0 and t[i - 1] in _ALNUM
-    if t[i] == "@" and _email_like(t, i):
+    if t[i] == "@" and _email_like(t, i, earlier[i]):
         return True, True
     return False, not prev_alnum
 
@@ -101,20 +110,21 @@ def is_blank(s):
     return True
 
 
-def _at_sub(t, m):
-    before, after = _defang_at(t, m.start())
+def _at_sub(t, m, earlier):
+    before, after = _defang_at(t, m.start(), earlier)
     return (ZWSP if before else "") + m.group() + (ZWSP if after else "")
 
 
 def defang_at(t):
     """`@`／`＠` 的處理（第 4 點）單獨拿出來：tools/cra/x86_firmware.py 的 md_esc 用同一份規則。t 要是已經把 & 換成 &amp; 的文字（& 不影響這裡的判斷）。"""
-    return _AT.sub(lambda m: _at_sub(t, m), t)
+    earlier = _earlier_at(t)
+    return _AT.sub(lambda m: _at_sub(t, m, earlier), t)
 
 
 def defang_links(t):
     """裸網址（`scheme://`、`www.`）與 `mailto:`／`xmpp:` 的自動連結處理（第 6、4b 點）。t 要是已經跳脫過反斜線與特殊字元的文字。"""
     t = _SCHEME.sub(lambda m: "\\:", t)
-    t = _MAILTO.sub(lambda m: m.group(1) + "\\:", t)
+    t = _MAILTO.sub(lambda m: m.group(1) + "\\:" + ZWSP, t)      # 冒號後面再插零寬空白：cmark-gfm 先合併文字節點再做 autolink，`\\:` 擋不住；零寬空白讓往回掃停在這裡
     return _WWW.sub(lambda m: m.group(1) + "\\", t)
 
 

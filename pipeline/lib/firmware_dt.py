@@ -493,10 +493,10 @@ def renamed_count(norm):
 def supplier_props_text(n, left=0, unprocessed=False):
     """供應商自帶 dumpling: 開頭的 property 的說明（固定文字加數字；`*`、`_` 的名稱放在行內程式碼裡，不被渲染成斜體）。
     n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數；
-    unprocessed＝整份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對、規劃失敗），所以一個都沒有改名（left 等於 n）。"""
+    unprocessed＝整份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata.properties 型別不對、規劃失敗），所以一個都沒有改名（left 等於 n）。"""
     ns = ("那是我們自己的命名空間：`dumpling:normalized-*`、`dumpling:supplier-*` 是正規化的紀錄，`dumpling:vuln-assessment` 等是評估標記；供應商可以自己塞")
     if unprocessed:
-        return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對或規劃失敗，原因見 normalize.json 的 notes），"
+        return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata.properties 型別不對或規劃失敗，原因見 normalize.json 的 notes），"
                 "所以一個都沒有改名，上傳副本仍帶有這些 dumpling: 開頭的供應商 property（%s）" % (n, ns))
     if left > 0:
         return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：%d 個已改名成 `supplier:dumpling:…`、%d 個超過變更筆數上限沒有改名"
@@ -963,7 +963,7 @@ def _normalize_note(info):
     ch, un = n.get("changes"), n.get("unnormalized")
     out = ""
     if n.get("processed") is False:
-        out += "；這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對或規劃失敗；原因見 normalize.json 的 notes，上傳的與原檔內容相同）"
+        out += "；這份 SBOM 沒有做正規化（specVersion 不在支援範圍、metadata.properties 型別不對或規劃失敗；原因見 normalize.json 的 notes；metadata.component 仍會換成本工具的根元件）"
     if isinstance(ch, int) and ch > 0:
         out += "；已正規化 %d 處（見 normalize.json；上傳的是正規化副本，原檔不變）" % ch
     if isinstance(un, int) and un > 0:
@@ -1111,8 +1111,8 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
           "|---|---|---|---|---|---|---|---|"]
     for info, res in rows:
         g = res["grype"] if res["grype"] != "OK" else "OK（%s 筆）" % res["grype_matches"]
-        md.append("| %s | %s@%s%s | %d | %s | %s | %s | %s | %s |" % (
-            _cell(info["slug"]), _cell(info["project_name"]), _cell(info["project_version"]),
+        md.append("| %s | %s%s | %d | %s | %s | %s | %s | %s |" % (
+            _cell(info["slug"]), _cell("%s@%s" % (info["project_name"], info["project_version"])),      # 整串一起過 md_safe：版本以字母結尾又含 `.` 時，name@version 是 email 形式
             "（合成）" if info.get("synthetic") else "", info["summary"]["components"], res["upload"],
             res["dt_components"], res["dt_findings"], g, res["status"]))
     md += ["", "## 怎麼讀", "",

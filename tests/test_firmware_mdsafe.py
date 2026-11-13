@@ -138,22 +138,63 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.defang_at(""), "")
         self.assertEqual(ms.md_safe("a@b.c @u pkg@1.0"), ms.defang_at("a@b.c @u pkg@1.0"))
 
-    def test_mailto_and_xmpp_colon_escaped(self):
+    def test_mailto_and_xmpp_colon_escaped_and_followed_by_zero_width_space(self):
         z = ms.ZWSP
-        self.assertEqual(ms.md_safe("mailto:a@example.com"), "mailto\\:a" + z + "@" + z + "example.com")
-        self.assertEqual(ms.md_safe("XMPP:a@example.com"), "XMPP\\:a" + z + "@" + z + "example.com")
-        self.assertEqual(ms.md_safe("xmpp:a/b@example.org"), "xmpp\\:a/b" + z + "@" + z + "example.org")
-        self.assertEqual(ms.md_safe("mailto:name@host"), "mailto\\:name@host")          # 網域沒有 `.`：cmark-gfm 不連結，但 markdown-it 的 mailto: 會
-        self.assertEqual(ms.md_safe("mailto:"), "mailto\\:")
+        # 冒號加反斜線之後再插零寬空白：cmark-gfm 先合併文字節點再做 autolink，只有反斜線擋不住 `xmpp:a@/.a` 這類形式
+        self.assertEqual(ms.md_safe("mailto:a@example.com"), "mailto\\:" + z + "a" + z + "@" + z + "example.com")
+        self.assertEqual(ms.md_safe("XMPP:a@example.com"), "XMPP\\:" + z + "a" + z + "@" + z + "example.com")
+        self.assertEqual(ms.md_safe("xmpp:a/b@example.org"), "xmpp\\:" + z + "a/b" + z + "@" + z + "example.org")
+        self.assertEqual(ms.md_safe("mailto:name@host"), "mailto\\:" + z + "name@host")          # 網域沒有 `.`：cmark-gfm 不連結，但 markdown-it 的 mailto: 會
+        self.assertEqual(ms.md_safe("mailto:"), "mailto\\:" + z)
+        for raw in ("xmpp:a@/.a", "xmpp:a@-/.a", "xmpp:1@a/.a", "xmpp:a@_/.a", "mailto:a@/.a", "MailTo:a@b/c.d"):
+            out = ms.md_safe(raw, 200)
+            self.assertEqual(out.replace(z, "").replace("\\", ""), raw, raw)
+            self.assertRegex(out, r"(?i)^(mailto|xmpp)\\:" + z, raw)                              # 前綴與名稱之間一定隔著零寬空白
         self.assertEqual(ms.md_safe("a:b mail:x"), "a:b mail:x")
-        self.assertEqual(ms.defang_links("mailto:x https://e www.e"), "mailto\\:x https\\://e www\\.e")
+        self.assertEqual(ms.defang_links("mailto:x https://e www.e"), "mailto\\:" + z + "x https\\://e www\\.e")
+
+    def test_no_lookback_limit_for_an_earlier_at_in_the_same_run(self):
+        z = ms.ZWSP
+        # `x@y.z` 接很多個 `1` 再接 `@Z`：同一串 email 字元，cmark-gfm 會連結 `y.z111…@Z`；不論多長，最後一個 @ 都要被隔開
+        for n in (0, 1, 100, 251, 252, 253, 254, 255, 256, 257, 300, 1000, 5000):
+            out = ms.md_safe("x@y.z" + "1" * n + "@Z", 100000)
+            self.assertTrue(out.endswith("1" * n + z + "@" + z + "Z") if n else out.endswith("z" + z + "@" + z + "Z"), n)
+        # 中間隔著空白或逗號就是另一串：後面的 @ 不受前面影響（見 test_earlier_at_only_counts_within_the_same_run_of_email_characters）
+        out = ms.md_safe("x@y.z" + "1" * 300 + " q@Z", 100000)
+        self.assertTrue(out.endswith(" q@Z"))
+        self.assertEqual(ms._earlier_at("a@b"), [False, False, True])
+        self.assertEqual(ms._earlier_at("a@b c"), [False, False, True, True, False])          # 空白隔開：重新計
+        self.assertEqual(ms._earlier_at("a@b,c"), [False, False, True, True, False])          # 逗號不是 email 字元
+        self.assertEqual(ms._earlier_at("a@b-c"), [False, False, True, True, True])           # `-` 是
+        self.assertEqual(ms._earlier_at(""), [])
+
+    def test_scans_are_linear(self):
+        import time
+        big = 100000
+        cases = ["a@" + "_" * big, "a@" + "-" * big, "a@" + "-_" * (big // 2), "a@" + "a-" * (big // 2), "@" * big, "a@b." * (big // 4),
+                 "x@y.z" + "1" * big + "@Z", "a@" + "a" * big, "mailto:" * (big // 7), "a@b.c " * (big // 6), "@a" * (big // 2), ("a@" + "_" * 1000 + " ") * (big // 1002)]
+        for raw in cases:
+            t0 = time.perf_counter()
+            out = ms.md_safe(raw, 10 ** 6)
+            dt = time.perf_counter() - t0
+            self.assertLess(dt, 1.0, (raw[:20], len(raw), dt))
+            self.assertGreaterEqual(len(out), 1)
+
+    def test_email_like_domain_chars_and_local_chars(self):
+        z = ms.ZWSP
+        # 網域掃描要認得 `-`、`_`；同一串 email 字元要認得 `_`（cmark-gfm 會連結這些，實測）
+        self.assertEqual(ms.md_safe("a@-.a"), "a" + z + "@" + z + "-.a")
+        self.assertEqual(ms.md_safe("aa@_.a"), "aa" + z + "@" + z + "\\_.a")
+        self.assertEqual(ms.md_safe("a@_.1@a"), "a@\\_.1" + z + "@" + z + "a")
+        self.assertEqual(ms.md_safe("a@b_c.d"), "a" + z + "@" + z + "b\\_c.d")
+        self.assertEqual(ms.md_safe("a@b-c.d"), "a" + z + "@" + z + "b-c.d")
 
     def test_is_blank(self):
         for blank in ("", " ", "\t\n", "\u00a0", "\u3000", "\u200b", "\u200b\u200d\u2060", "\ufeff", "\x00", "\x1b", "\u202e", "\u00ad", "\u180e", "\ufe0f", "\U000e0100",
-                      "\u0301", "\u034f", "\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\u2028", "\ud800", " \u200b\u3164\u2800 "):
+                      "\u0301", "\u20dd", "\u034f", "\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\u2028", "\ud800", " \u200b\u3164\u2800 "):
             with self.subTest(blank=repr(blank)):
                 self.assertTrue(ms.is_blank(blank))
-        for shown in ("a", "0", "_", ".", "-", "\u200ba", "\u3164a", "é", "中", "\u2603", "\ufffd", "\ufffc", "A-source"):
+        for shown in ("a", "\u0903", "\u093e", "0", "_", ".", "-", "\u200ba", "\u3164a", "é", "中", "\u2603", "\ufffd", "\ufffc", "A-source"):
             with self.subTest(shown=repr(shown)):
                 self.assertFalse(ms.is_blank(shown))
         self.assertFalse(ms.is_blank(None))             # str(None) 是 "None"

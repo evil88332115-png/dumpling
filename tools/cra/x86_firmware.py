@@ -143,6 +143,7 @@ import stat
 import struct
 import sys
 import time
+import unicodedata
 import uuid
 import zipfile
 import zlib
@@ -2475,7 +2476,7 @@ _MDSAFE = []
 
 def _mdsafe_funcs():
     """(defang_at, defang_links)：與 pipeline/lib/firmware_mdsafe.py 同一份規則（@ 提及與 email 自動連結、裸網址、mailto／xmpp）：載入同 repo 的那個檔案。
-    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，裸網址規則不做（不會比以前少跳脫）。"""
+    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，裸網址、mailto 規則不做。"""
     if not _MDSAFE:
         try:
             spec = importlib.util.spec_from_file_location("firmware_mdsafe_for_x86", _MDSAFE_PATH)
@@ -2487,12 +2488,20 @@ def _mdsafe_funcs():
     return _MDSAFE[0]
 
 
+def _plain(x):
+    """C 類字元（控制、格式如 U+202E 與零寬、單獨代理、私用、未指派）與 Zl／Zp 換成空白，連續空白壓成一個（firmware_mdsafe.plain 同一份規則；
+    單獨代理字元留著會讓寫檔時 UTF-8 編碼失敗）。"""
+    s = "".join(" " if (unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")) else ch for ch in str(x))
+    return " ".join(s.split())
+
+
 def md_esc(x):
-    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構（含 @ 提及、email 與裸網址的自動連結）。"""
+    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構（含 @ 提及、email 與裸網址的自動連結）。
+    與 firmware_mdsafe.md_safe 的差別：不截短；`<`、`>` 用 &lt;、&gt;；`!`、`$`、`(`、`)` 不跳脫（報告裡的 `$FPT`、`(…)` 是固定寫法，沒有 `[` 就不會變成連結或圖片）。"""
     at, links = _mdsafe_funcs()
-    s = at(" ".join(str(x).split()).replace("&", "&amp;"))        # @ 的判斷看原文（跳脫之前），和 firmware_mdsafe.md_safe 的順序相同
+    s = at(_plain(x).replace("&", "&amp;"))        # @ 的判斷看原文（跳脫之前），和 firmware_mdsafe.md_safe 的順序相同
     for a, b in (("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("*", "\\*"), ("_", "\\_"), ("[", "\\["), ("]", "\\]"),
-                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#")):
+                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#"), ("~", "\\~")):
         s = s.replace(a, b)
     return links(s)
 

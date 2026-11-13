@@ -1276,7 +1276,9 @@ class HardeningTests(ReportBase):
             self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
             self.assertIn("property 2 個：這份 SBOM 沒有正規化", out)
             self.assertIn("一個都沒有改名", md)
-            self.assertIn("這份 SBOM 沒有正規化（specVersion 不在支援範圍", out)
+            self.assertIn("這份 SBOM 沒有做正規化（specVersion 不在支援範圍", out)
+            self.assertIn("metadata.component 仍會換成本工具的根元件", out)
+            self.assertNotIn("與原檔內容相同", out)
             with open(os.path.join(self.last_prep, "sbom.cdx.json"), encoding="utf-8") as fh:
                 up = json.load(fh)
             self.assertEqual([p["name"] for p in up["metadata"]["properties"]], ["dumpling:p0", "dumpling:p1"])        # 真的原樣留著
@@ -1292,7 +1294,31 @@ class HardeningTests(ReportBase):
         info, out, md = self._supplier_case("clean13", spec="1.3")
         self.assertEqual(info["summary"]["supplier_dumpling_props"], 0)
         self.assertNotIn("供應商 SBOM 自帶名稱以 dumpling:", out)
-        self.assertIn("這份 SBOM 沒有正規化", out)
+        self.assertIn("這份 SBOM 沒有做正規化", out)
+
+    def test_unprocessed_flag_must_be_exactly_true(self):
+        base = {"supplier_dumpling_props": 3, "supplier_dumpling_props_left": 3}
+        text = lambda **kw: fd._props_text(dict(base, **kw))
+        self.assertIn("這份 SBOM 沒有正規化", text(supplier_dumpling_props_unprocessed=True))
+        for v in (1, "yes", "true", [1], {"a": 1}, 2, None, False, 0, ""):
+            with self.subTest(v=v):
+                t = text(supplier_dumpling_props_unprocessed=v)
+                self.assertNotIn("這份 SBOM 沒有正規化", t)                       # truthy 不算：只認 JSON 的 true
+                self.assertIn("超過變更筆數上限沒有改名", t)
+        self.assertNotIn("這份 SBOM 沒有正規化", text())
+
+    def test_project_name_at_version_is_one_markdown_safe_string(self):
+        """表格的「DT 專案」欄是 name@version：版本以字母結尾又含 `.` 時（1.2.3-rc），name@version 是 email 形式，整串一起過 md_safe。"""
+        HardeningTests.n += 1
+        slug = "ver%d" % HardeningTests.n
+        info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, version="firmware_version: 1.2.3-rc\n")
+        self.assertEqual(info["project_version"], "1.2.3-rc")
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        z = "\u200b"
+        self.assertIn(z + "@" + z + "1.2.3-rc", md)
+        row = [l for l in md.splitlines() if l.startswith("| " + slug)][0]
+        self.assertNotRegex(row, r"[A-Za-z0-9]@[A-Za-z0-9]")                      # 沒有未隔開的 name@version
 
     def test_supplier_props_text_fixed_wording_has_no_markdown_emphasis(self):
         import re as _re

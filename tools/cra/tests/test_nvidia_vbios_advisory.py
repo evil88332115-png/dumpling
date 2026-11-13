@@ -824,7 +824,7 @@ def test_md_esc_defangs_mentions_email_and_bare_urls():
     z = "\u200b"
     e = xf.md_esc
     assert e("@user") == "@" + z + "user" and e("x @org/team") == "x @" + z + "org/team" and e("＠u") == "＠" + z + "u"
-    assert e("a@example.com") == "a" + z + "@" + z + "example.com" and e("mailto:a@example.com") == "mailto\\:a" + z + "@" + z + "example.com"
+    assert e("a@example.com") == "a" + z + "@" + z + "example.com" and e("mailto:a@example.com") == "mailto\\:" + z + "a" + z + "@" + z + "example.com"
     assert e("pkg:generic/zlib@1.2.11") == "pkg:generic/zlib@1.2.11" and e("name@host") == "name@host"
     assert e("&commat;u") == "&amp;commat;u"
     assert e("https://evil.example") == "https\\://evil.example" and e("www.evil.example") == "www\\.evil.example"
@@ -905,3 +905,17 @@ def test_commit_date_may_be_a_date_like_c1_accepts(tmp_path):
     for ok in ("2026-11-10", "2026-11-10T13:01:57Z", "2026-11-10T13:01:57+08:00"):
         d["mirror"]["commit_date"] = ok
         assert nva.load(write(tmp_path, d)).mirror_commit_date == ok
+
+
+def test_md_esc_xmpp_long_runs_controls_and_tilde():
+    z = "\u200b"
+    e = xf.md_esc
+    assert e("xmpp:a@/.a") == "xmpp\\:" + z + "a@/.a" and e("mailto:a@-/.a") == "mailto\\:" + z + "a@-/.a"
+    assert e("x@y.z" + "1" * 300 + "@Z").endswith("1" * 300 + z + "@" + z + "Z")                   # 沒有回看上限
+    assert e("a\u202eb\ud800c\x00d") == "a b c d" and e("~~x~~") == "\\~\\~x\\~\\~"
+    e("\ud800").encode("utf-8")                                                                     # 單獨代理字元不會留著
+    import time
+    for raw in ("a@" + "_" * 100000, "a@" + "-_" * 50000, "@" * 100000, "x@y.z" + "1" * 100000 + "@Z", "a@b." * 25000):
+        t0 = time.perf_counter()
+        e(raw)
+        assert time.perf_counter() - t0 < 1.0, raw[:12]
