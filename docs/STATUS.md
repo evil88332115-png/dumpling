@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 12:34 +0800（C3）
+最後更新：2026-11-13 12:34 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -106,7 +106,7 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：依驗證代理的結果修 rock 標準答案（external_services 改 NOT_ASSESSED、範圍放寬、加 raw_sectors.by_slot／report_rows／cna.gap 等可核對欄位、DKMS 驅動歸 bsp）；rock 用 b865b82 重跑中；rpi 等 C1 的 kernel-cve cache 退回；ai-nas 等 scan.tools: full
+- 目前在做：M6。rock-5b-demo 標準答案依驗證代理核對修訂（58 項），CI 上 scan: OK（dev 43363642077）；已併入 wp1/m2 6b70949（kernel-cve 退回工具端、kernel-versions /2）；rpi 等 J 軌的 mirrors.sh（cache），ai-nas 等 scan.tools: full
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
 - 代理：無執行中（PR #28 驗證代理已完成：驗證通過、應修 3、建議 6；留言依使用者授權以 --body-file 發出，連結已回報 C0）
 - CI：dev.yml 依序跑 rpi-lite-demo → rock-5b-demo（c00611b）；ai-nas 最近一次 43341204962 FAIL（cdxgen 沒裝，已由 C1 在 M2 處理）
