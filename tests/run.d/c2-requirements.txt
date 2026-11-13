@@ -5,6 +5,7 @@
 #   mdurl 0.1.2（2022-08-14）：markdown-it-py 的相依。
 #   linkify-it-py 2.2.0（2026-08-29）、uc-micro-py 2.0.0（2026-03-01）：markdown-it-py 的裸網址／email 自動連結。
 #   cmarkgfm 2025.10.22（2025-10-22）：GitHub 的 cmark-gfm 的 Python 綁定；GitHub 實際用的就是這一套的 autolink／table／tagfilter 擴充。
+#   PyYAML 6.0.3（2025-09-25）：整份報告的測試要讀樣本的 firmware.yml（venv 看不到系統的 python3-yaml）。
 #   cffi 2.1.1（2026-08-03）、pycparser 3.0（2026-01-21）：cmarkgfm 的相依（cp312 有 manylinux wheel，不需要編譯）。
 markdown-it-py==4.2.0
 mdurl==0.1.2
@@ -13,3 +14,4 @@ uc-micro-py==2.0.0
 cmarkgfm==2025.10.22
 cffi==2.1.1
 pycparser==3.0
+PyYAML==6.0.3

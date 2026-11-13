@@ -43,6 +43,7 @@ def renderers():
         import cmarkgfm
         from cmarkgfm.cmark import Options
         import linkify_it  # noqa: F401  markdown-it-py 的 linkify 需要它
+        import yaml  # noqa: F401  整份報告的測試讀樣本的 firmware.yml
         from markdown_it import MarkdownIt
     except ImportError:
         return None
@@ -93,7 +94,7 @@ class RenderCase(unittest.TestCase):
     def setUp(self):
         self.R = renderers()
         if self.R is None:
-            self.skipTest("沒有 markdown-it-py、linkify-it-py 或 cmarkgfm（見 tests/run.d/c2-requirements.txt）")
+            self.skipTest("沒有 markdown-it-py、linkify-it-py、cmarkgfm 或 PyYAML（見 tests/run.d/c2-requirements.txt）")
 
     def check(self, text, want_visible=None, contexts=CONTEXTS, label=""):
         """text（已經過 md_safe）放進各種位置、用每個渲染器渲染：不能有問題；want_visible 去掉零寬空白後要出現在可見文字裡。"""
