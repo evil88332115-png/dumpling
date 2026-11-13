@@ -490,10 +490,14 @@ def renamed_count(norm):
     return sum(1 for c in norm["changes"] if c.get("rule") == nm.RULE_RESERVED)
 
 
-def supplier_props_text(n, left=0):
+def supplier_props_text(n, left=0, unprocessed=False):
     """供應商自帶 dumpling: 開頭的 property 的說明（固定文字加數字；`*`、`_` 的名稱放在行內程式碼裡，不被渲染成斜體）。
-    n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數。"""
+    n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數；
+    unprocessed＝整份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對、規劃失敗），所以一個都沒有改名（left 等於 n）。"""
     ns = ("那是我們自己的命名空間：`dumpling:normalized-*`、`dumpling:supplier-*` 是正規化的紀錄，`dumpling:vuln-assessment` 等是評估標記；供應商可以自己塞")
+    if unprocessed:
+        return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對或規劃失敗，原因見 normalize.json 的 notes），"
+                "所以一個都沒有改名，上傳副本仍帶有這些 dumpling: 開頭的供應商 property（%s）" % (n, ns))
     if left > 0:
         return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：%d 個已改名成 `supplier:dumpling:…`、%d 個超過變更筆數上限沒有改名"
                 "（上傳副本仍帶有 dumpling: 開頭的供應商 property；原名、位置與值的 SHA-256 見 normalize.json，沒改名的另見 unnormalized）（%s）" % (n, n - left, left, ns))
@@ -584,6 +588,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
     if norm:
         summary["supplier_dumpling_props"] = renamed_count(norm) + norm["reserved_not_renamed"]     # 全部（已改名加沒改名）
         summary["supplier_dumpling_props_left"] = norm["reserved_not_renamed"]
+        summary["supplier_dumpling_props_unprocessed"] = not norm["processed"]
     # 先把所有要寫的檔案序列化完（失敗就什麼都不寫，不會留下只有一半的輸出），全部成功才寫檔。
     sbom_text = dumps_json(out_doc, "上傳用 SBOM")
     sbom_sha = hashlib.sha256(sbom_text.encode("utf-8")).hexdigest()
@@ -595,7 +600,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "sbom_file": "sbom.cdx.json", "sbom_sha256": sbom_sha, "input_sbom_sha256": input_sha,
         "normalize": ({"file": "normalize.json", "applied": norm["applied"], "changes": len(norm["changes"]),
                        "unnormalized": norm["unnormalized_total"], "renamed": renamed_count(norm),
-                       "not_renamed": norm["reserved_not_renamed"]} if norm else None),
+                       "not_renamed": norm["reserved_not_renamed"], "processed": norm["processed"]} if norm else None),
         "duplicate_keys": ({"count": dups.total, "listed": len(dups.events),
                             "events": [{k: ev[k] for k in ("object_index", "pointer", "key_json", "dropped_value_sha256")} for ev in dups.events[:MAX_DUP_NOTES]]}
                            if dups.total else None),
@@ -688,12 +693,16 @@ def _load_mdsafe():
 _MDSAFE = []
 
 
+def _mdsafe():
+    if not _MDSAFE:
+        _MDSAFE.append(_load_mdsafe())
+    return _MDSAFE[0]
+
+
 def _cell(s, limit=300):
     """寫進 markdown 或狀態行的不可信文字（dt-verify／sca-scan 的檢查名與階段名、錯誤訊息、樣本名…）：一律經共用的 md_safe。
     只在文字產生時呼叫一次（notes、verify_fail 存的就是清理過的），輸出 markdown 時不要再呼叫，否則會跳脫兩次。"""
-    if not _MDSAFE:
-        _MDSAFE.append(_load_mdsafe())
-    return _MDSAFE[0].md_safe(s, limit)
+    return _mdsafe().md_safe(s, limit)
 
 
 _SEV = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
@@ -708,7 +717,7 @@ EMPTY_STAGE = "(空的階段名稱)"
 
 def read_status_tsv_checked(path):
     """(rows, anomalies)。rows：stage → (status, detail)，同一個階段出現多列時留「最嚴重」的那一列（不是最後一列：前面的 FAIL 不能被後面的 OK 蓋掉）。
-    anomalies：{"duplicates": {階段: 列數（>= 2）}, "empty_rows": 階段名稱是空的或只有空白的列數}。這兩種在 sca-scan 的正常輸出不會出現（每個階段一列、都有名稱），
+    anomalies：{"duplicates": {階段: 列數（>= 2）}, "empty_rows": 階段名稱看不到內容的列數（firmware_mdsafe.is_blank：空、空白、零寬字元、控制字元、Hangul filler 等）}。這兩種在 sca-scan 的正常輸出不會出現（每個階段一列、都有名稱），
     出現就代表檔案被改過或工具有 bug；即使採最嚴重那一列後狀態是 OK，report 也不能當作沒看到（見 stage_anomaly_notes）。"""
     raw = _read_limited(path, MAX_BYTES, "status.tsv").decode("utf-8", "replace")
     rows, count, empty = {}, {}, 0
@@ -717,7 +726,7 @@ def read_status_tsv_checked(path):
             stage = r.get("stage")
             if stage is None:
                 continue
-            if not stage.strip():           # 階段名稱是空的（或只有空白）的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
+            if _mdsafe().is_blank(stage):   # 階段名稱看不到內容（空、只有空白、零寬字元、控制字元、Hangul filler…）的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
                 stage = EMPTY_STAGE
                 empty += 1
             else:
@@ -745,7 +754,7 @@ def stage_anomaly_notes(an):
         out.append("status.tsv 有重複列：%s（同一階段多列時 report 只採最嚴重的一列；`scan-status-check.py` 是後值蓋前值，兩邊可能不一致）" % "、".join(
             "階段 %s %d 列" % (_cell(k, 60), n) for k, n in dups[:20]) + ("…另 %d 個階段" % (len(dups) - 20) if len(dups) > 20 else ""))
     if (an or {}).get("empty_rows"):
-        out.append("status.tsv 有 %d 列的階段名稱是空的或只有空白（當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))
+        out.append("status.tsv 有 %d 列的階段名稱是空的或看不到內容（只有空白、零寬字元、控制字元等；當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))
     return out
 
 
@@ -953,6 +962,8 @@ def _normalize_note(info):
         return ""
     ch, un = n.get("changes"), n.get("unnormalized")
     out = ""
+    if n.get("processed") is False:
+        out += "；這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 型別不對或規劃失敗；原因見 normalize.json 的 notes，上傳的與原檔內容相同）"
     if isinstance(ch, int) and ch > 0:
         out += "；已正規化 %d 處（見 normalize.json；上傳的是正規化副本，原檔不變）" % ch
     if isinstance(un, int) and un > 0:
@@ -964,6 +975,14 @@ def _left_count(s):
     """沒改名的供應商 dumpling: property 個數（不超過全部個數；讀不到當 0）。"""
     n, left = s.get("supplier_dumpling_props"), s.get("supplier_dumpling_props_left")
     return left if _is_count(left) and _is_count(n) and left <= n else 0
+
+
+def _props_text(s):
+    """供應商 dumpling: property 的說明（summary 讀不到個數時回空字串）。"""
+    n = s.get("supplier_dumpling_props")
+    if not (_is_count(n) and n > 0):
+        return ""
+    return supplier_props_text(n, _left_count(s), s.get("supplier_dumpling_props_unprocessed") is True)
 
 
 def _dup_count(s):
@@ -1012,8 +1031,8 @@ def attention_reasons(s, r):
         why.append("sca-scan 其他階段不是 OK（%d 個，OK 之前都要有人看過）：%s%s" % (
             len(lst), "、".join(lst[:20]), "…另 %d 個" % (len(lst) - 20) if len(lst) > 20 else ""))
     why.extend(r.get("status_anomalies") or [])
-    if _is_count(s.get("supplier_dumpling_props")) and s["supplier_dumpling_props"] > 0:
-        why.append(supplier_props_text(s["supplier_dumpling_props"], _left_count(s)))
+    if _props_text(s):
+        why.append(_props_text(s))
     if _dup_count(s):
         why.append(dup_text(_dup_count(s)))
     return why
@@ -1069,9 +1088,8 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         s = info["summary"]
         if _dup_count(s) and dup_text(_dup_count(s)) not in res["notes"]:
             res["notes"].append(dup_text(_dup_count(s)))      # 狀態不是 ATTENTION／OK 時 attention_reasons 沒跑到，這裡補上，重複鍵不能靜默
-        sp = s.get("supplier_dumpling_props")
-        if _is_count(sp) and sp > 0 and supplier_props_text(sp, _left_count(s)) not in res["notes"]:
-            res["notes"].append(supplier_props_text(sp, _left_count(s)))      # 同上：不是 ATTENTION／OK 的狀態也不能靜默
+        if _props_text(s) and _props_text(s) not in res["notes"]:
+            res["notes"].append(_props_text(s))      # 同上：不是 ATTENTION／OK 的狀態也不能靜默
         rows.append((info, res))
         va = "、".join("%s=%d" % (_cell(k, 40), v) for k, v in sorted(s["vuln_assessment"].items()))
         detail = "DT 專案 %s@%s；元件 %d（purl %d、cpe %d）；上傳 %s；DT 元件 %s；漏洞 %s；Grype %s（%s）；NOT_ASSESSED 與版本 GAP：%s／%d" % (

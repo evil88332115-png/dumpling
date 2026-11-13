@@ -238,8 +238,13 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 6. 找表裡「已審核、vendor 與 device ID 都對得上」的列。沒有 → NOT_ASSESSED（`no-row`）。表裡有任何未審核的列（`rows[].reviewed=false`）時，整張表算未經負責人確認，結果是 `table-not-reviewed`（和只有初審意見的公告一樣），不會只用已審核的列給 fixed。裝置不符就是沒有對應的列，不拿別的裝置的列套用。
 7. 逐列比版本：版本 ≥ `vbios_fixed_in` → fixed；低於 `vbios_affected_below`（或不高於 `vbios_affected_max`）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → **affected**（有 gap 的列、已修補的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（`range-gap`）；全部 fixed → **fixed**。
-8. 已審核的表，`mirror.fetched_utc` 超過 90 天（正好 90 天不算）、讀不到（缺、格式錯、沒有時區）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（`table-stale`，表可能漏了較新的公告）；affected 與其他結果照舊但加註「重新審核表」；有 vBIOS 元件時 `fw-inventory` 狀態 ATTENTION（`vbios_advisory.stale`）。
+8. 已審核的表，`mirror` 缺少（沒有 `mirror` 或沒有 `fetched_utc`）、`mirror.fetched_utc` 超過 90 天（正好 90 天不算）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（`table-stale`，表可能漏了較新的公告）；affected 與其他結果照舊但加註「重新審核表」；有 vBIOS 元件時 `fw-inventory` 狀態 ATTENTION（`vbios_advisory.stale`）。
+   `mirror.fetched_utc` 有值但格式不對（不是字串、不是 ISO 8601、沒有時區）：載入時就是 `table-invalid`，不是 `table-stale`；`mirror` 不是物件也是 `table-invalid`。
    現在時間由呼叫端傳入（`inventory(vbios_now=…)`、`match_vbios(now=…)`；沒給才用牆上時鐘，沒有時區的時間當成 UTC），測試一律傳固定時間，不吃時鐘。
+
+公告編號（`bulletins[].id`、`rows[].bulletin`、`not_applicable[].bulletin`，含未審核的）只收 1～8 位 ASCII 數字（`^[0-9]{1,8}$`，與 C1 `nvidia_bulletins.py` 的 `BULLETIN_ID_RE` 相同，用 `fullmatch`，`$` 不放行結尾換行）：這些編號會寫進 fw-inventory.md 與 SBOM 的 property，不合整張表 `table-invalid`。
+報告的「對照表」那一行與 `Table.confirmed` 同一個判斷：`reviewed_until` 有值、沒有只有初審意見的公告、沒有未審核的列，缺一個就寫「表尚未經負責人確認」並列出原因與未審核的筆數。
+fw-inventory.md 的字串經 `md_esc`：`@` 提及與 email 形式、裸網址、`mailto:`／`xmpp:` 與 `firmware_mdsafe` 同一份規則（載入 `pipeline/lib/firmware_mdsafe.py` 的 `defang_at`／`defang_links`）；公告編號的格式限制是第二道防線，兩道都留著：表是 repo 內審核過的檔案，但報告輸出不該依賴表一定乾淨。
 
 表驗證另外擋下自相矛盾的列：`vbios_fixed_in` 低於 `vbios_affected_below`，或不高於 `vbios_affected_max`（缺的段補 00／FF 後比）→ 整張表 `table-invalid`（`affected_below` 等於 `fixed_in` 是正常的「prior to X、fixed in X」，不擋）。
 
@@ -266,7 +271,7 @@ C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
 - C1 的 `validate_table` 不認得 vBIOS 的裝置範圍與十六進位版本：版本欄位只收點分十進位（`vkey`），沒有 PCI vendor／device 欄位。這張表用額外欄位（上表）表達，`tools/cra/nvidia_vbios_advisory.py` 在 `validate_table` 之後自己驗已審核的列。C1 的 `match` 只讀 jetson 群組的表，不讀這張。
   若 `validate_table` 要原生檢查這些欄位，需要接收 `pci_vendor`、`pci_devices`、`vbios_*`，以及可替換的版本比較函式。
 - `reviewed_until` 是審核者看過的最新公告日期（`candidates` 把日期比它晚的公告列為待審）；鏡像的時間點記在頂層 `mirror`（commit、commit_date、fetched_utc），`candidates` 目前不讀它。
-  `mirror` 缺漏或日期讀不到、過期、在未來：這張表的比對把 fixed 降成 NOT_ASSESSED（`table-stale`），affected 與其他結果照舊但加註。
+  `mirror` 缺少、過期、在未來：這張表的比對把 fixed 降成 NOT_ASSESSED（`table-stale`），affected 與其他結果照舊但加註；`fetched_utc` 有值但格式不對（含沒有時區）是 `table-invalid`。
 - 沒有 `fixed_in` 以外範圍欄位的列（只有 `vbios_fixed_in`）表示「低於這個版本都受影響」，不分版本線：審核時列的範圍要涵蓋到版本線，只適用某一條版本線的公告要寫成有 `vbios_affected_below`／`vbios_affected_max`（加 `pci_devices`）的列。
 
 ### 更新表（人工步驟）

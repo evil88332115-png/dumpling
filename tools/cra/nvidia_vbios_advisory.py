@@ -22,7 +22,8 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 `reviewed_until` 是審核者看過的最新公告的日期（不是鏡像 commit 的日期）；兩者分開記。
 
 比對規則（依序，第一個成立的就是結果）：
-1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
+1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對、公告編號（bulletins[].id、rows[].bulletin、not_applicable[].bulletin）不是 1～8 位數字、
+   mirror.fetched_utc 有值但格式不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
 2. 表的 reviewed_until 是 null，或表裡還有只有初審意見（reviewed=false）的公告 → 表尚未經負責人確認 → NOT_ASSESSED（table-not-reviewed）。
 3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）；ROM 裡有兩個以上不同的版本字串 → NOT_ASSESSED（version-ambiguous）。
 4. PCI vendor 不是 10de（含任何一個 x86／EFI 開機影像的 vendor）、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
@@ -30,8 +31,9 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row）。表裡有任何未審核的列時，整張表算未經負責人確認（見 2，table-not-reviewed，列出數量）。
 7. 逐列比版本：fixed_in 以上 → fixed；低於 affected_below（或不高於 affected_max）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → affected（有 gap 的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（range-gap）；全部 fixed → fixed。
-8. 表的 mirror 日期超過 MAX_MIRROR_AGE_DAYS、讀不到（含沒有時區的時間）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
-   affected 與其他結果照舊但加註。現在時間由呼叫端傳入（now 參數；測試一律傳固定的時間），沒給才用牆上時鐘。
+8. 表的 mirror 缺少（沒有 mirror 或沒有 fetched_utc）、日期超過 MAX_MIRROR_AGE_DAYS 或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
+   affected 與其他結果照舊但加註。mirror.fetched_utc 有值但格式不對（不是字串、不是 ISO 8601、沒有時區）：載入時就是 table-invalid（見 1），不是 table-stale。
+   現在時間由呼叫端傳入（now 參數；測試一律傳固定的時間），沒給才用牆上時鐘。
 所有 NOT_ASSESSED 的 basis 都以「資料庫沒有資料，以廠商公告為準」收尾（SBOM 內是英文）。
 """
 import datetime
@@ -63,6 +65,7 @@ VER_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:\.[0-9A-Fa-f]{2}){0,4}$")
 HEX4_RE = re.compile(r"^[0-9a-f]{4}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BULLETIN_ID_RE = re.compile(r"^[0-9]{1,8}$")      # 與 C1 nvidia_bulletins.py 的 BULLETIN_ID_RE 相同；公告編號會寫進報告與 SBOM，只收數字（不能帶 @、連結語法）
 ROW_VERSION_KEYS = ("vbios_affected_below", "vbios_affected_max", "vbios_fixed_in")
 
 
@@ -188,6 +191,29 @@ def validate_rows(doc):
                 bad(i, "vbios_fixed_in is not above vbios_affected_max (contradictory row)")
 
 
+def validate_ids(doc):
+    """公告編號（bulletins[].id、rows[].bulletin、not_applicable[].bulletin；未審核的也檢查）只收 BULLETIN_ID_RE；不對整張表視為壞掉。"""
+    def bad(where, v):
+        raise TableError("table-invalid", f"{where}: bulletin id must be 1 to 8 digits, got {str(v)[:40]!r}")
+    for name, key in (("bulletins", "id"), ("rows", "bulletin"), ("not_applicable", "bulletin")):
+        for i, x in enumerate(doc.get(name, [])):
+            v = x.get(key) if isinstance(x, dict) else None
+            if not (isinstance(v, str) and BULLETIN_ID_RE.fullmatch(v)):      # fullmatch：`$` 會放行結尾的換行字元（"9001\n"）
+                bad(f"{name}[{i}].{key}", v)
+
+
+def validate_mirror(doc):
+    """mirror.fetched_utc：沒有（沒有 mirror、或值是 null）→ 日期不明，比對時 table-stale；有值就要是有時區的 ISO 8601，否則 table-invalid。"""
+    m = doc.get("mirror")
+    if m is None:
+        return
+    if not isinstance(m, dict):
+        raise TableError("table-invalid", "mirror must be an object")
+    f = m.get("fetched_utc")
+    if f is not None and _parse_utc(f) is None:
+        raise TableError("table-invalid", "mirror.fetched_utc must be an ISO 8601 time with a time zone (for example 2026-11-13T16:52:04Z)")
+
+
 def load(path=None):
     """表 → Table；讀不到、超過上限、JSON 或結構不對 → TableError。"""
     p = Path(path) if path else TABLE_PATH
@@ -212,6 +238,8 @@ def load(path=None):
     except (TypeError, KeyError, AttributeError, ValueError):
         raise TableError("table-invalid", "validate_table: unexpected structure")
     validate_rows(doc)
+    validate_ids(doc)
+    validate_mirror(doc)
     return Table(doc, hashlib.sha256(data).hexdigest())
 
 

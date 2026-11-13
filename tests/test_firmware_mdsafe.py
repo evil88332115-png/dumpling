@@ -30,10 +30,15 @@ def _watch_match():
 
 
 class MdSafeTest(unittest.TestCase):
+    # 必須加反斜線跳脫的字元：寫死在測試裡（不從 ms.SPECIAL 取，否則從 SPECIAL 拿掉一個字元，這個測試也跟著少測一個）
+    ESCAPED = "\\[]()<>!*_#~|`$"
+
     def test_every_special_char_escaped(self):
-        for ch in ms.SPECIAL:
+        self.assertEqual(len(self.ESCAPED), 15)
+        for ch in self.ESCAPED:
             with self.subTest(ch=ch):
                 self.assertEqual(ms.md_safe("a%sb" % ch), "a\\%sb" % ch)
+        self.assertEqual(sorted(ms.SPECIAL), sorted(self.ESCAPED))      # 多一個少一個都要讓人看到：改 SPECIAL 要同時改這份清單與檔頭第 5 點
         self.assertNotIn("&", ms.SPECIAL)           # & 不加反斜線，改成 &amp;（見下面的實體測試）
 
     def test_link_image_html_neutralized(self):
@@ -62,17 +67,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("1.https://evil.example/x", 200), "1.https\\://evil.example/x")
         self.assertEqual(ms.md_safe("a:b c:d"), "a:b c:d")                       # 沒有 // 的冒號不動
         self.assertEqual(ms.md_safe("pkg:generic/a@1.0"), "pkg:generic/a@1.0")
-        try:
-            from markdown_it import MarkdownIt
-        except ImportError:
-            return
-        try:
-            md = MarkdownIt("gfm-like", {"linkify": True})            # 需要 linkify-it-py（runner 的 apt 套件沒有）
-            md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
-        except Exception:
-            return
-        for raw in ("1.https://evil.example/x", "-ftp://evil.example", "x-https://evil.example/x"):
-            self.assertNotIn("<a ", md.render(ms.md_safe(raw, 200)), raw)
+        # 整份渲染（cmark-gfm、markdown-it）的檢查在 tools/cra/tests/test_c2_report_render.py（需要固定版本的渲染器套件）
 
     def test_html_entities_do_not_decode(self):
         # &lt; &#64; &#x40; &commat; 渲染時會解碼成 < @ @ @，繞過後面的跳脫：& 一律換成 &amp;，渲染結果是字面的實體文字
@@ -91,7 +86,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("@user"), "@" + z + "user")
         self.assertEqual(ms.md_safe("x @org/team (@u2)"), "x @" + z + "org/team \\(@" + z + "u2\\)")
         self.assertEqual(ms.md_safe("＠user"), "＠" + z + "user")            # 全形
-        self.assertEqual(ms.md_safe("@@u"), "@" + z + "@" + z + "u")
+        self.assertEqual(ms.md_safe("@@u"), "@" + z + z + "@" + z + "u")        # 第二個 @ 在同一串 email 字元裡有更早的 @：cmark-gfm 的 `.` 計數不歸零，照 email 形式前後都隔開
         self.assertEqual(ms.md_safe("\\@u"), "\\\\@" + z + "u")                # 反斜線不是英數字
         self.assertEqual(ms.md_safe("_@u"), "\\_@" + z + "u")                  # 底線也處理（比 \w 嚴）
         self.assertEqual(ms.md_safe("é@u"), "é@" + z + "u")
@@ -106,6 +101,54 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe(" " + z + "@user"), "@" + z + "user")
         # 實體加 @ 的組合：&#64; 本身不再解碼，字面的 @ 另外處理
         self.assertEqual(ms.md_safe("&#64;user"), "&amp;\\#64;user")
+
+    def test_email_autolink_form_is_defanged_but_purl_is_not(self):
+        z = ms.ZWSP
+        # cmark-gfm 會連結成 mailto 的形式：@ 前後各插零寬空白（只插後面時，markdown-it 的 linkify 仍會把網域接起來）
+        for raw, want in (("a@b.c", "a" + z + "@" + z + "b.c"), ("user@example.org", "user" + z + "@" + z + "example.org"),
+                          ("pkg:deb/u/zlib@1.2.11.dfsg", "pkg:deb/u/zlib" + z + "@" + z + "1.2.11.dfsg"),
+                          ("a@b.c-", "a" + z + "@" + z + "b.c-"),        # cmark-gfm 不連結，但 markdown-it 的 linkify 連結到 `-` 前為止
+                          ("a@b.com_1", "a" + z + "@" + z + "b.com\\_1")):
+            with self.subTest(raw=raw):
+                self.assertEqual(ms.md_safe(raw), want)
+        # 不會被連結的形式原樣（purl 與版本字串可以原樣複製）
+        for keep in ("pkg:generic/zlib@1.2.11", "pkg:deb/ubuntu/zlib1g@1:1.2.11.dfsg-2ubuntu9?arch=amd64", "pkg:rpm/fedora/openssl@3.0.7-1.fc37",
+                     "name@host", "x9@y", "a@1.0", "a@b.c1", "pkg:npm/%40scope/x@1.2.3"):
+            with self.subTest(keep=keep):
+                self.assertEqual(ms.md_safe(keep, 200), keep)
+        # 第二個以後的 @：cmark-gfm 的 `.` 計數沒有歸零（x@y.z@Z 連結 y.z@Z），所以不要求 `.`
+        self.assertEqual(ms.md_safe("x@y.z@Z"), "x" + z + "@" + z + "y.z" + z + "@" + z + "Z")
+        # 前面不是英數字的 @：提及，只插後面；網域形式時前面也插
+        self.assertEqual(ms.md_safe("@user"), "@" + z + "user")
+        self.assertEqual(ms.md_safe("x @a.b"), "x " + z + "@" + z + "a.b")
+        self.assertEqual(ms.md_safe("＠a.b"), "＠" + z + "a.b")                   # 全形：沒有渲染器當 email，只照提及處理
+        self.assertEqual(ms.md_safe("a＠b.com"), "a＠b.com")
+
+    def test_defang_at_is_the_function_used_by_md_safe(self):
+        z = ms.ZWSP
+        self.assertEqual(ms.defang_at("a@b.c @u pkg@1.0"), "a" + z + "@" + z + "b.c " + "@" + z + "u pkg@1.0")
+        self.assertEqual(ms.defang_at(""), "")
+        self.assertEqual(ms.md_safe("a@b.c @u pkg@1.0"), ms.defang_at("a@b.c @u pkg@1.0"))
+
+    def test_mailto_and_xmpp_colon_escaped(self):
+        z = ms.ZWSP
+        self.assertEqual(ms.md_safe("mailto:a@b.com"), "mailto\\:a" + z + "@" + z + "b.com")
+        self.assertEqual(ms.md_safe("XMPP:a@b.com"), "XMPP\\:a" + z + "@" + z + "b.com")
+        self.assertEqual(ms.md_safe("xmpp:a/b@c.com"), "xmpp\\:a/b" + z + "@" + z + "c.com")
+        self.assertEqual(ms.md_safe("mailto:name@host"), "mailto\\:name@host")          # 網域沒有 `.`：cmark-gfm 不連結，但 markdown-it 的 mailto: 會
+        self.assertEqual(ms.md_safe("mailto:"), "mailto\\:")
+        self.assertEqual(ms.md_safe("a:b mail:x"), "a:b mail:x")
+        self.assertEqual(ms.defang_links("mailto:x https://e www.e"), "mailto\\:x https\\://e www\\.e")
+
+    def test_is_blank(self):
+        for blank in ("", " ", "\t\n", "\u00a0", "\u3000", "\u200b", "\u200b\u200d\u2060", "\ufeff", "\x00", "\x1b", "\u202e", "\u00ad", "\u180e", "\ufe0f", "\U000e0100",
+                      "\u0301", "\u034f", "\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\u2028", "\ud800", " \u200b\u3164\u2800 "):
+            with self.subTest(blank=repr(blank)):
+                self.assertTrue(ms.is_blank(blank))
+        for shown in ("a", "0", "_", ".", "-", "\u200ba", "\u3164a", "é", "中", "\u2603", "\ufffd", "\ufffc", "A-source"):
+            with self.subTest(shown=repr(shown)):
+                self.assertFalse(ms.is_blank(shown))
+        self.assertFalse(ms.is_blank(None))             # str(None) 是 "None"
 
     def test_agrees_with_watch_unsafe_markdown(self):
         """C3（pipeline/watch/match.py）的 unsafe_markdown 是同一類風險的最後一道檢查；這裡的輸出不能被它挑出問題。
@@ -167,7 +210,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertIn("@\u200bevil", out)
         self.assertNotIn("&#64;", out)
         self.assertNotIn("&lt;", out)
-        self.assertIn("a@b.c pkg:generic/x@1.0", out)
+        self.assertIn("a\u200b@\u200bb.c pkg:generic/x@1.0", out)       # email 形式前後都插零寬空白；purl 原樣
         self.assertIn("\\|", out)
 
     def test_cli_usage_error_is_64(self):
