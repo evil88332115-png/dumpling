@@ -2,19 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:02 +0800（C2）
+最後更新：2026-11-14 00:03 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：#42 C0 獨立驗證「不通過」2 項（已貼 PR，C1 修應修 1；應修 2 另開 [WP1] 小 PR）；驗證 C2 的 PR #46；正式 tag 等使用者
+- 目前在做：等 #42、#46 的 CI 綠後合併（diff 都已看過）；#47 C0 驗證不通過 1 項（對照表漏項）＋3 項要一起修，等 C3；驗證 #48；正式 tag 等使用者
 - 分支／PR／commit：main ec5b786。已合併：**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；自然時機再開 PR）
-- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C3 的 M5 PR #47（head ac2ee95），worktree `$AGENT_TMP/dumpling-wt-c0-verify-47`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-47/report.md`。之後：C2 的 cse-layout-size PR（還沒開）
+- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C2 的 PR #48（cse-layout-size 28a008e），worktree `$AGENT_TMP/dumpling-wt-c0-verify-48`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-48/report.md`。#47 驗證已完成（不通過 1 項，已貼 PR）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M2 #40 已合併。**推正式 tag 被 C1 的權限擋下，等使用者**（自己推，或放行 C1；C0 不代推）。tag 後 C1 用本機草稿附件核對正式 Release 再刪 wp1/m2-pr-draft。**PR #42**（wp1/m2-followup，c645966）：C1 的驗證通過；**C0 的驗證不通過 2 項**：(1)「不適用」只看說明開頭可被繞過 → #42 修；(2) 掃描層 C-kernel-cve-list／config／module-map 的 NOT_RUN 不進 report_status／gate（既有）→ 下一個 [WP1] 小 PR，並盤點沒人消費的 B-*／A-* 狀態列
-  - C2（第二台）：**PR #46**（fw-advisory 7ebeacc）C0 獨立驗證通過（已貼 PR），請 C2 補 D-043 的「資料庫沒有資料，以廠商公告為準」（沒有 Intel 微碼的映像），C0 看 diff 後合併。cse-layout-size 28a008e 私有檔複核已過，等開 PR。supplier-normalize 排預驗
-  - C3（第二台）：**M5 PR #47 已開**（wp5/gitlab 0432471，CI 綠，C3 的驗證第二輪通過），等 C0 獨立驗證。監控 wp2/watch-m2 aa68d5d（已併 main、mirrors.sh），real＋dry_run 與 tests 綠後開 PR。第一次真實基準要等正式 Release（目前全是 draft，監控會略過）。wp2/art14 等 M7。T-14（scan.sh 可改連常駐 DT）由 C0 排給 C1，M7 之後
+  - C2（第二台）：**#46** bb649a5（補 D-043「資料庫沒有資料」，C0 看過 diff OK）CI 綠就合併。**#48**（cse-layout-size 28a008e，私有檔複核已過）C0 驗證中。supplier-normalize 預驗不通過 2 項文字（CycloneDX 1.4 schema 授權、過時表格），修正中
+  - C3（第二台）：**M5 PR #47**（ac2ee95）C0 驗證不通過 1 項：GITLAB-PORT 對照表漏 dt-smoke、watch drill、workflow_dispatch 輸入；另請一起修 after_script 收 DT、watch:compute token、tag regex 要求 v；等 C3 新 HEAD。監控 wp2/watch-m2 aa68d5d（已併 main、mirrors.sh），real＋dry_run 與 tests 綠後開 PR。第一次真實基準要等正式 Release（目前全是 draft，監控會略過）。wp2/art14 等 M7。T-14（scan.sh 可改連常駐 DT）由 C0 排給 C1，M7 之後
   - C4（第二台）：wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
