@@ -879,3 +879,126 @@ def test_csaf_cves_rejects_bad_scores_and_skips_bad_cve_ids():
     assert got["CVE-2026-0003"]["cwe"] == "CWE-79" and got["CVE-2026-0003"]["cvss_v3_score"] == 6.1
     assert got["CVE-2026-0003"]["references"] == ["https://a", "https://b"]
     assert len(notes) == 8 and notes[-1] == "CVE-2026-0003 出現不只一次，合併" and all("略過" in n for n in notes[:7])
+
+
+# ---------- M7a2：vBIOS 列、mirror、公告編號（與 C2 的 tools/cra/nvidia_vbios_advisory.py 約定的契約；測資全部合成） ----------
+GPU_TABLE = PILOT / "lib" / "nvidia-bulletins-gpu-firmware.json"
+MIRROR_OK = {"commit": "0" * 39 + "a", "commit_date": "2026-11-10T13:01:57Z", "fetched_utc": "2026-11-13T16:52:04Z"}
+
+
+def _vt(*rows, mirror=MIRROR_OK, **top):
+    t = {"schema": nb.TABLE_SCHEMA, "reviewed_until": None, "bulletins": [{"id": "9001", "cves": {}}],
+         "rows": list(rows), "not_applicable": [], **top}
+    if mirror is not None:
+        t["mirror"] = dict(mirror)
+    return t
+
+
+def _vrow(reviewed=True, **kw):
+    r = {"bulletin": "9001", "cve": "CVE-2099-0001", "line": "vbios", "reviewed": reviewed,
+         "reviewed_by": "負責人" if reviewed else None, "reviewed_at": "2026-11-14" if reviewed else None,
+         "pci_vendor": "10de", "pci_devices": ["2684"], "vbios_affected_below": None, "vbios_affected_max": None,
+         "vbios_fixed_in": "94.04.5e.00.01"}
+    r.update(kw)
+    return r
+
+
+def _bad(t, *words):
+    with pytest.raises(nb.InputError) as ei:
+        nb.validate_table(t)
+    for w in words:
+        assert w in str(ei.value)
+
+
+def test_vbios_reviewed_row_is_valid_and_hex_case_is_accepted():
+    nb.validate_table(_vt(_vrow()))
+    nb.validate_table(_vt(_vrow(vbios_fixed_in="94.04.5E.00.01")))
+    nb.validate_table(_vt(_vrow(vbios_fixed_in=None, vbios_affected_max="94")))          # 1 段也可以
+
+
+@pytest.mark.parametrize("v", ["94.04.5G.00.01", "94.4", "94.04.5e.00.01.02", "XX.XX", "", 94, "94..04"])
+def test_vbios_version_format_is_checked_even_on_unreviewed_rows(v):
+    _bad(_vt(_vrow(reviewed=False, pci_vendor=None, pci_devices=None, vbios_fixed_in=v)), "vbios_fixed_in")
+
+
+def test_vbios_pci_fields_only_required_on_reviewed_rows():
+    nb.validate_table(_vt(_vrow(reviewed=False, pci_vendor=None, pci_devices=None)))   # C2 的草稿列
+    _bad(_vt(_vrow(pci_vendor=None)), "pci_vendor")
+    _bad(_vt(_vrow(pci_vendor="10DE")), "pci_vendor")                                   # PCI ID 只收小寫
+    _bad(_vt(_vrow(pci_devices=[])), "pci_devices")
+    _bad(_vt(_vrow(pci_devices=["2684", "26B1"])), "pci_devices")
+    _bad(_vt(_vrow(pci_devices="2684")), "pci_devices")
+    nb.validate_table(_vt(_vrow(pci_vendor="8086")))                                   # 「必須是 10de」留在 C2 的比對端
+
+
+def test_vbios_reviewed_row_needs_a_version_and_consistent_bounds():
+    _bad(_vt(_vrow(vbios_fixed_in=None)), "可比較的版本")
+    _bad(_vt(_vrow(vbios_affected_below="94.04", vbios_affected_max="94.03")), "mutually exclusive")
+    _bad(_vt(_vrow(vbios_affected_below="94.05", vbios_fixed_in="94.04")), "contradictory")
+    _bad(_vt(_vrow(vbios_affected_max="94.04", vbios_fixed_in="94.04.FF.FF.FF")), "contradictory")  # 上界補 FF
+    nb.validate_table(_vt(_vrow(vbios_affected_max="94.04", vbios_fixed_in="94.05")))
+    nb.validate_table(_vt(_vrow(vbios_affected_below="94.04", vbios_fixed_in="94.04")))
+    nb.validate_table(_vt(_vrow(reviewed=False, pci_vendor=None, vbios_affected_below="94.05", vbios_fixed_in="94.04")))  # 未審核只查格式
+
+
+@pytest.mark.parametrize("k", ["fixed_in", "affected_below", "affected_max"])
+def test_vbios_row_cannot_use_the_dotted_decimal_version_fields(k):
+    _bad(_vt(_vrow(**{k: "1.2"})), k)
+
+
+def test_non_vbios_row_cannot_carry_vbios_or_pci_fields():
+    jet = {"bulletin": "9001", "cve": "CVE-2099-0001", "line": "36", "reviewed": False, "fixed_in": "36.4.3"}
+    nb.validate_table(_vt(jet))
+    nb.validate_table(_vt({**jet, "pci_vendor": None, "vbios_fixed_in": None}))        # null 不算
+    _bad(_vt({**jet, "pci_vendor": "10de"}), "pci_vendor")
+    _bad(_vt({**jet, "vbios_fixed_in": "94.04"}), "vbios_fixed_in")
+
+
+def test_mirror_missing_is_gap_not_an_error():
+    for t in (_vt(mirror=None), {**_vt(mirror=None), "mirror": None}):
+        nb.validate_table(t)
+        info = nb.mirror_info(t)
+        assert info["status"] == "GAP" and info["commit"] is None and info["reason"]
+
+
+def test_mirror_accepts_both_commit_date_forms_and_extra_keys():
+    for cd in ("2026-11-10", "2026-11-10T13:01:57Z", "2026-11-10T21:01:57+08:00"):
+        t = _vt(mirror={**MIRROR_OK, "commit_date": cd, "note": "人寫的說明"})
+        nb.validate_table(t)
+        assert nb.mirror_info(t) == {"status": "OK", "commit": MIRROR_OK["commit"], "commit_date": cd,
+                                     "fetched_utc": MIRROR_OK["fetched_utc"], "reason": None}
+    nb.validate_table(_vt(mirror={**MIRROR_OK, "fetched_utc": "2099-01-01T00:00:00Z"}))  # 在未來：時間判斷由呼叫端做，不擋
+
+
+@pytest.mark.parametrize("patch,word", [
+    ({"commit": "0" * 39 + "A"}, "commit"), ({"commit": "abc"}, "commit"), ({"commit": None}, "commit"),
+    ({"commit_date": "2026-02-30"}, "commit_date"), ({"commit_date": "2026-11-10T13:01:57"}, "commit_date"),
+    ({"commit_date": None}, "commit_date"),
+    ({"fetched_utc": "2026-11-13T16:52:04"}, "fetched_utc"), ({"fetched_utc": "2026-11-13"}, "fetched_utc"),
+    ({"fetched_utc": "9999-99-99T00:00:00Z"}, "fetched_utc"), ({"fetched_utc": 12}, "fetched_utc"),
+])
+def test_malformed_mirror_is_an_input_error(patch, word):
+    t = _vt(mirror={**MIRROR_OK, **patch})
+    _bad(t, word)
+    with pytest.raises(nb.InputError):
+        nb.mirror_info(t)
+
+
+def test_mirror_must_be_an_object():
+    _bad({**_vt(mirror=None), "mirror": "98dc5d70"}, "mirror")
+
+
+@pytest.mark.parametrize("bid", ["@here", "5674 ", "B1", "", "1" * 9])
+def test_bulletin_ids_must_be_numeric(bid):
+    t = _vt()
+    t["bulletins"][0]["id"] = bid
+    _bad(t, "bulletins")
+    t = _vt(not_applicable=[{"bulletin": bid, "reviewed": False}])
+    _bad(t, "not_applicable")
+
+
+def test_shipped_gpu_firmware_table_is_valid_with_mirror_and_unreviewed():
+    t = nb.validate_table(json.loads(GPU_TABLE.read_text(encoding="utf-8")))
+    assert nb.mirror_info(t)["status"] == "OK"
+    assert t["reviewed_until"] is None and not t["rows"]
+    assert all(x.get("reviewed") is False for x in t["not_applicable"])    # 額外欄位（title、cves、reason、preliminary_*…）照收

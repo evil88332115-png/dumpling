@@ -168,8 +168,8 @@
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的空對照表（vBIOS；沒有已審核的列，所有 gpu-firmware 公告都列為待審）；格式同 `nvidia-bulletins.json` |
-| `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh` |
-| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh`；**新增（M7a2）**：對照表欄位一節補 `mirror`、公告編號格式、vBIOS 列（`line: vbios`）的欄位規則 |
+| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處；**行為修改（M7a2，與 C2 約定）**：`validate_table` 檢查 vBIOS 列（`line: vbios`：只用 `vbios_*` 版本、XX.XX.XX.XX.XX 格式、已審核列的 `pci_vendor`／`pci_devices`、上下界互斥與 fixed_in 自相矛盾）、非 vBIOS 列不得有 `vbios_*`／`pci_*`、頂層 `mirror` 的格式（commit、commit_date、fetched_utc）、公告編號只收數字；新增 `mirror_info()`（沒有 mirror → GAP） |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -193,7 +193,7 @@
 | `tools/pilot/tests/test_kernel_off_series.py` | （dumpling 自己寫） | — | 新增（M2）：kernelcheck 的 off-series 規則 a／b／c／d（合成資料，名稱與版本只取公開的樣子）：epoch、`+rpt`／`+rpi`、名稱、明確宣告、purl 的 `upstream=`（含 Radxa 型、URL 編碼的 Raspberry Pi purl、Debian／Ubuntu／Jetson 不被標）、規則是「或」、資料檔壞了 FAIL；M2 第二輪驗證：purl 的 `epoch=` 限定詞、沒有版本號的 `distro=debian`、`raspbian-*` 的已知盲點 |
 | `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處；M2：`kernel_cve_list` 的測試外殼多抽出 `kernel_ship_from` |
 | `tools/pilot/tests/test_kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：`--kernel-version`／`SCA_KERNEL_VERSIONS` 的參數檢查，以及 sca-scan 核心區段在 1 顆／多顆沒指定／多顆指定 1 顆／指定 2 顆的狀態列與 `kernel-versions.json`（合成的 rootfs tar，判定工具用假的）；另測 sca-scan 把 `--kernel-upstream-version` 轉給 kernel_versions.py（和 Makefile 一致／不一致）；**行為修改（M2）**：核心區段的測試外殼補 `KNONE=0; KOTHER=`（sca-scan 的核心區段新增分層判斷用的變數） |
-| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述；**新增（M7a2）**：vBIOS 列、mirror、公告編號的契約測試（合成表）與 gpu-firmware 對照表的格式測試 |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
 | `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
