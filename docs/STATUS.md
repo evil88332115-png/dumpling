@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:24 -0500（C2）
+最後更新：2026-11-13 04:24 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -24,7 +24,7 @@
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#20、#22、#23
   6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
-- 卡住／等決定（使用者）：五個對話都在第二台時，D-041 的「整台合計 8」要不要調整（D-045）
+- 卡住／等決定：無。D-045 使用者已確認；五個對話都在第二台時的代理上限，使用者授權**新 C0 搬過去後依那台實際負載調整**（D-041 的整台合計 8，調整前沿用；調整後寫進 DECISIONS 並通知 C1–C4）
 - 第二台上要先做的事（詳見 `wp0/docs-batch-4` 的 docs/HANDOFF.md「在第二台電腦（WSL2）接手」）：
   1. `~/.config/dumpling/local.env` 與 `forbidden.txt` 已在那台（C4 確認），變數 REPO_MAIN、AGENT_TMP、PUBLIC_IMAGES、SCA_CENTER、HEAVY_LOCK 都有
   2. 主 checkout `$REPO_MAIN`（C4 回報為 `$HOME/dumpling`）在 main、工作樹乾淨，C3／C4 只用 worktree，**直接當 C0 的主 checkout**；先 `git -C "$REPO_MAIN" pull --ff-only`（落後 origin/main）
