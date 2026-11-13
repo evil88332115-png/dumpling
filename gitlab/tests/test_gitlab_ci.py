@@ -29,6 +29,29 @@ def _spec(path, name):
     return m
 
 
+def command_text(text, script):
+    """text 裡以 python3 -I 執行 script 的那一個指令（含 \\ 接續的下一行），只取到指令結尾。只能出現一次（註解裡提到不算）。"""
+    starts = [m.start() for m in re.finditer(r"python3\s+-I\s+" + re.escape(script), text)]
+    if len(starts) != 1:
+        raise AssertionError("%s 應該剛好呼叫一次，找到 %d 次" % (script, len(starts)))
+    out = []
+    for line in text[starts[0]:].splitlines():
+        out.append(line.rstrip())
+        if not line.rstrip().endswith("\\"):
+            break
+    return " ".join(x.rstrip("\\") for x in out)
+
+
+def command_flags(text, script):
+    return re.findall(r"(?<!\S)(--[a-z][a-z0-9-]*)", command_text(text, script))
+
+
+def command_args(text, script):
+    """{參數: 值}（值去掉引號）。"""
+    toks = command_text(text, script).split()
+    return {t: toks[i + 1].strip('"') for i, t in enumerate(toks[:-1]) if t.startswith("--")}
+
+
 class CiFile(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -212,12 +235,23 @@ class CiFile(unittest.TestCase):
 
 
     def test_t01_release_meta_same_flags_as_github(self):
-        # T-01：release-meta.py 的參數與 .github/workflows/release.yml 相同（少了 --scan-summary，report_status／release_gate 會是 NOT_RUN）
+        # T-01：release-meta.py 的參數與 .github/workflows/release.yml 相同。不寫死清單：從兩邊的指令抓出參數名稱比對，
+        # release.yml 加了參數（例如 M7a 的 --notes，adapter-gaps #26）而範本沒跟上就失敗。
         gh = (HERE.parents[1] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        mine = self.lines_of("release:publish")
-        for flag in ("--project", "--version", "--tag", "--commit", "--run-id", "--steps", "--scan-summary", "--out"):
-            self.assertIn(flag, gh, "release.yml 已不用 %s：重新核對 T-01" % flag)
-            self.assertIn(flag, mine, "release:publish 的 release-meta.py 少了 %s" % flag)
+        gh_flags = command_flags(gh, "pipeline/release-meta.py")
+        mine = command_flags(self.lines_of("release:publish"), "pipeline/release-meta.py")
+        self.assertIn("--scan-summary", gh_flags)          # 沒有它 report_status／release_gate 會是 NOT_RUN
+        self.assertIn("--notes", gh_flags)
+        self.assertEqual(sorted(mine), sorted(gh_flags), "release:publish 的 release-meta.py 參數和 release.yml 不同")
+
+    def test_release_notes_rewritten_then_used(self):
+        # release-meta.py --notes 重寫的 notes.md，就是 release-payload.py 拿來當 Release 說明的那一份（notes.md 與 release-meta.json 的 pipeline_result 一致）
+        text = self.lines_of("release:publish")
+        meta = command_args(text, "pipeline/release-meta.py")
+        payload = command_args(text, "gitlab/release-payload.py")
+        self.assertEqual(meta.get("--notes"), payload.get("--notes"))
+        self.assertEqual(meta.get("--notes"), "result/notes.md")
+        self.assertLess(text.index("pipeline/release-meta.py"), text.index("gitlab/release-payload.py"))
 
     def test_t01_kernel_cve_cache(self):
         # 核心 CVE 鏡像的上一份（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：scan 與 watch:compute 都用，只存新抓的
