@@ -260,6 +260,8 @@ def main(argv=None):
     n = sub.add_parser("newest")
     n.add_argument("--root", required=True)
     n.add_argument("--prefix", required=True)
+    pl = sub.add_parser("plan")
+    pl.add_argument("--layers-json", required=True)
     v = sub.add_parser("services")
     v.add_argument("sbom")
     v.add_argument("--platform", default=None)
@@ -283,6 +285,9 @@ def main(argv=None):
             if not d:
                 raise ValueError("精靈沒有產生 %s* 資料夾" % a.prefix)
             print(d)
+        elif a.cmd == "plan":
+            for line in ps.scan_plan_lines(a.layers_json):       # C1 的共用函式（0x1F 分隔、驗證格式、拒絕重複後綴）
+                print(line)
         elif a.cmd == "services":
             print(json.dumps(services(a.sbom, a.platform), ensure_ascii=False))
         else:
