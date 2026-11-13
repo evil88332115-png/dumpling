@@ -93,6 +93,7 @@ def jetson_independent_version(a, ver, rootfs="rootfs"):
         for k, v in sorted((l4t.get("sources") or {}).items()):
             if isinstance(v, str) and v:
                 found.append({"source": "%s（%s）" % (k, c.get("prefix") or rootfs), "value": v})
+        # 三個來源不一致（ATTENTION）或都沒有（GAP）：版本確定不了，不能宣稱等於 tag → FAIL，不停在 ATTENTION（C0）
         if l4t.get("status") != "OK" or not isinstance(l4t.get("release"), str):
             bad.append("%s：%s" % (c.get("prefix") or rootfs, l4t.get("detail") or "沒有 L4T 版本"))
     res["found"] = found

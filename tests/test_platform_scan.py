@@ -256,6 +256,19 @@ class JetsonIndependentVersion(Generic):
                     {"release": None, "status": "GAP", "detail": "無法判斷 L4T 版本", "sources": {}}, "x"):
             self.assertEqual(self.iv(runs=["=" + self.full_run(l4t)])["status"], "FAIL", l4t)
 
+    def test_inconsistent_scanned_sources_fail_the_whole_collect(self):
+        """三個來源不一致：整體 FAIL（scan 步驟 FAIL），不只是 ATTENTION——就算設定包的版本等於 tag。"""
+        d = self.full_run({"release": None, "status": "ATTENTION", "detail": "來源不一致：nv_tegra_release 39.2.1、nvidia-l4t-core 39.2.0",
+                           "sources": {"nv_tegra_release": "39.2.1", "nvidia-l4t-core": "39.2.0"}})
+        w(os.path.join(d, "cra-project", "CRA", "Config", "config.json"), json.dumps({"product": {"name": "X", "version": "v39.2.1-demo1"}}))
+        a = self.args(version="v39.2.1-demo1", run=["=" + d], project_dir=self.proj)
+        with self.assertRaises(ps.ProductVersionMismatch) as cm:
+            ps.collect(a, self.js.JetsonHooks())
+        self.assertIn("來源不一致", str(cm.exception))
+        pvc = json.load(open(self.p("scan.json")))["product_version_check"]
+        self.assertEqual((pvc["status"], pvc["independent"]["status"], [c["status"] for c in pvc["checked"]]), ("FAIL", "FAIL", ["OK"]))
+        self.assertIn({"source": "nvidia-l4t-core（Linux_for_Tegra/rootfs）", "value": "39.2.0"}, pvc["independent"]["found"])
+
     def test_broken_list_or_missing_rootfs_fails(self):
         for raw in ("{not json", "[]", json.dumps({"rootfs": "x"}), json.dumps({"rootfs": []})):
             self.assertEqual(self.iv(runs=["=" + self.full_run(raw=raw)])["status"], "FAIL", raw)
