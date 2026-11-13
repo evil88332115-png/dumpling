@@ -53,6 +53,7 @@ jobs:
       expect_opened: 0
       dry_run: ${{ inputs.dry_run == true }}
 
+  # 合成 KEV（requests 的 CVE-2018-18074）同時在正式版 drill-demo/v1.0.0（bsp 層）與開發版 dev/drill-demo（product 層）→ 預期 2 個 Issue
   drill-2-new-kev:
     needs: drill-1-baseline
     permissions:
@@ -63,7 +64,7 @@ jobs:
       mode: drill
       round: drill-2
       overlay: true
-      expect_opened: ${{ inputs.dry_run == true && -1 || 1 }}
+      expect_opened: ${{ inputs.dry_run == true && -1 || 2 }}
       dry_run: ${{ inputs.dry_run == true }}
 
   drill-3-repeat:
