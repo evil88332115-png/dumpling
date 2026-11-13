@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 23:19 -0500（C0）
+最後更新：2026-11-13 12:34 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -87,26 +87,20 @@
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M4 已合併（PR #28，main 80ea467，驗證 #issuecomment-6843320189 通過）**；驗證的應修與建議 → **PR #32**（wp2/watch-fixes 588e359），等驗證與合併；M5 第一版完成，等 M2 合併後核對指令再開 PR
-- M4 架構（C0 同意）：每日不開 DT；Grype（exploited_grype 原樣重用）＋CISA KEV＋EUVD＋核心 CNA（kernel_cna_version.py；附件 `kernel-versions-<專案>-<版本>.json` schema /2）＋廠商層級；DT（OSV）、NVIDIA 公告、核心 .config 判定每天 NOT_RUN 並列出。狀態放在 `watch-state` Issue，沒有任何 job 有 contents: write。D-040：只開 KEV／廠商層級 Issue、超過 20 個併成彙總、示範專案字樣＋demo 標籤、排程 real 預設 dry_run（`WATCH_REAL_ISSUES` 由 C0 設）、不開 art14。降級連續 2 次開健康 Issue（watch-health）
+- 目前在做：M4 已合併（PR #28）；PR #32（第一輪應修）驗證通過、C0 背景合併；**M2 之後的監控 PR 分支 `wp2/watch-m2` 已先做好 #32 驗證的 F1–F6 與 concurrency**，等 M2 合併後接 mirrors.sh 再開 PR；M5 第一版完成，等 M2 合併後核對指令再開 PR
+- 架構（已合併）：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；D-040（只開 KEV／廠商層級、超過 20 個併成彙總、示範專案＋demo、排程 real 預設 dry_run、不開 art14）
 - 分支／PR／commit：
-  - `wp2/watch` → PR #28 已合併（worktree 已移除）
-  - `wp2/watch-fixes` 588e359 → **PR #32**（worktree `$AGENT_TMP/dumpling-wt-c3-fixes`）
-  - `wp5/gitlab` b0079fc（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`）；PR 未開（M5 完成才開）
-- 代理：
-  - 寫程式 collect.py、issues.py：完成、已併入
-  - 寫程式 M5 第一版（GITLAB-PORT＋gitlab/.gitlab-ci.yml＋官方 CI schema 收進 repo，MIT＋Apache-2.0，D-0xx C0 同意）：完成，b0079fc；tests run 43358540701 綠（b0079fc 前一版；最新版待重跑）
-  - 驗證 M4 預驗（Sonnet high）：第一輪不通過 → c4cfac6 修正 → 複驗通過；複驗的 3 個建議也已修正（PR 前）
-  - 目前沒有代理在跑。上限照 D-041：每個對話最多 4 個（寫程式 3、驗證 1），C3＋C4 合計 8，負載超過 12 不開
-- CI：main 上 real＋dry_run run 43362385127 綠（GAP、notify 跳過、keepalive OK、四個資料源 OK）；PR #32：演練 43363190221、real＋dry_run 43362391399、tests 43362394614 都綠。PR #28 head c0a4a4f：演練 run 43359678945 綠、tests run 43359682637 綠；real＋dry_run（M2 之前）run 43357443361 綠（GAP、notify 跳過）
-- 防 60 天停用：官方沒有定義 activity；keepalive 每天讀 state＋enable；**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`；M4 合併後開始算）
+  - `wp2/watch-fixes` 588e359 → PR #32（worktree `$AGENT_TMP/dumpling-wt-c3-fixes`，合併後移除）
+  - `wp2/watch-m2` b1b236e（worktree `$AGENT_TMP/dumpling-wt-c3-m2`，從 #32 head 開）：F1 大小警告算 ATTENTION、7 天一次；F2 修剪過的群組再出現用 open_if_closed（`dumpling.pruned_keys`）；F3 Grype DB 過期與 L4T 對應 GAP／FAIL 擋第一次基準；F4 有 Release 卻沒有基準 → 只開「還沒有基準」提醒 Issue（plan.state=null，不寫狀態、不算監控 Issue）；F5 演練三輪都可建基準；F6／concurrency：group 依 ref、compute 用 actions: read 查上一次排程 run（cancelled／失敗／超過 36 小時 → 降級）、keepalive 印最近 3 次排程。PR 未開（等 M2 的 mirrors.sh）
+  - `wp5/gitlab` b0079fc（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`）
+- 代理：目前沒有代理在跑（上限 D-041：4 個，寫程式 3、驗證 1）
+- CI：wp2/watch-m2 b1b236e：演練 43365208989 綠、tests 43365156856 綠（132 個 c3-watch 測試）、real＋dry_run 43366085628 綠（GAP）。main：real＋dry_run 43362385127 綠
+- 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 下一步：
-  - PR #32 驗證 → C0 合併（WATCH_REAL_ISSUES 由 C0 設，前提是 #32 合併＋第一次真實基準）
-  - M2 合併後（不在 PR #28）：併 main → 每日監控改用 M2 的 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像那天，報告與 Issue 寫出那行 ATTENTION）→ 手動 `mode=real`＋`baseline=true` 建立第一次真實基準 → 回報「打開的話會開哪些 Issue」給 C0
-  - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 派驗證 → 開 PR
-- 待辦（C0 2026-11-13 同意草案；**不另開 PR，併進 M2 合併後的 mirrors.sh／ATTENTION 那個 PR**，#32 驗證的其他意見也放那裡；#32 驗證期間 head 固定 588e359、不推送）：watch 的 concurrency group 是全域的，排隊中的 run 會被新的取消 → 排程那一輪被取消時不能沒有紀錄。做法草案：(1) concurrency group 改成依 ref 分（`watch-${{ github.ref }}`），分支上的手動演練不會取消 main 的排程；(2) compute 用 `actions: read` 查 watch.yml 上一次 schedule run 的 conclusion，是 cancelled／沒有跑就記進降級（健康 Issue）與報告；(3) keepalive 也印出上一次 schedule run 的結果
-- PR #32 驗證：C0 派（負載已降），等「驗證：通過／不通過」留言
-- 卡住／等決定：無
+  - M2 合併 → `wp2/watch-m2` 併 origin/main → 每日監控改用 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像時，報告與 Issue 寫出那行 ATTENTION）→ 演練／real dry_run → 開 PR → 驗證 → 合併
+  - 之後：手動 `mode=real`＋`baseline=true` 建第一次真實基準 → 排程 dry_run 跑一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
+  - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 驗證 → 開 PR
+- 卡住／等決定：等 M2 合併
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
