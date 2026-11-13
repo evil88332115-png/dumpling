@@ -273,8 +273,22 @@ def product_version_status(config_path, tag_version):
     return ("OK" if version_base(v) == tag_version else "MISMATCH"), v
 
 
+def config_version_phrase(pvc):
+    """notes.md 用：設定包版本核對的實際結果（照實寫，不固定寫「等於」）。"""
+    tag, checked = pvc["tag_version"], pvc["checked"]
+    if not checked:
+        return "找不到設定包（沒有跑到報告），沒有核對"
+    bad = [c for c in checked if c["status"] in ("MISMATCH", "UNREADABLE")]
+    if bad:
+        return "**和 tag %s 不一致**（%s）" % (tag, "、".join(
+            "%s／%s：%s" % (c["run"], c["role"], "讀不了" if c["status"] == "UNREADABLE" else repr(c["product_version"])) for c in bad))
+    if any(c["status"] == "NOT_SET" for c in checked):
+        return "有設定包沒有 product.version（報告裡是 TO BE COMPLETED），沒有東西可以和 tag %s 核對" % tag
+    return "版本等於 tag %s（%d 份）" % (tag, len(checked))
+
+
 NO_INDEPENDENT = {"status": "GAP", "rule": None, "expected": None, "found": [],
-                  "detail": "這個平台沒有和 tag 無關的版本來源：只確認了設定包的版本等於 tag，tag 本身對不對沒有核對"}
+                  "detail": "這個平台沒有和 tag 無關的版本來源：只能核對設定包的版本和 tag 是否一致，tag 本身對不對沒有核對"}
 _IND_STATUS = ("OK", "FAIL", "GAP")
 
 
@@ -492,8 +506,8 @@ def collect(a, hooks=None):
         L += ["| %s | %s | %s |" % ({"full": "完整（全部層）"}.get(r["report"], r["report"]), r["report_status"], r["release_gate"]) for r in scan["reports"]] + [""]
     L += ["由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), ""]
     ind = pvc["independent"]
-    L += ["- 版本核對（`product_version_check`）：**%s**。設定包的版本等於 tag %s；和 tag 無關的來源：**%s**，%s" % (
-        pvc["status"], ver, ind["status"], ind.get("detail") or "沒有說明"), ""]
+    L += ["- 版本核對（`product_version_check`）：**%s**。設定包：%s；和 tag 無關的來源：**%s**，%s" % (
+        pvc["status"], config_version_phrase(pvc), ind["status"], ind.get("detail") or "沒有說明"), ""]
     if steps_path and scan.get("pipeline_attention"):
         # ATTENTION：這次用了舊資料頂替（例如 git.kernel.org 連不上，沿用上一份核心 CVE 鏡像）。不擋 Release，但要讓讀的人一眼看到
         L += ["> **ATTENTION（用了舊資料頂替，結果照樣產生，不是 OK）**", ">"] + ["> - " + t.replace("\n", " ") for t in scan["pipeline_attention"]] + [""]

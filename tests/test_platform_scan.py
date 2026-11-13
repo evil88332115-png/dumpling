@@ -131,6 +131,7 @@ class ProductVersionVsTag(Generic):
         self.assertIn("沒有和 tag 無關的版本來源", pvc["independent"]["detail"])
         notes = open(self.p("rel", "notes.md"), encoding="utf-8").read()
         self.assertIn("版本核對（`product_version_check`）：**GAP**", notes)
+        self.assertIn("設定包：版本等於 tag v1（1 份）", notes)
         for st in ("GAP", "PASS", None):                                  # hook 給 GAP 或寫錯的狀態都不能變 OK
             self.assertEqual(ps.collect(self.args(run=["=" + self.with_config("w", "v1")]), IndependentHooks(st))["product_version_check"]["status"], "GAP", st)
 
@@ -153,6 +154,9 @@ class ProductVersionVsTag(Generic):
         self.assertIn("'v0.9'", str(cm.exception))
         self.assertIn("'v1'", str(cm.exception))
         sc = json.load(open(self.p("scan.json")))                          # 附件與 scan.json 都寫了，可以查
+        notes = open(self.p("rel", "notes.md"), encoding="utf-8").read()   # notes 照實寫，不能寫成「等於」
+        self.assertIn("**和 tag v1 不一致**（full／manufacturer：'v0.9'）", notes)
+        self.assertNotIn("版本等於 tag", notes)
         self.assertEqual(sc["product_version_check"]["status"], "FAIL")
         self.assertEqual([(c["role"], c["status"]) for c in sc["product_version_check"]["checked"]], [("manufacturer", "MISMATCH"), ("supplier", "OK")])
         self.assertTrue(os.path.isfile(self.p("rel", "notes.md")) and os.path.isfile(self.p("rel", "manifest.tsv")))
@@ -169,8 +173,10 @@ class ProductVersionVsTag(Generic):
     def test_not_set_and_not_found_do_not_block(self):
         scan = ps.collect(self.args(run=["=" + self.with_config("w0", False)]))             # 設定包沒有 product.version：精靈沒有東西可覆寫
         self.assertEqual(scan["product_version_check"]["status"], "NOT_SET")
+        self.assertIn("有設定包沒有 product.version", open(self.p("rel", "notes.md"), encoding="utf-8").read())
         scan = ps.collect(self.args(run=["=" + self.run_dir("w1", [])]))                    # 沒有設定檔（沒有跑到報告）
         self.assertEqual((scan["product_version_check"]["status"], scan["product_version_check"]["checked"]), ("NOT_RUN", []))
+        self.assertIn("找不到設定包（沒有跑到報告），沒有核對", open(self.p("rel", "notes.md"), encoding="utf-8").read())
         d = self.with_config("w2", "")
         self.assertEqual(ps.collect(self.args(run=["=" + d]))["product_version_check"]["status"], "NOT_SET")
 
@@ -268,6 +274,39 @@ class JetsonIndependentVersion(Generic):
         pvc = json.load(open(self.p("scan.json")))["product_version_check"]
         self.assertEqual((pvc["status"], pvc["independent"]["status"], [c["status"] for c in pvc["checked"]]), ("FAIL", "FAIL", ["OK"]))
         self.assertIn({"source": "nvidia-l4t-core（Linux_for_Tegra/rootfs）", "value": "39.2.0"}, pvc["independent"]["found"])
+
+    def sources_with_l4t(self, value):
+        p = os.path.join(self.proj, "sources.yml")
+        text = open(p, encoding="utf-8").read()
+        assert 'l4t_release: "39.2.1"' in text
+        open(p, "w", encoding="utf-8").write(text.replace('l4t_release: "39.2.1"', "l4t_release: %s" % value))
+
+    def test_declared_l4t_release_must_be_a_whole_l4t_version(self):
+        """sources.yml 的 l4t_release 要整串符合 L4T 版本（fullmatch）：39.2.1.0、R39.2.1、結尾換行、數字、缺少 → FAIL。"""
+        for value in ('"39.2.1.0"', '"R39.2.1"', '"39.2.1\\n"', '"39.2.1 "', "39.2", "null", '""'):
+            shutil.copy(os.path.join(ROOT, "projects", "orin-nano-demo", "sources.yml"), self.proj)
+            self.sources_with_l4t(value)
+            r = self.iv()
+            self.assertEqual(r["status"], "FAIL", value)
+            self.assertIn("不是 L4T 版本", r["detail"], value)
+            self.assertIsNone(r["expected"], value)
+
+    def test_symlinked_list_json_is_not_read(self):
+        """list.json 是符號連結 → 不讀（GAP），就算它指向一份內容正確的檔案。"""
+        good = self.full_run(name="real")
+        d = self.p("w-link")
+        os.makedirs(os.path.join(d, "scan"))
+        os.symlink(os.path.join(good, "scan", "list.json"), os.path.join(d, "scan", "list.json"))
+        r = self.iv(runs=["=" + d])
+        self.assertEqual(r["status"], "GAP")
+        self.assertIn("list.json", r["detail"])
+        self.assertEqual(self.iv(runs=["=" + good])["status"], "OK")
+
+    def test_one_scanned_source_is_enough(self):
+        """缺少的來源不算衝突：只有 nv_tegra_release 也算 OK。"""
+        r = self.iv(runs=["=" + self.full_run({"release": "39.2.1", "status": "OK", "sources": {"nv_tegra_release": "39.2.1",
+                                                                                                "nvidia-l4t-core": None, "nvidia-l4t-kernel": None}})])
+        self.assertEqual((r["status"], [f["value"] for f in r["found"]]), ("OK", ["39.2.1"]))
 
     def test_broken_list_or_missing_rootfs_fails(self):
         for raw in ("{not json", "[]", json.dumps({"rootfs": "x"}), json.dumps({"rootfs": []})):

@@ -203,11 +203,11 @@ dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…�
 
 **精靈對產品設定包複本做的事（D-039、D-055；原始的 `CRA/Config/` 不動）**：`product.version` 改成這次的版本（沒寫就填入）；有刷機包時 `product.identification` 改成這次的刷機包（沒寫而且有 MD5 就填入 `Flash package <檔名> (MD5 <md5>)`）；`support.end_date` 沒寫時由 `DUMPLING_SUPPORT_UNTIL` 產生（YYYY-MM），已寫而月份不同 → ATTENTION（project.yml 的一致性檢查會先 FAIL）。`platform_scan.collect` 之後核對每份報告設定包的 `product.version`（去掉 ` (rootfs)` 這類非版本後綴）等於 Release tag 的版本，不一致 → scan 步驟 FAIL，結果在 scan.json 的 `product_version_check`；這只是拿 tag 和 tag 自己比（tag 同時餵精靈的 `--version`），所以平台再用 `Hooks.independent_version(ctx)` 提供一個和 tag 無關的版本來源（M7b），結果在 `product_version_check.independent`：
   - 不一致或讀到了卻無法確定 → FAIL（scan 步驟 FAIL）。
-  - 平台沒有提供，或缺少資料無法核對 → GAP。這時設定包就算等於 tag，整體也是 GAP，不是 OK。
-  - Jetson 的規則：tag → `sources.yml` 該版本的 `platform_params.l4t_release`（人寫的對應，例如 `v39.2.1-demo1` 對 `39.2.1`）→ 必須等於刷機包 rootfs 裡掃到的 L4T 版本（完整掃描那次 `scan/list.json`：`etc/nv_tegra_release`、dpkg 的 `nvidia-l4t-core`／`nvidia-l4t-kernel`，三者要一致）。
+  - 平台沒有提供，或缺少資料無法核對 → GAP。這時設定包就算等於 tag，`product_version_check.status` 也是 GAP，不是 OK。這個 GAP 只寫在 scan.json 與 notes.md 的版本核對那一行，**不會**讓 pipeline_result、report_status 或 release_gate 降級（要不要降級另外決定）。
+  - Jetson 的規則：tag → `sources.yml` 該版本的 `platform_params.l4t_release`（人寫的對應，例如 `v39.2.1-demo1` 對 `39.2.1`）→ 必須等於刷機包 rootfs 裡掃到的 L4T 版本（完整掃描那次 `scan/list.json`：`etc/nv_tegra_release`、dpkg 的 `nvidia-l4t-core`／`nvidia-l4t-kernel`，三者要一致）。缺少的來源不算衝突：只讀到一個來源，只要它等於宣告的值也算 OK（`found` 列出實際讀到哪些）。
   - 掃描的三個來源互相不一致（`flash_package.py` 的 L4T 狀態是 ATTENTION），或一個都沒有：版本確定不了，不能宣稱它等於 tag，所以算 **FAIL**，不會停在 ATTENTION。
   - `l4t_release` 是人寫的宣告，受 D-046 約束：既有的版本段落永遠不被自動修改（包括 `l4t_release`）。新版本的 `l4t_release` 由人寫在新版本段落裡；自動化工具只能產生 PR，由人審核後才合併。
-  - 其他平台目前沒有提供，整體是 GAP。
+  - 其他平台目前沒有提供，`product_version_check.status` 是 GAP。
 
 `release-meta.py --tag` 也要等於 `<專案>/<版本>`。notes.md 開頭的 pipeline_result 由 `release-meta.py --notes` 依同一份 pipeline-steps.tsv 重寫，和 release-meta.json 一致。sbom.md 第 6 節的 BSP 說明依 list.json 的平台寫，非 Jetson 平台不出現 Jetson Linux 的文字。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
 
