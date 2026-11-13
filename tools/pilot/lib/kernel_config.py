@@ -46,6 +46,9 @@
   --list-kernel-versions：不判定，只列出 --from 的映像出貨的每顆核心（/usr/lib/modules/<版本>/ 有 .ko 或檔案的資料夾，排序、空白分隔），印一行
     KERNEL-VERSIONS<TAB>OK<TAB>版本…（沒有模組資料夾時版本欄是空的）；讀不出來 → KERNEL-VERSIONS<TAB>GAP<TAB>原因。
     sca-scan 用它找出「出貨但沒被判定」的核心（--kernel-version 沒給的那些）；不需要 --out。
+  --source-tree-version <核心原始碼樹>：不判定，只讀最上層 Makefile 的 VERSION／PATCHLEVEL／SUBLEVEL（和 --source-tree 同一個 tree_version），印一行
+    KERNEL-TREE-VERSION<TAB>OK<TAB>X.Y.Z；Makefile 讀不到、不是一般檔案、讀不出 X.Y.Z → KERNEL-TREE-VERSION<TAB>GAP<TAB>原因。
+    sca-scan 用它算 scan/kernel-versions.json 裡每顆出貨核心的上游版本（upstream_version）；不需要 --from／--out。
   --also-list-kernel-versions：判定（或 --probe-kernel-version）時，讀映像的同一趟順便多印一行 KERNEL-VERSIONS<TAB>OK<TAB>版本…（內容同
     --list-kernel-versions）。sca-scan 用它：刷機包 tbz2 不必為了列出核心再解壓一次。沒給時輸出和以前相同；--from 是核心原始碼樹時不印。
   --oot-build-record：樹外模組（例如 nvidia-oot、nvgpu）的建置資料夾，可重複；需要 --build-record。讀 .*.o.cmd 的 source／deps 與 .*.ko.cmd
@@ -3935,6 +3938,23 @@ def tree_version(files):
     return (f"{got['VERSION']}.{got['PATCHLEVEL']}" + (f".{sub}" if sub.isdigit() else "")), f"{got['VERSION']}.{got['PATCHLEVEL']}"
 
 
+def source_tree_makefile_version(root):
+    """核心原始碼樹最上層 Makefile → ("OK", "X.Y.Z") 或 ("GAP", 原因)。只讀這一個檔（一般檔案、不跟隨符號連結、最多 64 KB），
+    解析沿用 tree_version（和 --source-tree 同一份）。"""
+    mf = os.path.join(root, "Makefile")
+    try:
+        if not stat.S_ISREG(os.lstat(mf).st_mode):
+            return "GAP", "原始碼樹最上層的 Makefile 不是一般檔案"
+        with flash_package().open_nofollow(mf) as fh:
+            data = fh.read(1 << 16)
+    except OSError as e:
+        return "GAP", f"原始碼樹最上層的 Makefile 讀不到（{e.strerror or type(e).__name__}）"
+    ver = tree_version({("Makefile",): data})[0]
+    if not ver or not re.fullmatch(r"\d+\.\d+\.\d+", ver):
+        return "GAP", "原始碼樹最上層的 Makefile 讀不出 VERSION／PATCHLEVEL／SUBLEVEL"
+    return "OK", ver
+
+
 def apply_source_tree(info, tree):
     """--source-tree：Makefile／Kbuild 與檔案名稱改讀核心原始碼樹（collect_tree：唯讀、不跟隨符號連結、不執行任何東西、
     沿用 MAX_FILE／MAX_TOTAL／MAX_ENTRIES／MAX_SRC_NAMES 的上限）。.config、模組與 Image 照舊來自映像。
@@ -4578,6 +4598,7 @@ def main(argv=None):
     ap.add_argument("--probe-kernel-version", action="store_true")
     ap.add_argument("--list-kernel-versions", action="store_true")
     ap.add_argument("--also-list-kernel-versions", action="store_true")
+    ap.add_argument("--source-tree-version")
     ap.add_argument("--prefer-rootfs-image", action="store_true")
     ap.add_argument("--out")
     try:
@@ -4585,6 +4606,13 @@ def main(argv=None):
     except SystemExit:
         line("FAIL", "kernel_config.py 參數錯誤")
         return 3
+    if a.source_tree_version:
+        try:
+            st, text = source_tree_makefile_version(a.source_tree_version)
+        except Exception as e:
+            st, text = "GAP", f"讀不出原始碼樹的版本（{type(e).__name__}）"
+        print(f"KERNEL-TREE-VERSION\t{st}\t" + re.sub(r"[\t\r\n]+", " ", text)[:300])
+        return 0
     if a.list_kernel_versions:
         if not a.from_:
             print("KERNEL-VERSIONS\tGAP\t--list-kernel-versions 要 --from")
