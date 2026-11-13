@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # 每日監控的資料源（WATCH.md 第 3 節）：下載到 <輸出資料夾>，每個來源一行狀態；任何一個失敗不中止（match.py 依缺的來源標 GAP／NOT_RUN）。
 # 用法：pipeline/watch/feeds.sh <輸出資料夾（必須不存在或是空的）> [--no-kernel-cve] [--no-euvd]
+# 環境變數：KCVE_CACHE_DIR（上一份核心 CVE 鏡像，actions/cache 還原的；見 pipeline/lib/mirrors.sh）、MIRRORS_TRIES、MIRRORS_RETRY_DELAY
 # 產出：
 #   <out>/cisa-kev.json   CISA KEV（官方 feed；JSON 檢查：有 vulnerabilities 陣列、至少 CISA_KEV_MIN_ENTRIES 筆，預設 1000）
-#   <out>/euvd/           tools/mirror/euvd.sh 的鏡像（index.tsv）
-#   <out>/kernel-cve/     tools/mirror/kernel-cve.sh 的鏡像（SOURCE＋kernel-cves.zip）
+#   <out>/euvd/           tools/mirror/euvd.sh 的鏡像（index.tsv）；<out>/euvd.result 是腳本最後一行
+#   <out>/kernel-cve/     tools/mirror/kernel-cve.sh 的鏡像（SOURCE＋kernel-cves.zip）；<out>/kernel-cve.result 是腳本最後一行
+#   鏡像都經過 pipeline/lib/mirrors.sh（跟 Release 掃描同一份：最多試 MIRRORS_TRIES 次；最後一行 ATTENTION＝用了舊資料頂替，
+#   例如 git.kernel.org 連不上、沿用 $KCVE_CACHE_DIR 裡 48 小時內的上一份 → feeds.tsv 記 ATTENTION，match.py 把那一行寫進報告與 Issue）。
+#   失敗時刪掉不完整的資料夾（match.py 看到沒有資料夾 → NOT_RUN／GAP，不會讀到半份鏡像）。
 #   Grype DB：grype db update（GRYPE_DB_CACHE_DIR；grype 要在 PATH）
 #   <out>/feeds.tsv       來源<TAB>狀態<TAB>說明
 # 下載的檔案一律當不可信資料：只讀、不執行。
@@ -46,16 +50,29 @@ else
 fi
 rm -f "$out/cisa.err"
 
-# EUVD
+# EUVD、核心 CNA：經過 pipeline/lib/mirrors.sh（不在這裡另寫一份重試／頂替規則）
+. "$root/pipeline/lib/mirrors.sh"
+mirror_row() {  # <來源名> <成功與否> ：依 <out>/<名>.result 記 OK／ATTENTION；失敗記 GAP 並刪掉不完整的資料夾
+  local n=$1 ok=$2 last
+  if [ "$ok" = 0 ] && [ -f "$out/$n.result" ]; then
+    last=$(head -n 1 "$out/$n.result")
+    case $last in ATTENTION*) row "$n" ATTENTION "$last" ;; *) row "$n" OK "$last" ;; esac      # ::warning:: 由 mirror 印
+  else
+    rm -rf "${out:?}/$n" "$out/$n.result"
+    row "$n" GAP "tools/mirror/$n.sh 失敗：$(tail -n 1 "$out/$n.log" 2>/dev/null)"
+  fi
+}
+export MIRRORS_DIR="$out"
+unset MIRRORS_STEPS
+# mirror 的進度（第幾次失敗、OK／ATTENTION）直接印在 log；鏡像腳本自己的輸出在 <out>/<名>.log
 if [ "$euvd" = 1 ]; then
-  if bash "$root/tools/mirror/euvd.sh" "$out/euvd" "$out/euvd.manifest" > "$out/euvd.log" 2>&1; then row euvd OK "$(tail -n1 "$out/euvd.log")"
-  else row euvd GAP "tools/mirror/euvd.sh 失敗：$(tail -n1 "$out/euvd.log")"; fi
+  mirror euvd.sh euvd; mirror_row euvd $?
 else row euvd NOT_RUN "--no-euvd"; fi
-
-# 核心 CNA
+# 核心 CVE：kernel-cve.sh 自己會重試 clone（KERNEL_CVE_GIT_TRIES，預設 3 次、每次最多 KERNEL_CVE_GIT_TIMEOUT=900 秒），
+# mirror 再整支重試 3 次會疊成兩個多小時、超過 compute job 的上限 → 每日監控預設只讓 mirror 試 1 次（WATCH_KCVE_MIRROR_TRIES 可改）。
+# 上游連不上時有 $KCVE_CACHE_DIR 就用 48 小時內的上一份頂替（ATTENTION），不用一直重試。
 if [ "$kcve" = 1 ]; then
-  if bash "$root/tools/mirror/kernel-cve.sh" "$out/kernel-cve" "$out/kernel-cve.manifest" > "$out/kernel-cve.log" 2>&1; then row kernel-cve OK "$(tail -n1 "$out/kernel-cve.log")"
-  else row kernel-cve GAP "tools/mirror/kernel-cve.sh 失敗：$(tail -n1 "$out/kernel-cve.log")"; fi
+  MIRRORS_TRIES=${WATCH_KCVE_MIRROR_TRIES:-1} mirror_kernel_cve kernel-cve; mirror_row kernel-cve $?
 else row kernel-cve NOT_RUN "--no-kernel-cve"; fi
 
 # Grype DB

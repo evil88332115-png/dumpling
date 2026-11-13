@@ -27,7 +27,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `notes` | 挑選理由與限制 |
 | `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
 | `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
-| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 不符 CycloneDX schema，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的檔案）。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
+| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 有 prep 的格式正規化修不了的 CycloneDX schema 違規，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的原檔）。目前沒有樣本使用。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
 
 ### `expected` 的鍵
 
@@ -54,6 +54,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
 | `bios/asus-prime-b550m-a-3404` | AMD AM4 平台、AMI：EFS 因更新包標頭不在固定位置、combo 目錄指到多個 L1、新世代的 L1 指到 L2（`$PL2`／`$BL2`）、AMD 微碼與壓縮 firmware volume 裡的 AGESA 字串；release notes 有 AGESA 版本可當出處（解析見 `docs/notes/c2-amd-psp.md`） |
 | `bios/novacustom-v540tu-mtl-v1.0.1` | Dasharo coreboot 完整 32 MiB SPI 映像，ME 區域是新世代配置：區域開頭是 CSE layout table → BPDT（version 2），`$FPT` 只在 data partition、沒有 FTPR 項目、`$CPD` header version 2。用來驗證 `tools/cra/intel_cse_layout.py`（`expected.intel_me` 依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
+| `bios/novacustom-nuc-box-arl-v0.9.2` | Dasharo coreboot 完整 32 MiB SPI 映像（Arrow Lake-U/H FSP），ME 區域開頭的 CSE layout table 是 layout 1.7 的 Size 0x60 變體（CRC-32 相符），RBEP＋NFTP 版本一致、沒有 FTPR。用來驗證 `tools/cra/intel_cse_layout.py` 的 Size 0x60（`expected.intel_me`、微碼依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
 | `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
 | `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 
@@ -105,9 +106,16 @@ sbomqs 分數與各類別存在 `--out`（`<檔名>.sbomqs.json`、`sbom-check.m
     python3 -I pipeline/lib/firmware_dt.py expected --prep prep/<slug>
     python3 -I pipeline/lib/firmware_dt.py report   --prep prep/* [--dt-result <資料夾>] --out <資料夾>
 
-`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
+`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`kind: sbom` 的供應商 SBOM 另做上傳前的最小格式正規化並寫 `normalize.json`（見下）；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
 `report` 產出 `firmware-dt.md`，每個樣本一行 `FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL<TAB>…`（沒有 DT 結果＝NOT_RUN；有 FAIL 以 1 結束）。
 流程與接 workflow 的草稿見 `docs/notes/c2-firmware-dt.md`。
+
+### 供應商 SBOM 的格式正規化
+
+DT 上傳會做 CycloneDX schema 驗證，不符就整份拒收。Dasharo NS5x 的 SBOM 原檔有兩種違規（根物件多出 `platform`、`firmware_version`；`components[0].licenses[18].license` 只有 `url`），
+所以 prep 對 `kind: sbom` 的樣本只在上傳用的副本做最小正規化：多出的頂層欄位搬到 `metadata.properties`（`dumpling:supplier-extra:<名稱>`）、沒有 `id` 也沒有 `name` 的 license 項目移除並把 url 存成元件 property（`dumpling:supplier-license-url`）。
+**原檔不動、不刪資料、不補猜的值、不處理其他違規**；每一筆記在 `normalize.json`（原 JSON Pointer、新位置、原值 SHA-256），副本的 `metadata.properties` 加 `dumpling:normalized-from-sha256`、`dumpling:normalized-changes`。
+report 的說明會寫「已正規化 N 處（見 normalize.json）」。規則、上限、紀錄格式、驗證方式見 `docs/notes/c2-supplier-sbom.md`。
 
 ### DT 專案名稱與版本
 

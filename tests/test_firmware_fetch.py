@@ -3,6 +3,8 @@ import glob
 import hashlib
 import importlib.util
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -166,7 +168,7 @@ class FetchTest(unittest.TestCase):
         def fake_run(cmd, **kw):
             seen.append(cmd)
             return mock.Mock(returncode=0, stderr="")
-        with mock.patch.object(ff.subprocess, "run", fake_run):
+        with mock.patch.object(ff.fetch_verify.subprocess, "run", fake_run):
             self.assertIsNone(ff.curl_download("https://example.com/x.bin", "/dest/x.part", 1234))
         cmd = seen[0]
         self.assertEqual(cmd[0], "curl")
@@ -181,7 +183,7 @@ class FetchTest(unittest.TestCase):
 
     def test_curl_failure_message_has_exit_code(self):
         import unittest.mock as mock
-        with mock.patch.object(ff.subprocess, "run", lambda cmd, **kw: mock.Mock(returncode=63, stderr="too big")):
+        with mock.patch.object(ff.fetch_verify.subprocess, "run", lambda cmd, **kw: mock.Mock(returncode=63, stderr="too big")):
             msg = ff.curl_download("https://example.com/x.bin", "/dest/x.part", 1)
         self.assertIn("63", msg)
 
@@ -293,6 +295,42 @@ class RepoManifestsTest(unittest.TestCase):
             for f in doc.get("files", []):
                 self.assertRegex(f["sha256"], r"^[0-9a-f]{64}$", p)
                 self.assertTrue(f["url"].startswith("https://"), p)
+
+
+class SharedFetchVerifyTest(unittest.TestCase):
+    """firmware_fetch 的下載核對一律用共用的 pipeline/lib/fetch_verify.py，不能再有自己的一份。"""
+
+    def test_uses_shared_functions(self):
+        fv_path = os.path.realpath(os.path.join(ROOT, "pipeline", "lib", "fetch_verify.py"))
+        self.assertEqual(os.path.realpath(ff.fetch_verify.__file__), fv_path)
+        for name in ("fetch_one", "check_file", "sha256_of", "curl_download"):
+            self.assertIs(getattr(ff, name), getattr(ff.fetch_verify, name), name)
+        self.assertIs(ff.process.__defaults__[0], ff.fetch_verify.curl_download)
+        self.assertIs(ff.main.__defaults__[-1], ff.fetch_verify.curl_download)
+
+    def test_size_still_required(self):
+        # fetch_verify 允許 size 為 None；firmware 清單仍然要求 size，不跟著放寬
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "s"))
+            mf = os.path.join(d, "s", "firmware.yml")
+            with open(mf, "w", encoding="utf-8") as fh:
+                fh.write(manifest_text().replace("    size: %d\n" % len(DATA), ""))
+            st, _, msg = ff.process(mf, os.path.join(d, "out"), lambda u, dd, m: self.fail("不該下載"))
+        self.assertEqual(st, "FAIL")
+        self.assertIn("缺 size", msg)
+
+    def test_runs_isolated_from_other_cwd(self):
+        # firmware-fetch.sh 用 python3 -I 執行；從別的目錄跑也要找得到 fetch_verify
+        script = os.path.join(ROOT, "pipeline", "lib", "firmware_fetch.py")
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "s"))
+            mf = os.path.join(d, "s", "firmware.yml")
+            with open(mf, "w", encoding="utf-8") as fh:
+                fh.write(manifest_text(status="GAP"))
+            r = subprocess.run([sys.executable, "-I", script, mf, "--out", os.path.join(d, "out")],
+                               cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("FIRMWARE-FETCH\tGAP\t"), r.stdout)
 
 
 if __name__ == "__main__":

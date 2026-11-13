@@ -131,7 +131,7 @@ class ScriptTests(Tmp):
 while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --name) nm=$2; shift 2;; *) shift;; esac; done
 echo "$nm" >> "$(dirname "$out")/../scan-names.txt"; mkdir -p "$out/scan"; echo '{"matches": []}' > "$out/scan/grype.json"
 printf 'stage\\tstatus\\tdetail\\n' > "$out/status.tsv"
-for s in D-dt-project D-dt-upload D-dt-bom-processing C-grype; do printf '%s\\tOK\\tx\\n' "$s" >> "$out/status.tsv"; done
+for s in A-source B-sandbox B-sandbox-secrets B-sbom-provided C-grype C-upload-sbom D-dt-project D-dt-upload D-dt-bom-processing D-dt-vuln-analysis F-secret-scan; do printf '%s\\tOK\\tx\\n' "$s" >> "$out/status.tsv"; done
 exit 2
 """, 0o755)
         self.w("repo/pipeline/scan-status-check.py", "import sys\nprint('上傳: 假的 need=' + ','.join(sys.argv[2:]))\n")
@@ -139,8 +139,9 @@ exit 2
         self.w("repo/pipeline/dt-verify.py", """import json, sys
 exp = json.load(open(sys.argv[2])); out = sys.argv[3]
 bad = %r in exp['project_name']
-json.dump({'components': exp['components'], 'findings_total': 0,
-           'checks': [{'name': '元件數', 'status': 'FAIL' if bad else 'OK'}]}, open(out + '/summary.json', 'w'))
+json.dump({'components': max(exp['components'], 1), 'findings_total': 0,
+           'checks': [{'name': n, 'status': 'FAIL' if bad and n == '元件數' else 'OK'}
+                      for n in ('專案存在', '弱點分析完成', '元件數', '漏洞總數', '依生態系的漏洞數')]}, open(out + '/summary.json', 'w'))
 sys.exit(1 if bad else 0)
 """ % bad)
 
@@ -174,6 +175,44 @@ sys.exit(1 if bad else 0)
         rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
         self.assertEqual(rc, 0, out)
         self.assertIn("FIRMWARE-DT\tGAP\t", out)
+
+    def test_wait_rc_other_than_zero_is_gap_and_garbage_is_fail(self):
+        for v, want in (("124\n", "GAP"), ("1\n", "GAP"), ("0\n", None)):
+            self.fakes()
+            w, res = os.path.join(self.tmp, "w" + v.strip()), os.path.join(self.tmp, "res" + v.strip())
+            y, s = self.sample("good" + v.strip())
+            self.w(os.path.join("res" + v.strip(), "dt-wait.rc"), v)
+            rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+            self.assertEqual(rc, 0, out)
+            if want:
+                self.assertIn("FIRMWARE-DT\t%s\t" % want, out, v)
+            else:
+                self.assertNotIn("FIRMWARE-DT\tGAP\t", out, v)
+        self.fakes()
+        w, res = os.path.join(self.tmp, "wg"), os.path.join(self.tmp, "resg")
+        y, s = self.sample("goodg")
+        self.w("resg/dt-wait.rc", "+0\n")
+        rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("FIRMWARE-DT\tOK", out)
+
+    def test_supplier_sbom_normalization_record_goes_to_result_dir(self):
+        self.fakes()
+        w, res = os.path.join(self.tmp, "w"), os.path.join(self.tmp, "res")
+        y, _ = self.sample("sup", kind="sbom")
+        doc = sbom()
+        doc["specVersion"] = "1.4"
+        doc["platform"] = "Notebook X"
+        s = self.w("in/sup.json", doc)
+        rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("已正規化 1 處（見 normalize.json", out)
+        with open(os.path.join(res, "firmware-sbom-sup", "normalize.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["changes"][0]["from"], "/platform")
+        # BIOS 樣本（本工具自己產的 SBOM）沒有這個檔
+        y2, s2 = self.sample("bios1")
+        self.assertEqual(self.run_sh("--work", w, "--result", res, "--sample", y2, s2)[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(res, "firmware-bios-bios1", "normalize.json")))
 
     def test_old_results_are_not_mixed(self):
         self.fakes()

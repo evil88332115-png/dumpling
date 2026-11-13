@@ -301,7 +301,7 @@ class Labels:
 # ---------- plan ----------
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
-                            "demo", "summary", "drill", "watch-health"})
+                            "demo", "summary", "attention", "drill", "watch-health"})
 
 
 def load_plan(path, want_mode=None):
@@ -322,8 +322,10 @@ def load_plan(path, want_mode=None):
     st = plan.get("state")
     if isinstance(st, dict) and (st.get("schema") != 1 or (st.get("dumpling") or {}).get("mode") not in (None, plan["mode"])):
         bad("state 的 schema 或 dumpling.mode 不符")
-    if not isinstance(plan.get("state"), dict):
+    if plan.get("state") is not None and not isinstance(plan.get("state"), dict):
         bad("state")
+    if plan.get("state") is None and plan.get("state_base") is not None:
+        bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -371,9 +373,10 @@ def public_check(texts):
 def cmd_read_state(api, repo, mode, out):
     problems = []
     idx = watch_index(api, repo, problems)
-    n = len({k for k, lst in idx.items() if any(e["mode"] == mode for e in lst)})
+    keys = {k for k, lst in idx.items() if any(e["mode"] == mode for e in lst)}
+    n = len(keys)
     si = find_state_issue(api, repo, mode)
-    base = {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": n}
+    base = {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": n, "watch_keys": sorted(keys)}
     state = None
     if si:
         state = decode_state(si.get("body"), mode)  # 解不開就 FAIL，不寫任何檔
@@ -408,16 +411,18 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     # 先組好所有要寫的文字並檢查
     gen = plan.get("generated_at") if isinstance(plan.get("generated_at"), str) else ""
     st = plan["state"]
-    nm = len(st["matches"]) if isinstance(st.get("matches"), (dict, list)) else 0
+    no_state = st is None       # match.py 在「沒有基準」時只開提醒 Issue、不寫狀態（#32 驗證 F4）
+    nm = len(st["matches"]) if not no_state and isinstance(st.get("matches"), (dict, list)) else 0
     summary = f"最後執行：{gen}；比對數：{nm}"
-    too_big = None
+    too_big, state_body = None, None
     try:
-        state_body = encode_state(st, mode, summary)
+        if not no_state:
+            state_body = encode_state(st, mode, summary)
     except Fail as e:
         # 狀態太大：Issue 動作照樣執行（新的 KEV 與彙總 Issue 要開得出來），狀態不寫，最後明確 FAIL（PR #28 驗證應修 2）。
         # 下一輪從舊狀態重算：open 會因標記跳過，不會重複開；留言類可能重複。
         too_big, state_body = str(e), None
-    texts = [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
+    texts = [] if no_state else [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
     prepared = []
     for n, a in enumerate(plan["actions"]):
         a = dict(a)
@@ -475,10 +480,12 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                 r.update(result="would_comment" if dry else "commented", issue=ent["number"])
         # 全部做完才寫狀態 Issue
         sres = {}
-        if too_big:
+        if no_state:
+            sres = {"result": "skipped", "reason": "plan 的 state 是 null（還沒有基準）：不寫狀態"}
+        elif too_big:
             sres = {"result": "not_written", "reason": too_big}
             raise Fail(f"{too_big}：Issue 動作已執行，狀態沒有寫入（請修剪狀態或改成分段存放）")
-        if dry:
+        elif dry:
             sres = {"result": "would_update" if cur else "would_create"}
         elif cur:
             labels.ensure([state_label(mode)] + (["drill"] if mode == "drill" else []))
