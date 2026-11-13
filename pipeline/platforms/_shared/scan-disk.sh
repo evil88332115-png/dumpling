@@ -74,13 +74,6 @@ bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env �
   echo "OSV_DISTRO_MIRROR=$mir/osv"
 } >> "$PILOT_ENV"
 
-# ---------- 2. 精靈（完整掃描） ----------
-wk=$out/wizard-root; wo=$out/wizard-out
-rm -rf "$wk" "$wo" "$out/release" "$out/cra-config" "$out/layers" "$out/rescan-src" "$out/augment"; mkdir -p "$wk" "$wo" "$out/release" "$out/augment"
-cp -r "$proj/CRA/Config" "$out/cra-config" || fail "複製 CRA/Config 失敗"
-python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
-  --grype-cache "$out/grype-db" --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
-export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 # 要判定的核心（D-036）：sources.yml 的 platform_params.kernel_release（字串或清單）→ SCA_KERNEL_VERSIONS（逗號分隔）。
 # 映像裡有、但沒指定的核心，報告列「已出貨、未判定」並標 GAP；沒指定時映像有多顆核心就整個 GAP（不猜）。
 krel=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_release 2> /dev/null); krc=$?
@@ -94,6 +87,46 @@ print(",".join(v)) if ok else sys.exit(1)' "$krel") || fail "platform_params.ker
   3) unset SCA_KERNEL_VERSIONS; echo "沒有指定要判定的核心（platform_params.kernel_release）：映像有多顆核心時核心判斷是 GAP";;
   *) fail "讀不到 sources.yml 的 platform_params";;
 esac
+
+# ---------- 1b. 廠商 BSP 核心的上游版本（D-038） ----------
+# sources.yml 有 platform_params.kernel_upstream_version 時：映像模組資料夾與原始碼 Makefile 兩個來源都要相同（kernel_upstream.py），
+# 才用 kernel_cna_version.py（照原樣呼叫）依上游版本產生核心 CVE 清單，經 sca-scan 的 KERNEL_CVES 傳進去（候選，進待人審）。
+kurc=0; kujson=()
+rm -f "$out/kernel-upstream.json" "$out/kernel-cna.json" "$out/kernel-cves.txt"
+kup=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_upstream_version 2> /dev/null); kprc=$?
+case $kprc in
+  0)
+    if [ -z "${SCA_KERNEL_VERSIONS:-}" ] || [[ $SCA_KERNEL_VERSIONS == *,* ]]; then
+      kurc=3; echo "kernel-upstream: GAP（kernel_upstream_version 要搭配恰好一顆 kernel_release；現在是「${SCA_KERNEL_VERSIONS:-沒有}」）"
+    else
+      kujson=(--kernel-upstream-json "$out/kernel-upstream.json")
+      python3 -I "$here/kernel_upstream.py" check --image "$img" --source "$out/downloads/$ksrc" --upstream "$kup" \
+        --release "$SCA_KERNEL_VERSIONS" --out "$out/kernel-upstream.json" || kurc=$?
+      case $kurc in 0|3) ;; *) fail "kernel_upstream.py 失敗（結束碼 $kurc）";; esac
+      if python3 -I -c 'import json,sys;sys.exit(0 if json.load(open(sys.argv[1])).get("upstream_verified") else 1)' "$out/kernel-upstream.json"; then
+        cl=$(timeout 600 python3 -I "$root/tools/pilot/lib/kernel_cna_version.py" --kernel-version "$kup" --mirror "$mir/kcve" \
+          --out "$out/kernel-cna.json" --cves-out "$out/kernel-cves.txt" 2>&1 | grep -m1 $'^KERNEL-CNA-VERSION\t')
+        if [ -n "$cl" ] && [ -s "$out/kernel-cves.txt" ]; then
+          export KERNEL_CVES=$out/kernel-cves.txt
+          echo "核心 CVE 清單（上游 $kup，候選）：$(wc -l < "$out/kernel-cves.txt") 個（$(cut -f2- <<< "$cl" | tr '\t' ' ' | cut -c1-160)）"
+        else
+          kurc=3; echo "kernel-upstream: GAP（上游 $kup 的 CNA 版本比對沒有產生清單：${cl:-kernel_cna_version.py 失敗}）"
+        fi
+      else
+        kurc=3
+      fi
+    fi;;
+  3) ;;
+  *) fail "讀不到 sources.yml 的 platform_params";;
+esac
+
+# ---------- 2. 精靈（完整掃描） ----------
+wk=$out/wizard-root; wo=$out/wizard-out
+rm -rf "$wk" "$wo" "$out/release" "$out/cra-config" "$out/layers" "$out/rescan-src" "$out/augment"; mkdir -p "$wk" "$wo" "$out/release" "$out/augment"
+cp -r "$proj/CRA/Config" "$out/cra-config" || fail "複製 CRA/Config 失敗"
+python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
+  --grype-cache "$out/grype-db" --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
+export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$srcpath" \
@@ -168,7 +201,7 @@ runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 srcargs=(); [ -n "$srcjson" ] && srcargs=(--source-json "$srcjson")
 python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
-  --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} ${ksjson[@]+"${ksjson[@]}"} \
+  --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} ${ksjson[@]+"${ksjson[@]}"} ${kujson[@]+"${kujson[@]}"} \
   ${srcargs[@]+"${srcargs[@]}"} ${official[@]+"${official[@]}"} || fail "收集結果失敗"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json
 state=OK; msg=""
@@ -180,6 +213,7 @@ else
 fi
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP"; fi
 if [ "$arc" = 3 ]; then state=GAP; msg="$msg；補充元件有 GAP（$augment）"; fi
+if [ "$kurc" = 3 ]; then state=GAP; msg="$msg；廠商核心的上游版本或 CVE 清單有 GAP（見 kernel-upstream.json）"; fi
 kst=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print((d.get("kernel_source") or {}).get("status") or "")' "$out/scan.json" 2> /dev/null)
 case $kst in ""|OK) ;; *) state=GAP; msg="$msg；核心原始碼判斷 $kst（見 scan.json 的 kernel_source）";; esac
 {

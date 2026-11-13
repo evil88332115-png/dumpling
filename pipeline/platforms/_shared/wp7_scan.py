@@ -68,6 +68,11 @@ class Wp7Hooks(ps.Hooks):
             out["app_source"] = self.x["source"]
         if self.x.get("kernel_source") is not None:
             out["kernel_source"] = self.x["kernel_source"]
+        ku = self.x.get("kernel_upstream")
+        if ku is not None:
+            out["kernel_upstream"] = {k: ku.get(k) for k in ("status", "requested_upstream", "kernel_release", "upstream_verified", "sources",
+                                                             "shipped_config", "config_basis", "gaps")}
+            out["kernel_upstream"]["cna_cves"] = self.x.get("kernel_cna_count")
         return out
 
     def scan_tail(self, ctx):
@@ -106,6 +111,18 @@ class Wp7Hooks(ps.Hooks):
                 L.append("- **已出貨、未判定（GAP）**：%s" % "、".join(kv["not_judged"]))
         else:
             L.append("- 讀不到 kernel-versions.json：核心判定的範圍沒有記錄（GAP）。")
+        ku = self.x.get("kernel_upstream")
+        if ku is not None:
+            src = ku.get("sources") or {}
+            im, sm = src.get("image_modules") or {}, src.get("source_makefile") or {}
+            L += ["", "## 廠商 BSP 核心的上游版本（D-038）", "",
+                  "- 狀態 **%s**：指定上游 `%s`；映像模組資料夾 `%s` → `%s`；核心原始碼 Makefile `%s`（兩者都要相同）。" % (
+                      ku.get("status"), ku.get("requested_upstream"), ku.get("kernel_release"), im.get("upstream_from_release"), sm.get("version")),
+                  "- 核心 CVE 清單：依上游版本範圍（Linux 核心 CNA）列出 **%s** 個，是**候選**（廠商可能已回移修補），一律進待人審。" % self.x.get("kernel_cna_count"),
+                  "- 依 .config 排除的依據：映像裡實際出貨的 `%s`（依據類型 **shipped-config**，不是建置紀錄；和 Jetson 有 .cmd 的排除分開）。" % (
+                      (ku.get("shipped_config") or {}).get("path") or "沒有 config：C-kernel-config 是 GAP")]
+            for g in ku.get("gaps") or []:
+                L.append("- GAP：%s" % g)
         ks = self.x.get("kernel_source")
         if ks is not None:
             L += ["", "## 核心原始碼（D-035）", "",
@@ -158,6 +175,14 @@ def kernel_source(ks_path, sbom_path):
     return out
 
 
+def _count_lines(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return sum(1 for l in f if l.strip())
+    except OSError:
+        return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -176,6 +201,7 @@ def main(argv=None):
     c.add_argument("--raw-sectors", default=None)
     c.add_argument("--source-json", default=None, help="OMV 原始碼合併的摘要（repo、commit、line）")
     c.add_argument("--kernel-source-json", default=None, help="assemble 的 kernel-source.json（Debian 核心原始碼，D-035）")
+    c.add_argument("--kernel-upstream-json", default=None, help="scan 的 kernel-upstream.json（廠商 BSP 核心的上游版本，D-038）")
     c.add_argument("--official", action="store_true")
     a = ap.parse_args(argv)
     try:
@@ -196,7 +222,10 @@ def main(argv=None):
                  "source": ps.read_json(a.source_json) if a.source_json else None,
                  "services": services(os.path.join(a.layers, "sbom.product.cdx.json")),
                  "kernel_source": kernel_source(a.kernel_source_json, os.path.join(a.layers, "sbom.product.cdx.json"))
-                 if a.kernel_source_json else None}
+                 if a.kernel_source_json else None,
+                 "kernel_upstream": ps.read_json(a.kernel_upstream_json) if a.kernel_upstream_json else None,
+                 "kernel_cna_count": _count_lines(os.path.join(os.path.dirname(a.kernel_upstream_json), "kernel-cves.txt"))
+                 if a.kernel_upstream_json else None}
             ps.collect(a, Wp7Hooks(x))
             print("wp7_scan: OK（附件）")
     except (OSError, ValueError) as e:

@@ -4,6 +4,7 @@ releases:
   v1.0.0-demo1:
     platform_params:
       kernel_release: 6.1.84-8-rk2410
+      kernel_upstream_version: 6.1.84
       kernel_source_file: radxa-kernel-87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9.tar.gz
       upstream_release: rsdk-r6
       image: rock-5b_bookworm_kde_r6.output_512.img.xz
