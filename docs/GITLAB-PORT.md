@@ -56,7 +56,7 @@
 
 | workflow：輸入 | 用途 | GitLab 對應 |
 |---|---|---|
-| `release.yml`：`tag`（手動只建 **draft** Release，不建 git tag） | 正式 tag 之前先試整條 release 流程 | **不搬（T-17）**。範本的 `release:*` 只在 tag pipeline 跑。原因：官方 Releases API 頁沒有 draft 狀態（只有 `released_at` 設在未來的 Upcoming Release，官方沒說它不公開），不能照搬「草稿」；內部要試流程，建議用測試專案或測試 tag（第 14 節的「測試 tag 的完整 release」），或 T-17 再定一條「web／api 帶變數只跑 build＋scan、不建 Release」的路 |
+| `release.yml`：`tag`（手動只建 **draft** Release，不建 git tag） | 正式 tag 之前先試整條 release 流程 | **改成試跑（T-17）**：官方 Releases API 頁沒有 draft 狀態（只有 `released_at` 設在未來的 Upcoming Release，官方沒說它不公開），不能照搬「草稿」。改用網頁或 API 帶 `DUMPLING_RELEASE_DRY_RUN=1`、`DUMPLING_RELEASE_TAG=<專案>/<版本>`：跑 build＋scan，publish 只驗證，不上傳、不建 Release |
 | `release.yml`：`stop_after`（build｜all）、`reuse_build_run`、`reuse_scan_run` | 開發 GitHub workflow 本身時省時間（只編譯、沿用別的 run 的 artifact） | **不搬**：開發捷徑，不是發行流程的一部分；GitLab 可以直接重試單一 job（上游 job 的 artifacts 在 `expire_in` 之內還在）。需要時再加 |
 | `dev.yml`：`project`（只跑一個專案） | 手動只跑某個專案 | 範本用 `parallel:matrix` 的固定清單（T-02）；手動觸發是 `when: manual`（`.rules-dev`），在 pipeline 頁按要跑的那一格。GitHub 的 dispatch 是直接執行，GitLab 這裡要再按一次（避免 web pipeline 一次跑全部專案的編譯） |
 | `dev.yml`：`stop_after`、`reuse_build_run` | 同 release 的開發捷徑 | **不搬**（同上） |
@@ -397,11 +397,11 @@
 | T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案。**C0 決定（2026-11-13）**：排給 C1、放在 M7 之後；做法是 scan.sh 多一個選項，改連既有的 DT（URL＋金鑰從環境變數讀），不傳這個選項時照舊開臨時 DT | C1，M7 之後 |
 | T-15 | `dt-smoke.yml` 的 GitLab 版：T-14 之後改成「常駐 DT 連線與權限」的冒煙測試（T-14 之前 scan 本身就跑臨時 DT，不另搬） | T-14 |
 | T-16 | 每日監控的演練（drill 三輪＋關閉）與 web／api 入口 | T-05 |
-| T-17 | 手動試跑 release 流程：GitLab 沒有 draft Release（官方 Releases API 只有 Upcoming Release）；定一條 web／api 帶變數「只跑 build＋scan、不建 Release」的路，或規定用測試專案／測試 tag | 內部決定 |
+| T-17 | **已完成（2026-11-14，C0 決定）**：手動試跑 release＝網頁或 API 建 pipeline 時帶 `DUMPLING_RELEASE_DRY_RUN=1` 與 `DUMPLING_RELEASE_TAG=<專案>/<版本>`：跑 `release:build`、`release:scan`，`release:publish` 只驗證（`gitlab/release-publish.sh`），**不上傳 Package、不建 Release、不開 Issue**；`release:sign` 只在真的 tag push、而且不是試跑時跑（規則排除，腳本也檢查；簽章會寫進透明紀錄）。正式 release 的規則要 `$CI_PIPELINE_SOURCE == "push"`：在 tag ref 上從網頁或 API 手動建的 pipeline 也有 `CI_COMMIT_TAG`，沒帶 DRY_RUN 也不會發 Release。代替 GitHub 的「只建 draft Release」。測試：`test_t17_dry_run_pipeline_writes_nothing`（依 rules 求值，試跑 pipeline 自動跑的 job 沒有寫入）、`ReleasePublish.test_dry_run_writes_nothing`（假 curl：一次都沒呼叫）。沒有對真實 GitLab 驗證 | — |
 | T-18 | `scan.tools: full` 需要 Go（GitHub 版 `setup-go`，govulncheck 用）：映像含固定版本的 Go，或範本補安裝 | 有專案改用 full 時 |
-| T-19 | `dev/*` 分支有開啟的 merge request 時會有兩條 pipeline（branch＋MR），`validate:unit-tests` 重複跑：`workflow:rules` 加 `$CI_OPEN_MERGE_REQUESTS` 去重 | 內部驗證 |
-| T-20 | NOT_RUN 的 job（`dev:publish`、`firmware:dt`）目前 `exit 1`＋`allow_failure`，pipeline 會顯示黃燈；可改成 `exit 3`＋`allow_failure: {exit_codes: 3}`，跟 GitHub 版「NOT_RUN 不是失敗、但照實列出」的語意一致 | — |
-| T-21 | `release:publish` 先上傳 Generic Package、再由 `release-payload.py` 驗檔名：改成先驗再傳；`release-payload.py` 只接受 `https://` 的 API 網址，內部若是 http 要先決定（建議內部也用 https） | — |
+| T-19 | **已完成（2026-11-14）**：`validate:unit-tests`、`firmware:fetch` 在分支有開著的 MR 時，branch pipeline 不跑（`$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS` → never；官方 workflow 頁「避免重複 pipeline」的寫法）。放在 job 層級、不放 `workflow:rules`：dev/** 的 build／scan 只在 branch pipeline 跑，整條 branch pipeline 不能關。實際行為待內部驗證 | 內部驗證 |
+| T-20 | **已完成（2026-11-14）**：NOT_RUN 一律結束碼 3。`dev:publish` 用 `allow_failure: {exit_codes: [3]}`（官方：列出的結束碼才算允許失敗，其他照常失敗）；`release:sign` 也一樣（沒開簽章或試跑是 NOT_RUN＝3，真的簽章失敗才是失敗）。`firmware:dt`、`watch:*`、網頁觸發的 `dev:*` 是**規則裡的 `when: manual`**：保留規則層級的 `allow_failure: true`，結束碼也改成 3。原因：官方 job_control 頁寫「rules 裡的 `when: manual` 預設 `allow_failure: false`，也就是 blocking manual job，pipeline 會停在那個 stage」，但沒寫 job 層級的 `allow_failure: {exit_codes: [3]}` 會讓手動 job 算 optional 還是 blocking；改了可能讓沒人按的手動 job 卡住整條 pipeline。**內部 GitLab 要驗證**：手動 job 加 `exit_codes` 後是否仍是 optional；是的話再改成只放過 3 | 內部驗證 |
+| T-21 | **已完成（2026-11-14）**：`release:publish` 改呼叫 `gitlab/release-publish.sh`：先用 `release-payload.py --files-dir` 驗完全部附件（檔名安全、存在、是一般檔案、不重複），**驗不過一個檔都不上傳**，驗過才上傳 Generic Package、再建 Release。`release-payload.py` 只接受 `https://` 的 API 網址（內部也用 https）。上傳清單只用 release-payload.py 驗過後寫出的 `release-files.txt`（bash 不再自己解析 manifest：最後一行沒有換行、孤立的 `\r` 兩邊切行不同；manifest 有 `\r` 一律拒絕），上傳數要等於 Release 的連結數才建 Release。測試：`ReleasePublish`（假 curl：任何一個附件有問題時呼叫次數是 0；最後一行沒換行時照樣全部上傳；上傳回 HTTP 錯誤時不建 Release）。**TOCTOU（風險低，記一筆）**：驗證與上傳之間附件理論上可能被換掉；result/ 是同一個 job 從 artifact 解出來的暫存資料夾，只有這個 job 寫得到 | — |
 | T-22 | 預設映像 `DUMPLING_IMAGE: ubuntu:24.04` 是版本標籤、不是 digest，apt 套件也沒固定版本：內部換成 RD 映像時固定 digest（第 5 節、第 14 節） | 搬移時 |
 | T-23 | M8 B2 的支援期限檢查（`pipeline/watch/support.py`，WATCH.md 第 7 節）：範本的 `watch:compute` 在比對前加同一步（`--inventory`、`--out`；不加 `--demo`），`watch:notify` 用 `issues.py` 的 GitLab 版套用 stateless plan（私密 Issue）；FAIL 不擋每日監控的 Issue，另外讓 pipeline 變紅 | 跟 T-10 一起 |
 
