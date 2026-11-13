@@ -17,8 +17,9 @@ REPO = HERE.parents[2]
 SCRIPT = REPO / "pipeline" / "firmware-bios.sh"
 
 INTEL_NOTE = xf.ASSESS_NOTES["intel"]
+UCODE_NOTE = xf.ASSESS_NOTES["intel-microcode"]
 NVIDIA_NOTE = xf.ASSESS_NOTES["nvidia-vbios"]
-CSME_CPE_16 = "cpe:2.3:o:intel:converged_security_management_engine_firmware:16.1.30.2307:*:*:*:*:*:*:*"
+CSME_CPE_16 = "cpe:2.3:o:intel:converged_security_management_engine_firmware:16.1.30:*:*:*:*:*:*:*"        # 16.1.30.2307 的前三段（NVD 沒有 build 號）
 
 
 def props(c, name):
@@ -53,7 +54,7 @@ def test_every_component_is_not_assessed_with_a_reason(tmp_path):
     assert props(by["Intel CSE firmware"], "dumpling:vuln-assessment-note") == [INTEL_NOTE]
     for c in comps:
         if c["name"].startswith("Intel CPU microcode"):
-            assert props(c, "dumpling:vuln-assessment-note") == [INTEL_NOTE]
+            assert props(c, "dumpling:vuln-assessment-note") == [UCODE_NOTE]          # 微碼：候選公告在 dumpling:advisory-*，狀態仍是 NOT_ASSESSED
     vb = next(c for c in comps if c["name"].startswith("NVIDIA VBIOS"))
     assert props(vb, "dumpling:vuln-assessment-note") == [NVIDIA_NOTE]
     # BIOS 映像與非 ME 的區域：這一層沒有漏洞比對，也不套用 Intel 的說明
@@ -104,35 +105,52 @@ def test_me_region_without_manifest_is_gap_and_has_no_cpe(tmp_path):
 
 # ---------- CPE ----------
 
-def test_cpe_only_when_family_is_csme(tmp_path):
+def test_cpe_family_rules_and_basis(tmp_path):
     img = with_me(me_region("me11"))
-    assert "cpe" not in next(c for c in sbom(tmp_path, img) if c["name"] == "Intel CSE firmware")      # family 不明：不猜
+    # 版本清單沒有、映像分不出 family：major 16 ≥ 11，推定為 CSME（NVD 的 part o 只有 CSME 有 11 以上的版本），推定寫在 basis
+    me = next(c for c in sbom(tmp_path, img) if c["name"] == "Intel CSE firmware")
+    assert me["version"] == "16.1.30.2307" and me["cpe"] == CSME_CPE_16
+    assert "inferred CSME from major version 16" in props(me, "dumpling:cpe-basis")[0] and "dropped" in props(me, "dumpling:cpe-basis")[0]
+    assert props(me, "dumpling:cpe-note") == [xf.CPE_NOTE] and not props(me, "dumpling:cpe-gap")
+    # 清單寫 TXE：不同的 product → 不帶 CPE，寫 gap
     m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,TXE,16.1.30.2307,,Intel,")
-    assert "cpe" not in next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")  # TXE 是不同的 product
+    me = next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")
+    assert "cpe" not in me and "TXE" in props(me, "dumpling:cpe-gap")[0] and not props(me, "dumpling:cpe-basis")
+    # 清單寫 CSME：照清單
     m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,CSME,16.1.30.2307,,Intel,")
     me = next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")
-    assert me["cpe"] == CSME_CPE_16
+    assert me["cpe"] == CSME_CPE_16 and props(me, "dumpling:cpe-basis")[0].startswith("family CSME declared in the version list")
     assert all("cpe" not in c for c in sbom(tmp_path, img, m) if c is not me and not c["name"].startswith("Intel CSE"))
+    assert props(me, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no data in the database" in props(me, "dumpling:advisory-basis")[0]
 
 
 def test_cpe_for_standalone_me_image_without_region(tmp_path):
     m = manifest_with(tmp_path, "MB-1,ME,12.0.90,me,CSME,12.0.90.2072,,Intel,")
     me = next(c for c in sbom(tmp_path, csme12_image(), m) if c["name"] == "Intel CSE firmware")
-    assert me["cpe"].endswith("converged_security_management_engine_firmware:12.0.90.2072:*:*:*:*:*:*:*")
+    assert me["cpe"].endswith("converged_security_management_engine_firmware:12.0.90:*:*:*:*:*:*:*")
     assert props(me, "dumpling:vuln-assessment") == ["NOT_ASSESSED"]
 
 
-@pytest.mark.parametrize("version", ["16.1.30.2307", "14.0.47.1558", "11.8.50"])
-def test_csme_cpe_format(version):
-    assert xf.csme_cpe({"family": "CSME", "version": version}) == \
-        f"cpe:2.3:o:intel:converged_security_management_engine_firmware:{version}:*:*:*:*:*:*:*"
+@pytest.mark.parametrize("version,cpe_version", [("16.1.30.2307", "16.1.30"), ("14.0.47.1558", "14.0.47"), ("11.8.50", "11.8.50"),
+                                                   ("11.8.50.3425", "11.8.50"), ("011.08.050.1", "11.8.50")])
+def test_csme_cpe_format_drops_the_build_number(version, cpe_version):
+    for fam in ("CSME", None):                       # 清單寫 CSME，或映像分不出 family 但 major ≥ 11
+        assert xf.csme_cpe({"family": fam, "version": version}) == \
+            f"cpe:2.3:o:intel:converged_security_management_engine_firmware:{cpe_version}:*:*:*:*:*:*:*"
 
 
-@pytest.mark.parametrize("me", [None, {"family": None, "version": "16.1.30.2307"}, {"family": "TXE", "version": "4.0.10.1"},
+@pytest.mark.parametrize("me", [None, {"family": None, "version": "10.0.55.1000"}, {"family": None, "version": "4.0.10.1"},
+                                {"family": "TXE", "version": "4.0.10.1"}, {"family": "SPS", "version": "5.0.4.12"},
+                                {"family": "ME", "version": "16.1.30.2307"}, {"family": "TXE", "version": "16.1.30.2307"},
                                 {"family": "CSME", "version": ""}, {"family": "CSME", "version": "16.1:30"},
-                                {"family": "CSME", "version": "unknown"}, {"family": "CSME", "version": "16.1.30.2307:*"}])
+                                {"family": "CSME", "version": "unknown"}, {"family": "CSME", "version": "16.1.30.2307:*"},
+                                {"family": "CSME", "version": "16.1"}, {"family": None, "version": "16"},
+                                {"family": "CSME", "version": "16.1.30.2307.5"}, {"family": "CSME", "version": "-16.1.30"}])
 def test_csme_cpe_not_filled_when_unsure(me):
     assert xf.csme_cpe(me) is None
+    cpe, basis, gap = xf.csme_cpe_info(me)
+    assert cpe is None and basis is None and (gap is None) == (me is None)         # 沒有 ME 以外，都要寫沒有 CPE 的原因（GAP）
+    assert (xf.cpe_props(me) == []) == (me is None)
 
 
 def test_microcode_and_vbios_have_no_invented_cpe_or_purl(tmp_path):
