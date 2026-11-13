@@ -65,6 +65,30 @@ class CompareTest(unittest.TestCase):
         with self.assertRaises(fe.FormatError):
             fe.compare({"intel_vbt": "1.00"}, INV, sb)
 
+    def test_amd_keys(self):
+        sb = {"components": [
+            {"name": "AMD AGESA", "version": "ComboAM4v2PI 1.2.0.B", "properties": []},
+            {"name": "AMD AGESA", "version": "RenoirPI-FP6 1.0.0.8", "properties": []},
+            {"name": "AMD CPU microcode (equivalence id 0x8082)", "version": "0x0800820d",
+             "properties": [{"name": "sca-center:amd-equivalence-id", "value": "0x8082"}]},
+            {"name": "AMD CPU microcode (equivalence id 0x8012)", "version": "0x08001250",
+             "properties": [{"name": "sca-center:amd-equivalence-id", "value": "0x8012"}]}]}
+        ok = {"amd_agesa": "1.2.0.b", "amd_microcode": [{"equiv_id": "0x8082", "patch_id": "0x0800820D"}, {"equiv_id": "0X8012", "patch_id": "0x08001250"}]}
+        self.assertEqual(statuses(ok, INV, sb), ["OK"] * 3)
+        self.assertEqual(statuses({"amd_agesa": "ComboAM4v2PI 1.2.0.B"}, INV, sb), ["OK"])      # 整串相同也算
+        self.assertEqual(statuses({"amd_agesa": "1.0.0.8"}, INV, sb), ["OK"])                    # 另一個字串的 PI 版本號（任一個相符）
+        self.assertEqual(statuses({"amd_agesa": "1.2.0.C"}, INV, sb), ["MISMATCH"])
+        self.assertEqual(statuses({"amd_agesa": "0.B"}, INV, sb), ["MISMATCH"])                  # 只比最後一個符記，不是子字串
+        self.assertEqual(statuses({"amd_microcode": [{"equiv_id": "0x8082", "patch_id": "0x0800820e"}]}, INV, sb), ["MISMATCH"])
+        self.assertEqual(statuses({"amd_microcode": [{"equiv_id": "0x9999", "patch_id": "0x0800820d"}]}, INV, sb), ["MISSING"])
+        self.assertEqual(statuses(ok, INV, SBOM), ["MISSING"] * 3)                               # SBOM 沒有 AMD 元件
+        self.assertEqual(statuses({"amd_agesa": "1.2.0.B"}, INV, {"components": [{"name": "AMD AGESA"}]}), ["MISSING"])
+        self.assertEqual(statuses(ok, None, None), ["NOT_RUN"] * 3)
+        for bad in ({"amd_agesa": ""}, {"amd_agesa": 1.5, "x": 1}, {"amd_microcode": []}, {"amd_microcode": [{"equiv_id": "0x1"}]},
+                    {"amd_microcode": [{"equiv_id": "zz", "patch_id": "0x1"}]}, {"amd_microcode": [{"equiv_id": "0x1", "patch_id": "0x1", "x": 1}]}):
+            with self.assertRaises(fe.FormatError):
+                fe.compare(bad, INV, sb)
+
     def test_mismatch(self):
         r = dict(fe.compare({"intel_me": "14.0.47.1559"}, INV, SBOM))
         self.assertEqual(list(r), ["MISMATCH"])
