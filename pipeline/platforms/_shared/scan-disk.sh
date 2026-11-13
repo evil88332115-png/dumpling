@@ -108,6 +108,14 @@ case $kprc in
           --out "$out/kernel-cna.json" --cves-out "$out/kernel-cves.txt" 2>&1 | grep -m1 $'^KERNEL-CNA-VERSION\t')
         if [ -n "$cl" ] && [ -s "$out/kernel-cves.txt" ]; then
           export KERNEL_CVES=$out/kernel-cves.txt
+          # 清單的數字取決於 vulns.git 的 commit：把鏡像 SOURCE 的 commit、日期、紀錄數與這次的結果寫回 kernel-upstream.json（標準答案要連 commit 一起記）
+          python3 -I -c 'import json,sys
+src=dict(l.split("=",1) for l in open(sys.argv[2],encoding="utf-8").read().splitlines() if "=" in l)
+d=json.load(open(sys.argv[1],encoding="utf-8"))
+n=sum(1 for l in open(sys.argv[3],encoding="utf-8") if l.strip())
+d["cna"]={"cves":n,"result":sys.argv[4][:300],"mirror_commit":src.get("commit"),"mirror_commit_date":src.get("commit_date"),"mirror_records":src.get("records"),"mirror_fetched_utc":src.get("fetched_utc")}
+json.dump(d,open(sys.argv[1],"w",encoding="utf-8"),ensure_ascii=False,indent=1)' "$out/kernel-upstream.json" "$mir/kcve/SOURCE" "$out/kernel-cves.txt" "$(cut -f2- <<< "$cl" | tr '\t' ' ')" \
+            || fail "寫回 kernel-upstream.json 的 CNA 摘要失敗"
           echo "核心 CVE 清單（上游 $kup，候選）：$(wc -l < "$out/kernel-cves.txt") 個（$(cut -f2- <<< "$cl" | tr '\t' ' ' | cut -c1-160)）"
         else
           kurc=3; echo "kernel-upstream: GAP（上游 $kup 的 CNA 版本比對沒有產生清單：${cl:-kernel_cna_version.py 失敗}）"

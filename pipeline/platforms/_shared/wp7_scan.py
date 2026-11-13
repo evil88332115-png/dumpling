@@ -71,7 +71,7 @@ class Wp7Hooks(ps.Hooks):
         ku = self.x.get("kernel_upstream")
         if ku is not None:
             out["kernel_upstream"] = {k: ku.get(k) for k in ("status", "requested_upstream", "kernel_release", "upstream_verified", "sources",
-                                                             "shipped_config", "config_basis", "gaps")}
+                                                             "shipped_config", "config_basis", "gaps", "cna")}
             out["kernel_upstream"]["cna_cves"] = self.x.get("kernel_cna_count")
         return out
 
@@ -118,7 +118,8 @@ class Wp7Hooks(ps.Hooks):
             L += ["", "## 廠商 BSP 核心的上游版本（D-038）", "",
                   "- 狀態 **%s**：指定上游 `%s`；映像模組資料夾 `%s` → `%s`；核心原始碼 Makefile `%s`（兩者都要相同）。" % (
                       ku.get("status"), ku.get("requested_upstream"), ku.get("kernel_release"), im.get("upstream_from_release"), sm.get("version")),
-                  "- 核心 CVE 清單：依上游版本範圍（Linux 核心 CNA）列出 **%s** 個，是**候選**（廠商可能已回移修補），一律進待人審。" % self.x.get("kernel_cna_count"),
+                  "- 核心 CVE 清單：依上游版本範圍（Linux 核心 CNA，vulns.git commit `%s`）列出 **%s** 個，是**候選**（廠商可能已回移修補），一律進待人審。" % (
+                      (ku.get("cna") or {}).get("mirror_commit"), self.x.get("kernel_cna_count")),
                   "- 依 .config 排除的依據：映像裡實際出貨的 `%s`（依據類型 **shipped-config**，不是建置紀錄；和 Jetson 有 .cmd 的排除分開）。" % (
                       (ku.get("shipped_config") or {}).get("path") or "沒有 config：C-kernel-config 是 GAP")]
             for g in ku.get("gaps") or []:
