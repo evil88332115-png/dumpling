@@ -410,7 +410,13 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     st = plan["state"]
     nm = len(st["matches"]) if isinstance(st.get("matches"), (dict, list)) else 0
     summary = f"最後執行：{gen}；比對數：{nm}"
-    state_body = encode_state(st, mode, summary)
+    too_big = None
+    try:
+        state_body = encode_state(st, mode, summary)
+    except Fail as e:
+        # 狀態太大：Issue 動作照樣執行（新的 KEV 與彙總 Issue 要開得出來），狀態不寫，最後明確 FAIL（PR #28 驗證應修 2）。
+        # 下一輪從舊狀態重算：open 會因標記跳過，不會重複開；留言類可能重複。
+        too_big, state_body = str(e), None
     texts = [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
     prepared = []
     for n, a in enumerate(plan["actions"]):
@@ -469,6 +475,9 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                 r.update(result="would_comment" if dry else "commented", issue=ent["number"])
         # 全部做完才寫狀態 Issue
         sres = {}
+        if too_big:
+            sres = {"result": "not_written", "reason": too_big}
+            raise Fail(f"{too_big}：Issue 動作已執行，狀態沒有寫入（請修剪狀態或改成分段存放）")
         if dry:
             sres = {"result": "would_update" if cur else "would_create"}
         elif cur:

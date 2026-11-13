@@ -1,6 +1,7 @@
 name: watch
 # 每日監控（PLAN「E. 監控與通知」、docs/WATCH.md）。排程每天一輪 real；手動觸發可選 drill（合成資料的演練：建基準 → 開 1 個 → 不重複 → 關閉）。
-# 權限照 D-012：預設唯讀；compute 只讀，notify 只有 issues: write，keepalive 只有 actions: write。
+# 權限照 D-012：預設唯讀；compute 只讀，notify 與 drill-close（關閉演練 Issue）有 issues: write，keepalive 只有 actions: write。
+# 呼叫 watch-round 的 job 宣告 issues: write 是給被呼叫 workflow 的上限，實際生效的是 watch-round 裡各 job 自己的宣告。
 # 公開 repo 只做演練與公開資料；GitLab 階段「已被利用」的真實案件一律用私有 Issue（docs/GITLAB-PORT.md）。
 on:
   schedule:
@@ -14,6 +15,10 @@ on:
         default: drill
       dry_run:
         description: 只算不寫（不開 Issue、不寫狀態）
+        type: boolean
+        default: false
+      baseline:
+        description: real 而且還沒有狀態時，建立第一次的基準（要明確勾選；狀態 Issue 不見時不會自動重建）
         type: boolean
         default: false
 
@@ -34,6 +39,7 @@ jobs:
     with:
       mode: real
       round: real
+      allow_baseline: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline == true }}
       # D-040：排程的 real 預設只算不寫，C0 看過第一次真實基準後把 repo 變數 WATCH_REAL_ISSUES 設成 on 才開 Issue；手動觸發照輸入
       dry_run: ${{ (github.event_name == 'schedule' && vars.WATCH_REAL_ISSUES != 'on') || inputs.dry_run == true }}
 
@@ -45,6 +51,7 @@ jobs:
     uses: ./.github/workflows/watch-round.yml
     with:
       mode: drill
+      allow_baseline: true
       round: drill-1
       overlay: false
       expect_opened: 0

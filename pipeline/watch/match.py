@@ -4,7 +4,7 @@
 用法：
   python3 -I pipeline/watch/match.py --inventory <W/inventory.json> --state-dir <W/state> --feeds <W/feeds> --out <W/out>
         [--mode real|drill] [--kev-overlay <合成 KEV.json>（只限 drill）] [--max-new-issues 20] [--run-url <網址>]
-        [--grype <執行檔>] [--grype-total-timeout 1500] [--vendor-config <vendor-watch.json>] [--now <UTC ISO>] [--demo]
+        [--grype <執行檔>] [--grype-total-timeout 1500] [--vendor-config <vendor-watch.json>] [--now <UTC ISO>] [--demo] [--allow-baseline]
   --state-dir：issues.py read-state 的輸出（state-base.json 必要；state.json 有狀態 Issue 時才有）。
   --feeds：feeds.sh 的輸出：cisa-kev.json（CISA KEV）、euvd/（EUVD 鏡像，index.tsv）、kernel-cve/（kernel-cve.sh 的輸出）。
     Grype DB 用環境變數 GRYPE_DB_CACHE_DIR（同 exploited_grype.grype_env）。
@@ -286,6 +286,49 @@ VENDOR_FIELDS = ("first_detected", "status", "baseline", "history", "gone_since"
                  "vendor", "kev_vendor", "kev_product", "date_added", "kev_sources", "source", "vendor_from", "watch_via", "component_count")
 
 
+PRUNE_DAYS = 180            # 消失超過這麼多天的比對從狀態移除（10 年保存是 GitLab 階段的內部儲存，不靠公開 Issue）
+STATE_MAX_CHARS = 60000     # 同 issues.py MAX_BODY
+STATE_WARN_CHARS = 45000
+
+
+def state_size(st):
+    """跟 issues.py encode_state 同樣的編碼（gzip＋base64，每 76 字元換行）估算長度。"""
+    import base64
+    import gzip
+    raw = json.dumps(st, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    b = base64.b64encode(gzip.compress(raw, mtime=0))
+    return len(b) + len(b) // 76 + 200
+
+
+def prune_state(st, now):
+    """消失超過 PRUNE_DAYS 天的比對（matches、vendor_matches）與沒有剩下任何比對、開了超過 PRUNE_DAYS 天的群組紀錄。回傳說明或空字串。
+    被修剪的比對之後再出現時算新的（開新 Issue；偏保守）。"""
+    cut = now - datetime.timedelta(days=PRUNE_DAYS)
+
+    def old(t):
+        try:
+            return t and parse_now(t) < cut
+        except Fail:
+            return False
+    n1 = n2 = n3 = 0
+    for coll in ("matches", "vendor_matches"):
+        d = st.get(coll) or {}
+        for k in [k for k, e in d.items() if isinstance(e, dict) and e.get("status") == "gone" and old(e.get("gone_since"))]:
+            del d[k]
+            if coll == "matches":
+                n1 += 1
+            else:
+                n2 += 1
+    iss = (st.get("dumpling") or {}).get("issues") or {}
+    mode = (st.get("dumpling") or {}).get("mode") or "real"
+    live = {kev_group_key(mode, e) for e in (st.get("matches") or {}).values() if isinstance(e, dict) and "project_uuid" in e} | \
+        {vendor_group_key(mode, e) for e in (st.get("vendor_matches") or {}).values() if isinstance(e, dict) and "vendor" in e}
+    for k in [k for k, r in iss.items() if k not in live and old((r or {}).get("opened_at"))]:
+        del iss[k]
+        n3 += 1
+    return f"比對 {n1}、廠商層級 {n2}、群組紀錄 {n3}（消失或開出超過 {PRUNE_DAYS} 天）" if n1 or n2 or n3 else ""
+
+
 def sanitize_state(st):
     """只留公開欄位（WATCH.md 3.5：不放路徑、主機資訊）。"""
     out = {"schema": 1, "matches": {}, "vendor_matches": {}, "vendor_watch": {}, "runs": (st.get("runs") or [])[-RUNS_KEEP:],
@@ -563,6 +606,16 @@ def run(a, kernel_runner=None):
         with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
             json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": False}, f, ensure_ascii=False, indent=1)
         return "GAP", detail
+    if first and not a.allow_baseline:
+        # 狀態 Issue 與監控 Issue 都沒有：不悄悄重建基準（可能是有人誤刪了狀態 Issue，重建會吞掉之後的新命中）。
+        # 第一次建立基準要人明確指定（watch.yml 手動觸發 baseline=true → --allow-baseline）；不是 FAIL，不亮紅燈。
+        detail = ("還沒有狀態（沒有狀態 Issue、也沒有監控 Issue）：沒有指定 --allow-baseline，不建立基準、不產生 plan（GAP）。"
+                  "第一次建立基準請手動觸發 mode=real、baseline=true；如果之前已經建過基準，請先找回狀態 Issue")
+        with open(os.path.join(a.out, "report.md"), "w", encoding="utf-8") as f:
+            f.write(f"# 每日監控（{a.mode}）：GAP\n\n{detail}\n")
+        with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
+            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": False}, f, ensure_ascii=False, indent=1)
+        return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
     serious = [f"Release 問題：{x}"[:300] for x in inv_problems]     # 降級：連續發生要通知人（健康 Issue）
@@ -642,6 +695,7 @@ def run(a, kernel_runner=None):
             for g in kg:
                 gaps.append(f"{kp['name']}@{kp['version']}：{g}")
                 kp.setdefault("gaps", []).append(g)
+                serious.append(f"{kp['uuid']} {g}"[:300])
             if not ups:
                 per[kp["uuid"]]["kernel_cna"] = "GAP"
                 continue
@@ -654,13 +708,6 @@ def run(a, kernel_runner=None):
             else:
                 attn.append(f"{kp['name']}@{kp['version']}：核心 CNA NOT_RUN")
                 serious.append(f"{kp['uuid']} 核心 CNA NOT_RUN")
-        if first:
-            missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok]
-            if missing:
-                raise Fail(f"第一次執行要建立基準，但 {len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）："
-                           "基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
-            if not cisa["usable"]:
-                raise Fail("第一次執行要建立基準，但 CISA KEV 不能用：這次不寫狀態")
         new, back, gone = ew.update_state(state, matches, kernel_ok, now, grype_ok)
         # 廠商層級
         vrep = None
@@ -675,6 +722,25 @@ def run(a, kernel_runner=None):
             notes += vnotes
         except Exception as e:
             attn.append(f"廠商層級 NOT_RUN（{type(e).__name__}）")
+        if first:
+            # 基準不完整會讓下一次把既有的命中全部當成新的：任何一項沒有完整跑完就 FAIL、不寫狀態（PR #28 驗證應修 1）
+            why = []
+            missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok]
+            if missing:
+                why.append(f"{len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）")
+            if cisa["status"] != "OK":
+                why.append(f"CISA KEV 不是 OK（{cisa['status']}）")
+            if eix["status"] != "OK" and a.mode == "real":      # 演練刻意不下載 EUVD
+                why.append(f"EUVD 不是 OK（{eix['status']}）")
+            if inv_problems:
+                why.append(f"Release 有 {len(inv_problems)} 個問題（例如 {inv_problems[0][:120]}）")
+            knr = [u for u, r in per.items() if r.get("kernel_cna") == "NOT_RUN"]
+            if knr:
+                why.append(f"{len(knr)} 份 SBOM 的核心 CNA NOT_RUN")
+            if vrep is None:
+                why.append("廠商層級 NOT_RUN")
+            if why:
+                raise Fail("第一次執行要建立基準，但沒有完整跑完：" + "；".join(why) + "。基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
         coverage = list(NOT_RUN_DAILY)
         actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
@@ -690,7 +756,20 @@ def run(a, kernel_runner=None):
     detail = (f"{'第一次執行：建立基準，' if first else ''}{len(projs)} 份 SBOM；KEV 比對 {len(matches)} 筆（新 {len(new)}、再出現 {len(back)}、消失 {len(gone)}）；"
               f"開 Issue {stats['opened']}、彙總 {stats['summary']}、留言 {stats['comments']}；GAP {len(gaps)}、需注意 {len(attn)}")
     state.setdefault("runs", []).append({"at": utc(now), "status": status, "run_url": a.run_url, "mode": a.mode, "detail": detail[:300]})
+    pruned = prune_state(state, now)
+    if pruned:
+        notes.append(f"修剪狀態：{pruned}")
     clean = sanitize_state(state)
+    size = state_size(clean)
+    if size > STATE_WARN_CHARS:
+        msg = f"狀態編碼後約 {size} 字元，接近狀態 Issue 的上限 {STATE_MAX_CHARS}（超過時狀態寫不進去，issues.py apply 會 FAIL）"
+        attn.append(msg)
+        if not first and a.mode == "real":
+            # 先寫進健康 Issue：health_actions 已經算過，這裡補一個留言動作
+            actions.append({"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 狀態接近上限",
+                            "body": msg + "。請處理：修剪已消失很久的比對，或改成分段存放（GITLAB-PORT／WATCH.md 已知限制）。", "labels": ["watch-health"]})
+            if a.demo:
+                mark_demo(actions[-1:])
     plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url,
             "state_base": None if sbase.get("issue") is None else {k: sbase.get(k) for k in ("issue", "updated_at", "body_sha256")},
             "state": clean, "actions": actions, "status": status, "detail": detail}
@@ -745,6 +824,8 @@ def main(argv=None):
     ap.add_argument("--vendor-config", default=os.path.join(HERE, "vendor-watch.json"))
     ap.add_argument("--now")
     ap.add_argument("--demo", action="store_true", help="公開 repo：Issue 標明「示範專案（公開 BSP）」並加 demo 標籤（D-040）")
+    ap.add_argument("--allow-baseline", action="store_true",
+                    help="還沒有狀態時，允許建立第一次的基準（要人明確指定；沒給時回 GAP、不產生 plan）")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:

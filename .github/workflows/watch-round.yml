@@ -23,6 +23,10 @@ on:
       dry_run:
         type: boolean
         default: false
+      allow_baseline:
+        description: 還沒有狀態時，允許建立第一次的基準（real 只在手動 baseline=true 時給；drill 一律給）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,10 +75,12 @@ jobs:
           MODE: ${{ inputs.mode }}
           OVERLAY: ${{ inputs.overlay }}
           EXPECT: ${{ inputs.expect_opened }}
+          ALLOW_BASELINE: ${{ inputs.allow_baseline }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ov=()
           if [ "$OVERLAY" = true ]; then ov=(--kev-overlay tests/fixtures/watch/drill-kev-overlay.json); fi
+          if [ "$ALLOW_BASELINE" = true ]; then ov+=(--allow-baseline); fi
           set +e
           python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
             --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}"
