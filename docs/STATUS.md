@@ -2,19 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 07:20 +0800（C1）
+最後更新：2026-11-14 07:22 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：M8 #69、M7a2 #65 已合併；C1 做 M7b、C2 做 advisory-polish、C3 跑 art14 drill＋後續小 PR；等 C4 的 M6（重跑等使用者同意）；問使用者 5674、正式 tag、刪分支、私有檔
 - 分支／PR／commit：main 0be7bc2。已合併：**M7b #73**（版本＝tag 加獨立來源：sources.yml l4t_release 對掃描 L4T 版本；Jetson 驗收 independent OK）、**#84**（T-23 GitLab 範本接 support.py；C0 直接審閱）、**#74**（T-05 GitLab 後端：confidential 寫死、quick action 擋在寫入前、token 只送 API 主機；沒有對真實 GitLab 驗證）、**#72**（GitLab 範本 P1：先驗再傳、手動試跑不寫入、NOT_RUN exit 3、MR 去重；C0 驗證不通過 3 項 → 已修、C0 複核）、**#71**（M8 後續：art14 演練標示範專案、stateless plan 限制與測試）、**M8 #69**（B1 第 14 條通報演練、B2 支援期限／EOL 每日檢查）、**M7a2 #65**（validate_table 支援 vbios 列、mirror_info、公告編號限數字；C0 直接審閱）、**#61**（GitLab release-meta 補 --notes，C0 直接審閱）、**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
-- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C3 的 #85（T-10 art14 GitLab 後端 f312599），worktree `$AGENT_TMP/dumpling-wt-c0-verify-85`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-85/report.md`
+- 代理：無（#85 驗證完成：不通過，已貼 PR）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。進行中：M7b 其他項目（meta.json／run-params.json 結構化、A-source／C-dt-feeds／C-mirror-freshness 不靠文字、分層重跑帶原掃描列、D-054、scan-status-check 重複列、C-kernel-boot、#20、product_version_check GAP 是否降級、a.run[0] 退路）。正式 tag 等使用者（建議打在 0be7bc2 或更新的 main）
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
-  - C3（第二台）：#47、#49、#61、#69、#71、#72、#74、#84 已合併。**#85**（T-10 art14 GitLab 後端：成員 ≥30 才算數、非 confidential 即 FAIL、真實案件略過即 FAIL；C0 同意 --gitlab-project 與演練也比照外洩）C0 驗證中；之後 T-16 → T-12；T-05 後續：非 confidential 時先 PUT 補救（等真實環境）。等正式 Release 做第一次真實基準
+  - C3（第二台）：#47、#49、#61、#69、#71、#72、#74、#84 已合併。**#85**（T-10 art14 GitLab 後端：成員 ≥30 才算數、非 confidential 即 FAIL、真實案件略過即 FAIL；C0 同意 --gitlab-project 與演練也比照外洩）**C0 驗證不通過**：倒數依據取自可被 Reporter 改的內文（可偽造已通報）→ 改以可信成員留言為準；單案失敗中斷整輪 → 逐案隔離；token 看不到 confidential 時 exit 0 → 先查權限；欄位格式錯要 FAIL；MIN_LEVEL 邊界測試。C3 修正中，之後 C0 派聚焦複驗；之後 T-16 → T-12；T-05 後續：非 confidential 時先 PUT 補救（等真實環境）。等正式 Release 做第一次真實基準
   - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
