@@ -314,6 +314,22 @@ class ReportTests(ReportBase):
         self.assertIn("AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準", md)
         self.assertNotIn("PASS", md)
 
+    def test_nvidia_vbios_advisory_match_is_counted_and_explained(self):
+        """NVIDIA vBIOS 元件的 advisory-match（affected／fixed／NOT_ASSESSED）：計數照 property 值，「怎麼讀」寫明多數是 NOT_ASSESSED、fixed 不代表沒有其他漏洞。"""
+        vs = []
+        for i, m in enumerate(("NOT_ASSESSED", "affected", "fixed")):
+            c = comp("NVIDIA VBIOS 24%02d" % i, "v%d" % i, version="94.04.5E.00.9%d" % i)
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": m}, {"name": "dumpling:advisory-basis", "value": "table row"}]
+            vs.append(c)
+        info, o = self.prep(bom(*vs), kind="vbios")
+        self.assertEqual(info["summary"]["advisory_match"], {"NOT_ASSESSED": 1, "affected": 1, "fixed": 1})
+        rc, _, md = self.run_report([o])
+        self.assertIn("affected=1", md)
+        self.assertIn("NVIDIA vBIOS 元件另有 `advisory-match`", md)
+        self.assertIn("所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準", md)
+        self.assertIn("fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞", md)
+        self.assertNotIn("PASS", md)
+
     EVIL = "x|y\n# 標題\n[點我](http://evil.example/a)\n<b>z</b>"
 
     def test_supplier_sbom_advisory_match_is_not_trusted_and_not_injected(self):
@@ -359,6 +375,28 @@ class ReportTests(ReportBase):
         self.assertNotIn("\n# 標題", md)                  # 換行被取代，不會多出標題行
         self.assertNotIn("<b>", md)
         self.assertEqual(len([l for l in md.splitlines() if l.startswith("- 公告比對")]), 1)
+
+    def test_supplier_sbom_own_affected_and_fixed_are_not_trusted(self):
+        """kind: sbom（供應商 SBOM）自帶的 dumpling:advisory-match=affected／fixed 不採信、不進報告；其他 kind 的照計。"""
+        for i, val in enumerate(("affected", "fixed", "Fixed", "affected-candidate")):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": val}, {"name": "dumpling:advisory-bulletins", "value": "9999"}]
+            info, o = self.prep(bom(c), kind="sbom", out="s%d" % i)
+            self.assertEqual(info["summary"]["advisory_match"], {}, val)
+            rc, out, md = self.run_report([o])
+            self.assertNotIn("affected=", md)
+            self.assertNotIn("fixed=", md)
+            self.assertNotIn("公告比對（dumpling:advisory-match）", md)
+        c = comp("a", "r1", version="1.0")
+        c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}, {"name": "dumpling:vuln-assessment", "value": "OK"}]
+        info, _ = self.prep(bom(c), kind="sbom", out="s-mixed")
+        self.assertEqual(info["summary"]["advisory_match"], {})
+        self.assertIsNone(info["summary"]["vuln_assessment"].get("OK"))
+        for kind in ("bios", "vbios"):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}]
+            info, _ = self.prep(bom(c), kind=kind, out="own-" + kind)
+            self.assertEqual(info["summary"]["advisory_match"], {"fixed": 1})
 
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))

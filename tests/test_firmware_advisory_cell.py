@@ -74,6 +74,26 @@ class CellTests(unittest.TestCase):
         t = fc.cell(inv(*[intel(f"{i}.rom", "up-to-date") for i in range(fc.MAX_IMAGES + 3)]))
         self.assertIn("其餘 3 個映像沒有列出", t)
 
+    def test_nvidia_vbios_is_added_only_when_there_are_vbios(self):
+        def vb(*matches, status="OK"):
+            return {"vbios": [{"device": "2489", "advisory": {"match": m}} for m in matches], "vbios_advisory": {"status": status}}
+        base = inv(intel("a.rom", "up-to-date"))
+        self.assertEqual(fc.cell({**base, **vb()}), fc.cell(base))                          # 沒有 vBIOS：BIOS 樣本的欄位維持原樣
+        self.assertEqual(fc.cell({**base, "vbios": []}), "up-to-date 1")
+        t = fc.cell({**base, **vb("NOT_ASSESSED", "NOT_ASSESSED", "affected")})
+        self.assertTrue(t.startswith("up-to-date 1；NVIDIA vBIOS 3 個：affected 1、NOT_ASSESSED 2"), t)
+        self.assertIn("資料庫沒有資料，以廠商公告為準", t)
+        self.assertIn("不代表沒有其他漏洞", t)
+        t = fc.cell({**inv(), **vb("NOT_ASSESSED")})                                        # 只有 vBIOS（沒有 BIOS 映像）的樣本
+        self.assertEqual(t.split("；NVIDIA")[0], "沒有 BIOS 映像（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）")
+        self.assertIn("NVIDIA vBIOS 1 個：NOT_ASSESSED 1", t)
+        t = fc.cell({**inv(), **vb("NOT_ASSESSED", status="GAP")})
+        self.assertIn("對照表 GAP，NOT_ASSESSED 1", t)
+        self.assertIn("fixed 1", fc.cell({**inv(), **vb("fixed")}))
+        for w in ("PASS", "不受影響", "安全"):
+            self.assertNotIn(w, fc.cell({**inv(), **vb("NOT_ASSESSED", "fixed", "affected")}))
+        self.assertIn("NOT_ASSESSED 1", fc.cell({"bios": [], "vbios": [{"device": "x"}]}))   # 沒有 advisory 欄位的 vBIOS 當成 NOT_ASSESSED
+
     def test_cli_and_bad_input(self):
         with tempfile.TemporaryDirectory() as td:
             p = os.path.join(td, "i.json")
