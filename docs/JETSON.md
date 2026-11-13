@@ -76,6 +76,12 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 `build.sh` 把交給 scan 的東西全放在 `$DUMPLING_OUT/handoff/`：`BuildRecord-<專案>-<版本>.tar.gz`、`deliverables.tar.zst`（Image、.ko、dtb、核心建置設定）、`kernel.release`、`kernel-subdir`、`build.json`、`nvbuild-tail.txt`、`build-summary.md`。
 workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指名個別檔案**（契約見 `docs/PLATFORM-INTERFACE.md`）；`assemble.sh`／`scan.sh` 從 `handoff/` 讀。
 
+## 6c. 其他平台共用的部分（C4 之後的平台）
+
+`platform.yml` 的 `arch`、`build.mode`／`runner`／`apt`、`scan.runner`／`apt`／`tools`、`pipeline/run-step.sh`（所有步驟同一個結束碼規則與 `pipeline-steps.tsv`）、`pipeline/install-scan-tools.sh`（`sbom-only`｜`full`）、
+`pipeline/lib/platform_scan.py` 都與 Jetson 無關，契約見 `docs/PLATFORM-INTERFACE.md`。Jetson 沒設 `scan.tools`（預設 `sbom-only`），行為不變。
+`scan.tools: full` 在 runner 上驗證過（Go 1.26 由 `actions/setup-go` 裝；Syft、Grype、cdxgen 12.8.7、govulncheck v1.9.0、guarddog 3.2.0 都在家目錄遮蔽的 bwrap 裡跑得起來；guarddog 的 venv 在 `/opt/dumpling-tools`，不在家目錄）。
+
 ## 7. 待確認（已採最保守做法，不阻擋）
 
 1. **`public_sources.tbz2` 的整包 sha256 是首次下載記錄（TOFU）**：NVIDIA 沒有公布整包雜湊。若 NVIDIA 之後更新檔案，fetch 會因 sha256 不符而失敗（預期行為），要人工確認後才改 `sources.yml`。
