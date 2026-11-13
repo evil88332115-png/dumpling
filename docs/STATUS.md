@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:03 +0800（C0）
+最後更新：2026-11-14 00:07 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -54,11 +54,14 @@
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：沒有
+- 本機背景工作：狀態列盤點代理（唯讀）
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從 cc7d101 打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1` 並推送——C1 的推送被權限機制擋下，等使用者自己推或放行（本機與遠端都還沒有 tag）。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 run 編號與結果 → 刪 `wp1/m2-pr-draft`（draft Release 由 release.yml 自動刪）
   2. **[WP1] 小 PR #42**（wp1/m2-followup＝**cbcbcc5**）：C1 驗證通過（建議 1、2、4 在 c645966 修）；**C0 驗證對 a475ec1「不通過」**，應修 1（「不適用」只看文字，步驟輸出可繞過）在 cbcbcc5 改成 pipeline-steps.tsv 第 5 欄 `recorded`（只有 run-step.sh --record 寫）。已告訴 C0 新 HEAD，等 C0 看 diff 與 CI
-  2b. **下一個 [WP1] PR（C0 驗證應修 2，#42 合併後從 main 開）**：掃描層「該跑卻沒跑」的核心階段（C-kernel-cve-list／config／module-map 在沒有 CNA 鏡像時 NOT_RUN，不在 cra_report RISK_STAGES／COND_STAGES）至少讓 report_status 變 GAP；D-044 的「不適用，核心在 <報告> 判定」NOT_RUN 不降級；Jetson 標準答案不變；盤點沒有程式消費的刷機包層狀態列（B-uefi-binary、B-initrd-coverage、B-image-check、A-md5 等）決定哪些進整體狀態
+  2b. **掃描層 NOT_RUN 的 [WP1] PR（C0 驗證應修 2，C0 說現在就做）**：worktree `$AGENT_TMP/dumpling-wt-c1-scannr`，分支 wp1/scan-not-run（從 main ec5b786，**未推**）。
+     - 8268c5d（本機）：cra_report KERNEL_STAGES（C-kernel-cve-list／config／module-map／versions／cve-mirror、C-kernel-not-judged-*）不是 OK → GAP；D-044 的三個 NOT_RUN 只認 sca-scan 寫進 meta.json 的 kernel_in_other_report（不看文字）。tools/cra 2159、tools/pilot 1111、tests/ unittest 全過；Jetson 標準答案不變
+     - 盤點刷機包層與 sca-scan 其他沒人消費的狀態列：唯讀代理（Sonnet、high）進行中 → 依結果決定哪些進整體狀態 → 補 commit → #42 合併後 merge main → 推 → 開 PR → 驗證代理 → 通知 C0
+     - 對 C4 的影響要通知：-bsp／ours 報告若核心階段 NOT_RUN／GAP（沒有 CNA 鏡像、沒給 --kernel-build），report_status 會變 GAP
   2c. 給 C4 的提醒（已請 C0 轉）：wp7 合併 main 時不要用舊的 pipeline.yml 蓋掉「不適用：」那一列
   3. M7 待辦加上 C0 驗證建議 2–8（-os 8.7 節寫明核心在 -bsp 判定、LAYERS.md 註明各層加總≠完整、check-expected 下限檢查的測試、patch 修的 CVE 在 patched 版仍 P3 的說明、Release 說明步驟表少 pipeline-scan、SBOM 的上游維護者信箱、test_layers_report.py 單獨執行缺 sys.path）
 - 驗證（這輪之前）：
