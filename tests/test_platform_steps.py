@@ -66,6 +66,21 @@ class RunStep(Tmp):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([(x["step"], x["status"], x["detail"]) for x in self.rows()][-1], ("pipeline-scan", "NOT_RUN", "scan: 結果說明"))
         self.assertEqual(sr.overall(self.rows()), "GAP")
+        self.assertTrue(self.rows()[0].get("recorded") and not self.rows()[-1].get("recorded"))
+
+    def test_step_output_cannot_claim_not_applicable(self):
+        """一般執行的步驟最後一行印「不適用…」並結束碼 4：照樣算沒能執行（GAP）。只有 --record 記的列（recorded）能算不適用。"""
+        open(os.path.join(self.plats, "steps", "build.sh"), "w").write('#!/usr/bin/env bash\necho "不適用：這個平台不用編譯"\nexit 4\n')
+        r = self.run_step("build", self.proj, "v39.2.1-demo1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = self.rows()[-1]
+        self.assertEqual((row["status"], row["detail"]), ("NOT_RUN", "不適用：這個平台不用編譯"))
+        self.assertNotIn("recorded", row)
+        self.assertFalse(sr.not_applicable(row))
+        self.assertEqual(sr.overall(self.rows()), "GAP")
+        out = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "lib", "step_rows.py"), "status",
+                              os.path.join(self.out_base, "steps-demo", "v39.2.1-demo1", "pipeline-steps.tsv")], capture_output=True, text=True)
+        self.assertEqual(out.stdout.strip(), "GAP")
 
     def test_exit_code_rules(self):
         # (步驟腳本的結束碼, run-step 的結束碼, 記錄的狀態, 輸出裡的標記)
@@ -101,7 +116,7 @@ class RunStep(Tmp):
         r = self.run_step("--record", self.proj, "v39.2.1-demo1", "build", "NOT_RUN", "4", "build.mode: none")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         row = open(os.path.join(self.out_base, "steps-demo", "v39.2.1-demo1", "pipeline-steps.tsv"), encoding="utf-8").read()
-        self.assertEqual(row, "pipeline-build\tNOT_RUN\t4\tbuild.mode: none\n")
+        self.assertEqual(row, "pipeline-build\tNOT_RUN\t4\tbuild.mode: none\trecorded\n")              # --record 的列尾多一欄 recorded
         self.assertEqual(self.run_step("--record", self.proj, "v39.2.1-demo1", "build", "MAYBE", "4", "x").returncode, 1)     # 不認得的狀態
 
     def test_workflow_uses_run_step_for_every_platform_call(self):
@@ -115,7 +130,7 @@ class Rows(Tmp):
     def test_overall_and_format(self):
         f = self.p("s.tsv")
         sr.append_row(f, "fetch", "OK", 0, "ok\twith\ttabs")
-        sr.append_row(f, "pipeline-build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）")
+        sr.append_row(f, "pipeline-build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）", recorded=True)
         rows = sr.read_rows(f)
         self.assertEqual(rows[0]["detail"], "ok with tabs")
         self.assertEqual(sr.overall(rows), "OK")                                    # 「不適用」的 NOT_RUN 不降低整體狀態，但會列出
@@ -162,7 +177,8 @@ class CollectShowsSteps(Tmp):
     def test_not_run_that_should_have_run_is_gap(self):
         """NOT_RUN 分兩類：「不適用」開頭不降低整體；其他（平台沒有實作、非 aarch64 主機、舊格式沒有標示的說明）→ GAP。ATTENTION 也被它蓋過。"""
         for detail in ("scan: NOT_RUN（平台 x 沒有實作 scan）", "build: NOT_RUN（只在 aarch64 主機原生編譯；這台是 x86_64）",
-                       "build.mode: none", "（沒有輸出）", "這一步不適用"):
+                       "build.mode: none", "（沒有輸出）", "這一步不適用",
+                       "不適用：步驟自己印的，不是 --record 記的"):           # 沒有 recorded：文字開頭是「不適用」也不算
             f = self.p("nr-%d.tsv" % hash(detail))
             sr.append_row(f, "validate", "OK", 0, "ok")
             sr.append_row(f, "fetch", "ATTENTION", 0, "鏡像沿用快取")
@@ -173,10 +189,17 @@ class CollectShowsSteps(Tmp):
             self.assertEqual(ps.collect(self.args(f))["pipeline_status"], "GAP", detail)
         f = self.p("na.tsv")
         sr.append_row(f, "fetch", "ATTENTION", 0, "鏡像沿用快取")
-        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none")
+        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none", recorded=True)
         self.assertEqual(sr.overall(sr.read_rows(f)), "ATTENTION")                  # 不適用不蓋過 ATTENTION，也不降成 GAP
         sr.append_row(f, "assemble", "FAIL", 1, "x")
         self.assertEqual(sr.overall(sr.read_rows(f)), "FAIL")
+        h = self.p("rec.tsv")
+        sr.append_row(h, "build", "NOT_RUN", 4, "build.mode: none", recorded=True)
+        self.assertEqual(sr.overall(sr.read_rows(h)), "GAP")                      # recorded 但說明不是「不適用」開頭：照樣 GAP
+        open(h, "a", encoding="utf-8").write("pipeline-x\tNOT_RUN\t4\t不適用：x\trecordedX\n")
+        self.assertEqual(sr.read_rows(h)[-1]["status"], "FAIL")                    # 第 5 欄不是 recorded：格式不對，保留成 FAIL
+        open(h, "a", encoding="utf-8").write("pipeline-y\tNOT_RUN\t4\t不適用：y\trecorded\textra\n")
+        self.assertEqual(sr.read_rows(h)[-1]["status"], "FAIL")
         g = self.p("ok-na.tsv")
         sr.append_row(g, "build", "OK", 0, "不適用：只是說明文字")                     # 只有 NOT_RUN 才分類
         self.assertEqual(sr.overall(sr.read_rows(g)), "OK")
@@ -184,7 +207,7 @@ class CollectShowsSteps(Tmp):
     def test_all_ok_and_missing_file(self):
         f = self.p("ok.tsv")
         sr.append_row(f, "validate", "OK", 0, "ok")
-        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）")
+        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）", recorded=True)
         self.assertEqual(ps.collect(self.args(f))["pipeline_status"], "OK")
         scan = ps.collect(self.args(self.p("missing.tsv")))                          # 有指定卻讀不到紀錄：GAP，不是 OK
         self.assertEqual((scan["pipeline_status"], scan["pipeline_steps"]), ("GAP", None))
@@ -228,7 +251,7 @@ class ReleaseMetaAndStatusCheck(Tmp):
         self.assertEqual(need, "A B")
         # 沒能執行的 NOT_RUN：整體 GAP，訊息要列出那一步（不是「沒有 pipeline-steps.tsv」）；不適用的那一列不列
         steps2 = self.p("steps2.tsv")
-        sr.append_row(steps2, "build", "NOT_RUN", 4, "不適用：build.mode: none")
+        sr.append_row(steps2, "build", "NOT_RUN", 4, "不適用：build.mode: none", recorded=True)
         r = subprocess.run([sys.executable, "-I", chk, st, "A", "B", "--pipeline-steps", steps2], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout)
         sr.append_row(steps2, "scan", "NOT_RUN", 4, "scan: NOT_RUN（平台 x 沒有實作 scan）")
