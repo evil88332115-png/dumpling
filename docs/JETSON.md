@@ -132,3 +132,5 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
 - Image 的 SHA-256 兩次建置都不同（建置不可重現）：v39.2.1 第一次 `d39b0e3a…`、`b220eaee…`，最終 `ce766751…`；v39.2.0 最終 `3167d1d6…`。
 - 附件 19 個：`report-*.zip`×3（完整、-bsp、-os）、`sbom-*.cdx.json`×3、`vex-*.cdx.json`×3、`vuln-list-*.xlsx`×3、`p1-table-*.xlsx`×3、`layers.json`、`build-record-*.json`、`scan-summary-*.json`、`release-meta.json`。
 - Release 的 403：最終的兩個完整 run 沒有再出現。中間有 3 次（含 dev.yml 的 publish）在列出 releases 時回 403，原因沒查出來；`release.yml` 與 `dev.yml` 的 API 呼叫現在每 30 秒重試、最多 8 次，仍失敗就印出回應標頭當診斷（`ghx`）。
+
+合併 `origin/wp1/m2`（rpi 與原始碼的變更、K 軌 `--kernel-version`）、加入 `scan.tools` 與 `scan.runner` 之後，再各跑一次（沿用同一份 build 的 handoff，只重跑 scan）：`v39.2.0-demo1`（run 43347016848）綠燈、標準答案 23 項符合，與合併前的數字相同。
