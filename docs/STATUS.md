@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:19 +0800（C2）
+最後更新：2026-11-13 22:34 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,29 +36,29 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M2 收尾**（PLAN「里程碑」M2）。第三輪獨立驗證「不通過」（1 項應修，已在 852b6d3 修好）；852b6d3 的 draft 核對時另找到完整報告 tee Grype 一定 NOT_RUN（078710d 修）；**正在跑新一輪驗收 run（078710d）**。M1 已合併（PR #9）
+- 目前在做：**M2 PR #40 已開**（https://github.com/evil88332115-png/dumpling/pull/40，head 1e18ed9），等第四輪獨立驗證與 C0 的驗證。M1 已合併（PR #9）
 - 分支與 commit：
-  - **`wp1/m2`＝c08de27**（已推）：M2 整合分支；已含 main 26a6377（main 目前沒動，不用併）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
+  - **`wp1/m2`＝1e18ed9**（已推）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
   - 其他 M2 子分支都已併入或不合併，不用再動
 - 開出去的代理：
+  - 第四輪獨立驗證（Sonnet、high）：**進行中**
   - 第三輪獨立驗證（Sonnet、high）：**完成**，結論「驗證：不通過」，報告 `$AGENT_TMP/dumpling-tmp-c1/verify3/report.md`（開 PR 時貼成留言）。應修 1：-os 報告混入 bsp 的 OP-TEE Mbed TLS 11 列（另外我查到 -os 產品 SBOM 也有刷機包韌體 441 個 bsp 元件）→ 852b6d3：分層 SBOM 沒有 bsp／unknown 元件時，刷機包韌體、UEFI／OP-TEE 內建函式庫不適用（`layers.bsp_inputs_not_applicable`）；建議已處理：Release 說明成品上游比對不印 JSON、PLATFORM-INTERFACE 補 kernel_not_distro 不以 - 開頭；其餘建議（kernelcheck 上標數字 epoch 會 FAIL、完整報告 P1 沒範圍說明、步驟表沒有 pipeline-scan、標準答案沒固定 -os 核心階段）排 M7 或寫進 PR 說明
 - 驗收 run（f11bfdb）：release v39.2.0-demo1 **43399785656 綠**、v39.2.1-demo1 **43399800268 綠**、tests **43399813005 綠**；877ffbc 的 tests 43412769902 綠。
 - 852b6d3 的驗收 run：43416140192、43416151433、43416163311 **都綠**。draft 核對：-os 沒有 bsp 列（3780／3582 列全是 os）、-os 產品 SBOM 全是 os 元件（87518／88263；唯一含 flash 字樣的是 Ubuntu 的 libflashrom1）、`bsp_inputs_not_applicable.skipped`＝tee-source、flash-firmware；-bsp 照舊有 Mbed TLS 11 列與刷機包韌體 436／438 個元件；-os 的 Mbed TLS 只剩 Ubuntu deb（libmbedcrypto7t64 34、mbedtls 3）。**完整報告 tee Grype 兩輪都是 NOT_RUN（資料庫不可用）→ 078710d**
-- **新一輪驗收 run（078710d，重新編譯）**：release v39.2.0-demo1 **43429199382**、v39.2.1-demo1 **43429215851**、tests **43429232513**（進行中；本機背景等待）。預期完整報告 tee_source.grype_run OK、Mbed TLS 11 列
+- **新一輪驗收 run（078710d，重新編譯）**：release v39.2.0-demo1 **43429199382**、v39.2.1-demo1 **43429215851**、tests **43429232513****都綠**（tests 43429232513 被 c08de27 的 tests 取消；c08de27 tests 43429786314 綠）。draft6 核對：標準答案兩版 24 項、pipeline_result 兩版 OK、完整報告 tee Grype OK＋Mbed TLS 11 列（10360／10167）、-os 只有 os、-bsp 有 Mbed TLS 與刷機包韌體；-bsp＋-os 比完整多 1 列（CVE-2025-66034 fonttools：完整報告把 deb 與內含的 PyPI 併成一列，分層兩邊各算，排 M7，PR 已知限制）
 - draft 檢查結果（下一步 1，已完成）：
   - 兩份各 20 個附件；`check-expected.py` 兩版 24 項都符合；build_record_status、kernel_boot OK；上游被修改的檔案 v39.2.1＝1、v39.2.0＝0
   - release-meta：report_status／release_gate 都 GAP（NVD 沒開）；pipeline_result v39.2.1＝OK、**v39.2.0＝ATTENTION**：那次 git.kernel.org 連不上，kernel-cve 鏡像沿用 3 小時前的快取（設計中的退回，步驟表與 C-kernel-cve-mirror 都照實標 ATTENTION，scan 標準答案仍通過）→ 不重跑，PR 說明註明
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：等 078710d 三個 run（只查狀態，不佔 HEAVY_LOCK）
+- 本機背景工作：第四輪驗證代理（會用 HEAVY_LOCK 跑測試）
 - **下一步（照順序）**：
-  1. 078710d 三個 run 綠燈後，下載 draft 核對：上面 852b6d3 的各項照舊、**完整報告 tee_source.grype_run OK 且 Mbed TLS（bundled in OP-TEE）11 列**；標準答案 24 項；更新 `$AGENT_TMP/dumpling-tmp-c1/pr/runs.md`（PR 說明各段都在 `$AGENT_TMP/dumpling-tmp-c1/pr/`）
-  1b. 派**新的**驗證代理只驗 852b6d3、078710d 的修正與新 draft（不給結論）
-  2. main 有新 commit 時才 `git fetch && git merge origin/main`（不 rebase、不 force-push）→ 測試 → 推
-  3. 開 M2 PR（D-020）：`wp1/m2-pr-draft` 的草稿；併 main 後用 `m2table.py` 重新產生逐檔對照表；補「驗收 run」（上面三個 run＋draft 檢查結果，含 v39.2.0 的 ATTENTION 原因、accepted 的更正）與「驗證」（第三輪報告貼成 PR 留言並附連結）；最後一行 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
-  4. 通知 C0（C0 另派驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者）。刪掉這輪的 draft Release 與 `wp1/m2-pr-draft`
+  1. 第四輪獨立驗證（Sonnet、high，背景代理；驗 852b6d3、078710d、c08de27＋draft6，不給結論）完成後：報告 `$AGENT_TMP/dumpling-tmp-c1/verify4/report.md` 做公開資料掃描後貼成 PR #40 留言；有應修就在 wp1/m2 修、推、通知 C0
+  2. 看 PR #40 的 CI（tests 43443865429 等）綠燈
+  3. C0 另派驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者
+  4. 兩份驗證都過、正式 tag 之前：刪 draft Release（orin-nano-demo/v39.2.0-demo1、v39.2.1-demo1）與 `wp1/m2-pr-draft`（PR 說明各段在 `$AGENT_TMP/dumpling-tmp-c1/pr/`，body.md 是組好的）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
   - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
