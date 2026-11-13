@@ -2,13 +2,13 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:25 -0500（C0）
+最後更新：2026-11-13 18:52 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：**搬家準備完成：可在第二台（WSL2）以原開場指令接手**（D-045，使用者已確認）。C0、C1、C2 都已推送並停下；主要主機上的對話、worktree、repo 在使用者確認第二台接上前不刪
-- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 53a3112，**未開 PR**）：D-034～D-047＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 目前在做：**已在第二台（WSL2）接手**（2026-11-13，session 名 c0）。第二台檢查完成、代理上限調整為 D-048 並通知 C1–C4；等 C1 開 M2 PR
+- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 c7632bb，**未開 PR**；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-048＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
@@ -24,17 +24,10 @@
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#20、#22、#23
   6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
-- 卡住／等決定：無。D-045 使用者已確認；五個對話都在第二台時的代理上限，使用者授權**新 C0 搬過去後依那台實際負載調整**（D-041 的整台合計 8，調整前沿用；調整後寫進 DECISIONS 並通知 C1–C4）
-- 第二台上要先做的事（詳見 `wp0/docs-batch-4` 的 docs/HANDOFF.md「在第二台電腦（WSL2）接手」）：
-  1. `~/.config/dumpling/local.env` 與 `forbidden.txt` 已在那台（C4 確認），變數 REPO_MAIN、AGENT_TMP、PUBLIC_IMAGES、SCA_CENTER、HEAVY_LOCK 都有
-  2. 主 checkout `$REPO_MAIN`（C4 回報為 `$HOME/dumpling`）在 main、工作樹乾淨，C3／C4 只用 worktree，**直接當 C0 的主 checkout**；先 `git -C "$REPO_MAIN" pull --ff-only`（落後 origin/main）
-  3. 確認 `.git/hooks/pre-push` 存在、`git config user.email` 是 noreply（D-011）
-  4. `$SCA_CENTER` 有 25fa89a，但 checkout 停在別的分支：取檔一律 `git -C "$SCA_CENTER" show 25fa89a:<路徑>`，不要依賴目前分支
-  5. `gh auth status`：同一帳號（C4 確認）
-  6. tmux 每個對話一個 window，對話名稱 C0–C4；C1、C2 的新 worktree 照 `$AGENT_TMP/dumpling-wt-<對話>-<主題>` 從推送的分支開
-  7. 可清掉的舊 worktree：wt-c4-cra-survey（已併進 #15），由 C4 自己清
-  8. 新對話建議在 WSL 裡從 `$REPO_MAIN`（C0）或自己的 worktree 啟動 Claude Code，不要從 Windows 的 C: 啟動後在那裡 clone（C3 提醒）；`$AGENT_TMP` 是 `$HOME/dumpling-agent-tmp`，`HEAVY_LOCK` 是 `$AGENT_TMP/dumpling-heavy.lock`
-- 主要主機上的 C0–C2、worktree、repo：使用者確認第二台接上前不刪除、不關閉
+- 卡住／等決定：無
+- 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
+- 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
+- 主要主機上的 C0–C2、worktree、repo：使用者確認第二台接上前不刪除、不關閉（待使用者確認）
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
