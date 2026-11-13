@@ -164,7 +164,7 @@ jobs:
         run: |
           bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" build NOT_RUN 4 "build.mode: $BUILD_MODE"
 
-      - name: Go（scan.tools: full 才需要：govulncheck v1.9.0 要 Go 1.26 以上，runner 內建的比較舊）
+      - name: "Go（scan.tools 是 full 才需要：govulncheck v1.9.0 要 Go 1.26 以上，runner 內建的比較舊）"
         if: ${{ needs.plan.outputs.SCAN_TOOLS == 'full' }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
