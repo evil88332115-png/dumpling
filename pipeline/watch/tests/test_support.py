@@ -258,6 +258,22 @@ class TestRun(Base):
         self.assertEqual(rc, 1)
         self.assertIn("SUPPORT\tFAIL", out)
 
+    def test_table_names_sanitized_in_titles(self):
+        # 元件與 OS 的 Issue 標題用 md_title（資料表的名稱也是外部字串）；少了 md_title，unsafe_actions 會擋下、整個 FAIL
+        evil = "Debian 12 @everyone &commat;x"
+        t = table()
+        t["entries"][0]["name"] = evil
+        self.write_table(t)
+        self.project(name="p1", until="2031-12-31")
+        self.release()
+        self.project(name="p2", until="2031-12-31", os_resp="ours", status="shipped", os_block='os:\n  distro: debian\n  release: "12"')
+        rc, res, plan, out = self.run_support()
+        self.assertEqual(rc, 2, out)
+        titles = self.titles(plan)
+        self.assertTrue(any(f"：{match.md_title(evil)} 比產品先停止維護" in x for x in titles), titles)       # 元件（support.py 的元件標題）
+        self.assertTrue(any(f"：OS {match.md_title(evil)} 比產品先停止維護" in x for x in titles), titles)    # ours 的 OS
+        self.assertEqual(match.unsafe_actions(plan["actions"]), [])
+
     def test_injection_and_demo(self):
         self.project(until="2027-01-31", name_text="@everyone &commat;x [a](https://evil.example) #1")
         rc, res, plan, _ = self.run_support(demo=True)
@@ -312,13 +328,30 @@ class TestApplyStateless(Base):
         state, _, first = match.load_state(st)
         self.assertTrue(first)                            # 照樣可以建立第一次基準
 
-    def test_stateless_only_open(self):
+    def stateless_plan(self, actions):
         p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "stateless": True, "state_base": None, "state": None,
-             "actions": [{"op": "comment", "key": "a" * 64, "body": "x"}], "status": "OK", "detail": ""}
+             "actions": actions, "status": "OK", "detail": ""}
         path = os.path.join(self.dir, "plan.json")
         json.dump(p, open(path, "w"))
+        return path
+
+    def test_stateless_only_open(self):
+        # comment 與 open_if_closed（開過又關掉的會重新打開）都不行：支援期限的 Issue 關掉就是處理完了
+        ok = {"op": "open", "key": "a" * 64, "title": "t", "body": "x", "labels": ["support-period"]}
+        issues.load_plan(self.stateless_plan([ok]))
+        # open 以外的每一種 op（issues.ACTION_OPS 認得的，以後新增的也會自動列進來）＋字面上的 close（#71 驗證）
+        others = [op for op in issues.ACTION_OPS if op != "open"] + ["close"]
+        self.assertIn("comment", others)
+        self.assertIn("open_if_closed", others)
+        for op in others:
+            bad = {"op": op, "key": "a" * 64, "title": "t", "body": "x", "labels": ["support-period"]}
+            with self.assertRaises(issues.Fail, msg=op):
+                issues.load_plan(self.stateless_plan([ok, bad]))
+
+    def test_stateless_rejects_watch_label(self):
+        act = {"op": "open", "key": "a" * 64, "title": "t", "body": "x", "labels": ["support-period", "dumpling-watch"]}
         with self.assertRaises(issues.Fail):
-            issues.load_plan(path)
+            issues.load_plan(self.stateless_plan([act]))
 
     def test_stateless_with_state_rejected(self):
         p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "stateless": True, "state_base": None, "state": {"schema": 1},

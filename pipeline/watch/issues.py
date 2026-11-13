@@ -304,6 +304,7 @@ class Labels:
 
 
 # ---------- plan ----------
+ACTION_OPS = ("open", "comment", "open_if_closed")      # plan 的 action 認得的 op；stateless plan 只能用 open
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
                             "demo", "summary", "attention", "drill", "watch-health", "support-period"})
@@ -340,6 +341,8 @@ def load_plan(path, want_mode=None):
             bad("stateless 的 plan 不能帶 state")
         if any(not isinstance(a, dict) or a.get("op") != "open" for a in plan.get("actions") or []):
             bad("stateless 的 plan 只能有 open")
+        if any(isinstance(a, dict) and isinstance(a.get("labels"), list) and "dumpling-watch" in a["labels"] for a in plan.get("actions") or []):
+            bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限的 Issue 不是監控 Issue）")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -351,7 +354,7 @@ def load_plan(path, want_mode=None):
     if len(acts) > MAX_ACTIONS:
         bad(f"actions 有 {len(acts)} 個，超過上限 {MAX_ACTIONS}")
     for n, a in enumerate(acts):
-        if not isinstance(a, dict) or a.get("op") not in ("open", "comment", "open_if_closed"):
+        if not isinstance(a, dict) or a.get("op") not in ACTION_OPS:
             bad(f"actions[{n}].op")
         if not isinstance(a.get("key"), str) or not KEY_RE.fullmatch(a["key"]):
             bad(f"actions[{n}].key")
