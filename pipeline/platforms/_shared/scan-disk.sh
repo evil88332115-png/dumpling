@@ -53,7 +53,7 @@ fi
 
 # ---------- 1. 臨時 DT 與鏡像 ----------
 trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
-export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Debian,PyPI,Go,npm}
+export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Debian,PyPI,Go,npm,Maven}
 export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
 bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
 mir=$out/mirrors; rm -rf "$mir"; mkdir -p "$mir"
