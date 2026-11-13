@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:24 +0800（C1）
+最後更新：2026-11-14 02:24 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -15,7 +15,7 @@
   - C1（第二台）：#40、#42、#50 已合併。C0 請 C1 準備 M7 並提拆法（M7a／M7b…，每個可獨立驗證）。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54 已合併。wp3/supplier-followup（#54 建議 1、3、4、5）從 main 開；wp3/nvidia-vbios-advisory 修預驗應修中（牆上時鐘測試、5674 改回待審）；需要 C1 介面（M7）
   - C3（第二台）：M5 #47、監控 #49 已合併。real Issue 照 D-040：等正式 Release → 手動 baseline → 一天 dry_run → C3 回報 → C0 設 WATCH_REAL_ISSUES=on。GitLab 待辦 T-14（C1）、T-15～T-22。wp2/art14 等 M7（先整理需要 M7 的欄位）
-  - C4（第二台）：C0 同意 M6 不等 #50（#50 先合併就再併 main 重跑）；wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
+  - C4（第二台）：wp7/adapters 已併 main 9f11a90（25d3050）、獨立驗證已做（小修 107ce75）；support-lifecycle 11 筆已在 M6。**最終重跑等使用者同意**（C4 的本機派送腳本被 Claude Code 以「記憶體不足」停掉，依規定要使用者同意才能重啟）。通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
   2. M2 合併後：使用者決定合併後馬上打 tag（D-052），**等使用者自己推或放行 C1**；文件批次 #41 已合併；C2／C3／C4 已通知
@@ -24,7 +24,7 @@
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#19（rpi 報告端：有 KERNEL_CVES 時補 Grype 沒有的 CVE 成列、同一個 CVE 不按核心套件重複列；屬 D-044 (2)，M7 交給 C1；修好後 C4 再釘 rpi 的「bsp 核心候選 ≥ CNA 清單」）、#20、#22、#23、C0 的 M2 驗證建議 2–8（-os 8.7 節、LAYERS 列數說明、check-expected 下限測試、patch CVE 仍 P3 說明、步驟表缺 pipeline-scan、SBOM 上游信箱、test_layers_report sys.path）、C1 的 M2 驗證建議 3（-os sbom.md 開機韌體一節矛盾）、4（略過清單進風險評估 Layers 節）、6（Release 附件 SBOM 與報告包 SBOM 差別說明＋標準答案「-os 只有 os」）、C1 #50 盤點的 M7 項（A-source ATTENTION 依文字分辨、meta.json／run-params.json 結構化參數、C-dt-feeds／C-mirror-freshness 不依賴說明文字；D-054 的閘門最終做法）、scan-status-check.py 重複列是後值蓋前值、和 report 留最嚴重的不一致（C2 #54 驗證建議 2）、C2 需要的 C1 介面（validate_table 十六進位版本＋PCI 裝置欄位、表記鏡像 commit；NVIDIA vBIOS 公告比對用）、**D-055 M8 欄位**（markets 會員國 ISO alpha-2＋EU-ALL／UNKNOWN、support_until 為準產生 support.end_date、名稱／版本來源、os.distro／release；C3 清單在 `$AGENT_TMP/dumpling-tmp-c3/m8-needs-from-m7.md`）、#25（missing_fields 少算 flash_package_supplier、sbom.md 非 Jetson 平台出現 L4T 文字）、#26（notes.md 的 pipeline_result 改成跟 release-meta.json 一致）
   6. M7 之後：T-14（C1：scan.sh 加選項改連既有 DT，不傳照舊臨時 DT；做好後 C3 改 GitLab 範本）；D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
-- 卡住／等決定：無
+- 卡住／等決定：正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
 - 主要主機舊環境：使用者同意刪除（2026-11-13）。新 C1、C2 確認可以刪（分支 SHA 已在 origin 核對：wp1/m2 877ffbc、m2-pr-draft d3efdc8、amd-psp ebac3e9、csme-new 61e8ef7、supplier-normalize 8a960c0）。已通知 c1-old、c2-old 先自己檢查再移除各自的 worktree 和暫存，最後由 c0-old 檢查整個 clone 後刪 repo。**範圍只限 dumpling-* 項目**：主要主機的 `$AGENT_TMP` 和 sca-center 共用，不刪整個資料夾（c0-old 指出，HANDOFF 已補 f9e8d70）；`dumpling-heavy.lock`、`~/.config/dumpling/` 保留。c0-old 刪之前會直接向使用者確認範圍；等 c0-old 回報
