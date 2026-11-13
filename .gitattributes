@@ -1,0 +1,2 @@
+# 資料表的 sha256 固定在 tools/cra/fw_advisory.py：不做換行轉換（Windows 的 autocrlf 會讓雜湊不符）
+tools/cra/data/*.json -text

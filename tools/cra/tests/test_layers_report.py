@@ -418,13 +418,13 @@ def test_l4t_kernel_map_rows_with_name_and_version_resolve_to_the_kernel_package
 
 # ------------------------------------------------------------ BSP 專屬的附加輸入在沒有 BSP 元件的分層報告不適用
 
-def _layered_sbom(*layers):
-    """test_cra_report.SBOM 的元件依序標上層（其餘標 os）；給 bsp 時多一個 bsp 元件。"""
+def _layered_sbom(*layers, resp="customer"):
+    """test_cra_report.SBOM 的元件全部標 os；給 bsp／unknown 時各多一個該層的元件。resp＝SBOM 記的 os_responsibility（None＝沒記）。"""
     from test_cra_report import SBOM
     b = json.loads(json.dumps(SBOM))
     for c in cr.flatten(b["components"]):          # 巢狀元件也要標，沒標的算 unknown
         c.setdefault("properties", []).append({"name": "dumpling:layer", "value": "os"})
-    b["metadata"]["properties"] = [{"name": "dumpling:os-responsibility", "value": "customer"}]
+    b["metadata"]["properties"] = [{"name": "dumpling:os-responsibility", "value": resp}] if resp else []
     if "bsp" in layers:
         b["components"].append(comp(BSP, V[BSP], "bsp"))
     if "unknown" in layers:
@@ -432,13 +432,13 @@ def _layered_sbom(*layers):
     return b
 
 
-def _tee_layer_report(tmp_path, *layers, explicit=False):
+def _tee_layer_report(tmp_path, *layers, explicit=False, resp="customer"):
     from test_cra_report import MIN_CFG
     from test_tee_source import grype_json, make_tee, put_grype
     t = make_tee(tmp_path)
     put_grype(t, grype_json())
     proj = make_project(tmp_path / "p", MIN_CFG)
-    scan_ = make_scan(tmp_path / "res" / "scan", sbom=_layered_sbom(*layers))
+    scan_ = make_scan(tmp_path / "res" / "scan", sbom=_layered_sbom(*layers, resp=resp))
     extra = ()
     if explicit:
         extra = ("--tee-source", str(t))
@@ -459,6 +459,36 @@ def test_os_only_layer_report_skips_the_bsp_tee_libraries(tmp_path, explicit):
     assert s["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["tee-source"]
     assert rows["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["tee-source"]
     assert not [r for r in rows["rows"] if r["layer"] == "bsp"]                  # 合成的掃描結果裡對不到元件的列是 unknown（不猜），bsp 一列都沒有
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_os_only_upstream_vendor_report_also_skips(tmp_path, explicit):
+    s, rep, pb, rows = _tee_layer_report(tmp_path, explicit=explicit, resp="upstream-vendor")
+    assert not any(r["id"] == "CVE-2099-0101" for r in rows["rows"])
+    assert s["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["tee-source"]
+
+
+@pytest.mark.parametrize("resp", ["ours", None])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_os_only_sbom_ours_or_unset_keeps_the_tee_libraries(tmp_path, resp, explicit):
+    """ours 或沒給 os_responsibility：只有一份報告、沒有 bsp 那份。SBOM 只有 os 元件時也不能略過 BSP 輸入
+    （明確給的 --tee-source 會沒有人處理），照舊加元件、產生列、記狀態，不寫 bsp_inputs_not_applicable。"""
+    s, rep, pb, rows = _tee_layer_report(tmp_path, explicit=explicit, resp=resp)
+    row = next(r for r in rows["rows"] if r["id"] == "CVE-2099-0101")
+    assert row["layer"] == "bsp" and row["layer_basis"] == "synthetic:bundled-library"
+    assert {"OP-TEE", "TF-A", "Mbed TLS"} <= {c["name"] for c in pb["components"]}
+    assert s["product_sbom"]["tee_source"]["rows"] == 1
+    assert "bsp_inputs_not_applicable" not in s["layers"]
+
+
+def test_os_only_sbom_ours_keeps_the_flash_firmware(tmp_path):
+    from test_firmware_bom import flash_result
+    proj, scan_ = flash_result(tmp_path, sbom=_layered_sbom(resp="ours"))
+    r, s, rep = run(proj, scan_)
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    pb = json.loads((rep / "sbom.cdx.json").read_text(encoding="utf-8"))
+    assert {"mb1_t234_prod.bin", "NVIDIA Jetson Linux"} <= {c["name"] for c in pb["components"]}
+    assert s["product_sbom"]["flash_firmware"]["components"] == 9 and "bsp_inputs_not_applicable" not in s["layers"]
 
 
 @pytest.mark.parametrize("layers", [("bsp",), ("unknown",)])

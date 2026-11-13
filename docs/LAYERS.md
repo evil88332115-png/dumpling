@@ -65,7 +65,7 @@ cra_report 用 BSP 專屬輸入產生的列直接是 `bsp`（依據 `synthetic:*
 廠商核心 CVE 清單（kernel CNA）的列。其他列用元件找層：purl → 名稱＋版本 → 對應來源（`mapped_from`，例如 l4t 核心對應）→ 安裝的二進位套件
 （DT 以原始碼套件比對時）→ 擁有它的 deb（Ubuntu 打包的 Python 模組）；都對不到是 `unknown`。同一列對到多個層時 `bsp` > `unknown` > `os`。
 
-分層的 SBOM **沒有任何 bsp 或 unknown 元件**時（`customer`／`upstream-vendor` 的 `-os` 那份），BSP 專屬的附加輸入在這份不適用：刷機包韌體清單不加進產品 SBOM（sbom.md 第 6 節寫明在 BSP 報告）、UEFI 與 OP-TEE 的內建函式庫（`--uefi-source`／`--tee-source` 或 `<scan>/../uefi-source`、`tee-source`）不產生列、它們的狀態也不算進這份，避免和 `-bsp` 報告重複計算。略過哪幾項記在 `summary.json` 與 `vulnerability-rows.json` 的 `layers.bsp_inputs_not_applicable.skipped`。有 unknown 元件時照舊加入（unknown 保守算 BSP 待辦）。
+分層的 SBOM **沒有任何 bsp 或 unknown 元件**時（`customer`／`upstream-vendor` 的 `-os` 那份），BSP 專屬的附加輸入在這份不適用：刷機包韌體清單不加進產品 SBOM（sbom.md 第 6 節寫明在 BSP 報告）、UEFI 與 OP-TEE 的內建函式庫（`--uefi-source`／`--tee-source` 或 `<scan>/../uefi-source`、`tee-source`）不產生列、它們的狀態也不算進這份，避免和 `-bsp` 報告重複計算。略過哪幾項記在 `summary.json` 與 `vulnerability-rows.json` 的 `layers.bsp_inputs_not_applicable.skipped`。有 unknown 元件時照舊加入（unknown 保守算 BSP 待辦）。`ours` 或沒給 os_responsibility 時只有一份報告、沒有 `-bsp` 那份，即使 SBOM 只有 os 元件也照舊加入（不然明確給的 `--tee-source` 會沒有人處理）。
 
 ## 3. 三種 `os_responsibility` 的行為
 
