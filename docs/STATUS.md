@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 06:52 +0800（C0）
+最後更新：2026-11-14 06:55 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -280,12 +280,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：GitLab 待辦。**#72 已合併**（main e21adb0：T-21 先驗再傳、T-17 手動試跑不寫入、T-20 exit 3、T-19 MR 去重；手動 job 的 exit_codes 待內部驗證）。**PR #74**（wp5/gitlab-t05 13335a9：T-05 GitLab 後端，已併 main；C0 驗證的 5 項已修在 5d6b635）CI 跑中，綠了告訴 C0
+- 目前在做：GitLab 待辦（順序 T-23／T-10 → T-16 → T-12）。#72、#74 已合併（main ba36b6c）。**PR #84**（wp5/gitlab-t23：support.py 接進範本的 watch:compute／notify；T-05 記 confidential 補救）CI 跑中。**T-10**（art14 的 GitLab 版）：寫程式代理在 `wp5/gitlab-t10` 做
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
-- 已合併：#32、#47、#49、#61、#69、#71、#72（GitLab 範本 P1）
+- 已合併：#32、#47、#49、#61、#69、#71、#72（GitLab P1）、#74（T-05 GitLab 後端）
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
-- 代理（D-048）：目前沒有代理在跑（T-05 寫程式＋驗證各 1 個，已結束）
+- 代理（D-048）：1 個寫程式代理（Sonnet，T-10）
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：第一次真實基準等正式 Release（使用者推 tag）；T-14（C1，M7 之後）；GitLab 待辦先做哪些等 C0
 <!-- END C3 -->
