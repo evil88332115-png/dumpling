@@ -1,0 +1,15 @@
+{
+  "_comment": "合成命中（演練用，不是真實通報）：對應 tests/fixtures/watch/drill-kev-overlay.json 的 CVE-2018-18074（requests 2.19.0），合成產品 drill-demo v1.0.0 的 bsp 層。first_detected 是候選，不是知悉時間。",
+  "schema": "dumpling-art14-drill-match/1",
+  "kind": "vulnerability",
+  "product": "drill-demo",
+  "version": "v1.0.0",
+  "layer": "bsp",
+  "cve": "CVE-2018-18074",
+  "description": "requests 在轉址到 http 時可能把 Authorization 標頭送到不該送的地方（演練用，取自公開 CVE 說明的大意）",
+  "exploited_evidence": [
+    {"source": "KEV", "note": "演練用的合成 KEV 命中，不是 CISA 真實收錄"}
+  ],
+  "affected_versions": "requests 2.19.0（上游在 2.20.0 修正）",
+  "first_detected": "2026-11-13T00:00:00Z"
+}
