@@ -48,10 +48,14 @@ for m in "${manifests[@]}"; do
   [ "$erc" -eq 0 ] || est="${est:-expect 失敗}（exit $erc）"
   [ "$erc" -eq 0 ] && flag="" || flag="**不符**："
   adv=$(python3 -I -c 'import json,sys
-a=json.load(open(sys.argv[1])).get("advisory") or {}
+d=json.load(open(sys.argv[1]))
+a=d.get("advisory") or {}
 c=a.get("counts") or {}
 t="、".join("%s %d" % (k, c[k]) for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c)
-print(("資料表 GAP：" if a.get("status") == "GAP" else "") + (t or "沒有微碼"))' "$out/fw-inventory.json" 2>/dev/null || echo "-")
+amd=any(b.get("platform") == "amd" for b in d.get("bios", []))
+if not t:
+    t = "沒有 Intel 微碼" + ("（AMD 平台：AMD 微碼沒有解析，GAP，不是沒有微碼）" if amd else "")
+print(("資料表 GAP：" if a.get("status") == "GAP" else "") + t)' "$out/fw-inventory.json" 2>/dev/null || echo "-")
   echo "| $slug | $(cell "${line#FIRMWARE-BIOS$'\t'}") | $count | $flag$(cell "$est") | $(cell "$adv") |" >> "$summary"
   # 不符的明細也寫進摘要，方便不點進 log 就看到
   if [ "$erc" -ne 0 ]; then

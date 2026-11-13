@@ -11,9 +11,9 @@
   "retrieved": "2026-11-13"
  },
  "generator": "tools/cra/intel_ucode_releases.py",
- "generated_at": "2026-11-13T13:35:31Z",
+ "generated_at": "2026-11-13T14:14:26Z",
  "row_format": ["f-m-s", "platform-id-mask", "old-revision", "new-revision", "processor", "stepping"],
- "notes": ["releases 由新到舊（照來源順序）；date 取自 tag 名稱（來源標題沒有日期）。", "security 是 release 層級的公告清單：來源沒有逐 CPUID 列出公告。", "new／updated 是各 F-M-S／platform id 的 revision 變化；removed 是移除（沒有 New Ver）；disclosed 是「New Disclosures Updated in Prior Releases」表，不當成新 revision。", "資料表只涵蓋來源列出的 release；來源的 releases 數與最舊 tag 見 coverage。"],
+ "notes": ["releases 由新到舊（照來源順序）；date 取自 tag 名稱（來源標題沒有日期）。", "security 是 release 層級的公告清單：來源沒有逐 CPUID 列出公告。", "new／updated 是各 F-M-S／platform id 的 revision 變化；removed 是移除（沒有 New Ver）；disclosed 是「New Disclosures Updated in Prior Releases」表，不當成新 revision。", "資料表只涵蓋來源列出的 release；來源的 releases 數與最舊 tag 見 coverage。", "GitHub 上另有 tag microcode-20230516、microcode-20230516a、microcode-20230613、microcode-20260210-rev1，來源沒有它們的段落，資料表不涵蓋。", "來源沒有明確授權：只取事實性欄位；看不懂或不是公告的段落只記行號與分類，不抄原文。prose_rules 是人工對照（最多引一句原文），見產生器的 PROSE_RULES。"],
  "coverage": {
   "releases": 45,
   "newest": "microcode-20261110",
@@ -30,22 +30,73 @@
    "line": 346,
    "release": "microcode-20250812",
    "section": "disclosed",
-   "why": "表格區段裡的非表格文字",
-   "text": "All ADL, RPL, SPR, EMR, MTL, ARL Microcode patches previously released in May 2025."
+   "why": "表格區段裡的非表格文字，只記行號與分類",
+   "handled": "prose_rules"
   },
   {
    "line": 357,
    "release": "microcode-20250512",
    "section": "purpose",
-   "why": "Purpose 裡的非項目文字，原文記在 other",
-   "text": "# Note: INTEL-SA-01244 and INTEL-SA-01247 will be published on May 13th 2025"
+   "why": "Purpose 裡的非項目文字，只記行號與分類"
+  },
+  {
+   "line": 1066,
+   "release": "microcode-20230512",
+   "section": "purpose",
+   "why": "Purpose 裡的非項目文字，只記行號與分類"
   },
   {
    "line": 1905,
    "release": "microcode-20190618",
    "section": "new",
-   "why": "小標題 `Updated Platforms0` 多了尾碼，當成 `Updated Platforms` 讀",
-   "text": "### Updated Platforms0"
+   "why": "小標題多了尾碼 0，當成 `Updated Platforms` 讀"
+  }
+ ],
+ "prose_rules": [
+  {
+   "release": "microcode-20250812",
+   "line": 346,
+   "quote": "All ADL, RPL, SPR, EMR, MTL, ARL Microcode patches previously released in May 2025.",
+   "interpretation": "the advisories listed by this release cover the microcode of these platforms that was already released in May 2025 (microcode-20250512); a revision older than the platform's microcode-20250512 revision is a candidate for this release's advisories",
+   "codes": ["ADL", "RPL", "SPR", "EMR", "MTL", "ARL"],
+   "ref_release": "microcode-20250512",
+   "keys": [
+    ["06-8f-04", "87", "2b0004d0", "latest-before-ref-release"],
+    ["06-8f-05", "87", "2b0005c0", "latest-before-ref-release"],
+    ["06-8f-06", "87", "2b000603", "latest-before-ref-release"],
+    ["06-8f-07", "87", "2b000639", "row-in-ref-release"],
+    ["06-8f-08", "10", "2c0003f7", "row-in-ref-release"],
+    ["06-8f-08", "87", "2b000639", "row-in-ref-release"],
+    ["06-97-02", "03", "00000022", "latest-before-ref-release"],
+    ["06-97-02", "07", "0000003a", "row-in-ref-release"],
+    ["06-97-05", "03", "00000022", "latest-before-ref-release"],
+    ["06-97-05", "07", "0000003a", "row-in-ref-release"],
+    ["06-9a-03", "80", "00000437", "row-in-ref-release"],
+    ["06-9a-04", "80", "00000437", "row-in-ref-release"],
+    ["06-aa-04", "e6", "00000024", "row-in-ref-release"],
+    ["06-b5-00", "80", "0000000a", "row-in-ref-release"],
+    ["06-b7-01", "32", "0000012f", "row-in-ref-release"],
+    ["06-ba-02", "07", "00004112", "latest-before-ref-release"],
+    ["06-ba-02", "e0", "00004128", "row-in-ref-release"],
+    ["06-ba-03", "07", "00004112", "latest-before-ref-release"],
+    ["06-ba-03", "e0", "00004128", "row-in-ref-release"],
+    ["06-be-00", "01", "00000010", "latest-before-ref-release"],
+    ["06-be-00", "11", "0000001a", "latest-before-ref-release"],
+    ["06-bf-02", "03", "00000022", "latest-before-ref-release"],
+    ["06-bf-02", "07", "0000003a", "row-in-ref-release"],
+    ["06-bf-05", "03", "00000022", "latest-before-ref-release"],
+    ["06-bf-05", "07", "0000003a", "row-in-ref-release"],
+    ["06-c5-02", "82", "00000118", "row-in-ref-release"],
+    ["06-c6-02", "82", "00000118", "row-in-ref-release"],
+    ["06-cf-01", "87", "21000291", "latest-before-ref-release"],
+    ["06-cf-02", "87", "210002a9", "row-in-ref-release"]
+   ],
+   "gaps": [
+    {
+     "key": "06-be-00/19",
+     "why": "processor codes of this key mix listed and unlisted codes: ADL, TWL"
+    }
+   ]
   }
  ],
  "releases": [
@@ -98,7 +149,12 @@
    "security": [],
    "security_na": false,
    "functional_updates": 0,
-   "purpose_other": ["Removed MTL/06-aa-04/c0 due to functional issues observed when loading the MCU in some platforms."],
+   "purpose_other": [
+    {
+     "line": 59,
+     "kind": "removed-platform"
+    }
+   ],
    "other": [],
    "new": [],
    "updated": [],
@@ -285,7 +341,12 @@
    "security_na": false,
    "functional_updates": 10,
    "purpose_other": [],
-   "other": ["General updates to current Release Notes: Correction of Xeon 6 family processors names."],
+   "other": [
+    {
+     "line": 292,
+     "kind": "release-note-correction"
+    }
+   ],
    "new": [
     ["06-ae-01", "97", "", "01000273", "GNR-D", "B0/B1"]
    ],
@@ -348,7 +409,12 @@
    "security_na": false,
    "functional_updates": 10,
    "purpose_other": [],
-   "other": [],
+   "other": [
+    {
+     "line": 346,
+     "kind": "disclosure-prose"
+    }
+   ],
    "new": [],
    "updated": [
     ["06-c5-02", "82", "00000118", "00000119", "ARL-H", "A1"],
@@ -394,7 +460,12 @@
    "security_na": false,
    "functional_updates": 20,
    "purpose_other": [],
-   "other": ["# Note: INTEL-SA-01244 and INTEL-SA-01247 will be published on May 13th 2025"],
+   "other": [
+    {
+     "line": 357,
+     "kind": "note"
+    }
+   ],
    "new": [
     ["06-b5-00", "80", "", "0000000a", "ARL-U", "A1"],
     ["06-c6-02", "82", "", "00000118", "ARL-S/HX (8P)", "B0"],
@@ -634,7 +705,12 @@
    "security_na": false,
    "functional_updates": 16,
    "purpose_other": [],
-   "other": ["Update: Corrected the MCU file for 06-a5-03"],
+   "other": [
+    {
+     "line": 608,
+     "kind": "update-note"
+    }
+   ],
    "new": [],
    "updated": [
     ["06-8e-09", "10", "000000f4", "000000f6", "AML-Y22", "H0"],
@@ -1008,7 +1084,12 @@
    "security_na": true,
    "functional_updates": 0,
    "purpose_other": [],
-   "other": ["Microcode 20230512 update released on May 12, 2023, does not contain any security updates and the note, [INTEL-SA-NA] is meant to convey that there are no applicable (Not Applicable) security updates in the package."],
+   "other": [
+    {
+     "line": 1066,
+     "kind": "other"
+    }
+   ],
    "new": [
     ["06-be-00", "01", "", "00000010", "ADL-N", "A0"],
     ["06-9a-04", "40", "", "00000004", "AZB", "A0"],
@@ -1455,7 +1536,12 @@
    "security": [],
    "security_na": false,
    "functional_updates": 0,
-   "purpose_other": ["Removed TGL/06-8c-01/80 due to functional issues with some OEM platforms."],
+   "purpose_other": [
+    {
+     "line": 1545,
+     "kind": "removed-platform"
+    }
+   ],
    "other": [],
    "new": [],
    "updated": [],
@@ -1551,7 +1637,12 @@
    "security": [],
    "security_na": false,
    "functional_updates": 0,
-   "purpose_other": ["Revert to previous versions due to reported system hang."],
+   "purpose_other": [
+    {
+     "line": 1650,
+     "kind": "revert"
+    }
+   ],
    "other": [],
    "new": [],
    "updated": [
@@ -1685,7 +1776,12 @@
    ],
    "security_na": false,
    "functional_updates": 0,
-   "purpose_other": ["Correction in release notes for specific processor to CFL-S only.  Prior release showed as CFL-H/S."],
+   "purpose_other": [
+    {
+     "line": 1800,
+     "kind": "release-note-correction"
+    }
+   ],
    "other": [],
    "new": [],
    "updated": [
@@ -1804,7 +1900,12 @@
    "security": [],
    "security_na": false,
    "functional_updates": 0,
-   "purpose_other": ["Resolved errors in releasenote from microcode-20190514a."],
+   "purpose_other": [
+    {
+     "line": 1920,
+     "kind": "release-note-correction"
+    }
+   ],
    "other": [],
    "new": [
     ["06-37-08", "02", "", "00000838", "VLV", "C0"],

@@ -110,7 +110,10 @@ def test_cpe_family_rules_and_basis(tmp_path):
     # 版本清單沒有、映像分不出 family：major 16 ≥ 11，推定為 CSME（NVD 的 part o 只有 CSME 有 11 以上的版本），推定寫在 basis
     me = next(c for c in sbom(tmp_path, img) if c["name"] == "Intel CSE firmware")
     assert me["version"] == "16.1.30.2307" and me["cpe"] == CSME_CPE_16
-    assert "inferred CSME from major version 16" in props(me, "dumpling:cpe-basis")[0] and "dropped" in props(me, "dumpling:cpe-basis")[0]
+    basis = props(me, "dumpling:cpe-basis")[0]
+    assert "inferred from the version" in basis and "major 16 is in 11..30" in basis and "dropped" in basis and "needs human review" in basis
+    assert "TXE" in basis and "SPS" in basis and "below 11" in basis and "AMT" in basis and "different product" in basis     # NVD 上的依據照實寫
+    assert "temporary Dependency-Track" in props(me, "dumpling:cpe-note")[0]
     assert props(me, "dumpling:cpe-note") == [xf.CPE_NOTE] and not props(me, "dumpling:cpe-gap")
     # 清單寫 TXE：不同的 product → 不帶 CPE，寫 gap
     m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,TXE,16.1.30.2307,,Intel,")
@@ -122,6 +125,13 @@ def test_cpe_family_rules_and_basis(tmp_path):
     assert me["cpe"] == CSME_CPE_16 and props(me, "dumpling:cpe-basis")[0].startswith("family CSME declared in the version list")
     assert all("cpe" not in c for c in sbom(tmp_path, img, m) if c is not me and not c["name"].startswith("Intel CSE"))
     assert props(me, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no data in the database" in props(me, "dumpling:advisory-basis")[0]
+
+
+def test_csme_major_bounds_for_the_inferred_family():
+    assert xf.csme_cpe({"family": None, "version": "11.0.0.1"}) and xf.csme_cpe({"family": None, "version": "30.9.9"})
+    assert xf.csme_cpe({"family": None, "version": "10.9.9"}) is None and xf.csme_cpe({"family": None, "version": "31.0.0"}) is None
+    assert "above 30" in xf.csme_cpe_info({"family": None, "version": "31.0.0"})[2] and "< 11" in xf.csme_cpe_info({"family": None, "version": "10.0.0"})[2]
+    assert xf.csme_cpe({"family": "CSME", "version": "31.0.0"})                        # 版本清單明寫 CSME：照清單，不看上限
 
 
 def test_cpe_for_standalone_me_image_without_region(tmp_path):
@@ -145,7 +155,8 @@ def test_csme_cpe_format_drops_the_build_number(version, cpe_version):
                                 {"family": "CSME", "version": ""}, {"family": "CSME", "version": "16.1:30"},
                                 {"family": "CSME", "version": "unknown"}, {"family": "CSME", "version": "16.1.30.2307:*"},
                                 {"family": "CSME", "version": "16.1"}, {"family": None, "version": "16"},
-                                {"family": "CSME", "version": "16.1.30.2307.5"}, {"family": "CSME", "version": "-16.1.30"}])
+                                {"family": "CSME", "version": "16.1.30.2307.5"}, {"family": "CSME", "version": "-16.1.30"},
+                                {"family": None, "version": "31.0.0.1"}, {"family": None, "version": "258.32888.0.16720"}])
 def test_csme_cpe_not_filled_when_unsure(me):
     assert xf.csme_cpe(me) is None
     cpe, basis, gap = xf.csme_cpe_info(me)

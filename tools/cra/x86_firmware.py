@@ -54,7 +54,7 @@ BIOS（Intel 平台的完整 SPI 映像）：
   （CSME 12 以後：$FPT 在 +0x1000、沒有 FTPR 那一項）；都拿不到但有表頭像真的 `$FPT`、FTPR 的 `$CPD` 或候選數用完 → unknown；
   只有雜散的標記仍是 no-me-region。有兩個以上版本不同的 FTPR manifest（例如 capsule 裡兩個 ME 映像）時報第一個，
   me_conflict 列出全部、ATTENTION。沒有 ME 區域的檔案裡零散的 `$MN2`
-  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；SBOM 的 ME 元件的 cpe：清單寫明 CSME，或映像讀不出 family 但 major 版本 ≥ 11（NVD 的 o 類 CPE 只有 CSME 有這些版本）才帶，版本只放前三段（見 CSME_CPE、csme_cpe_info）；清單寫 ME／TXE／SPS、版本不是三段以上的數字、major < 11 且 family 不明時不填，原因在 dumpling:cpe-gap。
+  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；SBOM 的 ME 元件的 cpe：清單寫明 CSME，或映像讀不出 family 但 major 版本在 11～30（NVD 上 TXE、SPS 的版本都低於 11；推定寫在 dumpling:cpe-basis，比對結果待人審）才帶，版本只放前三段（見 CSME_CPE、csme_cpe_info）；清單寫 ME／TXE／SPS、版本不是三段以上的數字、major 在 11～30 以外且 family 不明時不填，原因在 dumpling:cpe-gap。
   格式依 me_cleaner、MEAnalyzer 的結構定義（只讀它們的原始碼核對欄位位置，沒有用它們的程式）。
 - 公告比對（fw_advisory.py，離線）：每份 Intel 微碼對 tools/cra/data/intel-microcode-releases.json（Intel 公開的微碼發佈說明，由 intel_ucode_releases.py 產生）
   比對，結果記在 inv["bios"][i]["microcode"][j]["advisory"]、SBOM 的 dumpling:advisory-* property 與 fw-inventory.md 的「公告比對」一節；
@@ -1510,25 +1510,28 @@ ASSESS_NOTES = {
 #   （`and` 的拼法只出現在 part a 的 converged_security_and_management_engine）。
 # - CVE 的 configurations（https://services.nvd.nist.gov/rest/json/cves/2.0?virtualMatchString=cpe:2.3:o:intel:converged_security_management_engine_firmware）
 #   36 筆 CVE，最新是 CVE-2022-38102：用 cpe:…:* 加三段的 versionStart／End（如 versionEndExcluding 16.1.27、versionStartIncluding 11.0）。
-#   所以 NVD 的 CSME 資料止於 2022，之後 Intel 公告的 CSME 弱點 NVD 沒有這個 CPE 的設定；DT／Grype 沒比到不代表沒有漏洞。
+#   所以 NVD 的 CSME 資料止於 2022，之後 Intel 公告的 CSME 弱點 NVD 沒有這個 CPE 的設定；Grype 沒比到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）。
 # - 其他 firmware 是不同的 product：TXE ＝ trusted_execution_engine_firmware（版本 3.0～4.0.x）、SPS ＝ server_platform_services_firmware
-#   （3.0.6～5.x，版本字串格式很雜）。part o 的 product 裡，major 版本 11 以上只有 CSME。
+#   （3.0.6～5.x，版本字串格式很雜），兩者的版本都低於 11。AMT ＝ active_management_technology_firmware（part o，版本也有 11.x～14.5.x）是另一個 product，
+#   CSME 的 CPE 比不到 AMT 的 CVE 設定。
 # 版本轉換：$MN2 的版本是 major.minor.hotfix.build 四段；NVD 只有前三段，所以 CPE 只放前三段（14.0.47.1558 → 14.0.47），元件的 version 維持四段。
-# family：映像分不出來。版本清單的 me 列寫明 CSME → 帶；寫 ME／TXE／SPS → 不帶；映像沒有清單時只憑 major 版本 11 以上推定為 CSME
-# （NVD part o 的 TXE 只到 4.x、SPS 只到 5.x，11 以上只有 CSME），推定寫在 dumpling:cpe-basis；11 以下分不出來 → 不帶、標 GAP。
+# family：映像分不出來。版本清單的 me 列寫明 CSME → 帶；寫 ME／TXE／SPS → 不帶；映像沒有清單時，major 版本在 11～30 之間推定為 CSME
+# （TXE、SPS 的版本都低於 11；上限 30 是我們的判斷：CSME 大約每年加一個 major，目前最高約 20；$MN2 裡雜散的欄位值會有幾百到幾萬，超過 30 就不是這個欄位）。
+# 推定寫在 dumpling:cpe-basis，比對結果待人審；11 以下或 30 以上分不出來 → 不帶、標 GAP。
 # microcode、NVIDIA vBIOS 沒有標準的 purl／CPE，不自己發明。
 CSME_CPE = "cpe:2.3:o:intel:converged_security_management_engine_firmware:{}:*:*:*:*:*:*:*"
 CSME_MIN_MAJOR = 11
+CSME_MAX_MAJOR = 30
 CPE_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[0-9]+)?")
 CPE_NOTE = ("NVD CPE and version-range data for Intel CSME is incomplete (the NVD CPE dictionary stops at CSME 14.5.11 and the CVE "
-            "configurations at CVE-2022-38102); no DT or Grype match does not mean there are no vulnerabilities; the Intel advisories "
-            "(INTEL-SA) are authoritative")
+            "configurations at CVE-2022-38102); no Grype match does not mean there are no vulnerabilities (the temporary Dependency-Track "
+            "has the NVD source disabled, so a component with only a CPE is not matched there); the Intel advisories (INTEL-SA) are authoritative")
 CPE_PROPS = ("dumpling:cpe-basis", "dumpling:cpe-note", "dumpling:cpe-gap")
 
 
 def csme_cpe_info(me):
     """ME 的 NVD CPE 判斷 → (cpe 或 None, basis 或 None, gap 原因或 None)。
-    要有三段以上的純數字版本；family 要是 CSME（版本清單）或 major ≥ 11（推定）；其他一律不帶並寫 gap 原因。"""
+    要有三段以上的純數字版本；family 要是 CSME（版本清單），或 major 在 11～30（推定）；其他一律不帶並寫 gap 原因。"""
     if not me:
         return None, None, None
     m = CPE_VERSION.fullmatch(me.get("version") or "")
@@ -1542,9 +1545,12 @@ def csme_cpe_info(me):
         return CSME_CPE.format(ver), "family CSME declared in the version list" + drop, None
     if fam:
         return None, None, f"family {fam} (version list) is not CSME; NVD uses a different product for it, no CPE"
-    if major >= CSME_MIN_MAJOR:
-        return (CSME_CPE.format(ver), f"family not readable from the image; inferred CSME from major version {major} >= {CSME_MIN_MAJOR} "
-                "(in NVD part-o CPEs only CSME has versions 11 and above; TXE stops at 4.x, SPS at 5.x)" + drop, None)
+    if CSME_MIN_MAJOR <= major <= CSME_MAX_MAJOR:
+        return (CSME_CPE.format(ver), f"family is not readable from the image and is inferred from the version: major {major} is in {CSME_MIN_MAJOR}..{CSME_MAX_MAJOR} "
+                "(on NVD the TXE trusted_execution_engine_firmware and SPS server_platform_services_firmware versions are all below 11; "
+                "AMT active_management_technology_firmware is a different product that this CPE does not match); the match result needs human review" + drop, None)
+    if major > CSME_MAX_MAJOR:
+        return None, None, f"major version {major} is above {CSME_MAX_MAJOR}, which is not plausible for a CSME version field; no CPE"
     return None, None, f"family not readable from the image and major version {major} < {CSME_MIN_MAJOR} could be ME, TXE, SPS or CSME; no CPE"
 
 
@@ -2172,7 +2178,11 @@ def advisory_section(inv, advisory=None):
     results = []
     for b in inv["bios"]:
         for u in b["microcode"]:
-            u["advisory"] = mod.match_microcode(table if table is not None else err, u)
+            try:
+                u["advisory"] = mod.match_microcode(table if table is not None else err, u)
+            except Exception as e:           # 比對本身出錯（資料表內容異常等）：這一份是 NOT_ASSESSED，不讓整個流程中斷
+                u["advisory"] = {**mod._na("match-error", f"the advisory matching failed ({type(e).__name__})"), "signatures": [],
+                                 "source": table.label() if table is not None else None, "notes": []}
             results.append(u["advisory"])
             n += 1
     sec = {"status": "OK" if table is not None else "GAP", "microcodes": n, "counts": mod.counts(results)}
@@ -2342,7 +2352,7 @@ def advisory_markdown(inv):
         cpe, _basis, gap = csme_cpe_info(m)
         if m:
             L += ["", f"- ME {e(m['version'])}：{ADV_TEXT['NOT_ASSESSED']}。Intel CSME／TXE／SPS 的公告沒有機器可讀的資料表。"
-                  + (f"SBOM 帶 NVD 的 CPE `{e(cpe)}`，讓 DT／Grype 比對；NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整，比不到不代表沒有漏洞，以 Intel 公告（INTEL-SA）為準。"
+                  + (f"SBOM 帶 NVD 的 CPE `{e(cpe)}`，讓 Grype 比對（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整，比不到不代表沒有漏洞，以 Intel 公告（INTEL-SA）為準。{'family 是由版本推定的（映像讀不出來），比對結果待人審。' if 'inferred' in (_basis or '') else ''}"
                      if cpe else f"沒有 CPE（GAP）：{e(gap)}。")]
         else:
             L += ["", f"- ME：{e(b['me_note'] or '沒有讀到 ME 版本')}；沒有 ME 版本可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），SBOM 不帶 CPE。"]

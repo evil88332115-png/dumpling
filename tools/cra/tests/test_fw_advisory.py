@@ -127,8 +127,10 @@ stray text in a table section
     for expect in ("沒有日期", "連結網址的編號不同", "讀不到 INTEL-SA 編號", "多了尾碼", "不認得的小標題", "有 5 欄", "不是 FF-MM-SS/PI",
                    "不是 8 位十六進位", "沒有 New Ver", "沒有 Processor 欄", "表格區段裡的非表格文字", "Purpose 裡的非項目文字", "Removed Platforms 的 New Ver 不是空的"):
         assert expect in whys, expect
-    assert any("Something nobody planned for" in x for x in r["purpose_other"])          # 沒分類的項目原文保留
-    assert any(u["text"].startswith("# Note: INTEL-SA-01003") for u in p["unparsed"]) and r["security"] == [{"id": "INTEL-SA-01001", "how": "security"}]   # 備註不算公告
+    assert any(x["kind"] == "other" for x in r["purpose_other"]) and all(set(x) == {"line", "kind"} for x in r["purpose_other"])     # 沒分類的項目只記行號與分類，不抄原文
+    assert any(x["kind"] == "note" for x in r["other"]) and r["security"] == [{"id": "INTEL-SA-01001", "how": "security"}]          # 備註不算公告
+    assert all(set(u) <= {"line", "release", "section", "why", "handled"} for u in p["unparsed"])                                     # 沒有原文欄位
+    assert "INTEL-SA-01003" not in json.dumps(p) and "Something nobody planned for" not in json.dumps(p) and "nobody" not in json.dumps(p)
     assert r["updated"] == [["06-bb-03", "e0", "000000a0", "000000a2", "ABC", "B0"]]    # 只有完整的列才收
     assert [u["section"] for u in p["unparsed"] if "不認得的小標題" in u["why"]] == [None]
     assert r["new"] == []                                                              # 不認得的小標題底下的表格不當成資料
@@ -141,7 +143,7 @@ def test_parse_heading_title_differs_from_tag_url_and_extra_headings():
     r = p["releases"][0]
     assert r["tag"] == "microcode-20220207" and r["heading"] == "microcode-2022027" and r["date"] == "2022-02-07"
     p = ur.parse(release("microcode-20240813", "## Update: Corrected the MCU file for 06-a5-03\n\n### Purpose\n\n- Update for functional issues. x\n"))
-    assert p["releases"][0]["other"] == ["Update: Corrected the MCU file for 06-a5-03"] and p["unparsed"] == []
+    assert p["releases"][0]["other"] == [{"line": 4, "kind": "update-note"}] and p["unparsed"] == []
     p = ur.parse(release("microcode-20230512-rev2", "### Purpose\n") + release("microcode-20190514a", "### Purpose\n"))
     assert [r["date"] for r in p["releases"]] == ["2023-05-12", "2019-05-14"]
 
@@ -168,7 +170,7 @@ Corrected names.
     a, b = p["releases"]
     assert a["removed"] == [["06-aa-04", "c0", "", "", "MTL", ""]]                                       # 只有文字的移除
     assert b["disclosed"][0] == ["06-6c-01", "10", "010002b0", "N/A", "ICL-D", "B0"] and b["disclosed"][1][3] == "N/A"
-    assert b["removed"] == [["06-86-04", "01", "0b00000f", "", "SNR", "B0"]] and b["other"] == ["Corrected names."]
+    assert b["removed"] == [["06-86-04", "01", "0b00000f", "", "SNR", "B0"]] and b["other"] == [{"line": 29, "kind": "other"}]
     assert b["updated"] == [] and p["unparsed"] == []
     # 表格已經有同一個 F-M-S／PI 就不重複補
     q = ur.parse(release("microcode-20260812", f"### Purpose\n\n- Removed TGL/06-8c-01/80 due to x\n\n### Removed Platforms\n\n{TBL}| TGL | B1 | 06-8c-01/80 | 00000068 | | y\n"))
@@ -233,6 +235,7 @@ def test_read_source_pins_sha256_and_size(tmp_path, monkeypatch):
 
 
 def test_generate_and_verify_cli_reproduce_the_table(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ur, "PROSE_RULES", ())
     src = tmp_path / "releasenote.md"
     src.write_text(notes(release("microcode-20240101", f"### Purpose\n\n- Security updates for [INTEL-SA-01001]({SA_URL}intel-sa-01001.html)\n\n### Updated Platforms\n\n{TBL}| ABC | B0 | 06-bb-02/e0 | 000000a0 | 000000a2 | x\n")), encoding="utf-8")
     monkeypatch.setattr(ur, "SOURCE_SHA256", hashlib.sha256(src.read_bytes()).hexdigest())
@@ -386,8 +389,9 @@ def test_reverted_revision_and_disclosure_note():
     assert fa.match_signature(t, CPU, "0xE0", "0x18")["match"] == "up-to-date"
     assert fa.match_signature(t, CPU, "0xE0", "0x20")["reason"] == "revision-newer-than-table"                       # 被復原掉的版本：不猜
     r = fa.match_signature(t, CPU, "0xE0", "0x10")
-    assert r["match"] == "affected-candidate" and r["releases"] == ["microcode-20240101", "microcode-20240201"]
+    assert r["match"] == "affected-candidate" and r["releases"] == ["microcode-20231201", "microcode-20240101", "microcode-20240201"]      # 揭露表也算
     assert any("New Disclosures" in n and "INTEL-SA-00009" in n for n in r["notes"])
+    assert {c["id"]: c["how"] for c in r["candidates"]} == {"INTEL-SA-00001": ["security"], "INTEL-SA-00009": ["disclosed"]}
 
 
 def test_updated_security_updates_keep_their_kind():
@@ -488,8 +492,12 @@ def test_committed_table_matches_pinned_sha256_and_generator_constants():
     doc = t.doc
     assert doc["generator"] == "tools/cra/intel_ucode_releases.py" and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", doc["generated_at"])
     assert doc["coverage"]["releases"] == len(doc["releases"]) == 45 and doc["coverage"]["newest"] == ur.TAG and doc["coverage"]["oldest"] == "microcode-20190312"
-    assert [u["why"] for u in doc["unparsed"]] == ["表格區段裡的非表格文字", "Purpose 裡的非項目文字，原文記在 other", "小標題 `Updated Platforms0` 多了尾碼，當成 `Updated Platforms` 讀"] or \
-        len(doc["unparsed"]) == 3                                                                          # 看不懂的段落都記著（目前 3 處），不是 0 也不是被吞掉
+    assert [(u["line"], u["release"]) for u in doc["unparsed"]] == [(346, "microcode-20250812"), (357, "microcode-20250512"),
+                                                                    (1066, "microcode-20230512"), (1905, "microcode-20190618")]          # 看不懂的段落都記著（目前 4 處）
+    assert doc["unparsed"][0]["handled"] == "prose_rules" and all("text" not in u for u in doc["unparsed"])
+    blob = json.dumps(doc)
+    assert "Security updates" not in blob and "Update for functional" not in blob and "Refer to" not in blob          # 來源的說明文字沒有抄進表（授權）
+    assert all(set(x) == {"line", "kind"} for r in doc["releases"] for x in r["other"] + r["purpose_other"])
     assert doc["unparsed"], "unparsed 不該是空的：來源有看不懂的段落"
 
 
@@ -579,3 +587,235 @@ def test_report_section_exists_without_microcode_or_bios(tmp_path):
     inv["status"], inv["detail"] = "GAP", "x"
     md = xf.markdown(inv)
     assert "## 公告比對" in md and "沒有 BIOS 映像" in md and inv["advisory"]["microcodes"] == 0
+
+
+# ---------- 揭露表、散文對照、被取代的 platform 遮罩 ----------
+
+def test_disclosure_table_rows_make_candidates_with_upper_bound_of_old_and_new():
+    # Old 0x20 / New N/A（揭露表只有 Old）；Old 0x30 / New 0x40（取較大者 0x40）
+    t = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00005", "INTEL-SA-00006"], disclosed=[(FMS, "e0", "00000020", "N/A"), ("06-cc-01", "01", "00000030", "00000040")]),
+                 rel("microcode-20240201", updated=[(FMS, "e0", "00000010", "00000030"), ("06-cc-01", "01", "00000030", "00000050")]))
+    r = fa.match_signature(t, CPU, "0xE0", "0x20")                                   # 0x20 ≤ 揭露的 0x20 → 候選
+    assert r["match"] == "affected-candidate" and {c["id"]: c["how"] for c in r["candidates"]} == {"INTEL-SA-00005": ["disclosed"], "INTEL-SA-00006": ["disclosed"]}
+    assert "microcode-20240301" in r["releases"] and "disclosure table" in r["basis"]
+    r = fa.match_signature(t, CPU, "0xE0", "0x30")                                   # 0x30 = 最新、高於揭露的 0x20 → 不用揭露表
+    assert r["match"] == "up-to-date" and any("above that" in n for n in r["notes"])
+    r = fa.match_signature(t, "000C06C1", "0x01", "0x40")                            # 06-cc-01：Old 0x30／New 0x40 → 上界 0x40
+    assert r["match"] == "affected-candidate" and {c["id"] for c in r["candidates"]} >= {"INTEL-SA-00005", "INTEL-SA-00006"}
+    r = fa.match_signature(t, "000C06C1", "0x01", "0x41")                           # 0x41 高於揭露的上界 0x40、低於最新 0x50（那個 release 沒有公告）
+    assert r["match"] == "older-no-sa" and r["releases"] == ["microcode-20240201"]
+    t2 = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00005"], disclosed=[(FMS, "e0", "00000020", "N/A")]))
+    r = fa.match_signature(t2, CPU, "0xE0", "0x10")                                  # 只有揭露表的鍵：revision ≤ 上界仍列候選，沒有最新 revision
+    assert r["match"] == "affected-candidate" and r["latest_revision"] is None and "only disclosure" in r["basis"]
+    assert fa.match_signature(t2, CPU, "0xE0", "0x21")["reason"] == "no-revision-history"
+
+
+def test_disclosure_with_latest_revision_equal_to_the_bound_is_still_candidate():
+    t = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00005"], disclosed=[(FMS, "e0", "00000010", "00000020")]),
+                 rel("microcode-20240101", updated=[(FMS, "e0", "00000010", "00000020")]))
+    r = fa.match_signature(t, CPU, "0xE0", "0x20")
+    assert r["match"] == "affected-candidate" and r["latest_revision"] == "0x00000020" and r["candidates"][0]["how"] == ["disclosed"]
+
+
+def prose_table(ref_rows, extra_rows=(), with_gap=True):
+    rules = [{"release": "microcode-20240301", "line": 7, "quote": "q", "interpretation": "i", "codes": ["ABC"], "ref_release": "microcode-20240201",
+              "keys": [[FMS, "e0", "00000030", "row-in-ref-release"]],
+              "gaps": [{"key": "06-bb-01/01", "why": "mixed"}, {"code": "XYZ", "why": "no table key has this processor code"}] if with_gap else []}]
+    doc = {"schema": fa.SCHEMA, "source": {"repo": "https://github.com/intel/x", "tag": "microcode-30000101", "commit": "b" * 40, "path": "releasenote.md", "sha256": "c" * 64},
+           "releases": [rel("microcode-20240301", sa=["INTEL-SA-00007", "INTEL-SA-00008"], updated=list(extra_rows)),
+                        rel("microcode-20240201", updated=list(ref_rows)),
+                        rel("microcode-20240101", updated=[(FMS, "e0", "00000010", "00000020"), ("06-bb-01", "01", "00000010", "00000020")])],
+           "prose_rules": rules}
+    fa.validate(doc)
+    return fa.Table(doc, "a" * 64)
+
+
+def test_prose_rule_adds_the_prose_release_for_revisions_below_the_reference():
+    t = prose_table([(FMS, "e0", "00000020", "00000030")])
+    r = fa.match_signature(t, CPU, "0xE0", "0x20")
+    assert r["match"] == "affected-candidate" and {c["id"]: c["how"] for c in r["candidates"]} == {"INTEL-SA-00007": ["prose"], "INTEL-SA-00008": ["prose"]}
+    assert "microcode-20240301" in r["releases"] and "prose, compiled by hand" in r["basis"] and "line 7" in r["basis"]
+    r = fa.match_signature(t, CPU, "0xE0", "0x30")                                     # 等於基準：不加
+    assert r["match"] == "up-to-date" and r["candidates"] == []
+    g = fa.match_signature(t, CPU, "0xE0", "0x10")
+    assert g["match"] == "affected-candidate"
+    gap = fa.match_signature(t, "000B06B1", "0x01", "0x10")                            # 06-bb-01/01：對照有 GAP → 只加註，不推
+    assert any("GAP in the hand-compiled prose mapping" in n and "mixed" in n for n in gap["notes"]) and not any(c["how"] == ["prose"] for c in gap["candidates"])
+
+
+def test_prose_rule_in_the_real_table_covers_the_adl_example_from_review():
+    t = fa.load()
+    r = fa.match_signature(t, "00090672", "0x07", "0x37")                              # ADL-S 06-97-02/07 在 20250211 的 revision
+    ids = {c["id"] for c in r["candidates"]}
+    assert {"INTEL-SA-01249", "INTEL-SA-01308", "INTEL-SA-01310", "INTEL-SA-01311", "INTEL-SA-01313", "INTEL-SA-01367"} <= ids
+    assert "microcode-20250812" in r["releases"] and all(c["how"] == ["prose"] for c in r["candidates"] if c["id"] in {"INTEL-SA-01249", "INTEL-SA-01367"})
+    ok = fa.match_signature(t, "00090672", "0x07", "0x3a")                             # 等於 20250512 的 revision：不靠散文，仍有 20251111／20260210 的候選
+    assert "INTEL-SA-01249" not in {c["id"] for c in ok["candidates"]}
+    rule = t.doc["prose_rules"][0]
+    assert (rule["release"], rule["line"], rule["ref_release"]) == ("microcode-20250812", 346, "microcode-20250512") and len(rule["quote"]) < 120
+    assert [g.get("key") for g in rule["gaps"]] == ["06-be-00/19"]                    # ADL-N 與 TWL 共用的鍵：歧義 → GAP，不猜
+    adl_n = fa.match_signature(t, "000B06E0", "0x19", "0x1d")
+    assert any("GAP in the hand-compiled prose mapping" in n for n in adl_n["notes"])
+
+
+def test_superseded_platform_mask_is_not_up_to_date():
+    t = fa.load()
+    for cpuid, pf, rev in (("00090672", "0x03", "0x22"), ("000B06E0", "0x01", "0x10"), ("000B06E0", "0x11", "0x1a"), ("000C06C2", "0x90", "0x11b")):
+        # 06-97-02/03、06-be-00/01 與 /11、06-cc-02/90：遮罩與較新的鍵有交集（0x90 & 0x94＝0x90）、而且那個鍵在之後還有更新
+        r = fa.match_signature(t, cpuid, pf, rev)
+        assert r["match"] == "NOT_ASSESSED" and r["reason"] == "superseded-platform-mask", (cpuid, pf)
+        assert "overlaps" in r["basis"] and "releases after" in r["basis"] and r["basis"].endswith(fa.NO_DATA) and "INTEL-SA-" in r["basis"]
+    assert int("90", 16) & int("94", 16) and not int("07", 16) & int("e0", 16)       # 核對過的遮罩關係
+    # 互不相交（06-ba-02/07 對 e0）：結果不變，加註
+    r = fa.match_signature(t, "000B06A2", "0x07", "0x4112")
+    assert r["match"] == "up-to-date" and any("disjoint" in n and "other platform mask" in n for n in r["notes"])
+    assert fa.match_signature(t, "00090672", "0x07", "0x3e")["match"] == "up-to-date"        # 最新的鍵本身不受影響
+
+
+def test_superseded_mask_candidates_are_also_listed_when_the_revision_is_older():
+    t = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00003"], updated=[(FMS, "07", "00000040", "00000050")]),
+                 rel("microcode-20240201", updated=[(FMS, "03", "00000020", "00000030")]),
+                 rel("microcode-20240101", sa=["INTEL-SA-00001"], new=[(FMS, "03", "", "00000020"), (FMS, "07", "", "00000040")]))
+    old = fa.match_signature(t, CPU, "0x03", "0x20")
+    assert old["match"] == "affected-candidate" and {c["id"] for c in old["candidates"]} == {"INTEL-SA-00003"} and old["candidates"][0]["how"] == ["superseded-mask"]
+    cur = fa.match_signature(t, CPU, "0x03", "0x30")
+    assert cur["match"] == "NOT_ASSESSED" and cur["reason"] == "superseded-platform-mask" and "INTEL-SA-00003" in cur["basis"]
+    assert fa.match_signature(t, CPU, "0x07", "0x50")["match"] == "up-to-date"
+
+
+def test_every_key_older_than_a_newer_overlapping_key_is_never_up_to_date_in_the_real_table():
+    t = fa.load()
+    bad = []
+    for (fms, pf), ev in t.events.items():
+        main = [e for e in ev if e[1] in ("new", "updated")]
+        if not main:
+            continue
+        top = min(e[0] for e in main)
+        inter, _ = fa._superseding(t, fms, pf, top)
+        latest = sorted({e[3] for e in main if e[0] == top})[-1]
+        f, m, st = (int(x, 16) for x in fms.split("-"))
+        cpuid = "%08X" % ((((m >> 4) & 0xF) << 16) | (f << 8) | ((m & 0xF) << 4) | st)
+        r = fa.match_signature(t, cpuid, "0x" + pf, "0x" + latest)
+        if inter and r["match"] == "up-to-date":
+            bad.append((fms, pf))
+    assert bad == []
+
+
+def test_revision_one_below_latest_is_never_up_to_date():
+    for latest in (0x40, 0x100, 0x1, 0x10000000):
+        t = mk_table(rel("microcode-20240101", updated=[(FMS, "e0", "00000000", "%08x" % latest)]))
+        assert fa.match_signature(t, CPU, "0xE0", hex(latest - 1) if latest > 1 else "0x0")["match"] != "up-to-date"
+        assert fa.match_signature(t, CPU, "0xE0", hex(latest))["match"] == "up-to-date"
+
+
+def test_removed_and_updated_in_the_same_release():
+    t = mk_table(rel("microcode-20240201", removed=[(FMS, "e0", "00000010", "")], updated=[(FMS, "e0", "00000010", "00000020")]),
+                 rel("microcode-20240101", new=[(FMS, "e0", "", "00000010")]))
+    r = fa.match_signature(t, CPU, "0xE0", "0x10")                       # 同一個 release 又 removed 又 updated：以 updated 為準（有新 revision）
+    assert r["match"] in ("affected-candidate", "older-no-sa") and r["latest_revision"] == "0x00000020"
+    assert fa.match_signature(t, CPU, "0xE0", "0x20")["match"] == "up-to-date"
+
+
+def test_extended_signature_priority_and_candidate_union():
+    t = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00003"], updated=[("06-bb-01", "01", "00000010", "00000030")]),
+                 rel("microcode-20240201", sa=["INTEL-SA-00002"], updated=[(FMS, "e0", "00000010", "00000020")]),
+                 rel("microcode-20240101", updated=[("06-bb-02", "03", "00000010", "00000020")]))
+    # 主 signature up-to-date、extended 是 older-no-sa（沒有公告的鍵）→ older-no-sa（不能是 up-to-date）
+    t0 = mk_table(rel("microcode-20240201", updated=[("06-bb-01", "01", "00000010", "00000030")]), rel("microcode-20240101", updated=[(FMS, "e0", "00000010", "00000020")]))
+    r = fa.match_microcode(t0, ucode("0x20", ext=[("000B06B1", "0x01")]))
+    assert [s["match"] for s in r["signatures"]] == ["up-to-date", "older-no-sa"] and r["match"] == "older-no-sa"
+    # 兩個 signature 各自的候選公告取聯集；how、releases 合併
+    r = fa.match_microcode(t, ucode("0x10", ext=[("000B06B1", "0x01")]))
+    assert r["match"] == "affected-candidate" and [c["id"] for c in r["candidates"]] == ["INTEL-SA-00002", "INTEL-SA-00003"]
+    assert r["releases"] == ["microcode-20240201", "microcode-20240301"]
+    # 其中一個 NOT_ASSESSED、另一個 up-to-date → NOT_ASSESSED；NOT_ASSESSED 與 older-no-sa → NOT_ASSESSED
+    r = fa.match_microcode(t, ucode("0x20", ext=[("000B06B9", "0x01")]))
+    assert r["match"] == "NOT_ASSESSED" and r["reason"] == "cpuid-not-in-table"
+
+
+def test_cpuid_seven_digits_and_extended_model_family_f():
+    assert fa.fms_of("0806EC") is None and fa.fms_of("00806EC") is None            # 7 位數不收
+    assert fa.fms_of("00000F41") == "0f-04-01" and fa.fms_of("00200F41") == "11-04-01" and fa.fms_of("000F0F41") == "0f-f4-01"      # family 0xF：extended family 相加、extended model 併入
+    assert fa.fms_of("000206A7") == "06-2a-07" and fa.fms_of("000306C3") == "06-3c-03"                     # family 6：extended model 併入
+    assert fa.fms_of("00000450") == "04-05-00"                                                       # family 4：不併 extended model
+    assert fa.fms_of("000F0450") == "04-05-00"
+    r = fa.match_signature(TABLE, "000B06A", "0xE0", "0x10")
+    assert r["reason"] == "bad-cpuid"
+
+
+def test_report_wording_for_up_to_date_and_no_data(tmp_path):
+    t = mk_table(rel("microcode-20240101", updated=[(FMS, "e0", "00004100", "00004121")]))
+    _, _, md = sbom_with(tmp_path, t)                                                  # spi_image 的 000B06A2/0xE0/0x4121 ＝ 最新
+    sec = md[md.index("## 公告比對"):]
+    assert "up-to-date（資料表沒有更新的 revision；不代表沒有漏洞）" in sec and "資料庫沒有資料，以廠商公告為準" in sec
+    assert "does not mean there are no vulnerabilities" in sec and "不受影響" not in sec
+
+
+def test_table_gap_without_microcode_keeps_status_and_says_gap(tmp_path):
+    p = tmp_path / "in.bin"
+    p.write_bytes(b"\x00" * 64)
+    err = fa.TableError("table-unreadable", "not a regular file")
+    inv = xf.inventory([p], advisory=err)
+    assert inv["advisory"]["status"] == "GAP" and inv["advisory"]["microcodes"] == 0
+    st, _ = xf.status_of(inv)
+    assert st == "GAP"                                                                 # 沒有 BIOS 結構的 GAP 不因資料表而變；資料表 GAP 只在有微碼時才讓狀態變 ATTENTION
+    inv["status"], inv["detail"] = st, ""
+    assert "GAP（不能用）" in xf.markdown(inv)
+
+
+def test_advisory_errors_become_not_assessed_not_exceptions(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise KeyError("x")
+    monkeypatch.setattr(fa, "match_microcode", boom)
+    inv, comps, md = sbom_with(tmp_path, TABLE)
+    assert inv["advisory"]["counts"] == {"NOT_ASSESSED": 2}
+    u = next(c for c in comps if c["name"].startswith("Intel CPU microcode"))
+    assert props(u, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "KeyError" in props(u, "dumpling:advisory-basis")[0]
+    assert "資料庫沒有資料，以廠商公告為準" in md
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d["releases"][0]["security"].append({"id": "INTEL-SA-00001", "how": "bogus"}),
+    lambda d: d["releases"][0].update(date="2020-01-01"),                                                    # 順序要由新到舊
+    lambda d: d["releases"][1].update(date="2025-01-01"),
+    lambda d: d["releases"][0].update(date="Jan 1"),
+    lambda d: d.update(prose_rules=[{"release": "nope"}]),
+    lambda d: d.update(prose_rules="x"),
+])
+def test_validate_rejects_bad_how_order_and_prose_rules(mutate):
+    doc = {"schema": fa.SCHEMA, "source": {"repo": "r", "tag": "t", "commit": "c", "path": "p", "sha256": "s"},
+           "releases": [rel("microcode-20240201", updated=[(FMS, "e0", "00000020", "00000030")]), rel("microcode-20240101", updated=[(FMS, "e0", "00000010", "00000020")])]}
+    doc["releases"][0]["date"], doc["releases"][1]["date"] = "2024-02-01", "2024-01-01"
+    fa.validate(doc)
+    mutate(doc)
+    with pytest.raises(fa.TableError):
+        fa.validate(doc)
+
+
+def test_security_regex_is_linear_on_repeated_prefixes_and_long_lines():
+    import time
+    t0 = time.time()
+    ur.security_bullet("Security updates for " + "INTEL-SA-" * 20000 + " [INTEL-SA-00001]")
+    ur.security_bullet("Security updates for " + "(" * 50000)
+    p = ur.parse(release("microcode-20240101", "### Purpose\n\n- " + "x" * (ur.MAX_LINE + 5) + "\n"))
+    assert "沒有解析" in p["unparsed"][0]["why"]
+    assert time.time() - t0 < 5
+    assert ur.security_bullet("Security updates for INTEL-SA-INTEL-SA-00972") == ("security", ["INTEL-SA-00972"], False)
+
+
+def test_prose_rules_must_match_the_source_line(monkeypatch):
+    text = notes(release("microcode-20250812", "### Purpose\n\n### New Disclosures Updated in Prior Releases\n\nSome sentence.\n"),
+                 release("microcode-20250512", f"### Updated Platforms\n\n{TBL}| ADL | C0 | 06-97-02/07 | 00000038 | 0000003a | x\n| ADL-N | N0 | 06-be-00/19 | 0000001a | 0000001b | x\n"
+                                                f"| TWL | N0 | 06-be-00/19 | 0000001a | 0000001b | x\n| SPR-SP | E4 | 06-8f-07/87 | 00000001 | 00000002 | x\n"))
+    rule = dict(ur.PROSE_RULES[0], line=8, quote="Some sentence.")
+    p = ur.parse(text, [rule])
+    pr = p["prose_rules"][0]
+    assert sorted(k[:3] for k in pr["keys"]) == sorted([["06-97-02", "07", "0000003a"], ["06-8f-07", "87", "00000002"]])
+    assert [g.get("key") or g.get("code") for g in pr["gaps"]][0] == "06-be-00/19" and {g["code"] for g in pr["gaps"] if "code" in g} == {"RPL", "EMR", "MTL", "ARL"}
+    assert p["unparsed"][0]["handled"] == "prose_rules"
+    with pytest.raises(ur.GenError, match="與來源不符"):
+        ur.parse(text, [dict(rule, quote="Other.")])
+    with pytest.raises(ur.GenError, match="不在"):
+        ur.parse(text, [dict(rule, release="microcode-20990101")])
+    with pytest.raises(ur.GenError, match="不在 microcode-20250812 底下"):
+        ur.parse(text, [dict(rule, line=1, quote="# Release Notes")])

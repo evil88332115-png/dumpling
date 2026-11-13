@@ -9,6 +9,8 @@ tools/cra/data/intel-microcode-releases.json，供 fw_advisory.py 離線比對�
       重新解析固定來源，與 <json> 逐項比對（只有 generated_at 不比）；不相符退出碼 1。
 
 輸入是不可信資料：只當文字讀、不執行；大小有上限；解析不了的行一律記進 `unparsed`（不會悄悄略過）。
+來源（releasenote.md）沒有明確授權，資料表只取事實性欄位（tag、日期、INTEL-SA 編號、F-M-S、platform 遮罩、revision、Processor 代號）；
+看不懂或不是公告的段落只記行號與分類（`unparsed`、`other`、`purpose_other`），不抄原文；人工對照（PROSE_RULES）最多引一句原文。
 這是人工執行的步驟（不在 CI 裡每次重抓）；步驟寫在 docs/notes/c2-firmware-advisory.md。
 
 releasenote.md 的格式（2026-11-13 對固定來源逐段核對）：
@@ -41,13 +43,14 @@ SOURCE_SHA256 = "338b556b2e8788e68f542361d2835f1344b2ad42b40991756beb1fc8a5cf11f
 SOURCE_BYTES = 157503
 MAX_BYTES = 4 << 20
 MAX_LINES = 100000
+MAX_LINE = 20000
 RETRIEVED = "2026-11-13"
 
 TAG_URL = re.compile(r"^\[(?P<title>[^\]]*)\]\(https://github\.com/intel/Intel-Linux-Processor-Microcode-Data-Files/releases/tag/(?P<tag>[A-Za-z0-9._-]+)\)\s*$")
 TAG_DATE = re.compile(r"^microcode-(\d{4})(\d{2})(\d{2})(?:-rev\d+|[a-z])?$")
 FMS_PI = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{2})-([0-9a-fA-F]{2})/([0-9a-fA-F]{2})$")
 REV = re.compile(r"^[0-9a-fA-F]{8}$")
-SA_ID = re.compile(r"(?:INTEL-SA-)+(\d{4,6})|(?<![A-Za-z0-9])SA(\d{5})(?![0-9])", re.I)
+SA_ID = re.compile(r"INTEL-SA-(\d{4,6})(?!\d)|(?<![A-Za-z0-9])SA(\d{5})(?![0-9])", re.I)      # `INTEL-SA-INTEL-SA-00972` 也從後面那個比到；沒有巢狀量詞，線性
 SA_NA = re.compile(r"\[INTEL-SA-NA\]", re.I)
 URL_PAREN = re.compile(r"\(https?://[^)\s]*\)")
 SA_URL = re.compile(r"/advisory/(intel-sa-\d{4,6})\.html", re.I)
@@ -107,22 +110,39 @@ def row_cells(line):
     return [c.strip() for c in s.split("|")]
 
 
-def parse(text):
-    """releasenote.md 的全文 → {"releases": [...], "unparsed": [...]}。看不懂的行記進 unparsed（行號、所在 release／區段、原文前 300 字）。"""
+def classify(text):
+    """非公告的項目／散文 → 分類（資料表不抄原文，只記行號與這個分類）。"""
+    t = text.strip().lower()
+    for prefix, kind in (("removed", "removed-platform"), ("revert", "revert"), ("correction", "release-note-correction"),
+                         ("resolved", "release-note-correction"), ("update:", "update-note"), ("general updates", "release-note-correction"),
+                         ("# note", "note"), ("microcode 20230512", "no-security-update-note")):
+        if t.startswith(prefix):
+            return kind
+    return "other"
+
+
+def parse(text, rules=()):
+    """releasenote.md 的全文 → {"releases": [...], "unparsed": [...], "prose_rules": [...]}。
+    看不懂的行記進 unparsed（行號、所在 release／區段、原因；不抄原文）。rules：人工對照（PROSE_RULES），預設沒有。"""
     lines = text.splitlines()
     if len(lines) > MAX_LINES:
         raise GenError(f"行數超過 {MAX_LINES}")
     releases, unparsed = [], []
+    seen = set()
     cur = None
     section = None            # purpose／new／updated／removed／disclosed／history／None
     last_bullet = None        # 前一個 Purpose 項目（接續行用）：(類型, index)
     header_seen = False
+    text_removed = []         # [(release, processor, F-M-S, PI)]：Purpose 文字寫的移除
 
-    def note(i, why, raw):
-        unparsed.append({"line": i, "release": cur["tag"] if cur else None, "section": section, "why": why, "text": raw.strip()[:300]})
+    def note(i, why):
+        unparsed.append({"line": i, "release": cur["tag"] if cur else None, "section": section, "why": why})
 
     for i, raw in enumerate(lines, 1):
         line = raw.rstrip("\r\n")
+        if len(line) > MAX_LINE:
+            note(i, f"這一行超過 {MAX_LINE} 字元，沒有解析")
+            continue
         s = line.strip()
         if not s:
             continue
@@ -136,30 +156,32 @@ def parse(text):
                 cur = {"tag": tag, "date": tag_date(tag), "security": [], "security_na": False, "functional_updates": 0,
                        "purpose_other": [], "other": [], "new": [], "updated": [], "removed": [], "disclosed": []}
                 if cur["date"] is None:
-                    note(i, "tag 名稱不是 microcode-YYYYMMDD 形式，沒有日期", s)
-                if m.group("title") != tag:
-                    cur["heading"] = m.group("title")
-                if any(r["tag"] == tag for r in releases):
+                    note(i, "tag 名稱不是 microcode-YYYYMMDD 形式，沒有日期")
+                title = m.group("title")
+                if title != tag:
+                    cur["heading"] = title if re.fullmatch(r"[A-Za-z0-9._-]{1,80}", title) else "(not an identifier)"
+                if tag in seen:
                     raise GenError(f"第 {i} 行：重複的 release {tag}")
+                seen.add(tag)
                 releases.append(cur)
                 section, last_bullet, header_seen = None, None, False
-            elif cur is not None:        # release 內的 `## Update: …` 之類的小標題：原文保留
-                cur["other"].append(s[3:].strip()[:300])
+            elif cur is not None:        # release 內的 `## Update: …` 之類的小標題：只記行號與分類
+                cur["other"].append({"line": i, "kind": classify(s[3:])})
             else:
-                note(i, "release 標題之前的 ## 標題", s)
+                note(i, "release 標題之前的 ## 標題")
             continue
         if cur is None:
-            note(i, "第一個 release 標題之前的內容", s)
+            note(i, "第一個 release 標題之前的內容")
             continue
         if s.startswith("### "):
             name = s[4:].strip()
             key = SECTIONS.get(name.lower())
-            if key is None and name.lower().rstrip("0123456789") in SECTIONS and name.lower().endswith("0"):
+            if key is None and name.lower().endswith("0") and name.lower().rstrip("0") in SECTIONS:
                 key = SECTIONS[name.lower().rstrip("0")]            # `Updated Platforms0`：多了一個 0 的筆誤
-                note(i, f"小標題 `{name}` 多了尾碼，當成 `{name.rstrip('0')}` 讀", s)
+                note(i, f"小標題多了尾碼 0，當成 `{name.rstrip('0')}` 讀")
             if key is None:
                 section = None
-                note(i, "不認得的小標題；底下的內容不當成資料", s)
+                note(i, "不認得的小標題；底下的內容不當成資料")
             else:
                 section = key
             last_bullet, header_seen = None, False
@@ -167,7 +189,7 @@ def parse(text):
         if s.startswith("|"):
             cells = row_cells(s)
             if section not in ROW_KINDS:
-                note(i, "表格不在 New／Updated／Removed／Disclosures 區段裡", s)
+                note(i, "表格不在 New／Updated／Removed／Disclosures 區段裡")
                 continue
             if all(re.fullmatch(r":?-{3,}:?", c) for c in cells):
                 continue
@@ -175,29 +197,29 @@ def parse(text):
                 header_seen = True
                 continue
             if not header_seen:
-                note(i, "表格沒有認得的表頭就出現資料列", s)
+                note(i, "表格沒有認得的表頭就出現資料列")
                 continue
             if len(cells) != 6:
-                note(i, f"表格列有 {len(cells)} 欄（預期 6）", s)
+                note(i, f"表格列有 {len(cells)} 欄（預期 6）")
                 continue
             proc, step, fms, old, new, _products = cells
             m = FMS_PI.match(fms)
             if not m:
-                note(i, "F-M-S/PI 不是 FF-MM-SS/PI 形式", s)
+                note(i, "F-M-S/PI 不是 FF-MM-SS/PI 形式")
                 continue
             bad = [v for v in (old, new) if v and v.upper() != "N/A" and not REV.match(v)]
             if bad:
-                note(i, "Old Ver／New Ver 不是 8 位十六進位", s)
+                note(i, "Old Ver／New Ver 不是 8 位十六進位")
                 continue
             if not proc:
-                note(i, "沒有 Processor 欄", s)
+                note(i, "沒有 Processor 欄")
                 continue
             if section == "new" and old:
-                note(i, "New Platforms 的 Old Ver 不是空的（照記）", s)
+                note(i, "New Platforms 的 Old Ver 不是空的（照記）")
             if section == "removed" and new:
-                note(i, "Removed Platforms 的 New Ver 不是空的（照記）", s)
+                note(i, "Removed Platforms 的 New Ver 不是空的（照記）")
             if section in ("updated", "new") and (not new or new.upper() == "N/A"):
-                note(i, "New／Updated Platforms 沒有 New Ver，這一列沒有收", s)
+                note(i, "New／Updated Platforms 沒有 New Ver，這一列沒有收")
                 continue
             cur[section].append(["%s-%s-%s" % tuple(x.lower() for x in m.groups()[:3]), m.group(4).lower(),
                                  "N/A" if old.upper() == "N/A" else old.lower(), "N/A" if new.upper() == "N/A" else new.lower(),
@@ -212,10 +234,10 @@ def parse(text):
                     if na:
                         cur["security_na"] = True
                     elif not ids:
-                        note(i, "像公告項目但讀不到 INTEL-SA 編號", s)
+                        note(i, "像公告項目但讀不到 INTEL-SA 編號")
                     urls = {u.lower() for u in SA_URL.findall(body)}
                     if urls and ids and {x.lower() for x in ids} != urls:
-                        note(i, "文字的編號與連結網址的編號不同（以文字為準）", s)
+                        note(i, "文字的編號與連結網址的編號不同（以文字為準）")
                     for sa in ids:
                         cur["security"].append({"id": sa, "how": how})
                     last_bullet = None
@@ -223,48 +245,120 @@ def parse(text):
                     cur["functional_updates"] += 1
                     last_bullet = ("func", None)
                 else:
-                    cur["purpose_other"].append(body[:300])
+                    cur["purpose_other"].append({"line": i, "kind": classify(body)})
+                    for m in TEXT_REMOVED.finditer(body):
+                        text_removed.append((cur["tag"], m.group(1), m.group(2).lower(), m.group(3).lower()))
                     last_bullet = ("other", len(cur["purpose_other"]) - 1)
                 continue
             if last_bullet is not None and not s.startswith("#"):
-                if last_bullet[0] == "other":
-                    cur["purpose_other"][last_bullet[1]] = (cur["purpose_other"][last_bullet[1]] + " " + s)[:300]
-                continue          # 功能更新項目的接續行（長網址換行）
-            if s.startswith("*") and s.endswith("*"):
-                cur["other"].append(s.strip("*").strip()[:300])
-                continue
-            cur["other"].append(s[:300])
-            note(i, "Purpose 裡的非項目文字，原文記在 other", s)
+                continue          # 項目的接續行（長網址換行）
+            cur["other"].append({"line": i, "kind": classify(s)})
+            note(i, "Purpose 裡的非項目文字，只記行號與分類")
             continue
         if section in ROW_KINDS:
             if s == "None":
                 continue
-            note(i, "表格區段裡的非表格文字", s)
+            cur["other"].append({"line": i, "kind": "disclosure-prose" if section == "disclosed" else classify(s)})
+            note(i, "表格區段裡的非表格文字，只記行號與分類")
             continue
         if section == "history":
-            cur["other"].append(s[:300])
+            cur["other"].append({"line": i, "kind": classify(s)})
             continue
-        note(i, "區段之外的文字", s)
-    for r in releases:
-        add_text_removals(r)
+        cur["other"].append({"line": i, "kind": classify(s)})
+        note(i, "區段之外的文字，只記行號與分類")
     if not releases:
         raise GenError("沒有找到任何 release 段落")
-    return {"releases": releases, "unparsed": unparsed}
+    add_text_removals(releases, text_removed)
+    prose = [resolve_rule(r, releases, unparsed, lines) for r in rules]
+    return {"releases": releases, "unparsed": unparsed, "prose_rules": prose}
 
 
 TEXT_REMOVED = re.compile(r"\bRemoved\s+([A-Za-z0-9_+-]+)/([0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2})/([0-9a-fA-F]{2})\b")
 
 
-def add_text_removals(rel):
+def add_text_removals(releases, found):
     """Purpose 的文字寫「Removed <名稱>/<F-M-S>/<PI> due to …」而 Removed Platforms 表沒有那一列時（microcode-20260812 只有文字），
     補一列 removed（Old Ver 與 Stepping 沒寫，留空；processor 記文字裡的名稱）。表裡已經有同一個 F-M-S／PI 的不重複補。"""
-    have = {(x[0], x[1]) for x in rel["removed"]}
-    for text in rel["purpose_other"]:
-        for m in TEXT_REMOVED.finditer(text):
-            fms, pi = m.group(2).lower(), m.group(3).lower()
-            if (fms, pi) not in have:
-                rel["removed"].append([fms, pi, "", "", m.group(1), ""])
-                have.add((fms, pi))
+    by = {r["tag"]: r for r in releases}
+    for tag, proc, fms, pi in found:
+        rel = by[tag]
+        if not any((x[0], x[1]) == (fms, pi) for x in rel["removed"]):
+            rel["removed"].append([fms, pi, "", "", proc, ""])
+
+
+# 人工對照：散文只在 release 層級說話、沒有逐列對應，這裡明確寫出我們怎麼解讀，產生器從固定來源重現（來源行號與原文對不上就失敗）。
+# 解讀：20250812 的 disclosure 區段只有這一句，表示 20250812 列的公告（INTEL-SA-01249 等）涵蓋「2025 年 5 月 release 已發佈」的這些平台的微碼。
+# 所以這些平台（Processor 欄第一個字詞是下面的代號）的 revision 比它們在 microcode-20250512 的 revision 舊時，20250812 的公告列為候選（how=prose）。
+# 對照 key 的規則（可重現）：key＝F-M-S／PI；成員＝在 20250812 以前（含）的 new／updated 列，Processor 第一個字詞（`ADL-N` 取 `ADL`）的集合與代號
+# 有交集；集合裡同時有代號以外的 → GAP（不猜）。基準 revision＝key 在 20250512 的 New Ver（兩個以上不同 → GAP）；沒有那一列就用 20250512
+# 以前最新的 New Ver；都沒有 → 只加註、不推。
+PROSE_RULES = ({
+    "release": "microcode-20250812", "line": 346,
+    "quote": "All ADL, RPL, SPR, EMR, MTL, ARL Microcode patches previously released in May 2025.",
+    "interpretation": ("the advisories listed by this release cover the microcode of these platforms that was already released in May 2025 "
+                       "(microcode-20250512); a revision older than the platform's microcode-20250512 revision is a candidate for this release's advisories"),
+    "codes": ["ADL", "RPL", "SPR", "EMR", "MTL", "ARL"],
+    "ref_release": "microcode-20250512",
+},)
+
+
+def first_token(proc):
+    m = re.match(r"[A-Za-z]+", proc)
+    return m.group(0).upper() if m else ""
+
+
+def resolve_rule(rule, releases, unparsed, lines):
+    """人工對照 → 資料表裡的 prose_rules 項目（對上的 key、基準 revision、GAP）。來源行與原文對不上 → GenError。"""
+    tags = [r["tag"] for r in releases]
+    for k in ("release", "ref_release"):
+        if rule[k] not in tags:
+            raise GenError(f"人工對照的 {k} {rule[k]} 不在來源裡")
+    n = rule["line"]
+    if not (1 <= n <= len(lines)) or lines[n - 1].strip() != rule["quote"]:
+        raise GenError(f"人工對照的第 {n} 行與來源不符")
+    hit = [u for u in unparsed if u["line"] == n]
+    if not hit or hit[0]["release"] != rule["release"]:
+        raise GenError(f"人工對照的第 {n} 行不在 {rule['release']} 底下")
+    hit[0]["handled"] = "prose_rules"
+    ridx, pidx = tags.index(rule["ref_release"]), tags.index(rule["release"])
+    codes = set(rule["codes"])
+    tokens, rows_ref, hist = {}, {}, {}
+    for idx, r in enumerate(releases):
+        if idx < pidx:                       # 比人工對照的那個 release 新的列不看
+            continue
+        for kind in ("new", "updated"):
+            for fms, pi, _old, new, proc, _st in r[kind]:
+                key = (fms, pi)
+                tokens.setdefault(key, set()).add(first_token(proc))
+                if idx == ridx:
+                    rows_ref.setdefault(key, set()).add(new)
+                elif idx > ridx:
+                    hist.setdefault(key, {})[idx] = hist.setdefault(key, {}).get(idx, set()) | {new}
+    keys, gaps = [], []
+    for key in sorted(tokens):
+        t = tokens[key]
+        if not (t & codes):
+            continue
+        name = f"{key[0]}/{key[1]}"
+        if t - codes:
+            gaps.append({"key": name, "why": "processor codes of this key mix listed and unlisted codes: " + ", ".join(sorted(t))})
+        elif len(rows_ref.get(key, ())) > 1:
+            gaps.append({"key": name, "why": "microcode-20250512 lists different new revisions for this key"})
+        elif key in rows_ref:
+            keys.append([key[0], key[1], next(iter(rows_ref[key])), "row-in-ref-release"])
+        elif key in hist:
+            idx = min(hist[key])              # 基準 release 之前（較舊）最新的一個
+            if len(hist[key][idx]) > 1:
+                gaps.append({"key": name, "why": "the latest release before microcode-20250512 lists different new revisions for this key"})
+            else:
+                keys.append([key[0], key[1], next(iter(hist[key][idx])), "latest-before-ref-release"])
+        else:
+            gaps.append({"key": name, "why": "no revision as of microcode-20250512; nothing is inferred"})
+    for c in sorted(codes):
+        if not any(c in t for t in tokens.values()):
+            gaps.append({"code": c, "why": "no table key has this processor code"})
+    return {"release": rule["release"], "line": n, "quote": rule["quote"], "interpretation": rule["interpretation"],
+            "codes": list(rule["codes"]), "ref_release": rule["ref_release"], "keys": keys, "gaps": gaps}
 
 
 def check_order(releases):
@@ -302,11 +396,11 @@ def read_source(path=None):
         raise GenError("來源不是 UTF-8")
 
 
-def build(text, generated_at):
-    p = parse(text)
+def build(text, generated_at, rules=None):
+    p = parse(text, PROSE_RULES if rules is None else rules)
     rel = p["releases"]
     order = check_order(rel)
-    unparsed = p["unparsed"] + [{"line": None, "release": None, "section": None, "why": x, "text": ""} for x in order]
+    unparsed = p["unparsed"] + [{"line": None, "release": None, "section": None, "why": x} for x in order]
     return {
         "schema": SCHEMA,
         "source": {"repo": REPO_URL, "tag": TAG, "commit": COMMIT, "path": PATH, "url": RAW_URL, "sha256": SOURCE_SHA256,
@@ -317,10 +411,13 @@ def build(text, generated_at):
         "notes": ["releases 由新到舊（照來源順序）；date 取自 tag 名稱（來源標題沒有日期）。",
                   "security 是 release 層級的公告清單：來源沒有逐 CPUID 列出公告。",
                   "new／updated 是各 F-M-S／platform id 的 revision 變化；removed 是移除（沒有 New Ver）；disclosed 是「New Disclosures Updated in Prior Releases」表，不當成新 revision。",
-                  "資料表只涵蓋來源列出的 release；來源的 releases 數與最舊 tag 見 coverage。"],
+                  "資料表只涵蓋來源列出的 release；來源的 releases 數與最舊 tag 見 coverage。",
+                  "GitHub 上另有 tag microcode-20230516、microcode-20230516a、microcode-20230613、microcode-20260210-rev1，來源沒有它們的段落，資料表不涵蓋。",
+                  "來源沒有明確授權：只取事實性欄位；看不懂或不是公告的段落只記行號與分類，不抄原文。prose_rules 是人工對照（最多引一句原文），見產生器的 PROSE_RULES。"],
         "coverage": {"releases": len(rel), "newest": rel[0]["tag"], "oldest": rel[-1]["tag"],
                      "rows": {k: sum(len(r[k]) for r in rel) for k in ROW_KINDS}},
         "unparsed": unparsed,
+        "prose_rules": p["prose_rules"],
         "releases": rel,
     }
 
