@@ -57,6 +57,24 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
 | `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 
+## 公告比對（Intel 微碼）
+
+`pipeline/firmware-bios.sh` 的輸出（`fw.cdx.json`、`fw-inventory.json`、`fw-inventory.md`）對每份 Intel 微碼離線比對 `tools/cra/data/intel-microcode-releases.json`
+（Intel 公開的微碼發佈說明，固定 tag／commit／sha256，由 `tools/cra/intel_ucode_releases.py` 產生；CI 不重新抓）：
+
+| `dumpling:advisory-match` | 意思 |
+|---|---|
+| `affected-candidate` | 有候選公告：資料表裡比映像的 revision 更新的 release 所列的 INTEL-SA、「New Disclosures」表涵蓋這個 revision 的 release、人工對照的散文（20250812）、同 F-M-S 重疊遮罩的較新更新。`dumpling:advisory-candidates` 是**候選**（來源只在 release 層級列公告，不一定影響這個 CPUID），不是確定受影響 |
+| `older-no-sa` | 有較新的 revision，但那些 release 沒列公告；不代表沒有漏洞 |
+| `up-to-date` | 資料表沒有更新的 revision；**不代表沒有漏洞**，以 Intel 公告為準 |
+| `NOT_ASSESSED` | 資料庫沒有資料，以廠商公告為準（資料表讀不到或 sha256 不符＝GAP、CPUID／platform 不在表、revision 讀不到或比表新、已被移除、同 F-M-S 另有重疊的 platform 遮罩在之後還有更新＝`superseded-platform-mask`…） |
+
+AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：AMD-SB 的規則表還沒有做，以 AMD 公告為準。
+
+`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。`fw-inventory.md` 每次都有「公告比對」一節；CI 摘要表有「微碼公告比對」欄。
+Intel ME 的 NVD CPE（`dumpling:cpe-*`）見 `docs/notes/c2-firmware-advisory.md`：只放前三段版本，NVD 對 CSME 的資料不完整，Grype 比不到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；family 讀不出來時由版本推定（major 11～30），比對結果待人審。
+規則、資料來源、重新產生資料表的步驟與限制都在那份 notes。
+
 ## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
 
 樣本 `sbom/dasharo-novacustom-ns5x-tgl-v1.6.0`：3mdeb 的 Dasharo 每個版本旁都放 CycloneDX 1.4 SBOM
