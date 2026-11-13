@@ -124,6 +124,14 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("＠a.b"), "＠" + z + "a.b")                   # 全形：沒有渲染器當 email，只照提及處理
         self.assertEqual(ms.md_safe("a＠example.com"), "a＠example.com")
 
+    def test_earlier_at_only_counts_within_the_same_run_of_email_characters(self):
+        z = ms.ZWSP
+        # 逗號、空白隔開後，前面的 @ 不影響後面的 @（cmark-gfm 的 `.` 計數只在同一串 email 字元裡不歸零）：後面這個沒有 `.`，原樣
+        self.assertEqual(ms.md_safe("a@b.test,y@Z"), "a" + z + "@" + z + "b.test,y@Z")
+        self.assertEqual(ms.md_safe("a@b.test y@Z"), "a" + z + "@" + z + "b.test y@Z")
+        self.assertEqual(ms.md_safe("a@b.test-y@Z"), "a" + z + "@" + z + "b.test-y" + z + "@" + z + "Z")      # 同一串（`-` 是 email 字元）：照 email 形式
+        self.assertEqual(ms.md_safe("WWW.example.test"), "WWW\\.example.test")                                  # www 不分大小寫
+
     def test_defang_at_is_the_function_used_by_md_safe(self):
         z = ms.ZWSP
         self.assertEqual(ms.defang_at("a@b.c @u pkg@1.0"), "a" + z + "@" + z + "b.c " + "@" + z + "u pkg@1.0")
