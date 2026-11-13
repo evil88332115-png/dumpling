@@ -59,7 +59,7 @@
 ## 5. 倒數與標籤
 
 - `countdown --repo R --drill [--now UTC]`：列出開著的 `art14-drill` Issue → 解析 → 更新倒數留言與階段標籤。**沒有可處理的案件就印一行、立刻結束（OK）**。
-- **只處理作者是 OWNER／MEMBER／COLLABORATOR 的 Issue**（`author_association`）；另外接受 `github-actions[bot]`（type=Bot）——工作流程用 `GITHUB_TOKEN` 開的演練 Issue 不一定是 OWNER，見第 9 節。其他作者的 Issue 略過並列出。
+- **只處理作者是 OWNER／MEMBER／COLLABORATOR 的 Issue**（`author_association`）；另外接受 `github-actions[bot]`（type=Bot）——工作流程用 `GITHUB_TOKEN` 開的 Issue 實測是 `author_association=NONE`，見第 9 節。其他作者的 Issue 略過並列出。
 - 倒數留言只維護一則：第一行是 `<!-- dumpling-art14-countdown -->`，用它找（留言者也要可信，偽造的標記留言不算），找到就編輯、內容沒變就不寫，找不到才新增。
 - 階段標籤 `art14-24h`／`art14-72h`／`art14-final`：跟著「下一個未完成的階段」，只留一個、其他拿掉；全部完成就全拿掉；其他標籤不動。
 - 沒有 `--drill` 的 `countdown`：在 GitHub 上找到開著的 `art14` Issue 就 **FAIL**（公開 repo 不該有真實案件），不修改它。沒有 `art14` Issue 就 OK。
@@ -95,7 +95,9 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 
 ## 9. 還沒驗證的地方
 
-- 用 `GITHUB_TOKEN` 建立的 Issue，`author_association` 是什麼，沒有在真實 GitHub 上驗證過（單元測試用假 GitHub）。程式因此額外接受 `user.login == github-actions[bot]` 且 `type == Bot`。合併後第一次 `action=drill` 會直接驗證；若真實值是 OWNER／MEMBER 以外且不是這個 Bot，演練會在步驟 2 失敗。
+- 用 `GITHUB_TOKEN` 建立的 Issue：**實測 `author_association` 是 `NONE`**（2026-11-13，每日監控演練開的 Issue #21 與它的留言：`user.login=github-actions[bot]`、`type=Bot`、`author_association=NONE`）。
+  所以只看 OWNER／MEMBER／COLLABORATOR 會把自己的演練 Issue 略過；程式另外接受 `user.login == github-actions[bot]` 且 `type == Bot`（必要，不能拿掉）。
+  能以 github-actions[bot] 身分寫 Issue 的只有本 repo 的 workflow（有 `issues: write` 的 job）；外部人士的 fork PR 拿到的是唯讀 token，repo 也沒有 `pull_request_target`。
 - 公開 repo 的 `art14-drill` 標籤只有有 triage 以上權限的人能加，這是額外的一層，但不是唯一一層（作者檢查）。
 
 ## 10. GitLab 階段要改的地方（只列對應；實作在 M5／M8 的 GitLab 部分）
