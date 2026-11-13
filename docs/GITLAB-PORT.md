@@ -348,19 +348,20 @@
 
 ---
 
-## 10. 第 14 條通報（M8，現在不做，只留對應）
+## 10. 第 14 條通報（M8；倒數的 GitLab 版已實作，見 T-10；email 提醒還沒做）
 
 | 項目 | GitHub 公開 repo | GitLab 內部 |
 |---|---|---|
 | 真實案件 | **不做**。公開 Issue 等於公開揭露 | **confidential Issue**（標籤 `art14`＋階段標籤 `art14-24h`／`art14-72h`／`art14-final`） |
 | 演練 | `art14-drill`，Issue 第一行「演練，不是真實通報」，合成資料 | 可保留，同樣標明演練 |
 | 倒數更新 | 有開著的 `art14`／`art14-drill` 時，排程每小時更新倒數留言（D-033(3)）；沒有就立刻結束 | pipeline schedule 每小時觸發（`DUMPLING_JOB=art14`），沒有開著的案件立刻結束；排程擁有者規則同第 8 節 |
-| 通知 | — | Issue 指派＋email（第 3 節） |
+| 通知 | — | Issue 指派＋email（第 3 節）——**email 與指派尚未實作（T-10 待辦，需內部郵件設定／T-08）** |
 | SRP 送出 | 人工步驟 | 人工步驟（工具不自動送） |
 | 起算點 | 「知悉時間」由負責人決定；KEV 的 `first_detected` 只是候選 | 同左 |
 
 驗收（M8 時）：真實案件 Issue 全為 confidential；倒數只更新有開著案件；演練與真實的標籤、第一行字樣不可混用；程式在 GitLab 後端寫入前確認 `confidential=true`。
 **官方依據**：第 3 節的 confidential Issue 與 Issues API；第 8 節的 pipeline schedules。
+**T-10 實作對應**（細節與內部驗證清單見 T-10 列）：`art14.py --backend gitlab`、`art14:countdown`（`DUMPLING_JOB=art14`）；真實案件用 `open-real`；作者／留言者要是成員且等級 ≥ Developer（30）；非 confidential 的 art14 Issue → FAIL、不寫入。上面的驗收項目已有對應的假 API 測試（`pipeline/watch/tests/test_art14_gitlab.py`、`gitlab/tests/test_gitlab_ci.py`），尚未對真實 GitLab 驗證。
 
 ---
 
@@ -390,7 +391,7 @@
 | T-07 | DT parent／child 專案在常駐 DT 再評估（D-030(4)） | 常駐 DT 環境 |
 | T-08 | 從 sca-center 帶回 `scripts/cra/alert_mail.py`（與測試），放 `tools/cra/`，在 `docs/PROVENANCE.md` 記來源 commit（D-015） | 需要自訂寄信時 |
 | T-09 | cosign 執行檔固定版本＋sha256 進 `pipeline/lib/tools.lock`（`pipeline/install-tool.sh cosign`） | M7（A2） |
-| T-10 | M8：第 14 條通報與倒數的 GitLab 版（第 10 節） | M4、M7 |
+| T-10 | **倒數與 GitLab 後端已實作（2026-11-14，沒有對真實 GitLab 驗證——只有假 API 的單元測試）；email 提醒還沒做。** `pipeline/watch/art14.py` 的 GitHub 呼叫全部改走 `issues.py` 的後端層（`Api`／`GitLabApi`），同一套指令邏輯跑在兩個後端；GitHub 行為不變（既有 `test_art14.py` 原封不動）。GitLab 用法：`--backend gitlab --gitlab-url <CI_API_V4_URL> --gitlab-project <數字 ID>`（注意：art14 的 `--project` 本來就是「專案資料夾」，所以 GitLab 專案 ID 用 `--gitlab-project`，和 `issues.py` 的 `--project` 不同）；token 只從環境變數 `GITLAB_TOKEN` 讀。**模式**：演練（`countdown --drill`、`open-drill`）＝標籤 `art14-drill`，演練與示範專案字樣照 GitHub 版，Issue 一律 confidential（後端寫死）；**真實**（`countdown` 不加 `--drill`）＝處理標籤 `art14` 的 Issue（第一行標記 `mode=real`）；新指令 `open-real --match … [--project projects/<專案>]` 開真實案件（私密、標籤 `art14`＋`art14-24h`、沒有演練與示範字樣、說明寫 GitLab 與私密）；**GitHub 上 `open-real` 一律拒絕（沒有任何 API 呼叫），GitHub 上不加 `--drill` 的 `countdown` 仍然是「找到 art14 Issue 就 FAIL」**。**信任**（取代 `author_association`＋`github-actions[bot]`）：Issue 作者、倒數留言的作者要是專案成員且 `access_level` ≥ 30（Developer），用 `GET /projects/:id/members/all/:user_id` 查（含繼承與受邀成員；要 `state == active`；同一個使用者一輪只查一次）；token 自己的使用者（project access token 的 bot 使用者）也是成員，所以工具寫的留言算在內；`system: true` 的留言一律不算倒數留言；偽造倒數標記的低權限留言不算（測試涵蓋 Reporter、Guest、blocked、非成員）。**外洩防線**：有 `art14`／`art14-drill` 標籤、卻不是 `confidential` 的 Issue → 整個 job FAIL、不寫入那個 Issue（不留言、不改標籤、不關閉；可能已經外洩，要人立刻處理），其他案件照常處理；工具建立或修改 Issue 時回應不是 confidential 也 FAIL（T-05 的規則）。**寫入前檢查**：所有要寫的文字（標題、內文、倒數留言、填知悉時間後的整份內文、關閉留言）先過 quick action 檢查（T-05 的 `QUICK_ACTION_RE`，行首 `/指令` 就整批不寫）；演練另外照舊要有「演練」字樣與公開檢查；GitLab 真實案件（內部儲存）不跑公開檢查、不要求「演練」字樣，但沒淨化的 Markdown（@提及、連結、圖片、HTML 實體）檢查照做。**範本**：`art14:countdown`（stage `watch`，排程 `DUMPLING_JOB=art14`，每小時；workflow 規則加上 art14）仍是 `when: manual`＋`allow_failure: true`（同 `watch:*`，驗證完再放開）；token 變數 `ART14_GITLAB_TOKEN`（project access token，scope `api`，角色 Developer 以上，protected＋masked；**和 watch 的 token 分開**，只有這個 job 用）；pipeline 變數 `DUMPLING_ART14_MODE=drill` 切成演練（預設真實）；結束碼 0 OK、1 FAIL；artifact `art14-out/result.json`。排程設定：每小時（例如 `7 * * * *`）、變數 `DUMPLING_JOB=art14`，擁有者規則同第 8 節。**依據的官方文件**（2026-11-14 逐頁讀過）：Notes API（docs.gitlab.com/api/notes/）：`GET /projects/:id/issues/:issue_iid/notes`（參數 `activity_filter`、`sort`、`order_by`；一次 20 筆，分頁看 /api/rest/）、`PUT …/issues/:issue_iid/notes/:note_id`（`body`）、`POST …/notes`（`body`）；回應有 `id`、`body`、`author{id,username,state}`、`system`、`internal`——**該頁沒有說明 `system` 欄位的語意**（只出現在範例回應，推定是 GitLab 自動產生的留言），這點待內部驗證；Project members API（docs.gitlab.com/api/project_members/）：`GET /projects/:id/members/all/:user_id`，回應 `id`、`username`、`state`、`access_level`；存取等級表（同頁）：Guest 10、Planner 15、Reporter 20、Security Manager 25、Developer 30、Maintainer 40、Owner 50（docs.gitlab.com/api/members/ 是 Group members 頁，同樣的等級表，Minimal access 是 5，只限頂層群組）；Issues API（docs.gitlab.com/api/issues/）：列表與單筆回應有 `confidential`（boolean）、`iid`、`state`、`labels`、`author{id,username,state}`（同頁另有 `author_id`、`confidential` 篩選參數，本程式沒用）。**內部 GitLab 要驗證**：(1) 不是成員時 `members/all/:user_id` 的回應（文件沒寫；程式把 HTTP 404 當「不是成員」，其他錯誤整個 FAIL）；blocked 使用者的 `state`；(2) `system` 留言的實際樣子（例如改標籤、改描述的活動紀錄），以及使用者手動留言一定是 `system: false`；(3) Notes 列表加 `per_page=100` 是否生效（notes 頁沒列 per_page；`x-next-page` 分頁照 /api/rest/）；(4) `ART14_GITLAB_TOKEN` 的角色與 scope 能讀 confidential Issue、查成員、寫留言與改 Issue；(5) confidential Issue 上留言的可見度（`internal` 欄位對 Issue 留言的語意；本程式不送 `internal`／`confidential`）；(6) 排程變數 `DUMPLING_ART14_MODE`、`DUMPLING_JOB` 在排程上的傳遞；(7) 依標籤列 Issue 剛建立或關閉後有沒有 GitHub 那種索引延遲（GitHub 實測有，見 ART14.md 第 9 節；GitLab 版沒有重試）；(8) 真實案件的 `open-real` 用 `projects/<專案>` 的 `project.yml`，內部儲存可放較多細節，但仍不放金鑰與個資。**還沒做（記為待辦）**：**email 期限前提醒**（ART14.md 第 10 節：期限前提醒負責人與備援人）——要內部的郵件設定（收件人放內部設定，不進公開 repo）與 T-08 的通知設定；Issue 指派（第 3 節）也還沒接；同一個命中的真實案件若被人改掉 `art14` 標籤，`open-real` 找不到原 Issue、可能重開；`fill-drill-aware`／`close-drill` 有多個演練 Issue 時是逐一檢查逐一寫（GitHub 版本來就這樣，影響小）。**驗證後補強（2026-11-14）**：真實案件被略過（作者不可信、標記不合）時 `countdown` FAIL，不靜默停掉法定倒數（成員 API 異常也會變成這樣）；`countdown` 也報出另一種標籤（演練／真實）裡不是 confidential 的 Issue；`open-real` 遇到同一個命中、但不是 confidential 的既有 Issue 時 FAIL；成員 API 的 404 用狀態碼判斷（不比對訊息文字）。**C0 驗證後的修正（2026-11-14）**：(a) **倒數依據只取自 Developer 以上成員的「art14 紀錄」留言**（ART14.md 第 4.1 節；官方 permissions 頁：Planner、Reporter 也能改別人的 Issue 內文，內文的時間不算數，否則能偽造「已通報」或延後期限）；(b) 逐案隔離：一個案件寫入失敗，記在 result 的 `failed`，其他照常處理、result.json 一定寫出，最後整體 FAIL；(c) **開始前檢查 token 的權限**：`GET /user`（官方 /api/users/ 的 Get the current user；project access token 能不能用文件沒寫，**待內部驗證**）＋ `members/all/:user_id`，不是 Developer 以上就 FAIL（看不到 confidential Issue 時不能當成「沒有案件」）；countdown、fill-drill-aware、close-drill、open 都檢查；(d) 真實案件的紀錄格式不對 → FAIL（不只 ATTENTION）；(e) 存取等級邊界測試（15、20、25＝Security Manager、29 不可信，30 可信）；(f) 人手關閉的真實案件列在 result 的 `closed`（還有未提交的階段會標出）；(g) close-drill 在 GitLab 上也只動作者可信的演練 Issue。**`ART14_GITLAB_TOKEN` 請設成 protected 變數，或限定到只給 art14 排程用的 environment（environment-scoped）**，不要讓一般分支的 pipeline 拿得到 | M4、M7 |
 | T-11 | 簽章方案決定（第 9.2 節最後一欄） | 內部決定 |
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
 | T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
@@ -466,5 +467,5 @@
 **其他**
 - [ ] DT parent／child 評估結論（T-07）。
 - [ ] alert_mail.py 帶回與 PROVENANCE 紀錄（T-08，需要時）。
-- [ ] 第 14 條通報的 GitLab 版（T-10，M8）。
+- [ ] 第 14 條通報的 GitLab 版（T-10，M8；倒數與後端已實作但未對真實 GitLab 驗證，email 提醒還沒做）。
 - [x] 範本通過 M2 合併後的核對（T-01，2026-11-13）。

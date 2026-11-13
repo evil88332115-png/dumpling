@@ -319,6 +319,43 @@ class CiFile(unittest.TestCase):
         self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state', c)
         self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py', c)
 
+    def test_t10_art14_countdown_rules_and_token(self):
+        j = self.jobs["art14:countdown"]
+        sched = self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="art14")
+        # 排程 DUMPLING_JOB=art14 會建立 pipeline；驗證完成前是 manual＋allow_failure（同 watch:*）
+        self.assertNotEqual(gitlabci.pipeline_when(self.doc, sched), "never")
+        self.assertEqual(gitlabci.job_when(j, sched), "manual")
+        self.assertTrue(all(r.get("when") == "manual" and r.get("allow_failure") is True for r in j["rules"]))
+        # 其他排程、其他來源都不跑
+        for ctx in (self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch"), self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="dev"),
+                    self.ctx(CI_PIPELINE_SOURCE="schedule"), self.ctx(CI_PIPELINE_SOURCE="web", DUMPLING_JOB="art14"),
+                    self.ctx(CI_PIPELINE_SOURCE="push", CI_COMMIT_BRANCH="main"), self.ctx(CI_PIPELINE_SOURCE="merge_request_event")):
+            self.assertEqual(gitlabci.job_when(j, ctx), "never", ctx)
+        # art14 排程的 pipeline 裡只有 art14:countdown（以及 watch:*／dev 的 job 不會被這個排程帶起來）
+        active = {n for n, jj in self.jobs.items() if gitlabci.job_when(jj, sched) != "never"}
+        self.assertEqual(active, {"art14:countdown"})
+        # 反方向：watch 排程不會跑 art14
+        wsched = self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch")
+        self.assertNotIn("art14:countdown", {n for n, jj in self.jobs.items() if gitlabci.job_when(jj, wsched) != "never"})
+        # 指令與 token：獨立的 ART14_GITLAB_TOKEN（只有這個 job 用）、GITLAB_TOKEN 只在指令前綴、不印 token、GitLab 後端參數齊全
+        c = self.lines_of("art14:countdown")
+        self.assertIn('GITLAB_TOKEN="$ART14_GITLAB_TOKEN" python3 -I pipeline/watch/art14.py countdown', c)
+        a = command_args(c, "pipeline/watch/art14.py")
+        self.assertEqual((a["--backend"], a["--gitlab-url"], a["--gitlab-project"]), ("gitlab", "$CI_API_V4_URL", "$CI_PROJECT_ID"))
+        self.assertNotRegex(c, r"echo[^\n]*\$\{?ART14_GITLAB_TOKEN")
+        self.assertIn("ART14_GITLAB_TOKEN", c)
+        self.assertNotIn("exit 3", c.replace("NOT_RUN", ""), "結束碼只有 0（OK）與 1（FAIL）")
+        self.assertIn("exit 1", c)
+        for n in self.jobs:
+            if n != "art14:countdown":
+                self.assertNotIn("ART14_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), n)
+        for n in ("watch:compute", "watch:notify"):
+            self.assertNotIn("art14.py", self.lines_of(n))
+        self.assertNotRegex(c, r"(?m)^\s*set\s+-[a-z]*x")
+        self.assertNotIn("CI_JOB_TOKEN", c)
+        self.assertEqual(j["resource_group"], "art14")
+        self.assertIn("art14-out/result.json", j["artifacts"]["paths"])
+
     def test_signing_job(self):
         j = self.jobs["release:sign"]
         self.assertEqual(j["id_tokens"]["SIGSTORE_ID_TOKEN"]["aud"], "sigstore")

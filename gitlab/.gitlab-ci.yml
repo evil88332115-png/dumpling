@@ -39,8 +39,8 @@ workflow:
   rules:
     # 1) tag <專案>/<版本> → release
     - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
-    # 2) 排程：每日監控或開發版，由排程變數 DUMPLING_JOB 區分
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev")'
+    # 2) 排程：每日監控、開發版或第 14 條倒數，由排程變數 DUMPLING_JOB 區分
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev" || $DUMPLING_JOB == "art14")'
     # 3) dev/** 分支與預設分支的 push → dev、tests、firmware
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && ($CI_COMMIT_BRANCH =~ /^dev\// || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
     # 4) merge request → tests、firmware
@@ -599,4 +599,43 @@ watch:drill:
   artifacts:
     when: always
     paths: [watch-drill-out/]
+    expire_in: 14 days
+
+# ---------------------------------------------------------------------------
+# art14：CRA 第 14 條通報倒數（排程變數 DUMPLING_JOB=art14，每小時；對應 art14.yml）。GITLAB-PORT T-10、docs/ART14.md 第 10 節
+# ---------------------------------------------------------------------------
+# pipeline/watch/art14.py 有 GitLab 後端，但只用假 API 測過、沒有對真實 GitLab 驗證；所以這個 job 仍是 when: manual（同 watch:*），
+# 驗證完再改成自動（見 GITLAB-PORT T-10 的內部驗證清單）。
+# 真實案件預設（DUMPLING_ART14_MODE 沒設或不是 drill）：處理標籤 art14 的 confidential Issue；不是 confidential 的 art14 Issue → job FAIL、不寫入。
+# 演練：pipeline 變數 DUMPLING_ART14_MODE=drill（處理標籤 art14-drill 的 Issue）。結束碼 0 OK、1 FAIL。
+# ART14_GITLAB_TOKEN：project access token，scope api（官方：Issues／Notes 寫入需要 api scope），角色 Developer 以上（要讀得到 confidential Issue、
+# 查成員等級；程式開始前會檢查，不夠就 FAIL）；protected＋masked，可以的話再限定到只給 art14 排程用的 environment；和 watch 的 token 分開（只有這個 job 用）。
+# 倒數的依據只取自 Developer 以上成員的「art14 紀錄」留言（ART14.md 第 4.1 節），內文的時間不算數。Email 提醒（ART14.md 第 10 節）還沒做。
+
+.rules-art14:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "art14"'
+      when: manual
+      allow_failure: true
+
+art14:countdown:
+  stage: watch
+  extends: [.rules-art14]
+  tags: [dumpling]
+  timeout: 10 minutes
+  interruptible: false
+  resource_group: art14
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${ART14_GITLAB_TOKEN:-}" || { echo "art14: FAIL（沒有 ART14_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
+    - |
+      mkdir -p art14-out
+      DRILL=""
+      if [ "${DUMPLING_ART14_MODE:-real}" = drill ]; then DRILL="--drill"; fi
+      GITLAB_TOKEN="$ART14_GITLAB_TOKEN" python3 -I pipeline/watch/art14.py countdown --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+        --gitlab-project "$CI_PROJECT_ID" --result art14-out/result.json $DRILL
+  artifacts:
+    when: always
+    paths: [art14-out/result.json]
     expire_in: 14 days
