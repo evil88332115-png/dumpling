@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:24 -0500（C0）
+最後更新：2026-11-13 04:25 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -136,19 +136,21 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
   - **ebac3e9 還沒有複驗**
 - ebac3e9：CI tests 43397906497、firmware 43397901286 綠（expected 3 項 OK）。本機 c2-x86-firmware 372（test_amd_psp 52 個）、c2-firmware OK、c1-tools 3166
 - 驗證代理的重現腳本在這台的 `$AGENT_TMP/dumpling-tmp-c2-verify-amd/scripts/`、`scripts2/`（t1～t14、fuzz1～4、fl.py、mut3），第二台沒有這些檔案；需要時照複驗報告的描述重寫
-- **等決定（要問 C0）**：ebac3e9 的歧義規則很保守
+- **已由 C0 決定（D-047，見下一步 1）**：ebac3e9 的歧義規則很保守
   - ASUS B550M 的 PSP 韌體版本 78 個全部進不了 SBOM，SBOM 只剩 21 個元件（映像、19 份微碼、AGESA）
   - ASUS B650M-A 1807（只在 notes 做過驗證）只剩 2 個元件；ASRock B550 PG4 沒有歧義，不受影響
   - 較窄的替代規則：只讓「不歧義路徑讀出的那筆」確定，另一種基底的讀法只列出，不連帶讓確定的那筆變歧義。代理沒有實作，notes 有寫這個取捨
-  - 我的看法：較窄的規則，前提是不歧義那條邊本身要用唯一的基底；但這要先問 C0
-- **新發現、要處理**：AGESA 搜尋的「位置比對」（建議 a）用 `sys._getframe(1)` 讀 C1 `uefi_image` 呼叫端的區域變數 `where`、`out`（amd_psp.py:746、:860 附近）
+- **新發現（已由 D-047 決定拿掉）**：AGESA 搜尋的「位置比對」（建議 a）用 `sys._getframe(1)` 讀 C1 `uefi_image` 呼叫端的區域變數 `where`、`out`（amd_psp.py:746、:860 附近）
   - 這不在 C1 的對外介面約定裡，屬於脆弱的耦合；失敗時方向是保守的（標成不完整）
   - 處理選項：(a) 請 C1 在 `uefi_image` 提供正式的回呼或來源資訊；(b) 拿掉 frame 讀取，只要原始位元組裡有任何標記不在走訪範圍內，就一律 complete=False
-  - 我傾向 (b)，或先 (b) 再和 C1 談 (a)。複驗時一併看
+  - D-047：採 (b)；(a) 留到 M7
 - 其他已知限制：壓縮的 BIOS 條目（0x62）和壓縮的微碼不解壓；真樣本的 AGESA 搜尋仍是「不完整」（2 個 `CE3233F5-…` GUID-defined section、1 個 FFS 檔的 section 串不乾淨）
 
 ### 下一步（新對話照這個順序接手）
-1. **D-042 AMD**：先問 C0 歧義規則要不要放寬，以及 `sys._getframe` 這件事；照決定修（派一個寫程式的代理）→ 派驗證代理複驗 ebac3e9 之後的版本 → 通過後：
+1. **D-042 AMD**：C0 已決定（**D-047**，在 wp0/docs-batch-4），照這兩點修（派一個寫程式的代理），改完和 ebac3e9 的改動一起複驗：
+   - (a) **歧義規則改窄，但要有校驗佐證**：同一位置被兩種基底讀到時，只有一種讀法的目錄通過自身的結構與校驗（目錄 checksum、條目範圍都在映像內等），就採用那一種的條目；另一種只列出來，並附上它沒通過的證據。兩種都通過而且內容衝突，或兩種都不通過 → 維持 GAP。（我的補充：子目錄要沿用被採用那一讀法的基底；測試要涵蓋「一邊 checksum 壞」「兩邊都過且內容不同」「兩邊都壞」，以及處理順序反過來結果相同；真樣本 B550M、B650M 重跑，報 SBOM 元件數的變化。）
+   - (b) **拿掉 `sys._getframe`**（amd_psp.py:746、:860 附近）：原始位元組裡只要有 AGESA 標記不在走訪範圍內，就標「搜尋不完整」（complete=False）。需要精確結果的話，M7 再請 C1 提供正式回呼介面，現在不跟 C1 談
+   - 之後派驗證代理複驗 → 通過後：
    - 把 `origin/wp3/csme-new` 併進 `wp3/amd-psp`。會衝突的有 `docs/PROVENANCE.md`、`tests/run.d/c2-x86-firmware.sh`（兩邊都改了最後的測試清單），x86_firmware.py 兩邊改的是不同段落
    - 併 origin/main（D-021：有衝突才併，開 PR 前確認只剩自己的改動）
    - 重跑 CI
@@ -179,7 +181,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
   - gpu-firmware 對照表（隨 M2 進 main）
 
 ### 卡住／等決定
-- AMD 歧義規則要不要放寬（見上），以及 `sys._getframe` 的處理方式：要問 C0
+- 無待決定事項（AMD 的兩件已由 D-047 決定）
 - 這台的代理暫存資料夾被安全檢查擋下沒刪，要使用者手動刪：`$AGENT_TMP/dumpling-tmp-c2-*` 共 21 個，`dumpling-tmp-c2` 本身是 STATUS 草稿，搬完再刪
 - worktree `$AGENT_TMP/dumpling-wt-c2-amd`、`-csme`、`-norm` 等使用者確認後再刪
 <!-- END C2 -->
