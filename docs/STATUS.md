@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:12 +0800（C1）
+最後更新：2026-11-13 23:17 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -145,7 +145,10 @@
 >   - 建議：revert 註記；cpe-basis 改成列舉值（listed／inferred）；註解邊界；補測試
 >   - 已交回寫程式代理（第三輪）：**完成 d8a20ec**。AMD 元件都有 advisory-match=NOT_ASSESSED，報告照實寫「已解析 N 份」；06-be-00/19 已納入（散文對照 30 個 key、0 個 GAP，AZB 加註）；cpe-basis 改成 listed／inferred；633 passed，四個樣本的 expected 全 OK
 >   - CI tests 43447781681、firmware 43447786318
-> - 驗證（Sonnet 5.5，effort high，新代理）：複驗 wp3/fw-advisory d8a20ec，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv3/`，狀態：**進行中**
+> - 驗證（新代理）：複驗 wp3/fw-advisory d8a20ec，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv3/`，狀態：**完成：驗證不通過**
+>   - 前一輪 3 項都修好了；oracle 差分 2417＋21 萬個案例 0 差異；四個樣本逐行核對過
+>   - 應修是 2 處 AMD 文字：DT 報告的標籤寫成「Intel 微碼與 ME」；amd 是 None 時 CI 欄寫「已解析 0 份」
+>   - 已交回寫程式代理（第四輪：先併 main cc7d101，再修上面 2 項和建議），**進行中**
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
@@ -169,7 +172,7 @@
 >   - test_intel_cse_layout 共 132 個；7 個樣本逐位元相同
 >   - 授權改指 release notes 頁，沒有出處的授權名稱拿掉了；V540TU 的 license 還沒核對
 > - C2 併入 main cc7d101 → **40bdd2f**（沒有衝突，581 passed）；CI tests 43449879817、firmware 43449885845
-> - **下一步**：fw-advisory 複驗結束後派 cse 預驗（40bdd2f）→ 新的 HEAD 給 C0 用私有檔複核 → 開 PR
+> - 驗證（新代理）：預驗 wp3/cse-layout-size 40bdd2f（D-053），暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse2/`，狀態：**進行中**。通過後，新的 HEAD 給 C0 用私有檔複核，再開 PR
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
