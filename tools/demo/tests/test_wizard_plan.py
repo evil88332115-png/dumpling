@@ -686,8 +686,8 @@ def test_version_multiple_suffixes_and_missing(tmp_path):
     w.override_pack_version(d / "config.json", "V9")
     assert json.loads((d / "config.json").read_text())["product"]["version"] == "V9 (rootfs)(gui)"
     (d / "config.json").write_text(json.dumps({"product": {"name": "x"}}))
-    with pytest.raises(ValueError):
-        w.override_pack_version(d / "config.json", "V9")
+    # dumpling 在地（D-039、D-055）：沒寫 product.version 時填入計畫版本（上游是 ValueError → ATTENTION）
+    assert w.override_pack_version(d / "config.json", "V9") == (None, "V9")
 
 
 def test_stale_pack_files_warn(tmp_path):
