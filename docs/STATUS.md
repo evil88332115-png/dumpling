@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 22:57 -0500（C0）
+最後更新：2026-11-13 12:12 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -87,21 +87,22 @@
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M4 PR #28 已開，等 C0 派驗證與合併**；M5 第一版完成，等 M2 合併後核對指令再開 PR
+- 目前在做：**M4 已合併（PR #28，main 80ea467，驗證 #issuecomment-6843320189 通過）**；驗證的應修與建議 → **PR #32**（wp2/watch-fixes 588e359），等驗證與合併；M5 第一版完成，等 M2 合併後核對指令再開 PR
 - M4 架構（C0 同意）：每日不開 DT；Grype（exploited_grype 原樣重用）＋CISA KEV＋EUVD＋核心 CNA（kernel_cna_version.py；附件 `kernel-versions-<專案>-<版本>.json` schema /2）＋廠商層級；DT（OSV）、NVIDIA 公告、核心 .config 判定每天 NOT_RUN 並列出。狀態放在 `watch-state` Issue，沒有任何 job 有 contents: write。D-040：只開 KEV／廠商層級 Issue、超過 20 個併成彙總、示範專案字樣＋demo 標籤、排程 real 預設 dry_run（`WATCH_REAL_ISSUES` 由 C0 設）、不開 art14。降級連續 2 次開健康 Issue（watch-health）
 - 分支／PR／commit：
-  - `wp2/watch` c0a4a4f → **PR #28**（worktree `$AGENT_TMP/dumpling-wt-c3-watch`）；暫時的 push 觸發已拿掉
+  - `wp2/watch` → PR #28 已合併（worktree 已移除）
+  - `wp2/watch-fixes` 588e359 → **PR #32**（worktree `$AGENT_TMP/dumpling-wt-c3-fixes`）
   - `wp5/gitlab` b0079fc（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`）；PR 未開（M5 完成才開）
 - 代理：
   - 寫程式 collect.py、issues.py：完成、已併入
   - 寫程式 M5 第一版（GITLAB-PORT＋gitlab/.gitlab-ci.yml＋官方 CI schema 收進 repo，MIT＋Apache-2.0，D-0xx C0 同意）：完成，b0079fc；tests run 43358540701 綠（b0079fc 前一版；最新版待重跑）
   - 驗證 M4 預驗（Sonnet high）：第一輪不通過 → c4cfac6 修正 → 複驗通過；複驗的 3 個建議也已修正（PR 前）
   - 目前沒有代理在跑。上限照 D-041：每個對話最多 4 個（寫程式 3、驗證 1），C3＋C4 合計 8，負載超過 12 不開
-- CI：PR head c0a4a4f：演練 run 43359678945 綠、tests run 43359682637 綠；real＋dry_run（M2 之前）run 43357443361 綠（GAP、notify 跳過）
+- CI：main 上 real＋dry_run run 43362385127 綠（GAP、notify 跳過、keepalive OK、四個資料源 OK）；PR #32：演練 43363190221、real＋dry_run 43362391399、tests 43362394614 都綠。PR #28 head c0a4a4f：演練 run 43359678945 綠、tests run 43359682637 綠；real＋dry_run（M2 之前）run 43357443361 綠（GAP、notify 跳過）
 - 防 60 天停用：官方沒有定義 activity；keepalive 每天讀 state＋enable；**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`；M4 合併後開始算）
 - 下一步：
-  - M4：PR #28 驗證 → C0 合併
-  - M2 合併後（不在 PR #28）：併 main → 每日監控改用 M2 的 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像那天，報告與 Issue 寫出那行 ATTENTION）→ 手動 `mode=real` 建立第一次真實基準 → 回報「打開的話會開哪些 Issue」給 C0
+  - PR #32 驗證 → C0 合併（WATCH_REAL_ISSUES 由 C0 設，前提是 #32 合併＋第一次真實基準）
+  - M2 合併後（不在 PR #28）：併 main → 每日監控改用 M2 的 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像那天，報告與 Issue 寫出那行 ATTENTION）→ 手動 `mode=real`＋`baseline=true` 建立第一次真實基準 → 回報「打開的話會開哪些 Issue」給 C0
   - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 派驗證 → 開 PR
 - 卡住／等決定：無
 <!-- END C3 -->
