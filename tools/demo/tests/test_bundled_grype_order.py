@@ -111,3 +111,37 @@ def test_import_failure_writes_not_run_for_both(tmp_path):
     for k in ("uefi", "tee"):
         assert re.search(rf"^B-{k}-grype-rootfs_no_gui\tNOT_RUN\tdocker import 失敗，sca-scan 沒有執行", st, re.M), st
         assert not (out / "rootfs_no_gui" / f"{k}-source" / "grype-run.json").exists()
+
+
+def test_full_scan_success_runs_grype_after_sca_scan(tmp_path):
+    """完整掃描（不是 --rescan-from）成功的路徑：假 docker import 成功、假 sca-scan 寫標記檔（更新資料庫）。
+    B-uefi-grype／B-tee-grype 各一列、OK，順序是 讀原始碼樹 → import → sca-scan → 比對。這條路徑就是完整報告少了 OP-TEE Mbed TLS 列的那條。"""
+    import hashlib
+    import test_flash_package as tfp
+    script = kva.tool_tree(tmp_path)
+    (Path(script).parents[1] / "pilot" / "sca-scan").write_text(FAKE_SCA)
+    b = tmp_path / "bin"
+    b.mkdir()
+    fake_grype(b, datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    for t in ("syft", "bwrap"):
+        (b / t).write_text("#!/bin/sh\necho 'Version: 0.0.0'\n")
+    (b / "docker").write_text(f"#!/bin/sh\ncase \"$1\" in info) echo {tmp_path};; version) echo 0;; import) echo sha256:{'a' * 64};; "
+                              "image) case \"$2\" in inspect) echo 'arm64 1 bytes';; *) exit 0;; esac;; *) exit 1;; esac\n")
+    for f in b.iterdir():
+        f.chmod(0o755)
+    a = str(tmp_path / "pkg.tbz2")
+    tfp.make_archive(a, gui=False)
+    (tmp_path / "pkg.tbz2.md5").write_text(f"{hashlib.md5(open(a, 'rb').read()).hexdigest()}  pkg.tbz2\n")
+    e = {k: v for k, v in os.environ.items() if k != "SCA_KERNEL_VERSIONS"}
+    e.update(PATH=f"{b}:{os.environ['PATH']}", FLASHPKG_ALLOW_TMP_OUT="1", SCA_TOOLS_DIR=str(tmp_path / "none"),
+             DB_MARKER=str(tmp_path / "db-updated"))
+    out = tmp_path / "r"
+    args = ["--archive", a, "--rootfs", "rootfs_no_gui", "--name", "EX-J100", "--version", "V1", "--no-upload", "--out", out,
+            "--uefi-source", uefi_tree(tmp_path), "--tee-source", tts.tree(tmp_path / "tee")]
+    p = subprocess.run(["bash", str(script), *map(str, args)], capture_output=True, text=True, env=e, timeout=300)
+    st = (out / "status.tsv").read_text()
+    assert re.search(r"^B-import-rootfs_no_gui\tOK\t", st, re.M) and (tmp_path / "db-updated").exists(), st + p.stderr
+    for k in ("uefi", "tee"):
+        r = re.findall(rf"^B-{k}-grype-rootfs_no_gui\t(\w+)\t", st, re.M)
+        assert r == ["OK"], st                         # 一列、OK（排在 sca-scan 之前是 NOT_RUN；刪掉那行就沒有這一列）
+        assert st.index(f"B-{k}-source-") < st.index("B-import-") < st.index("C-scan-") < st.index(f"B-{k}-grype-")
