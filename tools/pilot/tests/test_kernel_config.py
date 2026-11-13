@@ -653,7 +653,7 @@ def test_sca_scan_wiring():
     # （另一個在 kernel_cve_list：Grype、DT 都沒有核心 CVE 又沒有清單來源時，核心存在而沒有評估也要寫狀態列）
     assert s.count("status C-kernel-config NOT_RUN") == 2
     j = s.rindex("status C-kernel-config NOT_RUN")
-    assert s.rindex('elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ]; then', 0, j) > i
+    assert s.rindex('elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ] && [ "$KSEEN" = 1 ]; then', 0, j) > i   # SBOM 有核心才寫
     assert 'KSRC=(--from "$IMG_TAR")' in s and "timeout 3600 python3 -I" in s and 'ka+=(--findings "$OUT/dt/findings.json")' in s
     case = next(l for l in s.splitlines() if l.strip().startswith("case $k in DT_URL|"))
     assert "KERNEL_CVE_MIRROR" in case.split(" in ", 1)[1].split(")", 1)[0].split("|") and 'secret "$KERNEL_CVE_MIRROR"' not in s
