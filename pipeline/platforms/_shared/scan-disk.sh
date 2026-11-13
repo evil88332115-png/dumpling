@@ -182,8 +182,19 @@ case $augment in
       --label app-source --repo "$arepo" --commit "$acommit" --app-name "$aname" --app-version "$aversion") || mrc=$?
     echo "$line"
     case $mrc in 0) ;; 3) arc=3;; *) fail "併入原始碼 SBOM 失敗";; esac
-    python3 -I -c 'import json,sys;json.dump({"repo":sys.argv[1],"commit":sys.argv[2],"line":sys.argv[3]},open(sys.argv[4],"w"),ensure_ascii=False)' \
-      "$arepo" "$acommit" "${line#sbom-augment: }" "$out/augment/source.json"
+    # 摘要：應用本身的名稱與版本由 sources.yml 指定（cdxgen 原值從合併後的 SBOM 讀）；版本與 commit 是否完全相同 NOT_ASSESSED（D-025）
+    python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[5],encoding="utf-8")); app=None
+for c in d.get("components") or []:
+    p={x.get("name"):x.get("value") for x in c.get("properties") or [] if isinstance(x,dict)}
+    if "dumpling:source-vs-package" in p: app=(c,p); break
+c,p=app if app else ({},{})
+json.dump({"repo":sys.argv[1],"commit":sys.argv[2],"line":sys.argv[3],"app_name":c.get("name"),"app_version":c.get("version"),
+  "cdxgen_root_name":p.get("dumpling:source-root-name"),"cdxgen_root_version":p.get("dumpling:source-root-version"),
+  "name_basis":"sources.yml platform_params.app_name（要和 project.yml 的 own_software 對得上）",
+  "version_basis":"sources.yml platform_params.app_version＝固定 commit 的 debian/changelog 版本（D-025）",
+  "version_vs_commit":"NOT_ASSESSED","source_vs_package":p.get("dumpling:source-vs-package")},open(sys.argv[4],"w",encoding="utf-8"),ensure_ascii=False)' \
+      "$arepo" "$acommit" "${line#sbom-augment: }" "$out/augment/source.json" "$out/augment/sbom.cdx.json" || fail "寫 source.json 失敗"
     srcjson=$out/augment/source.json
     sbom1=$out/augment/sbom.cdx.json;;
 esac

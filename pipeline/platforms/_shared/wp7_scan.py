@@ -185,7 +185,10 @@ class Wp7Hooks(ps.Hooks):
         if src:
             L += ["", "## NAS 應用的原始碼", "",
                   "- `%s` commit `%s`：%s；元件帶 `dumpling:origin=source` 與 commit。原始碼與正式 deb 是否完全相同：**NOT_ASSESSED**（D-025）。" % (
-                      src.get("repo"), src.get("commit"), src.get("line"))]
+                      src.get("repo"), src.get("commit"), src.get("line")),
+                  "- 應用本身：`%s` `%s`。根元件名稱由 sources.yml 指定（cdxgen 原值是 `%s`，版本 `%s`）；版本取自固定 commit 的 debian/changelog（D-025），"
+                  "版本與 commit 是否完全相同：**%s**。" % (src.get("app_name"), src.get("app_version"), src.get("cdxgen_root_name"),
+                                                          src.get("cdxgen_root_version"), src.get("version_vs_commit") or "NOT_ASSESSED")]
         sv = self.x.get("services") or {}
         L += ["", "## 要特別注意的對外連線服務", ""]
         if sv.get("status") == "LISTED" and sv.get("items"):
