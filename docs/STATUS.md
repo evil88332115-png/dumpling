@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 03:18 +0800（C2）
+最後更新：2026-11-14 03:19 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -191,7 +191,8 @@
 > - 驗證：預驗 wp3/nvidia-vbios-advisory 3111d52，狀態：**不通過**（應修 1 項：測試吃牆上時鐘，2027-02 起會讓 CI 轉紅；建議：5674 標成 reviewed 讓 candidates 回 OK、沒有提醒負責人，要改回待審；矛盾的列可能判成 fixed；每個影像的 vendor；多個版本字串；過期要升 ATTENTION；5561 寫進 notes）
 > - 寫程式（nvvbios 代理第二、三輪）：**完成 3d270fe**（時鐘可注入，假時鐘 2027／2030 年都 1130 passed；5674 改回待審，candidates 回 ATTENTION；reviewed_until＝看過的最新公告日期，與 C1 說定；矛盾的列擋下；每個影像的 vendor；version-ambiguous；過期升 ATTENTION；5561 寫進 notes；併入 main d1f57c6）
 > - 驗證：複驗 3d270fe：**不通過**。比對規則 OK（18000 次 fuzz 沒有誤判成 fixed），3 項應修都在文字或測試：workflow 註解寫「判定不適用」與現況矛盾；輸出與文件還有「不適用」；確認後有測試吃牆上時鐘
-> - 寫程式（nvvbios 第四輪）：修上述 3 項＋建議（terminated 缺鍵 fail-open、有 awaiting 公告時視為未確認、補測試、notes），**進行中**
+> - 寫程式（nvvbios 第四輪）：**完成 91a5be2**（workflow 註解照實寫；「不適用」措辭全部拿掉；conftest 固定時間；terminated 缺鍵 fail-closed；Table.confirmed；確認後要改的 6 個測試寫進 notes；1140 passed；CI tests 43490925483、firmware 43490929895）
+> - 驗證（新代理）：第三次複驗 91a5be2，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-nv3/`，狀態：**進行中**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
