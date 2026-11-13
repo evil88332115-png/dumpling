@@ -1,0 +1,17 @@
+{
+ "schema": "sca-pilot-distro-kernel-sources/1",
+ "note": "kernelcheck.py 規則 d（purl 的 upstream= 來源套件）用的清單：哪些來源套件是發行版自己建核心用的。清單只列公開的套件名稱；dumpling 自己整理，沒有內部資料。",
+ "written": "2026-11-13",
+ "debian": {
+  "sources": ["linux", "linux-latest", "linux-signed-amd64", "linux-signed-arm64", "linux-signed-i386"],
+  "rule": "purl 是 distro=debian-* 的核心 deb，來源套件（upstream=）不在這個清單裡 → 不在發行版的核心序列上",
+  "evidence": "Debian package tracker 的標準頁面 https://tracker.debian.org/pkg/<來源套件名稱>（例如 https://tracker.debian.org/pkg/linux、https://tracker.debian.org/pkg/linux-latest、https://tracker.debian.org/pkg/linux-signed-amd64、https://tracker.debian.org/pkg/linux-signed-arm64、https://tracker.debian.org/pkg/linux-signed-i386）。linux 是核心原始碼套件，linux-signed-<架構> 是 Secure Boot 簽章核心的來源套件，linux-latest 是 linux-image-<架構> 等中介套件的來源套件。",
+  "checked": "未連網逐頁開啟核對（離線整理）：名稱是 Debian 核心的標準來源套件名稱；要審查請開上面的標準頁面。"
+ },
+ "ubuntu": {
+  "rule": "not applied",
+  "why": "Canonical 有很多合法的 linux-<flavor> 來源套件（linux-nvidia-tegra、linux-raspi、linux-aws…），不能用來源套件名稱判斷；Ubuntu 只套用 always_off_series。"
+ },
+ "always_off_series": ["linux-upstream"],
+ "always_off_series_why": "linux-upstream 是核心原始碼自己 make deb-pkg 的預設來源套件名稱，不是任何發行版建的核心。"
+}

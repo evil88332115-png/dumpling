@@ -388,7 +388,9 @@ def test_script_flow_until_import(tmp_path):
     assert pv["source"] == {"type": "archive", "file": "product-a.tbz2", "bytes": len(data), "md5": h, "sha256": hashlib.sha256(data).hexdigest()}
     assert re.fullmatch(r"[0-9a-f]{40}", pv["sca_center"]["commit"]) and pv["sca_center"]["from"] == "git"
     assert re.search(r"^A-provenance\t(OK|ATTENTION)\t", st, re.M) and "F-evidence" not in st
-    assert "B-own-software" not in st and not (out / "rootfs_gui" / "own-software").exists()   # 沒有 --product-config：不執行
+    # 沒有 --product-config：檢查不悄悄消失，B-own-software 記 GAP（沒有宣告自有軟體），own-software.json 只有宣告的結果
+    assert re.search(r"^B-own-software-rootfs_gui\tGAP\t沒有產品設定：沒有宣告自有軟體", st, re.M), st
+    assert json.loads((out / "rootfs_gui" / "own-software" / "own-software.json").read_text())["declaration"]["kind"] == "undeclared"
 
 
 OWN_CFG = {"schema_version": 1, "manufacturer": {"name": "Example Co."}, "product": {"name": "EX-J100"},
@@ -420,12 +422,25 @@ def test_script_own_software_from_rootfs_tar(tmp_path):
 
 
 def test_script_product_config_without_own_software(tmp_path):
-    """有 --product-config 但沒有 sbom.own_software：不執行、不寫狀態列、不建資料夾。"""
+    """有 --product-config 但沒有列 sbom.own_software：不算雜湊，但 B-own-software 記 GAP（沒有宣告），不可以悄悄消失。"""
     cfg = {k: v for k, v in OWN_CFG.items() if k != "sbom"}
     p, out, st, _ = own_run(tmp_path, cfg)
     assert "B-import-rootfs_no_gui" in st, st + p.stderr
-    assert "B-own-software" not in st and not (out / "rootfs_no_gui" / "own-software").exists()
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t沒有宣告自有軟體（sbom\.own_software）", st, re.M), st
+    doc = json.loads((out / "rootfs_no_gui" / "own-software" / "own-software.json").read_text())
+    assert doc["status"] == "GAP" and doc["declaration"]["kind"] == "undeclared" and "files" not in doc
     assert not (out / "rootfs_no_gui" / "logs" / "own-software.txt").exists()
+
+
+def test_script_product_config_declares_no_own_software(tmp_path):
+    """sbom.own_software: [] 加 own_software_none_reason：明確宣告沒有 → OK，說明寫理由（是宣告，掃描沒有驗證）。"""
+    cfg = dict(OWN_CFG, sbom={"own_software": [], "own_software_none_reason": "Image contains only distribution packages"})
+    p, out, st, _ = own_run(tmp_path, cfg)
+    assert re.search(r"^B-own-software-rootfs_no_gui\tOK\t製造商宣告沒有自有軟體：Image contains only distribution packages（是宣告", st, re.M), st
+    # 空陣列但沒有理由：仍然是沒有宣告
+    cfg2 = dict(OWN_CFG, sbom={"own_software": []})
+    p2, out2, st2, _ = own_run(tmp_path, cfg2, out="res2")
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t", st2, re.M), st2
 
 
 def rescan_prev(tmp_path):
@@ -456,9 +471,9 @@ def test_script_rescan_own_software_branches(tmp_path):
     os.remove(prev / "rootfs_no_gui" / "own-software" / "own-software.json")
     _, o3, st, _ = own_run(tmp_path, OWN_CFG, *rs, out="r3")
     assert "B-own-software-rootfs_no_gui\tGAP\t上一次沒有" in st, st
-    # 4) 設定沒有 sbom.own_software
+    # 4) 設定沒有 sbom.own_software：沒給 --archive 也照樣寫宣告的結果（沒宣告 → GAP），不悄悄消失
     _, o4, st, _ = own_run(tmp_path, {k: v for k, v in OWN_CFG.items() if k != "sbom"}, *rs, out="r4")
-    assert "B-own-software" not in st and "B-rescan-rootfs_no_gui\tOK" in st, st
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t沒有宣告自有軟體", st, re.M) and "B-rescan-rootfs_no_gui\tOK" in st, st
 
 
 def ownsw_function(tmp_path, fake):
@@ -960,7 +975,9 @@ def test_tool_commit_keeps_commit_when_status_times_out(monkeypatch, tmp_path):
 
 
 def test_script_uefi_source_runs_before_import_and_is_optional(tmp_path):
-    """--uefi-source：docker import 之前 uefi_source.py 讀樹（B-uefi-source）、再用 grype 比對（B-uefi-grype；這裡沒有 grype 資料庫 → NOT_RUN，不是 OK）。
+    """--uefi-source：docker import 之前 uefi_source.py 讀樹（B-uefi-source）。Grype 比對（B-uefi-grype）在 sca-scan 更新資料庫之後才跑
+    （test_bundled_grype_order.py）；這裡的 docker import 是假的、一定失敗，沒有走到 sca-scan：沒有比對、沒有 grype-run.json，
+    但 B-uefi-grype 照樣記 NOT_RUN（原因寫 sca-scan 沒有執行），不悄悄消失。
     沒給時不執行、不寫狀態列、不建資料夾；樹不是資料夾 → 退出碼 64。"""
     tree = tmp_path / "uefi"
     ossl = tree / "CryptoPkg" / "Library" / "OpensslLib" / "openssl"
@@ -978,9 +995,12 @@ def test_script_uefi_source_runs_before_import_and_is_optional(tmp_path):
     p = run_script(tmp_path, *base, "--out", str(tmp_path / "r1"), "--uefi-source", str(tree))
     st = (tmp_path / "r1" / "status.tsv").read_text()
     assert re.search(r"^B-uefi-source-rootfs_no_gui\tGAP\t.*OpenSSL 3\.4\.1", st, re.M), st + p.stderr     # edk2 版本不明 → GAP
-    assert re.search(r"^B-uefi-grype-rootfs_no_gui\t(NOT_RUN|OK|GAP)\t", st, re.M) and st.index("B-uefi-source") < st.index("B-import-rootfs_no_gui")
+    assert re.search(r"^B-uefi-grype-rootfs_no_gui\tNOT_RUN\tdocker import 失敗，sca-scan 沒有執行（Grype 資料庫不可用）", st, re.M), st
+    assert "B-tee-grype" not in st                      # 沒給 --tee-source：不寫這一列
+    assert st.index("B-uefi-source") < st.index("B-import-rootfs_no_gui") < st.index("B-uefi-grype-rootfs_no_gui")
+    assert re.search(r"^B-import-rootfs_no_gui\tFAIL\t", st, re.M), st
     d = tmp_path / "r1" / "rootfs_no_gui" / "uefi-source"
-    assert (d / "uefi-source.cdx.json").is_file() and json.loads((d / "grype-run.json").read_text())["status"] in ("NOT_RUN", "OK", "GAP", "FAIL")
+    assert (d / "uefi-source.cdx.json").is_file() and not (d / "grype-run.json").exists()
     p = run_script(tmp_path, *base, "--out", str(tmp_path / "r2"), "--uefi-source", str(tmp_path / "nope"))
     assert p.returncode == 64
 

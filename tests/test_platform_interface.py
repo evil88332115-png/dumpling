@@ -2,6 +2,7 @@
 import hashlib
 import inspect
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,6 +75,35 @@ class FetchVerify(Tmp):
         ok, msg = fv.fetch_one(self.entry(), self.tmp, d)
         self.assertTrue(ok)
         self.assertEqual(d.calls, [])
+
+    def test_sha1_match_is_checked_by_fetch_one_itself(self):
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1=hashlib.sha1(b"hello").hexdigest()), self.tmp, d)
+        self.assertTrue(ok, msg)
+        self.assertIn("SHA-1", msg)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "a.bin")))
+
+    def test_sha1_mismatch_fails_like_a_sha256_mismatch(self):
+        for kw in ({"sha1": "0" * 40}, {"sha256": sha(b"x")}):       # sha1 不符與 sha256 不符：同樣失敗、同樣不留檔案（正式檔與暫存檔都沒有）
+            tmp = tempfile.mkdtemp(prefix="dumpling-sha1-")
+            self.addCleanup(shutil.rmtree, tmp, True)
+            ok, msg = fv.fetch_one(self.entry(**kw), tmp, self.dl(b"hello"))
+            self.assertFalse(ok, kw)
+            self.assertEqual(os.listdir(tmp), [], kw)
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, self.dl(b"hello"))
+        self.assertIn("sha1 不符", msg)
+
+    def test_no_sha1_is_fine(self):
+        ok, msg = fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        self.assertTrue(ok, msg)
+        self.assertNotIn("SHA-1", msg)
+
+    def test_existing_file_with_wrong_sha1_is_downloaded_again(self):
+        fv.fetch_one(self.entry(), self.tmp, self.dl(b"hello"))
+        d = self.dl(b"hello")
+        ok, msg = fv.fetch_one(self.entry(sha1="0" * 40), self.tmp, d)      # 已存在的檔案 sha256 相符、sha1 不符：不信任，重新下載後仍不符 → 失敗
+        self.assertFalse(ok)
+        self.assertEqual(len(d.calls), 1)
 
     def test_sha_mismatch(self):
         ok, msg = fv.fetch_one(self.entry(sha256=sha(b"x")), self.tmp, self.dl(b"hello"))
@@ -407,7 +437,7 @@ class Scripts(Tmp):
         d = os.path.join(platforms, name)
         os.makedirs(d)
         with open(os.path.join(d, "platform.yml"), "w", encoding="utf-8") as fh:
-            fh.write("schema: 1\nplatform: %s\ndescription: test\nbuild: {mode: none}\nlayers: {default: os}\n" % name)
+            fh.write("schema: 1\nplatform: %s\ndescription: test\nbuild: {mode: none}\nlayers: {default: os}\nscan: {platform_arg: generic}\n" % name)
         for s in steps:
             with open(os.path.join(d, s + ".sh"), "w", encoding="utf-8") as fh:
                 fh.write('#!/usr/bin/env bash\necho "%s: OK（%s %s $DUMPLING_PLATFORM $DUMPLING_OS_RESPONSIBILITY $2）"\n' % (s, name, s))
@@ -471,20 +501,176 @@ class Scripts(Tmp):
             self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: %s" % (step, word))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "out", "ex1", ver, "raw-sectors.json")))
 
-    def test_jetson_skeleton_and_shared_fetch(self):
+    def test_jetson_steps_without_inputs_and_shared_fetch(self):
+        """J 軌實作後：沒有輸入（沒下載、沒有 build 的輸出）時，各步驟回報 FAIL 或 NOT_RUN（非 aarch64 的 build），不會假裝成功。"""
         proj = os.path.join(ROOT, "projects", "orin-nano-demo")
-        for step in ("build", "assemble", "scan"):
-            p = self.plat(step, proj, "v39.2.1-demo1")
+        p = self.plat("build", proj, "v39.2.1-demo1")
+        if os.uname().machine == "aarch64":
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip(), r"^build: FAIL（")
+        else:
             self.assertEqual(p.returncode, 4, p.stdout)
-            self.assertEqual(p.stdout.strip(), "%s: NOT_RUN（J 軌實作）" % step)
+            self.assertRegex(p.stdout.strip(), r"^build: NOT_RUN（只在 aarch64 主機原生編譯")
+        for step in ("assemble", "scan"):
+            p = self.plat(step, proj, "v39.2.1-demo1")
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertRegex(p.stdout.strip().splitlines()[-1], r"^%s: FAIL（" % step)
         p = self.plat("raw-sectors", proj, "v39.2.1-demo1")
         self.assertEqual((p.returncode, p.stdout.split("（")[0]), (0, "raw-sectors: OK"))
         p = self.plat("validate", proj, "v39.2.0-demo1")
         self.assertEqual(p.returncode, 0, p.stdout)
 
+    def test_scan_flash_package_platform_generic_and_arch_arguments(self):
+        """--platform generic 與 --arch／SCA_ARCH 的參數處理（不跑 Docker）：合法值過了參數檢查（之後因為沒給 --archive 才結束碼 64），不合法的值在參數檢查就被拒絕。"""
+        sfp = os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh")
+
+        def rc(*args, env=None):
+            p = run(["bash", sfp, *args], env=env)
+            return p.returncode, p.stderr
+        for args, env in ((["--platform", "generic"], None), (["--platform", "generic", "--arch", "amd64"], None), (["--arch", "arm64"], None),
+                          ([], {"SCA_ARCH": "amd64"}), ([], {"SCA_PLATFORM": "generic"})):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertNotIn("只接受", err, (args, env))             # 沒有被參數檢查擋下來，而是後面「需要 --archive」
+            self.assertIn("需要 --archive", err)
+        for args, env, word in ((["--platform", "bogus"], None, "--platform"), (["--arch", "riscv64"], None, "--arch"), (["--arch", ""], None, "--arch"),
+                                ([], {"SCA_ARCH": "x86"}, "--arch"), ([], {"SCA_ARCH": "ARM64"}, "--arch")):
+            code, err = rc(*args, env=env)
+            self.assertEqual(code, 64, err)
+            self.assertIn("只接受", err)
+            self.assertIn(word, err)
+        self.assertEqual(rc("--arch")[0], 64)                                     # 缺值
+        src = open(sfp, encoding="utf-8").read()
+        self.assertIn('docker import --platform "linux/$ARCH"', src)               # 架構參數真的用在 docker import
+        self.assertNotIn("linux/arm64", src.split("set -uo pipefail", 1)[1])        # 預設值 arm64 在變數裡，不寫死在 import
+        self.assertIn('[ "$PLATFORM" != generic ] || na=(--not-assessed generic)', src)   # generic 走 --not-assessed generic（NOT_ASSESSED，不是 GAP）
+
     def test_scan_flash_package_rejects_unknown_platform(self):
         p = run(["bash", os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh"), "--platform", "bogus"])
         self.assertEqual(p.returncode, 64, p.stderr)
+
+
+class KernelWizardArgs(unittest.TestCase):
+    """platform_params.kernel_release／kernel_upstream_version → 精靈的 --kernel-version／--kernel-upstream-version（project_config.kernel_wizard_args、
+    project-info.py --kernel-args）。"""
+
+    def test_shapes(self):
+        f = pc.kernel_wizard_args
+        self.assertEqual(f(None), [])
+        self.assertEqual(f({"l4t_release": "1.0"}), [])
+        self.assertEqual(f({"kernel_release": "6.1.0-v8"}), ["--kernel-version", "6.1.0-v8"])
+        self.assertEqual(f({"kernel_release": "6.1.0-v8", "kernel_upstream_version": "6.1.93"}),
+                         ["--kernel-version", "6.1.0-v8", "--kernel-upstream-version", "6.1.0-v8=6.1.93"])
+        self.assertEqual(f({"kernel_release": ["6.1.0-a", "6.1.0-b"], "kernel_upstream_version": {"6.1.0-b": "6.1.93"}}),
+                         ["--kernel-version", "6.1.0-a", "--kernel-version", "6.1.0-b", "--kernel-upstream-version", "6.1.0-b=6.1.93"])
+
+    def test_bad_shapes(self):
+        for params in ({"kernel_release": "a;b"}, {"kernel_release": ["x", "x"]}, {"kernel_release": 3},
+                       {"kernel_release": ["a", "b"], "kernel_upstream_version": "6.1.93"},       # 字串只用於一顆
+                       {"kernel_upstream_version": "6.1.93"},                                      # 沒有 kernel_release
+                       {"kernel_release": "a", "kernel_upstream_version": "6.1"},
+                       {"kernel_release": "a", "kernel_upstream_version": {"b": "6.1.93"}},
+                       {"kernel_release": "a", "kernel_upstream_version": ["6.1.93"]}):
+            with self.assertRaises(pc.ConfigError, msg=params):
+                pc.kernel_wizard_args(params)
+        errs = pc.validate_sources({"schema": 1, "releases": {"v1": {"platform_params": {"kernel_release": "a;b"},
+                                                                     "files": [{"name": "x", "url": "https://e.invalid/x", "sha256": "0" * 64, "role": "bsp"}]}}})
+        self.assertTrue(any("kernel_release" in e for e in errs), errs)
+
+    def test_not_distro_shapes(self):
+        """kernel_not_distro：理由字串 → --kernel-not-distro；platform.yml 的預設（第二個參數）被版本的 platform_params 取代。"""
+        f = pc.kernel_wizard_args
+        self.assertEqual(f({"kernel_not_distro": "廠商核心，版本字串看不出來"}), ["--kernel-not-distro", "廠商核心，版本字串看不出來"])
+        self.assertEqual(f({"kernel_release": "6.1.84-8", "kernel_not_distro": "x"}), ["--kernel-version", "6.1.84-8", "--kernel-not-distro", "x"])
+        self.assertEqual(f(None, "平台預設"), ["--kernel-not-distro", "平台預設"])
+        self.assertEqual(f({}, "平台預設"), ["--kernel-not-distro", "平台預設"])
+        self.assertEqual(f({"kernel_not_distro": "版本的理由"}, "平台預設"), ["--kernel-not-distro", "版本的理由"])      # 版本優先
+        self.assertEqual(f({"l4t_release": "1.0"}, None), [])                                                         # Jetson：都沒有就不印
+        for bad in ("", "   ", "a\nb", "a\tb", 3, ["x"], "x" * 301, "--evil", " -x"):            # - 開頭：精靈的 argparse 會當成選項
+            with self.assertRaises(pc.ConfigError, msg=repr(bad)):
+                f({"kernel_not_distro": bad})
+            with self.assertRaises(pc.ConfigError, msg=repr(bad)):
+                f({}, bad)
+        errs = pc.validate_sources({"schema": 1, "releases": {"v1": {"platform_params": {"kernel_not_distro": ""},
+                                                                     "files": [{"name": "x", "url": "https://e.invalid/x", "sha256": "0" * 64, "role": "bsp"}]}}})
+        self.assertTrue(any("kernel_not_distro" in e for e in errs), errs)
+
+    def test_platform_yml_scan_kernel_not_distro_validated(self):
+        base = pc.load_platform_config("jetson")
+        self.assertNotIn("kernel_not_distro", base.get("scan", {}))                     # Jetson 不設
+        ok = dict(base, scan=dict(base["scan"], kernel_not_distro="平台的核心不是發行版建的"))
+        self.assertEqual(pc.validate_platform_config(ok, "jetson"), [])
+        for bad in ("", "a\nb", 3, "x" * 301):
+            errs = pc.validate_platform_config(dict(base, scan=dict(base["scan"], kernel_not_distro=bad)), "jetson")
+            self.assertTrue(any("kernel_not_distro" in e for e in errs), (bad, errs))
+
+    def test_project_info_platform_default_and_release_override(self):
+        tmp = tempfile.mkdtemp(prefix="dumpling-nd-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plats = os.path.join(tmp, "plats")
+        shutil.copytree(os.path.join(ROOT, "pipeline", "platforms", "jetson"), os.path.join(plats, "jetson"))
+        yml = os.path.join(plats, "jetson", "platform.yml")
+        with open(yml, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(yml, "w", encoding="utf-8") as fh:
+            self.assertIn("\nscan:\n", text)
+            fh.write(text.replace("\nscan:\n", "\nscan:\n  kernel_not_distro: \"平台預設的理由\"\n", 1))
+        dst = os.path.join(tmp, "nd-demo")
+        shutil.copytree(os.path.join(ROOT, "projects", "orin-nano-demo"), dst)
+        env = dict(os.environ, DUMPLING_PLATFORMS_DIR=plats)
+        cmd = [sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"]
+        r = run(cmd, env=env)
+        self.assertEqual((r.returncode, r.stdout.splitlines()), (0, ["--kernel-not-distro", "平台預設的理由"]), r.stdout + r.stderr)   # 平台預設套用到每個版本
+        sp = os.path.join(dst, "sources.yml")
+        with open(sp, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(sp, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('      l4t_release: "39.2.1"\n', '      l4t_release: "39.2.1"\n      kernel_not_distro: "這一版的理由"\n', 1))
+        r = run(cmd, env=env)
+        self.assertEqual((r.returncode, r.stdout.splitlines()), (0, ["--kernel-not-distro", "這一版的理由"]), r.stdout + r.stderr)      # 版本覆蓋平台預設
+        r = run(cmd[:4] + [os.path.join(ROOT, "projects", "orin-nano-demo"), "v39.2.1-demo1"])
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stdout + r.stderr)                                                       # 真的 Jetson 平台沒設：不印
+
+    def test_project_info_kernel_args(self):
+        tmp = tempfile.mkdtemp(prefix="dumpling-kargs-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        src = os.path.join(ROOT, "projects", "orin-nano-demo")
+        dst = os.path.join(tmp, "kargs-demo")
+        shutil.copytree(src, dst)
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"])
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stdout + r.stderr)          # Jetson 沒設定：不印
+        sp = os.path.join(dst, "sources.yml")
+        with open(sp, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(sp, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('      l4t_release: "39.2.1"\n',
+                                  '      l4t_release: "39.2.1"\n      kernel_release: [6.8.12-a, 6.8.12-b]\n      kernel_upstream_version: {6.8.12-a: 6.8.12}\n', 1))
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["--kernel-version", "6.8.12-a", "--kernel-version", "6.8.12-b", "--kernel-upstream-version", "6.8.12-a=6.8.12"])
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v0-nope"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("project-info: FAIL", r.stdout)
+
+    def test_jetson_scan_passes_them_to_the_wizard(self):
+        with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
+            s = fh.read()
+        self.assertIn('project-info.py" --kernel-args "$proj" "$ver"', s)
+        self.assertIn('"${kargs[@]+"${kargs[@]}"}"', s)
+
+    def test_jetson_layer_rescans_pass_kernel_in_other_report_only_for_non_bsp_layers(self):
+        """bsp 以外的分層重跑（-os）才給 --kernel-in-other-report <專案>-bsp；-bsp（會指向自己）、完整掃描與 ours 的空後綴重跑不給。"""
+        with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
+            s = fh.read()
+        self.assertIn('case $suffix in ""|-bsp) lk=();; *) lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp");; esac', s)
+        self.assertIn('wiz "$suffix" "${lk[@]+"${lk[@]}"}" --rescan-from', s)
+        self.assertIn('w0=$(wiz "" |', s)                                    # 完整掃描：不給
+        self.assertEqual(len(re.findall(r"^\s*case \$suffix in", s, re.M)), 1)
+        # 把那一行單獨執行：空後綴與 -bsp 不給、-os 給 <專案>-bsp
+        line = re.search(r'^\s*(case \$suffix in .*esac)$', s, re.M).group(1)
+        for suffix, want in (("", ""), ("-bsp", ""), ("-os", "--kernel-in-other-report demo-bsp")):
+            r = subprocess.run(["bash", "-c", 'DUMPLING_PROJECT=demo; suffix="$1"; %s; echo "${lk[*]-}"' % line, "x", suffix], capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, want), r.stderr)
 
 
 if __name__ == "__main__":

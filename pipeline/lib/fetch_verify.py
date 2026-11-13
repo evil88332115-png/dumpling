@@ -10,7 +10,8 @@
 - 下載函式可注入：`downloader(url, dest, max_size) -> 錯誤訊息或 None`（測試用，不連網）。
 
 和 firmware_fetch.py 的差別（只放寬、不改既有行為）：entry 的 `size` 可以是 None（例如 NVIDIA 沒公布大小、
-也還沒記錄），這時不核對大小，下載上限用 DEFAULT_MAX_SIZE；有 `sha1` 時另外核對 SHA-1。
+也還沒記錄），這時不核對大小，下載上限用 DEFAULT_MAX_SIZE；entry 有 `sha1` 時，`fetch_one` 在 sha256 之後自己另外核對
+SHA-1（不符的處理和 sha256 不符完全一樣：刪除檔案、回報失敗）；邏輯只在這裡，`platform_fetch` 不再重複核對。
 """
 import hashlib
 import os
@@ -57,6 +58,16 @@ def check_file(path, size, sha):
     return None
 
 
+def check_sha1(path, sha1):
+    """核對 SHA-1（廠商公布的值）；回傳錯誤訊息或 None。sha1 是 None／空字串時不核對。"""
+    if not sha1:
+        return None
+    got = _digest_of(path, "sha1")
+    if got != str(sha1).lower():
+        return "sha1 不符（實際 %s）" % got
+    return None
+
+
 def _lstat(path):
     try:
         return os.lstat(path)
@@ -75,7 +86,7 @@ def fetch_one(entry, dest_dir, downloader=curl_download):
     if st is not None:
         if not stat.S_ISREG(st.st_mode):
             return False, "%s 已存在且不是一般檔案（拒絕）" % name
-        if check_file(final, size, sha) is None:
+        if check_file(final, size, sha) is None and check_sha1(final, entry.get("sha1")) is None:
             return True, "%s 已存在且核對相符" % name
         os.unlink(final)
     st = _lstat(tmp)
@@ -88,11 +99,14 @@ def fetch_one(entry, dest_dir, downloader=curl_download):
         err = "下載後沒有檔案"
     if err is None:
         err = check_file(tmp, size, sha)
+    if err is None:
+        err = check_sha1(tmp, entry.get("sha1"))        # 有 sha1 時在 sha256 之後核對；不符和 sha256 不符一樣：刪除暫存檔、失敗
     if err is not None:
         if _lstat(tmp) is not None:
             os.unlink(tmp)
         return False, "%s %s" % (name, err)
     os.replace(tmp, final)
+    extra = "、SHA-1" if entry.get("sha1") else ""
     if size is None:
-        return True, "%s 已下載並核對 sha256（大小未記錄）" % name
-    return True, "%s 已下載並核對（%d 位元組）" % (name, size)
+        return True, "%s 已下載並核對 sha256%s（大小未記錄）" % (name, extra)
+    return True, "%s 已下載並核對%s（%d 位元組）" % (name, extra, size)

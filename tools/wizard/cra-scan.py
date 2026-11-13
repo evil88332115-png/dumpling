@@ -4,7 +4,16 @@
 用法（用自己的帳號，不要 sudo）：
   python3 -I tools/wizard/cra-scan.py [--site-config 本機設定檔.json]
   （站台設定：路徑、工具位置等見 tools/wizard/README.md 與 wizard.example.json）
-  （非互動、測試用：--archive A --source S [--name N --version V --config C --role both|manufacturer|supplier --yes --plan-only]）
+  （非互動、測試用：--archive A [--source S（不給＝沒有原始碼，核心原始碼判斷標 GAP；不去目前資料夾找）] [--name N --version V --config C --role both|manufacturer|supplier --yes --plan-only]）
+  核心版本：--kernel-version <版本>（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準）。映像有不只一顆核心
+  （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 scan-flash-package.sh --kernel-version → sca-scan。
+  只接受英數字開頭、英數字與「. _ + ~ -」，否則 exit 64。出貨但沒指定的核心記為「出貨但沒有判定」（C-kernel-config 與 C-kernel-module-map 至少 GAP）；
+  指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan。
+  分層：--kernel-in-other-report <報告名稱>（環境變數 SCA_KERNEL_IN_OTHER_REPORT 也可以）。分層重跑（--rescan-from，SBOM 換成某一層的）時，這份報告的 SBOM 沒有
+  作業系統核心、核心在 <報告名稱> 那份報告判定：原樣交給 scan-flash-package.sh → sca-scan，SBOM 真的沒有核心時 C-kernel-cve-list、C-kernel-config、
+  C-kernel-module-map 記 NOT_RUN「不適用」，不跑核心階段；SBOM 有核心時照舊。名稱只接受 ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64。見 docs/LAYERS.md。
+  --kernel-not-distro <理由>（環境變數 SCA_KERNEL_NOT_DISTRO 也可以）：平台負責人宣告核心不是發行版（Debian／Ubuntu）的核心，版本字串看不出來時用；
+  SBOM 有核心時 C-kernel-coverage 是 GAP。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64。
 
 流程：核對 MD5 → 安全解開原始碼（不執行裡面任何東西）→ 自動找核心原始碼、UEFI、NVIDIA 樹外模組、核心建置紀錄
      → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
@@ -595,6 +604,67 @@ def extract_tools(repo, commit, dest):
         raise ToolsRevError(f"git archive {commit} 或解開失敗")
 
 
+KERNEL_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}")
+
+
+def kernel_versions_from(cli, environ=None):
+    """--kernel-version（可重複）／環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）→ 去掉重複的版本清單；兩者都給時以命令列為準。
+    只收英數字開頭、英數字與「. _ + ~ -」（不含 shell 特殊字元、「/」、空白），其餘 exit 64。值原樣往下傳，核心工具另有自己的檢查。"""
+    env = os.environ if environ is None else environ
+    vals = list(cli or []) or [t for t in re.split(r"[\s,]+", env.get("SCA_KERNEL_VERSIONS", "")) if t]
+    out = []
+    for v in vals:
+        if not KERNEL_VERSION_RE.fullmatch(v) or not v.isascii():
+            print(f"錯誤：核心版本只接受英數字開頭、英數字與「. _ + ~ -」，最多 100 字元（--kernel-version／SCA_KERNEL_VERSIONS）：{v[:120]}", file=sys.stderr)
+            sys.exit(64)
+        if v not in out:
+            out.append(v)
+    return out
+
+
+KERNEL_UPSTREAM_RE = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}")
+REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")
+NOT_DISTRO_MAX_BYTES = 300
+
+
+def kernel_in_other_report_from(cli, environ=None):
+    """--kernel-in-other-report <報告名稱>／環境變數 SCA_KERNEL_IN_OTHER_REPORT（命令列優先）→ 名稱或 None；格式不對 → exit 64。"""
+    env = os.environ if environ is None else environ
+    v = cli if cli is not None else env.get("SCA_KERNEL_IN_OTHER_REPORT", "")
+    if cli is None and not v:
+        return None
+    if not REPORT_NAME_RE.fullmatch(v) or not v.isascii():
+        print(f"錯誤：報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：{v[:120]}", file=sys.stderr)
+        sys.exit(64)
+    return v
+
+
+def kernel_not_distro_from(cli, environ=None):
+    """--kernel-not-distro <理由>／環境變數 SCA_KERNEL_NOT_DISTRO（命令列優先）→ 理由或 None；空的、有控制字元、超過 300 位元組 → exit 64。"""
+    env = os.environ if environ is None else environ
+    v = cli if cli is not None else env.get("SCA_KERNEL_NOT_DISTRO", "")
+    if cli is None and not v:
+        return None
+    if not v.strip() or not v.isprintable() or len(v.encode("utf-8")) > NOT_DISTRO_MAX_BYTES:
+        print(f"錯誤：--kernel-not-distro／SCA_KERNEL_NOT_DISTRO 的理由不能是空的、不能有控制字元、最多 {NOT_DISTRO_MAX_BYTES} 位元組：{v[:120]!r}", file=sys.stderr)
+        sys.exit(64)
+    return v
+
+
+def kernel_upstreams_from(cli):
+    """--kernel-upstream-version <核心版本>=<X.Y.Z>（可重複）→ 去掉重複的清單；格式不對或同一顆給兩個值 → exit 64。"""
+    out, seen = [], {}
+    for x in cli or []:
+        v, sep, up = x.partition("=")
+        if not sep or not KERNEL_VERSION_RE.fullmatch(v) or not v.isascii() or not KERNEL_UPSTREAM_RE.fullmatch(up) or seen.get(v, up) != up:
+            print(f"錯誤：--kernel-upstream-version 要是 <核心版本>=<X.Y.Z>（同一顆核心不能給兩個值）：{x[:120]}", file=sys.stderr)
+            sys.exit(64)
+        if v not in seen:
+            seen[v] = up
+            out.append(f"{v}={up}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="CRA 掃描精靈")
     ap.add_argument("--tools-rev", help="掃描用的工具版本（commit、分支或 tag）；不給時用環境變數 DUMPLING_TOOLS_REV，再不然目前 checkout 的 HEAD。"
@@ -609,16 +679,38 @@ def main():
     ap.add_argument("--inputs", help="輸入清單檔（JSON）；不給時用產品設定包裡的 inputs.json")
     ap.add_argument("--platform", help="沒有清單檔時改用平台範本（tools/wizard/platforms/<名稱>.json：jetson、rockchip、raspberrypi；草稿）")
     ap.add_argument("--site-config", help="站台設定檔（JSON）；不給時用環境變數 SCA_WIZARD_CONFIG，再不然 ~/.config/sca-center/wizard.json")
+    ap.add_argument("--rescan-from", help="上一次完整掃描的 scan 資料夾（scan-flash-package.sh 的結果，要有 list.json）：只重跑比對，沿用它的 SBOM（可以事先換成某一層的 SBOM，"
+                                          "分層用）與 A0 上游比對結果；不再做 A0。見 docs/LAYERS.md、docs/JETSON.md")
     ap.add_argument("--yes", action="store_true"); ap.add_argument("--plan-only", action="store_true")
+    ap.add_argument("--kernel-version", action="append", metavar="版本",
+                    help="要判定的核心版本（映像的 /usr/lib/modules/<版本>/），可重複；不給時用環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）。"
+                         "映像只有一顆核心可以不給；有多顆時沒指定的核心記為「出貨但沒有判定」")
+    ap.add_argument("--kernel-upstream-version", action="append", metavar="核心版本=X.Y.Z",
+                    help="平台設定（platform_params.kernel_upstream_version）給的上游版本，可重複；原樣交給 scan-flash-package.sh → sca-scan → "
+                         "kernel_versions.py --upstream-version，和核心原始碼的 Makefile 核對（不一致不採用）")
+    ap.add_argument("--kernel-in-other-report", metavar="報告名稱",
+                    help="分層重跑用：這份報告的 SBOM 沒有作業系統核心，核心在這份名稱的報告判定；原樣交給 scan-flash-package.sh → sca-scan。"
+                         "SBOM 真的沒有核心時核心階段記 NOT_RUN「不適用」，有核心時照舊；不給時行為不變。環境變數 SCA_KERNEL_IN_OTHER_REPORT")
+    ap.add_argument("--kernel-not-distro", metavar="理由",
+                    help="平台宣告核心不是發行版（Debian／Ubuntu）的核心（platform_params.kernel_not_distro）：SBOM 有核心時 C-kernel-coverage 是 GAP，"
+                         "發行版資料的比對不可靠。環境變數 SCA_KERNEL_NOT_DISTRO")
     a = ap.parse_args()
+    kvers = kernel_versions_from(a.kernel_version)
+    kups = kernel_upstreams_from(a.kernel_upstream_version)
+    kother = kernel_in_other_report_from(a.kernel_in_other_report)
+    knotdistro = kernel_not_distro_from(a.kernel_not_distro)
     ni = a.yes
     load_site_config(a.site_config)
 
     say("== CRA 掃描精靈 ==（Ctrl+C 可隨時中止；舊的結果不會被動到）\n")
     fp = Path(ask("1. 刷機包的路徑（.tbz2、update.img 或 zip）", check=lambda v: None if Path(v).is_file() else "找不到這個檔案",
                   args_value=a.archive, noninteractive=ni)).resolve()
-    sp = Path(ask("2. SourceCode 資料夾的路徑（裡面放著還沒解開的原始碼壓縮檔；也可以直接給壓縮檔）",
-                  check=lambda v: None if Path(v).exists() else "找不到這個路徑", args_value=a.source, noninteractive=ni)).resolve()
+    # 沒給（--yes 沒有 --source，或互動時直接按 Enter）＝沒有原始碼：核心原始碼判斷標 GAP，其他步驟照跑。
+    # 不去目前資料夾找：結果不能取決於執行時剛好放了什麼檔（可能拿錯版本或不可信的檔，也無法重現）。
+    sv = ask("2. SourceCode 資料夾的路徑（裡面放著還沒解開的原始碼壓縮檔；也可以直接給壓縮檔；沒有就直接按 Enter → 核心原始碼判斷標 GAP）", "",
+             check=lambda v: None if not v or Path(v).exists() else "找不到這個路徑", args_value=a.source, noninteractive=ni)
+    sp = Path(sv).resolve() if sv else None
+    sp_dir = (sp if sp.is_dir() else sp.parent) if sp else None
     m = re.match(r"(.+?)[_-]V?(\d[\w.\-]*?)(\.tbz2|\.tar\.\w+|\.img|\.zip)$", fp.name)
     name = ask("3. 產品名稱", m.group(1) if m else fp.stem, args_value=a.name, noninteractive=ni)
     version = ask("4. 版本", ("V" + m.group(2)) if m else "", args_value=a.version, noninteractive=ni)
@@ -675,16 +767,22 @@ def main():
 
     say("== 核對與解開原始碼 ==")
     say(f"  刷機包：{md5_check(fp)}")
-    sa = pick_source_archive(sp)
-    say(f"  原始碼壓縮檔：{sa.name}；{md5_check(sa)}")
-    say("  解開中（只解開一般檔案，不執行任何內容；大檔要幾分鐘）…")
-    safe_extract(sa, OUT / "src")
+    no_source = "沒有指定原始碼（--source）：核心原始碼判斷標 GAP；不去目前資料夾找" if sp is None else None
+    if sp is None:
+        sa = None
+        say(f"  原始碼：{no_source}")
+        (OUT / "src").mkdir()
+    else:
+        sa = pick_source_archive(sp)
+        say(f"  原始碼壓縮檔：{sa.name}；{md5_check(sa)}")
+        say("  解開中（只解開一般檔案，不執行任何內容；大檔要幾分鐘）…")
+        safe_extract(sa, OUT / "src")
     kt = find_kernel_tree(OUT / "src")
     uefi = find_dir_named(OUT / "src", {"uefi"})
     sources_root = kt[0].parent.parent if kt else None
     oot = [sources_root / x for x in JETSON_OOT if sources_root and (sources_root / x).is_dir()]
     # --build-record 有給就用它（優先於自動找到的）；沒給才在原始碼與 SourceCode 資料夾裡找
-    br = Path(a.build_record).resolve() if a.build_record else find_build_record(OUT / "src", sp if sp.is_dir() else sp.parent)
+    br = Path(a.build_record).resolve() if a.build_record else find_build_record(OUT / "src", sp_dir)
     if br and not br.exists():
         sys.exit(f"錯誤：找不到建置紀錄 {br}")
     if not br:
@@ -699,13 +797,13 @@ def main():
         if not built_oot:
             sys.exit(f"錯誤：{a.oot_build_dir} 底下的樹外模組資料夾都沒有編譯紀錄（.cmd）")
     else:
-        built_oot = find_built_oot(sp if sp.is_dir() else None)
+        built_oot = find_built_oot(sp if sp and sp.is_dir() else None)
     stable = STABLE_GIT.get(kt[1]) if kt else None
     stable = stable if stable and stable.exists() else None
 
     say("\n== 找到的輸入（請確認）==")
     say(f"  刷機包：{fp}")
-    say(f"  核心原始碼：{kt[0] if kt else '找不到 → 核心判斷會標 GAP'}" + (f"（Linux {kt[1]}）" if kt else ""))
+    say(f"  核心原始碼：{kt[0] if kt else (no_source or '找不到 → 核心判斷會標 GAP')}" + (f"（Linux {kt[1]}）" if kt else ""))
     say(f"  UEFI 原始碼：{uefi or '找不到 → 不比對 UEFI 內建函式庫'}")
     say(f"  核心建置紀錄：{br or '找不到 → 核心判斷不了的一律當成受影響（路線 B）'}")
     say(f"  樹外模組編譯紀錄：{(str(built_oot[0].parent) + f'（{len(built_oot)} 個資料夾有 .cmd）') if built_oot else '沒有已編譯的原始碼樹 → 標頭檔類的核心漏洞較多判斷不了'}")
@@ -715,7 +813,7 @@ def main():
     say(f"  名稱／版本／rootfs／角色：{name}／{version}／{rootfs}／{role}")
     say(f"  另外交付的韌體（{len(extras)} 個）：{', '.join(p.name for p in extras) or '無'}")
     say(f"  板子檢查結果檔（{len(board_tests)} 個）：{', '.join(p.name for p in board_tests) or '無 → 對外服務欄顯示「不明」'}")
-    plan = {"archive": str(fp), "source_archive": str(sa), "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
+    plan = {"archive": str(fp), "source_archive": str(sa) if sa else None, "source_note": no_source, "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
             "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
             "stable_git": str(stable) if stable else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
             "name": name, "version": version, "rootfs": rootfs, "role": role, "extra_deliverables": [str(p) for p in extras],
@@ -755,13 +853,17 @@ def main():
     plan["a0_artifacts"] = bool(plan["upstream_bsp"])
     plan["a0_source"] = bool(plan["upstream_source"]) and bool(oot or built_oot or kt)
     plan["board_test"] = [str(p) for p in board_tests]
+    plan["kernel_versions"] = kvers      # --kernel-version／SCA_KERNEL_VERSIONS（原樣交給 scan-flash-package.sh）
+    plan["kernel_upstream_versions"] = kups   # --kernel-upstream-version（原樣交給 scan-flash-package.sh）
+    plan["kernel_in_other_report"] = kother   # --kernel-in-other-report（分層：核心在哪份報告判定；原樣交給 scan-flash-package.sh）
+    plan["kernel_not_distro"] = knotdistro    # --kernel-not-distro（平台宣告核心不是發行版的核心；原樣交給 scan-flash-package.sh）
     say(f"  OP-TEE／TF-A 公開原始碼（--tee-source）：{tee_dir or ('GAP：' + tee_note)}")
     say("  UEFI 平台設定（config.dsc.inc）：" + (f"建置紀錄裡有 {len(uefi_defs)} 份" if uefi_defs else "建置紀錄裡沒有 → UEFI 映像檢查維持 not_assessed（" + "；".join(uefi_notes) + "）")
         + ("　※" + "；".join(uefi_notes) if uefi_defs and uefi_notes else ""))
     say(f"  A0 上游基準：成品比對 {'會做（' + plan['upstream_bsp'] + '）' if plan['a0_artifacts'] else 'GAP：沒有上游 BSP'}；"
         f"原始碼比對 {'會做（' + plan['upstream_source'] + '）' if plan['a0_source'] else 'GAP：沒有上游 public_sources 或沒有我們的 sources'}")
     if manifest:
-        res = check_inputs(manifest, plan, sp if sp.is_dir() else sp.parent, cfg_dir, up_name, up)
+        res = check_inputs(manifest, plan, sp_dir, cfg_dir, up_name, up)
         print_checklist(manifest, res)
         miss_req = [r for r in res if r["status"] == "missing" and r["required"]]
         miss_opt = [r for r in res if r["status"] == "missing" and not r["required"]]
@@ -852,10 +954,20 @@ def main():
            "--no-company", "--out", str(OUT / "scan")]
     if a.platform:      # 平台由呼叫端（project.yml）明確給，原樣傳下去；沒給時 scan-flash-package.sh 對原始磁碟映像標 GAP，不推測
         cmd += ["--platform", a.platform]
+    if a.rescan_from:   # 分層：沿用上一次完整掃描的資料夾（SBOM 已換成這一層的），只重跑比對
+        cmd += ["--rescan-from", str(Path(a.rescan_from).resolve())]
     if cfg_dir:
         cmd += ["--product-config", str(mcfg / "config.json")]
     if kt:
         cmd += ["--kernel-source", str(kt[0])]
+    for v in kvers:      # 核心版本原樣往下傳：scan-flash-package.sh → sca-scan → 核心工具
+        cmd += ["--kernel-version", v]
+    for v in kups:       # 平台設定的上游版本：scan-flash-package.sh → sca-scan → kernel_versions.py --upstream-version
+        cmd += ["--kernel-upstream-version", v]
+    if kother:           # 分層：這份報告的 SBOM 沒有核心時，核心階段不適用（scan-flash-package.sh → sca-scan）
+        cmd += ["--kernel-in-other-report", kother]
+    if knotdistro:       # 平台宣告核心不是發行版的核心
+        cmd += ["--kernel-not-distro", knotdistro]
     if uefi:
         cmd += ["--uefi-source", str(uefi)]
         for d in ("edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc",):      # NVIDIA Jetson 的平台 DSC（有的話才給；UEFI 映像檢查的 DSC 佐證）
@@ -885,7 +997,19 @@ def main():
     say("\n== 3b. A0 與 NVIDIA 原版的逐檔比對 ==")
     for mode, tag, ours, up_path, label, lim in a0:
         t0 = datetime.datetime.now()
-        if not up_path:
+        prev_a0 = Path(a.rescan_from) / "rootfs" / f"upstream-baseline-{mode}.json" if a.rescan_from else None
+        if prev_a0 and prev_a0.is_file():      # 分層重跑：A0 與 SBOM 無關，沿用完整掃描的結果，不重算
+            for ext in ("json", "md"):
+                if (prev_a0.parent / f"upstream-baseline-{mode}.{ext}").is_file():
+                    shutil.copy2(prev_a0.parent / f"upstream-baseline-{mode}.{ext}", rd)
+            steps[tag] = {"status": "GAP", "detail": "完整掃描沒有留下這一步的狀態紀錄（wizard-steps.json），不推測", "reused": True}
+            try:
+                prev_steps = json.loads((Path(a.rescan_from).parent / "wizard-steps.json").read_text(encoding="utf-8"))
+                if tag in prev_steps:
+                    steps[tag] = dict(prev_steps[tag], reused=True, detail="沿用完整掃描的結果：" + str(prev_steps[tag].get("detail", "")))
+            except (OSError, ValueError):
+                pass
+        elif not up_path:
             steps[tag] = {"status": "GAP", "detail": "沒有上游基準檔（站台設定 upstream 沒有或檔案不存在）"}
         elif not ours or not Path(ours).exists():
             steps[tag] = {"status": "GAP", "detail": "找不到我們的 " + ("刷機包" if mode == "artifacts" else "sources 資料夾")}

@@ -176,7 +176,8 @@ def deb_version_parts(v):
     return int(m.group(1) or 0), m.group(2), m.group(3) or ""
 MARKER_TEXT = {"K3": "K3: module loadable", "K4": "K4 GAP: no module mapping", "U1-not-applied": "U1 not applied",
                "U1-older-revision": "U1 not applied: older revision",
-               "distro_no_range_upstream_excludes": "possible false positive"}
+               "distro_no_range_upstream_excludes": "possible false positive",
+               "kernel_scope": "K1/K2 not adopted: another shipped kernel was not judged"}
 # 規則檔最上層的 author 是所有規則的預設責任人（專案負責人填一次）；規則自己的 author 優先。空的或還是範例的佔位字時規則照樣套用，
 # 但文件寫 TO BE COMPLETED、閘門 ATTENTION（不替人編名字，VEX 照原樣寫）
 # 責任人欄的佔位字（author_missing：比對前去掉前後空白、不分大小寫）。TBD、TODO、N/A、NA、unknown、none、-、? 是原本帳號 2026-11-07 加的：
@@ -570,9 +571,46 @@ def kconfig_toolchain_only(kcfg):
     return None
 
 
+KVERS_SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2")      # /2：shipped 是物件清單；not_judged 兩版相同，舊檔照樣讀
+
+
+def kernel_scope_of(kvers):
+    """scan/kernel-versions.json（sca-scan 的 --kernel-version）→ {"judged": [版本], "not_judged": [版本]}；沒有檔案、格式不對、
+    或沒有「出貨但沒判定」的核心 → None（沒有範圍限制，輸出和以前相同）。"""
+    if not isinstance(kvers, dict) or kvers.get("schema") not in KVERS_SCHEMAS:
+        return None
+    nj = [x["version"] for x in kvers.get("not_judged") or []
+          if isinstance(x, dict) and isinstance(x.get("version"), str) and x.get("shipped") is not False]
+    if not nj:
+        return None
+    return {"judged": [v for v in kvers.get("judged") or [] if isinstance(v, str)], "not_judged": nj}
+
+
+def kernel_with_scope(doc, kvers):
+    """K1／K2 的輸入（scan/kernel-config.json、scan/kernel-module-map.json）只判定了映像出貨的部分核心時，標上 scope_incomplete 與
+    scope（judged、not_judged）：這些檔案的排除（not_affected、resolved）只對判定過的核心成立，讀取端（kconfig_usable、module_map_of、
+    runtime_evidence）看到 scope_incomplete 就不採用。這是唯一的入口（cra_report 讀完檔案就呼叫）；沒有範圍限制時原樣回傳。"""
+    sc = kernel_scope_of(kvers)
+    if sc is None or not isinstance(doc, dict):
+        return doc
+    return dict(doc, scope_incomplete=True, scope=sc)
+
+
+def kernel_scope_note(doc):
+    """被 scope_incomplete 擋下的排除，寫在受影響的列與 VEX 小節的說明；沒有限制 → ""。"""
+    sc = (doc or {}).get("scope") if isinstance(doc, dict) and doc.get("scope_incomplete") else None
+    if not isinstance(sc, dict):
+        return ""
+    j, n = ", ".join(sc.get("judged") or []), ", ".join(sc.get("not_judged") or [])
+    return (f"Kernel exclusions (K1/K2) are not adopted: {'only kernel ' + j + ' was judged' if j else 'no kernel was judged'}; {n} shipped but "
+            f"{'was' if len(sc.get('not_judged') or []) == 1 else 'were'} not judged, so an exclusion does not apply to the whole product "
+            f"({'只判定了核心 ' + j if j else '沒有判定任何核心'}；{n} 已出貨、未判定，排除不適用整個產品)")
+
+
 def kconfig_usable(kcfg):
-    """讀取端採用 kernel-config.json 的結果：status OK，或依完整的 IKCONFIG 判定的 ATTENTION（kconfig_ikconfig）。"""
-    return (isinstance(kcfg, dict) and kcfg.get("schema") == KCFG_SCHEMA
+    """讀取端採用 kernel-config.json 的結果：status OK，或依完整的 IKCONFIG 判定的 ATTENTION（kconfig_ikconfig）。
+    scope_incomplete（映像另有出貨但沒判定的核心，kernel_with_scope）→ 不採用。"""
+    return (isinstance(kcfg, dict) and kcfg.get("schema") == KCFG_SCHEMA and not kcfg.get("scope_incomplete")
             and (kcfg.get("status") == "OK" or kconfig_ikconfig(kcfg) is not None))
 
 
@@ -902,6 +940,8 @@ def module_map_of(doc):
         return None, f"scan/kernel-module-map.json is not {MODMAP_SCHEMA}"
     if doc.get("status") != "OK":
         return None, f"scan/kernel-module-map.json has status {doc.get('status')!r}"
+    if doc.get("scope_incomplete"):
+        return None, "scan/kernel-module-map.json covers only part of the kernels shipped in the image (" + kernel_scope_note(doc) + ")"
     if not isinstance((doc.get("kernel") or {}).get("version"), str) or not isinstance(doc.get("component"), dict):
         return None, "scan/kernel-module-map.json has no kernel.version or component"
     return doc, None
@@ -2164,6 +2204,19 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
     used, conflicts = set(), []
     allrows = list(rows) + extra
     notes = Counter()
+    # 映像另有出貨但沒判定的核心（kernel-versions.json，kernel_with_scope）：K1／K2 的排除不採用（kconfig_usable、module_map_of），
+    # 但說明哪些核心列「本來會被排除」，寫在那一列的 vex_note 與摘要，留給人判定
+    mm_doc = (rule_ctx or {}).get("module_map")
+    scope_txt = kernel_scope_note(kcfg) or kernel_scope_note(mm_doc)
+    kfull = kconfig_index({k: v for k, v in kcfg.items() if k != "scope_incomplete"}) if scope_txt and isinstance(kcfg, dict) else {}
+    mm_cves = {str(c).upper() for c in (mm_doc.get("cves") or {})} if scope_txt and isinstance(mm_doc, dict) and isinstance(mm_doc.get("cves"), dict) else set()
+
+    def scope_withheld(r):
+        if not scope_txt or not r.get("kernel"):
+            return False
+        cves = [str(c).upper() for c in r.get("cves") or []]
+        k1 = bool(cves) and all(c in kfull for c in cves) and kconfig_component_matches(r, kcfg)
+        return k1 or any(c in mm_cves for c in cves)
 
     def judge(r, extra_cve=False):
         cands = []
@@ -2234,6 +2287,10 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
             r["vex_note"] = ((r["vex_note"] + "; ") if r["vex_note"] else "") + (
                 f"evidence rule {x['rule']} [{x['evidence']}] would set {x.get('would_set', 'not_affected')}: {x['detail']} – not applied because the row is "
                 "exploited (KEV, EUVD or manual evidence); decide by hand")
+        if not r["vex"] and scope_withheld(r):
+            r["vex_note"] = ((r["vex_note"] + "; ") if r["vex_note"] else "") + scope_txt
+            r.setdefault("vex_markers", []).append({"code": "kernel_scope", "rule": None, "gap": False, "detail": scope_txt})
+            notes["kernel_scope_withheld"] += 1
         return cands, d, dconf, aconf
 
     # 已經有自己一列的（CVE, 元件, 版本）：由那一列判定，不再從別列拆出來（否則同一個 CVE 在同一個元件上會有兩條陳述、各自判定、互相看不到）
@@ -2295,7 +2352,9 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
             "nvidia_extra_rows": len(extra), "nvidia_presumed": len(presumed),
             "annotations_used": len(used), "annotations_unused": sorted(i for i in range(len(annotations)) if i not in used),
             "kernel_config": None if not isinstance(kcfg, dict) else {"status": kcfg.get("status"), "not_affected": len(kidx),
-                                                                       "used": kidx != {} and kcfg.get("schema") == KCFG_SCHEMA},
+                                                                       "used": kidx != {} and kcfg.get("schema") == KCFG_SCHEMA,
+                                                                       **({"scope_incomplete": True, "scope": kcfg.get("scope"), "rows_withheld": notes["kernel_scope_withheld"]}
+                                                                          if kcfg.get("scope_incomplete") else {})},
             "distro_fixed_available": len(didx), "rules": evidence_summary(erules, estats) + rule_summary(rules, rstats),
             "kernel_config_via_rule": kidx_src is not kidx,
             "u1_excluded": u1_exclusions(allrows + ext, erules),
@@ -2778,6 +2837,12 @@ def section(num, g, info, conflicts, files, product, table, annotations_info, ru
     kc = info.get("kernel_config")
     if kc is None:
         parts.append("Kernel configuration check: no result (`scan/kernel-config.json`); no kernel row was marked `not_affected` by it.")
+    elif kc.get("scope_incomplete"):
+        sc = kc.get("scope") or {}
+        parts.append(f"Kernel configuration check and module map (K1/K2) are not adopted: the image ships kernels that were not judged "
+                     f"({', '.join(sc.get('not_judged') or [])}; judged: {', '.join(sc.get('judged') or []) or 'none'}), so no kernel row was marked "
+                     f"`not_affected` or `resolved` by them. {info.get('kernel_scope_withheld', 0)} kernel rows would have been excluded; they keep the "
+                     "status they have without K1/K2 (see each row's note). 只判定了部分核心，其餘已出貨的核心未判定，排除不適用整個產品。")
     elif not kc["used"]:
         parts.append(f"Kernel configuration check: status {kc['status'] or '?'}; its results are only used when the status is OK, so "
                      "no kernel row was marked `not_affected` by it.")

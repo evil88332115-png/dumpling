@@ -12,7 +12,7 @@
 # 每一步最後印一行 "<步驟>: OK|GAP|NOT_RUN|FAIL（說明）"。結束碼：0＝OK、1＝FAIL、3＝GAP、4＝NOT_RUN（沒做）、64＝用法錯誤。
 #
 # 轉接器收到的環境變數（都由這裡設定）：DUMPLING_ROOT、DUMPLING_PROJECT、DUMPLING_PROJECT_DIR、DUMPLING_VERSION、
-# DUMPLING_PLATFORM、DUMPLING_PLATFORM_DIR、DUMPLING_OS_RESPONSIBILITY、DUMPLING_OUT（預設 $DUMPLING_OUT_BASE 或 <repo>/out，
+# DUMPLING_PLATFORM、DUMPLING_PLATFORM_DIR、DUMPLING_OS_RESPONSIBILITY、DUMPLING_ARCH（platform.yml 的 arch，預設 arm64）、DUMPLING_SCAN_PLATFORM_ARG（掃描工具的 --platform：scan.platform_arg，沒寫是平台名稱）、DUMPLING_OUT（預設 $DUMPLING_OUT_BASE 或 <repo>/out，
 # 底下 <專案>/<版本>/；--out 直接指定）。轉接器的位置參數：<專案資料夾> <版本>。
 # 可用環境變數 DUMPLING_PLATFORMS_DIR 換掉轉接器根目錄（測試用）。
 set -uo pipefail
@@ -41,9 +41,16 @@ pname=$(basename "$proj")
 plat_root=${DUMPLING_PLATFORMS_DIR:-$here/platforms}
 
 # 驗證專案＋取平台名稱（project.yml 沒給或不認得 → FAIL，不猜）
-info=$(python3 -I "$here/project-info.py" --dir "$proj" "$ver") || fail "$(printf '%s' "$info" | head -1 | sed 's/^project-info: FAIL（//; s/）$//')"
+info=$(python3 -I "$here/project-info.py" --dir "$proj" "$ver"); irc=$?
+if [ $irc -ne 0 ]; then
+  echo "$step: FAIL（$(printf '%s' "$info" | head -1 | sed 's/^project-info: FAIL（//; s/）$//')）"
+  [ $irc = 64 ] && exit 64    # 64＝設定值不合法（例如 scan.tools）
+  exit 1
+fi
 platform=$(sed -n 's/^PLATFORM=//p' <<< "$info")
 osr=$(sed -n 's/^OS_RESPONSIBILITY=//p' <<< "$info")
+arch=$(sed -n 's/^ARCH=//p' <<< "$info")
+sparg=$(sed -n 's/^SCAN_PLATFORM_ARG=//p' <<< "$info")
 pdir=$plat_root/$platform
 [ -f "$pdir/platform.yml" ] || fail "未知平台 $platform"
 python3 -I "$here/lib/project_config.py" platform "$pdir/platform.yml" > /dev/null || fail "平台設定 $platform 驗證失敗"
@@ -52,7 +59,7 @@ if [ "$step" = validate ]; then echo "validate: OK（$pname $ver，平台 $platf
 out=${out:-${DUMPLING_OUT_BASE:-$root/out}/$pname/$ver}
 mkdir -p "$out" || fail "無法建立輸出資料夾"
 export DUMPLING_ROOT=$root DUMPLING_PROJECT=$pname DUMPLING_PROJECT_DIR=$proj DUMPLING_VERSION=$ver \
-  DUMPLING_PLATFORM=$platform DUMPLING_PLATFORM_DIR=$pdir DUMPLING_OS_RESPONSIBILITY=$osr DUMPLING_OUT=$out
+  DUMPLING_PLATFORM=$platform DUMPLING_PLATFORM_DIR=$pdir DUMPLING_OS_RESPONSIBILITY=$osr DUMPLING_ARCH=$arch DUMPLING_SCAN_PLATFORM_ARG=$sparg DUMPLING_OUT=$out
 
 script=$pdir/$step.sh
 case $step in

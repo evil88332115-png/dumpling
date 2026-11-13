@@ -56,7 +56,7 @@ UNKNOWN = "unknown"
 SCAN_FILES = ("status.tsv", "meta.json", "report.json", "report.html",
               "sbom/sbom.cdx.json", "sbom/sbom.upload.cdx.json",
               "scan/grype.json", "scan/grype-db-status.txt", "scan/sbomgate.json", "scan/sbomgate.txt", "scan/lockfiles.json",
-              "scan/govulncheck.json", "scan/kernel-coverage.json", "scan/kernel-config.json", "scan/kernel-boot.json", "scan/kernel-module-map.json",
+              "scan/govulncheck.json", "scan/kernel-coverage.json", "scan/kernel-config.json", "scan/kernel-boot.json", "scan/kernel-module-map.json", "scan/kernel-versions.json",
               "scan/l4t-kernel-map.json",
               "scan/nvidia-bulletins.json", "scan/distro-recheck.json",
               "dt/findings.json", "dt/deb-sources.json", "dt/data-sources.json", "dt/version.json",
