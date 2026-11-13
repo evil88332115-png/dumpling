@@ -19,7 +19,8 @@ merge-source（AI NAS 的 OpenMediaVault 原始碼）：
   - 映像的元件（含子元件）都加 `dumpling:origin` = image（已經有的不改）。
   - 原始碼 SBOM 的元件與它的 metadata.component（應用本身）併進來，bom-ref 一律改成 `dumpling:src:<名稱>:<原本的 ref>`（不跟映像的撞），
     每個元件加 `dumpling:origin` = source、`dumpling:origin-repo`、`dumpling:origin-commit`；
-    應用本身另加 `dumpling:source-vs-package` = NOT_ASSESSED（原始碼與正式 deb 是否完全相同沒有比對，D-025）。
+    應用本身另加 `dumpling:source-vs-package` = NOT_ASSESSED（原始碼與正式 deb 是否完全相同沒有比對，D-025）；
+    給了 --app-name／--app-version 時，應用本身的名稱與版本改成這兩個值（原本的值記在 dumpling:source-root-name／-version）。
   - dependencies 一起合併（ref 照樣改名）；兩端都在合併後元件裡的邊才保留，丟掉的邊數寫在 metadata 的 property。
   - 產品根元件（metadata.component）加一條依賴指到應用本身。
 輸出是確定的（同樣輸入同樣位元組）。
@@ -202,7 +203,7 @@ def from_raw_sectors(doc, raw):
 
 # ---------------------------------------------------------------- merge-source
 
-def merge_source(doc, src, label, repo, commit):
+def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None):
     for c in walk(doc.get("components")):
         prop(c, "dumpling:origin", "image")
     pre = "dumpling:src:%s:" % label
@@ -234,6 +235,14 @@ def merge_source(doc, src, label, repo, commit):
     if isinstance(app, dict):
         a = remap(app)
         a.setdefault("type", "application")
+        # 應用本身的名稱與版本由專案明確給（cdxgen 給的根元件名稱通常是 clone 下來的資料夾名）：
+        # 這樣 project.yml 的 own_software 與支援期資料表才對得到；原本的值留在屬性裡
+        if app_name:
+            prop(a, "dumpling:source-root-name", a.get("name"))
+            a["name"] = app_name
+        if app_version:
+            prop(a, "dumpling:source-root-version", a.get("version"))
+            a["version"] = app_version
         prop(a, "dumpling:source-vs-package", "NOT_ASSESSED")
         app_ref = a["bom-ref"]
         merged.append(a)
@@ -280,6 +289,7 @@ def main(argv=None):
     m = sub.add_parser("merge-source")
     m.add_argument("sbom"); m.add_argument("src"); m.add_argument("out")
     m.add_argument("--label", required=True); m.add_argument("--repo", required=True); m.add_argument("--commit", required=True)
+    m.add_argument("--app-name"); m.add_argument("--app-version")
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -289,7 +299,9 @@ def main(argv=None):
         print("sbom-augment: FAIL（要給子指令 raw-sectors 或 merge-source）")
         return USAGE
     if a.cmd == "merge-source":
-        if not LABEL_RE.match(a.label) or not a.repo.startswith("https://") or not SHA1_RE.match(a.commit):
+        if (not LABEL_RE.match(a.label) or not a.repo.startswith("https://") or not SHA1_RE.match(a.commit)
+                or (a.app_name and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}", a.app_name))
+                or (a.app_version and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+~:-]{0,99}", a.app_version))):
             print("sbom-augment: FAIL（--label、--repo（https）或 --commit（40 位小寫十六進位）不合法）")
             return USAGE
     try:
@@ -301,7 +313,7 @@ def main(argv=None):
         else:
             src = read_json(a.src)
             check_bom(src, "原始碼 SBOM")
-            n, kept, dropped, gaps = merge_source(doc, src, a.label, a.repo, a.commit)
+            n, kept, dropped, gaps = merge_source(doc, src, a.label, a.repo, a.commit, a.app_name, a.app_version)
             msg = "併入 %s 的 %d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）" % (a.label, n, kept, dropped)
         write_json(doc, a.out)
     except AugError as e:

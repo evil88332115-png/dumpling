@@ -49,6 +49,8 @@ if [ "$augment" = app-source ]; then
   acommit=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_commit) || fail "sources.yml 沒有 platform_params.app_commit"
   [[ $acommit =~ ^[0-9a-f]{40}$ ]] || fail "app_commit 必須是 40 位 commit SHA"
   [[ $arepo =~ ^https://[A-Za-z0-9./_-]+$ ]] || fail "app_repo 必須是 https 網址"
+  aname=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_name) || fail "sources.yml 沒有 platform_params.app_name（應用本身的名稱，要和 project.yml 的 own_software 對得上）"
+  aversion=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_version) || fail "sources.yml 沒有 platform_params.app_version"
 fi
 
 # ---------- 1. 臨時 DT 與鏡像 ----------
@@ -177,7 +179,7 @@ case $augment in
     [ -s "$asbom" ] || fail "NAS 應用原始碼沒有產生 SBOM（見 augment/app-scan.log）"
     mrc=0
     line=$(python3 -I "$here/sbom_augment.py" merge-source "$sbom0" "$asbom" "$out/augment/sbom.cdx.json" \
-      --label app-source --repo "$arepo" --commit "$acommit") || mrc=$?
+      --label app-source --repo "$arepo" --commit "$acommit" --app-name "$aname" --app-version "$aversion") || mrc=$?
     echo "$line"
     case $mrc in 0) ;; 3) arc=3;; *) fail "併入原始碼 SBOM 失敗";; esac
     python3 -I -c 'import json,sys;json.dump({"repo":sys.argv[1],"commit":sys.argv[2],"line":sys.argv[3]},open(sys.argv[4],"w"),ensure_ascii=False)' \
@@ -195,7 +197,8 @@ python3 -I "$root/pipeline/sbom-layers.py" split "$sbom1" "$DUMPLING_PLATFORM" "
 case $lrc in 0|3) ;; *) fail "sbom-layers split 失敗（結束碼 $lrc）";; esac
 runs=("=$w0")
 n=0
-while IFS=$'\t' read -r suffix sfile; do
+# 分隔字元用「|」：Tab 是 IFS 的空白類字元，開頭的空欄位（ours 的名稱後綴是空字串）會被吃掉，檔名就跑到後綴那一欄
+while IFS='|' read -r suffix sfile; do
   n=$((n+1))
   src=$out/rescan-src/$n; mkdir -p "$src"
   cp -a "$w0/scan" "$src/scan" && cp "$w0/wizard-steps.json" "$src/" 2> /dev/null
@@ -211,7 +214,7 @@ while IFS=$'\t' read -r suffix sfile; do
   runs+=("$suffix=$wl")
   rm -rf "$src"
 done < <(python3 -I -c 'import json,sys
-for it in json.load(open(sys.argv[1]))["scan_plan"]: print(it["name_suffix"] + "\t" + it["sbom"])' "$out/layers/layers.json")
+for it in json.load(open(sys.argv[1]))["scan_plan"]: print(it["name_suffix"] + "|" + it["sbom"])' "$out/layers/layers.json")
 
 # ---------- 5. 收集與標準答案 ----------
 echo "== 收集"

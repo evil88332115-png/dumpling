@@ -12,6 +12,8 @@ releases:
       image_member: disk.raw
       app_repo: https://github.com/openmediavault/openmediavault.git
       app_commit: 9d8530ffa6912ece116bc6c74d0f3d06045b6c26
+      app_name: openmediavault
+      app_version: 8.6.1-1
     files:
     - name: debian-13-generic-amd64-20261111-2659.tar.xz
       url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-generic-amd64-20261111-2659.tar.xz

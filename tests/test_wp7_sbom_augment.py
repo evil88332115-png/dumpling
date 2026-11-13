@@ -166,6 +166,20 @@ class AugmentTest(unittest.TestCase):
         self.assertEqual(deps["root-1"], [app["bom-ref"]])
         self.assertIn("pkg:deb/debian/bash@5", deps)                     # 映像原本的依賴還在
 
+    def test_merge_source_app_name_and_version(self):
+        img = self.path("img.json", bom([]))
+        src = self.path("src.json", {"bomFormat": "CycloneDX", "metadata": {"component": {"bom-ref": "r", "type": "application", "name": "src", "version": "0"}},
+                                     "components": []})
+        out = self.path("o.json")
+        rc, line = self.run_aug("merge-source", img, src, out, "--label", "app-source", "--repo", REPO, "--commit", COMMIT,
+                                "--app-name", "openmediavault", "--app-version", "8.6.1-1")
+        self.assertEqual(rc, 0, line)
+        app = rj(out)["components"][0]
+        self.assertEqual((app["name"], app["version"]), ("openmediavault", "8.6.1-1"))
+        self.assertEqual((props(app)["dumpling:source-root-name"], props(app)["dumpling:source-root-version"]), ("src", "0"))
+        rc, _ = self.run_aug("merge-source", img, src, out, "--label", "x", "--repo", REPO, "--commit", COMMIT, "--app-name", "bad name")
+        self.assertEqual(rc, 64)
+
     def test_merge_source_bad_args_and_input(self):
         img = self.path("img.json", bom([]))
         rc, _ = self.run_aug("merge-source", img, img, self.path("o.json"), "--label", "x", "--repo", "http://x", "--commit", COMMIT)
