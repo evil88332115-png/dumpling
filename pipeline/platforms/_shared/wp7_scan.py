@@ -200,8 +200,11 @@ class Wp7Hooks(ps.Hooks):
         return L
 
     def notes_after_vulnerabilities(self, ctx):
+        if (ctx.get("layers") or {}).get("os_responsibility") == "ours":
+            # ours：分層計畫只有一份（後綴是空字串），完整掃描之後用標好層、含補充元件的產品 SBOM 重跑，報告取重跑那次
+            return ["", "- OS 也是我們的待辦（ours）：只有一份報告，是補充元件與分層**之後**用產品 SBOM（bsp＋os＋unknown）重跑的，有層欄位。"]
         return ["", "- 「完整（全部層）」那份報告是補充元件與分層**之前**的掃描：不含原始磁區的開機程式、沒有層欄位；"
-                "待辦看 bsp／os（或 ours 時的單一份）報告。"]
+                "待辦看 bsp／os 報告。"]
 
     def notes_attachments(self, ctx):
         L = ["- `scan-summary-*.json`：標準答案比對用的掃描摘要；`assemble-*.json`：映像來源與解開方式。"]

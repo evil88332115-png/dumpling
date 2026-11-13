@@ -42,7 +42,28 @@ D-dt-data-sources／C-dt-feeds／D-dt-findings（NVD 照設計關閉）、D-dt-k
 
 ## ai-nas-demo v1.0.0-demo1（Debian 13＋OpenMediaVault）
 
-（待補：等 C1 的 `scan.tools: full`）
+- 依據的執行：dev run 43386797521（commit 5bd67f0），2026-11-13；標準答案草稿 60 項，等驗證代理獨立核對。
+- os_responsibility 是 ours：只有一份報告，是補充（OMV 原始碼）與分層**之後**用產品 SBOM 重跑的（platform_scan.collect 同一個後綴取後面那次）；notes 原本沿用「完整報告是分層之前」的說法，已改成依 os_responsibility 分開寫。
+- 先前幾次執行找到並修好的問題（不拿那幾次當標準答案）：cdxgen 沒裝（C1 加 `scan.tools: full`）；Debian 映像的 GNU sparse tar；分層計畫用 TAB 分隔讓 ours 的空後綴被吃掉（改用 C1 的 0x1F）；own_software 對不到元件（app_name／app_version 由 sources.yml 指定）；sca-scan 非 0 時原始碼掃描的非 OK 階段沒有記錄（改記在 scan_stages_not_ok）。
+
+| 項目 | 標準答案 | 怎麼核對的 |
+|---|---|---|
+| 映像 sha256 | 1e10629e… | sources.yml 固定；與官方 SHA512SUMS 同一個檔（platform-samples 時核對） |
+| disk.raw sha256 | 5b38b6ee…（3 GiB） | assemble 串流取出；精靈的 A-provenance 重算是同一個值 |
+| deb 套件 | os 322、bsp 沒有 | Debian 官方清單 `debian-13-generic-amd64-20261111-2659.json`（sha256 59bc90c5…，D-037）的 322 個套件，名稱（去掉 `:amd64`）與版本和 SBOM 的 pkg:deb 完全相同（C4 逐一比對） |
+| 元件 | 共 27220：bsp 2、os 25493、unknown 1725 | bsp＝OMV 根元件（own_software）＋子元件；unknown＝OMV 原始碼相依 1691（npm 1679、pypi 5、composer 4、github 3，缺口 7）＋映像的語言套件 34（pypi 33、maven 1，缺口 12） |
+| OMV 原始碼 | commit 9d8530ff、8.6.1-1 | 固定 commit 的 `deb/openmediavault/debian/changelog` 第一行是 `openmediavault (8.6.1-1)`（C4 從 GitHub 讀過）；原始碼 vs deb、版本 vs commit 都是 NOT_ASSESSED（D-025） |
+| 核心原始碼 | OK：86／86 個 patch，Debian 6.12.116-1 | D-035；映像的核心套件版本也是 6.12.116-1 |
+| 核心 | 6.12.116+deb13-amd64，上游 6.12.116 | 映像只有一顆核心；C-kernel-coverage OK（Debian 自己的核心，Grype 依 Debian 資料比對，428 列） |
+| 核心 .config | C-kernel-config、C-kernel-module-map GAP | 雲端映像沒有核心 headers 套件 |
+| 開機鏈 | NOT_ASSESSED | x86 沒有定義（缺口 3） |
+| 對外連線服務 | NOT_ASSESSED | 沒有定義清單（缺口 15）；映像開機就有 ssh（image-check） |
+| 漏洞 | 934 個 CVE、990 列（範圍 500–3000／500–3500）；unknown 層 169 列（50–800） | 資料庫會變；unknown 層的下限用來抓「原始碼沒有併入」 |
+| 產品狀態 | 報告 GAP、發行閘門 GAP | 釘住，避免被默默變成 OK |
+
+**預期的 GAP（不是錯）**：C-pyver（OMV 的 5 個 Python 相依沒有版本）、C-sbomgate、C-kernel-config／C-kernel-module-map（沒有 headers）、
+D-dt-data-sources／D-dt-kev-sources（NVD 照設計關閉、ENISA KEV 沒有日期）、A-md5（Debian 沒有 md5）、
+B-own-software（CRA 設定的 own_software 是範本的虛構路徑，缺口 21；標準答案不釘）。B-rockchip 的 ATTENTION 名稱與 EEPROM 訊息對 x86 不適用（缺口 20）。
 
 ## 驗證代理的獨立核對
 

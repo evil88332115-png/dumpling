@@ -153,6 +153,14 @@ class KernelVersionsNotesTest(unittest.TestCase):
     def test_missing_file_is_gap(self):
         self.assertIn("讀不到 kernel-versions.json", self.notes(None))
 
+    def test_full_report_note_depends_on_os_responsibility(self):
+        h = wp7_scan.Wp7Hooks({})
+        ours = "\n".join(h.notes_after_vulnerabilities({"layers": {"os_responsibility": "ours"}}))
+        self.assertIn("分層**之後**", ours)
+        self.assertNotIn("分層**之前**", ours)
+        cust = "\n".join(h.notes_after_vulnerabilities({"layers": {"os_responsibility": "customer"}}))
+        self.assertIn("分層**之前**", cust)
+
 
 class ExternalServicesTest(unittest.TestCase):
     def test_platform_without_list_is_not_assessed(self):

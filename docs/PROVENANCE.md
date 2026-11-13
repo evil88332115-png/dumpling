@@ -357,4 +357,4 @@ C4 沒有從 sca-center 複製新檔。對已複製檔案的修改記在這裡�
   `raspberrypi-kernel-6.18`、`raspberrypi-firmware`、`radxa-kernel-6.1-rk2410`、`radxa-u-boot-rk2410`、`openmediavault-8`，以及 informational 的
   `linux-6.1-upstream`、`linux-6.12-upstream`、`linux-6.18-upstream`）。既有的項目一個位元組都沒改。每筆都有原始來源網址與查核日期（2026-11-13）；
   官方沒有公布期限的（Raspberry Pi、Radxa、openmediavault 8）寫 `null`，不推估。
-- C4 自己寫的標準答案（不是從 sca-center 複製；逐項核對過，見 M6 PR 的核對紀錄）：`tests/expected/rock-5b-demo/v1.0.0-demo1.json`、`tests/expected/rpi-lite-demo/v1.0.0-demo1.json`
+- C4 自己寫的標準答案（不是從 sca-center 複製；逐項核對過，見 M6 PR 的核對紀錄）：`tests/expected/rock-5b-demo/v1.0.0-demo1.json`、`tests/expected/rpi-lite-demo/v1.0.0-demo1.json`、`tests/expected/ai-nas-demo/v1.0.0-demo1.json`
