@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 02:44 -0500（C1）
+最後更新：2026-11-13 16:03 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -121,11 +121,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6。rock-5b-demo 標準答案定案（72 項，8c44f9e）；rpi-lite-demo 標準答案草稿 43 項（17349bb；核心比對先不釘：-os 退回 CNA 多 2700 列、epoch 讓 Grype 漏報約 2400 個核心 CVE，已回報 C0／C1；kernel_upstream_version 6.18.50 已加，34529cf）；ai-nas 併入 7dd351c 後重跑中（dev run 43386797521）；已把 Radxa 核心 deb 名稱與版本（6.1.84-8，沒有 epoch；原始碼套件 linux-upstream／linux-rk2410）寄給 C1（D-044）
+- 目前在做：M6。rock-5b-demo 標準答案定案（72 項，8c44f9e）；rpi-lite-demo 標準答案草稿 43 項（17349bb；核心比對先不釘：-os 退回 CNA 多 2700 列、epoch 讓 Grype 漏報約 2400 個核心 CVE，已回報 C0／C1；kernel_upstream_version 6.18.50 已加，34529cf）；ai-nas 標準答案草稿 60 項（894debd，依 dev run 43386797521；deb 322 個與 Debian 官方清單逐一相同）、驗證代理核對中；已把 Radxa 核心 deb 名稱與版本（6.1.84-8，沒有 epoch；原始碼套件 linux-upstream／linux-rk2410）寄給 C1（D-044）
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
-- 代理：無執行中（rock 標準答案第三輪差異核對完成：可以定案）
-- CI：rock 定案依 43378104334；rpi 依 43380656858；ai-nas 43386797521 執行中
+- 代理：驗證代理 1 個執行中（ai-nas 標準答案，只讀，Sonnet）；rock 三輪已完成
+- CI：rock 定案依 43378104334；rpi 依 43380656858；ai-nas 43386797521 OK（scan 步驟 GAP：當時沒有標準答案）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
 - 下一步：看三個平台的結果；C1 的 D-036（--kernel-version）進來後再跑一次；標準答案逐項核對（官方 SBOM／manifest／.info）後由驗證代理獨立核對，PR 附核對紀錄；不擋路的缺口記在 docs/references/adapter-gaps.md；M6 完成開 PR
-- 卡住／等決定：等 C1 的 D-044（--kernel-in-other-report、非發行版核心的 C-kernel-coverage、平台設定宣告欄位名稱）；ai-nas 等這一輪結果
+- 卡住／等決定：等 C1 的 D-044（--kernel-in-other-report、非發行版核心的 C-kernel-coverage、平台設定宣告欄位名稱）；缺口 20（x86 也叫 B-rockchip、EEPROM 訊息）、21（示範專案 CRA config 是範本虛構值，含 C1 的 orin-nano-demo）已回報 C0
 <!-- END C4 -->
