@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 12:56 +0800（C3）
+最後更新：2026-11-12 23:56 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -10,7 +10,7 @@
 - 目前在做：看 PR、合併、驗收，回覆 C1–C4
 - 分支／PR／commit：main 26a6377。**M1（#9）、M3（#14）、M4（#28）＋修正 #32 已合併**；文件批次 #13、#15（D-029～D-033＋CRA 調查與提案）已合併；分支 `wp0/docs-batch-4`（已推送、未開 PR；D-034～D-041；D-039 使用者已確認），M2 合併後開 PR
 - 代理：無。PR #32 驗證代理完成：通過（應修 F1–F3，C3 併入 M2 後的監控 PR，開 real Issue 前必修）
-- 各對話：C1 做 M2（wp1/m2：P 平台介面＋開案範本、L 依層分開已完成、J Jetson 編譯＋掃描＋release 進行中）；C2：wp3/supplier-normalize（dd54722）正規化已完成、CI 綠，另修 report 假 OK 路徑；等 M2 合併後加 fetch_verify 再開 PR；C4（WSL）等 M2 的 P 軌。C0 已請 C4 不等 M2 合併、以 wp1/m2（P 軌已完成）為基礎開始轉接器；C2 已完成 fetch_verify 切換（wp3/supplier-normalize 8a960c0，CI 綠），PR 等 M2 進 main。C4 已開 wp7/adapters，回報 3 處契約只適用 Jetson（pipeline.yml 交接寫死、scan-flash-package.sh 平台與架構寫死、jetson_scan.py 通用部分），C1 已同意全部在 M2 做（build.mode none／handoff 資料夾、--platform generic＋--arch、platform_scan.py），名稱已轉 C4；AI NAS 加掃 OMV 原始碼由 C4 在 scan.sh 內做（C0 同意）。C4 wp7/adapters 8e4ced9：三平台 platform.yml／示範專案／build／assemble／raw-sectors／sbom_augment 完成，EOL 資料 11 筆已交；已接 C1 新介面、scan.sh 完成，rpi-lite-demo 端對端 CI 進行中（C0 提醒：Debian 核心要套 debian.tar.xz 修補、標準答案先人工核對、kernel_source_file 若動到 C1 介面要協調）。D-034：廠商分支 U-Boot 給上游 CPE、結果待人審。C3 已在 WSL 那台開工 M4（wp2/watch）：每日監控不開 DT；C0 要求核心／開機程式比對要涵蓋或標 NOT_RUN、狀態不放分支（排程 job 不給 contents: write）。C3：F1–F6＋concurrency 在 wp2/watch-m2（b1b236e），等 M2 後接 mirrors.sh 再開 PR；空檔先做 M8 B1 不依賴 M7 的部分（wp2/art14，不開 PR）
+- 各對話：C1 做 M2（wp1/m2：P 平台介面＋開案範本、L 依層分開已完成、J Jetson 編譯＋掃描＋release 進行中）；C2：wp3/supplier-normalize（dd54722）正規化已完成、CI 綠，另修 report 假 OK 路徑；等 M2 合併後加 fetch_verify 再開 PR；C4（WSL）等 M2 的 P 軌。C0 已請 C4 不等 M2 合併、以 wp1/m2（P 軌已完成）為基礎開始轉接器；C2 已完成 fetch_verify 切換（wp3/supplier-normalize 8a960c0，CI 綠），PR 等 M2 進 main。C4 已開 wp7/adapters，回報 3 處契約只適用 Jetson（pipeline.yml 交接寫死、scan-flash-package.sh 平台與架構寫死、jetson_scan.py 通用部分），C1 已同意全部在 M2 做（build.mode none／handoff 資料夾、--platform generic＋--arch、platform_scan.py），名稱已轉 C4；AI NAS 加掃 OMV 原始碼由 C4 在 scan.sh 內做（C0 同意）。C4 wp7/adapters 8e4ced9：三平台 platform.yml／示範專案／build／assemble／raw-sectors／sbom_augment 完成，EOL 資料 11 筆已交；已接 C1 新介面、scan.sh 完成，rpi-lite-demo 端對端 CI 進行中（C0 提醒：Debian 核心要套 debian.tar.xz 修補、標準答案先人工核對、kernel_source_file 若動到 C1 介面要協調）。D-034：廠商分支 U-Boot 給上游 CPE、結果待人審。C3 已在 WSL 那台開工 M4（wp2/watch）：每日監控不開 DT；C0 要求核心／開機程式比對要涵蓋或標 NOT_RUN、狀態不放分支（排程 job 不給 contents: write）。C3：F1–F6＋concurrency 在 wp2/watch-m2（b1b236e），等 M2 後接 mirrors.sh 再開 PR；M8 B1 不依賴 M7 的部分完成（wp2/art14 1346916，176 測試；開 PR 前要用暫時 push 觸發實跑 drill）
 - CI：無進行中（C0）。WATCH_REAL_ISSUES 尚未設定（流程：#32 合併 → M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報 → C0 設定）
 - 下一步：等 C1 的 M2 PR → 驗證 → 合併 → 問使用者何時打第一個正式 tag；M2 合併後開 C3（建議 WSL 那台）、C4 開始寫轉接器
 - 給 C3 的交接：(1) M1 沒帶 `alert_mail.py`（寄信），exploited_* 寄信測試約 29 個已刪，要寄信時由 C3 帶回；(2) GitLab 階段「已被利用」的真實案件一定要用私有 Issue；(3) 每日監控讀 Release 附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`，開發版讀滾動 pre-release `dev/<專案>`（D-029）；watch 自己的狀態檔（防 60 天停用）由 C3 設計；(4) GITLAB-PORT 待辦：DT parent／child 專案在常駐 DT 再評估（D-030）
