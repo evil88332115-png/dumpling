@@ -35,7 +35,9 @@ def main(argv):
         rs = step_rows.read_rows(steps)
         so = step_rows.overall(rs)
         if so not in ("OK", "ATTENTION"):   # ATTENTION＝用了舊資料頂替（不擋；在報告與 Release 說明裡標出來）
-            print("上傳: 流程步驟的整體狀態是 %s（不是 OK）：%s" % (so, "、".join("%s=%s" % (r["step"], r["status"]) for r in (rs or []) if r["status"] in ("GAP", "FAIL")) or "沒有 pipeline-steps.tsv"))
+            why = "、".join("%s=%s" % (r["step"], r["status"]) for r in (rs or [])
+                           if r["status"] in ("GAP", "FAIL") or (r["status"] == "NOT_RUN" and not step_rows.not_applicable(r)))
+            print("上傳: 流程步驟的整體狀態是 %s（不是 OK）：%s" % (so, why or ("沒有 pipeline-steps.tsv" if rs is None else "（沒有列出原因）")))
             return 1
     if bad or fails:
         print("上傳: sca-scan 必要階段不是 OK：" + ", ".join(bad) + "；FAIL：" + ", ".join(fails))

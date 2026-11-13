@@ -240,8 +240,8 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 
 每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|ATTENTION|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	不適用：build.mode: none（這個平台不編譯）`。
-`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
-`status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
+`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 或沒能執行的 NOT_RUN 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
+`status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 分兩類，看說明的開頭（`pipeline/lib/step_rows.py`）：「不適用」開頭＝本來就不該做（目前只有 workflow 用 `run-step.sh --record` 記的 build.mode 不是 compile 的那一列），不降低整體狀態；其他 NOT_RUN（結束碼 4，例如平台沒有實作這一步）＝該做卻沒做，整體降成 GAP。**平台腳本結束碼 4 時，最後一行照規則以 `<步驟>: NOT_RUN（…）` 開頭，不要以「不適用」開頭**：真的不適用的步驟由 workflow 記，不由腳本自己宣告。
 手動觸發（workflow_dispatch）只建 draft；push tag 建正式 Release（`--verify-tag`）。**GAP 不擋正式 Release**：scan 回 3（GAP）時 `run-step.sh` 記一列、以 0 繼續，Release 照樣發，結論寫在 `release-meta.json` 的 `report_status`／`release_gate`／`pipeline_result` 與 Release 說明開頭（D-033：資料缺口照實標示，不靠擋發佈）。只有 FAIL（1、64 或其他）讓 job 失敗、不發 Release。
 
 **ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。

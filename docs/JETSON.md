@@ -100,7 +100,7 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
 11. **兩版 VEX 的產品版本字串相同**：`metadata.component.version` 取自 `CRA/Config/config.json` 的 `product.version`（示範專案兩版共用一份），只能靠檔名區分版本。真實專案每一版要更新 `product.version`。
 12. **完整掃描的報告與 DT 專案含 host-tool**：完整掃描上傳的是拆分前的 SBOM；分層後的 `-bsp`／`-os` 不含 host-tool。Jetson 的 host-tool 是 0 個所以沒影響；其他平台以分層報告為準（完整那份只當對照，見第 7 點）。
 13. **步驟表的 validate、fetch 各出現兩次**：build job 與 scan job 各執行一次，`pipeline-steps.tsv` 各記一列（Release 說明與 `release-meta.json` 的 steps 照列）。結果一致，只是重複。
-14. **scan 回 NOT_RUN 時 `pipeline_result` 不會降級**（`step_rows` 只有 FAIL／GAP／ATTENTION 會）：scan 沒有執行時不會有 `notes.md`，Release 步驟會失敗，所以不會發出看起來正常的 Release。
+14. **scan 回 NOT_RUN 時 `pipeline_result` 降成 GAP**（`step_rows`：說明不是「不適用」開頭的 NOT_RUN 至少 GAP；PR #42 之前不降級）。另外 scan 沒有執行時不會有 `notes.md`，Release 步驟會失敗，所以不會發出看起來正常的 Release。
 15. **標準答案的範圍是第一次 CI 的實際值上下抓寬鬆**（第 8 點），不是獨立的依據；元件數、核心版本、狀態是 equals。
 
 ## 8. 跑通結果（2026-11-12；數字隨弱點資料庫變動，固定的部分在 `tests/expected/orin-nano-demo/*.json`）

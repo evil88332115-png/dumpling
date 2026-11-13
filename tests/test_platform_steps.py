@@ -226,6 +226,17 @@ class ReleaseMetaAndStatusCheck(Tmp):
         self.assertEqual(r.returncode, 1)
         self.assertIn("GAP", r.stdout)
         self.assertEqual(need, "A B")
+        # 沒能執行的 NOT_RUN：整體 GAP，訊息要列出那一步（不是「沒有 pipeline-steps.tsv」）；不適用的那一列不列
+        steps2 = self.p("steps2.tsv")
+        sr.append_row(steps2, "build", "NOT_RUN", 4, "不適用：build.mode: none")
+        r = subprocess.run([sys.executable, "-I", chk, st, "A", "B", "--pipeline-steps", steps2], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        sr.append_row(steps2, "scan", "NOT_RUN", 4, "scan: NOT_RUN（平台 x 沒有實作 scan）")
+        r = subprocess.run([sys.executable, "-I", chk, st, "A", "B", "--pipeline-steps", steps2], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("pipeline-scan=NOT_RUN", r.stdout)
+        self.assertNotIn("pipeline-build", r.stdout)
+        self.assertNotIn("沒有 pipeline-steps.tsv", r.stdout)
 
 
 class AttentionStatus(Tmp):
