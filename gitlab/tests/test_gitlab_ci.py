@@ -313,8 +313,8 @@ class CiFile(unittest.TestCase):
             if n not in ("watch:notify", "watch:drill"):     # 演練要寫 drill 的狀態與 Issue（T-16）
                 self.assertNotIn("WATCH_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), "只有 watch:notify／watch:drill 用 WATCH_GITLAB_TOKEN：" + n)
             txt = self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {}))
-            if n != "watch:compute":
-                self.assertNotIn("WATCH_GITLAB_READ_TOKEN", txt, "只有 watch:compute 用 WATCH_GITLAB_READ_TOKEN：" + n)
+            if n not in ("watch:compute", "watch:drill"):
+                self.assertNotIn("WATCH_GITLAB_READ_TOKEN", txt, "只有 watch:compute／watch:drill 用 WATCH_GITLAB_READ_TOKEN：" + n)
         c = self.lines_of("watch:compute")
         self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state', c)
         self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py', c)
@@ -507,6 +507,20 @@ class CiFile(unittest.TestCase):
             self.assertEqual(rc, 0, env)
             self.assertEqual(len(log), 2, env)
             self.assertTrue(all(("--dry-run" in x) == dry for x in log), (env, log))
+
+    def test_t16_notify_rejects_unknown_dry_run_values(self):
+        # #91 驗證建議 1：0／1 以外（true、yes…）一律拒絕，不當成「要寫入」
+        both = {"watch-out/plan.json": "{}", "watch-out-support/plan.json": "{}", "watch-out-support/status": "OK\n"}
+        for v in ("true", "yes", "TRUE", "2", " 1"):
+            rc, log, out = self.run_notify(both, CI_PIPELINE_SOURCE="web", DUMPLING_WATCH_DRY_RUN=v)
+            self.assertEqual(rc, 1, v)
+            self.assertEqual(log, [], v)
+
+    def test_t16_drill_after_script_closes_again(self):
+        a = "\n".join(str(x) for x in self.jobs["watch:drill"]["after_script"])
+        self.assertIn("issues.py close-drill --backend gitlab", a)
+        self.assertIn('[ "${DUMPLING_WATCH_DRY_RUN:-0}" != 1 ]', a)
+        self.assertLess(a.index("close-drill"), a.index('rm -rf "$DUMPLING_OUT_BASE"'))
 
     def test_t16_compute_baseline_only_when_manual_and_requested(self):
         import os
@@ -711,7 +725,7 @@ class WatchDrill(unittest.TestCase):
     STUB = r'''import json, os, sys
 log = os.environ["STUB_LOG"]
 with open(log, "a") as f:
-    f.write(os.path.basename(sys.argv[0]) + " " + " ".join(sys.argv[1:]) + "\n")
+    f.write(os.path.basename(sys.argv[0]) + " " + " ".join(sys.argv[1:]) + " tok=" + os.environ.get("GITLAB_TOKEN", "-") + "\n")
 a = sys.argv[1:]
 name = os.path.basename(sys.argv[0])
 def val(k):
@@ -721,9 +735,15 @@ if name == "collect.py":
 elif name == "match.py":
     if os.environ.get("STUB_MATCH_FAIL") == "1":
         sys.exit(1)
+    if os.environ.get("STUB_TERM_AT") and val("--out").endswith("round-" + os.environ["STUB_TERM_AT"]):
+        import signal
+        os.kill(os.getppid(), signal.SIGTERM)     # job 逾時或被取消時送給腳本的訊號
     os.makedirs(val("--out"), exist_ok=True); open(os.path.join(val("--out"), "plan.json"), "w").write("{}")
 elif name == "issues.py" and a[0] == "read-state":
     os.makedirs(val("--out"), exist_ok=True)
+elif name == "issues.py" and a[0] == "close-drill":
+    if os.environ.get("STUB_CLOSE_FAIL") == "1":
+        sys.exit(1)
 elif name == "issues.py" and a[0] == "apply":
     n = int(os.environ["STUB_OPENED"].split(",")[len([l for l in open(log) if " apply " in l]) - 1])
     res = {"actions": [{"result": "would_open" if "--dry-run" in a else "opened"}] * n}
@@ -742,7 +762,7 @@ elif name == "issues.py" and a[0] == "apply":
                 (tools / n).write_text(self.STUB)
             (tools / "feeds.sh").write_text('echo "feeds.sh $*" >> "$STUB_LOG"; mkdir -p "$1"\n')
             e = dict(os.environ, STUB_LOG=str(d / "log"), STUB_OPENED=opened, DUMPLING_WATCH_TOOLS=str(tools), DUMPLING_WATCH_FIXTURES="fx",
-                     CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7", GITLAB_TOKEN="t")
+                     CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7", WATCH_READ_TOKEN="r", WATCH_WRITE_TOKEN="w")
             e.pop("DUMPLING_WATCH_DRY_RUN", None)
             e.update(env)
             r = subprocess.run(["bash", str(HERE.parent / "watch-drill.sh"), str(d / "work"), str(d / "out")], env=e, capture_output=True, text=True)
@@ -761,6 +781,32 @@ elif name == "issues.py" and a[0] == "apply":
         self.assertTrue(all("--allow-baseline" in x and "--mode drill" in x for x in m))
         self.assertTrue(all("--mode drill" in x and "--confidential" in x for x in log if " apply " in x))
         self.assertTrue(all("--backend gitlab" in x for x in log if x.startswith("issues.py")))
+        # 讀取用 read token，開／關 Issue 用寫入 token（#91 驗證建議 3）
+        self.assertTrue(all(x.endswith("tok=r") for x in log if " read-state " in x))
+        self.assertTrue(all(x.endswith("tok=w") for x in log if " apply " in x or " close-drill " in x))
+
+    def test_close_failure_is_not_ok(self):
+        # #91 驗證應修：三輪都正常、只有 close 失敗 → 非 0，訊息照實寫；數量不符又 close 失敗也照實寫
+        rc, log, out = self.run_drill(STUB_CLOSE_FAIL="1")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("watch-drill: OK", out)
+        self.assertIn("收掉演練 Issue 失敗", out)
+        self.assertEqual(len([l for l in log if "close-drill" in l]), 1)          # 只收一次（EXIT trap 不重收）
+        rc, log, out = self.run_drill(opened="0,1,0", STUB_CLOSE_FAIL="1")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("演練 Issue 已收掉", out)
+
+    def test_signal_still_closes(self):
+        # #91 驗證建議 2：被取消或逾時（TERM）時 trap 收掉已開的演練 Issue
+        rc, log, out = self.run_drill(STUB_TERM_AT="2")
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("中斷訊號", out)
+        self.assertEqual(log[-1].split()[:2], ["issues.py", "close-drill"])
+
+    def test_tokens_required(self):
+        rc, log, out = self.run_drill(WATCH_READ_TOKEN="")
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(log, [])
 
     def test_count_mismatch_fails_and_still_closes(self):
         rc, log, out = self.run_drill(opened="0,1,0")
