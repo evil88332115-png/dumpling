@@ -7,16 +7,32 @@
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：看 PR、合併、驗收，回覆 C1–C4
-- 分支／PR／commit：main 26a6377。**M1（#9）、M3（#14）、M4（#28）＋修正 #32 已合併**；文件批次 #13、#15（D-029～D-033＋CRA 調查與提案）已合併；分支 `wp0/docs-batch-4`（已推送、未開 PR；D-034～D-043；D-039 使用者已確認、D-042／D-043 使用者已確認），M2 合併後開 PR
-- 代理：無。PR #32 驗證代理完成：通過（應修 F1–F3，C3 併入 M2 後的監控 PR，開 real Issue 前必修）
-- 各對話：C1 做 M2（wp1/m2：P 平台介面＋開案範本、L 依層分開已完成、J Jetson 編譯＋掃描＋release 進行中）；C2：wp3/supplier-normalize（dd54722）正規化已完成、CI 綠，另修 report 假 OK 路徑；等 M2 合併後加 fetch_verify 再開 PR；C4（WSL）等 M2 的 P 軌。C0 已請 C4 不等 M2 合併、以 wp1/m2（P 軌已完成）為基礎開始轉接器；C2 已完成 fetch_verify 切換（wp3/supplier-normalize 8a960c0，CI 綠），PR 等 M2 進 main。C4 已開 wp7/adapters，回報 3 處契約只適用 Jetson（pipeline.yml 交接寫死、scan-flash-package.sh 平台與架構寫死、jetson_scan.py 通用部分），C1 已同意全部在 M2 做（build.mode none／handoff 資料夾、--platform generic＋--arch、platform_scan.py），名稱已轉 C4；AI NAS 加掃 OMV 原始碼由 C4 在 scan.sh 內做（C0 同意）。C4 wp7/adapters 8e4ced9：三平台 platform.yml／示範專案／build／assemble／raw-sectors／sbom_augment 完成，EOL 資料 11 筆已交；已接 C1 新介面、scan.sh 完成，rpi-lite-demo 端對端 CI 進行中（C0 提醒：Debian 核心要套 debian.tar.xz 修補、標準答案先人工核對、kernel_source_file 若動到 C1 介面要協調）。D-034：廠商分支 U-Boot 給上游 CPE、結果待人審。C3 已在 WSL 那台開工 M4（wp2/watch）：每日監控不開 DT；C0 要求核心／開機程式比對要涵蓋或標 NOT_RUN、狀態不放分支（排程 job 不給 contents: write）。C3：F1–F6＋concurrency 在 wp2/watch-m2（b1b236e），等 M2 後接 mirrors.sh 再開 PR；M8 B1 不依賴 M7 的部分完成（wp2/art14 1346916，176 測試；開 PR 前要用暫時 push 觸發實跑 drill）。C4：rock-5b-demo 標準答案兩輪驗證定案（d50783d，68 項）；dthelper／libmraa 改歸 bsp（D-027）後重訂。C2 新工作 D-042：AMD PSP 目錄＋新世代 Intel CSME 解析（公開樣本、不提私有試跑）；D-043 韌體公告比對 (1)(2) 給 C2、(3) vendor-watch 給 C3。J 完成：wp1/m2 1bbcf69（C4 可併）；M2 PR 預計 4–5 小時後
-- CI：無進行中（C0）。WATCH_REAL_ISSUES 尚未設定（流程：#32 合併 → M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報 → C0 設定）
-- 下一步：C1 的 M2 驗收 run 已綠（43375548090、43375551920），C1 派驗證後開 PR → C0 另派獨立驗證 → 合併 → 問使用者何時打第一個正式 tag；M2 合併後：開文件批次 PR（D-034～D-043）、C2／C3／C4 併 main 後各自開 PR、排 M7（含 adapter-gaps #16）
-- 給 C3 的交接：(1) M1 沒帶 `alert_mail.py`（寄信），exploited_* 寄信測試約 29 個已刪，要寄信時由 C3 帶回；(2) GitLab 階段「已被利用」的真實案件一定要用私有 Issue；(3) 每日監控讀 Release 附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`，開發版讀滾動 pre-release `dev/<專案>`（D-029）；watch 自己的狀態檔（防 60 天停用）由 C3 設計；(4) GITLAB-PORT 待辦：DT parent／child 專案在常駐 DT 再評估（D-030）
-- 給 PM／法務的待決定：VEX 發行閘門要不要分層（客戶負責 OS 時，OS 層未評估的 KEV 是否擋發行；目前保守：擋）（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）
-- 卡住／等決定：等 C1 判斷兩個分層／核心問題（rpi bsp 核心因 epoch 約漏報 2400 CVE；-os 報告多出 2700 列 CNA 核心）是否放進 M2；至少 M2 要讓 C-kernel-coverage 在此情況標 GAP；另：ours 的 P1 表沒列 os 層（缺口 24）已請 C1 放進 M2
-- 卡住／等決定：無。D-041 已定（第二台每對話 4、整台 8、負載門檻 12）
+- 目前在做：**搬家準備（D-045）**：C0、C1、C2 從主要主機搬到第二台（WSL2）。已請 C1、C2 在下一個可停段落 commit＋push 並更新 STATUS；等兩者回報後，C0 寫「搬家準備完成」並停下
+- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 aaeb4f0，**未開 PR**）：D-034～D-045＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 代理：無
+- CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
+- 各對話現況（細節看各節）：
+  - C1：M2 收尾（wp1/m2；含 KS 核心防護 D-044、自有軟體宣告、p1_rows、vex-rules 只留 K1/K2/U1）。下一步：重跑兩個 release → 驗證補驗 → 併 main → 開 M2 PR
+  - C2：D-042 CSME 完成（wp3/csme-new 61e8ef7），AMD（wp3/amd-psp）修應修 4 項中，之後合成一個 PR；D-043 接在後面；supplier-normalize（8a960c0）等 M2
+  - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
+  - C4（第二台）：wp7/adapters 三平台重跑中（d31c872），標準答案依結果重訂後驗證；M6 PR 草稿已備
+- 下一步（新 C0 接手後）：
+  1. 等 C1 開 M2 PR → **C0 另派獨立驗證代理**（不附 C1 的結論）→ 兩份驗證都通過、CI 綠 → `gh pr merge --squash --match-head-commit <SHA> --author-email 287638252+evil88332115-png@users.noreply.github.com`
+  2. M2 合併後：問使用者何時打第一個正式 tag（例如 `orin-nano-demo/v39.2.1-demo1`）；開 `wp0/docs-batch-4` 的 PR；通知 C2／C3／C4 併 main 後各自開 PR
+  3. C2 的 D-042 PR 開出前，請 sca-center 對話用私有檔在本機驗（結果不回 repo）
+  4. 監控 real Issue：C3 修完 F1–F3（已在 wp2/watch-m2）→ M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
+  5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#20、#22、#23
+- 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
+- 卡住／等決定（使用者）：五個對話都在第二台時，D-041 的「整台合計 8」要不要調整（D-045）
+- 第二台上要先做的事（詳見 `wp0/docs-batch-4` 的 docs/HANDOFF.md「在第二台電腦（WSL2）接手」）：
+  1. `~/.config/dumpling/local.env` 與 `forbidden.txt` 已在那台（C4 確認），變數 REPO_MAIN、AGENT_TMP、PUBLIC_IMAGES、SCA_CENTER、HEAVY_LOCK 都有
+  2. 主 checkout `$REPO_MAIN`（C4 回報為 `$HOME/dumpling`）在 main、工作樹乾淨，C3／C4 只用 worktree，**直接當 C0 的主 checkout**；先 `git -C "$REPO_MAIN" pull --ff-only`（落後 origin/main）
+  3. 確認 `.git/hooks/pre-push` 存在、`git config user.email` 是 noreply（D-011）
+  4. `$SCA_CENTER` 有 25fa89a，但 checkout 停在別的分支：取檔一律 `git -C "$SCA_CENTER" show 25fa89a:<路徑>`，不要依賴目前分支
+  5. `gh auth status`：同一帳號（C4 確認）
+  6. tmux 每個對話一個 window，對話名稱 C0–C4；C1、C2 的新 worktree 照 `$AGENT_TMP/dumpling-wt-<對話>-<主題>` 從推送的分支開
+  7. 可清掉的舊 worktree：wt-c4-cra-survey（已併進 #15），由 C4 自己清
+- 主要主機上的 C0–C2、worktree、repo：使用者確認第二台接上前不刪除、不關閉
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
