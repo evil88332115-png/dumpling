@@ -496,6 +496,16 @@ watch:compute:
     - |
       rc=0; GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
+    # T-23：支援期限與 EOL（pipeline/watch/support.py，WATCH.md 第 7 節）。放在比對前面，失敗不擋每日監控：結果寫進 watch-out-support/status，
+    # watch:notify 套用完兩份 plan 之後，status 是 FAIL 才讓 job 變紅（同 watch-round.yml 的 support-fail job）。內部版不加 --demo
+    - |
+      mkdir -p watch-out-support
+      src=0
+      python3 -I pipeline/watch/support.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --out watch-out-support --run-url "$CI_PIPELINE_URL" || src=$?
+      case $src in 0) st=OK ;; 2) st=ATTENTION ;; *) st=FAIL ;; esac
+      echo "$st" > watch-out-support/status
+      [ -f watch-out-support/report.md ] && cat watch-out-support/report.md || true
+      [ "$st" != FAIL ] || echo "support: FAIL（結束碼 $src）：每日監控照常進行，watch:notify 最後會讓 job 變紅"
     - GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
       rc=0
@@ -506,7 +516,8 @@ watch:compute:
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
     when: always
-    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json]
+    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json,
+            watch-out-support/plan.json, watch-out-support/report.md, watch-out-support/result.json, watch-out-support/status]
     expire_in: 14 days
 
 # notify：只有這個 job 拿得到 WATCH_GITLAB_TOKEN（protected＋masked 的 CI/CD 變數，project access token，scope api；
@@ -528,13 +539,27 @@ watch:notify:
     - |
       python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - |
-      # 沒有 plan.json（GAP：不建基準、不開 Issue）→ 什麼都不做（同 watch-round.yml 的 has_plan）
-      test -f watch-out/plan.json || { echo "watch: 沒有 plan.json（match 是 GAP），不動任何 Issue"; exit 0; }
-      GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
-        --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json
+      # 每日監控：沒有 plan.json（GAP：不建基準、不開 Issue）→ 不動監控 Issue（同 watch-round.yml 的 has_plan）
+      rc=0
+      if [ -f watch-out/plan.json ]; then
+        GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json || rc=$?
+      else
+        echo "watch: 沒有 plan.json（match 是 GAP），不動監控 Issue"
+      fi
+      # T-23：支援期限的 Issue（stateless plan，不碰狀態 Issue；每日監控的 apply 失敗也照樣套用，同 watch-round.yml 的 !cancelled()）
+      src=0
+      if [ -f watch-out-support/plan.json ]; then
+        GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out-support/plan.json || src=$?
+      fi
+      st=$(cat watch-out-support/status 2>/dev/null || echo FAIL)
+      [ "$rc" = 0 ] || exit "$rc"
+      [ "$src" = 0 ] || exit "$src"
+      [ "$st" != FAIL ] || { echo "support: FAIL（支援期限檢查沒有完成：看 watch:compute 的輸出與 watch-out-support/）"; exit 1; }
   artifacts:
     when: always
-    paths: [watch-out/apply-result.json]
+    paths: [watch-out/apply-result.json, watch-out-support/apply-result.json]
     expire_in: 14 days
 
 # ---------------------------------------------------------------------------
