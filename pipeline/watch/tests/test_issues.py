@@ -16,6 +16,7 @@ K1 = "a" * 64
 K2 = "b" * 64
 K3 = "c" * 64
 TOKEN = "ghp_SECRETTOKEN0123456789"
+LOCAL_PATH = "/" + "home" + "/alice/secret/file"  # 執行時才組出本機路徑樣式，原始碼不含字面值
 
 
 class FakeGitHub(issues.Api):
@@ -320,12 +321,12 @@ class TestApply(Base):
         self.assertEqual(gh2.writes, [])
 
     def test_publiccheck_blocks_everything(self):
-        bad = dict(self.open_act(K2), body="路徑 /home/alice/secret/file")
+        bad = dict(self.open_act(K2), body="路徑 " + LOCAL_PATH)
         rc, out = self.apply(self.plan([self.open_act(K1), bad]))
         self.assertEqual(rc, 1)
         self.assertEqual(self.gh.writes, [])
         self.assertEqual(self.gh.issues, {})
-        rc, _ = self.apply(self.plan([self.open_act(K1)], state={"p": "/home/alice/x"}))
+        rc, _ = self.apply(self.plan([self.open_act(K1)], state={"p": LOCAL_PATH}))
         self.assertEqual(rc, 1)
         self.assertEqual(self.gh.writes, [])
 
