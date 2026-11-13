@@ -44,7 +44,8 @@ plat_root=${DUMPLING_PLATFORMS_DIR:-$here/platforms}
 info=$(python3 -I "$here/project-info.py" --dir "$proj" "$ver"); irc=$?
 if [ $irc -ne 0 ]; then
   echo "$step: FAIL（$(printf '%s' "$info" | head -1 | sed 's/^project-info: FAIL（//; s/）$//')）"
-  exit $([ $irc = 64 ] && echo 64 || echo 1)    # 64＝設定值不合法（例如 scan.tools）
+  [ $irc = 64 ] && exit 64    # 64＝設定值不合法（例如 scan.tools）
+  exit 1
 fi
 platform=$(sed -n 's/^PLATFORM=//p' <<< "$info")
 osr=$(sed -n 's/^OS_RESPONSIBILITY=//p' <<< "$info")

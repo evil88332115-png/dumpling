@@ -106,6 +106,8 @@ class Plan(unittest.TestCase):
         shutil.copytree(os.path.join(ROOT, "pipeline", "platforms", "example"), os.path.join(plats, "toolp"))
         y = os.path.join(plats, "toolp", "platform.yml")
         t = open(y, encoding="utf-8").read().replace("platform: example", "platform: toolp")
+        import re
+        t = re.sub(r"\n  tools: [^\n#]*", "", t, count=1)             # 範例平台自己寫了 tools: sbom-only：先拿掉，再依測試要的值加回去
         if value is not None:
             t = t.replace("scan:\n", "scan:\n  tools: %s\n" % value, 1)
         open(y, "w", encoding="utf-8").write(t)
