@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:08 +0800（C0）
+最後更新：2026-11-13 23:10 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -167,7 +167,12 @@
 >   - 建議：微碼出處要寫到正確小節；license.url 改指 release notes 頁；補測試（0x44～0x54、ELog 非 0、BP 落在表內）
 >   - C0 私有檔複核：CSME 18.1 那份 found；19.0、21.x 那兩份因為表尾非 0 而 GAP
 >   - → **D-053**：表尾非 0 時，CRC 相符、BP 全過、RBEP＝NFTP（或有 FTPR）三項都成立才採用，並記 ATTENTION 列原始值，用合成測試
-> - 寫程式（同一個 cse 代理，第二輪）：文字修正＋建議＋D-053，狀態：**進行中**。完成後再預驗，新的 HEAD 先給 C0 用私有檔複核，再開 PR
+> - 寫程式（同一個 cse 代理，第二輪）：文字修正＋建議＋D-053，狀態：**完成 c185446**
+>   - 表尾非 0 時，CRC、BP、版本三項都成立才 found，並記 `layout-undocumented-fields`（ATTENTION，列原始值），整份狀態變 ATTENTION
+>   - test_intel_cse_layout 共 132 個；7 個樣本逐位元相同
+>   - 授權改指 release notes 頁，沒有出處的授權名稱拿掉了；V540TU 的 license 還沒核對
+> - C2 併入 main cc7d101 → **40bdd2f**（沒有衝突，581 passed）；CI tests 43449879817、firmware 43449885845
+> - **下一步**：fw-advisory 複驗結束後派 cse 預驗（40bdd2f）→ 新的 HEAD 給 C0 用私有檔複核 → 開 PR
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
@@ -221,7 +226,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
    - **先通知 C0（sca-center 端要用私有檔在本機驗證）**，再開一個 PR，標題「[WP3] 擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，PR 說明照公開資料規定寫
    - 驗證由 C0 派，C0 合併
 1b. **CSE layout Size 0x60 的支援**（**進行中**，見上方代理）：標準答案用公開可下載的新世代 BIOS 更新檔，要確認 Size 是 0x60、CRC 相符、RBEP 和 NFTP 一致；找不到公開樣本就用合成測試，並在 notes 寫明「沒有公開真樣本核對」。順便評估更大的 Size 值。repo 裡只寫技術理由，不索取私有檔
-2. **supplier-normalize**：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
+2. **supplier-normalize**（**M2 已合併**。C2 已併入 main cc7d101 → **1322c67**：C2 沒改過的檔案一律取 main 的版本，只有 PROVENANCE 和 run.d 是手動合併；755 passed；CI tests 43449745772、firmware 43449751297。下一步是預驗 → 開 PR）：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
 3. **D-043**（排在 D-042 之後）：韌體 SBOM 的公告比對，只用公開資料。順序是 (1) → (2)，每段完成通知 C0
    - (1) 自動比對：
      - NVIDIA vBIOS：用每日鏡像的 NVIDIA product-security CSAF 填 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED
