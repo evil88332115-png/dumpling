@@ -40,6 +40,8 @@
 #           （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 sca-scan --kernel-version（只接受英數字開頭、
 #           英數字與「. _ + ~ -」，否則 exit 64）。出貨但沒指定的核心記為「出貨但沒有判定」，C-kernel-config 與 C-kernel-module-map 至少 GAP；
 #           指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan）
+#         [--kernel-upstream-version <核心版本>=<X.Y.Z>]（可重複；平台設定給的上游版本，原樣交給 sca-scan --kernel-upstream-version，
+#           和核心原始碼 Makefile 核對，不一致不採用；格式不對 exit 64）
 #         [--keep-image]（不刪 docker 映像）  [--no-upload]（不上傳 DT；只用於試跑，這時不需要 PILOT_ENV）
 #         [--dt-vex]（選用，預設不做：CRA 的 VEX 寫回 DT 的 rootfs 專案，讓 DT finding 帶我們的 analysis；D-dt-vex-*-<rootfs>，讀回才算套用）
 #         [--dt-product-components]（選用，預設不做：刷機包韌體／UEFI 內建函式庫／自有軟體另開 DT 專案「<名稱> / <版本> (product components)」；D-dt-product-*-<rootfs>）
@@ -95,6 +97,7 @@ FP=$ROOT/tools/demo/flash_package.py
 usage(){ sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
 KVERS=()   # --kernel-version（可重複）／SCA_KERNEL_VERSIONS：要判定的核心版本
+KUPS=()    # --kernel-upstream-version（可重複）：<核心版本>=<X.Y.Z>
 
 PLATFORM=${SCA_PLATFORM:-}
 ARCH=${SCA_ARCH:-arm64}
@@ -130,6 +133,7 @@ while [ $# -gt 0 ]; do case $1 in
   --extra-deliverable) optval "$@"; EXTRAS+=("$2"); shift 2;;
   --kernel-source) optval "$@"; [ -d "$2" ] || { echo "--kernel-source 要是資料夾：$2" >&2; exit 64; }; export KERNEL_SOURCE_DIR=$(readlink -f -- "$2"); shift 2;;
   --kernel-version) optval "$@"; KVERS+=("$2"); shift 2;;
+  --kernel-upstream-version) optval "$@"; KUPS+=("$2"); shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -183,6 +187,14 @@ kernel_versions_args(){
   KVERS=("${uniq[@]+"${uniq[@]}"}")
 }
 kernel_versions_args
+kernel_upstream_args(){
+  local t LC_ALL=C
+  for t in "${KUPS[@]+"${KUPS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}=[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$ ]] \
+      || { echo "--kernel-upstream-version 要是 <核心版本>=<X.Y.Z>：${t:0:120}" >&2; exit 64; }
+  done
+}
+kernel_upstream_args
 [ "$(id -u)" != 0 ] || { echo "不要用 root 執行（sca-scan 的沙箱要求非 root）；用常駐環境的帳號（sudo -u <帳號>）" >&2; exit 64; }
 # sudo -u 時 HOME 可能還是呼叫者的：sca-scan 的 Grype 資料庫在 $HOME/.cache，改成這個帳號自己的家目錄
 H=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$H" ] && [ "$HOME" != "$H" ] && export HOME=$H
@@ -566,6 +578,7 @@ sca_args(){  # sca-scan 的共用選項（整個系統映像的逐套件授權�
   # Debian 打包的 Python 模組的佔位值版本（B-pyver 的 python-versions.json）：sca-scan 把 RESOLVED 的版本寫進比對與上傳用的 SBOM 副本（C-pyver）
   [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json")
   local kv; for kv in "${KVERS[@]+"${KVERS[@]}"}"; do SCA_ARGS+=(--kernel-version "$kv"); done   # 核心版本原樣交給 sca-scan
+  for kv in "${KUPS[@]+"${KUPS[@]}"}"; do SCA_ARGS+=(--kernel-upstream-version "$kv"); done      # 平台設定的上游版本原樣交給 sca-scan
   return 0; }
 
 # ---------- A. 環境與核對 ----------

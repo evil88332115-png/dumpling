@@ -99,6 +99,10 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 - 有 `commit` 的封存檔若 sha256 不符，不接受新雜湊，改用 `git clone`（只 https、不跑 hook、不抓 submodule）取該 commit、核對 `git rev-parse HEAD`，工作樹放 `<下載資料夾>/<name>.checkout`；clone 也失敗就是 FAIL。
 - 下載的檔案是不可信資料：只下載、不解開、不執行。
 - `platform_params.kernel_release` 可以是字串或清單（映像有不只一顆核心時，例如 Raspberry Pi 的 Pi 5 與 Pi 4），轉給 wizard 時每個值一個 `--kernel-version`（可重複；wizard 另接受環境變數 `SCA_KERNEL_VERSIONS`，命令列優先）。值原樣往下傳到 sca-scan 與核心工具；映像出貨但沒指定的核心記為「出貨但沒有判定」（`scan/kernel-versions.json`），指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。
+- `platform_params.kernel_upstream_version`（選用）：核心的上游版本 X.Y.Z（每日監控的核心 CNA 比對用）。字串＝只有一顆 `kernel_release` 時那一顆的；多顆寫成 `{<kernel_release>: X.Y.Z}`。
+  轉給 wizard 時每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`，一路傳到 `kernel_versions.py --upstream-version`：和核心原始碼 Makefile 一致 → `upstream_basis` 是 `source-makefile+platform-param`；
+  不一致 → 不採用任何一個（`upstream_version` 是 null，note 寫兩個值）。scan.sh 用 `python3 -I pipeline/project-info.py --kernel-args <專案資料夾> <版本>` 取得這兩種參數（一行一個；沒設定不印），
+  格式不對 → 結束碼 1（sources.yml 驗證時就會報錯）。Jetson 的 `scan.sh` 是範例。
 
 ## 5. 平台轉接器
 
@@ -150,8 +154,14 @@ Jetson 的 `sources.yml` `platform_params`：
 - `scan` 的環境變數：`PILOT_ENV`（pilot.env 的路徑，放在單獨的資料夾）。輸出 `$DUMPLING_OUT/release/`（Release 附件，檔名一律 ASCII，另有 `manifest.tsv`：檔名 TAB 顯示名稱）、`scan.json`（標準答案比對用的摘要）、`summary.md`。
   結束碼：OK 0；GAP 3（沒有標準答案、分層有 GAP；結果照樣產生）；FAIL 1（含標準答案不符）。
 - **標準答案**：`tests/expected/<專案>/<版本>.json`，格式與規則見 `pipeline/check-expected.py` 的說明；沒有檔案 = GAP，不是通過。
-- **Release 附件命名**（機器可讀，給每日監控讀）：`sbom-<專案>-<版本>.cdx.json`（完整、標好層）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、`layers.json`、`release-meta.json`
-  （`project`、`version`、`tag`、`status`、`platform`、`os_responsibility`、`commit`、`built_at`、`workflow_run`；由 `pipeline/release-meta.py` 產生）。
+- **Release 附件命名**（機器可讀，給每日監控讀）：`sbom-<專案>-<版本>.cdx.json`（完整、標好層）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、`layers.json`、`kernel-versions-<專案>-<版本>.json`（映像出貨的核心、有沒有判定、上游版本；完整掃描那次 sca-scan 的 `scan/kernel-versions.json`，有才附）、`release-meta.json`
+  （`project`、`version`、`tag`、`status`、`platform`、`os_responsibility`、`commit`、`built_at`、`workflow_run`、`report_status`、`release_gate`、`pipeline_result`、`reports`、`kernel_versions`；由 `pipeline/release-meta.py` 產生）。
+- **release-meta.json 的四個狀態欄位不要混用**：
+  - `status`：**生命週期**（project.yml 的 `shipped`｜`development`），**不是掃描結論**。
+  - `report_status`：**產品結論**＝報告（cra_report `summary.json`）的整體狀態；分層時每份報告（完整、bsp、os）各一個，列在 `reports`，這裡取最差的那份。
+  - `release_gate`：VEX 發行閘門（`summary.json` 的 `vex.gate.verdict`），同樣取最差的那份。
+  - `pipeline_result`：workflow 各步驟的結果（`pipeline-steps.tsv`），只代表流程有沒有跑完，**不是產品結論**。
+  - 值的範圍 `OK`｜`ATTENTION`｜`NOT_RUN`｜`GAP`｜`NOT_ASSESSED`｜`FAIL`；缺檔、讀不到、值不認得 → `NOT_RUN`，不留空。Release 說明（notes.md）開頭依序印 report_status、release_gate、pipeline_result。
   已出貨版本的 SBOM 不提交進 repo（D-029）：Release 就是正式來源；開發版發到每個專案一個滾動的 pre-release `dev/<專案>`（只在 `main` 或 `dev/**` 分支發布）。
 
 ## 6. platform.yml
@@ -206,7 +216,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 
 每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|ATTENTION|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
-`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
+`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
 `status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
 Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
 
@@ -215,7 +225,7 @@ Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有�
 結果看腳本輸出的最後一行：`OK …` 成功；`ATTENTION …` 也算成功，並在 `pipeline-steps.tsv` 加 `pipeline-<腳本名>-mirror	ATTENTION	0	<那一行>`（例如 `pipeline-kernel-cve-mirror`）；其他 = 這一次失敗，重試（預設 3 次、每次換新資料夾、間隔 60 秒），仍失敗 = `mirror` 回傳 1，呼叫端 FAIL。
 scan job 用 `actions/cache/restore`／`save`（釘 commit SHA）保存 `kcve/`（kernel-cves.zip、SOURCE，幾十 MB；不存 git clone）：key `kernel-cve-mirror-<run_id>-<run_attempt>`、`restore-keys: kernel-cve-mirror-`；還原與儲存用同一個路徑（cache 的版本含路徑）。
 **只有這次新抓的才存**（結果 OK 且 SOURCE 沒有 `fallback=yes`）；沿用或頂替的舊資料不存回去，免得舊資料被當成新的。
-**Release 決定（D-033 一致）**：ATTENTION 不擋 Release，正式 tag 也一樣；但 Release 說明最上面會有「ATTENTION（用了舊資料頂替）」區塊與那一行原文，`summary.md`、`scan.json`（`pipeline_attention`）、`release-meta.json`（`result`、`attention`）都看得到。
+**Release 決定（D-033 一致）**：ATTENTION 不擋 Release，正式 tag 也一樣；但 Release 說明最上面會有「ATTENTION（用了舊資料頂替）」區塊與那一行原文，`summary.md`、`scan.json`（`pipeline_attention`）、`release-meta.json`（`pipeline_result`、`attention`）都看得到。
 
 **build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
 workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。

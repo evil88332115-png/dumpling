@@ -549,5 +549,60 @@ class Scripts(Tmp):
         self.assertEqual(p.returncode, 64, p.stderr)
 
 
+class KernelWizardArgs(unittest.TestCase):
+    """platform_params.kernel_release／kernel_upstream_version → 精靈的 --kernel-version／--kernel-upstream-version（project_config.kernel_wizard_args、
+    project-info.py --kernel-args）。"""
+
+    def test_shapes(self):
+        f = pc.kernel_wizard_args
+        self.assertEqual(f(None), [])
+        self.assertEqual(f({"l4t_release": "1.0"}), [])
+        self.assertEqual(f({"kernel_release": "6.1.0-v8"}), ["--kernel-version", "6.1.0-v8"])
+        self.assertEqual(f({"kernel_release": "6.1.0-v8", "kernel_upstream_version": "6.1.93"}),
+                         ["--kernel-version", "6.1.0-v8", "--kernel-upstream-version", "6.1.0-v8=6.1.93"])
+        self.assertEqual(f({"kernel_release": ["6.1.0-a", "6.1.0-b"], "kernel_upstream_version": {"6.1.0-b": "6.1.93"}}),
+                         ["--kernel-version", "6.1.0-a", "--kernel-version", "6.1.0-b", "--kernel-upstream-version", "6.1.0-b=6.1.93"])
+
+    def test_bad_shapes(self):
+        for params in ({"kernel_release": "a;b"}, {"kernel_release": ["x", "x"]}, {"kernel_release": 3},
+                       {"kernel_release": ["a", "b"], "kernel_upstream_version": "6.1.93"},       # 字串只用於一顆
+                       {"kernel_upstream_version": "6.1.93"},                                      # 沒有 kernel_release
+                       {"kernel_release": "a", "kernel_upstream_version": "6.1"},
+                       {"kernel_release": "a", "kernel_upstream_version": {"b": "6.1.93"}},
+                       {"kernel_release": "a", "kernel_upstream_version": ["6.1.93"]}):
+            with self.assertRaises(pc.ConfigError, msg=params):
+                pc.kernel_wizard_args(params)
+        errs = pc.validate_sources({"schema": 1, "releases": {"v1": {"platform_params": {"kernel_release": "a;b"},
+                                                                     "files": [{"name": "x", "url": "https://e.invalid/x", "sha256": "0" * 64, "role": "bsp"}]}}})
+        self.assertTrue(any("kernel_release" in e for e in errs), errs)
+
+    def test_project_info_kernel_args(self):
+        tmp = tempfile.mkdtemp(prefix="dumpling-kargs-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        src = os.path.join(ROOT, "projects", "orin-nano-demo")
+        dst = os.path.join(tmp, "kargs-demo")
+        shutil.copytree(src, dst)
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"])
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stdout + r.stderr)          # Jetson 沒設定：不印
+        sp = os.path.join(dst, "sources.yml")
+        with open(sp, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(sp, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('      l4t_release: "39.2.1"\n',
+                                  '      l4t_release: "39.2.1"\n      kernel_release: [6.8.12-a, 6.8.12-b]\n      kernel_upstream_version: {6.8.12-a: 6.8.12}\n', 1))
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["--kernel-version", "6.8.12-a", "--kernel-version", "6.8.12-b", "--kernel-upstream-version", "6.8.12-a=6.8.12"])
+        r = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v0-nope"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("project-info: FAIL", r.stdout)
+
+    def test_jetson_scan_passes_them_to_the_wizard(self):
+        with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
+            s = fh.read()
+        self.assertIn('project-info.py" --kernel-args "$proj" "$ver"', s)
+        self.assertIn('"${kargs[@]+"${kargs[@]}"}"', s)
+
+
 if __name__ == "__main__":
     unittest.main()

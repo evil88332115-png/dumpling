@@ -173,12 +173,12 @@ class ReleaseMetaAndStatusCheck(Tmp):
                             "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout)
         d = json.load(open(out))
-        self.assertEqual((d["result"], d["steps"][0]["status"]), ("GAP", "GAP"))
+        self.assertEqual((d["pipeline_result"], d["steps"][0]["status"]), ("GAP", "GAP"))
         self.assertIn(d["status"], ("shipped", "development"))                       # status 仍是 project.yml 的值
         sr.append_row(f, "assemble", "FAIL", 1, "f")
         subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
                         "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
-        self.assertEqual(json.load(open(out))["result"], "FAIL")
+        self.assertEqual(json.load(open(out))["pipeline_result"], "FAIL")
 
     def test_scan_status_check_takes_the_rows_into_account(self):
         st = self.p("status.tsv")
@@ -249,7 +249,7 @@ class AttentionStatus(Tmp):
                             "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout)
         d = json.load(open(out))
-        self.assertEqual((d["result"], d["attention"]), ("ATTENTION", ["ATTENTION mirror=/x 上游連不上"]))
+        self.assertEqual((d["pipeline_result"], d["attention"]), ("ATTENTION", ["ATTENTION mirror=/x 上游連不上"]))
         self.assertEqual([x["status"] for x in d["steps"]], ["OK", "ATTENTION"])
         st = self.p("status.tsv")
         open(st, "w").write("stage\tstatus\tdetail\nA\tOK\tx\n")
@@ -263,7 +263,7 @@ class AttentionStatus(Tmp):
         subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
                         "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
         d = json.load(open(out))
-        self.assertEqual(d["result"], "OK")
+        self.assertEqual(d["pipeline_result"], "OK")
         self.assertNotIn("attention", d)
 
 
@@ -371,6 +371,95 @@ class MirrorsLib(Tmp):
         save = wf[wf.index("actions/cache/save@"):]
         self.assertIn("steps.kcve-fresh.outputs.fresh == 'true'", wf[wf.rindex("- name:", 0, wf.index("actions/cache/save@")):])
         self.assertIn("kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}", save)
+
+
+class ProductConclusions(Tmp):
+    """release-meta.json 的產品結論：report_status（cra_report summary.json 的 status）、release_gate（vex.gate.verdict）、
+    pipeline_result（流程步驟）；分層時整體取最差的那份報告；讀不到一律 NOT_RUN。另有 kernel-versions 附件。"""
+
+    def wizard_dir(self, name, summary=None, kv=None):
+        d = self.p(name)
+        files = [("scan/rootfs/scan/status.tsv", "stage\tstatus\tdetail\n"),
+                 ("cra-project/CRA/Reports/vulnerability-rows.json", json.dumps({"rows": []})),
+                 ("報告/交給PM/VEX/vex.cdx.json", "{}")]
+        if summary is not None:
+            files.append(("cra-project/CRA/Reports/summary.json", summary if isinstance(summary, str) else json.dumps(summary)))
+        if kv is not None:
+            files.append(("scan/rootfs/scan/scan/kernel-versions.json", kv if isinstance(kv, str) else json.dumps(kv)))
+        for rel, content in files:
+            os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+            open(os.path.join(d, rel), "w", encoding="utf-8").write(content)
+        return d
+
+    def collect(self, runs, steps=None):
+        a = argparse.Namespace(out=self.p("rel"), project="p", version="v1", layers=None, build_json=None, assemble_json=None, scan_json=self.p("scan.json"),
+                               run=runs, official=False, steps=steps, steps_md=None)
+        return ps.collect(a)
+
+    def meta(self, *extra):
+        out = self.p("m.json")
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                            "--commit", "a" * 40, "--run-id", "1", *extra, "--out", out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return json.load(open(out))
+
+    def test_layered_reports_take_the_worst(self):
+        kv = {"schema": "sca-center-kernel-versions/2", "shipped": []}
+        runs = ["=" + self.wizard_dir("full", {"status": "ATTENTION", "vex": {"gate": {"verdict": "OK"}}}, kv),
+                "-bsp=" + self.wizard_dir("bsp", {"status": "GAP", "vex": {"gate": {"verdict": "ATTENTION"}}}),
+                "-os=" + self.wizard_dir("os", {"status": "OK", "vex": {"gate": {"verdict": "OK"}}})]
+        f = self.p("s.tsv")
+        sr.append_row(f, "scan", "OK", 0, "ok")
+        scan = self.collect(runs, f)
+        self.assertEqual((scan["report_status"], scan["release_gate"]), ("GAP", "ATTENTION"))
+        self.assertEqual([(r["report"], r["report_status"], r["release_gate"]) for r in scan["reports"]],
+                         [("full", "ATTENTION", "OK"), ("bsp", "GAP", "ATTENTION"), ("os", "OK", "OK")])
+        self.assertEqual(scan["kernel_versions_file"], "kernel-versions-p-v1.json")
+        self.assertTrue(os.path.isfile(self.p("rel", "kernel-versions-p-v1.json")))
+        self.assertIn("kernel-versions-p-v1.json\t", open(self.p("rel", "manifest.tsv"), encoding="utf-8").read())
+        notes = open(self.p("rel", "notes.md"), encoding="utf-8").read()
+        head = notes.split("\n")[2]
+        self.assertEqual(head, "**report_status GAP**｜**release_gate ATTENTION**｜**pipeline_result OK**")   # 開頭依序三個
+        self.assertIn("| bsp | GAP | ATTENTION |", notes)
+        # release-meta 照抄（kernel_versions 的檔名要對得上專案與版本：這裡是別的專案，所以是 null）
+        d = self.meta("--steps", f, "--scan-summary", self.p("scan.json"))
+        self.assertEqual((d["report_status"], d["release_gate"], d["pipeline_result"]), ("GAP", "ATTENTION", "OK"))
+        self.assertEqual(len(d["reports"]), 3)
+        self.assertIsNone(d["kernel_versions"])
+        self.assertIn(d["status"], ("shipped", "development"))                        # status 仍是生命週期
+        self.assertNotIn("result", d)
+
+    def test_unreadable_or_odd_values_are_not_run(self):
+        runs = ["=" + self.wizard_dir("full", "{not json", "{not json"),
+                "-bsp=" + self.wizard_dir("bsp", {"status": "PASS", "vex": {"gate": "x"}})]
+        scan = self.collect(runs)
+        self.assertEqual([(r["report_status"], r["release_gate"]) for r in scan["reports"]], [("NOT_RUN", "NOT_RUN"), ("NOT_RUN", "NOT_RUN")])
+        self.assertEqual((scan["report_status"], scan["release_gate"], scan["kernel_versions_file"]), ("NOT_RUN", "NOT_RUN", None))
+        self.assertFalse(os.path.exists(self.p("rel", "kernel-versions-p-v1.json")))
+        self.assertIn("**pipeline_result NOT_RUN**", open(self.p("rel", "notes.md"), encoding="utf-8").read())
+
+    def test_release_meta_without_or_with_broken_scan_summary(self):
+        d = self.meta()
+        self.assertEqual((d["report_status"], d["release_gate"], d["pipeline_result"], d["reports"], d["kernel_versions"]),
+                         ("NOT_RUN", "NOT_RUN", "NOT_RUN", [], None))
+        bad = self.p("bad.json")
+        open(bad, "w").write("[1]")
+        d = self.meta("--scan-summary", bad, "--steps", self.p("missing.tsv"))
+        self.assertEqual((d["report_status"], d["release_gate"], d["pipeline_result"]), ("NOT_RUN", "NOT_RUN", "GAP"))
+        self.assertEqual(self.meta("--scan-summary", self.p("nope.json"))["report_status"], "NOT_RUN")
+        odd = self.p("odd.json")
+        json.dump({"reports": [{"report": "../x", "report_status": "OK", "release_gate": "OK"}, {"report": "bsp", "report_status": "OK", "release_gate": "BAD"}],
+                   "kernel_versions_file": "kernel-versions-orin-nano-demo-v39.2.1-demo1.json"}, open(odd, "w"))
+        d = self.meta("--scan-summary", odd)
+        self.assertEqual(d["reports"], [{"report": "bsp", "report_status": "OK", "release_gate": "NOT_RUN"}])
+        self.assertEqual((d["report_status"], d["release_gate"]), ("OK", "NOT_RUN"))
+        self.assertEqual(d["kernel_versions"], "kernel-versions-orin-nano-demo-v39.2.1-demo1.json")
+
+    def test_workflows_pass_the_scan_summary(self):
+        for wf in ("release.yml", "dev.yml"):
+            s = open(os.path.join(ROOT, ".github", "workflows", wf), encoding="utf-8").read()
+            self.assertIn("--scan-summary", s, wf)
+        self.assertIn('"kernel-versions-$PROJECT-$VERSION.json"', open(os.path.join(ROOT, ".github", "workflows", "dev.yml"), encoding="utf-8").read())
 
 
 if __name__ == "__main__":

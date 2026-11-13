@@ -125,11 +125,11 @@
 | `tools/demo/tests/test_flash_package.py` | `scripts/demo/tests/test_flash_package.py` | 25fa89a | 路徑調整 1 處、清理 52 行；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/demo/tests/test_jetson_lookup.py` | `scripts/demo/tests/test_jetson_lookup.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_jetson_rootfs.py` | `scripts/demo/tests/test_jetson_rootfs.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_kernel_version_args.py` | （dumpling 自己寫） | — | 新增（M2）：`scan-flash-package.sh` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（可重複、環境變數、不合法 exit 64、原樣交給 sca-scan；用假的 sca-scan 看收到的參數）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，只轉給 sca-scan |
+| `tools/demo/tests/test_kernel_version_args.py` | （dumpling 自己寫） | — | 新增（M2）：`scan-flash-package.sh` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（可重複、環境變數、不合法 exit 64、原樣交給 sca-scan；用假的 sca-scan 看收到的參數）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，只轉給 sca-scan；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（可重複，格式不對 exit 64），原樣轉給 sca-scan |
 | `tools/demo/tests/test_pack_build_record.py` | `scripts/demo/tests/test_pack_build_record.py` | 25fa89a | 原樣 |
 | `tools/demo/tests/test_rockchip_img.py` | `scripts/demo/tests/test_rockchip_img.py` | 25fa89a | 路徑調整 1 處、清理 2 行 |
 | `tools/demo/tests/test_rpi_img.py` | `scripts/demo/tests/test_rpi_img.py` | 25fa89a | 原樣 |
-| `tools/demo/tests/test_wizard_kernel_version.py` | （dumpling 自己寫） | — | 新增（M2）：`cra-scan.py` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（plan.json 的 `kernel_versions`、不合法 exit 64、掃描指令原樣傳給 scan-flash-package.sh）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，原樣傳給 scan-flash-package.sh，plan.json 多一個 `kernel_versions` |
+| `tools/demo/tests/test_wizard_kernel_version.py` | （dumpling 自己寫） | — | 新增（M2）：`cra-scan.py` 的 `--kernel-version`／`SCA_KERNEL_VERSIONS`（plan.json 的 `kernel_versions`、不合法 exit 64、掃描指令原樣傳給 scan-flash-package.sh）。**該腳本的行為修改（M2）記在這一列**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`，原樣傳給 scan-flash-package.sh，plan.json 多一個 `kernel_versions`；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（平台設定的上游版本，可重複，格式不對或同一顆兩個值 exit 64），原樣傳給 scan-flash-package.sh，plan.json 多一個 `kernel_upstream_versions` |
 | `tools/demo/tests/test_wizard_plan.py` | `scripts/demo/tests/test_wizard_plan.py` | 25fa89a | 平台範本清單去掉 `android.json`（1 處）；新增「工具版本」測試（`resolve_tools_rev`、`extract_tools`，約 60 行）；新增 `test_platform_is_explicit_and_never_guessed`（M2）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/e2e/dtread.py` | `scripts/e2e/dtread.py` | 25fa89a | 原樣 |
 | `tools/e2e/install-tools.sh` | `scripts/e2e/install-tools.sh` | 25fa89a | 路徑調整 1 處；**行為修改**：新增第三個參數 `--sbom-only`（只裝 Syft、Grype 固定版本與 bubblewrap，給 dt-smoke 用；不裝 cdxgen、govulncheck、guarddog），bubblewrap 安裝與 userns 放寬抽成函式，完整安裝的行為不變；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -172,7 +172,7 @@
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/usn_cves.py` | `scripts/pilot/lib/usn_cves.py` | 25fa89a | 原樣 |
 | `tools/pilot/report.py` | `scripts/pilot/report.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；註解：移除上游私有 repo 的編號與內部部署描述；HTML 結尾的已知限制說明拿掉指向上游內部文件的參照（dumpling 沒有那份文件），其餘文字不變 |
-| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述；metadata 的 network.note 拿掉指向上游內部文件的參照，其餘文字不變；**行為修改（M2）**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`（出貨但沒判定的核心記 `C-kernel-not-judged-<版本>`、寫 `scan/kernel-versions.json`，指定 2 顆以上一顆都不判定；沒指定而且只有 1 顆核心時行為不變） |
+| `tools/pilot/sca-scan` | `scripts/pilot/sca-scan` | 25fa89a | 路徑調整 82 處；**行為修改**：E 段（授權匯入）與 E2 段（檔案層級掃描）開始前檢查輔助程式（`scio_prep.py` 等，dumpling 沒帶）是否存在，缺就記 NOT_RUN 並寫出缺的檔名，不再因找不到檔案記 FAIL；註解：移除上游私有 repo 的編號與內部部署描述；metadata 的 network.note 拿掉指向上游內部文件的參照，其餘文字不變；**行為修改（M2）**：新增 `--kernel-version`／`SCA_KERNEL_VERSIONS`（出貨但沒判定的核心記 `C-kernel-not-judged-<版本>`、寫 `scan/kernel-versions.json`，指定 2 顆以上一顆都不判定；沒指定而且只有 1 顆核心時行為不變）；另新增 `--kernel-upstream-version <核心版本>=<X.Y.Z>`（只用於 --image、--sbom，轉成 kernel_versions.py `--upstream-version`，和原始碼 Makefile 核對；沒給時行為不變） |
 | `tools/pilot/tests/conftest.py` | `scripts/pilot/tests/conftest.py` | 25fa89a | 重寫（比照 D-017）：原檔載入 sca-center 的 `integration/conftest.py`，改成載入 `tools/cra/tests/conftest.py`（`DUMPLING_REQUIRE_TEST_DATA=1` 時 skip 算失敗）；沒有帶 `integration/` |
 | `tools/pilot/tests/pilot_fixtures.py` | `scripts/pilot/tests/pilot_fixtures.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_deb_sources.py` | `scripts/pilot/tests/test_deb_sources.py` | 25fa89a | 路徑調整 2 處 |
@@ -187,7 +187,7 @@
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_oot_sections.py` | `scripts/pilot/tests/test_kernel_oot_sections.py` | 25fa89a | 原樣（合成 ELF 字串裡的建置路徑登記在 `ci/public-allow.txt`） |
 | `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處；M2：`kernel_cve_list` 的測試外殼多抽出 `kernel_ship_from` |
-| `tools/pilot/tests/test_kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：`--kernel-version`／`SCA_KERNEL_VERSIONS` 的參數檢查，以及 sca-scan 核心區段在 1 顆／多顆沒指定／多顆指定 1 顆／指定 2 顆的狀態列與 `kernel-versions.json`（合成的 rootfs tar，判定工具用假的） |
+| `tools/pilot/tests/test_kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：`--kernel-version`／`SCA_KERNEL_VERSIONS` 的參數檢查，以及 sca-scan 核心區段在 1 顆／多顆沒指定／多顆指定 1 顆／指定 2 顆的狀態列與 `kernel-versions.json`（合成的 rootfs tar，判定工具用假的）；另測 sca-scan 把 `--kernel-upstream-version` 轉給 kernel_versions.py（和 Makefile 一致／不一致） |
 | `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
 | `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處；註解：移除上游私有 repo 的編號與內部部署描述 |

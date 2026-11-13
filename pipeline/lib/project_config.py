@@ -200,6 +200,46 @@ def validate_file_entry(f, prefix):
     return errs
 
 
+KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$")   # 同 tools/wizard/cra-scan.py 的 --kernel-version
+KERNEL_UPSTREAM_RE = re.compile(r"^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$")    # 同 tools/pilot/lib/kernel_versions.py 的 UP_RE（X.Y.Z）
+
+
+def kernel_wizard_args(params):
+    """版本的 platform_params → 精靈（tools/wizard/cra-scan.py）的核心參數清單。
+    - kernel_release：字串或字串清單 → 每個一個 `--kernel-version`。
+    - kernel_upstream_version：上游版本 X.Y.Z。字串＝只有一顆 kernel_release 時那一顆的；mapping＝{kernel_release: X.Y.Z}（鍵要在 kernel_release 裡）
+      → 每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`（kernel_versions.py 和原始碼 Makefile 核對，不一致不採用）。
+    都沒有 → []。格式不對 → ConfigError。"""
+    params = params or {}
+    if not isinstance(params, dict):
+        raise ConfigError("platform_params 必須是 mapping")
+    kr = params.get("kernel_release")
+    rels = [] if kr is None else [kr] if isinstance(kr, str) else kr
+    if not isinstance(rels, list) or not all(isinstance(r, str) and KERNEL_RELEASE_RE.match(r) for r in rels) or len(set(rels)) != len(rels):
+        raise ConfigError("platform_params.kernel_release 必須是核心版本字串或不重複的清單（英數字開頭、英數字與「. _ + ~ -」）")
+    up = params.get("kernel_upstream_version")
+    if up is None:
+        ups = {}
+    elif isinstance(up, str):
+        if len(rels) != 1:
+            raise ConfigError("platform_params.kernel_upstream_version 是字串時 kernel_release 要剛好一顆；多顆請寫成 {kernel_release: X.Y.Z}")
+        ups = {rels[0]: up}
+    elif isinstance(up, dict):
+        ups = up
+    else:
+        raise ConfigError("platform_params.kernel_upstream_version 必須是 X.Y.Z 或 {kernel_release: X.Y.Z}")
+    for k, v in ups.items():
+        if k not in rels or not isinstance(v, str) or not KERNEL_UPSTREAM_RE.match(v):
+            raise ConfigError("platform_params.kernel_upstream_version 的鍵要是 kernel_release 裡的核心、值要是 X.Y.Z")
+    out = []
+    for r in rels:
+        out += ["--kernel-version", r]
+    for r in rels:
+        if r in ups:
+            out += ["--kernel-upstream-version", "%s=%s" % (r, ups[r])]
+    return out
+
+
 def validate_sources(doc):
     """回傳錯誤清單。releases 是 {版本: {platform_params?, files: [...]}}。"""
     if not isinstance(doc, dict):
@@ -221,6 +261,11 @@ def validate_sources(doc):
         params = body.get("platform_params")
         if params is not None and not isinstance(params, dict):
             errs.append("%s.platform_params 必須是 mapping" % p)
+        elif params:
+            try:
+                kernel_wizard_args(params)
+            except ConfigError as e:
+                errs.append("%s：%s" % (p, e))
         files = body.get("files")
         if not isinstance(files, list) or not files:
             errs.append("%s.files 必須是非空清單" % p)

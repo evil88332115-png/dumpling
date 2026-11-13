@@ -617,6 +617,23 @@ def kernel_versions_from(cli, environ=None):
     return out
 
 
+KERNEL_UPSTREAM_RE = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}")
+
+
+def kernel_upstreams_from(cli):
+    """--kernel-upstream-version <核心版本>=<X.Y.Z>（可重複）→ 去掉重複的清單；格式不對或同一顆給兩個值 → exit 64。"""
+    out, seen = [], {}
+    for x in cli or []:
+        v, sep, up = x.partition("=")
+        if not sep or not KERNEL_VERSION_RE.fullmatch(v) or not v.isascii() or not KERNEL_UPSTREAM_RE.fullmatch(up) or seen.get(v, up) != up:
+            print(f"錯誤：--kernel-upstream-version 要是 <核心版本>=<X.Y.Z>（同一顆核心不能給兩個值）：{x[:120]}", file=sys.stderr)
+            sys.exit(64)
+        if v not in seen:
+            seen[v] = up
+            out.append(f"{v}={up}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="CRA 掃描精靈")
     ap.add_argument("--tools-rev", help="掃描用的工具版本（commit、分支或 tag）；不給時用環境變數 DUMPLING_TOOLS_REV，再不然目前 checkout 的 HEAD。"
@@ -637,8 +654,12 @@ def main():
     ap.add_argument("--kernel-version", action="append", metavar="版本",
                     help="要判定的核心版本（映像的 /usr/lib/modules/<版本>/），可重複；不給時用環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）。"
                          "映像只有一顆核心可以不給；有多顆時沒指定的核心記為「出貨但沒有判定」")
+    ap.add_argument("--kernel-upstream-version", action="append", metavar="核心版本=X.Y.Z",
+                    help="平台設定（platform_params.kernel_upstream_version）給的上游版本，可重複；原樣交給 scan-flash-package.sh → sca-scan → "
+                         "kernel_versions.py --upstream-version，和核心原始碼的 Makefile 核對（不一致不採用）")
     a = ap.parse_args()
     kvers = kernel_versions_from(a.kernel_version)
+    kups = kernel_upstreams_from(a.kernel_upstream_version)
     ni = a.yes
     load_site_config(a.site_config)
 
@@ -794,6 +815,7 @@ def main():
     plan["a0_source"] = bool(plan["upstream_source"]) and bool(oot or built_oot or kt)
     plan["board_test"] = [str(p) for p in board_tests]
     plan["kernel_versions"] = kvers      # --kernel-version／SCA_KERNEL_VERSIONS（原樣交給 scan-flash-package.sh）
+    plan["kernel_upstream_versions"] = kups   # --kernel-upstream-version（原樣交給 scan-flash-package.sh）
     say(f"  OP-TEE／TF-A 公開原始碼（--tee-source）：{tee_dir or ('GAP：' + tee_note)}")
     say("  UEFI 平台設定（config.dsc.inc）：" + (f"建置紀錄裡有 {len(uefi_defs)} 份" if uefi_defs else "建置紀錄裡沒有 → UEFI 映像檢查維持 not_assessed（" + "；".join(uefi_notes) + "）")
         + ("　※" + "；".join(uefi_notes) if uefi_defs and uefi_notes else ""))
@@ -899,6 +921,8 @@ def main():
         cmd += ["--kernel-source", str(kt[0])]
     for v in kvers:      # 核心版本原樣往下傳：scan-flash-package.sh → sca-scan → 核心工具
         cmd += ["--kernel-version", v]
+    for v in kups:       # 平台設定的上游版本：scan-flash-package.sh → sca-scan → kernel_versions.py --upstream-version
+        cmd += ["--kernel-upstream-version", v]
     if uefi:
         cmd += ["--uefi-source", str(uefi)]
         for d in ("edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc",):      # NVIDIA Jetson 的平台 DSC（有的話才給；UEFI 映像檢查的 DSC 佐證）
