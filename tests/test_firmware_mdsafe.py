@@ -66,8 +66,11 @@ class MdSafeTest(unittest.TestCase):
             from markdown_it import MarkdownIt
         except ImportError:
             return
-        md = MarkdownIt("gfm-like", {"linkify": True})
-        md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        try:
+            md = MarkdownIt("gfm-like", {"linkify": True})            # 需要 linkify-it-py（runner 的 apt 套件沒有）
+            md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        except Exception:
+            return
         for raw in ("1.https://evil.example/x", "-ftp://evil.example", "x-https://evil.example/x"):
             self.assertNotIn("<a ", md.render(ms.md_safe(raw, 200)), raw)
 

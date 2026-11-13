@@ -21,6 +21,20 @@ spec.loader.exec_module(fd)
 YML = "kind: %s\nvendor: Acme\nmodel: Box 1\nstatus: %s\n%s"
 
 
+def markdown_it_or_none():
+    """markdown-it-py 的渲染器（沒有安裝回 None）。gfm-like 需要 linkify-it-py（runner 的 apt 套件沒有），沒有時退回 commonmark（沒有裸網址自動連結，其餘判斷相同）。"""
+    try:
+        from markdown_it import MarkdownIt
+    except ImportError:
+        return None
+    try:
+        m = MarkdownIt("gfm-like")
+        m.render("probe www.example.com")        # linkify-it-py 缺少時，錯誤是在渲染才出現
+        return m
+    except Exception:
+        return MarkdownIt("commonmark")
+
+
 def comp(name, ref=None, version="1.0", purl=None, cpe=None, va="NOT_ASSESSED", vs="OK"):
     c = {"type": "firmware", "name": name, "properties": [
         {"name": "dumpling:vuln-assessment", "value": va}, {"name": "dumpling:version-status", "value": vs},
@@ -1165,11 +1179,10 @@ class HardeningTests(ReportBase):
             t = fd.supplier_props_text(n, left)
             self.assertNotRegex(_re.sub(r"`[^`]*`", "", t), r"[*_<>\[\]]")                        # 行內程式碼以外沒有會被渲染的符號
             self.assertIn("`dumpling:normalized-*`", t)
-        try:
-            from markdown_it import MarkdownIt
-        except ImportError:
+        mdr = markdown_it_or_none()
+        if mdr is None:
             return
-        html = MarkdownIt("gfm-like").render("- " + fd.supplier_props_text(3))
+        html = mdr.render("- " + fd.supplier_props_text(3))
         self.assertNotIn("<em>", html)
         self.assertNotIn("<strong>", html)
         self.assertIn("<code>dumpling:normalized-*</code>", html)
@@ -1210,9 +1223,8 @@ class HardeningTests(ReportBase):
     def test_whole_report_fixed_text_renders_without_emphasis_or_links(self):
         """報告裡所有固定文字（不經 md_safe 的說明）用 CommonMark 渲染：不能出現斜體、連結、圖片（需要 markdown-it-py，沒有就略過）。
         粗體只有「怎麼讀」那一行是故意的。"""
-        try:
-            from markdown_it import MarkdownIt
-        except ImportError:
+        mdr = markdown_it_or_none()
+        if mdr is None:
             self.skipTest("沒有 markdown-it-py")
         nm = fd._norm_mod()
         self.addCleanup(setattr, nm, "MAX_CHANGES", nm.MAX_CHANGES)
@@ -1227,7 +1239,7 @@ class HardeningTests(ReportBase):
         self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
         for want in ("status.tsv 有重複列", "只有空白", "沒有 purl", "供應商 SBOM 自帶名稱以 dumpling: 開頭的 property", "已正規化"):
             self.assertIn(want, md)
-        html = MarkdownIt("gfm-like").render(md)                 # 預設開 fuzzy link：比 GitHub 更嚴（`scan-status-check.py` 之類的檔名也會被連結）
+        html = mdr.render(md)                 # 有 linkify-it-py 時預設開 fuzzy link：比 GitHub 更嚴（`scan-status-check.py` 之類的檔名也會被連結）
         self.assertEqual(re.findall(r"<(?:em|a|img|script)[ >]", html), [])
         self.assertEqual(html.count("<strong>"), 1)
 
