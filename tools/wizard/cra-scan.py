@@ -9,6 +9,11 @@
   （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 scan-flash-package.sh --kernel-version → sca-scan。
   只接受英數字開頭、英數字與「. _ + ~ -」，否則 exit 64。出貨但沒指定的核心記為「出貨但沒有判定」（C-kernel-config 與 C-kernel-module-map 至少 GAP）；
   指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan。
+  分層：--kernel-in-other-report <報告名稱>（環境變數 SCA_KERNEL_IN_OTHER_REPORT 也可以）。分層重跑（--rescan-from，SBOM 換成某一層的）時，這份報告的 SBOM 沒有
+  作業系統核心、核心在 <報告名稱> 那份報告判定：原樣交給 scan-flash-package.sh → sca-scan，SBOM 真的沒有核心時 C-kernel-cve-list、C-kernel-config、
+  C-kernel-module-map 記 NOT_RUN「不適用」，不跑核心階段；SBOM 有核心時照舊。名稱只接受 ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64。見 docs/LAYERS.md。
+  --kernel-not-distro <理由>（環境變數 SCA_KERNEL_NOT_DISTRO 也可以）：平台負責人宣告核心不是發行版（Debian／Ubuntu）的核心，版本字串看不出來時用；
+  SBOM 有核心時 C-kernel-coverage 是 GAP。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64。
 
 流程：核對 MD5 → 安全解開原始碼（不執行裡面任何東西）→ 自動找核心原始碼、UEFI、NVIDIA 樹外模組、核心建置紀錄
      → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
@@ -618,6 +623,32 @@ def kernel_versions_from(cli, environ=None):
 
 
 KERNEL_UPSTREAM_RE = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}")
+REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")
+NOT_DISTRO_MAX_BYTES = 300
+
+
+def kernel_in_other_report_from(cli, environ=None):
+    """--kernel-in-other-report <報告名稱>／環境變數 SCA_KERNEL_IN_OTHER_REPORT（命令列優先）→ 名稱或 None；格式不對 → exit 64。"""
+    env = os.environ if environ is None else environ
+    v = cli if cli is not None else env.get("SCA_KERNEL_IN_OTHER_REPORT", "")
+    if cli is None and not v:
+        return None
+    if not REPORT_NAME_RE.fullmatch(v) or not v.isascii():
+        print(f"錯誤：報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：{v[:120]}", file=sys.stderr)
+        sys.exit(64)
+    return v
+
+
+def kernel_not_distro_from(cli, environ=None):
+    """--kernel-not-distro <理由>／環境變數 SCA_KERNEL_NOT_DISTRO（命令列優先）→ 理由或 None；空的、有控制字元、超過 300 位元組 → exit 64。"""
+    env = os.environ if environ is None else environ
+    v = cli if cli is not None else env.get("SCA_KERNEL_NOT_DISTRO", "")
+    if cli is None and not v:
+        return None
+    if not v.strip() or not v.isprintable() or len(v.encode("utf-8")) > NOT_DISTRO_MAX_BYTES:
+        print(f"錯誤：--kernel-not-distro／SCA_KERNEL_NOT_DISTRO 的理由不能是空的、不能有控制字元、最多 {NOT_DISTRO_MAX_BYTES} 位元組：{v[:120]!r}", file=sys.stderr)
+        sys.exit(64)
+    return v
 
 
 def kernel_upstreams_from(cli):
@@ -657,9 +688,17 @@ def main():
     ap.add_argument("--kernel-upstream-version", action="append", metavar="核心版本=X.Y.Z",
                     help="平台設定（platform_params.kernel_upstream_version）給的上游版本，可重複；原樣交給 scan-flash-package.sh → sca-scan → "
                          "kernel_versions.py --upstream-version，和核心原始碼的 Makefile 核對（不一致不採用）")
+    ap.add_argument("--kernel-in-other-report", metavar="報告名稱",
+                    help="分層重跑用：這份報告的 SBOM 沒有作業系統核心，核心在這份名稱的報告判定；原樣交給 scan-flash-package.sh → sca-scan。"
+                         "SBOM 真的沒有核心時核心階段記 NOT_RUN「不適用」，有核心時照舊；不給時行為不變。環境變數 SCA_KERNEL_IN_OTHER_REPORT")
+    ap.add_argument("--kernel-not-distro", metavar="理由",
+                    help="平台宣告核心不是發行版（Debian／Ubuntu）的核心（platform_params.kernel_not_distro）：SBOM 有核心時 C-kernel-coverage 是 GAP，"
+                         "發行版資料的比對不可靠。環境變數 SCA_KERNEL_NOT_DISTRO")
     a = ap.parse_args()
     kvers = kernel_versions_from(a.kernel_version)
     kups = kernel_upstreams_from(a.kernel_upstream_version)
+    kother = kernel_in_other_report_from(a.kernel_in_other_report)
+    knotdistro = kernel_not_distro_from(a.kernel_not_distro)
     ni = a.yes
     load_site_config(a.site_config)
 
@@ -816,6 +855,8 @@ def main():
     plan["board_test"] = [str(p) for p in board_tests]
     plan["kernel_versions"] = kvers      # --kernel-version／SCA_KERNEL_VERSIONS（原樣交給 scan-flash-package.sh）
     plan["kernel_upstream_versions"] = kups   # --kernel-upstream-version（原樣交給 scan-flash-package.sh）
+    plan["kernel_in_other_report"] = kother   # --kernel-in-other-report（分層：核心在哪份報告判定；原樣交給 scan-flash-package.sh）
+    plan["kernel_not_distro"] = knotdistro    # --kernel-not-distro（平台宣告核心不是發行版的核心；原樣交給 scan-flash-package.sh）
     say(f"  OP-TEE／TF-A 公開原始碼（--tee-source）：{tee_dir or ('GAP：' + tee_note)}")
     say("  UEFI 平台設定（config.dsc.inc）：" + (f"建置紀錄裡有 {len(uefi_defs)} 份" if uefi_defs else "建置紀錄裡沒有 → UEFI 映像檢查維持 not_assessed（" + "；".join(uefi_notes) + "）")
         + ("　※" + "；".join(uefi_notes) if uefi_defs and uefi_notes else ""))
@@ -923,6 +964,10 @@ def main():
         cmd += ["--kernel-version", v]
     for v in kups:       # 平台設定的上游版本：scan-flash-package.sh → sca-scan → kernel_versions.py --upstream-version
         cmd += ["--kernel-upstream-version", v]
+    if kother:           # 分層：這份報告的 SBOM 沒有核心時，核心階段不適用（scan-flash-package.sh → sca-scan）
+        cmd += ["--kernel-in-other-report", kother]
+    if knotdistro:       # 平台宣告核心不是發行版的核心
+        cmd += ["--kernel-not-distro", knotdistro]
     if uefi:
         cmd += ["--uefi-source", str(uefi)]
         for d in ("edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc",):      # NVIDIA Jetson 的平台 DSC（有的話才給；UEFI 映像檢查的 DSC 佐證）

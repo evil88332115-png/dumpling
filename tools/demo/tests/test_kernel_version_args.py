@@ -129,3 +129,56 @@ def test_upstream_version_passed_to_sca_scan_and_invalid(tmp_path):
                 "--kernel-upstream-version", bad, script=sc)
         assert p.returncode == 64 and "--kernel-upstream-version" in p.stderr, (bad, p.stdout + p.stderr)
         assert sca_args(tmp_path) is None
+
+
+# ---------- --kernel-in-other-report／--kernel-not-distro ----------
+
+def opt_of(args, name):
+    return [args[i + 1] for i, x in enumerate(args) if x == name]
+
+
+def test_in_other_report_and_not_distro_passed_to_sca_scan(tmp_path):
+    a, pv = prev(tmp_path)
+    p = run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company",
+            "--kernel-in-other-report", "demo-bsp", "--kernel-not-distro", "廠商核心", script=tool_tree(tmp_path))
+    args = sca_args(tmp_path)
+    assert args is not None, p.stdout + p.stderr
+    assert opt_of(args, "--kernel-in-other-report") == ["demo-bsp"] and opt_of(args, "--kernel-not-distro") == ["廠商核心"]
+
+
+def test_in_other_report_and_not_distro_env_and_cli_wins(tmp_path):
+    a, pv = prev(tmp_path)
+    script = tool_tree(tmp_path)
+    run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company", script=script,
+        env={"SCA_KERNEL_IN_OTHER_REPORT": "env-bsp", "SCA_KERNEL_NOT_DISTRO": "env 理由"})
+    args = sca_args(tmp_path)
+    assert opt_of(args, "--kernel-in-other-report") == ["env-bsp"] and opt_of(args, "--kernel-not-distro") == ["env 理由"]
+    (tmp_path / "sca-args.txt").unlink()
+    run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res2", "--no-upload", "--no-company", "--kernel-in-other-report", "cli-bsp",
+        script=script, env={"SCA_KERNEL_IN_OTHER_REPORT": "env-bsp"})
+    assert opt_of(sca_args(tmp_path), "--kernel-in-other-report") == ["cli-bsp"]
+
+
+def test_without_options_sca_scan_gets_neither(tmp_path):
+    a, pv = prev(tmp_path)
+    run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company", script=tool_tree(tmp_path))
+    args = sca_args(tmp_path)
+    assert args is not None and "--kernel-in-other-report" not in args and "--kernel-not-distro" not in args
+
+
+@pytest.mark.parametrize("opt,bad", [("--kernel-in-other-report", "a;b"), ("--kernel-in-other-report", "a/b"), ("--kernel-in-other-report", "$(id)"),
+                                     ("--kernel-in-other-report", "a b"), ("--kernel-in-other-report", "x" * 101), ("--kernel-in-other-report", ""),
+                                     ("--kernel-not-distro", ""), ("--kernel-not-distro", "   "), ("--kernel-not-distro", "x" * 301),
+                                     ("--kernel-not-distro", "a\tb")])
+def test_invalid_exit_64_before_anything_runs(tmp_path, opt, bad):
+    a, pv = prev(tmp_path)
+    p = run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company", opt, bad, script=tool_tree(tmp_path))
+    assert p.returncode == 64, p.stdout + p.stderr
+    assert sca_args(tmp_path) is None
+
+
+def test_invalid_env_exit_64(tmp_path):
+    a, pv = prev(tmp_path)
+    p = run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company", script=tool_tree(tmp_path),
+            env={"SCA_KERNEL_IN_OTHER_REPORT": "a;b"})
+    assert p.returncode == 64 and "報告名稱只接受" in p.stderr and sca_args(tmp_path) is None

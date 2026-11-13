@@ -241,7 +241,7 @@ def kernel_run(tmp_path, members, kvers=(), fake_status="OK", source_dir=None, k
     script = f"""set -uo pipefail
 ROOT={root}; OUT={out}; ST=$OUT/status.tsv; printf 'stage\\tstatus\\tdetail\\n' > "$ST"
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
-MODE=sbom; SBOM_OK=1; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=; KERNEL_CVES=; SCA_KERNEL_VERSIONS=
+MODE=sbom; SBOM_OK=1; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=; KERNEL_CVES=; SCA_KERNEL_VERSIONS=; KNONE=0; KOTHER=
 {'KERNEL_SOURCE_DIR=' + str(source_dir) if source_dir else 'unset KERNEL_SOURCE_DIR'}
 KVERS=({kv})
 KUPS=({" ".join(f"'{v}'" for v in kups)})

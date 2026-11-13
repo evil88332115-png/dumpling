@@ -24,6 +24,14 @@
 #           只有 1 顆核心而且沒指定時照舊判定它）
 #         --kernel-upstream-version <核心版本>=<X.Y.Z>（可重複；--image、--sbom：平台設定給的上游版本，交給 kernel_versions.py --upstream-version，
 #           和核心原始碼 Makefile 核對：一致才填 upstream_version，不一致不採用；格式不對 exit 64）
+#         --kernel-in-other-report <報告名稱>（環境變數 SCA_KERNEL_IN_OTHER_REPORT；--image、--sbom。分層：這份報告的 SBOM 是某一層（例如只有使用者空間的 -os），
+#           作業系統核心在另一份報告（例如 <專案>-bsp）判定。給了而且 kernelcheck 判定這份 SBOM 沒有作業系統核心（C-kernel-coverage 的 NOT_RUN）時：
+#           C-kernel-cve-list、C-kernel-config、C-kernel-module-map 各記一列 NOT_RUN「不適用」，不執行 CNA 版本比對、kernel_config.py、kernel_module_map.py，
+#           不記 C-kernel-not-judged-*，也不寫 scan/kernel-versions.json。SBOM 有核心時照舊。沒給時行為不變：單一 SBOM 的廠商核心（不是套件）仍走 CNA 版本比對，
+#           所以不能只由「SBOM 沒有核心」推定。名稱只接受 ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64）
+#         --kernel-not-distro <理由>（環境變數 SCA_KERNEL_NOT_DISTRO；--image、--sbom。平台負責人宣告：這個產品的核心不是發行版（Debian／Ubuntu）的核心，
+#           版本字串看不出來時用，例如部分 Radxa 核心。SBOM 有核心時 C-kernel-coverage 是 GAP（發行版資料的比對不可靠，可能漏報），理由寫進說明與
+#           scan/kernel-coverage.json 的 off_series。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64。其他不在發行版核心序列上的自動判斷見 lib/kernelcheck.py）
 #   環境變數 KERNEL_BUILD_RECORD（選用；只用於 --image、--sbom）：這個出貨版本的核心建置紀錄（make 之後的建置資料夾，或它的
 #     .tar／.tar.gz／.tar.xz；保留 .config、每個 .*.cmd、modules.order、modules.builtin、System.map、include/config/kernel.release、
 #     include/generated/（utsversion.h、compile.h：和燒錄的 Image 的版本字串核對，證明是出貨的那一次建置）），
@@ -96,7 +104,7 @@ ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 
 usage(){ sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
-MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS= KVERS=() KVERS_CLI=0 KUPS=()
+MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS= KVERS=() KVERS_CLI=0 KUPS=() KOTHER= KOTHER_CLI=0 KNOTDISTRO= KNOTDISTRO_CLI=0
 while [ $# -gt 0 ]; do case $1 in
   --git) optval "$@"; MODE=git; SRC=$2; shift 2;;
   --dir) optval "$@"; MODE=dir; SRC=$2; shift 2;;
@@ -116,6 +124,8 @@ while [ $# -gt 0 ]; do case $1 in
   --py-versions) optval "$@"; PYVERS=$2; shift 2;;
   --kernel-version) optval "$@"; KVERS+=("$2"); KVERS_CLI=1; shift 2;;
   --kernel-upstream-version) optval "$@"; KUPS+=("$2"); shift 2;;
+  --kernel-in-other-report) optval "$@"; KOTHER=$2; KOTHER_CLI=1; shift 2;;
+  --kernel-not-distro) optval "$@"; KNOTDISTRO=$2; KNOTDISTRO_CLI=1; shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -170,6 +180,24 @@ kernel_upstream_args(){   # --kernel-upstream-version：<核心版本>=<X.Y.Z>�
   done
 }
 kernel_upstream_args
+# --kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT：分層時核心在哪份報告判定。只收英數字開頭、英數字與「. _ + -」；環境變數只在 --image、--sbom 看，命令列優先。
+# --kernel-not-distro／SCA_KERNEL_NOT_DISTRO：平台宣告核心不是發行版的核心（理由文字）。不空、沒有控制字元、最多 300 位元組。
+kernel_layer_args(){
+  local LC_ALL=C
+  if [ "$KOTHER_CLI" = 1 ]; then [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-in-other-report 只用於 --image 或 --sbom" >&2; exit 64; }
+  elif [[ "$MODE" =~ ^(image|sbom)$ ]]; then KOTHER=${SCA_KERNEL_IN_OTHER_REPORT:-}; fi
+  if [ "$KOTHER_CLI" = 1 ] || [ -n "$KOTHER" ]; then
+    [[ "$KOTHER" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] \
+      || { echo "報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：${KOTHER:0:120}" >&2; exit 64; }
+  fi
+  if [ "$KNOTDISTRO_CLI" = 1 ]; then [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-not-distro 只用於 --image 或 --sbom" >&2; exit 64; }
+  elif [[ "$MODE" =~ ^(image|sbom)$ ]]; then KNOTDISTRO=${SCA_KERNEL_NOT_DISTRO:-}; fi
+  if [ "$KNOTDISTRO_CLI" = 1 ] || [ -n "$KNOTDISTRO" ]; then
+    { [ -n "${KNOTDISTRO//[[:space:]]/}" ] && [ ${#KNOTDISTRO} -le 300 ] && ! [[ "$KNOTDISTRO" =~ [[:cntrl:]] ]]; } \
+      || { echo "--kernel-not-distro／SCA_KERNEL_NOT_DISTRO 的理由不能是空的、不能有控制字元、最多 300 位元組：${KNOTDISTRO:0:120}" >&2; exit 64; }
+  fi
+}
+kernel_layer_args
 if [ -z "$NAME" ]; then
   case $MODE in git) NAME=$(basename "${SRC%/}" .git);; dir) NAME=$(basename "$SRC");; image) NAME=${SRC%%@*}; NAME=${NAME##*/}; NAME=${NAME%%:*};; sbom) NAME=$(basename "$SRC"); NAME=${NAME%.json}; NAME=${NAME%.cdx};; esac
 fi
@@ -457,6 +485,7 @@ else
   elif [ "$n" = x ]; then status C-grype FAIL "輸出無法解析"; rm -f "$GR"
   else status C-grype OK "$n matches（比對完成；不代表不存在其他弱點）"; fi
 fi
+KNONE=0      # 1＝給了 --kernel-in-other-report 而且 kernelcheck 判定這份 SBOM 沒有作業系統核心
 # 作業系統核心的比對涵蓋（tools/pilot/lib/kernelcheck.py）：映像與 --sbom。SBOM 有核心（linux-kernel／linux-kernel-module 元件、
 # Linux 核心 CPE 或核心套件）但 Grype 對核心 0 筆 → GAP（核心的 CVE 未評估）。沒有核心、沒有 SBOM（B 段已記）或原始碼模式
 # 不寫這一列：一般容器映像本來就沒有核心，多一列 NOT_RUN 會讓整體退出碼從 0 變 2（同 C-govulncheck 只在 Go 專案出現）。
@@ -464,9 +493,12 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]]; then
   if [ $SBOM_OK = 1 ]; then
     ka=(); [ -s "$GR" ] && ka=(--grype "$GR")
     [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")   # 說明寫出比對對象是對應的 Canonical 核心
+    [ -n "$KNOTDISTRO" ] && ka+=(--not-distro-kernel "$KNOTDISTRO")   # 平台宣告核心不是發行版的核心：有核心時 GAP
     r=$(python3 -I "$ROOT/tools/pilot/lib/kernelcheck.py" --sbom "$SBOM" "${ka[@]+"${ka[@]}"}" --out "$OUT/scan/kernel-coverage.json" 2>&1)
     l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-coverage\t')
     if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"; [ "$s2" = NOT_RUN ] || status "$s1" "$s2" "$s3"
+      # 分層：給了 --kernel-in-other-report 而且這份 SBOM 沒有核心（NOT_RUN）→ 核心階段不適用（見下面的 KNONE）
+      [ "$s2" = NOT_RUN ] && [ -n "$KOTHER" ] && KNONE=1
     else status C-kernel-coverage FAIL "kernelcheck.py 失敗：$(echo "$r" | tail -1)"; fi
   fi
 fi
@@ -922,13 +954,21 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   else rm -f "$KBF"; status C-kernel-boot FAIL "kernel_boot.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
   [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
 fi
-[[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && kernel_versions_prepare
+[[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && [ "$KNONE" != 1 ] && kernel_versions_prepare
 # CNA 鏡像是沿用的舊資料（tools/mirror/kernel-cve.sh 的 KERNEL_CVE_FALLBACK_FROM：上游連不上）：結果照用，但報告要看得到
 if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ -n "$KERNEL_CVE_MIRROR" ] && [ -f "$KERNEL_CVE_MIRROR/SOURCE" ] \
    && grep -qx 'fallback=yes' "$KERNEL_CVE_MIRROR/SOURCE"; then
   status C-kernel-cve-mirror ATTENTION "$(sed -n 's/^fallback_note=//p' "$KERNEL_CVE_MIRROR/SOURCE" | head -1)"
 fi
-if [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
+if [ "$KNONE" = 1 ]; then
+  # 分層：這份報告的 SBOM 沒有作業系統核心，核心在另一份報告判定（--kernel-in-other-report）。核心的三個階段不適用：記 NOT_RUN，
+  # 不執行 CNA 版本比對、kernel_config.py、kernel_module_map.py（否則 -os 層會對映像裡的核心跑一遍：Jetson 得 3 列假的 GAP，
+  # Raspberry Pi 的 CNA 比對會成功，在 -os 報告裡產生約 2700 列合成的核心弱點）。出貨核心有沒有判定是另一份報告的事：
+  # 不記 C-kernel-not-judged-*、不寫 scan/kernel-versions.json（KVACT 沒有設，kernel_versions_finish 不執行）
+  for _st in C-kernel-cve-list C-kernel-config C-kernel-module-map; do
+    status "$_st" NOT_RUN "不適用：這份報告的 SBOM 沒有作業系統核心，核心在 $KOTHER 報告判定"
+  done
+elif [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
 elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")
   [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")
