@@ -217,3 +217,26 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - `watch.yml` 手動觸發 `mode=drill`：inventory 用 `tests/fixtures/watch/drill/`（合成 Release：合成的 SBOM，元件是公開套件的真實版本），
   KEV 用合成的 KEV 檔（`--kev-overlay`：把指定 CVE 加進 CISA KEV 清單），狀態用 `watch-state-drill`，跟真實狀態完全分開。
 - 驗收步驟：(1) 沒有 overlay → 建立基準、0 個 Issue；(2) overlay 加一個 CVE（requests 2.19.0 的 CVE-2018-18074，正式版 bsp 層與開發版各有一份）→ 開 2 個 Issue（每個 Release 一個）；(3) 再跑一次 → 0 個新 Issue；(4) `close-drill`。
+
+## 7. 支援期限與 EOL（M8 B2，`pipeline/watch/support.py`）
+
+每日監控的 real 那一輪在 compute 多跑一步（`watch-round.yml` 的「支援期限與 EOL（real）」），不連網，只讀 `projects/*/project.yml`、collect 收集到的 Release SBOM 與 `tools/cra/data/support-lifecycle.json`。演練不跑。
+
+- **產品支援期限以 `project.yml` 的 `support_until` 為準**（D-055；`config.json` 的 `support.end_date` 由它產生，`load_project` 比對月份，不一致就 FAIL）。
+  - 期限前 180／90／30 天各開一次提醒 Issue。只開當下最近的那一級：第一次跑時如果已經剩 20 天，就不補開 180、90 天那兩次。期限當天還算在支援期內。
+  - 過了期限：狀態 EOL，開一次 Issue，報告寫 GAP「支援期已結束」。
+  - 還沒填（只有 development 可能）：NOT_ASSESSED，不是 OK。
+- **元件的維護期**：每個 Release 把各層 SBOM 合併後，用 `tools/cra/support_check.py` 比對資料表。
+  - 比對用的設定是複本：`support.end_date` 由 `support_until` 產生，`support.subscriptions` 照 `config.json`。
+  - 元件比產品先停止維護、維護期沒有公開、或需要的訂閱沒有設定：ATTENTION，每個元件開一次 Issue。
+  - 元件版本不在資料表：NOT_ASSESSED，只寫進報告。
+- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。
+- **資料表的查核日期**超過 `max_age_days`（或在未來）：這些項目併成一個提醒 Issue。
+- **不重複開**：每個 Issue 的 key 由專案、門檻或元件、日期組成，同一個 key 已經有 Issue（含已關閉）就不再開。支援期限改了，key 就會變，會重新提醒。
+  - plan 是 `stateless`（`issues.py apply` 不碰監控的狀態 Issue，也不做樂觀鎖）。
+  - 標籤：`support-period`、`dumpling-watch`；ATTENTION 類另加 `attention`；公開 repo 另加 `demo`。
+- **跟每日監控的關係**：放在比對前面，失敗不擋每日監控的 Issue。
+  - FAIL（`project.yml` 不合格、資料表壞掉）由 `support-fail` job 讓這一輪變紅。
+  - 用的是同一個 `dry_run`：排程預設只算不寫，C0 設 `WATCH_REAL_ISSUES=on` 之後才真的開 Issue（D-040）。
+- 輸出在 artifact `watch-support-<round>-<attempt>`（`report.md`、`result.json`、`plan.json`），報告也寫進 job summary。
+- 資料表只有人工維護的項目。Debian、Raspberry Pi OS、Radxa、OMV 由 C4 補（提案 B2）；在那之前，這些平台的 OS 是 NOT_ASSESSED（SBOM 裡的元件），或 ATTENTION（`ours` 的 OS）。

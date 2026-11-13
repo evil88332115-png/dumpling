@@ -105,6 +105,23 @@ class WatchWorkflow(unittest.TestCase):
         self.assertIn('[ -f "$w/$n.result" ] || rm -rf', self.round)
         self.assertRegex(self.round, r"id: kcve-fresh\n\s+if: inputs\.mode == 'real' && steps\.feeds\.outcome == 'success'")
 
+    def test_support_check_wiring(self):
+        # M8 B2：支援期限檢查只在 real 跑、失敗不擋每日監控（continue-on-error＋support-fail job 讓這一輪變紅）、Issue 跟每日監控同一個 dry_run
+        m = re.search(r"(?ms)^      - name: 支援期限與 EOL（real）\n(.*?)^      - name:", self.round)
+        step = m.group(1)
+        self.assertIn("if: inputs.mode == 'real'", step)
+        self.assertIn("continue-on-error: true", step)
+        self.assertLess(self.round.index("name: 支援期限與 EOL（real）"), self.round.index("      - name: 比對\n"))    # 比對 FAIL 也照樣跑
+        fail = re.search(r"(?ms)^  support-fail:\n(.*?)^  notify:", self.round).group(1)
+        self.assertIn("if: needs.compute.outputs.support_status == 'FAIL'", fail)
+        self.assertIn("exit 1", fail)
+        notify = re.search(r"(?ms)^  notify:\n(.*)", self.round).group(1)
+        self.assertIn("needs.compute.outputs.has_support_plan == 'true'", notify.split("steps:")[0])
+        sup = re.search(r"(?ms)- name: 套用支援期限的 Issue\n(.*?)(?=^      - |\Z)", notify).group(1)
+        self.assertRegex(sup, r"DRY:\s*\$\{\{\s*inputs\.dry_run\s*\}\}")
+        self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', sup)
+        self.assertRegex(sup, r'issues\.py apply [^\n]*support/plan\.json[^\n]*"\$\{d\[@\]\}"')
+
     def test_translator_rejects_unknown_syntax(self):
         with self.assertRaises(AssertionError):
             to_python("github.event_name == 'schedule' || format('x')")

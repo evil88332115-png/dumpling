@@ -403,6 +403,7 @@
 | T-20 | NOT_RUN 的 job（`dev:publish`、`firmware:dt`）目前 `exit 1`＋`allow_failure`，pipeline 會顯示黃燈；可改成 `exit 3`＋`allow_failure: {exit_codes: 3}`，跟 GitHub 版「NOT_RUN 不是失敗、但照實列出」的語意一致 | — |
 | T-21 | `release:publish` 先上傳 Generic Package、再由 `release-payload.py` 驗檔名：改成先驗再傳；`release-payload.py` 只接受 `https://` 的 API 網址，內部若是 http 要先決定（建議內部也用 https） | — |
 | T-22 | 預設映像 `DUMPLING_IMAGE: ubuntu:24.04` 是版本標籤、不是 digest，apt 套件也沒固定版本：內部換成 RD 映像時固定 digest（第 5 節、第 14 節） | 搬移時 |
+| T-23 | M8 B2 的支援期限檢查（`pipeline/watch/support.py`，WATCH.md 第 7 節）：範本的 `watch:compute` 在比對前加同一步（`--inventory`、`--out`；不加 `--demo`），`watch:notify` 用 `issues.py` 的 GitLab 版套用 stateless plan（私密 Issue）；FAIL 不擋每日監控的 Issue，另外讓 pipeline 變紅 | 跟 T-10 一起 |
 
 ---
 

@@ -301,7 +301,7 @@ class Labels:
 # ---------- plan ----------
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
-                            "demo", "summary", "attention", "drill", "watch-health"})
+                            "demo", "summary", "attention", "drill", "watch-health", "support-period"})
 
 
 def load_plan(path, want_mode=None):
@@ -326,6 +326,11 @@ def load_plan(path, want_mode=None):
         bad("state")
     if plan.get("state") is None and plan.get("state_base") is not None:
         bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
+    # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）
+    if "stateless" in plan and not isinstance(plan["stateless"], bool):
+        bad("stateless")
+    if plan.get("stateless") and plan.get("state") is not None:
+        bad("stateless 的 plan 不能帶 state")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -398,9 +403,12 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     mode = plan["mode"]
     problems, results = [], []
     # 樂觀鎖
-    cur = find_state_issue(api, repo, mode)
+    stateless = plan.get("stateless") is True
+    cur = None if stateless else find_state_issue(api, repo, mode)
     sb = plan["state_base"]
-    if sb is None:
+    if stateless:
+        pass                    # 不碰狀態 Issue（支援期限檢查和每日監控各自獨立，狀態 Issue 有沒有都不影響）
+    elif sb is None:
         if cur:
             raise Fail(f"樂觀鎖：plan 說沒有狀態 Issue，現在有 #{cur['number']}")
     else:
@@ -480,7 +488,9 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                 r.update(result="would_comment" if dry else "commented", issue=ent["number"])
         # 全部做完才寫狀態 Issue
         sres = {}
-        if no_state:
+        if stateless:
+            sres = {"result": "skipped", "reason": "stateless 的 plan：不寫狀態"}
+        elif no_state:
             sres = {"result": "skipped", "reason": "plan 的 state 是 null（還沒有基準）：不寫狀態"}
         elif too_big:
             sres = {"result": "not_written", "reason": too_big}
