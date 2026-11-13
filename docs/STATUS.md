@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:55 +0800（C0）
+最後更新：2026-11-13 22:58 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -145,7 +145,9 @@
 >   - 應修 2：06-be-00/19（ADL-N＋TWL）的散文對照被整組設成 GAP，候選因此漏列
 >   - 應修 3：notes 有過時的地方，以及寫起因的句子
 >   - 建議：revert 註記；cpe-basis 改成列舉值（listed／inferred）；註解邊界；補測試
->   - 已交回寫程式代理（第三輪，進行中）
+>   - 已交回寫程式代理（第三輪）：**完成 d8a20ec**。AMD 元件都有 advisory-match=NOT_ASSESSED，報告照實寫「已解析 N 份」；06-be-00/19 已納入（散文對照 30 個 key、0 個 GAP，AZB 加註）；cpe-basis 改成 listed／inferred；633 passed，四個樣本的 expected 全 OK
+>   - CI tests 43447781681、firmware 43447786318
+>   - **下一步**：cse 預驗結束後，派新的驗證代理複驗 d8a20ec
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
