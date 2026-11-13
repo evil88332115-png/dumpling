@@ -47,6 +47,7 @@ STAGE = "WATCH-MATCH"
 EXIT = {"OK": 0, "FAIL": 1, "ATTENTION": 2}
 KEY_PREFIX = "dumpling-watch/1"
 KERNEL_CNA = os.path.join(ROOT, "tools", "pilot", "lib", "kernel_cna_version.py")
+KV_SCHEMA = "sca-center-kernel-versions/2"
 UPSTREAM_RE = re.compile(r"^[0-9]+\.[0-9]+(\.[0-9]+)?$")
 CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
 RUNS_KEEP = 30
@@ -201,7 +202,10 @@ def kernel_upstreams(path):
             doc = json.load(f)
     except (OSError, ValueError) as e:
         return [], [f"kernel-versions 附件讀不到（{type(e).__name__}）：核心 CNA 沒有比對（GAP）"]
-    sh = doc.get("shipped") if isinstance(doc, dict) else None
+    if not isinstance(doc, dict) or doc.get("schema") != KV_SCHEMA:
+        got = doc.get("schema") if isinstance(doc, dict) else None
+        return [], [f"kernel-versions 附件的 schema 是 {str(got)[:60]!r}，只接受 {KV_SCHEMA}（不猜格式）：核心 CNA 沒有比對（GAP）"]
+    sh = doc.get("shipped")
     if sh is None:
         return [], ["kernel-versions 附件的 shipped 是 null（出貨的核心讀不出來）：核心 CNA 沒有比對（GAP）"]
     if not isinstance(sh, list):

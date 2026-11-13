@@ -145,7 +145,7 @@ class T(Base):
 
     def test_kernel_cna(self):
         kv = os.path.join(self.inv, "releases", "0", "kernel-versions-demo-v1.json")
-        json.dump({"shipped": [{"version": "6.8.12-1-tegra", "upstream_version": "6.8.12", "upstream_basis": "source-makefile",
+        json.dump({"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.8.12-1-tegra", "upstream_version": "6.8.12", "upstream_basis": "source-makefile",
                                 "upstream_note": "ok"}]}, open(kv, "w"))
         self.inventory["releases"][0]["kernel_versions"] = "releases/0/kernel-versions-demo-v1.json"
         json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
@@ -159,13 +159,22 @@ class T(Base):
 
     def test_kernel_null_upstream_is_gap(self):
         kv = os.path.join(self.inv, "releases", "0", "kv.json")
-        json.dump({"shipped": [{"version": "6.1.0-rpi7", "upstream_version": None, "upstream_note": "對不上 Makefile"}]}, open(kv, "w"))
+        json.dump({"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.1.0-rpi7", "upstream_version": None, "upstream_note": "對不上 Makefile"}]}, open(kv, "w"))
         self.inventory["releases"][0]["kernel_versions"] = "releases/0/kv.json"
         json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
         st, _, plan = self.run_once(NOW1)
         res = json.load(open(os.path.join(self.w, "out-" + NOW1[:10], "result.json")))
         self.assertTrue(any("對不上 Makefile" in g for g in res["gaps"]))
         self.assertEqual(res["per_sbom"]["dumpling:demo/v1#bsp"]["kernel_cna"], "GAP")
+
+    def test_kernel_schema_v1_is_gap(self):
+        kv = os.path.join(self.inv, "releases", "0", "kv.json")
+        json.dump({"schema": "sca-center-kernel-versions/1", "shipped": ["6.8.12"]}, open(kv, "w"))
+        self.inventory["releases"][0]["kernel_versions"] = "releases/0/kv.json"
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1, kernel_runner=lambda v, m: self.fail("不應該呼叫核心 CNA"))
+        res = json.load(open(os.path.join(self.w, "out-" + NOW1[:10], "result.json")))
+        self.assertTrue(any("schema" in g and "sca-center-kernel-versions/2" in g for g in res["gaps"]))
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
