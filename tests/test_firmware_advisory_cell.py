@@ -35,7 +35,7 @@ class CellTests(unittest.TestCase):
     def test_intel_only(self):
         self.assertEqual(fc.cell(inv(intel("a.rom", "affected-candidate", "affected-candidate", "up-to-date"))), "affected-candidate 2、up-to-date 1")
         self.assertEqual(fc.cell(inv(intel("a.rom", "NOT_ASSESSED", "older-no-sa"))), "older-no-sa 1、NOT_ASSESSED 1")      # 固定順序
-        self.assertEqual(fc.cell(inv(intel("a.rom"))), "沒有 Intel 微碼")
+        self.assertEqual(fc.cell(inv(intel("a.rom"))), "沒有 Intel 微碼（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）")
 
     def test_amd_only(self):
         t = fc.cell(inv(amd(microcode=19)))
@@ -59,7 +59,7 @@ class CellTests(unittest.TestCase):
         t = fc.cell(inv(intel("a.rom", "NOT_ASSESSED", "NOT_ASSESSED"), status="GAP"))
         self.assertEqual(t, "資料表 GAP：NOT_ASSESSED 2")
         self.assertTrue(fc.cell(inv(amd(), status="GAP")).startswith("資料表 GAP：沒有 Intel 微碼；AMD 微碼已解析"))
-        self.assertEqual(fc.cell(inv(status="GAP")), "資料表 GAP：沒有 BIOS 映像")
+        self.assertEqual(fc.cell(inv(status="GAP")), "資料表 GAP：沒有 BIOS 映像（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）")
 
     def test_mixed_images_each_one_is_listed(self):
         t = fc.cell(inv(intel("dir/protectli.rom", "affected-candidate", "affected-candidate", "affected-candidate"), amd("x.zip!PRIME.CAP", 19)))
@@ -70,7 +70,7 @@ class CellTests(unittest.TestCase):
         self.assertIn("a.rom：Intel 微碼 up-to-date 1", t)
 
     def test_no_bios_and_many_images(self):
-        self.assertEqual(fc.cell(inv()), "沒有 BIOS 映像")
+        self.assertEqual(fc.cell(inv()), "沒有 BIOS 映像（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）")
         t = fc.cell(inv(*[intel(f"{i}.rom", "up-to-date") for i in range(fc.MAX_IMAGES + 3)]))
         self.assertIn("其餘 3 個映像沒有列出", t)
 

@@ -10,6 +10,7 @@ import sys
 ORDER = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")
 AMD_NO_MATCH = "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）"
 MAX_IMAGES = 20
+NO_MATCH = "（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）"           # 沒有可比對的 Intel 微碼時也要寫明（和 ME、其他元件的說法一致）
 
 
 def short(name):
@@ -34,7 +35,7 @@ def image_text(b):
         if a:
             return f"沒有 Intel 微碼；AMD 微碼已解析 {len(a.get('microcode') or [])} 份，{AMD_NO_MATCH}"
         return f"沒有 Intel 微碼；AMD PSP 目錄解析沒有執行（GAP），微碼、PSP、AGESA 都沒有列出；NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準"
-    return "沒有 Intel 微碼"
+    return "沒有 Intel 微碼" + NO_MATCH
 
 
 def cell(inv):
@@ -42,7 +43,7 @@ def cell(inv):
     bios = inv.get("bios") or []
     prefix = "資料表 GAP：" if adv.get("status") == "GAP" else ""
     if not bios:
-        return prefix + "沒有 BIOS 映像"
+        return prefix + "沒有 BIOS 映像" + NO_MATCH
     if len(bios) == 1:
         text = image_text(bios[0])
         if text.startswith("Intel 微碼 "):           # 單一映像：維持原本的「affected-candidate 3」格式

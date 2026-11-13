@@ -47,7 +47,7 @@ for m in "${manifests[@]}"; do
   [ -n "$est" ] || est=$(grep -P '^FIRMWARE-EXPECT\tERROR\t' "$out/expect.log" | cut -f4)
   [ "$erc" -eq 0 ] || est="${est:-expect 失敗}（exit $erc）"
   [ "$erc" -eq 0 ] && flag="" || flag="**不符**："
-  adv=$(python3 -I "$here/lib/firmware_advisory_cell.py" "$out/fw-inventory.json" 2>/dev/null || echo "-")
+  adv=$(python3 -I "$here/lib/firmware_advisory_cell.py" "$out/fw-inventory.json" 2>/dev/null) || adv="-"     # 失敗時只顯示一個「-」
   echo "| $slug | $(cell "${line#FIRMWARE-BIOS$'\t'}") | $count | $flag$(cell "$est") | $(cell "$adv") |" >> "$summary"
   # 不符的明細也寫進摘要，方便不點進 log 就看到
   if [ "$erc" -ne 0 ]; then

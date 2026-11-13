@@ -2499,7 +2499,7 @@ def advisory_markdown(inv):
                 L.append("AMD 平台：PSP 目錄解析沒有執行（GAP，原因見映像元件的 sca-center:gap），AMD 微碼、PSP 韌體、AGESA 都沒有列出，"
                          "沒有比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）。")
         else:
-            L.append("微碼：映像裡沒有找到 Intel microcode，沒有可比對的項目。")
+            L.append("微碼：映像裡沒有找到 Intel microcode，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。")
         m = b["me"]
         cpe, _basis, gap = csme_cpe_info(m)
         if m:
@@ -2510,7 +2510,7 @@ def advisory_markdown(inv):
             L += ["", f"- ME：{e(b['me_note'] or '沒有讀到 ME 版本')}；沒有 ME 版本可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），SBOM 不帶 CPE。"]
         L.append("- 其他元件（FSP、GOP／VBT／legacy VBIOS、coreboot、edk2、BIOS 映像本身）：沒有公告比對，NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
     if not inv["bios"]:
-        L += ["", "沒有 BIOS 映像，沒有微碼與 ME 可比對。"]
+        L += ["", "沒有 BIOS 映像，沒有微碼與 ME 可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。"]
     if inv["vbios"]:
         L += ["", f"### NVIDIA vBIOS（{len(inv['vbios'])} 個）", "",
               "公告比對：這一版沒有做（NOT_ASSESSED）：資料庫沒有資料，以廠商公告為準（NVIDIA 的 vBIOS 弱點走夥伴通知）。"]

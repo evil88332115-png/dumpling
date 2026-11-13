@@ -130,7 +130,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 - 同為 `o` 的其他韌體是不同的 product：TXE ＝ `trusted_execution_engine_firmware`（版本 3.0～4.0.x）、SPS ＝ `server_platform_services_firmware`（3.0.6.267.4～5.00.04.012，版本字串格式很雜）。`o` 類 product 裡 major 版本 11 以上只有 CSME。
 - AMT（`active_management_technology_firmware`，part o）是另一個 product，版本也有 11.x～14.5.x（89 筆，2026-11-13）；CSME 的 CPE 比不到 AMT 的 CVE 設定。所以不能說「11 以上只有 CSME」，只能說 TXE、SPS 的版本都低於 11。
 - **轉換**：CPE 版本只放 `$MN2` 版本的前三段（`14.0.47.1558` → `14.0.47`），build 號丟掉（NVD 沒有、範圍比較也只用三段）；元件的 `version` 維持四段。三段以下或非純數字的版本不帶 CPE。
-- **family**：映像分不出 CSME／TXE／SPS（`sca-center:me-family` 仍寫 `unknown`）。帶 CPE 的條件：版本清單的 me 列寫明 `CSME`（不看版本範圍）；或映像沒有清單、major 版本在 **11～30** → 由版本推定為 CSME（`dumpling:cpe-basis` 的值固定是 `listed` 或 `inferred`，說明文字在 `dumpling:cpe-basis-note`；報告寫「family 是由版本推定的，比對結果待人審」）。
+- **family**：映像分不出 CSME／TXE／SPS（`sca-center:me-family` 仍寫 `unknown`）。帶 CPE 的條件：版本清單的 me 列寫明 `CSME`（這時**不套** major 11～30 的範圍：清單是人寫明的 family，只要版本是三段以上的數字就帶）；或映像沒有清單、major 版本在 **11～30** → 由版本推定為 CSME（`dumpling:cpe-basis` 的值固定是 `listed` 或 `inferred`，說明文字在 `dumpling:cpe-basis-note`；報告寫「family 是由版本推定的，比對結果待人審」）。
   依據：NVD 上 TXE（`trusted_execution_engine_firmware`）與 SPS（`server_platform_services_firmware`）的版本都低於 11，AMT 是另一個 product 不會被這個 CPE 比到。
   上限 30 是判斷：CSME 大約每年加一個 major（目前最高約 20），`$MN2` 裡雜散的欄位值是幾百到幾萬，超過 30 就不是版本欄位。清單寫 ME／TXE／SPS → 不帶；清單對同一個 ME 版本同時寫了不同 family（例如 CSME 與 TXE，自相矛盾）→ 不推定、不帶 CPE，`dumpling:cpe-gap` 寫「版本清單 family 矛盾」，狀態 ATTENTION；major < 11 或 > 30 且 family 不明、少於三段、非數字 → 不帶，`dumpling:cpe-gap` 寫原因（GAP）。
   這個推定由 C0 的決定 D-051 採用；要退回「一律不推定」，把 `csme_cpe_info` 的 11～30 那個分支拿掉即可。

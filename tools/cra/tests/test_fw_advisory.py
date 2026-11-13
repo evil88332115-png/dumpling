@@ -586,7 +586,23 @@ def test_report_section_exists_without_microcode_or_bios(tmp_path):
     inv = xf.inventory([p], advisory=TABLE)
     inv["status"], inv["detail"] = "GAP", "x"
     md = xf.markdown(inv)
-    assert "## 公告比對" in md and "沒有 BIOS 映像" in md and inv["advisory"]["microcodes"] == 0
+    assert "## 公告比對" in md and "沒有 BIOS 映像，沒有微碼與 ME 可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）" in md and inv["advisory"]["microcodes"] == 0
+
+
+def test_report_says_no_data_for_an_intel_image_without_microcode(tmp_path):
+    """沒有 Intel 微碼的 BIOS 映像（例如 OVMF 這類只有 firmware volume 的映像）：報告和 CI 摘要欄都要寫明
+    「資料庫沒有資料，以廠商公告為準」，和 ME、其他元件的說法一致。"""
+    from test_x86_firmware import fv, ffs
+    sys.path.insert(0, str(HERE.parents[2] / "pipeline" / "lib"))
+    import firmware_advisory_cell as fc
+    p = tmp_path / "fv.bin"
+    p.write_bytes(fv([ffs(0x02, b"\x00" * 32)]))
+    inv = xf.inventory([p], advisory=TABLE)
+    assert len(inv["bios"]) == 1 and not inv["bios"][0]["microcode"] and inv["bios"][0]["platform"] != "amd"
+    md = xf.markdown(inv)
+    sec = md[md.index("## 公告比對"):]
+    assert "沒有找到 Intel microcode，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）" in sec
+    assert fc.cell(inv) == "沒有 Intel 微碼（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）"
 
 
 # ---------- 揭露表、散文對照、被取代的 platform 遮罩 ----------
