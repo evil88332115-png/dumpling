@@ -2,13 +2,13 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:20 -0500（C0）
+最後更新：2026-11-13 04:23 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：**搬家準備（D-045）**：C0、C1、C2 從主要主機搬到第二台（WSL2）。已請 C1、C2 在下一個可停段落 commit＋push 並更新 STATUS；等兩者回報後，C0 寫「搬家準備完成」並停下
-- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 aaeb4f0，**未開 PR**）：D-034～D-045＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 aaeb4f0，**未開 PR**）：D-034～D-046＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
@@ -22,6 +22,7 @@
   3. C2 的 D-042 PR 開出前，請 sca-center 對話用私有檔在本機驗（結果不回 repo）
   4. 監控 real Issue：C3 修完 F1–F3（已在 wp2/watch-m2）→ M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#20、#22、#23
+  6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
 - 卡住／等決定（使用者）：五個對話都在第二台時，D-041 的「整台合計 8」要不要調整（D-045）
 - 第二台上要先做的事（詳見 `wp0/docs-batch-4` 的 docs/HANDOFF.md「在第二台電腦（WSL2）接手」）：
