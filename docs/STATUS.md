@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 20:31 +0800（C0）
+最後更新：2026-11-13 20:45 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -112,7 +112,12 @@
 >   - 應修 F4：loop／MAX_DEPTH 讓結果依賴處理順序
 >   - 建議：存活的變異要補測試；FV 外非空白位元組裡的 LZMA 會讓 AGESA complete=True 卻漏搜；排序鍵；notes 精簡
 >   - 已交回寫程式代理修正
-> - 驗證（Sonnet 5.5，effort high，新代理）：二次複驗 ebac3e9..29a2cc9，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify47b/`，狀態：**進行中**
+> - 驗證（Sonnet 5.5，effort high，新代理）：二次複驗 ebac3e9..29a2cc9，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify47b/`，狀態：**完成：驗證通過**（29a2cc9）
+>   - 沒有應修項目。F1–F4 都確認修好
+>   - 順序打亂 fuzz：合成 4200 張、真樣本變異 315 次，零差異、零例外
+>   - 證據用獨立腳本重算過；99／25／101、expected 3 OK、431 passed
+>   - 建議（不擋）：檔頭與程式不一致、AGESA 值超過上限時要 complete=False、members 排序、補邊界測試、notes 寫取捨、拿掉歷史口吻
+> - 寫程式代理第四輪（收尾，只改文件、補測試、做小的保守修正）：**進行中**。收尾的 diff 由 C2 自己看，不再派完整複驗
 >
 > **本機背景工作**：無。**CI**：29a2cc9 的 tests 43422066766、firmware 43422071269（進行中）。1cd25aa 的兩個都綠。
 
