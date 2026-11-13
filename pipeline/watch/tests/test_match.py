@@ -176,6 +176,11 @@ class T(Base):
         res = json.load(open(os.path.join(self.w, "out-" + NOW1[:10], "result.json")))
         self.assertTrue(any("schema" in g and "sca-center-kernel-versions/2" in g for g in res["gaps"]))
 
+    def test_baseline_needs_grype(self):
+        match.mods()["eg"].prepare = lambda *a, **k: ({"status": "NOT_RUN", "why": "fake down"}, None)
+        with self.assertRaises(match.Fail):
+            self.run_once(NOW1)
+
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
         txt = json.dumps(plan["state"])

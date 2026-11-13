@@ -18,7 +18,7 @@
 專案鍵：project_uuid＝dumpling:<專案>/<監控版本>#<層>（開發版的監控版本固定是 dev）。
 
 規則（WATCH.md 3.2）：
-  - 沒有狀態、也沒有任何監控 Issue → 第一次：所有比對記 baseline，不開 Issue。沒有狀態、卻有監控 Issue → FAIL（不重建基準）。
+  - 沒有狀態、也沒有任何監控 Issue → 第一次：所有比對記 baseline，不開 Issue（全部 SBOM 的 Grype 都跑完、CISA KEV 可用才建，否則 FAIL）。沒有狀態、卻有監控 Issue → FAIL（不重建基準）。
   - 之後：新的比對群組（專案、監控版本、層、CVE）→ open；再出現 → open_if_closed（原 Issue 開著就留言）；
     群組全部消失 → comment（不自動關閉）。廠商層級：（專案、監控版本、層、CVE、廠商）一個 Issue；baseline 不開。
   - 一次最多開 --max-new-issues 個，其餘併成一個彙總 Issue（那些群組之後的事件都留言在彙總 Issue）。
@@ -529,6 +529,13 @@ def run(a, kernel_runner=None):
                 kernel_ok.add(kp["uuid"])
             else:
                 attn.append(f"{kp['name']}@{kp['version']}：核心 CNA NOT_RUN")
+        if first:
+            missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok]
+            if missing:
+                raise Fail(f"第一次執行要建立基準，但 {len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）："
+                           "基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
+            if not cisa["usable"]:
+                raise Fail("第一次執行要建立基準，但 CISA KEV 不能用：這次不寫狀態")
         new, back, gone = ew.update_state(state, matches, kernel_ok, now, grype_ok)
         # 廠商層級
         vrep = None
