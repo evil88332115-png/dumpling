@@ -17,6 +17,11 @@
 #           只接受英數字開頭、英數字與「空白 . _ + ~ ( ) -」，最多 100 字元，例如 "V1.0.2_a (rootfs_no_gui)"）
 #         --kernel-build <路徑> [--kernel-build-prefix <前綴>]（只用於 --image、--sbom：核心建置設定的來源，給 C-kernel-config；
 #           rootfs tar、rootfs 資料夾，或刷機包 tbz2 加上 rootfs 在裡面的路徑。--image 沒給時用 docker save 的映像 tar）
+#         --kernel-version <版本>（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準。--image、--sbom：要判定的核心
+#           （映像的 /usr/lib/modules/<版本>/），原樣交給 C-kernel-config、C-kernel-module-map、核心 CVE 清單；只接受英數字開頭、英數字與「. _ + ~ -」。
+#           映像出貨的核心沒被指定就不判定：每一顆記一列 C-kernel-not-judged-<版本>（GAP），C-kernel-config 與 C-kernel-module-map 至少 GAP，
+#           並寫 scan/kernel-versions.json（shipped、requested、judged、not_judged）。指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）；
+#           只有 1 顆核心而且沒指定時照舊判定它）
 #   環境變數 KERNEL_BUILD_RECORD（選用；只用於 --image、--sbom）：這個出貨版本的核心建置紀錄（make 之後的建置資料夾，或它的
 #     .tar／.tar.gz／.tar.xz；保留 .config、每個 .*.cmd、modules.order、modules.builtin、System.map、include/config/kernel.release、
 #     include/generated/（utsversion.h、compile.h：和燒錄的 Image 的版本字串核對，證明是出貨的那一次建置）），
@@ -87,9 +92,9 @@ set -uo pipefail
 [ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "需要 bash 4 以上" >&2; exit 64; }
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 
-usage(){ sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage(){ sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
-MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS=
+MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS= KVERS=() KVERS_CLI=0
 while [ $# -gt 0 ]; do case $1 in
   --git) optval "$@"; MODE=git; SRC=$2; shift 2;;
   --dir) optval "$@"; MODE=dir; SRC=$2; shift 2;;
@@ -107,6 +112,7 @@ while [ $# -gt 0 ]; do case $1 in
   --kernel-build) optval "$@"; KBUILD=$2; shift 2;;
   --kernel-build-prefix) optval "$@"; KBUILD_PREFIX=$2; shift 2;;
   --py-versions) optval "$@"; PYVERS=$2; shift 2;;
+  --kernel-version) optval "$@"; KVERS+=("$2"); KVERS_CLI=1; shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -132,6 +138,26 @@ if [ -n "$KBUILD" ] || [ -n "$KBUILD_PREFIX" ]; then
   [[ -z "$KBUILD_PREFIX" || "$KBUILD_PREFIX" =~ ^[A-Za-z0-9._/-]{1,300}$ ]] && [[ "/$KBUILD_PREFIX/" != */../* ]] \
     || { echo "--kernel-build-prefix 只接受英數字與「. _ / -」，不能有 ..：$KBUILD_PREFIX" >&2; exit 64; }
 fi
+# --kernel-version／SCA_KERNEL_VERSIONS：核心版本（映像 /usr/lib/modules/ 底下的資料夾名稱）。只收英數字開頭、英數字與「. _ + ~ -」
+# （不含 shell 特殊字元、「/」、空白），其餘 exit 64；工具另有自己的檢查。環境變數只在 --image、--sbom 看（其他模式沒有核心可判定）；命令列有給就不看環境變數。
+kernel_versions_args(){
+  local t kv LC_ALL=C      # 字元範圍 [A-Za-z] 在 UTF-8 地區設定下可能含重音字母
+  if [ "$KVERS_CLI" = 1 ]; then
+    [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-version 只用於 --image 或 --sbom" >&2; exit 64; }
+  elif [ -n "${SCA_KERNEL_VERSIONS:-}" ] && [[ "$MODE" =~ ^(image|sbom)$ ]]; then
+    kv=${SCA_KERNEL_VERSIONS//,/ }; set -f
+    for t in $kv; do KVERS+=("$t"); done
+    set +f
+  fi
+  local uniq=()
+  for t in "${KVERS[@]+"${KVERS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$ ]] \
+      || { echo "核心版本只接受英數字開頭、英數字與「. _ + ~ -」，最多 100 字元（--kernel-version／SCA_KERNEL_VERSIONS）：${t:0:120}" >&2; exit 64; }
+    case " ${uniq[*]+"${uniq[*]}"} " in *" $t "*) ;; *) uniq+=("$t");; esac
+  done
+  KVERS=("${uniq[@]+"${uniq[@]}"}")
+}
+kernel_versions_args
 if [ -z "$NAME" ]; then
   case $MODE in git) NAME=$(basename "${SRC%/}" .git);; dir) NAME=$(basename "$SRC");; image) NAME=${SRC%%@*}; NAME=${NAME##*/}; NAME=${NAME%%:*};; sbom) NAME=$(basename "$SRC"); NAME=${NAME%.json}; NAME=${NAME%.cdx};; esac
 fi
@@ -717,6 +743,9 @@ rm -f "$KCF" "$KCF.xz"   # 同一個 --out 重跑：不留上一次的結果給 
 rm -f "$KMM" "$KMM.xz"
 rm -f "$OUT/scan/kernel-cve-list.txt" "$OUT/scan/kernel-cve-list.json"   # 同一個 --out 重跑：不留上一次的核心 CVE 清單（cra_report 會讀）
 KSRC=(); KLABEL=; KREC=(); KCVL=; KPREF=()
+KVF=$OUT/scan/kernel-versions.json
+rm -f "$KVF"   # 同一個 --out 重跑：不留上一次的出貨核心清單給 cra_report
+KVMULTI=0; KVARGS=(); KVACT=0
 # 核心建置紀錄（環境變數 KERNEL_BUILD_RECORD，選用）：只給 kernel_config.py（kernel_module_map.py 不讀）；不存在等問題由 kernel_config.py 記 GAP
 [ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
 # 樹外模組的建置紀錄（環境變數 KERNEL_OOT_BUILD_RECORDS，選用；用冒號分隔多個資料夾）：給 kernel_config.py 的 --oot-build-record（可重複）。
@@ -749,8 +778,12 @@ kernel_cve_list(){
     status C-kernel-module-map GAP "KERNEL_CVES 不能用：核心的 CVE 沒有對應到模組（來源：$KLABEL）"
     return 1
   fi
-  pr=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --probe-kernel-version "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" 2>&1)
-  pr=$(printf '%s\n' "$pr" | grep -m1 $'^KERNEL-VERSION\t')
+  if [ "${KVERS[*]+x}" = x ] && [ ${#KVERS[@]} -eq 1 ]; then pr=$'KERNEL-VERSION\tOK\t'"${KVERS[0]}"      # 剛好指定 1 顆：用它，不探測
+  else
+    pr=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --probe-kernel-version --also-list-kernel-versions "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" 2>&1)
+    kernel_ship_from "$pr"
+    pr=$(printf '%s\n' "$pr" | grep -m1 $'^KERNEL-VERSION\t')
+  fi
   if [ -z "$pr" ]; then
     status C-kernel-cve-list GAP "Grype、DT 都沒有核心 CVE，產品核心版本讀不出來（kernel_config.py --probe-kernel-version 失敗或超過 3600 秒；來源：$KLABEL）：不猜"
     status C-kernel-config GAP "沒有核心 CVE 清單（核心版本讀不出來）：核心的 CVE 沒有依 .config 判定（來源：$KLABEL）"
@@ -787,6 +820,71 @@ kernel_cve_list(){
   status C-kernel-cve-list "$cs" "核心 $pv 的 CVE 清單 $(wc -l < "$kl") 個，由 Linux 核心 CNA 的版本範圍比對產生（kernel_cna_version.py），不是 Grype／DT：$ct"
   return 0
 }
+# 映像出貨的核心與 --kernel-version（scan/kernel-versions.json，tools/pilot/lib/kernel_versions.py）：一個映像可以有不只一顆核心（例如 Raspberry Pi
+# 有 Pi 5 與 Pi 4 兩個 /usr/lib/modules/<版本>/）。出貨但沒被判定的核心不可以靜默不見：每一顆記一列 C-kernel-not-judged-<版本>（GAP），
+# C-kernel-config 與 C-kernel-module-map 至少 GAP，檔案寫 shipped（映像的清單）、requested（指定的）、judged（交給判定工具的）、not_judged（附原因）。
+# 指定剛好 1 顆：判定那一顆（--kernel-version 原樣交給 kernel_config.py、kernel_module_map.py，核心 CVE 清單也用它、不探測）。
+# 指定 2 顆以上：多顆核心逐一判定還沒實作（M2 之後）→ 一顆都不判定（KVMULTI=1），兩個階段 GAP。沒指定：映像只有 1 顆就照舊；有多顆照舊 GAP（工具不猜）。
+# 映像出貨的核心（KSHIP 陣列、KSHIP_OK＝1 表示讀到了）不另外讀一次映像（刷機包 tbz2 要解壓好幾分鐘）：判定工具與 --probe-kernel-version
+# 帶 --also-list-kernel-versions，讀映像的同一趟順便印一行 KERNEL-VERSIONS，由 kernel_ship_from 收；都沒讀到映像時（指定 2 顆以上、
+# 沒有核心 CVE 所以工具沒讀映像…）kernel_versions_finish 才用 --list-kernel-versions 補讀一次。
+kernel_ship_from(){   # $1：工具的輸出；只收第一次讀到的
+  local l s2 s3
+  [ "$KSHIP_OK" = 1 ] && return 0
+  l=$(printf '%s\n' "$1" | grep -m1 $'^KERNEL-VERSIONS\t')
+  if [ -n "$l" ]; then IFS=$'\t' read -r _ s2 s3 <<< "$l"; [ "$s2" = OK ] && { KSHIP_OK=1; read -r -a KSHIP <<< "$s3"; }; fi
+  return 0
+}
+# 準備：設 KVMULTI、KVARGS（要交給判定工具的 --kernel-version）。
+kernel_versions_prepare(){
+  KVMULTI=0; KVARGS=(); KSHIP=(); KSHIP_OK=0
+  if [ "${KVERS[*]+x}" = x ]; then
+    [ ${#KVERS[@]} -ge 2 ] && KVMULTI=1
+    [ ${#KVERS[@]} -eq 1 ] && KVARGS=(--kernel-version "${KVERS[0]}")
+  fi
+  KVACT=1
+  return 0
+}
+# 狀態列至少 GAP：$1 階段、$2 前綴、$3 說明。沒有這一列 → 新增 GAP；有 → 狀態升到 GAP（GAP、FAIL 不動），說明接在後面。
+kernel_stage_floor(){
+  local n
+  n=$(awk -F'\t' -v s="$1" '$1==s{n=NR} END{print n+0}' "$ST")
+  if [ "$n" = 0 ]; then status "$1" GAP "$2：$3"; return 0; fi
+  awk -F'\t' -v OFS='\t' -v n="$n" -v note="$3" 'NR==n{ if ($2!="GAP" && $2!="FAIL") $2="GAP"; $3=$3 (($3!="")?"；":"") note } {print}' "$ST" > "$ST.tmp" \
+    && mv "$ST.tmp" "$ST" && echo "[GAP] $1 $3"
+  return 0
+}
+# 收尾：寫 scan/kernel-versions.json 與沒判定的核心的狀態列；多顆指定時兩個階段在這裡記 GAP（工具沒有執行）。
+kernel_versions_finish(){
+  local pa=(--out "$KVF") r line v note= unk=
+  rm -f "$KVF"
+  if [ "$KSHIP_OK" != 1 ]; then    # 判定工具沒有讀映像（或沒讀成功）：補讀一次
+    r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --list-kernel-versions "${KSRC[@]}" 2>&1); kernel_ship_from "$r"
+  fi
+  if [ "$KSHIP_OK" = 1 ]; then for v in "${KSHIP[@]+"${KSHIP[@]}"}"; do pa+=(--shipped "$v"); done; else pa+=(--shipped-unknown); fi
+  for v in "${KVERS[@]+"${KVERS[@]}"}"; do pa+=(--requested "$v"); done
+  r=$(timeout 300 python3 -I "$ROOT/tools/pilot/lib/kernel_versions.py" "${pa[@]}" 2>&1); local rc=$?
+  if [ $rc -ne 0 ]; then
+    rm -f "$KVF"; status C-kernel-versions FAIL "kernel_versions.py 失敗：$(printf '%s\n' "$r" | tail -1)（映像出貨的核心有沒有判定不明）"
+    kernel_stage_floor C-kernel-config "核心的 CVE 沒有依 .config 判定" "映像出貨的核心有沒有判定不明（kernel_versions.py 失敗）"
+    kernel_stage_floor C-kernel-module-map "核心的 CVE 沒有對應到模組" "映像出貨的核心有沒有判定不明（kernel_versions.py 失敗）"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case $line in
+      KERNEL-NOT-JUDGED$'\t'*) IFS=$'\t' read -r _ v unk <<< "$line"
+        status "C-kernel-not-judged-$v" GAP "核心 $v 出貨但沒有判定：$unk；要排除某顆核心必須記錄證據（例如設計文件寫明這個板子不載入它）";;
+      KERNEL-VERSIONS-UNKNOWN$'\t'*) IFS=$'\t' read -r _ unk <<< "$line"
+        status C-kernel-versions GAP "$unk（來源：$KLABEL）"; [ -n "$note" ] || note=$unk;;
+      KERNEL-VERSIONS-NOTE$'\t'*) IFS=$'\t' read -r _ note <<< "$line";;
+    esac
+  done <<< "$r"
+  if [ -n "$note" ]; then
+    kernel_stage_floor C-kernel-config "核心的 CVE 沒有依 .config 判定" "$note"
+    kernel_stage_floor C-kernel-module-map "核心的 CVE 沒有對應到模組" "$note"
+  fi
+  return 0
+}
 # 刷機包有兩顆不同的核心（C-kernel-boot，tools/pilot/lib/kernel_boot.py，scan/kernel-boot.json）：kernel/Image 與 rootfs/boot/Image 並列
 # （版本字串、建置時間、設定差異）。預設不改 K1：燒錄流程預期裝 kernel/Image。環境變數 KERNEL_BOARD_OS_TXT（選用，板子 board-test 的 os.txt）
 # 有 uname -v 時比對；只有板子的 uname -v 只對上 rootfs/boot/Image 時（k1_kernel rootfs），C-kernel-config 才改用該 Image（--prefer-rootfs-image），
@@ -803,10 +901,14 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   else rm -f "$KBF"; status C-kernel-boot FAIL "kernel_boot.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
   [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
 fi
-if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
+[[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && kernel_versions_prepare
+if [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
+elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")
   [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")
   [ -n "$KERNEL_CVE_MIRROR" ] && ka+=(--mirror "$KERNEL_CVE_MIRROR")
+  [ ${#KVARGS[@]} -gt 0 ] && ka+=("${KVARGS[@]}")      # --kernel-version：剛好指定 1 顆時交給 kernel_config.py 與 kernel_module_map.py
+  ka+=(--also-list-kernel-versions)                    # 讀映像的同一趟順便列出出貨的核心（kernel_ship_from）
   # 刷機包要整個解壓（數 GB 的 bzip2）：時間上限 3600 秒；映像 tar 與資料夾通常幾十秒
   kcl_tried=0; kskip=0
   if [ -n "${KERNEL_CVES:-}" ]; then      # 明確給的清單：和 Grype／DT 的核心 CVE 合併（kernel_config.py 的 --cves）
@@ -815,6 +917,7 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   fi
   while [ $kskip = 0 ]; do
     r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" --out "$KCF" "${KREC[@]+"${KREC[@]}"}" 2>&1)
+    kernel_ship_from "$r"
     l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-config\t')
     if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
       # NOT_RUN＝Grype、DT（與 --cves）都沒有核心元件的 CVE：廠商核心（不是套件）。以前什麼都不寫；現在找清單來源（上面的 kernel_cve_list），
@@ -831,6 +934,7 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   # 模組對應：同樣的輸入再讀一次（刷機包也是 3600 秒上限）
   kk=(); [ -s "$KCF" ] && kk=(--kernel-config "$KCF")      # 兩個階段各讀一次 CNA 鏡像：commit 不同時模組對應記 GAP
   r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_module_map.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" "${kk[@]+"${kk[@]}"}" --out "$KMM" 2>&1)
+  kernel_ship_from "$r"
   l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-module-map\t')
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
     case $s2 in NOT_RUN) rm -f "$KMM";; FAIL) rm -f "$KMM"; status "$s1" "$s2" "$s3（來源：$KLABEL）";; *) status "$s1" "$s2" "$s3（來源：$KLABEL）";; esac
@@ -840,6 +944,7 @@ elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ]; then
   status C-kernel-config NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有依產品核心的 .config 判定"
   status C-kernel-module-map NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有對應到模組"
 fi
+[ "$KVACT" = 1 ] && kernel_versions_finish
 
 # ---- C-euvd（tools/pilot/lib/euvd.py annotate）----
 # ENISA EUVD 的 EUVD 編號與「已遭利用」標記（EUVD 的 exploited＝kev/dump＝CISA KEV ∪ ENISA EU KEV；2026-11-05 實測比 DT 的 CISA ∪ eukev.json

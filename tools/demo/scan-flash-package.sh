@@ -36,6 +36,10 @@
 #         [--company <檔案> | --no-company]（CRA 的公司共用設定；預設 /etc/sca-gitlab/company.json，讀得到時）
 #         [--manufacturer <名稱>]（沒有公司共用設定也沒有 --product-config 時，CRA 文件的製造商；都沒有時不產生 CRA 文件）
 #         [--kernel-source <核心原始碼樹>]（同環境變數 KERNEL_SOURCE_DIR：Makefile／Kbuild 的來源，C-kernel-config 與 C-kernel-module-map 都收到）
+#         [--kernel-version <核心版本>]（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準。映像有不只一顆核心
+#           （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 sca-scan --kernel-version（只接受英數字開頭、
+#           英數字與「. _ + ~ -」，否則 exit 64）。出貨但沒指定的核心記為「出貨但沒有判定」，C-kernel-config 與 C-kernel-module-map 至少 GAP；
+#           指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan）
 #         [--keep-image]（不刪 docker 映像）  [--no-upload]（不上傳 DT；只用於試跑，這時不需要 PILOT_ENV）
 #         [--dt-vex]（選用，預設不做：CRA 的 VEX 寫回 DT 的 rootfs 專案，讓 DT finding 帶我們的 analysis；D-dt-vex-*-<rootfs>，讀回才算套用）
 #         [--dt-product-components]（選用，預設不做：刷機包韌體／UEFI 內建函式庫／自有軟體另開 DT 專案「<名稱> / <版本> (product components)」；D-dt-product-*-<rootfs>）
@@ -88,8 +92,9 @@ set -uo pipefail
 umask 077
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 FP=$ROOT/tools/demo/flash_package.py
-usage(){ sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
+usage(){ sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
+KVERS=()   # --kernel-version（可重複）／SCA_KERNEL_VERSIONS：要判定的核心版本
 
 PLATFORM=${SCA_PLATFORM:-}
 ARCH=${SCA_ARCH:-arm64}
@@ -124,6 +129,7 @@ while [ $# -gt 0 ]; do case $1 in
   --tee-source) optval "$@"; TEESRC=$2; shift 2;;
   --extra-deliverable) optval "$@"; EXTRAS+=("$2"); shift 2;;
   --kernel-source) optval "$@"; [ -d "$2" ] || { echo "--kernel-source 要是資料夾：$2" >&2; exit 64; }; export KERNEL_SOURCE_DIR=$(readlink -f -- "$2"); shift 2;;
+  --kernel-version) optval "$@"; KVERS+=("$2"); shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -160,6 +166,23 @@ case $RFS in rootfs_no_gui|rootfs_gui|rootfs|all) ;; *) echo "--rootfs 要是 ro
 [ -z "$COMPANY" ] || [ -r "$COMPANY" ] || { echo "讀不到 --company $COMPANY" >&2; exit 64; }
 [ -n "$COMPANY" ] && [ $NOCOMP = 1 ] && { echo "--company 與 --no-company 只能選一個" >&2; exit 64; }
 [ -z "$MD5" ] || [ -r "$MD5" ] || { echo "讀不到 --md5 $MD5" >&2; exit 64; }
+# --kernel-version／SCA_KERNEL_VERSIONS：命令列有給就不看環境變數；只收英數字開頭、英數字與「. _ + ~ -」（不含 shell 特殊字元、「/」、空白），其餘 exit 64。
+# 值原樣交給 sca-scan（sca_args），核心工具自己另有檢查
+kernel_versions_args(){
+  local t kv uniq=() LC_ALL=C      # 字元範圍 [A-Za-z] 在 UTF-8 地區設定下可能含重音字母
+  if [ ${#KVERS[@]} -eq 0 ] && [ -n "${SCA_KERNEL_VERSIONS:-}" ]; then
+    kv=${SCA_KERNEL_VERSIONS//,/ }; set -f
+    for t in $kv; do KVERS+=("$t"); done
+    set +f
+  fi
+  for t in "${KVERS[@]+"${KVERS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$ ]] \
+      || { echo "核心版本只接受英數字開頭、英數字與「. _ + ~ -」，最多 100 字元（--kernel-version／SCA_KERNEL_VERSIONS）：${t:0:120}" >&2; exit 64; }
+    case " ${uniq[*]+"${uniq[*]}"} " in *" $t "*) ;; *) uniq+=("$t");; esac
+  done
+  KVERS=("${uniq[@]+"${uniq[@]}"}")
+}
+kernel_versions_args
 [ "$(id -u)" != 0 ] || { echo "不要用 root 執行（sca-scan 的沙箱要求非 root）；用常駐環境的帳號（sudo -u <帳號>）" >&2; exit 64; }
 # sudo -u 時 HOME 可能還是呼叫者的：sca-scan 的 Grype 資料庫在 $HOME/.cache，改成這個帳號自己的家目錄
 H=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$H" ] && [ "$HOME" != "$H" ] && export HOME=$H
@@ -541,7 +564,9 @@ rk_prepare(){  # Rockchip：zip 裡的 update.img 複製到 .work（只有這一
 sca_args(){  # sca-scan 的共用選項（整個系統映像的逐套件授權與檔案層級掃描太久；預設只做漏洞）
   SCA_ARGS=(--no-package-scan --no-files-scan); [ $LICENSE = 0 ] && SCA_ARGS+=(--no-license); [ $NOUP = 1 ] && SCA_ARGS+=(--no-upload)
   # Debian 打包的 Python 模組的佔位值版本（B-pyver 的 python-versions.json）：sca-scan 把 RESOLVED 的版本寫進比對與上傳用的 SBOM 副本（C-pyver）
-  [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json"); return 0; }
+  [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json")
+  local kv; for kv in "${KVERS[@]+"${KVERS[@]}"}"; do SCA_ARGS+=(--kernel-version "$kv"); done   # 核心版本原樣交給 sca-scan
+  return 0; }
 
 # ---------- A. 環境與核對 ----------
 PILOT_ENV=${PILOT_ENV:-$HOME/.config/sca-scan/pilot.env}

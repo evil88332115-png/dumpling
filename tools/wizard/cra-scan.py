@@ -5,6 +5,10 @@
   python3 -I tools/wizard/cra-scan.py [--site-config 本機設定檔.json]
   （站台設定：路徑、工具位置等見 tools/wizard/README.md 與 wizard.example.json）
   （非互動、測試用：--archive A [--source S（不給＝沒有原始碼，核心原始碼判斷標 GAP；不去目前資料夾找）] [--name N --version V --config C --role both|manufacturer|supplier --yes --plan-only]）
+  核心版本：--kernel-version <版本>（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準）。映像有不只一顆核心
+  （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 scan-flash-package.sh --kernel-version → sca-scan。
+  只接受英數字開頭、英數字與「. _ + ~ -」，否則 exit 64。出貨但沒指定的核心記為「出貨但沒有判定」（C-kernel-config 與 C-kernel-module-map 至少 GAP）；
+  指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan。
 
 流程：核對 MD5 → 安全解開原始碼（不執行裡面任何東西）→ 自動找核心原始碼、UEFI、NVIDIA 樹外模組、核心建置紀錄
      → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
@@ -595,6 +599,24 @@ def extract_tools(repo, commit, dest):
         raise ToolsRevError(f"git archive {commit} 或解開失敗")
 
 
+KERNEL_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}")
+
+
+def kernel_versions_from(cli, environ=None):
+    """--kernel-version（可重複）／環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）→ 去掉重複的版本清單；兩者都給時以命令列為準。
+    只收英數字開頭、英數字與「. _ + ~ -」（不含 shell 特殊字元、「/」、空白），其餘 exit 64。值原樣往下傳，核心工具另有自己的檢查。"""
+    env = os.environ if environ is None else environ
+    vals = list(cli or []) or [t for t in re.split(r"[\s,]+", env.get("SCA_KERNEL_VERSIONS", "")) if t]
+    out = []
+    for v in vals:
+        if not KERNEL_VERSION_RE.fullmatch(v) or not v.isascii():
+            print(f"錯誤：核心版本只接受英數字開頭、英數字與「. _ + ~ -」，最多 100 字元（--kernel-version／SCA_KERNEL_VERSIONS）：{v[:120]}", file=sys.stderr)
+            sys.exit(64)
+        if v not in out:
+            out.append(v)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="CRA 掃描精靈")
     ap.add_argument("--tools-rev", help="掃描用的工具版本（commit、分支或 tag）；不給時用環境變數 DUMPLING_TOOLS_REV，再不然目前 checkout 的 HEAD。"
@@ -612,7 +634,11 @@ def main():
     ap.add_argument("--rescan-from", help="上一次完整掃描的 scan 資料夾（scan-flash-package.sh 的結果，要有 list.json）：只重跑比對，沿用它的 SBOM（可以事先換成某一層的 SBOM，"
                                           "分層用）與 A0 上游比對結果；不再做 A0。見 docs/LAYERS.md、docs/JETSON.md")
     ap.add_argument("--yes", action="store_true"); ap.add_argument("--plan-only", action="store_true")
+    ap.add_argument("--kernel-version", action="append", metavar="版本",
+                    help="要判定的核心版本（映像的 /usr/lib/modules/<版本>/），可重複；不給時用環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）。"
+                         "映像只有一顆核心可以不給；有多顆時沒指定的核心記為「出貨但沒有判定」")
     a = ap.parse_args()
+    kvers = kernel_versions_from(a.kernel_version)
     ni = a.yes
     load_site_config(a.site_config)
 
@@ -767,6 +793,7 @@ def main():
     plan["a0_artifacts"] = bool(plan["upstream_bsp"])
     plan["a0_source"] = bool(plan["upstream_source"]) and bool(oot or built_oot or kt)
     plan["board_test"] = [str(p) for p in board_tests]
+    plan["kernel_versions"] = kvers      # --kernel-version／SCA_KERNEL_VERSIONS（原樣交給 scan-flash-package.sh）
     say(f"  OP-TEE／TF-A 公開原始碼（--tee-source）：{tee_dir or ('GAP：' + tee_note)}")
     say("  UEFI 平台設定（config.dsc.inc）：" + (f"建置紀錄裡有 {len(uefi_defs)} 份" if uefi_defs else "建置紀錄裡沒有 → UEFI 映像檢查維持 not_assessed（" + "；".join(uefi_notes) + "）")
         + ("　※" + "；".join(uefi_notes) if uefi_defs and uefi_notes else ""))
@@ -870,6 +897,8 @@ def main():
         cmd += ["--product-config", str(mcfg / "config.json")]
     if kt:
         cmd += ["--kernel-source", str(kt[0])]
+    for v in kvers:      # 核心版本原樣往下傳：scan-flash-package.sh → sca-scan → 核心工具
+        cmd += ["--kernel-version", v]
     if uefi:
         cmd += ["--uefi-source", str(uefi)]
         for d in ("edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc",):      # NVIDIA Jetson 的平台 DSC（有的話才給；UEFI 映像檢查的 DSC 佐證）
