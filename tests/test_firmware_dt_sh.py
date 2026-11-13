@@ -206,9 +206,12 @@ sys.exit(1 if bad else 0)
         s = self.w("in/sup.json", doc)
         rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
         self.assertEqual(rc, 0, out)
-        self.assertIn("已正規化 1 處（見 normalize.json", out)
+        # 1 處頂層欄位 + 2 個元件自帶的 dumpling: 標記（改名成 supplier:dumpling:…，也算一處）
+        self.assertIn("已正規化 3 處（見 normalize.json", out)
         with open(os.path.join(res, "firmware-sbom-sup", "normalize.json"), encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh)["changes"][0]["from"], "/platform")
+            ch = json.load(fh)["changes"]
+        self.assertEqual(ch[0]["from"], "/platform")
+        self.assertEqual([c["rule"] for c in ch[1:]], ["supplier-dumpling-property"] * 2)
         # BIOS 樣本（本工具自己產的 SBOM）沒有這個檔
         y2, s2 = self.sample("bios1")
         self.assertEqual(self.run_sh("--work", w, "--result", res, "--sample", y2, s2)[0], 0)

@@ -91,3 +91,30 @@ def test_already_valid_document_is_untouched():
     assert doc == before and not rec["applied"] and rec["changes"] == []
     assert errors(v, doc) == []
 
+
+
+def test_renamed_supplier_dumpling_properties_stay_schema_valid():
+    """供應商自帶的 dumpling: 開頭 property 改名成 supplier:dumpling:… 後，副本仍符合官方 1.4 schema，而且副本裡的 dumpling: property 都是我們寫的。"""
+    v = cdx_validator_14()
+    doc = supplier_doc()
+    doc["metadata"]["properties"] += [{"name": "dumpling:normalized-from-sha256", "value": "1" * 64}, {"name": "dumpling:normalized-changes", "value": "0"}]
+    doc["components"][0]["properties"].append({"name": "dumpling:vuln-assessment", "value": "NONE"})
+    rec = fsn.normalize(doc, SHA)
+    assert errors(v, doc) == []
+    assert sum(1 for c in rec["changes"] if c["rule"] == fsn.RULE_RESERVED) == 3
+    ours = [p["name"] for p in doc["metadata"]["properties"] if p["name"].startswith("dumpling:")]
+    assert sorted(ours) == sorted(["dumpling:normalized-changes", "dumpling:normalized-from-sha256", "dumpling:supplier-extra:platform", "dumpling:supplier-extra:firmware_version"])
+    assert [p["value"] for p in doc["metadata"]["properties"] if p["name"] == "dumpling:normalized-from-sha256"] == [SHA]
+    assert "dumpling:vuln-assessment" not in [p["name"] for p in doc["components"][0]["properties"]]
+
+
+def test_vulnerabilities_section_is_left_in_place_and_validates():
+    """DT 5.2.0 的 BOM 上傳不讀 vulnerabilities，正規化不移除它（依據見 docs/notes/c2-supplier-sbom.md）；符合 schema 的 vulnerabilities 不影響驗證。"""
+    v = cdx_validator_14()
+    doc = supplier_doc()
+    vulns = [{"id": "CVE-2000-0001", "source": {"name": "NVD"}, "analysis": {"state": "not_affected", "justification": "code_not_present"},
+              "affects": [{"ref": "c1"}]}]
+    doc["vulnerabilities"] = vulns
+    fsn.normalize(doc, SHA)
+    assert doc["vulnerabilities"] == vulns
+    assert errors(v, doc) == []

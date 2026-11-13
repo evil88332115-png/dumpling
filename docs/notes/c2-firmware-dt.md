@@ -53,7 +53,12 @@ report 讀的結果資料夾（`--dt-result`）：
     上傳三階段與 C-grype 另有專屬判斷，不重複列。**預期的 NOT_RUN 不列**：`E-*`（`firmware-dt.sh` 固定 `--no-license`，授權與版權整段 NOT_RUN）、`C-kernel-config`、`C-kernel-module-map`（沒給 `--kernel-build`，韌體沒有產品核心的 `.config`）。
     其餘 NOT_RUN（沒檢查鏡像新鮮度、DT 資料源、EUVD…）代表該做的檢查沒做，要列。`scan-status-check.py` 只擋「必要階段」與 FAIL；report 也要求必要階段的每一列都存在（缺列＝GAP），並且列出其他非 OK 階段，所以比它嚴：它回答「必要的有沒有做到」，report 回答「能不能顯示 OK」。
     同一階段在 `status.tsv` 出現多列時留最嚴重的一列（前面的 FAIL 不會被後面的 OK 蓋掉）。
+  - **`status.tsv` 有重複列或空名稱列**：各階段的狀態不變（重複的取最嚴重的一列；名稱是空的當成一個不認得的階段「(空的階段名稱)」照常判定），但**只要有這兩種，OK 就降成 ATTENTION**，說明寫「status.tsv 有重複列：階段 X N 列」與「有 N 列的階段名稱是空的」；
+    階段名稱只有空白（含 NBSP、全形空白）也算空名稱。FAIL／GAP 等其他狀態也加同一則說明，不靜默。理由：`sca-scan` 每個階段只寫一列、每列都有名稱，出現這兩種代表檔案被改過或寫檔有 bug；取最嚴重的一列只保證「不會往好的方向誤判」，不代表檔案可信，所以選保守的 ATTENTION 而不是只記 note。
+    `scan-status-check.py` 是 C1 的檔案、這裡不改；它對重複列是後值蓋前值，與 report 取最嚴重不一致（前面是 FAIL、後面是 OK 時它看到 OK）。
   - **輸入 SBOM 有重複鍵**：見下一節。
+  - **供應商 SBOM 自帶 `dumpling:` 開頭的 property**（`kind: sbom`）：prep 把它們就地改名成 `supplier:dumpling:…`（值不動、`normalize.json` 逐筆記原名與位置；規則見 `docs/notes/c2-supplier-sbom.md`），
+    讓副本裡的 `dumpling:` property 都是我們寫的。report 寫「供應商 SBOM 自帶名稱以 dumpling: 開頭的 property N 個」，狀態至少 ATTENTION（FAIL／GAP 等其他狀態也加同一則說明）；report 讀 `dt-project.json`，不讀 SBOM 裡的 property，偽造的 `dumpling:normalized-*` 不會進報告。
 - **`dumpling:advisory-match`**（本工具產的 SBOM）：只認 `affected-candidate`／`older-no-sa`／`up-to-date`／`NOT_ASSESSED` 四個值計數；其他值（含非字串、同一元件多個不同值）記成「不認得的值」「多個值」，不原樣進報告；報告裡的標籤一律經 `_cell`。這一行只是計數，不影響 OK／ATTENTION。
 - **結果檔的讀取**：`status.tsv` 以 `QUOTE_NONE` 解析（欄位開頭的 `"` 是普通字元，不會吞掉後面的列）；`grype.json`、`summary.json` 有重複鍵時不採信（後值會蓋掉前值）→ FAIL；`status.tsv`／`summary.json`／`dt-wait.rc` 路徑存在但不是一般檔案（資料夾、斷掉的符號連結、FIFO）→ FAIL，不當成「沒有」；`dt-wait.rc` 只認 `^[0-9]+$`（前後的 ASCII 空白與換行可以有）。
 - 元件欄位型別：`group`、`name`、`version`、`purl`、`cpe` 必須是字串（或沒有／null），`properties` 必須是陣列（或沒有／null）；不符合 → prep 失敗（`FIRMWARE-DT-PREP FAIL`，訊息寫明第幾個元件、哪個欄位），這個樣本不上傳。
@@ -161,6 +166,8 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 
 ## 限制
 
+- 宣告 `expected_dt: rejected` 的樣本同時有 status.tsv 重複列或空名稱列時，「與宣告一致」（`accepted`）的判斷不看這兩種；說明裡仍會列出，狀態是 FAIL。
+- 重複列與空名稱列的檢查只涵蓋 report 讀的 `scan/status.tsv`；`scan-status-check.py` 的行為見上。
 - report 的 OK 不看 NVIDIA 公告對照（公告步驟獨立於 report）；目前沒有工具會寫 `dumpling:vuln-assessment=NONE`，所以 vbios 樣本實際上不會是 OK。
 - `summary.json` 內部的一致性不檢查（`components`、`findings_total` 與 `checks[]` 互相矛盾時不擋）：這些值由 `dt-verify.py` 自己寫，report 只檢查型別、必要檢查是否存在與狀態。
 
