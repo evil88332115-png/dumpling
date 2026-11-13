@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 12:12 +0800（C3）
+最後更新：2026-11-13 12:13 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -104,6 +104,8 @@
   - PR #32 驗證 → C0 合併（WATCH_REAL_ISSUES 由 C0 設，前提是 #32 合併＋第一次真實基準）
   - M2 合併後（不在 PR #28）：併 main → 每日監控改用 M2 的 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像那天，報告與 Issue 寫出那行 ATTENTION）→ 手動 `mode=real`＋`baseline=true` 建立第一次真實基準 → 回報「打開的話會開哪些 Issue」給 C0
   - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 派驗證 → 開 PR
+- 待辦（C0 2026-11-13 指定，#32 合併後另開 PR；#32 驗證期間 head 固定 588e359、不推送）：watch 的 concurrency group 是全域的，排隊中的 run 會被新的取消 → 排程那一輪被取消時不能沒有紀錄。做法草案：(1) concurrency group 改成依 ref 分（`watch-${{ github.ref }}`），分支上的手動演練不會取消 main 的排程；(2) compute 用 `actions: read` 查 watch.yml 上一次 schedule run 的 conclusion，是 cancelled／沒有跑就記進降級（健康 Issue）與報告；(3) keepalive 也印出上一次 schedule run 的結果
+- PR #32 驗證：C0 派（負載已降），等「驗證：通過／不通過」留言
 - 卡住／等決定：無
 <!-- END C3 -->
 
