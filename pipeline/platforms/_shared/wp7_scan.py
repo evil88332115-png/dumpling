@@ -108,8 +108,18 @@ class Wp7Hooks(ps.Hooks):
                 counts[key] = None
         prod = {("full" if k == "" else k.lstrip("-")): {"report_status": v.get("report_status"), "release_gate": v.get("release_gate")}
                 for k, v in ctx["runs"].items()}
-        return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
-                "report_rows": counts, "product_status": prod}
+        out = {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
+               "report_rows": counts, "product_status": prod}
+        # D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 的 kernel-versions.json（/2：shipped 每筆帶 upstream_version）應該一致；不一致是 bug
+        ku = self.x.get("kernel_upstream")
+        if ku is not None:
+            shipped = ((ctx["main_run"].get("kernel_versions") or {}).get("shipped")) or []
+            hit = next((x for x in shipped if isinstance(x, dict) and x.get("version") == ku.get("kernel_release")), None)
+            c1v = hit.get("upstream_version") if hit else None
+            c4v = ku.get("requested_upstream") if ku.get("upstream_verified") else None
+            out["kernel_upstream_crosscheck"] = {"c4": c4v, "c1": c1v, "c1_basis": hit.get("upstream_basis") if hit else None,
+                                                 "agree": (c4v is not None and c4v == c1v)}
+        return out
 
     def extra_attachments(self, ctx, manifest):
         out = ctx["out"]

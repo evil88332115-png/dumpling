@@ -74,7 +74,8 @@ bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env �
   echo "OSV_DISTRO_MIRROR=$mir/osv"
 } >> "$PILOT_ENV"
 
-# 要判定的核心（D-036）：sources.yml 的 platform_params.kernel_release（字串或清單）→ SCA_KERNEL_VERSIONS（逗號分隔）。
+# 要判定的核心（D-036）：sources.yml 的 platform_params.kernel_release（字串或清單）。交給精靈的參數由 project-info.py --kernel-args 產生（下面）；
+# 這裡的清單只給 C4 自己的 D-038 核對用。
 # 映像裡有、但沒指定的核心，報告列「已出貨、未判定」並標 GAP；沒指定時映像有多顆核心就整個 GAP（不猜）。
 krel=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_release 2> /dev/null); krc=$?
 case $krc in
@@ -83,10 +84,14 @@ v=sys.argv[1].strip()
 v=json.loads(v) if v.startswith("[") else [v]
 ok=isinstance(v,list) and v and all(isinstance(x,str) and re.fullmatch(r"[0-9][A-Za-z0-9.+_~-]{0,80}",x) for x in v)
 print(",".join(v)) if ok else sys.exit(1)' "$krel") || fail "platform_params.kernel_release 格式不對（字串或字串清單，例如 6.18.50+rpt-rpi-2712）"
-     export SCA_KERNEL_VERSIONS=$kvs; echo "要判定的核心：$kvs";;
-  3) unset SCA_KERNEL_VERSIONS; echo "沒有指定要判定的核心（platform_params.kernel_release）：映像有多顆核心時核心判斷是 GAP";;
+     KREL_LIST=$kvs; echo "要判定的核心：$kvs";;
+  3) KREL_LIST=; echo "沒有指定要判定的核心（platform_params.kernel_release）：映像有多顆核心時核心判斷是 GAP";;
   *) fail "讀不到 sources.yml 的 platform_params";;
 esac
+unset SCA_KERNEL_VERSIONS
+# 交給精靈的核心參數（--kernel-version、--kernel-upstream-version）一律由 C1 的 project-info.py 產生（格式由它檢查，不合法 → FAIL）
+kargs_out=$(python3 -I "$root/pipeline/project-info.py" --kernel-args "$proj" "$ver") || fail "platform_params 的核心參數不合法：$(tail -1 <<< "$kargs_out")"
+mapfile -t kargs <<< "$kargs_out"; [ -n "$kargs_out" ] || kargs=()
 
 # ---------- 1b. 廠商 BSP 核心的上游版本（D-038） ----------
 # sources.yml 有 platform_params.kernel_upstream_version 時：映像模組資料夾與原始碼 Makefile 兩個來源都要相同（kernel_upstream.py），
@@ -96,12 +101,12 @@ rm -f "$out/kernel-upstream.json" "$out/kernel-cna.json" "$out/kernel-cves.txt"
 kup=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_upstream_version 2> /dev/null); kprc=$?
 case $kprc in
   0)
-    if [ -z "${SCA_KERNEL_VERSIONS:-}" ] || [[ $SCA_KERNEL_VERSIONS == *,* ]]; then
-      kurc=3; echo "kernel-upstream: GAP（kernel_upstream_version 要搭配恰好一顆 kernel_release；現在是「${SCA_KERNEL_VERSIONS:-沒有}」）"
+    if [ -z "${KREL_LIST:-}" ] || [[ $KREL_LIST == *,* ]] || [[ $kup == \{* ]]; then
+      kurc=3; echo "kernel-upstream: GAP（C4 的 D-038 核對只支援恰好一顆 kernel_release 與 X.Y.Z；現在是「${KREL_LIST:-沒有}」、「$kup」）"
     else
       kujson=(--kernel-upstream-json "$out/kernel-upstream.json")
       python3 -I "$here/kernel_upstream.py" check --image "$img" --source "$out/downloads/$ksrc" --upstream "$kup" \
-        --release "$SCA_KERNEL_VERSIONS" --out "$out/kernel-upstream.json" || kurc=$?
+        --release "$KREL_LIST" --out "$out/kernel-upstream.json" || kurc=$?
       case $kurc in 0|3) ;; *) fail "kernel_upstream.py 失敗（結束碼 $kurc）";; esac
       if python3 -I -c 'import json,sys;sys.exit(0 if json.load(open(sys.argv[1])).get("upstream_verified") else 1)' "$out/kernel-upstream.json"; then
         cl=$(timeout 600 python3 -I "$root/tools/pilot/lib/kernel_cna_version.py" --kernel-version "$kup" --mirror "$mir/kcve" \
@@ -139,7 +144,7 @@ wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最�
   local suffix=$1; shift
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$srcpath" \
     --name "$DUMPLING_PROJECT$suffix" --version "$ver" --rootfs rootfs --config "$out/cra-config" --role "$crole" --yes \
-    --platform "$parg" "$@" > "$out/wizard$suffix.log" 2>&1
+    --platform "$parg" "${kargs[@]+"${kargs[@]}"}" "$@" > "$out/wizard$suffix.log" 2>&1
   local rc=$?
   tail -25 "$out/wizard$suffix.log"
   [ $rc = 0 ] || return $rc
