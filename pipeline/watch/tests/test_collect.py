@@ -237,6 +237,7 @@ class TestGitHub(Base):
         self.assertEqual(code, 0, so)
         self.assertEqual([r["tag"] for r in inv["releases"]], ["p/v2"])
         self.assertEqual(inv["skipped"], [])
+        self.assertEqual(inv["drafts"], ["p/v1"])            # match.py 只列出、不降級
         self.assertIn("draft 1", so)
         self.assertFalse(any("/assets/1" in u for u, h in w.requests))  # draft 的附件沒碰
 

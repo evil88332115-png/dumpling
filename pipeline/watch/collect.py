@@ -600,7 +600,7 @@ def collect_release(source, rel, kind, project, tagver, out, n):
 
 def build(source, out, now):
     inv = {"schema": SCHEMA, "generated_at": now, "source": source.label, "status": "OK", "detail": "",
-           "releases": [], "skipped": []}
+           "releases": [], "skipped": [], "drafts": []}
     releases, skipped = inv["releases"], inv["skipped"]
     rdir = os.path.join(out, "releases")
     if os.path.islink(rdir):
@@ -618,6 +618,8 @@ def build(source, out, now):
             continue
         if rel["draft"]:
             drafts += 1
+            if len(inv["drafts"]) < 50:
+                inv["drafts"].append(tag)       # 正常略過（還沒發布）：match.py 只列出、不降級
             continue
         kind, project, tagver = classify(rel["tag"], rel["prerelease"])
         if kind is None:
@@ -642,6 +644,8 @@ def build(source, out, now):
     if gap_extra:
         inv["status"] = "GAP"
         notes.append("有資料格式不符的 Release（見 skipped）")
+    if any(not x["why"].startswith("tag 重複") for x in skipped) and not gap_extra:
+        notes.append("有 tag 不合規則的 Release 被略過（見 skipped）")
     summary = "正式版 %d、開發版 %d、略過 %d、draft %d" % (nrel, ndev, len(skipped), drafts)
     inv["detail"] = "；".join(notes + [summary]) if notes else summary
     return inv

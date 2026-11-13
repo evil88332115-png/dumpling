@@ -168,6 +168,8 @@ class T(Base):
         self.assertEqual(len(opens), 1)                         # 超過上限：只有一個彙總 Issue
         self.assertIn("彙總", opens[0]["title"])
         self.assertIn("5 個新的命中群組", opens[0]["title"])
+        self.assertIn("[ATTENTION]", opens[0]["title"])         # D-040「標 ATTENTION」：標題與標籤
+        self.assertIn("attention", opens[0]["labels"])
 
     def test_demo_marking(self):
         self.run_once(NOW1)
@@ -558,7 +560,7 @@ class FeedFallback(Base):
         self.kev.append("CVE-2018-18074")
         _, _, plan = self.run_once(NOW2)
         body = [x for x in nohealth(plan) if x["op"] == "open"][0]["body"]
-        self.assertIn("EUVD 鏡像用了舊資料頂替：mirror=<路徑> 用了上一份：這段時間新增的 EUVD 紀錄不在清單裡", body)
+        self.assertIn(match.md_text("EUVD 鏡像用了舊資料頂替：mirror=<路徑> 用了上一份：這段時間新增的 EUVD 紀錄不在清單裡"), body)
 
     def test_ok_result_adds_nothing(self):
         self.run_once(NOW1)
@@ -568,6 +570,98 @@ class FeedFallback(Base):
         self.assertFalse(any("舊資料頂替" in x["body"] for x in plan["actions"]))
         res = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
         self.assertFalse(any("舊資料頂替" in x for x in res["attention"]))
+
+
+EVIL = "@everyone @someuser [x](https://evil.example) ![i](https://evil.example/a.png) #1 `tick`"
+
+
+class Injection(Base):
+    """公開 Issue：外部字串不能變成 @提及、連結、圖片、Issue 參照（#49 驗證應修 3）。"""
+
+    def assert_safe(self, plan):
+        for x in plan["actions"]:
+            for field in ("title", "body"):
+                t = match._CODE_SPAN.sub(" ", x.get(field, ""))
+                self.assertNotRegex(t, r"(?<![\\\w])@(?!\u200b)[A-Za-z]", field)
+                self.assertNotIn("](https://evil", t.replace("\\]\\(", ""), field)
+                self.assertNotRegex(t, r"(?<!\\)!\[(?!\\)", field)
+                self.assertNotRegex(t, r"#\d", field)
+            self.assertEqual(match.unsafe_markdown(x["body"]), [], x["body"])
+
+    def test_component_sources_and_meta_attention(self):
+        self.inventory["releases"][0]["attention"] = ["@octocat [x](https://evil.example) ![i](https://evil.example/a.png)"]
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1)
+        evil_purl = "pkg:npm/%40types/node@1.0.0"
+        self.grype.append({"vulnerability": {"id": "CVE-2018-18074"}, "relatedVulnerabilities": [],
+                           "artifact": {"name": EVIL, "version": "1.0.0", "purl": evil_purl, "type": "npm"}})
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2, demo=True)
+        opens = [x for x in nohealth(plan) if x["op"] == "open"]
+        self.assertEqual(len(opens), 1)
+        body = opens[0]["body"]
+        self.assertIn(match.md_code(EVIL + "@1.0.0"), body)    # 元件（名稱@版本）整格放進行內程式碼：原樣可複製、不解讀
+        self.assertIn("`` @everyone", body)                     # 內容有反引號 → 分隔符號用兩個
+        self.assertIn(match.md_text("@octocat [x](https://evil.example)"), body)
+        self.assert_safe(plan)
+
+    def test_vendor_body_and_gaps_escaped(self):
+        e = {"cve": "CVE-2024-0001", "kev_vendor": "@acme [x](https://evil.example)", "kev_product": "![i](https://evil.example/a.png) #1",
+             "project": "demo", "version": "v1", "vendor": "acme`x", "watch_via": ["@x"], "component_count": 1,
+             "date_added": "2024-01-01", "source": "@src", "first_detected": NOW1}
+        body = match.vendor_body("real", e, None, None, match.parse_now(NOW1))
+        self.assertEqual(match.unsafe_markdown(body), [])
+        self.assertNotIn("#1", body)
+        p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1", "gaps": ["upstream_note: @bob [x](https://evil.example)"]}
+        body = match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
+                                         "component": "c", "purl": "p", "basis": "b", "sources": []}], p, [], None, match.parse_now(NOW1))
+        self.assertEqual(match.unsafe_markdown(body), [])
+
+    def test_unsafe_markdown_catches_unescaped(self):
+        for raw in ("@everyone", "[x](https://evil.example)", "![i](https://evil.example/a.png)"):
+            self.assertTrue(match.unsafe_markdown("前文 " + raw), raw)
+            self.assertEqual(match.unsafe_markdown("前文 " + match.md_text(raw)), [], raw)
+            self.assertEqual(match.unsafe_markdown("前文 " + match.md_code(raw)), [], raw)
+        self.assertEqual(match.unsafe_markdown("purl ` pkg:maven/a/b@1.0 `"), [])   # 行內程式碼裡的 @ 不算
+
+    def test_md_code_keeps_text_copyable(self):
+        self.assertEqual(match.md_code("pkg:npm/%40types/node@1.0.0"), "` pkg:npm/%40types/node@1.0.0 `")
+        self.assertEqual(match.md_code("a|b"), "` a\\|b `")
+        self.assertEqual(match.md_code(""), "—")
+        self.assertEqual(match.md_code("x\ny\u202ez"), "` x y z `")
+
+
+class SkippedReleases(Base):
+    """被略過的 Release：格式壞掉、tag 不合、tag 重複 → 降級（ATTENTION）並列出；draft 只列出、不降級（#49 驗證應修 2）。"""
+
+    def test_skipped_release_makes_attention(self):
+        self.run_once(NOW1)
+        self.inventory["skipped"] = [{"tag": "weird-tag", "why": "tag 格式不是 <專案>/<版本> 或 dev/<專案>"},
+                                     {"tag": "p/v9", "why": "draft／prerelease 欄位不是布林"}]
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        st, _, plan = self.run_once(NOW2)
+        self.assertEqual(st, "ATTENTION")
+        res = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        self.assertTrue(any("weird-tag" in g and "tag 格式" in g for g in res["gaps"]), res["gaps"])
+        self.assertTrue(any("p/v9" in g for g in res["serious"]), res["serious"])
+        report = open(os.path.join(self.w, "out-" + NOW2[:10], "report.md"), encoding="utf-8").read()
+        self.assertIn("weird-tag", report)
+
+    def test_skipped_release_blocks_first_baseline(self):
+        self.inventory["skipped"] = [{"tag": "weird-tag", "why": "tag 格式不是 <專案>/<版本> 或 dev/<專案>"}]
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        with self.assertRaises(match.Fail):
+            self.run_once(NOW1)
+
+    def test_draft_is_listed_not_degraded(self):
+        self.run_once(NOW1)
+        self.inventory["drafts"] = ["demo/v2"]
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        st, _, _ = self.run_once(NOW2)
+        res = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        self.assertFalse(any("demo/v2" in g for g in res["gaps"] + res["serious"]))
+        self.assertTrue(any("draft" in n and "demo/v2" in n for n in res["notes"]), res["notes"])
+        self.assertFalse(any("demo/v2" in a for a in res["attention"]))
 
 
 if __name__ == "__main__":

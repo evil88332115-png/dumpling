@@ -49,6 +49,7 @@ watch.yml（每天）
 - 核心 CVE 用 `mirror_kernel_cve`：有 `KCVE_CACHE_DIR`（actions/cache 還原的上一份）時，上游沒變就沿用；git.kernel.org 連不上就用 48 小時內的上一份頂替，鏡像腳本最後一行是 ATTENTION、SOURCE 寫 `fallback=yes`。
 - **用了舊資料頂替時**：feeds.tsv 記 ATTENTION、`::warning::`；match.py 讀 `<名>.result`／SOURCE，把「核心 CVE 鏡像（Linux 核心 CNA）用了舊資料頂替：…：這段時間新增的核心 CVE 不在清單裡」列進報告的「需注意」（整輪 ATTENTION），並附在這次每個要開的 Issue 與留言最後。訊息裡的絕對路徑換成 `<路徑>`（runner 的暫存路徑不進公開 Issue）。不擋第一次基準（資料最多 48 小時舊；超過就 FAIL → 核心 CNA NOT_RUN，照降級規則處理）。
 - 演練不下載 EUVD 與核心 CVE（`--no-euvd --no-kernel-cve`），也不碰 cache。
+- watch-round.yml 的資料源步驟有自己的 `timeout-minutes: 100`＋`continue-on-error`：卡住時這一步失敗、job 繼續比對並留下報告；沒有 `.result` 的鏡像（沒做完）先刪掉，缺的資料源在報告標 GAP／NOT_RUN（CISA KEV 與 EUVD 都沒有就 FAIL），也不存 cache。
 
 ### 3.1 `pipeline/watch/collect.py`（4a）
 
@@ -58,7 +59,9 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 - `--repo`：用 GitHub REST API（`GH_TOKEN`／`GITHUB_TOKEN`，只讀）列出 Release。**跳過 draft**。
   - 正式版：tag `<專案>/<版本>`、不是 prerelease → `kind: release`
   - 開發版：tag `dev/<專案>`、prerelease → `kind: dev`
-  - 其他 tag → 列進 `skipped`（附原因）
+  - 其他 tag → 列進 `skipped`（附原因）；draft 的 tag 列進 `drafts`（最多 50 個）
+  - **match.py 怎麼看**：`skipped`（資料格式壞掉、tag 不合規則、tag 重複）每一筆都算 Release 問題 → 降級（ATTENTION、連續兩次開健康 Issue）、擋第一次基準，報告寫出是哪個 tag、為什麼；`drafts`（還沒發布）只列在報告的「說明」，不降級。
+    （GitHub 的 `GITHUB_TOKEN` 只有 `contents: read` 時列不到 draft，所以排程的報告通常看不到 draft。）
 - `--from-dir`：讀 `<資料夾>/*/release-meta.json`（合成 Release，演練與測試用）；同一個資料夾裡的附件檔名規則和真的一樣。
 - 每個 Release 下載：`release-meta.json`（必要）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、整份 `sbom-<專案>-<版本>.cdx.json`、
   `layers.json`、`kernel-versions-<專案>-<版本>.json`（C1 在 M2 提供，見下；只接受 schema `sca-center-kernel-versions/2`，其他版本 → 核心 CNA 標 GAP、寫明 schema 不符：shipped 每顆核心有 `upstream_version`（對不上是 null）、`upstream_basis`、`upstream_note`；null 或沒有附件 → 核心 CNA 標 GAP，Issue／報告寫 upstream_note）、`scan-summary-<專案>-<版本>.json`（選填）。
@@ -196,7 +199,12 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 排程的 real **預設只算不寫**（dry_run）：repo 變數 `WATCH_REAL_ISSUES` 是 `on` 才開 Issue。M2 合併、第一次真實基準（手動 `mode=real`，只寫狀態 Issue、不開監控 Issue）之後，
   C3 回報「打開的話會開哪些 Issue」，C0 看過再打開。手動觸發 `mode=real` 照輸入的 dry_run。
 - 只開兩種 Issue：已遭利用（KEV／EUVD）、廠商層級。一般 CVE 候選（核心 CNA 的上千筆、D-034 的 U-Boot 候選）不開。
-  一次新增超過 20 個群組 → 全部併成一個彙總 Issue（ATTENTION）。
+  一次新增超過 20 個群組 → 全部併成一個彙總 Issue：標題 `[KEV][ATTENTION] 彙總：…`、加 `attention` 標籤，內文也寫 ATTENTION（已有 Issue 的群組事件太多時的彙總也一樣）。
+- **外部字串不能變成通知或連結**：元件名、purl、KEV 的廠商／產品、release-meta 的 attention、kernel-versions 的說明、鏡像訊息都是外部資料。
+  識別字（元件、purl、依據、來源、廠商）放進行內程式碼（`match.md_code`：原樣可複製，裡面的 `@`、連結、圖片都不解讀；反引號用更長的分隔符號）；
+  其他文字用 `match.md_text`（跳脫 `\ [ ] ( ) ! < > ` | * _ ~`，`@`、`#` 後面插零寬空白，不會通知 `@types` 這類組織、不會連到別的 Issue）；
+  標題用 `match.md_title`。產生 plan 前最後再檢查一次（`unsafe_markdown`）：行內程式碼以外還有沒淨化的 `@提及`、`](` 連結或 `![` 圖片就 FAIL、不產生 plan。
+- 第一次建立基準前，先看那次 dry_run 的報告有沒有 ATTENTION（例如核心 CVE 用了 48 小時內的舊資料頂替）：基準不會擋它，但之後補進的那段時間的命中會被當成新的。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8）。
 

@@ -301,7 +301,7 @@ class Labels:
 # ---------- plan ----------
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
-                            "demo", "summary", "drill", "watch-health"})
+                            "demo", "summary", "attention", "drill", "watch-health"})
 
 
 def load_plan(path, want_mode=None):

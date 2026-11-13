@@ -130,6 +130,11 @@ def load_inventory(path, base):
     if inv.get("status") == "FAIL":
         raise Fail(f"收集 Release 失敗：{inv.get('detail') or '?'}")
     projs, problems = [], []
+    # 被略過的 Release（資料格式壞掉、tag 不合規則、tag 重複）：不是正常狀態，算 Release 問題（降級、ATTENTION、擋第一次基準）。
+    # draft 是正常略過（還沒發布），由 run() 只列在「說明」（#49 驗證應修 2）
+    for x in inv.get("skipped") or []:
+        if isinstance(x, dict):
+            problems.append(f"Release 被略過：{str(x.get('tag'))[:120]}：{str(x.get('why'))[:200]}")
     for r in inv["releases"]:
         if not isinstance(r, dict):
             continue
@@ -403,8 +408,51 @@ def sanitize_state(st):
     return out
 
 
-def md_cell(x):
-    return str(x if x is not None else "").replace("|", "\\|").replace("\n", " ")[:300]
+# ---------- 寫進公開 Issue 的外部字串（#49 驗證應修 3） ----------
+# 元件名、purl、KEV 的廠商／產品、release-meta 的 attention、kernel-versions 的說明、鏡像訊息……都是外部資料：
+# @ 會通知 GitHub 上的使用者或組織（例如 npm 的 @types/node），[x](url)、![i](url) 會變成連結或圖片，#123 會連到別的 Issue。
+_MD_CTRL = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
+ZWSP = "\u200b"
+
+
+def _plain(x, limit):
+    return re.sub(r"\s+", " ", _MD_CTRL.sub(" ", str(x if x is not None else ""))).strip()[:limit]
+
+
+def md_text(x, limit=300):
+    """外部字串 → Markdown 純文字：跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
+    s = _plain(x, limit).replace("\\", "\\\\")
+    s = re.sub(r"([\[\]()!<>`|*_~])", r"\\\1", s)
+    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, s)
+
+
+md_cell = md_text
+
+
+def md_code(x, limit=300):
+    """外部的識別字（元件名、purl、CVE 來源）→ 行內程式碼：原樣可複製，裡面的 @、連結、圖片都不會被解讀。
+    反引號：用比內容最長的連續反引號多一個的分隔符號；| 跳脫（GFM 表格在行內程式碼裡也要跳脫）。"""
+    s = _plain(x, limit)
+    if not s:
+        return "—"
+    s = s.replace("|", "\\|")
+    fence = "`" * (max((len(r) for r in re.findall(r"`+", s)), default=0) + 1)
+    return f"{fence} {s} {fence}"
+
+
+def md_title(x, limit=200):
+    """Issue 標題裡的外部字串：去控制字元，@ 與 # 後面插零寬空白（標題不解讀 Markdown 跳脫，所以不加反斜線）。"""
+    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, _plain(x, limit))
+
+
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1", re.S)
+_UNSAFE = (re.compile(r"(?<![\\\w])[@＠](?!\u200b)[A-Za-z0-9_-]"), re.compile(r"(?<!\\)\]\("), re.compile(r"(?<!\\)!\[(?!\\)"))
+
+
+def unsafe_markdown(text):
+    """最後一道檢查：行內程式碼以外，還有沒有沒淨化的 @提及、](連結、![圖片。回傳找到的片段（空＝沒有）。"""
+    t = _CODE_SPAN.sub(" ", text)
+    return [m.group(0) for rx in _UNSAFE for m in rx.finditer(t)][:3]
 
 
 def kev_group_key(mode, e):
@@ -429,7 +477,7 @@ def release_results(p):
            + f"；流程結果（pipeline_result）{p.get('pipeline_result') or 'NOT_RUN'}"
            "（取自 Release 的 release-meta.json；生命週期 shipped／development 不是掃描結論）")
     if p.get("meta_attention"):
-        out += "；Release 建置時用了舊資料頂替：" + "；".join(p["meta_attention"])
+        out += "；Release 建置時用了舊資料頂替：" + "；".join(md_text(x) for x in p["meta_attention"])
     return out
 
 
@@ -455,7 +503,7 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     if mode == "drill":
         lines.append("> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。")
         lines.append("")
-    lines += [f"**{e0['cve']}** 在已遭利用清單（KEV）上，比對到 **{e0['project']} {e0['version']}**（{p['layer'] if p else '?'} 層）。", ""]
+    lines += [f"**{md_text(e0['cve'])}** 在已遭利用清單（KEV）上，比對到 **{md_text(e0['project'])} {md_text(e0['version'])}**（{p['layer'] if p else '?'} 層）。", ""]
     if p:
         lines += [f"- Release：{p.get('tag') or '?'}（{p.get('html_url') or '—'}）、Release 版本 {p.get('release_version') or '?'}",
                   f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
@@ -463,7 +511,7 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     lines += [f"- 第一次偵測：{min(x.get('cve_first_detected') or x['first_detected'] for x in entries)}（這次執行 {utc(now)}）", "",
               "| 元件 | purl | 依據 | 來源 |", "|---|---|---|---|"]
     for e in entries:
-        lines.append(f"| {md_cell(e.get('component'))} | {md_cell(e.get('purl'))} | {md_cell(e.get('basis'))} | {md_cell('; '.join(e.get('sources') or []))} |")
+        lines.append(f"| {md_code(e.get('component'))} | {md_code(e.get('purl'))} | {md_code(e.get('basis'))} | {md_code('; '.join(str(x) for x in e.get('sources') or []))} |")
     lines += ["", f"每日監控沒有涵蓋的項目（每次都列出）：", *[f"- {a}：{b}" for a, b in coverage]]
     if p and p.get("gaps"):
         lines += ["", "這個 Release 這次的 GAP：", *[f"- {md_cell(g)}" for g in p["gaps"]]]
@@ -477,11 +525,11 @@ def vendor_body(mode, e, p, run_url, now):
     lines = []
     if mode == "drill":
         lines += ["> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。", ""]
-    lines += [f"廠商層級、**可能相關**：{e['cve']}（KEV 廠商 {e.get('kev_vendor') or '?'}、產品 {e.get('kev_product') or '?'}）"
-              f"與 **{e.get('project')} {e.get('version')}** 監看的廠商 `{e.get('vendor')}` 相同，但沒有元件比對。", "",
-              f"- 監看來源：{', '.join(e.get('watch_via') or [])}；元件數 {e.get('component_count')}",
-              f"- KEV 加入日期：{e.get('date_added') or '?'}；來源：{e.get('source') or '?'}",
-              f"- 第一次偵測：{e.get('first_detected')}（這次執行 {utc(now)}）"]
+    lines += [f"廠商層級、**可能相關**：{md_text(e['cve'])}（KEV 廠商 {md_text(e.get('kev_vendor') or '?')}、產品 {md_text(e.get('kev_product') or '?')}）"
+              f"與 **{md_text(e.get('project'))} {md_text(e.get('version'))}** 監看的廠商 {md_code(e.get('vendor'))} 相同，但沒有元件比對。", "",
+              f"- 監看來源：{md_text(', '.join(str(x) for x in e.get('watch_via') or []))}；元件數 {md_text(e.get('component_count'))}",
+              f"- KEV 加入日期：{md_text(e.get('date_added') or '?')}；來源：{md_text(e.get('source') or '?')}",
+              f"- 第一次偵測：{md_text(e.get('first_detected'))}（這次執行 {utc(now)}）"]
     if p:
         lines += [f"- Release：{p.get('tag') or '?'}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
                   f"- Release 的結論：{release_results(p)}"]
@@ -535,14 +583,14 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         if gk in iss:
             continue
         p = pinfo_of(projs, es[0]["project_uuid"])
-        title = f"[KEV] {es[0]['cve']} 在 {es[0]['project']} {es[0]['version']}（{p['layer'] if p else '?'} 層）"
+        title = f"[KEV] {md_title(es[0]['cve'])} 在 {md_title(es[0]['project'])} {md_title(es[0]['version'])}（{p['layer'] if p else '?'} 層）"
         pending.append((gk, "kev", title, kev_body(mode, es, p, coverage, run_url, now), labels_for(p, "kev"), es[0]))
     for e in (vrep or {}).get("new") or []:
         gk = vendor_group_key(mode, e)
         if gk in iss:
             continue
         p = pinfo_of(projs, e["project_uuid"])
-        title = f"[廠商層級] {e['cve']}（{e.get('vendor')}）可能影響 {e.get('project')} {e.get('version')}"
+        title = f"[廠商層級] {md_title(e['cve'])}（{md_title(e.get('vendor'))}）可能影響 {md_title(e.get('project'))} {md_title(e.get('version'))}"
         pending.append((gk, "vendor", title, vendor_body(mode, e, p, run_url, now), labels_for(p, "vendor"), e))
     actions, opened = [], 0
     pruned_keys = dd.setdefault("pruned_keys", [])
@@ -563,8 +611,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             body.insert(0, "> **演練（合成資料）**\n")
         if run_url:
             body += ["", f"執行紀錄：{run_url}"]
-        actions.append({"op": "open", "key": sk, "title": f"[KEV] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
-                        "labels": ["kev", "summary"]})
+        actions.append({"op": "open", "key": sk, "title": f"[KEV][ATTENTION] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
+                        "labels": ["kev", "summary", "attention"]})
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
             if gk in pruned_keys:
@@ -591,10 +639,10 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         if not t or gk in just_opened:
             continue
         e0 = evs[0][1]
-        lines = [f"{e0['cve']} 在 {e0['project']} {e0['version']}（{ts}）："] + \
-            [f"- {what}：{e.get('component')}（{e.get('purl')}）" for what, e in evs] + \
+        lines = [f"{md_text(e0['cve'])} 在 {md_text(e0['project'])} {md_text(e0['version'])}（{ts}）："] + \
+            [f"- {what}：{md_code(e.get('component'))}（{md_code(e.get('purl'))}）" for what, e in evs] + \
             ["", "原 Issue 已關閉時會開新的 Issue。" + (f"執行紀錄：{run_url}" if run_url else "")]
-        actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {e0['cve']} 在 {e0['project']} {e0['version']}：新的比對",
+        actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {md_title(e0['cve'])} 在 {md_title(e0['project'])} {md_title(e0['version'])}：新的比對",
                         "body": "\n".join(lines), "labels": ["kev"] + (labels_for(pinfo_of(projs, e0["project_uuid"]), "kev")[1:])})
         comments += 1
     ev_acts = [x for x in actions if x["op"] == "open_if_closed"]
@@ -603,8 +651,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         ek = issue_key(mode, "events", ts[:10], str(len(ev_acts)), ev_acts[0]["key"])
         body = [f"這次執行有 {len(ev_acts)} 個已有 Issue 的群組出現新的比對（新增元件或再出現），超過 {max_new} 個的上限，全部列在這裡。", ""] + \
             [f"- {md_cell(x['title'])}" for x in ev_acts] + ([f"", f"執行紀錄：{run_url}"] if run_url else [])
-        actions.append({"op": "open", "key": ek, "title": f"[KEV] 彙總：{len(ev_acts)} 個群組有新的比對（{ts[:10]}）", "body": "\n".join(body),
-                        "labels": ["kev", "summary"]})
+        actions.append({"op": "open", "key": ek, "title": f"[KEV][ATTENTION] 彙總：{len(ev_acts)} 個群組有新的比對（{ts[:10]}）", "body": "\n".join(body),
+                        "labels": ["kev", "summary", "attention"]})
         comments = comments - len(ev_acts) + 1
     seen_gone = set()
     for k in gone:
@@ -614,7 +662,7 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         still = any(x.get("status") == "open" and kev_group_key(mode, x) == gk for x in state["matches"].values())
         if t and not still and gk not in seen_gone:
             seen_gone.add(gk)
-            actions.append({"op": "comment", "key": t, "body": f"{e['cve']} 在 {e['project']} {e['version']} 這次沒有再比對到（{ts}）："
+            actions.append({"op": "comment", "key": t, "body": f"{md_text(e['cve'])} 在 {md_text(e['project'])} {md_text(e['version'])} 這次沒有再比對到（{ts}）："
                             "可能已修補、元件移除，或 KEV 清單改變。Issue 不會自動關閉，請負責人確認後關閉。", "reopen_if_closed": False})
             comments += 1
     return actions, {"opened": opened, "summary": len(rest), "comments": comments}
@@ -685,7 +733,7 @@ def health_actions(mode, state, serious, now, run_url):
         return []
     h["notified_at"] = ts
     body = [f"每日監控從 {h['since']} 起連續 {h['streak']} 次降級：下面這些項目沒有完整檢查，這段期間可能漏掉新的已遭利用漏洞（不能當成沒有新的）。", ""] + \
-        [f"- {x}" for x in h["latest"]] + ["", f"恢復時會在這裡留言；一直沒恢復時每 {HEALTH_REPEAT_DAYS} 天提醒一次。"] + \
+        [f"- {md_text(x)}" for x in h["latest"]] + ["", f"恢復時會在這裡留言；一直沒恢復時每 {HEALTH_REPEAT_DAYS} 天提醒一次。"] + \
         ([f"執行紀錄：{run_url}"] if run_url else [])
     return [{"op": "open_if_closed", "key": key, "title": "[監控降級] 每日監控有項目沒有完整檢查", "body": "\n".join(body), "labels": ["watch-health"]}]
 
@@ -758,6 +806,9 @@ def run(a, kernel_runner=None):
     gaps += ps_bad
     if ps_note:
         notes.append(ps_note)
+    drafts = [str(x)[:120] for x in inv.get("drafts") or []]
+    if drafts:      # draft 是還沒發布的 Release：正常略過，只列出、不降級（#49 驗證應修 2）
+        notes.append(f"draft Release 略過 {len(drafts)} 個（還沒發布，正常，不降級）：{'、'.join(drafts[:10])}")
     try:
         cisa, cisa_path = load_cisa(eg, a.feeds, a.kev_overlay, work, now)
         if cisa["status"] != "OK":
@@ -929,6 +980,10 @@ def run(a, kernel_runner=None):
         [x for act in actions for x in publiccheck.check_text(act.get("title", "") + "\n" + act.get("body", ""), rules)]
     if probs:
         raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{len(probs)} 筆，例如 {probs[0]}）：不產生 plan.json")
+    # 最後一道：外部字串都應該經過 md_text／md_code／md_title；還有沒淨化的 @提及、連結、圖片就不產生 plan（程式漏了某個欄位）
+    bad = [x for act in actions for x in unsafe_markdown(act.get("body", "")) + [y for y in unsafe_markdown(act.get("title", "")) if "@" in y or "＠" in y]]
+    if bad:
+        raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
     result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
               "new": new, "back": back, "gone": gone, "stats": stats, "baseline": first}
     for name, obj in (("plan.json", plan), ("result.json", result)):

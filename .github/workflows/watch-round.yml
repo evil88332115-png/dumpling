@@ -60,7 +60,12 @@ jobs:
           path: ${{ runner.temp }}/kcve-cache/kcve
           key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: kernel-cve-mirror-
+      # 資料源自己的逾時：卡住時（例如上游連不上、鏡像腳本沒有整體逾時）這一步失敗但 job 繼續，後面照樣比對、留下報告
+      # （缺的資料源在報告標 GAP／NOT_RUN；CISA KEV 與 EUVD 都沒有就 FAIL）。不完整的鏡像下一步刪掉，不會被讀到。
       - name: 資料源（CISA KEV、EUVD、核心 CNA、Grype DB）
+        id: feeds
+        timeout-minutes: 100
+        continue-on-error: true
         env:
           MODE: ${{ inputs.mode }}
           KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
@@ -68,9 +73,16 @@ jobs:
           extra=()
           if [ "$MODE" = drill ]; then extra=(--no-kernel-cve --no-euvd); fi
           pipeline/watch/feeds.sh "$RUNNER_TEMP/w/feeds" "${extra[@]}"
+      - name: 資料源沒有完成時刪掉不完整的鏡像（沒有 .result 的鏡像不能讀）
+        if: steps.feeds.outcome != 'success'
+        run: |
+          w="$RUNNER_TEMP/w/feeds"; mkdir -p "$w"
+          for n in euvd kernel-cve; do [ -f "$w/$n.result" ] || rm -rf "${w:?}/$n"; done
+          printf 'feeds\tFAIL\t資料源步驟沒有完成（逾時或失敗）：缺的資料源在報告標 GAP／NOT_RUN\n' >> "$w/feeds.tsv"
+          echo "::warning::資料源步驟沒有完成（逾時或失敗），照樣比對並留下報告"
       - name: 核心 CVE 鏡像是不是這次新抓的（只有新抓的才存 cache，頂替用的舊資料不存回去）
         id: kcve-fresh
-        if: inputs.mode == 'real'
+        if: inputs.mode == 'real' && steps.feeds.outcome == 'success'
         env:
           KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
         run: |
