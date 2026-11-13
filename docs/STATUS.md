@@ -2,24 +2,24 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:10 +0800（C2）
+最後更新：2026-11-13 22:18 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：**已在第二台（WSL2）接手**（2026-11-13，session 名 c0）。第二台檢查完成、代理上限調整為 D-048 並通知 C1–C4；等 C1 開 M2 PR
-- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 45de835，**未開 PR**；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-051＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
-- 代理：無。C2 ca80b27 的獨立驗證代理已完成：**驗證：通過**（應修 0、建議 5），報告在 `$AGENT_TMP/dumpling-tmp-c0-verify-c2/report.md`（已去識別化，PR 開出後貼上）；worktree `$AGENT_TMP/dumpling-wt-c0-verify-c2` 合併後清掉
+- 分支／PR／commit：main c0a54eb。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 45de835，**未開 PR**；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-051＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：852b6d3 三個 run 綠、draft 核對 OK；另修 078710d（UEFI／OP-TEE Grype 比對移到 sca-scan 之後，CI 新機器原本沒有資料庫 → 完整報告少 11 列）。新驗收 run：43429199382、43429215851、tests 43429232513。C0 審查後 C1 補 c08de27（import 失敗時 B-uefi-grype／B-tee-grype 仍記 NOT_RUN，只改失敗那條路，C0 已看 diff 確認），tests 43429786314；release draft 沿用 078710d 驗收、不重跑（PR 說明會註明）。之後 C1 核對 draft、獨立驗證，再開 M2 PR
-  - C2（第二台）：wp3/amd-psp 34fd4f9（ca80b27＋建議 1–3 修正，C0 已看 diff OK）；firmware 43435026101 綠就開 PR，C0 貼獨立驗證報告後合併。私有檔驗證已完成（後續另開 CSE layout Size 0x60）。wp3/fw-advisory（D-043 (1) Intel，5bddbf8）預驗中；ME family 推定定為 D-051
+  - C2（第二台）：#39 已合併（c0a54eb）。接著：CSE layout Size 0x60 小修正（從 main）；wp3/fw-advisory（D-043 (1) Intel，D-051）預驗中；supplier-normalize 等 M2
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：三平台差異核對完成、標準答案定案（403fae7；rpi 90、rock 99、ai-nas 76 項，最後一輪 run rpi 43419144284、rock 43413770363、ai-nas 43416974360，併入 61d7c6f）；驗證代理只拿原始資料。#27 已由 C0 決定（D-049：lgpio 維持 os）。下一步：M2 合併後併 main 重跑，核對 rock／rpi 的 -os 項目（852b6d3 影響），再開 M6 PR
 - 下一步（新 C0 接手後）：
   1. 等 C1 開 M2 PR → **C0 另派獨立驗證代理**（不附 C1 的結論）→ 兩份驗證都通過、CI 綠 → `gh pr merge --squash --match-head-commit <SHA> --author-email 287638252+evil88332115-png@users.noreply.github.com`
   2. M2 合併後：問使用者何時打第一個正式 tag（例如 `orin-nano-demo/v39.2.1-demo1`）；開 `wp0/docs-batch-4` 的 PR；通知 C2／C3／C4 併 main 後各自開 PR
-  3. C2 的 D-042 PR 私有檔驗證：**已完成**（改由 C0 在第二台用使用者提供的 3 份 Intel 新世代樣本跑 ca80b27，檔案只在 C0 暫存、不進 repo）：沒有當掉、沒有確知的錯值；3 份 ME 版本都 GAP，原因是 CSE layout Size 0x60 不在支援清單（加入後 CRC 相符、RBEP／NFTP 一致）。不擋這次 PR，C2 合併後另開小修正（公開樣本或合成測試）
+  3. （完成）D-042 PR #39 已合併；私有檔驗證由 C0 用使用者提供的 3 份樣本完成（暫存在 C0 的 scratchpad，待使用者決定刪除）
   4. 監控 real Issue：C3 修完 F1–F3（已在 wp2/watch-m2）→ M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#19（rpi 報告端：有 KERNEL_CVES 時補 Grype 沒有的 CVE 成列、同一個 CVE 不按核心套件重複列；屬 D-044 (2)，M7 交給 C1；修好後 C4 再釘 rpi 的「bsp 核心候選 ≥ CNA 清單」）、#20、#22、#23、#25（missing_fields 少算 flash_package_supplier、sbom.md 非 Jetson 平台出現 L4T 文字）、#26（notes.md 的 pipeline_result 改成跟 release-meta.json 一致）
   6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
