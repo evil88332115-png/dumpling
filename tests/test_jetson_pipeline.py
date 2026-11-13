@@ -297,6 +297,17 @@ class Assemble(Tmp):
         self.assertEqual(len(rep["bsp_skipped"]), 3)
 
 
+class ScanScript(unittest.TestCase):
+    def test_every_wizard_call_passes_source_and_platform_explicitly(self):
+        """精靈沒給 --source 時核心原始碼的判斷會悄悄變 GAP：scan.sh 只有一個 cra-scan.py 呼叫點（wiz），完整掃描與每一層的重跑都經過它，而且明確傳 --source、--platform。"""
+        t = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
+        call = t[t.index('python3 -I "$root/tools/wizard/cra-scan.py"'):]
+        call = call[:call.index("> \"$out/wizard$suffix.log\"")]
+        for need in ('--source "$out/SourceCode"', '--platform "$DUMPLING_PLATFORM"', '--archive "$pkg"', '--build-record "$br"'):
+            self.assertIn(need, call)
+        self.assertEqual(t.count('"$root/tools/wizard/cra-scan.py"'), 1)
+
+
 class CheckExpected(Tmp):
     def run_cli(self, expected, actual):
         e, a = self.p("e.json"), self.p("a.json")

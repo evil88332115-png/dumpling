@@ -51,6 +51,7 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 
 1. **臨時 DT**（`pipeline/dt-ephemeral.sh up → wait → env`）：只開 OSV 與 KEV，關 NVD。OSV 生態系 `Ubuntu,PyPI,Go,Maven`：rootfs 的 Ubuntu deb（含 `nvidia-l4t-*` 以 deb 身分比對）、Python、Go 執行檔、Java jar。
    DT 鏡像進行的同時，下載其他資料鏡像（`tools/mirror/`：NVIDIA 公告、Linux 核心 CNA、EUVD、Ubuntu 的 OSV 發行版紀錄）寫進 `pilot.env`。**任何一個鏡像失敗 = FAIL**（弱點資料不完整，不當作沒有漏洞）。
+   例外是核心 CVE 鏡像：git.kernel.org 有些 runner 連不上（TCP 約 133 秒後失敗，重試沒用），`kernel-cve.sh` 在上游連不上時會沿用 48 小時內、通過檢查的上一份（`actions/cache` 還原的 `kcve/`），最後一行是 `ATTENTION …`；`mirror` 算成功並記一列 `pipeline-kernel-cve-mirror ATTENTION`，**不擋 Release（正式 tag 也一樣），但 Release 說明、summary.md、release-meta.json 都標出來**。沒有可沿用的、或太舊 = 照舊 FAIL。實作在共用的 `pipeline/lib/mirrors.sh`（其他平台也用它），見 `docs/PLATFORM-INTERFACE.md`。
    Grype 資料庫由 Grype 自己線上更新（`GRYPE_DB_UPDATE=online`）；`MIRROR_REFRESH_STATUS=""`（不檢查常駐環境的鏡像新鮮度）。
 2. **精靈** `tools/wizard/cra-scan.py --yes`：站台設定檔（`SCA_WIZARD_CONFIG` 的替代：`--site-config`）由 `jetson_scan.py site-config` 產生；用 CI 的建置紀錄，不是自編模式；`--platform "$DUMPLING_PLATFORM"` 原樣傳下去，不從映像格式推測。
    `inputs.json` 的 `upstream_set` 與字樣依 `platform_params.l4t_release` 在複本裡改成該版本。SourceCode 是 assemble 重新做出來的、套好 patch 的原始碼樹（上游比對用）；OP-TEE／TF-A 原始碼（`atf_t234_src`、`nvidia-jetson-optee-source`）解開給 `--tee-source`。
@@ -75,6 +76,12 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 
 `build.sh` 把交給 scan 的東西全放在 `$DUMPLING_OUT/handoff/`：`BuildRecord-<專案>-<版本>.tar.gz`、`deliverables.tar.zst`（Image、.ko、dtb、核心建置設定）、`kernel.release`、`kernel-subdir`、`build.json`、`nvbuild-tail.txt`、`build-summary.md`。
 workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指名個別檔案**（契約見 `docs/PLATFORM-INTERFACE.md`）；`assemble.sh`／`scan.sh` 從 `handoff/` 讀。
+
+## 6c. 其他平台共用的部分（C4 之後的平台）
+
+`platform.yml` 的 `arch`、`build.mode`／`runner`／`apt`、`scan.runner`／`apt`／`tools`、`pipeline/run-step.sh`（所有步驟同一個結束碼規則與 `pipeline-steps.tsv`）、`pipeline/install-scan-tools.sh`（`sbom-only`｜`full`）、
+`pipeline/lib/platform_scan.py` 都與 Jetson 無關，契約見 `docs/PLATFORM-INTERFACE.md`。Jetson 沒設 `scan.tools`（預設 `sbom-only`），行為不變。
+`scan.tools: full` 在 runner 上驗證過（Go 1.26 由 `actions/setup-go` 裝；Syft、Grype、cdxgen 12.8.7、govulncheck v1.9.0、guarddog 3.2.0 都在家目錄遮蔽的 bwrap 裡跑得起來；guarddog 的 venv 在 `/opt/dumpling-tools`，不在家目錄）。
 
 ## 7. 待確認（已採最保守做法，不阻擋）
 
@@ -109,6 +116,28 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
   (3) Syft 的檔案紀錄讓 unknown 變成 9 萬多個——用 dpkg `.list` 的擁有者分層（見 `docs/LAYERS.md`）；(4) l4t 核心對應列的 `mapped_from` 是「名稱 版本」，原本找不到層。
 - Release 步驟的 403：第一次兩個完整的 run（build＋scan 共約 1.5 小時），最後的 `release` job 呼叫 GitHub API（列出 release）回 `403 Resource not accessible by integration`；同一個 job 重跑也一樣。同樣的步驟在新的 run（沿用 scan artifact）和獨立探測 workflow（包含 62 分鐘之後才呼叫）都成功，原因沒查出來（排除了 token 過期、事件類型、權限設定）；之後的完整 run 見第 9 節。
 
-## 9. 最終驗證（handoff 版本的 workflow）
+## 9. 最終驗證（handoff 與 run-step 版本的 workflow，2026-11-13）
 
-（跑完後補：兩個版本各一次完整的 `release.yml` 手動觸發 run 的結果與 draft Release 附件。）
+兩個版本各做一次完整的 `release.yml` 手動觸發（build＋scan＋Release，不重用任何 artifact；手動觸發只建 draft，不建 git tag）：
+
+| | `v39.2.0-demo1` | `v39.2.1-demo1` |
+|---|---|---|
+| run | 43331496725 | 43331490342 |
+| build job | 約 34 分鐘 | 約 38 分鐘（`nvbuild.sh` 2,032 秒） |
+| scan job | 約 40 分鐘 | 約 39 分鐘（scan 步驟 1,640 秒，assemble 504 秒） |
+| 整個 run | 綠燈，含最後的 Release job（建 draft，19 個附件） | 同左（run 約 1 小時 17 分鐘，Release job 在 1 小時後照樣成功） |
+| `pipeline-steps.tsv` 整體狀態／標準答案 | OK／23 項符合 | OK／23 項符合 |
+| 建置紀錄、C-kernel-boot | OK、OK | OK、OK |
+| 上游比對（原始碼）被修改的檔案 | 0 | 1 |
+
+- Image 的 SHA-256 兩次建置都不同（建置不可重現）：v39.2.1 第一次 `d39b0e3a…`、`b220eaee…`，最終 `ce766751…`；v39.2.0 最終 `3167d1d6…`。
+- 附件 19 個：`report-*.zip`×3（完整、-bsp、-os）、`sbom-*.cdx.json`×3、`vex-*.cdx.json`×3、`vuln-list-*.xlsx`×3、`p1-table-*.xlsx`×3、`layers.json`、`build-record-*.json`、`scan-summary-*.json`、`release-meta.json`。
+- Release 的 403：最終的兩個完整 run 沒有再出現。中間有 3 次（含 dev.yml 的 publish）在列出 releases 時回 403，原因沒查出來；`release.yml` 與 `dev.yml` 的 API 呼叫現在每 30 秒重試、最多 8 次，仍失敗就印出回應標頭當診斷（`ghx`）。
+
+合併 `origin/wp1/m2`（rpi 與原始碼的變更、K 軌 `--kernel-version`）、加入 `scan.tools` 與 `scan.runner` 之後，再各跑一次（沿用同一份 build 的 handoff，只重跑 scan）：`v39.2.0-demo1`（run 43347016848）綠燈、標準答案 23 項符合，與合併前的數字相同。
+
+核心 CVE 鏡像的 cache 與 ATTENTION（C1 追加）之後的驗證（commit `b31f247`）：dev.yml 手動觸發（run 43360084178，v39.2.1，沿用 build，只跑 scan；非 main／dev 分支，所以只建 draft `dev/orin-nano-demo`，5 個附件）綠燈，cache 沒有命中，新抓的鏡像存進 `kernel-cve-mirror-43360084178-1`（35 MiB）；
+release.yml 手動觸發（run 43365351840，v39.2.0）還原了那份 cache（`Cache restored from key: kernel-cve-mirror-43360084178-1`），鏡像 `kcve` 是 OK，標準答案 23 項符合，draft 19 個附件。ATTENTION（上游連不上、沿用舊的）在 runner 上沒有實際遇到，
+用本機的 `file://` 來源加一個壞網址跑過真正的 `kernel-cve.sh`＋`mirrors.sh`：最後一行 `ATTENTION …`、`pipeline-steps.tsv` 多一列 `pipeline-kernel-cve-mirror`、整體狀態 ATTENTION、`mirror_is_fresh` 回 false（不會存回 cache）；單元測試涵蓋 OK、ATTENTION、FAIL 三種結果與 collect／release-meta 的整體狀態。
+`dev.yml` 的 `concurrency` 是同一個 ref 後面的 run 取消前面的（`cancel-in-progress`），所以在同一個分支連續手動觸發兩次 dev，第一次會被取消。
+Release 的 403 又出現兩次（run 43346232399 與 43346236827，commit `7f12e63`，重試 8 次加整個 job 重跑都失敗），在 `POST /releases` 回 403，同時間 `GET` 正常；同一個 commit 之後的 commit 重跑就成功，包括對舊 commit 的 run 重跑 Release job。原因仍不明，不是舊 commit 本身（舊 commit 的 run 重跑成功）、不是同時執行（單獨重跑也失敗）。

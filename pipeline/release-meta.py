@@ -3,6 +3,7 @@
 
 用法：python3 -I pipeline/release-meta.py --project <專案名> --version <版本> --commit <40 位 commit> --run-id <數字> [--built-at <UTC ISO 8601>] [--tag <tag>] --out <檔案>
 欄位：project、version、tag、status（取自 project.yml：shipped｜development）、platform、os_responsibility、commit、built_at、workflow_run。
+給 --steps（pipeline-steps.tsv）時另有 steps（每個 workflow 步驟的結果）與 result（OK｜GAP｜FAIL：有 FAIL 是 FAIL、有 GAP 至少 GAP、檔案不存在是 GAP；`status` 仍是 project.yml 的 shipped／development，兩者不同）。
 tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev/<專案>）。專案或版本不合法 → 不寫檔、結束碼 1。
 """
 import argparse
@@ -15,6 +16,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import project_config as pc  # noqa: E402
+import step_rows  # noqa: E402
 
 
 def build_meta(projects_dir, project, version, commit, run_id, built_at=None, tag=None):
@@ -45,11 +47,19 @@ def main(argv=None):
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--built-at")
     ap.add_argument("--tag")
+    ap.add_argument("--steps", help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）：寫進 steps，整體結果寫進 result（有 FAIL／GAP／ATTENTION 不是 OK）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--projects-dir", default=os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(HERE, "..", "projects")))
     a = ap.parse_args(argv)
     try:
         meta = build_meta(a.projects_dir, a.project, a.version, a.commit, a.run_id, a.built_at, a.tag)
+        if a.steps:
+            rows = step_rows.read_rows(a.steps)
+            meta["steps"] = rows if rows is not None else []
+            meta["result"] = step_rows.overall(rows)
+            att = step_rows.attention_lines(rows)
+            if att:
+                meta["attention"] = att   # 用了舊資料頂替的說明（例如核心 CVE 鏡像上游連不上）；不擋 Release，但 result 不是 OK
     except pc.ConfigError as e:
         print("release-meta: FAIL（%s）" % e)
         return 1

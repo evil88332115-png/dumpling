@@ -18,6 +18,7 @@ scan:
   platform_arg: rockchip
   runner: amd64            # 預設值：scan 跑的 runner（amd64＝ubuntu-24.04）；scan 只匯入與讀映像，不執行目標平台的程式，不跟著 arch
   apt: []                  # scan job 額外的 apt 套件（選填）
+  tools: sbom-only         # 預設值：sbom-only＝Syft／Grype；full＝再加 cdxgen、govulncheck、guarddog（git／dir 模式的原始碼掃描要用）
 project_defaults:
   platform_version: Example SoC 1.0
   bsp_os_source: Example 公開映像

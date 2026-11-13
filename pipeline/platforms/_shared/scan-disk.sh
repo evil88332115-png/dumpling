@@ -56,15 +56,15 @@ trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
 export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Debian,PyPI,Go,npm,Maven}
 export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
 bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
-mir=$out/mirrors; rm -rf "$mir"; mkdir -p "$mir"
-mirror() {  # <腳本> <資料夾名>（腳本的參數：新資料夾、manifest）
-  local s=$1 d=$2
-  if ! bash "$root/tools/mirror/$s" "$mir/$d" "$mir/$d.manifest" > "$mir/$d.log" 2>&1; then tail -5 "$mir/$d.log"; fail "鏡像 $s 失敗（弱點資料不完整，不當作沒有漏洞）"; fi
-  echo "鏡像 $d：OK（$(tail -1 "$mir/$d.log" | cut -c1-160)）"
-}
-mirror kernel-cve.sh kcve
-mirror euvd.sh euvd
-OSV_DISTRO_ECOSYSTEMS=Debian mirror osv-distro.sh osv
+export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
+mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
+# 共用的鏡像函式（C1 的 pipeline/lib/mirrors.sh）：最多試 3 次；kernel-cve 有 KCVE_CACHE_DIR（workflow 的 cache）時，
+# 上游沒變就沿用、git.kernel.org 連不上就退回 48 小時內的上一份（最後一行 ATTENTION，記一列 pipeline-steps.tsv）；其他失敗 = FAIL
+# shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
+. "$root/pipeline/lib/mirrors.sh"
+mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
+mirror euvd.sh euvd || fail "鏡像 euvd.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
+OSV_DISTRO_ECOSYSTEMS=Debian mirror osv-distro.sh osv || fail "鏡像 osv-distro.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
 mkdir -p "$(dirname "$PILOT_ENV")"
 bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env 失敗"

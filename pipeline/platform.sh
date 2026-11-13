@@ -41,7 +41,12 @@ pname=$(basename "$proj")
 plat_root=${DUMPLING_PLATFORMS_DIR:-$here/platforms}
 
 # 驗證專案＋取平台名稱（project.yml 沒給或不認得 → FAIL，不猜）
-info=$(python3 -I "$here/project-info.py" --dir "$proj" "$ver") || fail "$(printf '%s' "$info" | head -1 | sed 's/^project-info: FAIL（//; s/）$//')"
+info=$(python3 -I "$here/project-info.py" --dir "$proj" "$ver"); irc=$?
+if [ $irc -ne 0 ]; then
+  echo "$step: FAIL（$(printf '%s' "$info" | head -1 | sed 's/^project-info: FAIL（//; s/）$//')）"
+  [ $irc = 64 ] && exit 64    # 64＝設定值不合法（例如 scan.tools）
+  exit 1
+fi
 platform=$(sed -n 's/^PLATFORM=//p' <<< "$info")
 osr=$(sed -n 's/^OS_RESPONSIBILITY=//p' <<< "$info")
 arch=$(sed -n 's/^ARCH=//p' <<< "$info")

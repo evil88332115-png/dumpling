@@ -23,6 +23,7 @@ layers:
       - "boot/*"
   default: os
 scan:
+  tools: full                   # NAS 應用原始碼要用 cdxgen（sca-scan --git）：scan job 裝 install-tools.sh 的完整工具組
   platform_arg: generic        # x86 沒有定義開機鏈：開機程式分類 NOT_ASSESSED（不是 GAP），平台由 project.yml 明確給定
   rootfs: rootfs
 project_defaults:

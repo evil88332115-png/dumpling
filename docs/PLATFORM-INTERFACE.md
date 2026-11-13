@@ -175,6 +175,7 @@ layers:                        # 分層規則（D-027）：套件名稱（不含
 scan:                          # 選填
   runner: amd64                # 選填：scan job 的 runner amd64｜arm64（預設 amd64 → ubuntu-24.04）
   apt: [zstd]                  # 選填：scan job 額外的 apt 套件
+  tools: sbom-only             # 選填：sbom-only（預設）｜full（見下表）
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
   platform_arg: jetson         # 傳給掃描工具的 --platform
   rootfs: rootfs
@@ -182,7 +183,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
 ```
-**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`ARCH`）：
+**workflow 怎麼用這些欄位**（`pipeline.yml` 的 `plan` job 讀 `pipeline/project-info.py` 的輸出 `BUILD_MODE`、`BUILD_RUNNER`、`BUILD_APT`、`SCAN_RUNNER`、`SCAN_APT`、`SCAN_TOOLS`、`ARCH`）：
 
 | 欄位 | 預設 | 作用 |
 |---|---|---|
@@ -191,7 +192,30 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | `build.runner` | `arm64` | build job 的 runner：`arm64`＝`ubuntu-24.04-arm`、`amd64`＝`ubuntu-24.04` |
 | `build.apt` | `[]` | build job 的 apt 相依 |
 | `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
+| `scan.tools` | `sbom-only` | scan job 裝哪套掃描工具：`sbom-only`＝Syft、Grype、bubblewrap（`install-tools.sh --sbom-only`）；`full`＝`install-tools.sh` 不帶旗標（Syft、Grype、cdxgen、govulncheck、guarddog、bubblewrap，版本都固定在 `install-tools.sh`）。**不分項**：git／dir 模式的 sca-scan（A-tools）檢查整套工具的版本，只裝一部分會回 ATTENTION 或 FAIL。`full` 裝在 `/opt/dumpling-tools`（沙箱只遮蔽家目錄與 runner 目錄），guarddog 在 `/usr/local/bin` 是符號連結指向 `/opt` 底下的 venv；裝完用家目錄遮蔽的 bwrap 確認每個工具看得到。其他值：`project-info.py`／`platform.sh validate` 結束碼 64。實作 `pipeline/install-scan-tools.sh` |
 | `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
+
+**步驟的結束碼規則與紀錄**（`pipeline/run-step.sh <步驟> <專案資料夾> <版本>`，workflow 所有 `platform.sh` 呼叫的唯一入口；`--record <專案資料夾> <版本> <步驟> <狀態> <結束碼> <說明>` 只記一列）：
+
+| 結束碼 | 狀態 | 行為 |
+|---|---|---|
+| 0 | OK | 繼續 |
+| 3 | GAP | 印 `::warning::`，繼續（結果照樣產生，但整體狀態不是 OK） |
+| 4 | NOT_RUN | 印 `::notice::`，繼續（不能當成成功；照實列出） |
+| 1、64 或其他 | FAIL | job 失敗 |
+
+每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|ATTENTION|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
+scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
+`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
+`status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
+Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
+
+**ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。
+所有平台的 scan 都 `source pipeline/lib/mirrors.sh`，用 `mirror <tools/mirror 底下的腳本> <資料夾名>`（不要各寫一份）；`mirror_kernel_cve <名>` 會把上一份核心 CVE 鏡像（`$KCVE_CACHE_DIR`）傳給 `kernel-cve.sh` 的 `KERNEL_CVE_REUSE_FROM`（上游 HEAD 沒變就沿用）與 `KERNEL_CVE_FALLBACK_FROM`（上游連不上就退而求其次）。
+結果看腳本輸出的最後一行：`OK …` 成功；`ATTENTION …` 也算成功，並在 `pipeline-steps.tsv` 加 `pipeline-<腳本名>-mirror	ATTENTION	0	<那一行>`（例如 `pipeline-kernel-cve-mirror`）；其他 = 這一次失敗，重試（預設 3 次、每次換新資料夾、間隔 60 秒），仍失敗 = `mirror` 回傳 1，呼叫端 FAIL。
+scan job 用 `actions/cache/restore`／`save`（釘 commit SHA）保存 `kcve/`（kernel-cves.zip、SOURCE，幾十 MB；不存 git clone）：key `kernel-cve-mirror-<run_id>-<run_attempt>`、`restore-keys: kernel-cve-mirror-`；還原與儲存用同一個路徑（cache 的版本含路徑）。
+**只有這次新抓的才存**（結果 OK 且 SOURCE 沒有 `fallback=yes`）；沿用或頂替的舊資料不存回去，免得舊資料被當成新的。
+**Release 決定（D-033 一致）**：ATTENTION 不擋 Release，正式 tag 也一樣；但 Release 說明最上面會有「ATTENTION（用了舊資料頂替）」區塊與那一行原文，`summary.md`、`scan.json`（`pipeline_attention`）、`release-meta.json`（`result`、`attention`）都看得到。
 
 **build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
 workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。
