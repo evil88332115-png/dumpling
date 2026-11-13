@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rpi-lite-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43380656858，跑的 commit 是 eacb60d）。不是直接存輸出：逐項核對過（官方 SBOM／.info 的 633 個套件）。核心的比對先不釘：(1) -os 重跑時 sca-scan 退回 CNA，OS 報告多出 2700 列核心候選；(2) bsp 報告的 1328 列核心只有 Debian 還沒修的 CVE——核心套件版本帶 epoch（1:6.18.50-1+rpt1），Grype 拿它比 Debian 6.12.x 的修補版本，約 2400 個 CVE 被當成已修補而沒有列出。兩件都已回報 C0／C1，修好後補上核心的項目。C-grype-db 不釘（Grype 上游 DB 的新舊隨時間變）。元件數、雜湊、狀態用 equals；漏洞數用範圍。",
+ "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43410313151，跑的 commit 是 b907181）。不是直接存輸出：逐項核對過（官方 SBOM／.info 的 633 個套件；核心 config 與官方 deb 核對）。核心：D-044 修好後 OS 報告沒有核心列；D-038 的 CNA 清單（2700）有產生、也用在 .config 判定，但交付報告的核心列仍只有 Grype 對 Debian 資料比對到的 332 個 CVE（×4 個核心套件＝1328 列），CNA 候選沒有成列（缺口 19，C1／sca-center 的報告端）：bsp 的核心列數先不釘，修好後再釘「bsp 核心候選 ≥ CNA 清單」。C-grype-db 不釘。元件數、雜湊、狀態用 equals；漏洞數用範圍。",
  "checks": {
   "platform": {
    "equals": "raspberrypi",
@@ -132,7 +132,7 @@
   },
   "runs..stages.C-kernel-config": {
    "equals": "GAP",
-   "reason": "固定是 GAP：Pi 5 的核心依出貨 .config 判定，但有判斷不了的 CVE（2026-11-13：332 個中無法判斷 191）"
+   "reason": "固定是 GAP：依出貨 .config 判定 CNA 候選＋Grype 的核心 CVE（2026-11-13 共 2839 個：有編 1324、無法判斷 1515、沒編進 0）；無法判斷的多半是 CNA 紀錄沒有修補的檔案清單"
   },
   "runs.-bsp.stages.C-kernel-config": {
    "equals": "GAP",
@@ -320,6 +320,63 @@
   "runs.-os.stages.C-kernel-module-map": {
    "equals": "NOT_RUN",
    "reason": "D-044：OS 層的 SBOM 沒有核心，核心階段不適用（核心在 -bsp 那份報告）"
+  },
+  "kernel_upstream.status": {
+   "equals": "OK",
+   "reason": "D-038 兩個來源一致：映像模組資料夾 6.18.50+rpt-rpi-2712（開頭的 6.18.50）與核心原始碼 raspberrypi-linux-stable_20260911 的 Makefile；出貨 config 存在"
+  },
+  "kernel_upstream.upstream_verified": {
+   "equals": true,
+   "reason": "同上"
+  },
+  "kernel_upstream.requested_upstream": {
+   "equals": "6.18.50",
+   "reason": "sources.yml 的 kernel_upstream_version"
+  },
+  "kernel_upstream.kernel_release": {
+   "equals": "6.18.50+rpt-rpi-2712",
+   "reason": "D-036：只判定 Pi 5 的核心"
+  },
+  "kernel_upstream.shipped_config": {
+   "equals": {
+    "path": "/boot/config-6.18.50+rpt-rpi-2712",
+    "bytes": 255907,
+    "sha256": "8914d802785a04fbb68a00e88e90774db7aa2ec33b9fa1e28f3296be3ebbcff8"
+   },
+   "reason": "映像出貨的 config；與官方 linux-image-6.18.50+rpt-rpi-2712_1:6.18.50-1+rpt1 deb 裡的 boot/config 同一個 sha256（C4 從 archive.raspberrypi.com 下載核對）。C-kernel-config 讀的是 linux-headers 的 .config（sha256 8282cb6f…），兩份只差 CONFIG_BUILD_SALT 與空的 CONFIG_SYSTEM_TRUSTED_KEYS 兩行，不影響哪些程式編進核心"
+  },
+  "kernel_upstream.cna.gap": {
+   "equals": true,
+   "reason": "CNA 清單已知不完整：2024-02 以前其他單位發的 CVE 不在 CNA 資料裡"
+  },
+  "kernel_upstream.cna.cves": {
+   "min": 2000,
+   "max": 12000,
+   "reason": "依上游 6.18.50 的 CNA 版本範圍列出的候選（affected＋unknown）；2026-11-13 是 2700 個，vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11、18225 筆紀錄）；核心 CVE 每月增加，上限放寬"
+  },
+  "kernel_upstream_crosscheck.agree": {
+   "equals": true,
+   "reason": "D-038 兩邊核對：C4 的 kernel_upstream（6.18.50）與 C1 的 kernel-versions /2（6.18.50，basis source-makefile+platform-param）一致"
+  },
+  "kernel_upstream_crosscheck.c1": {
+   "equals": "6.18.50",
+   "reason": "C1 那邊的上游版本"
+  },
+  "runs..stages.C-kernel-coverage": {
+   "equals": "GAP",
+   "reason": "D-044：核心不在 Debian 的核心序列上（epoch 1:、+rpt、明確宣告 kernel_not_distro），Grype 對 Debian 資料的比對不可靠 → GAP（不是 OK）"
+  },
+  "runs.-bsp.stages.C-kernel-coverage": {
+   "equals": "GAP",
+   "reason": "同上"
+  },
+  "runs..stages.C-kernel-cve-list": {
+   "equals": "OK",
+   "reason": "D-038：KERNEL_CVES（上游 6.18.50 的 CNA 候選 2700 個）交給 sca-scan"
+  },
+  "runs.-bsp.stages.C-kernel-cve-list": {
+   "equals": "OK",
+   "reason": "同上"
   }
  }
 }
