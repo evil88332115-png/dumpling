@@ -56,7 +56,7 @@ BIOS（Intel 平台的完整 SPI 映像）：
   me_conflict 列出全部、ATTENTION。沒有 ME 區域的檔案裡零散的 `$MN2`
   不當成 CSE 版本（只記在 me_note）。新世代的配置（CSME 18 這類：區域開頭是 CSE layout table，`$FPT` 只在 data partition、沒有 FTPR 那一項）
   上面的做法都拿不到、結果是 unknown 時，再走 intel_cse_layout.py：layout table → BP 的 BPDT → FTPR（type 2）、RBEP（1）、NFTP（7）三種分割區的
-  `$CPD` → `<名稱>.man` 的 `$MN2`；有 FTPR 取它，沒有就要 RBEP 與 NFTP 等至少兩個獨立來源版本相同才採用（basis「BPDT (CSE layout table …): …」），
+  `$CPD` → `<名稱>.man` 的 `$MN2`；有 FTPR 取它，沒有就要 RBEP 與 NFTP 兩種類型各至少一份、版本相同才採用（同一類型的拷貝不算獨立來源）（basis「BPDT (CSE layout table …): …」），
   讀得到的版本互相矛盾、結構不一致、只有一個來源 → 維持 unknown（原因接在 me_note）。上面的做法有結果時完全不動。沒有 descriptor 時
   layout table 或 BPDT 要在檔案開頭。格式與出處見 intel_cse_layout.py、docs/notes/c2-csme-layout.md。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；family 是 CSME 時 SBOM 的 ME 元件才有 cpe（見 CSME_CPE），其他情況不填。
   格式依 me_cleaner、MEAnalyzer 的結構定義（只讀它們的原始碼核對欄位位置，沒有用它們的程式）。

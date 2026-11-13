@@ -27,6 +27,12 @@ notes: |
   上游若移除舊版，網址會失效、firmware-fetch 會 FAIL；此時換同系列其他版本（v1.0.0 的 ME 版本在 release notes 也是 18.0.10.2285）。
 expected:
   # 只寫有公開出處的值。ME：release notes（v1.0.1、v1.0.0）的 "Intel Management Engine version v18.0.10.2285"。
-  # 映像另外讀出微碼（000A06A4／platform 0xE6／revision 0x25）、coreboot／FSP 等，release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12"
-  # 這種編號，與映像裡 FSPH 的 ImageRevision 不同格式），沒有獨立佐證，所以不寫。
   intel_me: 18.0.10.2285
+  # 微碼：映像讀到 000A06A4／platform 0xE6／revision 0x25。出處兩處：
+  #  - Dasharo v1.0.1 release notes 的 SBOM "Intel microcode version MTL C0 0x00000025 0x25 19/03/2025"，連結指到 Intel 微碼倉庫的 intel-ucode/06-aa-04
+  #    （檔名 06-aa-04＝CPUID 000A06A4）；
+  #  - Intel 微碼倉庫 microcode-20250812 的 releasenote.md："MTL | C0 | 06-aa-04/e6 | 00000024 | 00000025"（/e6＝platform mask 0xE6）。
+  microcode:
+    - {cpuid: "000A06A4", platform_mask: "0xE6", revision: "0x25"}
+  # 映像另外讀出 FSP、coreboot 資訊，release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12" 這種編號，與映像裡 FSPH 的 ImageRevision 不同格式），
+  # 沒有獨立佐證，所以不寫。

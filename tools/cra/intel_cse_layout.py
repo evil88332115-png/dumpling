@@ -22,16 +22,23 @@ BPDT 項目裡的 S-BPDT（type 5）不往下追（不會有循環或遞迴）�
   每個項目 0x18 bytes：名稱 12 bytes、+0xC offset（低 25 bits，相對 `$CPD` 開頭；高位元是壓縮旗標，manifest 不可壓縮）、+0x10 長度、+0x14 保留。
 - `$MN2` manifest：+0x10 vendor 0x8086、+0x14 BCD 日期、+0x1C tag、+0x24 的 major.minor.hotfix.build（4×u16；cse_layout.h 的
   subpart_entry_manifest_header、MEAnalyzer 的 MN2_Manifest）。
-- CSE layout table（區域開頭）：layout 1.7＝0x10 bytes ROM bypass、+0x10 size(u16，0x58)、redundancy(u16)、checksum(u32)、data(offset,size)、
-  bp1…bp5(offset,size)、temp、flog，欄位都是 u32；出處 cse_layout.h 的 cse_layout。較舊的 layout 1.6 沒有 size／checksum 那三個欄位：
-  0x10 bytes ROM bypass 後直接是 data(offset,size)、bp1(offset,size)、bp2(offset,size)（只有一個公開樣本的觀察，後面的欄位意義沒有讀到，不使用）。
-  layout table 的 checksum 算法沒有查到，不驗證；改以「每個 BPn 都真的指到 BPDT」確認。
+- CSE layout table（區域開頭；MEAnalyzer 的 CSE_Layout_Table_16／17，coreboot cse_layout.h 的 cse_layout）：
+  layout 1.7＝+0 ROM bypass 16 bytes、+0x10 Size(u16)、+0x12 Flags(bit 0＝CSE redundancy：BP2 是 BP1 的備份)、+0x14 checksum(u32)、
+  +0x18 data(offset,size)、+0x20…+0x44 BP1…BP5(offset,size)、+0x48 temp pages、+0x50 external error log（Size 0x48 以上才有）；欄位都是 u32，offset 相對區域開頭。
+  **Size 從 +0x10 起算**（表的總長是 0x10＋Size）。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog），公開真樣本（兩個版本）是 0x58。
+  **checksum 是 CRC-32**，範圍是 d[+0x10:+0x14] ＋ 4 個 0（checksum 欄位本身不入算）＋ d[+0x18:+0x10+Size]（MEAnalyzer 的驗證程式；
+  兩個真樣本的 stored 值都相符）。本模組認 Size 0x40、0x48、0x58，CRC 不符 → GAP；Size 是其他值 → 不認（none）。
+  0x40 與 0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。
+  layout 1.6＝同樣 16 bytes ROM bypass，+0x10 data(offset,size)、+0x18…+0x3C BP1…BP5(offset,size)、+0x40 u64 checksum，表長 0x48，
+  之後到 0x1000 全是 0xFF（MEAnalyzer 也用這個填充當辨識條件之一，因為 1.6 沒有標記）。MEAnalyzer 註解說 checksum 是整張表（不含 ROM bypass）的二補數和；
+  唯一的公開樣本（Comet Lake）存的是 0x22，我試過位元組、u32、u64 的加總都湊不成 0，算法沒確認，**不驗證**。
+  兩種 layout 都以「每個非空 BPn 都真的指到 BPDT、範圍不重疊不超出區域」確認。
 
 主程式（CSE 版本）的判定，不猜：
 - 看 BPDT 的 type 2（FTPR）、type 1（RBEP）、type 7（NFTP）三種分割區。分割區名稱必須是對應的 FTPR／RBEP／NFTP，
   `$CPD` 表頭、checksum、`<名稱>.man` 項目、`$MN2` 都要過，版本不能全是 0。
-- 有 FTPR：取 FTPR.man 的版本；沒有 FTPR（新世代）：至少要兩個互相獨立的分割區（例如 BP1 的 RBEP 與 BP3 的 NFTP）版本相同才採用，
-  只有一個來源不採用（沒有第二個來源可以佐證）。
+- 有 FTPR：取 FTPR.man 的版本；沒有 FTPR（新世代）：RBEP 與 NFTP 兩種類型各至少要有一份，而且版本相同才採用。
+  同一類型的多份拷貝（例如 redundancy 開啟時 BP2 是 BP1 的備份）不算獨立來源；只有一種類型 → 不採用。
 - 讀得到的主程式 manifest 版本互相不同、任何一個 BPDT 或主程式分割區結構不一致（越界、重疊、重複項目、名稱不符、checksum 不符、manifest 壞）→ 不回報版本，
   回報原因（呼叫端維持 unknown／GAP）。
 - 限制：只看 CSE 區域本身（呼叫端給的範圍）；區域外的 IFWI（例如整個放在 BIOS 區域裡的平台）、capsule 包著的區域、layout table 之外的配置不處理。
@@ -45,7 +52,9 @@ BPDT_ENTRY = 0x0C
 MAX_BP = 5                             # layout 1.7 最多 5 個 boot partition
 MAX_BPDT_ENTRIES = 48                  # 實際約 5～10 項；coreboot 的類型表到 33
 MAX_CPD_ENTRIES = 256
-LAYOUT_17_SIZE = 0x58
+LAYOUT_17_SIZES = (0x40, 0x48, 0x58)    # Size 欄位（從 +0x10 起算）：MEAnalyzer 的 0x40／0x48 與公開真樣本的 0x58
+LAYOUT_16_SIZE = 0x48
+LAYOUT_PAD = 0x1000                      # 1.6 的表後面填 0xFF 到這裡
 MAIN_TYPES = {2: "FTPR", 1: "RBEP", 7: "NFTP"}    # BPDT 類型 → `$CPD` 名稱（ifwitool.c 與 cse_layout.h 的類型表）
 PARSE_ERRORS = (struct.error, IndexError, ValueError, OverflowError)
 
@@ -58,28 +67,35 @@ def u32(d, o):
     return struct.unpack_from("<I", d, o)[0]
 
 
+def erased(d, p, size):
+    """p～p+size 全是 0xFF（flash 清除過）。"""
+    return not d[p:p + size].strip(b"\xff")
+
+
 def layout_table(d, base, end):
     """區域開頭的 CSE layout table → ({"version", "ranges": [(名稱, 相對 offset, size)]}, None)；不像 layout table → (None, None)；
-    像（layout 1.7 的 size 欄位對）但內容矛盾 → (None, 原因)。"""
+    像（layout 1.7 的 Size 欄位對）但 CRC 不符或內容矛盾 → (None, 原因)。"""
     if base + 0x20 > end:
         return None, None
-    if u16(d, base + 0x10) == LAYOUT_17_SIZE:
-        if base + LAYOUT_17_SIZE > end:
-            return None, f"CSE layout table at 0x{base:x} goes past the end of the region"
-        ver = "1.7"
+    size = end - base
+    sz = u16(d, base + 0x10)
+    if sz in LAYOUT_17_SIZES:
+        total = 0x10 + sz
+        if base + total > end:
+            return None, f"CSE layout table at 0x{base:x} (Size 0x{sz:x}) goes past the end of the region"
+        want = u32(d, base + 0x14)
+        got = zlib.crc32(d[base + 0x10:base + 0x14] + bytes(4) + d[base + 0x18:base + total])
+        if got != want:
+            return None, f"CSE layout table at 0x{base:x}: CRC-32 mismatch (stored 0x{want:08x}, computed 0x{got:08x})"
+        ver, strict, head = "1.7", True, total
         pairs = [("data", u32(d, base + 0x18), u32(d, base + 0x1C))]
         pairs += [(f"BP{i + 1}", u32(d, base + 0x20 + 8 * i), u32(d, base + 0x24 + 8 * i)) for i in range(MAX_BP)]
-        head = LAYOUT_17_SIZE
-        strict = True
     else:
-        if base + 0x28 > end:
+        if size < LAYOUT_16_SIZE or not erased(d, base + LAYOUT_16_SIZE, min(LAYOUT_PAD, size) - LAYOUT_16_SIZE):
             return None, None
-        ver = "1.6"
-        pairs = [("data", u32(d, base + 0x10), u32(d, base + 0x14)),
-                 ("BP1", u32(d, base + 0x18), u32(d, base + 0x1C)), ("BP2", u32(d, base + 0x20), u32(d, base + 0x24))]
-        head = 0x28
-        strict = False
-    size = end - base
+        ver, strict, head = "1.6", False, LAYOUT_16_SIZE
+        pairs = [("data", u32(d, base + 0x10), u32(d, base + 0x14))]
+        pairs += [(f"BP{i + 1}", u32(d, base + 0x18 + 8 * i), u32(d, base + 0x1C + 8 * i)) for i in range(MAX_BP)]
     used = [(n, o, s) for n, o, s in pairs if o or s]
     why = None
     for n, o, s in used:
@@ -205,7 +221,7 @@ def _find(d, base, end, budget):
             if n == "data":
                 continue
             p = base + o
-            if d[p:p + 4] == b"\xff\xff\xff\xff":       # 配置了但是空的（清除過的 flash）
+            if erased(d, p, s):                         # 配置了但整個 boot partition 都是 0xFF（清除過的 flash）；只有表頭是 0xFF 不算
                 continue
             lbps.append((n, p, p + s))
     elif base + 4 <= end and u32(d, base) == BPDT_SIG:
@@ -241,10 +257,11 @@ def _find(d, base, end, budget):
     if len({c["version"] for c in cands}) > 1:
         return {"status": "gap", "note": f"{how}: the main-program manifests disagree ({desc}); no version is reported"}
     ftpr = next((c for c in cands if c["name"] == "FTPR"), None)
-    if ftpr is None and len(cands) < 2:
-        return {"status": "gap", "note": (f"{how}: no FTPR partition and only one other main-program manifest ({desc}); "
-                                          "a second independent partition with the same version is required, so no version is reported")}
-    pick = ftpr or cands[0]                              # cands 依 boot partition、FTPR／RBEP／NFTP 的順序；沒有 FTPR 時各份版本相同
+    kinds = {c["name"] for c in cands}
+    if ftpr is None and not {"RBEP", "NFTP"} <= kinds:
+        return {"status": "gap", "note": (f"{how}: no FTPR partition and no {' or '.join(sorted({'RBEP', 'NFTP'} - kinds))} partition ({desc}); "
+                                          "RBEP and NFTP must both be present with the same version (copies of one type are not independent), so no version is reported")}
+    pick = ftpr or next(c for c in cands if c["name"] == "RBEP")     # 有 FTPR 取它；否則取第一個 RBEP（各份版本都相同）
     return {"status": "found", "version": pick["version"], "date_raw": pick["date_raw"], "offset": pick["offset"],
-            "basis": f"BPDT ({how}): {desc}" + ("" if ftpr else "; no FTPR partition, the manifests agree"),
+            "basis": f"BPDT ({how}): {desc}" + ("" if ftpr else "; no FTPR partition, RBEP and NFTP agree"),
             "sources": cands, "layout": how}
