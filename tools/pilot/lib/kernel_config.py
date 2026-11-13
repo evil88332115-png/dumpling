@@ -43,6 +43,9 @@
     相同或只差工具鏈照舊；不同 → 記出來，狀態 ATTENTION。樹的主.次版本和判定的核心不同 → GAP。輸出的 kernel.source_tree 記 Makefile 的來源。
   --probe-kernel-version：不判定，只從 --from 讀出產品核心版本（/lib/modules/<版本>，沒有時 Image 的版本字串），印一行
     KERNEL-VERSION<TAB>OK|NONE|GAP<TAB>版本或原因（sca-scan 在 Grype／DT 沒有核心 CVE 時用）；不需要 --out。
+  --list-kernel-versions：不判定，只列出 --from 的映像出貨的每顆核心（/usr/lib/modules/<版本>/ 有 .ko 或檔案的資料夾，排序、空白分隔），印一行
+    KERNEL-VERSIONS<TAB>OK<TAB>版本…（沒有模組資料夾時版本欄是空的）；讀不出來 → KERNEL-VERSIONS<TAB>GAP<TAB>原因。
+    sca-scan 用它找出「出貨但沒被判定」的核心（--kernel-version 沒給的那些）；不需要 --out。
   --oot-build-record：樹外模組（例如 nvidia-oot、nvgpu）的建置資料夾，可重複；需要 --build-record。讀 .*.o.cmd 的 source／deps 與 .*.ko.cmd
     （kernel_oot_record.py）。映像裡每一個樹外 .ko 都有完整的紀錄時，標頭檔看紀錄的 deps（核心與樹外模組都沒列 → 沒編；樹外模組列了 → 有編），
     否則標頭檔照舊因為樹外模組而 unknown（全部或沒有：未驗證的模組可能讀了任何標頭檔，部分採用只能多判 affected，而且要限制在已驗證模組的物件，暫不做）。
@@ -4531,6 +4534,14 @@ def probe_kernel_version(a):
     return "OK", ver
 
 
+def list_kernel_versions(a):
+    """--list-kernel-versions：--from 的映像 → 出貨的核心（模組資料夾的名稱，排序）。判斷方式與 locate／probe_kernel_version 相同。"""
+    col, _ = collect(a.from_, a.prefix, images=True)
+    if col is None:
+        raise InputError("--list-kernel-versions 的 --from 要是映像或刷機包（不是核心原始碼樹）")
+    return sorted(v for v, m in col.modules.items() if m["ko"] or m["files"] or m.get("ko_links"))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="核心 CVE 依產品 .config 判斷修補的程式有沒有編進核心（C-kernel-config）")
     ap.add_argument("--grype")
@@ -4550,6 +4561,7 @@ def main(argv=None):
     ap.add_argument("--cves-origin")
     ap.add_argument("--source-tree")
     ap.add_argument("--probe-kernel-version", action="store_true")
+    ap.add_argument("--list-kernel-versions", action="store_true")
     ap.add_argument("--prefer-rootfs-image", action="store_true")
     ap.add_argument("--out")
     try:
@@ -4557,6 +4569,20 @@ def main(argv=None):
     except SystemExit:
         line("FAIL", "kernel_config.py 參數錯誤")
         return 3
+    if a.list_kernel_versions:
+        if not a.from_:
+            print("KERNEL-VERSIONS\tGAP\t--list-kernel-versions 要 --from")
+            return 3
+        try:
+            vers = list_kernel_versions(a)
+        except InputError as e:
+            print("KERNEL-VERSIONS\tGAP\t" + re.sub(r"[\t\r\n]+", " ", str(e))[:300])
+            return 3
+        except Exception as e:
+            print(f"KERNEL-VERSIONS\tGAP\t讀不出映像出貨的核心（{type(e).__name__}）")
+            return 3
+        print("KERNEL-VERSIONS\tOK\t" + " ".join(re.sub(r"\s+", "_", v) for v in vers)[:4000])
+        return 0
     if a.probe_kernel_version:
         if not a.from_:
             print("KERNEL-VERSION\tGAP\t--probe-kernel-version 要 --from")
