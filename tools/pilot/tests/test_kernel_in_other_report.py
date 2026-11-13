@@ -43,7 +43,7 @@ KC_BLOCK = block("KNONE=0 ", "# NVIDIA 安全公告")
 K_BLOCK = tkv.block_text()
 
 
-def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=()):
+def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=(), kbuild=True):
     root = tmp_path / "root"
     lib = root / "tools" / "pilot" / "lib"
     lib.mkdir(parents=True)
@@ -66,12 +66,14 @@ def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=()):
     script = f"""set -uo pipefail
 ROOT={root}; OUT={out}; ST=$OUT/status.tsv; printf 'stage\\tstatus\\tdetail\\n' > "$ST"
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
-MODE=sbom; SBOM_OK=1; SBOM=$OUT/sbom/sbom.cdx.json; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=/nonexistent-mirror; KERNEL_CVES=
+MODE=sbom; SBOM_OK=1; SBOM=$OUT/sbom/sbom.cdx.json; KBUILD={src if kbuild else "''"}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=/nonexistent-mirror; KERNEL_CVES=
 SCA_KERNEL_VERSIONS=; KOTHER={kother!r}; KNOTDISTRO={knotdistro!r}
+declare -A META=()
 unset KERNEL_SOURCE_DIR
 KVERS=({kv}); KUPS=()
 {KC_BLOCK}
 {K_BLOCK}
+printf '%s' "${{META[kernel_in_other_report]:-}}" > "$OUT/meta-kother.txt"
 echo done
 """
     pybin = Path(sys.executable).parent
@@ -95,6 +97,7 @@ def test_no_kernel_sbom_with_option_writes_three_not_run_rows_and_runs_nothing(t
     assert "C-kernel-coverage" not in rows and not any(k.startswith("C-kernel-not-judged") for k in rows) and "C-kernel-versions" not in rows
     assert not kv_exists
     assert not (out / "scan" / "kernel-cve-list.txt").exists() and not (out / "scan" / "kernel-config.json").exists()
+    assert (out / "meta-kother.txt").read_text() == OTHER                            # 結構上的標記：cra_report 只認這個決定三個 NOT_RUN 不降級
 
 
 def test_pi_like_two_kernels_image_still_nothing_runs_and_no_not_judged_rows(tmp_path):
@@ -124,7 +127,7 @@ def test_no_kernel_sbom_without_option_is_unchanged(tmp_path):
     rows, kv_exists, log, out = layer_run(tmp_path, NO_KERNEL_SBOM, tkc.rootfs_members(kver=A))
     assert "kernel_config.py" in log and "kernel_module_map.py" in log
     assert not any("不適用" in v[1] for v in rows.values())
-    assert kv_exists
+    assert kv_exists and (out / "meta-kother.txt").read_text() == ""
 
 
 def test_coverage_not_run_row_is_not_written_and_option_without_kernelcheck_ok_does_not_apply(tmp_path):
@@ -132,6 +135,7 @@ def test_coverage_not_run_row_is_not_written_and_option_without_kernelcheck_ok_d
     rows, kv_exists, log, out = layer_run(tmp_path, KERNEL_SBOM, tkc.rootfs_members(kver=A), kother=OTHER)
     assert rows["C-kernel-coverage"][0] == "GAP"
     assert not any("不適用" in v[1] for v in rows.values()) and "kernel_config.py" in log
+    assert (out / "meta-kother.txt").read_text() == ""                               # 有核心：給了選項也不寫標記
 
 
 def test_not_distro_declaration_reaches_kernelcheck(tmp_path):
@@ -143,6 +147,19 @@ def test_not_distro_declaration_reaches_kernelcheck(tmp_path):
     (tmp_path / "n").mkdir()
     rows, _, _, _ = layer_run(tmp_path / "n", NO_KERNEL_SBOM, tkc.rootfs_members(kver=A), knotdistro="x", kother=OTHER)
     assert "C-kernel-coverage" not in rows and rows["C-kernel-config"][0] == "NOT_RUN"
+
+
+def test_sbom_without_kernel_build_writes_not_run_only_when_the_sbom_has_a_kernel(tmp_path):
+    """--sbom 沒給 --kernel-build：SBOM 有核心 → C-kernel-config／module-map NOT_RUN（cra_report 算 GAP）；
+    SBOM 看不到核心 → 不寫（沒有核心的產品不該永遠 GAP；同 C-kernel-coverage 不寫）。"""
+    (tmp_path / "k").mkdir()
+    rows, _, log, out = layer_run(tmp_path / "k", KERNEL_SBOM, tkc.rootfs_members(kver=A), kbuild=False)
+    assert rows["C-kernel-config"] == ("NOT_RUN", "沒給 --kernel-build：核心的 CVE 沒有依產品核心的 .config 判定"), rows
+    assert rows["C-kernel-module-map"][0] == "NOT_RUN" and log == ""
+    (tmp_path / "n").mkdir()
+    rows, _, log, out = layer_run(tmp_path / "n", NO_KERNEL_SBOM, tkc.rootfs_members(kver=A), kbuild=False)
+    assert not any(k.startswith("C-kernel") for k in rows), rows
+    assert log == "" and (out / "meta-kother.txt").read_text() == ""
 
 
 # ---------- 參數 ----------
