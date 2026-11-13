@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 03:03 -0500（C0）
+最後更新：2026-11-13 03:10 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -15,7 +15,7 @@
 - 下一步：C1 的 M2 驗收 run 已綠（43375548090、43375551920），C1 派驗證後開 PR → C0 另派獨立驗證 → 合併 → 問使用者何時打第一個正式 tag；M2 合併後：開文件批次 PR（D-034～D-043）、C2／C3／C4 併 main 後各自開 PR、排 M7（含 adapter-gaps #16）
 - 給 C3 的交接：(1) M1 沒帶 `alert_mail.py`（寄信），exploited_* 寄信測試約 29 個已刪，要寄信時由 C3 帶回；(2) GitLab 階段「已被利用」的真實案件一定要用私有 Issue；(3) 每日監控讀 Release 附件 `sbom-<專案>-<版本>.cdx.json`＋`release-meta.json`，開發版讀滾動 pre-release `dev/<專案>`（D-029）；watch 自己的狀態檔（防 60 天停用）由 C3 設計；(4) GITLAB-PORT 待辦：DT parent／child 專案在常駐 DT 再評估（D-030）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（客戶負責 OS 時，OS 層未評估的 KEV 是否擋發行；目前保守：擋）（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）
-- 卡住／等決定：等 C1 判斷兩個分層／核心問題（rpi bsp 核心因 epoch 約漏報 2400 CVE；-os 報告多出 2700 列 CNA 核心）是否放進 M2；至少 M2 要讓 C-kernel-coverage 在此情況標 GAP
+- 卡住／等決定：等 C1 判斷兩個分層／核心問題（rpi bsp 核心因 epoch 約漏報 2400 CVE；-os 報告多出 2700 列 CNA 核心）是否放進 M2；至少 M2 要讓 C-kernel-coverage 在此情況標 GAP；另：ours 的 P1 表沒列 os 層（缺口 24）已請 C1 放進 M2
 - 卡住／等決定：無。D-041 已定（第二台每對話 4、整台 8、負載門檻 12）
 <!-- END C0 -->
 
