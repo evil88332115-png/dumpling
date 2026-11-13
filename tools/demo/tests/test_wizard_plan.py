@@ -615,3 +615,190 @@ def test_platform_is_explicit_and_never_guessed(site):
     r = run(base + ["--platform", "rockchip"])
     assert r.returncode == 0, r.stdout + r.stderr
     assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] == "rockchip"
+
+
+# ---- 設定包的版本與刷機包識別由精靈覆寫 ----
+def _pack(tmp_path, **prod):
+    d = tmp_path / "pack"
+    d.mkdir()
+    cfg = {"schema_version": 1, "product": {"name": "DEMO_Board", "version": "V1.0.0.1_a (rootfs)", **prod}}
+    (d / "config.json").write_text(json.dumps(cfg))
+    return d
+
+
+def test_override_version_and_identification(tmp_path):
+    w = _load_wizard()
+    old_md5, new_md5 = "a" * 32, "b" * 32
+    pack = _pack(tmp_path, identification=f"Flash package DEMO_Board_V1.0.0.1.tbz2 (MD5 {old_md5}), root filesystem rootfs, Linux 6.8")
+    orig = (pack / "config.json").read_text()
+    work = tmp_path / "work"
+    shutil.copytree(pack, work)
+    assert w.override_pack_version(work / "config.json", "V1.0.1_a") == ("V1.0.0.1_a (rootfs)", "V1.0.1_a (rootfs)")
+    st, info = w.override_pack_identification(work / "config.json", "DEMO_Board_V1.0.1.tbz2", new_md5)
+    assert st == "OVERRIDDEN"
+    p = json.loads((work / "config.json").read_text())["product"]
+    assert p["version"] == "V1.0.1_a (rootfs)"
+    assert p["identification"] == f"Flash package DEMO_Board_V1.0.1.tbz2 (MD5 {new_md5}), root filesystem rootfs, Linux 6.8"
+    assert (pack / "config.json").read_text() == orig          # 原始設定包不動
+    assert w.override_pack_identification(work / "config.json", "DEMO_Board_V1.0.1.tbz2", new_md5)[0] == "SAME"
+
+
+def test_override_version_suffix_rules(tmp_path):
+    w = _load_wizard()
+    for n, (old, new) in enumerate((('V1.0.0.1_a', 'V2.0'), ('V1.0.0.1_a (rootfs)', 'V2.0 (rootfs)'), ('1.0 (2.0.1)', 'V2.0'))):
+        d = tmp_path / f"p{n}"
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps({"product": {"version": old}}))
+        w.override_pack_version(d / "config.json", "V2.0")
+        assert json.loads((d / "config.json").read_text())["product"]["version"] == new
+
+
+def test_unrecognised_identification_unchanged(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path, identification="label on the module")
+    before = (pack / "config.json").read_text()
+    st, info = w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", "b" * 32)
+    assert st == "UNRECOGNISED" and info == "label on the module"
+    assert (pack / "config.json").read_text() == before
+
+
+def test_override_identification_without_md5_keeps_old(tmp_path):
+    w = _load_wizard()
+    old = "Flash package DEMO_Board_V1.0.0.1.tbz2 (MD5 " + "a" * 32 + "), root filesystem rootfs"
+    pack = _pack(tmp_path, identification=old)
+    for bad in (None, "", "xyz", "b" * 31):
+        st, info = w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", bad)
+        assert st == "NO_MD5"
+        assert json.loads((pack / "config.json").read_text())["product"]["identification"] == old      # 不是新檔名＋舊 MD5
+
+
+def test_identification_filename_does_not_cross_comma(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path, identification="Flash package, root filesystem rootfs")
+    assert w.override_pack_identification(pack / "config.json", "x.tbz2", "b" * 32)[0] == "UNRECOGNISED"
+
+
+def test_version_multiple_suffixes_and_missing(tmp_path):
+    w = _load_wizard()
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({"product": {"version": "V1 (rootfs)(gui)  "}}))
+    w.override_pack_version(d / "config.json", "V9")
+    assert json.loads((d / "config.json").read_text())["product"]["version"] == "V9 (rootfs)(gui)"
+    (d / "config.json").write_text(json.dumps({"product": {"name": "x"}}))
+    # dumpling 在地（D-039、D-055）：沒寫 product.version 時填入計畫版本（上游是 ValueError → ATTENTION）
+    assert w.override_pack_version(d / "config.json", "V9") == (None, "V9")
+
+
+def test_stale_pack_files_warn(tmp_path):
+    w = _load_wizard()
+    (tmp_path / "kernel-modules.json").write_text(json.dumps({"source": "image rootfs (flash package DEMO_Board_V1.0.0.1.tbz2): lib/modules",
+                                                              "image_sha256": "sha256:" + "c" * 64}))
+    (tmp_path / "exposed-services.json").write_text(json.dumps({"collected": "2026-01-01", "source": "board running V1.0.0.1_a"}))
+    r, n = w.stale_pack_files(tmp_path, "DEMO_Board_V1.0.0.3.tbz2", "V1.0.0.3_a", {"d" * 64})
+    assert len(r) == 3 and "kernel-modules.json 的 source" in r[0] and "image_sha256" in r[1] and "exposed-services.json" in r[2] and n == []
+    # 同一個映像：sha256: 前綴與大小寫不同也算相同
+    (tmp_path / "kernel-modules.json").write_text(json.dumps({"source": "x", "image_sha256": "SHA256:" + "C" * 64}))
+    assert w.stale_pack_files(tmp_path, "DEMO_Board_V1.0.0.1.tbz2", "V1.0.0.1_a", {"c" * 64}) == ([], [])
+    # 讀不到映像識別：記「沒比對」，不是靜默略過
+    r, n = w.stale_pack_files(tmp_path, "DEMO_Board_V1.0.0.1.tbz2", "V1.0.0.1_a", None)
+    assert r == [] and len(n) == 1 and "沒比對" in n[0]
+
+
+def test_exposed_services_no_false_positive(tmp_path):
+    w = _load_wizard()
+    es = tmp_path / "exposed-services.json"
+    for src in ("board running V1.0.0.1", "board running V1.0.0.1_a", "Linux V5.10 on DEMO_Board V1.0.0.1_a", "kernel V5.10.104"):
+        es.write_text(json.dumps({"source": src, "$comment": "old V0.9.0.1"}))
+        assert w.stale_pack_files(tmp_path, None, "V1.0.0.1_a", {"d" * 64}) == ([], []), src
+
+
+def test_read_scan_image_ids_xz_and_missing(tmp_path):
+    import lzma
+    w = _load_wizard()
+    assert w.read_scan_image_ids(tmp_path) is None
+    (tmp_path / "meta.json.xz").write_bytes(lzma.compress(json.dumps({"digest": "sha256:" + "A" * 64}).encode()))
+    assert w.read_scan_image_ids(tmp_path) == {"a" * 64}
+
+
+def test_post_scan_pack_checks_integration(tmp_path):
+    w = _load_wizard()
+    out = tmp_path / "out"
+    (out / "scan").mkdir(parents=True)
+    scan_dir = out / "scan" / "rootfs" / "scan"
+    scan_dir.mkdir(parents=True)
+    old_ident = "Flash package DEMO_Board_V1.0.0.1.tbz2 (MD5 " + "a" * 32 + "), root filesystem rootfs"
+    pack = _pack(tmp_path, identification=old_ident)
+    (pack / "kernel-modules.json").write_text(json.dumps({"source": "x", "image_sha256": "sha256:" + "c" * 64}))
+    mcfg = out / "cra-project" / "CRA" / "Config"
+    shutil.copytree(pack, mcfg)
+    steps = []
+    # provenance 缺少 → 不改 identification，ATTENTION；meta 讀不到 → NOT_RUN
+    msgs = []
+    w.post_scan_pack_checks(mcfg, out, scan_dir, "V1.0.1_a", steps, [], {}, {}, msgs.append)
+    assert json.loads((mcfg / "config.json").read_text())["product"]["identification"] == old_ident
+    chk = json.loads((out / "inputs-check.json").read_text())
+    byid = {r["id"]: r for r in chk["inputs"]}
+    assert byid["step:pack-identification-override"]["step_status"] == "ATTENTION"
+    assert byid["step:pack-stale-imagehash"]["step_status"] == "NOT_RUN"
+    assert any("ATTENTION" in m for m in msgs)
+    # provenance 有 → 覆寫並記進 inputs-check.json；供應商複本（從製造商複本複製）值相同
+    (out / "scan" / "provenance.json").write_text(json.dumps({"source": {"file": "DEMO_Board_V1.0.1.tbz2", "md5": "b" * 32}}))
+    (scan_dir / "meta.json").write_text(json.dumps({"digest": "sha256:" + "d" * 64}))
+    steps = []
+    w.post_scan_pack_checks(mcfg, out, scan_dir, "V1.0.1_a", steps, [], {}, {}, msgs.append)
+    scfg = out / "supplier" / "cra-project" / "CRA" / "Config"
+    shutil.copytree(mcfg, scfg)
+    for c in (mcfg, scfg):
+        ident = json.loads((c / "config.json").read_text())["product"]["identification"]
+        assert ident == "Flash package DEMO_Board_V1.0.1.tbz2 (MD5 " + "b" * 32 + "), root filesystem rootfs"
+    byid = {r["id"]: r for r in json.loads((out / "inputs-check.json").read_text())["inputs"]}
+    assert byid["step:pack-identification-override"]["step_status"] == "OK"
+    assert byid["step:pack-stale-files"]["step_status"] == "ATTENTION"
+
+
+# ---- dumpling（D-039、D-055）：設定包沒寫的版本、刷機包識別、支援期限由精靈填入 ----
+def test_missing_version_is_filled_with_the_plan_version(tmp_path):
+    w = _load_wizard()
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({"product": {"name": "DEMO_Board"}}))
+    assert w.override_pack_version(d / "config.json", "v39.2.1-demo1") == (None, "v39.2.1-demo1")
+    assert json.loads((d / "config.json").read_text())["product"]["version"] == "v39.2.1-demo1"
+    (d / "config.json").write_text(json.dumps({"product": {"name": "x", "version": 3}}))
+    with pytest.raises(ValueError):                       # 有寫但不是字串：不猜
+        w.override_pack_version(d / "config.json", "v1")
+    (d / "config.json").write_text(json.dumps({"schema_version": 1}))
+    with pytest.raises(ValueError):                       # 沒有 product：不是我們認得的設定包
+        w.override_pack_version(d / "config.json", "v1")
+
+
+def test_missing_identification_is_filled_only_with_a_valid_md5(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path)                                # 沒有 identification
+    st, info = w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", "B" * 32)
+    assert st == "FILLED" and info == (None, "Flash package DEMO_Board_V1.0.1.tbz2 (MD5 " + "B" * 32 + ")")
+    assert json.loads((pack / "config.json").read_text())["product"]["identification"] == info[1]
+    assert w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", "B" * 32)[0] == "SAME"
+    (tmp_path / "x").mkdir()
+    p2 = _pack(tmp_path / "x")
+    assert w.override_pack_identification(p2 / "config.json", "DEMO_Board_V1.0.1.tbz2", "bad")[0] == "UNRECOGNISED"   # 沒有可用的 MD5 不填
+    assert "identification" not in json.loads((p2 / "config.json").read_text())["product"]
+    assert w.override_pack_identification(p2 / "config.json", None, "b" * 32)[0] == "NO_PROVENANCE"
+
+
+def test_support_end_date_comes_from_support_until(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path)
+    cfg = pack / "config.json"
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == (None, "2031-12")
+    assert json.loads(cfg.read_text())["support"]["end_date"] == "2031-12"
+    assert w.fill_pack_support_end(cfg, "2031-12-01") is None              # 同月：不動
+    with pytest.raises(ValueError):                                         # 不同月：不改，讓呼叫端記 ATTENTION（project_config 會先擋）
+        w.fill_pack_support_end(cfg, "2032-01-31")
+    for bad in (None, "", "TO BE COMPLETED", "2031-12"):
+        assert w.fill_pack_support_end(cfg, bad) is None                    # 沒給或格式不對：不猜
+    c = json.loads(cfg.read_text()); c["support"]["end_date"] = "TO BE COMPLETED"; cfg.write_text(json.dumps(c))
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == ("TO BE COMPLETED", "2031-12")
+    c["support"] = None; cfg.write_text(json.dumps(c))                     # "support": null 不讓精靈當掉
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == (None, "2031-12")

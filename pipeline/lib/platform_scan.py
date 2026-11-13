@@ -38,7 +38,15 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
 3. **步驟紀錄**：給 `args.steps` 時，`collect` 把每個 workflow 步驟的結果（OK｜GAP｜NOT_RUN｜FAIL）放進 scan.json 的 `pipeline_steps`、`pipeline_status`
    （有 FAIL → FAIL；有 GAP → GAP；其他 OK；檔案不存在 → GAP）、notes.md 的「流程步驟」表，並寫 `args.steps_md`。整體狀態有 GAP 或 FAIL 時不是 OK——
    平台的 scan 沒有去讀 raw-sectors.json 之類的檔案，GAP 也不會消失。呼叫端（scan.sh）據此至少回報 GAP。
+   沒給 `args.steps`（平台自己的收集腳本沒有 `--steps` 參數，例如 `_shared/wp7_scan.py`）時，用環境變數 `DUMPLING_OUT`（`pipeline/platform.sh` 替每個轉接器設定）
+   底下的 `pipeline-steps.tsv`，所以 notes.md 的 pipeline_result 不會因為腳本漏傳參數變成 NOT_RUN（adapter-gaps #26）；兩個都沒有（單元測試、手動呼叫）才是 NOT_RUN。
+   collect 執行時 `scan` 這一步自己的列還沒寫（run-step.sh 在步驟結束後才記）：release 工作的 `pipeline/release-meta.py --notes` 會用完整的步驟紀錄重寫 notes.md
+   開頭的 pipeline_result 與「流程步驟」一節（`refresh_notes`），讓 notes.md 與 release-meta.json 一致。
 4. 標準答案（`tests/expected/<專案>/<版本>.json`）的路徑是 scan.json 的點分路徑；平台特有欄位由 hook 放進去。
+5. **版本核對（D-055 (3)）**：每個 run 的輸出資料夾裡，精靈覆寫後的設定包（`cra-project/CRA/Config/config.json`，有供應商資料包時再加 `supplier/cra-project/…`）
+   的 `product.version` 必須等於 Release tag 的版本（`args.version`；括號後綴如 ` (rootfs)` 不算）；不一致 → scan.json 的 `product_version_check.status` 是 FAIL，
+   collect 把所有輸出寫完之後丟 `ProductVersionMismatch`（ValueError 的子類別，各平台的收集腳本都把它當 FAIL 結束）。設定包沒有 `product.version`（精靈沒有東西可覆寫，
+   報告裡版本是 TO BE COMPLETED）是 NOT_SET，不擋；找不到設定檔（沒有跑到報告）是 NOT_RUN。
 
 規則：缺的項目在 scan.json 記 null，**不推測**，標準答案比對會因此失敗而不是通過；附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元），中文名稱放在 manifest 的顯示標籤。
 """
@@ -224,6 +232,106 @@ def add(manifest, out, name, label):
     manifest.append((name, label))
 
 
+# ---------------------------------------------------------------- 版本核對（D-055 (3)）
+
+_VER_LIKE = re.compile(r"^[Vv]?\d+(\.\d+)+")      # 同 tools/wizard/cra-scan.py：括號裡是版本號的不是「後綴」
+
+
+class ProductVersionMismatch(ValueError):
+    """精靈覆寫後的 product.version 與 Release tag 的版本不一致（D-055 (3)）。collect 在輸出都寫完之後才丟。"""
+
+
+def version_base(value):
+    """設定包的 product.version → 去掉尾端非版本號的括號後綴（精靈 override_pack_version 保留的 " (rootfs)"、"(rootfs)(gui)"）之後的版本。
+    "V1 (rootfs)(gui)" → "V1"；"1.0 (2.0.1)" 的括號是版本號，不當後綴 → 整串留著。"""
+    base = value.strip()
+    while True:
+        m = re.fullmatch(r"(.*?)\s*(\([^()]+\))", base)
+        if not m or _VER_LIKE.match(m.group(2)[1:-1].strip()):
+            return base
+        base = m.group(1).rstrip()
+
+
+def product_version_status(config_path, tag_version):
+    """一份設定檔 → (狀態, product.version 或 None)：OK｜MISMATCH｜NOT_SET（沒有 product.version）｜UNREADABLE（讀不了、不是 JSON 物件、或 product.version 不是字串）｜
+    NOT_FOUND（沒有這個檔）。"""
+    if not os.path.isfile(config_path):
+        return "NOT_FOUND", None
+    cfg = read_json(config_path)
+    prod = cfg.get("product") if isinstance(cfg, dict) else None
+    if not isinstance(prod, dict):
+        return "UNREADABLE", None
+    v = prod.get("version")
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return "NOT_SET", None
+    if not isinstance(v, str):
+        return "UNREADABLE", None
+    return ("OK" if version_base(v) == tag_version else "MISMATCH"), v
+
+
+def check_product_versions(runs, tag_version):
+    """runs：{後綴: 精靈輸出資料夾}。→ {"tag_version", "status": OK｜FAIL｜NOT_SET｜NOT_RUN, "checked": [{run, role, product_version, status}], "failures": [說明]}。
+    FAIL：任何一份是 MISMATCH 或 UNREADABLE。其餘：有 OK 且沒有 NOT_SET → OK；有 NOT_SET → NOT_SET（沒有東西可核對，不擋）；一份都沒找到 → NOT_RUN。"""
+    checked, failures = [], []
+    for suffix, w in sorted(runs.items()):
+        for role, rel in (("manufacturer", "cra-project"), ("supplier", os.path.join("supplier", "cra-project"))):
+            st, v = product_version_status(os.path.join(w, rel, "CRA", "Config", "config.json"), tag_version)
+            if st == "NOT_FOUND":
+                continue
+            run = "full" if suffix == "" else suffix.lstrip("-")
+            checked.append({"run": run, "role": role, "product_version": v, "status": st})
+            if st == "MISMATCH":
+                failures.append("%s 報告（%s）的 product.version 是 %r，Release tag 的版本是 %r" % (run, role, v, tag_version))
+            elif st == "UNREADABLE":
+                failures.append("%s 報告（%s）的設定檔讀不了或 product.version 不是字串，不能確認版本是 %r" % (run, role, tag_version))
+    sts = {c["status"] for c in checked}
+    status = "FAIL" if failures else "NOT_RUN" if not checked else "NOT_SET" if "NOT_SET" in sts else "OK"
+    return {"tag_version": tag_version, "status": status, "checked": checked, "failures": failures}
+
+
+# ---------------------------------------------------------------- 流程步驟：notes.md 與 release-meta.json 一致（adapter-gaps #26）
+
+STEPS_HEADING = "## 流程步驟"
+_NOTES_HEAD = re.compile(r"^(\*\*report_status \S+?\*\*｜\*\*release_gate \S+?\*\*｜\*\*pipeline_result )\S+?(\*\*)$", re.M)
+
+
+def steps_section(rows):
+    """notes.md 的「流程步驟」一節（Markdown 行；rows 是 step_rows.read_rows 的結果，None＝沒有紀錄檔）。collect 與 refresh_notes 共用。"""
+    return ["", "%s（workflow 每一步的結果；整體狀態 **%s**）" % (STEPS_HEADING, step_rows.overall(rows)), ""] + \
+        (step_rows.markdown_table(rows) if rows is not None else ["（沒有 pipeline-steps.tsv：不能當成沒問題，整體狀態 GAP）"])
+
+
+def default_steps_path():
+    """平台的收集腳本沒給 --steps 時的預設：$DUMPLING_OUT/pipeline-steps.tsv（run-step.sh 寫的那個檔）；沒有 DUMPLING_OUT → None。"""
+    out = os.environ.get("DUMPLING_OUT")
+    return os.path.join(out, "pipeline-steps.tsv") if out else None
+
+
+def refresh_notes(notes_path, rows):
+    """用完整的步驟紀錄 rows 重寫 notes.md：開頭一行的 pipeline_result，以及「流程步驟」一節（沒有就插在「附件」前）。
+    collect 在 scan 步驟自己的列寫進去之前就產生 notes.md，所以兩者可能差一列；release-meta.py 以同一份紀錄、同一個算法（step_rows.overall）重寫，
+    notes.md 與 release-meta.json 就一致。→ True＝內容有改、False＝本來就一致、None＝開頭那行找不到（不是 collect 寫的 notes.md），不動。"""
+    with open(notes_path, encoding="utf-8") as f:
+        text = f.read()
+    new, n = _NOTES_HEAD.subn(lambda m: m.group(1) + step_rows.overall(rows) + m.group(2), text, count=1)
+    if not n:
+        return None
+    sec = "\n".join(steps_section(rows))
+    m = re.search(r"\n%s[^\n]*\n.*?(?=\n## |\Z)" % re.escape(STEPS_HEADING), new, re.S)
+    if m:
+        new = new[:m.start()] + sec + "\n" + new[m.end():]
+    elif "\n## 附件" in new:
+        i = new.index("\n## 附件")
+        new = new[:i] + sec + "\n" + new[i:]
+    else:
+        new = new.rstrip("\n") + "\n" + sec + "\n"
+    if new == text:
+        return False
+    with open(notes_path, "w", encoding="utf-8") as f:
+        f.write(new)
+    return True
+
+
 # ---------------------------------------------------------------- collect
 
 class Hooks:
@@ -337,13 +445,14 @@ def collect(a, hooks=None):
     scan["kernel_versions_file"] = kv_name
     scan["own_software"] = (runs.get(full_name) or {}).get("own_software")   # 完整掃描那次的 B-own-software（標準答案可以固定它）
     scan.update(hooks.scan_tail(ctx))
-    steps_path = getattr(a, "steps", None)
+    steps_path = getattr(a, "steps", None) or default_steps_path()
     srows = step_rows.read_rows(steps_path) if steps_path else None
     if steps_path:
         scan["pipeline_steps"] = srows
         scan["pipeline_status"] = step_rows.overall(srows)
         scan["pipeline_attention"] = step_rows.attention_lines(srows)
     scan["vulnerabilities"] = {("full" if k == "" else k.lstrip("-")): v.get("vulnerabilities") for k, v in runs.items()}
+    scan["product_version_check"] = pvc = check_product_versions(last, ver)       # D-055 (3)：精靈覆寫後的版本要等於 Release tag 的版本
     with open(a.scan_json, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=1)
     shutil.copy2(a.scan_json, os.path.join(out, "scan-summary-%s-%s.json" % (proj, ver)))
@@ -372,8 +481,7 @@ def collect(a, hooks=None):
         L.append("| %s | %s | %s | %s |" % ({"full": "完整（全部層）"}.get(k, k), v.get("rows_total"), v.get("cves_total"), v.get("p1_rows")))
     L += hooks.notes_after_vulnerabilities(ctx)
     if steps_path:
-        L += ["", "## 流程步驟（workflow 每一步的結果；整體狀態 **%s**）" % scan["pipeline_status"], ""]
-        L += step_rows.markdown_table(srows) if srows is not None else ["（沒有 pipeline-steps.tsv：不能當成沒問題，整體狀態 GAP）"]
+        L += steps_section(srows)
         sm = getattr(a, "steps_md", None)
         if sm:
             with open(sm, "w", encoding="utf-8") as f:
@@ -391,4 +499,6 @@ def collect(a, hooks=None):
     with open(os.path.join(out, "manifest.tsv"), "w", encoding="utf-8") as f:
         for name, label in manifest:
             f.write("%s\t%s\n" % (name, label))
+    if pvc["status"] == "FAIL":      # 輸出都寫完才丟：留著附件與 scan.json 可以查是哪一份、什麼值
+        raise ProductVersionMismatch("版本與 Release tag 不一致（D-055 (3)）：" + "；".join(pvc["failures"]))
     return scan
