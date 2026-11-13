@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:52 +0800（C0）
+最後更新：2026-11-13 21:53 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -180,12 +180,13 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 1. **D-042 AMD**：C0 已決定（**D-047**，在 wp0/docs-batch-4），照這兩點修（**寫程式代理已派出，進行中**），改完和 ebac3e9 的改動一起複驗：
    - (a) **歧義規則改窄，但要有校驗佐證**：同一位置被兩種基底讀到時，只有一種讀法的目錄通過自身的結構與校驗（目錄 checksum、條目範圍都在映像內等），就採用那一種的條目；另一種只列出來，並附上它沒通過的證據。兩種都通過而且內容衝突，或兩種都不通過 → 維持 GAP。（我的補充：子目錄要沿用被採用那一讀法的基底；測試要涵蓋「一邊 checksum 壞」「兩邊都過且內容不同」「兩邊都壞」，以及處理順序反過來結果相同；真樣本 B550M、B650M 重跑，報 SBOM 元件數的變化。）
    - (b) **拿掉 `sys._getframe`**（amd_psp.py:746、:860 附近）：原始位元組裡只要有 AGESA 標記不在走訪範圍內，就標「搜尋不完整」（complete=False）。需要精確結果的話，M7 再請 C1 提供正式回呼介面，現在不跟 C1 談
-   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**更新**：C0 對 ca80b27 的獨立驗證「通過」；延伸證據定為 **D-050**（wp0/docs-batch-4 b5c5015）。開 PR 前要修 3 項：(1) checksum 不符的單一讀法目錄仍被標 adopted，它的 L2 子目錄版本因此進了 SBOM；(2) notes 和報告依據要寫明 D-050 的兩個前提；(3) firmware.yml 的目錄與條目數要把兩種口徑分開寫。**已派寫程式代理到 wp3/amd-psp 修**（第 1 項做法：untrusted／untrusted-path 不採用），修好後把 HEAD 告訴 C0，C0 會看 diff。PR 要等私有檔驗證有結論，或使用者決定跳過，才開（私有檔驗證的那個對話在等使用者放行權限）。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
+   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**更新**：C0 對 ca80b27 的獨立驗證「通過」；延伸證據定為 **D-050**（wp0/docs-batch-4 b5c5015）。開 PR 前要修 3 項：(1) checksum 不符的單一讀法目錄仍被標 adopted，它的 L2 子目錄版本因此進了 SBOM；(2) notes 和報告依據要寫明 D-050 的兩個前提；(3) firmware.yml 的目錄與條目數要把兩種口徑分開寫。**已派寫程式代理到 wp3/amd-psp 修**（第 1 項做法：untrusted／untrusted-path 不採用），34fd4f9 已告訴 C0，等 C0 看 diff。**私有檔驗證已由 C0 跑完**（ca80b27，結果不進 repo）：沒有當掉，也沒有確知錯誤的值；ME 是 GAP，因為 CSE layout 的 Size 0x60 不在支援清單。這一項**不擋**這次 PR，C0 看過 diff 就請 C2 開 PR。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
    - 把 `origin/wp3/csme-new` 併進 `wp3/amd-psp`。會衝突的有 `docs/PROVENANCE.md`、`tests/run.d/c2-x86-firmware.sh`（兩邊都改了最後的測試清單），x86_firmware.py 兩邊改的是不同段落
    - 併 origin/main（D-021：有衝突才併，開 PR 前確認只剩自己的改動）
    - 重跑 CI
    - **先通知 C0（sca-center 端要用私有檔在本機驗證）**，再開一個 PR，標題「[WP3] 擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，PR 說明照公開資料規定寫
    - 驗證由 C0 派，C0 合併
+1b. **CSE layout Size 0x60 的支援**（C0 指示，這次 PR 合併後從 main 開小分支）：標準答案用公開可下載的新世代 BIOS 更新檔，要確認 Size 是 0x60、CRC 相符、RBEP 和 NFTP 一致；找不到公開樣本就用合成測試，並在 notes 寫明「沒有公開真樣本核對」。順便評估更大的 Size 值。repo 裡只寫技術理由，不索取私有檔
 2. **supplier-normalize**：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
 3. **D-043**（排在 D-042 之後）：韌體 SBOM 的公告比對，只用公開資料。順序是 (1) → (2)，每段完成通知 C0
    - (1) 自動比對：
