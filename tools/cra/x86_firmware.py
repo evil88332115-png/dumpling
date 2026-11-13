@@ -1053,6 +1053,7 @@ def me_info(data, regs, me_r, beyond, budget=None):
         if r["status"] == "no-me-region":              # 沒有 descriptor、其他 ME 結構也沒有：開頭碰巧像 layout table 不算有 ME
             return r
         return {**r, "status": "unknown", "note": "; ".join(x for x in (r["note"], "CSE layout/BPDT: " + cse["note"]) if x)}
+    r["incomplete"].extend(f"{x['code']}: {x['text']}" for x in cse.get("attention", ()))     # 未解讀的表尾 → ATTENTION（incomplete 會進狀態與 SBOM）
     mn = me_manifests(data, base, end, budget, notes=r["incomplete"])
     return {**r, "status": "found", "standalone": regs is None,
             "note": "no usable $FPT or FTPR $CPD; the version comes from the BPDT main-program partitions (see basis)",

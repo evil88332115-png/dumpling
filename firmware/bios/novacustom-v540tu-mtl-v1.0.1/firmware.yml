@@ -20,7 +20,7 @@ notes: |
   `$FPT` 只出現在 data partition（區域 +0x3A2000），區域開頭與 +0x10 都沒有；BPDT 沒有 FTPR（type 2）項目，沒有名稱是 FTPR 的 `$CPD`；
   `$CPD` 都是 header version 2（長度 0x14、+0x10 是 CRC-32 checksum）。區域內有 14 個 `$CPD` 分割區、15 個 `$MN2`，各分割區的版本不同。
   CSE 主程式在 BP1 的 RBEP（BPDT type 1）與 BP3 的 NFTP（type 7）：兩個 manifest 的版本相同（18.0.10.2285）。
-  以前的解析（只認 `$FPT`／名稱是 FTPR 的 `$CPD`）在這份映像上是 unknown；intel_cse_layout.py 之後讀到 18.0.10.2285，basis 寫明走 BPDT 的 RBEP＋NFTP。
+  只靠 `$FPT`／名稱是 FTPR 的 `$CPD` 讀不到這份映像的 ME 版本；intel_cse_layout.py 走 BPDT 的 RBEP＋NFTP，讀到 18.0.10.2285（basis 寫明）。
   格式與判定規則見 docs/notes/c2-csme-layout.md。
   下載頁與 release notes：https://docs.dasharo.com/variants/novacustom_v540tu/releases/ （v1.0.1，2026-01-29）。
   同目錄另有 .sha256 檔（與本檔 sha256 相符，2026-11-13 核對）、EC 版本與 .cap 更新檔；這裡只用 btg_prod 的完整 .rom。
