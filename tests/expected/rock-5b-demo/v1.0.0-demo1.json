@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-13，dev run 43360353706、commit b865b82）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals（固定輸入不會變）；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-13，dev run 43366738948、commit 62d92b8）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對兩輪（第二輪「可以定案」，見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals（固定輸入不會變）；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -246,27 +246,43 @@
   },
   "product_status.full.report_status": {
    "equals": "GAP",
-   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。完整（補充與分層之前）：弱點資料不完整，核心 CNA 候選待人審、601 筆 exploitable 待決定"
   },
   "product_status.full.release_gate": {
    "equals": "GAP",
-   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、未判定與 exploitable 待決定"
   },
   "product_status.bsp.report_status": {
    "equals": "GAP",
-   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。bsp：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審（5458 列未判定）、DDR／BL31 GAP、開機鏈 NOT_ASSESSED"
   },
   "product_status.bsp.release_gate": {
    "equals": "GAP",
-   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、5458 列未判定"
   },
   "product_status.os.report_status": {
    "equals": "GAP",
-   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。os：弱點資料不完整（NVD 關閉），Debian 套件有 600 筆 exploitable 待決定是否出貨"
   },
   "product_status.os.release_gate": {
    "equals": "GAP",
-   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、600 筆 exploitable 待決定"
+  },
+  "runs..stages.A-source": {
+   "equals": "OK",
+   "reason": "掃描來源（磁碟映像）讀取完成"
+  },
+  "runs..stages.B-sandbox": {
+   "equals": "OK",
+   "reason": "bwrap 沙箱探測通過"
+  },
+  "unknown_by_purl_type.pypi": {
+   "equals": 30,
+   "reason": "unknown 的 30 個是 deb 帶進來的 Python 套件（缺口 12）"
+  },
+  "unknown_by_purl_type.maven": {
+   "equals": 1,
+   "reason": "unknown 的 1 個是 Debian 的 libintl jar（缺口 12）"
   }
  }
 }

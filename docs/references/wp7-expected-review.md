@@ -5,7 +5,7 @@
 
 ## rock-5b-demo v1.0.0-demo1（Rockchip，Radxa ROCK 5B rsdk-r6）
 
-- 依據的執行：dev run 43360353706（commit b865b82），2026-11-13。第一版標準答案依 43354620546（2a50091）訂，驗證代理核對後改了輸出與標準答案（見下面「驗證代理的獨立核對」）。
+- 依據的執行：dev run 43366738948（commit 62d92b8），2026-11-13。第一版標準答案依 43354620546（2a50091）訂；驗證代理第一輪「需要修改」，改了輸出與標準答案後第二輪「可以定案」（見下面「驗證代理的獨立核對」）。
 - 先前幾次執行找到並修好的問題（所以不拿那幾次當標準答案）：
   1. unknown 122187／126696：沒有 owners.json，Syft 的檔案紀錄找不到擁有的套件 → assemble 從 dpkg .list 產生 owners.json。
   2. unknown 3950：dpkg 自己的資料庫檔（var/lib/dpkg/*）不屬於任何套件 → 平台設定歸 os。
@@ -60,8 +60,23 @@ D-dt-data-sources／C-dt-feeds／D-dt-findings（NVD 照設計關閉）、D-dt-k
 | 中 | -os 重跑的核心階段出現沒有意義的 GAP | 缺口 13；標準答案只釘完整與 -bsp 的核心階段 |
 | 中 | `rtl8852bu-dkms`、`rtw89-dkms` 與已歸 bsp 的 `rtk-btusb-dkms` 同類卻歸 os；C4 原本「板上藍牙」的註解是錯的（ROCK 5B 板上沒有） | 三個都歸 bsp（板子廠商替選購無線模組提供的 DKMS 驅動），deb 50／1779 |
 | 中 | unknown 31 會讓 bsp 報告多 46 列（含 1 個 P1） | reason 補上 |
-| 漏項 | 開機程式的 sha256 與版本、U-Boot 候選數、-bsp 的核心階段、OS 報告不含核心列、預期的 GAP | scan.json 加 raw_sectors.by_slot（鍵不含「.」）與 report_rows，標準答案從 27 項增加到 58 項 |
+| 漏項 | 開機程式的 sha256 與版本、U-Boot 候選數、-bsp 的核心階段、OS 報告不含核心列、預期的 GAP | scan.json 加 raw_sectors.by_slot（鍵不含「.」）、report_rows、product_status；標準答案從 27 項增加到 68 項 |
 | 輕 | 幾個 reason 不精確（bsp 的組成、C-kernel-coverage 的原因寫成推測、config 實際讀的是 linux-headers 的副本、judged 的意思） | 改寫 |
 
 未確認（驗證代理沒有讀磁碟映像、沒有連網）：解開後的 sha256、映像與官方 sha512sum 的關係、FIT 內 5 個映像各自重算、radxa/kernel@87ba2c6 是否確為套件的建置來源。
 
+
+### rock-5b-demo（第二輪複驗，2026-11-13）
+
+同一個驗證代理，依 dev run 43366738948 的 artifact、官方 manifest 與官方 deb 重算 64 項，並讀 D-034～D-041 全文。結論：**可以定案**。
+
+- 上一輪的嚴重 1、中 6、輕與漏項都已處理且正確（逐項對照）；沒有新的「該 GAP 卻被寫成正常值」。
+- 補驗上一輪「未確認」的一項：自己解析 FIT，5 個內嵌映像（uboot、atf-1、atf-2、atf-3、fdt）的 sha256 都等於 FIT 記載。
+- 元件組成重算：bsp 16332＝50 deb＋15033 檔案紀錄＋1230 核心模組＋13 模組資料夾檔案＋2 firmware＋4 子元件；os 110333＝1779 deb＋104634 檔案紀錄＋3919 dpkg 資料庫檔＋1 OS。DKMS 改歸 bsp 移動的檔案數兩邊相同（1119）。
+- 產品狀態：三份報告的 summary.json status 與 vex.gate 都是 GAP（不是 OK）。
+- D-038：除了「報告註明候選、廠商可能已回移修補」只出現在 notes.md 與 JSON、沒有進交付的 CRA 報告（cra_report 是 C1 的檔，缺口 16），其他五項要求與實作、標準答案一致。
+
+輕微項目的處理：標準答案的 note 與本紀錄的 run／項數更新；產品狀態六項的 reason 依層各自寫；補釘 A-source、B-sandbox、unknown_by_purl_type（共 68 項）。
+dthelper、libmraa*（Radxa 發行、可能和硬體存取有關）目前歸 os，是否歸 bsp 列為缺口 17、待確認。
+
+未確認（沒有讀磁碟映像、沒有連網）：解開後的 sha256、映像與官方 sha512sum 的關係、radxa/kernel@87ba2c6 是否確為套件 6.1.84-8 的建置來源。
