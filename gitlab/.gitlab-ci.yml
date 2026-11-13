@@ -3,8 +3,9 @@
 # 用法：複製成產品 repo 根目錄的 .gitlab-ci.yml，或在內部 repo 用 include:local 引入（注意：Sigstore 簽章的 id_tokens
 # 必須寫在被簽署的專案本身，include 進來的 CI 檔與 child pipeline 不支援，見 GITLAB-PORT 第 9 節）。
 #
-# job 呼叫的指令與 GitHub 版相同（pipeline/run-step.sh、pipeline/platform.sh、pipeline/watch/*）；
-# M2（release.yml／dev.yml／pipeline.yml）以 origin/wp1/m2-jetson 為準，M2 合併後再核對一次（GITLAB-PORT 待辦 T-01）。
+# job 呼叫的指令與 GitHub 版相同（pipeline/run-step.sh、pipeline/platform.sh、pipeline/watch/*）；已對照 M2 合併後的 main 核對（GITLAB-PORT T-01）。
+# runner 的前提（GITLAB-PORT 第 5 節）：跟 GitHub 代管 runner 一樣——非 root 時要有免密碼 sudo（install-scan-tools.sh、install-tools.sh 用 sudo）；
+# scan 用的 runner 要能跑 docker（pipeline/platforms/*/scan.sh 目前一定開臨時 DT，常駐 DT 模式是待辦 T-14）。
 #
 # 這份範本只由「語法檢查＋單元測試」驗證過（gitlab/tests、官方 CI JSON schema），尚未在內部 GitLab 實際執行。
 # 標「待內部驗證」的地方，是官方文件沒寫、要在內部環境確認的行為。
@@ -20,7 +21,7 @@ variables:
   # 全部 job 的執行映像。預設值是固定版本的公開映像，內部請改成 RD 的編譯／掃描映像（固定 digest 或固定版本，不可用 latest）。
   DUMPLING_IMAGE: "ubuntu:24.04"
   # 映像裡沒有的工具，用 apt 安裝（內部映像已含這些就清空）
-  DUMPLING_APT: "git curl ca-certificates python3 python3-yaml jq"
+  DUMPLING_APT: "git curl ca-certificates python3 python3-yaml jq sudo"
   # 開發版（dev 分支與排程）要跑的專案；空白代表 projects/ 底下全部（M2 的 project-info.py --matrix）
   DUMPLING_DEV_PROJECTS: ""
   # 選填：要簽章 Release 附件時改成 "cosign-keyless"（見 GITLAB-PORT 第 9 節；預設不簽）
@@ -66,10 +67,12 @@ workflow:
 .setup:
   script:
     - set -eu
+    # root（docker executor 的預設）不需要 sudo；非 root（shell executor）用免密碼 sudo，同 GitHub 代管 runner
+    - if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO=sudo; fi; export SUDO
     - |
       if [ -n "$DUMPLING_APT" ]; then
-        # 內部映像若已含這些套件，把 DUMPLING_APT 清空即可（不需要 root 與外網）
-        apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $DUMPLING_APT > /dev/null
+        # 內部映像若已含這些套件，把 DUMPLING_APT 清空即可（不需要 root 與外網）；清空時也不裝 platform.yml 的 build.apt／scan.apt（映像要自己含）
+        $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends $DUMPLING_APT > /dev/null
       fi
 
 # 由 tag（release）或 parallel:matrix 的 PROJECT（dev）決定 PROJECT、VERSION；project-info.py 驗證格式並確認專案與版本存在。
@@ -81,7 +84,8 @@ workflow:
     - |
       PROJECT=$(sed -n 's/^PROJECT=//p' info.txt); VERSION=$(sed -n 's/^VERSION=//p' info.txt)
       BUILD_MODE=$(sed -n 's/^BUILD_MODE=//p' info.txt); SCAN_TOOLS=$(sed -n 's/^SCAN_TOOLS=//p' info.txt)
-      export PROJECT VERSION BUILD_MODE SCAN_TOOLS
+      BUILD_APT=$(sed -n 's/^BUILD_APT=//p' info.txt); SCAN_APT=$(sed -n 's/^SCAN_APT=//p' info.txt)
+      export PROJECT VERSION BUILD_MODE SCAN_TOOLS BUILD_APT SCAN_APT
       export DUMPLING_PROJECT_DIR="projects/$PROJECT"
       export DUMPLING_OUT="$DUMPLING_OUT_BASE/$PROJECT/$VERSION"
 
@@ -94,13 +98,19 @@ workflow:
     - cat info.txt
     - |
       BUILD_MODE=$(sed -n 's/^BUILD_MODE=//p' info.txt); SCAN_TOOLS=$(sed -n 's/^SCAN_TOOLS=//p' info.txt)
-      export VERSION BUILD_MODE SCAN_TOOLS PROJECT
+      BUILD_APT=$(sed -n 's/^BUILD_APT=//p' info.txt); SCAN_APT=$(sed -n 's/^SCAN_APT=//p' info.txt)
+      export VERSION BUILD_MODE SCAN_TOOLS PROJECT BUILD_APT SCAN_APT
       export DUMPLING_PROJECT_DIR="projects/$PROJECT"
       export DUMPLING_OUT="$DUMPLING_OUT_BASE/$PROJECT/$VERSION"
 
 # build 與 scan 的共同步驟（對應 pipeline.yml 的 build／scan job）。順序：先 .setup，再 .resolve-*，再下面的片段。
 .build-steps:
   script:
+    # platform.yml 的 build.apt（同 pipeline.yml 的 build job；project-info.py 已驗證套件名稱）
+    - |
+      if [ -n "$DUMPLING_APT" ] && [ "$BUILD_MODE" = compile ] && [ -n "$BUILD_APT" ]; then
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends $BUILD_APT > /dev/null
+      fi
     - bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$VERSION"
     # build.mode 是 none 的平台沒有編譯步驟：交給 scan 去記 NOT_RUN
     - |
@@ -117,9 +127,17 @@ workflow:
 
 .scan-steps:
   script:
-    # 常駐 DT：pilot.env 由 CI/CD 變數（File 類型、protected）提供，不開臨時 DT；格式待內部驗證
+    # 臨時 DT（同 GitHub 版）：pipeline/platforms/*/scan.sh 目前一定用 dt-ephemeral.sh 開臨時 DT（要 docker），把連線資訊寫進 PILOT_ENV 這個路徑、
+    # 自己下載鏡像、MIRROR_REFRESH_STATUS 設空。目標是改連內部常駐 DT（GITLAB-PORT 第 4 節），要等 scan.sh 有常駐 DT 模式（待辦 T-14）。
+    # PILOT_ENV 放單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾；同 pipeline.yml）。
+    - export PILOT_ENV="$DUMPLING_OUT_BASE/pilot-env/pilot.env"
     - |
-      test -n "${PILOT_ENV:-}" || { echo "scan: FAIL（沒有 PILOT_ENV：請在 CI/CD 變數設定常駐 DT 的 File 變數，protected）"; exit 1; }
+      command -v docker > /dev/null || { echo "scan: FAIL（runner 沒有 docker：臨時 DT 需要；常駐 DT 模式是待辦 T-14）"; exit 1; }
+    # scan job 的 apt（同 pipeline.yml：bubblewrap、python3-yaml＋platform.yml 的 scan.apt）
+    - |
+      if [ -n "$DUMPLING_APT" ]; then
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml $SCAN_APT > /dev/null
+      fi
     - mkdir -p "$DUMPLING_OUT" "$DUMPLING_OUT_BASE/tools"
     - |
       if [ -d build-handoff/handoff ]; then
@@ -131,13 +149,7 @@ workflow:
     - bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$VERSION"
     - bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$VERSION"
     - bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "$VERSION"
-    # 常駐環境要檢查鏡像新鮮度：這裡不設 MIRROR_REFRESH_STATUS=""（GitHub 版因為是臨時 DT 才設空）
     - bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$VERSION"
-    # 核心 CVE 鏡像：只有這次新抓的才放進 cache 資料夾（頂替用的舊資料不存回去；同 pipeline.yml 的 kcve-fresh）
-    - |
-      export MIRRORS_DIR="$DUMPLING_OUT/mirrors"
-      . pipeline/lib/mirrors.sh
-      if mirror_is_fresh kcve; then rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kcve" "$KCVE_CACHE_DIR"; fi
     - |
       rm -rf result && mkdir -p result
       [ -d "$DUMPLING_OUT/release" ] && cp -r "$DUMPLING_OUT/release/." result/ || true
@@ -159,12 +171,14 @@ workflow:
 # 上一份核心 CVE 鏡像（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：上游沒變就沿用，git.kernel.org 連不上就用 48 小時內的上一份頂替（ATTENTION）。
 # 官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內；預設存在 runner 那台機器（設了分散式 cache 才共用）；
 # 保護與非保護分支預設不共用 cache；cache 在 after_script 之後才封存。scan 與 watch:compute 用同一個 key。
+# scan 失敗也存（同 pipeline.yml 的 !cancelled()）：cache:when: always，新抓的鏡像在 after_script 複製進 cache 資料夾（after_script 在 cache 封存之前執行）。
 .kcve-cache:
   variables:
     KCVE_CACHE_DIR: "$CI_PROJECT_DIR/.kcve-cache/kcve"
   cache:
     key: kernel-cve-mirror
     paths: [.kcve-cache/kcve/]
+    when: always
 
 .scan:
   stage: scan
@@ -173,6 +187,14 @@ workflow:
   timeout: 4 hours
   interruptible: false
   after_script:
+    # 核心 CVE 鏡像：只有這次新抓的才放進 cache 資料夾（頂替用的舊資料不存回去；同 pipeline.yml 的 kcve-fresh）。after_script 是新的 shell，用 glob 找
+    - |
+      for d in "$DUMPLING_OUT_BASE"/*/*/mirrors; do
+        [ -d "$d" ] || continue
+        if (export MIRRORS_DIR="$d"; . pipeline/lib/mirrors.sh; mirror_is_fresh kcve); then
+          rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$d/kcve" "$KCVE_CACHE_DIR"
+        fi
+      done
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
     when: always
@@ -186,7 +208,8 @@ workflow:
 validate:unit-tests:
   stage: validate
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+    # tag 的 push 也是 push（官方 job_rules：push 事件含分支與 tag）：加 $CI_COMMIT_BRANCH，tag pipeline 不跑（同 tests.yml 不在 tag 跑，不擋 release）
+    - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
   tags: [dumpling]
   timeout: 30 minutes
   script:
@@ -261,6 +284,7 @@ release:sign:
   needs: ["release:publish"]
   tags: [dumpling]
   allow_failure: true
+  interruptible: false
   id_tokens:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
@@ -329,14 +353,15 @@ dev:publish:
 # ---------------------------------------------------------------------------
 # firmware：firmware/ 與韌體相關腳本有變動時（對應 firmware.yml 的 firmware-fetch）
 # ---------------------------------------------------------------------------
-# rules:changes 在 tag、排程、手動 pipeline 沒有 push 事件，需要 compare_to（官方）；這個 job 只在 push 與 merge request 跑。
+# rules:changes 在 tag、排程、手動 pipeline 沒有 push 事件、一律算有變動（官方 ci/yaml）；tag 的 push 也是 push（官方 job_rules），
+# 所以條件要加 $CI_COMMIT_BRANCH：只在分支 push 與 merge request 跑，tag pipeline 不跑（不擋 release）。
 
 firmware:fetch:
   stage: validate
   tags: [dumpling]
   timeout: 30 minutes
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - firmware/**/*
         - pipeline/firmware-*.sh
@@ -363,12 +388,25 @@ firmware:fetch:
       rc=0
       pipeline/firmware-ci.sh "$DUMPLING_OUT_BASE/firmware-dl" "$DUMPLING_OUT_BASE/firmware-work" firmware-out firmware-summary.md || rc=$?
       cat firmware-summary.md
+      # 供應商 SBOM（kind: sbom）的品質檢查（同 firmware.yml）：sbomqs 固定版本與 sha256 在 pipeline/lib/tools.lock；只有 FAIL 算失敗
+      exe=$(pipeline/install-tool.sh sbomqs "$DUMPLING_OUT_BASE/bin" | tail -n 1)
+      pipeline/check-tool-version.sh sbomqs "$exe"
+      files=$(find "$DUMPLING_OUT_BASE/firmware-dl/sbom" -mindepth 2 -maxdepth 2 -name '*.sbom.json' 2>/dev/null | sort)
+      if [ -z "$files" ]; then
+        echo "FIRMWARE-SBOM	NOT_RUN	-	沒有 kind: sbom 的樣本可檢查" > sbom-check.log; cat sbom-check.log
+      else
+        src=0
+        # shellcheck disable=SC2086  # 檔名來自 firmware-fetch 依規則產生的路徑（不含空白）
+        SBOMQS="$exe" pipeline/firmware-sbom-check.sh $files --out sbom-check > sbom-check.log || src=$?
+        cat sbom-check.log
+        [ "$src" = 0 ] || [ "$rc" != 0 ] || rc=$src
+      fi
       exit "$rc"
   after_script:
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
     when: always
-    paths: [firmware-out/, firmware-summary.md, fetch.log]
+    paths: [firmware-out/, firmware-summary.md, fetch.log, sbom-check/, sbom-check.log]
     expire_in: 14 days
 
 # 韌體 SBOM 上傳常駐 DT（GitHub 版是臨時 DT 的 firmware-dt job）。待辦 T-04：pilot.env／常駐 DT 的上傳驗證流程在內部確認後再開。
@@ -418,16 +456,24 @@ watch:compute:
     - |
       python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
     - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
+    # grype 要在 PATH（feeds.sh 的 grype db update、match.py；同 watch-round.yml）
+    - $SUDO install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"
+    # 核心 CVE 鏡像的上一份：feeds.sh 讀 KCVE_CACHE_DIR（pipeline/lib/mirrors.sh 的 mirror_kernel_cve；wp2/watch-m2 的 feeds.sh 起）
     - pipeline/watch/feeds.sh "$DUMPLING_OUT_BASE/w/feeds"
     - |
       export MIRRORS_DIR="$DUMPLING_OUT_BASE/w/feeds"
       . pipeline/lib/mirrors.sh
       if mirror_is_fresh kernel-cve; then rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kernel-cve" "$KCVE_CACHE_DIR"; fi
-    - python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv"
+    # 結束碼同 watch-round.yml：collect 0／3（3＝沒有可監控的 Release），match 0／2／3（ATTENTION、GAP 不算失敗；只有 1 FAIL 讓 job 變紅）
+    - |
+      rc=0; python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv" || rc=$?
+      [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
     - python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
+      rc=0
       python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \
-        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL"
+        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" || rc=$?
+      [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"
   after_script:
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
@@ -454,6 +500,8 @@ watch:notify:
     - |
       python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
     - |
+      # 沒有 plan.json（GAP：不建基準、不開 Issue）→ 什麼都不做（同 watch-round.yml 的 has_plan）
+      test -f watch-out/plan.json || { echo "watch: 沒有 plan.json（match 是 GAP），不動任何 Issue"; exit 0; }
       GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
         --project "$CI_PROJECT_ID" --confidential --plan watch-out/plan.json
   artifacts:

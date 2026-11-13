@@ -35,7 +35,7 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 | `DUMPLING_DEV_PROJECTS` | `.gitlab-ci.yml` | 目前未使用，保留給動態 matrix（T-02）；專案清單目前寫在 `dev:*` 的 `parallel:matrix` |
 | `DUMPLING_SIGN_MODE` | `.gitlab-ci.yml` | `none`（預設，不簽章）或 `cosign-keyless`（需自架 Sigstore，見 GITLAB-PORT 第 9 節） |
 | `tags:`（`dumpling`、`dumpling-build`、`dumpling-scan`） | `.gitlab-ci.yml` | 換成內部 runner 的標籤 |
-| `PILOT_ENV` | CI/CD 變數，**File 類型、protected** | 常駐 DT 的連線設定（含 `$INTERNAL_DT_URL` 與 API key），格式待內部驗證 |
+| `PILOT_ENV` | 目前由範本設定（`$DUMPLING_OUT_BASE/pilot-env/pilot.env`，臨時 DT 寫入）；**T-14 之後**改成 CI/CD 變數，File 類型、protected | 常駐 DT 的連線設定（含 `$INTERNAL_DT_URL` 與 API key），格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控通知用的 project access token（scope `api`，只給一個專案）；只有 `watch:notify` 使用 |
 | `DUMPLING_JOB` | Pipeline schedule 的變數 | `watch`（每日監控）或 `dev`（每日開發版） |
 | `INTERNAL_MIRROR_URL` | `watch:compute` 的 `variables`，或 CI/CD 變數 | 內部資料源鏡像網址（T-06）；公開 repo 裡只放空字串 |
@@ -47,7 +47,8 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 - `watch:compute`、`watch:notify`：`pipeline/watch/issues.py`、`collect.py` 目前只支援 GitHub API，GitLab 後端是待辦 T-05。這兩個 job 是 `when: manual`，沒有後端時會印 `NOT_RUN` 並失敗。
 - `dev:publish`（T-03）、`firmware:dt`（T-04）：同樣印 `NOT_RUN`。
 - `release:sign`：預設 `DUMPLING_SIGN_MODE=none` 就印 `NOT_RUN`；`cosign` 執行檔尚未進 `tools.lock`（T-09）。
-- M2 的指令（`project-info.py`、`run-step.sh`、`release-meta.py`…）以 `origin/wp1/m2-jetson` 為準，M2 合併後要再核對一次（T-01）。
+- M2 的指令（`project-info.py`、`run-step.sh`、`release-meta.py`…）已對照 M2 合併後的 main 核對（T-01，2026-11-13）。
+- runner 前提同 GitHub 代管 runner：非 root 要免密碼 sudo、掃描 runner 要有 docker（scan.sh 目前一定開臨時 DT，常駐 DT 模式是 T-14）；`DUMPLING_APT` 清空時，映像要自己含 platform.yml 的 `build.apt`／`scan.apt`（見 GITLAB-PORT 第 5 節）。
 
 ## 內部版本核對表
 

@@ -145,16 +145,17 @@
 **GitHub 現況**：每個 job 用 `pipeline/dt-ephemeral.sh up/wait/env/down` 開臨時 Dependency-Track（DT），UUID 每天不同；`dt-smoke.yml` 做煙霧測試。每日監控刻意不開 DT（WATCH.md 第 1 節）。
 
 **GitLab 做法**：
-- 掃描（`.scan-steps`）不開臨時 DT，改連**內部常駐 DT**（已有完整鏡像：OSV、KEV、NVD 等）。連線設定 `PILOT_ENV`：File 類型 CI/CD 變數、protected，內容是 `pilot.env`（含 `$INTERNAL_DT_URL` 與服務帳號 API key）。格式**待內部驗證**。
-- 因為是常駐環境，`MIRROR_REFRESH_STATUS` **不設為空**（GitHub 版設空是因為臨時 DT 沒有那個狀態檔）：讓鏡像新鮮度檢查生效，過期標 GAP。
+- **現況（範本照這個寫）**：`pipeline/platforms/*/scan.sh` 一定用 `pipeline/dt-ephemeral.sh` 開臨時 DT（要 docker），把連線資訊寫進 `PILOT_ENV` 這個**路徑**、自己從公開網址抓 NVIDIA 公告／核心 CVE／EUVD／OSV 鏡像，並設 `MIRROR_REFRESH_STATUS=""`。所以範本的 scan 跟 GitHub 版一樣開臨時 DT：`PILOT_ENV` 是 `$DUMPLING_OUT_BASE/pilot-env/pilot.env`（單獨一個資料夾），掃描 runner 要有 docker（第 5 節），還不能斷外網。
+- **目標（待辦 T-14）**：掃描改連**內部常駐 DT**（已有完整鏡像：OSV、KEV、NVD 等）。需要 `scan.sh`／`dt-ephemeral.sh` 新增常駐 DT 模式（C1 的檔案，經 C0 協調）：連線設定 `PILOT_ENV` 改成 File 類型 CI/CD 變數、protected，內容是 `pilot.env`（含 `$INTERNAL_DT_URL` 與服務帳號 API key，格式**待內部驗證**）；`MIRROR_REFRESH_STATUS` **不設為空**，讓鏡像新鮮度檢查生效，過期標 GAP。T-14 完成後範本的 scan 再改。
 - DT 專案分層：GitHub 版是 `<名稱>-bsp`／`<名稱>-os` 兩個平行專案（D-030(4)）。**T-07：parent／child 專案在常駐 DT 再評估**（會影響每日監控的專案鍵 `dumpling:<專案>/<版本>#<層>` 與 DT 內的呈現；評估時一併決定舊的平行專案是否遷移）。
 - 持續性：常駐 DT 的 UUID 穩定，每日監控理論上可以改走 DT 路線（`exploited_watch.py` 以 DT 專案 UUID 為鍵）。要不要改是另一個決定，不在這次範圍；範本維持與 GitHub 相同的 Grype＋KEV＋EUVD 路線。
 
-**要換的東西**：`PILOT_ENV` 變數、`$INTERNAL_DT_URL`、DT API key（見第 7 節）、`firmware:dt` 的呼叫方式（T-04）。
+**要換的東西**（T-14 之後）：`PILOT_ENV` 變數、`$INTERNAL_DT_URL`、DT API key（見第 7 節）、`firmware:dt` 的呼叫方式（T-04）。
 
 **驗收**：
-- [ ] `release:scan` 在測試 tag 上完成，常駐 DT 內出現對應專案，`pipeline/dt-verify.py` 通過。
-- [ ] 鏡像過期時（故意讓狀態檔過期）scan 標 GAP，不是 OK。
+- [ ] （現況）`release:scan` 在測試 tag 上以臨時 DT 完成，`pipeline/dt-verify.py` 通過。
+- [ ] （T-14 之後）`release:scan` 連常駐 DT 完成，常駐 DT 內出現對應專案，`pipeline/dt-verify.py` 通過。
+- [ ] （T-14 之後）鏡像過期時（故意讓狀態檔過期）scan 標 GAP，不是 OK。
 - [ ] DT API key 沒有出現在 job log、artifacts（`result/`）。
 
 **官方依據**：這一節大部分是內部系統，沒有 GitLab 官方文件；File 類型變數與 protected 見第 7 節的 https://docs.gitlab.com/ci/variables/ 。**常駐 DT 的 pilot.env 格式與權限模型：官方文件不適用，待內部環境驗證。**
@@ -166,7 +167,11 @@
 **GitHub 現況**：全部 `ubuntu-24.04`（x64）與 `ubuntu-24.04-arm`（Jetson 編譯）內建 runner；公開 repo 不接自架 runner（任何人開 PR 都能在機器上跑程式）；開頭刪預裝工具騰磁碟；build 與 scan 分 job；每個 job 最長 6 小時。
 
 **GitLab 做法**：
-- 三種標籤（範本）：`dumpling`（輕量：測試、打包、通知）、`dumpling-build`（核心／樹外模組編譯，要 arm64 時另標）、`dumpling-scan`（掃描，需要 bubblewrap／user namespace、能連常駐 DT 與鏡像）。實際標籤換成內部的。
+- 三種標籤（範本）：`dumpling`（輕量：測試、打包、通知）、`dumpling-build`（核心／樹外模組編譯，要 arm64 時另標）、`dumpling-scan`（掃描，需要 bubblewrap／user namespace、docker（臨時 DT，T-14 之前）、能連鏡像）。實際標籤換成內部的。
+- **跟 GitHub 代管 runner 相同的前提**（範本與被呼叫的腳本都假設；GitHub 版在 runner 上都有）：
+  - 非 root 執行時要有**免密碼 sudo**：`pipeline/install-scan-tools.sh` 用 `sudo install`，`tools/e2e/install-tools.sh` 用 `sudo apt-get install bubblewrap` 與 `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`。範本 `.setup` 依 `id -u` 設 `$SUDO`（root 時為空）；docker executor 以 root 跑時，`DUMPLING_APT` 預設含 `sudo`，讓腳本裡的 `sudo` 可以執行。
+  - 套件：`DUMPLING_APT` 不是空的時，範本照 GitHub 版安裝 platform.yml 的 `build.apt`（build）與 `bubblewrap python3-yaml`＋`scan.apt`（scan）。內部映像把 `DUMPLING_APT` 清空時，**映像必須自己含這些套件**（例如 Jetson 編譯要 build-essential、bc、bison、flex、libssl-dev、libelf-dev…，掃描要 zstd、lbzip2；以各專案 platform.yml 為準）。
+  - 掃描 runner 要能跑 docker（臨時 DT）：shell executor 裝 docker，或 docker executor 給 docker 存取（做法內部決定；docker-in-docker 要 privileged，安全取捨要內部評估）。T-14 完成、改連常駐 DT 後才不需要。
 - executor：shell 或 docker 都可。docker executor 用 `DUMPLING_IMAGE`（RD 的編譯映像，固定 digest 或固定版本，不可用 `latest`，測試檢查）。shell executor 的沙箱需求（user namespace 設定）是整台機器的設定，要在 runner 安裝腳本處理（參考 sca-center 的 `deploy/gitlab-runner/` 的做法，**不複製內部細節**）。
 - `concurrent`／清理：編譯需要大量磁碟；範本在 `after_script` 刪除 `$DUMPLING_OUT_BASE`（輸出放在專案資料夾外，避免被掃到自己）；runner 本身需要週期清理工作資料夾與 Docker 資源（做法內部決定）。`concurrent` 的值依磁碟與 CPU 決定，**建議從 1 開始**（掃描與編譯同時跑會互搶磁碟）。
 - 不開 `interruptible`：build／scan／release 的 job 設 `interruptible: false`，避免新的 push 取消一個已跑一小時的編譯（`default` 設 true 是給測試類 job）。
@@ -201,7 +206,7 @@
 | 編譯環境 | runner 上 `apt-get` 安裝（`build.apt`） | RD 的 Docker 映像（`DUMPLING_IMAGE`），`DUMPLING_APT` 清空 |
 
 **驗收**：
-- [ ] 斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。
+- [ ] （T-06、T-14 之後）斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。現況 scan.sh 與 feeds.sh 都直接從公開網址下載，**還不能斷網**。
 - [ ] 鏡像過期時狀態是 GAP；沒有任何步驟靜默回退到公開網址。
 
 **官方依據**：內部系統，不適用 GitLab 官方文件。
@@ -216,7 +221,7 @@
 
 | 機密／設定 | 放哪裡 | 設定 |
 |---|---|---|
-| DT API key／`PILOT_ENV` | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不適用於多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
+| DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不適用於多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN`（通知用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**；只有 `watch:notify` 讀（測試檢查） |
 | `COSIGN` 金鑰（若選金鑰對方案，見第 9 節） | KMS 優先；其次 protected＋masked variable | 待內部決定 |
 | 排程變數 `DUMPLING_JOB` | Pipeline schedule 的變數 | 不是機密 |
@@ -235,7 +240,7 @@
 - 第三方 action 的 SHA 固定在 GitLab 對應為：`image` 固定 digest／版本（第 5 節）；`include:` 若引用外部範本要用 `ref:` 固定 commit SHA 或 tag（範本本身目前沒有 `include`）。
 
 **驗收**：
-- [ ] `PILOT_ENV`、`WATCH_GITLAB_TOKEN` 的 protected 旗標已開；在非保護分支 pipeline 印環境變數看不到它們。
+- [ ] `WATCH_GITLAB_TOKEN`（與 T-14 之後的 `PILOT_ENV`）的 protected 旗標已開；在非保護分支 pipeline 印環境變數看不到它們。
 - [ ] 在 merge request pipeline 看不到它們。
 - [ ] `watch:notify` 以外的 job 看不到 `WATCH_GITLAB_TOKEN` 的使用（測試）；log 與 artifacts 掃不到 token 字串。
 - [ ] token 到期日已記入行事曆／排程提醒。
@@ -359,7 +364,7 @@
 
 | 編號 | 內容 | 阻塞於 |
 |---|---|---|
-| T-01 | **已完成（2026-11-13，main cc7d101）**：核對 `gitlab/.gitlab-ci.yml` 呼叫的指令與 M2 合併後的版本。`project-info.py`、`run-step.sh`、`install-scan-tools.sh`、`install-tool.sh`、`firmware-*.sh` 的參數一致；修了兩處：(1) `release-meta.py` 少了 `--scan-summary`（沒有它 report_status／release_gate 會是 NOT_RUN），已補；(2) M2 的 scan 會用 `KCVE_CACHE_DIR`（上一份核心 CVE 鏡像，`pipeline/lib/mirrors.sh`）→ 範本加 `.kcve-cache`（GitLab `cache:`，scan 與 watch:compute 共用，只存新抓的）。官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內、預設存在 runner 那台機器（多台 runner 要設分散式 cache 才共用）、保護與非保護分支預設不共用。`gitlab/tests/test_gitlab_ci.py` 的 `test_t01_*` 會在 release.yml 改參數時提醒重新核對 | — |
+| T-01 | **已完成（2026-11-13，main cc7d101）**：核對 `gitlab/.gitlab-ci.yml` 呼叫的指令與 M2 合併後的版本。`project-info.py`、`run-step.sh`、`install-scan-tools.sh`、`install-tool.sh`、`firmware-*.sh` 的參數一致。獨立驗證另外找到並已修：scan 照現行 scan.sh 開臨時 DT（見 T-14）、sudo 與 platform.yml 的 apt、tag pipeline 不跑 validate 類 job（官方 job_rules：tag 的 push 也是 push）、firmware 補 sbomqs 品質檢查、watch 的 grype PATH 與結束碼。修了兩處：(1) `release-meta.py` 少了 `--scan-summary`（沒有它 report_status／release_gate 會是 NOT_RUN），已補；(2) M2 的 scan 會用 `KCVE_CACHE_DIR`（上一份核心 CVE 鏡像，`pipeline/lib/mirrors.sh`）→ 範本加 `.kcve-cache`（GitLab `cache:`，scan 與 watch:compute 共用，只存新抓的；scan 在 after_script 存、`cache:when: always`，失敗也存；watch:compute 要 `wp2/watch-m2` 合併後的 feeds.sh 才會讀 `KCVE_CACHE_DIR`）。官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內、預設存在 runner 那台機器（多台 runner 要設分散式 cache 才共用）、保護與非保護分支預設不共用。`gitlab/tests/test_gitlab_ci.py` 的 `test_t01_*` 會在 release.yml 改參數時提醒重新核對 | — |
 | T-02 | dev 版專案清單改動態產生（child pipeline），取代範本的固定 `parallel:matrix` | 內部 GitLab 版本核對 |
 | T-03 | `dev:publish`：滾動開發版 SBOM 在 GitLab 的存放（Generic Package 覆蓋行為待驗證）；每日監控 collect 讀取方式 | 內部環境驗證 |
 | T-04 | `firmware:dt`：韌體 SBOM 上傳常駐 DT 的呼叫方式（`firmware-dt.sh` 的 pilot.env 與工作目錄） | 內部環境驗證 |
@@ -371,6 +376,7 @@
 | T-10 | M8：第 14 條通報與倒數的 GitLab 版（第 10 節） | M4、M7 |
 | T-11 | 簽章方案決定（第 9.2 節最後一欄） | 內部決定 |
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
+| T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案，經 C0 協調 | C0／C1 決定 |
 | T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
 
 ---
@@ -403,13 +409,14 @@
 
 **runner 與映像**
 - [ ] 三種標籤的 runner 上線，掃描／發行 runner 設為只跑保護 ref。驗收：未保護分支的 scan job 為 stuck。
+- [ ] runner 符合第 5 節「跟 GitHub 代管 runner 相同的前提」：非 root 有免密碼 sudo、掃描 runner 有 docker（T-14 之前）、映像含 platform.yml 的 apt 套件（`DUMPLING_APT` 清空時）。驗收：一次 release:scan 的 log。
 - [ ] `DUMPLING_IMAGE` 換成 RD 映像，固定 digest 或版本。驗收：`tests/run.d/c3-gitlab.sh` 通過、job log 的映像為預期版本。
 - [ ] 編譯機磁碟與清理規劃完成，一次完整編譯後磁碟回復。驗收：job 前後 `df`。
 
 **變數與機密**
-- [ ] `PILOT_ENV`（File，protected）、`WATCH_GITLAB_TOKEN`（Masked and hidden，protected）建立。驗收：非保護分支與 MR pipeline 看不到。
+- [ ] `WATCH_GITLAB_TOKEN`（Masked and hidden，protected）建立；T-14 之後再加 `PILOT_ENV`（File，protected）。驗收：非保護分支與 MR pipeline 看不到。
 - [ ] project access token 的最小角色與 scope 確認，到期日已排提醒。驗收：記錄於交接文件。
-- [ ] 外部資料來源改內部鏡像（第 6 節）。驗收：外網斷線下 release:scan 成功。
+- [ ] 外部資料來源改內部鏡像（第 6 節，T-06、T-14 之後）。驗收：外網斷線下 release:scan 成功。
 
 **流程**
 - [ ] 語法：官方 schema 驗證 OK（`c3-gitlab-schema.sh`）。驗收：腳本輸出。

@@ -148,7 +148,7 @@ class CiFile(unittest.TestCase):
         self.assertEqual(self.jobs["release:publish"]["needs"], ["release:scan"])
         # 有 tag 以外的條件才會跑的 job 不可以是 release 階段（避免非 tag 發 Release）
         for n, j in self.jobs.items():
-            if "releases" in self.lines_of(n) and "POST" not in self.lines_of(n) and "/releases" in self.lines_of(n):
+            if "/releases" in self.lines_of(n):      # 呼叫 Releases API 的 job（建 Release）只能在 tag 跑
                 self.assertTrue(any("CI_COMMIT_TAG" in x.get("if", "") for x in j["rules"]), n)
 
     def test_dev_and_firmware_rules(self):
@@ -216,6 +216,7 @@ class CiFile(unittest.TestCase):
         kc = self.doc[".kcve-cache"]
         self.assertTrue(kc["variables"]["KCVE_CACHE_DIR"].startswith("$CI_PROJECT_DIR/"), "cache 路徑要在專案資料夾內（官方）")
         self.assertEqual(kc["cache"]["paths"], [".kcve-cache/kcve/"])
+        self.assertEqual(kc["cache"].get("when"), "always", "scan 失敗也存（同 pipeline.yml 的 !cancelled()）")
         self.assertIn(".kcve-cache", self.doc[".scan"]["extends"])
         for job in ("release:scan", "dev:scan", "watch:compute"):      # 展開 extends 後：有 cache 與變數（watch:compute 自己的變數也還在）
             self.assertEqual(self.jobs[job]["cache"], kc["cache"], job)
@@ -223,6 +224,47 @@ class CiFile(unittest.TestCase):
         self.assertIn("INTERNAL_MIRROR_URL", self.jobs["watch:compute"]["variables"])
         for job, name in (("release:scan", "kcve"), ("watch:compute", "kernel-cve")):
             self.assertIn("mirror_is_fresh %s" % name, self.lines_of(job))
+
+
+    def test_tag_push_does_not_run_validate_jobs(self):
+        # 官方 job_rules：tag 的 push 也是 CI_PIPELINE_SOURCE == "push"；validate 的 job 不能在 tag pipeline 跑（會擋 release）
+        for n in ("validate:unit-tests", "firmware:fetch"):
+            for r in self.jobs[n]["rules"]:
+                cond = r.get("if", "")
+                if '"push"' in cond:
+                    self.assertIn('($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH)', cond, n)
+
+    def test_scan_matches_current_scan_sh(self):
+        # pipeline/platforms/*/scan.sh 目前一定開臨時 DT（docker）並寫入 PILOT_ENV 這個路徑：範本不能要求 File 變數、要檢查 docker
+        txt = self.lines_of("release:scan")
+        self.assertIn('export PILOT_ENV="$DUMPLING_OUT_BASE/pilot-env/pilot.env"', txt)
+        self.assertIn("command -v docker", txt)
+        self.assertNotIn("test -n \"${PILOT_ENV:-}\"", txt)
+        self.assertIn("bubblewrap python3-yaml $SCAN_APT", txt)
+        scan_sh = (HERE.parents[1] / "pipeline" / "platforms" / "jetson" / "scan.sh").read_text(encoding="utf-8")
+        self.assertIn("dt-ephemeral.sh", scan_sh, "scan.sh 已不用臨時 DT：重新評估 T-14 與範本的 scan")
+
+    def test_platform_apt_and_sudo(self):
+        # platform.yml 的 build.apt／scan.apt 要裝（同 pipeline.yml）；非 root 用 sudo（install-scan-tools.sh 本身用 sudo）
+        for n in ("release:build", "dev:build"):
+            self.assertIn("$SUDO apt-get install -y -qq --no-install-recommends $BUILD_APT", self.lines_of(n))
+        for n in ("release:build", "release:scan", "dev:build", "dev:scan"):
+            txt = self.lines_of(n)
+            self.assertIn("BUILD_APT=$(sed -n 's/^BUILD_APT=//p' info.txt); SCAN_APT=$(sed -n 's/^SCAN_APT=//p' info.txt)", txt)
+            self.assertIn('if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO=sudo; fi', txt)
+        self.assertIn("sudo", self.vars["DUMPLING_APT"].split())
+
+    def test_watch_exit_codes_like_watch_round(self):
+        c = self.lines_of("watch:compute")
+        self.assertIn('[ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"', c)
+        self.assertIn('[ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"', c)
+        self.assertIn('install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"', c)
+        self.assertIn("test -f watch-out/plan.json", self.lines_of("watch:notify"))
+
+    def test_firmware_sbom_check_like_github(self):
+        txt = self.lines_of("firmware:fetch")
+        for x in ("install-tool.sh sbomqs", "check-tool-version.sh sbomqs", "firmware-sbom-check.sh"):
+            self.assertIn(x, txt)
 
 
 class ReleasePayload(unittest.TestCase):
