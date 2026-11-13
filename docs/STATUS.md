@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 07:22 +0800（C0）
+最後更新：2026-11-14 07:24 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,7 +12,7 @@
 - 代理：無（#85 驗證完成：不通過，已貼 PR）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。進行中：M7b 其他項目（meta.json／run-params.json 結構化、A-source／C-dt-feeds／C-mirror-freshness 不靠文字、分層重跑帶原掃描列、D-054、scan-status-check 重複列、C-kernel-boot、#20、product_version_check GAP 是否降級、a.run[0] 退路）。正式 tag 等使用者（建議打在 0be7bc2 或更新的 main）
+  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
   - C3（第二台）：#47、#49、#61、#69、#71、#72、#74、#84 已合併。**#85**（T-10 art14 GitLab 後端：成員 ≥30 才算數、非 confidential 即 FAIL、真實案件略過即 FAIL；C0 同意 --gitlab-project 與演練也比照外洩）**C0 驗證不通過**：倒數依據取自可被 Reporter 改的內文（可偽造已通報）→ 改以可信成員留言為準；單案失敗中斷整輪 → 逐案隔離；token 看不到 confidential 時 exit 0 → 先查權限；欄位格式錯要 FAIL；MIN_LEVEL 邊界測試。C3 修正中，之後 C0 派聚焦複驗；之後 T-16 → T-12；T-05 後續：非 confidential 時先 PUT 補救（等真實環境）。等正式 Release 做第一次真實基準
   - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
