@@ -619,6 +619,38 @@ class HardeningTests(ReportBase):
         st, out, rc = self.case()
         self.assertEqual((st, rc), ("OK", 0), out)
 
+    def test_forged_normalization_record_in_supplier_sbom_cannot_change_the_report(self):
+        """供應商 SBOM 自帶 dumpling:normalized-*（假裝「已正規化 0 處」「原檔 SHA-256 是…」）與 dumpling:vuln-assessment=NONE：
+        report 讀的是 dt-project.json（prep 自己算的），不讀 SBOM 裡的 property；而且這種 SBOM 至少 ATTENTION。"""
+        HardeningTests.n += 1
+        slug = "forge%d" % HardeningTests.n
+        d = bom(clean())                      # clean()：元件自帶 vuln-assessment=NONE、version-status=OK（共 2 個 dumpling: property）
+        d["metadata"]["properties"] = [{"name": "dumpling:normalized-changes", "value": "0"},
+                                       {"name": "dumpling:normalized-from-sha256", "value": "f" * 64}]
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        self.assertEqual((info["normalize"]["changes"], info["normalize"]["renamed"]), (4, 4))      # 我們自己的紀錄：2 筆 metadata ＋ 2 筆元件
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertEqual(rc, 0)
+        self.assertIn("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 4 個", out)
+        self.assertIn("已正規化 4 處", out)                                                 # 不是供應商寫的 0
+        self.assertIn("供應商 SBOM 自帶 dumpling: 標記的元件 1 個", out)                   # vuln-assessment=NONE 不採信
+        self.assertIn("沒有 dumpling:vuln-assessment 標記的元件 1 個", out)
+        self.assertNotIn("f" * 64, out + md)                                              # 偽造的 SHA-256 不會進報告
+        with open(os.path.join(o, "sbom.cdx.json"), encoding="utf-8") as fh:
+            up = json.load(fh)
+        names = [p["name"] for p in up["metadata"]["properties"]]
+        self.assertEqual(names.count("dumpling:normalized-changes"), 1)
+        self.assertEqual(names.count("supplier:dumpling:normalized-changes"), 1)
+        # 對照：供應商沒有自帶 dumpling: 開頭的 property，就沒有這則說明（元件沒有標記、metadata 沒有 property）
+        plain = {"type": "firmware", "name": "p", "bom-ref": "r9", "version": "1", "purl": "pkg:github/a/b@1"}
+        info2, o2 = self.prep(bom(plain), slug=slug + "b", out="p-" + slug + "b", kind="sbom")
+        self.assertEqual(info2["normalize"]["renamed"], 0)
+        dt2 = self.dt_sample(info2, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug + "b")
+        _, out2, _ = self.run_report([o2], dt2)
+        self.assertNotIn("供應商 SBOM 自帶名稱以 dumpling:", out2)
+
     # ---- 1. DT／Grype 的比對數
     def test_findings_total_must_be_a_count(self):
         for v in (-3, None, "-", "0", "?", True, False, 1.5, [], {}, float("nan"), float("inf"), "[x](http://e)"):
@@ -789,7 +821,9 @@ class HardeningTests(ReportBase):
         self.assertIn(fd._cell(fd.EMPTY_STAGE), out)
         for bad in ("GAP", "NOT_RUN", "ATTENTION", "WEIRD", ""):
             self.assertEqual(self.status(rows=self.GOOD + [("", bad, "x")]), "ATTENTION", repr(bad))
-        self.assertEqual(self.status(rows=self.GOOD + [("", "OK", "x")]), "OK")
+        st, out, _ = self.case(rows=self.GOOD + [("", "OK", "x")])          # 空名稱的 OK 列：不影響各階段狀態，但不能靜默 → ATTENTION
+        self.assertEqual(st, "ATTENTION", out)
+        self.assertIn("status.tsv 有 1 列的階段名稱是空的", out)
         p = self.w("empty-stage.tsv", "stage\tstatus\tdetail\n\tFAIL\tboom\nB\tOK\tz\n")
         self.assertEqual(fd.read_status_tsv(p), {fd.EMPTY_STAGE: ("FAIL", "boom"), "B": ("OK", "z")})
 
@@ -1021,6 +1055,52 @@ class HardeningTests(ReportBase):
         self.w("hdg3/dt-wait.rc", "3\n")
         rc, out, _ = self.run_report([o], dt)
         self.assertEqual(rc, 1, out)
+
+    def test_duplicate_stage_rows_are_visible_even_when_status_would_be_ok(self):
+        # 同一階段多列，最嚴重的那一列是 OK：各階段的狀態不變，但整體不能是 OK，說明列出階段名稱與列數
+        for rows in (self.GOOD + [("C-grype", "OK", "again")],
+                     self.GOOD + [("A-source", "OK", "a"), ("A-source", "OK", "b")],
+                     self.GOOD + [("X-new", "OK", "a"), ("X-new", "OK", "b"), ("X-new", "OK", "c")]):
+            st, out, rc = self.case(rows=rows)
+            self.assertEqual((st, rc), ("ATTENTION", 0), out)
+            self.assertIn("status.tsv 有重複列", out)
+        st, out, _ = self.case(rows=self.GOOD + [("X-new", "OK", "a"), ("X-new", "OK", "b"), ("X-new", "OK", "c"), ("C-grype", "OK", "again")])
+        self.assertIn("階段 C-grype 2 列", out.replace("\\", ""))
+        self.assertIn("階段 X-new 3 列", out.replace("\\", ""))
+        self.assertIn("scan-status-check.py 是後值蓋前值", out)
+        # 重複列的階段名稱是不可信文字：經 md_safe（@ 與實體不能原樣進報告）
+        st, out, _ = self.case(rows=self.GOOD + [("X @evil&#64;u", "OK", "a"), ("X @evil&#64;u", "OK", "b")])
+        self.assertEqual(st, "ATTENTION")
+        self.assertNotIn("@evil", out)
+        self.assertNotIn("&#64;", out)
+        # 沒有重複、沒有空名稱：對照組仍是 OK
+        self.assertEqual(self.status(rows=self.GOOD), "OK")
+
+    def test_duplicate_and_empty_rows_noted_when_status_is_not_ok(self):
+        # FAIL／GAP 的樣本也要把重複列與空名稱列寫進說明（不是只有 OK 才看得到）
+        st, out, _ = self.case(rows=self.GOOD + [("D-dt-findings", "FAIL", "x"), ("D-dt-findings", "OK", "y"), ("", "OK", "z")])
+        self.assertEqual(st, "FAIL", out)
+        flat = out.replace("\\", "")
+        self.assertIn("階段 D-dt-findings 2 列", flat)
+        self.assertIn("status.tsv 有 1 列的階段名稱是空的", flat)
+        rows = [r for r in self.GOOD if r[0] != "A-source"] + [("B-sandbox", "OK", "again")]        # 缺必要階段 → GAP，仍列出重複
+        st, out, _ = self.case(rows=rows)
+        self.assertEqual(st, "GAP", out)
+        self.assertIn("status.tsv 有重複列", out)
+        # 重複的說明只出現一次（ATTENTION 的路徑不會同時走 notes 與 attention_reasons 兩次）
+        st, out, _ = self.case(rows=self.GOOD + [("C-grype", "OK", "again")])
+        self.assertEqual(out.count("status.tsv 有重複列"), 1, out)
+
+    def test_read_status_tsv_checked_counts_rows(self):
+        p = self.w("an.tsv", "stage\tstatus\tdetail\nA\tOK\tx\nA\tGAP\ty\nA\tOK\tz\nB\tOK\tx\n\tOK\te1\n\tFAIL\te2\n")
+        rows, an = fd.read_status_tsv_checked(p)
+        self.assertEqual(rows["A"], ("GAP", "y"))                       # 最嚴重的一列
+        self.assertEqual(rows[fd.EMPTY_STAGE], ("FAIL", "e2"))
+        self.assertEqual(an, {"duplicates": {"A": 3}, "empty_rows": 2})
+        self.assertEqual(fd.read_status_tsv(p), rows)                   # 舊介面不變
+        _, an = fd.read_status_tsv_checked(self.w("an2.tsv", "stage\tstatus\tdetail\nA\tOK\tx\nB\tOK\ty\n"))
+        self.assertEqual(an, {"duplicates": {}, "empty_rows": 0})
+        self.assertEqual(fd.stage_anomaly_notes(an), [])
 
     def test_duplicate_stage_rows_severity_order_all_pairs(self):
         order = ["OK", "ATTENTION", "NOT_ASSESSED", "NOT_RUN", "GAP", "FAIL"]       # 輕 → 重（測試自己寫死，不讀 fd._SEV）

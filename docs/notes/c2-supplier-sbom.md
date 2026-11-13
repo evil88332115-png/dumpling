@@ -39,8 +39,11 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
 - 檔名、元件名稱、版本、規格版本、sbomqs 輸出的文字都當不可信文字，寫進 stdout 狀態行、`sbom-check.md`、`$GITHUB_STEP_SUMMARY` 之前一律經 `firmware_mdsafe.md_safe`：
   1. 用 `unicodedata.category` 把所有 C 類（Cc 含 C1 控制字元、Cf 如 U+202E 與零寬字元、Cs 單獨代理、Co、Cn）與 Zl／Zp（U+2028／U+2029）換成空白，連續空白壓成一個；
   2. 先截短（元件名 80、檔名 120 個字元，超過加「…」），再跳脫，不會切在跳脫序列中間；
-  3. Markdown 特殊字元 `\ [ ] ( ) < > ! * _ # ~ | ` & $` 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時還讀得出原字元；代價是 stdout 與 log 裡的 `_`、`(` 也會有反斜線）；
-  4. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線，GitHub 才不會自動變成連結。沒處理 email 自動連結（只會變成 mailto 連結）。
+  3. `&` 換成 `&amp;`（最先做）：`&lt;`、`&#64;`、`&#x40;`、`&commat;` 這類 HTML 實體渲染時會解碼成 `<`、`@`、`[`，等於繞過後面的跳脫；換成 `&amp;` 之後渲染結果是字面的實體文字，不靠反斜線規則（和 `pipeline/watch/match.py` 的 `md_text` 同一個寫法）。代價：stdout 與 log 裡的 `&` 顯示成 `&amp;`；
+  4. `@`（含全形 `＠`）後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織；前面緊接 ASCII 英數字的 `@`（purl 的 `a@1.0`、`name@host`）不是提及，原樣保留（和 `match.unsafe_markdown` 的判斷一致，這裡更嚴）；
+  5. Markdown 特殊字元 `\ [ ] ( ) < > ! * _ # ~ | ` $` 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時還讀得出原字元；代價是 stdout 與 log 裡的 `_`、`(` 也會有反斜線）；
+  6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線，GitHub 才不會自動變成連結。沒處理 email 自動連結（只會變成 mailto 連結）。
+  和 `md_text` 的差別、不直接 import `match.py` 的理由寫在 `firmware_mdsafe.py` 檔頭；`tests/test_firmware_mdsafe.py` 載入 `match.py`，用它的 `unsafe_markdown` 檢查 `md_safe` 的輸出（規則不一致時測試失敗）。
   跳脫只做一次：`md_cell` 只處理換行；workflow 摘要表的 awk 用 `\\?\|` 規則，已跳脫的 `\|` 不會被再跳脫成 `\\|`。
   `firmware-ci.sh` 的摘要表儲存格（狀態行、expected 說明）與 `firmware_dt.py` 報告裡的檢查名、階段名、錯誤訊息也走同一個函式。
   沒改：`x86_firmware.py` 的 `fw-inventory.md` 有自己的 `md_esc`（HTML 實體＋反斜線），而且只當 artifact、不進步驟摘要。
@@ -68,12 +71,13 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
 
 DT 5.2.0 把這份供應商 SBOM 拒收（http=400，`Schema validation failed`）。用 CycloneDX 1.4 官方 schema 驗證原檔，錯誤剛好兩個：根物件多出 `platform`、`firmware_version`
 （1.4 起根物件 `additionalProperties: false`），以及 `components[0].licenses[18].license` 只有 `url`（`license` 物件要有 `id` 或 `name`）。
-處理原則：**只改上傳用的副本、原檔不動；不刪資料、不補猜的值、每一筆留紀錄；只處理這兩種已知違規。**
+處理原則：**只改上傳用的副本、原檔不動；不刪資料、不補猜的值、每一筆留紀錄；只處理這兩種已知違規，另加一條命名空間隔離（第三條，不是違規修正）。**
 
 | 規則 | 條件 | 做法 |
 |---|---|---|
 | `top-level-extra-field` | 根物件的鍵不在該 specVersion 的 schema `properties` 裡（表：1.4、1.5、1.6，取自 CycloneDX/specification 各 tag 的 `bom-<版本>.schema.json`） | 搬到 `metadata.properties`，名稱 `dumpling:supplier-extra:<原欄位名>`，值＝字串原值；其他型別是標準 JSON 字串（`sort_keys`、分隔符 `,` `:`、`ensure_ascii=False`） |
 | `license-without-id-or-name` | `components[]`（含巢狀）的 `licenses[]` 項目恰好只有 `license` 一個鍵、`license` 是物件、**沒有 `id` 鍵也沒有 `name` 鍵** | 從 `licenses` 移除該項，元件 `properties` 加 `dumpling:supplier-license-url`（url 為字串時）。license 物件除了 `url` 還有別的欄位（`text` 等）或 `url` 不是字串：整個 license 物件以 JSON 字串存進 `dumpling:supplier-license-entry`（url 為字串時仍另寫 `-url`）。**不把 url 填成 name** |
+| `supplier-dumpling-property` | `metadata.properties` 與 `components[]`（含巢狀）的 `properties[]` 裡，項目是物件、`name` 是字串、**以 `dumpling:` 開頭**（區分大小寫，我們的流程也是完全相等才讀） | 就地改名成 `supplier:` + 原名（`supplier:dumpling:normalized-changes`），值、其他鍵與位置不變；紀錄記原名（最多 200 字元）、位置（`from`＝`to`）、整個原項目的標準 JSON SHA-256 |
 
 不處理（照原樣上傳，DT 拒收就照實 FAIL）：其他任何 schema 違規；`id`／`name` 鍵存在但值不合格（`""`、不是 SPDX id）；項目多一個鍵；`licenses` 不是陣列；
 `services`、`metadata.component` 的 licenses；`specVersion` 不是 1.4／1.5／1.6（1.2、1.3 的根物件允許額外欄位；1.7 沒有查證）；`metadata`／`metadata.properties`／元件 `properties` 型別不對（沒有地方放紀錄）。
@@ -91,6 +95,8 @@ DT 5.2.0 把這份供應商 SBOM 拒收（http=400，`Schema validation failed`�
                  {"rule": "license-without-id-or-name", "from": "/components/0/licenses/18", "to": ["/components/0/properties/0"],
                   "property": ["dumpling:supplier-license-url"], "value_sha256": "…"}],
      "unnormalized": [{"rule": "…", "at": "<JSON Pointer>", "reason": "…"}], "notes": []}
+
+改名的那一種：`{"rule": "supplier-dumpling-property", "from": "/metadata/properties/3", "to": ["/metadata/properties/3"], "property": ["supplier:dumpling:normalized-changes"], "original_name": "dumpling:normalized-changes", "value_sha256": "<整個原 property 物件標準 JSON 的 SHA-256>"}`（就地改名，`to` 與 `from` 相同）。
 
 `from` 是原檔的 JSON Pointer（索引是原檔的，不是移除後的）；`to` 是副本裡新 property 的位置。副本另在 `metadata.properties` 加
 `dumpling:normalized-from-sha256`（原檔 SHA-256，與 `dt-project.json` 的 `input_sbom_sha256` 相同）與 `dumpling:normalized-changes`（筆數，不含這兩個標記本身）。
@@ -112,10 +118,35 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
 - **還原時 `metadata`／`metadata.properties` 一律還原成空陣列**：無法從副本區分原檔是「沒有這個鍵」「`null`」還是「空陣列」。內容不會遺失（空陣列沒有資料），但還原後的形狀可能和原檔不同。
   `normalize.json` 的 `original_shape` 記原本的狀態（`{"metadata": "absent｜null｜object", "metadata.properties": "absent｜null｜array"}`），license 規則的每一筆另有 `component_properties_before`（元件的 `properties` 原本是 `absent｜null｜array`）；
   要逐位元還原原檔，以這些欄位加上 `input_sha256` 核對為準（原檔本身不動、仍是權威）。
-- **供應商自帶同名的 `dumpling:normalized-*` property**：副本的 `metadata.properties` 會出現兩個同名 property（供應商的與我們加的）。以 `normalize.json` 的 `input_sha256`、`changes` 筆數、各筆 `to` 的位置指標為準
-  （我們加的永遠是 `metadata.properties` 的最後兩個，位置可由 `to` 與 `changes` 筆數推得）；不去除供應商的那兩個（不刪資料）。
+- **供應商自帶 `dumpling:` 開頭的 property**（第三條規則）：`dumpling:` 是我們的命名空間——`dumpling:normalized-*`、`dumpling:supplier-*` 是這個模組寫的紀錄，`dumpling:vuln-assessment`、`dumpling:version-status`、
+  `dumpling:advisory-match` 是 report 讀的評估標記。供應商如果自帶同名 property，和我們加的混在一起會被誤當成我們的紀錄（例如偽造的 `dumpling:normalized-changes: 0`）。
+  選「改名保留」而不是「移除」：符合「不刪資料」，值仍在副本裡，也不丟證據；改名是就地的，其他 property 的位置不變。
+  結果：副本裡所有 `dumpling:` 開頭的 property 都是我們寫的，我們加的 `dumpling:normalized-from-sha256`、`dumpling:normalized-changes` 永遠是 `metadata.properties` 的最後兩個。
+  改名計入 `changes`（也計入 `dumpling:normalized-changes` 的筆數）；沒有其他違規、只有改名時 `applied` 也是 true。
+  report 另寫「供應商 SBOM 自帶名稱以 dumpling: 開頭的 property N 個」，狀態至少 ATTENTION（`dt-project.json` 的 `normalize.renamed`、`summary.supplier_dumpling_props`）；
+  report 本來就不讀 SBOM 裡的 property，它讀 `dt-project.json`（prep 自己算的）；元件自帶的三個評估標記本來就不採信，摘要在改名之前算，所以「供應商自帶標記的元件 N 個」仍是原本的數字。
+  範圍：只有 `metadata.properties` 與元件的 `properties`（我們只寫這兩處、report 只讀元件的）。頂層 `properties`（1.5 起）、`services`、`pedigree`／`evidence` 底下的元件不動；`metadata.component` 本來就由 prep 整個換成我們的根元件。
+  `specVersion` 不在支援範圍（1.2、1.3、1.7 以後）時整份不處理，所以不改名；但那種 SBOM 的 property 一樣不被 report 採信。
+  變更筆數超過上限（`MAX_CHANGES`）時剩下的不改名，記在 `unnormalized`（規則 `supplier-dumpling-property`，`at` 是位置），report 說「另有 N 處已知違規無法正規化」。
+  供應商自己原本就有 `supplier:dumpling:…` 名稱的 property 不會再被改；區分靠 `normalize.json` 的位置指標。
 - **供應商 SBOM 有重複 JSON 鍵**：標準庫讀檔時後值會悄悄蓋掉前值，上傳的副本只剩後值。`firmware_dt.py prep` 用 `object_pairs_hook` 偵測，`normalize.json` 的 `notes` 逐筆寫
   「第幾個完成解析的物件（與位置指標）、鍵、被丟掉的前值的 SHA-256」，report 狀態至少 ATTENTION（見 `docs/notes/c2-firmware-dt.md`）。前值本身不保存（原檔才是權威）。
+
+## 供應商 SBOM 的 `vulnerabilities`（DT 會不會套用）
+
+問題：上傳副本保留供應商的頂層 `vulnerabilities`（含 `vulnerabilities[].analysis`，例如 `state: not_affected`）時，DT 會不會把它當成分析結果套用。
+結論：**DT 5.2.0 的 BOM 上傳（`/api/v1/bom`）不讀 `vulnerabilities`，不會套用**；所以正規化不移除它（副本與原檔在這一點相同，測試釘住「不動、不算變更」）。沒有用真的 DT 實測（這台沒有 Docker），依據是原始碼：
+
+- 版本：`pipeline/dt-compose.yaml` 的 `ghcr.io/dependencytrack/apiserver:5.2.0`；原始碼取 `github.com/DependencyTrack/dependency-track` 的 tag `5.2.0`（commit `d67a6a3a28006e95dcc7611553469bf89c6c9e0a`），路徑都在 `apiserver/src/main/java/org/dependencytrack/` 底下。
+- BOM 上傳：`resources/v1/BomResource.java` 建立 `ImportBomWorkflow`（`tasks/ImportBomWorkflow.java`）→ `tasks/ImportBomActivity.java`。`processEvent`／`consumeBom` 解析 CycloneDX 後只讀 `specVersion`、`serialNumber`、`version`、`metadata`（時間戳、`component`、專案中繼資料）、`components`、`services`、`dependencies`
+  （`ModelConverter.convertComponents`／`convertServices`／`convertDependencyGraph`／`convertToProject`／`convertToProjectMetadata`），沒有碰 `vulnerabilities`。
+- 整個 `apiserver/src/main` 搜尋 `getVulnerabilities()`：CycloneDX 的 `Bom.getVulnerabilities()` 只有 `parser/cyclonedx/CycloneDXVexImporter.java` 讀，它只被 `tasks/ImportVexActivity.java` 呼叫，
+  該活動只由 `ImportVexWorkflow` 啟動，而 `ImportVexWorkflow` 只在 `resources/v1/VexResource.java`（`/api/v1/vex`）建立。`ModelConverter` 裡提到 vulnerability 的是匯出方向（DT → CycloneDX，`CycloneDXExporter`）。
+  也就是只有「另外上傳 VEX」才會套用，`firmware-dt.sh` 不做這件事。
+- Grype：用 Syft v1.55.0 的 CycloneDX 解碼器讀 SBOM，那個目錄沒有引用 `Vulnerabilities`；Grype v0.121.0 的 `Vulnerabilities` 只出現在輸出方向（presenter）。供應商宣告的漏洞資訊不影響比對。
+- 若沒有套用，`vulnerabilities` 留在上傳副本裡只是 DT 不讀的資料（schema 驗證仍會檢查它的格式，格式不對會讓整份被拒收，那是一般 FAIL）。
+
+要再確認的時機：`dt-compose.yaml` 的 DT 版本升級時，重新搜尋 `getVulnerabilities()` 的呼叫位置（上面的路徑與搜尋字串）；若 BOM 上傳開始讀 `vulnerabilities`，改成在正規化時移除，稽核紀錄記原值的 SHA-256 與筆數，report 寫明「供應商宣告的漏洞資訊沒有上傳，原值見稽核紀錄」。
 
 ## 還沒做
 
