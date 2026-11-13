@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -527,6 +528,80 @@ def test_mirror_script_url_and_caps(tmp_path):
     assert r.returncode != 0 and "KERNEL_CVE_MAX_RECORD_KB" in r.stderr and not (tmp_path / "y.man").exists()
 
 
+def test_mirror_script_retries_clone(tmp_path):
+    # 假的 git 放在 PATH 前面：前 N 次 clone 失敗（模擬 runner 連不上），其他呼叫交給真的 git
+    repo = git_repo(tmp_path, RECORDS)
+    real = shutil.which("git")
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    cnt = tmp_path / "clones"
+    (fake / "git").write_text(f"""#!/bin/bash
+for a in "$@"; do if [ "$a" = clone ]; then
+  n=$(( $(cat {cnt} 2>/dev/null || echo 0) + 1 )); echo $n > {cnt}
+  [ "$n" -le "$FAIL_CLONES" ] && {{ echo "fatal: unable to connect" >&2; exit 128; }}
+fi; done
+exec {real} "$@"
+""")
+    (fake / "git").chmod(0o755)
+    env = {"KERNEL_CVE_GIT_URL": repo.as_uri(), "PATH": f"{fake}:{os.environ['PATH']}", "KERNEL_CVE_GIT_RETRY_DELAY": "0", "FAIL_CLONES": "2"}
+    r = run_mirror(tmp_path / "m", tmp_path / "m.man", env=env)
+    assert r.returncode == 0, r.stderr
+    assert cnt.read_text().strip() == "3" and "第 1 次失敗" in r.stderr and "第 3 次成功" in r.stderr
+    cnt.unlink()
+    r = run_mirror(tmp_path / "n", tmp_path / "n.man", env={**env, "FAIL_CLONES": "9", "KERNEL_CVE_GIT_TRIES": "2"})
+    assert r.returncode == 1 and "試了 2 次都失敗" in r.stderr and not (tmp_path / "n.man").exists()
+    assert cnt.read_text().strip() == "2"
+    assert run_mirror(tmp_path / "o", tmp_path / "o.man", env={**env, "KERNEL_CVE_GIT_TRIES": "x"}).returncode == 3
+
+
+def _fake_git(tmp_path, cnt):
+    """PATH 前面放假的 git：clone 與 ls-remote 都連不上（模擬 runner 連不到 git.kernel.org），其他呼叫交給真的 git。"""
+    real = shutil.which("git")
+    fake = tmp_path / "fakebin-down"
+    fake.mkdir()
+    (fake / "git").write_text(f"""#!/bin/bash
+for a in "$@"; do case $a in clone|ls-remote)
+  echo $(( $(cat {cnt} 2>/dev/null || echo 0) + 1 )) > {cnt}
+  echo "fatal: unable to access: Failed to connect to git.kernel.org port 443" >&2; exit 128;; esac; done
+exec {real} "$@"
+""")
+    (fake / "git").chmod(0o755)
+    return fake
+
+
+def test_mirror_script_falls_back_to_previous_copy(tmp_path):
+    repo = git_repo(tmp_path, RECORDS)
+    assert run_mirror(tmp_path / "prev", tmp_path / "prev.man", env={"KERNEL_CVE_GIT_URL": repo.as_uri()}).returncode == 0
+    prev_src = (tmp_path / "prev" / "SOURCE").read_text()
+    old_fetched = [l for l in prev_src.splitlines() if l.startswith("fetched_utc=")][0]
+    cnt = tmp_path / "net"
+    env = {"KERNEL_CVE_GIT_URL": repo.as_uri(), "PATH": f"{_fake_git(tmp_path, cnt)}:{os.environ['PATH']}", "KERNEL_CVE_GIT_RETRY_DELAY": "0",
+           "KERNEL_CVE_FALLBACK_FROM": str(tmp_path / "prev"), "KERNEL_CVE_REUSE_FROM": str(tmp_path / "prev")}
+    r = run_mirror(tmp_path / "m", tmp_path / "m.man", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    last = r.stdout.strip().splitlines()[-1]
+    assert last.startswith("ATTENTION mirror=") and "上游連不上" in last and "小時前" in last, last
+    src = (tmp_path / "m" / "SOURCE").read_text()
+    assert old_fetched in src and "fallback=yes" in src and "fallback_note=上游連不上" in src     # fetched_utc 維持舊值
+    assert cnt.read_text().strip() == "2"          # ls-remote 一次＋clone 只再試一次
+    assert (tmp_path / "m" / "kernel-cves.zip").read_bytes() == (tmp_path / "prev" / "kernel-cves.zip").read_bytes()
+    chk = run_mirror("--check", tmp_path / "m")
+    assert chk.returncode == 0 and "fallback=yes" in chk.stdout
+    # 太舊：fetched_utc 改成 3 小時前、上限 2 小時 → FAIL，不沿用
+    t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (tmp_path / "prev" / "SOURCE").write_text(prev_src.replace(old_fetched, f"fetched_utc={t}"))
+    r = run_mirror(tmp_path / "n", tmp_path / "n.man", env={**env, "KERNEL_CVE_FALLBACK_MAX_HOURS": "2"})
+    assert r.returncode == 1 and "超過 KERNEL_CVE_FALLBACK_MAX_HOURS=2" in r.stderr and "FAIL git clone" in r.stderr
+    # 沿用的鏡像被改過（sha256 不符）→ FAIL
+    with open(tmp_path / "prev" / "kernel-cves.zip", "ab") as f:
+        f.write(b"x")
+    r = run_mirror(tmp_path / "o", tmp_path / "o.man", env=env)
+    assert r.returncode == 1 and "sha256 與 SOURCE 不符" in r.stderr
+    # 沒有可沿用的：照舊 FAIL
+    r = run_mirror(tmp_path / "q", tmp_path / "q.man", env={k: v for k, v in env.items() if k != "KERNEL_CVE_FALLBACK_FROM"})
+    assert r.returncode == 1 and "試了 3 次都失敗" in r.stderr
+
+
 @pytest.mark.parametrize("what,msg", [("stale", "過期"), ("sha", "sha256"), ("few", "可能只下載到一部分"), ("nosource", "缺少 SOURCE"),
                                       ("member", "不是 cve/published"), ("org", "格式不是預期"), ("symlink", "一般檔案與資料夾以外"),
                                       ("fifo", "一般檔案與資料夾以外"), ("count", "records=")])
@@ -578,7 +653,7 @@ def test_sca_scan_wiring():
     # （另一個在 kernel_cve_list：Grype、DT 都沒有核心 CVE 又沒有清單來源時，核心存在而沒有評估也要寫狀態列）
     assert s.count("status C-kernel-config NOT_RUN") == 2
     j = s.rindex("status C-kernel-config NOT_RUN")
-    assert s.rindex('elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ]; then', 0, j) > i
+    assert s.rindex('elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ] && [ "$KSEEN" = 1 ]; then', 0, j) > i   # SBOM 有核心才寫
     assert 'KSRC=(--from "$IMG_TAR")' in s and "timeout 3600 python3 -I" in s and 'ka+=(--findings "$OUT/dt/findings.json")' in s
     case = next(l for l in s.splitlines() if l.strip().startswith("case $k in DT_URL|"))
     assert "KERNEL_CVE_MIRROR" in case.split(" in ", 1)[1].split(")", 1)[0].split("|") and 'secret "$KERNEL_CVE_MIRROR"' not in s

@@ -27,7 +27,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `notes` | 挑選理由與限制 |
 | `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
 | `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
-| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 不符 CycloneDX schema，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的檔案）。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
+| `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 有 prep 的格式正規化修不了的 CycloneDX schema 違規，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的原檔）。目前沒有樣本使用。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
 
 ### `expected` 的鍵
 
@@ -40,6 +40,8 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `coreboot_revision`、`edk2_revision` | git 修訂（縮寫即可） | 一方是另一方的前綴就算相符（至少 7 碼）；edk2 取 coreboot config 的 `CONFIG_EDK2_TAG_OR_REV` |
 | `coreboot_build_date` | `YYYY-MM-DD` | 與 CBFS `build_info` 的建置日期（UTC）相同 |
 | `intel_gop`、`intel_legacy_vbios` | 字串 | 與 SBOM 的 `Intel GOP driver`／`Intel legacy VBIOS (option ROM)` 元件 version 相同；同名元件多個時任一個相符就 OK；沒有元件或都沒讀到版本＝MISSING。GOP 的 version 只有 build 編號（如 `1070`）。VBT 不提供此鍵（version 是表頭格式版本） |
+| `amd_agesa` | 字串（PI 版本號，例如 `1.2.0.B`） | SBOM 的 `AMD AGESA` 元件 version 的最後一個以空白分隔的符記相同（不分大小寫），或整串相同；映像有好幾個不同的 AGESA 字串時任一個相符就 OK；沒有元件或沒讀到版本＝MISSING。前面的名稱（`ComboAM4v2PI`、`ComboV2PI`…）各廠商寫法不同，不比 |
+| `amd_microcode` | `[{equiv_id, patch_id}]`（十六進位） | SBOM 有 `AMD CPU microcode` 元件，其 `sca-center:amd-equivalence-id` 與 `version`（patch level）相符；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING；映像多出來的微碼不比 |
 
 每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 
@@ -50,8 +52,31 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/ubuntu-ovmf-2024.02` | PLAN B 段第一個樣本：edk2 成品（deb 內的 OVMF）加完整原始碼包與 Ubuntu patch，Launchpad 網址長期不變 |
 | `bios/dasharo-protectli-vp46xx-v1.2.0` | coreboot＋edk2，含 Intel ME、FSP、微碼；已有試掃結果可當預期值（`expected`）。附 coreboot、edk2 原始碼封存（GitHub 動態產生，雜湊可能變動，見該檔 notes） |
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
+| `bios/asus-prime-b550m-a-3404` | AMD AM4 平台、AMI：EFS 因更新包標頭不在固定位置、combo 目錄指到多個 L1、新世代的 L1 指到 L2（`$PL2`／`$BL2`）、AMD 微碼與壓縮 firmware volume 裡的 AGESA 字串；release notes 有 AGESA 版本可當出處（解析見 `docs/notes/c2-amd-psp.md`） |
+| `bios/novacustom-v540tu-mtl-v1.0.1` | Dasharo coreboot 完整 32 MiB SPI 映像，ME 區域是新世代配置：區域開頭是 CSE layout table → BPDT（version 2），`$FPT` 只在 data partition、沒有 FTPR 項目、`$CPD` header version 2。用來驗證 `tools/cra/intel_cse_layout.py`（`expected.intel_me` 依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
+| `bios/novacustom-nuc-box-arl-v0.9.2` | Dasharo coreboot 完整 32 MiB SPI 映像（Arrow Lake-U/H FSP），ME 區域開頭的 CSE layout table 是 layout 1.7 的 Size 0x60 變體（CRC-32 相符），RBEP＋NFTP 版本一致、沒有 FTPR。用來驗證 `tools/cra/intel_cse_layout.py` 的 Size 0x60（`expected.intel_me`、微碼依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
 | `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
 | `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
+
+## 公告比對（Intel 微碼）
+
+`pipeline/firmware-bios.sh` 的輸出（`fw.cdx.json`、`fw-inventory.json`、`fw-inventory.md`）對每份 Intel 微碼離線比對 `tools/cra/data/intel-microcode-releases.json`
+（Intel 公開的微碼發佈說明，固定 tag／commit／sha256，由 `tools/cra/intel_ucode_releases.py` 產生；CI 不重新抓）：
+
+| `dumpling:advisory-match` | 意思 |
+|---|---|
+| `affected-candidate` | 有候選公告：資料表裡比映像的 revision 更新的 release 所列的 INTEL-SA、「New Disclosures」表涵蓋這個 revision 的 release、人工對照的散文（20250812）、同 F-M-S 重疊遮罩的較新更新。`dumpling:advisory-candidates` 是**候選**（來源只在 release 層級列公告，不一定影響這個 CPUID），不是確定受影響 |
+| `older-no-sa` | 有較新的 revision，但那些 release 沒列公告；不代表沒有漏洞 |
+| `up-to-date` | 資料表沒有更新的 revision；**不代表沒有漏洞**，以 Intel 公告為準 |
+| `NOT_ASSESSED` | 資料庫沒有資料，以廠商公告為準（資料表讀不到或 sha256 不符＝GAP、CPUID／platform 不在表、revision 讀不到或比表新、已被移除、同 F-M-S 另有重疊的 platform 遮罩在之後還有更新＝`superseded-platform-mask`…） |
+
+AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：AMD-SB 的規則表還沒有做，以 AMD 公告為準。
+
+NVIDIA vBIOS 元件另有 `dumpling:advisory-match`（`affected`／`fixed`／`NOT_ASSESSED`）：用 vBIOS 版本與 option ROM 的 PCI vendor／device ID 查 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（repo 內的 NVIDIA product-security gpu-firmware 公告；離線，CI 不連網）。目前表裡沒有可比對的列，而且尚未經負責人確認（唯一的公告 5674 是 HGX／DGX 伺服器韌體，初審意見是無法對應到顯卡 option ROM），所以每個 vBIOS 都是 `NOT_ASSESSED`：資料庫沒有資料，以廠商公告為準（NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告，主要管道是合作夥伴通知）；版本是佔位字串、裝置 ID 讀不到也是 `NOT_ASSESSED`。`affected`、`fixed` 只是對照表裡已審核的列的比對結果，`fixed` 不代表沒有其他漏洞。
+
+`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。`fw-inventory.md` 每次都有「公告比對」一節；CI 摘要表有「公告比對」欄（微碼，有 NVIDIA vBIOS 時再加一段）。
+Intel ME 的 NVD CPE（`dumpling:cpe-*`）見 `docs/notes/c2-firmware-advisory.md`：只放前三段版本，NVD 對 CSME 的資料不完整，Grype 比不到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；family 讀不出來時由版本推定（major 11～30），比對結果待人審。
+規則、資料來源、重新產生資料表的步驟與限制都在那份 notes。
 
 ## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
 
@@ -81,9 +106,16 @@ sbomqs 分數與各類別存在 `--out`（`<檔名>.sbomqs.json`、`sbom-check.m
     python3 -I pipeline/lib/firmware_dt.py expected --prep prep/<slug>
     python3 -I pipeline/lib/firmware_dt.py report   --prep prep/* [--dt-result <資料夾>] --out <資料夾>
 
-`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
+`prep` 產出 `sbom.cdx.json`（要上傳的）與 `dt-project.json`；`kind: sbom` 的供應商 SBOM 另做上傳前的最小格式正規化並寫 `normalize.json`（見下）；`expected` 產出 `expected.json`（給 `dt-verify.py verify`）與 `firmware-dt-expected.json`；
 `report` 產出 `firmware-dt.md`，每個樣本一行 `FIRMWARE-DT<TAB>OK|ATTENTION|GAP|NOT_RUN|FAIL<TAB>…`（沒有 DT 結果＝NOT_RUN；有 FAIL 以 1 結束）。
 流程與接 workflow 的草稿見 `docs/notes/c2-firmware-dt.md`。
+
+### 供應商 SBOM 的格式正規化
+
+DT 上傳會做 CycloneDX schema 驗證，不符就整份拒收。Dasharo NS5x 的 SBOM 原檔有兩種違規（根物件多出 `platform`、`firmware_version`；`components[0].licenses[18].license` 只有 `url`），
+所以 prep 對 `kind: sbom` 的樣本只在上傳用的副本做最小正規化：多出的頂層欄位搬到 `metadata.properties`（`dumpling:supplier-extra:<名稱>`）、沒有 `id` 也沒有 `name` 的 license 項目移除並把 url 存成元件 property（`dumpling:supplier-license-url`）。
+**原檔不動、不刪資料、不補猜的值、不處理其他違規**；每一筆記在 `normalize.json`（原 JSON Pointer、新位置、原值 SHA-256），副本的 `metadata.properties` 加 `dumpling:normalized-from-sha256`、`dumpling:normalized-changes`。
+report 的說明會寫「已正規化 N 處（見 normalize.json）」。規則、上限、紀錄格式、驗證方式見 `docs/notes/c2-supplier-sbom.md`。
 
 ### DT 專案名稱與版本
 

@@ -54,17 +54,35 @@ BIOS（Intel 平台的完整 SPI 映像）：
   （CSME 12 以後：$FPT 在 +0x1000、沒有 FTPR 那一項）；都拿不到但有表頭像真的 `$FPT`、FTPR 的 `$CPD` 或候選數用完 → unknown；
   只有雜散的標記仍是 no-me-region。有兩個以上版本不同的 FTPR manifest（例如 capsule 裡兩個 ME 映像）時報第一個，
   me_conflict 列出全部、ATTENTION。沒有 ME 區域的檔案裡零散的 `$MN2`
-  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；family 是 CSME 時 SBOM 的 ME 元件才有 cpe（見 CSME_CPE），其他情況不填。
+  不當成 CSE 版本（只記在 me_note）。新世代的配置（CSME 18 這類：區域開頭是 CSE layout table，`$FPT` 只在 data partition、沒有 FTPR 那一項）
+  上面的做法都拿不到、結果是 unknown 時，再走 intel_cse_layout.py：layout table → BP 的 BPDT → FTPR（type 2）、RBEP（1）、NFTP（7）三種分割區的
+  `$CPD` → `<名稱>.man` 的 `$MN2`；有 FTPR 取它，沒有就要 RBEP 與 NFTP 兩種類型各至少一份、版本相同才採用（同一類型的拷貝不算獨立來源）（basis「BPDT (CSE layout table …): …」），
+  讀得到的版本互相矛盾、結構不一致、只有一個來源 → 維持 unknown（原因接在 me_note）。上面的做法有結果時完全不動。沒有 descriptor 時
+  layout table 或 BPDT 要在檔案開頭。格式與出處見 intel_cse_layout.py、docs/notes/c2-csme-layout.md。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；SBOM 的 ME 元件的 cpe：清單寫明 CSME，或映像讀不出 family 但 major 版本在 11～30（NVD 上 TXE、SPS 的版本都低於 11；推定寫在 dumpling:cpe-basis，比對結果待人審）才帶，版本只放前三段（見 CSME_CPE、csme_cpe_info）；清單寫 ME／TXE／SPS、版本不是三段以上的數字、major 在 11～30 以外且 family 不明時不填，原因在 dumpling:cpe-gap。
   格式依 me_cleaner、MEAnalyzer 的結構定義（只讀它們的原始碼核對欄位位置，沒有用它們的程式）。
+- 公告比對（fw_advisory.py，離線）：每份 Intel 微碼對 tools/cra/data/intel-microcode-releases.json（Intel 公開的微碼發佈說明，由 intel_ucode_releases.py 產生）
+  比對，結果記在 inv["bios"][i]["microcode"][j]["advisory"]、SBOM 的 dumpling:advisory-* property 與 fw-inventory.md 的「公告比對」一節；
+  規則與限制見 fw_advisory.py 檔頭與 docs/notes/c2-firmware-advisory.md。結果是候選，不是漏洞判定；dumpling:vuln-assessment 仍是 NOT_ASSESSED。
 - CPU microcode：Intel microcode header（header version 1、loader revision 1、BCD 日期、CPUID、platform id、大小），
   先檢查 header 欄位再算整份 checksum（為 0 才算）；每個（CPUID、platform id）一列；extended signature table 的 CPUID 另外記。
   全檔掃描照舊（找 FIT 沒列的備援或 OS／UEFI 階段才載入的）；另外讀 FIT（見 fit_table）：每份 microcode 記 in_fit
   （重置時 CPU 會載入的那幾份；true／false，FIT 沒找到或不能用時是 null＝不知道）。FIT 指到的位置不是有效 microcode → incomplete。
-  認出 AMD 平台（Embedded Firmware Structure，或兩種不同的 PSP／BIOS 目錄 cookie）時記 GAP「AMD microcode 不支援」、ATTENTION
-  （不是「沒有 microcode」）。有 Intel descriptor 或 Intel microcode 時不判斷；NVIDIA vBIOS 更新包裡只有 AMD 標記時不當成 BIOS 映像。
-  這個規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
+  認出 AMD 平台（Embedded Firmware Structure，或兩種不同的 PSP／BIOS 目錄 cookie）時：Intel 格式的 microcode 清單不適用（不是「沒有 microcode」），
+  改交 amd_psp.py 解析（見下面「AMD 平台」）。有 Intel descriptor 或 Intel microcode 時不判斷；NVIDIA vBIOS 更新包裡只有 AMD 標記時不當成 BIOS 映像。
+  這個辨識規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
   認不出來，沒有其他結構時是 GAP；構造的情況：AMD 映像裡剛好有一份 checksum 對的 Intel 格式 microcode → platform 不是 amd，
   沒有 microcode 的 Intel BIOS 區域檔在 0x20000 剛好是 0x55AA55AA → 誤判 AMD；兩種都是 ATTENTION。
+- AMD 平台（解析在 amd_psp.py，格式與出處見該檔檔頭與 docs/notes/c2-amd-psp.md；結果在 bios[].amd）：EFS（每個 16 MiB 視窗各找、容許 capsule 標頭造成的位移）
+  → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）→ 每個項目的 type、subprogram、instance、位置、大小；
+  PSP 韌體標頭（fw_type 與 size_total 和目錄項目相符）通過才讀版本，BIOS 目錄 type 0x66 的 AMD 微碼列 patch level、日期、equivalence id
+  （前面有 `DMA\\0` container 的等價表才對出 CPUID，沒有就不猜），AGESA 字串（`AGESA!V<n>` 後面的字串，整個映像與解開的 firmware volume 都找，不同值全部列出並 ATTENTION）。
+  看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、壓縮或 size 0 的條目、slot header checksum 不符、
+  Promontory 指標、AGESA 搜尋不完整或字串被截斷）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符（或沒有完整解析）的目錄不採用它的條目，只經由它到得了的子目錄也不採用（untrusted-path）；
+  指標在兩種座標解讀下都指到目錄（或同一個位置被不同基底讀到）時，兩邊都列出並各自做結構檢查：只有結構上的正面證據（checksum 不符、位址或範圍超出檔案、指標沒指到目錄…）才算不通過；
+  每一種都完整檢查過而且恰好一邊通過就採用它、另一邊標「未採用」（rejected，附證據）；兩邊都通過而內容相同 → 都採用；都通過但內容不同、都沒通過、有任何一邊無法判斷（工具的限制：上限、不解的 address mode、超時…）、
+  或碰到上限／循環／超時 → 全部維持歧義，不判斷哪個是硬體實際使用的，只經由它到得了的目錄的條目、版本、微碼（amd.ambiguous）不進 SBOM。
+  SBOM：有版本的 PSP 韌體條目、AMD 微碼 patch、AGESA 字串各一個元件（掛在 BIOS 映像底下），dumpling:vuln-assessment 同樣是 NOT_ASSESSED（note: ASSESS_NOTES["amd"]）。
+  amd_psp 載入不了或丟錯 → b["amd"] 是 None，gaps 寫「parser did not run」。
 - coreboot 類映像（例如 Dasharo）的 CBFS（見 coreboot_cbfs.py）：找到 FMAP（或 `LARCHIVE`）的 CBFS 區域時，讀 `revision`／`build_info`
   （coreboot 版本、git 修訂、建置時間）、`config`（關鍵設定欄位與雜湊）、FSP（`FSPH` 標頭的 ImageRevision、M／S 類型）、`vbt.bin`（`$VBT` 版本）、
   SELF payload（身分與雜湊，不展開裡面的 firmware volume）。每個 CBFS 區域（RO、RW_A…）分開記，相同內容只記一次、列出所有位置。
@@ -108,10 +126,11 @@ SBOM 的 dumpling: property（每個元件都有）：
 包括 --time-limit 不是大於 0 的有限秒數；參數不接受縮寫）；
 GAP（沒有找到任何 vBIOS 或 BIOS 結構，包括全部檔案都因上限或損壞被略過）；
 ATTENTION（沒有 descriptor、版本對不上、清單有「不知道」、檔案略過、超過上限沒解析完、區域超出檔案、vBIOS 開頭不確定、
-ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台、有壓縮或 GUID 不認得的 UEFI section 沒有解析、有不同版本的 FTPR manifest）；OK。FAIL 時刪掉的輸出包括 fw-inventory.md。
+ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台有 GAP 或要確認的項目（見上面）、有壓縮或 GUID 不認得的 UEFI section 沒有解析、有不同版本的 FTPR manifest）；OK。FAIL 時刪掉的輸出包括 fw-inventory.md。
 """
 import argparse
 import csv
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -648,12 +667,15 @@ def rom_at(data, p, budget=None, starts=None):
     rom = data[p:q]
     first = images[0]
     vm = VBIOS_VER.search(rom)
+    others = sorted({x.group(1).decode() for x in VBIOS_VER.finditer(rom)} - ({vm.group(1).decode()} if vm else set()))
     r = {"offset": p, "length": q - p, "vendor": f"{first['vendor']:04x}", "device": f"{first['device']:04x}",
          "class": first["class"], "version": vm.group(1).decode() if vm else None,
          "terminated": ("truncated" if images[-1].get("truncated") else "last-flag" if images[-1]["last"] else "invalid-next-image"),
          "images": [{"offset": i["offset"] - p, "code_type": i["code_type"], "length": i["length"],
                      "length_basis": i["length_basis"], "vendor": f"{i['vendor']:04x}", "device": f"{i['device']:04x}"}
                     for i in images], **hashes(rom)}
+    if others:                                  # ROM 裡有不同的版本字串：不知道哪一個是 vBIOS 版本（公告比對不給 fixed）；只有這時才寫這個鍵
+        r["other_versions"] = others
     if r["terminated"] != "last-flag":
         r["terminated_note"] = images[-1].get("truncated") or why
     if start_note:
@@ -949,8 +971,9 @@ def ftpr_conflict(data, h, others):
             + f"; reported {ver} at 0x{h:x} (the first one found by the method in basis); the others are only in other_versions")
 
 
-def me_info(data, regs, me_r, beyond, budget=None):
-    """CSME／ME／TXE（不分是哪一種：family 不猜）→ {me（dict 或 None）, status, note, loose, standalone, incomplete}。
+def me_info_fpt(data, regs, me_r, beyond, budget=None):
+    """（$FPT、FTPR 的 `$CPD` 這條路；外面的 me_info 在這條路沒有結果時才試新世代的 BPDT 配置。）
+    CSME／ME／TXE（不分是哪一種：family 不猜）→ {me（dict 或 None）, status, note, loose, standalone, incomplete}。
     status：found；no-me-region（descriptor 沒有 ME 區域，或沒有 descriptor、也沒有任何 ME 的結構）；unknown（有 ME 的結構但沒有可用的 manifest）。
     有 ME 區域：先用 $FPT（區域開頭與 +0x10 都試）→ FTPR 分割區（basis「FTPR partition ($FPT…)」）；沒有 $FPT 或 FTPR 拿不到時，
     退回舊的 `$CPD` 做法：區域裡前面最近的 `$CPD` 目錄名稱是 FTPR 的 `$MN2` → found（basis「FTPR partition manifest」，原因記在 note）。
@@ -1016,6 +1039,33 @@ def me_info(data, regs, me_r, beyond, budget=None):
     r["me"] = {"version": ver, "date": date, "basis": basis, "offset": h, "family": None,
                "other_versions": sorted({x["version"] for x in mn} - {ver})}
     return {**r, "status": "found"}
+
+
+def me_info(data, regs, me_r, beyond, budget=None):
+    """ME 版本。先走 me_info_fpt（$FPT、名稱是 FTPR 的 `$CPD`；有結果就不動，既有世代的行為不變）；那條路是 unknown
+    （或沒有 descriptor 時是 no-me-region）時，再試新世代的 CSE 配置（intel_cse_layout.py：CSE layout table → BPDT → FTPR／RBEP／NFTP 的 manifest）。
+    只在那邊找到一致的版本才 found（basis 寫明走哪一條路）；認得出配置但版本不可用或互相矛盾 → 維持 unknown，原因接在 note 後面；
+    不是這種配置 → 原樣回傳。範圍：有 descriptor 時是 ME 區域，沒有時是整個檔案（layout table 或 BPDT 要在檔案開頭）。"""
+    r = me_info_fpt(data, regs, me_r, beyond, budget)
+    if r["status"] == "found" or (regs is not None and (me_r is None or r["status"] == "no-me-region")):
+        return r                                        # descriptor 沒有 ME 區域、或 ME 區域超出檔案（me_r 不存在）：沒有範圍可看
+    if regs is not None:
+        base, end = me_r["base"], min(me_r["limit"] + 1, len(data))
+    else:
+        base, end = 0, len(data)
+    cse = load_sibling("intel_cse_layout").find_cse(data, base, end, budget)
+    if cse["status"] == "none":
+        return r
+    if cse["status"] == "gap":
+        if r["status"] == "no-me-region":              # 沒有 descriptor、其他 ME 結構也沒有：開頭碰巧像 layout table 不算有 ME
+            return r
+        return {**r, "status": "unknown", "note": "; ".join(x for x in (r["note"], "CSE layout/BPDT: " + cse["note"]) if x)}
+    r["incomplete"].extend(f"{x['code']}: {x['text']}" for x in cse.get("attention", ()))     # 未解讀的表尾 → ATTENTION（incomplete 會進狀態與 SBOM）
+    mn = me_manifests(data, base, end, budget, notes=r["incomplete"])
+    return {**r, "status": "found", "standalone": regs is None,
+            "note": "no usable $FPT or FTPR $CPD; the version comes from the BPDT main-program partitions (see basis)",
+            "me": {"version": cse["version"], "date": bcd_date(cse["date_raw"], "ymd"), "basis": cse["basis"], "offset": cse["offset"],
+                   "family": None, "other_versions": sorted({x["version"] for x in mn} - {cse["version"]})}}
 
 
 def me_without_fpt(data, r, ff, budget=None):
@@ -1309,6 +1359,12 @@ def bios_image(data, budget=None):
             if l["offset"] <= x["offset"] < l["offset"] + l["length"] and w not in u.setdefault("cbfs_files", []):
                 u["cbfs_files"].append(w)
     amd = [] if regs is not None or ucodes else amd_markers(data, budget)     # 有 Intel descriptor 或 Intel microcode：不是 AMD
+    amd_r, amd_err = None, None
+    if amd:                            # AMD 平台：PSP／BIOS 目錄、微碼、AGESA（解析在 amd_psp.py；沒有 Intel descriptor，所以範圍是整個檔案）
+        try:
+            amd_r = load_sibling("amd_psp").analyze(data, budget, (OverBudget,))
+        except (Fail, *PARSE_ERRORS) as e:
+            amd_err = str(e) if isinstance(e, Fail) else f"AMD PSP parse failed ({type(e).__name__})"
     uefi = uefi_stats(data, lo, hi, budget)
     ibv = ibv_hints(data[lo:hi] if bios_r else data)
     evidence = [k for k, v in (("descriptor", regs is not None), ("me", mi["me"] or mi["status"] == "unknown" or mi["loose"]),
@@ -1319,11 +1375,14 @@ def bios_image(data, budget=None):
     incomplete = ([f"region beyond the end of the file (truncated image?): {x}" for x in beyond] + ([mc_note] if mc_note else [])
                   + [f"ME: {x}" for x in mi["incomplete"]]
                   + fit.pop("incomplete") + uefi.pop("incomplete")
-                  + ([cbfs_err] if cbfs_err else []) + [f"CBFS: {x}" for x in (cbfs["incomplete"] if cbfs else ())])
+                  + ([cbfs_err] if cbfs_err else []) + [f"CBFS: {x}" for x in (cbfs["incomplete"] if cbfs else ())]
+                  + (amd_r["incomplete"] if amd_r else []))
     gaps = list(cbfs["gaps"]) if cbfs else []
-    if amd:
-        gaps.append("AMD platform recognised (" + "; ".join(amd[:2]) + "): AMD microcode (PSP directories) is not supported; "
-                    "the microcode list is not complete (this is not 'no microcode')")
+    if amd_r:
+        gaps += amd_r["gaps"]
+    elif amd:
+        gaps.append("AMD platform recognised (" + "; ".join(amd[:2]) + f"): the PSP/BIOS directory parser did not run ({amd_err}); "
+                    "AMD microcode, PSP firmware and AGESA are not listed (this is not 'no microcode')")
     n_comp, n_other = sum(uefi["compressed"].values()), sum(uefi["guided_other"].values())
     if n_comp:
         gaps.append(f"{n_comp} compressed UEFI sections not parsed (" +
@@ -1332,7 +1391,7 @@ def bios_image(data, budget=None):
     if n_other:
         gaps.append(f"{n_other} GUID-defined UEFI sections that need processing (unknown GUID) not parsed")
     return {"descriptor": regs is not None, "descriptor_note": why, "regions": regs or [], "me": mi["me"], "me_status": mi["status"],
-            "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd,
+            "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd, "amd": amd_r,
             "uefi": uefi, "cbfs": cbfs, "ibv_hint": ibv, "incomplete": incomplete, "gaps": gaps, "evidence": evidence}
 
 
@@ -1489,30 +1548,96 @@ VERSION_STATUS = "dumpling:version-status"          # OK＝版本從映像（或
 NOT_ASSESSED = "NOT_ASSESSED"
 ASSESS_NOTES = {
     "intel": "Intel advisories cannot be matched by machine; manual cross-check against Intel advisories is required",
-    "nvidia-vbios": "vBIOS vulnerabilities are communicated by NVIDIA through partner notifications; this tool only confirms version and hash",
+    "intel-microcode": "advisory candidates (if any) are in the dumpling:advisory-* properties: they are release-level candidates from Intel's public "
+                       "microcode release notes, not confirmed findings; manual cross-check against Intel advisories is required",
+    "nvidia-vbios": "vBIOS vulnerabilities are communicated by NVIDIA through partner notifications; this tool only confirms version and hash; "
+                    "the version and PCI device ID are also looked up in a reviewed table of NVIDIA product-security bulletins "
+                    "(dumpling:advisory-*), and no match does not mean no vulnerability",
     "coreboot": "NVD has almost no coreboot data (its CPE and version forms do not match coreboot or vendor forks such as Dasharo); "
                 "no vulnerability matching is possible, and no finding would not mean no vulnerability",
     "edk2-payload": "the edk2 version is not known (only the build configuration's git revision of the vendor fork was read), so vulnerability "
                     "matching by version is not possible",
     "vbt": "Intel advisories cannot be matched by machine; manual cross-check against Intel advisories is required "
            "(the VBT is a display configuration data table, not executable code)",
+    "amd": "AMD security bulletins cannot be matched by machine; manual cross-check against AMD product security bulletins is required "
+           "(the version is the one read from the image: PSP firmware header, microcode patch level or AGESA string)",
     "image": "no vulnerability matching at this level; this tool only reports the parsed structure, versions and hashes",
 }
-# Intel CSME 的 CPE。查證：NVD CPE API（https://services.nvd.nist.gov/rest/json/cpes/2.0）2026-11-12，
-# cpeMatchString=cpe:2.3:o:intel:converged_security_management_engine_firmware:* 有 53 筆
-# （vendor intel、product converged_security_management_engine_firmware、part o）；同一天 CVE-2022-38102 的 configurations
-# 也用 cpe:2.3:o:intel:converged_security_management_engine_firmware:*（versionEndExcluding 16.1.27、15.0.45）。
-# 只有 family 確定是 CSME（版本清單寫明，見 inventory）才帶；TXE、SPS 是不同的 product，family 不明時不猜、不填。
+# Intel CSME 的 CPE。查證（NVD 公開 API，2026-11-13）：
+# - CPE 字典（https://services.nvd.nist.gov/rest/json/cpes/2.0?cpeMatchString=cpe:2.3:o:intel:converged_security_management_engine_firmware:*）
+#   有 53 筆，part 是 o、vendor intel、product converged_security_management_engine_firmware；版本只有 major.minor 或 major.minor.hotfix
+#   （例如 11.8.50、12.0.45、14.5.11；沒有四段、字典沒有 14.5.11 之後的版本）。拼成 converged_security_and_management_engine_firmware 的 o 類 CPE 是 0 筆
+#   （`and` 的拼法只出現在 part a 的 converged_security_and_management_engine）。
+# - CVE 的 configurations（https://services.nvd.nist.gov/rest/json/cves/2.0?virtualMatchString=cpe:2.3:o:intel:converged_security_management_engine_firmware）
+#   36 筆 CVE，最新是 CVE-2022-38102：用 cpe:…:* 加三段的 versionStart／End（如 versionEndExcluding 16.1.27、versionStartIncluding 11.0）。
+#   所以 NVD 的 CSME 資料止於 2022，之後 Intel 公告的 CSME 弱點 NVD 沒有這個 CPE 的設定；Grype 沒比到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）。
+# - 其他 firmware 是不同的 product：TXE ＝ trusted_execution_engine_firmware（版本 3.0～4.0.x）、SPS ＝ server_platform_services_firmware
+#   （3.0.6～5.x，版本字串格式很雜），兩者的版本都低於 11。AMT ＝ active_management_technology_firmware（part o，版本也有 11.x～14.5.x）是另一個 product，
+#   CSME 的 CPE 比不到 AMT 的 CVE 設定。
+# 版本轉換：$MN2 的版本是 major.minor.hotfix.build 四段；NVD 只有前三段，所以 CPE 只放前三段（14.0.47.1558 → 14.0.47），元件的 version 維持四段。
+# family：映像分不出來。版本清單的 me 列寫明 CSME → 帶；寫 ME／TXE／SPS → 不帶；映像沒有清單時，major 版本在 11～30 之間推定為 CSME
+# （TXE、SPS 的版本都低於 11；上限 30 是我們的判斷：CSME 大約每年加一個 major，目前最高約 20；$MN2 裡雜散的欄位值會有幾百到幾萬，超過 30 就不是這個欄位）。
+# dumpling:cpe-basis 的值固定是 listed（版本清單寫明）或 inferred（由版本推定，比對結果待人審），說明在 dumpling:cpe-basis-note；
+# major 小於 11 或大於 30（11 與 30 本身都帶）分不出來或不合理 → 不帶、標 GAP（dumpling:cpe-gap）。
 # microcode、NVIDIA vBIOS 沒有標準的 purl／CPE，不自己發明。
 CSME_CPE = "cpe:2.3:o:intel:converged_security_management_engine_firmware:{}:*:*:*:*:*:*:*"
-CPE_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){1,3}")
+CSME_MIN_MAJOR = 11
+CSME_MAX_MAJOR = 30
+CPE_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[0-9]+)?")
+CPE_NOTE = ("NVD CPE and version-range data for Intel CSME is incomplete (the NVD CPE dictionary stops at CSME 14.5.11 and the CVE "
+            "configurations at CVE-2022-38102); no Grype match does not mean there are no vulnerabilities (the temporary Dependency-Track "
+            "has the NVD source disabled, so a component with only a CPE is not matched there); the Intel advisories (INTEL-SA) are authoritative")
+CPE_PROPS = ("dumpling:cpe-basis", "dumpling:cpe-basis-note", "dumpling:cpe-note", "dumpling:cpe-gap")
+
+
+def csme_cpe_info(me):
+    """ME 的 NVD CPE 判斷 → (cpe 或 None, basis（listed／inferred）或 None, gap 原因或 None)。
+    要有三段以上的純數字版本；family 要是 CSME（版本清單），或 major 在 11～30（推定）；其他一律不帶並寫 gap 原因。"""
+    if not me:
+        return None, None, None
+    if me.get("family_conflict"):
+        return None, None, ("the version list gives conflicting families for this version (版本清單 family 矛盾): "
+                            + ", ".join(me["family_conflict"]) + "; nothing is inferred, no CPE")
+    m = CPE_VERSION.fullmatch(me.get("version") or "")
+    if not m:
+        return None, None, "ME version is not a plain major.minor.hotfix[.build] number; no CPE"
+    major, minor, hotfix = (int(x) for x in m.groups())
+    fam = me.get("family")
+    ver = f"{major}.{minor}.{hotfix}"
+    if fam == "CSME":
+        return CSME_CPE.format(ver), "listed", None
+    if fam:
+        return None, None, f"family {fam} (version list) is not CSME; NVD uses a different product for it, no CPE"
+    if CSME_MIN_MAJOR <= major <= CSME_MAX_MAJOR:
+        return CSME_CPE.format(ver), "inferred", None
+    if major > CSME_MAX_MAJOR:
+        return None, None, f"major version {major} is above {CSME_MAX_MAJOR}, which is not plausible for a CSME version field; no CPE"
+    return None, None, f"family not readable from the image and major version {major} < {CSME_MIN_MAJOR} could be ME, TXE, SPS or CSME; no CPE"
 
 
 def csme_cpe(me):
-    """ME 的 CPE；family 不是 CSME、或版本不是純數字的點分格式時是 None（不填）。"""
-    if me and me.get("family") == "CSME" and CPE_VERSION.fullmatch(me["version"] or ""):
-        return CSME_CPE.format(me["version"])
-    return None
+    """ME 的 CPE；判斷不了（family 不是 CSME 且推定不了、版本不是點分數字）時是 None（不填）。"""
+    return csme_cpe_info(me)[0]
+
+
+def csme_basis_note(me, basis):
+    """dumpling:cpe-basis 的說明文字（值本身只有 listed／inferred）。"""
+    m = CPE_VERSION.fullmatch(me["version"])
+    ver = f"{int(m.group(1))}.{int(m.group(2))}.{int(m.group(3))}"
+    drop = "" if m.group(0) == ver else f"; the build number is dropped (NVD CSME versions are major.minor.hotfix): {me['version']} -> {ver}"
+    if basis == "listed":
+        return "family CSME is declared in the version list" + drop
+    return (f"family is not readable from the image and is inferred from the version: major {m.group(1)} is in {CSME_MIN_MAJOR}..{CSME_MAX_MAJOR} "
+            "(on NVD the TXE trusted_execution_engine_firmware and SPS server_platform_services_firmware versions are all below 11; "
+            "AMT active_management_technology_firmware is a different product that this CPE does not match); the match result needs human review" + drop)
+
+
+def cpe_props(me):
+    """ME 元件的 CPE 相關 property：有 CPE → basis（listed／inferred）、basis-note、note；沒有 → gap 原因。"""
+    cpe, basis, gap = csme_cpe_info(me)
+    if cpe:
+        return [prop("dumpling:cpe-basis", basis), prop("dumpling:cpe-basis-note", csme_basis_note(me, basis)), prop("dumpling:cpe-note", CPE_NOTE)]
+    return [prop("dumpling:cpe-gap", gap)] if gap else []
 
 
 def assessed(c, kind):
@@ -1650,6 +1775,67 @@ def cbfs_components(b, img, comps, sub):
         sub.append(ref)
 
 
+AMD_VENDOR = {"name": "Advanced Micro Devices, Inc."}
+
+
+def amd_where(x):
+    return f"{x['directory']} entry {x['index']} (instance {x['instance']}) @0x{x['offset']:x}"
+
+
+def amd_components(b, img, comps, sub):
+    """AMD 平台（amd_psp.analyze 的結果 b["amd"]）：有版本的 PSP 韌體條目、微碼 patch、AGESA 字串各一個元件，掛在 BIOS 映像底下。
+    版本都是映像裡讀到的原值（PSP 標頭的版本欄位、patch_id、AGESA 標記後的字串）；讀不到的不產元件（GAP 在 BIOS 映像元件的 sca-center:gap）。"""
+    a = b.get("amd")
+    if not a:
+        return
+    n = 0
+    for p in a["psp_firmware"]:
+        n += 1
+        ref = f"{img}:amd-psp:{p['type']:02x}:{p['subprogram']:02x}:{(p['sha256'] or 'nohash')[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": f"AMD PSP firmware {p['type_name'] or ''} (type 0x{p['type']:02x}, subprogram {p['subprogram']})".replace("  ", " "),
+             "version": p["version"], "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:version-basis", "PSP firmware header (amd_fw_header) version field at +0x60; fw_type and size_total agree with the directory entry. The version is a field the image declares about itself: the only check is the directory checksum (self-consistency, no signature verification), and the directory reading was chosen by structural checks that assume the image was not tampered with"),
+                            prop("sca-center:amd-psp-type", f"0x{p['type']:02x}"), prop("sca-center:amd-psp-subprogram", p["subprogram"]),
+                            prop("sca-center:size", p["size"]), *[prop("sca-center:found-in", amd_where(x)) for x in p["locations"]]]}
+        if p["sha256"]:
+            c["hashes"] = hlist(p)
+        c["properties"] += amd_advisory_props()
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+    for m in a["microcode"]:
+        n += 1
+        ref = f"{img}:amd-microcode:{m['equiv_id']}:{m['patch_id']}:{(m['sha256'] or 'nohash')[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": f"AMD CPU microcode (equivalence id {m['equiv_id']})", "version": m["patch_id"], "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:version-basis", "microcode patch header patch_id (patch level)"), prop("sca-center:amd-equivalence-id", m["equiv_id"]),
+                            prop("sca-center:build-date", m["date"]), prop("sca-center:size", m["patch_size"]),
+                            *([prop("sca-center:cpuid", x) for x in m["cpuids"]] if m["cpuids"] else
+                              [prop("sca-center:cpuid-status", "not determined: the patch is not inside a container with an equivalence table (the mapping is not guessed)")]),
+                            *[prop("sca-center:found-in", amd_where(x)) for x in m["locations"]]]}
+        if m["sha256"]:
+            c["hashes"] = hlist(m)
+        c["properties"] += amd_advisory_props()
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+    ag = a["agesa"]
+    for g in ag["values"]:
+        n += 1
+        ref = f"{img}:amd-agesa:{hashlib.sha256((g['tag'] + g['value']).encode()).hexdigest()[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": "AMD AGESA", "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:agesa-marker", g["tag"]),
+                            prop("sca-center:count", g["count"]),
+                            *[prop("sca-center:found-in", f"{w['where']} +0x{w['offset']:x}") for w in g["found"]],
+                            *([prop("sca-center:note", f"{len(ag['values'])} different AGESA strings were found in this image; all are listed")] if len(ag["values"]) > 1 else []),
+                            *([prop("sca-center:incomplete", "the AGESA search did not cover all UEFI content (see sca-center:gap)")] if not ag["complete"] else [])]}
+        if g.get("truncated"):         # 字串超過讀取上限被截斷：前綴不是完整版本，不寫 version（dumpling:version-status 會是 GAP）
+            c["properties"].append(prop("sca-center:note", f"the AGESA string is longer than the read limit; only this prefix was read and it is not used as a version: {g['value']}"))
+        else:
+            c["version"] = g["value"]
+            c["properties"].insert(0, prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"))
+        c["properties"] += amd_advisory_props()
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+
+
 def pfat_props(p):
     """BIOS 映像元件的 AMI PFAT 來源 property（原檔與組回映像的雜湊；元件本身的 hashes 是組回的映像）。"""
     if not p:
@@ -1659,6 +1845,53 @@ def pfat_props(p):
             prop("dumpling:pfat-signature", "not verified"),
             prop("dumpling:pfat-layout", f"{len(p['files'])} files from {p['info'].get('blocks', '?')} blocks concatenated in package order "
                                          f"({p['image_label']}), then {p['info'].get('oob_size', 0)} trailing bytes; not an SPI address map")]
+
+
+ME_ADVISORY_BASIS = ("Intel CSME/TXE/SPS advisories (INTEL-SA) are not machine-matched by this tool: the public release notes used for microcode "
+                     "do not cover them and NVD CPE data for CSME is incomplete; " + "no data in the database; the vendor advisory (Intel INTEL-SA) is authoritative")
+
+
+def me_advisory_props():
+    """ME 元件的公告比對：沒有機器可讀的 Intel CSME 公告資料 → NOT_ASSESSED（不是沒有漏洞）。"""
+    return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", ME_ADVISORY_BASIS)]
+
+
+AMD_ADVISORY_BASIS = ("AMD security bulletins (AMD-SB) are not matched by this tool: the AMD-SB rule table has not been built; "
+                      "no data in the database; the vendor advisory (AMD-SB) is authoritative")
+
+
+def amd_advisory_props():
+    """AMD 的微碼、PSP 韌體、AGESA 元件的公告比對：AMD-SB 的規則表還沒有，NOT_ASSESSED（不是沒有漏洞）。"""
+    return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", AMD_ADVISORY_BASIS)]
+
+
+def advisory_props(res):
+    """微碼元件的公告比對 property（fw_advisory.match_microcode 的結果；沒有結果 → 不加）。"""
+    if not res:
+        return []
+    out = [prop("dumpling:advisory-match", res["match"])]
+    if res["match"] == "affected-candidate":
+        out.append(prop("dumpling:advisory-candidates", ", ".join(c["id"] for c in res["candidates"])))
+    out.append(prop("dumpling:advisory-basis", res["basis"]))
+    if res.get("latest_revision"):
+        out.append(prop("dumpling:advisory-latest-revision", f"{res['latest_revision']} ({res['latest_release']})"))
+    out.append(prop("dumpling:advisory-source", res["source"] or "advisory table not available"))
+    out += [prop("dumpling:advisory-note", n) for n in res.get("notes", [])]
+    return out
+
+
+def vbios_advisory_props(res):
+    """NVIDIA vBIOS 元件的公告比對 property（nvidia_vbios_advisory.match_vbios 的結果；沒有結果 → 不加）。"""
+    if not res:
+        return []
+    out = [prop("dumpling:advisory-match", res["match"])]
+    if res["match"] in ("affected", "fixed") and res.get("bulletins"):
+        out.append(prop("dumpling:advisory-bulletins", ", ".join(res["bulletins"])))
+        out.append(prop("dumpling:advisory-cves", ", ".join(res["cves"])))
+    out.append(prop("dumpling:advisory-basis", res["basis"]))
+    out.append(prop("dumpling:advisory-source", res["source"] or "advisory table not available"))
+    out += [prop("dumpling:advisory-note", n) for n in res.get("notes", [])]
+    return out
 
 
 def components(inv):
@@ -1682,6 +1915,10 @@ def components(inv):
         if v.get("start_note"):                   # 開頭有兩個以上的候選、分不出來：offset 與雜湊可能不對
             c["properties"].append(prop("sca-center:note", f"option ROM start is ambiguous ({v['start_note']}); "
                                                            "the offset and hash may be wrong"))
+        if v.get("other_versions"):
+            c["properties"].append(prop("sca-center:note", f"the option ROM contains more than one XX.XX.XX.XX.XX string ({', '.join(v['other_versions'])} besides "
+                                                           f"{v['version']}); the first one is reported as the version, which one is the vBIOS version is not known"))
+        c["properties"] += vbios_advisory_props(v.get("advisory"))
         comps.append(assessed(c, "nvidia-vbios"))
     for b in inv["bios"]:
         img = f"{REF}bios:{b['sha256'][:16]}"
@@ -1724,6 +1961,7 @@ def components(inv):
                 if r["name"] == "me":
                     rc["properties"] += me_props
                     if b["me"]:
+                        rc["properties"] += cpe_props(b["me"]) + me_advisory_props()
                         rc["name"], rc["version"] = ME_NAME, b["me"]["version"]
                         rc["manufacturer"] = {"name": "Intel Corporation"}
                         if csme_cpe(b["me"]):
@@ -1733,7 +1971,7 @@ def components(inv):
         if b["me"] and not any(r["name"] == "me" for r in b["regions"]):
             ref = f"{img}:me"
             mc = {"type": "firmware", "bom-ref": ref, "name": ME_NAME, "version": b["me"]["version"],
-                  "manufacturer": {"name": "Intel Corporation"}, "properties": me_props}
+                  "manufacturer": {"name": "Intel Corporation"}, "properties": me_props + cpe_props(b["me"]) + me_advisory_props()}
             if csme_cpe(b["me"]):
                 mc["cpe"] = csme_cpe(b["me"])
             comps.append(assessed(mc, "intel"))
@@ -1747,9 +1985,11 @@ def components(inv):
                                          prop("sca-center:in-fit", in_fit_text(u)), prop("sca-center:in-fit-basis", in_fit_basis(b, u)),
                                          *[prop("sca-center:extended-signature", f"{x['cpuid']} {x['platform_id']}")
                                            for x in u["extended_signatures"]],
-                                         *[prop("sca-center:found-in", w) for w in u.get("cbfs_files", [])]]}, "intel"))
+                                         *[prop("sca-center:found-in", w) for w in u.get("cbfs_files", [])],
+                                         *advisory_props(u.get("advisory"))]}, "intel-microcode"))
             sub.append(ref)
         cbfs_components(b, img, comps, sub)
+        amd_components(b, img, comps, sub)
         uefi_gfx_components(b, img, comps, sub)
         deps[img] = sub
     intel_gfx_components(inv, comps, deps)
@@ -1996,7 +2236,10 @@ def pfat_unwrap(label, data, budget, partial):
             "info": pf["info"], "notes": pf["notes"], "signature_verified": False}, pf["image"]
 
 
-def inventory(paths, manifest=None, budget=None):
+def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=None, vbios_now=None):
+    """advisory：測試用，Table 或 TableError（fw_advisory）；沒給就載入 repo 內的 Intel 微碼發佈資料表。
+    vbios_advisory：測試用，Table 或 TableError（nvidia_vbios_advisory）；沒給就載入 repo 內的 NVIDIA 公告對照表。
+    vbios_now：表過期判斷用的現在時間（datetime）；測試一律傳固定的時間，沒給就用牆上時鐘。"""
     rows = read_manifest(manifest) if manifest else None
     budget = budget or Budget()
     gen, skipped = inputs(paths, budget)
@@ -2033,6 +2276,7 @@ def inventory(paths, manifest=None, budget=None):
             e = target.setdefault(r["sha256"], {**{k: r.get(k) for k in ("vendor", "device", "class", "version", "length", "images",
                                                                       "terminated", "terminated_note", "sha256", "sha512")},
                                                 **({"start_note": r["start_note"]} if r.get("start_note") else {}),   # 沒有說明時不寫這個鍵
+                                                **({"other_versions": r["other_versions"]} if r.get("other_versions") else {}),
                                                 "locations": [], "found_at": []})
             if label not in e["locations"]:             # 同一個檔裡出現兩次：檔名記一次，位置都記
                 e["locations"].append(label)
@@ -2065,6 +2309,8 @@ def inventory(paths, manifest=None, budget=None):
            "partial": [{"file": f, "reason": r} for f, r in partial],
            "limits": {"time_limit_s": budget.time_limit if math.isfinite(budget.time_limit) else None, "max_file": MAX_FILE, "max_total": MAX_TOTAL, "max_checksum": MAX_CHECKSUM,
                       "max_fit_entries": MAX_FIT_ENTRIES, "max_fpt_entries": MAX_FPT_ENTRIES, "max_fv": MAX_FV, "max_ffs_items": MAX_FFS_ITEMS}}
+    inv["advisory"] = advisory_section(inv, advisory)
+    inv["vbios_advisory"] = vbios_advisory_section(inv, vbios_advisory, vbios_now)
     if rows is not None:
         bv = sorted({r["firmware_version"] for r in rows if r["component"] == "bios" and r["firmware_version"]
                      and norm("bios", "version", r["firmware_version"]) != "?"})
@@ -2081,8 +2327,71 @@ def inventory(paths, manifest=None, budget=None):
                    and version_matches("me", norm("me", "version", r["version"]), b["me"]["version"])}
             if len(fam) == 1:
                 b["me"].update(family=fam.pop(), family_basis="version list")
+            elif len(fam) > 1:            # 清單對同一個版本寫了不同的 family（自相矛盾）：不推定，不帶 CPE
+                b["me"]["family_conflict"] = sorted(fam)
         inv["comparison"] = compare(inv, rows)
     return inv
+
+
+def advisory_section(inv, advisory=None):
+    """每份微碼比對一次（結果記在 u["advisory"]，SBOM 與報告共用）→ inv["advisory"]：資料表來源與狀態（OK／GAP）、各結果的數量。"""
+    mod = load_sibling("fw_advisory")
+    if advisory is None:
+        table, err = mod.load_default()
+    elif isinstance(advisory, mod.TableError):
+        table, err = None, advisory
+    else:
+        table, err = advisory, None
+    n = 0
+    results = []
+    for b in inv["bios"]:
+        for u in b["microcode"]:
+            try:
+                u["advisory"] = mod.match_microcode(table if table is not None else err, u)
+            except Exception as e:           # 比對本身出錯（資料表內容異常等）：這一份是 NOT_ASSESSED，不讓整個流程中斷
+                u["advisory"] = {**mod._na("match-error", f"the advisory matching failed ({type(e).__name__})"), "signatures": [],
+                                 "source": table.label() if table is not None else None, "notes": []}
+            results.append(u["advisory"])
+            n += 1
+    sec = {"status": "OK" if table is not None else "GAP", "microcodes": n, "counts": mod.counts(results)}
+    if table is not None:
+        sec["source"] = {k: table.source[k] for k in ("repo", "tag", "commit", "path", "sha256")}
+        sec["source"]["table_sha256"] = table.sha256
+        sec["source"]["releases"] = len(table.releases)
+        sec["source"]["oldest"] = table.releases[-1]["tag"]
+    else:
+        sec["gap"] = f"{err.reason}: {err.detail}"
+    return sec
+
+
+def vbios_advisory_section(inv, advisory=None, now=None):
+    """每個 NVIDIA vBIOS 比對一次（結果記在 v["advisory"]，SBOM 與報告共用）→ inv["vbios_advisory"]：對照表來源與狀態（OK／GAP）、各結果的數量。"""
+    mod = load_sibling("nvidia_vbios_advisory")
+    if advisory is None:
+        table, err = mod.load_default()
+    elif isinstance(advisory, mod.TableError):
+        table, err = None, advisory
+    else:
+        table, err = advisory, None
+    results = []
+    now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+    for v in inv["vbios"]:
+        try:
+            v["advisory"] = mod.match_vbios(table if table is not None else err, v, now=now)
+        except Exception as e:           # 比對本身出錯（對照表內容異常等）：這一個是 NOT_ASSESSED，不讓整個流程中斷
+            v["advisory"] = mod._na("match-error", f"the advisory matching failed ({type(e).__name__})",
+                                    source=table.label() if table is not None else None)
+        results.append(v["advisory"])
+    sec = {"status": "OK" if table is not None else "GAP", "vbios": len(results), "counts": mod.counts(results)}
+    if table is not None:
+        # 已審核的表過期（或日期讀不到、在未來）：fixed 會降成 NOT_ASSESSED，狀態要提醒重新審核；沒審核過的表另有 table-not-reviewed
+        sec["stale"] = bool(table.confirmed and table.stale(now))
+        sec["source"] = {"mirror_commit": table.mirror_commit, "mirror_fetched_utc": table.mirror_fetched_text, "reviewed_until": table.reviewed_until,
+                         "table_sha256": table.sha256, "reviewed_rows": len(table.rows), "unreviewed_rows": len(table.unreviewed),
+                         "not_applicable": list(table.not_applicable), "awaiting_confirmation": list(table.awaiting)}
+    else:
+        sec["gap"] = f"{err.reason}: {err.detail}"
+    return sec
 
 
 def status_of(inv):
@@ -2102,10 +2411,17 @@ def status_of(inv):
             att.append(f"{b['file']}：" + "；".join(b["incomplete"]))
         if b.get("me_status") == "unknown":
             att.append(f"{b['file']}：有 ME 區域但 ME 版本 unknown（{b['me_note']}）")
+        if (b.get("me") or {}).get("family_conflict"):
+            att.append(f"{b['file']}：版本清單 family 矛盾（同一個 ME 版本寫了 {'、'.join(b['me']['family_conflict'])}），不推定 family、不帶 CPE")
         if b.get("me_conflict"):
             att.append(f"{b['file']}：有不同版本的 FTPR manifest，ME 版本要確認（{b['me_conflict']}）")
         if b.get("platform") == "amd":
-            att.append(f"{b['file']}：AMD 平台，AMD microcode 不支援（GAP，不是沒有 microcode）")
+            a = b.get("amd")
+            if a is None:
+                att.append(f"{b['file']}：AMD 平台，PSP／BIOS 目錄解析沒有執行（GAP，不是沒有 microcode）")
+            elif a["gaps"] or a["attention"] or a["incomplete"]:
+                att.append(f"{b['file']}：AMD 平台（" + load_sibling("amd_psp").summary_text(a) + f"）；{len(a['gaps'])} 項 GAP"
+                           + ("；" + "、".join(a["attention"]) if a["attention"] else "") + "（見 fw-inventory.json 的 amd）")
         att += uefi_gfx_status(b)
         n = sum(b.get("uefi", {}).get("compressed", {}).values())
         g = sum(b.get("uefi", {}).get("guided_other", {}).values())
@@ -2113,6 +2429,15 @@ def status_of(inv):
             att.append(f"{b['file']}：{n} 個壓縮的 UEFI section 沒有解析（GAP，裡面的模組與版本沒有列出）")
         if g:                              # 需要處理、GUID 不認得的（例如簽章 section）：內容一樣被略過
             att.append(f"{b['file']}：{g} 個需要處理的 GUID-defined UEFI section（GUID 不認得）沒有解析（GAP，裡面的模組與版本沒有列出）")
+    adv = inv.get("advisory")
+    if adv and adv["status"] == "GAP" and adv["microcodes"]:
+        att.append(f"Intel 微碼公告比對的資料表不能用（GAP，{adv['gap']}）；{adv['microcodes']} 份微碼都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準")
+    va = inv.get("vbios_advisory")
+    if va and va["status"] == "GAP" and va["vbios"]:
+        att.append(f"NVIDIA vBIOS 公告比對的對照表不能用（GAP，{va['gap']}）；{va['vbios']} 個 vBIOS 都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準")
+    if va and va.get("stale") and va["vbios"]:
+        att.append(f"NVIDIA vBIOS 公告對照表過期（鏡像日期超過 {load_sibling('nvidia_vbios_advisory').MAX_MIRROR_AGE_DAYS} 天、讀不到或在未來），"
+                   "已修補（fixed）的結果會降成 NOT_ASSESSED；要重新審核表")
     for v in inv["vbios"]:
         if not v["version"]:
             att.append(f"vBIOS {v['device']}：ROM 裡找不到版本")
@@ -2188,6 +2513,127 @@ def cbfs_markdown(cb):
     return L
 
 
+ADV_TEXT = {"affected-candidate": "affected-candidate（有較新的 release，列出候選公告；不是確定受影響）",
+            "older-no-sa": "older-no-sa（有較新的 revision，但那些 release 沒有列公告；不代表沒有漏洞）",
+            "up-to-date": "up-to-date（資料表沒有更新的 revision；不代表沒有漏洞）",
+            "NOT_ASSESSED": "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）"}
+
+
+VB_ADV_TEXT = {"affected": "affected（對照表列為受影響；不是完整的漏洞判定）",
+               "fixed": "fixed（對照表列為已修補；不代表沒有其他漏洞）",
+               "NOT_ASSESSED": "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）"}
+
+
+def nvidia_vbios_advisory_markdown(inv):
+    """### NVIDIA vBIOS：依 vBIOS 版本與 PCI vendor／device ID 查 repo 內的 NVIDIA 公告對照表（離線）。"""
+    e = md_esc
+    va = inv.get("vbios_advisory") or {"status": "GAP", "gap": "沒有比對（inventory 沒有 vbios_advisory 欄位）", "vbios": 0, "counts": {}}
+    L = ["", f"### NVIDIA vBIOS（{len(inv['vbios'])} 個）", "",
+         "- **這一段不是漏洞判定，沒有任何一項代表「沒有漏洞」。** NVIDIA 對消費型與專業型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是 NVIDIA 的合作夥伴通知），"
+         "所以多數 vBIOS 的結果是 `NOT_ASSESSED` ＝ 資料庫沒有資料，以廠商公告（NVIDIA 的合作夥伴通知或 product-security 公告）為準；請向顯卡團隊或 NVIDIA 的合作夥伴管道確認。",
+         "- 比對方式：用 vBIOS 版本（`XX.XX.XX.XX.XX`）與 option ROM 的 PCI vendor／device ID 查 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`"
+         "（repo 內依 NVIDIA product-security gpu-firmware 群組公告整理的對照表；是否已經負責人確認見下一行）；版本讀不到（例如佔位字串）、裝置 ID 讀不到、表裡沒有對應的列、表不能用都是 NOT_ASSESSED。"
+         "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
+    if va["status"] == "OK":
+        s = va["source"]
+        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] and not s.get("awaiting_confirmation")
+               else "**表尚未經負責人確認**（" + ("reviewed_until 為 null" if not s["reviewed_until"] else "還有公告只有初審意見") + "，所有 vBIOS 都是 NOT_ASSESSED）")
+        L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
+                 f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
+                 + (f"已確認無法對應到 option ROM 版本與裝置的公告：{e('、'.join(s['not_applicable']))}（技術理由見對照表）；" if s["not_applicable"] else "")
+                 + (f"初審無法對應（待負責人確認）的公告：{e('、'.join(s['awaiting_confirmation']))}（初審意見：沒有 PCI 裝置 ID 與 option ROM 版本的對應，原因見對照表）；"
+                    if s.get("awaiting_confirmation") else "")
+                 + f"對照表檔案 SHA-256 `{s['table_sha256']}`。")
+        if va.get("stale"):
+            L.append("- **對照表過期**（鏡像日期超過上限、讀不到或在未來）：fixed 會降成 NOT_ASSESSED（`table-stale`），要重新審核表。")
+    else:
+        L.append(f"- 對照表：**GAP（不能用）**：{e(va['gap'])}。所有 NVIDIA vBIOS 都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
+    c = va["counts"]
+    L.append(f"- NVIDIA vBIOS {va['vbios']} 個：" + ("、".join(f"{k} {c[k]}" for k in ("affected", "fixed", "NOT_ASSESSED") if k in c) or "無"))
+    L += ["", "| PCI device | 版本 | 比對結果 | 公告 | CVE |", "|---|---|---|---|---|"]
+    for v in inv["vbios"]:
+        r = v.get("advisory")
+        if not r:
+            L.append(f"| {e(v['device'])} | {e(v['version'] or '找不到')} | NOT_ASSESSED（沒有比對結果） | | |")
+            continue
+        L.append(f"| {e(v['device'])} | {e(v['version'] or '找不到')} | {VB_ADV_TEXT[r['match']]} | "
+                 f"{e('、'.join(r['bulletins']) if r['match'] in ('affected', 'fixed') else '')} | {e('、'.join(r['cves']) if r['match'] in ('affected', 'fixed') else '')} |")
+    L.append("")
+    for v in inv["vbios"]:
+        r = v.get("advisory")
+        if r:
+            L.append(f"- `{e(v['device'])}/{e(v['version'] or '-')}`：{e(r['basis'])}")
+            L += [f"  - {e(n)}" for n in r.get("notes", [])]
+    return L
+
+
+def advisory_markdown(inv):
+    """## 公告比對：每份 SBOM（這次輸出）都有這一節。微碼用 Intel 公開的微碼發佈資料表離線比對；其他元件寫明沒有比對。"""
+    e = md_esc
+    adv = inv.get("advisory") or {"status": "GAP", "gap": "沒有比對（inventory 沒有 advisory 欄位）", "microcodes": 0, "counts": {}}
+    L = ["", "## 公告比對", "",
+         "- **這一節不是漏洞判定，沒有任何一項代表「沒有漏洞」。** 候選公告是資料表裡「比映像的微碼 revision 更新的 release」所列的 INTEL-SA："
+         "來源只在 release 層級列公告、沒有逐 CPUID 列出，所以候選不一定影響這個 CPUID；資料表只涵蓋 Intel 公開的 Linux 微碼套件"
+         "（不含只能由 BIOS 載入的微碼與 OEM 專用版本）。",
+         "- `up-to-date` 只表示資料表裡沒有更新的 revision；`NOT_ASSESSED` ＝ 資料庫沒有資料，以廠商公告（Intel INTEL-SA）為準。"]
+    if adv["status"] == "OK":
+        s = adv["source"]
+        L.append(f"- 資料表：Intel `{e(s['repo'].split('github.com/')[-1])}` 的 `{e(s['path'])}`，tag `{e(s['tag'])}`、commit `{s['commit']}`、"
+                 f"來源 SHA-256 `{s['sha256']}`；資料表檔案 SHA-256 `{s['table_sha256']}`；涵蓋 {s['releases']} 個 release（最舊 `{e(s['oldest'])}`）。"
+                 "比對在本機離線完成，沒有連網。")
+    else:
+        L.append(f"- 資料表：**GAP（不能用）**：{e(adv['gap'])}。所有微碼都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
+    c = adv["counts"]
+    L.append(f"- Intel 微碼 {adv['microcodes']} 份：" + ("、".join(f"{k} {c[k]}" for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c) or "無"))
+    for b in inv["bios"]:
+        L += ["", f"### {e(fname(b['file']))}", ""]
+        if b["microcode"]:
+            L += ["| CPUID | platform id | revision | 比對結果 | 資料表最新 revision | 候選 INTEL-SA |", "|---|---|---|---|---|---|"]
+            for u in b["microcode"]:
+                r = u.get("advisory")
+                if not r:
+                    L.append(f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | NOT_ASSESSED（沒有比對結果） | | |")
+                    continue
+                late = f"{r['latest_revision']}（{e(r['latest_release'])}）" if r.get("latest_revision") else ""
+                sa = "、".join(x["id"] for x in r["candidates"])
+                L.append(f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | {ADV_TEXT[r['match']]} | {late} | {sa} |")
+            L.append("")
+            for u in b["microcode"]:
+                r = u.get("advisory")
+                if r:
+                    L.append(f"- `{u['cpuid']}/{u['platform_id']}/{u['revision']}`：{e(r['basis'])}")
+                    L += [f"  - {e(n)}" for n in r.get("notes", [])]
+        elif b["platform"] == "amd":
+            a = b.get("amd")
+            if a:
+                L.append(f"AMD 平台：AMD 微碼已解析 {len(a['microcode'])} 份、PSP 韌體 {len(a['psp_firmware'])} 項、AGESA 字串 {len(a['agesa']['values'])} 個，"
+                         "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。映像裡沒有 Intel 微碼。")
+            else:
+                L.append("AMD 平台：PSP 目錄解析沒有執行（GAP，原因見映像元件的 sca-center:gap），AMD 微碼、PSP 韌體、AGESA 都沒有列出，"
+                         "沒有比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）。")
+        else:
+            L.append("微碼：映像裡沒有找到 Intel microcode，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。")
+        m = b["me"]
+        cpe, _basis, gap = csme_cpe_info(m)
+        if m:
+            L += ["", f"- ME {e(m['version'])}：{ADV_TEXT['NOT_ASSESSED']}。Intel CSME／TXE／SPS 的公告沒有機器可讀的資料表。"
+                  + (f"SBOM 帶 NVD 的 CPE `{e(cpe)}`，讓 Grype 比對（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整，比不到不代表沒有漏洞，以 Intel 公告（INTEL-SA）為準。{'family 是由版本推定的（映像讀不出來），比對結果待人審。' if _basis == 'inferred' else ''}"
+                     if cpe else f"沒有 CPE（GAP）：{e(gap)}。")]
+        else:
+            L += ["", f"- ME：{e(b['me_note'] or '沒有讀到 ME 版本')}；沒有 ME 版本可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），SBOM 不帶 CPE。"]
+        L.append("- 其他元件（FSP、GOP／VBT／legacy VBIOS、coreboot、edk2、BIOS 映像本身）：沒有公告比對，NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
+    if not inv["bios"]:
+        L += ["", "沒有 BIOS 映像，沒有微碼與 ME 可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。"]
+    if inv["vbios"]:
+        L += nvidia_vbios_advisory_markdown(inv)
+    elif not inv["bios"]:
+        L += ["", "沒有找到 NVIDIA vBIOS，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。"]
+    if inv.get("intel_vbios"):
+        L += ["", f"### Intel legacy VBIOS（{len(inv['intel_vbios'])} 個）", "",
+              "公告比對：沒有做（NOT_ASSESSED）：資料庫沒有資料，以廠商公告為準。"]
+    return L
+
+
 def markdown(inv):
     """fw-inventory.md：給人看的 BIOS 元件版本（與 vBIOS 摘要）。內容和 fw-inventory.json 相同來源，以 JSON 為準。"""
     e = md_esc
@@ -2229,13 +2675,17 @@ def markdown(inv):
               f"FIT：{f['status']}" + (f"（file offset 0x{f['offset']:x}，{f['entries']} 項）" if f["offset"] is not None else "")
               + (f"；{e(f['note'])}" if f["note"] else ""), ""]
         if b["platform"] == "amd":
-            L += ["**AMD microcode 不支援（GAP）**：PSP 目錄裡的 microcode 沒有解析，下面的清單不完整，不代表沒有 microcode。", ""]
+            L += ["AMD 平台：下面是 Intel 格式的 microcode 掃描；AMD 微碼（BIOS 目錄 type 0x66）見後面的 AMD 區段。", ""]
         if b["microcode"]:
             L += ["| CPUID | platform id | revision | 日期 | in FIT | 位置 |", "|---|---|---|---|---|---|"]
             L += [f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | {u['date']} | {in_fit_text(u)} | 0x{u['offset']:x} |"
                   for u in b["microcode"]]
         else:
-            L.append("映像裡沒有找到 Intel microcode" + ("（AMD 平台，見上面）" if b["platform"] == "amd" else "") + "。")
+            L.append("映像裡沒有找到 Intel microcode" + ("（AMD 平台，見後面的 AMD 區段）" if b["platform"] == "amd" else "") + "。")
+        if b.get("amd"):
+            L += load_sibling("amd_psp").markdown_lines(b["amd"], e)
+        elif b["platform"] == "amd":
+            L += ["", "### AMD", "", "**GAP**：PSP／BIOS 目錄解析沒有執行，AMD 微碼、PSP 韌體與 AGESA 沒有列出，不代表沒有。"]
         L += ["", "### IBV 線索", "", ("、".join(b["ibv_hint"]) + "（未壓縮的字串，只是線索）") if b["ibv_hint"] else "沒有找到（不代表不是這些 IBV）"]
         u = b["uefi"]
         L += ["", "### UEFI 壓縮 section（沒有解壓）", "",
@@ -2271,6 +2721,7 @@ def markdown(inv):
         L += ["", "## 版本清單比對", "", "| 元件 | identifier | 清單 | 映像 | 結果 |", "|---|---|---|---|---|"]
         L += [f"| {c['component']} | {e(c['identifier'] or '')} | {e(c['declared'] or '')} | {e(c['extracted'] or '')} | {c['result']}"
               + ("" if c["verifiable"] else "（映像拆不出來）") + " |" for c in inv["comparison"]]
+    L += advisory_markdown(inv)
     if inv["skipped"] or inv["partial"]:
         L += ["", "## 略過與只解析一部分", ""] + [f"- 略過 {e(x['file'])}：{e(x['reason'])}" for x in inv["skipped"]] \
             + [f"- 只解析一部分 {e(x['file'])}：{e(x['reason'])}" for x in inv["partial"]]

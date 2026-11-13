@@ -130,6 +130,11 @@ def load_inventory(path, base):
     if inv.get("status") == "FAIL":
         raise Fail(f"收集 Release 失敗：{inv.get('detail') or '?'}")
     projs, problems = [], []
+    # 被略過的 Release（資料格式壞掉、tag 不合規則、tag 重複）：不是正常狀態，算 Release 問題（降級、ATTENTION、擋第一次基準）。
+    # draft 是正常略過（還沒發布），由 run() 只列在「說明」（#49 驗證應修 2）
+    for x in inv.get("skipped") or []:
+        if isinstance(x, dict):
+            problems.append(f"Release 被略過：{str(x.get('tag'))[:120]}：{str(x.get('why'))[:200]}")
     for r in inv["releases"]:
         if not isinstance(r, dict):
             continue
@@ -152,6 +157,9 @@ def load_inventory(path, base):
                           "layer": layer, "status": r["status"], "tag": r.get("tag"), "kind": r.get("kind"),
                           "release_version": r.get("version"), "os_responsibility": r.get("os_responsibility"),
                           "html_url": r.get("html_url"), "sbom": os.path.join(base, rel), "sha256": s.get("sha256"),
+                          "report_status": r.get("report_status") or "NOT_RUN", "release_gate": r.get("release_gate") or "NOT_RUN",
+                          "pipeline_result": r.get("pipeline_result") or "NOT_RUN",
+                          "reports": r.get("reports") or [], "meta_attention": r.get("attention") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
                           and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None})
     return inv, projs, problems
@@ -165,7 +173,10 @@ def load_state(state_dir):
     if not os.path.exists(sp):
         if base.get("issue") is not None:
             raise Fail("狀態 Issue 存在，但 state.json 沒有產生（解碼失敗？）：不重建基準")
-        if int(base.get("watch_issues") or 0) > 0:
+        n = int(base.get("watch_issues") or 0)
+        if isinstance(base.get("watch_keys"), list):      # 「還沒有基準」的提醒 Issue 不算監控 Issue（它是在沒有狀態時開的）
+            n = len(set(base["watch_keys"]) - {issue_key(m, "no-baseline") for m in ("real", "drill")})
+        if n > 0:
             raise Fail(f"沒有狀態 Issue，卻已有 {base['watch_issues']} 個監控 Issue：不能重新建立基準（會吞掉新的命中），請先找回狀態 Issue")
         return {"schema": 1, "matches": {}, "runs": []}, base, True
     st = read_json(sp, "state.json")
@@ -198,6 +209,54 @@ def load_cisa(eg, feeds, overlay, work, now):
 
 
 # ---------- 核心 CNA ----------
+
+FEED_LABELS = (("kernel-cve", "核心 CVE 鏡像（Linux 核心 CNA）", "這段時間新增的核心 CVE 不在清單裡"),
+               ("euvd", "EUVD 鏡像", "這段時間新增的 EUVD 紀錄不在清單裡"))
+_ABS_PATH = re.compile(r"(?<![\w.:/])/[^\s，、；：）)」]+")
+
+
+def _feed_text(s):
+    """鏡像腳本的訊息 → 可以寫進公開 Issue 的一行：去掉控制字元與 <>、絕對路徑換成 <路徑>（runner 的暫存路徑不進 Issue）、限長。"""
+    s = re.sub(r"[\x00-\x1f\x7f<>]", " ", str(s))
+    return re.sub(r"\s+", " ", _ABS_PATH.sub("<路徑>", s)).strip()[:300]
+
+
+def feed_attention(feeds):
+    """鏡像用了舊資料頂替（pipeline/lib/mirrors.sh 的 ATTENTION；核心 CVE 是 SOURCE 的 fallback=yes）→ 報告與 Issue 要寫出的行。"""
+    out = []
+    for name, label, lag in FEED_LABELS:
+        line = ""
+        try:
+            with open(os.path.join(feeds, name + ".result"), encoding="utf-8", errors="replace") as f:
+                line = f.readline().strip()
+        except OSError:
+            pass
+        src = {}
+        try:
+            with open(os.path.join(feeds, name, "SOURCE"), encoding="utf-8", errors="replace") as f:
+                src = dict(x.split("=", 1) for x in f.read().splitlines() if "=" in x)
+        except OSError:
+            pass
+        if src.get("fallback") == "yes":
+            why = src.get("fallback_note") or f"沿用下載於 {src.get('fetched_utc') or '?'} 的上一份"
+        elif line.startswith("ATTENTION"):
+            why = line[len("ATTENTION"):].strip() or "鏡像腳本回報 ATTENTION"
+        else:
+            continue
+        why = _feed_text(why)
+        out.append(f"{label}用了舊資料頂替：{why}" + ("" if lag in why else f"：{lag}"))
+    return out
+
+
+def add_feed_note(actions, lines):
+    """這次執行的資料源用了舊資料頂替：每個要開的 Issue、留言都寫出那幾行（報告另外列在「需注意」）。"""
+    if not lines:
+        return actions
+    note = "\n\n> **這次執行的資料源用了舊資料頂替（ATTENTION）**\n" + "\n".join(f"> - {md_cell(x)}" for x in lines)
+    for x in actions:
+        x["body"] = x["body"] + note
+    return actions
+
 
 def kernel_upstreams(path):
     """kernel-versions-<專案>-<版本>.json → ([(upstream_version, 說明)], [GAP 說明])。"""
@@ -323,8 +382,11 @@ def prune_state(st, now):
     mode = (st.get("dumpling") or {}).get("mode") or "real"
     live = {kev_group_key(mode, e) for e in (st.get("matches") or {}).values() if isinstance(e, dict) and "project_uuid" in e} | \
         {vendor_group_key(mode, e) for e in (st.get("vendor_matches") or {}).values() if isinstance(e, dict) and "vendor" in e}
+    pk = (st.get("dumpling") or {}).setdefault("pruned_keys", []) if st.get("dumpling") is not None else []
     for k in [k for k, r in iss.items() if k not in live and old((r or {}).get("opened_at"))]:
         del iss[k]
+        if k not in pk:
+            pk.append(k)          # 這個群組有過 Issue（可能已關閉）：之後再出現用 open_if_closed，不會被「已有 Issue」跳過（#32 驗證 F2）
         n3 += 1
     return f"比對 {n1}、廠商層級 {n2}、群組紀錄 {n3}（消失或開出超過 {PRUNE_DAYS} 天）" if n1 or n2 or n3 else ""
 
@@ -346,8 +408,60 @@ def sanitize_state(st):
     return out
 
 
-def md_cell(x):
-    return str(x if x is not None else "").replace("|", "\\|").replace("\n", " ")[:300]
+# ---------- 寫進公開 Issue 的外部字串（#49 驗證應修 3） ----------
+# 元件名、purl、KEV 的廠商／產品、release-meta 的 attention、kernel-versions 的說明、鏡像訊息……都是外部資料：
+# @ 會通知 GitHub 上的使用者或組織（例如 npm 的 @types/node），[x](url)、![i](url) 會變成連結或圖片，#123 會連到別的 Issue。
+_MD_CTRL = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
+ZWSP = "\u200b"
+
+
+def _plain(x, limit):
+    return re.sub(r"\s+", " ", _MD_CTRL.sub(" ", str(x if x is not None else ""))).strip()[:limit]
+
+
+def md_text(x, limit=300):
+    """外部字串 → Markdown 純文字：& 先換成 &amp;（否則 &commat; 之類的 HTML 實體渲染時會解碼成 @、[ 等），
+    再跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
+    s = _plain(x, limit).replace("&", "&amp;").replace("\\", "\\\\")
+    s = re.sub(r"([\[\]()!<>`|*_~])", r"\\\1", s)
+    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, s)
+
+
+md_cell = md_text
+
+
+def md_code(x, limit=300):
+    """外部的識別字（元件名、purl、CVE 來源）→ 行內程式碼：原樣可複製，裡面的 @、連結、圖片都不會被解讀。
+    反引號：用比內容最長的連續反引號多一個的分隔符號；| 跳脫（GFM 表格在行內程式碼裡也要跳脫）。"""
+    s = _plain(x, limit)
+    if not s:
+        return "—"
+    s = s.replace("|", "\\|")
+    fence = "`" * (max((len(r) for r in re.findall(r"`+", s)), default=0) + 1)
+    return f"{fence} {s} {fence}"
+
+
+def md_title(x, limit=200):
+    """Issue 標題裡的外部字串：去控制字元，@ # & 後面插零寬空白（標題不解讀 Markdown 跳脫，所以不加反斜線；
+    & 也不換成 &amp;，不然標題會照字面顯示 &amp;。& 後面有零寬空白就不會被當成 HTML 實體）。"""
+    return re.sub(r"([@#＠＃&＆])", "\\1" + ZWSP, _plain(x, limit))
+
+
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1", re.S)
+_UNSAFE = (re.compile(r"(?<![\\\w])[@＠](?!\u200b)[A-Za-z0-9_-]"), re.compile(r"(?<!\\)\]\("), re.compile(r"(?<!\\)!\[(?!\\)"),
+           re.compile(r"&(?!amp;)(?:[A-Za-z][A-Za-z0-9]*;|#)"))       # HTML 實體（md_text 自己產生的 &amp; 除外）
+
+
+def unsafe_markdown(text):
+    """最後一道檢查：行內程式碼以外，還有沒有沒淨化的 @提及、](連結、![圖片、HTML 實體（&name; 與 &#）。回傳找到的片段（空＝沒有）。"""
+    t = _CODE_SPAN.sub(" ", text)
+    return [m.group(0) for rx in _UNSAFE for m in rx.finditer(t)][:3]
+
+
+def unsafe_actions(actions):
+    """所有動作的 unsafe_markdown 結果。標題不是 Markdown（] ( ! 照字面顯示），只算 @提及 與 HTML 實體。"""
+    return [x for act in actions for x in unsafe_markdown(act.get("body", ""))
+            + [y for y in unsafe_markdown(act.get("title", "")) if y[0] in "@＠&"]]
 
 
 def kev_group_key(mode, e):
@@ -360,6 +474,20 @@ def vendor_group_key(mode, e):
 
 def pinfo_of(projs, uuid):
     return next((p for p in projs if p["uuid"] == uuid), None)
+
+
+def release_results(p):
+    """Release 的結論（release-meta；缺少時 NOT_RUN）。status 是生命週期，這幾個才是掃描與發行的結論。"""
+    if not p:
+        return "報告狀態 NOT_RUN（找不到 Release 資訊）"
+    reps = "、".join(f"{x['report']} 報告 {x['report_status']}／閘門 {x['release_gate']}" for x in p.get("reports") or [])
+    out = (f"報告狀態（report_status）{p.get('report_status') or 'NOT_RUN'}；發行閘門（release_gate）{p.get('release_gate') or 'NOT_RUN'}"
+           + (f"（各報告：{reps}）" if reps else "（各報告：release-meta 沒有 reports）")
+           + f"；流程結果（pipeline_result）{p.get('pipeline_result') or 'NOT_RUN'}"
+           "（取自 Release 的 release-meta.json；生命週期 shipped／development 不是掃描結論）")
+    if p.get("meta_attention"):
+        out += "；Release 建置時用了舊資料頂替：" + "；".join(md_text(x) for x in p["meta_attention"])
+    return out
 
 
 def layer_note(p):
@@ -384,14 +512,15 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     if mode == "drill":
         lines.append("> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。")
         lines.append("")
-    lines += [f"**{e0['cve']}** 在已遭利用清單（KEV）上，比對到 **{e0['project']} {e0['version']}**（{p['layer'] if p else '?'} 層）。", ""]
+    lines += [f"**{md_text(e0['cve'])}** 在已遭利用清單（KEV）上，比對到 **{md_text(e0['project'])} {md_text(e0['version'])}**（{p['layer'] if p else '?'} 層）。", ""]
     if p:
-        lines += [f"- Release：{p.get('tag') or '?'}（{p.get('html_url') or '—'}）、Release 版本 {p.get('release_version') or '?'}",
-                  f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}"]
+        lines += [f"- Release：{md_code(p.get('tag'))}（{md_code(p.get('html_url'))}）、Release 版本 {md_text(p.get('release_version') or '?')}",
+                  f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
+                  f"- Release 的結論：{release_results(p)}"]
     lines += [f"- 第一次偵測：{min(x.get('cve_first_detected') or x['first_detected'] for x in entries)}（這次執行 {utc(now)}）", "",
               "| 元件 | purl | 依據 | 來源 |", "|---|---|---|---|"]
     for e in entries:
-        lines.append(f"| {md_cell(e.get('component'))} | {md_cell(e.get('purl'))} | {md_cell(e.get('basis'))} | {md_cell('; '.join(e.get('sources') or []))} |")
+        lines.append(f"| {md_code(e.get('component'))} | {md_code(e.get('purl'))} | {md_code(e.get('basis'))} | {md_code('; '.join(str(x) for x in e.get('sources') or []))} |")
     lines += ["", f"每日監控沒有涵蓋的項目（每次都列出）：", *[f"- {a}：{b}" for a, b in coverage]]
     if p and p.get("gaps"):
         lines += ["", "這個 Release 這次的 GAP：", *[f"- {md_cell(g)}" for g in p["gaps"]]]
@@ -405,13 +534,14 @@ def vendor_body(mode, e, p, run_url, now):
     lines = []
     if mode == "drill":
         lines += ["> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。", ""]
-    lines += [f"廠商層級、**可能相關**：{e['cve']}（KEV 廠商 {e.get('kev_vendor') or '?'}、產品 {e.get('kev_product') or '?'}）"
-              f"與 **{e.get('project')} {e.get('version')}** 監看的廠商 `{e.get('vendor')}` 相同，但沒有元件比對。", "",
-              f"- 監看來源：{', '.join(e.get('watch_via') or [])}；元件數 {e.get('component_count')}",
-              f"- KEV 加入日期：{e.get('date_added') or '?'}；來源：{e.get('source') or '?'}",
-              f"- 第一次偵測：{e.get('first_detected')}（這次執行 {utc(now)}）"]
+    lines += [f"廠商層級、**可能相關**：{md_text(e['cve'])}（KEV 廠商 {md_text(e.get('kev_vendor') or '?')}、產品 {md_text(e.get('kev_product') or '?')}）"
+              f"與 **{md_text(e.get('project'))} {md_text(e.get('version'))}** 監看的廠商 {md_code(e.get('vendor'))} 相同，但沒有元件比對。", "",
+              f"- 監看來源：{md_text(', '.join(str(x) for x in e.get('watch_via') or []))}；元件數 {md_text(e.get('component_count'))}",
+              f"- KEV 加入日期：{md_text(e.get('date_added') or '?')}；來源：{md_text(e.get('source') or '?')}",
+              f"- 第一次偵測：{md_text(e.get('first_detected'))}（這次執行 {utc(now)}）"]
     if p:
-        lines += [f"- Release：{p.get('tag') or '?'}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}"]
+        lines += [f"- Release：{md_code(p.get('tag'))}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
+                  f"- Release 的結論：{release_results(p)}"]
     lines += ["", "要人工確認：KEV 的受影響產品是不是在這個專案裡（廠商可能有很多產品）。", "", ART14_NOTE]
     if run_url:
         lines += ["", f"執行紀錄：{run_url}"]
@@ -462,20 +592,24 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         if gk in iss:
             continue
         p = pinfo_of(projs, es[0]["project_uuid"])
-        title = f"[KEV] {es[0]['cve']} 在 {es[0]['project']} {es[0]['version']}（{p['layer'] if p else '?'} 層）"
+        title = f"[KEV] {md_title(es[0]['cve'])} 在 {md_title(es[0]['project'])} {md_title(es[0]['version'])}（{p['layer'] if p else '?'} 層）"
         pending.append((gk, "kev", title, kev_body(mode, es, p, coverage, run_url, now), labels_for(p, "kev"), es[0]))
     for e in (vrep or {}).get("new") or []:
         gk = vendor_group_key(mode, e)
         if gk in iss:
             continue
         p = pinfo_of(projs, e["project_uuid"])
-        title = f"[廠商層級] {e['cve']}（{e.get('vendor')}）可能影響 {e.get('project')} {e.get('version')}"
+        title = f"[廠商層級] {md_title(e['cve'])}（{md_title(e.get('vendor'))}）可能影響 {md_title(e.get('project'))} {md_title(e.get('version'))}"
         pending.append((gk, "vendor", title, vendor_body(mode, e, p, run_url, now), labels_for(p, "vendor"), e))
     actions, opened = [], 0
+    pruned_keys = dd.setdefault("pruned_keys", [])
     if len(pending) <= max_new:
         for gk, kind, title, body, labels, e in pending:
-            actions.append({"op": "open", "key": gk, "title": title, "body": body, "labels": labels})
+            op = "open_if_closed" if gk in pruned_keys else "open"     # 修剪過的群組：舊 Issue 可能已關閉，關閉的就開新的
+            actions.append({"op": op, "key": gk, "title": title, "body": body, "labels": labels})
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts}
+            if gk in pruned_keys:
+                pruned_keys.remove(gk)
             opened += 1
     rest = pending if len(pending) > max_new else []
     if rest:        # 超過上限：全部併成一個彙總 Issue（不一筆一個，D-040）
@@ -486,12 +620,14 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             body.insert(0, "> **演練（合成資料）**\n")
         if run_url:
             body += ["", f"執行紀錄：{run_url}"]
-        actions.append({"op": "open", "key": sk, "title": f"[KEV] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
-                        "labels": ["kev", "summary"]})
+        actions.append({"op": "open", "key": sk, "title": f"[KEV][ATTENTION] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
+                        "labels": ["kev", "summary", "attention"]})
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
+            if gk in pruned_keys:
+                pruned_keys.remove(gk)
     comments = 0
-    just_opened = {x["key"] for x in actions if x["op"] == "open"} | {gk for gk, *_ in rest}
+    just_opened = {gk for gk, *_ in pending}
 
     def target(gk):
         r = iss.get(gk)
@@ -512,10 +648,10 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         if not t or gk in just_opened:
             continue
         e0 = evs[0][1]
-        lines = [f"{e0['cve']} 在 {e0['project']} {e0['version']}（{ts}）："] + \
-            [f"- {what}：{e.get('component')}（{e.get('purl')}）" for what, e in evs] + \
+        lines = [f"{md_text(e0['cve'])} 在 {md_text(e0['project'])} {md_text(e0['version'])}（{ts}）："] + \
+            [f"- {what}：{md_code(e.get('component'))}（{md_code(e.get('purl'))}）" for what, e in evs] + \
             ["", "原 Issue 已關閉時會開新的 Issue。" + (f"執行紀錄：{run_url}" if run_url else "")]
-        actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {e0['cve']} 在 {e0['project']} {e0['version']}：新的比對",
+        actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {md_title(e0['cve'])} 在 {md_title(e0['project'])} {md_title(e0['version'])}：新的比對",
                         "body": "\n".join(lines), "labels": ["kev"] + (labels_for(pinfo_of(projs, e0["project_uuid"]), "kev")[1:])})
         comments += 1
     ev_acts = [x for x in actions if x["op"] == "open_if_closed"]
@@ -524,8 +660,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         ek = issue_key(mode, "events", ts[:10], str(len(ev_acts)), ev_acts[0]["key"])
         body = [f"這次執行有 {len(ev_acts)} 個已有 Issue 的群組出現新的比對（新增元件或再出現），超過 {max_new} 個的上限，全部列在這裡。", ""] + \
             [f"- {md_cell(x['title'])}" for x in ev_acts] + ([f"", f"執行紀錄：{run_url}"] if run_url else [])
-        actions.append({"op": "open", "key": ek, "title": f"[KEV] 彙總：{len(ev_acts)} 個群組有新的比對（{ts[:10]}）", "body": "\n".join(body),
-                        "labels": ["kev", "summary"]})
+        actions.append({"op": "open", "key": ek, "title": f"[KEV][ATTENTION] 彙總：{len(ev_acts)} 個群組有新的比對（{ts[:10]}）", "body": "\n".join(body),
+                        "labels": ["kev", "summary", "attention"]})
         comments = comments - len(ev_acts) + 1
     seen_gone = set()
     for k in gone:
@@ -535,10 +671,44 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         still = any(x.get("status") == "open" and kev_group_key(mode, x) == gk for x in state["matches"].values())
         if t and not still and gk not in seen_gone:
             seen_gone.add(gk)
-            actions.append({"op": "comment", "key": t, "body": f"{e['cve']} 在 {e['project']} {e['version']} 這次沒有再比對到（{ts}）："
+            actions.append({"op": "comment", "key": t, "body": f"{md_text(e['cve'])} 在 {md_text(e['project'])} {md_text(e['version'])} 這次沒有再比對到（{ts}）："
                             "可能已修補、元件移除，或 KEV 清單改變。Issue 不會自動關閉，請負責人確認後關閉。", "reopen_if_closed": False})
             comments += 1
     return actions, {"opened": opened, "summary": len(rest), "comments": comments}
+
+
+PREV_MAX_HOURS = 36         # 上一次排程超過這麼久 → 算沒跑（每天一次，多留 12 小時）
+BAD_CONCLUSIONS = ("cancelled", "failure", "timed_out", "startup_failure", "action_required", "stale")
+
+
+def prev_schedule_check(path, run_id, now):
+    """watch-round 的 compute 查到的 watch.yml 最近幾次排程 run（GitHub API）→ (降級說明清單, 說明)。
+    上一次排程（不算這一次）被取消、失敗、逾時，或超過 PREV_MAX_HOURS 小時沒有排程 → 降級（報告＋健康 Issue），不能沒有紀錄。"""
+    if not path:
+        return [], None
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return [f"上一次排程的結果讀不到（{type(e).__name__}）"], None
+    if not isinstance(doc, dict) or doc.get("error"):
+        return [f"上一次排程的結果：{str((doc or {}).get('error') or '格式不對')[:120]}"], None
+    runs = [r for r in doc.get("runs") or [] if isinstance(r, dict) and str(r.get("id")) != str(run_id or "")]
+    if not runs:
+        return [], "還沒有排程 run（第一次）"
+    runs.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    last = runs[0]
+    out = []
+    note = f"上一次排程 run {last.get('id')}：{last.get('status')}／{last.get('conclusion') or '-'}（{last.get('created_at')}）"
+    if last.get("status") == "completed" and last.get("conclusion") in BAD_CONCLUSIONS:
+        out.append(f"上一次排程 run {last.get('id')} 是 {last.get('conclusion')}（{last.get('created_at')}）：那一輪沒有完成監控")
+    try:
+        t = datetime.datetime.strptime(str(last.get("created_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+        if (now - t).total_seconds() > PREV_MAX_HOURS * 3600:
+            out.append(f"上一次排程是 {last.get('created_at')}，超過 {PREV_MAX_HOURS} 小時：排程可能被停用或沒有觸發")
+    except ValueError:
+        out.append("上一次排程的時間讀不懂")
+    return out, note
 
 
 HEALTH_AFTER_RUNS = 2       # 連續幾次降級才通知
@@ -572,7 +742,7 @@ def health_actions(mode, state, serious, now, run_url):
         return []
     h["notified_at"] = ts
     body = [f"每日監控從 {h['since']} 起連續 {h['streak']} 次降級：下面這些項目沒有完整檢查，這段期間可能漏掉新的已遭利用漏洞（不能當成沒有新的）。", ""] + \
-        [f"- {x}" for x in h["latest"]] + ["", f"恢復時會在這裡留言；一直沒恢復時每 {HEALTH_REPEAT_DAYS} 天提醒一次。"] + \
+        [f"- {md_text(x)}" for x in h["latest"]] + ["", f"恢復時會在這裡留言；一直沒恢復時每 {HEALTH_REPEAT_DAYS} 天提醒一次。"] + \
         ([f"執行紀錄：{run_url}"] if run_url else [])
     return [{"op": "open_if_closed", "key": key, "title": "[監控降級] 每日監控有項目沒有完整檢查", "body": "\n".join(body), "labels": ["watch-health"]}]
 
@@ -613,14 +783,44 @@ def run(a, kernel_runner=None):
                   "第一次建立基準請手動觸發 mode=real、baseline=true；如果之前已經建過基準，請先找回狀態 Issue")
         with open(os.path.join(a.out, "report.md"), "w", encoding="utf-8") as f:
             f.write(f"# 每日監控（{a.mode}）：GAP\n\n{detail}\n")
+        wrote_plan = False
+        if a.mode == "real":
+            # 有可監控的 Release 卻沒有基準：排程每天綠燈但什麼都沒監控 → 在固定的「沒有基準」健康 Issue 留下紀錄（#32 驗證 F4）。
+            # plan 的 state 是 null：issues.py 只執行這個動作、不寫狀態（不會因此變成「已有狀態」）。op 是 open：已經有（含已關閉）就不重複。
+            act = {"op": "open", "key": issue_key(a.mode, "no-baseline"), "title": "[監控降級] 每日監控還沒有基準，沒有在監控",
+                   "body": detail + f"\n\n可監控的 SBOM：{len(projs)} 份（{', '.join(md_code(t) for t in sorted({p['tag'] or '?' for p in projs})[:20])}）。"
+                   + "建立基準後這個 Issue 可以關閉。" + (f"\n\n執行紀錄：{a.run_url}" if a.run_url else ""), "labels": ["watch-health"]}
+            if a.demo:
+                mark_demo([act])
+            probs = publiccheck.check_text(act["title"] + "\n" + act["body"])
+            if probs:
+                raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{probs[0]}）")
+            bad = unsafe_actions([act])
+            if bad:
+                raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
+            plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url, "state_base": None,
+                    "state": None, "actions": [act], "status": "GAP", "detail": detail}
+            with open(os.path.join(a.out, "plan.json"), "w", encoding="utf-8") as f:
+                json.dump(plan, f, ensure_ascii=False, indent=1)
+            wrote_plan = True
         with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
-            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": False}, f, ensure_ascii=False, indent=1)
+            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": wrote_plan}, f, ensure_ascii=False, indent=1)
         return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
     serious = [f"Release 問題：{x}"[:300] for x in inv_problems]     # 降級：連續發生要通知人（健康 Issue）
     if not projs:
         serious.append("沒有任何可監控的 Release／SBOM（已有狀態）")
+    feed_attn = feed_attention(a.feeds)       # 鏡像用了舊資料頂替：整輪 ATTENTION，報告與 Issue 都寫出來（不擋基準：資料最多 48 小時舊）
+    attn += feed_attn
+    ps_bad, ps_note = prev_schedule_check(a.prev_schedule, a.run_id, now)
+    serious += ps_bad
+    gaps += ps_bad
+    if ps_note:
+        notes.append(ps_note)
+    drafts = [str(x)[:120] for x in inv.get("drafts") or []]
+    if drafts:      # draft 是還沒發布的 Release：正常略過，只列出、不降級（#49 驗證應修 2）
+        notes.append(f"draft Release 略過 {len(drafts)} 個（還沒發布，正常，不降級）：{'、'.join(drafts[:10])}")
     try:
         cisa, cisa_path = load_cisa(eg, a.feeds, a.kev_overlay, work, now)
         if cisa["status"] != "OK":
@@ -655,6 +855,7 @@ def run(a, kernel_runner=None):
                 info, ctx = {"status": "NOT_RUN", "why": f"internal error ({type(e).__name__})"}, None
             budget -= (datetime.datetime.now() - t0).total_seconds()
             row = {"uuid": p["uuid"], "tag": p["tag"], "layer": p["layer"], "grype": info.get("status"), "why": info.get("why"),
+                   "report_status": p.get("report_status"), "release_gate": p.get("release_gate"),
                    "kernel_map": (info.get("kernel_map") or {}).get("status"), "exploited": 0, "version_unknown": 0, "kernel_cna": None}
             if row["kernel_map"] in ("GAP", "FAIL"):
                 # L4T 核心對應失敗：Grype 用原始 SBOM 比對，核心的 KEV 可能漏掉（Release 掃描這種情況也標 GAP；預驗第 3 項）
@@ -730,6 +931,11 @@ def run(a, kernel_runner=None):
                 why.append(f"{len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）")
             if cisa["status"] != "OK":
                 why.append(f"CISA KEV 不是 OK（{cisa['status']}）")
+            if db["status"] != "OK":
+                why.append(f"Grype DB 不是 OK（{db['status']}：過期的 DB 建出的基準，DB 更新後既有命中會被當成新的）")
+            kmap_bad = [u for u, r in per.items() if r.get("kernel_map") in ("GAP", "FAIL")]
+            if kmap_bad:
+                why.append(f"{len(kmap_bad)} 份 SBOM 的 L4T 核心對應是 GAP／FAIL（核心元件沒有比對，基準會漏掉核心的 KEV）")
             if eix["status"] != "OK" and a.mode == "real":      # 演練刻意不下載 EUVD
                 why.append(f"EUVD 不是 OK（{eix['status']}）")
             if inv_problems:
@@ -742,9 +948,15 @@ def run(a, kernel_runner=None):
             if why:
                 raise Fail("第一次執行要建立基準，但沒有完整跑完：" + "；".join(why) + "。基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
         coverage = list(NOT_RUN_DAILY)
+        nb_key = issue_key(a.mode, "no-baseline")
+        nb_actions = [{"op": "comment", "key": nb_key, "reopen_if_closed": False,
+                       "body": f"已建立基準（{utc(now)}，{len(projs)} 份 SBOM）。每日監控開始比對，這個 Issue 可以關閉。"}] \
+            if first and nb_key in (sbase.get("watch_keys") or []) else []
         actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
+        actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
+        add_feed_note(actions, feed_attn)
         if a.demo:
             mark_demo(actions)
     finally:
@@ -752,24 +964,25 @@ def run(a, kernel_runner=None):
     gaps += inv_problems and [f"Release 有問題（不比對）：{x}" for x in inv_problems]
     if not projs:
         gaps.append("沒有可監控的 Release／SBOM")
+    pruned = prune_state(state, now)
+    if pruned:
+        notes.append(f"修剪狀態：{pruned}")
+    size = state_size(sanitize_state(state))
+    if size > STATE_WARN_CHARS:      # 先處理大小再算整輪狀態（#32 驗證 F1）
+        msg = f"狀態編碼後約 {size} 字元，接近狀態 Issue 的上限 {STATE_MAX_CHARS}（超過時狀態寫不進去，issues.py apply 會 FAIL）"
+        attn.append(msg)
+        dd = state.setdefault("dumpling", {})
+        last = dd.get("size_warned_at")
+        if not first and a.mode == "real" and (not last or (now - parse_now(last)).days >= HEALTH_REPEAT_DAYS):
+            dd["size_warned_at"] = utc(now)        # 跟降級提醒一樣 7 天一次，不每天留言
+            act = {"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 狀態接近上限",
+                   "body": msg + "。請處理：修剪已消失很久的比對，或改成分段存放（WATCH.md 3.5 已知限制）。", "labels": ["watch-health"]}
+            actions.append(mark_demo([act])[0] if a.demo else act)
     status = "ATTENTION" if (stats["opened"] or stats["summary"] or attn or gaps) else "OK"
     detail = (f"{'第一次執行：建立基準，' if first else ''}{len(projs)} 份 SBOM；KEV 比對 {len(matches)} 筆（新 {len(new)}、再出現 {len(back)}、消失 {len(gone)}）；"
               f"開 Issue {stats['opened']}、彙總 {stats['summary']}、留言 {stats['comments']}；GAP {len(gaps)}、需注意 {len(attn)}")
     state.setdefault("runs", []).append({"at": utc(now), "status": status, "run_url": a.run_url, "mode": a.mode, "detail": detail[:300]})
-    pruned = prune_state(state, now)
-    if pruned:
-        notes.append(f"修剪狀態：{pruned}")
     clean = sanitize_state(state)
-    size = state_size(clean)
-    if size > STATE_WARN_CHARS:
-        msg = f"狀態編碼後約 {size} 字元，接近狀態 Issue 的上限 {STATE_MAX_CHARS}（超過時狀態寫不進去，issues.py apply 會 FAIL）"
-        attn.append(msg)
-        if not first and a.mode == "real":
-            # 先寫進健康 Issue：health_actions 已經算過，這裡補一個留言動作
-            actions.append({"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 狀態接近上限",
-                            "body": msg + "。請處理：修剪已消失很久的比對，或改成分段存放（GITLAB-PORT／WATCH.md 已知限制）。", "labels": ["watch-health"]})
-            if a.demo:
-                mark_demo(actions[-1:])
     plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url,
             "state_base": None if sbase.get("issue") is None else {k: sbase.get(k) for k in ("issue", "updated_at", "body_sha256")},
             "state": clean, "actions": actions, "status": status, "detail": detail}
@@ -779,6 +992,10 @@ def run(a, kernel_runner=None):
         [x for act in actions for x in publiccheck.check_text(act.get("title", "") + "\n" + act.get("body", ""), rules)]
     if probs:
         raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{len(probs)} 筆，例如 {probs[0]}）：不產生 plan.json")
+    # 最後一道：外部字串都應該經過 md_text／md_code／md_title；還有沒淨化的 @提及、連結、圖片就不產生 plan（程式漏了某個欄位）
+    bad = unsafe_actions(actions)
+    if bad:
+        raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
     result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
               "new": new, "back": back, "gone": gone, "stats": stats, "baseline": first}
     for name, obj in (("plan.json", plan), ("result.json", result)):
@@ -795,10 +1012,11 @@ def render_report(mode, detail, status, per, gaps, attn, notes, coverage, action
     L = [f"# 每日監控（{mode}）：{status}", "", detail, ""]
     if first:
         L += ["**第一次執行：只建立基準，不開 Issue。**", ""]
-    L += ["## 各 SBOM", "", "| 專案鍵 | Release | Grype | 已遭利用 | 版本未知 | 核心 CNA | 說明 |", "|---|---|---|---|---|---|---|"]
+    L += ["## 各 SBOM", "", "| 專案鍵 | Release | 報告狀態 | 發行閘門 | Grype | 已遭利用 | 版本未知 | 核心 CNA | 說明 |",
+          "|---|---|---|---|---|---|---|---|---|"]
     for r in per.values():
-        L.append(f"| {md_cell(r['uuid'])} | {md_cell(r['tag'])} | {r['grype']} | {r['exploited']} | {r['version_unknown']} | "
-                 f"{r['kernel_cna'] or '—'} | {md_cell(r['why'])} |")
+        L.append(f"| {md_cell(r['uuid'])} | {md_code(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
+                 f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or '不適用'} | {md_cell(r['why'])} |")
     L += ["", "## 每日沒有涵蓋的項目", ""] + [f"- {x}：{y}" for x, y in coverage]
     for title, xs in (("GAP", gaps), ("需注意", attn), ("說明", notes)):
         if xs:
@@ -824,6 +1042,8 @@ def main(argv=None):
     ap.add_argument("--vendor-config", default=os.path.join(HERE, "vendor-watch.json"))
     ap.add_argument("--now")
     ap.add_argument("--demo", action="store_true", help="公開 repo：Issue 標明「示範專案（公開 BSP）」並加 demo 標籤（D-040）")
+    ap.add_argument("--prev-schedule", help="watch.yml 最近幾次排程 run 的 JSON（workflow 用 actions: read 查）：上一次被取消或沒跑 → 降級")
+    ap.add_argument("--run-id", help="這一次的 run id（從 --prev-schedule 排除）")
     ap.add_argument("--allow-baseline", action="store_true",
                     help="還沒有狀態時，允許建立第一次的基準（要人明確指定；沒給時回 GAP、不產生 plan）")
     try:

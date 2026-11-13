@@ -330,6 +330,22 @@ class InjectionTest(Base):
         self.assertIn("\\<img src=x onerror=alert\\(1\\)\\>", md)
         self.assertEqual(len(line), 4)
 
+    def test_mentions_and_html_entities_neutralized(self):
+        # @名稱 會通知 GitHub 使用者；&lt; &#64; &#x40; 渲染時會解碼成 < @，繞過跳脫
+        names = ["@evil/pkg", "x &#64;evil &#x40;evil &commat;evil", "&lt;img src=x&gt;", "@types/node"]
+        line, md = self.run_check(cdx(*[comp(n, version=None) for n in names], comp("ok")))
+        text = "\t".join(line) + md
+        self.assertNotRegex(text, r"(?<![A-Za-z0-9])@(?!\u200b)[A-Za-z0-9_-]")        # 沒有可能變成提及的 @
+        for bad in ("&#64;", "&#x40;", "&commat;", "&lt;", "&gt;"):
+            self.assertNotIn(bad, text, bad)
+        self.assertIn("@\u200bevil/pkg", md)
+        self.assertIn("&amp;#64;", md.replace("\\", ""))
+        self.assertIn("&amp;lt;img", md.replace("\\", ""))
+        self.assertEqual(len(line), 4)
+        # purl／版本字串裡的 @（前面是英數字）不受影響
+        line, md = self.run_check(cdx(comp("good", version="1.0", purl="pkg:generic/good@1.0"), comp("b")))
+        self.assertNotIn("\u200b", "\t".join(line) + md)
+
     def test_control_format_and_separator_chars_removed(self):
         name = "a\u202eb\x85c\u2028d\u2029e\u200bf\x1b[31mg\ud800h\tn\nz"
         line, md = self.run_check(cdx(comp(name, version=None), comp("ok")))

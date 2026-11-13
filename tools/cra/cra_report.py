@@ -50,6 +50,9 @@ stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK 
   - 選填欄位缺少 → 文件內顯示 TO BE COMPLETED，該文件至少 GAP。
   - 風險評估：沒有 DT findings 或 SBOM 為空 → NOT_ASSESSED；status.tsv 缺、DT 資料源／KEV／OSV 涵蓋／弱點分析／findings、
     sbomgate、meta.json 任一不是 OK → GAP（清單不完整）；有條件才寫的階段（COND_STAGES）有這一列而且不是 OK → GAP；
+    核心判定階段（KERNEL_STAGES、C-kernel-not-judged-*）有這一列而且不是 OK → GAP（ATTENTION 維持；meta.json 有 kernel_in_other_report 時
+    C-kernel-cve-list／config／module-map 的 NOT_RUN 是 D-044 的不適用，不降級）；刷機包的掃描另讀 <結果>/status.tsv 的 FLASH_ROOTFS_STAGES／
+    FLASH_PRODUCT_STAGES（有這一列而且不是 OK／INFO → GAP，ATTENTION 維持；-os 的 bsp_na 時 BSP 專屬的不算）；
     有未處理的 P1、Grype 有 DT 沒有的 CVE、C-grype 不是 OK 或沒有 Grype 結果 → ATTENTION。
   - Grype 有、DT 沒有的比對（交叉核對的同一個判斷）成為「只有 Grype」的列（grype_only_rows；Source IDs GRYPE:…，
     元件欄 found only by Grype），和其他列一樣分級、判斷、寫 VEX；DT 的列不變。
@@ -71,6 +74,12 @@ EUVD（scan/euvd.json，兩種分級方式；沒有檔案時輸出不變）：EU
   資料狀態也加一個 ATTENTION 的理由（不能因為移出而變成 OK）。只有公告（USN／DSA／DLA）說已修補的列不移（distro_fixed_advisory_only）。
   只移出 P1–P3（accepted 不動）、不移核心的列；列裡有 distro_recheck 沒看到的 finding（例如 NVIDIA 公告）時不移。
   專案自己的風險評估範本沒有引用 text.distro_section 時不移（列不能從文件消失），並記警告。
+分層（M2；SBOM 的元件帶 dumpling:layer 時才動作，由 pipeline/sbom-layers.py 標；沒有時輸出不變，--os-responsibility 也沒有作用；
+  規則見 docs/LAYERS.md）：每一列有 layer（bsp｜os｜unknown）、layer_todo（算不算我們的待辦）、layer_basis。host-tool 元件上的 DT finding 與
+  Grype 比對移出產品比對結果（不進清單、交叉核對與 P1；summary.json 的 layers.host_tool 記數量與身分）。layer_todo：bsp、unknown 一定算；
+  os 只有 os_responsibility 是 ours 或沒給（保守，並讓風險評估文件 GAP）時算。整體狀態（ATTENTION）的 P1 理由、移出 P1–P3 的 KEV 理由、
+  分級方式 exploitation 的出貨關卡都只看我們的待辦；OS 層（customer／upstream-vendor）的列照樣在表上，已被利用的另列「通知客戶」
+  （風險評估 Layers 一節、summary.json 的 layers.notify_customer）。vex_export 的發行閘門不分層（不變）。
 安全測試（tools/cra/security_findings.py；風險評估第 9 節、技術文件第 6 項、security-findings.md、summary.json 的 security_testing）：
   輸入是掃描資料夾旁邊的 <scan>/../image-check/image-check.json（image_check.py）與 <scan>/../board-test/board-test.json
   （board_import.py），或 --image-check／--board-test 指定的檔案。人工決定檔 CRA/Config/security-findings.json（格式錯 → FAIL）。
@@ -130,10 +139,73 @@ RISK_STAGES = ["D-dt-data-sources", "D-dt-kev-sources", "D-dt-osv-coverage", "D-
 INFO_STAGES = ["C-grype-db", "C-grype"]
 # 有條件才寫的階段：有這一列而且不是 OK → GAP（沒有這一列不算缺）。核心沒比對、DT 沒補原始碼套件、BOM 處理沒確認完成
 # B-toolchain（Maven／Gradle 缺工具）、B-npm-no-lockfile（npm 沒有鎖定檔又不能連網）：依賴沒有解析出來，0 筆不代表沒有漏洞
-COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile"]
+# C-pyver（Debian 打包的 Python 模組仍有佔位值版本：比對用的版本不對）、B-php-runtime（有 PHP 卻沒認出 PHP 本體：PHP 的弱點沒比對）
+COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile",
+               "C-pyver", "B-php-runtime"]
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
 # C-dt-feeds：GAP → GAP；NOT_RUN 只在原因是金鑰沒有權限（說明含 SYSTEM_CONFIGURATION_READ）時算 GAP——沒用 DT 的 NOT_RUN 已由 D-dt-data-sources 反映
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
+# 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
+# kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
+# 唯一的例外：分層報告的 SBOM 沒有核心、核心在另一份報告判定（sca-scan --kernel-in-other-report，D-044）時三個核心階段是 NOT_RUN「不適用」——
+# 只認 sca-scan 寫在 meta.json 的 kernel_in_other_report（結構上的標記），不看說明文字。C-kernel-cve-mirror（CNA 鏡像用了沿用的舊資料）是 ATTENTION。
+KERNEL_STAGES = ["C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map", "C-kernel-versions", "C-kernel-cve-mirror"]
+KERNEL_STAGE_PREFIX = "C-kernel-not-judged-"
+KERNEL_OTHER_REPORT_NA = ("C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map")
+REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")      # sca-scan --kernel-in-other-report 收的報告名稱
+
+
+# 刷機包層（scan-flash-package.sh 的 <結果>/status.tsv；cra_report 平常只讀 <rootfs>/scan/status.tsv）會影響弱點清單完整性的列。
+# 只在刷機包的掃描（<結果>/list.json 有 rootfs 清單）時讀；有這一列才處理：OK／INFO 不影響，ATTENTION 維持，其他 → GAP。
+#   B-initrd-coverage-<rootfs>：initrd 裡有沒被套件涵蓋的 ELF／腳本（不在 SBOM，弱點沒比對）或讀不懂
+#   B-rootfs-tar-<rootfs>：rootfs 有讀不到、略過的項目（裡面的套件不會在 SBOM）
+#   B-uefi-binary（整個產品一列）：刷機包的 UEFI 映像和給的原始碼不一致或沒核對（UEFI 內建函式庫的列可能不是出貨的東西）
+# 值＝這一列是不是 BSP 專屬（分層的 -os 報告不適用，同 bsp_na）。
+FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False}
+FLASH_PRODUCT_STAGES = {"B-uefi-binary": True}
+FLASH_STATUS_MISSING = "flash-package status.tsv"
+
+
+def flash_stage_status(scan):
+    """刷機包層 status.tsv 裡這個 rootfs 的 FLASH_ROOTFS_STAGES 與整個產品的 FLASH_PRODUCT_STAGES → {階段: (狀態, 說明, 是否 BSP 專屬)}。
+    沒有 list.json（不是刷機包的掃描）→ {}；list.json 壞掉或沒有 rootfs 清單、status.tsv 沒有或讀不到 → {FLASH_STATUS_MISSING: GAP}。"""
+    res = scan.parent.parent
+    if not (res / "list.json").exists():
+        return {}                     # 不是刷機包的掃描
+    lst = load_json(res / "list.json")
+    if not (isinstance(lst, dict) and isinstance(lst.get("rootfs"), list)):
+        # list.json 在（刷機包的掃描）卻壞掉或格式不對：壞掉的輸入不能當成沒事（D-043）→ GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/list.json of the flash package scan is not valid (no rootfs list): "
+                                       "the flash package status could not be read", False)}
+    try:
+        st = read_status(res / "status.tsv") if (res / "status.tsv").is_file() else None
+    except (OSError, UnicodeDecodeError):
+        st = None
+    if st is None:  # 確定是刷機包的掃描（有 list.json）卻沒有或讀不到刷機包層的 status.tsv：那三列有沒有問題不知道 → GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/status.tsv of the flash package scan is missing or not readable", False)}
+    v = scan.parent.name
+    out = {f"{k}-{v}": st[f"{k}-{v}"] + (bsp,) for k, bsp in FLASH_ROOTFS_STAGES.items() if f"{k}-{v}" in st}
+    out.update({k: st[k] + (bsp,) for k, bsp in FLASH_PRODUCT_STAGES.items() if k in st})
+    return out
+
+
+def flash_stage_level(st):
+    return None if st in ("OK", "INFO") else "ATTENTION" if st == "ATTENTION" else "GAP"
+
+
+def kernel_stage_keys(status):
+    """status.tsv 裡有的核心判定階段（KERNEL_STAGES 與 C-kernel-not-judged-*），照固定順序。"""
+    return [k for k in KERNEL_STAGES if k in status] + sorted(k for k in status if k.startswith(KERNEL_STAGE_PREFIX))
+
+
+def kernel_stage_level(k, st, meta):
+    """核心判定階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
+    if st == "OK":
+        return None
+    other = (meta or {}).get("kernel_in_other_report")
+    if st == "NOT_RUN" and k in KERNEL_OTHER_REPORT_NA and isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
+        return None                       # D-044：核心在另一份報告判定（sca-scan 在 meta.json 記的；格式同 sca-scan 收的報告名稱）
+    return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
 def fresh_stage_level(k, st, detail):
@@ -1261,11 +1333,13 @@ def flash_firmware(scan, cfg, spec, inventory=None):
     if isinstance(rt, dict) and isinstance(rt.get("prefix"), str):
         prefix = rt["prefix"]
     inv = load_json(inv_p)
+    plat = fwmod().platform_of(fwmod().pick_rootfs(lst, variant, prefix)[0])     # list.json 的 l4t 欄位：jetson｜other｜None（不知道）
     if not isinstance(inv, dict):
         why = "missing" if not inv_p.exists() else "not readable"
         return None, None, None, {"absent": f"**Flash firmware missing from the SBOM:** the flash package inventory (`{inv_p.name}`) is {why}. "
-                                  "Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware are not in "
-                                  "the product SBOM.", "flash_package": True, "status": "ATTENTION"}
+                                  + ("Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware" if plat == "jetson" else
+                                     "Boot and flash firmware, the platform release information, kernel modules and MCU firmware")
+                                  + " are not in the product SBOM.", "flash_package": True, "status": "ATTENTION", "platform": plat}
     try:     # 清點檔是不可信資料：格式怪異時不讓整份 CRA 文件失敗
         comps, deps, top, info = fw.build(inv, lst if isinstance(lst, dict) else None, variant, prefix,
                                           (cfg.get("sbom") or {}).get("flash_package_supplier"), spec,
@@ -1417,12 +1491,18 @@ def uefimod():
 
 def own_software(scan, cfg, spec, fwc, fw_info, path=None):
     """設定 sbom.own_software（產品自有軟體）→ own_software.build() 的 (元件, 頂層 ref, info, 刷機包的元件)；
-    沒有設定 → (None, None, None, fwc)：什麼都不做，輸出和沒有這個功能時逐位元組相同。
+    沒有設定 → (None, None, None, fwc)：什麼都不做，輸出和沒有這個功能時逐位元組相同；但 own-software.json 是 own_software.py --declaration
+    寫的宣告結果時，回傳 declaration_info（沒宣告 → GAP，明確宣告沒有 → OK），SBOM 文件照樣標出來。
     path：--own-software（預設 <scan>/../own-software/own-software.json）。同一個檔案已經是刷機包的 kernel 模組（fwc）時不重複列，
     改在那個元件上標記（在複本上改，成功才換掉 fwc；處理失敗時刷機包的元件維持原樣）。"""
-    if not ownmod().configured(cfg):
-        return None, None, None, fwc
     p = Path(path) if path else scan.parent / "own-software" / "own-software.json"
+    if not ownmod().configured(cfg):
+        # 沒有列自有軟體：scan-flash-package.sh（own_software.py --declaration）寫了宣告的結果時才標出來（沒宣告 → GAP；
+        # 明確宣告沒有 → OK 並寫出理由）；沒有那個檔案的流程輸出照舊
+        d = load_json(p) if p.is_file() and not p.is_symlink() else None
+        if isinstance(d, dict) and isinstance(d.get("declaration"), dict):
+            return None, None, ownmod().declaration_info(cfg, p.name), fwc
+        return None, None, None, fwc
     doc = load_json(p)
     fw2 = json.loads(json.dumps(fwc)) if fwc else fwc
     try:     # own-software.json 是不可信資料：格式怪異時不讓整份 CRA 文件失敗
@@ -3312,6 +3392,7 @@ def vulnerability_rows(vrows, cidx, upri_of, services, svc_info, kernel_net, gse
             "aliases": sorted(set(r.get("all_ids") or []) - {r["id"]}),
             "component": r.get("component"), "version": r.get("version"), "purl": r.get("purl") or None,
             "is_kernel": bool(r.get("kernel")),
+            **({"layer": r["layer"], "layer_todo": r.get("layer_todo", True), "layer_basis": r.get("layer_basis")} if r.get("layer") else {}),
             **({"uefi_build_check": r["uefi_build_check"]} if r.get("uefi_build_check") else {}),
             **({"uefi_image_check": r["uefi_image_check"]} if r.get("uefi_image_check") else {}),
             **({"suggestion": r["suggestion"]} if r.get("suggestion") else {}),
@@ -3370,6 +3451,9 @@ def vuln_table(rows, kernel=False):
             "Fix (Grype)"]
     if kernel:
         head = head[:1] + ["Tier"] + head[1:-1] + ["Fix state (Grype)", "Fix (Grype)", "Analysis state"]
+    layered = bool(rows) and all("layer" in r for r in rows)       # 分層（SBOM 有 dumpling:layer）時多一欄 Layer，放在 Type 後面
+    if layered:
+        head.insert(head.index("Type") + 1, "Layer")
     head = head + ["VEX status"]
     out = []
     for i, r in enumerate(rows, 1):
@@ -3379,6 +3463,8 @@ def vuln_table(rows, kernel=False):
             x = x[:1] + [r["tier"].upper()] + x[1:-1] + [r["fix_state"], r["fix"],
                                                        ", ".join(sorted({a["state"] or "NOT_SET" for a in r["analysis"]}))
                                                        + (" (suppressed)" if all(a["suppressed"] for a in r["analysis"]) else "")]
+        if layered:
+            x.insert(head.index("Layer"), LAYER_ZH.get(r["layer"], r["layer"]))
         out.append(x + [vexmod().label(r)])
     return table(head, out)
 
@@ -4043,17 +4129,248 @@ def scan_command(project, out, cfg):
             "--name", s.get("name") or cfg["product"]["name"]] + list(s.get("options") or [])
 
 
+# ---------- 分層（bsp／os／host-tool／unknown；規則見 docs/LAYERS.md） ----------
+# SBOM 的元件由 pipeline/sbom-layers.py（pipeline/lib/layers.py）標 property；沒有任何元件帶 dumpling:layer 時
+# 這一節的程式全部不動作（layers_on 為 False），輸出和沒有分層功能時一樣。property 名稱要和 pipeline/lib/layers.py 一致（測試核對）。
+LAYER_PROP, LAYER_BASIS_PROP, LAYER_RESP_PROP = "dumpling:layer", "dumpling:layer-basis", "dumpling:os-responsibility"
+# 分層、這份報告的 SBOM 沒有 BSP 元件時（cra_report 的 bsp_na）：sbom.md 第 6 節與 summary.json 的 product_sbom.flash_firmware.absent
+BSP_NA_FIRMWARE = ("Not applicable to this report: its SBOM is a layer without BSP components, so the flash package firmware, the UEFI "
+                   "bundled libraries and the OP-TEE/TF-A/Mbed TLS components (all BSP) are not added here; they are in the SBOM and "
+                   "the vulnerability list of the BSP layer's report.")
+LAYER_REASON_PROP = "dumpling:unknown-reason"      # unknown 判斷不了的原因（no-path｜path-no-rule｜inherited），選用
+LAYER_VALUES = ("bsp", "os", "host-tool", "unknown")
+LAYER_PRECEDENCE = ("bsp", "unknown", "os", "host-tool")      # 同一列對到多個層時：最保守的優先（在產品上、我們負責的優先）
+LAYER_RANK = {"bsp": 0, "unknown": 1, "os": 2, "host-tool": 3}
+OS_RESPONSIBILITIES = ("ours", "customer", "upstream-vendor")
+LAYER_ZH = {"bsp": "BSP", "os": "OS", "unknown": "unknown", "host-tool": "host tools"}
+DISTRO_PURL_TYPES = ("deb", "rpm", "apk", "alpm")
+
+
+def _purl_key(purl):
+    return purl.split("#", 1)[0].split("?", 1)[0] if isinstance(purl, str) else ""
+
+
+def _purl_type_name(purl):
+    body = _purl_key(purl)
+    if not body.startswith("pkg:"):
+        return None, None
+    typ, _, rest = body[4:].partition("/")
+    name = urllib.parse.unquote(rest.rsplit("/", 1)[-1].split("@", 1)[0]) if rest else None
+    return (typ.lower() or None), (name or None)
+
+
+def build_layer_index(bom):
+    """SBOM（scan 的 sbom/sbom.cdx.json）→ 分層索引；沒有任何元件帶 dumpling:layer → None（不分層）。
+    索引：purl（不含 qualifiers）、(名稱, 版本)、發行版套件名稱 → 該處出現過的層（集合）；host-tool 元件清單；各層元件數；
+    SBOM metadata 的 dumpling:os-responsibility。沒標層或值不認得的元件算 unknown（不丟）。"""
+    if not isinstance(bom, dict):
+        return None
+    comps = list(flatten(bom.get("components")))
+    props = [{p["name"]: p["value"] for p in c.get("properties") or []
+              if isinstance(p, dict) and isinstance(p.get("name"), str) and isinstance(p.get("value"), str)} for c in comps]
+    if not any(LAYER_PROP in p for p in props):
+        return None
+    idx = {"purl": {}, "nv": {}, "deb": {}, "counts": dict.fromkeys(LAYER_VALUES, 0), "host": [], "basis": Counter(), "unknown_types": Counter(), "unknown_reasons": Counter()}
+    for c, p in zip(comps, props):
+        layer = p.get(LAYER_PROP) if p.get(LAYER_PROP) in LAYER_VALUES else "unknown"
+        idx["counts"][layer] += 1
+        idx["basis"][p.get(LAYER_BASIS_PROP) or "(none)"] += 1
+        pk = _purl_key(c.get("purl"))
+        if pk:
+            idx["purl"].setdefault(pk, set()).add(layer)
+        if c.get("name"):
+            idx["nv"].setdefault((c["name"], str(c.get("version") or "")), set()).add(layer)
+        t, n = _purl_type_name(c.get("purl"))
+        if t in DISTRO_PURL_TYPES and n:
+            idx["deb"].setdefault(n, set()).add(layer)
+        if layer == "host-tool":
+            idx["host"].append({"name": c.get("name") or "?", "version": c.get("version") or "", "purl": c.get("purl") or ""})
+        if layer == "unknown":
+            idx["unknown_types"][t or ("(no purl)" if not c.get("purl") else "(other)")] += 1
+            idx["unknown_reasons"][p.get(LAYER_REASON_PROP) or "(not recorded)"] += 1
+    mp = {q["name"]: q["value"] for q in (bom.get("metadata") or {}).get("properties") or []
+          if isinstance(q, dict) and isinstance(q.get("name"), str) and isinstance(q.get("value"), str)}
+    idx["resp"] = mp.get(LAYER_RESP_PROP) if mp.get(LAYER_RESP_PROP) in OS_RESPONSIBILITIES else None
+    return idx
+
+
+def _pick_layer(layers):
+    return next((l for l in LAYER_PRECEDENCE if l in layers), "unknown")
+
+
+def host_only(purl, name, version, idx):
+    """這個元件在 SBOM 裡只出現在 host-tool 層（同一個 purl 或名稱＋版本在別的層也有 → 不算，保守地留在產品清單）。"""
+    ls = idx["purl"].get(_purl_key(purl))
+    if ls is None:
+        ls = idx["nv"].get((name, str(version or "")))
+    return ls == {"host-tool"}
+
+
+def drop_host_tool(findings, grype, idx):
+    """host-tool 層元件上的 DT findings 與 Grype 比對移出產品的比對結果（不進產品漏洞清單，也不進交叉核對）。
+    回傳 (findings, grype, 記錄)；記錄：移出的 finding／比對筆數與 CVE 編號（summary.json 與報告的 host tools 一節用，漏洞不是消失，只是不在產品清單）。"""
+    info = {"findings": 0, "matches": 0, "ids": set()}
+    if isinstance(findings, list):
+        keep = []
+        for f in findings:
+            c = (f.get("component") if isinstance(f, dict) else None) or {}
+            if isinstance(f, dict) and host_only(c.get("purl"), c.get("name"), c.get("version"), idx):
+                info["findings"] += 1
+                info["ids"].add(str((f.get("vulnerability") or {}).get("vulnId") or "?"))
+            else:
+                keep.append(f)
+        findings = keep
+    if isinstance(grype, dict) and isinstance(grype.get("matches"), list):
+        keep = []
+        for m in grype["matches"]:
+            a = (m.get("artifact") if isinstance(m, dict) else None) or {}
+            if isinstance(m, dict) and host_only(a.get("purl"), a.get("name"), a.get("version"), idx):
+                info["matches"] += 1
+                info["ids"].add(str((m.get("vulnerability") or {}).get("id") or "?"))
+            else:
+                keep.append(m)
+        grype = dict(grype, matches=keep)
+    return findings, grype, info
+
+
+def layer_of_row(r, idx):
+    """漏洞列 → (層, 依據)。順序：cra_report 自己用 BSP 專屬輸入產生的列（UEFI／OP-TEE 內建函式庫、NVIDIA 公告、廠商核心 CVE 清單）→ bsp；
+    purl → 名稱＋版本 → 對應來源（mapped_from、l4t 核心對應）→ 安裝的二進位套件（DT 以原始碼套件比對時）→ 擁有它的 deb（Ubuntu 打包的 Python）。
+    都對不到 → unknown（不猜）。同一列對到多個層時 bsp > unknown > os（保守）。host-tool 不會到這裡（已在比對結果階段移出）。"""
+    if r.get("found_by") == KERNEL_CNA:
+        return "bsp", "synthetic:kernel-cna"
+    if r.get("bundled_in"):
+        return "bsp", "synthetic:bundled-library"
+    if r.get("source_ids") and all(str(x).startswith("NVIDIA:") for x in r["source_ids"]):
+        return "bsp", "synthetic:nvidia-bulletin"
+    pk = _purl_key(r.get("purl"))
+    if pk in idx["purl"]:
+        return _pick_layer(idx["purl"][pk]), "purl"
+    if (r.get("name"), r.get("version")) in idx["nv"]:
+        return _pick_layer(idx["nv"][(r["name"], r["version"])]), "name-version"
+    # mapped_from 是「名稱 版本」（C-kernel-l4t-map），套件索引只認名稱
+    names = [n for n in [str(r.get("mapped_from") or "").partition(" ")[0]] + list(r.get("installed_as") or [])
+             + [((r.get("deb_python") or {}).get("owner") or {}).get("name")] if n]
+    found = set().union(*(idx["deb"].get(n, set()) for n in names)) if names else set()
+    if found:
+        return _pick_layer(found), "owner-package"
+    return "unknown", "unmatched"
+
+
+def layer_todo(layer, resp):
+    """這一層的列算不算我們的待辦：bsp、unknown 一定算；os 只有 os_responsibility 是 ours 或沒給（保守）時算。"""
+    return layer != "os" or resp in (None, "ours")
+
+
+def notify_rows(rows, resp):
+    """要通知客戶的列：OS 層、不是我們的待辦（customer／upstream-vendor）、而且已被利用（KEV、EUVD、人工證據）、還沒被判定為不受影響。"""
+    return [r for r in rows if r.get("layer") == "os" and not r.get("layer_todo", True) and exploited(r)
+            and r["tier"] in ("p1", "p2", "p3", "distro_fixed")]
+
+
+RESP_TEXT = {
+    "ours": "The OS layer is part of the product we ship and maintain: its open rows are our to-do, like the BSP layer.",
+    "customer": "The OS layer (the example root file system) is the customer's responsibility. It is scanned and listed separately for the "
+                "customer's reference; its open rows are not our to-do and do not by themselves make the status ATTENTION. Exploited rows "
+                "(KEV, EUVD, manual evidence) in the OS layer are listed under customer notification.",
+    "upstream-vendor": "The OS is the responsibility of the upstream OS vendor. It is scanned and listed separately; its open rows are not "
+                       "our to-do and do not by themselves make the status ATTENTION, but we notify the customer: exploited rows (KEV, EUVD, "
+                       "manual evidence) in the OS layer are listed under customer notification.",
+    None: "GAP: os_responsibility was not given (`--os-responsibility` or the SBOM property `dumpling:os-responsibility`). It is not defaulted: "
+          "all layers are treated as our to-do (the most conservative way) until it is set.",
+}
+
+
+def layers_summary(rows, vrows, idx, resp, host_info, notify):
+    """summary.json 的 layers 與 vulnerability-rows.json 的 layers 共用的內容。"""
+    by = {l: [r for r in rows if r.get("layer") == l] for l in ("bsp", "os", "unknown")}
+    return {
+        "active": True, "os_responsibility": resp, "os_responsibility_gap": resp is None,
+        "components": dict(idx["counts"]), "basis": dict(sorted(idx["basis"].items())),
+        "rows": {l: len(v) for l, v in by.items()},
+        "open_rows": {l: sum(1 for r in v if r["tier"] in OPEN_TIERS) for l, v in by.items()},
+        "p1_rows": {l: sum(1 for r in v if r["tier"] == "p1") for l, v in by.items()},
+        "todo_rows": sum(1 for r in rows if r.get("layer_todo", True)),
+        "unknown_by_reason": dict(sorted(idx["unknown_reasons"].items())),
+        "unknown": {"components": idx["counts"]["unknown"], "by_purl_type": dict(sorted(idx["unknown_types"].items())),
+                    "rows": len(by["unknown"]), "handling": "treated as our to-do (not defaulted to OS)"},
+        "notify_customer": [{"id": r["id"], "component": r["component"], "version": r["version"], "tier": r["tier"],
+                             "evidence": (["KEV (" + ", ".join(r.get("kev_sources") or ["DT"]) + ")"] if r.get("kev") else [])
+                             + list(r.get("exploited_sources") or [])} for r in notify],
+        "host_tool": {"components": sorted(idx["host"], key=lambda x: (x["name"], x["version"])), "count": len(idx["host"]),
+                      "findings_not_listed": host_info["findings"], "grype_matches_not_listed": host_info["matches"],
+                      "ids": sorted(host_info["ids"])},
+    }
+
+
+UNKNOWN_REASON_EN = {"no-path": "no path and not a distribution package", "path-no-rule": "a path that matches no rule",
+                     "inherited": "sub-component of an unknown component", "file-unowned": "file record with no owning package and a path that matches no rule",
+                     "(not recorded)": "reason not recorded (SBOM was tagged by an older tool)"}
+
+
+def layer_section(num, summ, rows, notify, table):
+    """風險評估的分層一節（前面帶空行）。summ 是 layers_summary 的結果。"""
+    resp = summ["os_responsibility"]
+    n = summ["components"]
+    head = ["Layer", "Components", "Rows", "P1", "Open rows (P1–P3)", "In our to-do"]
+    body = []
+    for l in ("bsp", "os", "unknown"):
+        vs = [r for r in rows if r.get("layer") == l]
+        body.append([LAYER_ZH[l], n.get(l, 0), len(vs), summ["p1_rows"][l], summ["open_rows"][l],
+                     sum(1 for r in vs if r.get("layer_todo", True) and r["tier"] in OPEN_TIERS)])
+    txt = [f"\n### {num} Layers (BSP / OS / host tools)\n",
+           "Every component of the SBOM carries a layer (SBOM property `dumpling:layer`, set by `pipeline/sbom-layers.py`): `bsp` (BSP: kernel, "
+           "out-of-tree modules, boot software, firmware, vendor user-space packages, our own software), `os` (the operating system "
+           "packages), `host-tool` (tools that run on the development host, not on the product) or `unknown` (the layer could not be "
+           "determined). Rows are assigned to the layer of their component. "
+           f"Components: BSP {n.get('bsp', 0)}, OS {n.get('os', 0)}, unknown {n.get('unknown', 0)}, host tools {n.get('host-tool', 0)}.\n",
+           RESP_TEXT[resp] + "\n", table(head, body)]
+    if summ["unknown"]["components"]:
+        bt = ", ".join(f"{k} {v}" for k, v in summ["unknown"]["by_purl_type"].items())
+        txt.append(f"\n{plural(summ['unknown']['components'], 'component')} ({bt}) could not be assigned to a layer (no package identity from a "
+                   f"distribution and no path); {plural(summ['unknown']['rows'], 'row')} {verb(summ['unknown']['rows'], 'is', 'are')} listed. "
+                   "They are not defaulted to OS: they are treated as our to-do.")
+        br = summ.get("unknown_by_reason") or {}
+        if br:
+            txt.append("\nWhy the layer could not be determined: " + "; ".join(
+                f"{UNKNOWN_REASON_EN.get(k, k)} {v}" for k, v in br.items()) + ".")
+    if resp in ("customer", "upstream-vendor"):
+        txt.append(f"\n**Customer notification** (exploited rows in the OS layer): {plural(len(notify), 'row')}.\n")
+        txt.append(table(["CVE", "Component", "Version", "Tier", "Exploitation evidence"],
+                         [[x["id"], x["component"], x["version"], x["tier"].upper(), "; ".join(x["evidence"]) or "—"] for x in summ["notify_customer"]]))
+    h = summ["host_tool"]
+    txt.append(f"\n**Host tools (not running on the product)**: {plural(h['count'], 'component')}; "
+               f"{plural(h['findings_not_listed'], 'Dependency-Track finding')} and {plural(h['grype_matches_not_listed'], 'Grype match', 'Grype matches')} "
+               "on them are not in the product vulnerability list. "
+               + ("; ".join(f"{x['name']} {x['version']}".strip() for x in h["components"][:20]) + ("; …" if h["count"] > 20 else "") if h["count"] else "")
+               + "\n\nHost tools are shipped to the customer with the BSP and run on the customer's host, not on the product.")
+    return "\n".join(txt) + "\n"
+
+
 def generate(project, scan, out, cfg, warnings, company=None, image_check=None, board_test=None, flash_inventory=None, pkgdb=None,
-             own_software_file=None, uefi_source=None, tee_source=None):
+             own_software_file=None, uefi_source=None, tee_source=None, os_responsibility=None):
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     pol = policy_of(cfg)
     paths = {k: find(scan, k) for k in ("dt/findings.json", "sbom/sbom.cdx.json", "scan/grype.json", "meta.json", "status.tsv",
                                         "dt/deb-sources.json", "scan/sbomgate.json", "scan/l4t-kernel-map.json",
                                         "scan/nvidia-bulletins.json", "scan/distro-recheck.json", "scan/kernel-config.json",
                                         "dt/analysis.json", "scan/usn-cves.json", "scan/ubuntu-priority.json",
-                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json")}
+                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json", "scan/kernel-versions.json")}
     findings, bom, grype, meta = (load_json(paths[k]) for k in ("dt/findings.json", "sbom/sbom.cdx.json", "scan/grype.json", "meta.json"))
     findings = merge_readback(findings, load_json(paths["dt/analysis.json"]))
+    # 分層（SBOM 的元件帶 dumpling:layer 時才動作；沒有時 layers_on 是 False，下面所有分層的程式都不改任何輸出）
+    lidx = build_layer_index(bom)
+    layers_on = lidx is not None
+    resp = (os_responsibility or lidx["resp"]) if layers_on else None
+    # 分層的 SBOM 沒有 bsp 也沒有 unknown 元件（customer／upstream-vendor 的 -os 那份）：BSP 專屬的附加輸入（刷機包韌體清單、UEFI 與
+    # OP-TEE 的內建函式庫）屬於 bsp 層，在 bsp 那份報告處理。這份不加它們的元件、不產生它們的列、它們的 GAP 也不算進這份——不然會和
+    # bsp 報告重複計算（-os 的漏洞清單出現 bsp 層的列、產品 SBOM 出現刷機包韌體）。有 unknown 元件時照舊（unknown 保守算 BSP 待辦，D-030）。
+    # 只限 customer／upstream-vendor：ours 或沒給時只有一份報告、沒有 bsp 那份，略過就沒有人處理這些輸入（給了 --tee-source 也會消失）
+    bsp_na = layers_on and resp in ("customer", "upstream-vendor") and not (lidx["counts"]["bsp"] or lidx["counts"]["unknown"])
+    bsp_na_skipped = []
+    host_info = {"findings": 0, "matches": 0, "ids": set()}
+    if layers_on and lidx["host"]:
+        findings, grype, host_info = drop_host_tool(findings, grype, lidx)       # host-tool 不進產品漏洞清單
     vx = vexmod()
     try:
         anns, ann_info = vx.load_annotations(project)
@@ -4094,6 +4411,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     except (sm.SecInputError, OSError) as e:
         raise Fail(f"安全測試的人工決定檔有錯：{e}")
     status = read_status(paths["status.tsv"])
+    flash = flash_stage_status(scan)              # 刷機包層會影響清單完整性的列（不是刷機包的掃描時是空的）
     hashes = {k: sha256(p) for k, p in paths.items() if p}
     meta = meta if isinstance(meta, dict) else {}
     ctx = dict(report_fields(cfg))
@@ -4220,6 +4538,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # DT 沒有這些元件，所以比對結果只來自 Grype，成為「只有 Grype」的列（元件欄 "OpenSSL 3.4.1 (bundled in UEFI)"，修補建議是重建 UEFI）。
     # 沒有給資料夾（也沒有 <scan>/../uefi-source/）→ uefi_info 是 None，下面全部照舊
     uefi_dir = Path(uefi_source) if uefi_source else (scan.parent / "uefi-source" if (scan.parent / "uefi-source").is_dir() else None)
+    if bsp_na and uefi_dir:
+        bsp_na_skipped.append("uefi-source")     # 分層、這份沒有 BSP 元件：不適用（見 bsp_na）
+        uefi_dir = None
     uefi_info, uefi_rows = (uefimod().load(uefi_dir) if uefi_dir else None), []
     # 開機韌體涵蓋說明（scan-flash-package.sh 寫的 <rootfs>/bootloader-coverage.json）與 UEFI 映像-原始碼一致性檢查（<結果>/uefi-binary-check.json）；
     # 都沒有（舊的結果、不是 Jetson 刷機包）→ None，下面全部照舊
@@ -4242,6 +4563,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # tos-optee 映像的 OP-TEE、TF-A 與 OP-TEE 內建的 Mbed TLS（--tee-source 或 <scan>/../tee-source/）：做法同上面的 UEFI 內建函式庫（tee_source.py、tee_bundled.py grype）。
     # 沒有給資料夾（也沒有 <scan>/../tee-source/）→ tee_info 是 None，下面全部照舊
     tee_dir = Path(tee_source) if tee_source else (scan.parent / "tee-source" if (scan.parent / "tee-source").is_dir() else None)
+    if bsp_na and tee_dir:
+        bsp_na_skipped.append("tee-source")      # 同上
+        tee_dir = None
     tee_info, tee_rows = (teemod().load(tee_dir) if tee_dir else None), []
     if tee_info is not None:
         tee_info["auto_detected"] = not tee_source      # 沒給 --tee-source、由 <scan>/../tee-source 自動帶入
@@ -4295,6 +4619,12 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         rows.sort(key=lambda r: row_order(r, euvd=True))
     for r in rows:
         r["kernel"] = is_kernel_row(r, kinfo)
+    if layers_on:
+        for r in rows:
+            r["layer"], r["layer_basis"] = layer_of_row(r, lidx)
+            if r["layer"] == "host-tool":      # 不會發生（比對結果階段已移出）；萬一有，不讓它從待辦消失
+                r["layer"], r["layer_basis"] = "unknown", "host-tool-not-filtered"
+            r["layer_todo"] = layer_todo(r["layer"], resp)
     # Grype 沒有修補狀態的 Ubuntu 列（含 Ubuntu 打包的 Python 模組，看擁有它的 deb）：依 Ubuntu CVE Tracker 推出修補狀態
     # （scan/ubuntu-status.json，status OK 時；apply_ubuntu_tracker）。Grype 有的照用 Grype 的，不同的在交叉核對並列
     ustatus_doc = load_json(paths["scan/ubuntu-status.json"])
@@ -4315,6 +4645,13 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                          "（backport）的列照舊留在 P1–P3；要分開列請在 {{ text.nvidia_section }} 後面加上 {{ text.distro_section }}"]
     # VEX：每一列的判定（DT 的人工分析 ＞ vex-annotations.json ＞ 發行版已修補 ＞ 核心設定 ＞ NVIDIA 推定），表格的 VEX status 欄用
     kcfg = load_json(paths["scan/kernel-config.json"])
+    # 映像另有出貨但沒判定的核心（scan/kernel-versions.json 的 not_judged）：K1／K2 的排除只對判定過的核心成立，不套用到整個產品
+    # （vex_export.with_scope 標 scope_incomplete；kconfig_usable、module_map_of、runtime_evidence 看到就不採用）。沒有檔案或 not_judged 為空 → 原樣
+    kvers_doc = load_json(paths["scan/kernel-versions.json"])
+    kcfg = vx.kernel_with_scope(kcfg, kvers_doc)
+    if vx.kernel_scope_of(kvers_doc) is not None:
+        warnings = list(warnings) + ["核心：映像出貨的核心 " + "、".join(vx.kernel_scope_of(kvers_doc)["not_judged"]) + " 沒有判定；"
+                                     "核心設定比對（K1）與模組對應（K2）的排除不套用到整個產品（沒有排除任何核心的列）"]
     # 刷機包有兩顆不同的核心（scan/kernel-boot.json，C-kernel-boot）：資訊性 ATTENTION／GAP 進設定警告（報告包的警告區也會顯示）
     kboot = load_json(paths["scan/kernel-boot.json"])
     if isinstance(kboot, dict) and kboot.get("schema") == "sca-center-kernel-boot/1" and kboot.get("status") in ("ATTENTION", "GAP"):
@@ -4340,7 +4677,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 生效日和報告日（UTC）比；Debian 版本比較用 deb_vercmp
     rctx.update(image_ids=sorted({x for x in (vx.norm_image(meta.get(k)) for k in ("digest", "image_id", "content_sha256", "version")) if x}),
                 today=now[:10], kernel_modules=kmods, kernel_modules_info=kmods_info,
-                module_map=load_json(paths["scan/kernel-module-map.json"]), module_map_sha256=hashes.get("scan/kernel-module-map.json"),
+                module_map=vx.kernel_with_scope(load_json(paths["scan/kernel-module-map.json"]), kvers_doc), module_map_sha256=hashes.get("scan/kernel-module-map.json"),
                 ubuntu_status=ustatus_doc, vercmp=deb_vercmp)
     # NVIDIA 公告的 CVE 其實是發行版套件的（nvidia_distro.py）：依 Grype DB（唯讀）判斷；沒有資料庫 → 不查，維持原狀並記在 summary
     nvd_info = {"checked": False, "reason": "no NVIDIA bulletin", "remapped": {}}
@@ -4448,6 +4785,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 層級與整體狀態用全部的列（by）；主清單（8.4–8.6、附錄 A）只列核心以外的（mby），核心的列在 8.7 節與 kernel-vulnerabilities.md
     krows, mrows = [r for r in rows if r["kernel"]], [r for r in rows if not r["kernel"]]
     by = {t: [r for r in rows if r["tier"] == t] for t in TIERS}
+    # 我們的待辦（分層：OS 層在 customer／upstream-vendor 時不算）：依日期的出貨關卡（exploitation）用這一組；沒分層時就是 rows、by 本身
+    rows_t = [r for r in rows if r.get("layer_todo", True)] if layers_on else rows
+    by_t = {t: [r for r in v if r.get("layer_todo", True)] for t, v in by.items()} if layers_on else by
     # 專案自己的風險評估範本沒有引用 text.kernel_section：核心的列留在主清單（不讓它們從文件消失），並記警告
     split = not krows or "text.kernel_section" in ra_ph
     mby = {t: [r for r in (mrows if split else rows) if r["tier"] == t] for t in TIERS}
@@ -4475,6 +4815,17 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 # ATTENTION（例如 B-npm-no-lockfile 在連網解析時）只提醒；其他非 OK 表示資料不完整
                 risk_st = worst([risk_st, "ATTENTION" if status[k][0] == "ATTENTION" else "GAP"])
                 reasons.append(f"{k} is {status[k][0]}")
+        for k in kernel_stage_keys(status):
+            lv = kernel_stage_level(k, status[k][0], meta)
+            if lv:
+                risk_st = worst([risk_st, lv])
+                reasons.append(f"{k} is {status[k][0]}: the operating system kernel's CVEs were not fully assessed against the product kernel"
+                               if lv == "GAP" else f"{k} is {status[k][0]}")
+        for k, (fst, _fd, bsp_only) in flash.items():
+            lv = None if (bsp_only and bsp_na) else flash_stage_level(fst)
+            if lv:
+                risk_st = worst([risk_st, lv])
+                reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
         for k in FRESH_STAGES:
             lv = fresh_stage_level(k, status[k][0], status[k][1]) if k in status else None
             if lv:
@@ -4598,14 +4949,20 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                   + (f" {', '.join(x['grype']['fix_versions'])}" if x["grype"]["fix_versions"] else "")
                                   + f", Tracker {tracker_status_text(x['tracker']['status'], x['tracker']['note'])}"
                                   for x in ud[:10]) + ("; …" if len(ud) > 10 else "") + " (summary.json ubuntu_tracker_fix lists all).")
-    if by["p1"]:
+    # 分層：整體狀態（ATTENTION）只看我們的待辦（bsp、unknown、os 在 ours 或沒給 os_responsibility 時）；OS 層在 customer／
+    # upstream-vendor 時不算，但列照樣在表上與「通知客戶」裡（沒有列消失）。沒分層時 p1_todo 就是 by["p1"]，文字不變
+    p1_todo = [r for r in by["p1"] if r.get("layer_todo", True)]
+    p1_other = len(by["p1"]) - len(p1_todo)
+    if p1_todo:
         risk_st = worst([risk_st, "ATTENTION"])
-        nk = sum(1 for r in by["p1"] if r["kernel"])
-        reasons.append(f"{plural(len(by['p1']), 'open finding')} in tier P1 ({pol['tiers']['p1']['label']})"
-                       + (f"; {nk} of them for the operating system kernel ({'section 8.7' if split else '`' + KERNEL_DOC[1] + '`'})" if nk else ""))
+        nk = sum(1 for r in p1_todo if r["kernel"])
+        reasons.append(f"{plural(len(p1_todo), 'open finding')} in tier P1 ({pol['tiers']['p1']['label']})"
+                       + (f"; {nk} of them for the operating system kernel ({'section 8.7' if split else '`' + KERNEL_DOC[1] + '`'})" if nk else "")
+                       + (f"; {plural(p1_other, 'more P1 row')} in the OS layer {verb(p1_other, 'is', 'are')} not counted here "
+                          f"(os_responsibility {resp}: for the customer, see the layers section)" if p1_other else ""))
     # 移出 P1–P3 的 KEV 列：已知被利用，只靠發行版紀錄移出，要人工確認，所以整體至少 ATTENTION（不會因為移出而變成 OK）
     dkev = [r for r in dmoved if r["kev"] or euvd_hit(r)]     # EUVD 的被利用標記也算（不設 kev）
-    if dkev:
+    if any(r.get("layer_todo", True) for r in dkev):       # 分層：OS 層不是我們的待辦時不讓整體變 ATTENTION（列在通知客戶）；沒分層時就是 if dkev
         risk_st = worst([risk_st, "ATTENTION"])
         reasons.append(f"{plural(len(dkev), 'row')} listed in a KEV catalogue {verb(len(dkev), 'was', 'were')} moved out of P1–P3 because the "
                        f"distribution's records state the installed package is fixed ({', '.join(sorted(c for r in dkev for c in (r['cves'] or [r['id']])))}); "
@@ -4763,7 +5120,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         "text.completeness": completeness, "text.cross_check": cross, "text.no_vuln_data_section": nvdmod().section(nvd, table),
         "tables.data_sources": table(["Stage", "Status", "Detail (as recorded by sca-scan)"],
                                      [[k, (status.get(k) or ("NOT_RUN",))[0], en((status.get(k) or ("", "not in status.tsv"))[1])] for k in RISK_STAGES + INFO_STAGES]
-                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status])
+                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status]
+                                     + [[k, status[k][0], en(status[k][1])] for k in kernel_stage_keys(status)]
+                                     + [[k, v[0], en(v[1])] for k, v in flash.items()])
         if status is not None else "_status.tsv not available: data-source status is UNKNOWN._",
         "tables.counts": table(["Metric", "Total", "OS kernel (section 8.7)" if split else f"OS kernel (`{KERNEL_DOC[1]}`)",
                                 "Other components"] if krows else ["Metric", "Value"], counts),
@@ -4839,6 +5198,10 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 "text.security_techdoc": sm.techdoc_text(sec)})
     fwc, fwd, fwt, fw_info = (flash_firmware(scan, cfg, b.get("specVersion"), flash_inventory) if b else
                               (None, None, None, {"absent": "No product SBOM (no scanner SBOM): flash firmware was not added."}))
+    if bsp_na and (fwc or not fw_info.get("absent")):
+        # 分層、這份沒有 BSP 元件（見 bsp_na）：刷機包韌體屬於 bsp 層，不加進這份的產品 SBOM
+        bsp_na_skipped.append("flash-firmware")
+        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True, "platform": fw_info.get("platform")}
     # 產品自有軟體（設定 sbom.own_software；own_software.py）：沒有設定時 own_info 是 None，下面全部照舊
     owc, owt, own_info, fwc = own_software(scan, cfg, b.get("specVersion"), fwc, fw_info, own_software_file) if b else (None, None, None, fwc)
     if own_info is None and ownmod().configured(cfg):
@@ -4866,6 +5229,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
             if tee_info["gaps"]:
                 bom_st = worst([bom_st, "GAP"])
                 ctx.update({"bom.status": bom_st, "bom.status_detail": bom_reasons})
+    if layers_on:
+        # 產品 SBOM 裡 cra_report 自己加的元件（刷機包韌體、自有軟體、UEFI／OP-TEE 內建函式庫）都是 BSP 的東西；掃描 SBOM 的元件已帶層
+        for c in flatten(fwc or []):
+            if not any(isinstance(q, dict) and q.get("name") == LAYER_PROP for q in c.get("properties") or []):
+                c.setdefault("properties", []).extend([{"name": LAYER_PROP, "value": "bsp"}, {"name": LAYER_BASIS_PROP, "value": "synthetic"}])
     pbom = product_bom(b, cfg, meta, now, hashes["sbom/sbom.cdx.json"], (fwc, fwd, fwt)) if b else None
     pbom = strip_work_paths(pbom) if pbom else None
     # 支援期檢查（support_check.py；技術文件第 4 節）：產品 SBOM（含刷機包韌體）元件的維護期 vs 產品的 support.end_date；只回報，不改文件狀態
@@ -4887,11 +5255,14 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         else bool(cfg["sbom"]["tools_scope_note"])
     scope_txt = spmod().TOOLS_SCOPE_NOTE if scope_note else ""
     ctx.update({"text.sbom_scope": ("\n\n" + scope_txt) if scope_txt else ""})
+    # 第 6 節標題：只有 Jetson 的刷機包才寫 Jetson Linux 版本；其他平台（或不知道平台）寫中性的標題（adapter-gaps #25）
+    ctx.update({"text.sbom_firmware_title": "Flash firmware, Jetson Linux release and kernel modules" if fw_info.get("platform") == "jetson"
+                else "Flash firmware and kernel modules"})
     ctx.update({"text.sbom_firmware": fwmod().firmware_text(fw_info, table) + ("\n\n### Scope of the SBOM\n\n" + scope_txt if scope_txt else "") + ("\n\n" + ownmod().text(own_info, table) if own_info else "")
                                                                                 + ("\n\n" + uefimod().text(uefi_info, table) if uefi_info else "")
                                                                                 + ("\n\n" + teemod().text(tee_info, table) if tee_info else "")
                                                                                 + ("\n\n### Boot firmware coverage\n\n" + bootmod().customer_text(boot_cov) if boot_cov else ""),
-                "text.sbom_tr03183": fwmod().tr_text(tr, table),
+                "text.sbom_tr03183": fwmod().tr_text(tr, table, platform=fw_info.get("platform")),
                 "bom.firmware_status": fw_info.get("status") or "not applicable", "bom.tr03183_status": tr["status"]})
     pbom_text = json.dumps(pbom, ensure_ascii=False, separators=(",", ":")) + "\n" if pbom else None
     # 板子執行中使用的證據（runtime_evidence.py）：只加欄位與 VEX 說明的一句話，不改 tier、不改 VEX 狀態。
@@ -4959,7 +5330,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         kfiles = kernel_fix_files(kcfg)
         knet = (svc_info or {}).get("kernel_network")
         esection, esumm, est, ereasons = exploitation_section(
-            f"8.{9 + bool(nsection) + bool(dsection)}", rows, by, pol, isinstance(findings, list), risk_st, services, svc_info,
+            f"8.{9 + bool(nsection) + bool(dsection)}", rows_t, by_t, pol, isinstance(findings, list), risk_st, services, svc_info,
             evidence, ev_info, ev_used, euvd_cves, euvd_p, ref[0], ref[1], table, pkgs, vgate["verdict"],
             cvss_index(findings + nvf if isinstance(findings, list) else nvf, grype),
             lambda r: ubuntu_priority_of(r, upri, gpri, sevin["nvdebs"]), euvd_status,
@@ -4970,12 +5341,35 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                          "清單與依日期的出貨關卡不會出現在文件裡（summary.json 的 exploitation 照樣有）；請在 {{ text.vex_section }} "
                                          "後面加上 {{ text.exploitation_section }}"]
     ctx["text.exploitation_section"] = esection
+    # 分層一節（8.x）、通知客戶、host tools；沒有 os_responsibility → 文件 GAP（不預設，全部列入待辦）
+    lsumm, lsection = None, ""
+    if layers_on:
+        for r in vrows:        # vex_export 另加的列（NVIDIA 公告推定）沒經過上面的標層
+            if "layer" not in r:
+                r["layer"], r["layer_basis"] = layer_of_row(r, lidx)
+                r["layer_todo"] = layer_todo(r["layer"], resp)
+        notify = notify_rows(rows, resp)
+        lsumm = layers_summary(rows, vrows, lidx, resp, host_info, notify)
+        # BSP 專屬的附加輸入在這份不適用時（bsp_na）：哪幾項被略過；沒有略過任何一項時不加（輸出不變）
+        if bsp_na_skipped:
+            lsumm["bsp_inputs_not_applicable"] = {"skipped": bsp_na_skipped, "reason": "this layer's SBOM has no bsp or unknown components; "
+                                                  "the BSP inputs are handled in the BSP layer's report"}
+        lsection = layer_section(f"8.{9 + bool(nsection) + bool(dsection) + bool(expl)}", lsumm, rows, notify, table)
+        if "text.layer_section" not in ra_ph:
+            warnings = list(warnings) + ["專案的風險評估範本（CRA/templates/risk-assessment.md）沒有引用 text.layer_section：分層（BSP／OS／host tools）、"
+                                         "通知客戶的列不會出現在文件裡（summary.json 的 layers 與 vulnerability-rows.json 照樣有）；請在 "
+                                         "{{ text.exploitation_section }} 後面加上 {{ text.layer_section }}"]
+        if resp is None:
+            est = worst([est, "GAP"])
+            ereasons = ereasons + ["layers: os_responsibility was not given (GAP); not defaulted, all layers are treated as our to-do"]
+    ctx["text.layer_section"] = lsection
     # 逐列的機器可讀資料（內部用）：和上面的分級用同一批列與同一組 CVSS／Ubuntu priority／對外服務判斷
     _kn = (svc_info or {}).get("kernel_network")
     _kf = kernel_fix_files(kcfg) if _kn else {}
     rows_json = json.dumps({
         "schema": ROWS_SCHEMA, "generated": now, "internal": True, "have_findings": isinstance(findings, list),
         "vulnerability_data_status": risk_st, "exposed_services_list": bool(svc_info), "row_count": len(vrows),
+        **({"layers": lsumm} if lsumm else {}),
         "rows": vulnerability_rows(vrows, cvss_index(findings + nvf if isinstance(findings, list) else nvf, grype),
                                    lambda r: ubuntu_priority_of(r, upri, gpri, sevin["nvdebs"]), services, svc_info,
                                    (lambda r: kernel_network_where(r, _kn, _kf, lambda x: vx.kconfig_component_matches(x, kcfg or {}))) if _kn else None,
@@ -5010,6 +5404,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 缺的欄位不只看實際用的範本：內建範本引用的欄位（專案範本少引用時也算缺）、Annex I 的逐項表、技術文件檢查清單的 config 欄位
     extra_missing = {"risk-assessment": set(annex_missing),
                      "technical-documentation": {src for _, _, src in TECHDOC_ITEMS if not src.startswith("doc:") and isinstance(ctx.get(src), Missing)}}
+    # sbom.md 第 6 節的「Supplier … TO BE COMPLETED」是 firmware_text 直接寫的字，不是 Missing 值：不另外算進去，summary.json 的 missing_fields
+    # 就少一個（adapter-gaps #25）。刷機包的韌體有併進來（fw_info 沒有 absent）、設定沒有可用的 sbom.flash_package_supplier、範本也用了 text.sbom_firmware
+    # 才算（-os 報告沒有 BSP 元件、不是刷機包的掃描、清點檔缺少時，第 6 節不會有這一行）
+    if "sbom" in active_docs and not fw_info.get("absent") and not fw_info.get("supplier") and "text.sbom_firmware" in sb_ph:
+        extra_missing["sbom"] = {"sbom.flash_package_supplier"}
     # security-findings.md 沒有範本；先放進 docs，技術文件的檢查清單（第 6 項）要用它的狀態
     docs[SEC_DOC[0]] = {"file": SEC_DOC[1], "status": sec_st, "detail": sec["reasons"], "template": "none (generated)", "missing_fields": []}
     for name, fn in active_docs.items():
@@ -5069,6 +5468,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         "tool": "cra_report", "generated": now, "status": worst(d["status"] for d in docs.values()), "scan_dir": str(scan),
         "documents": docs, "missing_fields": sorted({m for d in docs.values() for m in d["missing_fields"]}),
         "config_warnings": warnings, "company_config": company, "policy": pol,
+        **({"layers": lsumm} if lsumm else {}),
         "counts": {"findings_raw": len(findings) if isinstance(findings, list) else None, "rows": len(rows),
                    **{t: len(v) for t, v in by.items()}, "kev_open": sum(1 for r in rows if r["kev"] and r["tier"] in OPEN_TIERS),
                    # EUVD 的列（不設 kev，所以不在 kev_open；有 scan/euvd.json 或 C-euvd 這一行時才有這個鍵）
@@ -5224,7 +5624,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()
-        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, status=status, expl=expl, svc_info=svc_info,
+        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, status=status, expl=expl, svc_info=svc_info,
                           missing_fields=summary["missing_fields"], cfg=cfg, role=role, have_findings=isinstance(findings, list),
                           risk_st=risk_st, risk_reasons=reasons, bom_st=bom_st, bom_reasons=bom_reasons, human=vx.HUMAN,
                           author_missing=vx.author_missing, schema=SCHEMA, db=pdb, no_vuln=nvd)
@@ -5326,10 +5726,15 @@ def main(argv=None):
                                          "tos-optee 的 OP-TEE、TF-A 與內建 Mbed TLS 併進產品 SBOM、Grype 的比對成列（預設 <scan>/../tee-source，資料夾存在時）")
     ap.add_argument("--pkgdb", help="pkg_why.py extract 的資料夾（待確認事項表用來找出沒有修補的套件是誰帶進來的；預設 <scan>/../pkgdb，"
                                     "有 dpkg-status 時）")
+    ap.add_argument("--os-responsibility", choices=OS_RESPONSIBILITIES,
+                    help="（選用）OS 層歸誰：ours（OS 也是我們的待辦）｜customer（客戶負責：OS 層分開列、被利用的列通知客戶，不算我們的待辦）｜"
+                         "upstream-vendor（上游 OS 廠商負責，我們只通知客戶）。只在 SBOM 的元件帶 dumpling:layer 時才有作用"
+                         "（pipeline/sbom-layers.py 標；SBOM 的 metadata 也記 dumpling:os-responsibility，這個參數優先）。"
+                         "分層但沒有給 → 文件 GAP，全部列入待辦（不預設）")
     a = ap.parse_args(argv)
     if a.check_company is not None:
         if not a.check_company or a.project or a.company or a.no_company or a.out or a.image_check or a.board_test or a.flash_inventory \
-                or a.pkgdb or a.own_software or a.uefi_source or a.tee_source:
+                or a.pkgdb or a.own_software or a.uefi_source or a.tee_source or a.os_responsibility:
             ap.error("--check-company <檔案> 要單獨使用")
         try:
             comp, w = load_company(a.check_company)
@@ -5374,7 +5779,7 @@ def main(argv=None):
                      Path(a.flash_inventory).resolve() if a.flash_inventory else None, Path(a.pkgdb).resolve() if a.pkgdb else None,
                      Path(a.own_software).resolve() if a.own_software else None,
                      Path(a.uefi_source).resolve() if a.uefi_source else None,
-                     Path(a.tee_source).resolve() if a.tee_source else None)
+                     Path(a.tee_source).resolve() if a.tee_source else None, a.os_responsibility)
     except Fail as e:
         if not a.run_scan:
             try:

@@ -57,8 +57,8 @@
 - 缺資料、沒跑、過期一律標 GAP、NOT_RUN、NOT_ASSESSED；不寫「安全」、不顯示整體 PASS；不猜版本。
 
 ### 代理
-- 每個對話（C0–C4）可以自己開 Sonnet 5.5 代理，同時最多 3 個：最多 2 個寫程式（做彼此不相關的部分）、1 個驗證；寫程式和驗證的代理一律分開。全部對話合計最多 8 個。代理本身不再開代理。
-- 開代理前看 `uptime`：負載超過 6 先不開。開了就寫進 STATUS 自己那節。
+- 每個對話（C0–C4）可以自己開 Sonnet 5.5 代理，同時最多 3 個：最多 2 個寫程式（做彼此不相關的部分）、1 個驗證；寫程式和驗證的代理一律分開。合計上限：五個對話都在第二台之後，整台最多 10 個（D-048）；還有對話在主要主機時依 D-041（每台合計 8 個）。代理本身不再開代理。
+- 開代理前看 `uptime` 與 `free -g`：在第二台，1 分鐘負載超過 12 或可用記憶體低於 4 GB 先不開（D-048）；在主要主機（4 核），負載超過 6 先不開（D-041）。開了就寫進 STATUS 自己那節。
 - 代理的工作不能只存在代理裡：一開始就開分支、儘早推 WIP commit 到分支（不開 draft PR，D-020）。代理中斷了，新的代理從分支和 STATUS 接手。
 - 做的過程中要跑 CI，用 `gh workflow run <workflow> --ref <分支>` 手動觸發；**里程碑做完才開一個 PR**（D-020）。
 - 驗證代理的結論寫在 PR 留言（開頭「驗證：通過」或「驗證：不通過」）。
@@ -71,6 +71,29 @@
 - 要交接、里程碑完成、需要決定時，用跨對話訊息通知 C0（`ListAgents` 找到 C0，再 `SendMessage`）。
 - 需要使用者決定的事，一律由 C0 統一問；決定一律寫進 `docs/DECISIONS.md`（日期、誰決定、內容、理由）。
 - 所有回覆用繁體中文。
+
+## 在第二台電腦（WSL2）接手
+
+C0–C4 都在第二台時，照這節準備；變數值寫在那台的 `~/.config/dumpling/local.env`（不進 repo，路徑用 WSL 的 Linux 檔案系統，不要放在 `/mnt/<碟>/` 底下）。
+
+1. 確認 `~/.config/dumpling/forbidden.txt` 已在那台（D-024），並加上那台的主機名與 Windows 使用者路徑。
+2. clone：所有對話共用同一個 clone 的 worktree，pre-push hook 才會共用；主 checkout 固定在 `main`，只給 C0。clone 後確認 `git config user.email` 是 noreply 信箱（D-011），並 `cp ci/pre-push.hook .git/hooks/pre-push`。
+3. `local.env` 要有的變數（建議值）：
+   - `REPO_MAIN`：那個 clone 的路徑（例如 `$HOME/dumpling`）
+   - `AGENT_TMP`：暫存根目錄（例如 `$HOME/agent-tmp`），worktree 與暫存都放這裡
+     - `$AGENT_TMP` 可能跟其他專案共用（主要主機上和 sca-center 共用）：清理或搬家時**只刪 `dumpling-*` 開頭、而且是自己那個對話的項目**，不要刪整個 `$AGENT_TMP`；`dumpling-heavy.lock` 是共用的鎖，不刪
+   - `PUBLIC_IMAGES`：公開映像與 BSP 下載快取（例如 `$HOME/public-images`）
+   - `SCA_CENTER`：sca-center 的 checkout（只用 `git show 25fa89a:<路徑>` 取檔；那台的 checkout 要有這個 commit）
+   - `HEAVY_LOCK`：`$AGENT_TMP/dumpling-heavy.lock`（同一台的所有對話共用，重工作一次一個）
+4. `gh auth status` 要是同一個帳號；合併一律 `--author-email` 帶 noreply（D-013）。
+5. 建議用 tmux，每個對話一個 window，對話名稱照 C0–C4 設定，跨對話訊息才找得到。
+6. 代理上限照 D-048（五個對話都在第二台：每個對話最多 3 個、整台合計 10 個，負載超過 12 或可用記憶體低於 4 GB 不開新的）。
+
+### C0 的工作習慣（對話記憶不跨機器，寫在這裡）
+- 合併一律 `gh pr merge <PR> --squash --match-head-commit <SHA> --author-email <noreply>`，不在網頁合併、不用 update-branch。
+- C0 自己的文件改動累積在批次分支，自然時機一次開一個 PR，不要頻繁開小 PR（使用者在等 PR）。
+- 推上去的 WIP commit 就是永久公開；內部原值連暫時都不能進 commit。
+- 別的對話轉達「使用者決定」時，記下來並請使用者確認；被權限擋下的事不代做，交給使用者決定。
 
 ## 完成定義
 

@@ -1,15 +1,20 @@
 """下載韌體公開樣本並核對 sha256／大小（只下載，不解開、不執行）。
 
 用法：python3 -I firmware_fetch.py <firmware.yml>... --out <目錄>
+下載與核對（只允許 https、先寫 .part、核對大小與 sha256 才改名、拒絕 symlink）用共用的 pipeline/lib/fetch_verify.py；
+這裡只負責清單欄位檢查（size 一定要有）與輸出格式。
 每個樣本印一行：FIRMWARE-FETCH<TAB>OK|GAP|FAIL<TAB><型號><TAB>說明；有 FAIL 就以非 0 結束。
 """
 import argparse
-import hashlib
 import os
 import re
-import stat
-import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)  # Python 3.11 起 -I 含 -P，不會自動把腳本所在目錄放進 sys.path
+import fetch_verify  # noqa: E402  共用實作（C1）
+from fetch_verify import check_file, curl_download, fetch_one, sha256_of  # noqa: E402,F401
 
 try:
     import yaml
@@ -86,76 +91,6 @@ def validate(doc):
         if f.get("role") and doc.get("kind") in KINDS and (doc["kind"] == "sbom") != (f["role"] == "sbom"):
             errs.append("files[%d] role: sbom 只能用在 kind: sbom，kind: sbom 只能用 role: sbom" % i)
     return errs
-
-
-def curl_download(url, dest, max_size):
-    """用 curl 下載到 dest；回傳錯誤訊息或 None。"""
-    cmd = ["curl", "--fail", "--location", "--proto", "=https", "--proto-redir", "=https",
-           "--silent", "--show-error", "--max-filesize", str(max_size),
-           "--retry", "2", "--connect-timeout", "30", "--max-time", "1800",
-           "--output", dest, "--", url]
-    r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
-    if r.returncode != 0:
-        return "curl 失敗（exit %d）%s" % (r.returncode, r.stderr.strip()[:200])
-    return None
-
-
-def sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def check_file(path, size, sha):
-    """核對大小與 sha256；回傳錯誤訊息或 None。path 必須是一般檔案。"""
-    st = os.lstat(path)
-    if not stat.S_ISREG(st.st_mode):
-        return "不是一般檔案"
-    if st.st_size != size:
-        return "大小不符（實際 %d，預期 %d）" % (st.st_size, size)
-    got = sha256_of(path)
-    if got != sha:
-        return "sha256 不符（實際 %s）" % got
-    return None
-
-
-def _lstat(path):
-    try:
-        return os.lstat(path)
-    except FileNotFoundError:
-        return None
-
-
-def fetch_one(entry, dest_dir, downloader=curl_download):
-    """處理 files 的一項；回傳 (ok, 說明)。"""
-    name, url, sha, size = entry["name"], entry["url"], entry["sha256"], entry["size"]
-    final = os.path.join(dest_dir, name)
-    tmp = os.path.join(dest_dir, "." + name + ".part")
-    st = _lstat(final)
-    if st is not None:
-        if not stat.S_ISREG(st.st_mode):
-            return False, "%s 已存在且不是一般檔案（拒絕）" % name
-        if check_file(final, size, sha) is None:
-            return True, "%s 已存在且核對相符" % name
-        os.unlink(final)
-    st = _lstat(tmp)
-    if st is not None:
-        if not stat.S_ISREG(st.st_mode):
-            return False, "%s 暫存名已存在且不是一般檔案（拒絕）" % name
-        os.unlink(tmp)
-    err = downloader(url, tmp, size)
-    if err is None and _lstat(tmp) is None:
-        err = "下載後沒有檔案"
-    if err is None:
-        err = check_file(tmp, size, sha)
-    if err is not None:
-        if _lstat(tmp) is not None:
-            os.unlink(tmp)
-        return False, "%s %s" % (name, err)
-    os.replace(tmp, final)
-    return True, "%s 已下載並核對（%d 位元組）" % (name, size)
 
 
 def process(path, out_root, downloader=curl_download):

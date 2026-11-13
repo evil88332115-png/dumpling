@@ -1,0 +1,18 @@
+# 開案資訊（《開案-CRA資訊表》的機器可讀版）。欄位說明見 docs/PLATFORM-INTERFACE.md。
+# 值是 "TO BE COMPLETED" 的欄位還沒填；status 改成 shipped 之前都要填完。
+schema: 1
+product_name: "Orin Nano Demo"
+brand: "dumpling public demo (not a real manufacturer)"   # 品牌或客戶（公開示範專案，不是真實產品）
+company_role: "manufacturer"         # manufacturer｜supplier｜both
+markets: ["EU-ALL"]                # 銷售市場
+platform: "jetson"
+platform_version: "Jetson Linux r39.2.x（NVIDIA 公開 BSP）" # 平台與版本
+bsp_os_source: "NVIDIA Jetson Linux 公開 BSP、公開範例 rootfs 與 public_sources"       # BSP／OS 來源
+kernel_source: "NVIDIA public_sources 的 Linux 核心與樹外模組，加專案 patches/"       # 核心來源
+bootloader: "NVIDIA 公開 BSP 內建 UEFI（edk2-nvidia）、OP-TEE、MB1／MB2（閉源韌體以 BSP 原樣）"             # 開機程式
+own_software: []         # 自有軟體（沒有就留空清單 []）。這裡是開案資訊；CRA 的自有軟體宣告在 CRA/Config/config.json 的 sbom.own_software（示範專案沒有宣告 → B-own-software GAP）
+interfaces: ["Ethernet", "USB", "UART 除錯埠"]             # 對外介面
+support_until: "2031-12-31"       # 支援期限 YYYY-MM-DD（示範值，不是真實產品的承諾）
+status: "development"                     # development｜shipped
+# OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
+os_responsibility: "customer"

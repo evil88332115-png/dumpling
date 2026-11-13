@@ -10,10 +10,15 @@
 #           （B-img-extract；磁碟需求約等於未壓縮的映像，Pi OS lite 約 3 GB；結束時刪除）。boot 的 FAT 與 root 的 ext4 直接讀（rpi_img.py）；
 #           B-bootloader-coverage 用 Raspberry Pi 的真實分類（GPU 韌體 GAP、EEPROM 不在映像裡）
 #         [--md5 <檔案>]（--archive 預設 <tbz2>.md5（存在時）；--dir 要給逐檔的 md5 清單，沒有時 A-md5 記 NOT_RUN）
+#         [--platform <jetson|raspberrypi|rockchip|generic>]（或環境變數 SCA_PLATFORM；由 project.yml 的 platform 明確傳入，不從映像格式推測。
+#           原始磁碟映像（raw-disk-img*）沒給平台時，開機程式分類標 GAP「沒有指定平台，不推測」，不預設成 raspberrypi。
+#           generic＝沒有定義開機鏈的平台（例如 x86 NAS）：任何映像格式的開機程式分類都走 `bootloader_coverage.py --not-assessed generic`，狀態 NOT_ASSESSED（不是 GAP）；
+#           沒給平台（空值）仍然是 GAP（--unspecified））
+#         [--arch <arm64|amd64>]（或環境變數 SCA_ARCH；預設 arm64：`docker import --platform linux/<arch>` 的架構，映像只匯入與讀取、不執行。其他值結束碼 64）
 #         [--out <資料夾>]（預設 $HOME/sca-results/<name>-<version>-<UTC 時間>；FLASHPKG_RESULTS 改上層資料夾）
 #         [--product-config <config.json>]（產品的 CRA 設定；沒有時產生只有產品名稱與版本的最小設定，其他欄位標 TO BE COMPLETED）
 #         [--uefi-source <UEFI 原始碼樹>]（公司自建 UEFI 的原始碼：tools/cra/uefi_source.py 讀 edk2 版本與內建的 OpenSSL／Mbed TLS 版本 →
-#           <rootfs>/uefi-source/，再用離線的 Grype 資料庫比對（tools/cra/uefi_bundled.py grype）；cra_report.py 把這些函式庫併進產品 SBOM、
+#           <rootfs>/uefi-source/，sca-scan 更新 Grype 資料庫之後再用離線的資料庫比對（tools/cra/uefi_bundled.py grype）；cra_report.py 把這些函式庫併進產品 SBOM、
 #           比對結果成為風險表的列「OpenSSL x.y.z (bundled in UEFI)」。B-uefi-source-*、B-uefi-grype-*；版本不明／讀不到 → GAP。沒給時不執行）
 #           給了 --uefi-source 又有 --archive／--dir 時另做 B-uefi-binary：刷機包裡每個 uefi_*.bin 的版本字串與內嵌除錯來源路徑對照這份原始碼樹
 #           （bootloader_coverage.py uefi-check；MATCH＝與用這份原始碼建置一致，不是逐位元相同；<結果>/uefi-binary-check.json；
@@ -21,8 +26,8 @@
 #           [--uefi-platform-dsc <樹內的平台 DSC>]（可重複；例如 edk2-nvidia/Platform/NVIDIA/NVIDIA.common.dsc）：沒有它，Mbed TLS／OpenSSL 的 absent 不成立（字串可能被去光，要 DSC 佐證）
 #           同一步也把映像解開找內建的 OpenSSL／Mbed TLS（uefi_image.py），結果在該檔的 libraries，cra_report 據此判 UB1／UB2）
 #         [--tee-source <廠商公開原始碼資料夾>]（tos-optee_<soc>.img 的 OP-TEE 與 TF-A 是廠商用公開原始碼建的：tools/cra/tee_source.py 唯讀讀 TF-A、OP-TEE、
-#           OP-TEE 內建 Mbed TLS 的版本（版本檔矛盾／讀不到 → 版本未知 → GAP、不給 CPE）→ <rootfs>/tee-source/，再用離線的 Grype 資料庫比對
-#           （tools/cra/tee_bundled.py grype）；cra_report.py 併進產品 SBOM、風險表的列「Mbed TLS x.y.z (bundled in OP-TEE)」。
+#           OP-TEE 內建 Mbed TLS 的版本（版本檔矛盾／讀不到 → 版本未知 → GAP、不給 CPE）→ <rootfs>/tee-source/，sca-scan 更新 Grype 資料庫之後
+#           再用離線的資料庫比對（tools/cra/tee_bundled.py grype）；cra_report.py 併進產品 SBOM、風險表的列「Mbed TLS x.y.z (bundled in OP-TEE)」。
 #           有 --archive／--dir 時同時對照刷機包的 tos-optee 映像（版本字串；與用這份原始碼建置一致，不是逐位元相同）。B-tee-source-*、B-tee-grype-*。沒給時不執行）
 #         [--extra-deliverable <檔案>]（可重複；不在刷機包裡、另外交付給客戶的韌體，例如 bootloader capsule：記名稱、大小、sha256／512、可讀的版本字串、
 #           配對的刷機包，併進產品 SBOM；版本與刷機包不同 → ATTENTION，讀不到版本 → GAP；只收一般檔案、不掃描。B-extra-deliverable）
@@ -31,6 +36,18 @@
 #         [--company <檔案> | --no-company]（CRA 的公司共用設定；預設 /etc/sca-gitlab/company.json，讀得到時）
 #         [--manufacturer <名稱>]（沒有公司共用設定也沒有 --product-config 時，CRA 文件的製造商；都沒有時不產生 CRA 文件）
 #         [--kernel-source <核心原始碼樹>]（同環境變數 KERNEL_SOURCE_DIR：Makefile／Kbuild 的來源，C-kernel-config 與 C-kernel-module-map 都收到）
+#         [--kernel-version <核心版本>]（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準。映像有不只一顆核心
+#           （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 sca-scan --kernel-version（只接受英數字開頭、
+#           英數字與「. _ + ~ -」，否則 exit 64）。出貨但沒指定的核心記為「出貨但沒有判定」，C-kernel-config 與 C-kernel-module-map 至少 GAP；
+#           指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan）
+#         [--kernel-upstream-version <核心版本>=<X.Y.Z>]（可重複；平台設定給的上游版本，原樣交給 sca-scan --kernel-upstream-version，
+#           和核心原始碼 Makefile 核對，不一致不採用；格式不對 exit 64）
+#         [--kernel-in-other-report <報告名稱>]（環境變數 SCA_KERNEL_IN_OTHER_REPORT；分層的重跑（--rescan-from，SBOM 換成某一層的）用：
+#           這份報告的 SBOM 沒有作業系統核心、核心在 <報告名稱> 那份報告判定。原樣交給 sca-scan --kernel-in-other-report：SBOM 真的沒有核心時，
+#           C-kernel-cve-list、C-kernel-config、C-kernel-module-map 記 NOT_RUN「不適用」，不跑核心階段；SBOM 有核心時照舊。名稱只接受
+#           ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64。見 docs/LAYERS.md）
+#         [--kernel-not-distro <理由>]（環境變數 SCA_KERNEL_NOT_DISTRO；平台負責人宣告核心不是發行版（Debian／Ubuntu）的核心，版本字串看不出來時用。
+#           原樣交給 sca-scan --kernel-not-distro：SBOM 有核心時 C-kernel-coverage 是 GAP。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64）
 #         [--keep-image]（不刪 docker 映像）  [--no-upload]（不上傳 DT；只用於試跑，這時不需要 PILOT_ENV）
 #         [--dt-vex]（選用，預設不做：CRA 的 VEX 寫回 DT 的 rootfs 專案，讓 DT finding 帶我們的 analysis；D-dt-vex-*-<rootfs>，讀回才算套用）
 #         [--dt-product-components]（選用，預設不做：刷機包韌體／UEFI 內建函式庫／自有軟體另開 DT 專案「<名稱> / <版本> (product components)」；D-dt-product-*-<rootfs>）
@@ -74,7 +91,8 @@
 #   只在燒錄時用的 initrd 另列、不分析。Rockchip 沒有定義開機鏈：B-bootloader-coverage-* 寫 NOT_ASSESSED 與說明檔。
 # - 產品自有軟體（--product-config 有 sbom.own_software 時）：tools/cra/own_software.py 同樣在 docker import 之前從 rootfs tar 算列出的檔案的雜湊
 #   → <rootfs>/own-software/own-software.json（B-own-software-*；列了但找不到 → GAP），cra_report.py 以 pkg:generic 元件併進產品 SBOM。
-#   沒有 --product-config 或設定沒有 sbom.own_software 時不執行、不寫狀態列。--rescan-from：有 --archive／--dir 就重讀（設定可能改了），
+#   沒有 --product-config 或設定沒有列 sbom.own_software：B-own-software-* 記 GAP（沒有宣告自有軟體）；設定寫 own_software: [] 加
+#   own_software_none_reason（明確宣告沒有）→ OK。--rescan-from：有 --archive／--dir 就重讀（設定可能改了），
 #   否則沿用上一次的 own-software.json（cra_report 會把設定有、檔案裡沒有的樣式標 GAP）。
 # - sca-scan 加 --no-package-scan --no-files-scan（整個系統映像的逐套件授權與檔案層級掃描太久）；預設再加 --no-license。
 #   DT 的專案版本是「<產品版本> (<rootfs 名稱>)」（sca-scan --version）。
@@ -83,9 +101,15 @@ set -uo pipefail
 umask 077
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 FP=$ROOT/tools/demo/flash_package.py
-usage(){ sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; }
+usage(){ sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
+KVERS=()   # --kernel-version（可重複）／SCA_KERNEL_VERSIONS：要判定的核心版本
+KUPS=()    # --kernel-upstream-version（可重複）：<核心版本>=<X.Y.Z>
+KOTHER=; KOTHER_CLI=0         # --kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT：核心在哪份報告判定（分層）
+KNOTDISTRO=; KNOTDISTRO_CLI=0 # --kernel-not-distro／SCA_KERNEL_NOT_DISTRO：平台宣告核心不是發行版的核心（理由）
 
+PLATFORM=${SCA_PLATFORM:-}
+ARCH=${SCA_ARCH:-arm64}
 ARCHIVE= SRCDIR= MD5= RFS= PREFIX= NAME= VERSION= OUT= PCONF= LICENSE=0 KEEP=0 NOUP=0 COMPANY= NOCOMP=0 MANUF= RESCAN= IC_NOTE= EVOUT= PROV_MD5= PROV_ST= DECFROM= UEFISRC= UEFIDSC=() TEESRC= EXTRAS=() DTVEX=${DT_VEX_WRITEBACK:-0} DTPROD=${DT_PRODUCT_COMPONENTS:-0}
 while [ $# -gt 0 ]; do case $1 in
   --archive) optval "$@"; ARCHIVE=$2; shift 2;;
@@ -96,6 +120,8 @@ while [ $# -gt 0 ]; do case $1 in
   --name) optval "$@"; NAME=$2; shift 2;;
   --version) optval "$@"; VERSION=$2; shift 2;;
   --out) optval "$@"; OUT=$2; shift 2;;
+  --platform) optval "$@"; PLATFORM=$2; shift 2;;
+  --arch) optval "$@"; ARCH=$2; shift 2;;
   --product-config) optval "$@"; PCONF=$2; shift 2;;
   --vuln-only) LICENSE=0; shift;;
   --with-license) LICENSE=1; shift;;
@@ -115,9 +141,15 @@ while [ $# -gt 0 ]; do case $1 in
   --tee-source) optval "$@"; TEESRC=$2; shift 2;;
   --extra-deliverable) optval "$@"; EXTRAS+=("$2"); shift 2;;
   --kernel-source) optval "$@"; [ -d "$2" ] || { echo "--kernel-source 要是資料夾：$2" >&2; exit 64; }; export KERNEL_SOURCE_DIR=$(readlink -f -- "$2"); shift 2;;
+  --kernel-version) optval "$@"; KVERS+=("$2"); shift 2;;
+  --kernel-upstream-version) optval "$@"; KUPS+=("$2"); shift 2;;
+  --kernel-in-other-report) optval "$@"; KOTHER=$2; KOTHER_CLI=1; shift 2;;
+  --kernel-not-distro) optval "$@"; KNOTDISTRO=$2; KNOTDISTRO_CLI=1; shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
+case $PLATFORM in ""|jetson|raspberrypi|rockchip|generic) ;; *) echo "--platform（SCA_PLATFORM）只接受 jetson、raspberrypi、rockchip、generic：$PLATFORM" >&2; exit 64;; esac
+case $ARCH in arm64|amd64) ;; *) echo "--arch（SCA_ARCH）只接受 arm64、amd64：$ARCH" >&2; exit 64;; esac
 if [ -n "$ARCHIVE" ] && [ -n "$SRCDIR" ]; then echo "--archive 與 --dir 只能選一個" >&2; exit 64; fi
 if [ -n "$DECFROM" ]; then
   [ -z "$RESCAN" ] || { echo "--decisions-from 只用於完整掃描（--rescan-from 本來就帶上一次的判定檔）" >&2; exit 64; }
@@ -149,6 +181,46 @@ case $RFS in rootfs_no_gui|rootfs_gui|rootfs|all) ;; *) echo "--rootfs 要是 ro
 [ -z "$COMPANY" ] || [ -r "$COMPANY" ] || { echo "讀不到 --company $COMPANY" >&2; exit 64; }
 [ -n "$COMPANY" ] && [ $NOCOMP = 1 ] && { echo "--company 與 --no-company 只能選一個" >&2; exit 64; }
 [ -z "$MD5" ] || [ -r "$MD5" ] || { echo "讀不到 --md5 $MD5" >&2; exit 64; }
+# --kernel-version／SCA_KERNEL_VERSIONS：命令列有給就不看環境變數；只收英數字開頭、英數字與「. _ + ~ -」（不含 shell 特殊字元、「/」、空白），其餘 exit 64。
+# 值原樣交給 sca-scan（sca_args），核心工具自己另有檢查
+kernel_versions_args(){
+  local t kv uniq=() LC_ALL=C      # 字元範圍 [A-Za-z] 在 UTF-8 地區設定下可能含重音字母
+  if [ ${#KVERS[@]} -eq 0 ] && [ -n "${SCA_KERNEL_VERSIONS:-}" ]; then
+    kv=${SCA_KERNEL_VERSIONS//,/ }; set -f
+    for t in $kv; do KVERS+=("$t"); done
+    set +f
+  fi
+  for t in "${KVERS[@]+"${KVERS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$ ]] \
+      || { echo "核心版本只接受英數字開頭、英數字與「. _ + ~ -」，最多 100 字元（--kernel-version／SCA_KERNEL_VERSIONS）：${t:0:120}" >&2; exit 64; }
+    case " ${uniq[*]+"${uniq[*]}"} " in *" $t "*) ;; *) uniq+=("$t");; esac
+  done
+  KVERS=("${uniq[@]+"${uniq[@]}"}")
+}
+kernel_versions_args
+kernel_upstream_args(){
+  local t LC_ALL=C
+  for t in "${KUPS[@]+"${KUPS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}=[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$ ]] \
+      || { echo "--kernel-upstream-version 要是 <核心版本>=<X.Y.Z>：${t:0:120}" >&2; exit 64; }
+  done
+}
+kernel_upstream_args
+# --kernel-in-other-report／--kernel-not-distro：命令列有給就不看環境變數；規則同 sca-scan（值原樣交給 sca-scan，它另有同樣的檢查）
+kernel_layer_args(){
+  local LC_ALL=C
+  [ "$KOTHER_CLI" = 1 ] || KOTHER=${SCA_KERNEL_IN_OTHER_REPORT:-}
+  if [ "$KOTHER_CLI" = 1 ] || [ -n "$KOTHER" ]; then
+    [[ "$KOTHER" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] \
+      || { echo "報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：${KOTHER:0:120}" >&2; exit 64; }
+  fi
+  [ "$KNOTDISTRO_CLI" = 1 ] || KNOTDISTRO=${SCA_KERNEL_NOT_DISTRO:-}
+  if [ "$KNOTDISTRO_CLI" = 1 ] || [ -n "$KNOTDISTRO" ]; then
+    { [ -n "${KNOTDISTRO//[[:space:]]/}" ] && [ ${#KNOTDISTRO} -le 300 ] && ! [[ "$KNOTDISTRO" =~ [[:cntrl:]] ]]; } \
+      || { echo "--kernel-not-distro／SCA_KERNEL_NOT_DISTRO 的理由不能是空的、不能有控制字元、最多 300 位元組：${KNOTDISTRO:0:120}" >&2; exit 64; }
+  fi
+}
+kernel_layer_args
 [ "$(id -u)" != 0 ] || { echo "不要用 root 執行（sca-scan 的沙箱要求非 root）；用常駐環境的帳號（sudo -u <帳號>）" >&2; exit 64; }
 # sudo -u 時 HOME 可能還是呼叫者的：sca-scan 的 Grype 資料庫在 $HOME/.cache，改成這個帳號自己的家目錄
 H=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$H" ] && [ "$HOME" != "$H" ] && export HOME=$H
@@ -304,9 +376,24 @@ imgcheck_step(){
 }
 ownsw_step(){
   # 產品自有軟體（產品設定 sbom.own_software）→ <rootfs>/own-software/own-software.json（tools/cra/own_software.py；cra_report.py 併進產品 SBOM）。
-  # 沒有 --product-config 或設定沒有 sbom.own_software → 什麼都不做（不寫狀態列，結果和沒有這一步時相同）
-  local v=$1 from=$2 r s d x lim=${OWNSW_TIMEOUT:-7200}; shift 2
-  [ -n "$PCONF" ] && python3 -I "$ROOT/tools/cra/own_software.py" --config "$PCONF" --configured 2> /dev/null || return 0
+  # 沒有 --product-config 或設定沒有列 sbom.own_software：檢查不可以悄悄消失 → own_software.py --declaration 寫一列
+  # （沒宣告 → GAP「沒有宣告自有軟體」；sbom.own_software: [] 加 sbom.own_software_none_reason → OK，說明寫理由），
+  # 也寫 own-software.json（只有宣告的結果），cra_report.py 讀到它在 SBOM 文件標出來
+  local v=$1 from=$2 r s d x c=0 lim=${OWNSW_TIMEOUT:-7200}; shift 2
+  [ -n "$PCONF" ] && { python3 -I "$ROOT/tools/cra/own_software.py" --config "$PCONF" --configured 2> /dev/null || c=$?; }
+  [ -n "$PCONF" ] || c=1
+  if [ "$c" != 0 ]; then
+    if [ "$c" = 1 ]; then
+      local da=(); [ -n "$PCONF" ] && da=(--config "$PCONF")
+      r=$(python3 -I "$ROOT/tools/cra/own_software.py" "${da[@]+"${da[@]}"}" --declaration --out "$OUT/$v/own-software" 2> "$OUT/$v/logs/own-software.err"); x=$?
+      r=$(grep -m1 $'^B-own-software\t' <<< "$r")
+      [ -n "$r" ] || r=$'B-own-software\tFAIL\town_software.py --declaration 失敗（exit '"$x）：$(tail -1 "$OUT/$v/logs/own-software.err" 2>/dev/null)"
+      IFS=$'\t' read -r _ s d <<< "$r"
+      case "$s:$x" in OK:0|GAP:2|FAIL:*) ;; *) d="own_software.py 印出 ${s:-（沒有狀態）} 但 exit $x：${d}"; s=FAIL;; esac
+    else s=FAIL; d="讀不到產品設定（own_software.py --configured exit $c）"; fi
+    status "B-own-software-$v" "$s" "$d"
+    return 0
+  fi
   r=$(timeout --foreground -k 30 "$lim" python3 -I "$ROOT/tools/cra/own_software.py" --from "$from" "$@" --config "$PCONF" \
         --out "$OUT/$v/own-software" 2> "$OUT/$v/logs/own-software.err"); x=$?
   printf '%s\n' "$r" > "$OUT/$v/logs/own-software.txt"
@@ -319,8 +406,8 @@ ownsw_step(){
   status "B-own-software-$v" "$s" "$d$([ "$s" = FAIL ] || echo "；GAP 與版本未知的明細在 $v/logs/own-software.txt")"
 }
 uefisrc_step(){
-  # UEFI 原始碼樹（--uefi-source）→ <rootfs>/uefi-source/（uefi_source.py：edk2、內建 OpenSSL／Mbed TLS 的版本與 CPE）→ 離線 Grype（uefi_bundled.py grype）。
-  # 第二個參數 reuse：--rescan-from 沒給樹時，沿用上一次的 uefi-source.cdx.json／uefi-source.json，只用現在的資料庫重新比對。
+  # UEFI 原始碼樹（--uefi-source）→ <rootfs>/uefi-source/（uefi_source.py：edk2、內建 OpenSSL／Mbed TLS 的版本與 CPE）→ 離線 Grype（uefigrype_step，sca-scan 之後）。
+  # 第二個參數 reuse：--rescan-from 沒給樹時，沿用上一次的 uefi-source.cdx.json／uefi-source.json，之後 uefigrype_step 用現在的資料庫重新比對。
   # 沒給 --uefi-source（也不是 reuse）→ 什麼都不做（不寫狀態列、不建資料夾，結果和沒有這一步時相同）
   local v=$1 mode=${2:-} U=$OUT/$1/uefi-source r s d x lim=${UEFISRC_TIMEOUT:-3600}
   if [ "$mode" = reuse ]; then
@@ -340,6 +427,11 @@ uefisrc_step(){
     status "B-uefi-source-$v" "$s" "$d"
     uefibin_step "$v"
   fi
+}
+uefigrype_step(){
+  # UEFI 內建函式庫的離線 Grype 比對（uefi_bundled.py grype）。在 sca-scan 之後跑：Grype 資料庫是 sca-scan 更新的（GRYPE_DB_UPDATE），
+  # 排在前面時全新的機器（例如 CI）還沒有資料庫，比對一定 NOT_RUN。沒有 <rootfs>/uefi-source/uefi-source.cdx.json → 什麼都不做
+  local v=$1 U=$OUT/$1/uefi-source r s d x
   [ -s "$U/uefi-source.cdx.json" ] || return 0
   r=$(timeout --foreground -k 30 600 python3 -I "$ROOT/tools/cra/uefi_bundled.py" grype --dir "$U" --max-age-days "${GRYPE_DB_MAX_AGE_DAYS:-1}" 2> "$OUT/$v/logs/uefi-grype.err"); x=$?
   r=$(grep -m1 $'^B-uefi-grype\t' <<< "$r")
@@ -347,8 +439,8 @@ uefisrc_step(){
   IFS=$'\t' read -r _ s d <<< "$r"; status "B-uefi-grype-$v" "$s" "$d"
 }
 teesrc_step(){
-  # 廠商公開原始碼（--tee-source）→ <rootfs>/tee-source/（tee_source.py：TF-A、OP-TEE、內建 Mbed TLS 的版本與 CPE；有刷機包時對照 tos-optee 映像）→ 離線 Grype（tee_bundled.py grype）。
-  # 第二個參數 reuse：--rescan-from 沒給樹時沿用上一次的 tee-source，只用現在的資料庫重新比對。沒給 --tee-source（也不是 reuse）→ 不呼叫這個函式
+  # 廠商公開原始碼（--tee-source）→ <rootfs>/tee-source/（tee_source.py：TF-A、OP-TEE、內建 Mbed TLS 的版本與 CPE；有刷機包時對照 tos-optee 映像）→ 離線 Grype（teegrype_step，sca-scan 之後）。
+  # 第二個參數 reuse：--rescan-from 沒給樹時沿用上一次的 tee-source，之後 teegrype_step 用現在的資料庫重新比對。沒給 --tee-source（也不是 reuse）→ 不呼叫這個函式
   local v=$1 mode=${2:-} T=$OUT/$1/tee-source r s d x lim=${TEESRC_TIMEOUT:-3600} ia=()
   if [ "$mode" = reuse ]; then
     mkdir -p "$T" && cp -- "$RESCAN/$v/tee-source/tee-source.cdx.json" "$RESCAN/$v/tee-source/tee-source.json" "$T/" 2> /dev/null \
@@ -365,6 +457,16 @@ teesrc_step(){
     case "$s:$x" in OK:0|ATTENTION:2|GAP:2|FAIL:*) ;; *) d="tee_source.py 印出 ${s:-（沒有狀態）} 但 exit $x：${d}"; s=FAIL;; esac
     status "B-tee-source-$v" "$s" "$d"
   fi
+}
+bundled_grype_not_run(){
+  # 讀了原始碼樹（有 uefi-source／tee-source 的 SBOM）卻沒走到比對時，B-uefi-grype／B-tee-grype 照樣寫 NOT_RUN（不讓這一項悄悄消失）
+  local v=$1 why=$2
+  [ ! -s "$OUT/$v/uefi-source/uefi-source.cdx.json" ] || status "B-uefi-grype-$v" NOT_RUN "$why"
+  [ ! -s "$OUT/$v/tee-source/tee-source.cdx.json" ] || status "B-tee-grype-$v" NOT_RUN "$why"
+}
+teegrype_step(){
+  # OP-TEE／TF-A／內建 Mbed TLS 的離線 Grype 比對（tee_bundled.py grype）。同 uefigrype_step：在 sca-scan 更新資料庫之後跑
+  local v=$1 T=$OUT/$1/tee-source r s d x
   [ -s "$T/tee-source.cdx.json" ] || return 0
   r=$(timeout --foreground -k 30 600 python3 -I "$ROOT/tools/cra/tee_bundled.py" grype --dir "$T" --max-age-days "${GRYPE_DB_MAX_AGE_DAYS:-1}" 2> "$OUT/$v/logs/tee-grype.err"); x=$?
   r=$(grep -m1 $'^B-tee-grype\t' <<< "$r")
@@ -411,8 +513,14 @@ coverage_step(){
   local v=$1 r s d x na=() tj=
   case $RKFMT in
     rockchip-*) na=(--not-assessed rockchip);;
-    raw-disk-img*) na=(--platform raspberrypi);;     # Raspberry Pi：boot 分割區與 kernel 的真實分類（GPU 韌體 GAP、EEPROM 不在映像裡）
+    raw-disk-img*)       # 原始磁碟映像：平台一律由呼叫端明確給（project.yml 的 platform），不從映像格式推測
+      case $PLATFORM in
+        raspberrypi) na=(--platform raspberrypi);;     # Raspberry Pi：boot 分割區與 kernel 的真實分類（GPU 韌體 GAP、EEPROM 不在映像裡）
+        "") na=(--unspecified);;                       # 沒指定平台：標 GAP，不預設成 raspberrypi
+        *) na=(--not-assessed "$PLATFORM");;           # 其他平台（例如 rockchip）：沒有定義開機鏈
+      esac;;
   esac
+  [ "$PLATFORM" != generic ] || na=(--not-assessed generic)    # generic＝沒有定義開機鏈：不論映像格式，一律 NOT_ASSESSED（不是 GAP）
   if [ ${#na[@]} -gt 0 ]; then :
   elif [ ! -f "$OUT/flash-inventory.json" ]; then return 0; fi
   [ ! -f "$OUT/$v/tee-source/tee-source.json" ] || tj=$OUT/$v/tee-source/tee-source.json   # 和 cra_report.py 讀的同一份 tee-source
@@ -524,7 +632,12 @@ rk_prepare(){  # Rockchip：zip 裡的 update.img 複製到 .work（只有這一
 sca_args(){  # sca-scan 的共用選項（整個系統映像的逐套件授權與檔案層級掃描太久；預設只做漏洞）
   SCA_ARGS=(--no-package-scan --no-files-scan); [ $LICENSE = 0 ] && SCA_ARGS+=(--no-license); [ $NOUP = 1 ] && SCA_ARGS+=(--no-upload)
   # Debian 打包的 Python 模組的佔位值版本（B-pyver 的 python-versions.json）：sca-scan 把 RESOLVED 的版本寫進比對與上傳用的 SBOM 副本（C-pyver）
-  [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json"); return 0; }
+  [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json")
+  local kv; for kv in "${KVERS[@]+"${KVERS[@]}"}"; do SCA_ARGS+=(--kernel-version "$kv"); done   # 核心版本原樣交給 sca-scan
+  for kv in "${KUPS[@]+"${KUPS[@]}"}"; do SCA_ARGS+=(--kernel-upstream-version "$kv"); done      # 平台設定的上游版本原樣交給 sca-scan
+  [ -z "$KOTHER" ] || SCA_ARGS+=(--kernel-in-other-report "$KOTHER")         # 分層：核心在另一份報告判定
+  [ -z "$KNOTDISTRO" ] || SCA_ARGS+=(--kernel-not-distro "$KNOTDISTRO")      # 平台宣告核心不是發行版的核心
+  return 0; }
 
 # ---------- A. 環境與核對 ----------
 PILOT_ENV=${PILOT_ENV:-$HOME/.config/sca-scan/pilot.env}
@@ -642,6 +755,7 @@ else:
           && status "B-own-software-$v" ATTENTION "沿用上一次的 $v/own-software/own-software.json（這次沒給 --archive／--dir，沒有重讀；設定改過的樣式在 sbom.md 標 GAP）" \
           || status "B-own-software-$v" FAIL "無法複製上一次的 $v/own-software"
       else status "B-own-software-$v" GAP "上一次沒有 $v/own-software/own-software.json，這次也沒給 --archive／--dir：自有軟體不在產品 SBOM（sbom.md 標 GAP）"; fi
+    else ownsw_step "$v" ""      # 沒有列自有軟體（或沒有產品設定）：不用讀映像，照樣寫宣告的結果（沒宣告 GAP），不悄悄消失
     fi
     # initrd 涵蓋：有刷機包就重讀；沒有時沿用上一次的 initrd-coverage（一般檔案才帶），都沒有 → NOT_RUN
     if [ -n "$ARCHIVE" ]; then initrd_step "$v" "${RKIMG:-$ARCHIVE}" --prefix "$prefix"
@@ -675,6 +789,7 @@ else:
       "${kb[@]+"${kb[@]}"}" > "$D/logs/sca-scan.txt" 2>&1; x=$?
     s=$(scan_worst "$D/scan/status.tsv"); case $x in 0|2) ;; *) s=FAIL;; esac
     status "C-scan-$v" "$s" "sca-scan --sbom exit=$x；DT $NAME @ $VERSION ($v)；$(( $(date +%s)-t0 )) 秒；非 OK 階段：$(awk -F'\t' -v vo="$((1-LICENSE))" 'NR>1 && $2!="OK" && !(vo=="1" && $2=="NOT_RUN" && $1 ~ /^E-/){printf "%s=%s ", $1, $2}' "$D/scan/status.tsv" 2>/dev/null)"
+    uefigrype_step "$v"; teegrype_step "$v"   # sca-scan 更新了 Grype 資料庫之後才比對
     coverage_step "$v"
     cra_step "$v"
     pkgwhy_step "$v"
@@ -778,13 +893,14 @@ for v in "${VARS[@]}"; do
   [ -z "$TEESRC" ] || teesrc_step "$v"
   PENDING_TAG=$tag
   msg="sca-center flash package scan: $SRCNAME $prefix (imported, never run)"
-  iid=$(docker import --platform linux/arm64 -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err") || \
+  iid=$(docker import --platform "linux/$ARCH" -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err") || \
     { grep -qi 'platform' "$D/logs/import.err" && iid=$(docker import -m "$msg" "$WORK/$v.tar" "$tag" 2> "$D/logs/import.err"); }
   rm -f "$WORK/$v.tar"
   if [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     IID[$v]=$iid; PENDING_TAG=; status "B-import-$v" OK "$tag → $iid（$(docker image inspect --format '{{.Architecture}} {{.Size}} bytes' "$iid" 2>/dev/null)）；暫存 tar 已刪"
   else docker image rm -f "$tag" > /dev/null 2>&1; PENDING_TAG=
-    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"; continue; fi
+    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"
+    bundled_grype_not_run "$v" "docker import 失敗，sca-scan 沒有執行，沒有更新 Grype 資料庫：不比對"; continue; fi
 
   t0=$(date +%s); sca_args
   # 核心的建置設定與燒錄的核心（IKCONFIG）從刷機包讀（C-kernel-config）：Rockchip 讀 update.img；Jetson 讀刷機包 tbz2／資料夾加 rootfs 前綴，
@@ -802,6 +918,7 @@ for v in "${VARS[@]}"; do
     || status "Z-cleanup-image-$v" ATTENTION "刪除映像 $iid 失敗：請手動 docker image rm $iid"
   else status "Z-cleanup-image-$v" INFO "--keep-image：保留 $tag（$iid）"; unset "IID[$v]"; fi
 
+  uefigrype_step "$v"; teegrype_step "$v"   # sca-scan 更新了 Grype 資料庫之後才比對
   coverage_step "$v"
   cra_step "$v"
   pkgwhy_step "$v"

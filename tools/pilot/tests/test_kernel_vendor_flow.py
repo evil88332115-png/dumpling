@@ -83,9 +83,9 @@ def test_probe_rejects_source_tree_and_missing_from(tmp_path):
     assert p.returncode == 3 and p.stdout.startswith("KERNEL-VERSION\tGAP")
 
 
-def extract_fn():
+def extract_fn(name="kernel_cve_list"):
     s = SCAN.read_text(encoding="utf-8")
-    i = s.index("kernel_cve_list(){")
+    i = s.index(name + "(){")
     return s[i:s.index("\n}\n", i) + 3]
 
 
@@ -102,6 +102,8 @@ status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
 KSRC=(--from {src}); KLABEL="rootfs tar"; KCVL=; KCVO=
 KERNEL_CVE_MIRROR={mirror or ''}
 {'KERNEL_CVES=' + str(cves_file) if cves_file else 'KERNEL_CVES='}
+KSHIP_OK=0; KSHIP=()
+{extract_fn('kernel_ship_from')}
 {extract_fn()}
 kernel_cve_list; echo "rc=$?"; echo "KCVL=$KCVL"; echo "KCVO=$KCVO"
 """
