@@ -167,7 +167,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 只開兩種 Issue：已遭利用（KEV／EUVD）、廠商層級。一般 CVE 候選（核心 CNA 的上千筆、D-034 的 U-Boot 候選）不開。
   一次新增超過 20 個群組 → 全部併成一個彙總 Issue（ATTENTION）。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
-- 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8）。
+- 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 
