@@ -2,19 +2,19 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:49 +0800（C0）
+最後更新：2026-11-13 23:51 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：#42 C0 獨立驗證「不通過」2 項（已貼 PR，C1 修應修 1；應修 2 另開 [WP1] 小 PR）；驗證 C2 的 PR #46；正式 tag 等使用者
 - 分支／PR／commit：main ec5b786。已合併：**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；自然時機再開 PR）
-- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 PR #46（C2 fw-advisory，head 7ebeacc，不讀 PR 說明與留言），worktree `$AGENT_TMP/dumpling-wt-c0-verify-46`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-46/report.md`。排隊：C2 的 cse-layout-size PR（28a008e，私有檔複核已過）
+- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 PR #46（C2 fw-advisory，head 7ebeacc，不讀 PR 說明與留言），worktree `$AGENT_TMP/dumpling-wt-c0-verify-46`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-46/report.md`。排隊：C2 的 cse-layout-size PR（28a008e，私有檔複核已過）→ C3 的 M5 PR #47（wp5/gitlab 0432471）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M2 #40 已合併。**推正式 tag 被 C1 的權限擋下，等使用者**（自己推，或放行 C1；C0 不代推）。tag 後 C1 用本機草稿附件核對正式 Release 再刪 wp1/m2-pr-draft。**PR #42**（wp1/m2-followup，c645966）：C1 的驗證通過；**C0 的驗證不通過 2 項**：(1)「不適用」只看說明開頭可被繞過 → #42 修；(2) 掃描層 C-kernel-cve-list／config／module-map 的 NOT_RUN 不進 report_status／gate（既有）→ 下一個 [WP1] 小 PR，並盤點沒人消費的 B-*／A-* 狀態列
   - C2（第二台）：cse-layout-size 40bdd2f（D-053）預驗通過、**C0 私有檔複核通過**（3/3 found，表尾非 0 的兩份帶 ATTENTION）；收尾只動測試與文件後開 PR，C0 派獨立驗證。fw-advisory 7ebeacc（已併 main）CI 綠就開 PR（複驗到 d8a20ec 不通過 2 處文字、7ebeacc 已修、作者自看），C0 派獨立驗證整個 PR。supplier-normalize 已併 main（1322c67）排預驗
-  - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
+  - C3（第二台）：**M5 PR #47 已開**（wp5/gitlab 0432471，CI 綠，C3 的驗證第二輪通過），等 C0 獨立驗證。監控 wp2/watch-m2 aa68d5d（已併 main、mirrors.sh），real＋dry_run 與 tests 綠後開 PR。第一次真實基準要等正式 Release（目前全是 draft，監控會略過）。wp2/art14 等 M7。T-14（scan.sh 可改連常駐 DT）由 C0 排給 C1，M7 之後
   - C4（第二台）：wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
@@ -22,7 +22,7 @@
   3. （完成）D-042 PR #39 已合併；私有檔驗證由 C0 用使用者提供的 3 份樣本完成（暫存在 C0 的 scratchpad，待使用者決定刪除）
   4. 監控 real Issue：C3 修完 F1–F3（已在 wp2/watch-m2）→ M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
   5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#19（rpi 報告端：有 KERNEL_CVES 時補 Grype 沒有的 CVE 成列、同一個 CVE 不按核心套件重複列；屬 D-044 (2)，M7 交給 C1；修好後 C4 再釘 rpi 的「bsp 核心候選 ≥ CNA 清單」）、#20、#22、#23、C0 的 M2 驗證建議 2–8（-os 8.7 節、LAYERS 列數說明、check-expected 下限測試、patch CVE 仍 P3 說明、步驟表缺 pipeline-scan、SBOM 上游信箱、test_layers_report sys.path）、C1 的 M2 驗證建議 3（-os sbom.md 開機韌體一節矛盾）、4（略過清單進風險評估 Layers 節）、6（Release 附件 SBOM 與報告包 SBOM 差別說明＋標準答案「-os 只有 os」）、#25（missing_fields 少算 flash_package_supplier、sbom.md 非 Jetson 平台出現 L4T 文字）、#26（notes.md 的 pipeline_result 改成跟 release-meta.json 一致）
-  6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
+  6. M7 之後：T-14（C1：scan.sh 加選項改連既有 DT，不傳照舊臨時 DT；做好後 C3 改 GitLab 範本）；D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
 - 卡住／等決定：無
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
