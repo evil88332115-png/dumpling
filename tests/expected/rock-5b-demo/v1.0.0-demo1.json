@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-13，dev run 43378104334、commit eacb60d）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-13；依據的 CI 是 dev run 43378104334，跑的 commit 是 eacb60d）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -290,7 +290,7 @@
   },
   "kernel_upstream_crosscheck.agree": {
    "equals": true,
-   "reason": "D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 kernel-versions /2 的 upstream_version 一致；不一致是 bug"
+   "reason": "D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 kernel-versions /2 的 upstream_version 一致。兩邊用同一份 Makefile 與同一個宣告值，所以這一項是防止兩邊實作漂移，不是多一個獨立證據；不一致是 bug"
   },
   "kernel_upstream_crosscheck.c1": {
    "equals": "6.1.84",

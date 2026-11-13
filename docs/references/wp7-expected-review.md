@@ -80,3 +80,15 @@ D-dt-data-sources／C-dt-feeds／D-dt-findings（NVD 照設計關閉）、D-dt-k
 dthelper、libmraa*（Radxa 發行、可能和硬體存取有關）目前歸 os，是否歸 bsp 列為缺口 17、待確認。
 
 未確認（沒有讀磁碟映像、沒有連網）：解開後的 sha256、映像與官方 sha512sum 的關係、radxa/kernel@87ba2c6 是否確為套件 6.1.84-8 的建置來源。
+
+### rock-5b-demo（第三輪：差異核對，2026-11-13）
+
+範圍只有兩件：C0 決定 dthelper、libmraa2、libmraa-dev 歸 bsp（第 17 項），以及新增的 D-038 兩邊核對（kernel_upstream_crosscheck）。
+依據 dev run 43378104334（commit eacb60d）；標準答案 72 項。結論：**可以定案**。
+
+- deb 50／1779 → 53／1776：正好這三個套件（版本與 manifest 相同），總數仍是 1829；其他套件沒有換層。
+- bsp 16332 → 16376、os 110333 → 110289：變動的 44 個是 3 個 deb 與 41 個它們擁有的檔案紀錄（路徑含 mraa／dthelper）；其他類別都沒變。
+- 漏洞列數完全沒變（這三個套件沒有任何漏洞列）；只有「沒有弱點資料的套件」清單跟著換層。
+- D-038 兩邊核對：C4（兩個來源）與 C1（kernel-versions /2：upstream_version 6.1.84、basis source-makefile+platform-param）都是 6.1.84；
+  agree 的計算在任一邊是 null 時是 false，不會誤判。兩邊用同一份 Makefile 與宣告值，這一項是防止實作漂移（reason 已寫明）。
+- 沒有新的「該 GAP 卻寫成正常值」。
