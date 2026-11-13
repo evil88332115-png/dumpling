@@ -1,0 +1,441 @@
+# dumpling 的 GitLab CI 範本（內部 GitLab 版）。對照與搬移步驟見 docs/GITLAB-PORT.md，用法見 gitlab/README.md。
+#
+# 用法：複製成產品 repo 根目錄的 .gitlab-ci.yml，或在內部 repo 用 include:local 引入（注意：Sigstore 簽章的 id_tokens
+# 必須寫在被簽署的專案本身，include 進來的 CI 檔與 child pipeline 不支援，見 GITLAB-PORT 第 9 節）。
+#
+# job 呼叫的指令與 GitHub 版相同（pipeline/run-step.sh、pipeline/platform.sh、pipeline/watch/*）；
+# M2（release.yml／dev.yml／pipeline.yml）以 origin/wp1/m2-jetson 為準，M2 合併後再核對一次（GITLAB-PORT 待辦 T-01）。
+#
+# 這份範本只由「語法檢查＋單元測試」驗證過（gitlab/tests、官方 CI JSON schema），尚未在內部 GitLab 實際執行。
+# 標「待內部驗證」的地方，是官方文件沒寫、要在內部環境確認的行為。
+
+stages:
+  - validate
+  - build
+  - scan
+  - release
+  - watch
+
+variables:
+  # 全部 job 的執行映像。預設值是固定版本的公開映像，內部請改成 RD 的編譯／掃描映像（固定 digest 或固定版本，不可用 latest）。
+  DUMPLING_IMAGE: "ubuntu:24.04"
+  # 映像裡沒有的工具，用 apt 安裝（內部映像已含這些就清空）
+  DUMPLING_APT: "git curl ca-certificates python3 python3-yaml jq"
+  # 開發版（dev 分支與排程）要跑的專案；空白代表 projects/ 底下全部（M2 的 project-info.py --matrix）
+  DUMPLING_DEV_PROJECTS: ""
+  # 選填：要簽章 Release 附件時改成 "cosign-keyless"（見 GITLAB-PORT 第 9 節；預設不簽）
+  DUMPLING_SIGN_MODE: "none"
+  # 暫存與輸出放專案資料夾外，避免被掃到自己（artifacts 只收複製進專案資料夾的部分）
+  DUMPLING_OUT_BASE: "$CI_BUILDS_DIR/dumpling-out/$CI_PROJECT_PATH_SLUG-$CI_PIPELINE_ID"
+  GIT_DEPTH: "1"
+
+default:
+  image: $DUMPLING_IMAGE
+  interruptible: true
+
+# 哪些情況建立 pipeline：沒有任何規則符合就不建立（官方：workflow:rules，沒有規則為 true 時 pipeline 不會執行）
+workflow:
+  rules:
+    # 1) tag <專案>/<版本> → release
+    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$/'
+    # 2) 排程：每日監控或開發版，由排程變數 DUMPLING_JOB 區分
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev")'
+    # 3) dev/** 分支與預設分支的 push → dev、tests、firmware
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && ($CI_COMMIT_BRANCH =~ /^dev\// || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
+    # 4) merge request → tests、firmware
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # 5) 手動從網頁或 API 建立
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+
+# ---------------------------------------------------------------------------
+# 共用片段
+# ---------------------------------------------------------------------------
+
+.rules-tag-release:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$/'
+
+.rules-dev:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "dev"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^dev\//'
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+      when: manual
+      allow_failure: true
+
+.setup:
+  script:
+    - set -eu
+    - |
+      if [ -n "$DUMPLING_APT" ]; then
+        # 內部映像若已含這些套件，把 DUMPLING_APT 清空即可（不需要 root 與外網）
+        apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $DUMPLING_APT > /dev/null
+      fi
+
+# 由 tag（release）或 parallel:matrix 的 PROJECT（dev）決定 PROJECT、VERSION；project-info.py 驗證格式並確認專案與版本存在。
+# 不用管線（|）接 project-info.py：不同 shell 的 pipefail 行為不同，失敗會被吃掉。
+.resolve-from-tag:
+  script:
+    - python3 -I pipeline/project-info.py "$CI_COMMIT_TAG" > info.txt
+    - cat info.txt
+    - |
+      PROJECT=$(sed -n 's/^PROJECT=//p' info.txt); VERSION=$(sed -n 's/^VERSION=//p' info.txt)
+      BUILD_MODE=$(sed -n 's/^BUILD_MODE=//p' info.txt); SCAN_TOOLS=$(sed -n 's/^SCAN_TOOLS=//p' info.txt)
+      export PROJECT VERSION BUILD_MODE SCAN_TOOLS
+      export DUMPLING_PROJECT_DIR="projects/$PROJECT"
+      export DUMPLING_OUT="$DUMPLING_OUT_BASE/$PROJECT/$VERSION"
+
+.resolve-from-matrix:
+  script:
+    # 版本取 sources.yml 的最後一個版本（M2 的 project-info.py --matrix）
+    - python3 -I pipeline/project-info.py --matrix "$PROJECT" > matrix.json
+    - VERSION=$(python3 -I -c 'import json; print(json.load(open("matrix.json"))[0]["version"])')
+    - python3 -I pipeline/project-info.py --dir "projects/$PROJECT" "$VERSION" > info.txt
+    - cat info.txt
+    - |
+      BUILD_MODE=$(sed -n 's/^BUILD_MODE=//p' info.txt); SCAN_TOOLS=$(sed -n 's/^SCAN_TOOLS=//p' info.txt)
+      export VERSION BUILD_MODE SCAN_TOOLS PROJECT
+      export DUMPLING_PROJECT_DIR="projects/$PROJECT"
+      export DUMPLING_OUT="$DUMPLING_OUT_BASE/$PROJECT/$VERSION"
+
+# build 與 scan 的共同步驟（對應 pipeline.yml 的 build／scan job）。順序：先 .setup，再 .resolve-*，再下面的片段。
+.build-steps:
+  script:
+    - bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$VERSION"
+    # build.mode 是 none 的平台沒有編譯步驟：交給 scan 去記 NOT_RUN
+    - |
+      rm -rf build-handoff && mkdir -p build-handoff
+      if [ "$BUILD_MODE" = compile ]; then
+        bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$VERSION"
+        bash pipeline/run-step.sh build "$DUMPLING_PROJECT_DIR" "$VERSION"
+        # 交給 scan 的東西都在 $DUMPLING_OUT/handoff/；複製進專案資料夾才能當 artifact
+        cp -a "$DUMPLING_OUT/handoff" build-handoff/handoff
+        cp -a "$DUMPLING_OUT/pipeline-steps.tsv" build-handoff/
+      else
+        echo "build.mode: $BUILD_MODE" > build-handoff/NO-BUILD
+      fi
+
+.scan-steps:
+  script:
+    # 常駐 DT：pilot.env 由 CI/CD 變數（File 類型、protected）提供，不開臨時 DT；格式待內部驗證
+    - |
+      test -n "${PILOT_ENV:-}" || { echo "scan: FAIL（沒有 PILOT_ENV：請在 CI/CD 變數設定常駐 DT 的 File 變數，protected）"; exit 1; }
+    - mkdir -p "$DUMPLING_OUT" "$DUMPLING_OUT_BASE/tools"
+    - |
+      if [ -d build-handoff/handoff ]; then
+        cp -a build-handoff/handoff "$DUMPLING_OUT/handoff"; cp -a build-handoff/pipeline-steps.tsv "$DUMPLING_OUT/"
+      else
+        bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "$VERSION" build NOT_RUN 4 "build.mode: $BUILD_MODE"
+      fi
+    - bash pipeline/install-scan-tools.sh "${SCAN_TOOLS:-sbom-only}" "$DUMPLING_OUT_BASE/tools/versions.txt"
+    - bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$VERSION"
+    - bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$VERSION"
+    - bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "$VERSION"
+    # 常駐環境要檢查鏡像新鮮度：這裡不設 MIRROR_REFRESH_STATUS=""（GitHub 版因為是臨時 DT 才設空）
+    - bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$VERSION"
+    - |
+      rm -rf result && mkdir -p result
+      [ -d "$DUMPLING_OUT/release" ] && cp -r "$DUMPLING_OUT/release/." result/ || true
+      for f in handoff/build.json assemble.json scan.json expected-check.txt pipeline-steps.tsv; do [ -f "$DUMPLING_OUT/$f" ] && cp "$DUMPLING_OUT/$f" result/ || true; done
+      [ -f "$DUMPLING_OUT/summary.md" ] && cat "$DUMPLING_OUT/summary.md" || true
+
+.build:
+  stage: build
+  tags: [dumpling-build]
+  timeout: 2 hours
+  interruptible: false
+  after_script:
+    # 輸出放在專案資料夾外，job 結束就刪（磁碟的第一道防線；runner 本身的清理見 GITLAB-PORT 第 5 節）
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    paths: [build-handoff/]
+    expire_in: 1 day
+
+.scan:
+  stage: scan
+  tags: [dumpling-scan]
+  timeout: 4 hours
+  interruptible: false
+  after_script:
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    when: always
+    paths: [result/]
+    expire_in: 7 days
+
+# ---------------------------------------------------------------------------
+# validate：單元測試（對應 GitHub 的 tests.yml 的 unit-tests；公開檢查 public-check 是公開 repo 專用，內部不需要）
+# ---------------------------------------------------------------------------
+
+validate:unit-tests:
+  stage: validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+  tags: [dumpling]
+  timeout: 30 minutes
+  script:
+    - !reference [.setup, script]
+    - bash tests/run.sh
+
+# ---------------------------------------------------------------------------
+# release：tag <專案>/<版本> → build → scan → 發 Release
+# ---------------------------------------------------------------------------
+
+release:build:
+  extends: [.build, .rules-tag-release]
+  script:
+    - !reference [.setup, script]
+    - !reference [.resolve-from-tag, script]
+    - !reference [.build-steps, script]
+
+release:scan:
+  extends: [.scan, .rules-tag-release]
+  needs: ["release:build"]
+  script:
+    - !reference [.setup, script]
+    - !reference [.resolve-from-tag, script]
+    - !reference [.scan-steps, script]
+
+# 正式 Release：附件上傳到 Generic Package Registry（長期保存），再用 Releases API 建 Release 並掛 assets links。
+# 同一個 tag 同時只跑一個（resource_group）；tag 已有 Release 時 API 會回錯誤，job 失敗，不覆蓋。
+release:publish:
+  stage: release
+  extends: [.rules-tag-release]
+  needs: ["release:scan"]
+  tags: [dumpling]
+  timeout: 30 minutes
+  interruptible: false
+  resource_group: release-$CI_COMMIT_TAG
+  script:
+    - !reference [.setup, script]
+    - !reference [.resolve-from-tag, script]
+    - |
+      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" \
+        --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv --out result/release-meta.json
+      printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv
+    - |
+      test -s result/manifest.tsv || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
+    # 附件 → Generic Package（套件名稱＝專案，套件版本＝版本；tag 含斜線，不能直接當套件版本。套件名稱與版本的字元規則官方沒寫，待內部驗證）
+    - |
+      cd result
+      while IFS=$'\t' read -r f label; do
+        [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
+        curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PROJECT/$VERSION/$f"
+      done < manifest.tsv
+      cd ..
+    - |
+      python3 -I gitlab/release-payload.py --manifest result/manifest.tsv --tag "$CI_COMMIT_TAG" --project "$PROJECT" --version "$VERSION" \
+        --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes result/notes.md --out release.json
+    - |
+      curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --header "Content-Type: application/json" \
+        --data @release.json "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
+      echo "release: OK（$CI_COMMIT_TAG）"
+  artifacts:
+    # 長期保存靠 Generic Package 與 Release；這裡只留給除錯與簽章 job 用
+    paths: [result/, release.json]
+    expire_in: 14 days
+
+# 選用：Release 附件簽章（Sigstore cosign keyless）。預設不跑；內部 Self-Managed 要先有自架 Sigstore（GITLAB-PORT 第 9 節）。
+# 官方限制：id_tokens 要寫在被簽署的專案本身（不能 include、不能放 child pipeline）。cosign 需 2.0.1 以上。
+release:sign:
+  stage: release
+  extends: [.rules-tag-release]
+  needs: ["release:publish"]
+  tags: [dumpling]
+  allow_failure: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  script:
+    - !reference [.setup, script]
+    - |
+      test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 0; }
+    # cosign 執行檔要固定版本與 sha256：進 pipeline/lib/tools.lock（待辦 T-09，M7 的 A2 一併處理）
+    - bash pipeline/install-tool.sh cosign "$DUMPLING_OUT_BASE/bin"
+    - |
+      cd result
+      while IFS=$'\t' read -r f label; do
+        "$DUMPLING_OUT_BASE/bin/cosign" sign-blob --yes "$f" --bundle "$f.cosign.bundle"
+      done < manifest.tsv
+  artifacts:
+    paths: ["result/*.cosign.bundle"]
+    expire_in: 14 days
+
+# ---------------------------------------------------------------------------
+# dev：dev/** 分支 push、排程（DUMPLING_JOB=dev）→ 同一套 build／scan，不發正式 Release
+# ---------------------------------------------------------------------------
+# 待辦 T-02：GitHub 版用動態 matrix（project-info.py --matrix）。GitLab 範本先用固定清單（改 PROJECT 的值）；
+# 要動態產生，改成先產生 child pipeline 的 YAML 再 trigger:include:artifact（官方：child pipeline 可有自己的 rules／workflow）。
+
+dev:build:
+  extends: [.build, .rules-dev]
+  parallel:
+    matrix:
+      - PROJECT: ["orin-nano-demo"]
+  script:
+    - !reference [.setup, script]
+    - !reference [.resolve-from-matrix, script]
+    - !reference [.build-steps, script]
+
+dev:scan:
+  extends: [.scan, .rules-dev]
+  parallel:
+    matrix:
+      - PROJECT: ["orin-nano-demo"]
+  needs:
+    - job: "dev:build"
+      parallel:
+        matrix:
+          - PROJECT: ["orin-nano-demo"]
+  script:
+    - !reference [.setup, script]
+    - !reference [.resolve-from-matrix, script]
+    - !reference [.scan-steps, script]
+
+# 開發版最新 SBOM 的「滾動 pre-release」（GitHub 的 dev/<專案>）：GitLab 版預計放 Generic Package（套件版本固定 dev，覆蓋）。
+# 待辦 T-03：每日監控的 GitLab 版 collect 要讀這裡；Generic Package 同名檔案是否覆蓋，官方文件沒寫，待內部環境驗證。
+dev:publish:
+  stage: release
+  extends: [.rules-dev]
+  needs:
+    - job: "dev:scan"
+      parallel:
+        matrix:
+          - PROJECT: ["orin-nano-demo"]
+  tags: [dumpling]
+  allow_failure: true
+  script:
+    - echo "dev:publish NOT_RUN（待辦 T-03：滾動開發版的 GitLab 版發布方式尚未定案，見 docs/GITLAB-PORT.md）"
+    - exit 1
+
+# ---------------------------------------------------------------------------
+# firmware：firmware/ 與韌體相關腳本有變動時（對應 firmware.yml 的 firmware-fetch）
+# ---------------------------------------------------------------------------
+# rules:changes 在 tag、排程、手動 pipeline 沒有 push 事件，需要 compare_to（官方）；這個 job 只在 push 與 merge request 跑。
+
+firmware:fetch:
+  stage: validate
+  tags: [dumpling]
+  timeout: 30 minutes
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - firmware/**/*
+        - pipeline/firmware-*.sh
+        - pipeline/install-tool.sh
+        - pipeline/check-tool-version.sh
+        - pipeline/lib/tools.lock
+        - pipeline/firmware-expect.py
+        - pipeline/lib/firmware_*.py
+        - pipeline/dt-*
+        - pipeline/scan-status-check.py
+        - tools/pilot/**/*
+        - tools/e2e/**/*
+        - tools/cra/**/*
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+      when: manual
+      allow_failure: true
+  script:
+    - !reference [.setup, script]
+    - python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
+    - pipeline/firmware-fetch.sh firmware/*/*/firmware.yml --out "$DUMPLING_OUT_BASE/firmware-dl" > fetch.log
+    - cat fetch.log
+    # ATTENTION／GAP（結束碼 2）不算失敗；FAIL、expected 不符才失敗。狀態行才是結果，job 綠燈不代表韌體安全。
+    - |
+      rc=0
+      pipeline/firmware-ci.sh "$DUMPLING_OUT_BASE/firmware-dl" "$DUMPLING_OUT_BASE/firmware-work" firmware-out firmware-summary.md || rc=$?
+      cat firmware-summary.md
+      exit "$rc"
+  after_script:
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    when: always
+    paths: [firmware-out/, firmware-summary.md, fetch.log]
+    expire_in: 14 days
+
+# 韌體 SBOM 上傳常駐 DT（GitHub 版是臨時 DT 的 firmware-dt job）。待辦 T-04：pilot.env／常駐 DT 的上傳驗證流程在內部確認後再開。
+firmware:dt:
+  stage: scan
+  tags: [dumpling-scan]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+      when: manual
+      allow_failure: true
+  needs:
+    - job: "firmware:fetch"
+      optional: true
+      artifacts: true
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${PILOT_ENV:-}" || { echo "firmware-dt: FAIL（沒有 PILOT_ENV）"; exit 1; }
+    - |
+      echo "firmware-dt: NOT_RUN（待辦 T-04：常駐 DT 版的 firmware-dt.sh 呼叫方式待內部驗證）"
+    - exit 1
+
+# ---------------------------------------------------------------------------
+# watch：每日監控（排程變數 DUMPLING_JOB=watch）。compute 與 notify 分開，對應 watch-round.yml
+# ---------------------------------------------------------------------------
+# 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）目前只支援 GitHub API。
+# GitLab 版需要新增後端（--backend gitlab）；在那之前這兩個 job 都是 when: manual，不會自動跑，也不假裝能跑。
+# 下面的 --backend 旗標是「預期的介面」，現行程式沒有這個旗標。
+
+.rules-watch:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "watch"'
+      when: manual
+      allow_failure: true
+
+watch:compute:
+  stage: watch
+  extends: [.rules-watch]
+  tags: [dumpling-scan]
+  timeout: 90 minutes
+  interruptible: false
+  variables:
+    # 內部鏡像：CISA KEV、EUVD、核心 CNA、Grype DB 由 sca-center 的鏡像腳本更新（待辦 T-06）
+    INTERNAL_MIRROR_URL: ""
+  script:
+    - !reference [.setup, script]
+    - |
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+    - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
+    - pipeline/watch/feeds.sh "$DUMPLING_OUT_BASE/w/feeds"
+    - python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv"
+    - python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
+    - |
+      python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \
+        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL"
+  after_script:
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    when: always
+    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json]
+    expire_in: 14 days
+
+# notify：只有這個 job 拿得到 WATCH_GITLAB_TOKEN（protected＋masked 的 CI/CD 變數，project access token，scope api；
+# 官方：Issues API 寫入需要 api scope，沒有更細的 scope）。狀態 Issue 與命中 Issue 一律 confidential。
+watch:notify:
+  stage: watch
+  extends: [.rules-watch]
+  needs: ["watch:compute"]
+  tags: [dumpling]
+  timeout: 30 minutes
+  interruptible: false
+  resource_group: watch-notify
+  variables:
+    DUMPLING_ISSUES_CONFIDENTIAL: "true"
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${WATCH_GITLAB_TOKEN:-}" || { echo "watch: FAIL（沒有 WATCH_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
+    - |
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+    - |
+      GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+        --project "$CI_PROJECT_ID" --confidential --plan watch-out/plan.json
+  artifacts:
+    when: always
+    paths: [watch-out/apply-result.json]
+    expire_in: 14 days
