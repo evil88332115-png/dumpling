@@ -64,6 +64,8 @@ class Api:
         u = urllib.parse.urlsplit(self.base)
         if u.scheme not in ("https", "http") or not u.hostname:
             raise Fail("GITHUB_API_URL 不是合法的網址")
+        if u.scheme == "http" and u.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise Fail("GITHUB_API_URL 只有本機（測試）可以用 http：token 不能以明文送到別台")
         self.origin = (u.scheme, u.netloc)
 
     def _scrub(self, s):
@@ -297,7 +299,12 @@ class Labels:
 
 
 # ---------- plan ----------
-def load_plan(path):
+MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
+ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
+                            "demo", "summary", "drill", "watch-health"})
+
+
+def load_plan(path, want_mode=None):
     try:
         with open(path, encoding="utf-8") as f:
             plan = json.load(f)
@@ -310,6 +317,11 @@ def load_plan(path):
         bad("schema")
     if plan.get("mode") not in ("real", "drill"):
         bad("mode")
+    if want_mode is not None and plan["mode"] != want_mode:
+        bad(f"mode 是 {plan['mode']}，這一輪是 {want_mode}")
+    st = plan.get("state")
+    if isinstance(st, dict) and (st.get("schema") != 1 or (st.get("dumpling") or {}).get("mode") not in (None, plan["mode"])):
+        bad("state 的 schema 或 dumpling.mode 不符")
     if not isinstance(plan.get("state"), dict):
         bad("state")
     sb = plan.get("state_base")
@@ -320,6 +332,8 @@ def load_plan(path):
     acts = plan.get("actions")
     if not isinstance(acts, list):
         bad("actions")
+    if len(acts) > MAX_ACTIONS:
+        bad(f"actions 有 {len(acts)} 個，超過上限 {MAX_ACTIONS}")
     for n, a in enumerate(acts):
         if not isinstance(a, dict) or a.get("op") not in ("open", "comment", "open_if_closed"):
             bad(f"actions[{n}].op")
@@ -335,6 +349,9 @@ def load_plan(path):
                 bad(f"actions[{n}].title")
             if not isinstance(a.get("labels"), list) or not all(isinstance(x, str) and x for x in a["labels"]):
                 bad(f"actions[{n}].labels")
+            extra = sorted(set(a["labels"]) - ALLOWED_LABELS)
+            if extra:
+                bad(f"actions[{n}].labels 有不在白名單的標籤 {extra[:3]}")
     return plan
 
 
@@ -373,8 +390,8 @@ def cmd_read_state(api, repo, mode, out):
     return f"狀態 Issue {'#' + str(si['number']) if si else '不存在'}；監控 Issue {n} 個"
 
 
-def cmd_apply(api, repo, plan_path, dry):
-    plan = load_plan(plan_path)
+def cmd_apply(api, repo, plan_path, dry, want_mode=None):
+    plan = load_plan(plan_path, want_mode)
     mode = plan["mode"]
     problems, results = [], []
     # 樂觀鎖
@@ -525,6 +542,7 @@ def main(argv=None, api=None):
     b.add_argument("--repo", required=True)
     b.add_argument("--plan", required=True)
     b.add_argument("--dry-run", action="store_true")
+    b.add_argument("--mode", choices=["real", "drill"], help="這一輪的 mode：plan 的 mode 不同就 FAIL（workflow 一律給）")
     c = sub.add_parser("close-drill", add_help=False)
     c.add_argument("--repo", required=True)
     try:
@@ -540,7 +558,7 @@ def main(argv=None, api=None):
         if args.cmd == "read-state":
             msg = cmd_read_state(api, args.repo, args.mode, args.out)
         elif args.cmd == "apply":
-            msg = cmd_apply(api, args.repo, args.plan, args.dry_run)
+            msg = cmd_apply(api, args.repo, args.plan, args.dry_run, args.mode)
         else:
             msg = cmd_close_drill(api, args.repo)
     except Fail as e:

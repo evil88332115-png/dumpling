@@ -73,9 +73,19 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 
 讀 inventory、feeds、state.json → 呼叫既有工具 → 產生 `plan.json`。規則：
 - **第一次（state.json 不存在且 `state-base.json` 說沒有任何監控 Issue）只建基準**：所有比對記 `baseline: true`，不開 Issue。
+  條件：全部 SBOM 的 Grype 都跑完、CISA KEV 可用，否則 FAIL、不寫狀態（基準不完整會讓下一次洗版）。
+- **還沒有狀態、也沒有任何可監控的 SBOM**（例如 M2 之前只有 draft 或舊格式 Release）→ GAP（結束碼 3），不建空的基準、不產生 plan.json；
+  workflow 的 compute 輸出 `has_plan=false`，notify 跳過。M2 之前排程每天是 GAP，不是 FAIL（不亮紅燈）。演練一定要有 plan，沒有就失敗。
 - 狀態 Issue 不存在、但已有監控 Issue → FAIL（不能重新建基準，會吞掉新的命中）。
-- 已有基準之後：新的（含新加入的 Release 本來就有的 KEV）→ 開 Issue；再出現 → 在原 Issue 留言（原 Issue 已關閉時開新 Issue）；
-  消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。一次最多開 `--max-new-issues`（預設 20）個，其餘併成一個彙總 Issue。
+- 已有基準之後：新的群組（含新加入的 Release 本來就有的 KEV）→ 開 Issue；
+  已有 Issue 的群組出現新元件（同一個 CVE 的新 purl：SBOM 重發、開發版元件版本變了、Grype DB 多比對到一個元件）或再出現 → `open_if_closed`
+  （原 Issue 開著就留言，關閉了就開新的）；基準裡的比對消失後又出現、群組從來沒有 Issue → 不再算基準，開 Issue；
+  群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
+- 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
+- 降級（只在 real）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
+  → 連續 2 次就在固定的健康 Issue（標籤 `watch-health`）開／留言，沒恢復時每 7 天提醒一次，恢復時留言一次。報告與 Step Summary 每次都列。
+- 每個 KEV Issue 列出靜態的「每日沒有涵蓋」三項，加上這個 Release 這次的 GAP（例如核心 CNA 缺附件時的 upstream_note、L4T 核心對應失敗）。
+- 正式版的版本字串是 `dev` → 不比對（會跟開發版的專案鍵相同），記成 Release 問題。一次最多開 `--max-new-issues`（預設 20）個，其餘併成一個彙總 Issue。
 - Issue 粒度：比對 (專案, 監控版本, 層, CVE) 一個 Issue（同一個 CVE 的多個元件列在同一個 Issue）；廠商層級 (專案, 監控版本, CVE, 廠商) 一個。
 
 ### 3.3 `plan.json`（match.py → issues.py 的契約）
@@ -109,6 +119,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
   - `read-state` 輸出 `<out>/state.json`（沒有狀態 Issue 時不產生）與 `<out>/state-base.json`：
     `{"issue": 12｜null, "updated_at": "…", "body_sha256": "…", "watch_issues": <該 mode 的監控 Issue 數>}`。
 - `apply`：
+  - plan 的交叉核對：`--mode`（workflow 一律給）要等於 plan.mode、state.schema 是 1、state.dumpling.mode 相同；actions 最多 200 個；
+    標籤只能是白名單（dumpling-watch、kev、vendor-level、shipped、development、layer-*、demo、summary、drill、watch-health）。不合 → FAIL、什麼都不做。
   - 先確認 `state_base` 跟現在的狀態 Issue 一致（樂觀鎖），不一致 → FAIL、什麼都不改。
   - 依序執行 actions：`open` 前再列一次標記，已存在就跳過（冪等）；`comment` 找不到原 Issue → 記 problem（不 FAIL）。
   - 缺的標籤自動建立（顏色固定）。
@@ -122,6 +134,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 - 結構沿用 `exploited_watch` 的狀態檔（schema 1）：`matches`（鍵＝json [project_uuid, CVE, 元件]）、`vendor_matches`、`vendor_watch`、`runs`，
   另加 `dumpling`: `{"baseline_at": "…", "mode": "real|drill", "issues": {"<key>": {"kind": "kev|vendor", "first_detected": "…"}}}`。
 - 只放公開資料：CVE、purl、版本、時間、Release tag、SBOM sha256。**不放路徑、主機資訊**（match.py 寫入前只保留白名單欄位）。
+  （Step Summary 與 artifact 裡的報告會有 runner 的暫存路徑，例如 Grype NOT_RUN 的原因；那不寫進 Issue。）
+- 已知限制：`dumpling.issues` 不修剪，Release 與命中很多時會逐漸接近 60000 字元上限（超過 → apply FAIL，不截斷）；GitLab 階段改放內部儲存。
 - `runs` 只留最近 30 次。
 - GitLab 階段：狀態 Issue 一定設成 confidential（寫在 GITLAB-PORT）。
 
@@ -130,7 +144,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 官方文件（2026-11-13 查）只寫「公開 repo 60 天沒有 repository activity，排程 workflow 會自動停用」，**沒有定義什麼算 activity**；
 `PUT /repos/{owner}/{repo}/actions/workflows/{id}/enable` 說明是「sets the state of the workflow to active」，沒寫會不會重新計算 60 天；
 通知寄給「最後修改 cron 語法的使用者」。做法：keepalive job（只有 `actions: write`）每天先讀 workflow 的 state 並寫進 job 摘要，再呼叫 enable；
-STATUS 的 C3 節記「下次人工檢查日期」，每月人工看一次 `gh workflow view watch.yml`。
+`status` 分支上 `docs/STATUS.md` 的 C3 節（D-008，不在 main）記「下次人工檢查日期」，每月人工看一次 `gh workflow view watch.yml`。
+workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋得住。
 
 ## 5. 公開 repo 的 real 模式（D-040）
 

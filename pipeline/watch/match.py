@@ -138,6 +138,9 @@ def load_inventory(path, base):
             problems.append(f"{r.get('tag')}: " + "；".join(str(x) for x in r["problems"])[:300])
         if r.get("status") not in ("shipped", "development") or not isinstance(r.get("sboms"), dict):
             continue
+        if r.get("kind") != "dev" and r.get("watch_version") == "dev":
+            problems.append(f"{r.get('tag')}: 正式版的版本字串是 dev，會跟開發版 dev/{r.get('project')} 的專案鍵相同：不比對")
+            continue
         for layer, s in sorted(r["sboms"].items()):
             if layer not in ("bsp", "os", "product") or not isinstance(s, dict) or not isinstance(s.get("file"), str):
                 continue
@@ -346,7 +349,10 @@ def kev_body(mode, entries, p, coverage, run_url, now):
               "| 元件 | purl | 依據 | 來源 |", "|---|---|---|---|"]
     for e in entries:
         lines.append(f"| {md_cell(e.get('component'))} | {md_cell(e.get('purl'))} | {md_cell(e.get('basis'))} | {md_cell('; '.join(e.get('sources') or []))} |")
-    lines += ["", f"每日監控沒有涵蓋的項目（每次都列出）：", *[f"- {a}：{b}" for a, b in coverage], "", ART14_NOTE]
+    lines += ["", f"每日監控沒有涵蓋的項目（每次都列出）：", *[f"- {a}：{b}" for a, b in coverage]]
+    if p and p.get("gaps"):
+        lines += ["", "這個 Release 這次的 GAP：", *[f"- {md_cell(g)}" for g in p["gaps"]]]
+    lines += ["", ART14_NOTE]
     if run_url:
         lines += ["", f"執行紀錄：{run_url}"]
     return "\n".join(lines)
@@ -398,6 +404,12 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             e["baseline"] = True
         return [], {"opened": 0, "summary": 0, "comments": 0, "baseline_matches": len(state["matches"]),
                     "baseline_vendor": len(state.get("vendor_matches") or {})}
+    # 基準裡的比對消失後又出現、而且它的群組從來沒有 Issue → 不再算基準，當成新的開 Issue（預驗第 2 項）
+    for k in back:
+        e = state["matches"][k]
+        if e.get("baseline") and kev_group_key(mode, e) not in iss:
+            e["baseline"] = False
+            e.setdefault("history", []).append({"event": "baseline_cleared_on_reappear", "at": ts})
     groups = {}
     for k, e in state["matches"].items():
         if e.get("status") == "open" and not e.get("baseline"):
@@ -436,22 +448,34 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
     comments = 0
+    just_opened = {x["key"] for x in actions if x["op"] == "open"} | {gk for gk, *_ in rest}
 
     def target(gk):
         r = iss.get(gk)
         return (r.get("via_summary") or gk) if r else None
-    seen_back, seen_gone = set(), set()
+    # 已有 Issue 的群組：新出現的元件（同一個 CVE 的新 purl，例如 SBOM 重發、開發版元件版本變了）與再出現的比對
+    # → 在那個 Issue 留言；Issue 已被關閉時開新的（open_if_closed）。（預驗第 1 項）
+    events = {}
+    for k in new:
+        e = state["matches"][k]
+        if not e.get("baseline"):
+            events.setdefault(kev_group_key(mode, e), []).append(("新增元件", e))
     for k in back:
         e = state["matches"][k]
-        if e.get("baseline"):
-            continue
-        gk = kev_group_key(mode, e)
+        if not e.get("baseline"):
+            events.setdefault(kev_group_key(mode, e), []).append(("再出現", e))
+    for gk, evs in sorted(events.items()):
         t = target(gk)
-        if t and gk not in seen_back and gk not in {a["key"] for a in actions if a["op"] == "open"}:
-            seen_back.add(gk)
-            actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] 再出現：{e['cve']} 在 {e['project']} {e['version']}",
-                            "body": f"{e['cve']} 在 {e['project']} {e['version']} 再次比對到（{ts}；元件 {e.get('component')}）。之前曾經消失。", "labels": ["kev"]})
-            comments += 1
+        if not t or gk in just_opened:
+            continue
+        e0 = evs[0][1]
+        lines = [f"{e0['cve']} 在 {e0['project']} {e0['version']}（{ts}）："] + \
+            [f"- {what}：{e.get('component')}（{e.get('purl')}）" for what, e in evs] + \
+            ["", "原 Issue 已關閉時會開新的 Issue。" + (f"執行紀錄：{run_url}" if run_url else "")]
+        actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {e0['cve']} 在 {e0['project']} {e0['version']}：新的比對",
+                        "body": "\n".join(lines), "labels": ["kev"] + (labels_for(pinfo_of(projs, e0["project_uuid"]), "kev")[1:])})
+        comments += 1
+    seen_gone = set()
     for k in gone:
         e = state["matches"][k]
         gk = kev_group_key(mode, e)
@@ -463,6 +487,37 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
                             "可能已修補、元件移除，或 KEV 清單改變。Issue 不會自動關閉，請負責人確認後關閉。", "reopen_if_closed": False})
             comments += 1
     return actions, {"opened": opened, "summary": len(rest), "comments": comments}
+
+
+HEALTH_AFTER_RUNS = 2       # 連續幾次降級才通知
+HEALTH_REPEAT_DAYS = 7      # 一直沒恢復時，隔幾天再提醒一次
+
+
+def health_actions(mode, state, serious, now, run_url):
+    """降級狀態（Grype NOT_RUN、資料源不能用或過期、L4T 核心對應失敗、核心 CNA NOT_RUN、已遭利用但版本未知）不只在報告：
+    連續 HEALTH_AFTER_RUNS 次就在固定的健康 Issue 開／留言，之後每 HEALTH_REPEAT_DAYS 天提醒一次；恢復時留言一次。"""
+    dd = state.setdefault("dumpling", {})
+    h = dd.setdefault("health", {"streak": 0})
+    key = issue_key(mode, "health")
+    ts = utc(now)
+    if not serious:
+        out = []
+        if h.get("notified_at"):
+            out.append({"op": "comment", "key": key, "body": f"監控已恢復正常（{ts}）。之前的降級從 {h.get('since')} 開始。", "reopen_if_closed": False})
+        dd["health"] = {"streak": 0}
+        return out
+    h["streak"] = int(h.get("streak") or 0) + 1
+    h.setdefault("since", ts)
+    last = h.get("notified_at")
+    due = h["streak"] >= HEALTH_AFTER_RUNS and (not last or (now - parse_now(last)).days >= HEALTH_REPEAT_DAYS)
+    h["latest"] = sorted(set(serious))[:30]
+    if not due:
+        return []
+    h["notified_at"] = ts
+    body = [f"每日監控從 {h['since']} 起連續 {h['streak']} 次降級：下面這些項目沒有完整檢查，這段期間可能漏掉新的已遭利用漏洞（不能當成沒有新的）。", ""] + \
+        [f"- {x}" for x in h["latest"]] + ["", f"恢復時會在這裡留言；一直沒恢復時每 {HEALTH_REPEAT_DAYS} 天提醒一次。"] + \
+        ([f"執行紀錄：{run_url}"] if run_url else [])
+    return [{"op": "open_if_closed", "key": key, "title": "[監控降級] 每日監控有項目沒有完整檢查", "body": "\n".join(body), "labels": ["watch-health"]}]
 
 
 # ---------- 一次執行 ----------
@@ -496,13 +551,16 @@ def run(a, kernel_runner=None):
         return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
+    serious = []      # 降級：連續發生要通知人（健康 Issue，預驗第 5 項）
     try:
         cisa, cisa_path = load_cisa(eg, a.feeds, a.kev_overlay, work, now)
         if cisa["status"] != "OK":
             gaps.append(f"CISA KEV：{cisa['detail']}")
+            serious.append(f"CISA KEV {'不能用' if not cisa['usable'] else '過期'}")
         eix = euvd.exploited_index(os.path.join(a.feeds, "euvd") if os.path.isdir(os.path.join(a.feeds, "euvd")) else None, now=now)
         if eix["status"] != "OK":
             gaps.append(f"EUVD：{eix['detail']}")
+            serious.append(f"EUVD {'不能用' if not eix['usable'] else '過期'}")
         eu_now = eix["exploited"] if eix["usable"] else None
         exploited = {"cisa": cisa["cves"] if cisa["usable"] else None, "euvd": eu_now, "euvd_sticky": ew.euvd_sticky(state), "dt": set(),
                      "euvd_text": ew.euvd_text,
@@ -515,6 +573,7 @@ def run(a, kernel_runner=None):
         db = eg.db_status(gpath, genv, now, 3) if gpath else {"status": "NOT_RUN", "usable": False, "built": None, "detail": gwhy}
         if db["status"] != "OK":
             gaps.append(f"Grype DB：{db['detail']}")
+            serious.append(f"Grype DB {db['status']}")
         sbx = eg.sandbox_check()
         budget = float(a.grype_total_timeout)
         matches, grype_ok, kernel_ok, per = {}, set(), set(), {}
@@ -528,6 +587,12 @@ def run(a, kernel_runner=None):
             budget -= (datetime.datetime.now() - t0).total_seconds()
             row = {"uuid": p["uuid"], "tag": p["tag"], "layer": p["layer"], "grype": info.get("status"), "why": info.get("why"),
                    "kernel_map": (info.get("kernel_map") or {}).get("status"), "exploited": 0, "version_unknown": 0, "kernel_cna": None}
+            if row["kernel_map"] in ("GAP", "FAIL"):
+                # L4T 核心對應失敗：Grype 用原始 SBOM 比對，核心的 KEV 可能漏掉（Release 掃描這種情況也標 GAP；預驗第 3 項）
+                g = f"{p['name']}@{p['version']}#{p['layer']}：L4T 核心對應 {row['kernel_map']}（{(info.get('kernel_map') or {}).get('detail') or ''}）：核心元件可能沒有比對"
+                gaps.append(g[:400])
+                p.setdefault("gaps", []).append(g[:400])
+                serious.append(f"{p['uuid']} L4T 核心對應 {row['kernel_map']}")
             if ctx is not None:
                 out, counts, unknown = eg.extract(p, ctx, [], exploited)
                 matches.update(out)
@@ -535,8 +600,11 @@ def run(a, kernel_runner=None):
                 row.update(exploited=len(out), version_unknown=len(unknown), grype_matches=counts["grype_matches"])
                 if unknown:
                     gaps.append(f"{p['name']}@{p['version']}#{p['layer']}：{len(unknown)} 筆已遭利用的比對元件版本未知（規則 13，GAP，不開 Issue）")
+                    serious.append(f"{p['uuid']}：已遭利用但元件版本未知 {len(unknown)} 筆（" +
+                                   "、".join(sorted({c for u in unknown for c in u.get('cves') or []}))[:200] + "）")
             else:
                 attn.append(f"{p['name']}@{p['version']}#{p['layer']}：Grype NOT_RUN（{info.get('why')}）")
+                serious.append(f"{p['uuid']} Grype NOT_RUN")
             per[p["uuid"]] = row
         # 核心 CNA（bsp 層；沒有分層時 product）
         ex_cves = {}
@@ -544,6 +612,9 @@ def run(a, kernel_runner=None):
             ex_cves.setdefault(c, []).append("CISA KEV mirror")
         for c in (eu_now or {}):
             ex_cves.setdefault(c, [])
+        for e in state["matches"].values():        # 之前算已遭利用的核心 CVE：這次資料源缺一時照樣算，不記成消失（同 extract 的 sticky；預驗第 6 項）
+            if isinstance(e, dict) and e.get("basis") == "kernel_cna" and e.get("status") == "open" and e.get("cve") not in ex_cves:
+                ex_cves[e["cve"]] = ["earlier run"]
         layers_by_rel = {}
         for p in projs:
             layers_by_rel.setdefault((p["name"], p["version"]), []).append(p)
@@ -554,6 +625,7 @@ def run(a, kernel_runner=None):
             ups, kg = kernel_upstreams(kp["kernel_versions"])
             for g in kg:
                 gaps.append(f"{kp['name']}@{kp['version']}：{g}")
+                kp.setdefault("gaps", []).append(g)
             if not ups:
                 per[kp["uuid"]]["kernel_cna"] = "GAP"
                 continue
@@ -565,6 +637,7 @@ def run(a, kernel_runner=None):
                 kernel_ok.add(kp["uuid"])
             else:
                 attn.append(f"{kp['name']}@{kp['version']}：核心 CNA NOT_RUN")
+                serious.append(f"{kp['uuid']} 核心 CNA NOT_RUN")
         if first:
             missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok]
             if missing:
@@ -588,6 +661,8 @@ def run(a, kernel_runner=None):
             attn.append(f"廠商層級 NOT_RUN（{type(e).__name__}）")
         coverage = list(NOT_RUN_DAILY)
         actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
+        if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
+            actions += health_actions(a.mode, state, serious, now, a.run_url)
         if a.demo:
             mark_demo(actions)
     finally:
@@ -609,7 +684,7 @@ def run(a, kernel_runner=None):
         [x for act in actions for x in publiccheck.check_text(act.get("title", "") + "\n" + act.get("body", ""), rules)]
     if probs:
         raise Fail(f"要寫進公開 Issue 的內容沒過公開檢查（{len(probs)} 筆，例如 {probs[0]}）：不產生 plan.json")
-    result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes,
+    result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
               "new": new, "back": back, "gone": gone, "stats": stats, "baseline": first}
     for name, obj in (("plan.json", plan), ("result.json", result)):
         tmp = os.path.join(a.out, name + ".tmp")

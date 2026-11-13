@@ -117,7 +117,7 @@ class Base(unittest.TestCase):
 
     def plan(self, actions, state=None, base=None, mode="real", name="plan.json"):
         p = {"schema": issues.PLAN_SCHEMA, "mode": mode, "generated_at": "2026-01-02T00:00:00Z",
-             "state_base": base, "state": state if state is not None else {"matches": {}, "runs": []},
+             "state_base": base, "state": state if state is not None else {"schema": 1, "matches": {}, "runs": []},
              "actions": actions, "status": "OK", "detail": ""}
         path = os.path.join(self.dir, name)
         with open(path, "w") as f:
@@ -129,6 +129,33 @@ class Base(unittest.TestCase):
 
     def open_act(self, key=K1, labels=("kev",), op="open"):
         return {"op": op, "key": key, "title": "CVE-2026-0001 於 demo", "body": "內容", "labels": list(labels)}
+
+
+class TestPlanHardening(Base):
+    """預驗第 7 項：notify 對 plan 的交叉核對。"""
+
+    def test_mode_mismatch_fails_and_writes_nothing(self):
+        rc, _ = self.apply(self.plan([self.open_act()], mode="drill"), "--mode", "real")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.gh.issues if isinstance(self.gh.issues, list) else list(self.gh.issues), [])
+
+    def test_label_not_in_whitelist_fails(self):
+        rc, _ = self.apply(self.plan([self.open_act(labels=("kev", "anything-else"))]), "--mode", "real")
+        self.assertEqual(rc, 1)
+
+    def test_too_many_actions_fails(self):
+        acts = [self.open_act(key=("%064x" % i)) for i in range(issues.MAX_ACTIONS + 1)]
+        rc, _ = self.apply(self.plan(acts), "--mode", "real")
+        self.assertEqual(rc, 1)
+
+    def test_state_mode_mismatch_fails(self):
+        rc, _ = self.apply(self.plan([], state={"schema": 1, "matches": {}, "dumpling": {"mode": "drill"}}), "--mode", "real")
+        self.assertEqual(rc, 1)
+
+    def test_http_only_loopback(self):
+        with self.assertRaises(issues.Fail):
+            issues.Api(base="http://api.example.com", token="t")
+        issues.Api(base="http://127.0.0.1:9", token="t")
 
 
 class TestMarker(unittest.TestCase):
@@ -268,7 +295,7 @@ class TestApply(Base):
         self.assertEqual(self.gh.writes, [])
 
     def test_open_and_state_created(self):
-        rc, out = self.apply(self.plan([self.open_act()], state={"matches": {"m": 1}}))
+        rc, out = self.apply(self.plan([self.open_act()], state={"schema": 1, "matches": {"m": 1}}))
         self.assertEqual(rc, 0, out)
         iss = [i for i in self.gh.issues.values() if "dumpling-watch" in [l["name"] for l in i["labels"]]]
         self.assertEqual(len(iss), 1)
@@ -276,7 +303,7 @@ class TestApply(Base):
         self.assertEqual([l["name"] for l in iss[0]["labels"]], ["kev", "dumpling-watch"])
         st = [i for i in self.gh.issues.values() if i["labels"] == [{"name": "watch-state"}]]
         self.assertEqual(len(st), 1)
-        self.assertEqual(issues.decode_state(st[0]["body"], "real"), {"matches": {"m": 1}})
+        self.assertEqual(issues.decode_state(st[0]["body"], "real"), {"schema": 1, "matches": {"m": 1}})
         self.assertEqual(self.gh.labels["kev"], "d73a4a")
         res = json.load(open(os.path.join(self.dir, "apply-result.json")))
         self.assertEqual(res["actions"][0]["result"], "opened")
@@ -328,7 +355,7 @@ class TestApply(Base):
         self.assertEqual(rc, 1)
         self.assertEqual(self.gh.writes, [])
         self.assertEqual(self.gh.issues, {})
-        rc, _ = self.apply(self.plan([self.open_act(K1)], state={"p": LOCAL_PATH}))
+        rc, _ = self.apply(self.plan([self.open_act(K1)], state={"schema": 1, "p": LOCAL_PATH}))
         self.assertEqual(rc, 1)
         self.assertEqual(self.gh.writes, [])
 

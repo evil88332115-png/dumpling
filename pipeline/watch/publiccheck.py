@@ -53,14 +53,15 @@ def check_text(text, rules=None):
     pats, allows = rules or load_rules()
     out = []
     for n, line in enumerate(str(text).splitlines() or [""], 1):
-        if any(a.search(line) for a in allows):
-            continue
-        for p in pats:
-            m = p.search(line)
-            if m:
-                out.append(f"第 {n} 行命中通用規則 {p.pattern!r}：{m.group(0).strip()[:60]!r}")
+        line_allowed = any(a.search(line) for a in allows)
+        if not line_allowed:
+            for p in pats:
+                m = p.search(line)
+                if m:
+                    out.append(f"第 {n} 行命中通用規則 {p.pattern!r}：{m.group(0).strip()[:60]!r}")
+        # 信箱同 ci/public-check.sh（grep -o 只看信箱本身）：白名單要比對信箱字串，不是整行
         for m in EMAIL_RE.finditer(line):
-            if not EMAIL_ALLOW.search(m.group(0)):
+            if not EMAIL_ALLOW.search(m.group(0)) and not any(a.search(m.group(0)) for a in allows):
                 out.append(f"第 {n} 行有不允許的信箱")
     return out
 

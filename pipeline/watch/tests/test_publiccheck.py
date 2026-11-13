@@ -21,6 +21,12 @@ class T(unittest.TestCase):
         self.assertEqual(pc.check_text("by 1+x@users.noreply.github.com"), [])
         self.assertTrue(pc.check_text("by someone@" + "corp.com"))
 
+    def test_email_not_excused_by_allowed_line(self):
+        pats, _ = pc.load_rules()
+        allows = [__import__("re").compile(r"(^|[^A-Za-z0-9._%+@-])" + "allowed-token-xyz" + r"($|[^A-Za-z0-9._%+@-])")]
+        self.assertTrue(pc.check_text("bob@" + "corp.com allowed-token-xyz", (pats, allows)))
+        self.assertEqual(pc.check_text("10." + "1.2.3 allowed-token-xyz", (pats, allows)), [])
+
     def test_source_relative_path_ok(self):
         self.assertEqual(pc.check_text("drivers/media/usb/x.c"), [])
 

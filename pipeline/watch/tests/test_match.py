@@ -88,7 +88,18 @@ class Base(unittest.TestCase):
         return st, detail, plan
 
 
+HEALTH_KEY = match.issue_key("real", "health")
+
+
+def nohealth(plan):
+    return [x for x in plan["actions"] if x["key"] != HEALTH_KEY]
+
+
 class T(Base):
+    def kev_key(self, plan, cve):
+        e = next(e for e in plan["state"]["matches"].values() if e["cve"] == cve)
+        return match.kev_group_key("real", e)
+
     def test_first_run_is_baseline(self):
         st, detail, plan = self.run_once(NOW1)
         self.assertEqual(plan["actions"], [])
@@ -100,14 +111,14 @@ class T(Base):
         self.run_once(NOW1)
         self.kev.append("CVE-2018-18074")                      # 合成的 KEV：把 requests 的 CVE 加進清單
         st, _, plan = self.run_once(NOW2)
-        opens = [x for x in plan["actions"] if x["op"] == "open"]
+        opens = [x for x in nohealth(plan) if x["op"] == "open"]
         self.assertEqual(len(opens), 1)
         self.assertIn("CVE-2018-18074", opens[0]["title"])
         self.assertIn("shipped", opens[0]["labels"])
         self.assertIn("layer-bsp", opens[0]["labels"])
         self.assertEqual(st, "ATTENTION")
         st, _, plan = self.run_once(NOW3)
-        self.assertEqual([x for x in plan["actions"] if x["op"] == "open"], [])
+        self.assertEqual([x for x in nohealth(plan) if x["op"] == "open"], [])
 
     def test_gone_comments(self):
         self.run_once(NOW1)
@@ -115,7 +126,9 @@ class T(Base):
         self.run_once(NOW2)
         self.grype = self.grype[:1]                             # requests 的比對消失
         _, _, plan = self.run_once(NOW3)
-        self.assertEqual([x["op"] for x in plan["actions"]], ["comment"])
+        acts = nohealth(plan)
+        self.assertEqual([x["op"] for x in acts], ["comment"])
+        self.assertEqual(acts[0]["key"], self.kev_key(plan, "CVE-2018-18074"))
 
     def test_missing_state_with_issues_fails(self):
         self.write_base(None, 3)
@@ -204,6 +217,65 @@ class T(Base):
         self.assertEqual(st, "GAP")
         self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
         self.assertTrue(os.path.exists(os.path.join(out, "report.md")))
+
+    def test_baseline_reappear_opens_issue(self):
+        """預驗 E1：基準裡的比對消失後再出現 → 開 Issue（不再當基準）。"""
+        self.run_once(NOW1)                                     # 基準含 log4j
+        saved = self.grype
+        self.grype = saved[1:]                                  # log4j 消失
+        self.run_once(NOW2)
+        self.grype = saved                                      # 再出現
+        _, _, plan = self.run_once(NOW3)
+        opens = [x for x in nohealth(plan) if x["op"] == "open"]
+        self.assertEqual(len(opens), 1)
+        self.assertIn("CVE-2021-44228", opens[0]["title"])
+
+    def test_new_component_in_existing_group_notifies(self):
+        """預驗 E2：已有 Issue 的群組出現新元件 → open_if_closed（原 Issue 留言，關閉了就開新的）。"""
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        _, _, p2 = self.run_once(NOW2)
+        self.grype.append(gmatch("CVE-2018-18074", "requests", "2.19.1", "pkg:pypi/requests@2.19.1"))
+        _, _, plan = self.run_once(NOW3)
+        acts = nohealth(plan)
+        self.assertEqual([x["op"] for x in acts], ["open_if_closed"])
+        self.assertEqual(acts[0]["key"], [x for x in p2["actions"] if x["op"] == "open"][0]["key"])
+        self.assertIn("新增元件", acts[0]["body"])
+        self.assertIn("requests@2.19.1", acts[0]["body"])
+
+    def test_health_issue_after_two_degraded_runs(self):
+        self.run_once(NOW1)                                     # 測試環境沒有 EUVD：每次都降級
+        _, _, p2 = self.run_once(NOW2)
+        self.assertEqual([x for x in p2["actions"] if x["key"] == HEALTH_KEY], [])     # 第 1 次降級：還不通知
+        _, _, p3 = self.run_once(NOW3)
+        h = [x for x in p3["actions"] if x["key"] == HEALTH_KEY]
+        self.assertEqual(len(h), 1)
+        self.assertIn("EUVD", h[0]["body"])
+        _, _, p4 = self.run_once("2026-11-13T01:00:00Z")
+        self.assertEqual([x for x in p4["actions"] if x["key"] == HEALTH_KEY], [])     # 7 天內不重複提醒
+
+    def test_kernel_cna_sticky_when_feed_missing(self):
+        kv = os.path.join(self.inv, "releases", "0", "kv.json")
+        json.dump({"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.8.12-x", "upstream_version": "6.8.12"}]}, open(kv, "w"))
+        self.inventory["releases"][0]["kernel_versions"] = "releases/0/kv.json"
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        runner = lambda v, m: ({"CVE-2024-99999": "affected"}, "fake")
+        self.run_once(NOW1, kernel_runner=runner)
+        self.kev.append("CVE-2024-99999")
+        self.run_once(NOW2, kernel_runner=runner)
+        self.kev.remove("CVE-2024-99999")                       # 資料源這次沒有這個 CVE
+        _, _, plan = self.run_once(NOW3, kernel_runner=runner)
+        self.assertEqual([x for x in nohealth(plan) if x["op"] == "comment"], [])      # 不記成消失
+        e = next(e for e in plan["state"]["matches"].values() if e["cve"] == "CVE-2024-99999")
+        self.assertEqual(e["status"], "open")
+
+    def test_release_version_dev_rejected(self):
+        self.inventory["releases"][0]["watch_version"] = "dev"
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        st, _ = match.run(argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds,
+                                             out=os.path.join(self.w, "o"), mode="real", kev_overlay=None, max_new_issues=20, run_url=None,
+                                             grype=None, grype_total_timeout=100, vendor_config=None, now=NOW1, demo=False))
+        self.assertEqual(st, "GAP")
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
