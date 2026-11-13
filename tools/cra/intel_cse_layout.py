@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Intel CSE 的 IFWI 分割區配置：CSE layout table → BPDT → 主程式分割區的 `$CPD` → `<名稱>.man` 的 `$MN2` manifest。
 
-x86_firmware.py 的 ME 版本原本靠 `$FPT` 分割區表（或名稱是 FTPR 的 `$CPD`）。新世代的 CSE 區域不用 `$FPT` 找主程式：
+x86_firmware.py 的 ME 版本先靠 `$FPT` 分割區表（或名稱是 FTPR 的 `$CPD`），沒有結果時才用這個模組。新世代的 CSE 區域不用 `$FPT` 找主程式：
 區域開頭是 CSE layout table，指到 1～5 個 boot partition（BP1…BP5），每個 boot partition 開頭是 BPDT（Boot Partition Descriptor Table），
 BPDT 的項目指到各子分割區（每個是一個 `$CPD` 目錄）。`$FPT` 只剩在 data partition 裡，不在區域開頭，也不列主程式。
 新世代（例如 CSME 18）沒有 FTPR 那一項：CSE 主程式在 RBEP（BPDT type 1）與 NFTP（type 7）兩個分割區，各自的 manifest 版本相同。
@@ -32,7 +32,7 @@ BPDT 項目裡的 S-BPDT（type 5）不往下追（不會有循環或遞迴）�
   未知的 Size 沒有依據，CRC 算得對也不代表欄位排列相同）；CRC 不符 → GAP；Size 是其他值（例如 0x5C、0x64、0x68、0x70）→ 不認（none）。
   0x40 與 0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。
   公開定義（MEAnalyzer、coreboot cse_layout.h）只到 +0x58（external error log 結尾）；Size 0x58 的 +0x58…+0x67 與 Size 0x60 的 +0x58…+0x6F（表尾）沒有公開欄位定義
-  （三個公開真樣本的表尾都是 0）。表尾全為 0 時行為不變。表尾不全為 0 時**不解讀它**（不當成 BP 指標），只在下面三項全部成立時才採用版本：
+  （三個公開真樣本的表尾都是 0）。表尾全為 0：照一般流程，沒有 ATTENTION。表尾不全為 0 時**不解讀它**（不當成 BP 指標），只在下面三項全部成立時才採用版本：
   (a) 整張表的 CRC-32 相符（範圍照 Size，包含表尾）、(b) BP1…BP5 都通過上面的檢查（指到 BPDT、不重疊、不超出區域、不壓到表本身——BP 落在表內一律 GAP）、
   (c) 有 FTPR，或 RBEP 與 NFTP 都在而且版本相同。採用時另外回報 attention（代碼 layout-undocumented-fields，文字「layout table 有未公開欄位（+0x58～+0x<尾>），未解讀」
   與原始值，8 bytes 一組），basis 也帶同一段；任一項不成立 → GAP，原因照實寫。這個情況沒有公開真樣本核對（測試用合成資料）。

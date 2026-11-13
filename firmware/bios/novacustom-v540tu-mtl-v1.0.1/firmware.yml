@@ -11,9 +11,9 @@ files:
     size: 33554432
     role: image
 license:
-  name: Dasharo 開放原始碼韌體（coreboot GPL-2.0；edk2 BSD-2-Clause-Patent；內含 Intel ME／FSP／微碼二進位 blob）
-  url: https://docs.dasharo.com/
-  note: 3mdeb 公開下載；blob 的條款屬 Intel 所有（release notes 的 SBOM 列出 Intel OBL 授權連結）。本 repo 只在 CI 下載核對，不重新散布。
+  name: Dasharo 韌體映像（coreboot、edk2 的 Dasharo 分支，加上 Intel ME／FSP／微碼二進位 blob；各元件依上游專案或 Intel 的授權）
+  url: https://docs.dasharo.com/variants/novacustom_v540tu/releases/
+  note: 3mdeb 公開下載。v1.0.1 release notes 的 SBOM 對 ME、FSP、flash descriptor 附 Intel OBL 軟體授權（dasharo-blobs 倉庫 licenses 目錄的 PDF）、微碼附 Intel 微碼倉庫的 license 檔；coreboot 與 edk2 兩列頁面沒有列授權。本 repo 只在 CI 下載核對，不重新散布。
 notes: |
   挑選的技術理由：完整 32 MiB SPI 映像，有 flash descriptor 與 ME 區域，但 ME 區域的配置是新世代的：
   區域開頭是 CSE layout table（layout 1.7，size 欄位 0x58）→ BP1、BP3 兩個 boot partition，各有 BPDT（version 2）；

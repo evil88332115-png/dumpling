@@ -1,7 +1,7 @@
 # C2：擴充新世代 Intel CSME 的解析範圍（分支 wp3/csme-new）
 
-x86_firmware.py 原本只有一條路找 CSE 版本：`$FPT` 分割區表 → FTPR → `$CPD` 的 FTPR.man →
-`$MN2`（退路：名稱是 FTPR 的 `$CPD`）。新世代的 ME 區域配置沒有這兩樣，結果是 unknown。這份是工作紀錄，不是驗證結論；
+x86_firmware.py 有兩條路找 CSE 版本。第一條：`$FPT` 分割區表 → FTPR → `$CPD` 的 FTPR.man →
+`$MN2`（退路：名稱是 FTPR 的 `$CPD`）。第二條（`intel_cse_layout.py`）：CSE layout table → BPDT → FTPR／RBEP／NFTP 的 manifest，只在第一條沒有結果時才走。新世代的 ME 區域配置沒有第一條要的東西（`$FPT` 只在 data partition、沒有 FTPR 那一項）。這份是工作紀錄，不是驗證結論；
 數字是 2026-11-13 對公開樣本量的，樣本不進 repo（D-028）。
 
 ## 檔案
@@ -9,8 +9,8 @@ x86_firmware.py 原本只有一條路找 CSE 版本：`$FPT` 分割區表 → FT
 | 檔案 | 內容 |
 |---|---|
 | `tools/cra/intel_cse_layout.py` | 新模組：CSE layout table → BPDT → FTPR／RBEP／NFTP 分割區的 `$CPD` → `<名稱>.man` 的 `$MN2`。只讀、無全檔掃描、無 regex、全部有固定上限 |
-| `tools/cra/x86_firmware.py` | 只動 ME 那段的接線（含把表尾 ATTENTION 加進 `incomplete`）：原來的 `me_info` 改名 `me_info_fpt`（內容沒改），新的 `me_info` 先呼叫它，結果不是 found 才試新模組；AMD 相關程式沒動 |
-| `tools/cra/tests/test_intel_cse_layout.py` | 132 個測試（pytest 計數，含參數化），測資全由測試當場合成 |
+| `tools/cra/x86_firmware.py` | ME 那段的接線：`me_info_fpt` 走第一條路（`$FPT`、名稱是 FTPR 的 `$CPD`），`me_info` 先呼叫它，結果不是 found 才呼叫 `intel_cse_layout.py`；採用 layout table 的版本而表尾不全為 0 時，把 ATTENTION 加進 `incomplete` |
+| `tools/cra/tests/test_intel_cse_layout.py` | 141 個測試（pytest 計數，含參數化），測資全由測試當場合成 |
 | `firmware/bios/novacustom-v540tu-mtl-v1.0.1/firmware.yml` | 公開真樣本（Size 0x58）與 `expected.intel_me` |
 | `firmware/bios/novacustom-nuc-box-arl-v0.9.2/firmware.yml` | 公開真樣本（Size 0x60）與 `expected.intel_me`、微碼 |
 
@@ -60,7 +60,7 @@ Dasharo NovaCustom V540TU（Meteor Lake）v1.0.1 的 `btg_prod.rom`（32 MiB，s
 微碼也寫進 expected：映像讀到 000A06A4／platform 0xE6／revision 0x25，Dasharo v1.0.1 release notes 的 SBOM 寫 "MTL C0 0x00000025 0x25 19/03/2025"（連結指到 `intel-ucode/06-aa-04`），Intel 微碼倉庫 microcode-20250812 的 releasenote.md 寫 "MTL | C0 | 06-aa-04/e6 | 00000024 | 00000025"（platform mask e6）。FSP、coreboot 資訊：release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12"，與映像的 FSPH ImageRevision 不同格式），**已讀出但沒有佐證**，不寫。
 
 交叉驗證（不改變任何既有結果）：Comet Lake 的 Dasharo 映像（`dasharo-protectli-vp46xx-v1.2.0`，layout 1.6、BPDT version 1、`$CPD` header version 1）用新模組讀到
-FTPR.man、RBEP.man、NFTP.man 全部是 14.0.47.1558，與既有 expected 一致。那份映像原本就由舊的退路（名稱是 FTPR 的 `$CPD`）找到，新模組不會被呼叫。
+FTPR.man、RBEP.man、NFTP.man 全部是 14.0.47.1558，與既有 expected 一致。那份映像由第一條路的退路（名稱是 FTPR 的 `$CPD`）找到，這個模組不會被呼叫。映像裡有名稱是 FTPR 的 `$CPD`、第一條路先找到版本時，不會查 layout table，所以表尾不會有 ATTENTION（表尾規則只管從 layout table 採用版本的情況）。
 
 ## layout 1.7 的 Size 0x60 變體
 
@@ -86,7 +86,7 @@ FTPR.man、RBEP.man、NFTP.man 全部是 14.0.47.1558，與既有 expected 一�
 
 **表尾（+0x58 到表尾）**：公開定義（MEAnalyzer 的 `CSE_Layout_Table_17`、coreboot `cse_layout.h` 的 `struct cse_layout`）都只到 +0x58（external error log 結尾）；
 Size 0x58 的 +0x58…+0x67 與 Size 0x60 的 +0x58…+0x6F 都沒有公開欄位名稱。三個公開真樣本這段全是 0。本模組**不解讀**這段（不當成 BP 指標），規則：
-- 表尾全為 0：行為完全不變。
+- 表尾全為 0：照一般流程，沒有 ATTENTION。
 - 表尾不全為 0：下面三項**全部**成立才採用版本——(a) 整張表的 CRC-32 相符（範圍照 Size，包含表尾）；(b) BP1…BP5 都通過同樣的檢查（每個非空 BPn 指到 BPDT、不重疊、不超出區域、不壓到表本身）；
   (c) 有 FTPR，或 RBEP 與 NFTP 都在而且版本相同。採用時另外回報 ATTENTION：代碼 `layout-undocumented-fields`，文字「layout table 有未公開欄位（+0x58～+0x<尾>），未解讀」加上原始值（檔案順序的 bytes，8 bytes 一組）。
   這段會進三個地方：x86_firmware 的 `incomplete`（前綴 `ME:`，所以整份狀態是 ATTENTION、SBOM 的 `sca-center:incomplete`、fw-inventory.md 的「不完整」）、ME 元件的 `sca-center:version-basis`（basis 尾端 `ATTENTION layout-undocumented-fields: …`）。

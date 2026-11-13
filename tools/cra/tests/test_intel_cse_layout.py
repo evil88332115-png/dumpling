@@ -220,7 +220,7 @@ def test_standalone_region_file_with_layout_table_at_the_start():
     mi = xf.me_info(full, regs, next(r for r in regs if r["name"] == "me"), beyond)
     assert mi["status"] == "found" and mi["standalone"] is False
     assert xf.bios_image(full)["fit"]["status"] != "not-applicable"
-    # 不在檔案開頭（例如 capsule 包著）：不處理，維持原本的結果（沒有 ME 結構 → no-me-region 或 unknown）
+    # 不在檔案開頭（例如 capsule 包著）：不處理，結果由第一條路決定（沒有 ME 結構 → no-me-region 或 unknown）
     b = xf.bios_image(b"\x00" * 0x1000 + bytes(good_region()))
     assert b["me"] is None and b["me_status"] in ("no-me-region", "unknown")
 
@@ -228,7 +228,7 @@ def test_standalone_region_file_with_layout_table_at_the_start():
 # ---------- 既有世代不變 ----------
 
 def test_fpt_generation_result_is_unchanged():
-    """$FPT 找得到 FTPR → basis、版本和以前一樣（$FPT 在區域開頭或 +0x10；新模組沒有 layout table 可看）。"""
+    """$FPT 找得到 FTPR → basis 與版本照第一條路（$FPT 在區域開頭或 +0x10；新模組沒有 layout table 可看）。"""
     for off in (0, 0x10):
         b = xf.bios_image(with_me(bytes(me_region("me11", off))))
         assert b["me"]["version"] == "16.1.30.2307" and b["me"]["basis"] == "FTPR partition ($FPT, $CPD FTPR.man)" and b["me_note"] is None
@@ -715,6 +715,65 @@ def test_layout_17_nonzero_tail_with_a_missing_nftp_is_a_gap(size):
     r[0x3100:0x3200] = b"\xff" * 0x100
     res = found(r)
     assert res["status"] == "gap" and "version" not in res
+
+
+def recrc(r, size):
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    return r
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+@pytest.mark.parametrize("only,gone", [("RBEP", 0x30), ("NFTP", 0x20)])
+def test_layout_17_nonzero_tail_with_a_single_main_partition_type_is_a_gap(size, only, gone):
+    """表尾非 0 時仍要 FTPR，或 RBEP＋NFTP 兩種都在：只有 RBEP 或只有 NFTP → GAP、不報版本、沒有 attention。"""
+    r = with_tail(size, 0x58, 0x01)
+    struct.pack_into("<II", r, gone, 0, 0)                          # 0x30＝BP3（NFTP）、0x20＝BP1（RBEP）的指標拿掉
+    recrc(r, size)
+    res = found(r)
+    assert res["status"] == "gap" and "version" not in res and "attention" not in res, res
+    assert only in res["note"] or "no FTPR" in res["note"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_wiring_carries_the_complete_raw_values(size):
+    """incomplete、SBOM 的 sca-center:incomplete 與 version-basis 都要有完整的原始值（逐 8 bytes 一組），不是只有開頭。"""
+    r = good_region(size=size)
+    n = 0x10 + size - 0x58
+    r[0x58:0x58 + n] = bytes(range(0x11, 0x11 + n))
+    recrc(r, size)
+    raw = tail_raw(r, size)
+    assert raw.count("+0x") == n // 8 and raw.split(", ")[-1].endswith(bytes(r[0x58 + n - 8:0x58 + n]).hex())
+    img = with_me(bytes(r))
+    b = xf.bios_image(img)
+    want = f"ME: layout-undocumented-fields: layout table 有未公開欄位（+0x58～+0x{0x10 + size - 1:x}），未解讀；原始值（檔案順序的 bytes，8 bytes 一組）{raw}"
+    assert want in b["incomplete"] and b["me"]["basis"].endswith(f"ATTENTION layout-undocumented-fields: {want[len('ME: layout-undocumented-fields: '):]}")
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "BIOS.bin"
+        p.write_bytes(img)
+        inv = xf.inventory([p])
+        comps, _ = xf.components(inv)
+    vals = [q["value"] for c in comps for q in c.get("properties", []) if q["name"] in ("sca-center:incomplete", "sca-center:version-basis")]
+    assert want in vals and any(raw in v for v in vals if v.startswith("BPDT"))
+    assert raw in xf.status_of(inv)[1] and raw in xf.markdown(inv)
+
+
+def test_layout_16_never_has_an_attention():
+    res = found(good_region("1.6", REGION, None, 1, 1))
+    assert res["status"] == "found" and res["layout"] == "CSE layout table 1.6" and res["attention"] == [] and "ATTENTION" not in res["basis"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_bp_end_exactly_at_the_region_end_is_normal_and_one_byte_more_is_a_gap(size):
+    def region(bp3_size):
+        r = good_region(size=size)
+        struct.pack_into("<II", r, 0x18, 0x100, 0x100)                       # data 移開，才不會壓到延長後的 BP3
+        struct.pack_into("<II", r, 0x30, 0x3000, bp3_size)
+        return recrc(r, size)
+    ok = found(region(REGION - 0x3000))
+    assert ok["status"] == "found" and ok["version"] == VERS
+    over = found(region(REGION - 0x3000 + 1))
+    assert over["status"] == "gap" and "outside the region" in over["note"] and "version" not in over
 
 
 @pytest.mark.parametrize("size", [0x58, 0x60])
