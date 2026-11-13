@@ -75,7 +75,9 @@ class FakeGitHub(issues.Api):
             return 201, {}, json.dumps(self.issues[num]).encode()
         if len(tail) == 2 and tail[0] == "issues" and method == "PATCH":
             i = self.issues[int(tail[1])]
-            i.update({k: v for k, v in data.items()})
+            i.update({k: v for k, v in data.items() if k != "labels"})
+            if "labels" in data:
+                i["labels"] = [{"name": x} for x in data["labels"]]
             i["updated_at"] = self._ts()
             return 200, {}, json.dumps(i).encode()
         if len(tail) == 3 and tail[2] == "comments" and method == "POST":
@@ -411,6 +413,27 @@ class TestCloseDrill(Base):
         self.assertNotIn(r, self.gh.comments)
         self.assertNotIn(rs, self.gh.comments)
         self.assertNotIn(done, self.gh.comments)
+        names = lambda n: [l["name"] for l in self.gh.issues[n]["labels"]]
+        self.assertEqual(names(d), ["dumpling-watch-drill-done", "drill"])
+        self.assertEqual(names(ds), ["watch-state-drill-done", "drill"])
+        self.assertEqual(names(r), ["dumpling-watch"])
+        self.assertEqual(names(rs), ["watch-state"])
+        self.assertEqual(names(done), ["dumpling-watch", "drill"])
+
+    def test_fresh_drill_after_close(self):
+        plan = self.plan([self.open_act()], mode="drill")
+        self.assertEqual(run(["apply", "--repo", REPO, "--plan", plan], self.gh)[0], 0)
+        self.assertEqual(run(["close-drill", "--repo", REPO], self.gh)[0], 0)
+        rc, _ = run(["read-state", "--repo", REPO, "--mode", "drill", "--out", self.dir], self.gh)
+        self.assertEqual(rc, 0)
+        with open(os.path.join(self.dir, "state-base.json")) as f:
+            self.assertEqual(json.load(f), {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 0})
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "state.json")))
+        before = len(self.gh.issues)
+        plan = self.plan([self.open_act()], mode="drill", name="p2.json")
+        rc, _ = run(["apply", "--repo", REPO, "--plan", plan], self.gh)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.gh.issues), before + 2)  # 新的監控 Issue＋新的狀態 Issue
 
 
 class TestTransport(Base):

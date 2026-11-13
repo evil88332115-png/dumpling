@@ -487,16 +487,23 @@ def cmd_apply(api, repo, plan_path, dry):
 
 
 def cmd_close_drill(api, repo):
+    """關閉演練 Issue，並把 dumpling-watch／watch-state-drill 標籤換成 *-done，讓下一次演練完全看不到這次的痕跡。
+    只碰有 drill 標籤的 Issue；沒有 drill 標籤的絕不改標籤。"""
     closed = []
-    targets = [i for i in list_issues(api, repo, "dumpling-watch", "open")]
+    targets = list_issues(api, repo, "dumpling-watch", "open")
     targets += list_issues(api, repo, "watch-state-drill", "open")
+    swap = {"dumpling-watch": "dumpling-watch-drill-done", "watch-state-drill": "watch-state-drill-done"}
+    labels = Labels(api, repo, False)
     seen = set()
     for i in targets:
-        if i["number"] in seen or "drill" not in label_names(i):
+        names = label_names(i)
+        if i["number"] in seen or "drill" not in names:
             continue
         seen.add(i["number"])
+        new = list(dict.fromkeys(swap.get(n, n) for n in names))
+        labels.ensure([n for n in new if n.endswith("-done")])
         api.request("POST", f"/repos/{repo}/issues/{i['number']}/comments", {"body": "演練結束，自動關閉"})
-        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"state": "closed"})
+        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"state": "closed", "labels": new})
         closed.append(i["number"])
     return f"關閉 {len(closed)} 個演練 Issue：{closed}"
 
