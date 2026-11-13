@@ -178,10 +178,13 @@ class GitHubSource:
             h["Authorization"] = "Bearer " + self.token
         return h
 
+    def _page_headers(self, url):
+        return self._headers("application/vnd.github+json", True)
+
     def _get_page(self, url):
         if _origin(url) != _origin(self.api_base):
             raise ApiError("分頁網址不在 API 主機")
-        req = urllib.request.Request(url, headers=self._headers("application/vnd.github+json", True))
+        req = urllib.request.Request(url, headers=self._page_headers(url))
         try:
             resp = self.opener.open(req, timeout=TIMEOUT)
         except urllib.error.HTTPError as e:
@@ -336,10 +339,20 @@ class GitLabSource(GitHubSource):
         return "gitlab:" + self.project
 
     def _headers(self, accept, auth):
+        raise AssertionError("GitLabSource 只用 _auth_headers(url, …)：token 要先核對網址才送")
+
+    def _auth_headers(self, url, accept):
+        """GitLab 的請求標頭：token（PRIVATE-TOKEN）只送給 API 主機——每次都依網址核對，不靠呼叫端記得（#74 驗證建議 5）。"""
+        if _origin(url) != _origin(self.api_base):
+            raise ApiError("不送 token 到 API 主機以外的網址")
         h = {"Accept": accept, "User-Agent": UA}
-        if auth and self.token:
+        if self.token:
             h["PRIVATE-TOKEN"] = self.token
         return h
+
+    def _page_headers(self, url):
+        # GitLab 的 API 回 JSON；GitHub 的 vnd.github+json 對 GitLab 可能是 406（#74 驗證應修 2，官方 /api/rest/ 的範例不帶 Accept）
+        return self._auth_headers(url, "application/json")
 
     def list_releases(self):
         url = "%s/projects/%s/releases?per_page=100" % (self.api_base, self.project)
@@ -400,7 +413,11 @@ class GitLabSource(GitHubSource):
         url = asset.handle
         if self._package_file(url) is None:
             raise AssetError("附件網址不是本專案的 Generic Package 檔案")
-        req = urllib.request.Request(url, headers=self._headers("application/octet-stream", True))
+        try:
+            hdr = self._auth_headers(url, "application/octet-stream")
+        except ApiError as e:
+            raise AssetError(str(e))
+        req = urllib.request.Request(url, headers=hdr)
         try:
             resp = self.opener.open(req, timeout=TIMEOUT)
         except urllib.error.HTTPError as e:

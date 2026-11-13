@@ -230,7 +230,9 @@ class Api:
 #   Notes：/api/notes/（POST …/issues/:issue_iid/notes，body 必填）　Labels：/api/labels/（POST name＋color，color 要 # 開頭）
 #   分頁：/api/rest/（per_page 最大 100；Link rel=next；x-next-page）　rate limit：/administration/settings/user_and_ip_rate_limits/（429、Retry-After、RateLimit-Reset 是 epoch 秒）
 # 行首（允許縮排：官方只說要「獨立一行」，沒說縮排行算不算）是 /指令 的行。驗證 S1：放寬到縮排也擋
-QUICK_ACTION_RE = re.compile(r"^[ \t]*/[A-Za-z_]+(\s|$)", re.M)
+# 行首的判定從嚴（#74 驗證建議 4）：\n 以外，\r、\v、\f、NEL、U+2028／U+2029 之後也算行首；縮排可以是空白、tab、NBSP、全形空白。
+# 寧可誤擋。零寬字元、全形 ／ 開頭會不會被 GitLab 當成 quick action 沒有核對（GITLAB-PORT T-05 的內部驗證清單）
+QUICK_ACTION_RE = re.compile(r"(?:^|[\r\x0b\x0c\x85\u2028\u2029])[ \t\u00a0\u3000]*/[A-Za-z_]+(\s|$)", re.M)
 GITLAB_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/api/v4$")
 LOOPBACK_URL_RE = re.compile(r"^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/api/v4$")
 
@@ -314,7 +316,7 @@ class GitLabApi(Api):
 
     @staticmethod
     def precheck(texts):
-        """apply 在任何寫入之前呼叫：要送出的內文都不能有 quick action 行（dry-run 也檢查；驗證 F1）。"""
+        """apply 在任何寫入之前呼叫：要送出的標題與內文都不能有 quick action 行（dry-run 也檢查；驗證 F1、#74 驗證應修 1）。"""
         for what, t in texts:
             if isinstance(t, str) and QUICK_ACTION_RE.search(t):
                 raise Fail(f"{what}有以 / 開頭的行（GitLab quick action，可能被執行）：什麼都沒寫")
@@ -341,7 +343,7 @@ class GitLabApi(Api):
 
     def create_issue(self, repo, title, body, labels):
         d, _ = self.request("POST", f"/projects/{repo}/issues",
-                            {"title": title, "description": self._text(body, "Issue 內文"),
+                            {"title": self._text(title, "Issue 標題"), "description": self._text(body, "Issue 內文"),
                              "labels": self._labels(labels), "confidential": True})
         # 伺服器沒照做（例如參數被忽略）就不能當作沒事：Issue 已建立但不是 confidential → FAIL，讓人去處理（驗證 S4）
         if not isinstance(d, dict) or d.get("confidential") is not True:
@@ -360,6 +362,8 @@ class GitLabApi(Api):
             return None
         payload["confidential"] = True      # 改既有 Issue 時也確保是 confidential（例如狀態 Issue 是別人手動建的；驗證 S4）
         d, _ = self.request("PUT", f"/projects/{repo}/issues/{number}", payload)
+        if not isinstance(d, dict) or d.get("confidential") is not True:      # 同建立：回應不是 confidential 就 FAIL（#74 驗證應修 3）
+            raise Fail(f"GitLab Issue #{number} 修改後不是 confidential：請立刻手動改成 confidential")
         return self._issue(d)
 
     def add_comment(self, repo, number, body):
@@ -654,7 +658,8 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
         prepared.append(a)
     public_check(texts)
     if getattr(api, "kind", "github") == "gitlab":      # quick action：寫入前全部檢查（狀態內文＋每個動作的內文；dry-run 也是）
-        GitLabApi.precheck([("狀態 Issue 內文", state_body)] + [(f"actions[{n}].body", a["body"]) for n, a in enumerate(prepared)])
+        GitLabApi.precheck([("狀態 Issue 內文", state_body)] + [(f"actions[{n}].body", a["body"]) for n, a in enumerate(prepared)]
+                           + [(f"actions[{n}].title", a.get("title")) for n, a in enumerate(prepared)])
 
     labels = Labels(api, repo, dry)
     created = set()  # dry-run 用：本次「會建立」的 key

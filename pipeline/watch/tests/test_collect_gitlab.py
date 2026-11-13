@@ -97,6 +97,32 @@ class TestGitLab(Base):
         self.assertEqual(sorted(inv["releases"][0]), sorted(ginv["releases"][0]))
         self.assertEqual(inv["releases"][0]["sboms"]["os"]["sha256"], ginv["releases"][0]["sboms"]["os"]["sha256"])
 
+    def test_accept_header_differs_by_backend(self):
+        # #74 驗證應修 2：GitLab 列 Release 不送 GitHub 的 vnd.github+json（真實 GitLab 可能回 406）
+        w = World()
+        w.add("p/v1", tc.files())
+        self.assertEqual(self.gl(w)[0], 0)
+        lists = [h for u, h in w.requests if "/releases?" in u]
+        self.assertTrue(lists)
+        self.assertTrue(all(h["accept"] == "application/json" for h in lists), lists)
+        gh = tc.World(use_redirect=False)
+        gh.add("p/v1", tc.files())
+        tc.go(["--repo", "o/r", "--out", os.path.join(self._td.name, "gh")], {"GH_TOKEN": tc.TOKEN}, gh)
+        ghl = [h for u, h in gh.requests if "/releases?" in u]
+        self.assertTrue(ghl)
+        self.assertTrue(all(h["accept"] == "application/vnd.github+json" for h in ghl), ghl)
+
+    def test_token_only_for_api_host_checked_per_url(self):
+        # #74 驗證建議 5：token 標頭每次依網址核對（不靠呼叫端），別的主機一律拒絕；舊的 _headers(accept, auth) 不能再用
+        src = collect.GitLabSource(PROJ, BASE, TOKEN, None, 1 << 20)
+        h = src._auth_headers(BASE + "/projects/7/releases", "application/json")
+        self.assertEqual(h["PRIVATE-TOKEN"], TOKEN)
+        for u in ("https://evil.example/api/v4/projects/7/releases", "http://gitlab.example.com/api/v4/x", "https://gitlab.example.com:8443/api/v4/x"):
+            with self.assertRaises(collect.ApiError, msg=u):
+                src._auth_headers(u, "application/json")
+        with self.assertRaises(AssertionError):
+            src._headers("application/json", True)
+
     def test_private_token_header_and_no_authorization(self):
         w = World()
         w.add("p/v1", tc.files())

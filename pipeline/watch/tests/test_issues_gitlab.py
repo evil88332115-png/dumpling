@@ -371,6 +371,49 @@ class TestApply(Base):
         self.assertEqual(st_issue["description"], issues.encode_state(hit, "real", summary, urlsafe=True))
         self.assertNotIn("/", st_issue["description"].split("```")[1])
 
+    def test_quick_action_in_title_refused_before_writes(self):
+        # #74 驗證應修 1：標題也擋（real 與 dry-run）
+        act = self.open_act()
+        act["title"] = "/close"
+        for extra in ((), ("--dry-run",)):
+            rc, out = self.apply(self.plan([act]), "--mode", "real", *extra)
+            self.assertEqual(rc, 1, (extra, out))
+            self.assertEqual(self.gl.writes, [])
+
+    def test_quick_action_line_starts_strict(self):
+        # #74 驗證建議 4：\r、NBSP、U+2028／U+2029、全形空白之後的 / 也算行首；行中間的不算
+        for t in ("x\r/close", "\u00a0/close", "x\u2028/close", "x\u2029/close", "\u3000/close", "x\x0b/close", "x\x85/close", "\t /label ~x"):
+            self.assertIsNotNone(issues.QUICK_ACTION_RE.search(t), repr(t))
+        for t in ("see a/close", "path /usr/lib", "x /2close"):
+            self.assertIsNone(issues.QUICK_ACTION_RE.search(t), repr(t))
+
+    def test_api_layer_refuses_quick_action_without_precheck(self):
+        # 第二道防線（_text）：直接呼叫 API 層也擋，什麼都不送（#74 驗證建議 5：只拿掉 _text 時要有測試失敗）
+        n = self.gl.add_issue("x", ["kev"])
+        for call in (lambda: self.gl.create_issue(PROJ, "t", "a\n/close", []),
+                     lambda: self.gl.create_issue(PROJ, "/close", "b", []),
+                     lambda: self.gl.edit_issue(PROJ, n, body="/reopen"),
+                     lambda: self.gl.add_comment(PROJ, n, "ok\n/close")):
+            with self.assertRaises(issues.Fail):
+                call()
+        self.assertEqual([r for r in self.gl.requests if r[0] != "GET"], [])
+
+    def test_edit_response_must_be_confidential(self):
+        # #74 驗證應修 3：PUT 的回應不是 confidential → FAIL
+        n = self.gl.add_issue("x", ["kev"])
+        self.gl.issues[n]["confidential"] = False
+        orig = self.gl._raw
+        def raw(method, url, headers, body):
+            st, h, data = orig(method, url, headers, body)
+            if method == "PUT":
+                d = json.loads(data)
+                d["confidential"] = False
+                data = json.dumps(d).encode()
+            return st, h, data
+        self.gl._raw = raw
+        with self.assertRaises(issues.Fail):
+            self.gl.edit_issue(PROJ, n, body="y")
+
     def test_create_must_come_back_confidential_and_edits_keep_it(self):
         self.gl.create_confidential_reply = False      # 伺服器忽略了 confidential
         rc, out = self.apply(self.plan([self.open_act()]), "--mode", "real")
