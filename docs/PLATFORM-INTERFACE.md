@@ -106,9 +106,9 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
   格式不對 → 結束碼 1（sources.yml 驗證時就會報錯）。Jetson 的 `scan.sh` 是範例。
 - **分層重跑要告訴 sca-scan 核心在哪份報告**（`--kernel-in-other-report <專案>-bsp`；詳見 `docs/LAYERS.md` §6）。核心永遠在 bsp 層，`-os` 層的 SBOM 沒有核心，
   但 sca-scan 的核心階段是從**映像**讀核心的，不看分層後的 SBOM：不告訴它，`-os` 報告會對映像裡的核心再判定一遍（Jetson 得 `C-kernel-cve-list`／`C-kernel-config`／`C-kernel-module-map` 三列假的 GAP；
-  Raspberry Pi 型的 CNA 版本比對會「成功」，`-os` 報告多出約 2700 列合成的 linux-kernel 列，標 `synthetic:kernel-cna`）。**平台轉接器對 `scan_plan` 裡後綴不是空的每一項重跑，都要給**
+  Raspberry Pi 型的 CNA 版本比對會「成功」，`-os` 報告多出約 2700 列合成的 linux-kernel 列，標 `synthetic:kernel-cna`）。**平台轉接器對 `scan_plan` 裡 bsp 以外的分層重跑（`-os`）都要給**
   `wiz "$suffix" --kernel-in-other-report "$DUMPLING_PROJECT-bsp" --rescan-from …`（wizard `cra-scan.py` 的選項，一路傳到 `scan-flash-package.sh`、`sca-scan`；後兩者另接受環境變數 `SCA_KERNEL_IN_OTHER_REPORT`，命令列優先）。
-  完整掃描和 `ours` 的空後綴重跑（SBOM 是整個產品）不給。給了也只有「SBOM 真的沒有核心」（kernelcheck 的 NOT_RUN）才生效，bsp 層有核心照舊，所以對 bsp 層給是無害的。
+  `-bsp` 自己、完整掃描和 `ours` 的空後綴重跑（SBOM 是整個產品）**不給**：給 `-bsp` 等於指向自己，bsp 的 SBOM 偵測不到核心時（廠商核心不是套件）會把該做的核心判定（含 CNA 退回）壓掉，sca-scan 對「名稱等於自己的 `--name`」以 exit 64 拒絕。給了也只有「SBOM 真的沒有核心」（kernelcheck 的 NOT_RUN）才生效。
   不能只由「SBOM 沒有核心」推定：單一 SBOM 的廠商核心（不是套件）要走 CNA 版本比對。名稱只接受 `^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$`，否則 exit 64。Jetson 的 `scan.sh` 是範例。
 - **宣告核心不是發行版的核心**（`kernel_not_distro`，選用）。Grype、DT 對 Debian／Ubuntu 套件是用發行版的原始碼套件與版本字串比對；核心若不是發行版建的（廠商 BSP 核心的 deb、Raspberry Pi、Radxa），這個比對不可靠，
   而且是漏報的方向（例如 `1:6.18.50-1+rpt1` 因為 epoch，被當成比 Debian 6.12.x 的任何修補都新，Debian 修好的 CVE 全算已修好，只剩 Debian 尚未修的）。所以 `C-kernel-coverage` 在這種核心上是 GAP，
@@ -121,7 +121,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
        `distro=ubuntu-*` **不**看其他 `linux-<flavor>` 來源（`linux-nvidia-tegra`、`linux-raspi`、`linux-aws`… 都是 Canonical 的核心）。清單與出處在 `tools/pilot/lib/data/distro-kernel-sources.json`；檔案讀不到或格式不對 → `C-kernel-coverage` FAIL，不當作沒有問題。
     - 名稱與版本取 SBOM 元件的欄位與 purl 兩邊（purl 先解碼），任何一邊成立就算。`nvidia-l4t-kernel*`（NVIDIA 的核心套件，經 `C-kernel-l4t-map` 對應 Canonical 核心比對）和 Canonical 的 Tegra 核心不會被標，Jetson 不受影響。
   - **自動規則抓不到的**（要用 `kernel_not_distro` 宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu（沒有 epoch、沒有 `+rpt`／`+rpi`），而且 purl 沒有 `upstream=`／`distro=` 限定詞，或限定詞也像發行版
-    （例如把來源套件命名成 `linux` 的廠商）；非 deb 的核心（rpm、apk、Yocto 的 `linux-kernel` 元件、沒有套件的廠商核心）；後綴不在清單裡的廠商（例如其他 SoC 廠商的 `+vendor1` 後綴）。這些規則抓得到已知的樣子，抓不到不代表核心是發行版的。
+    （例如把來源套件命名成 `linux` 的廠商）；非 deb 的核心（rpm、apk、Yocto 的 `linux-kernel` 元件、沒有套件的廠商核心）；後綴不在清單裡的廠商（例如其他 SoC 廠商的 `+vendor1` 後綴）或不是 `+` 的寫法（`~rpt`、`.rpt`）；`distro=` 不是 Debian（例如 `raspbian-*`）而來源套件是自訂名稱、或 purl 只有 `upstream=` 沒有 `distro=`；套件名稱不在核心套件清單（`KERNEL_PACKAGE_PATTERNS`）裡，連「SBOM 有核心」都偵測不到的套件（例如 `raspberrypi-kernel`）。這些規則抓得到已知的樣子，抓不到不代表核心是發行版的。
   - 宣告：`sources.yml` 的 `releases.<版本>.platform_params.kernel_not_distro: "<理由>"`，或 `platform.yml` 的 `scan.kernel_not_distro: "<理由>"`（該平台所有專案、所有版本的預設；版本的值取代平台的預設）。
     `project-info.py --kernel-args` 轉成 `--kernel-not-distro <理由>`（一行一個參數；理由不能是空的、不能有換行或控制字元、最多 300 位元組，否則 sources.yml／platform.yml 驗證就報錯），
     wizard → `scan-flash-package.sh` → `sca-scan` 一路傳（後兩者另接受 `SCA_KERNEL_NOT_DISTRO`）。SBOM 有核心時 `C-kernel-coverage` 是 GAP，說明寫出理由；SBOM 沒有核心（例如 `-os` 層）時照舊不寫這一列。Jetson 不設。

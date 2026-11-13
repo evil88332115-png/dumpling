@@ -197,6 +197,11 @@ class ScanPlatformArg(unittest.TestCase):
         self.assertTrue(any("scan.platform_arg" in e for e in pc.validate_platform_config(self.cfg(platform_arg="android"), "my-nas")))
         self.assertTrue(any("scan.rootfs" in e for e in pc.validate_platform_config(self.cfg(platform_arg="generic", rootfs="sysroot"), "my-nas")))
         self.assertFalse([e for e in pc.validate_platform_config(self.cfg(platform_arg="generic", rootfs="rootfs"), "my-nas") if "rootfs" in e])
+        # 沒有 scan 區塊（或 scan: null）也要檢查：平台名稱就是 --platform（第二輪驗證）
+        no_scan = {k: v for k, v in self.cfg().items() if k != "scan"}
+        self.assertTrue(any("scan.platform_arg" in e for e in pc.validate_platform_config(no_scan, "my-nas")))
+        self.assertTrue(any("scan.platform_arg" in e for e in pc.validate_platform_config(dict(no_scan, scan=None), "my-nas")))
+        self.assertFalse([e for e in pc.validate_platform_config(dict(no_scan, platform="generic"), "generic") if "platform_arg" in e])
 
     def test_wired_through_platform_sh_and_jetson_scan(self):
         sh = open(os.path.join(ROOT, "pipeline", "platform.sh"), encoding="utf-8").read()

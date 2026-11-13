@@ -740,6 +740,7 @@ else:
           && status "B-own-software-$v" ATTENTION "沿用上一次的 $v/own-software/own-software.json（這次沒給 --archive／--dir，沒有重讀；設定改過的樣式在 sbom.md 標 GAP）" \
           || status "B-own-software-$v" FAIL "無法複製上一次的 $v/own-software"
       else status "B-own-software-$v" GAP "上一次沒有 $v/own-software/own-software.json，這次也沒給 --archive／--dir：自有軟體不在產品 SBOM（sbom.md 標 GAP）"; fi
+    else ownsw_step "$v" ""      # 沒有列自有軟體（或沒有產品設定）：不用讀映像，照樣寫宣告的結果（沒宣告 GAP），不悄悄消失
     fi
     # initrd 涵蓋：有刷機包就重讀；沒有時沿用上一次的 initrd-coverage（一般檔案才帶），都沒有 → NOT_RUN
     if [ -n "$ARCHIVE" ]; then initrd_step "$v" "${RKIMG:-$ARCHIVE}" --prefix "$prefix"

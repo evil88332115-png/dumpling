@@ -530,6 +530,10 @@ def test_conflicting_declaration_is_a_config_error(tmp_path):
     c.write_text(json.dumps(dict(CFG, sbom={"own_software": ["/usr/bin/acme-agent"], ow.NONE_REASON_KEY: "none"})))
     p = cli("--from", src, "--config", c, "--out", tmp_path / "out")
     assert p.returncode == 2 and p.stdout.startswith("B-own-software\tGAP\t") and "contradicts" in p.stdout
+    # SBOM 文件（build()）也是 GAP，不會和狀態列互相矛盾（第二輪驗證）
+    cfg = json.loads(c.read_text())
+    info = ow.build(json.loads((tmp_path / "out" / "own-software.json").read_text()), cfg, "1.6")[2]
+    assert info["status"] == "GAP" and any("contradicts" in g for g in info["gaps"])
 
 
 def test_cra_report_reads_the_declaration(tmp_path):

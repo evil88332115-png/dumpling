@@ -210,9 +210,10 @@ NOT_DISTRO_MAX_BYTES = 300     # 同 tools/wizard/cra-scan.py 的 --kernel-not-d
 
 
 def check_not_distro(v, label):
-    """kernel_not_distro 的理由：非空字串、沒有控制字元（換行、tab）、最多 300 位元組。不合法 → ConfigError。"""
-    if not (isinstance(v, str) and v.strip() and v.isprintable() and len(v.encode("utf-8")) <= NOT_DISTRO_MAX_BYTES):
-        raise ConfigError("%s 必須是理由字串（非空、沒有換行或控制字元、最多 %d 位元組）" % (label, NOT_DISTRO_MAX_BYTES))
+    """kernel_not_distro 的理由：非空字串、沒有控制字元（換行、tab）、不以 - 開頭（精靈的 argparse 會當成選項）、最多 300 位元組。不合法 → ConfigError。"""
+    if not (isinstance(v, str) and v.strip() and v.isprintable() and not v.lstrip().startswith("-")
+            and len(v.encode("utf-8")) <= NOT_DISTRO_MAX_BYTES):
+        raise ConfigError("%s 必須是理由字串（非空、沒有換行或控制字元、不以 - 開頭、最多 %d 位元組）" % (label, NOT_DISTRO_MAX_BYTES))
     return v
 
 
@@ -441,11 +442,13 @@ def validate_platform_config(doc, name=None):
             for k in ("inputs_template", "platform_arg", "rootfs"):
                 if k in scan and not (isinstance(scan[k], str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", scan[k])):
                     errs.append("scan.%s 不合法" % k)
-            parg = scan.get("platform_arg") or doc.get("platform")
-            if isinstance(parg, str) and parg not in SCAN_PLATFORM_ARGS:
-                errs.append("scan.platform_arg（沒寫時是平台名稱 %s）必須是掃描工具認得的 %s" % (parg, "／".join(SCAN_PLATFORM_ARGS)))
             if "rootfs" in scan and scan["rootfs"] != SCAN_ROOTFS:
                 errs.append("scan.rootfs 目前只能是 %s（scan.sh 與 platform_scan 固定用這個名稱）" % SCAN_ROOTFS)
+    # 掃描工具的 --platform：scan.platform_arg，沒寫（或根本沒有 scan 區塊）時是平台名稱；工具不認得 → 驗證就失敗，不等到 scan 才 exit 64
+    sc = scan if isinstance(scan, dict) else {}
+    parg = sc.get("platform_arg") or doc.get("platform")
+    if isinstance(parg, str) and parg not in SCAN_PLATFORM_ARGS:
+        errs.append("scan.platform_arg（沒寫時是平台名稱 %s）必須是掃描工具認得的 %s" % (parg, "／".join(SCAN_PLATFORM_ARGS)))
     return errs
 
 

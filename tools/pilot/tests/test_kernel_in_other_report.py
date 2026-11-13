@@ -151,12 +151,13 @@ def fn(name):
     return tkv.fn(name)
 
 
-def layer_args(mode, kother_cli=None, kd_cli=None, env=None):
+def layer_args(mode, kother_cli=None, kd_cli=None, env=None, name=""):
     # 值經環境變數交給 bash（不用 repr：\t、\n 要是真的控制字元）
     cl = 'KOTHER="$T_KOTHER"; KOTHER_CLI=1; ' if kother_cli is not None else "KOTHER=; KOTHER_CLI=0; "
     cl += 'KNOTDISTRO="$T_KD"; KNOTDISTRO_CLI=1' if kd_cli is not None else "KNOTDISTRO=; KNOTDISTRO_CLI=0"
     script = f"""set -uo pipefail
 MODE={mode}
+NAME="$T_NAME"
 {cl}
 {fn('kernel_layer_args')}
 (kernel_layer_args; echo "KOTHER=[$KOTHER] KNOTDISTRO=[$KNOTDISTRO]")
@@ -164,7 +165,7 @@ echo "rc=$?"
 """
     e = {k: v for k, v in os.environ.items() if not k.startswith("SCA_KERNEL_")}
     e.update(env or {})
-    e.update(T_KOTHER=kother_cli or "", T_KD=kd_cli or "")
+    e.update(T_KOTHER=kother_cli or "", T_KD=kd_cli or "", T_NAME=name)
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=e, timeout=30)
     m = re.search(r"KOTHER=\[(.*)\] KNOTDISTRO=\[(.*)\]", p.stdout)
     return int(re.search(r"rc=(\d+)", p.stdout).group(1)), (m.groups() if m else None), p.stderr
@@ -176,6 +177,15 @@ def test_args_valid_values_and_env():
     assert layer_args("sbom", None, None, {"SCA_KERNEL_IN_OTHER_REPORT": OTHER, "SCA_KERNEL_NOT_DISTRO": "env 理由"})[:2] == (0, (OTHER, "env 理由"))
     assert layer_args("sbom", "cli-name", None, {"SCA_KERNEL_IN_OTHER_REPORT": OTHER})[:2] == (0, ("cli-name", ""))   # 命令列優先
     assert layer_args("dir", None, None, {"SCA_KERNEL_IN_OTHER_REPORT": "a;b"})[:2] == (0, ("", ""))                # 其他模式不看環境變數
+
+
+def test_args_pointing_at_itself_exit_64():
+    """-bsp 層也給 <專案>-bsp（指向這份報告自己）：拒絕。SBOM 偵測不到核心時會把這份報告該做的核心判定（含 CNA 退回）壓掉。"""
+    rc, _, err = layer_args("sbom", "demo-bsp", name="demo-bsp")
+    assert rc == 64 and "指向這份報告自己" in err
+    rc, _, err = layer_args("sbom", None, None, {"SCA_KERNEL_IN_OTHER_REPORT": "demo-bsp"}, name="demo-bsp")
+    assert rc == 64 and "指向這份報告自己" in err
+    assert layer_args("sbom", "demo-bsp", name="demo-os")[:2] == (0, ("demo-bsp", ""))
 
 
 @pytest.mark.parametrize("bad", ["a;b", "a/b", "$(id)", "`id`", "a b", "-x", ".x", "é", "x" * 101, "a|b", "a\\b", ""])
