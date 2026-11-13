@@ -86,7 +86,7 @@ C0–C4 都在第二台時，照這節準備；變數值寫在那台的 `~/.conf
    - `HEAVY_LOCK`：`$AGENT_TMP/dumpling-heavy.lock`（同一台的所有對話共用，重工作一次一個）
 4. `gh auth status` 要是同一個帳號；合併一律 `--author-email` 帶 noreply（D-013）。
 5. 建議用 tmux，每個對話一個 window，對話名稱照 C0–C4 設定，跨對話訊息才找得到。
-6. 代理上限照 D-041；五個對話都在同一台時的整台合計待使用者決定（D-045）。
+6. 代理上限照 D-041；五個對話都在同一台時的整台合計由搬家後的 C0 調整（D-045）。
 
 ### C0 的工作習慣（對話記憶不跨機器，寫在這裡）
 - 合併一律 `gh pr merge <PR> --squash --match-head-commit <SHA> --author-email <noreply>`，不在網頁合併、不用 update-branch。
