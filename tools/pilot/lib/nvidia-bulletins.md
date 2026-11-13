@@ -98,7 +98,9 @@ Grype 和 DT 都比對不到 NVIDIA 對 Jetson Linux 發的公告：公告的版
 - `not_applicable`：判定不適用的公告（`reason`；`reviewed=false` 表示還沒有人確認，`candidates` 會列出）。
 - `rows`：見下表。
 - `mirror`（選用）：表是對哪一份公告鏡像審核的，記錄鏡像的時間點，和 `reviewed_until` 分開記。
+  - 有寫 `mirror` 時，`commit`、`commit_date`、`fetched_utc` 三個鍵都必填。
   - 格式：`commit` 是 40 位小寫十六進位；`commit_date` 是 `YYYY-MM-DD` 或帶時區的 ISO 8601；`fetched_utc` 是帶時區的 ISO 8601；其他鍵（例如 `note`）照收。
+  - 帶時區的 ISO 8601 只收一種寫法：`YYYY-MM-DDTHH:MM:SS`，秒後面可以加 3 或 6 位小數，時區寫 `Z` 或 `±HH:MM`。
   - 沒寫或 `null`：`mirror_info()` 回 GAP，不算錯誤。
   - 格式不對：`validate_table` 擋下。
   - 過期或時間在未來：屬於時間判斷，由呼叫端決定（例如 C2 的 table-stale）。
@@ -134,6 +136,8 @@ Grype 和 DT 都比對不到 NVIDIA 對 Jetson Linux 發的公告：公告的版
   - `vbios_fixed_in` 不能低於 `vbios_affected_below`，也不能不高於 `vbios_affected_max`。比較前把版本補到 5 段：上界補 FF，其他補 00。
 - 「`pci_vendor` 必須是 `10de`」由比對端檢查。
 - 不是 vBIOS 的列不能有非 `null` 的 `vbios_*`、`pci_*` 欄位，避免欄位被靜靜忽略。
+- `candidates --draft` 產生的草稿列用的是 `fixed_in` 這類通用欄位。把 `line` 改成 `vbios` 時，要同時把版本搬到 `vbios_*`，否則 `validate_table` 會擋下。
+- 所有格式檢查都比對整個字串：結尾多一個換行也不算符合。
 
 ## 判定規則
 

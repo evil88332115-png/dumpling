@@ -169,7 +169,7 @@
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的空對照表（vBIOS；沒有已審核的列，所有 gpu-firmware 公告都列為待審）；格式同 `nvidia-bulletins.json` |
 | `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh`；**新增（M7a2）**：對照表欄位一節補 `mirror`、公告編號格式、vBIOS 列（`line: vbios`）的欄位規則 |
-| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處；**行為修改（M7a2，與 C2 約定）**：`validate_table` 檢查 vBIOS 列（`line: vbios`：只用 `vbios_*` 版本、XX.XX.XX.XX.XX 格式、已審核列的 `pci_vendor`／`pci_devices`、上下界互斥與 fixed_in 自相矛盾）、非 vBIOS 列不得有 `vbios_*`／`pci_*`、頂層 `mirror` 的格式（commit、commit_date、fetched_utc）、公告編號只收數字；新增 `mirror_info()`（沒有 mirror → GAP） |
+| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處；**行為修改（M7a2，與 C2 約定）**：`validate_table` 檢查 vBIOS 列（`line: vbios`：只用 `vbios_*` 版本、XX.XX.XX.XX.XX 格式、已審核列的 `pci_vendor`／`pci_devices`、上下界互斥與 fixed_in 自相矛盾）、非 vBIOS 列不得有 `vbios_*`／`pci_*`、頂層 `mirror` 的格式（commit、commit_date、fetched_utc）、公告編號只收數字；新增 `mirror_info()`（沒有 mirror → GAP）；PR #65 驗證應修：validate_table 的格式檢查改用 fullmatch（含原有的 reviewed_until、reviewed_at 日期；`$` 會放行結尾換行），帶時區的 ISO 8601 用明確的正規式限定 |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |

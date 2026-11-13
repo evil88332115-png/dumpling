@@ -1002,3 +1002,33 @@ def test_shipped_gpu_firmware_table_is_valid_with_mirror_and_unreviewed():
     assert nb.mirror_info(t)["status"] == "OK"
     assert t["reviewed_until"] is None and not t["rows"]
     assert all(x.get("reviewed") is False for x in t["not_applicable"])    # 額外欄位（title、cves、reason、preliminary_*…）照收
+
+
+def test_trailing_newline_is_rejected_everywhere():
+    """re 的 $ 會吃結尾換行；validate_table 一律 fullmatch（PR #65 驗證應修）。"""
+    t = _vt(); t["bulletins"][0]["id"] = "9001\n"
+    _bad(t, "bulletins")
+    _bad(_vt(not_applicable=[{"bulletin": "5674\n", "reviewed": False}]), "not_applicable")
+    _bad(_vt(_vrow(pci_devices=["2684\n"])), "pci_devices")
+    _bad(_vt(_vrow(pci_vendor="10de\n")), "pci_vendor")
+    _bad(_vt(_vrow(reviewed=False, pci_vendor=None, pci_devices=None, vbios_fixed_in="94\n")), "vbios_fixed_in")
+    _bad(_vt(mirror={**MIRROR_OK, "commit": MIRROR_OK["commit"] + "\n"}), "commit")
+    _bad(_vt(mirror={**MIRROR_OK, "commit_date": "2026-11-10\n"}), "commit_date")
+    _bad(_vt(mirror={**MIRROR_OK, "fetched_utc": MIRROR_OK["fetched_utc"] + "\n"}), "fetched_utc")
+    _bad(_vt(mirror=None, reviewed_until="2026-11-10\n"), "reviewed_until")
+    _bad(_vt(_vrow(reviewed_at="2026-11-14\n")), "reviewed_at")
+
+
+@pytest.mark.parametrize("v,ok", [
+    ("2026-11-13T16:52:04Z", True), ("2026-11-13T16:52:04+08:00", True), ("2026-11-13T16:52:04.123Z", True),
+    ("2026-11-13T16:52:04.123456-05:00", True),
+    ("2026-11-13T16:52:04.5Z", False), ("2026-11-13T16:52:04.123456789Z", False), ("2026-11-13T16:52:04+0800", False),
+    ("20261113T165204Z", False), ("2026-11-13 16:52:04Z", False), ("2026-11-13T25:00:00Z", False),
+])
+def test_iso_timestamps_are_limited_to_one_explicit_format(v, ok):
+    """格式不隨 Python 版本的 datetime.fromisoformat 放寬（3.10 與 3.11+ 能讀的格式不同）。"""
+    t = _vt(mirror={**MIRROR_OK, "fetched_utc": v})
+    if ok:
+        nb.validate_table(t)
+    else:
+        _bad(t, "fetched_utc")

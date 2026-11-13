@@ -86,6 +86,9 @@ HEX4_RE = re.compile(r"^[0-9a-f]{4}$")
 BULLETIN_ID_RE = re.compile(r"^[0-9]{1,8}$")
 # 對照表頂層的 mirror：表是對哪一份公告鏡像審核的（鏡像的時間點；和 reviewed_until 分開記）
 MIRROR_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+# 帶時區的 ISO 8601（秒可帶 3 或 6 位小數；時區是 Z 或 ±HH:MM）：明確限定格式，不讓 datetime.fromisoformat 隨 Python 版本放寬
+ISO_TZ_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}|\.\d{6})?(?:Z|[+-]\d{2}:\d{2})")
+# 以上與 DATE_RE 在 validate_table 一律用 fullmatch：re 的 $ 會吃掉結尾的換行（"5797\n" 不能過）
 # 公告裡的 JetPack 主版本 → Jetson Linux 版本線（JetPack 4＝L4T 32、5＝35、6＝36）。
 # JetPack 7 對應 38 與 39 兩條版本線，不能自動判斷：草稿列的 line 留 "?"，由人填。
 JETPACK_LINE = {"4": "32", "5": "35", "6": "36"}
@@ -210,7 +213,7 @@ def load_json(path, label):
 
 def _iso_with_tz(v):
     """帶時區的 ISO 8601 時間 → datetime；格式不對或沒有時區 → None。"""
-    if not isinstance(v, str) or "T" not in v:
+    if not (isinstance(v, str) and ISO_TZ_RE.fullmatch(v)):
         return None
     try:
         d = datetime.datetime.fromisoformat(v[:-1] + "+00:00" if v.endswith("Z") else v)
@@ -220,7 +223,7 @@ def _iso_with_tz(v):
 
 
 def _valid_date(v):
-    if not (isinstance(v, str) and DATE_RE.match(v)):
+    if not (isinstance(v, str) and DATE_RE.fullmatch(v)):
         return False
     try:
         datetime.date.fromisoformat(v)
@@ -233,7 +236,7 @@ def _check_mirror(m):
     """對照表頂層 mirror 的格式（有寫才檢查；沒寫或 null 由 mirror_info 回 GAP）。日期在未來或過期是時間判斷，不在這裡擋。"""
     if not isinstance(m, dict):
         raise InputError("mirror 必須是物件（commit、commit_date、fetched_utc）")
-    if not (isinstance(m.get("commit"), str) and MIRROR_COMMIT_RE.match(m["commit"])):
+    if not (isinstance(m.get("commit"), str) and MIRROR_COMMIT_RE.fullmatch(m["commit"])):
         raise InputError("mirror.commit 必須是 40 位小寫十六進位")
     cd = m.get("commit_date")
     if not (_valid_date(cd) or _iso_with_tz(cd)):
@@ -262,15 +265,15 @@ def _check_vbios_row(r, where):
     vers = {}
     for k in VBIOS_VERSION_KEYS:
         if r.get(k) is not None:
-            if not (isinstance(r[k], str) and VBIOS_VER_RE.match(r[k])):
+            if not (isinstance(r[k], str) and VBIOS_VER_RE.fullmatch(r[k])):
                 raise InputError(f"{where} 的 {k} 不是 XX.XX.XX.XX.XX 版本（1～5 段、每段兩位十六進位）：{r[k]!r}")
             vers[k] = tuple(int(x, 16) for x in r[k].split("."))
     if not r["reviewed"]:
         return
-    if not (isinstance(r.get("pci_vendor"), str) and HEX4_RE.match(r["pci_vendor"])):
+    if not (isinstance(r.get("pci_vendor"), str) and HEX4_RE.fullmatch(r["pci_vendor"])):
         raise InputError(f"{where} 已審核但 pci_vendor 不是 4 位小寫十六進位")
     d = r.get("pci_devices")
-    if not (isinstance(d, list) and d and all(isinstance(x, str) and HEX4_RE.match(x) for x in d)):
+    if not (isinstance(d, list) and d and all(isinstance(x, str) and HEX4_RE.fullmatch(x) for x in d)):
         raise InputError(f"{where} 已審核但 pci_devices 不是非空的 4 位小寫十六進位清單")
     if not vers:
         raise InputError(f"{where} 已審核但沒有任何可比較的版本（{'、'.join(VBIOS_VERSION_KEYS)}）")
@@ -290,7 +293,7 @@ def validate_table(t):
     if not isinstance(t, dict) or t.get("schema") != TABLE_SCHEMA:
         raise InputError(f"對照表的 schema 不是 {TABLE_SCHEMA}")
     ru = t.get("reviewed_until")
-    if ru is not None and not (isinstance(ru, str) and DATE_RE.match(ru)):
+    if ru is not None and not (isinstance(ru, str) and DATE_RE.fullmatch(ru)):
         raise InputError("reviewed_until 必須是 null 或 YYYY-MM-DD")
     if t.get("mirror") is not None:
         _check_mirror(t["mirror"])
@@ -301,7 +304,7 @@ def validate_table(t):
     for b in t.get("bulletins", []):
         if not isinstance(b, dict) or not isinstance(b.get("id"), str) or not isinstance(b.get("cves", {}), dict):
             raise InputError("bulletins 每一筆要有 id（字串）與 cves（物件）")
-        if not BULLETIN_ID_RE.match(b["id"]):
+        if not BULLETIN_ID_RE.fullmatch(b["id"]):
             raise InputError(f"bulletins 的 id 必須是數字編號：{b['id']!r}")
         ids.add(b["id"])
     for i, r in enumerate(t.get("rows", [])):
@@ -330,17 +333,17 @@ def validate_table(t):
                 except ValueError:
                     raise InputError(f"{where} 的 {k} 不是點分版本：{r[k]!r}")
         if r["reviewed"]:
-            if not r.get("reviewed_by") or not (isinstance(r.get("reviewed_at"), str) and DATE_RE.match(r["reviewed_at"])):
+            if not r.get("reviewed_by") or not (isinstance(r.get("reviewed_at"), str) and DATE_RE.fullmatch(r["reviewed_at"])):
                 raise InputError(f"{where} 已審核但缺少 reviewed_by 或 reviewed_at（YYYY-MM-DD）")
             if r["line"].isdigit() and not (r.get("fixed_in") or r.get("affected_below") or r.get("affected_max")):
                 raise InputError(f"{where} 已審核但沒有任何可比較的版本（fixed_in、affected_below、affected_max）")
     for i, x in enumerate(t.get("not_applicable", [])):
         if not isinstance(x, dict) or not isinstance(x.get("bulletin"), str):
             raise InputError(f"not_applicable[{i}] 要有 bulletin")
-        if not BULLETIN_ID_RE.match(x["bulletin"]):
+        if not BULLETIN_ID_RE.fullmatch(x["bulletin"]):
             raise InputError(f"not_applicable[{i}] 的 bulletin 必須是數字編號：{x['bulletin']!r}")
         if x.get("reviewed", True) is not False and not (x.get("reviewed_by") and isinstance(x.get("reviewed_at"), str)
-                                                          and DATE_RE.match(x["reviewed_at"])):
+                                                          and DATE_RE.fullmatch(x["reviewed_at"])):
             raise InputError(f"not_applicable[{i}] 要有 reviewed_by 與 reviewed_at（YYYY-MM-DD），還沒審核的寫 reviewed=false")
     return t
 
