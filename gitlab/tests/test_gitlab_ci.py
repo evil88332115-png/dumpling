@@ -284,7 +284,13 @@ class CiFile(unittest.TestCase):
     def test_watch_jobs_manual_until_backend_exists_and_confidential(self):
         for n in ("watch:compute", "watch:notify"):
             r = self.jobs[n]["rules"]
-            self.assertTrue(all(x.get("when") == "manual" for x in r), n + " 在 GitLab 後端完成前必須 when: manual")
+            # 排程：對真實 GitLab 驗證完之前一律 when: manual；手動入口（T-16）是人明確要跑，照輸入跑
+            sched = [x for x in r if "schedule" in x.get("if", "")]
+            self.assertTrue(sched and all(x.get("when") == "manual" for x in sched), n + " 的排程在驗證前必須 when: manual")
+            for x in r:
+                if x not in sched:
+                    self.assertIn('$DUMPLING_WATCH_MODE == "real"', x["if"], n)
+                    self.assertRegex(x["if"], r'CI_PIPELINE_SOURCE == "web"')
             self.assertIn("DUMPLING_JOB", json.dumps(r))
             self.assertIn("schedule", json.dumps(r))
             self.assertIn("NOT_RUN", self.lines_of(n), "沒有後端時要印 NOT_RUN，不假裝能跑")
@@ -304,8 +310,8 @@ class CiFile(unittest.TestCase):
             if "/issues" in body:
                 self.assertNotIn("CI_JOB_TOKEN", body, "官方文件沒有列出 job token 可用 Issues API：" + n)
         for n in self.jobs:
-            if n != "watch:notify":
-                self.assertNotIn("WATCH_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), "只有 watch:notify 用 WATCH_GITLAB_TOKEN：" + n)
+            if n not in ("watch:notify", "watch:drill"):     # 演練要寫 drill 的狀態與 Issue（T-16）
+                self.assertNotIn("WATCH_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), "只有 watch:notify／watch:drill 用 WATCH_GITLAB_TOKEN：" + n)
             txt = self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {}))
             if n != "watch:compute":
                 self.assertNotIn("WATCH_GITLAB_READ_TOKEN", txt, "只有 watch:compute 用 WATCH_GITLAB_READ_TOKEN：" + n)
@@ -416,7 +422,7 @@ class CiFile(unittest.TestCase):
         for f in ("plan.json", "report.md", "result.json", "status"):
             self.assertIn("watch-out-support/" + f, paths)
 
-    def run_notify(self, files, watch_rc=0, support_rc=0):
+    def run_notify(self, files, watch_rc=0, support_rc=0, **extra_env):
         """實際執行 watch:notify 的最後一項（假的 python3：記錄呼叫、依 plan 回傳結束碼）。"""
         import os
         import subprocess
@@ -432,9 +438,62 @@ class CiFile(unittest.TestCase):
                 (d / rel).write_text(text)
             env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), WATCH_RC=str(watch_rc), SUP_RC=str(support_rc),
                        WATCH_GITLAB_TOKEN="t", CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
+            for k in ("CI_PIPELINE_SOURCE", "WATCH_REAL_ISSUES", "DUMPLING_WATCH_DRY_RUN"):
+                env.pop(k, None)
+            env.update(extra_env)
             r = subprocess.run(["bash", "-c", item], cwd=d, env=env, capture_output=True, text=True)
             log = (d / "log").read_text().splitlines() if (d / "log").exists() else []
         return r.returncode, log, r.stdout
+
+    def test_t16_manual_entry_rules(self):
+        # 手動入口（T-16）：DUMPLING_WATCH_MODE=real → compute／notify；drill → watch:drill；沒帶 → 都不跑；排程照舊 manual
+        jobs = ("watch:compute", "watch:notify", "watch:drill")
+        def whens(**ctx):
+            return tuple(gitlabci.job_when(self.jobs[n], self.ctx(**ctx)) for n in jobs)
+        for src in ("web", "api"):
+            self.assertEqual(whens(CI_PIPELINE_SOURCE=src, CI_COMMIT_BRANCH="main", DUMPLING_WATCH_MODE="real"), ("on_success", "on_success", "never"))
+            self.assertEqual(whens(CI_PIPELINE_SOURCE=src, CI_COMMIT_BRANCH="main", DUMPLING_WATCH_MODE="drill"), ("never", "never", "on_success"))
+            self.assertEqual(whens(CI_PIPELINE_SOURCE=src, CI_COMMIT_BRANCH="main"), ("never", "never", "never"))
+            self.assertEqual(whens(CI_PIPELINE_SOURCE=src, CI_COMMIT_BRANCH="main", DUMPLING_WATCH_MODE="REAL"), ("never", "never", "never"))
+        self.assertEqual(whens(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch"), ("manual", "manual", "never"))
+        self.assertEqual(whens(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch", DUMPLING_WATCH_MODE="drill"), ("manual", "manual", "never"))
+        self.assertEqual(whens(CI_PIPELINE_SOURCE="push", CI_COMMIT_BRANCH="main", DUMPLING_WATCH_MODE="real"), ("never", "never", "never"))
+
+    def test_t16_notify_dry_run_rules(self):
+        # 排程預設只算不寫（WATCH_REAL_ISSUES=on 才寫）；手動 DUMPLING_WATCH_DRY_RUN=1 只算不寫；兩份 plan 都帶同一個 --dry-run
+        both = {"watch-out/plan.json": "{}", "watch-out-support/plan.json": "{}", "watch-out-support/status": "OK\n"}
+        cases = ((dict(CI_PIPELINE_SOURCE="schedule"), True), (dict(CI_PIPELINE_SOURCE="schedule", WATCH_REAL_ISSUES="off"), True),
+                 (dict(CI_PIPELINE_SOURCE="schedule", WATCH_REAL_ISSUES="on"), False), (dict(CI_PIPELINE_SOURCE="web"), False),
+                 (dict(CI_PIPELINE_SOURCE="web", DUMPLING_WATCH_DRY_RUN="1"), True), (dict(CI_PIPELINE_SOURCE="schedule", WATCH_REAL_ISSUES="on", DUMPLING_WATCH_DRY_RUN="1"), True))
+        for env, dry in cases:
+            rc, log, _ = self.run_notify(both, **env)
+            self.assertEqual(rc, 0, env)
+            self.assertEqual(len(log), 2, env)
+            self.assertTrue(all(("--dry-run" in x) == dry for x in log), (env, log))
+
+    def test_t16_compute_baseline_only_when_manual_and_requested(self):
+        import os
+        import subprocess
+        import tempfile
+        item = [it for it in self.items_of("watch:compute") if "pipeline/watch/match.py" in it][0]
+        def run(**env):
+            with tempfile.TemporaryDirectory() as d:
+                d = Path(d)
+                (d / "bin").mkdir()
+                (d / "bin" / "python3").write_text('#!/bin/sh\necho "$*" >> "$LOG"\nexit 0\n')
+                (d / "bin" / "python3").chmod(0o755)
+                e = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), DUMPLING_OUT_BASE=str(d), CI_PIPELINE_URL="u")
+                for k in ("CI_PIPELINE_SOURCE", "DUMPLING_WATCH_BASELINE"):
+                    e.pop(k, None)
+                e.update(env)
+                r = subprocess.run(["bash", "-c", item], cwd=d, env=e, capture_output=True, text=True)
+                return r.returncode, (d / "log").read_text()
+        for env, want in ((dict(CI_PIPELINE_SOURCE="web", DUMPLING_WATCH_BASELINE="1"), True), (dict(CI_PIPELINE_SOURCE="api", DUMPLING_WATCH_BASELINE="1"), True),
+                          (dict(CI_PIPELINE_SOURCE="web"), False), (dict(CI_PIPELINE_SOURCE="schedule", DUMPLING_WATCH_BASELINE="1"), False),
+                          (dict(CI_PIPELINE_SOURCE="web", DUMPLING_WATCH_BASELINE="yes"), False)):
+            rc, log = run(**env)
+            self.assertEqual(rc, 0, env)
+            self.assertEqual("--allow-baseline" in log, want, (env, log))
 
     def test_t23_notify_applies_both_and_reports_support_fail(self):
         both = {"watch-out/plan.json": "{}", "watch-out-support/plan.json": "{}", "watch-out-support/status": "ATTENTION\n"}
@@ -607,6 +666,88 @@ class ReleasePublish(unittest.TestCase):
         rc, out, calls = self.run_pub(DUMPLING_RELEASE_DRY_RUN="yes")          # 只認 0／1
         self.assertNotEqual(rc, 0)
         self.assertEqual(calls, [])
+
+
+class WatchDrill(unittest.TestCase):
+    """gitlab/watch-drill.sh 的行為（T-16）：用假的 pipeline/watch 工具（記錄呼叫、照指定的開出數寫 apply-result.json）。"""
+
+    STUB = r'''import json, os, sys
+log = os.environ["STUB_LOG"]
+with open(log, "a") as f:
+    f.write(os.path.basename(sys.argv[0]) + " " + " ".join(sys.argv[1:]) + "\n")
+a = sys.argv[1:]
+name = os.path.basename(sys.argv[0])
+def val(k):
+    return a[a.index(k) + 1]
+if name == "collect.py":
+    os.makedirs(val("--out"), exist_ok=True); open(os.path.join(val("--out"), "inventory.json"), "w").write("{}")
+elif name == "match.py":
+    if os.environ.get("STUB_MATCH_FAIL") == "1":
+        sys.exit(1)
+    os.makedirs(val("--out"), exist_ok=True); open(os.path.join(val("--out"), "plan.json"), "w").write("{}")
+elif name == "issues.py" and a[0] == "read-state":
+    os.makedirs(val("--out"), exist_ok=True)
+elif name == "issues.py" and a[0] == "apply":
+    n = int(os.environ["STUB_OPENED"].split(",")[len([l for l in open(log) if " apply " in l]) - 1])
+    res = {"actions": [{"result": "would_open" if "--dry-run" in a else "opened"}] * n}
+    json.dump(res, open(os.path.join(os.path.dirname(val("--plan")), "apply-result.json"), "w"))
+'''
+
+    def run_drill(self, opened="0,2,0", **env):
+        import os
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            tools = d / "tools"
+            tools.mkdir()
+            for n in ("collect.py", "match.py", "issues.py"):
+                (tools / n).write_text(self.STUB)
+            (tools / "feeds.sh").write_text('echo "feeds.sh $*" >> "$STUB_LOG"; mkdir -p "$1"\n')
+            e = dict(os.environ, STUB_LOG=str(d / "log"), STUB_OPENED=opened, DUMPLING_WATCH_TOOLS=str(tools), DUMPLING_WATCH_FIXTURES="fx",
+                     CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7", GITLAB_TOKEN="t")
+            e.pop("DUMPLING_WATCH_DRY_RUN", None)
+            e.update(env)
+            r = subprocess.run(["bash", str(HERE.parent / "watch-drill.sh"), str(d / "work"), str(d / "out")], env=e, capture_output=True, text=True)
+            log = (d / "log").read_text().splitlines() if (d / "log").exists() else []
+        return r.returncode, log, r.stdout + r.stderr
+
+    def test_three_rounds_then_close(self):
+        rc, log, out = self.run_drill()
+        self.assertEqual(rc, 0, out)
+        seq = [l.split()[0] + (" " + l.split()[1] if l.startswith("issues.py") else "") for l in log]
+        self.assertEqual(seq, ["collect.py", "feeds.sh"] + ["issues.py read-state", "match.py", "issues.py apply"] * 3 + ["issues.py close-drill"])
+        self.assertIn("--no-kernel-cve --no-euvd", [l for l in log if l.startswith("feeds.sh")][0])
+        m = [l for l in log if l.startswith("match.py")]
+        self.assertNotIn("--kev-overlay", m[0])
+        self.assertTrue(all("--kev-overlay fx/drill-kev-overlay.json" in x for x in m[1:]))
+        self.assertTrue(all("--allow-baseline" in x and "--mode drill" in x for x in m))
+        self.assertTrue(all("--mode drill" in x and "--confidential" in x for x in log if " apply " in x))
+        self.assertTrue(all("--backend gitlab" in x for x in log if x.startswith("issues.py")))
+
+    def test_count_mismatch_fails_and_still_closes(self):
+        rc, log, out = self.run_drill(opened="0,1,0")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("數量不符", out)
+        self.assertEqual(log[-1].split()[:2], ["issues.py", "close-drill"])
+        self.assertEqual(len([l for l in log if " apply " in l]), 2)          # 第 2 輪不符就停，第 3 輪不跑
+
+    def test_match_failure_fails_and_still_closes(self):
+        rc, log, out = self.run_drill(STUB_MATCH_FAIL="1")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(log[-1].split()[:2], ["issues.py", "close-drill"])
+        self.assertFalse([l for l in log if " apply " in l])
+
+    def test_dry_run_writes_nothing(self):
+        rc, log, out = self.run_drill(opened="5,5,5", DUMPLING_WATCH_DRY_RUN="1")
+        self.assertEqual(rc, 0, out)
+        applies = [l for l in log if " apply " in l]
+        self.assertEqual(len(applies), 3)
+        self.assertTrue(all("--dry-run" in x for x in applies))
+        self.assertFalse([l for l in log if "close-drill" in l])
+        rc, log, out = self.run_drill(DUMPLING_WATCH_DRY_RUN="yes")
+        self.assertEqual(rc, 1)
+        self.assertEqual(log, [])
 
 
 class SchemaValidatorScript(unittest.TestCase):

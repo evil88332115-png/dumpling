@@ -459,11 +459,17 @@ firmware:dt:
 # 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）已有 GitLab 後端（--backend gitlab），
 # 但只用假 API 測過、沒有對真實 GitLab 驗證；所以這兩個 job 仍是 when: manual，不會自動跑（驗證完再改，見 GITLAB-PORT T-05）。
 
+# T-16：手動入口（同 watch.yml 的 workflow_dispatch）。網頁 Run pipeline 或 API 帶 pipeline 變數：
+#   DUMPLING_WATCH_MODE=real：照輸入跑一輪（DUMPLING_WATCH_DRY_RUN=1 只算不寫；DUMPLING_WATCH_BASELINE=1 還沒有狀態時建立第一次的基準，
+#     要明確指定，狀態 Issue 不見時不會自動重建）
+#   DUMPLING_WATCH_MODE=drill：watch:drill（合成資料的三輪演練＋關閉）
+# 排程的 real 預設只算不寫（同 D-040：第一次真實基準看過「會開哪些 Issue」之前），CI/CD 變數 WATCH_REAL_ISSUES=on 才真的開 Issue。
 .rules-watch:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "watch"'
       when: manual
       allow_failure: true
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_WATCH_MODE == "real"'
 
 watch:compute:
   stage: watch
@@ -509,8 +515,11 @@ watch:compute:
     - GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
       rc=0
+      # 第一次的基準只在手動指定時建立（DUMPLING_WATCH_BASELINE=1，同 watch.yml 的 baseline；排程不能自己建）
+      ab=()
+      if { [ "$CI_PIPELINE_SOURCE" = web ] || [ "$CI_PIPELINE_SOURCE" = api ]; } && [ "${DUMPLING_WATCH_BASELINE:-0}" = 1 ]; then ab=(--allow-baseline); fi
       python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \
-        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" || rc=$?
+        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" "${ab[@]}" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"
   after_script:
     - rm -rf "$DUMPLING_OUT_BASE"
@@ -539,11 +548,16 @@ watch:notify:
     - |
       python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - |
+      # 只算不寫（T-16）：手動帶 DUMPLING_WATCH_DRY_RUN=1，或排程而 WATCH_REAL_ISSUES 不是 on（同 watch.yml 的 dry_run 運算式）
+      d=()
+      if [ "${DUMPLING_WATCH_DRY_RUN:-0}" = 1 ] || { [ "$CI_PIPELINE_SOURCE" = schedule ] && [ "${WATCH_REAL_ISSUES:-}" != on ]; }; then
+        d=(--dry-run); echo "watch: 只算不寫（dry-run）"
+      fi
       # 每日監控：沒有 plan.json（GAP：不建基準、不開 Issue）→ 不動監控 Issue（同 watch-round.yml 的 has_plan）
       rc=0
       if [ -f watch-out/plan.json ]; then
         GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
-          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json || rc=$?
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json "${d[@]}" || rc=$?
       else
         echo "watch: 沒有 plan.json（match 是 GAP），不動監控 Issue"
       fi
@@ -551,7 +565,7 @@ watch:notify:
       src=0
       if [ -f watch-out-support/plan.json ]; then
         GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
-          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out-support/plan.json || src=$?
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out-support/plan.json "${d[@]}" || src=$?
       fi
       st=$(cat watch-out-support/status 2>/dev/null || echo FAIL)
       [ "$rc" = 0 ] || exit "$rc"
@@ -560,4 +574,29 @@ watch:notify:
   artifacts:
     when: always
     paths: [watch-out/apply-result.json, watch-out-support/apply-result.json]
+    expire_in: 14 days
+
+# T-16：每日監控的演練（同 watch.yml 的 drill-1-baseline／drill-2-new-kev／drill-3-repeat／drill-close）。
+# 網頁或 API 帶 DUMPLING_WATCH_MODE=drill（DUMPLING_WATCH_DRY_RUN=1 只算不寫）：合成 Release＋合成 KEV，三輪（預期開 0／2／0 個）後關閉。
+# 演練 Issue 一律 confidential（後端寫死）、標籤 drill。寫入用 WATCH_GITLAB_TOKEN（讀寫同一個 token；演練只碰 drill 的狀態與 Issue）。
+watch:drill:
+  stage: watch
+  rules:
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_WATCH_MODE == "drill"'
+  tags: [dumpling-scan]
+  timeout: 90 minutes
+  interruptible: false
+  resource_group: watch-notify
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${WATCH_GITLAB_TOKEN:-}" || { echo "watch-drill: FAIL（沒有 WATCH_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
+    - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
+    - $SUDO install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"
+    - GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" bash gitlab/watch-drill.sh "$DUMPLING_OUT_BASE/drill" watch-drill-out
+  after_script:
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    when: always
+    paths: [watch-drill-out/]
     expire_in: 14 days
