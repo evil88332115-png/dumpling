@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:43 +0800（C3）
+最後更新：2026-11-14 05:43 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -14,7 +14,7 @@
 - 各對話現況（細節看各節）：
   - C1（第二台）：M7a #58、M7a2 #65 已合併。M7b 進行中（wp1/m7b 97d1d99）：第一項「版本＝tag」改成 tag → sources.yml 的 l4t_release（人宣告）→ 對掃描讀到的 L4T 版本；其他平台 Hooks.independent_version 預設 None → GAP（已轉 C4）。C0 同意設計，要求三個來源不一致時一律 FAIL、l4t_release 受 D-046 約束。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
-  - C3（第二台）：#47、#49、#61、#69、#71 已合併。等正式 Release（第一次真實基準）與 T-14（C1）；有空整理 GitLab 待辦 T-15～T-23 的優先順序
+  - C3（第二台）：#47、#49、#61、#69、#71 已合併。GitLab 待辦優先順序（`$AGENT_TMP/dumpling-tmp-c3/gitlab-todo-priority.md`）C0 同意：P1 小 PR（T-19 MR 雙 pipeline、T-20 NOT_RUN exit 3、T-21 先驗再傳）→ T-05 GitLab 後端（假 API，寫明未對真實 GitLab 驗證）→ T-23／T-10、T-16、T-12；T-17 採 DUMPLING_RELEASE_DRY_RUN=1（只 build＋scan、不寫入）。等正式 Release 做第一次真實基準
   - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
