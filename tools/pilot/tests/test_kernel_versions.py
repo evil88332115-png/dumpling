@@ -191,13 +191,18 @@ def test_sca_scan_cli_exit_64(tmp_path):
 # ---------- sca-scan：核心區段 ----------
 
 FAKE_TOOL = """#!/usr/bin/env python3
-import os, sys
+import os, subprocess, sys
 a = sys.argv[1:]
 NAME = os.path.basename(sys.argv[0])
-if "--list-kernel-versions" in a:
-    os.execv(sys.executable, [sys.executable, "-I", os.environ["REAL_KERNEL_CONFIG"]] + a)
+REAL = [sys.executable, "-I", os.environ["REAL_KERNEL_CONFIG"]]
+if "--list-kernel-versions" in a:                 # 另外讀一次映像
+    with open(os.environ["FAKE_LOG"], "a") as f:
+        f.write("LIST\\n")
+    os.execv(sys.executable, REAL + a)
 with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(NAME + " " + " ".join(a) + "\\n")
+if "--also-list-kernel-versions" in a:            # 真的工具讀映像的同一趟順便印出貨的核心：這裡借真的列舉
+    print(subprocess.run(REAL + ["--list-kernel-versions", "--from", a[a.index("--from") + 1]], capture_output=True, text=True).stdout.strip())
 stage = "C-kernel-config" if NAME == "kernel_config.py" else "C-kernel-module-map"
 out = a[a.index("--out") + 1]
 open(out, "w").write("{}")
@@ -252,6 +257,7 @@ def test_one_kernel_unchanged(tmp_path):
     assert rows["C-kernel-config"][0] == "OK" and rows["C-kernel-module-map"][0] == "OK"
     assert not any(k.startswith("C-kernel-not-judged") for k in rows) and "C-kernel-versions" not in rows
     assert "--kernel-version" not in log                                  # 沒指定：不加參數，和以前相同
+    assert "LIST" not in log and log.count("--also-list-kernel-versions") == 2     # 出貨的核心由判定工具讀映像的同一趟印出，不另外讀映像
     assert doc["shipped"] == [A] and doc["requested"] == [] and doc["judged"] == [A] and doc["not_judged"] == []
     # 指定的就是那一顆：判定它，工具收到 --kernel-version
     rows, doc, log, p = kernel_run(sub(tmp_path, "g"), tkc.rootfs_members(kver=A), [A])
@@ -279,6 +285,7 @@ def test_two_kernels_nothing_given(tmp_path):
 def test_two_kernels_one_given(tmp_path):
     rows, doc, log, p = kernel_run(tmp_path, two_kernels(), [A])
     assert doc["shipped"] == [A, B] and doc["requested"] == [A] and doc["judged"] == [A]
+    assert "LIST" not in log
     assert doc["not_judged"] == [{"version": B, "reason": kvmod.REASON_OTHER_GIVEN, "shipped": True}]
     assert log.count(f"--kernel-version {A}") == 2 and B not in log        # 指定的那顆交給工具
     assert rows[f"C-kernel-not-judged-{B}"][0] == "GAP" and f"C-kernel-not-judged-{A}" not in rows
@@ -289,7 +296,8 @@ def test_two_kernels_one_given(tmp_path):
 
 def test_two_kernels_two_given_judges_none(tmp_path):
     rows, doc, log, p = kernel_run(tmp_path, two_kernels(), [A, B])
-    assert log == ""                                                       # 判定工具一次都沒執行
+    assert log == "LIST\n"                                                 # 判定工具一次都沒執行；沒有別的工具讀映像，只補讀這一次出貨的核心
+    assert doc["shipped"] == [A, B]
     assert doc["requested"] == [A, B] and doc["judged"] == []
     assert [x["version"] for x in doc["not_judged"]] == [A, B] and {x["reason"] for x in doc["not_judged"]} == {NOTE_MULTI}
     for stage in ("C-kernel-config", "C-kernel-module-map"):
@@ -330,7 +338,8 @@ OUT={out}; ST=$OUT/status.tsv
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
 KSRC=(--from {src}); KLABEL="rootfs tar"; KCVL=; KCVO=; KERNEL_CVES=
 KERNEL_CVE_MIRROR={mirror}
-KVERS=({kv})
+KVERS=({kv}); KSHIP_OK=0; KSHIP=()
+{fn('kernel_ship_from')}
 {fn('kernel_cve_list')}
 kernel_cve_list; echo "rc=$?"; echo "KCVO=$KCVO"
 """
@@ -353,3 +362,26 @@ def test_cve_list_uses_given_version_without_probe(tmp_path):
     rc, rows, out, p = cve_list_harness(tmp_path / "s", two_kernels(), [A], mirror)
     assert rc == 0, out + p.stderr
     assert A in rows["C-kernel-cve-list"][1] and "kernel-cna-version" in out and B not in rows["C-kernel-cve-list"][1]
+
+
+# ---------- 讀映像的同一趟順便列出出貨的核心（--also-list-kernel-versions） ----------
+
+def test_also_list_kernel_versions_in_the_same_pass(tmp_path):
+    src = tkc.write_tar(tmp_path / "x.tar", two_kernels())
+    cves = tmp_path / "cves.txt"
+    cves.write_text("CVE-2024-0001\n")
+    kmm = PILOT / "lib" / "kernel_module_map.py"
+    want = f"KERNEL-VERSIONS\tOK\t{A} {B}"
+
+    def run_tool(lib, *extra):
+        p = subprocess.run([sys.executable, "-I", str(lib), "--from", str(src), "--cves", str(cves), "--out", str(tmp_path / "o.json"), *extra],
+                           capture_output=True, text=True, timeout=120)
+        return p.stdout.splitlines()
+    for lib, stage in ((tkc.LIB, "C-kernel-config"), (kmm, "C-kernel-module-map")):
+        plain = run_tool(lib)
+        assert not any(l.startswith("KERNEL-VERSIONS") for l in plain) and any(l.startswith(stage + "\t") for l in plain)    # 沒給旗標：輸出和以前相同
+        got = run_tool(lib, "--also-list-kernel-versions")
+        assert want in got and [l for l in got if l != want] == plain
+    p = subprocess.run([sys.executable, "-I", str(tkc.LIB), "--probe-kernel-version", "--also-list-kernel-versions", "--from", str(src)],
+                       capture_output=True, text=True, timeout=60)
+    assert want in p.stdout.splitlines() and any(l.startswith("KERNEL-VERSION\tGAP") for l in p.stdout.splitlines())

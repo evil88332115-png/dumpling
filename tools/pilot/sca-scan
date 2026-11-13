@@ -780,7 +780,8 @@ kernel_cve_list(){
   fi
   if [ "${KVERS[*]+x}" = x ] && [ ${#KVERS[@]} -eq 1 ]; then pr=$'KERNEL-VERSION\tOK\t'"${KVERS[0]}"      # 剛好指定 1 顆：用它，不探測
   else
-    pr=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --probe-kernel-version "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" 2>&1)
+    pr=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --probe-kernel-version --also-list-kernel-versions "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" 2>&1)
+    kernel_ship_from "$pr"
     pr=$(printf '%s\n' "$pr" | grep -m1 $'^KERNEL-VERSION\t')
   fi
   if [ -z "$pr" ]; then
@@ -824,13 +825,19 @@ kernel_cve_list(){
 # C-kernel-config 與 C-kernel-module-map 至少 GAP，檔案寫 shipped（映像的清單）、requested（指定的）、judged（交給判定工具的）、not_judged（附原因）。
 # 指定剛好 1 顆：判定那一顆（--kernel-version 原樣交給 kernel_config.py、kernel_module_map.py，核心 CVE 清單也用它、不探測）。
 # 指定 2 顆以上：多顆核心逐一判定還沒實作（M2 之後）→ 一顆都不判定（KVMULTI=1），兩個階段 GAP。沒指定：映像只有 1 顆就照舊；有多顆照舊 GAP（工具不猜）。
-# 準備：列出映像出貨的核心 → KSHIP（陣列）、KSHIP_OK（1＝讀得到）；設 KVMULTI、KVARGS（要交給判定工具的 --kernel-version）。
-kernel_versions_prepare(){
-  local r l s2 s3
-  KVMULTI=0; KVARGS=(); KSHIP=(); KSHIP_OK=0
-  r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --list-kernel-versions "${KSRC[@]}" 2>&1)
-  l=$(printf '%s\n' "$r" | grep -m1 $'^KERNEL-VERSIONS\t')
+# 映像出貨的核心（KSHIP 陣列、KSHIP_OK＝1 表示讀到了）不另外讀一次映像（刷機包 tbz2 要解壓好幾分鐘）：判定工具與 --probe-kernel-version
+# 帶 --also-list-kernel-versions，讀映像的同一趟順便印一行 KERNEL-VERSIONS，由 kernel_ship_from 收；都沒讀到映像時（指定 2 顆以上、
+# 沒有核心 CVE 所以工具沒讀映像…）kernel_versions_finish 才用 --list-kernel-versions 補讀一次。
+kernel_ship_from(){   # $1：工具的輸出；只收第一次讀到的
+  local l s2 s3
+  [ "$KSHIP_OK" = 1 ] && return 0
+  l=$(printf '%s\n' "$1" | grep -m1 $'^KERNEL-VERSIONS\t')
   if [ -n "$l" ]; then IFS=$'\t' read -r _ s2 s3 <<< "$l"; [ "$s2" = OK ] && { KSHIP_OK=1; read -r -a KSHIP <<< "$s3"; }; fi
+  return 0
+}
+# 準備：設 KVMULTI、KVARGS（要交給判定工具的 --kernel-version）。
+kernel_versions_prepare(){
+  KVMULTI=0; KVARGS=(); KSHIP=(); KSHIP_OK=0
   if [ "${KVERS[*]+x}" = x ]; then
     [ ${#KVERS[@]} -ge 2 ] && KVMULTI=1
     [ ${#KVERS[@]} -eq 1 ] && KVARGS=(--kernel-version "${KVERS[0]}")
@@ -851,6 +858,9 @@ kernel_stage_floor(){
 kernel_versions_finish(){
   local pa=(--out "$KVF") r line v note= unk=
   rm -f "$KVF"
+  if [ "$KSHIP_OK" != 1 ]; then    # 判定工具沒有讀映像（或沒讀成功）：補讀一次
+    r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" --list-kernel-versions "${KSRC[@]}" 2>&1); kernel_ship_from "$r"
+  fi
   if [ "$KSHIP_OK" = 1 ]; then for v in "${KSHIP[@]+"${KSHIP[@]}"}"; do pa+=(--shipped "$v"); done; else pa+=(--shipped-unknown); fi
   for v in "${KVERS[@]+"${KVERS[@]}"}"; do pa+=(--requested "$v"); done
   r=$(timeout 300 python3 -I "$ROOT/tools/pilot/lib/kernel_versions.py" "${pa[@]}" 2>&1); local rc=$?
@@ -898,6 +908,7 @@ elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 
   [ -s "$OUT/scan/l4t-kernel-map.json" ] && ka+=(--kernel-map "$OUT/scan/l4t-kernel-map.json")
   [ -n "$KERNEL_CVE_MIRROR" ] && ka+=(--mirror "$KERNEL_CVE_MIRROR")
   [ ${#KVARGS[@]} -gt 0 ] && ka+=("${KVARGS[@]}")      # --kernel-version：剛好指定 1 顆時交給 kernel_config.py 與 kernel_module_map.py
+  ka+=(--also-list-kernel-versions)                    # 讀映像的同一趟順便列出出貨的核心（kernel_ship_from）
   # 刷機包要整個解壓（數 GB 的 bzip2）：時間上限 3600 秒；映像 tar 與資料夾通常幾十秒
   kcl_tried=0; kskip=0
   if [ -n "${KERNEL_CVES:-}" ]; then      # 明確給的清單：和 Grype／DT 的核心 CVE 合併（kernel_config.py 的 --cves）
@@ -906,6 +917,7 @@ elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 
   fi
   while [ $kskip = 0 ]; do
     r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_config.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" --out "$KCF" "${KREC[@]+"${KREC[@]}"}" 2>&1)
+    kernel_ship_from "$r"
     l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-config\t')
     if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
       # NOT_RUN＝Grype、DT（與 --cves）都沒有核心元件的 CVE：廠商核心（不是套件）。以前什麼都不寫；現在找清單來源（上面的 kernel_cve_list），
@@ -922,6 +934,7 @@ elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 
   # 模組對應：同樣的輸入再讀一次（刷機包也是 3600 秒上限）
   kk=(); [ -s "$KCF" ] && kk=(--kernel-config "$KCF")      # 兩個階段各讀一次 CNA 鏡像：commit 不同時模組對應記 GAP
   r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_module_map.py" "${ka[@]+"${ka[@]}"}" "${KSRC[@]}" "${KPREF[@]+"${KPREF[@]}"}" "${kk[@]+"${kk[@]}"}" --out "$KMM" 2>&1)
+  kernel_ship_from "$r"
   l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-module-map\t')
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
     case $s2 in NOT_RUN) rm -f "$KMM";; FAIL) rm -f "$KMM"; status "$s1" "$s2" "$s3（來源：$KLABEL）";; *) status "$s1" "$s2" "$s3（來源：$KLABEL）";; esac
