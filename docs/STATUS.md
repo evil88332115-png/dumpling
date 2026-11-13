@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 06:41 +0800（C0）
+最後更新：2026-11-14 06:42 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -280,9 +280,9 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：GitLab 待辦。**PR #72**（wp5/gitlab-p1：T-21／T-17／T-20／T-19）CI 綠，等 C0 驗證。**PR #74**（wp5/gitlab-t05 2a9e635：T-05 GitLab 後端，只用假 API 測、沒有對真實 GitLab 驗證）CI 綠，自己的驗證代理不通過（應修 1：狀態 base64 行被當 quick action）＋建議 6，已修；等 C0 驗證。兩個 PR 不衝突
+- 目前在做：GitLab 待辦。**#72 已合併**（main e21adb0：T-21 先驗再傳、T-17 手動試跑不寫入、T-20 exit 3、T-19 MR 去重；手動 job 的 exit_codes 待內部驗證）。**PR #74**（wp5/gitlab-t05 13335a9：T-05 GitLab 後端，已併 main；C0 驗證的 5 項已修在 5d6b635）CI 跑中，綠了告訴 C0
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
-- 已合併：#32（每日監控架構）、#47（M5 GitLab 範本）、#49（M2 之後的每日監控）、#61（GitLab release-meta --notes）、#69（M8：第 14 條演練＋支援期限／EOL）、#71（M8 後續）
+- 已合併：#32、#47、#49、#61、#69、#71、#72（GitLab 範本 P1）
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑（T-05 寫程式＋驗證各 1 個，已結束）
