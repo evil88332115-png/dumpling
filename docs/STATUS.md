@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 03:14 +0800（C0）
+最後更新：2026-11-14 03:15 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -285,7 +285,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：第一次真實基準等正式 Release；M8 等 M7（C1 照 D-055 實作欄位與驗證）
+- 卡住／等決定：第一次真實基準等正式 Release；M8 等 C1 的 M7a PR #58（wp1/m7a，C0 驗證中）合併，C0 會通知。已唯讀看過 #58 的介面（markets／_markets_unknown、support_until 一致性、os.distro／release），M8 的接法寫在 `$AGENT_TMP/dumpling-tmp-c3/m8-plan.md`
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
