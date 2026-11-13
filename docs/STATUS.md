@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:11 +0800（C4）
+最後更新：2026-11-13 23:12 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -53,10 +53,10 @@
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：wp1/m2-followup 的 tests/run.sh（HEAVY_LOCK）
+- 本機背景工作：PR #42 的驗證代理（會用 HEAVY_LOCK）
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從 cc7d101 打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1` 並推送——C1 的推送被權限機制擋下，等使用者自己推或放行（本機與遠端都還沒有 tag）。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 run 編號與結果 → 刪 `wp1/m2-pr-draft`（draft Release 由 release.yml 自動刪）
-  2. **[WP1] 小 PR**（worktree `$AGENT_TMP/dumpling-wt-c1-followup`，分支 wp1/m2-followup，從 main cc7d101）：我的第四輪建議 1、2、5（c137451，cherry-pick 自 92d8e52）＋ C0 驗證建議 1（step_rows.overall：NOT_RUN 說明以「不適用」開頭才不降級，其他 NOT_RUN → GAP；pipeline.yml 的 build.mode 紀錄改成「不適用：…」；未 commit，本機完整測試中）→ 推 → 開 PR → 派驗證代理（Sonnet、high）→ 通知 C0
+  2. **[WP1] 小 PR #42**（https://github.com/evil88332115-png/dumpling/pull/42，wp1/m2-followup＝a475ec1，從 main cc7d101）：我的第四輪建議 1、2、5（c137451）＋C0 驗證建議 1（a475ec1：step_rows.overall 的 NOT_RUN 分「不適用」與沒能執行）。驗證代理（Sonnet、high）進行中 → 報告公開資料掃描後貼 #42 留言 → 有應修就修 → 通知 C0
   3. M7 待辦加上 C0 驗證建議 2–8（-os 8.7 節寫明核心在 -bsp 判定、LAYERS.md 註明各層加總≠完整、check-expected 下限檢查的測試、patch 修的 CVE 在 patched 版仍 P3 的說明、Release 說明步驟表少 pipeline-scan、SBOM 的上游維護者信箱、test_layers_report.py 單獨執行缺 sys.path）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
