@@ -43,8 +43,11 @@ class Wp7Hooks(ps.Hooks):
 
     def run_summary_fields(self, paths, status):
         bc = ps.read_json(os.path.join(paths["rootfs"], "bootloader-coverage.json"), {}) or {}
+        kv = ps.read_json(os.path.join(paths["scan"], "scan", "kernel-versions.json"))     # D-036（C1 的工具產生；沒有就 null，不推測）
+        kv = {k: kv.get(k) for k in ("shipped", "requested", "judged", "not_judged")} if isinstance(kv, dict) else None
         return {"bootloader_coverage": bc.get("status") if isinstance(bc, dict) else None,
-                "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status")}
+                "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status"),
+                "kernel_versions": kv}
 
     def scan_head(self, ctx):
         asm = ctx["asm"] or {}
@@ -68,7 +71,7 @@ class Wp7Hooks(ps.Hooks):
         return out
 
     def scan_tail(self, ctx):
-        return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage")}
+        return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions")}
 
     def extra_attachments(self, ctx, manifest):
         out = ctx["out"]
@@ -95,6 +98,14 @@ class Wp7Hooks(ps.Hooks):
             for g in rs.get("gaps") or []:
                 L.append("- GAP：%s" % g)
             L.append("- 閉源成品（DDR 初始化、TF-A BL31）沒有可機器比對的安全公告：GAP。U-Boot 給上游 CPE，比對結果是候選、進待人審（D-034）。")
+        kv = (ctx["main_run"] or {}).get("kernel_versions")
+        L += ["", "## 核心（D-036）", ""]
+        if kv:
+            L.append("- 映像裡的核心：%s；指定判定：%s；已判定：%s。" % tuple("、".join(kv.get(k) or []) or "無" for k in ("shipped", "requested", "judged")))
+            if kv.get("not_judged"):
+                L.append("- **已出貨、未判定（GAP）**：%s" % "、".join(kv["not_judged"]))
+        else:
+            L.append("- 讀不到 kernel-versions.json：核心判定的範圍沒有記錄（GAP）。")
         ks = self.x.get("kernel_source")
         if ks is not None:
             L += ["", "## 核心原始碼（D-035）", "",

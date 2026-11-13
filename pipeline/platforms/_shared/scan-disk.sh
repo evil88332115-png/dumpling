@@ -81,6 +81,19 @@ cp -r "$proj/CRA/Config" "$out/cra-config" || fail "複製 CRA/Config 失敗"
 python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
   --grype-cache "$out/grype-db" --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
 export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
+# 要判定的核心（D-036）：sources.yml 的 platform_params.kernel_release（字串或清單）→ SCA_KERNEL_VERSIONS（逗號分隔）。
+# 映像裡有、但沒指定的核心，報告列「已出貨、未判定」並標 GAP；沒指定時映像有多顆核心就整個 GAP（不猜）。
+krel=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" kernel_release 2> /dev/null); krc=$?
+case $krc in
+  0) kvs=$(python3 -I -c 'import json,re,sys
+v=sys.argv[1].strip()
+v=json.loads(v) if v.startswith("[") else [v]
+ok=isinstance(v,list) and v and all(isinstance(x,str) and re.fullmatch(r"[0-9][A-Za-z0-9.+_~-]{0,80}",x) for x in v)
+print(",".join(v)) if ok else sys.exit(1)' "$krel") || fail "platform_params.kernel_release 格式不對（字串或字串清單，例如 6.18.50+rpt-rpi-2712）"
+     export SCA_KERNEL_VERSIONS=$kvs; echo "要判定的核心：$kvs";;
+  3) unset SCA_KERNEL_VERSIONS; echo "沒有指定要判定的核心（platform_params.kernel_release）：映像有多顆核心時核心判斷是 GAP";;
+  *) fail "讀不到 sources.yml 的 platform_params";;
+esac
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$srcpath" \

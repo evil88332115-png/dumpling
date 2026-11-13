@@ -3,6 +3,7 @@ schema: 1
 releases:
   v1.0.0-demo1:
     platform_params:
+      kernel_release: 6.12.116+deb13-amd64
       kernel_source_file: linux_6.12.116.orig.tar.xz
       kernel_orig_file: linux_6.12.116.orig.tar.xz
       kernel_debian_file: linux_6.12.116-1.debian.tar.xz
