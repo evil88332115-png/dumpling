@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 21:54 -0500（C1）
+最後更新：2026-11-13 10:56 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -87,15 +87,17 @@
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：M4（PLAN「E. 監控與通知」）設計與骨架。架構（C3 提案，已通知 C0）：每日監控不開 DT（exploited_watch.py 以 DT 專案 UUID 為比對鍵，臨時 DT 每天 UUID 不同會每天全算新的），改 Grype＋CISA KEV＋EUVD＋廠商層級，import 既有 exploited_grype／euvd／exploited_vendor 函式
-- 分支／PR／commit：`wp2/watch`（worktree `$AGENT_TMP/dumpling-wt-c3-watch`，從 main dd7664e）；PR 未開（M4 完成才開，D-020）
-- M4 拆分：4a 收集 Release（release-meta＋bsp／os SBOM，跳過 draft；`--from-dir` 讀合成 Release）／4b 比對／4c 狀態檔（鍵＝專案、版本、層、CVE、purl；第一次只建基準；`watch-state` 分支每日提交防 60 天停用，待查官方文件）／4d 開 Issue（標籤 kev、shipped／development、vendor-level、layer-os、drill；內文標記去重）／4e watch.yml（D-012 權限）／4f 合成 KEV 演練／4g M2 合併後接真 Release＋真實基準
-- M5 拆分：5a GITLAB-PORT 對照（已被利用真實案件用 confidential Issue）／5b 待辦：DT parent-child（D-030）、簽章與來源證明 GitLab 方案（D-032／D-033 A2，查官方文件）／5c gitlab/.gitlab-ci.yml（官方 CI schema 離線檢查；release／dev 等 M2 定案）／5d 搬移檢查清單
-- 等 M2：4a 接真 Release、4g 真實基準、5c 的 release／dev 段
-- 代理：無
-- CI：無
-- 下一步：查 60 天停用規則與 exploited_grype 可重用程度 → 寫 4b／4c；4a、4d 派代理
-- 卡住／等決定：無（alert_mail.py：GitHub 階段不帶，M5 視 GitLab 寄信需要再帶）
+- 目前在做：M4（PLAN「E. 監控與通知」）。契約 `docs/WATCH.md`。架構（C0 同意）：每日不開 DT；Grype（exploited_grype.prepare／extract 原樣重用）＋CISA KEV＋EUVD＋核心 CNA（kernel_cna_version.py 原樣呼叫，上游版本取自 Release 附件 `kernel-versions-<專案>-<版本>.json` schema /2）＋廠商層級（exploited_vendor）；DT（OSV）、NVIDIA 公告、核心 .config 判定每天 NOT_RUN 並列在報告與 Issue
+- 狀態：不開 watch-state 分支、任何 job 都沒有 contents: write（C0 決定）。狀態放在標籤 `watch-state`（演練 `watch-state-drill`）的 Issue 內文（gzip＋base64 JSON，只放公開欄位、寫入前過 public-patterns）；每筆命中一個 Issue，內文標記去重
+- workflow：`watch.yml`（每天 01:17 UTC＋手動 drill／real）→ `watch-round.yml`：compute（contents/issues: read）→ notify（issues: write）；keepalive（actions: write：讀 state 再 enable）。**暫時有 push 觸發（登錄用，所有 job 跳過），開 PR 前拿掉**
+- 分支／PR／commit：`wp2/watch` 1749fe3（worktree `$AGENT_TMP/dumpling-wt-c3-watch`）；PR 未開（M4 完成才開，D-020）
+- 代理：寫程式 collect.py（Sonnet high）完成、已併入；寫程式 issues.py（Sonnet medium）完成、已併入；目前無代理在跑
+- CI：watch drill run 43355566482、tests run 43355569622（進行中）
+- 防 60 天停用：官方沒有定義 activity；keepalive 每天讀狀態＋enable；**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`，M4 合併後開始算）
+- 下一步：看 drill 結果（預期 drill-1 建基準 0 個、drill-2 開 1 個、drill-3 0 個、close-drill）→ 修正 → 派驗證代理 → M2 合併後接真 Release、real 第一次只建基準 → 開 PR
+- 等 M2：真 Release 的收集、核心 CNA（kernel_cna_version.py 與 kernel-versions 附件都在 M2）、real 第一次基準
+- 待問 C0：公開 repo 的排程 real 模式要不要真的開 Issue（Release 是公開 BSP 資料；開場指令寫「公開 repo 只做演練」）
+- M5：尚未開始（GITLAB-PORT 要寫：狀態 Issue 與已被利用案件一律 confidential、DT parent/child、簽章 GitLab 方案、alert_mail 視需要帶回）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
