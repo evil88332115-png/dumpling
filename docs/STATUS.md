@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 11:44 +0800（C4）
+最後更新：2026-11-13 11:54 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -111,7 +111,7 @@
 
 - 目前在做：依驗證代理的結果修 rock 標準答案（external_services 改 NOT_ASSESSED、範圍放寬、加 raw_sectors.by_slot／report_rows／cna.gap 等可核對欄位、DKMS 驅動歸 bsp）；rock 用 b865b82 重跑中；rpi 等 C1 的 kernel-cve cache 退回；ai-nas 等 scan.tools: full
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
-- 代理：驗證代理 1 個（Sonnet 5.5，effort high，只讀；任務：C0 委託代開，獨立驗證 C3 的 PR #28；不做 GitHub 寫入，留言草稿寫成檔案交回；狀態：進行中）
+- 代理：無執行中（PR #28 驗證代理已完成：驗證通過、應修 3、建議 6；留言依使用者授權以 --body-file 發出，連結已回報 C0）
 - CI：dev.yml 依序跑 rpi-lite-demo → rock-5b-demo（c00611b）；ai-nas 最近一次 43341204962 FAIL（cdxgen 沒裝，已由 C1 在 M2 處理）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
 - 下一步：看三個平台的結果；C1 的 D-036（--kernel-version）進來後再跑一次；標準答案逐項核對（官方 SBOM／manifest／.info）後由驗證代理獨立核對，PR 附核對紀錄；不擋路的缺口記在 docs/references/adapter-gaps.md；M6 完成開 PR
