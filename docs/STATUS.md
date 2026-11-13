@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:39 +0800（C0）
+最後更新：2026-11-13 23:41 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -151,7 +151,7 @@
 >   - 應修是 2 處 AMD 文字：DT 報告的標籤寫成「Intel 微碼與 ME」；amd 是 None 時 CI 欄寫「已解析 0 份」
 >   - 寫程式代理第四輪：**完成 7ebeacc**（併入 main 時 7dbdc86 沒有衝突；2 處 AMD 文字已修；CI 欄抽成 firmware_advisory_cell.py；family 矛盾不推定；加了 .gitattributes；638＋177 passed；四個樣本 OK）。diff 由 C2 看過
 >   - CI tests 43451689061、firmware 43451693975
->   - **C0 選 (a)**：CI 綠就開 PR；說明寫明複驗做到 d8a20ec、7ebeacc 是作者自己看的 diff、family 矛盾不推定。PR 說明在 `$AGENT_TMP/dumpling-tmp-c2/pr-body-adv.md`
+>   - **C0 選 (a)**：CI 綠就開 PR → **PR #46 已開**（head 7ebeacc，CI 兩個都綠）。驗證由 C0 派（驗整個 PR），合併由 C0 做
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
@@ -177,7 +177,8 @@
 > - C2 併入 main cc7d101 → **40bdd2f**（沒有衝突，581 passed）；CI tests 43449879817、firmware 43449885845
 > - 驗證（新代理）：預驗 wp3/cse-layout-size 40bdd2f（D-053），狀態：**完成：驗證通過**，沒有應修（差分 fuzz 12,000 次 0 不同；7 個樣本逐位元相同）
 > - **C0 私有檔複核 40bdd2f：通過**（3 份都 found；表尾非 0 的兩份有 ATTENTION 和原始值）
-> - 寫程式（cse 代理第三輪）：收尾，**只動測試和文件**（補測試、拿掉歷史口吻、V540TU license 改指 release notes 頁、notes 補 FTPR 先命中的情況），**進行中** → 附上 diff --stat 後開 PR
+> - 寫程式（cse 代理第三輪）：收尾**完成 28a008e**（只動 4 個檔案：notes、V540TU yml、intel_cse_layout.py 兩行 docstring、測試；ast 相同；test_intel_cse_layout 共 141 個）。CI tests 43454875213、firmware 43454880937 → 綠了就開 PR（說明在 `$AGENT_TMP/dumpling-tmp-c2/pr-body-cse.md`）
+>   - 代理的暫存 `$AGENT_TMP/dumpling-tmp-c2-cse60/tmp`、`pytest` 被安全檢查擋下沒刪，**要使用者手動刪**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
