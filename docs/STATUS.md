@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:56 +0800（C2）
+最後更新：2026-11-13 22:10 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -127,7 +127,15 @@
 >   - CSME CPE：NVD 的 product 是 converged_security_management_engine_firmware，版本只到三段，NVD 資料止於 2022
 >   - **D-051（C0 決定）**：family 讀不出來時 major ≥ 11 推定為 CSME（cpe-basis=inferred）。報告要寫明「family 是由版本推定、比對結果待人審」，這句還要補；若預驗找到公開反例就改回 GAP，並通知 C0
 >   - CI tests 43436190471、firmware 43436194559（進行中）
-> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/fw-advisory 5bddbf8，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv/`，狀態：**進行中**
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/fw-advisory 5bddbf8，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv/`，狀態：**完成：驗證不通過**。
+>   - 確認沒問題的部分：資料表重現 OK；獨立解析器對照一致；差分測試 2188 案例一致；6 份樣本微碼核對了原檔行號；major ≥ 11 沒找到 TXE／SPS 的反例，D-051 維持
+>   - 應修 1：揭露表（New Disclosures Updated in Prior Releases）沒有納入候選
+>   - 應修 2：20250812 的散文會影響 ADL 等的候選，只放在 unparsed
+>   - 應修 3：同 F-M-S 被新的 mask 取代時，舊 mask 被標 up-to-date
+>   - 應修 4：cpe-basis 的依據句不實（漏了 AMT）
+>   - 建議：補邊界測試；validate 的強化；產生器超線性；授權方面（release notes 沒有明確授權）只留事實性欄位
+>   - 供應商 SBOM 的公告比對還沒做，等 supplier-normalize 合併後由 C2 處理
+>   - 已交回寫程式代理修正（進行中）
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
 >   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
