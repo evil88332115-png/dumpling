@@ -50,13 +50,43 @@ jobs:
           bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
           sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/grype"
           grype version | head -n 3
+      # 上一份核心 CVE 鏡像：跟 pipeline.yml 同一個 key 前綴與路徑（cache 的版本含路徑），Release 掃描與每日監控互相沿用。
+      # 上游沒變就沿用；git.kernel.org 連不上就用 48 小時內的上一份頂替（ATTENTION，報告與 Issue 會寫出來）。演練不下載核心 CVE。
+      - name: 還原上一份核心 CVE 鏡像（real；有 cache 才有）
+        if: inputs.mode == 'real'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: kernel-cve-mirror-
       - name: 資料源（CISA KEV、EUVD、核心 CNA、Grype DB）
         env:
           MODE: ${{ inputs.mode }}
+          KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
         run: |
           extra=()
           if [ "$MODE" = drill ]; then extra=(--no-kernel-cve --no-euvd); fi
           pipeline/watch/feeds.sh "$RUNNER_TEMP/w/feeds" "${extra[@]}"
+      - name: 核心 CVE 鏡像是不是這次新抓的（只有新抓的才存 cache，頂替用的舊資料不存回去）
+        id: kcve-fresh
+        if: inputs.mode == 'real'
+        env:
+          KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
+        run: |
+          export MIRRORS_DIR="$RUNNER_TEMP/w/feeds"
+          . pipeline/lib/mirrors.sh
+          if mirror_is_fresh kernel-cve; then
+            rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kernel-cve" "$KCVE_CACHE_DIR"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"; du -sh "$KCVE_CACHE_DIR"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "核心 CVE 鏡像不是這次新抓的（或沒有）：不存 cache"
+          fi
+      - name: 存核心 CVE 鏡像（cache；新抓的才存，GitHub 會淘汰舊的）
+        if: inputs.mode == 'real' && steps.kcve-fresh.outputs.fresh == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
       - name: 收集 Release
         env:
           GH_TOKEN: ${{ github.token }}

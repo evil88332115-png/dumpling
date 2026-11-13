@@ -205,6 +205,54 @@ def load_cisa(eg, feeds, overlay, work, now):
 
 # ---------- 核心 CNA ----------
 
+FEED_LABELS = (("kernel-cve", "核心 CVE 鏡像（Linux 核心 CNA）", "這段時間新增的核心 CVE 不在清單裡"),
+               ("euvd", "EUVD 鏡像", "這段時間新增的 EUVD 紀錄不在清單裡"))
+_ABS_PATH = re.compile(r"(?<![\w.:/])/[^\s，、；：）)」]+")
+
+
+def _feed_text(s):
+    """鏡像腳本的訊息 → 可以寫進公開 Issue 的一行：去掉控制字元與 <>、絕對路徑換成 <路徑>（runner 的暫存路徑不進 Issue）、限長。"""
+    s = re.sub(r"[\x00-\x1f\x7f<>]", " ", str(s))
+    return re.sub(r"\s+", " ", _ABS_PATH.sub("<路徑>", s)).strip()[:300]
+
+
+def feed_attention(feeds):
+    """鏡像用了舊資料頂替（pipeline/lib/mirrors.sh 的 ATTENTION；核心 CVE 是 SOURCE 的 fallback=yes）→ 報告與 Issue 要寫出的行。"""
+    out = []
+    for name, label, lag in FEED_LABELS:
+        line = ""
+        try:
+            with open(os.path.join(feeds, name + ".result"), encoding="utf-8", errors="replace") as f:
+                line = f.readline().strip()
+        except OSError:
+            pass
+        src = {}
+        try:
+            with open(os.path.join(feeds, name, "SOURCE"), encoding="utf-8", errors="replace") as f:
+                src = dict(x.split("=", 1) for x in f.read().splitlines() if "=" in x)
+        except OSError:
+            pass
+        if src.get("fallback") == "yes":
+            why = src.get("fallback_note") or f"沿用下載於 {src.get('fetched_utc') or '?'} 的上一份"
+        elif line.startswith("ATTENTION"):
+            why = line[len("ATTENTION"):].strip() or "鏡像腳本回報 ATTENTION"
+        else:
+            continue
+        why = _feed_text(why)
+        out.append(f"{label}用了舊資料頂替：{why}" + ("" if lag in why else f"：{lag}"))
+    return out
+
+
+def add_feed_note(actions, lines):
+    """這次執行的資料源用了舊資料頂替：每個要開的 Issue、留言都寫出那幾行（報告另外列在「需注意」）。"""
+    if not lines:
+        return actions
+    note = "\n\n> **這次執行的資料源用了舊資料頂替（ATTENTION）**\n" + "\n".join(f"> - {md_cell(x)}" for x in lines)
+    for x in actions:
+        x["body"] = x["body"] + note
+    return actions
+
+
 def kernel_upstreams(path):
     """kernel-versions-<專案>-<版本>.json → ([(upstream_version, 說明)], [GAP 說明])。"""
     if not path:
@@ -703,6 +751,8 @@ def run(a, kernel_runner=None):
     serious = [f"Release 問題：{x}"[:300] for x in inv_problems]     # 降級：連續發生要通知人（健康 Issue）
     if not projs:
         serious.append("沒有任何可監控的 Release／SBOM（已有狀態）")
+    feed_attn = feed_attention(a.feeds)       # 鏡像用了舊資料頂替：整輪 ATTENTION，報告與 Issue 都寫出來（不擋基準：資料最多 48 小時舊）
+    attn += feed_attn
     ps_bad, ps_note = prev_schedule_check(a.prev_schedule, a.run_id, now)
     serious += ps_bad
     gaps += ps_bad
@@ -843,6 +893,7 @@ def run(a, kernel_runner=None):
         actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
+        add_feed_note(actions, feed_attn)
         if a.demo:
             mark_demo(actions)
     finally:

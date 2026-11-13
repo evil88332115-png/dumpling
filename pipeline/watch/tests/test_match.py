@@ -512,5 +512,63 @@ class T(Base):
         self.assertNotIn("releases/0", txt)
 
 
+class FeedFallback(Base):
+    """鏡像用了舊資料頂替（pipeline/lib/mirrors.sh 的 ATTENTION）：報告與 Issue 都寫出那一行；runner 的絕對路徑不進 Issue。"""
+    RUNNER_PATH = "/home/runner/work/_temp/kcve-cache/kcve"
+
+    def write_kcve_fallback(self):
+        d = os.path.join(self.feeds, "kernel-cve")
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "SOURCE"), "w", encoding="utf-8").write(
+            "commit=0123456789abcdef0123456789abcdef01234567\nfetched_utc=2026-11-10T01:00:00Z\nfallback=yes\nfallback_utc=2026-11-11T01:00:00Z\n"
+            f"fallback_note=上游連不上（clone 失敗：{self.RUNNER_PATH}/x），沿用 vulns.git 0123456789ab（下載於 2026-11-10T01:00:00Z，24 小時前；上限 48 小時）"
+            "：這段時間新增的核心 CVE 不在清單裡\n")
+        open(os.path.join(self.feeds, "kernel-cve.result"), "w").write(f"ATTENTION mirror={self.feeds}/kernel-cve manifest=x 上游連不上\n")
+
+    def test_kernel_fallback_in_report_and_issue(self):
+        self.run_once(NOW1)
+        self.write_kcve_fallback()
+        self.kev.append("CVE-2018-18074")
+        st, _, plan = self.run_once(NOW2, demo=True)
+        self.assertEqual(st, "ATTENTION")
+        opens = [x for x in nohealth(plan) if x["op"] == "open"]
+        self.assertEqual(len(opens), 1)
+        self.assertIn("資料源用了舊資料頂替", opens[0]["body"])
+        self.assertIn("核心 CVE 鏡像（Linux 核心 CNA）用了舊資料頂替", opens[0]["body"])
+        self.assertIn("這段時間新增的核心 CVE 不在清單裡", opens[0]["body"])
+        self.assertEqual(opens[0]["body"].count("這段時間新增的核心 CVE 不在清單裡"), 1)
+        for x in plan["actions"]:
+            self.assertNotIn("/home/runner", x["body"])
+            self.assertNotIn(self.feeds, x["body"])
+        out = os.path.join(self.w, "out-" + NOW2[:10])
+        res = json.load(open(os.path.join(out, "result.json")))
+        self.assertTrue(any("核心 CVE 鏡像" in x and "不在清單裡" in x for x in res["attention"]))
+        self.assertIn("這段時間新增的核心 CVE 不在清單裡", open(os.path.join(out, "report.md"), encoding="utf-8").read())
+
+    def test_fallback_does_not_block_baseline(self):
+        self.write_kcve_fallback()
+        st, detail, plan = self.run_once(NOW1)
+        self.assertIn("建立基準", detail)
+        self.assertEqual(plan["actions"], [])
+        self.assertEqual(st, "ATTENTION")
+
+    def test_euvd_attention_line(self):
+        self.run_once(NOW1)
+        open(os.path.join(self.feeds, "euvd.result"), "w").write("ATTENTION mirror=/tmp/x/euvd 用了上一份\n")
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2)
+        body = [x for x in nohealth(plan) if x["op"] == "open"][0]["body"]
+        self.assertIn("EUVD 鏡像用了舊資料頂替：mirror=<路徑> 用了上一份：這段時間新增的 EUVD 紀錄不在清單裡", body)
+
+    def test_ok_result_adds_nothing(self):
+        self.run_once(NOW1)
+        open(os.path.join(self.feeds, "kernel-cve.result"), "w").write("OK commit=abc fetched_utc=2026-11-11T00:00:00Z\n")
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2)
+        self.assertFalse(any("舊資料頂替" in x["body"] for x in plan["actions"]))
+        res = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        self.assertFalse(any("舊資料頂替" in x for x in res["attention"]))
+
+
 if __name__ == "__main__":
     unittest.main()
