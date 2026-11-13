@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 15:26 +0800（C4）
+最後更新：2026-11-13 02:30 -0500（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -40,8 +40,8 @@
 - CI：手動觸發（`gh workflow run <wf> --ref <分支>`）
 - M7 待辦（M2 合併後；判斷邏輯，一起驗證）：D-035 排除依據類型；D-036 逐顆核心判定與合併；D-039 核心可利用性三層判斷（從 sca-center 同步，PROVENANCE 更新來源 commit）與精靈以掃描版本覆寫 version／identification
 - M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M2 之後
-- 我自己：release-meta.json 加 report_status／release_gate／pipeline_result（result 改名）／reports／kernel_versions、Release 說明開頭依序印出；附件 kernel-versions-<專案>-<版本>.json（dev 也發）；platform_params.kernel_upstream_version → `project-info.py --kernel-args` → 精靈 `--kernel-upstream-version` → sca-scan → kernel_versions.py `--upstream-version`。已推 wp1/m2 9f1d2f0，本機全測 OK；已通知 C0 轉 C3、C4。驗收 run：release.yml v39.2.0 43375548090、v39.2.1 43375551920（從新的 build，draft）；tests.yml 43375594174
-- 下一步：兩個 release.yml 跑完 → 獨立驗證 → 併最新 main → PR → 通知 C0（正式 tag 由 C0 問使用者）
+- 我自己：release-meta.json 加 report_status／release_gate／pipeline_result（result 改名）／reports／kernel_versions、Release 說明開頭依序印出；附件 kernel-versions-<專案>-<版本>.json（dev 也發）；platform_params.kernel_upstream_version → `project-info.py --kernel-args` → 精靈 `--kernel-upstream-version` → sca-scan → kernel_versions.py `--upstream-version`。已推 wp1/m2 9f1d2f0；已通知 C0 轉 C3、C4。**驗收 run 全部綠燈**：release.yml v39.2.0 43375548090、v39.2.1 43375551920（從新的 build，draft，各 20 個附件），tests.yml 43375594174。兩份 draft：標準答案 23/23、build record OK、C-kernel-boot OK、上游被修改的檔案 v39.2.1＝1（inet_connection_sock.c）／v39.2.0＝0、kernel-versions 附件 schema /2（upstream 6.8.12，source-makefile）；report_status／release_gate 都是 GAP（NVD 沒開，已知），pipeline_result OK
+  - C4 回報、C0 轉（2026-11-13）：scan.sh 讀 scan_plan 用 TAB 分隔，ours 的空後綴被吃掉。修法：`jetson_scan.py plan`（platform_scan.scan_plan_lines，格式驗證）每行用 0x1F 分隔；collect 同一後綴出現兩次取後面那次（ours 的產品 SBOM 重跑），kernel-versions 仍取完整掃描；LAYERS.md 加說明；測試 7 個（含舊寫法的反證）。本機全測進行中，跑完推送
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
