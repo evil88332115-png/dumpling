@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:52 +0800（C2）
+最後更新：2026-11-13 22:53 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -42,7 +42,7 @@
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
   - 其他 M2 子分支都已併入或不合併，不用再動
 - 開出去的代理：
-  - 第四輪獨立驗證（Sonnet、high）：**進行中**
+  - 第四輪獨立驗證（Sonnet、high）：**完成，通過**（應修 0、建議 6），已貼 #40 留言（報告 `$AGENT_TMP/dumpling-tmp-c1/verify4/report.md`）。建議 1（bsp_na 沒看 os_responsibility）、2（完整掃描成功路徑沒有順序測試）、5（NOT_RUN 說明）提議合併後開小 PR；3、4、6 排 M7；等 C0 決定
   - 第三輪獨立驗證（Sonnet、high）：**完成**，結論「驗證：不通過」，報告 `$AGENT_TMP/dumpling-tmp-c1/verify3/report.md`（開 PR 時貼成留言）。應修 1：-os 報告混入 bsp 的 OP-TEE Mbed TLS 11 列（另外我查到 -os 產品 SBOM 也有刷機包韌體 441 個 bsp 元件）→ 852b6d3：分層 SBOM 沒有 bsp／unknown 元件時，刷機包韌體、UEFI／OP-TEE 內建函式庫不適用（`layers.bsp_inputs_not_applicable`）；建議已處理：Release 說明成品上游比對不印 JSON、PLATFORM-INTERFACE 補 kernel_not_distro 不以 - 開頭；其餘建議（kernelcheck 上標數字 epoch 會 FAIL、完整報告 P1 沒範圍說明、步驟表沒有 pipeline-scan、標準答案沒固定 -os 核心階段）排 M7 或寫進 PR 說明
 - 驗收 run（f11bfdb）：release v39.2.0-demo1 **43399785656 綠**、v39.2.1-demo1 **43399800268 綠**、tests **43399813005 綠**；877ffbc 的 tests 43412769902 綠。
 - 852b6d3 的驗收 run：43416140192、43416151433、43416163311 **都綠**。draft 核對：-os 沒有 bsp 列（3780／3582 列全是 os）、-os 產品 SBOM 全是 os 元件（87518／88263；唯一含 flash 字樣的是 Ubuntu 的 libflashrom1）、`bsp_inputs_not_applicable.skipped`＝tee-source、flash-firmware；-bsp 照舊有 Mbed TLS 11 列與刷機包韌體 436／438 個元件；-os 的 Mbed TLS 只剩 Ubuntu deb（libmbedcrypto7t64 34、mbedtls 3）。**完整報告 tee Grype 兩輪都是 NOT_RUN（資料庫不可用）→ 078710d**
@@ -53,10 +53,10 @@
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：第四輪驗證代理（會用 HEAVY_LOCK 跑測試）
+- 本機背景工作：沒有
 - **下一步（照順序）**：
-  1. 第四輪獨立驗證（Sonnet、high，背景代理；驗 852b6d3、078710d、c08de27＋draft6，不給結論）完成後：報告 `$AGENT_TMP/dumpling-tmp-c1/verify4/report.md` 做公開資料掃描後貼成 PR #40 留言；有應修就在 wp1/m2 修、推、通知 C0
-  2. 看 PR #40 的 CI（tests 43443865429 等）綠燈
+  1. ~~第四輪驗證~~ 完成（見上）；PR 說明已更正（-bsp＋-os 比完整多 1／7 列：python3-fonttools、pip、wheel）
+  2. PR #40 CI：unit-tests、public-check、dt-smoke、firmware-fetch 綠，firmware-dt 進行中
   3. **wp1/m2 停在 1e18ed9，不推新 commit**（C0 用 --match-head-commit 1e18ed9 合併；真的要推先告訴 C0）。C0 的驗證代理在驗 1e18ed9＋兩份 draft
   4. **D-052（使用者決定）**：兩份驗證都過、CI 綠、C0 合併後**馬上**由 C1 推 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`（從合併後的 main）。release.yml 在 tag push 時建正式 Release 之前會自動刪同名 draft（第 136–140 行），已告知 C0；本機 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 有兩份 draft 的完整附件，用來和正式 Release 核對（附件數、標準答案 24 項、各層列數）。release workflow 綠、核對過後才刪 `wp1/m2-pr-draft`
   5. VEX 發行閘門暫不分層（D-052 (2)，接受 D-030 (3)）
