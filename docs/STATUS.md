@@ -2,17 +2,17 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:24 +0800（C0）
+最後更新：2026-11-14 02:25 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：M2 後續全部合併（#42、#50）；等 C4 開 M6 PR、C1 提 M7 拆法；正式 tag 等使用者（從最新 main 打）
-- 分支／PR／commit：main 9f11a90。已合併：**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 fedb819：D-051 補、D-054、D-055；自然時機再開 PR）
+- 分支／PR／commit：main 9f11a90。已合併：**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：#40、#42、#50 已合併。C0 請 C1 準備 M7 並提拆法（M7a／M7b…，每個可獨立驗證）。正式 tag 等使用者
+  - C1（第二台）：#40、#42、#50 已合併。**M7 拆法已確認（D-056）**：M7a 專案欄位∥M7a2 validate_table → M7b 狀態結構化 → M7c VEX 依據 → M7d 逐顆核心 → M7e 可利用性分層；M7f（A1–A3、C1 骨架、文字建議）M7b 後平行。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54 已合併。wp3/supplier-followup（#54 建議 1、3、4、5）從 main 開；wp3/nvidia-vbios-advisory 修預驗應修中（牆上時鐘測試、5674 改回待審）；需要 C1 介面（M7）
   - C3（第二台）：M5 #47、監控 #49 已合併。real Issue 照 D-040：等正式 Release → 手動 baseline → 一天 dry_run → C3 回報 → C0 設 WATCH_REAL_ISSUES=on。GitLab 待辦 T-14（C1）、T-15～T-22。wp2/art14 等 M7（先整理需要 M7 的欄位）
   - C4（第二台）：wp7/adapters 已併 main 9f11a90（25d3050）、獨立驗證已做（小修 107ce75）；support-lifecycle 11 筆已在 M6。**最終重跑等使用者同意**（C4 的本機派送腳本被 Claude Code 以「記憶體不足」停掉，依規定要使用者同意才能重啟）。通過後開 M6 PR
@@ -21,7 +21,7 @@
   2. M2 合併後：使用者決定合併後馬上打 tag（D-052），**等使用者自己推或放行 C1**；文件批次 #41 已合併；C2／C3／C4 已通知
   3. （完成）#39、#48 已合併；私有檔驗證與複核由 C0 用使用者提供的 3 份樣本完成（暫存在 C0 的 scratchpad，待使用者決定刪除）
   4. 監控 real Issue：#49 已合併 → 等正式 Release（tag）→ 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
-  5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#19（rpi 報告端：有 KERNEL_CVES 時補 Grype 沒有的 CVE 成列、同一個 CVE 不按核心套件重複列；屬 D-044 (2)，M7 交給 C1；修好後 C4 再釘 rpi 的「bsp 核心候選 ≥ CNA 清單」）、#20、#22、#23、C0 的 M2 驗證建議 2–8（-os 8.7 節、LAYERS 列數說明、check-expected 下限測試、patch CVE 仍 P3 說明、步驟表缺 pipeline-scan、SBOM 上游信箱、test_layers_report sys.path）、C1 的 M2 驗證建議 3（-os sbom.md 開機韌體一節矛盾）、4（略過清單進風險評估 Layers 節）、6（Release 附件 SBOM 與報告包 SBOM 差別說明＋標準答案「-os 只有 os」）、C1 #50 盤點的 M7 項（A-source ATTENTION 依文字分辨、meta.json／run-params.json 結構化參數、C-dt-feeds／C-mirror-freshness 不依賴說明文字；D-054 的閘門最終做法）、scan-status-check.py 重複列是後值蓋前值、和 report 留最嚴重的不一致（C2 #54 驗證建議 2）、C2 需要的 C1 介面（validate_table 十六進位版本＋PCI 裝置欄位、表記鏡像 commit；NVIDIA vBIOS 公告比對用）、**D-055 M8 欄位**（markets 會員國 ISO alpha-2＋EU-ALL／UNKNOWN、support_until 為準產生 support.end_date、名稱／版本來源、os.distro／release；C3 清單在 `$AGENT_TMP/dumpling-tmp-c3/m8-needs-from-m7.md`）、#25（missing_fields 少算 flash_package_supplier、sbom.md 非 Jetson 平台出現 L4T 文字）、#26（notes.md 的 pipeline_result 改成跟 release-meta.json 一致）
+  5. M7：照 D-056 拆成 M7a～M7f（C1），每個 PR C0 派獨立驗證；M7c～M7e 改 Jetson 標準答案前要先經 C0 同意
   6. M7 之後：T-14（C1：scan.sh 加選項改連既有 DT，不傳照舊臨時 DT；做好後 C3 改 GitLab 範本）；D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
 - 卡住／等決定：正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
