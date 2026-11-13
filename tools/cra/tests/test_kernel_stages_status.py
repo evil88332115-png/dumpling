@@ -189,3 +189,21 @@ def test_flash_scan_without_flash_status_tsv_is_gap(tmp_path):
     st, detail = _risk(s)
     assert any(x.startswith("flash-package status.tsv is GAP (flash package scan)") for x in detail), detail
     assert st == cr.worst([base, "GAP"])
+
+
+@pytest.mark.parametrize("bad", ["{not json", "[]", "null", '{"rootfs": "rootfs_no_gui"}', '{"x": 1}'])
+def test_broken_list_json_is_gap_not_a_non_flash_scan(tmp_path, bad):
+    """list.json 在（刷機包的掃描）卻不是合法 JSON 或沒有 rootfs 清單：不能當成「不是刷機包的掃描」略過 → GAP（D-043）。"""
+    from test_cra_report import SBOM
+    res = tmp_path / "res"
+    findings = [f for f in FINDINGS if not f["vulnerability"].get("isKev") and (f["vulnerability"].get("epssPercentile") or 0) < 0.9]
+    scan = make_scan(res / "rootfs_no_gui" / "scan", findings=findings, sbom=SBOM)
+    (res / "list.json").write_text(bad, encoding="utf-8")
+    (res / "status.tsv").write_text("stage\tstatus\tdetail\nB-uefi-binary\tOK\tx\n", encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "p", json.loads(json.dumps(EXAMPLE))), scan)
+    assert s is not None, r.stdout + r.stderr
+    st, detail = _risk(s)
+    assert any(x.startswith("flash-package status.tsv is GAP (flash package scan)") for x in detail), detail
+    assert cr.ORDER.index(st) <= cr.ORDER.index("GAP")
+    assert cr.flash_stage_status(scan) == {cr.FLASH_STATUS_MISSING: cr.flash_stage_status(scan)[cr.FLASH_STATUS_MISSING]}
+    assert "list.json" in cr.flash_stage_status(scan)[cr.FLASH_STATUS_MISSING][1]

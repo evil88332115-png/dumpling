@@ -168,11 +168,15 @@ FLASH_STATUS_MISSING = "flash-package status.tsv"
 
 def flash_stage_status(scan):
     """刷機包層 status.tsv 裡這個 rootfs 的 FLASH_ROOTFS_STAGES 與整個產品的 FLASH_PRODUCT_STAGES → {階段: (狀態, 說明, 是否 BSP 專屬)}。
-    不是刷機包的掃描、沒有 status.tsv 或讀不到 → {}。"""
+    沒有 list.json（不是刷機包的掃描）→ {}；list.json 壞掉或沒有 rootfs 清單、status.tsv 沒有或讀不到 → {FLASH_STATUS_MISSING: GAP}。"""
     res = scan.parent.parent
+    if not (res / "list.json").exists():
+        return {}                     # 不是刷機包的掃描
     lst = load_json(res / "list.json")
     if not (isinstance(lst, dict) and isinstance(lst.get("rootfs"), list)):
-        return {}
+        # list.json 在（刷機包的掃描）卻壞掉或格式不對：壞掉的輸入不能當成沒事（D-043）→ GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/list.json of the flash package scan is not valid (no rootfs list): "
+                                       "the flash package status could not be read", False)}
     try:
         st = read_status(res / "status.tsv") if (res / "status.tsv").is_file() else None
     except (OSError, UnicodeDecodeError):
