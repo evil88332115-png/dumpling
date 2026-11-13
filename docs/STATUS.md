@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 03:00 +0800（C2）
+最後更新：2026-11-14 03:13 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,7 +36,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M7a**（D-056：C0 已確認 M7 拆成 M7a／a2／b／c／d／e／f）。兩個寫程式代理平行：欄位契約（wp1/m7a-fields，worktree `$AGENT_TMP/dumpling-wt-c1-m7a-fields`）、報告端與同步 sca-center #220（wp1/m7a-report，`-m7a-report`，effort high）；做完由 C1 審查、合併到 wp1/m7a（`-m7a`），另派驗證。正式 tag 等使用者，從最新 main（9f11a90 或更新）打
+- 目前在做：**M7a PR #58**（https://github.com/evil88332115-png/dumpling/pull/58，wp1/m7a＝f1eeb17，worktree `$AGENT_TMP/dumpling-wt-c1-m7a`）：驗收 run（重新編譯）release 43489995288、43490013212、tests 43490031261 進行中；我的驗證代理進行中；已通知 C0。正式 tag 等使用者，從最新 main 打
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
@@ -54,10 +54,10 @@
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：M7a 兩個寫程式代理
+- 本機背景工作：PR #58 的驗證代理
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
-  2. **M7a**（D-055 欄位、精靈覆寫版本＝同步 sca-center #220 ddce170＋版本須等於 tag、new-project 不帶範本值、adapter-gaps #25 #26）：代理進行中 → C1 審查兩個分支 → 合併到 wp1/m7a → 測試（flock）→ 開 PR → 驗證代理 → 通知 C0。C0 補充：markets 代碼表與 EU-ALL／UNKNOWN 語意寫進 PLATFORM-INTERFACE；舊值 EU 只警告、不改寫使用者的 project.yml
+  2. **M7a #58**：驗收 run 綠 → 下載 draft 核對（標準答案 24 項、設定包 version／identification／support.end_date、scan.json product_version_check、notes 與 release-meta 的 pipeline_result 一致、sbom.md 第 6 節）→ 補進 PR 說明 → 驗證報告貼留言 → 有應修就修 → C0 驗證 → 合併。兩個代理的子分支 wp1/m7a-fields、wp1/m7a-report 已併入 wp1/m7a，合併後刪
      之後：M7a2（C2 validate_table，介面已確認，見對外介面約定）→ M7b → M7c → M7d（含 adapter-gaps #7）→ M7e（同步 sca-center #221）；M7f 從 M7b 後平行（A2 要列新增 permissions 與固定 SHA 的 action）。M7c–e 若要改 Jetson 標準答案，先跟 C0 說明原因與數字
   3. 移除 worktree：scannr、followup 已移除；`dumpling-wt-c1-m2` 留到 tag 核對完
 - 驗證（這輪之前）：
