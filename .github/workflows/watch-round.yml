@@ -1,0 +1,121 @@
+name: watch-round
+# 每日監控的一輪（docs/WATCH.md 第 3 節）：compute（只讀）→ notify（只有 issues: write）。由 watch.yml 呼叫，不單獨觸發。
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: real 或 drill
+        type: string
+        required: true
+      round:
+        description: 這一輪的名稱（artifact 名稱用）
+        type: string
+        required: true
+      overlay:
+        description: drill 時是否併入合成 KEV（tests/fixtures/watch/drill-kev-overlay.json）
+        type: boolean
+        default: false
+      expect_opened:
+        description: drill 的驗收：這一輪應該開出幾個 Issue（-1＝不檢查）
+        type: number
+        default: -1
+      dry_run:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  compute:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 工具（Syft、Grype 固定版本＋bubblewrap）
+        run: |
+          bash tools/e2e/install-tools.sh "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/versions.txt" --sbom-only
+          sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/grype"
+          grype version | head -n 3
+      - name: 資料源（CISA KEV、EUVD、核心 CNA、Grype DB）
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          extra=()
+          if [ "$MODE" = drill ]; then extra=(--no-kernel-cve --no-euvd); fi
+          pipeline/watch/feeds.sh "$RUNNER_TEMP/w/feeds" "${extra[@]}"
+      - name: 收集 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$MODE" = drill ]; then src=(--from-dir tests/fixtures/watch/drill); else src=(--repo "$GITHUB_REPOSITORY"); fi
+          set +e; python3 -I pipeline/watch/collect.py "${src[@]}" --out "$RUNNER_TEMP/w/inv"; rc=$?; set -e
+          [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
+      - name: 讀狀態 Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+        run: python3 -I pipeline/watch/issues.py read-state --repo "$GITHUB_REPOSITORY" --mode "$MODE" --out "$RUNNER_TEMP/w/state"
+      - name: 比對
+        env:
+          MODE: ${{ inputs.mode }}
+          OVERLAY: ${{ inputs.overlay }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ov=()
+          if [ "$OVERLAY" = true ]; then ov=(--kev-overlay tests/fixtures/watch/drill-kev-overlay.json); fi
+          set +e
+          python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
+            --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" "${ov[@]}"
+          rc=$?
+          set -e
+          if [ -f "$RUNNER_TEMP/w/out/report.md" ]; then cat "$RUNNER_TEMP/w/out/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          { echo; echo '```'; cat "$RUNNER_TEMP/w/feeds/feeds.tsv"; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+          [ "$rc" = 0 ] || [ "$rc" = 2 ] || exit "$rc"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: watch-plan-${{ inputs.round }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/w/out/plan.json
+            ${{ runner.temp }}/w/out/report.md
+            ${{ runner.temp }}/w/out/result.json
+          retention-days: 14
+          if-no-files-found: error
+
+  notify:
+    needs: compute
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: watch-plan-${{ inputs.round }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan
+      - name: 套用 Issue 動作與狀態
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          d=()
+          if [ "$DRY" = true ]; then d=(--dry-run); fi
+          python3 -I pipeline/watch/issues.py apply --repo "$GITHUB_REPOSITORY" --plan "$RUNNER_TEMP/plan/plan.json" "${d[@]}"
+      - name: 演練驗收（這一輪開出的 Issue 數）
+        if: inputs.expect_opened >= 0
+        env:
+          WANT: ${{ inputs.expect_opened }}
+        run: |
+          got=$(python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(sum(1 for a in r["actions"] if a.get("result") in ("opened","would_open")))' "$RUNNER_TEMP/plan/apply-result.json")
+          echo "drill: 開出 $got 個 Issue（預期 $WANT）" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$got" = "$WANT" ]

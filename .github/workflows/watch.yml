@@ -1,0 +1,112 @@
+name: watch
+# 每日監控（PLAN「E. 監控與通知」、docs/WATCH.md）。排程每天一輪 real；手動觸發可選 drill（合成資料的演練：建基準 → 開 1 個 → 不重複 → 關閉）。
+# 權限照 D-012：預設唯讀；compute 只讀，notify 只有 issues: write，keepalive 只有 actions: write。
+# 公開 repo 只做演練與公開資料；GitLab 階段「已被利用」的真實案件一律用私有 Issue（docs/GITLAB-PORT.md）。
+on:
+  # 暫時：讓新 workflow 在非預設分支登錄（push 時所有 job 都跳過）；開 PR 前拿掉
+  push:
+    branches: [wp2/watch]
+  schedule:
+    - cron: '17 1 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: drill（演練）或 real（真實監控）
+        type: choice
+        options: [drill, real]
+        default: drill
+      dry_run:
+        description: 只算不寫（不開 Issue、不寫狀態）
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  real:
+    if: github.event_name == 'schedule' || inputs.mode == 'real'
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/watch-round.yml
+    with:
+      mode: real
+      round: real
+      dry_run: ${{ inputs.dry_run == true }}
+
+  drill-1-baseline:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'drill'
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/watch-round.yml
+    with:
+      mode: drill
+      round: drill-1
+      overlay: false
+      expect_opened: 0
+      dry_run: ${{ inputs.dry_run == true }}
+
+  drill-2-new-kev:
+    needs: drill-1-baseline
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/watch-round.yml
+    with:
+      mode: drill
+      round: drill-2
+      overlay: true
+      expect_opened: ${{ inputs.dry_run == true && -1 || 1 }}
+      dry_run: ${{ inputs.dry_run == true }}
+
+  drill-3-repeat:
+    needs: drill-2-new-kev
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/watch-round.yml
+    with:
+      mode: drill
+      round: drill-3
+      overlay: true
+      expect_opened: ${{ inputs.dry_run == true && -1 || 0 }}
+      dry_run: ${{ inputs.dry_run == true }}
+
+  drill-close:
+    needs: drill-3-repeat
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.mode == 'drill' && inputs.dry_run != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 關閉演練 Issue（換成 *-done 標籤）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I pipeline/watch/issues.py close-drill --repo "$GITHUB_REPOSITORY"
+
+  keepalive:
+    if: github.event_name == 'schedule' || inputs.mode == 'real'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 讀 workflow 狀態並重新啟用（防 60 天停用；官方沒有定義 activity，見 WATCH.md 第 4 節）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml"
+          echo "watch.yml state（enable 之前）：$(gh api "$api" --jq .state)" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh api -X PUT "$api/enable"
+          echo "watch.yml state（enable 之後）：$(gh api "$api" --jq .state)" | tee -a "$GITHUB_STEP_SUMMARY"
