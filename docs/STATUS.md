@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:17 +0800（C0）
+最後更新：2026-11-14 02:17 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -276,14 +276,14 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**#49 已合併**（main 3452cfe；worktree 與本機分支已移除）。照 C0 交辦，已整理好「M8 需要 M7 提供的欄位」並交給 C0（`$AGENT_TMP/dumpling-tmp-c3/m8-needs-from-m7.md`）。必要的兩項：B1 銷售市場要細到會員國（現有的 `markets` 只到 EU）；B2 支援期限有兩個來源（project.yml 的 `support_until` 與 config.json 的 `support.end_date`）要定一個為準
+- 目前在做：**#49 已合併**（main 3452cfe）。M8 需要 M7 的欄位清單已交 C0，C0 定為 **D-055**（wp0/docs-batch-5 fedb819，C0 轉給 C1）：markets 改成 ISO 3166-1 alpha-2 會員國代碼（希臘 GR），保留值 EU-ALL／UNKNOWN（UNKNOWN 標 GAP），舊值 EU 遷移成 EU-ALL；支援期限以 project.yml 的 support_until 為準、config.json 的 support.end_date 由它產生，不一致 FAIL；產品名稱以 project.yml、版本以 tag 為準；OS 放 project.yml 的 os.distro／os.release。M8 照這些接
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32（每日監控架構）、#47（M5 GitLab 範本與搬移清單）、#49（M2 之後的每日監控：mirrors.sh、核心 CVE 鏡像 cache、release-meta 欄位、公開 Issue 防 @提及／連結／HTML 實體注入）
 - M8 B1（第 14 條通報）：`wp2/art14` e66f499（worktree `$AGENT_TMP/dumpling-wt-c3-art14`，177 個測試，GitHub 演練兩次全綠），等 M7 的欄位再開 M8 PR
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：第一次真實基準等正式 Release；M8 等 M7（欄位清單已交 C0）
+- 卡住／等決定：第一次真實基準等正式 Release；M8 等 M7（C1 照 D-055 實作欄位與驗證）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
