@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 02:33 -0500（C0）
+最後更新：2026-11-13 02:35 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -84,7 +84,7 @@
   - 預驗 41353d3（驗證，Sonnet 5.5 high），狀態：完成，**不通過**。真樣本、expected 出處（ASUS API、linux-firmware 位元組比對與等價表）、Intel／OVMF 輸出不變、公開資料規則都過。應修：(1) 壓縮的 0x66 條目沒做範圍檢查 → analyze 丟 struct.error，整份 AMD 結果作廢（被 x86_firmware 接住、記 GAP，但不該發生）；(2) 兩種位址解讀都有目錄 cookie 時靜默選一邊（真樣本有 2 處）；(3) size 0 與壓縮條目沒有 GAP；(4) AGESA 截斷仍當完整版本。建議：Fletcher-32 初值照 coreboot、ISH checksum 有公開算法、AGESA 分隔、UI section、EFS 位置分表、額外驗證補來源、8 個存活變異 → 交回代理 O 修，狀態：進行中
   - 代理 P（寫程式，Sonnet 5.5 high）：`wp3/csme-new` 17072b5，D-042 新世代 CSME，狀態：完成。新模組 `tools/cra/intel_cse_layout.py`（CSE layout table 1.6／1.7 → BPDT v1／v2 → FTPR／RBEP／NFTP 的 `$CPD` v1／v2 → `.man` 版本；沒有 FTPR 時要 RBEP 與 NFTP 版本相同才採用，矛盾／單一來源／結構不一致→GAP；無全檔掃描、有上限）；x86_firmware.py 只在舊路徑沒結果時才試新模組。公開樣本 Dasharo NovaCustom V540TU v1.0.1（ME 區域開頭不是 `$FPT`、沒有 FTPR）：改動前 unknown → 18.0.10.2285，expected `intel_me` 依 release notes（我另外直接抓原始 HTML 核對相符）。CI firmware 43377248319、tests 43377252522 綠；本機 c2-x86-firmware 380、c2-firmware 167、c1-tools 3173
   - 預驗 17072b5（驗證，Sonnet 5.5 high），狀態：完成，**通過**。沒有錯誤版本、崩潰、違反 GAP 的問題（約 28 萬次 fuzz 零例外；Protectli／NUC／OVMF 新舊輸出逐位元相同；Nova 真樣本與 release notes 原始 HTML 重現 18.0.10.2285）。應修 1：layout 1.7 的 CRC-32 其實有公開定義（MEAnalyzer），文件寫成「沒查到」。建議：驗 layout CRC、沒有 FTPR 時要 RBEP＋NFTP 兩種類型（同類兩份是備份、不算獨立）、1.6 讀 BP1…BP5、「已清除」不能只看 4 bytes、補 6 個存活變異的測試、微碼的出處說法 → 交回代理 P 修，狀態：完成（70db3f6）：layout 1.7 驗 CRC-32（Size 從 +0x10 起算，認 0x40／0x48／0x58）、沒有 FTPR 要 RBEP＋NFTP 兩類型且版本相同、1.6 讀 BP1…BP5 並納入矛盾檢查（u64 checksum 算法不確定、不驗）、整個 BP 都是 0xFF 才算清除、16 個變異全殺；expected 加微碼 000A06A4／0xE6／0x25（Dasharo v1.0.1 release notes 與 Intel microcode-20250812 releasenote，我直接抓原始檔核對）。CI firmware 43382783573、tests 43382788001 綠；本機 c2-x86-firmware 403、c2-firmware 167、c1-tools 3197
-  - 複驗 70db3f6（驗證，沿用 CSME 預驗代理），狀態：進行中
+  - 複驗 70db3f6（驗證，沿用 CSME 預驗代理），狀態：完成，**通過**，無應修（fuzz 共約 36 萬次零例外、44 個變異全殺、Protectli／NUC／OVMF 新舊輸出逐位元相同、Nova v1.0.0 另外驗證也相符）。建議的文件小修我補在 61e8ef7。**D-042 新世代 CSME 完成**（`wp3/csme-new` 61e8ef7）
   - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
 - 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
 - 下一步（兩件分開進行）：
