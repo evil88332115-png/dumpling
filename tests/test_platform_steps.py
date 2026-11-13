@@ -403,6 +403,16 @@ class ProductConclusions(Tmp):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return json.load(open(out))
 
+    def test_own_software_status_from_the_flash_package_level(self):
+        """scan.json 的 own_software：完整掃描那次刷機包層 status.tsv 的 B-own-software-*（取最差）；沒有那一列 → None。"""
+        full = self.wizard_dir("full")
+        with open(os.path.join(full, "scan", "status.tsv"), "w", encoding="utf-8") as f:
+            f.write("stage\tstatus\tdetail\nB-own-software-rootfs\tGAP\t沒有宣告自有軟體\nB-own-software-rootfs2\tOK\tx\n")
+        scan = self.collect(["=" + full])
+        self.assertEqual(scan["own_software"], "GAP")
+        self.assertEqual(scan["runs"][""]["own_software"], "GAP")
+        self.assertIsNone(self.collect(["=" + self.wizard_dir("bare")])["own_software"])
+
     def test_same_suffix_twice_keeps_the_rescan_as_the_report(self):
         """os_responsibility: ours：完整掃描之後用產品 SBOM 重跑一次，後綴都是空字串 → 報告只有一份（重跑那次），kernel-versions 取完整掃描。"""
         kv = {"schema": "sca-center-kernel-versions/2", "shipped": []}

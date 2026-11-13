@@ -85,7 +85,8 @@
 #   只在燒錄時用的 initrd 另列、不分析。Rockchip 沒有定義開機鏈：B-bootloader-coverage-* 寫 NOT_ASSESSED 與說明檔。
 # - 產品自有軟體（--product-config 有 sbom.own_software 時）：tools/cra/own_software.py 同樣在 docker import 之前從 rootfs tar 算列出的檔案的雜湊
 #   → <rootfs>/own-software/own-software.json（B-own-software-*；列了但找不到 → GAP），cra_report.py 以 pkg:generic 元件併進產品 SBOM。
-#   沒有 --product-config 或設定沒有 sbom.own_software 時不執行、不寫狀態列。--rescan-from：有 --archive／--dir 就重讀（設定可能改了），
+#   沒有 --product-config 或設定沒有列 sbom.own_software：B-own-software-* 記 GAP（沒有宣告自有軟體）；設定寫 own_software: [] 加
+#   own_software_none_reason（明確宣告沒有）→ OK。--rescan-from：有 --archive／--dir 就重讀（設定可能改了），
 #   否則沿用上一次的 own-software.json（cra_report 會把設定有、檔案裡沒有的樣式標 GAP）。
 # - sca-scan 加 --no-package-scan --no-files-scan（整個系統映像的逐套件授權與檔案層級掃描太久）；預設再加 --no-license。
 #   DT 的專案版本是「<產品版本> (<rootfs 名稱>)」（sca-scan --version）。
@@ -350,9 +351,24 @@ imgcheck_step(){
 }
 ownsw_step(){
   # 產品自有軟體（產品設定 sbom.own_software）→ <rootfs>/own-software/own-software.json（tools/cra/own_software.py；cra_report.py 併進產品 SBOM）。
-  # 沒有 --product-config 或設定沒有 sbom.own_software → 什麼都不做（不寫狀態列，結果和沒有這一步時相同）
-  local v=$1 from=$2 r s d x lim=${OWNSW_TIMEOUT:-7200}; shift 2
-  [ -n "$PCONF" ] && python3 -I "$ROOT/tools/cra/own_software.py" --config "$PCONF" --configured 2> /dev/null || return 0
+  # 沒有 --product-config 或設定沒有列 sbom.own_software：檢查不可以悄悄消失 → own_software.py --declaration 寫一列
+  # （沒宣告 → GAP「沒有宣告自有軟體」；sbom.own_software: [] 加 sbom.own_software_none_reason → OK，說明寫理由），
+  # 也寫 own-software.json（只有宣告的結果），cra_report.py 讀到它在 SBOM 文件標出來
+  local v=$1 from=$2 r s d x c=0 lim=${OWNSW_TIMEOUT:-7200}; shift 2
+  [ -n "$PCONF" ] && { python3 -I "$ROOT/tools/cra/own_software.py" --config "$PCONF" --configured 2> /dev/null || c=$?; }
+  [ -n "$PCONF" ] || c=1
+  if [ "$c" != 0 ]; then
+    if [ "$c" = 1 ]; then
+      local da=(); [ -n "$PCONF" ] && da=(--config "$PCONF")
+      r=$(python3 -I "$ROOT/tools/cra/own_software.py" "${da[@]+"${da[@]}"}" --declaration --out "$OUT/$v/own-software" 2> "$OUT/$v/logs/own-software.err"); x=$?
+      r=$(grep -m1 $'^B-own-software\t' <<< "$r")
+      [ -n "$r" ] || r=$'B-own-software\tFAIL\town_software.py --declaration 失敗（exit '"$x）：$(tail -1 "$OUT/$v/logs/own-software.err" 2>/dev/null)"
+      IFS=$'\t' read -r _ s d <<< "$r"
+      case "$s:$x" in OK:0|GAP:2|FAIL:*) ;; *) d="own_software.py 印出 ${s:-（沒有狀態）} 但 exit $x：${d}"; s=FAIL;; esac
+    else s=FAIL; d="讀不到產品設定（own_software.py --configured exit $c）"; fi
+    status "B-own-software-$v" "$s" "$d"
+    return 0
+  fi
   r=$(timeout --foreground -k 30 "$lim" python3 -I "$ROOT/tools/cra/own_software.py" --from "$from" "$@" --config "$PCONF" \
         --out "$OUT/$v/own-software" 2> "$OUT/$v/logs/own-software.err"); x=$?
   printf '%s\n' "$r" > "$OUT/$v/logs/own-software.txt"

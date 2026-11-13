@@ -31,6 +31,8 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
    - 每個 run：`report-<專案>-<版本><後綴>.zip`、`vex-…`、`vuln-list-….xlsx`、`p1-table-….xlsx`（檔名、來源路徑、顯示名稱由 `Hooks.report_files` 決定）
    - `scan-summary-<專案>-<版本>.json`（＝scan.json，標準答案比對用，見 `pipeline/check-expected.py`）、`notes.md`、`manifest.tsv`（檔名 TAB 顯示名稱）
    - `kernel-versions-<專案>-<版本>.json`：完整掃描那次 sca-scan 的 `scan/kernel-versions.json`（有而且 schema 對才放）
+   - scan.json 的 `own_software`：完整掃描那次 scan-flash-package.sh 的 B-own-software 狀態（沒有宣告自有軟體 → GAP；明確宣告沒有 → OK；
+     沒有那一列 → null）；每個 run 也有 `runs[後綴].own_software`
    - scan.json 的產品結論：`reports`（每份報告的 `report_status`＝cra_report summary.json 的 status、`release_gate`＝vex.gate.verdict）、
      整體的 `report_status`／`release_gate`（最差的那份）；讀不到是 NOT_RUN。notes.md 開頭依序印 report_status、release_gate、pipeline_result
 3. **步驟紀錄**：給 `args.steps` 時，`collect` 把每個 workflow 步驟的結果（OK｜GAP｜NOT_RUN｜FAIL）放進 scan.json 的 `pipeline_steps`、`pipeline_status`
@@ -174,6 +176,11 @@ def run_summary(w, hooks=None, rootfs="rootfs", detail_stages=DETAIL_STAGES):
     out = {"stages": {k: v["status"] for k, v in st.items()},
            "stage_details": {k: v["detail"][:300] for k, v in st.items() if k in detail_stages}}
     out.update(hooks.run_summary_fields(p, st))
+    # 產品自有軟體（scan-flash-package.sh 的 B-own-software-<rootfs>，在刷機包那一層的 status.tsv）：沒有宣告時也有這一列（GAP），
+    # 沒有這一列（沒經過 scan-flash-package.sh、或舊版）→ None
+    pst = read_status_tsv(os.path.join(w, "scan", "status.tsv"))
+    own = [v["status"] for k, v in pst.items() if k.startswith("B-own-software")]
+    out["own_software"] = worst_verdict(verdict(s) for s in own) if own else None
     out["report_status"], out["release_gate"] = report_verdicts(read_json(os.path.join(p["reports"], "summary.json")))
     out["vulnerabilities"] = vuln_metrics(read_json(os.path.join(p["reports"], "vulnerability-rows.json")))
     return out
@@ -324,6 +331,7 @@ def collect(a, hooks=None):
     scan["report_status"] = worst_verdict(r["report_status"] for r in scan["reports"])
     scan["release_gate"] = worst_verdict(r["release_gate"] for r in scan["reports"])
     scan["kernel_versions_file"] = kv_name
+    scan["own_software"] = (runs.get(full_name) or {}).get("own_software")   # 完整掃描那次的 B-own-software（標準答案可以固定它）
     scan.update(hooks.scan_tail(ctx))
     steps_path = getattr(a, "steps", None)
     srows = step_rows.read_rows(steps_path) if steps_path else None
