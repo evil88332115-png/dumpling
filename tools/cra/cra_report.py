@@ -4263,7 +4263,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                         "dt/deb-sources.json", "scan/sbomgate.json", "scan/l4t-kernel-map.json",
                                         "scan/nvidia-bulletins.json", "scan/distro-recheck.json", "scan/kernel-config.json",
                                         "dt/analysis.json", "scan/usn-cves.json", "scan/ubuntu-priority.json",
-                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json")}
+                                        "scan/ubuntu-status.json", "scan/kernel-module-map.json", "scan/kernel-boot.json", "scan/kernel-versions.json")}
     findings, bom, grype, meta = (load_json(paths[k]) for k in ("dt/findings.json", "sbom/sbom.cdx.json", "scan/grype.json", "meta.json"))
     findings = merge_readback(findings, load_json(paths["dt/analysis.json"]))
     # 分層（SBOM 的元件帶 dumpling:layer 時才動作；沒有時 layers_on 是 False，下面所有分層的程式都不改任何輸出）
@@ -5483,7 +5483,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()
-        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, status=status, expl=expl, svc_info=svc_info,
+        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=load_json(paths["scan/kernel-versions.json"]), status=status, expl=expl, svc_info=svc_info,
                           missing_fields=summary["missing_fields"], cfg=cfg, role=role, have_findings=isinstance(findings, list),
                           risk_st=risk_st, risk_reasons=reasons, bom_st=bom_st, bom_reasons=bom_reasons, human=vx.HUMAN,
                           author_missing=vx.author_missing, schema=SCHEMA, db=pdb, no_vuln=nvd)
