@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-12 19:04 -0500（C1）
+最後更新：2026-11-13 08:11 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -96,11 +96,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6 轉接器。三個平台的 validate／fetch／build／assemble 完成並實測；scan 共用 _shared/scan-disk.sh；AI NAS 核心原始碼依 D-035 套 Debian 修補（86 個，版本對得上）；正在 CI 跑 rpi-lite-demo 第二次端對端（第一次卡在精靈要原始碼壓縮檔，已改 kernel_source_file）
+- 目前在做：M6 轉接器端對端。rpi-lite-demo、rock-5b-demo 在 CI 各跑通一次（GAP：還沒有標準答案）；依結果加了 owners.json（unknown 過多）、Maven、kernel_release（D-036）；三個專案正在依序重跑（背景腳本 $AGENT_TMP/scripts/chain-dev.sh）
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
 - 代理：無執行中（驗證代理兩輪審查已完成，問題都已修）
-- CI：tests.yml 在 wp7/adapters 通過（Python 3.12 確認）；dev.yml run 43329817032（rpi-lite-demo）進行中
+- CI：dev.yml 依序跑 rpi-lite-demo → rock-5b-demo → ai-nas-demo（最新 commit）；tests.yml 在 wp7/adapters 通過
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
-- 下一步：rpi 跑通後依序跑 rock-5b-demo、ai-nas-demo（dev 的 concurrency 會互相取消，一次一個）；標準答案不直接存第一次輸出：逐項核對（官方 SBOM／manifest／.info 的套件數），再由驗證代理獨立核對，PR 附核對紀錄（C0 指示）；M6 完成開 PR
-- 卡住／等決定：無
+- 下一步：看三個平台的結果；C1 的 D-036（--kernel-version）進來後再跑一次；標準答案逐項核對（官方 SBOM／manifest／.info）後由驗證代理獨立核對，PR 附核對紀錄；不擋路的缺口記在 docs/references/adapter-gaps.md；M6 完成開 PR
+- 卡住／等決定：等 C1 的 D-036 實作（多顆核心的 --kernel-version）；M2 範圍已凍結
 <!-- END C4 -->
