@@ -60,11 +60,19 @@ BIOS（Intel 平台的完整 SPI 映像）：
   先檢查 header 欄位再算整份 checksum（為 0 才算）；每個（CPUID、platform id）一列；extended signature table 的 CPUID 另外記。
   全檔掃描照舊（找 FIT 沒列的備援或 OS／UEFI 階段才載入的）；另外讀 FIT（見 fit_table）：每份 microcode 記 in_fit
   （重置時 CPU 會載入的那幾份；true／false，FIT 沒找到或不能用時是 null＝不知道）。FIT 指到的位置不是有效 microcode → incomplete。
-  認出 AMD 平台（Embedded Firmware Structure，或兩種不同的 PSP／BIOS 目錄 cookie）時記 GAP「AMD microcode 不支援」、ATTENTION
-  （不是「沒有 microcode」）。有 Intel descriptor 或 Intel microcode 時不判斷；NVIDIA vBIOS 更新包裡只有 AMD 標記時不當成 BIOS 映像。
-  這個規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
+  認出 AMD 平台（Embedded Firmware Structure，或兩種不同的 PSP／BIOS 目錄 cookie）時：Intel 格式的 microcode 清單不適用（不是「沒有 microcode」），
+  改交 amd_psp.py 解析（見下面「AMD 平台」）。有 Intel descriptor 或 Intel microcode 時不判斷；NVIDIA vBIOS 更新包裡只有 AMD 標記時不當成 BIOS 映像。
+  這個辨識規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
   認不出來，沒有其他結構時是 GAP；構造的情況：AMD 映像裡剛好有一份 checksum 對的 Intel 格式 microcode → platform 不是 amd，
   沒有 microcode 的 Intel BIOS 區域檔在 0x20000 剛好是 0x55AA55AA → 誤判 AMD；兩種都是 ATTENTION。
+- AMD 平台（解析在 amd_psp.py，格式與出處見該檔檔頭與 docs/notes/c2-amd-psp.md；結果在 bios[].amd）：EFS（每個 16 MiB 視窗各找、容許 capsule 標頭造成的位移）
+  → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）→ 每個項目的 type、subprogram、instance、位置、大小；
+  PSP 韌體標頭（fw_type 與 size_total 和目錄項目相符）通過才讀版本，BIOS 目錄 type 0x66 的 AMD 微碼列 patch level、日期、equivalence id
+  （前面有 `DMA\\0` container 的等價表才對出 CPUID，沒有就不猜），AGESA 字串（`AGESA!V<n>` 後面的字串，整個映像與解開的 firmware volume 都找，不同值全部列出並 ATTENTION）。
+  看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、A/B 復原的 slot header checksum 未驗證、
+  Promontory 指標、AGESA 搜尋不完整）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符的目錄不採用它的條目。
+  SBOM：有版本的 PSP 韌體條目、AMD 微碼 patch、AGESA 字串各一個元件（掛在 BIOS 映像底下），dumpling:vuln-assessment 同樣是 NOT_ASSESSED（note: ASSESS_NOTES["amd"]）。
+  amd_psp 載入不了或丟錯 → b["amd"] 是 None，gaps 寫「parser did not run」。
 - coreboot 類映像（例如 Dasharo）的 CBFS（見 coreboot_cbfs.py）：找到 FMAP（或 `LARCHIVE`）的 CBFS 區域時，讀 `revision`／`build_info`
   （coreboot 版本、git 修訂、建置時間）、`config`（關鍵設定欄位與雜湊）、FSP（`FSPH` 標頭的 ImageRevision、M／S 類型）、`vbt.bin`（`$VBT` 版本）、
   SELF payload（身分與雜湊，不展開裡面的 firmware volume）。每個 CBFS 區域（RO、RW_A…）分開記，相同內容只記一次、列出所有位置。
@@ -108,7 +116,7 @@ SBOM 的 dumpling: property（每個元件都有）：
 包括 --time-limit 不是大於 0 的有限秒數；參數不接受縮寫）；
 GAP（沒有找到任何 vBIOS 或 BIOS 結構，包括全部檔案都因上限或損壞被略過）；
 ATTENTION（沒有 descriptor、版本對不上、清單有「不知道」、檔案略過、超過上限沒解析完、區域超出檔案、vBIOS 開頭不確定、
-ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台、有壓縮或 GUID 不認得的 UEFI section 沒有解析、有不同版本的 FTPR manifest）；OK。FAIL 時刪掉的輸出包括 fw-inventory.md。
+ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台有 GAP 或要確認的項目（見上面）、有壓縮或 GUID 不認得的 UEFI section 沒有解析、有不同版本的 FTPR manifest）；OK。FAIL 時刪掉的輸出包括 fw-inventory.md。
 """
 import argparse
 import csv
@@ -1309,6 +1317,12 @@ def bios_image(data, budget=None):
             if l["offset"] <= x["offset"] < l["offset"] + l["length"] and w not in u.setdefault("cbfs_files", []):
                 u["cbfs_files"].append(w)
     amd = [] if regs is not None or ucodes else amd_markers(data, budget)     # 有 Intel descriptor 或 Intel microcode：不是 AMD
+    amd_r, amd_err = None, None
+    if amd:                            # AMD 平台：PSP／BIOS 目錄、微碼、AGESA（解析在 amd_psp.py；沒有 Intel descriptor，所以範圍是整個檔案）
+        try:
+            amd_r = load_sibling("amd_psp").analyze(data, budget, (OverBudget,))
+        except (Fail, *PARSE_ERRORS) as e:
+            amd_err = str(e) if isinstance(e, Fail) else f"AMD PSP parse failed ({type(e).__name__})"
     uefi = uefi_stats(data, lo, hi, budget)
     ibv = ibv_hints(data[lo:hi] if bios_r else data)
     evidence = [k for k, v in (("descriptor", regs is not None), ("me", mi["me"] or mi["status"] == "unknown" or mi["loose"]),
@@ -1319,11 +1333,14 @@ def bios_image(data, budget=None):
     incomplete = ([f"region beyond the end of the file (truncated image?): {x}" for x in beyond] + ([mc_note] if mc_note else [])
                   + [f"ME: {x}" for x in mi["incomplete"]]
                   + fit.pop("incomplete") + uefi.pop("incomplete")
-                  + ([cbfs_err] if cbfs_err else []) + [f"CBFS: {x}" for x in (cbfs["incomplete"] if cbfs else ())])
+                  + ([cbfs_err] if cbfs_err else []) + [f"CBFS: {x}" for x in (cbfs["incomplete"] if cbfs else ())]
+                  + (amd_r["incomplete"] if amd_r else []))
     gaps = list(cbfs["gaps"]) if cbfs else []
-    if amd:
-        gaps.append("AMD platform recognised (" + "; ".join(amd[:2]) + "): AMD microcode (PSP directories) is not supported; "
-                    "the microcode list is not complete (this is not 'no microcode')")
+    if amd_r:
+        gaps += amd_r["gaps"]
+    elif amd:
+        gaps.append("AMD platform recognised (" + "; ".join(amd[:2]) + f"): the PSP/BIOS directory parser did not run ({amd_err}); "
+                    "AMD microcode, PSP firmware and AGESA are not listed (this is not 'no microcode')")
     n_comp, n_other = sum(uefi["compressed"].values()), sum(uefi["guided_other"].values())
     if n_comp:
         gaps.append(f"{n_comp} compressed UEFI sections not parsed (" +
@@ -1332,7 +1349,7 @@ def bios_image(data, budget=None):
     if n_other:
         gaps.append(f"{n_other} GUID-defined UEFI sections that need processing (unknown GUID) not parsed")
     return {"descriptor": regs is not None, "descriptor_note": why, "regions": regs or [], "me": mi["me"], "me_status": mi["status"],
-            "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd,
+            "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd, "amd": amd_r,
             "uefi": uefi, "cbfs": cbfs, "ibv_hint": ibv, "incomplete": incomplete, "gaps": gaps, "evidence": evidence}
 
 
@@ -1496,6 +1513,8 @@ ASSESS_NOTES = {
                     "matching by version is not possible",
     "vbt": "Intel advisories cannot be matched by machine; manual cross-check against Intel advisories is required "
            "(the VBT is a display configuration data table, not executable code)",
+    "amd": "AMD security bulletins cannot be matched by machine; manual cross-check against AMD product security bulletins is required "
+           "(the version is the one read from the image: PSP firmware header, microcode patch level or AGESA string)",
     "image": "no vulnerability matching at this level; this tool only reports the parsed structure, versions and hashes",
 }
 # Intel CSME 的 CPE。查證：NVD CPE API（https://services.nvd.nist.gov/rest/json/cpes/2.0）2026-11-12，
@@ -1650,6 +1669,59 @@ def cbfs_components(b, img, comps, sub):
         sub.append(ref)
 
 
+AMD_VENDOR = {"name": "Advanced Micro Devices, Inc."}
+
+
+def amd_where(x):
+    return f"{x['directory']} entry {x['index']} (instance {x['instance']}) @0x{x['offset']:x}"
+
+
+def amd_components(b, img, comps, sub):
+    """AMD 平台（amd_psp.analyze 的結果 b["amd"]）：有版本的 PSP 韌體條目、微碼 patch、AGESA 字串各一個元件，掛在 BIOS 映像底下。
+    版本都是映像裡讀到的原值（PSP 標頭的版本欄位、patch_id、AGESA 標記後的字串）；讀不到的不產元件（GAP 在 BIOS 映像元件的 sca-center:gap）。"""
+    a = b.get("amd")
+    if not a:
+        return
+    n = 0
+    for p in a["psp_firmware"]:
+        n += 1
+        ref = f"{img}:amd-psp:{p['type']:02x}:{p['subprogram']:02x}:{(p['sha256'] or 'nohash')[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": f"AMD PSP firmware {p['type_name'] or ''} (type 0x{p['type']:02x}, subprogram {p['subprogram']})".replace("  ", " "),
+             "version": p["version"], "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:version-basis", "PSP firmware header (amd_fw_header) version field at +0x60; fw_type and size_total agree with the directory entry"),
+                            prop("sca-center:amd-psp-type", f"0x{p['type']:02x}"), prop("sca-center:amd-psp-subprogram", p["subprogram"]),
+                            prop("sca-center:size", p["size"]), *[prop("sca-center:found-in", amd_where(x)) for x in p["locations"]]]}
+        if p["sha256"]:
+            c["hashes"] = hlist(p)
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+    for m in a["microcode"]:
+        n += 1
+        ref = f"{img}:amd-microcode:{m['equiv_id']}:{m['patch_id']}:{(m['sha256'] or 'nohash')[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": f"AMD CPU microcode (equivalence id {m['equiv_id']})", "version": m["patch_id"], "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:version-basis", "microcode patch header patch_id (patch level)"), prop("sca-center:amd-equivalence-id", m["equiv_id"]),
+                            prop("sca-center:build-date", m["date"]), prop("sca-center:size", m["patch_size"]),
+                            *([prop("sca-center:cpuid", x) for x in m["cpuids"]] if m["cpuids"] else
+                              [prop("sca-center:cpuid-status", "not determined: the patch is not inside a container with an equivalence table (the mapping is not guessed)")]),
+                            *[prop("sca-center:found-in", amd_where(x)) for x in m["locations"]]]}
+        if m["sha256"]:
+            c["hashes"] = hlist(m)
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+    ag = a["agesa"]
+    for g in ag["values"]:
+        n += 1
+        ref = f"{img}:amd-agesa:{hashlib.sha256((g['tag'] + g['value']).encode()).hexdigest()[:12]}:{n}"
+        c = {"type": "firmware", "bom-ref": ref, "name": "AMD AGESA", "version": g["value"], "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"), prop("sca-center:agesa-marker", g["tag"]),
+                            prop("sca-center:count", g["count"]),
+                            *[prop("sca-center:found-in", f"{w['where']} +0x{w['offset']:x}") for w in g["found"]],
+                            *([prop("sca-center:note", f"{len(ag['values'])} different AGESA strings were found in this image; all are listed")] if len(ag["values"]) > 1 else []),
+                            *([prop("sca-center:incomplete", "the AGESA search did not cover all UEFI content (see sca-center:gap)")] if not ag["complete"] else [])]}
+        comps.append(assessed(c, "amd"))
+        sub.append(ref)
+
+
 def pfat_props(p):
     """BIOS 映像元件的 AMI PFAT 來源 property（原檔與組回映像的雜湊；元件本身的 hashes 是組回的映像）。"""
     if not p:
@@ -1750,6 +1822,7 @@ def components(inv):
                                          *[prop("sca-center:found-in", w) for w in u.get("cbfs_files", [])]]}, "intel"))
             sub.append(ref)
         cbfs_components(b, img, comps, sub)
+        amd_components(b, img, comps, sub)
         uefi_gfx_components(b, img, comps, sub)
         deps[img] = sub
     intel_gfx_components(inv, comps, deps)
@@ -2105,7 +2178,12 @@ def status_of(inv):
         if b.get("me_conflict"):
             att.append(f"{b['file']}：有不同版本的 FTPR manifest，ME 版本要確認（{b['me_conflict']}）")
         if b.get("platform") == "amd":
-            att.append(f"{b['file']}：AMD 平台，AMD microcode 不支援（GAP，不是沒有 microcode）")
+            a = b.get("amd")
+            if a is None:
+                att.append(f"{b['file']}：AMD 平台，PSP／BIOS 目錄解析沒有執行（GAP，不是沒有 microcode）")
+            elif a["gaps"] or a["attention"] or a["incomplete"]:
+                att.append(f"{b['file']}：AMD 平台（" + load_sibling("amd_psp").summary_text(a) + f"）；{len(a['gaps'])} 項 GAP"
+                           + ("；" + "、".join(a["attention"]) if a["attention"] else "") + "（見 fw-inventory.json 的 amd）")
         att += uefi_gfx_status(b)
         n = sum(b.get("uefi", {}).get("compressed", {}).values())
         g = sum(b.get("uefi", {}).get("guided_other", {}).values())
@@ -2229,13 +2307,17 @@ def markdown(inv):
               f"FIT：{f['status']}" + (f"（file offset 0x{f['offset']:x}，{f['entries']} 項）" if f["offset"] is not None else "")
               + (f"；{e(f['note'])}" if f["note"] else ""), ""]
         if b["platform"] == "amd":
-            L += ["**AMD microcode 不支援（GAP）**：PSP 目錄裡的 microcode 沒有解析，下面的清單不完整，不代表沒有 microcode。", ""]
+            L += ["AMD 平台：下面是 Intel 格式的 microcode 掃描；AMD 微碼（BIOS 目錄 type 0x66）見後面的 AMD 區段。", ""]
         if b["microcode"]:
             L += ["| CPUID | platform id | revision | 日期 | in FIT | 位置 |", "|---|---|---|---|---|---|"]
             L += [f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | {u['date']} | {in_fit_text(u)} | 0x{u['offset']:x} |"
                   for u in b["microcode"]]
         else:
-            L.append("映像裡沒有找到 Intel microcode" + ("（AMD 平台，見上面）" if b["platform"] == "amd" else "") + "。")
+            L.append("映像裡沒有找到 Intel microcode" + ("（AMD 平台，見後面的 AMD 區段）" if b["platform"] == "amd" else "") + "。")
+        if b.get("amd"):
+            L += load_sibling("amd_psp").markdown_lines(b["amd"], e)
+        elif b["platform"] == "amd":
+            L += ["", "### AMD", "", "**GAP**：PSP／BIOS 目錄解析沒有執行，AMD 微碼、PSP 韌體與 AGESA 沒有列出，不代表沒有。"]
         L += ["", "### IBV 線索", "", ("、".join(b["ibv_hint"]) + "（未壓縮的字串，只是線索）") if b["ibv_hint"] else "沒有找到（不代表不是這些 IBV）"]
         u = b["uefi"]
         L += ["", "### UEFI 壓縮 section（沒有解壓）", "",
