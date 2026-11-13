@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 19:14 +0800（C2）
+最後更新：2026-11-13 19:18 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -99,11 +99,12 @@
 > **現況（2026-11-13，第二台 WSL2 重開後）**：C2 已在第二台接手（D-045）。worktree `$AGENT_TMP/dumpling-wt-c2-amd`（wp3/amd-psp，從 origin ebac3e9 重建）。AMD 三個公開樣本（B550M 3404、B650M 1807、ASRock PG4 3.40）已在第二台重新下載並核對 sha256 OK，放 `$PUBLIC_IMAGES/bios/`；main 的 Protectli、NUC11、OVMF、vbios、供應商 SBOM，以及 csme-new 的 NovaCustom V540TU 也都用 firmware-fetch 下載核對 OK（放 `$PUBLIC_IMAGES/<bios|vbios|sbom>/<名稱>/`）。代理上限照 D-048（每對話 3 個：2 寫＋1 驗；整台 10；負載 >12 或可用記憶體 <4 GB 不開）。
 >
 > **開出去的代理**
-> - 寫程式（Sonnet 5.5，effort high）：D-047 (1) 歧義規則改窄＋(2) 拿掉 sys._getframe，分支 `wp3/amd-psp`，暫存 `$AGENT_TMP/dumpling-tmp-c2-amd47/`（samples、out、venv 留給驗證用），狀態：**進行中（第二輪）**
+> - 寫程式（Sonnet 5.5，effort high）：D-047 (1) 歧義規則改窄＋(2) 拿掉 sys._getframe，分支 `wp3/amd-psp`，暫存 `$AGENT_TMP/dumpling-tmp-c2-amd47/`（samples、out、venv 留給驗證用），狀態：**完成**（最後 commit **1cd25aa**）
 >   - 第一輪完成 **9fc6d1e**。(1) 改成依結構檢查採用／拒絕：checksum、條目範圍、slot header、combo 子目錄、目錄表不落在自己的條目裡。恰好一種讀法通過就採用，另一種讀法記 `reading-rejected`（ATTENTION）並附證據；都通過但內容不同、或都不通過，仍是 GAP。真樣本 SBOM 元件數：B550M 21→99、B650M 2→25、ASRock 101→101；B550M expected 3 項 OK。本機 408 passed
->   - 第二輪：(2) 第一輪改用 `Scan.layers` 計數，這不在介面約定內，C2 決定改照 D-047 字面：原始位元組有任何 AGESA 標記就 complete=False，只在原始位元組有的值照樣列出。三個真樣本的原始位元組標記數都是 0，結果不受影響
+>   - 第二輪：(2) 第一輪改用 `Scan.layers` 計數，這不在介面約定內，C2 決定改照 D-047 字面：原始位元組有任何 AGESA 標記就 complete=False，只在原始位元組有的值照樣列出。三個真樣本的原始位元組標記數都是 0，結果不受影響。第二輪完成 **1cd25aa**：SBOM 元件數仍是 99／25／101，B550M expected 3 項 OK，本機 406 passed
+> - 驗證（Sonnet 5.5，effort high）：複驗 ebac3e9..1cd25aa（D-047 兩點，加上 ebac3e9 本身還沒複驗的部分），暫存 `$AGENT_TMP/dumpling-tmp-c2-verify47/`（重現腳本放 scripts/），狀態：**進行中**
 >
-> **本機背景工作**：無。**CI**：9fc6d1e firmware 43415227458（進行中），第二輪推送後重跑。
+> **本機背景工作**：無。**CI**：1cd25aa 的 tests 43415788738、firmware 43415792430（進行中）。9fc6d1e 的 run 被新 commit 取消，不用管。
 
 ### 公開資料規定（D-042／D-043，重要）
 repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、firmware.yml、STATUS）**不能提到這兩項工作的起因**，也不能寫是哪種產品或平台需要它。一律寫成「擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，選樣本只講技術理由（例如「沒有 $FPT 的分割區配置」「有 L2 目錄的 PSP」）。只用公開可下載的樣本和公開資料；不使用、也不索取任何公司的 BIOS 檔。代理的指示也照這個寫，不要告訴代理起因。
