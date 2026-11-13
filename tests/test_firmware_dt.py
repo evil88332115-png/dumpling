@@ -281,6 +281,22 @@ class ReportTests(Base):
         self.assertIn("AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準", md)
         self.assertNotIn("PASS", md)
 
+    def test_nvidia_vbios_advisory_match_is_counted_and_explained(self):
+        """NVIDIA vBIOS 元件的 advisory-match（affected／fixed／NOT_ASSESSED）：計數照 property 值，「怎麼讀」寫明多數是 NOT_ASSESSED、fixed 不代表沒有其他漏洞。"""
+        vs = []
+        for i, m in enumerate(("NOT_ASSESSED", "affected", "fixed")):
+            c = comp("NVIDIA VBIOS 24%02d" % i, "v%d" % i, version="94.04.5E.00.9%d" % i)
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": m}, {"name": "dumpling:advisory-basis", "value": "table row"}]
+            vs.append(c)
+        info, o = self.prep(bom(*vs), kind="vbios")
+        self.assertEqual(info["summary"]["advisory_match"], {"NOT_ASSESSED": 1, "affected": 1, "fixed": 1})
+        rc, _, md = self.run_report([o])
+        self.assertIn("affected=1", md)
+        self.assertIn("NVIDIA vBIOS 元件另有 `advisory-match`", md)
+        self.assertIn("所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準", md)
+        self.assertIn("fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞", md)
+        self.assertNotIn("PASS", md)
+
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))
         rc, out, md = self.run_report([o])

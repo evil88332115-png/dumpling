@@ -11,8 +11,9 @@
 | `tools/cra/data/intel-microcode-releases.json` | 產生出來的資料表（約 80 KB，進 repo）。每個 release 的 tag、日期、INTEL-SA 清單、各 F-M-S／platform id 的 revision 變化、人工對照 `prose_rules`；附來源 URL、tag、commit、sha256、產生時間、看不懂的段落（`unparsed`，只有行號與原因）。只放事實性欄位（見「授權」） |
 | `tools/cra/fw_advisory.py` | 離線比對：載入資料表（核對 sha256 與結構）、CPUID → F-M-S、revision 比較、結果分類 |
 | `tools/cra/x86_firmware.py` | 呼叫比對、SBOM property（`dumpling:advisory-*`）、`fw-inventory.md` 的「公告比對」一節、資料表不能用時 ATTENTION；ME 的 CPE 與 `dumpling:cpe-*` |
-| `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表多一欄「微碼公告比對」（文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
+| `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表多一欄「公告比對」（原名「微碼公告比對」，有 NVIDIA vBIOS 時加一段；文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
 | `tools/cra/tests/test_fw_advisory.py`、`test_x86_firmware_sbom.py`、`tests/test_firmware_dt.py` | 測試（合成資料，不連網） |
+| `tools/cra/nvidia_vbios_advisory.py`、`tools/cra/tests/test_nvidia_vbios_advisory.py`、`tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | NVIDIA vBIOS 的離線比對、測試、人工審核過的公告對照表（見最後一節） |
 
 ## 資料來源（固定）
 
@@ -114,7 +115,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 `dumpling:advisory-match`（四種值之一）、`dumpling:advisory-candidates`（只有 affected-candidate：以逗號分隔的 INTEL-SA）、`dumpling:advisory-basis`、`dumpling:advisory-latest-revision`（`0x… (<tag>)`，有就寫）、
 `dumpling:advisory-source`（倉庫、tag、commit 前 12 碼、來源與資料表 sha256 前 16 碼）、`dumpling:advisory-note`（可多筆）。`dumpling:vuln-assessment` 維持 `NOT_ASSESSED`，note 換成 `ASSESS_NOTES["intel-microcode"]`
 （說明候選在 `dumpling:advisory-*`、是 release 層級候選、不是確定的發現、需要人工對 Intel 公告）。Intel ME 元件也有 `advisory-match: NOT_ASSESSED` 與 basis（沒有機器可讀的 CSME 公告資料表）。
-其他元件（FSP、GOP／VBT／legacy VBIOS、coreboot、edk2、BIOS 映像、NVIDIA vBIOS）沒有比對，仍只有 `vuln-assessment: NOT_ASSESSED` 與各自的說明；`fw-inventory.md` 的「公告比對」一節每次輸出都有，逐一寫明這些項目沒有比對（NVIDIA vBIOS 的公告比對這一版沒有做）。
+其他元件（FSP、GOP／VBT／legacy VBIOS、coreboot、edk2、BIOS 映像）沒有比對，仍只有 `vuln-assessment: NOT_ASSESSED` 與各自的說明；`fw-inventory.md` 的「公告比對」一節每次輸出都有，逐一寫明這些項目沒有比對（NVIDIA vBIOS 另有自己的比對，見「NVIDIA vBIOS 的公告比對」一節）。
 
 ## Intel CSME 的 CPE
 
@@ -175,5 +176,5 @@ B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項�
 - `up-to-date`、`older-no-sa` 都不代表沒有漏洞：資料表的「最新」是 Intel Linux 套件在 `microcode-20261110` 為止的最新；BIOS 專用的微碼不在裡面。
 - 不做 CPUID 的 platform 子集推論（只在「同 F-M-S 的遮罩有交集且較新的鍵還有更新」時降成 NOT_ASSESSED 或加候選）、不猜被 revert／移除的 revision；New Disclosures 表只用保守的上界規則（見規則 6.b），不判斷它的確切語意。
 - 20250812 的散文對照由人整理，GAP 的鍵只加註。
-- 微碼只比 Intel。AMD 的微碼、PSP 韌體、AGESA 已由 `amd_psp.py` 解析，每個元件有 `advisory-match=NOT_ASSESSED`（資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。ME／TXE／SPS 的公告沒有機器可讀資料，NVIDIA vBIOS 的公告比對這一版沒有做。
+- 微碼只比 Intel。AMD 的微碼、PSP 韌體、AGESA 已由 `amd_psp.py` 解析，每個元件有 `advisory-match=NOT_ASSESSED`（資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。ME／TXE／SPS 的公告沒有機器可讀資料。NVIDIA vBIOS 的比對見最後一節。
 - 資料表不隨 CI 更新：它會變舊。`microcode-20261110` 之後的 release 不在裡面（比表新的 revision 會是 `revision-newer-than-table`，不會被當成 up-to-date）。
