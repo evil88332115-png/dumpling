@@ -81,6 +81,7 @@ C0–C4 都在第二台時，照這節準備；變數值寫在那台的 `~/.conf
 3. `local.env` 要有的變數（建議值）：
    - `REPO_MAIN`：那個 clone 的路徑（例如 `$HOME/dumpling`）
    - `AGENT_TMP`：暫存根目錄（例如 `$HOME/agent-tmp`），worktree 與暫存都放這裡
+     - `$AGENT_TMP` 可能跟其他專案共用（主要主機上和 sca-center 共用）：清理或搬家時**只刪 `dumpling-*` 開頭、而且是自己那個對話的項目**，不要刪整個 `$AGENT_TMP`；`dumpling-heavy.lock` 是共用的鎖，不刪
    - `PUBLIC_IMAGES`：公開映像與 BSP 下載快取（例如 `$HOME/public-images`）
    - `SCA_CENTER`：sca-center 的 checkout（只用 `git show 25fa89a:<路徑>` 取檔；那台的 checkout 要有這個 commit）
    - `HEAVY_LOCK`：`$AGENT_TMP/dumpling-heavy.lock`（同一台的所有對話共用，重工作一次一個）
