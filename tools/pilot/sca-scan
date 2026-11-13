@@ -910,6 +910,11 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
 fi
 [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && kernel_versions_prepare
+# CNA 鏡像是沿用的舊資料（tools/mirror/kernel-cve.sh 的 KERNEL_CVE_FALLBACK_FROM：上游連不上）：結果照用，但報告要看得到
+if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ -n "$KERNEL_CVE_MIRROR" ] && [ -f "$KERNEL_CVE_MIRROR/SOURCE" ] \
+   && grep -qx 'fallback=yes' "$KERNEL_CVE_MIRROR/SOURCE"; then
+  status C-kernel-cve-mirror ATTENTION "$(sed -n 's/^fallback_note=//p' "$KERNEL_CVE_MIRROR/SOURCE" | head -1)"
+fi
 if [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
 elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")
