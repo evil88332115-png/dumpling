@@ -377,7 +377,7 @@
 | T-11 | 簽章方案決定（第 9.2 節最後一欄） | 內部決定 |
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
 | T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
-| T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案，經 C0 協調 | C0／C1 決定 |
+| T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案。**C0 決定（2026-11-13）**：排給 C1、放在 M7 之後；做法是 scan.sh 多一個選項，改連既有的 DT（URL＋金鑰從環境變數讀），不傳這個選項時照舊開臨時 DT | C1，M7 之後 |
 
 ---
 
