@@ -111,6 +111,8 @@ os:
 - `os` 下不認得的鍵是錯誤。`new-project.sh` 在 `ours` 時產生 `os:` 區塊（`--os-distro`、`--os-release`，沒給是 `TO BE COMPLETED`）。
 - 下游（M8 的 OS 支援期限檢查）讀 `project["os"]["distro"]`、`project["os"]["release"]`。
 
+主要營業地所在的會員國是公司層級的資料，**不放 `project.yml`**（D-055 (5)）；GitLab 階段放內部設定，公開版 M8 保留人工步驟。負責人、備援人的 email 一律不進 repo。
+
 ## 4. sources.yml
 
 ```yaml

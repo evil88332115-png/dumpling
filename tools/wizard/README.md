@@ -74,7 +74,7 @@ python3 -I tools/wizard/cra-scan.py --site-config /path/to/wizard.json
 設定包不要寫死版本；精靈會覆寫 `config.json` 的 `product.version` 與刷機包識別（`product.identification`），避免換版後 SBOM、VEX、客戶資料包與報告掛著舊版名稱。只改輸出資料夾裡的複本（製造商與供應商兩份），`--config` 指的原資料夾不動。
 
 - 版本：改成精靈的計畫版本。設定包的值結尾若有括號後綴（例如 `V39.2.0.2_a (rootfs)` 的 ` (rootfs)`）且後綴本身不是版本號，保留後綴 → `<計畫版本> (rootfs)`；否則直接是 `<計畫版本>`。
-- 版本的括號後綴可以有多個（`V1 (rootfs)(gui)` → `V9 (rootfs)(gui)`）；`config.json` 讀不了或 `product.version` 缺少／不是字串時不猜，記 ATTENTION。
+- 版本的括號後綴可以有多個（`V1 (rootfs)(gui)` → `V9 (rootfs)(gui)`）；`config.json` 讀不了或 `product.version` 不是字串時不猜，記 ATTENTION。**dumpling 在地（D-039、D-055）**：`product.version` 沒寫時直接填入這次的版本（不記 ATTENTION）；`identification` 沒寫而 provenance 有 32 碼 MD5 時填入 `Flash package <檔名> (MD5 <md5>)`；`support.end_date` 沒寫時由 `DUMPLING_SUPPORT_UNTIL`（project.yml 的 `support_until`）產生 YYYY-MM，已寫而月份不同記 ATTENTION。
 - 識別：掃描後，若 `identification` 以 `Flash package <檔名> (MD5 <md5>)` 開頭，換成 `scan/provenance.json` 的 `source.file`、`source.md5`，句子其餘部分不動。格式認不得，或 provenance 沒有可用的 MD5（缺少或不是 32 碼十六進位），就不改（不會拼出新檔名加舊 MD5），印 `ATTENTION` 請人自行修改。
 - 每項覆寫印一行（舊 → 新），並記進 `inputs-check.json` 的步驟（`pack-version-override`、`pack-identification-override`），報告看得到。
 - 過期檢查（只警告、不改任何結果，記為步驟 `pack-stale-files`）：`kernel-modules.json` 的 `source` 提到別的刷機包檔名、`image_sha256` 和這次掃描的映像不同；`exposed-services.json` 的 `source` 提到和計畫版本同形（同樣段數）、且彼此不是前綴的版本號（`V2.0.0.1` 與 `V2.0.0.1_a` 視為同一版，`Linux V5.10` 不抓）。`image_sha256` 去掉 `sha256:` 前綴、轉小寫後比對；讀不到掃描的 `meta.json`（或 `.xz`）時記 `NOT_RUN`（沒比對），不是靜默略過。

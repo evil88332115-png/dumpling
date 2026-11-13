@@ -430,6 +430,12 @@ class ProjectFieldsD055(Tmp):
         self.assertNotIn("WARN", i.stdout)                   # stdout 只有 KEY=VALUE
         self.assertEqual(open(os.path.join(d, "project.yml"), "rb").read(), before)
 
+    def test_project_info_prints_support_until(self):
+        """project-info.py 輸出 SUPPORT_UNTIL（platform.sh 匯出成 DUMPLING_SUPPORT_UNTIL，精靈用它產生 support.end_date；D-055 (2)）。"""
+        out = lambda d: dict(l.split("=", 1) for l in run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--dir", d, "v1"]).stdout.splitlines() if "=" in l)  # noqa: E731
+        self.assertEqual(out(self._project_dir('markets: ["DE"]', support_until="2030-06-30"))["SUPPORT_UNTIL"], "2030-06-30")
+        self.assertEqual(out(self._project_dir('markets: ["DE"]', support_until="TO BE COMPLETED"))["SUPPORT_UNTIL"], "")
+
     def test_load_project_unknown_flag(self):
         p = pc.load_project(self._project_dir('markets: ["UNKNOWN"]'))
         self.assertTrue(p["_markets_unknown"])

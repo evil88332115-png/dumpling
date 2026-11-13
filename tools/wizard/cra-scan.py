@@ -344,7 +344,7 @@ def fill_pack_support_end(cfg_path, support_until):
         return None
     if cur not in (None, "", "TO BE COMPLETED"):
         raise ValueError(f"support.end_date {cur} 與 project.yml 的 support_until {support_until} 月份不同")
-    c.setdefault("support", {})["end_date"] = want
+    c["support"] = dict(sup or {}, end_date=want)          # "support": null 也當成沒有
     Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return cur, want
 

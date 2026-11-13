@@ -73,6 +73,13 @@ class RunStep(Tmp):
         self.assertEqual(sr.overall(self.rows()), "GAP")
         self.assertTrue(self.rows()[0].get("recorded") and not self.rows()[-1].get("recorded"))
 
+    def test_platform_sh_exports_support_until(self):
+        """platform.sh 把 project.yml 的 support_until 匯出成 DUMPLING_SUPPORT_UNTIL 給轉接器與精靈（D-055 (2)）。"""
+        open(os.path.join(self.plats, "steps", "scan.sh"), "w").write('#!/usr/bin/env bash\necho "scan: support=[$DUMPLING_SUPPORT_UNTIL]"\n')
+        r = self.run_step("scan", self.proj, "v39.2.1-demo1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.rows()[-1]["detail"], "scan: support=[2031-12-31]")       # orin-nano-demo 的 support_until
+
     def test_step_output_cannot_claim_not_applicable(self):
         """一般執行的步驟最後一行印「不適用…」並結束碼 4：照樣算沒能執行（GAP）。只有 --record 記的列（recorded）能算不適用。"""
         open(os.path.join(self.plats, "steps", "build.sh"), "w").write('#!/usr/bin/env bash\necho "不適用：這個平台不用編譯"\nexit 4\n')

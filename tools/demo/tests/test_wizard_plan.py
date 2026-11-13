@@ -800,3 +800,5 @@ def test_support_end_date_comes_from_support_until(tmp_path):
         assert w.fill_pack_support_end(cfg, bad) is None                    # 沒給或格式不對：不猜
     c = json.loads(cfg.read_text()); c["support"]["end_date"] = "TO BE COMPLETED"; cfg.write_text(json.dumps(c))
     assert w.fill_pack_support_end(cfg, "2031-12-31") == ("TO BE COMPLETED", "2031-12")
+    c["support"] = None; cfg.write_text(json.dumps(c))                     # "support": null 不讓精靈當掉
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == (None, "2031-12")
