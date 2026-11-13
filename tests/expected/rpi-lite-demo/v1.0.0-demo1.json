@@ -305,6 +305,16 @@
    "max": 80,
    "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43396859926：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
   },
+  "product_status.os.bsp_inputs_not_applicable": {
+   "equals": [
+    "flash-firmware"
+   ],
+   "reason": "-os 那份的分層 SBOM 沒有 bsp／unknown 元件，刷機包韌體清單（boot 分割區的 dtb、overlay、開機韌體 416 個）不加進這份、在 -bsp 那份（cra_report 的 layers.bsp_inputs_not_applicable，852b6d3；dev run 43454142042：-os 報告 SBOM 1004 → 588 個元件，漏洞列與文件狀態不變）"
+  },
+  "product_status.bsp.bsp_inputs_not_applicable": {
+   "equals": [],
+   "reason": "-bsp 那份有 bsp 元件，BSP 專屬輸入照常處理、沒有略過（刷機包韌體 416 個元件仍在 -bsp 報告；dev run 43454142042）"
+  },
   "report_rows.os.kernel_rows": {
    "equals": 0,
    "reason": "D-044：-os 重跑傳 --kernel-in-other-report，SBOM 沒有核心 → 核心階段 NOT_RUN，不退回 CNA（缺口 18 修好前這裡是 2700 列）"

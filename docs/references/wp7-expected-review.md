@@ -160,3 +160,16 @@ rock 的 accepted 3627 全來自 kconfig、拿掉 R1～R5 不影響；ai-nas p1_
 
 C4 另外核對：rpi 的核心 CVE 除了 4 個 linux-image-*，也掛在 4 個 linux-base-*（8×332 列），併進缺口 19。
 未確認：DECISIONS.md 的 D-034 以後在 main 還沒有（代理只看到 D-033）；orin 的 accepted 2990；v8 核心的 config；cdxgen 在 CI 實際的版本；ai-nas 6.12.116 的 CNA 候選數。
+
+### 併上 main（M2）之後的 -os 核對（2026-11-14，C4）
+
+M2 的 852b6d3（-os 那份沒有 bsp／unknown 元件時略過 BSP 專屬輸入；#42 限 customer／upstream-vendor）會改變 rock、rpi 的 -os 報告。
+用併 main 後的 dev run（rock 43449928625、rpi 43454142042、ai-nas 43457231137）逐份比對舊 run 的 summary.json 與 scan.json：
+
+| 專案 | -os 報告 | -bsp 報告 | 漏洞列、文件狀態、發行閘門 |
+|---|---|---|---|
+| rock（customer） | 刷機包韌體（rootfs `lib/modules/*/updates/` 的 13 個 DKMS 驅動）不再加進來：SBOM 1791 → 1778 個元件；`layers.bsp_inputs_not_applicable.skipped` = `["flash-firmware"]` | 13 個照樣在（1334 個元件，不變） | 都不變（那 13 個元件本來就沒有漏洞列） |
+| rpi（customer） | boot 分割區的 dtb、overlay、開機韌體 416 個不再加進來：SBOM 1004 → 588 個元件；skipped = `["flash-firmware"]` | 416 個照樣在（4610 個元件，不變） | 都不變 |
+| ai-nas（ours） | 只有一份報告（含全部層），沒有略過任何輸入（skipped 是空的） | — | 都不變 |
+
+標準答案加釘 `product_status.<報告>.bsp_inputs_not_applicable`（rock 101 項、rpi 92 項、ai-nas 77 項）；這個欄位由 wp7_scan.py 從各份報告的 summary.json 讀（8429d1f）。

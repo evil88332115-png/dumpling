@@ -399,6 +399,16 @@
    "max": 80,
    "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
   },
+  "product_status.os.bsp_inputs_not_applicable": {
+   "equals": [
+    "flash-firmware"
+   ],
+   "reason": "-os 那份的分層 SBOM 沒有 bsp／unknown 元件，刷機包韌體清單（rootfs 的 lib/modules/*/updates/ 13 個 DKMS 驅動）不加進這份、在 -bsp 那份（cra_report 的 layers.bsp_inputs_not_applicable，852b6d3；dev run 43449928625：-os 報告 SBOM 1791 → 1778 個元件，漏洞列與文件狀態不變）"
+  },
+  "product_status.bsp.bsp_inputs_not_applicable": {
+   "equals": [],
+   "reason": "-bsp 那份有 bsp 元件，BSP 專屬輸入照常處理、沒有略過（刷機包韌體 13 個元件仍在 -bsp 報告；dev run 43449928625）"
+  },
   "runs.-os.stages.C-kernel-config": {
    "equals": "NOT_RUN",
    "reason": "D-044：-os 重跑傳 --kernel-in-other-report，OS 層的 SBOM 沒有核心，核心階段不適用（缺口 13 原本是沒有意義的 GAP）"

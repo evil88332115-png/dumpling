@@ -366,6 +366,10 @@
    "min": 40,
    "max": 80,
    "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）。變少很多（例如又帶進範本值）時會被抓到"
+  },
+  "product_status.full.bsp_inputs_not_applicable": {
+   "equals": [],
+   "reason": "os_responsibility 是 ours：只有一份報告、含全部層，BSP 專屬輸入照常處理、沒有略過（cra_report 的 layers.bsp_inputs_not_applicable 只用在 customer／upstream-vendor 的 -os 報告，852b6d3、#42；dev run 43457231137）"
   }
  }
 }
