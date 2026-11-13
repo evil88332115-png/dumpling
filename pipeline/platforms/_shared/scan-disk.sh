@@ -196,7 +196,12 @@ while IFS=$'\t' read -r suffix sfile; do
   cp -a "$w0/scan" "$src/scan" && cp "$w0/wizard-steps.json" "$src/" 2> /dev/null
   cp "$out/layers/$sfile" "$src/scan/rootfs/scan/sbom/sbom.cdx.json" || fail "放不進分層 SBOM $sfile"
   echo "== 分層重跑 ${suffix:-（單一專案）}：$sfile"
-  wl=$(wiz "$suffix" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+  # D-038 的核心 CVE 清單（KERNEL_CVES）只屬於有核心的那一份：-os（OS 層，SBOM 裡沒有核心）重跑時不帶，否則核心的列會在 OS 報告重複出現
+  if [ "$suffix" = -os ]; then
+    wl=$( (unset KERNEL_CVES; wiz "$suffix" --rescan-from "$src/scan") | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+  else
+    wl=$(wiz "$suffix" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+  fi
   if [ -z "$wl" ] || [ ! -d "$wl/報告" ]; then fail "分層 $suffix 沒有報告包"; fi
   runs+=("$suffix=$wl")
   rm -rf "$src"
