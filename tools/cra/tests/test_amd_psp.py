@@ -25,11 +25,23 @@ EFS = 0x20000
 
 
 def fl32(b):
-    s1 = s2 = 0
-    for i in range(0, len(b), 2):
-        s1 = (s1 + b[i] + (b[i + 1] << 8)) % 65535
-        s2 = (s2 + s1) % 65535
-    return (s2 << 16) | s1
+    """獨立的測試實作：c0＝c1＝0xFFFF 起算，每個字加完就把高 16 位加回低 16 位（end-around carry），最後再折疊一次。"""
+    c0 = c1 = 0xFFFF
+    for i in range(0, len(b) - 1, 2):
+        c0 += b[i] + (b[i + 1] << 8)
+        c0 = (c0 & 0xFFFF) + (c0 >> 16)
+        c1 += c0
+        c1 = (c1 & 0xFFFF) + (c1 >> 16)
+    c0 = (c0 & 0xFFFF) + (c0 >> 16)
+    c1 = (c1 & 0xFFFF) + (c1 >> 16)
+    return (c1 << 16) | c0
+
+
+def ish_bytes(pl2, good=True, prio=0xFFFFFFFF, psp_id=0xBC0D0300):
+    """Image Slot Header：checksum 是 fl32(+4..+0x20)。"""
+    body = struct.pack("<IIIIIII", prio, 0xF, 0xFFFFFF00, pl2, psp_id, 0xFFFFFFFF, 0xFFFFFFFF)
+    ck = fl32(body)
+    return struct.pack("<I", ck ^ (0 if good else 1)) + body
 
 
 def phys(o):
@@ -88,12 +100,12 @@ def put(img, off, b):
     img[off:off + len(b)] = b
 
 
-def efs(img, new_psp=0, bios0=0, psp=0, extra=None):
-    put(img, EFS, b"\xaa\x55\xaa\x55" + b"\x00" * 0x3C)
+def efs(img, new_psp=0, bios0=0, psp=0, extra=None, at=EFS):
+    put(img, at, b"\xaa\x55\xaa\x55" + b"\x00" * 0x3C)
     for o, v in ((0x10, psp), (0x14, new_psp), (0x18, bios0), (0x1C, 0), (0x20, 0), (0x28, 0), (0x2C, 0)):
-        struct.pack_into("<I", img, EFS + o, v)
+        struct.pack_into("<I", img, at + o, v)
     for o, v in (extra or {}).items():
-        struct.pack_into("<I", img, EFS + o, v)
+        struct.pack_into("<I", img, at + o, v)
 
 
 def good_image():
@@ -154,7 +166,7 @@ def test_normal_l1_l2_bios_and_microcode():
     assert mc["0x0800820d"]["form"] == "raw-patch"
     assert mc["0x0a20102b"]["cpuids"] == ["00A20F10"] and mc["0x0a20102b"]["form"] == "container" and mc["0x0a20102b"]["date"] == "2023-01-15"
     assert "ucode-cpuid" in codes(r) and any("equivalence id" in g and "not guessed" in g for g in r["gaps"])
-    assert k["bios"]["entries"][3]["kind"] == "empty"          # 只有 dest 的 APOB
+    assert k["bios"]["entries"][3]["kind"] == "dest-only" and "entry-empty" not in codes(r)          # 只有 dest 的 APOB（有依據的非缺口）
     assert r["attention"] == []
 
 
@@ -288,8 +300,10 @@ def test_too_many_entries_and_total_limits(monkeypatch):
     r = run(img)
     assert "dir-too-many-entries" in codes(r) and dirs_by_kind(r)["psp"]["parsed"] is False and r["psp_firmware"] == []
     # 項目數剛好超過單一目錄上限
-    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x31000))] * (ap.MAX_DIR_ENTRIES + 1)))
-    assert "dir-too-many-entries" in codes(run(img))
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x31000))] * 257))
+    assert "dir-too-many-entries" in codes(run(img)) and ap.MAX_DIR_ENTRIES == 256
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x31000))] * 256))
+    assert "dir-too-many-entries" not in codes(run(img))
     # 跨目錄的項目總數（各目錄都沒超過單一上限）
     monkeypatch.setattr(ap, "MAX_ENTRIES_TOTAL", 6)
     r = run(good_image())
@@ -358,31 +372,57 @@ def test_unrecognised_microcode_is_a_gap():
 
 
 def test_a_b_recovery_slot_header_leads_to_the_l2_directory():
-    """size 0 的 RECOVERYAB（0x48／0x4A）項目指到 Image Slot Header，裡面的 pl2_location 是 L2 目錄；不能當成「沒有資料」。"""
+    """0x48／0x4A（size 0 或 0x100）指到 Image Slot Header，裡面的 pl2_location 是 L2 目錄；checksum 對才採用；不能當成「沒有資料」。"""
     img = bytearray(b"\xff" * SIZE)
     smu = psp_blob(8, (0, 0x54, 0x4F, 0), 0x200)
     put(img, 0x52000, smu)
     put(img, 0x51000, directory(b"$PL2", [psp_ent(8, size=len(smu), addr=0x52000, mode=1)], info=1 << 29))
-    ish = struct.pack("<IIIIIIII", 0x12345678, 0xFFFFFFFF, 0xF, 0xFFFFFF00, 0x51000, 0xBC0D0300, 0xFFFFFFFF, 0xFFFFFFFF)
-    put(img, 0x50120, ish)
-    put(img, 0x50140, ish[:16] + struct.pack("<IIII", 0xDEAD0000, 0, 0, 0))            # pl2_location 不是目錄
-    put(img, 0x50000, directory(b"$PSP", [psp_ent(0x48, size=0, addr=0x50120), psp_ent(0x4A, size=0, addr=0x50140), psp_ent(0x48, size=0, addr=SIZE - 8)], info=1 << 29))
+    put(img, 0x50120, ish_bytes(0x51000))
+    put(img, 0x50140, ish_bytes(0xDEAD0000))                                          # pl2_location 不是目錄
+    put(img, 0x50160, ish_bytes(0x51000, good=False))                                 # checksum 不符：不採用
+    put(img, 0x50000, directory(b"$PSP", [psp_ent(0x48, size=0, addr=0x50120), psp_ent(0x4A, size=0x100, addr=0x50140), psp_ent(0x48, size=0, addr=0x50160),
+                                          psp_ent(0x48, size=0, addr=SIZE - 8), psp_ent(0x4A, size=0x44, addr=0x50120)], info=1 << 29))
     efs(img, new_psp=0x50000)
     r = run(img)
     k = dirs_by_kind(r)
     assert set(k) == {"psp", "psp-l2"} and k["psp-l2"]["reached_via"][0].startswith("PSP directory L1 @0x50000 entry 0")
     ents = k["psp"]["entries"]
-    assert [e["kind"] for e in ents] == ["ish", "ish", "unresolved"] and ents[0]["child"] == 0x51000 and ents[0]["ish"]["checksum_verified"] is False
+    assert [e["kind"] for e in ents] == ["ish", "ish", "ish", "unresolved", "unresolved"]
+    assert ents[0]["child"] == 0x51000 and ents[0]["ish"]["checksum_verified"] is True and ents[2]["ish"]["checksum_verified"] is False and ents[2]["child"] is None
     assert [p["version"] for p in r["psp_firmware"]] == ["00.4f.54.00"]
-    assert {"ish-unverified", "pointer-unresolved", "entry-address"} <= codes(r)
+    assert {"ish-checksum", "pointer-unresolved", "entry-address", "ish-size"} <= codes(r)
+    assert any("image slot header checksum" in a for a in r["attention"])
 
 
-def test_bios_compressed_entry_has_no_trusted_extent():
+def test_compressed_entries_are_range_checked_gap_and_never_parsed_as_plain_data():
     img = good_image()
-    put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x62, 0x400020, phys(0x80000), f1=0x0B)]))        # 壓縮：size 不是儲存範圍
+    put(img, 0x41000, patch())
+    ents = [bhd_ent(0x62, 0x400020, 0x80000, f1=0x0B),                       # 壓縮、size 超過檔尾：起點在檔案內，記 GAP，不算 entry-range
+            bhd_ent(0x66, 0xC80, 0x41000, f1=0x08),                          # 壓縮的微碼：開頭剛好像明文 patch 也不能列成微碼
+            bhd_ent(0x66, 0x100, SIZE - 0x10, f1=0x08),                      # 壓縮的微碼、起點接近檔尾
+            bhd_ent(0x66, 0x100, SIZE + 0x1000, f1=0x08)]                    # 壓縮、起點在檔案外（目錄 address mode 1＝相對視窗）
+    put(img, 0x40000, directory(b"$BHD", ents, info=1 << 29))
     r = run(img)
-    assert "entry-range" not in codes(r) and "entry-overlap" not in codes(r)
-    assert "size_note" in dirs_by_kind(r)["bios"]["entries"][0]
+    assert r["microcode"] == [] and "ucode-unrecognised" not in codes(r)
+    kinds = [e["kind"] for e in dirs_by_kind(r)["bios"]["entries"]]
+    assert kinds == ["compressed", "compressed", "compressed", "unresolved"] and "entry-range" in codes(r)
+    assert "entry-compressed" in codes(r) and "entry-overlap" not in codes(r)
+    assert any("compressed entries" in g and "(3)" in g for g in r["gaps"])
+    assert any("runs past the end" in p["text"] for p in r["problems"] if p["code"] == "entry-compressed")
+
+
+def test_size_zero_entries_are_gaps_except_apob_with_a_destination():
+    img = good_image()
+    boot = psp_blob(1, (1, 2, 3, 4), 0x300)
+    put(img, 0x31000, boot)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=phys(0x31000)), psp_ent(8, size=0, addr=phys(0x32000)), psp_ent(0x12, size=0, addr=0)]))
+    put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x66, 0, phys(0x41000)), bhd_ent(0x61, 0, 0, dest=0xA200000), bhd_ent(0x61, 0, 0), bhd_ent(0x63, 0, 0)]))
+    r = run(img)
+    assert [e["kind"] for e in dirs_by_kind(r)["psp"]["entries"]] == ["blob", "empty", "empty"]
+    assert [e["kind"] for e in dirs_by_kind(r)["bios"]["entries"]] == ["empty", "dest-only", "empty", "empty"]      # APOB 沒有 destination 或其他 type：缺口
+    assert r["microcode"] == []
+    gap = next(g for g in r["gaps"] if "entries with size 0" in g)
+    assert "(5)" in gap
 
 
 def test_unparsed_efs_pointers_are_reported():
@@ -578,3 +618,283 @@ def test_wiring_when_the_parser_cannot_run(tmp_path, monkeypatch):
     b = xf.bios_image(bytes(img))
     assert b["platform"] == "amd" and b["amd"] is None
     assert any("parser did not run" in g and "not 'no microcode'" in g for g in b["gaps"])
+
+
+# ---------- 預驗抓到的問題：不丟例外、壓縮與 size 0 的缺口、位址座標、AGESA 的邊界 ----------
+
+def test_analyze_never_raises_even_when_a_stage_or_an_entry_breaks(monkeypatch):
+    # 壓縮的微碼條目起點靠近檔尾（以前 patch_header 丟 struct.error）、一般條目的內容解析丟例外：只影響那個條目或階段
+    img = good_image()
+    put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x66, 0x100, SIZE - 0x10, f1=0x08), bhd_ent(0x66, 0xC80, 0x41000)], info=1 << 29))
+    r = run(img)
+    assert [m["patch_id"] for m in r["microcode"]] == ["0x0800820d"] and "entry-compressed" in codes(r)
+    real = ap.parse_ucode
+
+    def boom(ctx, ent):
+        raise ValueError("boom")
+    monkeypatch.setattr(ap, "parse_ucode", boom)
+    r = run(good_image())
+    assert "entry-error" in codes(r) and r["psp_firmware"] and any("failed to parse" in g or "content parse failed" in g for g in r["gaps"])
+    monkeypatch.setattr(ap, "parse_ucode", real)
+
+    def boom2(ctx, amd):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(ap, "collect_contents", boom2)
+    r = run(good_image())
+    assert "internal-error" in codes(r) and len(r["directories"]) == 3 and r["agesa"]["problems"] is not None
+    assert any("internal-error" in a or "parse stages that failed" in a for a in r["attention"])
+    monkeypatch.undo()
+
+    def boom3(ctx, rec, i, e, where, depth, stack):
+        raise struct.error("boom")
+    monkeypatch.setattr(ap, "entry", boom3)
+    r = run(good_image())
+    assert "entry-error" in codes(r) and len(r["directories"]) >= 2 and all(e["kind"] == "unresolved" for d in r["directories"] for e in d["entries"])
+    monkeypatch.undo()
+
+    def boom4(data, budget=None, soft=()):
+        raise OSError("boom")
+    monkeypatch.setattr(ap, "agesa_search", boom4)
+    r = run(good_image())
+    assert r["agesa"]["complete"] is False and any("failed" in p for p in r["agesa"]["problems"]) and r["psp_firmware"]
+
+
+def test_random_bios_entries_never_raise():
+    rnd = random.Random(99)
+    sizes = [0, 1, 0x10, 0x1A, 0x100, 0xC80, 0x1000, 0xFFFFFFFF, 0xFFFFFFF0, 0x4000000, 0x4000001, SIZE]
+    addrs = [0, 1, 0x41000, SIZE - 0x10, SIZE - 1, SIZE, SIZE + 0x1000, 0xFFFFFFFF, 1 << 40, (1 << 62) - 1, phys(0x41000), phys(SIZE - 8)]
+    for _ in range(300):
+        img = good_image()
+        put(img, 0x41000, rnd.choice([patch(), container([(1, 0x8082)], [patch()]), b"DMA\x00" + bytes(rnd.randrange(256) for _ in range(40))]))
+        ents = [bhd_ent(rnd.choice([0x66, 0x66, 0x62, 0x61, 0x60, 0x70, 0x77]), rnd.choice(sizes), rnd.choice(addrs), f1=rnd.randrange(256), f2=rnd.randrange(256),
+                        mode=rnd.randrange(4)) for _ in range(rnd.randrange(1, 8))]
+        put(img, 0x40000, directory(b"$BHD", ents, info=rnd.choice([0, 1 << 29, 2 << 29, 3 << 29, (1 << 31) | (1 << 24), (1 << 31) | (2 << 24)])))
+        r = run(img)
+        json.dumps(r)
+        assert isinstance(r["gaps"], list)
+
+
+def two_readings_image(extra_pointer=None):
+    """EFS 在 0x21000（視窗開頭 0x1000，位移）。new_psp 指標 0x30000：視窗座標是 0x31000、整個檔案的偏移是 0x30000，兩邊都有目錄（內容不同、checksum 都對）。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    a, b = psp_blob(1, (1, 1, 1, 1), 0x300), psp_blob(1, (2, 2, 2, 2), 0x300)
+    put(img, 0x50000, a)
+    put(img, 0x51000, b)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x50000))]))          # 檔案座標：基底 0 → 0x50000（a）
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x50000))]))          # 視窗座標：基底 0x1000 → 0x51000（b）
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))               # 第二種 cookie：讓 x86_firmware 認得這是 AMD 平台（EFS 不在固定位置）
+    efs(img, new_psp=0x30000, at=0x21000, extra=extra_pointer)
+    return img
+
+
+def test_pointer_readable_both_ways_lists_both_sides_and_uses_neither(tmp_path):
+    img = two_readings_image()
+    r = run(img)
+    k = {d["offset"]: d for d in r["directories"]}
+    assert sorted(k) == [0x30000, 0x31000] and all(d["checksum_ok"] and d["ambiguous"] for d in k.values())
+    assert k[0x30000]["readings"] == ["0x31000"] and k[0x31000]["readings"] == ["0x30000"]
+    assert "pointer-ambiguous" in codes(r) and "dir-ambiguous" in codes(r)
+    assert r["psp_firmware"] == []                                                       # 兩邊的版本都不進 SBOM 用的清單
+    assert sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["01.01.01.01", "02.02.02.02"]
+    assert any("this tool does not decide which one the hardware uses" in p["text"] for p in r["problems"] if p["code"] == "pointer-ambiguous")
+    assert any(g.startswith("AMD: pointers readable as a directory in two ways") for g in r["gaps"]) and any(g.startswith("AMD: directories reachable only") for g in r["gaps"])
+    assert any("in two ways" in a for a in r["attention"])
+    md = "\n".join(ap.markdown_lines(r, str))
+    assert md.count("**歧義**") >= 2 and "01.01.01.01" in md and "02.02.02.02" in md and "不進 SBOM" in md and "歧義目錄裡的版本" in md
+    p = tmp_path / "amb.bin"
+    p.write_bytes(bytes(img))
+    inv = xf.inventory([p])
+    st, detail = xf.status_of(inv)
+    assert st == "ATTENTION" and "pointers readable as a directory in two ways" in detail
+    md = xf.markdown(inv)
+    assert "pointers readable as a directory in two ways" in md and "01.01.01.01" in md and "02.02.02.02" in md
+    comps, deps = xf.components(inv)
+    assert not [c for c in comps if c["name"].startswith("AMD PSP firmware")]           # SBOM 不能只放其中一邊
+    bios = next(c for c in comps if c["name"] == "amb.bin")
+    assert any(q["name"] == "sca-center:gap" and "two ways" in q["value"] for q in bios["properties"])
+
+
+def test_directory_also_reached_by_an_unambiguous_pointer_is_definite_and_children_inherit():
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    a, b = psp_blob(1, (1, 1, 1, 1), 0x300), psp_blob(1, (2, 2, 2, 2), 0x300)
+    put(img, 0x50000, a)
+    put(img, 0x51000, b)
+    put(img, 0x34000, directory(b"$PL2", [psp_ent(1, size=0x300, addr=0x51000, mode=1)], info=1 << 29))
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))                          # 檔案偏移的讀法（基底 0）
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1), psp_ent(0x40, size=0x400, addr=0x33000, mode=1)], info=1 << 29))     # 視窗讀法（基底 0x1000）
+    efs(img, new_psp=0x30000)                                                       # EFS#1（基底 0）：0x30000 只有檔案偏移讀法 0x30000 …… 視窗 0 + 0x30000，單一解讀
+    efs(img, new_psp=0x30000, at=0x21000)                                           # EFS#2（基底 0x1000）：兩種讀法都有目錄
+    r = run(img)
+    k = {d["offset"]: d for d in r["directories"]}
+    assert sorted(k) == [0x30000, 0x31000, 0x34000]
+    assert [k[o]["ambiguous"] for o in (0x30000, 0x31000, 0x34000)] == [False, True, True]       # 0x34000 在歧義的 0x31000 底下
+    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"]
+    assert sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["02.02.02.02"]
+
+
+def test_agesa_tag_separator_truncation_and_dedupe():
+    r = run(agesa_image(b"AGESA!V9ComboAM4v2PI 1.2.0.B\x00"))
+    ag = r["agesa"]
+    assert ag["values"] == [] and any("no NUL or space after the tag" in p for p in ag["problems"])
+    assert any("AMD: AGESA search" in g and "no NUL or space" in g for g in r["gaps"])
+    r = run(agesa_image(b"AGESA!V\x00" + b"x"))                            # tag 是空的
+    assert r["agesa"]["values"] == []
+    r = run(agesa_image(b"AGESA!V9 ComboAM4v2PI 1.2.0.B\x00", b"AGESA!V9\x00ComboAM4v2PI 1.2.0.B\x00"))
+    assert [(x["tag"], x["value"], x["count"]) for x in r["agesa"]["values"]] == [("AGESA!V9", "ComboAM4v2PI 1.2.0.B", 2)]
+    # 超過長度上限：不是完整版本
+    r = run(agesa_image(b"AGESA!V9\x00" + b"A" * 200 + b" 1.2.0.B\x00"))
+    v = r["agesa"]["values"][0]
+    assert v["truncated"] is True and len(v["value"]) == ap.AGESA_VALUE_LEN
+    assert any("not used as a complete version" in p for p in r["agesa"]["problems"])
+    assert any("no complete AGESA version string" in g for g in r["gaps"]) and r["attention"] == [] and r["stats"]["agesa_values"] == 0
+    assert "被截斷" in "\n".join(ap.markdown_lines(r, str))
+    # 剛好 64 個字元（沒有更多）不是截斷
+    assert run(agesa_image(b"AGESA!V9\x00" + b"B" * ap.AGESA_VALUE_LEN + b"\x00"))["agesa"]["values"][0]["truncated"] is False
+    assert run(agesa_image(b"AGESA!V9\x00" + b"B" * (ap.AGESA_VALUE_LEN + 1)))["agesa"]["values"][0]["truncated"] is True
+    # 問題訊息不重複
+    r = run(agesa_image(*([b"AGESA!V9\x00\x00\x00"] * 20)))
+    ps = r["agesa"]["problems"]
+    assert len(ps) == len(set(ps)) and len(ps) <= 4
+
+
+def test_agesa_marker_in_content_the_walk_does_not_search_is_found_and_incomplete():
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00"
+    for name, volume in (("ui", fv([ffs(0x07, secs(sec(0x15, M + b"\0" * 8)))])), ("pad", fv([ffs(0xF0, M + b"\0" * 8)])),
+                         ("deleted", fv([ffs(0x07, secs(sec(0x10, M + b"\0" * 8)), state=0x00)]))):
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x80000, volume)
+        ag = run(img)["agesa"]
+        assert [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"], name
+        assert ag["complete"] is False or all(f["where"].startswith("uefi:") for x in ag["values"] for f in x["found"]), name
+    # 一定會被走訪涵蓋的位置：沒有多餘的「沒看到」說明、而且完整
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, b"MZ" + M + b"\0" * 8)))]))
+    ag = run(img)["agesa"]
+    assert ag["complete"] is True and [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"] and ag["values"][0]["count"] >= 1
+    assert not any("not seen" in p for p in ag["problems"])
+
+
+def test_agesa_missed_by_the_walk_makes_it_incomplete(monkeypatch):
+    """走訪看不到的位置（這裡用假的 uefi_image：什麼內容都不送）裡的標記：列出來、搜尋不完整。"""
+    class FakeScan:
+        fvs, files, parse_errors, notes, undecoded = 1, 1, 0, [], []
+
+    class FakeUi:
+        Scan = FakeScan
+
+        class Stop(Exception):
+            pass
+
+        @staticmethod
+        def parse_fvs(data, sc, depth):
+            return None
+    monkeypatch.setattr(ap, "_sibling", lambda name: FakeUi)
+    ag = run(agesa_image(b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00"))["agesa"]
+    assert ag["complete"] is False and [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"]
+    assert ag["values"][0]["found"][0]["where"] == "image (raw bytes)" and any("not seen in the decoded UEFI content" in p for p in ag["problems"])
+
+
+def test_efs_offset_tables_depend_on_the_window_size():
+    def with_efs(size, at):
+        img = bytearray(b"\xff" * size)
+        put(img, at, b"\xaa\x55\xaa\x55" + b"\x00" * 0x3C)
+        return [e["offset"] for e in run(img)["efs"]]
+    assert with_efs(8 << 20, 0x7A0000) == [0x7A0000]                 # 8 MiB 表
+    assert with_efs(16 << 20, 0x7A0000) == []                         # 16 MiB 表沒有 0x7A0000：不是 EFS 的位置
+    assert with_efs(16 << 20, 0xFA0000) == [0xFA0000] and with_efs(8 << 20, 0x3A0000) == []
+    assert with_efs(4 << 20, 0x3A0000) == [0x3A0000] and with_efs(4 << 20, 0x1A0000) == []
+    assert with_efs(1 << 20, 0x20000) == [0x20000] and with_efs(1 << 20, 0x30000) == []
+    assert ap.efs_offsets(1 << 20) == ap.EFS_OFFSETS_4 and ap.efs_offsets(8 << 20) == ap.EFS_OFFSETS_8 and ap.efs_offsets(16 << 20) == ap.EFS_OFFSETS_16
+
+
+def test_efs_shift_limit(monkeypatch):
+    def shifted(shift):
+        img = bytearray(b"\xff" * (SIZE + shift))
+        inner = good_image()
+        put(img, shift, inner[:SIZE])
+        return [e["window_base"] for e in run(img)["efs"]]
+    assert shifted(ap.MAX_SHIFT) == [ap.MAX_SHIFT] and shifted(ap.MAX_SHIFT + 0x1000) == []
+    monkeypatch.setattr(ap, "MAX_SHIFT", 0x1000)
+    assert shifted(0x1000) == [0x1000] and shifted(0x2000) == []
+    assert shifted(0x1800) == []                           # 不是 4 KiB 的整數倍
+
+
+def test_psp_bak_directory_pointer_and_directory_header_versions():
+    img = bytearray(b"\xff" * SIZE)
+    boot = psp_blob(1, (1, 2, 3, 4), 0x300)
+    put(img, 0x31000, boot)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=phys(0x31000))]))
+    efs(img, extra={0x2C: phys(0x30000)})                            # 只有 psp_bak_directory（+0x2C）
+    r = run(img)
+    assert [d["reached_via"][0] for d in r["directories"]] == ["EFS@0x20000 psp_bak_directory"] and r["psp_firmware"]
+    # 目錄標頭版本 1：address_mode 在位元 24–25；版本 0：在位元 29–30（互不混用）
+    for info, mode in ((2 << 29, 2), ((1 << 31) | (2 << 24), 2), ((1 << 31) | (2 << 29), 0), ((1 << 31) | (1 << 24), 1), ((3 << 29), 3), (1 << 24, 0)):
+        assert ap.dir_mode(info) == mode, hex(info)
+    # 相對目錄（mode 2）的項目用項目自己的 mode 2：位置 = 目錄位置 + 值
+    for info in (2 << 29, (1 << 31) | (2 << 24)):
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x31000, boot)
+        put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=0x1000, mode=2)], info=info))
+        efs(img, new_psp=0x30000)
+        assert [p["version"] for p in run(img)["psp_firmware"]] == ["04.03.02.01"], hex(info)
+    # v1 標頭但 address_mode 位元（24–25）是 0：項目的 mode 2 被忽略，值 0x1000 當成視窗內偏移 → 讀到 0x1000 而不是 0x31000
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x31000, boot)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=0x1000, mode=2)], info=(1 << 31) | (2 << 29)))
+    efs(img, new_psp=0x30000)
+    assert run(img)["psp_firmware"] == []
+
+
+def test_instance_and_flag_bit_positions():
+    img = good_image()
+    boot = psp_blob(1, (1, 2, 3, 4), 0x300)
+    put(img, 0x31000, boot)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=phys(0x31000), flags=(5 << 3) | (1 << 2) | 2)]))
+    put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x60, 0x104, phys(0x43000), f1=(7 << 4) | 0b0111, f2=5 | (2 << 3) | (1 << 5))]))
+    r = run(img)
+    p = dirs_by_kind(r)["psp"]["entries"][0]
+    assert (p["instance"], p["writable"], p["rom_id"]) == (5, True, 2)
+    b = dirs_by_kind(r)["bios"]["entries"][0]
+    assert (b["instance"], b["reset"], b["copy"], b["read_only"], b["compressed"], b["subprogram"], b["rom_id"], b["writable"]) == (7, True, True, True, False, 5, 2, True)
+    put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x60, 0x104, phys(0x43000), f1=0b1000, f2=0), bhd_ent(0x60, 0x104, phys(0x43000), f2=0x20),
+                                          bhd_ent(0x60, 0x104, phys(0x43000), f2=0x10)]))
+    e = dirs_by_kind(run(img))["bios"]["entries"]
+    assert (e[0]["instance"], e[0]["reset"], e[0]["compressed"], e[0]["writable"], e[0]["subprogram"]) == (0, False, True, False, 0)
+    assert (e[1]["writable"], e[1]["rom_id"]) == (True, 0) and (e[2]["writable"], e[2]["rom_id"]) == (False, 2)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=len(boot), addr=phys(0x31000), flags=1 << 2), psp_ent(1, size=len(boot), addr=phys(0x31000), flags=2),
+                                          psp_ent(1, size=len(boot), addr=phys(0x31000), flags=1 << 7)]))
+    e = dirs_by_kind(run(img))["psp"]["entries"]
+    assert [(x["writable"], x["rom_id"], x["instance"]) for x in e] == [(True, 0, 0), (False, 2, 0), (False, 0, 0)]
+
+
+def test_microcode_container_size_checks_and_date_range(monkeypatch):
+    def run_ucode(blob):
+        img = good_image()
+        put(img, 0x41000, b"\xff" * 0x2000)
+        put(img, 0x41000, blob)
+        put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x66, len(blob), phys(0x41000))]))
+        return run(img)
+    ok = container([(0x00870F10, 0x8082)], [patch()])
+    eq24 = b"DMA\x00" + struct.pack("<II", 0, 24) + struct.pack("<IIIHH", 0x00870F10, 0, 0, 0x8082, 0) + b"\x00" * 8 + struct.pack("<II", 1, len(patch())) + patch()
+    assert run_ucode(eq24)["microcode"] == []                                         # 等價表大小不是 16 的倍數
+    assert [m["cpuids"] for m in run_ucode(ok)["microcode"]] == [["00870F10"]]
+    bad_type = b"DMA\x00" + struct.pack("<II", 1, 32) + ok[12:]
+    assert run_ucode(bad_type)["microcode"] == []
+    bad_mod = b"DMA\x00" + struct.pack("<II", 0, 17) + ok[12:]
+    assert run_ucode(bad_mod)["microcode"] == []
+    huge = b"DMA\x00" + struct.pack("<II", 0, len(ok)) + ok[12:]                    # 等價表比項目還大
+    assert run_ucode(huge)["microcode"] == []
+    monkeypatch.setattr(ap, "MAX_EQUIV", 1)
+    assert run_ucode(ok)["microcode"] == []                                           # 等價表有 2 個項目（含結尾的 0）：超過上限
+    monkeypatch.setattr(ap, "MAX_EQUIV", 256)
+    monkeypatch.setattr(ap, "MAX_PATCHES", 1)
+    two = container([(1, 0x8082)], [patch(), patch(0x04162019, 0x08008210, 0x8082)])
+    assert len(run_ucode(two)["microcode"]) == 1
+    monkeypatch.undo()
+    for date, good in ((0x01012000, True), (0x12312099, True), (0x01011999, False), (0x01012100, False), (0x00012019, False), (0x13012019, False), (0x01002019, False),
+                       (0x01322019, False), (0x0101201A, False)):
+        assert (ap.bcd_date(date) is not None) == good, hex(date)
+        assert bool(run_ucode(patch(date=date))["microcode"]) == good, hex(date)
+    # patch 的 patch_id／equivalence id 為 0 或全 1 不算
+    for kw in ({"pid": 0}, {"pid": 0xFFFFFFFF}, {"equiv": 0}, {"equiv": 0xFFFF}):
+        assert run_ucode(patch(**kw))["microcode"] == []

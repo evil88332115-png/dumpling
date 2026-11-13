@@ -2,16 +2,19 @@
 """AMD 平台 BIOS 映像的 PSP／BIOS 目錄、微碼與 AGESA 版本：只讀解析（x86_firmware.py 辨識出 AMD 平台時呼叫 analyze()）。
 
 只依賴標準函式庫與同目錄的 uefi_image.py（C1；找 AGESA 字串時用它解開 firmware volume）。輸入是不可信資料：只讀、不執行、不寫磁碟；
-所有欄位先對照檔案範圍與上限（MAX_*）才使用；看不懂的一律記 problem（對外是 GAP），不猜。
+所有欄位先對照檔案範圍與上限（MAX_*）才使用；看不懂的一律記 problem（對外是 GAP），不猜。analyze() 永遠回傳 dict、不丟例外
+（soft 參數列的例外＝超時，也只記為不完整）：單一條目的解析錯誤只影響那個條目（problem `entry-error`），其他階段出錯記在 incomplete，已有的結果照給。
 
 ## 做什麼
-1. Embedded Firmware Structure（EFS，簽章 0x55AA55AA，位置照 coreboot util/amdfwtool/amdfwread.c 的 fw_header_offsets，每個 16 MiB 視窗各找一次）
+1. Embedded Firmware Structure（EFS，簽章 0x55AA55AA，位置照 coreboot util/amdfwtool/amdfwread.c 依 ROM 大小（≤4／≤8／其餘 MiB）分的三張 fw_header_offsets 表，每個視窗各查一次；
+   視窗＝16 MiB 區塊，更新包有標頭造成位移時，指標之一要真的指到目錄 cookie 才採用）
    → 指標欄位 → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）。目錄裡的項目若指向另一個目錄
    （PSP 的 0x40、BIOS 的 0x70、combo 的每一項……只要解出的位置開頭是目錄 cookie）就往下走，深度、目錄數、項目總數都有上限，循環不重複走。
 2. 每個目錄項目：type、subprogram、instance、rom id、位置、大小、旗標。PSP 韌體條目的標頭（0x100 bytes）通過檢查才讀版本；其餘版本欄位記 GAP。
 3. BIOS 目錄 type 0x66 的 AMD 微碼：patch level（patch_id）、日期、equivalence id；微碼前面有 container 的等價表（`DMA\\0`）時才對出 CPUID，
    否則只列 equivalence id（不猜對照）。
-4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：整個映像的原始位元組找一次，再走訪 firmware volume（LZMA 等解開）找一次，不同值全部列出。
+4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外數整個映像原始位元組裡的標記，走訪沒涵蓋到的標記（例如在 UI section、
+   空白區、被刪除的檔案裡）一律讓搜尋標為不完整並列出；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
 
 ## 格式出處（只讀公開的格式說明核對欄位，沒有複製程式碼；程式是自己寫的）
 - coreboot `src/vendorcode/amd/psp/psp_efs.h`（EFS 欄位）、`psp_directory.h`（目錄標頭、項目、type 編號、cookie）、`bios_directory.h`
@@ -28,7 +31,8 @@ EFS（位置 E）：+0 簽章；+0x04 imc、+0x08 gec、+0x0C xhci；+0x10 psp_d
   +0x18 bios0、+0x1C bios1、+0x20 bios2、+0x28 bios3；+0x2C psp_bak_directory；+0x30、+0x34、+0x38 Promontory 韌體指標（這裡不解析，有值就記 GAP）。
   指標值 0／0xFFFFFFFF／0xFFFFFFFE 是「沒有」。
 目錄標頭 16 bytes：cookie、checksum、num_entries、additional_info（版本 0：dir_size 位元 0–9、address_mode 位元 29–30；版本 1：bit 31＝1，
-  address_mode 位元 24–25）。checksum＝Fletcher-32（16 位元字、模 65535）涵蓋 +8 到最後一個項目結尾。
+  address_mode 位元 24–25）。checksum＝Fletcher-32（coreboot util/amdfwtool/amdfwtool.c 的 fletcher32：初值 0xFFFF、16 位元字、每 359 個字與最後各折疊一次）
+  涵蓋 +8 到最後一個項目結尾。Image Slot Header 的 checksum 用同一個函式，涵蓋 +4 到 +0x20（amdfwtool.c integrate_psp_ab_ish）。
 PSP 項目 16 bytes：type u8、subprogram u8、flags u16（位元 0–1 rom id、位元 2 writable、位元 3–6 instance）、size u32、
   位址 u64（位元 0–61 值，位元 62–63 address mode）。size 0xFFFFFFFF 的項目（例如 type 0x0B 的 soft fuse）位址欄位是「值」不是位置。
 BIOS 項目 24 bytes：type u8、region_type u8、flags u8（位元 0 reset、1 copy、2 ro、3 compressed、4–7 instance）、
@@ -36,7 +40,11 @@ BIOS 項目 24 bytes：type u8、region_type u8、flags u8（位元 0 reset、1 
 combo 目錄：32 bytes 標頭（cookie、checksum、num_entries、lookup、16 bytes 保留，checksum 涵蓋 +8 起），項目 16 bytes：id_sel u32、id u32、目錄位址 u64。
 位址：address mode 0（實體）或 1（相對視窗開頭）。值在 2^32−W 以上是「映射在 4 GB 頂端的視窗」位置（W＝視窗大小，最大 16 MiB；
   偏移＝值−(2^32−W)，大於 16 MiB 的映像等於遮成 24 bits），其餘是視窗內偏移；視窗＝EFS 所在的 16 MiB 區塊。
-  mode 2＝相對目錄開頭；mode 3（相對 slot）slot 起點未知 → 不解。指向目錄的指標一定用 cookie 驗證，視窗開頭和 0 兩種基底都試，只有一個成立才採用。
+  mode 2＝相對目錄開頭；mode 3（相對 slot）slot 起點未知 → 不解。指向目錄的指標一定用 cookie 驗證。EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）
+  或「整個檔案的偏移」兩種解讀。**兩種解讀都在目標位置看到目錄 cookie 時不判斷哪一個才是硬體實際使用的**：兩邊都解析、都列出（各自的 checksum、項目、版本），
+  記 pointer-ambiguous（ATTENTION）；只經由這種指標（以及它們底下的子目錄）才到得了的目錄標成 ambiguous，它們的條目、版本、微碼只列在 inventory
+  （amd.ambiguous 與各目錄的 ambiguous／readings 欄位），不進 SBOM。也從別的、沒有歧義的指標到得了的目錄不算歧義。
+  目錄裡的位址（L2 指標、slot header、條目）一律用該目錄自己的基底；combo 項目和 EFS 一樣試兩種基底。
 
 ## 上限與放大控制（見 MAX_*）
 視窗內 EFS 數、目錄數、深度、每個目錄的項目數、全部目錄的項目總數、雜湊總量（同一段 offset＋size 只算一次）、單一項目大小、微碼數、AGESA 標記數與
@@ -70,9 +78,17 @@ AGESA_VALUE_LEN = 64                   # AGESA 標記後面讀的字串長度上
 AGESA_MARK = b"AGESA!V"
 
 EFS_SIG = b"\xaa\x55\xaa\x55"
-# coreboot util/amdfwtool/amdfwread.c 的 fw_header_offsets（和 x86_firmware.AMD_EFS_OFFSETS 相同；這個模組不依賴 x86_firmware）
-EFS_OFFSETS = (0xFA0000, 0xF20000, 0xE20000, 0xC20000, 0x820000, 0x020000, 0x7A0000, 0x720000, 0x620000, 0x420000,
-               0x3A0000, 0x320000, 0x220000)
+# coreboot util/amdfwtool/amdfwread.c 的 fw_header_offsets（ROM 大於 8 MiB）、fw_header_offsets_8MiB、fw_header_offsets_4MiB（ROM ≤ 4 MiB）；
+# 視窗大小 ≤ 4 MiB 用 4 MiB 表、≤ 8 MiB 用 8 MiB 表、其餘用 16 MiB 表（視窗大小見 window_size）
+EFS_OFFSETS_16 = (0xFA0000, 0xF20000, 0xE20000, 0xC20000, 0x820000, 0x020000)
+EFS_OFFSETS_8 = (0x7A0000, 0x720000, 0x620000, 0x420000, 0x020000)
+EFS_OFFSETS_4 = (0x3A0000, 0x320000, 0x220000, 0x020000)
+EFS_OFFSETS = tuple(sorted(set(EFS_OFFSETS_16 + EFS_OFFSETS_8 + EFS_OFFSETS_4), reverse=True))
+
+
+def efs_offsets(w):
+    return EFS_OFFSETS_4 if w <= 4 << 20 else EFS_OFFSETS_8 if w <= 8 << 20 else EFS_OFFSETS_16
+
 EFS_SIZE = 0x3C                        # 讀到 promontory19 指標（+0x38）為止
 EFS_POINTERS = ((0x10, "psp_directory"), (0x14, "new_psp_directory"), (0x2C, "psp_bak_directory"),
                 (0x18, "bios0"), (0x1C, "bios1"), (0x20, "bios2"), (0x28, "bios3"))
@@ -110,8 +126,10 @@ BIOS_TYPES = {0x05: "RTM_PUBKEY", 0x07: "SIG", 0x60: "APCB", 0x61: "APOB", 0x62:
 UCODE_TYPE = 0x66
 # 指向另一個目錄的項目 type（名稱沿用上游）；不是這些 type 但解出的位置開頭是目錄 cookie 時也會往下走
 POINTER_TYPES = {"psp": (0x40, 0x48, 0x49, 0x4A), "psp-l2": (0x40, 0x48, 0x49, 0x4A), "bios": (0x70,), "bios-l2": (0x70,)}
-ISH_TYPES = (0x48, 0x4A)               # RECOVERYAB_A／B：size 0 時位址指到 Image Slot Header
+ISH_TYPES = (0x48, 0x4A)               # RECOVERYAB_A／B：位址指到 Image Slot Header（0x20 bytes）
 ISH_LEN = 0x20
+ISH_ENTRY_SIZE = 0x100                 # coreboot 寫的是 BLOB_ALIGNMENT（0x100）；實際映像也有 0。其他大小不解讀（ish-size）
+APOB_TYPE = 0x61
 PSP_HDR_LEN = 0x100                    # amd_fw_header
 PSP_VERSION_AT, PSP_SIZE_AT, PSP_TYPE_AT = 0x60, 0x6C, 0x7C
 
@@ -125,6 +143,7 @@ class Ctx:
     def __init__(self, data, budget):
         self.data, self.n, self.budget = data, len(data), budget
         self.dirs, self.by_off, self.problems, self.counts = [], {}, [], {}
+        self.edges = []                 # (上一層目錄位置或 None＝EFS, 目錄位置, 這條邊是不是歧義的指標)
         self.entries_total = 0
         self.hash_left = MAX_HASH_TOTAL
         self.hashed = {}
@@ -143,12 +162,20 @@ def u32(d, o):
 
 
 def fletcher32(buf):
-    """16 位元小端字、模 65535 的 Fletcher-32（奇數長度的最後一個 byte 不算；目錄涵蓋範圍一定是偶數）。"""
-    s1 = s2 = 0
-    for (w,) in struct.iter_unpack("<H", buf[:len(buf) & ~1]):
-        s1 = (s1 + w) % 65535
-        s2 = (s2 + s1) % 65535
-    return (s2 << 16) | s1
+    """coreboot util/amdfwtool/amdfwtool.c 的 fletcher32：c0＝c1＝0xFFFF 起算，16 位元小端字，每 359 個字折疊一次（高 16 位加回低 16 位），最後再折疊一次；
+    奇數長度的最後一個 byte 不算。"""
+    n = len(buf) // 2
+    words = struct.unpack_from("<%dH" % n, buf) if n else ()
+    c0 = c1 = 0xFFFF
+    for i in range(0, n, 359):
+        for w in words[i:i + 359]:
+            c0 = (c0 + w) & 0xFFFFFFFF
+            c1 = (c1 + c0) & 0xFFFFFFFF
+        c0 = (c0 & 0xFFFF) + (c0 >> 16)
+        c1 = (c1 & 0xFFFF) + (c1 >> 16)
+    c0 = (c0 & 0xFFFF) + (c0 >> 16)
+    c1 = (c1 & 0xFFFF) + (c1 >> 16)
+    return ((c1 << 16) | c0) & 0xFFFFFFFF
 
 
 def window_size(n, base):
@@ -186,23 +213,24 @@ def bcd_date(v):
 
 # ---------- EFS ----------
 
+def cookie_at(ctx, off):
+    return off is not None and 0 <= off and off + 16 <= ctx.n and bytes(ctx.data[off:off + 4]) in COOKIES
+
+
 def pointers_resolve(ctx, p, base):
-    """p の EFS の指標のどれかが、base を基底にして目錄 cookie の位置に着くか。"""
+    """p 位置的 EFS，有沒有任何一個目錄指標以 base 為基底時指到目錄 cookie。"""
     w = window_size(ctx.n, base)
     for o, _ in EFS_POINTERS:
         v = u32(ctx.data, p + o)
-        if v in NO_POINTER:
-            continue
-        off = to_offset(v, base, w)
-        if off is not None and off + 4 <= ctx.n and bytes(ctx.data[off:off + 4]) in COOKIES:
+        if v not in NO_POINTER and cookie_at(ctx, to_offset(v, base, w)):
             return True
     return False
 
 
 def find_efs(ctx):
-    """EFS 簽章の位置 → [(位置, 基底)]。基底＝EFS_OFFSETS のどれかを引いた値で、4 KiB 単位の整数。
-    16 MiB 視窗の開頭（ずれ 0）なら指標が解けなくても採用（解けなければ problem になる）。カプセルの先頭ヘッダー分ずれている
-    （ずれ 0 でなく MAX_SHIFT 以内）場合は、指標のどれかが目錄 cookie に着いたときだけ採用する。"""
+    """全檔的 EFS 簽章候選 → [(位置, 視窗開頭)]。視窗開頭＝位置減掉該視窗大小對應的那張 coreboot 表裡的偏移，必須是 4 KiB 的整數倍。
+    視窗開頭是 16 MiB 的整數倍（沒有位移）時，指標解不出來也採用（會記 pointer-unresolved）；
+    有位移（更新包的標頭，不超過 MAX_SHIFT）時，指標之一要真的指到目錄 cookie 才採用。"""
     hits, pos = [], ctx.data.find(EFS_SIG)
     while pos >= 0 and len(hits) < MAX_SIG_HITS:
         hits.append(pos)
@@ -215,15 +243,12 @@ def find_efs(ctx):
             continue
         for o in EFS_OFFSETS:
             base = p - o
-            if base < 0 or base % 0x1000:
+            if base < 0 or base % 0x1000 or o not in efs_offsets(window_size(ctx.n, base)):
                 continue
             shift = base % WINDOW
             if shift == 0 or (shift <= MAX_SHIFT and pointers_resolve(ctx, p, base)):
                 if p not in found or found[p][1] > shift:
                     found[p] = (base, shift)
-                break_ok = shift == 0
-                if break_ok:
-                    break
     out = sorted((p, b) for p, (b, _) in found.items())
     if len(out) > MAX_EFS:
         ctx.problem("efs-limit", "image", f"{len(out)} EFS signatures found; only the first {MAX_EFS} are parsed")
@@ -250,25 +275,34 @@ def dir_mode(info):
 
 
 def follow(ctx, value, bases, via, depth, stack):
-    """指標值（EFS 或 combo 項目）→ 驗證目錄 cookie 後解析。基底依序試（EFS 所在視窗的開頭優先，其次 0＝整個檔案的偏移），
-    第一個在目標位置看到目錄 cookie 的採用；兩個基底都成立時仍採用視窗內的，另一個位置記在 base_alternative（供人核對）。"""
+    """指標值（EFS 或 combo 項目）→ 驗證目錄 cookie 後解析。bases＝可用的基底清單（視窗開頭、0）。
+    兩個基底在不同位置都看到目錄 cookie → 不判斷哪個才是硬體實際使用的：兩邊都解析，邊標成歧義（pointer-ambiguous）；只有一個 → 正常；都沒有 → pointer-unresolved。"""
     cands = []
     for base, w in bases:
         off = to_offset(value, base, w)
-        if off is not None and 0 <= off and off + 16 <= ctx.n and bytes(ctx.data[off:off + 4]) in COOKIES and off not in [c[0] for c in cands]:
+        if cookie_at(ctx, off) and off not in [c[0] for c in cands]:
             cands.append((off, base, w))
     if not cands:
         ctx.problem("pointer-unresolved", via, f"{via}: pointer 0x{value:x} does not resolve to a PSP/BIOS directory (no directory cookie at the target)")
-        return None
-    off, base, w = cands[0]
-    rec = parse_dir(ctx, off, base, w, via, depth, stack)
-    if rec is not None and len(cands) > 1:
-        rec["base_alternative"] = f"0x{cands[1][0]:x}"
-    return rec
+        return []
+    amb = len(cands) > 1
+    if amb:
+        ctx.problem("pointer-ambiguous", via, f"{via}: pointer 0x{value:x} reads as a directory two ways, as a window offset (0x{cands[0][0]:x}) and as a file offset (0x{cands[1][0]:x}); "
+                    "this tool does not decide which one the hardware uses: both are parsed and listed, and neither is used for the SBOM unless it is also reached by an unambiguous pointer")
+    out = []
+    for off, base, w in cands:
+        rec = parse_dir(ctx, off, base, w, via, depth, stack, amb)
+        if rec is not None:
+            if amb:
+                rec.setdefault("readings", [])
+                rec["readings"] += [f"0x{o:x}" for o, _, _ in cands if o != off and f"0x{o:x}" not in rec["readings"]]
+            out.append(rec)
+    return out
 
 
-def parse_dir(ctx, off, base, w, via, depth, stack):
+def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
     d = ctx.data
+    ctx.edges.append((stack[-1] if stack else None, off, amb))
     if off in stack:
         ctx.problem("dir-loop", f"0x{off:x}", f"{via}: directory at 0x{off:x} points back into the path that led to it (loop); not followed again")
         return None
@@ -290,7 +324,7 @@ def parse_dir(ctx, off, base, w, via, depth, stack):
     num, info = u32(d, off + 8), u32(d, off + 12)
     rec = {"kind": kind, "cookie": cookie.decode("ascii"), "offset": off, "base": base, "window_size": w, "reached_via": [via],
            "num_entries": num, "checksum": f"0x{u32(d, off + 4):08x}", "checksum_ok": None, "parsed": False, "trusted": False, "entries": [],
-           "address_mode": None, "size": None}
+           "address_mode": None, "size": None, "ambiguous": True}      # ambiguous：mark_ambiguous() 確認有不歧義的路徑到得了才改成 False
     ctx.by_off[off] = rec
     ctx.dirs.append(rec)
     where = f"{KIND_TEXT[kind]} @0x{off:x}"
@@ -325,10 +359,18 @@ def parse_dir(ctx, off, base, w, via, depth, stack):
             rec["entries"].append(ent)
             if addr in (0, (1 << 64) - 1, 0xFFFFFFFF):
                 continue
-            ch = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (off,))
-            ent["child"] = None if ch is None else ch["offset"]
+            # combo 的項目和 EFS 的指標一樣有兩種解讀
+            chs = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (off,))
+            ent["child"] = chs[0]["offset"] if len(chs) == 1 else None
+            ent["children"] = [c["offset"] for c in chs]
         else:
-            rec["entries"].append(entry(ctx, rec, i, e, where, depth, stack))
+            try:
+                ent = entry(ctx, rec, i, e, where, depth, stack)
+            except (struct.error, IndexError, ValueError, OverflowError) as ex:      # 不該發生（都有檢查邊界）；只影響這一個條目
+                ent = {"index": i, "kind": "unresolved", "type": d[e] if e < ctx.n else None, "size": 0, "offset": None, "type_name": None,
+                       "version": None, "where": f"{where} entry {i}"}
+                ctx.problem("entry-error", ent["where"], f"{ent['where']}: parse failed ({type(ex).__name__}); this entry is not interpreted")
+            rec["entries"].append(ent)
     return rec
 
 
@@ -346,16 +388,27 @@ def entry(ctx, rec, i, e, where, depth, stack):
                "instance": (fl >> 3) & 15, "flags": f"0x{fl:04x}"}
     emode, value = src >> 62, src & ADDR_MASK
     ent.update(size=size, value=f"0x{value:x}", entry_address_mode=emode, offset=None, kind="blob", version=None, version_basis=None, sha256=None, sha512=None)
-    where_e = f"{where} entry {i} (type 0x{typ:02x}{' ' + ent['type_name'] if ent['type_name'] else ''})"
+    name = f" {ent['type_name']}" if ent["type_name"] else ""
+    where_e = f"{where} entry {i} (type 0x{typ:02x}{name})"
     ent["where"] = where_e
     if ent["type_name"] is None:
         ctx.problem("type-unknown", where_e, f"{where_e}: entry type 0x{typ:02x} is not in the public type lists used here (coreboot psp_directory.h／bios_directory.h); not interpreted")
     if size == VALUE_SIZE:
         ent["kind"] = "value"               # 位址欄位是值（例如 soft fuse chain），不是位置
         return ent
-    ish = size == 0 and not bios and typ in ISH_TYPES
+    ish = not bios and typ in ISH_TYPES and size in (0, ISH_ENTRY_SIZE)
+    if not bios and typ in ISH_TYPES and not ish:
+        ent["kind"] = "unresolved"
+        ctx.problem("ish-size", where_e, f"{where_e}: A/B recovery entry with size 0x{size:x} (expected 0 or 0x{ISH_ENTRY_SIZE:x}, the slot header entry sizes); not interpreted")
+        return ent
+    if size == 0 and bios and typ == APOB_TYPE and ent["dest"] is not None:
+        # APOB（AGESA 開機時寫入記憶體的資料）只有 destination：coreboot util/amdfwtool/amdfwtool.c 要求 APOB 一定要有 destination（"APOB destination not provided"），
+        # source／size 可以是 0。有 destination 的 size 0 APOB 不當成「沒有資料」的缺口。
+        ent["kind"] = "dest-only"
+        return ent
     if size == 0 and not ish:
-        ent["kind"] = "empty"               # 沒有來源資料（例如只有 dest 的 APOB）
+        ent["kind"] = "empty"
+        ctx.problem("entry-empty", where_e, f"{where_e}: size 0, no data in the directory entry; what it stands for is not known")
         return ent
     mode = rec["address_mode"] if rec["address_mode"] in (0, 1) else emode
     if mode == 3:
@@ -363,14 +416,24 @@ def entry(ctx, rec, i, e, where, depth, stack):
         ent["kind"] = "unresolved"
         return ent
     off = rec["offset"] + value if mode == 2 else to_offset(value, rec["base"], rec["window_size"])
-    if ish:                                 # A/B 復原：size 0 的 0x48／0x4A 項目指到 Image Slot Header（0x20 bytes），裡面有 L2 目錄的位置
+    if ish:                                 # A/B 復原：0x48／0x4A 項目指到 Image Slot Header（0x20 bytes），裡面有 L2 目錄的位置
         return ish_entry(ctx, rec, ent, off, where_e, depth, stack)
     if off is None or off < 0:
         ctx.problem("entry-address", where_e, f"{where_e}: address 0x{value:x} cannot be resolved (mode {mode})")
         ent["kind"] = "unresolved"
         return ent
     ent["offset"] = off
-    if 0 <= off and off + 16 <= ctx.n and bytes(d[off:off + 4]) in COOKIES and size >= 16:
+    if bios and ent["compressed"]:
+        # 壓縮的條目：size 不一定是儲存範圍（可能是解壓後大小），起點要在檔案內；內容不解析、不當成明文（包括 type 0x66 微碼）
+        ent["kind"] = "compressed"
+        if off >= ctx.n:
+            ctx.problem("entry-range", where_e, f"{where_e}: compressed entry starts at 0x{off:x}, past the end of the file (0x{ctx.n:x})")
+            ent["kind"] = "unresolved"
+        else:
+            past = f"; its size field (0x{size:x}) runs past the end of the file" if off + size > ctx.n else ""
+            ctx.problem("entry-compressed", where_e, f"{where_e}: compressed entry, content not decompressed or interpreted{past}")
+        return ent
+    if cookie_at(ctx, off) and size >= 16:
         ent["kind"] = "directory-pointer"   # 解出的位置是另一個目錄：往下走（不是韌體條目）
         ch = parse_dir(ctx, off, rec["base"], rec["window_size"], where_e, depth + 1, stack + (rec["offset"],))
         ent["child"] = None if ch is None else ch["offset"]
@@ -383,9 +446,6 @@ def entry(ctx, rec, i, e, where, depth, stack):
         ctx.problem("entry-size", where_e, f"{where_e}: size 0x{size:x} is larger than the limit 0x{MAX_BLOB:x}; not read")
         ent["kind"] = "unresolved"
         return ent
-    if bios and ent["compressed"]:
-        ent["size_note"] = "compressed entry: the stored extent is not known from the size field, so range and overlap checks are skipped"
-        return ent
     if off + size > ctx.n:
         ctx.problem("entry-range", where_e, f"{where_e}: range 0x{off:x}+0x{size:x} extends past the end of the file (0x{ctx.n:x})")
         ent["kind"] = "unresolved"
@@ -394,26 +454,24 @@ def entry(ctx, rec, i, e, where, depth, stack):
 
 def ish_entry(ctx, rec, ent, off, where_e, depth, stack):
     """Image Slot Header（coreboot ish.h 的 ish_directory_table，0x20 bytes：checksum、boot_priority、update_retry_count、glitch_retry_count＋3 保留、
-    pl2_location、psp_id、slot_max_size、保留）。pl2_location 用 cookie 驗證後往下走。checksum 的算法沒有公開說明可核對 → 不驗證，記一筆 problem。"""
+    pl2_location、psp_id、slot_max_size、保留）。checksum＝fletcher32（+4 到 +0x20；coreboot amdfwtool.c integrate_psp_ab_ish），不符 → 不採用 pl2_location。
+    pl2_location 還要在目標位置看到目錄 cookie 才往下走。"""
     d = ctx.data
     if off is None or off < 0 or off + ISH_LEN > ctx.n:
         ctx.problem("entry-address", where_e, f"{where_e}: image slot header cannot be read (address outside the file)")
         ent["kind"] = "unresolved"
         return ent
-    ent["offset"], ent["kind"] = off, "ish"
+    ent["offset"], ent["kind"], ent["child"] = off, "ish", None
     cks, prio, retry, _, pl2, psp_id, slot_max, _ = struct.unpack_from("<IIIIIIII", d, off)
-    ent["ish"] = {"checksum": f"0x{cks:08x}", "checksum_verified": False, "boot_priority": f"0x{prio:08x}", "update_retry_count": f"0x{retry:08x}",
+    calc = fletcher32(d[off + 4:off + ISH_LEN])
+    ent["ish"] = {"checksum": f"0x{cks:08x}", "checksum_verified": calc == cks, "boot_priority": f"0x{prio:08x}", "update_retry_count": f"0x{retry:08x}",
                   "pl2_location": f"0x{pl2:08x}", "psp_id": f"0x{psp_id:08x}", "slot_max_size": f"0x{slot_max:08x}"}
-    if not ctx.counts.get("ish-unverified"):
-        ctx.problem("ish-unverified", where_e, "image slot header (A/B recovery) checksums are not verified: no documented algorithm was available to check against; "
-                    "the L2 directory location in each header is accepted only if a directory cookie is found there")
-    else:
-        ctx.counts["ish-unverified"] += 1
-    ent["child"] = None
+    if calc != cks:
+        ctx.problem("ish-checksum", where_e, f"{where_e}: image slot header checksum 0x{cks:08x} does not match the computed 0x{calc:08x}; its L2 directory location is not used")
+        return ent
     if pl2 not in NO_POINTER:
-        ch = follow(ctx, pl2, [(rec["base"], rec["window_size"])] + ([(0, rec["window_size"])] if rec["base"] else []), f"{where_e} slot header pl2_location",
-                    depth + 1, stack + (rec["offset"],))
-        ent["child"] = None if ch is None else ch["offset"]
+        chs = follow(ctx, pl2, [(rec["base"], rec["window_size"])], f"{where_e} slot header pl2_location", depth + 1, stack + (rec["offset"],))
+        ent["child"] = chs[0]["offset"] if chs else None
     return ent
 
 
@@ -464,6 +522,8 @@ def parse_ucode(ctx, ent):
     """BIOS 目錄 type 0x66 的項目 → ([微碼 dict], problem 文字或 None)。
     項目開頭是 `DMA\\0` container（等價表＋patch 區段）或單一 patch 標頭；其他 → 看不懂。"""
     d, off, size = ctx.data, ent["offset"], ent["size"]
+    if off < 0 or off + size > ctx.n:
+        return [], "the entry extends past the end of the file"
     if d[off:off + 4] == UCODE_MAGIC:
         if size < 12 + 16:
             return [], "container is too short"
@@ -498,56 +558,94 @@ def parse_ucode(ctx, ent):
 
 
 def collect_contents(ctx, amd):
-    """已解析（checksum 通過）的目錄項目 → psp_firmware、microcode。"""
-    psp, ucode, seen_u = {}, [], {}
+    """已解析（checksum 通過）的目錄項目 → psp_firmware、microcode。單一條目的錯誤只影響那個條目（entry-error）。"""
+    psp_d, ucode_d, seen_d = {}, [], {}
+    psp_amb, ucode_amb, seen_u_amb = {}, [], {}
     unversioned = {}
+
+    def one(rec, ent):
+        amb = rec["ambiguous"]
+        psp, ucode, seen_u = (psp_amb, ucode_amb, seen_u_amb) if amb else (psp_d, ucode_d, seen_d)
+        if rec["kind"].startswith("psp"):
+            v = psp_version(ctx, ent)
+            if v is None:
+                unversioned.setdefault((ent["type"], ent["type_name"]), []).append(ent["where"])
+                return
+            ent["version"], ent["version_basis"] = v, "PSP firmware header (amd_fw_header) +0x60; fw_type and size_total agree with the directory entry"
+            ent["sha256"], ent["sha512"] = digests(ctx, ent["offset"], ent["size"])
+            key = (ent["type"], ent["subprogram"], v, ent["sha256"] or f"{ent['offset']}:{ent['size']}")
+            p = psp.setdefault(key, {"type": ent["type"], "type_name": ent["type_name"], "subprogram": ent["subprogram"], "version": v,
+                                     "size": ent["size"], "sha256": ent["sha256"], "sha512": ent["sha512"], "locations": []})
+            if len(p["locations"]) < 16:
+                p["locations"].append({"directory": f"{KIND_TEXT[rec['kind']]} @0x{rec['offset']:x}", "index": ent["index"],
+                                       "instance": ent["instance"], "offset": ent["offset"]})
+        elif ent["type"] == UCODE_TYPE:
+            if len(ucode) >= MAX_UCODE:
+                ctx.problem("ucode-limit", ent["where"], f"more than {MAX_UCODE} microcode patches; the rest are not listed")
+                return
+            patches, why = parse_ucode(ctx, ent)
+            if why:
+                ctx.problem("ucode-unrecognised", ent["where"], f"{ent['where']}: microcode entry not fully understood ({why})")
+            for h in patches:
+                sha = digests(ctx, h["patch_offset"], h["patch_size"])
+                k = (h["patch_id"], h["equiv_id"], sha[0] or (h["patch_offset"], h["patch_size"]))
+                m = seen_u.get(k)
+                loc = {"directory": f"{KIND_TEXT[rec['kind']]} @0x{rec['offset']:x}", "index": ent["index"], "instance": ent["instance"],
+                       "offset": h["patch_offset"]}
+                if m is None:
+                    m = seen_u[k] = {**h, "sha256": sha[0], "sha512": sha[1], "locations": []}
+                    ucode.append(m)
+                if len(m["locations"]) < 16:
+                    m["locations"].append(loc)
+
     for rec in ctx.dirs:
         if not rec["trusted"] or rec["kind"].startswith("combo"):
             continue
         for ent in rec["entries"]:
             if ent["kind"] != "blob" or ent["offset"] is None:
                 continue
-            if rec["kind"].startswith("psp"):
-                v = psp_version(ctx, ent)
-                if v is None:
-                    unversioned.setdefault((ent["type"], ent["type_name"]), []).append(ent["where"])
-                    continue
-                ent["version"], ent["version_basis"] = v, "PSP firmware header (amd_fw_header) +0x60; fw_type and size_total agree with the directory entry"
-                ent["sha256"], ent["sha512"] = digests(ctx, ent["offset"], ent["size"])
-                key = (ent["type"], ent["subprogram"], v, ent["sha256"] or f"{ent['offset']}:{ent['size']}")
-                p = psp.setdefault(key, {"type": ent["type"], "type_name": ent["type_name"], "subprogram": ent["subprogram"], "version": v,
-                                         "size": ent["size"], "sha256": ent["sha256"], "sha512": ent["sha512"], "locations": []})
-                if len(p["locations"]) < 16:
-                    p["locations"].append({"directory": f"{KIND_TEXT[rec['kind']]} @0x{rec['offset']:x}", "index": ent["index"],
-                                           "instance": ent["instance"], "offset": ent["offset"]})
-            elif ent["type"] == UCODE_TYPE:
-                if len(ucode) >= MAX_UCODE:
-                    ctx.problem("ucode-limit", ent["where"], f"more than {MAX_UCODE} microcode patches; the rest are not listed")
-                    continue
-                patches, why = parse_ucode(ctx, ent)
-                if why:
-                    ctx.problem("ucode-unrecognised", ent["where"], f"{ent['where']}: microcode entry not fully understood ({why})")
-                for h in patches:
-                    sha = digests(ctx, h["patch_offset"], h["patch_size"])
-                    k = (h["patch_id"], h["equiv_id"], sha[0] or (h["patch_offset"], h["patch_size"]))
-                    m = seen_u.get(k)
-                    loc = {"directory": f"{KIND_TEXT[rec['kind']]} @0x{rec['offset']:x}", "index": ent["index"], "instance": ent["instance"],
-                           "offset": h["patch_offset"]}
-                    if m is None:
-                        m = seen_u[k] = {**h, "sha256": sha[0], "sha512": sha[1], "locations": []}
-                        ucode.append(m)
-                    if len(m["locations"]) < 16:
-                        m["locations"].append(loc)
+            try:
+                one(rec, ent)
+            except (struct.error, IndexError, ValueError, OverflowError) as ex:
+                ctx.problem("entry-error", ent["where"], f"{ent['where']}: content parse failed ({type(ex).__name__}); this entry is not interpreted")
     if unversioned:
         n = sum(len(v) for v in unversioned.values())
         names = ", ".join(f"0x{t:02x}{' ' + nm if nm else ''}×{len(v)}" for (t, nm), v in sorted(unversioned.items()))
         ctx.problem("version-unverified", "PSP directories", f"{n} PSP directory entries have no verifiable version field "
                     f"(no PSP header with fw_type and size_total matching the entry, or an all-zero／all-one version field): {names}")
-    if any(m["cpuids"] is None for m in ucode):
+    if any(m["cpuids"] is None for m in ucode_d + ucode_amb):
         ctx.problem("ucode-cpuid", "BIOS directories", "microcode patches are not inside a container with an equivalence table, so only the equivalence id is listed "
                     "(the mapping from equivalence id to CPUID is not guessed)")
-    amd["psp_firmware"] = sorted(psp.values(), key=lambda x: (x["type"], x["subprogram"], x["version"]))
-    amd["microcode"] = sorted(ucode, key=lambda x: (x["equiv_id"], x["patch_id"]))
+    psp_key = lambda x: (x["type"], x["subprogram"], x["version"])      # noqa: E731
+    uc_key = lambda x: (x["equiv_id"], x["patch_id"])                    # noqa: E731
+    amd["psp_firmware"] = sorted(psp_d.values(), key=psp_key)
+    amd["microcode"] = sorted(ucode_d, key=uc_key)
+    # 只有歧義的目錄（兩種解讀都成立）才到得了的項目：列在 inventory，不進 SBOM。同一份內容（雜湊相同）在不歧義的目錄也有的，以不歧義的為準
+    amd["ambiguous"] = {"psp_firmware": sorted((v for k, v in psp_amb.items() if k not in psp_d), key=psp_key),
+                        "microcode": sorted((m for k, m in seen_u_amb.items() if k not in seen_d), key=uc_key)}
+
+
+def mark_ambiguous(ctx):
+    """從 EFS 出發只走不歧義的邊（單一解讀的指標），到得了的目錄是確定的；其餘（只經由歧義的指標，或經由歧義目錄的子目錄才到得了）標成 ambiguous，
+    並為每個記一筆 dir-ambiguous。"""
+    definite, queue = set(), [c for p, c, amb in ctx.edges if p is None and not amb]
+    children = {}
+    for p, c, amb in ctx.edges:
+        if p is not None and not amb:
+            children.setdefault(p, []).append(c)
+    while queue:
+        o = queue.pop()
+        if o in definite:
+            continue
+        definite.add(o)
+        queue += children.get(o, [])
+    for r in ctx.dirs:
+        r["ambiguous"] = r["offset"] not in definite
+        if r["ambiguous"]:
+            w = f"{KIND_TEXT[r['kind']]} @0x{r['offset']:x}"
+            ctx.problem("dir-ambiguous", w, f"{w}: reachable only through a pointer that reads as a directory two ways"
+                        + (f" (other reading{'s' if len(r.get('readings', [])) > 1 else ''}: {', '.join(r['readings'])})" if r.get("readings") else " (it is below such a directory)")
+                        + f"; its {r['num_entries']} entries, versions and microcode are listed but not used for the SBOM")
 
 
 # ---------- 範圍重疊 ----------
@@ -603,84 +701,115 @@ def _sibling(name):
 
 
 def read_agesa(buf, pos):
-    """pos 是 `AGESA!V` 的位置 → (tag, value, truncated)。tag＝`V` 加最多 4 個英數字（例如 V9）；中間最多一個 NUL 或空白；
-    value＝接著最多 AGESA_VALUE_LEN 個可列印 ASCII（去頭尾空白）。"""
+    """pos 是 `AGESA!V` 的位置 → (tag, value, status)。tag＝`V` 加 1–4 個英數字（例如 V9）；tag 後面一定要接一個 NUL 或空白當分隔，
+    value＝接著最多 AGESA_VALUE_LEN 個可列印 ASCII（去頭尾空白）。status：
+      ok         正常
+      truncated  字串在長度上限被截斷（value 只是前綴，不能當完整版本）
+      nosep      tag 後面不是 NUL 或空白（tag 和字串黏在一起或 tag 超過 4 個字元，切不出來）→ value 是 None
+      empty      分隔符後面沒有可列印字元 → value 是 None"""
     i = pos + len(AGESA_MARK)
     j = i
     while j < len(buf) and j - i < 4 and (48 <= buf[j] <= 57 or 65 <= buf[j] <= 90 or 97 <= buf[j] <= 122):
         j += 1
     tag = "V" + bytes(buf[i:j]).decode("ascii")
-    if j < len(buf) and buf[j] in (0, 0x20):
-        j += 1
+    if j == i or j >= len(buf) or buf[j] not in (0, 0x20):
+        return tag, None, "nosep"
+    j += 1
     k = j
     while k < len(buf) and k - j < AGESA_VALUE_LEN and 0x20 <= buf[k] < 0x7F:
         k += 1
-    truncated = k - j == AGESA_VALUE_LEN and k < len(buf) and 0x20 <= buf[k] < 0x7F
-    return tag, bytes(buf[j:k]).decode("ascii").strip(), truncated
+    value = bytes(buf[j:k]).decode("ascii").strip()
+    if not value:
+        return tag, None, "empty"
+    return tag, value, ("truncated" if k - j == AGESA_VALUE_LEN and k < len(buf) and 0x20 <= buf[k] < 0x7F else "ok")
 
 
 def agesa_search(data, budget=None, soft=()):
-    """走訪 firmware volume（uefi_image，LZMA 等解開；FV 以外的非空白位元組它也當原始內容送進來）搜尋；uefi_image 載入不了或走訪失敗時改搜原始位元組。
-    → {"values": [{tag, value, count, found}], "problems": [文字], "complete": bool, "stats": {...}}。永遠回傳，不丟例外（soft 的例外除外時也只記為不完整）。"""
-    r = {"values": [], "problems": [], "complete": False, "walk": False, "stats": {"markers": 0, "inspected_bytes": 0, "fvs": 0, "ffs_files": 0}}
-    table, st, seen = {}, r["stats"], set()
-    state = {"capped": False, "inspect_capped": False}
+    """AGESA 字串。走訪 firmware volume（uefi_image，LZMA 等解開；FV 以外的非空白位元組它也送進來）逐塊內容找 `AGESA!V` 標記；
+    另外數整個映像原始位元組裡的標記，原始位元組裡有、走訪的內容裡沒看到的（例如在 UI section、空白區、被刪除的檔案裡）
+    也列出來並把搜尋標為不完整。uefi_image 載入不了或走訪失敗時只有原始位元組的結果（不完整）。
+    → {"values": [{tag, value, count, found, truncated}], "problems": [文字，已去重], "complete": bool, "stats": {...}}。永遠回傳，不丟例外。"""
+    r = {"values": [], "problems": [], "complete": False, "walk": False, "stats": {"markers": 0, "raw_markers": 0, "inspected_bytes": 0, "fvs": 0, "ffs_files": 0}}
+    table, st = {}, r["stats"]
+    seen_problems = set()
+    walk_counts, raw_counts, raw_locs = {}, {}, {}
+    state = {"capped": False, "raw_capped": False, "inspect_capped": False}
 
-    def inspect(buf, where):
-        if budget is not None:
-            budget.check()
+    def note(text):
+        if text not in seen_problems:
+            seen_problems.add(text)
+            r["problems"].append(text)
+
+    def scan(buf, where, counts, count_key, locs=None):
+        """在 buf 找標記；每個標記用 (tag, value, status) 計數。回傳 False＝超過標記總數上限。"""
         pos = buf.find(AGESA_MARK)
         while pos >= 0:
-            if st["markers"] >= MAX_AGESA_MARKERS:
+            if st[count_key] >= MAX_AGESA_MARKERS:
                 if not state["capped"]:
                     state["capped"] = True
-                    r["problems"].append(f"more than {MAX_AGESA_MARKERS} AGESA markers; the rest are not read")
-                return
-            st["markers"] += 1
-            tag, value, trunc = read_agesa(buf, pos)
-            if not value:
-                r["problems"].append(f"AGESA marker without a readable version string at {where} +0x{pos:x}")
-            else:
-                key = (tag, value)
-                e = table.get(key)
-                if e is None:
-                    if len(table) >= MAX_AGESA_VALUES:
-                        r["problems"].append(f"more than {MAX_AGESA_VALUES} distinct AGESA strings; the rest are not listed")
-                        e = {"found": [], "count": 0}
-                    else:
-                        e = table[key] = {"tag": "AGESA!" + tag, "value": value, "count": 0, "found": [], "truncated": trunc}
-                e["count"] += 1
-                if len(e["found"]) < MAX_AGESA_LOCATIONS:
-                    e["found"].append({"where": where, "offset": pos})
+                    note(f"more than {MAX_AGESA_MARKERS} AGESA markers; the rest are not read")
+                return False
+            st[count_key] += 1
+            tag, value, status = read_agesa(buf, pos)
+            key = (tag, value, status)
+            counts[key] = counts.get(key, 0) + 1
+            if locs is not None:
+                locs.setdefault(key, []).append(pos)
+            if count_key == "markers":
+                if status in ("nosep", "empty"):
+                    note(f"AGESA marker without a readable version string ({'no NUL or space after the tag' if status == 'nosep' else 'nothing after the separator'}) in {where}; not used")
+                else:
+                    e = table.get((tag, value))
+                    if e is None:
+                        if len(table) >= MAX_AGESA_VALUES:
+                            note(f"more than {MAX_AGESA_VALUES} distinct AGESA strings; the rest are not listed")
+                            e = {"found": [], "count": 0}
+                        else:
+                            e = table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": 0, "found": [], "truncated": status == "truncated"}
+                    if status == "truncated":
+                        e["truncated"] = True
+                        note(f"AGESA string longer than {AGESA_VALUE_LEN} characters (starts with '{value[:24]}…'): only the first {AGESA_VALUE_LEN} were read, so it is not used as a complete version")
+                    e["count"] += 1
+                    if len(e["found"]) < MAX_AGESA_LOCATIONS:
+                        e["found"].append({"where": where, "offset": pos})
             pos = buf.find(AGESA_MARK, pos + 1)
+        return True
 
     def walk_inspect(buf, module):
         n = len(buf)
         if n == 0:
             return
-        k = (n, hashlib.blake2b(buf, digest_size=16).digest())
-        if k in seen:
-            return
-        seen.add(k)
+        if budget is not None:
+            budget.check()
         if st["inspected_bytes"] + n > MAX_AGESA_INSPECT:
             if not state["inspect_capped"]:
                 state["inspect_capped"] = True
-                r["problems"].append(f"more than {MAX_AGESA_INSPECT} bytes of distinct UEFI content; the rest was not searched")
+                note(f"more than {MAX_AGESA_INSPECT} bytes of UEFI content; the rest was not searched")
             return
         st["inspected_bytes"] += n
-        inspect(buf, "uefi:" + (module or "?"))
+        scan(buf, "uefi:" + (module or "?"), walk_counts, "markers")
 
     complete = True
     try:
+        if budget is not None:
+            budget.check()
+        scan(data, "image", raw_counts, "raw_markers", raw_locs)
+    except soft as e:
+        note(f"stopped early: {e}")
+        return finish(r, table, complete=False)
+    try:
         ui = _sibling("uefi_image")
     except ImportError as e:
-        r["problems"].append(f"{e}; compressed UEFI content was not searched for AGESA strings (only the raw bytes were)")
-        try:
-            inspect(data, "image")
-        except soft as e2:
-            r["problems"].append(f"stopped early: {e2}")
-        r["values"] = list(table.values())
-        return r
+        note(f"{e}; compressed UEFI content was not searched for AGESA strings (only the raw bytes were)")
+        walk_counts.update(raw_counts)
+        for key, n in raw_counts.items():                  # 只有原始位元組：把它們當成結果
+            tag, value, status = key
+            if value is not None:
+                table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": n, "truncated": status == "truncated",
+                                       "found": [{"where": "image", "offset": o} for o in raw_locs[key][:MAX_AGESA_LOCATIONS]]}
+            else:
+                note(f"AGESA marker without a readable version string in image; not used")
+        return finish(r, table, complete=False)
 
     class AgesaScan(ui.Scan):
         def scan_bytes(self, buf, module=None):           # 覆寫：不做函式庫指紋，只找 AGESA（和 uefi_gfx.py 同樣的做法）
@@ -691,34 +820,54 @@ def agesa_search(data, budget=None, soft=()):
     try:
         ui.parse_fvs(bytes(data), sc, 0)
     except ui.Stop as e:
-        r["problems"].append(f"UEFI walk reached a limit ({e}); the AGESA search is incomplete")
+        note(f"UEFI walk reached a limit ({e}); the AGESA search is incomplete")
         complete = False
     except soft as e:
-        r["problems"].append(f"stopped early: {e}")
+        note(f"stopped early: {e}")
         complete = False
     except Exception as e:      # noqa: BLE001 — 不可信輸入：任何例外都只記為不完整
-        r["problems"].append(f"UEFI walk failed ({type(e).__name__}); the AGESA search is incomplete")
+        note(f"UEFI walk failed ({type(e).__name__}); the AGESA search is incomplete")
         complete = False
-        try:
-            inspect(data, "image")          # 走訪失敗：至少把原始位元組搜一遍
-        except soft:
-            pass
     st["fvs"], st["ffs_files"] = sc.fvs, sc.files
     # 最上層、FV 以外的位元組 uefi_image 當原始內容送進 scan_bytes 了（有被搜尋），所以不算沒解開
     undec = [x for x in sc.undecoded if not (x["where"] == "image" and "outside any valid firmware volume" in x["reason"])]
     if undec:
         why = sorted({" ".join(str(x["reason"]).split())[:120] for x in undec})[:3]
-        r["problems"].append(f"{len(undec)} UEFI parts were not decoded ({'; '.join(why)}); the AGESA search did not look inside them")
+        note(f"{len(undec)} UEFI parts were not decoded ({'; '.join(why)}); the AGESA search did not look inside them")
         complete = False
     if sc.notes or sc.parse_errors:
         first = " ".join(str(sc.notes[0]).split())[:120] if sc.notes else f"{sc.parse_errors} parse errors"
-        r["problems"].append(f"the UEFI walk reported structure warnings ({first}); the AGESA search may be incomplete")
+        note(f"the UEFI walk reported structure warnings ({first}); the AGESA search may be incomplete")
         complete = False
     if not sc.fvs:
-        r["problems"].append("no UEFI firmware volume was decoded; only the raw bytes were searched for AGESA strings")
+        note("no UEFI firmware volume was decoded; only the raw bytes were searched for AGESA strings")
         complete = False
     if state["capped"] or state["inspect_capped"]:
         complete = False
+    # 原始位元組裡的標記，走訪看到的內容裡沒有（數量比較）：沒被搜尋到的地方有標記
+    missed = {k: n - walk_counts.get(k, 0) for k, n in raw_counts.items() if n > walk_counts.get(k, 0)}
+    if missed:
+        complete = False
+        note(f"{sum(missed.values())} AGESA marker(s) in the raw image bytes were not seen in the decoded UEFI content (for example inside a UI section, free space "
+             "or a deleted file); they are listed with the location 'image' and the search is not complete")
+        if not state["capped"]:
+            for key, n in missed.items():
+                tag, value, status = key
+                if value is None:
+                    continue
+                e = table.get((tag, value))
+                if e is None:
+                    if len(table) >= MAX_AGESA_VALUES:
+                        continue
+                    e = table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": 0, "found": [], "truncated": status == "truncated"}
+                e["count"] += n
+                for o in raw_locs[key][:MAX_AGESA_LOCATIONS]:
+                    if len(e["found"]) < MAX_AGESA_LOCATIONS:
+                        e["found"].append({"where": "image (raw bytes)", "offset": o})
+    return finish(r, table, complete)
+
+
+def finish(r, table, complete):
     r["complete"] = complete
     r["values"] = sorted(table.values(), key=lambda x: (x["tag"], x["value"]))
     return r
@@ -728,14 +877,16 @@ def agesa_search(data, budget=None, soft=()):
 
 GAP_TEXT = {
     "efs-limit": "EFS limit", "efs-pointer-unparsed": "EFS pointers present but not parsed", "pointer-unresolved": "pointers that do not resolve to a directory",
-"dir-loop": "directory loops", "dir-limit": "directory limits reached",
+    "pointer-ambiguous": "pointers readable as a directory in two ways", "dir-ambiguous": "directories reachable only through such pointers", "dir-loop": "directory loops", "dir-limit": "directory limits reached",
     "dir-too-many-entries": "directories with too many entries", "dir-truncated": "directories running past the end of the file",
     "dir-checksum": "directory checksum mismatches", "type-unknown": "entries of unknown type", "entry-address": "entries whose address cannot be resolved",
     "entry-size": "entries too large", "entry-range": "entries outside the file", "entry-overlap": "overlapping ranges", "version-unverified": "entries without a version",
-    "no-directory": "no usable PSP/BIOS directory", "efs-no-pointer": "EFS without directory pointers",
-    "ucode-unrecognised": "microcode entries not understood", "ucode-cpuid": "microcode without CPUID", "ucode-limit": "microcode limit", "hash-limit": "hash limit", "ish-unverified": "image slot header checksums not verified",
+    "entry-empty": "entries with size 0", "entry-compressed": "compressed entries not interpreted", "entry-error": "entries that failed to parse",
+    "no-directory": "no usable PSP/BIOS directory", "efs-no-pointer": "EFS without directory pointers", "internal-error": "parse stages that failed",
+    "ucode-unrecognised": "microcode entries not understood", "ucode-cpuid": "microcode without CPUID", "ucode-limit": "microcode limit", "hash-limit": "hash limit",
+    "ish-checksum": "image slot header checksum mismatches", "ish-size": "A/B recovery entries with an unexpected size",
 }
-ATTENTION_CODES = ("dir-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit")
+ATTENTION_CODES = ("dir-checksum", "pointer-ambiguous", "dir-ambiguous", "ish-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit", "entry-error", "internal-error")
 
 
 def summarize(problems, counts):
@@ -749,37 +900,50 @@ def summarize(problems, counts):
     return out
 
 
+def run_stage(ctx, amd, name, fn, soft):
+    """一個階段；超時（soft）或其他例外只讓這個階段不完整，已有的結果照給。"""
+    try:
+        fn()
+    except soft as e:
+        amd["incomplete"].append(f"AMD {name} stopped early: {e}")
+    except Exception as e:      # noqa: BLE001 — 不可信輸入：任何例外都只記成這個階段失敗，不能讓整份結果作廢
+        ctx.problem("internal-error", name, f"AMD {name} failed ({type(e).__name__}); results of this stage may be missing")
+
+
 def analyze(data, budget=None, soft=()):
-    """AMD 平台映像的位元組 → dict（可轉 JSON）。永遠回傳（soft 例外＝超時：已有的結果照給，記 incomplete）。
+    """AMD 平台映像的位元組 → dict（可轉 JSON）。永遠回傳、不丟例外（soft 例外＝超時：已有的結果照給，記 incomplete）。
     鍵：efs、directories、psp_firmware、microcode、agesa、problems（逐筆）、gaps（彙整後的文字）、attention（要 ATTENTION 的理由）、incomplete、stats。"""
     data = bytes(data) if not isinstance(data, bytes) else data
     ctx = Ctx(data, budget)
     amd = {"efs": [], "directories": [], "psp_firmware": [], "microcode": [], "agesa": {"values": [], "complete": False, "problems": []},
            "problems": [], "gaps": [], "attention": [], "incomplete": [], "stats": {}}
-    efs = []
-    try:
-        efs = [efs_info(ctx, p, b) for p, b in find_efs(ctx)]
-        for x in efs:
+
+    def directories():
+        for p, b in find_efs(ctx):
+            x = efs_info(ctx, p, b)
             raw = x.pop("_raw")
+            amd["efs"].append(x)
             base, w = x["window_base"], x["window_size"]
             bases = [(base, w)] + ([(0, w)] if base else [])
             n_before = len(ctx.dirs)
             for _, name in EFS_POINTERS:
-                if raw[name] in NO_POINTER:
-                    continue
-                follow(ctx, raw[name], bases, f"EFS@0x{x['offset']:x} {name}", 0, ())
+                if raw[name] not in NO_POINTER:
+                    follow(ctx, raw[name], bases, f"EFS@0x{p:x} {name}", 0, ())
             x["directories_found"] = len(ctx.dirs) - n_before
-            if not x["directories_found"] and not any(raw[n] not in NO_POINTER for _, n in EFS_POINTERS):
-                ctx.problem("efs-no-pointer", f"EFS@0x{x['offset']:x}", f"EFS at 0x{x['offset']:x} has no PSP/BIOS directory pointer")
-        amd["efs"] = efs
-        collect_contents(ctx, amd)
-        check_overlaps(ctx)
-    except soft as e:
-        amd["incomplete"].append(f"AMD PSP/BIOS directory parse stopped early: {e}")
+            if not any(raw[n] not in NO_POINTER for _, n in EFS_POINTERS):
+                ctx.problem("efs-no-pointer", f"EFS@0x{p:x}", f"EFS at 0x{p:x} has no PSP/BIOS directory pointer")
+
+    run_stage(ctx, amd, "PSP/BIOS directory parse", directories, soft)
+    run_stage(ctx, amd, "ambiguity check", lambda: mark_ambiguous(ctx), soft)
+    amd["ambiguous"] = {"psp_firmware": [], "microcode": []}
+    run_stage(ctx, amd, "firmware and microcode extraction", lambda: collect_contents(ctx, amd), soft)
+    run_stage(ctx, amd, "range overlap check", lambda: check_overlaps(ctx), soft)
     try:
         ag = agesa_search(data, budget, soft)
     except soft as e:
         ag = {"values": [], "problems": [f"stopped early: {e}"], "complete": False, "walk": False, "stats": {}}
+    except Exception as e:      # noqa: BLE001
+        ag = {"values": [], "problems": [f"AGESA search failed ({type(e).__name__})"], "complete": False, "walk": False, "stats": {}}
     amd["agesa"] = ag
     amd["directories"] = [{k: v for k, v in r.items() if k != "window_size"} for r in ctx.dirs]
     shown, seen = [], {}
@@ -795,25 +959,26 @@ def analyze(data, budget=None, soft=()):
     gaps = summarize(shown, counts)
     if not amd["microcode"]:
         gaps.append("AMD: no microcode patch was read from a BIOS directory (type 0x66); this is not 'no microcode'")
-    for t in ag["problems"][:3]:
+    for t in ag["problems"][:6]:
         gaps.append("AMD: AGESA search: " + t)
-    if not ag["values"] and ag["complete"] is False:
-        gaps.append("AMD: no AGESA string found in a search that was not complete (not found does not mean absent)")
-    elif not ag["values"]:
-        gaps.append("AMD: no AGESA string found")
+    if not [x for x in ag["values"] if not x.get("truncated")] and ag["complete"] is False:
+        gaps.append("AMD: no complete AGESA version string found in a search that was not complete (not found does not mean absent)")
+    elif not [x for x in ag["values"] if not x.get("truncated")]:
+        gaps.append("AMD: no complete AGESA version string found")
     amd["gaps"] = gaps
     amd["attention"] = [f"{GAP_TEXT[c]} ({counts[c]})" for c in ATTENTION_CODES if counts.get(c)]
-    if len(ag["values"]) > 1:
-        amd["attention"].append("more than one AGESA string: " + ", ".join(f"{x['tag']} {x['value']}" for x in ag["values"]))
-    amd["stats"] = {"efs": len(efs), "directories": len(ctx.dirs), "entries": ctx.entries_total,
-                    "psp_firmware": len(amd["psp_firmware"]), "microcode": len(amd["microcode"]), "agesa_values": len(ag["values"]),
+    full = [x for x in ag["values"] if not x.get("truncated")]
+    if len(full) > 1:
+        amd["attention"].append("more than one AGESA string: " + ", ".join(f"{x['tag']} {x['value']}" for x in full))
+    amd["stats"] = {"efs": len(amd["efs"]), "directories": len(ctx.dirs), "entries": ctx.entries_total,
+                    "psp_firmware": len(amd["psp_firmware"]), "microcode": len(amd["microcode"]), "agesa_values": len(full),
                     "problems": dict(counts), "hashed_bytes": MAX_HASH_TOTAL - ctx.hash_left}
     return amd
 
 
 def summary_text(amd):
     """一行摘要（狀態、SBOM property 用）。"""
-    ag = amd["agesa"]["values"]
+    ag = [x for x in amd["agesa"]["values"] if not x.get("truncated")]
     return (f"{amd['stats']['directories']} directories, {amd['stats']['entries']} entries, {len(amd['psp_firmware'])} versioned PSP firmware items, "
             f"{len(amd['microcode'])} microcode patches, AGESA: " + (", ".join(f"{x['tag']} {x['value']}" for x in ag) if ag else "not found"))
 
@@ -828,20 +993,32 @@ def markdown_lines(amd, e):
         L.append("")
     for r in amd["directories"]:
         flag = "" if r["trusted"] else ("（checksum 不符，條目不採用）" if r["parsed"] else "（沒有解析）")
+        if r["ambiguous"]:
+            flag += "（**歧義**：只經由兩種解讀都成立的指標到得了，" + (f"另一種解讀在 {e(', '.join(r['readings']))}；" if r.get("readings") else "它在這樣的目錄底下；") + "工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）"
         L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}` @0x{r['offset']:x}{flag}", "",
               f"{r['num_entries']} 項；checksum {r['checksum']}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
         if r["kind"].startswith("combo"):
             if r["entries"]:
                 L += ["| # | id | 目錄位址 | 解到 |", "|---|---|---|---|"]
-                L += [f"| {x['index']} | {e(x['id'])} | {e(x['address'])} | {hex_or_none(x['child']) or '無'} |" for x in r["entries"]]
+                L += [f"| {x['index']} | {e(x['id'])} | {e(x['address'])} | {e(', '.join(f'0x{c:x}' for c in x.get('children', [])) or '無')} |" for x in r["entries"]]
                 L.append("")
             continue
         if r["entries"]:
             L += ["| # | type | 名稱 | sub | inst | 位置 | 大小 | 版本 |", "|---|---|---|---|---|---|---|---|"]
             for x in r["entries"]:
-                loc = hex_or_none(x["offset"]) if x["kind"] in ("blob", "directory-pointer") else x["kind"]
-                L.append(f"| {x['index']} | 0x{x['type']:02x} | {e(x['type_name'] or '未知')} | {x['subprogram']} | {x['instance']} | {e(loc or '未解')} | 0x{x['size']:x} | {e(x['version'] or '')} |")
+                loc = hex_or_none(x["offset"]) if x["kind"] in ("blob", "directory-pointer", "ish", "compressed") else x["kind"]
+                note = x["kind"] if x["kind"] in ("ish", "compressed", "empty", "dest-only", "value", "unresolved") else ""
+                if x["kind"] == "ish":
+                    note = "slot header，checksum " + ("相符" if x["ish"]["checksum_verified"] else "不符")
+                L.append(f"| {x['index']} | 0x{x['type']:02x} | {e(x['type_name'] or '未知')} | {x.get('subprogram', '')} | {x.get('instance', '')} | {e(loc or '未解')} | 0x{x['size']:x} | {e(x['version'] or note)} |")
             L.append("")
+    amb = amd.get("ambiguous") or {"psp_firmware": [], "microcode": []}
+    if amb["psp_firmware"] or amb["microcode"]:
+        L += ["#### 歧義目錄裡的版本與微碼（GAP：不進 SBOM）", "",
+              "下列項目只在「兩種解讀都成立」的目錄裡讀到（見上面標 **歧義** 的目錄）。工具不判斷哪一個解讀才是硬體實際使用的，所以只列出，不當成確定的結果。", ""]
+        L += [f"- PSP type 0x{p['type']:02x} {e(p['type_name'] or '')} sub {p['subprogram']}：版本 {e(p['version'])}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in p['locations'][:2]))}）" for p in amb["psp_firmware"]]
+        L += [f"- 微碼 patch level {m['patch_id']}、equivalence id {m['equiv_id']}、{m['date']}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in m['locations'][:2]))}）" for m in amb["microcode"]]
+        L.append("")
     L += ["#### AMD 微碼（BIOS 目錄 type 0x66）", ""]
     if amd["microcode"]:
         L += ["| patch level | 日期 | equivalence id | CPUID | 形式 | 大小 | 位置 |", "|---|---|---|---|---|---|---|"]
@@ -852,7 +1029,8 @@ def markdown_lines(amd, e):
     L += ["", "#### AGESA", ""]
     if amd["agesa"]["values"]:
         L += ["| 標記 | 字串 | 次數 | 位置 |", "|---|---|---|---|"]
-        L += [f"| {e(x['tag'])} | {e(x['value'])} | {x['count']} | " + e("；".join(f"{w['where']} +0x{w['offset']:x}" for w in x["found"][:2])) + " |" for x in amd["agesa"]["values"]]
+        L += [f"| {e(x['tag'])} | {e(x['value'])}{'（被截斷，不是完整版本）' if x.get('truncated') else ''} | {x['count']} | " + e("；".join(f"{w['where']} +0x{w['offset']:x}" for w in x["found"][:2])) + " |" for x in amd["agesa"]["values"]]
     else:
         L.append("沒有找到" + ("" if amd["agesa"]["complete"] else "（搜尋不完整，不代表不存在）") + "。")
+    L += [""] + [f"- AGESA 搜尋：{e(p)}" for p in amd["agesa"]["problems"]]
     return L

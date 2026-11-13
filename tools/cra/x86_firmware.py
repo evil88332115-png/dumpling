@@ -69,8 +69,9 @@ BIOS（Intel 平台的完整 SPI 映像）：
   → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）→ 每個項目的 type、subprogram、instance、位置、大小；
   PSP 韌體標頭（fw_type 與 size_total 和目錄項目相符）通過才讀版本，BIOS 目錄 type 0x66 的 AMD 微碼列 patch level、日期、equivalence id
   （前面有 `DMA\\0` container 的等價表才對出 CPUID，沒有就不猜），AGESA 字串（`AGESA!V<n>` 後面的字串，整個映像與解開的 firmware volume 都找，不同值全部列出並 ATTENTION）。
-  看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、A/B 復原的 slot header checksum 未驗證、
-  Promontory 指標、AGESA 搜尋不完整）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符的目錄不採用它的條目。
+  看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、壓縮或 size 0 的條目、slot header checksum 不符、
+  Promontory 指標、AGESA 搜尋不完整或字串被截斷）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符的目錄不採用它的條目；
+  指標在兩種座標解讀下都指到目錄時不判斷哪個是硬體實際使用的：兩邊都列出，只經由它到得了的目錄的條目、版本、微碼（amd.ambiguous）不進 SBOM。
   SBOM：有版本的 PSP 韌體條目、AMD 微碼 patch、AGESA 字串各一個元件（掛在 BIOS 映像底下），dumpling:vuln-assessment 同樣是 NOT_ASSESSED（note: ASSESS_NOTES["amd"]）。
   amd_psp 載入不了或丟錯 → b["amd"] 是 None，gaps 寫「parser did not run」。
 - coreboot 類映像（例如 Dasharo）的 CBFS（見 coreboot_cbfs.py）：找到 FMAP（或 `LARCHIVE`）的 CBFS 區域時，讀 `revision`／`build_info`
@@ -1712,12 +1713,17 @@ def amd_components(b, img, comps, sub):
     for g in ag["values"]:
         n += 1
         ref = f"{img}:amd-agesa:{hashlib.sha256((g['tag'] + g['value']).encode()).hexdigest()[:12]}:{n}"
-        c = {"type": "firmware", "bom-ref": ref, "name": "AMD AGESA", "version": g["value"], "manufacturer": AMD_VENDOR,
-             "properties": [prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"), prop("sca-center:agesa-marker", g["tag"]),
+        c = {"type": "firmware", "bom-ref": ref, "name": "AMD AGESA", "manufacturer": AMD_VENDOR,
+             "properties": [prop("sca-center:agesa-marker", g["tag"]),
                             prop("sca-center:count", g["count"]),
                             *[prop("sca-center:found-in", f"{w['where']} +0x{w['offset']:x}") for w in g["found"]],
                             *([prop("sca-center:note", f"{len(ag['values'])} different AGESA strings were found in this image; all are listed")] if len(ag["values"]) > 1 else []),
                             *([prop("sca-center:incomplete", "the AGESA search did not cover all UEFI content (see sca-center:gap)")] if not ag["complete"] else [])]}
+        if g.get("truncated"):         # 字串超過讀取上限被截斷：前綴不是完整版本，不寫 version（dumpling:version-status 會是 GAP）
+            c["properties"].append(prop("sca-center:note", f"the AGESA string is longer than the read limit; only this prefix was read and it is not used as a version: {g['value']}"))
+        else:
+            c["version"] = g["value"]
+            c["properties"].insert(0, prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"))
         comps.append(assessed(c, "amd"))
         sub.append(ref)
 
