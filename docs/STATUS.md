@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 20:57 +0800（C2）
+最後更新：2026-11-13 20:59 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -38,7 +38,7 @@
 
 - 目前在做：**M2 收尾**（PLAN「里程碑」M2）。第三輪獨立驗證「不通過」（1 項應修，已在 852b6d3 修好）；852b6d3 的 draft 核對時另找到完整報告 tee Grype 一定 NOT_RUN（078710d 修）；**正在跑新一輪驗收 run（078710d）**。M1 已合併（PR #9）
 - 分支與 commit：
-  - **`wp1/m2`＝078710d**（已推）：M2 整合分支；已含 main 26a6377（main 目前沒動，不用併）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）
+  - **`wp1/m2`＝c08de27**（已推）：M2 整合分支；已含 main 26a6377（main 目前沒動，不用併）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
   - 其他 M2 子分支都已併入或不合併，不用再動
 - 開出去的代理：
