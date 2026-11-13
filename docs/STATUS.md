@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 19:04 +0800（C0）
+最後更新：2026-11-13 19:11 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -15,13 +15,13 @@
   - C1：**搬家準備完成、已停下**。wp1/m2 f11bfdb（全推，本機完整測試 OK）；PR 草稿在 wp1/m2-pr-draft d3efdc8（不合併，開 PR 後刪）。驗收 run 在 f11bfdb 上跑：release v39.2.0 43399785656、v39.2.1 43399800268、tests 43399813005。下一步見 C1 節：檢查 draft → 新的獨立驗證 → 併 main → 開 M2 PR
   - C2：**搬家準備完成、已停下**（C2 節 f48ffb2）。D-042 CSME 完成（wp3/csme-new 61e8ef7）；AMD（wp3/amd-psp ebac3e9）應修已修、**還沒複驗**；新 C2 先照 D-047 改歧義規則（需校驗佐證）與拿掉 sys._getframe，再複驗，兩半合成一個 PR（開之前請 sca-center 用私有檔本機驗）；D-043 接在後面；supplier-normalize（8a960c0）等 M2；公開樣本在第二台要照各分支 firmware.yml 重新下載
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
-  - C4（第二台）：wp7/adapters 三平台重跑中（d31c872），標準答案依結果重訂後驗證；M6 PR 草稿已備
+  - C4（第二台）：D-048 收到；wt-c4-cra-survey 已清。rpi dev run 43410313151 OK（D-038、D-044 生效），rpi 標準答案 84 項（1abab06）；rock、ai-nas 在 8729785 上做最後一輪，之後跑 rpi，再派驗證代理做差異核對（只給原始資料）；M6 PR 草稿已備
 - 下一步（新 C0 接手後）：
   1. 等 C1 開 M2 PR → **C0 另派獨立驗證代理**（不附 C1 的結論）→ 兩份驗證都通過、CI 綠 → `gh pr merge --squash --match-head-commit <SHA> --author-email 287638252+evil88332115-png@users.noreply.github.com`
   2. M2 合併後：問使用者何時打第一個正式 tag（例如 `orin-nano-demo/v39.2.1-demo1`）；開 `wp0/docs-batch-4` 的 PR；通知 C2／C3／C4 併 main 後各自開 PR
   3. C2 的 D-042 PR 開出前，請 sca-center 對話用私有檔在本機驗（結果不回 repo）
   4. 監控 real Issue：C3 修完 F1–F3（已在 wp2/watch-m2）→ M2 合併 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
-  5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#20、#22、#23
+  5. 排 M7：A1–A4、C1（D-033）＋D-035 依據類型＋D-036 逐顆核心＋D-038 交付報告說明（adapter-gaps #16）＋D-039 可利用性分層＋D-044 非發行版核心改用 CNA 合併＋new-project 不帶範本值（config、vex-rules）＋adapter-gaps #7、#19（rpi 報告端：有 KERNEL_CVES 時補 Grype 沒有的 CVE 成列、同一個 CVE 不按核心套件重複列；屬 D-044 (2)，M7 交給 C1；修好後 C4 再釘 rpi 的「bsp 核心候選 ≥ CNA 清單」）、#20、#22、#23
   6. M7 之後：D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
 - 卡住／等決定：無
