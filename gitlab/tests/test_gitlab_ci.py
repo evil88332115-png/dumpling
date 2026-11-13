@@ -5,6 +5,7 @@
 import importlib.util
 import json
 import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -47,9 +48,9 @@ def command_flags(text, script):
 
 
 def command_args(text, script):
-    """{參數: 值}（值去掉引號）。"""
-    toks = command_text(text, script).split()
-    return {t: toks[i + 1].strip('"') for i, t in enumerate(toks[:-1]) if t.startswith("--")}
+    """{參數: 值}。用 shlex 依 shell 規則切字（引號裡有空白的值不會被切開，引號也會去掉）。"""
+    toks = shlex.split(command_text(text, script))
+    return {t: toks[i + 1] for i, t in enumerate(toks[:-1]) if t.startswith("--")}
 
 
 class CiFile(unittest.TestCase):
