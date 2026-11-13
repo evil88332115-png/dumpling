@@ -1,0 +1,6 @@
+{
+  "vendors": ["nvidia", "intel", "ami", "realtek", "insyde", "phoenix", "amd", "arm", "trustedfirmware", "rockchip", "broadcom"],
+  "exclude": [],
+  "aliases": {},
+  "projects": {}
+}
