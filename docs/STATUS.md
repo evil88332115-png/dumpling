@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:10 +0800（C1）
+最後更新：2026-11-13 23:11 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -278,11 +278,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6。三個示範專案最後一輪都通過標準答案：rock 99 項（dev run 43413770363，8729785）、ai-nas 76 項（43416974360，1abab06）、rpi 84 項（43419144284，1abab06）；驗證代理做差異核對中（只給原始資料，不附結論）
-- 分支／PR／commit：`wp7/adapters`（最後 1abab06；已併入 origin/wp1/m2 61d7c6f、f11bfdb）；`wp7/platform-samples`（868f064）；`wp7/cra-survey` 的 worktree 已清（PR #15 已合併、內容與 main 相同）；PR 尚未開（M6 完成才開，D-020）
-- 代理：驗證代理 1 個執行中（三專案差異核對，只讀，Sonnet）；D-048 上限 3
-- CI：見上；ai-nas 的 scan 步驟 GAP 是 app-source 的預期 GAP
-- 今天處理：缺口 21（三個示範專案的 CRA config 拿掉範本虛構值、vex-rules 拿掉 R1～R5；ai-nas own_software＝OMV 安裝路徑，rpi／rock 用 own_software_none_reason）；D-044 接上（-os 傳 --kernel-in-other-report、kernel_not_distro）；D-038 核對讀得出 6.18.50+rpt-rpi-2712；各文件狀態、own_software、p1_rows 釘進標準答案；缺口 13、18 已處理
-- 下一步：驗證結果出來後定案並通知 C0；M2 合併後併 main 重跑（852b6d3 會讓 rock／rpi 的 -os 報告少掉 bsp 的刷機包元件，要重核）；完成 PR 草稿後開 M6 PR
-- 卡住／等決定：缺口 19 的報告端（Grype 有比對時 CNA 候選沒有成列，rpi 核心漏報）排在 M7（C0 決定）；缺口 7、20、22、23 排 M7
+- 目前在做：M6 收尾。M2（PR #40）已合併，`wp7/adapters` 用 merge 併上 main cc7d101（736bbee，不 rebase；C1 的檔案取 main 版、PROVENANCE 保留 C4 節）；product_status 加 `bsp_inputs_not_applicable`（8429d1f）；三個示範專案依序重跑中（rock → rpi → ai-nas），跑完核對 rock／rpi 的 -os 項目（852b6d3 的影響）並釘進標準答案
+- 分支／PR／commit：`wp7/adapters`（8429d1f）；`wp7/platform-samples`（868f064）；PR 尚未開（M6 完成才開，D-020）
+- 代理：0 個（重跑完、標準答案更新後派 1 個驗證代理；D-048 上限 3）
+- CI：單元測試 c4-wp7 88 項、c1-m2-jetson 40、c1-m2-platform 63、c1-m2-layers 35 都通過（併 main 之後）；dev 重跑中
+- 今天處理：缺口 21、D-044、D-038 的 +rpt 版本讀法、三專案標準答案定案（403fae7）；adapter-gaps #25～#27 依 C0 決定（#27 D-049 維持現狀）
+- 下一步：重跑結果核對 → 更新標準答案 → 獨立驗證 → 完成 PR 草稿 → 開 M6 PR、通知 C0
+- 卡住／等決定：無。缺口 19（rpi 核心 CNA 候選沒有成列）、7、20、22、23、25、26 排 M7
 <!-- END C4 -->
