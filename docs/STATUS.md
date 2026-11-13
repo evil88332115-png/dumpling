@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:30 +0800（C2）
+最後更新：2026-11-13 21:45 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -121,9 +121,19 @@
 > - 寫程式代理第四輪（收尾）：**完成** **48058e1**。程式只改了排序，另加 AGESA 不同值上限時 complete=False；C2 已看過 diff。test_amd_psp 共 103 個，99／25／101 不變
 > - **C2 已把 origin/wp3/csme-new 併進 wp3/amd-psp → ca80b27**：只有清單衝突，三處都保留兩邊的項目。main 仍是 26a6377，不用併。本機 C2 測試組 527 passed。所有代理都已結束
 >
-> - 寫程式（Sonnet 5.5，effort high）：D-043 (1) 的 Intel 部分（微碼公告比對：固定 commit 的 Intel microcode release notes → 資料表 → CPUID＋rev 比對；CSME 加 NVD CPE），分支 `wp3/fw-advisory`（從 main 26a6377 開，worktree `$AGENT_TMP/dumpling-wt-c2-advisory`），暫存 `$AGENT_TMP/dumpling-tmp-c2-adv/`，狀態：**進行中**。NVIDIA vBIOS 那項要用 gpu-firmware 對照表，等 M2 進 main 才做
+> - 寫程式（Sonnet 5.5，effort high）：D-043 (1) 的 Intel 部分（微碼公告比對：固定 commit 的 Intel microcode release notes → 資料表 → CPUID＋rev 比對；CSME 加 NVD CPE），分支 `wp3/fw-advisory`（從 main 26a6377 開，worktree `$AGENT_TMP/dumpling-wt-c2-advisory`），暫存 `$AGENT_TMP/dumpling-tmp-c2-adv/`，狀態：**完成 5bddbf8**。NVIDIA vBIOS 那項要用 gpu-firmware 對照表，等 M2 進 main 才做
+>   - 資料表：microcode-20261110 的 releasenote.md（commit d71fe4e2…，sha256 338b556b…），45 個 release、920 列，SA 只列在 release 層級
+>   - 結果分四種：affected-candidate（候選）、older-no-sa、up-to-date（不代表沒有漏洞）、NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）；vuln-assessment 仍是 NOT_ASSESSED
+>   - CSME CPE：NVD 的 product 是 converged_security_management_engine_firmware，版本只到三段，NVD 資料止於 2022
+>   - **待 C0 決定**：family 讀不出來時 major ≥ 11 推定為 CSME（basis 記 inferred）；這會讓 CPE 可能誤報，不會漏報
+>   - CI tests 43436190471、firmware 43436194559（進行中）
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/fw-advisory 5bddbf8，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv/`，狀態：**進行中**
 >
-> - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**進行中**
+> - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
+>   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
+>   - D-050 的兩個前提已寫進 notes 與報告依據；firmware.yml 的兩種口徑分開寫
+>   - 本機 532 passed，99／25／101 不變；C0 的重現由 C2 親手跑過
+>   - CI tests 43435020981、firmware 43435026101（進行中）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
