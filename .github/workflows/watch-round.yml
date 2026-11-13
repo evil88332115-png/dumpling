@@ -42,6 +42,8 @@ jobs:
       actions: read
     outputs:
       has_plan: ${{ steps.match.outputs.has_plan }}
+      has_support_plan: ${{ steps.support.outputs.has_plan }}
+      support_status: ${{ steps.support.outputs.status }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,6 +123,30 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml/runs?event=schedule&branch=main&per_page=5" \
             --jq '{runs: [.workflow_runs[] | {id, status, conclusion, created_at}]}' > "$RUNNER_TEMP/w/prev-schedule.json" \
             || echo '{"error": "查不到上一次排程（API 失敗）"}' > "$RUNNER_TEMP/w/prev-schedule.json"
+      # 支援期限與 EOL（M8 B2，docs/WATCH.md 第 7 節）：只在 real。這一步 FAIL 不擋每日監控的 Issue（continue-on-error），
+      # FAIL 由 support-fail job 讓這一輪變紅。放在比對前面，報告一定會留在 summary；但比對 FAIL 時 compute 失敗、notify 不跑，
+      # 支援期限的 Issue 延到下一輪（key 不變，不會漏，只是晚一天）。plan 是 stateless，Issue 用自己的標記與 support-period 標籤，
+      # 不是監控 Issue、不碰監控的狀態 Issue。
+      - name: PyYAML（支援期限檢查讀 project.yml 要用；runner 映像內建）
+        if: inputs.mode == 'real'
+        continue-on-error: true
+        run: python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
+      - name: 支援期限與 EOL（real）
+        id: support
+        if: inputs.mode == 'real'
+        continue-on-error: true
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          python3 -I pipeline/watch/support.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --out "$RUNNER_TEMP/w/support" --run-url "$RUN_URL" --demo
+          rc=$?
+          set -e
+          if [ -f "$RUNNER_TEMP/w/support/report.md" ]; then cat "$RUNNER_TEMP/w/support/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f "$RUNNER_TEMP/w/support/plan.json" ]; then echo "has_plan=true" >> "$GITHUB_OUTPUT"; else echo "has_plan=false" >> "$GITHUB_OUTPUT"; fi
+          case $rc in 0) st=OK ;; 2) st=ATTENTION ;; *) st=FAIL ;; esac
+          echo "status=$st" >> "$GITHUB_OUTPUT"
+          [ "$rc" = 0 ] || [ "$rc" = 2 ] || { echo "::error::支援期限檢查 FAIL（結束碼 $rc）"; exit "$rc"; }
       - name: 比對
         id: match
         env:
@@ -155,10 +181,32 @@ jobs:
             ${{ runner.temp }}/w/out/result.json
           retention-days: 14
           if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.mode == 'real'
+        with:
+          name: watch-support-${{ inputs.round }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/w/support/plan.json
+            ${{ runner.temp }}/w/support/report.md
+            ${{ runner.temp }}/w/support/result.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # 支援期限檢查 FAIL（例如 project.yml 不合格、資料表壞掉）：讓這一輪變紅，但不擋 notify（每日監控的 Issue 照開）
+  support-fail:
+    needs: compute
+    if: needs.compute.outputs.support_status == 'FAIL'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: |
+          echo "::error::支援期限與 EOL 檢查 FAIL：看 compute 的『支援期限與 EOL』步驟與 watch-support artifact"
+          exit 1
 
   notify:
     needs: compute
-    if: needs.compute.outputs.has_plan == 'true'
+    if: needs.compute.outputs.has_plan == 'true' || needs.compute.outputs.has_support_plan == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -169,10 +217,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.compute.outputs.has_plan == 'true'
         with:
           name: watch-plan-${{ inputs.round }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/plan
       - name: 套用 Issue 動作與狀態
+        if: needs.compute.outputs.has_plan == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DRY: ${{ inputs.dry_run }}
@@ -181,8 +231,24 @@ jobs:
           d=()
           if [ "$DRY" = true ]; then d=(--dry-run); fi
           python3 -I pipeline/watch/issues.py apply --repo "$GITHUB_REPOSITORY" --plan "$RUNNER_TEMP/plan/plan.json" --mode "$MODE" "${d[@]}"
+      # 支援期限的 Issue：同一個 dry_run（排程預設只算不寫，D-040）；stateless plan，不碰監控的狀態 Issue
+      # !cancelled()：上面每日監控的 apply 失敗（例如樂觀鎖）時，支援期限的 Issue 照樣套用
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ !cancelled() && needs.compute.outputs.has_support_plan == 'true' }}
+        with:
+          name: watch-support-${{ inputs.round }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/support
+      - name: 套用支援期限的 Issue
+        if: ${{ !cancelled() && needs.compute.outputs.has_support_plan == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          d=()
+          if [ "$DRY" = true ]; then d=(--dry-run); fi
+          python3 -I pipeline/watch/issues.py apply --repo "$GITHUB_REPOSITORY" --plan "$RUNNER_TEMP/support/plan.json" --mode real "${d[@]}"
       - name: 演練驗收（這一輪開出的 Issue 數）
-        if: inputs.expect_opened >= 0
+        if: inputs.expect_opened >= 0 && needs.compute.outputs.has_plan == 'true'
         env:
           WANT: ${{ inputs.expect_opened }}
         run: |
