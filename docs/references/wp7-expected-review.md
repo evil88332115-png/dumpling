@@ -5,7 +5,7 @@
 
 ## rock-5b-demo v1.0.0-demo1（Rockchip，Radxa ROCK 5B rsdk-r6）
 
-- 依據的執行：dev run 43354620546（commit 2a50091），2026-11-13。
+- 依據的執行：dev run 43360353706（commit b865b82），2026-11-13。第一版標準答案依 43354620546（2a50091）訂，驗證代理核對後改了輸出與標準答案（見下面「驗證代理的獨立核對」）。
 - 先前幾次執行找到並修好的問題（所以不拿那幾次當標準答案）：
   1. unknown 122187／126696：沒有 owners.json，Syft 的檔案紀錄找不到擁有的套件 → assemble 從 dpkg .list 產生 owners.json。
   2. unknown 3950：dpkg 自己的資料庫檔（var/lib/dpkg/*）不屬於任何套件 → 平台設定歸 os。
@@ -16,8 +16,8 @@
 |---|---|---|
 | 映像 sha256 | 76f434fa… | sources.yml 固定；與 GitHub 附件 digest、官方 sha512sum 相同（platform-samples 時核對） |
 | 解開後的 sha256 | d93a7889… | 本機與 CI 各解一次，相同 |
-| deb 套件 | bsp 48＋os 1781＝1829 | 官方 `rock-5b_bookworm_kde_r6.manifest` 的套件數 1829；映像 rootfs 的 dpkg .list 也是 1829 個 |
-| 元件 | 共 126696：bsp 15211、os 111454、unknown 31 | Syft 1.55.0（固定）× 固定映像；unknown 31＝pypi 30、maven 1（缺口 12，保守列待辦） |
+| deb 套件 | bsp 50＋os 1779＝1829 | 官方 `rock-5b_bookworm_kde_r6.manifest` 的 1829 個套件，名稱與版本完全相同（驗證代理逐一比對）；映像 rootfs 的 dpkg .list 也是 1829 個 |
+| 元件 | 共 126696：bsp 16332、os 110333、unknown 31 | Syft 1.55.0（固定）× 固定映像；unknown 31＝pypi 30、maven 1（缺口 12，保守列待辦，會讓 bsp 報告多 46 列） |
 | 原始磁區 | OK | 本機用官方 u-boot-rk2410 deb 與 rootfs 的同名檔逐位元組比對（idbloader.img、u-boot.itb）；FIT 5 個映像重算 sha256 與 FIT 記載的相同；CI 結果相同 |
 | 原始磁區讀到的版本 | U-Boot／SPL rk2410-2017.09-64-39cd993、DDR v1.22、BL31 v1.54 | 磁區字串；與 deb 的版本（2017.09-64-39cd993）一致 |
 | U-Boot CVE | 48 個候選（U-Boot、SPL 各一列） | D-034：CPE `cpe:2.3:a:denx:u-boot:2017.09`，advisory-check ATTENTION、進待人審 |
@@ -28,6 +28,8 @@
 | 核心 CNA 清單 | 8943 個候選（範圍 8000–12000） | vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11）；CNA 紀錄 18225 筆，affected 7718＋unknown 1225；清單本身標 GAP（2024-02 以前其他單位發的 CVE 不在 CNA 資料裡） |
 | 依 .config 排除 | accepted 3627 | VEX not_affected／code_not_present，source 目前是 `kconfig`；依據是實際出貨的 config（shipped-config），名稱在 C1 的 M7 統一 |
 | 開機鏈分類 | NOT_ASSESSED | Rockchip 沒有定義開機鏈（缺口 3） |
+| 對外連線服務 | NOT_ASSESSED | 只有 Raspberry Pi 定義了清單；Rockchip 的映像有 ssh、avahi 等服務，沒有評估（缺口 15） |
+| 報告的核心列 | os 0、bsp 8943；U-Boot 列只在 bsp（96） | scan.json 的 report_rows（機器可核對） |
 | OS 報告 | 2812 個 CVE（範圍 2000–4500），沒有核心的列 | Debian 12 KDE 桌面的套件；核心只屬於 bsp |
 
 **預期的 GAP（不是錯）**：C-kernel-coverage（Grype 對廠商核心沒有比對，改由 CNA 清單）、C-sbomgate（版本未知的元件不比對）、
@@ -44,4 +46,22 @@ D-dt-data-sources／C-dt-feeds／D-dt-findings（NVD 照設計關閉）、D-dt-k
 
 ## 驗證代理的獨立核對
 
-（待補）
+### rock-5b-demo（第一版標準答案，2026-11-13）
+
+驗證代理（Sonnet 5.5，effort high，只讀）不看 C4 的結論，從 artifact、官方 manifest 與官方 deb 重算每一項。總結：**需要修改**。
+重算的數字（元件數、雜湊、核心版本、.config sha256、accepted 列）全部與原始資料吻合，沒有寫錯的值；問題與處理：
+
+| 嚴重度 | 發現 | 處理 |
+|---|---|---|
+| 嚴重 | `external_services` equals []：清單只定義了 rpi-connect，Rockchip 從來沒評估過，卻寫成「沒有」 | scan.json 改成 {status, items, reason}，沒有定義清單的平台記 NOT_ASSESSED；標準答案釘 status |
+| 中 | CNA 清單已知不完整（2024-02 以前）沒有機器可核對的標記 | 加 `kernel_upstream.cna.gap`（true）並釘住 |
+| 中 | 三個漏洞數的上限太窄（核心 CVE 約每月 +500，半年內會誤失敗） | cna.cves 與 bsp.cves_total 上限 35000、accepted 12000、os 6000 |
+| 中 | 完整報告是補充與分層之前的掃描（沒有 U-Boot、沒有層） | notes 加說明；缺口 14；標準答案不釘完整報告的漏洞數 |
+| 中 | -os 重跑的核心階段出現沒有意義的 GAP | 缺口 13；標準答案只釘完整與 -bsp 的核心階段 |
+| 中 | `rtl8852bu-dkms`、`rtw89-dkms` 與已歸 bsp 的 `rtk-btusb-dkms` 同類卻歸 os；C4 原本「板上藍牙」的註解是錯的（ROCK 5B 板上沒有） | 三個都歸 bsp（板子廠商替選購無線模組提供的 DKMS 驅動），deb 50／1779 |
+| 中 | unknown 31 會讓 bsp 報告多 46 列（含 1 個 P1） | reason 補上 |
+| 漏項 | 開機程式的 sha256 與版本、U-Boot 候選數、-bsp 的核心階段、OS 報告不含核心列、預期的 GAP | scan.json 加 raw_sectors.by_slot（鍵不含「.」）與 report_rows，標準答案從 27 項增加到 58 項 |
+| 輕 | 幾個 reason 不精確（bsp 的組成、C-kernel-coverage 的原因寫成推測、config 實際讀的是 linux-headers 的副本、judged 的意思） | 改寫 |
+
+未確認（驗證代理沒有讀磁碟映像、沒有連網）：解開後的 sha256、映像與官方 sha512sum 的關係、FIT 內 5 個映像各自重算、radxa/kernel@87ba2c6 是否確為套件的建置來源。
+

@@ -67,8 +67,9 @@ class Wp7Hooks(ps.Hooks):
             by_slot = {}
             for r in rs.get("regions") or []:
                 if r.get("slot"):
-                    by_slot[r["slot"]] = {"start_lba": r.get("start_lba"), "sha256": r.get("sha256"), "kind": (r.get("identity") or {}).get("kind"),
-                                          "versions": {v.get("component"): v.get("version") for v in (r.get("identity") or {}).get("versions") or []},
+                    # 鍵不能有「.」（標準答案的點分路徑會拆錯）：idbloader.img → idbloader_img
+                    by_slot[r["slot"].replace(".", "_")] = {"slot": r["slot"], "start_lba": r.get("start_lba"), "sha256": r.get("sha256"), "kind": (r.get("identity") or {}).get("kind"),
+                                          "versions": {str(v.get("component")).replace(".", "_"): v.get("version") for v in (r.get("identity") or {}).get("versions") or []},
                                           "corroboration_consistent": sum(1 for c in r.get("corroboration") or [] if c.get("state") == "一致"),
                                           "corroboration_inconsistent": sum(1 for c in r.get("corroboration") or [] if c.get("state") == "不一致")}
             out["raw_sectors"] = {"status": rs.get("status"), "gaps": rs.get("gaps"), "by_slot": by_slot,
