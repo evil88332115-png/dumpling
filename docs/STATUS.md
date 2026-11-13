@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:53 +0800（C0）
+最後更新：2026-11-13 21:56 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -125,7 +125,7 @@
 >   - 資料表：microcode-20261110 的 releasenote.md（commit d71fe4e2…，sha256 338b556b…），45 個 release、920 列，SA 只列在 release 層級
 >   - 結果分四種：affected-candidate（候選）、older-no-sa、up-to-date（不代表沒有漏洞）、NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）；vuln-assessment 仍是 NOT_ASSESSED
 >   - CSME CPE：NVD 的 product 是 converged_security_management_engine_firmware，版本只到三段，NVD 資料止於 2022
->   - **待 C0 決定**：family 讀不出來時 major ≥ 11 推定為 CSME（basis 記 inferred）；這會讓 CPE 可能誤報，不會漏報
+>   - **D-051（C0 決定）**：family 讀不出來時 major ≥ 11 推定為 CSME（cpe-basis=inferred）。報告要寫明「family 是由版本推定、比對結果待人審」，這句還要補；若預驗找到公開反例就改回 GAP，並通知 C0
 >   - CI tests 43436190471、firmware 43436194559（進行中）
 > - 驗證（Sonnet 5.5，effort high）：預驗 wp3/fw-advisory 5bddbf8，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv/`，狀態：**進行中**
 >
@@ -133,7 +133,7 @@
 >   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
 >   - D-050 的兩個前提已寫進 notes 與報告依據；firmware.yml 的兩種口徑分開寫
 >   - 本機 532 passed，99／25／101 不變；C0 的重現由 C2 親手跑過
->   - CI tests 43435020981、firmware 43435026101（進行中）
+>   - CI tests 43435020981、firmware 43435026101 **綠**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
@@ -180,7 +180,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 1. **D-042 AMD**：C0 已決定（**D-047**，在 wp0/docs-batch-4），照這兩點修（**寫程式代理已派出，進行中**），改完和 ebac3e9 的改動一起複驗：
    - (a) **歧義規則改窄，但要有校驗佐證**：同一位置被兩種基底讀到時，只有一種讀法的目錄通過自身的結構與校驗（目錄 checksum、條目範圍都在映像內等），就採用那一種的條目；另一種只列出來，並附上它沒通過的證據。兩種都通過而且內容衝突，或兩種都不通過 → 維持 GAP。（我的補充：子目錄要沿用被採用那一讀法的基底；測試要涵蓋「一邊 checksum 壞」「兩邊都過且內容不同」「兩邊都壞」，以及處理順序反過來結果相同；真樣本 B550M、B650M 重跑，報 SBOM 元件數的變化。）
    - (b) **拿掉 `sys._getframe`**（amd_psp.py:746、:860 附近）：原始位元組裡只要有 AGESA 標記不在走訪範圍內，就標「搜尋不完整」（complete=False）。需要精確結果的話，M7 再請 C1 提供正式回呼介面，現在不跟 C1 談
-   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**更新**：C0 對 ca80b27 的獨立驗證「通過」；延伸證據定為 **D-050**（wp0/docs-batch-4 b5c5015）。開 PR 前要修 3 項：(1) checksum 不符的單一讀法目錄仍被標 adopted，它的 L2 子目錄版本因此進了 SBOM；(2) notes 和報告依據要寫明 D-050 的兩個前提；(3) firmware.yml 的目錄與條目數要把兩種口徑分開寫。**已派寫程式代理到 wp3/amd-psp 修**（第 1 項做法：untrusted／untrusted-path 不採用），34fd4f9 已告訴 C0，等 C0 看 diff。**私有檔驗證已由 C0 跑完**（ca80b27，結果不進 repo）：沒有當掉，也沒有確知錯誤的值；ME 是 GAP，因為 CSE layout 的 Size 0x60 不在支援清單。這一項**不擋**這次 PR，C0 看過 diff 就請 C2 開 PR。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
+   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**更新**：C0 對 ca80b27 的獨立驗證「通過」；延伸證據定為 **D-050**（wp0/docs-batch-4 b5c5015）。開 PR 前要修 3 項：(1) checksum 不符的單一讀法目錄仍被標 adopted，它的 L2 子目錄版本因此進了 SBOM；(2) notes 和報告依據要寫明 D-050 的兩個前提；(3) firmware.yml 的目錄與條目數要把兩種口徑分開寫。**已派寫程式代理到 wp3/amd-psp 修**（第 1 項做法：untrusted／untrusted-path 不採用），34fd4f9 的 diff C0 已看過，沒問題；CI 兩個都綠。**PR #39 已開**（head 34fd4f9），驗證報告由 C0 貼，C0 合併。**私有檔驗證已由 C0 跑完**（ca80b27，結果不進 repo）：沒有當掉，也沒有確知錯誤的值；ME 是 GAP，因為 CSE layout 的 Size 0x60 不在支援清單。這一項**不擋**這次 PR，C0 看過 diff 就請 C2 開 PR。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
    - 把 `origin/wp3/csme-new` 併進 `wp3/amd-psp`。會衝突的有 `docs/PROVENANCE.md`、`tests/run.d/c2-x86-firmware.sh`（兩邊都改了最後的測試清單），x86_firmware.py 兩邊改的是不同段落
    - 併 origin/main（D-021：有衝突才併，開 PR 前確認只剩自己的改動）
    - 重跑 CI
