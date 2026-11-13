@@ -801,7 +801,7 @@ class PlatformConfigTest(unittest.TestCase):
             name = "fourth-%s" % plat
             p = subprocess.run(["bash", os.path.join(ROOT, "pipeline", "new-project.sh"), name, "--platform", plat,
                                 "--company-role", "manufacturer", "--os-responsibility", resp, "--product-name", "X", "--brand", "Y",
-                                "--markets", "EU", "--support-until", "2031-12-31", "--projects-dir", tmp],
+                                "--markets", "EU-ALL", "--support-until", "2031-12-31", "--projects-dir", tmp],
                                capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
             d = os.path.join(tmp, name)
