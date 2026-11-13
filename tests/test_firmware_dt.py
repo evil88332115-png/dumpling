@@ -782,6 +782,17 @@ class HardeningTests(ReportBase):
             self.assertEqual(st, "ATTENTION", repr(bad))
             self.assertIn("C-x", out)
 
+    def test_row_with_an_empty_stage_name_is_not_dropped(self):
+        # 階段名稱是空的列：FAIL 就是 FAIL，其他非 OK 至少 ATTENTION，不能因為名稱空白被略過而得到 OK
+        st, out, rc = self.case(rows=self.GOOD + [("", "FAIL", "boom")])
+        self.assertEqual((st, rc), ("FAIL", 1), out)
+        self.assertIn(fd._cell(fd.EMPTY_STAGE), out)
+        for bad in ("GAP", "NOT_RUN", "ATTENTION", "WEIRD", ""):
+            self.assertEqual(self.status(rows=self.GOOD + [("", bad, "x")]), "ATTENTION", repr(bad))
+        self.assertEqual(self.status(rows=self.GOOD + [("", "OK", "x")]), "OK")
+        p = self.w("empty-stage.tsv", "stage\tstatus\tdetail\n\tFAIL\tboom\nB\tOK\tz\n")
+        self.assertEqual(fd.read_status_tsv(p), {fd.EMPTY_STAGE: ("FAIL", "boom"), "B": ("OK", "z")})
+
     def test_upload_stage_status_must_be_exactly_ok(self):
         for bad in (" OK", "ok", "OK "):
             rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", bad, "x") for r in self.GOOD]

@@ -682,17 +682,24 @@ def _sev(st):
     return _SEV.get(st, 1)       # 不認得的狀態：比 OK 嚴重
 
 
+EMPTY_STAGE = "(空的階段名稱)"
+
+
 def read_status_tsv(path):
     """stage → (status, detail)。同一個階段出現多列時留「最嚴重」的那一列（不是最後一列：前面的 FAIL 不能被後面的 OK 蓋掉）。"""
     raw = _read_limited(path, MAX_BYTES, "status.tsv").decode("utf-8", "replace")
     rows = {}
     try:
         for r in csv.DictReader(raw.splitlines(), delimiter="\t", quoting=csv.QUOTE_NONE):
-            if r.get("stage"):
-                new = (r.get("status") or "", r.get("detail") or "")       # 不 strip：" OK" 不是 OK（scan-status-check.py 也是完全相等才算）
-                old = rows.get(r["stage"])
-                if old is None or _sev(new[0]) >= _sev(old[0]):
-                    rows[r["stage"]] = new
+            stage = r.get("stage")
+            if stage is None:
+                continue
+            if stage == "":                 # 階段名稱是空的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
+                stage = EMPTY_STAGE
+            new = (r.get("status") or "", r.get("detail") or "")       # 不 strip：" OK" 不是 OK（scan-status-check.py 也是完全相等才算）
+            old = rows.get(stage)
+            if old is None or _sev(new[0]) >= _sev(old[0]):
+                rows[stage] = new
     except csv.Error as e:
         raise DtError("status.tsv 格式不對（%s）" % type(e).__name__)
     return rows
