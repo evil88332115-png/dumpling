@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:23 +0800（C0）
+最後更新：2026-11-14 02:24 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,7 +36,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M2 已合併**（PR #40 → main cc7d101，C0 與 C1 第四輪驗證都通過）。**正式 tag 被 C1 session 的權限機制擋下（建立公開 Release），等使用者決定**；同時做 [WP1] 小 PR（wp1/m2-followup）
+- 目前在做：**M2 與後續都已合併**（#40 cc7d101、#42 7b5c6b2、#50 9f11a90）。**M7 拆法提案已送 C0 等確認**（M7a 欄位與設定來源／M7a2 C2 validate_table／M7b 狀態判定結構化／M7c VEX 依據與 under_investigation／M7d 核心候選與逐顆判定／M7e 可利用性分層／M7f CRA 文件與 SBOM 品質）。正式 tag 等使用者，改從最新 main（9f11a90 或更新）打
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
@@ -56,11 +56,9 @@
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
 - 本機背景工作：沒有
 - **下一步（照順序）**：
-  1. **正式 tag（D-052）**：從 cc7d101 打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1` 並推送——C1 的推送被權限機制擋下，等使用者自己推或放行（本機與遠端都還沒有 tag）。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 run 編號與結果 → 刪 `wp1/m2-pr-draft`（draft Release 由 release.yml 自動刪）
-  2. ~~PR #42~~ **已合併**（main 7b5c6b2）
-  2b. **掃描層 PR #50**（https://github.com/evil88332115-png/dumpling/pull/50，wp1/scan-not-run＝**b7e2f9d**，已併 main 7b5c6b2）：8268c5d 核心判定階段（KERNEL_STAGES；D-044 只認 meta.json 的 kernel_in_other_report）＋ae8b6dd 盤點後納入 C-pyver、B-php-runtime（COND）、刷機包層 B-initrd-coverage／B-rootfs-tar／B-uefi-binary。我的驗證「不通過」（應修 1：--sbom 沒給 --kernel-build 時沒有核心的產品也寫 NOT_RUN → 永遠 GAP），ced649c 修（KSEEN）＋建議 2（meta 標記要是報告名稱）、3（刷機包層 status.tsv 缺 → GAP）；f45ed46 修兩個原始碼文字斷言。報告已貼留言，已告訴 C0 新 head；C0 的驗證（f45ed46）**通過**；C0 要求的 list.json 壞掉 → GAP 在 b7e2f9d 改好，已告訴 C0，CI 綠就合併。建議 1（分層重跑不寫 B-rootfs-tar／B-uefi-binary）排 M7。合併後 worktree `$AGENT_TMP/dumpling-wt-c1-scannr`、`-followup` 可移除
-  2c. 給 C4 的提醒（已請 C0 轉）：wp7 合併 main 時不要用舊的 pipeline.yml 蓋掉「不適用：」那一列；#50 之後 -bsp／ours 的核心階段不是 OK 會讓 report_status GAP
-  3. M7 待辦加上 C0 驗證建議 2–8（-os 8.7 節寫明核心在 -bsp 判定、LAYERS.md 註明各層加總≠完整、check-expected 下限檢查的測試、patch 修的 CVE 在 patched 版仍 P3 的說明、Release 說明步驟表少 pipeline-scan、SBOM 的上游維護者信箱、test_layers_report.py 單獨執行缺 sys.path）
+  1. **正式 tag（D-052）**：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
+  2. **M7**：等 C0 確認拆法後從 M7a（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、adapter-gaps #25 #26）開始；M7a2（C2 validate_table）先問 C2 欄位。各 PR 的內容見 C0 節「下一步 5」與給 C0 的提案訊息
+  3. 移除 worktree：scannr、followup 已移除；`dumpling-wt-c1-m2` 留到 tag 核對完
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
   - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
