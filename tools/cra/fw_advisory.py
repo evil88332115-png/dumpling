@@ -36,7 +36,7 @@ from pathlib import Path
 
 TABLE_PATH = Path(__file__).resolve().parent / "data" / "intel-microcode-releases.json"
 # 資料表檔案本身的 sha256（重新產生資料表後要一起更新；tests 會核對）。檔案被改動、截斷或換成別的內容時，比對一律 NOT_ASSESSED。
-TABLE_SHA256 = "cf18b547f047d0e9fd25363073688ea4ef53c25081d91281b121d08507a786c7"
+TABLE_SHA256 = "253aab94c3c2a14eda457b1ee4a7a1490e00d4e854622cd9f05e77a07904e271"
 SCHEMA = "dumpling-intel-microcode-releases/1"
 MAX_TABLE = 4 << 20
 MATCHES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")
@@ -86,7 +86,8 @@ class Table:
                     self.events.setdefault((row[0], row[1]), []).append((i, kind, row[2], row[3], r["tag"]))
                     self.fms_pis.setdefault(row[0], set()).add(row[1])
         self.prose = {}                         # (fms, pi) -> [(rule, ref_revision)]
-        self.prose_gaps = {}                    # (fms, pi) -> [(rule, why)]
+        self.prose_gaps = {}                    # (fms, pi) -> [(rule, why)]（歧義、沒有基準）
+        self.prose_unlisted = {}                # (fms, pi) -> [(rule, why)]（同 F-M-S 的其他 platform，原文沒提到）
         for rule in doc.get("prose_rules", []):
             for fms, pi, ref, _how in rule["keys"]:
                 self.prose.setdefault((fms, pi), []).append((rule, int(ref, 16)))
@@ -94,6 +95,9 @@ class Table:
                 if "key" in g:
                     f, p = g["key"].split("/")
                     self.prose_gaps.setdefault((f, p), []).append((rule, g["why"]))
+            for g in rule.get("unlisted", []):
+                f, p = g["key"].split("/")
+                self.prose_unlisted.setdefault((f, p), []).append((rule, g["why"]))
 
     def label(self):
         s = self.source
@@ -157,7 +161,11 @@ def validate(doc):
             if (not isinstance(k, list) or len(k) != 4 or not all(isinstance(x, str) for x in k)
                     or not re.fullmatch(r"[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}", k[0]) or not re.fullmatch(r"[0-9a-f]{2}", k[1]) or not _hex8(k[2])):
                 bad("prose_rules key")
-        for g in rule["gaps"]:
+        if not isinstance(rule.get("unlisted", []), list):
+            bad("prose_rules unlisted")
+        if not all(isinstance(g, dict) and "key" in g for g in rule.get("unlisted", [])):
+            bad("prose_rules unlisted entry")
+        for g in rule["gaps"] + rule.get("unlisted", []):
             if not isinstance(g, dict) or not isinstance(g.get("why"), str) or ("key" in g and not re.fullmatch(r"[0-9a-f-]{8}/[0-9a-f]{2}", str(g["key"]))):
                 bad("prose_rules gap")
 
@@ -324,6 +332,8 @@ def match_signature(table, cpuid, platform_id, revision):
                          f"in {rule['ref_release']}; this revision is below that platform's 0x{ref:08x}, so the advisories of {rule['release']} are candidates (release level)")
     for rule, why in table.prose_gaps.get((fms, pf), []):
         notes.append(f"GAP in the hand-compiled prose mapping of {rule['release']} line {rule['line']}: {why}; nothing is inferred from it")
+    for rule, why in table.prose_unlisted.get((fms, pf), []):
+        notes.append(f"the same F-M-S has a platform in the hand-compiled prose mapping of {rule['release']} line {rule['line']}; this platform is not mentioned there ({why})")
     if not main:
         if cands.by:
             out, tags = cands.result()
@@ -370,6 +380,10 @@ def match_signature(table, cpuid, platform_id, revision):
     first, last = table.releases[-1]["tag"], table.releases[0]["tag"]
     if rev == latest:
         head = f"{sigtxt}: equals the table's latest revision for this mask ({latest_tag})"
+        higher = sorted({(int(e[3], 16), e[4]) for e in upd if int(e[3], 16) > latest})
+        if higher:                                         # 歷史上出現過更大的 New Ver，後來退回現在這個 revision
+            notes.append("an earlier release listed a larger revision for this signature and a later release went back to this one: "
+                         + ", ".join(f"0x{v:08x} ({t})" for v, t in higher))
         if not cands.by and inter:
             return {"match": "NOT_ASSESSED", "reason": "superseded-platform-mask", "candidates": [], "releases": [], **base, "notes": notes,
                     "basis": f"{head}, but " + "; ".join(sup_txt) + "; the newer entries are reference candidates, not findings; " + NO_DATA}

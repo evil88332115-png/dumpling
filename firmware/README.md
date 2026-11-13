@@ -69,6 +69,8 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `up-to-date` | 資料表沒有更新的 revision；**不代表沒有漏洞**，以 Intel 公告為準 |
 | `NOT_ASSESSED` | 資料庫沒有資料，以廠商公告為準（資料表讀不到或 sha256 不符＝GAP、CPUID／platform 不在表、revision 讀不到或比表新、已被移除、同 F-M-S 另有重疊的 platform 遮罩在之後還有更新＝`superseded-platform-mask`…） |
 
+AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：AMD-SB 的規則表還沒有做，以 AMD 公告為準。
+
 `dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。`fw-inventory.md` 每次都有「公告比對」一節；CI 摘要表有「微碼公告比對」欄。
 Intel ME 的 NVD CPE（`dumpling:cpe-*`）見 `docs/notes/c2-firmware-advisory.md`：只放前三段版本，NVD 對 CSME 的資料不完整，Grype 比不到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；family 讀不出來時由版本推定（major 11～30），比對結果待人審。
 規則、資料來源、重新產生資料表的步驟與限制都在那份 notes。

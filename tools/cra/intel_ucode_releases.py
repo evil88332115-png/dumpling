@@ -289,9 +289,9 @@ def add_text_removals(releases, found):
 # 人工對照：散文只在 release 層級說話、沒有逐列對應，這裡明確寫出我們怎麼解讀，產生器從固定來源重現（來源行號與原文對不上就失敗）。
 # 解讀：20250812 的 disclosure 區段只有這一句，表示 20250812 列的公告（INTEL-SA-01249 等）涵蓋「2025 年 5 月 release 已發佈」的這些平台的微碼。
 # 所以這些平台（Processor 欄第一個字詞是下面的代號）的 revision 比它們在 microcode-20250512 的 revision 舊時，20250812 的公告列為候選（how=prose）。
-# 對照 key 的規則（可重現）：key＝F-M-S／PI；成員＝在 20250812 以前（含）的 new／updated 列，Processor 第一個字詞（`ADL-N` 取 `ADL`）的集合與代號
-# 有交集；集合裡同時有代號以外的 → GAP（不猜）。基準 revision＝key 在 20250512 的 New Ver（兩個以上不同 → GAP）；沒有那一列就用 20250512
-# 以前最新的 New Ver；都沒有 → 只加註、不推。
+# 對照 key 的規則（可重現）：key＝F-M-S／PI；成員＝在 20250812 以前（含）的 new／updated 列裡，任何一列的 Processor 第一個字詞（`ADL-N` 取 `ADL`）屬於
+# 代號清單（保守：同一個 key 還有清單外的代號，例如 ADL-N 與 TWL，也納入）。同 F-M-S 的其他 platform 不在成員內時記進 `unlisted`（原文沒提到，只加註）。
+# 基準 revision＝key 在 20250512 的 New Ver（兩個以上不同 → GAP）；沒有那一列就用 20250512 以前最新的 New Ver；都沒有 → 只加註、不推。
 PROSE_RULES = ({
     "release": "microcode-20250812", "line": 346,
     "quote": "All ADL, RPL, SPR, EMR, MTL, ARL Microcode patches previously released in May 2025.",
@@ -334,15 +334,17 @@ def resolve_rule(rule, releases, unparsed, lines):
                     rows_ref.setdefault(key, set()).add(new)
                 elif idx > ridx:
                     hist.setdefault(key, {})[idx] = hist.setdefault(key, {}).get(idx, set()) | {new}
-    keys, gaps = [], []
+    keys, gaps, unlisted = [], [], []
+    member = {key for key, t in tokens.items() if t & codes}            # 任一列的 Processor 代號屬於清單就納入（保守：寧可多列）
+    member_fms = {key[0] for key in member}
     for key in sorted(tokens):
-        t = tokens[key]
-        if not (t & codes):
-            continue
         name = f"{key[0]}/{key[1]}"
-        if t - codes:
-            gaps.append({"key": name, "why": "processor codes of this key mix listed and unlisted codes: " + ", ".join(sorted(t))})
-        elif len(rows_ref.get(key, ())) > 1:
+        if key not in member:
+            if key[0] in member_fms:
+                unlisted.append({"key": name, "why": "another platform of the same F-M-S is in the mapping; the prose does not mention this one "
+                                                      "(processor codes: " + ", ".join(sorted(tokens[key])) + ")"})
+            continue
+        if len(rows_ref.get(key, ())) > 1:
             gaps.append({"key": name, "why": "microcode-20250512 lists different new revisions for this key"})
         elif key in rows_ref:
             keys.append([key[0], key[1], next(iter(rows_ref[key])), "row-in-ref-release"])
@@ -358,7 +360,7 @@ def resolve_rule(rule, releases, unparsed, lines):
         if not any(c in t for t in tokens.values()):
             gaps.append({"code": c, "why": "no table key has this processor code"})
     return {"release": rule["release"], "line": n, "quote": rule["quote"], "interpretation": rule["interpretation"],
-            "codes": list(rule["codes"]), "ref_release": rule["ref_release"], "keys": keys, "gaps": gaps}
+            "codes": list(rule["codes"]), "ref_release": rule["ref_release"], "keys": keys, "gaps": gaps, "unlisted": unlisted}
 
 
 def check_order(releases):

@@ -11,7 +11,7 @@
   "retrieved": "2026-11-13"
  },
  "generator": "tools/cra/intel_ucode_releases.py",
- "generated_at": "2026-11-13T14:14:26Z",
+ "generated_at": "2026-11-13T14:52:41Z",
  "row_format": ["f-m-s", "platform-id-mask", "old-revision", "new-revision", "processor", "stepping"],
  "notes": ["releases 由新到舊（照來源順序）；date 取自 tag 名稱（來源標題沒有日期）。", "security 是 release 層級的公告清單：來源沒有逐 CPUID 列出公告。", "new／updated 是各 F-M-S／platform id 的 revision 變化；removed 是移除（沒有 New Ver）；disclosed 是「New Disclosures Updated in Prior Releases」表，不當成新 revision。", "資料表只涵蓋來源列出的 release；來源的 releases 數與最舊 tag 見 coverage。", "GitHub 上另有 tag microcode-20230516、microcode-20230516a、microcode-20230613、microcode-20260210-rev1，來源沒有它們的段落，資料表不涵蓋。", "來源沒有明確授權：只取事實性欄位；看不懂或不是公告的段落只記行號與分類，不抄原文。prose_rules 是人工對照（最多引一句原文），見產生器的 PROSE_RULES。"],
  "coverage": {
@@ -82,6 +82,7 @@
     ["06-ba-03", "e0", "00004128", "row-in-ref-release"],
     ["06-be-00", "01", "00000010", "latest-before-ref-release"],
     ["06-be-00", "11", "0000001a", "latest-before-ref-release"],
+    ["06-be-00", "19", "0000001d", "row-in-ref-release"],
     ["06-bf-02", "03", "00000022", "latest-before-ref-release"],
     ["06-bf-02", "07", "0000003a", "row-in-ref-release"],
     ["06-bf-05", "03", "00000022", "latest-before-ref-release"],
@@ -91,10 +92,11 @@
     ["06-cf-01", "87", "21000291", "latest-before-ref-release"],
     ["06-cf-02", "87", "210002a9", "row-in-ref-release"]
    ],
-   "gaps": [
+   "gaps": [],
+   "unlisted": [
     {
-     "key": "06-be-00/19",
-     "why": "processor codes of this key mix listed and unlisted codes: ADL, TWL"
+     "key": "06-9a-04/40",
+     "why": "another platform of the same F-M-S is in the mapping; the prose does not mention this one (processor codes: AZB)"
     }
    ]
   }

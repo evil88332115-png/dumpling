@@ -110,19 +110,21 @@ def test_cpe_family_rules_and_basis(tmp_path):
     # 版本清單沒有、映像分不出 family：major 16 ≥ 11，推定為 CSME（NVD 的 part o 只有 CSME 有 11 以上的版本），推定寫在 basis
     me = next(c for c in sbom(tmp_path, img) if c["name"] == "Intel CSE firmware")
     assert me["version"] == "16.1.30.2307" and me["cpe"] == CSME_CPE_16
-    basis = props(me, "dumpling:cpe-basis")[0]
-    assert "inferred from the version" in basis and "major 16 is in 11..30" in basis and "dropped" in basis and "needs human review" in basis
-    assert "TXE" in basis and "SPS" in basis and "below 11" in basis and "AMT" in basis and "different product" in basis     # NVD 上的依據照實寫
+    assert props(me, "dumpling:cpe-basis") == ["inferred"]                                                                   # 值固定是 listed／inferred
+    note = props(me, "dumpling:cpe-basis-note")[0]
+    assert "inferred from the version" in note and "major 16 is in 11..30" in note and "dropped" in note and "needs human review" in note
+    assert "TXE" in note and "SPS" in note and "below 11" in note and "AMT" in note and "different product" in note     # NVD 上的依據照實寫
     assert "temporary Dependency-Track" in props(me, "dumpling:cpe-note")[0]
     assert props(me, "dumpling:cpe-note") == [xf.CPE_NOTE] and not props(me, "dumpling:cpe-gap")
     # 清單寫 TXE：不同的 product → 不帶 CPE，寫 gap
     m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,TXE,16.1.30.2307,,Intel,")
     me = next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")
-    assert "cpe" not in me and "TXE" in props(me, "dumpling:cpe-gap")[0] and not props(me, "dumpling:cpe-basis")
+    assert "cpe" not in me and "TXE" in props(me, "dumpling:cpe-gap")[0] and not props(me, "dumpling:cpe-basis") and not props(me, "dumpling:cpe-basis-note")
     # 清單寫 CSME：照清單
     m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,CSME,16.1.30.2307,,Intel,")
     me = next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")
-    assert me["cpe"] == CSME_CPE_16 and props(me, "dumpling:cpe-basis")[0].startswith("family CSME declared in the version list")
+    assert me["cpe"] == CSME_CPE_16 and props(me, "dumpling:cpe-basis") == ["listed"]
+    assert props(me, "dumpling:cpe-basis-note")[0].startswith("family CSME is declared in the version list") and "inferred" not in props(me, "dumpling:cpe-basis-note")[0]
     assert all("cpe" not in c for c in sbom(tmp_path, img, m) if c is not me and not c["name"].startswith("Intel CSE"))
     assert props(me, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no data in the database" in props(me, "dumpling:advisory-basis")[0]
 

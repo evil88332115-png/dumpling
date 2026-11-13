@@ -76,7 +76,9 @@ GitHub 上共 49 個 tag，release notes 只有 45 段。沒有段落的是 `mic
 所以這些平台的 revision 比它們在 `microcode-20250512` 的 revision 舊時，把 20250812 的公告列為候選（`how=prose`）。
 對照 key 的規則（產生器可重現）：成員 ＝ 在 20250812 以前（含）的 new／updated 列、Processor 欄第一個字詞（`ADL-N` 取 `ADL`）屬於 ADL／RPL／SPR／EMR／MTL／ARL 的 key；
 基準 revision ＝該 key 在 20250512 的 New Ver（有兩個以上不同 → GAP）；沒有那一列就用 20250512 以前最新的 New Ver；都沒有 → GAP。
-一個 key 的 Processor 字詞同時有代號內與代號外的（`06-be-00/19`：ADL-N 與 TWL）→ GAP，只加註、不推。結果：29 個 key 有基準、1 個 GAP。
+一個 key 的任何一列（≤ 20250812）的 Processor 字詞屬於代號清單就納入（保守；多列可以）：`06-be-00/19` 的 Processor 欄是 ADL-N 加 TWL，納入，基準是 20250512 的 0x1d。
+同 F-M-S 的其他 platform、但原文沒提到的 key 不納入，記進 `unlisted`、比對時加註：`06-9a-04/40`（AZB，與 ADL 的 06-9a-04/80 同 F-M-S）。結果：30 個 key 有基準、0 個 GAP、1 個 `unlisted`。
+基準有歧義（兩個不同的 New Ver）或沒有任何基準的 key 才是 GAP（只加註、不推）；清單的代號沒有任何 key 時也記 GAP。
 SBOM 的 revision 不低於基準時不加 20250812 的公告。
 
 ## 比對規則（`fw_advisory.py`）
@@ -94,12 +96,12 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
    - b. **「New Disclosures Updated in Prior Releases」表**：這個鍵在揭露表有一列，而且 revision ≤ 那一列 Old／New 中有值的較大者 → 揭露那個 release 的公告列為候選（`how=disclosed`）。
      對原文的判斷：這個表列的是「先前 release 已發佈、現在才揭露有公告涵蓋」的微碼（20241112 的 ICL-D 06-6c-01/10 Old 0x010002b0、ICX-SP 06-6a-06/87 Old 0x0d0003e7，New 是 N/A；20250211 的 CFL-H/S 06-9e-0c/22 0xf6→0xf8）；
      Old／New 的確切語意原文沒有說明（N/A 沒有對應的新 revision），所以用保守規則：不高於上界的 revision 都列，寧可多列、不少列。revision 等於最新、但不高於揭露上界時也是 affected-candidate（例如 06-9e-0c/22 的 0xf8）。
-   - c. **人工對照的散文**：鍵在 `prose_rules` 裡、revision 低於基準 → 20250812 的公告（`how=prose`，basis 寫明來源是散文、對照由人整理）。對照的 GAP 只加註。
+   - c. **人工對照的散文**：鍵在 `prose_rules` 裡、revision 低於基準 → 20250812 的公告（`how=prose`，basis 寫明來源是散文、對照由人整理）。對照的 GAP 與 `unlisted` 只加註。
    - d. **被取代的 platform 遮罩**：同一個 F-M-S 另有遮罩與 SBOM 的遮罩有交集（`a & b ≠ 0`），而且那個鍵在 SBOM 這個鍵最後一次更新之後的 release 還有 new／updated → 那些 release 的公告（`how=superseded-mask`）。
 7. SBOM revision ＝最新：沒有 6.b 候選、而且 6.d 成立 → **NOT_ASSESSED**（`superseded-platform-mask`；basis 列出較新的遮罩、它的最新 revision、之後各 release 的公告當參考候選，不是發現）。
    例（資料表 `microcode-20261110`）：06-97-02/03 的最新 0x22（20220809）而 06-97-02/07 到 20260210 還在更新（0x03 ⊂ 0x07）；06-be-00/01 與 /11 對 /19；06-cc-02/90 對 /94（0x90 ⊂ 0x94，核對過）；06-b7-01/32 對 /36（0x32 ⊂ 0x36）。
    遮罩互不相交（如 06-ba-02/07 對 /e0：0x07 & 0xe0 ＝ 0）→ 結果不變，加註「同 F-M-S 的其他 platform 在 <release> 之後仍有更新」。沒有交集的新更新時 → **up-to-date**：「以資料表 <tag> 為準沒有更新的 revision；不代表沒有漏洞，以 Intel 公告為準」（不寫成「不受影響」）。
-   資料表所有鍵以最新 revision 逐一代入檢查：9 個鍵是 `superseded-platform-mask`、3 個是 `removed`、2 個是 affected-candidate（06-9e-0c/22 因揭露表、06-3e-04/ed 因曾被 revert 的 release）、其餘 up-to-date。
+   資料表所有鍵以最新 revision 逐一代入檢查：9 個鍵是 `superseded-platform-mask`、3 個是 `removed`、1 個是 affected-candidate（06-9e-0c/22，因揭露表）、其餘 up-to-date。06-3e-04/ed 的 0x42e 等於最新（20190514 列過 0x42f，20190514a 退回 0x42e），結果是 up-to-date，並加一則 note 說明這段歷史。
 8. SBOM revision 低於最新：有任何候選公告 → **affected-candidate**；沒有 → **older-no-sa**（有較新的 revision、但沒有列公告；不是「沒有漏洞」）。
 9. 有 extended signature：每個 signature 各算一次；任何一個 affected-candidate → affected-candidate；否則任何一個 NOT_ASSESSED → NOT_ASSESSED（有一個比不到就不能寫 up-to-date）；否則有 older-no-sa → older-no-sa；否則 up-to-date；候選取聯集。
 10. 候選的 basis 一定寫「公告在來源裡是 release 層級，不是逐 CPUID；候選不一定影響這個 CPUID；不是確定的發現」。NOT_ASSESSED 的 basis 一律以「資料庫沒有資料，以廠商公告為準」收尾（SBOM 內是英文 `no data in the database; the vendor advisory (Intel INTEL-SA) is authoritative`）。
@@ -128,7 +130,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 - 同為 `o` 的其他韌體是不同的 product：TXE ＝ `trusted_execution_engine_firmware`（版本 3.0～4.0.x）、SPS ＝ `server_platform_services_firmware`（3.0.6.267.4～5.00.04.012，版本字串格式很雜）。`o` 類 product 裡 major 版本 11 以上只有 CSME。
 - AMT（`active_management_technology_firmware`，part o）是另一個 product，版本也有 11.x～14.5.x（89 筆，2026-11-13）；CSME 的 CPE 比不到 AMT 的 CVE 設定。所以不能說「11 以上只有 CSME」，只能說 TXE、SPS 的版本都低於 11。
 - **轉換**：CPE 版本只放 `$MN2` 版本的前三段（`14.0.47.1558` → `14.0.47`），build 號丟掉（NVD 沒有、範圍比較也只用三段）；元件的 `version` 維持四段。三段以下或非純數字的版本不帶 CPE。
-- **family**：映像分不出 CSME／TXE／SPS（`sca-center:me-family` 仍寫 `unknown`）。帶 CPE 的條件：版本清單的 me 列寫明 `CSME`（不看版本範圍）；或映像沒有清單、major 版本在 **11～30** → 由版本推定為 CSME（`dumpling:cpe-basis` 寫「inferred from the version」與依據，報告寫「family 是由版本推定的，比對結果待人審」）。
+- **family**：映像分不出 CSME／TXE／SPS（`sca-center:me-family` 仍寫 `unknown`）。帶 CPE 的條件：版本清單的 me 列寫明 `CSME`（不看版本範圍）；或映像沒有清單、major 版本在 **11～30** → 由版本推定為 CSME（`dumpling:cpe-basis` 的值固定是 `listed` 或 `inferred`，說明文字在 `dumpling:cpe-basis-note`；報告寫「family 是由版本推定的，比對結果待人審」）。
   依據：NVD 上 TXE（`trusted_execution_engine_firmware`）與 SPS（`server_platform_services_firmware`）的版本都低於 11，AMT 是另一個 product 不會被這個 CPE 比到。
   上限 30 是判斷：CSME 大約每年加一個 major（目前最高約 20），`$MN2` 裡雜散的欄位值是幾百到幾萬，超過 30 就不是版本欄位。清單寫 ME／TXE／SPS → 不帶；major < 11 或 > 30 且 family 不明、少於三段、非數字 → 不帶，`dumpling:cpe-gap` 寫原因（GAP）。
   這個推定由 C0 的決定 D-051 採用；要退回「一律不推定」，把 `csme_cpe_info` 的 11～30 那個分支拿掉即可。
@@ -145,7 +147,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 5. `python3 -I tools/cra/intel_ucode_releases.py verify --source <檔案> --table tools/cra/data/intel-microcode-releases.json`：重新解析固定來源，與資料表逐項比對（`generated_at` 不比），確認表可由來源重現。
 6. 跑 `tests/run.d/c2-x86-firmware.sh`；對公開樣本重跑 `pipeline/firmware-bios.sh`，抽幾筆對原始 `releasenote.md` 人工核對。
 
-## 公開樣本的結果（2026-11-13，資料表 `microcode-20261110`）
+## 公開樣本的結果（資料表 `microcode-20261110`，四個公開樣本：Protectli、NUC11、Novacustom、B550M）
 
 | 樣本 | CPUID／platform／revision | F-M-S／PI | 結果 | 資料表最新 |
 |---|---|---|---|---|
@@ -156,10 +158,9 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 | 同上 | 000806C1／0x80／0xBE | 06-8c-01／80 | up-to-date（不代表沒有漏洞） | 0xbe（20260210） |
 | Novacustom（V540TU-MTL v1.0.1） | 000A06A4／0xE6／0x25 | 06-aa-04／e6 | affected-candidate：20260210、20260811、20260925，10 個 INTEL-SA | 0x2b（20260925） |
 
-（審查後的修正：揭露表、散文對照、被取代的遮罩三項加進規則，三個樣本重跑結果與上表相同：它們的鍵都不在揭露表與散文對照，也沒有與較新的遮罩重疊的鍵。）
-
 ME：Protectli 是 `14.0.47.1558`，family 讀不出來、major 14 在 11～30 → 由版本推定 CSME（待人審），CPE `cpe:2.3:o:intel:converged_security_management_engine_firmware:14.0.47:*:*:*:*:*:*:*`（basis 與 NVD 不完整的 note 都在元件上）。
-NUC11 的檔案沒有 flash descriptor／`$FPT`／FTPR（ME 讀不到）、Novacustom 的 ME 版本 unknown（`$MN2` 候選不確定屬於哪個分割區）→ 都沒有 CPE，報告寫明原因。
+Novacustom 的 ME 是 `18.0.10.2285`（intel_cse_layout 讀到），major 18 在 11～30，同樣由版本推定 CSME，CPE `…:18.0.10:*:*:*:*:*:*:*`。NUC11 的檔案沒有 flash descriptor／`$FPT`／FTPR（ME 讀不到）→ 沒有 CPE，報告寫明原因。
+B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項、AGESA 1 個都已解析，每個元件有 `dumpling:advisory-match=NOT_ASSESSED`（AMD-SB 的規則表還沒有做，以 AMD 公告為準）。
 
 人工核對（對 commit `d71fe4e2…` 的 `releasenote.md`，行號是該檔的行號）：
 - 000806EC／0x94／0xF8：`06-8e-0c/94` 在 963–966 行（20230808，`000000f6 → 000000f8`，Purpose 897–899 行：INTEL-SA-00828／00836／00837）＝0xF8 是那個 release 的 New Ver；
@@ -174,5 +175,5 @@ NUC11 的檔案沒有 flash descriptor／`$FPT`／FTPR（ME 讀不到）、Novac
 - `up-to-date`、`older-no-sa` 都不代表沒有漏洞：資料表的「最新」是 Intel Linux 套件在 `microcode-20261110` 為止的最新；BIOS 專用的微碼不在裡面。
 - 不做 CPUID 的 platform 子集推論（只在「同 F-M-S 的遮罩有交集且較新的鍵還有更新」時降成 NOT_ASSESSED 或加候選）、不猜被 revert／移除的 revision；New Disclosures 表只用保守的上界規則（見規則 6.b），不判斷它的確切語意。
 - 20250812 的散文對照由人整理，GAP 的鍵只加註。
-- 微碼只比 Intel；AMD 微碼沒有解析（原本就是 GAP）。ME／TXE／SPS 的公告沒有機器可讀資料，NVIDIA vBIOS 的公告比對這一版沒有做。
+- 微碼只比 Intel。AMD 的微碼、PSP 韌體、AGESA 已由 `amd_psp.py` 解析，每個元件有 `advisory-match=NOT_ASSESSED`（資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。ME／TXE／SPS 的公告沒有機器可讀資料，NVIDIA vBIOS 的公告比對這一版沒有做。
 - 資料表不隨 CI 更新：它會變舊。`microcode-20261110` 之後的 release 不在裡面（比表新的 revision 會是 `revision-newer-than-table`，不會被當成 up-to-date）。

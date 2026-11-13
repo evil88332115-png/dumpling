@@ -1570,7 +1570,8 @@ ASSESS_NOTES = {
 # 版本轉換：$MN2 的版本是 major.minor.hotfix.build 四段；NVD 只有前三段，所以 CPE 只放前三段（14.0.47.1558 → 14.0.47），元件的 version 維持四段。
 # family：映像分不出來。版本清單的 me 列寫明 CSME → 帶；寫 ME／TXE／SPS → 不帶；映像沒有清單時，major 版本在 11～30 之間推定為 CSME
 # （TXE、SPS 的版本都低於 11；上限 30 是我們的判斷：CSME 大約每年加一個 major，目前最高約 20；$MN2 裡雜散的欄位值會有幾百到幾萬，超過 30 就不是這個欄位）。
-# 推定寫在 dumpling:cpe-basis，比對結果待人審；11 以下或 30 以上分不出來 → 不帶、標 GAP。
+# dumpling:cpe-basis 的值固定是 listed（版本清單寫明）或 inferred（由版本推定，比對結果待人審），說明在 dumpling:cpe-basis-note；
+# major 小於 11 或大於 30（11 與 30 本身都帶）分不出來或不合理 → 不帶、標 GAP（dumpling:cpe-gap）。
 # microcode、NVIDIA vBIOS 沒有標準的 purl／CPE，不自己發明。
 CSME_CPE = "cpe:2.3:o:intel:converged_security_management_engine_firmware:{}:*:*:*:*:*:*:*"
 CSME_MIN_MAJOR = 11
@@ -1579,11 +1580,11 @@ CPE_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[0-9]+)?")
 CPE_NOTE = ("NVD CPE and version-range data for Intel CSME is incomplete (the NVD CPE dictionary stops at CSME 14.5.11 and the CVE "
             "configurations at CVE-2022-38102); no Grype match does not mean there are no vulnerabilities (the temporary Dependency-Track "
             "has the NVD source disabled, so a component with only a CPE is not matched there); the Intel advisories (INTEL-SA) are authoritative")
-CPE_PROPS = ("dumpling:cpe-basis", "dumpling:cpe-note", "dumpling:cpe-gap")
+CPE_PROPS = ("dumpling:cpe-basis", "dumpling:cpe-basis-note", "dumpling:cpe-note", "dumpling:cpe-gap")
 
 
 def csme_cpe_info(me):
-    """ME 的 NVD CPE 判斷 → (cpe 或 None, basis 或 None, gap 原因或 None)。
+    """ME 的 NVD CPE 判斷 → (cpe 或 None, basis（listed／inferred）或 None, gap 原因或 None)。
     要有三段以上的純數字版本；family 要是 CSME（版本清單），或 major 在 11～30（推定）；其他一律不帶並寫 gap 原因。"""
     if not me:
         return None, None, None
@@ -1593,15 +1594,12 @@ def csme_cpe_info(me):
     major, minor, hotfix = (int(x) for x in m.groups())
     fam = me.get("family")
     ver = f"{major}.{minor}.{hotfix}"
-    drop = "" if m.group(0) == ver else f"; the build number is dropped (NVD CSME versions are major.minor.hotfix): {me['version']} -> {ver}"
     if fam == "CSME":
-        return CSME_CPE.format(ver), "family CSME declared in the version list" + drop, None
+        return CSME_CPE.format(ver), "listed", None
     if fam:
         return None, None, f"family {fam} (version list) is not CSME; NVD uses a different product for it, no CPE"
     if CSME_MIN_MAJOR <= major <= CSME_MAX_MAJOR:
-        return (CSME_CPE.format(ver), f"family is not readable from the image and is inferred from the version: major {major} is in {CSME_MIN_MAJOR}..{CSME_MAX_MAJOR} "
-                "(on NVD the TXE trusted_execution_engine_firmware and SPS server_platform_services_firmware versions are all below 11; "
-                "AMT active_management_technology_firmware is a different product that this CPE does not match); the match result needs human review" + drop, None)
+        return CSME_CPE.format(ver), "inferred", None
     if major > CSME_MAX_MAJOR:
         return None, None, f"major version {major} is above {CSME_MAX_MAJOR}, which is not plausible for a CSME version field; no CPE"
     return None, None, f"family not readable from the image and major version {major} < {CSME_MIN_MAJOR} could be ME, TXE, SPS or CSME; no CPE"
@@ -1612,11 +1610,23 @@ def csme_cpe(me):
     return csme_cpe_info(me)[0]
 
 
+def csme_basis_note(me, basis):
+    """dumpling:cpe-basis 的說明文字（值本身只有 listed／inferred）。"""
+    m = CPE_VERSION.fullmatch(me["version"])
+    ver = f"{int(m.group(1))}.{int(m.group(2))}.{int(m.group(3))}"
+    drop = "" if m.group(0) == ver else f"; the build number is dropped (NVD CSME versions are major.minor.hotfix): {me['version']} -> {ver}"
+    if basis == "listed":
+        return "family CSME is declared in the version list" + drop
+    return (f"family is not readable from the image and is inferred from the version: major {m.group(1)} is in {CSME_MIN_MAJOR}..{CSME_MAX_MAJOR} "
+            "(on NVD the TXE trusted_execution_engine_firmware and SPS server_platform_services_firmware versions are all below 11; "
+            "AMT active_management_technology_firmware is a different product that this CPE does not match); the match result needs human review" + drop)
+
+
 def cpe_props(me):
-    """ME 元件的 CPE 相關 property：有 CPE → basis＋note；沒有 → gap 原因。"""
+    """ME 元件的 CPE 相關 property：有 CPE → basis（listed／inferred）、basis-note、note；沒有 → gap 原因。"""
     cpe, basis, gap = csme_cpe_info(me)
     if cpe:
-        return [prop("dumpling:cpe-basis", basis), prop("dumpling:cpe-note", CPE_NOTE)]
+        return [prop("dumpling:cpe-basis", basis), prop("dumpling:cpe-basis-note", csme_basis_note(me, basis)), prop("dumpling:cpe-note", CPE_NOTE)]
     return [prop("dumpling:cpe-gap", gap)] if gap else []
 
 
@@ -1779,6 +1789,7 @@ def amd_components(b, img, comps, sub):
                             prop("sca-center:size", p["size"]), *[prop("sca-center:found-in", amd_where(x)) for x in p["locations"]]]}
         if p["sha256"]:
             c["hashes"] = hlist(p)
+        c["properties"] += amd_advisory_props()
         comps.append(assessed(c, "amd"))
         sub.append(ref)
     for m in a["microcode"]:
@@ -1792,6 +1803,7 @@ def amd_components(b, img, comps, sub):
                             *[prop("sca-center:found-in", amd_where(x)) for x in m["locations"]]]}
         if m["sha256"]:
             c["hashes"] = hlist(m)
+        c["properties"] += amd_advisory_props()
         comps.append(assessed(c, "amd"))
         sub.append(ref)
     ag = a["agesa"]
@@ -1809,6 +1821,7 @@ def amd_components(b, img, comps, sub):
         else:
             c["version"] = g["value"]
             c["properties"].insert(0, prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"))
+        c["properties"] += amd_advisory_props()
         comps.append(assessed(c, "amd"))
         sub.append(ref)
 
@@ -1831,6 +1844,15 @@ ME_ADVISORY_BASIS = ("Intel CSME/TXE/SPS advisories (INTEL-SA) are not machine-m
 def me_advisory_props():
     """ME 元件的公告比對：沒有機器可讀的 Intel CSME 公告資料 → NOT_ASSESSED（不是沒有漏洞）。"""
     return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", ME_ADVISORY_BASIS)]
+
+
+AMD_ADVISORY_BASIS = ("AMD security bulletins (AMD-SB) are not matched by this tool: the AMD-SB rule table has not been built; "
+                      "no data in the database; the vendor advisory (AMD-SB) is authoritative")
+
+
+def amd_advisory_props():
+    """AMD 的微碼、PSP 韌體、AGESA 元件的公告比對：AMD-SB 的規則表還沒有，NOT_ASSESSED（不是沒有漏洞）。"""
+    return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", AMD_ADVISORY_BASIS)]
 
 
 def advisory_props(res):
@@ -2442,7 +2464,7 @@ def advisory_markdown(inv):
     else:
         L.append(f"- 資料表：**GAP（不能用）**：{e(adv['gap'])}。所有微碼都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
     c = adv["counts"]
-    L.append(f"- 微碼 {adv['microcodes']} 份：" + ("、".join(f"{k} {c[k]}" for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c) or "無"))
+    L.append(f"- Intel 微碼 {adv['microcodes']} 份：" + ("、".join(f"{k} {c[k]}" for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c) or "無"))
     for b in inv["bios"]:
         L += ["", f"### {e(fname(b['file']))}", ""]
         if b["microcode"]:
@@ -2462,14 +2484,20 @@ def advisory_markdown(inv):
                     L.append(f"- `{u['cpuid']}/{u['platform_id']}/{u['revision']}`：{e(r['basis'])}")
                     L += [f"  - {e(n)}" for n in r.get("notes", [])]
         elif b["platform"] == "amd":
-            L.append("微碼：AMD 平台的微碼沒有解析（GAP），沒有比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。")
+            a = b.get("amd")
+            if a:
+                L.append(f"AMD 平台：AMD 微碼已解析 {len(a['microcode'])} 份、PSP 韌體 {len(a['psp_firmware'])} 項、AGESA 字串 {len(a['agesa']['values'])} 個，"
+                         "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。映像裡沒有 Intel 微碼。")
+            else:
+                L.append("AMD 平台：PSP 目錄解析沒有執行（GAP，原因見映像元件的 sca-center:gap），AMD 微碼、PSP 韌體、AGESA 都沒有列出，"
+                         "沒有比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）。")
         else:
             L.append("微碼：映像裡沒有找到 Intel microcode，沒有可比對的項目。")
         m = b["me"]
         cpe, _basis, gap = csme_cpe_info(m)
         if m:
             L += ["", f"- ME {e(m['version'])}：{ADV_TEXT['NOT_ASSESSED']}。Intel CSME／TXE／SPS 的公告沒有機器可讀的資料表。"
-                  + (f"SBOM 帶 NVD 的 CPE `{e(cpe)}`，讓 Grype 比對（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整，比不到不代表沒有漏洞，以 Intel 公告（INTEL-SA）為準。{'family 是由版本推定的（映像讀不出來），比對結果待人審。' if 'inferred' in (_basis or '') else ''}"
+                  + (f"SBOM 帶 NVD 的 CPE `{e(cpe)}`，讓 Grype 比對（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整，比不到不代表沒有漏洞，以 Intel 公告（INTEL-SA）為準。{'family 是由版本推定的（映像讀不出來），比對結果待人審。' if _basis == 'inferred' else ''}"
                      if cpe else f"沒有 CPE（GAP）：{e(gap)}。")]
         else:
             L += ["", f"- ME：{e(b['me_note'] or '沒有讀到 ME 版本')}；沒有 ME 版本可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），SBOM 不帶 CPE。"]
