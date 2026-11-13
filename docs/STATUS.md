@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 20:59 +0800（C1）
+最後更新：2026-11-13 21:00 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,7 +12,7 @@
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：852b6d3 三個 run 綠、draft 核對 OK；另修 078710d（UEFI／OP-TEE Grype 比對移到 sca-scan 之後，CI 新機器原本沒有資料庫 → 完整報告少 11 列）。新驗收 run：43429199382、43429215851、tests 43429232513。C0 已請 C1 確認 import 失敗時 B-uefi-grype／B-tee-grype 仍記 NOT_RUN、不省略。之後 C1 核對 draft、獨立驗證，再開 M2 PR
+  - C1（第二台）：852b6d3 三個 run 綠、draft 核對 OK；另修 078710d（UEFI／OP-TEE Grype 比對移到 sca-scan 之後，CI 新機器原本沒有資料庫 → 完整報告少 11 列）。新驗收 run：43429199382、43429215851、tests 43429232513。C0 審查後 C1 補 c08de27（import 失敗時 B-uefi-grype／B-tee-grype 仍記 NOT_RUN，只改失敗那條路，C0 已看 diff 確認），tests 43429786314；release draft 沿用 078710d 驗收、不重跑（PR 說明會註明）。之後 C1 核對 draft、獨立驗證，再開 M2 PR
   - C2：**搬家準備完成、已停下**（C2 節 f48ffb2）。D-042 CSME 完成（wp3/csme-new 61e8ef7）；AMD（wp3/amd-psp ebac3e9）應修已修、**還沒複驗**；新 C2 先照 D-047 改歧義規則（需校驗佐證）與拿掉 sys._getframe，再複驗，兩半合成一個 PR（開之前請 sca-center 用私有檔本機驗）；D-043 接在後面；supplier-normalize（8a960c0）等 M2；公開樣本在第二台要照各分支 firmware.yml 重新下載
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：三平台差異核對完成、標準答案定案（403fae7；rpi 90、rock 99、ai-nas 76 項，最後一輪 run rpi 43419144284、rock 43413770363、ai-nas 43416974360，併入 61d7c6f）；驗證代理只拿原始資料。#27 已由 C0 決定（D-049：lgpio 維持 os）。下一步：M2 合併後併 main 重跑，核對 rock／rpi 的 -os 項目（852b6d3 影響），再開 M6 PR
