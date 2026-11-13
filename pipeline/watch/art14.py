@@ -522,7 +522,7 @@ def cmd_countdown(api, repo, drill, now, result):
     if errors:
         raise Fail("；".join(errors))
     if not cases:
-        return "沒有可處理的演練案件，立刻結束" + (f"（略過 {len(skipped)} 個不可信的）" if skipped else "")
+        return "沒有可處理的演練案件，立刻結束" + (f"（略過 {len(skipped)} 個：" + "；".join(f"#{n} {why}" for n, why in skipped[:5]) + "）" if skipped else "")
     return f"更新 {len(out)} 個演練案件的倒數"
 
 

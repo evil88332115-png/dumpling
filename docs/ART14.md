@@ -96,7 +96,12 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 
 每一步以 `--result` 輸出 JSON，下一步用 `check` 比對。**新 workflow 不在預設分支時 `gh workflow run` 會 404**：合併前無法在分支上觸發，CI 驗證靠單元測試；合併後再手動跑 `action=drill`（M8 合併後的待辦）。
 
-## 9. 還沒驗證的地方
+## 9. 在 GitHub 上實跑的結果與還沒驗證的地方
+
+- 2026-11-13：合併前用暫時的分支 push 觸發（只限 wp2/art14，跑完已拿掉）在 GitHub 上實跑 `action=drill` 六步：run 43369037768（40f3fb5）、
+  43369266378（fa42238）都綠。演練 Issue #37、#38：開 → 時鐘未起算 → 填合成知悉時間 → 24h／72h 期限正確、同一則倒數留言被編輯 → 不重複開 → 關閉並換成 `art14-drill-done`。
+- 實跑才發現的：依標籤列 Issue 剛建立／剛關閉後有索引延遲（第一次 run 43368765916 在步驟 2 列不到剛開的 #36 而失敗、失敗時的清理也列不到）。
+  演練步驟改成重試（每 10 秒、最多 2 分鐘），countdown 跳過列表裡已關閉的 Issue。每小時的排程不受影響（Issue 早就開好了）。
 
 - 用 `GITHUB_TOKEN` 建立的 Issue：**實測 `author_association` 是 `NONE`**（2026-11-13，每日監控演練開的 Issue #21 與它的留言：`user.login=github-actions[bot]`、`type=Bot`、`author_association=NONE`）。
   所以只看 OWNER／MEMBER／COLLABORATOR 會把自己的演練 Issue 略過；程式另外接受 `user.login == github-actions[bot]` 且 `type == Bot`（必要，不能拿掉）。
