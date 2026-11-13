@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:15 +0800（C4）
+最後更新：2026-11-14 00:17 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -270,7 +270,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M2 已合併（main cc7d101）**。**M5 PR #47 已開**（wp5/gitlab ac2ee95；CI 綠 43454886063；獨立驗證兩輪：第一輪 6 項應修已修、第二輪 PASS；等 C0 派驗證）。T-14（scan.sh 改連既有 DT 的選項）C0 決定排給 C1、M7 之後。監控 PR：`wp2/watch-m2` 02681bc（已併 main、mirrors.sh、核心 CVE 舊資料頂替的 ATTENTION、actions/cache）；演練綠 43450669290、tests 綠（重跑）；real dry_run 第一次卡在核心 CVE clone（mirror 3 次 × kernel-cve.sh 3 次 × 900 秒）→ 已改成 mirror 只試 1 次、log 看得到進度、compute 150 分鐘，重跑中 → 綠了就開 PR。本機用真實 draft Release 跑完整比對：可建基準（OK）、70 筆已遭利用、193 筆廠商層級、GAP 0、狀態 10.5K 字元
+- 目前在做：**M5 PR #47**：C0 的獨立驗證（ac2ee95）不通過 1 項（對照表漏 dt-smoke、watch 演練、workflow_dispatch 輸入）＋3 項建議 → 已修在 7a15b39，CI 綠（43459391758），等 C0 看 diff 合併。**監控 PR #49 已開**（wp2/watch-m2 02681bc；演練 43450669290、real dry_run 43457313091、tests 43457318568 都綠；real 第一次卡在核心 CVE clone → mirror 只試 1 次、compute 150 分鐘）。T-14（scan.sh 改連既有 DT）C0 排給 C1、M7 之後
 - 架構（已合併）：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；D-040（只開 KEV／廠商層級、超過 20 個併成彙總、示範專案＋demo、排程 real 預設 dry_run、不開 art14）
 - 分支／PR／commit：
   - PR #32 已合併（main 26a6377），worktree 已移除
