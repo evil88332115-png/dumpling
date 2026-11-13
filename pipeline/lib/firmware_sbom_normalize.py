@@ -154,12 +154,14 @@ def _iter_components(doc, unnorm):
 def normalize(doc, input_sha256):
     """就地正規化 doc（CycloneDX JSON 的 dict），回傳紀錄 dict。先完整規劃、通過才套用；規劃中出任何例外都不改 doc。
 
-    紀錄：{schema, input_sha256, spec_version, applied, supported, changes: [...], unnormalized: [...], notes: [...]}。
-    changes[]: {rule, from, to[], property[], value_sha256}（每個搬移的項目一筆；to／property 是陣列，license 項目可能同時寫 url 與整個物件；
+    紀錄：{schema, input_sha256, spec_version, applied, supported, changes: [...], unnormalized: [...], unnormalized_total, reserved_not_renamed, notes: [...]}。
+    unnormalized_total＝無法正規化的真正筆數（unnormalized 清單最多留 MAX_UNNORMALIZED 筆，之後只有一筆「more」）；
+    reserved_not_renamed＝供應商自帶的 dumpling: property 因為上限或無法序列化而沒有改名的個數（副本仍帶著它們）。
+    changes[]（property、original_name 最多留 MAX_NAME_RECORD 字元，完整原值以 value_sha256 為準）: {rule, from, to[], property[], value_sha256}（每個搬移的項目一筆；to／property 是陣列，license 項目可能同時寫 url 與整個物件；
     license 項目另有 component_properties_before：元件的 properties 鍵原本是 absent／null／array，副本一律是陣列）；unnormalized[]: {rule, at, reason}（已知違規但無法搬移，欄位原樣保留）。
     """
     rec = {"schema": SCHEMA_ID, "input_sha256": input_sha256, "spec_version": None, "supported": False, "applied": False,
-           "changes": [], "unnormalized": [], "notes": []}
+           "changes": [], "unnormalized": [], "unnormalized_total": 0, "reserved_not_renamed": 0, "notes": []}
     if not isinstance(doc, dict):
         rec["notes"].append("根物件不是 JSON 物件，不處理")
         return rec
@@ -181,6 +183,7 @@ def normalize(doc, input_sha256):
         rec["notes"].append("規劃時發生 %s，整份不處理" % type(e).__name__)
         return rec
     rec["changes"], rec["unnormalized"] = plan["changes"], plan["unnormalized"]
+    rec["unnormalized_total"], rec["reserved_not_renamed"] = plan["unnormalized_total"], plan["reserved_not_renamed"]
     if not plan["changes"]:
         return rec
     _apply(doc, meta, plan, input_sha256)
@@ -201,7 +204,12 @@ def _plan(doc, meta, spec):
     def room(n_new=1):
         return count[0] + n_new <= MAX_CHANGES
 
+    stat = {"unnorm": 0, "reserved_left": 0}      # 真正的筆數（unnorm 清單最多留 MAX_UNNORMALIZED 筆，不能拿清單長度當筆數）
+
     def skip(rule, at, reason):
+        stat["unnorm"] += 1
+        if rule == RULE_RESERVED:
+            stat["reserved_left"] += 1
         if len(unnorm) < MAX_UNNORMALIZED:
             unnorm.append({"rule": rule, "at": at, "reason": reason})
         elif len(unnorm) == MAX_UNNORMALIZED:
@@ -245,7 +253,7 @@ def _plan(doc, meta, spec):
                 continue
             count[0] += 1
             idxs.append(i)
-            changes.append({"rule": RULE_RESERVED, "from": at, "to": [at], "property": [SUPPLIER_PREFIX + entry["name"]],
+            changes.append({"rule": RULE_RESERVED, "from": at, "to": [at], "property": [(SUPPLIER_PREFIX + entry["name"])[:MAX_NAME_RECORD]],
                             "original_name": entry["name"][:MAX_NAME_RECORD], "value_sha256": sha})
         return idxs
 
@@ -308,7 +316,8 @@ def _plan(doc, meta, spec):
                 pos += 1
             changes.append({"rule": "license-without-id-or-name", "from": at, "to": tos,
                             "property": [n for n, _ in vals], "value_sha256": sha, "component_properties_before": pstate})
-    return {"changes": changes, "unnormalized": unnorm, "top_moves": top_moves, "lic_moves": lic_moves,
+    deep = sum(1 for u in unnorm if u["rule"] == "nesting-too-deep")       # 這種直接由 _iter_components 加進清單，不經 skip
+    return {"changes": changes, "unnormalized": unnorm, "unnormalized_total": stat["unnorm"] + deep, "reserved_not_renamed": stat["reserved_left"], "top_moves": top_moves, "lic_moves": lic_moves,
             "meta_ren": meta_ren, "comp_ren": comp_ren}
 
 

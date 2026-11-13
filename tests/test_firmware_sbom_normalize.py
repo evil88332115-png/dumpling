@@ -433,7 +433,7 @@ class RecordShape(unittest.TestCase):
     @staticmethod
     def base(**kw):
         r = {"schema": "firmware-sbom-normalize/1", "input_sha256": SHA, "spec_version": None, "supported": False, "applied": False,
-             "changes": [], "unnormalized": [], "notes": []}
+             "changes": [], "unnormalized": [], "unnormalized_total": 0, "reserved_not_renamed": 0, "notes": []}
         r.update(kw)
         return r
 
@@ -461,7 +461,7 @@ class RecordShape(unittest.TestCase):
             self.assertEqual(fsn.normalize(d, SHA), self.base(spec_version=spec, supported=True), spec)
         d = doc14(platform="P")
         rec = fsn.normalize(d, SHA)
-        self.assertEqual(set(rec), {"schema", "input_sha256", "spec_version", "supported", "applied", "changes", "unnormalized", "notes"})
+        self.assertEqual(set(rec), {"schema", "input_sha256", "spec_version", "supported", "applied", "changes", "unnormalized", "unnormalized_total", "reserved_not_renamed", "notes"})
         self.assertEqual((rec["schema"], rec["input_sha256"], rec["spec_version"], rec["supported"], rec["applied"], rec["notes"]),
                          ("firmware-sbom-normalize/1", SHA, "1.4", True, True, []))
         self.assertEqual(set(rec["changes"][0]), {"rule", "from", "to", "property", "value_sha256"})
@@ -643,6 +643,61 @@ class SupplierNamespace(unittest.TestCase):
         self.assertEqual(names[1:4], ["supplier:dumpling:p0", "supplier:dumpling:p1", "supplier:dumpling:p2"])
         self.assertEqual(names[4:6], ["dumpling:p3", "dumpling:p4"])         # 超過上限的沒改，紀錄寫「無法正規化」
 
+    def test_counts_are_true_numbers_beyond_the_list_caps(self):
+        # 超過 MAX_CHANGES：剩下的沒改名；unnormalized 清單最多 MAX_UNNORMALIZED 筆（再加一筆「more」），但計數是真的
+        d = doc14()
+        n = 12
+        d["metadata"]["properties"] += [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(n)]
+        for attr, val in (("MAX_CHANGES", 4), ("MAX_UNNORMALIZED", 3)):
+            self.addCleanup(setattr, fsn, attr, getattr(fsn, attr))
+            setattr(fsn, attr, val)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(len(rec["changes"]), 4)
+        self.assertEqual(len(rec["unnormalized"]), 4)                          # 3 筆 + 一筆 more
+        self.assertEqual(rec["unnormalized"][-1]["rule"], "more")
+        self.assertEqual((rec["unnormalized_total"], rec["reserved_not_renamed"]), (n - 4, n - 4))
+        left = [p["name"] for p in d["metadata"]["properties"] if p["name"].startswith("dumpling:") and not p["name"].startswith("dumpling:normalized")]
+        self.assertEqual(len(left), n - 4)                                      # 副本裡真的還有這麼多沒改名
+        # 其他規則的略過也算進 unnormalized_total，但不算 reserved_not_renamed
+        d2 = doc14(bad=True, platform="x" * (fsn.MAX_VALUE_BYTES + 1))
+        rec2 = fsn.normalize(d2, SHA)
+        self.assertEqual((rec2["unnormalized_total"], rec2["reserved_not_renamed"]), (1, 0))
+
+    def test_deep_nesting_counts_in_unnormalized_total(self):
+        d = doc14()
+        c = d["components"][0]
+        for _ in range(fsn.MAX_NEST + 2):
+            c["components"] = [{"type": "library", "name": "n"}]
+            c = c["components"][0]
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual([u["rule"] for u in rec["unnormalized"]], ["nesting-too-deep"])
+        self.assertEqual(rec["unnormalized_total"], 1)
+
+    def test_record_property_name_is_truncated_like_original_name(self):
+        d = doc14()
+        d["metadata"]["properties"].append({"name": "dumpling:" + "n" * 100000, "value": "v"})
+        rec = fsn.normalize(d, SHA)
+        ch = rec["changes"][0]
+        self.assertLessEqual(len(ch["property"][0]), fsn.MAX_NAME_RECORD)
+        self.assertTrue(ch["property"][0].startswith("supplier:dumpling:nnn"))
+        self.assertEqual(len(ch["original_name"]), fsn.MAX_NAME_RECORD)
+        self.assertEqual(len(d["metadata"]["properties"][1]["name"]), len("supplier:dumpling:") + 100000)     # 副本裡的名稱不截短
+        # 紀錄的大小與名稱長度無關（完整原值有 value_sha256）
+        self.assertLess(len(json.dumps(rec)), 2000)
+
+    def test_unserializable_entry_is_skipped_and_counted(self):
+        d = doc14()
+        d["metadata"]["properties"].append({"name": "dumpling:x", "value": "v"})
+        old = fsn.canonical_sha256
+        self.addCleanup(setattr, fsn, "canonical_sha256", old)
+        fsn.canonical_sha256 = lambda v: None
+        before = copy.deepcopy(d)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["changes"], [])
+        self.assertEqual([(u["rule"], u["at"], u["reason"]) for u in rec["unnormalized"]], [(fsn.RULE_RESERVED, "/metadata/properties/1", "無法序列化")])
+        self.assertEqual((rec["unnormalized_total"], rec["reserved_not_renamed"], rec["applied"]), (1, 1, False))
+        self.assertEqual(d, before)                                             # 沒改名，文件不動
+
     def test_vulnerabilities_pass_through_untouched(self):
         # DT 5.2.0 的 BOM 上傳不讀 vulnerabilities（見 docs/notes/c2-supplier-sbom.md），所以不移除；這裡釘住「不動、不算變更」
         d = doc14(vulnerabilities=[{"id": "CVE-2000-0001", "analysis": {"state": "not_affected", "justification": "code_not_present"},
@@ -689,7 +744,7 @@ class PrepIntegration(unittest.TestCase):
         rec = rj(os.path.join(o, "normalize.json"))
         self.assertEqual(rec["input_sha256"], sha_in)
         self.assertEqual(len(rec["changes"]), 2)
-        self.assertEqual(info["normalize"], {"file": "normalize.json", "applied": True, "changes": 2, "unnormalized": 0, "renamed": 0})
+        self.assertEqual(info["normalize"], {"file": "normalize.json", "applied": True, "changes": 2, "unnormalized": 0, "renamed": 0, "not_renamed": 0})
         self.assertEqual(info["input_sbom_sha256"], sha_in)
         self.assertEqual(rj(src), d)               # 原檔沒動
         self.assertEqual(sha_of(src), sha_in)

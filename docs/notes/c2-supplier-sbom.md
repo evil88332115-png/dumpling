@@ -42,7 +42,7 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
   3. `&` 換成 `&amp;`（最先做）：`&lt;`、`&#64;`、`&#x40;`、`&commat;` 這類 HTML 實體渲染時會解碼成 `<`、`@`、`[`，等於繞過後面的跳脫；換成 `&amp;` 之後渲染結果是字面的實體文字，不靠反斜線規則（和 `pipeline/watch/match.py` 的 `md_text` 同一個寫法）。代價：stdout 與 log 裡的 `&` 顯示成 `&amp;`；
   4. `@`（含全形 `＠`）後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織；前面緊接 ASCII 英數字的 `@`（purl 的 `a@1.0`、`name@host`）不是提及，原樣保留（和 `match.unsafe_markdown` 的判斷一致，這裡更嚴）；
   5. Markdown 特殊字元 `\ [ ] ( ) < > ! * _ # ~ | ` $` 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時還讀得出原字元；代價是 stdout 與 log 裡的 `_`、`(` 也會有反斜線）；
-  6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線，GitHub 才不會自動變成連結。沒處理 email 自動連結（只會變成 mailto 連結）。
+  6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線（`://` 的 `:` 一律跳脫，不看前面的字元：`1.https://x`、`-ftp://x` 渲染器也會連結），GitHub 才不會自動變成連結。沒處理 email 自動連結（只會變成 mailto 連結）。
   和 `md_text` 的差別、不直接 import `match.py` 的理由寫在 `firmware_mdsafe.py` 檔頭；`tests/test_firmware_mdsafe.py` 載入 `match.py`，用它的 `unsafe_markdown` 檢查 `md_safe` 的輸出（規則不一致時測試失敗）。
   跳脫只做一次：`md_cell` 只處理換行；workflow 摘要表的 awk 用 `\\?\|` 規則，已跳脫的 `\|` 不會被再跳脫成 `\\|`。
   `firmware-ci.sh` 的摘要表儲存格（狀態行、expected 說明）與 `firmware_dt.py` 報告裡的檢查名、階段名、錯誤訊息也走同一個函式。
@@ -127,7 +127,9 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
   report 本來就不讀 SBOM 裡的 property，它讀 `dt-project.json`（prep 自己算的）；元件自帶的三個評估標記本來就不採信，摘要在改名之前算，所以「供應商自帶標記的元件 N 個」仍是原本的數字。
   範圍：只有 `metadata.properties` 與元件的 `properties`（我們只寫這兩處、report 只讀元件的）。頂層 `properties`（1.5 起）、`services`、`pedigree`／`evidence` 底下的元件不動；`metadata.component` 本來就由 prep 整個換成我們的根元件。
   `specVersion` 不在支援範圍（1.2、1.3、1.7 以後）時整份不處理，所以不改名；但那種 SBOM 的 property 一樣不被 report 採信。
-  變更筆數超過上限（`MAX_CHANGES`）時剩下的不改名，記在 `unnormalized`（規則 `supplier-dumpling-property`，`at` 是位置），report 說「另有 N 處已知違規無法正規化」。
+  變更筆數超過上限（`MAX_CHANGES`）時剩下的不改名（副本仍帶著它們），記在 `unnormalized`（規則 `supplier-dumpling-property`，`at` 是位置；清單最多 200 筆再加一筆 `more`，所以另有真正的計數 `unnormalized_total` 與 `reserved_not_renamed`）。
+  report 與 `dt-project.json` 用真正的計數：`summary.supplier_dumpling_props` 是全部（已改名加沒改名）、`supplier_dumpling_props_left` 是沒改名的；說明寫「N 個：R 個已改名、M 個超過變更筆數上限沒有改名（上傳副本仍帶有 dumpling: 開頭的供應商 property）」，「另有 N 處已知違規無法正規化」的 N 也是真正的筆數。
+  改名紀錄的 `property`、`original_name` 都最多留 200 字元（完整原值以 `value_sha256` 為準），所以 `normalize.json` 的大小不隨供應商的 property 名稱長度放大。
   供應商自己原本就有 `supplier:dumpling:…` 名稱的 property 不會再被改；區分靠 `normalize.json` 的位置指標。
 - **供應商 SBOM 有重複 JSON 鍵**：標準庫讀檔時後值會悄悄蓋掉前值，上傳的副本只剩後值。`firmware_dt.py prep` 用 `object_pairs_hook` 偵測，`normalize.json` 的 `notes` 逐筆寫
   「第幾個完成解析的物件（與位置指標）、鍵、被丟掉的前值的 SHA-256」，report 狀態至少 ATTENTION（見 `docs/notes/c2-firmware-dt.md`）。前值本身不保存（原檔才是權威）。
@@ -147,6 +149,11 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
 - 若沒有套用，`vulnerabilities` 留在上傳副本裡只是 DT 不讀的資料（schema 驗證仍會檢查它的格式，格式不對會讓整份被拒收，那是一般 FAIL）。
 
 要再確認的時機：`dt-compose.yaml` 的 DT 版本升級時，重新搜尋 `getVulnerabilities()` 的呼叫位置（上面的路徑與搜尋字串）；若 BOM 上傳開始讀 `vulnerabilities`，改成在正規化時移除，稽核紀錄記原值的 SHA-256 與筆數，report 寫明「供應商宣告的漏洞資訊沒有上傳，原值見稽核紀錄」。
+
+## 已知限制（這一輪沒有處理）
+
+- 對已經正規化過的副本再跑一次 `normalize`：我們寫的 `dumpling:normalized-*`、`dumpling:supplier-*` 會被當成「供應商自帶」而改名成 `supplier:dumpling:…`，不是冪等。pipeline 只對供應商原檔跑一次，所以不會發生。
+- 前綴比對是精確的（區分大小寫，不 strip）：`Dumpling:x`、` dumpling:x` 不改名。我們的流程讀取時也是完全相等才算，所以不會被誤讀。
 
 ## 還沒做
 

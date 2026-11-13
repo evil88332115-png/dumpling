@@ -51,6 +51,26 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("foowww.bar"), "foowww.bar")          # 單字中間的 www 不是自動連結
         self.assertEqual(ms.md_safe("1.2.3 pkg:generic/a@1.0"), "1.2.3 pkg:generic/a@1.0")   # 一般版本與 purl 不被改動
 
+    def test_scheme_colon_escaped_whatever_precedes_it(self):
+        # 前面緊接 [A-Za-z0-9+.-] 時，渲染器仍會把 scheme:// 連結起來，所以不看前面的字元
+        for raw in ("1.https://evil.example/x", "x-https://evil.example/x", "a+https://evil.example/x", "name.http://evil.example",
+                    "-ftp://evil.example", "9https://e/x", "https://e", "file:///etc/x", "a://b", "x:://y"):
+            with self.subTest(raw=raw):
+                out = ms.md_safe(raw, 200)
+                self.assertNotRegex(out, r"(?<!\\):(?=//)")                    # 每個 :// 的冒號前都有反斜線
+                self.assertEqual(out.replace("\\:", ":"), raw)
+        self.assertEqual(ms.md_safe("1.https://evil.example/x", 200), "1.https\\://evil.example/x")
+        self.assertEqual(ms.md_safe("a:b c:d"), "a:b c:d")                       # 沒有 // 的冒號不動
+        self.assertEqual(ms.md_safe("pkg:generic/a@1.0"), "pkg:generic/a@1.0")
+        try:
+            from markdown_it import MarkdownIt
+        except ImportError:
+            return
+        md = MarkdownIt("gfm-like", {"linkify": True})
+        md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        for raw in ("1.https://evil.example/x", "-ftp://evil.example", "x-https://evil.example/x"):
+            self.assertNotIn("<a ", md.render(ms.md_safe(raw, 200)), raw)
+
     def test_html_entities_do_not_decode(self):
         # &lt; &#64; &#x40; &commat; 渲染時會解碼成 < @ @ @，繞過後面的跳脫：& 一律換成 &amp;，渲染結果是字面的實體文字
         for raw in ("&lt;", "&#64;", "&#x40;", "&#X40;", "&commat;", "&amp;", "&#91;", "&lbrack;", "&#0;", "&", "&&", "A&B", "R&D;", "&lt"):

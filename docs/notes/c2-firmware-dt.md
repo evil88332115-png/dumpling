@@ -54,8 +54,8 @@ report 讀的結果資料夾（`--dt-result`）：
     其餘 NOT_RUN（沒檢查鏡像新鮮度、DT 資料源、EUVD…）代表該做的檢查沒做，要列。`scan-status-check.py` 只擋「必要階段」與 FAIL；report 也要求必要階段的每一列都存在（缺列＝GAP），並且列出其他非 OK 階段，所以比它嚴：它回答「必要的有沒有做到」，report 回答「能不能顯示 OK」。
     同一階段在 `status.tsv` 出現多列時留最嚴重的一列（前面的 FAIL 不會被後面的 OK 蓋掉）。
   - **`status.tsv` 有重複列或空名稱列**：各階段的狀態不變（重複的取最嚴重的一列；名稱是空的當成一個不認得的階段「(空的階段名稱)」照常判定），但**只要有這兩種，OK 就降成 ATTENTION**，說明寫「status.tsv 有重複列：階段 X N 列」與「有 N 列的階段名稱是空的」；
-    FAIL／GAP 等其他狀態也加同一則說明，不靜默。理由：`sca-scan` 每個階段只寫一列、每列都有名稱，出現這兩種代表檔案被改過或寫檔有 bug；取最嚴重的一列只保證「不會往好的方向誤判」，不代表檔案可信，所以選保守的 ATTENTION 而不是只記 note。
-    `scan-status-check.py` 是 C1 的檔案、這裡不改；它對重複列是後值蓋前值，與 report 取最嚴重不一致（前面是 FAIL、後面是 OK 時它看到 OK），這件事已列入 M7 交給 C1。
+    階段名稱只有空白（含 NBSP、全形空白）也算空名稱。FAIL／GAP 等其他狀態也加同一則說明，不靜默。理由：`sca-scan` 每個階段只寫一列、每列都有名稱，出現這兩種代表檔案被改過或寫檔有 bug；取最嚴重的一列只保證「不會往好的方向誤判」，不代表檔案可信，所以選保守的 ATTENTION 而不是只記 note。
+    `scan-status-check.py` 是 C1 的檔案、這裡不改；它對重複列是後值蓋前值，與 report 取最嚴重不一致（前面是 FAIL、後面是 OK 時它看到 OK）。
   - **輸入 SBOM 有重複鍵**：見下一節。
   - **供應商 SBOM 自帶 `dumpling:` 開頭的 property**（`kind: sbom`）：prep 把它們就地改名成 `supplier:dumpling:…`（值不動、`normalize.json` 逐筆記原名與位置；規則見 `docs/notes/c2-supplier-sbom.md`），
     讓副本裡的 `dumpling:` property 都是我們寫的。report 寫「供應商 SBOM 自帶名稱以 dumpling: 開頭的 property N 個」，狀態至少 ATTENTION（FAIL／GAP 等其他狀態也加同一則說明）；report 讀 `dt-project.json`，不讀 SBOM 裡的 property，偽造的 `dumpling:normalized-*` 不會進報告。
@@ -166,6 +166,8 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 
 ## 限制
 
+- 宣告 `expected_dt: rejected` 的樣本同時有 status.tsv 重複列或空名稱列時，「與宣告一致」（`accepted`）的判斷不看這兩種；說明裡仍會列出，狀態是 FAIL。
+- 重複列與空名稱列的檢查只涵蓋 report 讀的 `scan/status.tsv`；`scan-status-check.py` 的行為見上。
 - report 的 OK 不看 NVIDIA 公告對照（公告步驟獨立於 report）；目前沒有工具會寫 `dumpling:vuln-assessment=NONE`，所以 vbios 樣本實際上不會是 OK。
 - `summary.json` 內部的一致性不檢查（`components`、`findings_total` 與 `checks[]` 互相矛盾時不擋）：這些值由 `dt-verify.py` 自己寫，report 只檢查型別、必要檢查是否存在與狀態。
 
