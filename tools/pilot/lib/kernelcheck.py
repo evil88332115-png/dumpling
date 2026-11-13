@@ -3,15 +3,18 @@
   C-kernel-coverage<TAB>狀態<TAB>說明
 
 用法：python3 -I kernelcheck.py --sbom <CycloneDX JSON> [--grype <grype.json>] [--dt-findings <DT findings.json>] [--kernel-map <l4t-kernel-map.json>]
-                          --out <kernel-coverage.json>
+                          [--not-distro-kernel <理由>] --out <kernel-coverage.json>
   --grype：Grype JSON（sca-scan 在 C-grype 之後執行；Grype 沒有結果時不給）。
   --kernel-map：C-kernel-l4t-map 的摘要（lib/l4t_kernel.py）。--sbom 是原始 SBOM，沒有那個只供比對的 Canonical 核心元件
     （例如 linux-nvidia-tegra）；Grype 對它的比對照樣依名稱算進核心（KERNEL_PACKAGE_PATTERNS 的 linux-*-tegra*），
     這個參數只讓說明與證據寫出比對對象是對應的 Canonical 核心。
   --dt-findings：DT 的 finding 清單（tools/e2e/dtread.py 的輸出）。保留給之後在 D 段之後再判一次；sca-scan 目前不給。
+  --not-distro-kernel：平台負責人明確宣告「這個產品的核心不是發行版（Debian／Ubuntu）的核心」，值是理由（platform_params.kernel_not_distro
+    → sca-scan --kernel-not-distro／SCA_KERNEL_NOT_DISTRO）。給了而且 SBOM 有核心 → GAP（見下「不在發行版核心序列上」的規則 c）。
 判定：
   - SBOM 沒有核心 → NOT_RUN「SBOM 沒有作業系統核心」。
-  - 有核心，Grype（或 DT）對核心至少 1 筆比對 → OK（只表示有做核心比對，不代表核心的弱點完整）。
+  - 有核心，Grype（或 DT）對核心至少 1 筆比對 → OK（只表示有做核心比對，不代表核心的弱點完整）；
+    但核心不在發行版的核心序列上（OFF_SERIES_RULES，見下）時不是 OK，是 GAP。
   - 有核心，對核心 0 筆比對（或沒有 Grype 結果）→ GAP：核心的 CVE 未評估，0 筆不代表沒有。
 退出碼：0 已判定；3 輸入錯誤（同時印 FAIL 那一行，不印 traceback）。
 
@@ -26,17 +29,37 @@ Grype 與 DT 對核心都是 0 筆，報告看起來像核心沒有弱點（Jets
      不算核心的還有 linux-libc-dev（使用者空間標頭；Grype 預設規則會忽略它以上游 linux 比對到的紀錄）、linux-firmware、linux-base、kerneloops。
 「對核心的比對」：Grype 比對的 artifact 是 linux-kernel／linux-kernel-module，或 artifact／matchDetails 的 CPE 是 Linux 核心，
   或 artifact 是上面第 2 條的核心套件。DT finding 同理（元件 purl 或 CPE）。Grype 的 ignoredMatches 不算，只記數量。
+「不在發行版的核心序列上」（off-series）：Grype、DT 對 Debian／Ubuntu 套件是以發行版的原始碼套件（Debian 的 linux、Ubuntu 的 linux／linux-<flavor>）
+  比對，並依套件版本字串判斷修好了沒有。核心若不是發行版建的，這個比對不可靠，而且方向是漏報：例如 Raspberry Pi 的核心 deb（1:6.18.50-1+rpt1，
+  Debian purl）被對到 Debian 的 linux（6.12.x）；因為 epoch，Debian 在 6.12.x 修好的 CVE 全算「已修好」，只剩 Debian 尚未修的 CVE。
+  所以有比對也不能當作涵蓋，C-kernel-coverage 是 GAP。只用下面明確的規則判斷（不模糊比對），每條規則都寫在 OFF_SERIES_RULES。
+  規則是「或」：任何一條成立就是 off-series，沒有一條能取消另一條（來源套件是 Debian 的 linux 不會取消 epoch 或 +rpt）；成立的原因全部寫進證據。
+  名稱與版本取 SBOM 元件的欄位與 purl（先解碼，%3A → :、%2B → +），兩者不一致時任何一個成立都算。
+  只看 deb 套件（apk、rpm 不看）；nvidia-l4t-kernel* 例外（NVIDIA 的核心套件，由 C-kernel-l4t-map 對應到 Canonical 核心比對）：
+    a. 版本有 epoch 而且 ≥ 1（^N:，N 轉成整數；0: 等於沒有 epoch）。Debian、Ubuntu 自己的 linux 套件不會有 epoch。
+    b. 版本含已知的廠商後綴 +rpt／+rpi（不分大小寫，上游部分或 Debian revision 都算，例如 6.18.50-1+rpt1、6.12.25+rpt-rpi-v8），
+       或套件名稱含 +rpt／-rpt-（例如 linux-image-6.18.50+rpt-rpi-v8）。清單 VENDOR_LOCAL_SUFFIXES。
+    c. 明確宣告：--not-distro-kernel <理由>。給沒有任何版本字串線索的平台（例如部分 Radxa 核心）；由平台負責人宣告。
+    d. purl 的 upstream= 限定詞（來源套件，URL 編碼，可能是 name@version，取名稱）：
+       清單在資料檔 lib/data/distro-kernel-sources.json（附出處）；檔案讀不到或格式不對 → FAIL（exit 3），不當作沒有問題。
+       - always_off_series（linux-upstream：核心自己 make deb-pkg 的預設來源套件名稱，不是發行版建的）→ off-series（任何發行版）。
+       - distro=debian-* 而且來源套件不在 debian.sources（linux、linux-latest、linux-signed-<架構>；Debian 的核心只由這些來源套件建）→ off-series。
+       - distro=ubuntu-* 不看其他 linux-<flavor> 來源（linux-nvidia-tegra、linux-raspi、linux-aws… 都是 Canonical 的核心），只有 always_off_series。
+  已知沒有涵蓋的情況（要用 c 明確宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu、purl 也沒有 upstream／distro 限定詞（或限定詞也像發行版）。
+  這些規則抓得到的是已知的樣子，抓不到不代表核心是發行版的。核心 CVE 要以上游版本對核心 CNA（尚未實作，見 M7）。
 核心版本的來源（依序）：linux-kernel 元件的版本 → 核心模組所在的 /usr/lib/modules/<版本>/（或 /lib/modules/）路徑，
   路徑沒有時用 Syft 的 syft:metadata:kernelVersion → 核心套件的版本。
 """
 import argparse
 import collections
 import json
+import os
 import re
 import sys
 from urllib.parse import unquote
 
 STAGE = "C-kernel-coverage"
+MAX_REASON_BYTES = 300     # --not-distro-kernel 的理由（status 說明欄只有 500 位元組）
 KERNEL_SYFT_TYPES = ("linux-kernel", "linux-kernel-module")
 KERNEL_CPE_PREFIX = "cpe:2.3:o:linux:linux_kernel:"
 PACKAGE_TYPES = ("deb", "rpm", "apk")
@@ -54,6 +77,31 @@ KERNEL_PACKAGE_PATTERNS = (
 _PKG_RE = [re.compile(f"^{p}$") for p, _ in KERNEL_PACKAGE_PATTERNS]
 # 名稱裡有這些段落的不算核心（不含執行中的核心）：例如 linux-headers-…-tegra、nvidia-l4t-kernel-headers、linux-tools-…-tegra
 NOT_KERNEL_SEGMENTS = ("headers", "tools", "cloud-tools", "doc", "source", "buildinfo", "dbg", "dbgsym", "devel", "libc")
+# 不在發行版核心序列上的規則（只用於 deb 核心套件）。每一條要能說出為什麼發行版的比對不可靠。
+OFF_SERIES_RULES = (
+    ("a", "版本有 epoch ≥ 1：Debian、Ubuntu 自己的 linux 套件不用 epoch；有 epoch 的核心是廠商另外打包的，epoch 會讓它比發行版的任何 linux 版本都新"),
+    ("b", "版本或名稱含廠商後綴（VENDOR_LOCAL_SUFFIXES）：不是發行版建的核心"),
+    ("c", "平台負責人明確宣告核心不是發行版的核心（--not-distro-kernel／platform_params.kernel_not_distro）"),
+    ("d", "purl 的來源套件（upstream=）不是這個發行版建核心的來源套件"),
+)
+# 已知的廠商本地後綴（版本字串裡接在 + 後面，不分大小寫，後面不能再接字母）。每一條要寫出是誰的核心。
+VENDOR_LOCAL_SUFFIXES = (
+    ("rpt", "Raspberry Pi（Raspberry Pi Trading）的核心 deb，例如 1:6.18.50-1+rpt1"),
+    ("rpi", "Raspberry Pi 的核心 deb（+rpi 後綴）"),
+)
+# 套件「名稱」含這些片段 → 廠商核心（不分大小寫）。例如 linux-image-6.18.50+rpt-rpi-v8
+VENDOR_NAME_MARKERS = (
+    ("+rpt", "Raspberry Pi 的核心 deb：名稱帶 +rpt"),
+    ("-rpt-", "Raspberry Pi 的核心 deb：名稱帶 -rpt-"),
+)
+# 規則 d 的來源套件清單在資料檔（有出處、可審查）：debian.sources 是 Debian 建核心的來源套件；always_off_series 任何發行版都算
+DISTRO_SOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "distro-kernel-sources.json")
+DISTRO_SOURCES_SCHEMA = "sca-pilot-distro-kernel-sources/1"
+# 不套用規則 a、b、d 的核心套件（名稱 regex）：NVIDIA 的核心套件，由 C-kernel-l4t-map 對應到 Canonical 核心再比對
+OFF_SERIES_EXEMPT = (r"nvidia-l4t-kernel(-.+)?",)
+_EXEMPT_RE = [re.compile(f"^{p}$") for p in OFF_SERIES_EXEMPT]
+_EPOCH_RE = re.compile(r"^(\d+):")
+_VENDOR_VER_RE = re.compile(r"\+(" + "|".join(re.escape(k) for k, _ in VENDOR_LOCAL_SUFFIXES) + r")(?![a-z])", re.I)
 MODULE_PATH_RE = re.compile(r"^/(?:usr/)?lib/modules/([^/]+)/")
 
 
@@ -80,6 +128,116 @@ def is_kernel_package_name(name):
     if any(seg in n.split("-") for seg in NOT_KERNEL_SEGMENTS):
         return False
     return any(r.match(n) for r in _PKG_RE)
+
+
+def purl_qualifiers(purl):
+    """purl 的限定詞 → {鍵: 解碼後的值}（鍵轉小寫）；不是 purl 或沒有限定詞回 {}。"""
+    if not isinstance(purl, str) or not purl.startswith("pkg:") or "?" not in purl:
+        return {}
+    q = purl.split("#", 1)[0].split("?", 1)[1]
+    out = {}
+    for part in q.split("&"):
+        k, sep, v = part.partition("=")
+        if sep and k:
+            out.setdefault(k.lower(), unquote(v))
+    return out
+
+
+def purl_upstream_name(purl):
+    """purl 的 upstream= 限定詞（來源套件；可能是 name@version，URL 編碼）→ 名稱；沒有回 None。"""
+    u = purl_qualifiers(purl).get("upstream")
+    if not u:
+        return None
+    return u.split("@", 1)[0].strip().lower() or None
+
+
+_DISTRO_CACHE = {}
+
+
+def load_distro_sources(path=None):
+    """規則 d 的資料檔 → {"debian": [來源套件], "always": [來源套件]}。讀不到或格式不對丟 InputError（不靜默當作沒有規則）。"""
+    path = path or DISTRO_SOURCES_PATH
+    if path in _DISTRO_CACHE:
+        return _DISTRO_CACHE[path]
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        ok = isinstance(doc, dict) and doc.get("schema") == DISTRO_SOURCES_SCHEMA
+        deb = doc["debian"]["sources"] if ok else None
+        always = doc["always_off_series"] if ok else None
+        ok = ok and all(isinstance(x, list) and x and all(isinstance(i, str) and i for i in x) for x in (deb, always))
+        ok = ok and "linux" in deb and isinstance(doc["ubuntu"], dict) and isinstance(doc["debian"].get("evidence"), str)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        ok = False
+    if not ok:
+        raise InputError(f"發行版核心來源套件的資料檔讀不到或格式不對（{os.path.basename(path)}）：規則 d 無法判斷，不當作沒有問題")
+    out = {"debian": [x.lower() for x in deb], "always": [x.lower() for x in always]}
+    _DISTRO_CACHE[path] = out
+    return out
+
+
+def purl_version(purl):
+    """pkg:type/ns/name@version?… → 解碼後的版本（%3A → :、%2B → +）；沒有回 None。"""
+    if not isinstance(purl, str) or not purl.startswith("pkg:"):
+        return None
+    body = purl[4:].split("#", 1)[0].split("?", 1)[0]
+    last = body.rsplit("/", 1)[-1]
+    return unquote(last.split("@", 1)[1]) if "@" in last else None
+
+
+def off_series_reasons(name, version, purl, sources=None):
+    """一個 deb 核心套件不在發行版核心序列上的所有原因（OFF_SERIES_RULES 的 a、b、d；c 在 assess）→ 原因文字清單，空清單＝沒有規則成立。
+
+    規則是「或」：任何一條成立就是 off-series，沒有一條可以取消另一條（例如 purl 的來源套件是 Debian 的 linux，不會取消 epoch 或 +rpt）。
+    所以這裡只往 reasons 加，最後看清單是不是空的；所有成立的原因都留作證據。
+    名稱與版本各有兩個來源：SBOM 元件的欄位與 purl（解碼後）；兩者不一致時任何一個成立都算。"""
+    names = {n.lower() for n in (name, purl_type_name(purl)[1]) if isinstance(n, str) and n}
+    if any(r.match(n) for n in names for r in _EXEMPT_RE):
+        return []
+    versions = []
+    for v in (version, purl_version(purl)):
+        if isinstance(v, str) and v and v not in versions:
+            versions.append(v)
+    reasons = []
+
+    def add(r):
+        if r not in reasons:
+            reasons.append(r)
+
+    for v in versions:                                                   # 規則 a
+        m = _EPOCH_RE.match(v)
+        if m and int(m.group(1)) >= 1:
+            add(f"規則 a：版本 {v} 有 epoch {int(m.group(1))}（Debian、Ubuntu 自己的 linux 套件沒有 epoch）")
+    for v in versions:                                                   # 規則 b：版本
+        m = _VENDOR_VER_RE.search(v)
+        if m:
+            add(f"規則 b：版本 {v} 含廠商後綴 +{m.group(1).lower()}（{dict(VENDOR_LOCAL_SUFFIXES)[m.group(1).lower()]}）")
+    for n in sorted(names):                                              # 規則 b：名稱
+        for marker, why in VENDOR_NAME_MARKERS:
+            if marker in n:
+                add(f"規則 b：套件名稱 {n} 含 {marker}（{why}）")
+    up = purl_upstream_name(purl)                                        # 規則 d
+    if up:
+        sources = sources or load_distro_sources()
+        if up in sources["always"]:
+            add(f"規則 d：purl 的來源套件是 {up}（核心自己 make deb-pkg 的預設名稱，不是發行版建的；{os.path.basename(DISTRO_SOURCES_PATH)}）")
+        elif (purl_qualifiers(purl).get("distro") or "").lower().startswith("debian-") and up not in sources["debian"]:
+            add(f"規則 d：purl 的來源套件是 {up}，不是 Debian 建核心用的來源套件（{', '.join(sources['debian'])}；{os.path.basename(DISTRO_SOURCES_PATH)}）")
+    return reasons
+
+
+def off_series_packages(packages, sources=None):
+    """kernel_packages（detect 的結果）裡不在發行版核心序列上的 deb 套件 → [{name, version, reason, reasons}]。資料檔壞了 → InputError。"""
+    out = []
+    if sources is None and any(p.get("purl_type") == "deb" for p in packages):
+        sources = load_distro_sources()          # 有 deb 核心套件就要讀得到資料檔（不是只有 purl 有 upstream= 才讀）
+    for p in packages:
+        if p.get("purl_type") != "deb":
+            continue
+        rs = off_series_reasons(p.get("name"), p.get("version"), p.get("purl"), sources)
+        if rs:
+            out.append({"name": p.get("name"), "version": p.get("version"), "reason": "；".join(rs), "reasons": rs})
+    return out
 
 
 def props(c):
@@ -277,8 +435,9 @@ def mapped_kernel(kmap):
     return {"name": c.get("name"), "version": c.get("version"), "purl": c.get("purl"), "release": kmap.get("release")}
 
 
-def assess(sbom, grype=None, dt_findings=None, kmap=None):
-    """回傳 (狀態, 說明, 證據)。輸入結構不對時丟 InputError。dt_findings 可省略（sca-scan 在 C-grype 之後、DT 之前執行）。"""
+def assess(sbom, grype=None, dt_findings=None, kmap=None, not_distro=None):
+    """回傳 (狀態, 說明, 證據)。輸入結構不對時丟 InputError。dt_findings 可省略（sca-scan 在 C-grype 之後、DT 之前執行）。
+    not_distro：平台宣告核心不是發行版核心的理由（規則 c）；None＝沒宣告。"""
     comps, versions = detect(sbom)
     mk = mapped_kernel(kmap)
     present = bool(comps["linux_kernel"] or comps["linux_kernel_modules"] or comps["kernel_packages"])
@@ -287,16 +446,34 @@ def assess(sbom, grype=None, dt_findings=None, kmap=None):
     ev = {"schema": "sca-pilot-kernel-coverage/1", "kernel_present": present, "versions": versions,
           "version_source": versions[0]["source"] if versions else None, "components": comps,
           "matches": {"grype": g, "dt": d}, "possible_reasons": [], "not_counted": [], "mapped_kernel": mk,
+          "off_series": [], "not_distro_declared": not_distro,
           "rules": {"syft_types": list(KERNEL_SYFT_TYPES), "cpe_prefix": KERNEL_CPE_PREFIX, "package_types": list(PACKAGE_TYPES),
                     "package_patterns": [{"regex": f"^{p}$", "why": w} for p, w in KERNEL_PACKAGE_PATTERNS],
-                    "not_kernel_segments": list(NOT_KERNEL_SEGMENTS)}}
+                    "not_kernel_segments": list(NOT_KERNEL_SEGMENTS),
+                    "off_series_rules": [{"rule": r, "why": w} for r, w in OFF_SERIES_RULES],
+                    "vendor_local_suffixes": [{"suffix": "+" + k, "why": w} for k, w in VENDOR_LOCAL_SUFFIXES],
+                    "vendor_name_markers": [{"marker": k, "why": w} for k, w in VENDOR_NAME_MARKERS],
+                    "distro_kernel_sources_file": "tools/pilot/lib/data/" + os.path.basename(DISTRO_SOURCES_PATH)}}
     if not present:
         st, detail = "NOT_RUN", "SBOM 沒有作業系統核心（沒有 linux-kernel／linux-kernel-module 元件、Linux 核心 CPE 或核心套件）"
     else:
         vt, what = version_text(versions), what_text(comps)
         gn = g["matches"] if g else 0
         dn = d["matches"] if d else 0
-        if gn + dn > 0:
+        off = off_series_packages(comps["kernel_packages"])
+        if not_distro:
+            r = f"規則 c：平台宣告核心不是發行版的核心（{not_distro}）"
+            off.insert(0, {"name": None, "version": None, "reason": r, "reasons": [r]})
+        ev["off_series"] = off
+        if off:
+            f = off[0]
+            who = f["reason"] if f["name"] is None else f"{f['name']} {f['version']}：{f['reason']}"
+            more = f"，另有 {len(off) - 1} 項" if len(off) > 1 else ""
+            st = "GAP"
+            matched = f"Grype／DT 對核心有 {gn + dn} 筆比對，但" if gn + dn > 0 else "對核心的比對 0 筆，而且"
+            detail = (f"核心不在發行版的核心序列上（{who}{more}）：發行版資料（Grype／DT 的 Debian／Ubuntu 紀錄）的比對不可靠，可能漏報；"
+                      f"核心 CVE 要以上游版本對核心 CNA（尚未實作，見 M7）。{matched}不當作核心已涵蓋；核心{vt}；{what}；證據見 scan/kernel-coverage.json 的 off_series")
+        elif gn + dn > 0:
             st = "OK"
             tools = f"Grype {gn}" + (f"、DT {dn}" if d is not None else "")
             via = f"；比對對象含 L4T {mk['release']} 對應的 Canonical 核心 {mk['name']} {mk['version']}（C-kernel-l4t-map）" if mk else ""
@@ -341,6 +518,7 @@ def main(argv=None):
     ap.add_argument("--grype")
     ap.add_argument("--dt-findings")
     ap.add_argument("--kernel-map")
+    ap.add_argument("--not-distro-kernel", metavar="理由")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     try:
@@ -348,7 +526,10 @@ def main(argv=None):
         grype = load(a.grype, "Grype JSON") if a.grype else None
         dt = load(a.dt_findings, "DT findings") if a.dt_findings else None
         kmap = load(a.kernel_map, "核心對應摘要") if a.kernel_map else None
-        st, detail, ev = assess(sbom, grype, dt, kmap)
+        nd = a.not_distro_kernel
+        if nd is not None and (not nd.strip() or len(nd.encode("utf-8")) > MAX_REASON_BYTES or not nd.isprintable()):
+            raise InputError(f"--not-distro-kernel 的理由不能是空的、不能有控制字元、最多 {MAX_REASON_BYTES} 位元組")
+        st, detail, ev = assess(sbom, grype, dt, kmap, nd.strip() if nd is not None else None)
     except InputError as e:
         line("FAIL", f"kernelcheck.py 輸入錯誤：{e}")
         return 3
