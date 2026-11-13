@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 
@@ -97,7 +98,13 @@ class PrepTests(Base):
         info, _ = self.prep(doc)
         self.assertEqual(info["summary"]["version_gap"], 1)
         self.assertEqual(info["summary"]["no_version"], 1)
-        self.assertEqual(info["replaced_metadata_component"], {"name": "old", "version": "9"})
+        self.assertEqual(info["replaced_metadata_component"], {"name": "old", "version": "9", "purl": None})
+        doc["metadata"]["component"]["purl"] = "pkg:generic/old@9"
+        info, _ = self.prep(doc)
+        self.assertEqual(info["replaced_metadata_component"], {"name": "old", "version": "9", "purl": "pkg:generic/old@9"})
+        doc["metadata"]["component"]["purl"] = ["not", "a", "string"]
+        info, _ = self.prep(doc)
+        self.assertIsNone(info["replaced_metadata_component"]["purl"])
 
     def test_name_rules(self):
         self.assertEqual(fd.project_name("vbios", "x", True), "firmware-vbios-synthetic-x")
@@ -502,7 +509,7 @@ def raw_comp(**fields):
 
 
 class HardeningTests(ReportBase):
-    """驗證代理用合成輸入找到的「誤判成 OK」情形：資料不完整、有疑點時一律不是 OK。"""
+    """用合成輸入釘住「誤判成 OK」的情形：資料不完整、有疑點時一律不是 OK。"""
     n = 0
 
     def case(self, comps=None, summ=None, rows=None, grype=None, kind="bios", ver="firmware_version: 1.0\n"):
@@ -552,6 +559,60 @@ class HardeningTests(ReportBase):
     def test_grype_matches_not_a_list_is_fail(self):
         for g in ({"matches": {}}, {"matches": None}, [], {}):
             self.assertEqual(self.status(grype=g), "FAIL", g)
+
+    def _grype_variants(self, tag):
+        """C-grype 是 OK 但 grype.json 讀不到或壞掉的各種情形：(名稱, 動作(grype.json 的路徑) → None)。"""
+        def missing(p):
+            if os.path.lexists(p):
+                os.unlink(p)
+        def directory(p):
+            os.unlink(p)
+            os.makedirs(p)
+        def symlink(p):
+            os.unlink(p)
+            os.symlink(os.path.join(self.tmp, "elsewhere-" + tag), p)
+        def broken(p):
+            with open(p, "w") as fh:
+                fh.write("{not json")
+        def not_utf8(p):
+            with open(p, "wb") as fh:
+                fh.write(b'{"matches": [\xff]}')
+        def empty(p):
+            open(p, "w").close()
+        return (("不存在", missing), ("是資料夾", directory), ("是符號連結", symlink), ("不是 JSON", broken), ("不是 UTF-8", not_utf8), ("空檔案", empty))
+
+    def test_grype_json_unreadable_or_broken_is_fail(self):
+        open(os.path.join(self.tmp, "elsewhere-g"), "w").write('{"matches": []}')
+        for name, act in self._grype_variants("g"):
+            HardeningTests.n += 1
+            slug = "g%d" % HardeningTests.n
+            info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, kind="bios", version="firmware_version: 1.0\n")
+            dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+            act(os.path.join(dt, info["project_name"], "scan", "scan", "grype.json"))
+            rc, out, _ = self.run_report([o], dt)
+            self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), (name, out))
+            self.assertEqual(rc, 1, name)
+            self.assertIn("grype.json", out, name)
+
+    def test_declared_rejection_with_broken_grype_json_is_not_accepted(self):
+        # expected_dt 宣告的拒收只在「沒有別的失敗」時放行：C-grype 是 OK 但 grype.json 壞掉／讀不到，是別的失敗
+        self.ED = ReportTests.ED
+        open(os.path.join(self.tmp, "elsewhere-r"), "w").write('{"matches": []}')
+        rows = ReportTests.REJ + [("C-grype", "OK", "0 matches")]
+        o, dt = ReportTests.rej_case(self, True, rows, ReportTests.REJ_SUMM, "hg0")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 0, out)                                      # 對照：grype.json 正常時仍與宣告一致
+        self.assertIn("與 firmware.yml 宣告的 expected_dt 一致", out)
+        for i, (name, act) in enumerate(self._grype_variants("r")):
+            o, dt = ReportTests.rej_case(self, True, rows, ReportTests.REJ_SUMM, "hg%d" % (i + 1))
+            with open(os.path.join(o, "dt-project.json"), encoding="utf-8") as fh:
+                proj = json.load(fh)["project_name"]
+            act(os.path.join(dt, proj, "scan", "scan", "grype.json"))
+            rc, out, _ = self.run_report([o], dt)
+            self.assertEqual(rc, 1, (name, out))
+            self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), (name, out))
+            self.assertIn("不放行", out, name)
+            self.assertNotIn("與 firmware.yml 宣告的 expected_dt 一致", out, name)
 
     # ---- 2. dt-verify 的 checks
     def test_required_checks_must_exist_and_be_ok(self):
@@ -641,6 +702,26 @@ class HardeningTests(ReportBase):
         fd.load_json(self.w("longkey.json", '{"%s": {"a": 1, "a": 2}}' % k), fd.MAX_BYTES, "SBOM", d)
         self.assertEqual(len(d.events[0]["pointer"]), 300)
 
+    def test_long_key_pointer_is_truncated_while_walking(self):
+        # 長鍵名（祖先路徑）底下有很多個含重複鍵的物件：位置要一邊走一邊截斷，不能每筆事件都先組出完整路徑（時間 ∝ 鍵長 × 事件數）
+        k = "k/~" * (1300 * 1024)                      # 約 3.9 MB 的鍵名；轉義後每個字元組 "k" "~1" "~0"
+        inner = "[" + ",".join('{"a":1,"a":2}' for _ in range(fd.MAX_DUP_EVENTS)) + "]"
+        path = self.w("longkey2.json", '{"x": {"%s": %s}}' % (k, inner))
+        d = fd.DupKeys()
+        t0 = time.monotonic()
+        fd.load_json(path, fd.MAX_BYTES, "SBOM", d)
+        took = time.monotonic() - t0
+        self.assertLess(took, 2.0)
+        self.assertEqual(d.total, fd.MAX_DUP_EVENTS)
+        want = ("/x/" + "k~1~0" * 100)[:fd.POINTER_CAP]
+        for ev in d.events:
+            self.assertEqual(len(ev["pointer"]), fd.POINTER_CAP)
+            self.assertEqual(ev["pointer"], want)
+        # 沒有長鍵名時完整保留（含索引與轉義）；根物件的位置是 "/"
+        d2 = fd.DupKeys()
+        fd.load_json(self.w("shortkey.json", '{"a": 1, "a": 2, "b/c": [{"d~": {"e": 1, "e": 2}}]}'), fd.MAX_BYTES, "SBOM", d2)
+        self.assertEqual([ev["pointer"] for ev in d2.events], ["/b~1c/0/d~0", "/"])      # 內層物件先完成
+
     def test_expected_not_run_stages_are_ignored(self):
         # firmware-dt.sh 固定 --no-license（E 段 NOT_RUN），沒有 --kernel-build（C-kernel-* NOT_RUN）：這些不能讓乾淨樣本變 ATTENTION
         rows = self.GOOD + [("E-notice", "NOT_RUN", "--no-license"), ("E-files-scan", "NOT_RUN", "--no-license"),
@@ -659,6 +740,68 @@ class HardeningTests(ReportBase):
         p = self.w("t.tsv", "stage\tstatus\tdetail\nA\tGAP\tx\nA\tOK\ty\nB\tOK\tz\n")
         self.assertEqual(fd.read_status_tsv(p), {"A": ("GAP", "x"), "B": ("OK", "z")})
 
+    def test_duplicate_stage_rows_severity_order_all_pairs(self):
+        order = ["OK", "ATTENTION", "NOT_ASSESSED", "NOT_RUN", "GAP", "FAIL"]       # 輕 → 重（測試自己寫死，不讀 fd._SEV）
+        for i, a in enumerate(order):
+            for j, b in enumerate(order):
+                if i == j:
+                    continue
+                p = self.w("sev-%d-%d.tsv" % (i, j), "stage\tstatus\tdetail\nA\t%s\tfirst\nA\t%s\tsecond\n" % (a, b))
+                self.assertEqual(fd.read_status_tsv(p)["A"][0], order[max(i, j)], (a, b))
+        # 不認得的狀態比 OK 重、比 ATTENTION 輕；兩個都不認得時留後面那一列
+        for first, second, want in (("OK", "weird", "weird"), ("weird", "OK", "weird"), ("weird", "ATTENTION", "ATTENTION"), ("ATTENTION", "weird", "ATTENTION")):
+            p = self.w("sev-w.tsv", "stage\tstatus\tdetail\nA\t%s\tx\nA\t%s\ty\n" % (first, second))
+            self.assertEqual(fd.read_status_tsv(p)["A"][0], want, (first, second))
+
+    def test_duplicate_stage_rows_end_to_end_gap_and_attention(self):
+        base = [r for r in self.GOOD if r[0] != "D-dt-upload"]
+        for a, b in (("GAP", "OK"), ("OK", "GAP")):                                 # 上傳階段：GAP 不能被 OK 蓋掉
+            self.assertEqual(self.status(rows=base + [("D-dt-upload", a, "x"), ("D-dt-upload", b, "y")]), "GAP", (a, b))
+        for a, b in (("FAIL", "GAP"), ("GAP", "FAIL")):                              # FAIL 比 GAP 重
+            self.assertEqual(self.status(rows=base + [("D-dt-upload", a, "x"), ("D-dt-upload", b, "y")]), "FAIL", (a, b))
+        for a, b in (("ATTENTION", "OK"), ("OK", "ATTENTION")):                      # 其他階段：ATTENTION 也不能被 OK 蓋掉（OK 之前要有人看過）
+            self.assertEqual(self.status(rows=self.GOOD + [("C-euvd", a, "x"), ("C-euvd", b, "y")]), "ATTENTION", (a, b))
+        for a, b in (("GAP", "ATTENTION"), ("ATTENTION", "GAP"), ("NOT_RUN", "GAP")):
+            st, out, _ = self.case(rows=self.GOOD + [("C-euvd", a, "x"), ("C-euvd", b, "y")])
+            self.assertEqual(st, "ATTENTION", (a, b))
+            self.assertIn("C-euvd GAP", out, (a, b))                                 # 留下的是比較重的那一列
+        for a, b in (("FAIL", "OK"), ("OK", "FAIL"), ("GAP", "FAIL")):
+            self.assertEqual(self.status(rows=self.GOOD + [("C-euvd", a, "x"), ("C-euvd", b, "y")]), "FAIL", (a, b))
+        # C-grype：GAP／NOT_RUN 與 OK 同時出現時不算 OK（不讀 grype.json）
+        base = [r for r in self.GOOD if r[0] != "C-grype"]
+        for a, b in (("GAP", "OK"), ("OK", "GAP")):
+            self.assertEqual(self.status(rows=base + [("C-grype", a, "x"), ("C-grype", b, "y")]), "GAP", (a, b))
+
+    def test_wait_rc_only_zero_can_be_ok_and_every_other_value_is_gap(self):
+        def run(rc, rows=None, summ=None):
+            HardeningTests.n += 1
+            slug = "w%d" % HardeningTests.n
+            info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, kind="bios", version="firmware_version: 1.0\n")
+            dt = self.dt_sample(info, rows if rows is not None else self.GOOD, self.SUMM if summ is None else summ, {"matches": []}, root="dt-" + slug)
+            if rc is not None:
+                self.w("dt-%s/dt-wait.rc" % slug, rc)
+            r, out, md = self.run_report([o], dt)
+            return out.split("\t")[1], out, r
+        self.assertEqual(run(None)[0], "OK")                  # 沒有 dt-wait.rc（沒有 wait 的紀錄）：照其他資料判斷
+        self.assertEqual(run("0\n")[0], "OK")
+        self.assertEqual(run("00\n")[0], "OK")
+        for v in ("1", "2", "-1", "4", "124", "137", "255", "256", "99999"):
+            st, out, rc = run(v + "\n")
+            self.assertEqual((st, rc), ("GAP", 0), (v, out))
+            self.assertIn("dt-ephemeral wait 結束碼 %s" % int(v), out)
+        st, out, _ = run("3\n")
+        self.assertEqual(st, "GAP")
+        self.assertIn("資料不完整", out)
+        # 看不懂的內容是錯誤，不是 OK
+        for v in ("", "x", "1.5", "0x0", "\n"):
+            st, out, rc = run(v)
+            self.assertEqual(rc, 1, (v, out))
+            self.assertIn("dt-wait.rc 不是整數", out)
+            self.assertNotIn("FIRMWARE-DT\tOK", out)
+        # FAIL 仍然是 FAIL（結束碼不能把 FAIL 降成 GAP）
+        for v in ("0", "1", "3", "124"):
+            self.assertEqual(run(v + "\n", rows=self.GOOD + [("C-euvd", "FAIL", "x")])[0], "FAIL", v)
+
     def test_status_tsv_oversize_field_is_dt_error_not_crash(self):
         p = self.w("big.tsv", "stage\tstatus\tdetail\nA\tOK\t" + "x" * 200000 + "\n")
         with self.assertRaises(fd.DtError):
@@ -669,7 +812,7 @@ class HardeningTests(ReportBase):
         o, dt = ReportTests.rej_case(self, True, ReportTests.REJ + [("C-euvd", "GAP", "x"), ("C-sbomgate", "NOT_ASSESSED", "x")],
                                      ReportTests.REJ_SUMM, "hx1")
         rc, out, _ = self.run_report([o], dt)
-        self.assertEqual(rc, 0, out)                       # 非 FAIL 的其他階段不影響已宣告的拒收（和原本一樣）
+        self.assertEqual(rc, 0, out)                       # 非 FAIL 的其他階段不影響已宣告的拒收（宣告的拒收仍成立）
         self.assertIn("與 firmware.yml 宣告的 expected_dt 一致", out)
         # 拒收不是 BOM_INVALID 那種 400：不放行
         rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", "FAIL", "http=400 {}") for r in ReportTests.REJ]

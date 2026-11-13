@@ -312,6 +312,121 @@ class Hostile(unittest.TestCase):
         self.assertEqual(d["components"][0]["licenses"], [])
 
 
+class AuditRecord(unittest.TestCase):
+    """normalize.json 的稽核內容：位置、無法正規化的原因、雜湊的固定向量。"""
+
+    def test_canonical_sha256_fixed_vector(self):
+        # 標準 JSON：sort_keys、分隔符 , :、ensure_ascii=False、UTF-8。期望值是對下面這串位元組直接算的 SHA-256（不經 json.dumps）
+        value = {"b": "\u00e9", "a": [1, "\u754c", None, True, 1.5]}
+        want = '{"a":[1,"\u754c",null,true,1.5],"b":"\u00e9"}'.encode("utf-8")
+        self.assertEqual(hashlib.sha256(want).hexdigest(), "bc9e8853e8a022c63fea7e24e21eed563fade186a441ce745eb0c6f097d38831")
+        self.assertEqual(fsn.canonical_sha256(value), "bc9e8853e8a022c63fea7e24e21eed563fade186a441ce745eb0c6f097d38831")
+        self.assertEqual(fsn.canonical_sha256({"a": 1, "b": 2}), fsn.canonical_sha256({"b": 2, "a": 1}))     # 鍵順序不影響
+        # ensure_ascii=True 的寫法會得到不同的雜湊（固定不用）
+        self.assertNotEqual(fsn.canonical_sha256("\u754c"), hashlib.sha256(json.dumps("\u754c").encode()).hexdigest())
+        self.assertEqual(fsn.canonical_sha256("\u754c"), hashlib.sha256('"\u754c"'.encode("utf-8")).hexdigest())
+        # 不能序列化就是 None，不丟例外
+        self.assertIsNone(fsn.canonical_sha256(object()))
+
+    def test_top_level_to_points_after_existing_properties(self):
+        d = doc14(platform="x", firmware_version="y")                       # metadata.properties 原本有 1 個
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual([(c["rule"], c["from"], c["to"], c["property"]) for c in rec["changes"]],
+                         [("top-level-extra-field", "/platform", ["/metadata/properties/1"], ["dumpling:supplier-extra:platform"]),
+                          ("top-level-extra-field", "/firmware_version", ["/metadata/properties/2"], ["dumpling:supplier-extra:firmware_version"])])
+        d = doc14(platform="x")
+        d["metadata"]["properties"] = None
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["changes"][0]["to"], ["/metadata/properties/0"])
+        d = doc14(platform="x")
+        del d["metadata"]
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["changes"][0]["to"], ["/metadata/properties/0"])
+
+    def test_unnormalized_rule_at_reason(self):
+        d = doc14(platform="x" * (fsn.MAX_VALUE_BYTES + 1), **{"": 1, "ctl\x01": 1, "a" * 101: 1})
+        rec = fsn.normalize(d, SHA)
+        bad_name = "欄位名稱不合格（空、過長或含控制字元）"
+        self.assertEqual(rec["unnormalized"], [
+            {"rule": "top-level-extra-field", "at": "/platform", "reason": "值超過 8192 位元組上限或無法序列化"},
+            {"rule": "top-level-extra-field", "at": "/", "reason": bad_name},
+            {"rule": "top-level-extra-field", "at": "/ctl\x01", "reason": bad_name},
+            {"rule": "top-level-extra-field", "at": "(欄位名稱過長或不是字串)", "reason": bad_name}])
+        for u in rec["unnormalized"]:
+            self.assertEqual(set(u), {"rule", "at", "reason"})
+        # license 的無法正規化：值太大／總量上限
+        d = doc14(bad=True)
+        d["components"][0]["licenses"][1]["license"]["url"] = "http://x/" + "a" * fsn.MAX_VALUE_BYTES
+        self.assertEqual(fsn.normalize(d, SHA)["unnormalized"],
+                         [{"rule": "license-without-id-or-name", "at": "/components/0/licenses/1", "reason": "值超過 8192 位元組上限或無法序列化"}])
+        old = fsn.MAX_CHANGES
+        self.addCleanup(setattr, fsn, "MAX_CHANGES", old)
+        fsn.MAX_CHANGES = 1
+        d = doc14(a1="x", a2="y")
+        self.assertEqual(fsn.normalize(d, SHA)["unnormalized"],
+                         [{"rule": "top-level-extra-field", "at": "/a2", "reason": "超過搬移總量上限（262144 位元組或 1 筆）"}])
+
+    def test_unnormalized_overflow_marker(self):
+        d = doc14(**{"k%03d" % i: "x" * (fsn.MAX_VALUE_BYTES + 1) for i in range(fsn.MAX_UNNORMALIZED + 5)})
+        un = fsn.normalize(d, SHA)["unnormalized"]
+        self.assertEqual(len(un), fsn.MAX_UNNORMALIZED + 1)
+        self.assertEqual(un[-1], {"rule": "more", "at": "", "reason": "無法正規化的項目超過 200，以下不列"})
+
+    def test_nesting_deeper_than_limit_is_recorded_once(self):
+        comp = {"type": "library", "name": "n0"}
+        root = {"type": "library", "name": "root", "components": [comp]}
+        for i in range(fsn.MAX_NEST + 20):
+            nxt = {"type": "library", "name": "n%d" % (i + 1), "licenses": [{"license": {"url": "https://x/%d" % i}}]}
+            comp["components"] = [nxt]
+            comp = nxt
+        d = doc14()
+        d["components"] = [root]
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["unnormalized"], [{"rule": "nesting-too-deep", "at": "/components" + "/0/components" * (fsn.MAX_NEST - 1) + "/0/components",
+                                                "reason": "元件巢狀超過 100 層，以下不處理"}])
+        self.assertEqual(rec["unnormalized"][0]["at"].count("/components"), fsn.MAX_NEST + 1)
+        self.assertTrue(rec["applied"])
+        self.assertEqual(len(rec["changes"]), 98)            # 第 3～100 層的 98 個元件有 license 項目；100 層以下不動
+        self.assertEqual(rec["changes"][-1]["from"].count("/components"), fsn.MAX_NEST)
+        # 超過 100 層的元件原樣留著
+        cur = d["components"][0]
+        for _ in range(fsn.MAX_NEST - 1):
+            cur = cur["components"][0]
+        self.assertEqual(cur["components"][0]["licenses"], [{"license": {"url": "https://x/%d" % (fsn.MAX_NEST - 2)}}])
+
+    def test_component_properties_not_array_skip_path(self):
+        for bad in ("oops", {"a": 1}, 5, True):
+            d = doc14(bad=True, platform="x")
+            d["components"][0]["properties"] = bad
+            d["components"].append({"type": "library", "name": "ok", "licenses": [{"license": {"url": "https://ok/1"}}]})
+            rec = fsn.normalize(d, SHA)
+            self.assertEqual(rec["unnormalized"], [{"rule": "license-without-id-or-name", "at": "/components/0/licenses/1",
+                                                    "reason": "元件的 properties 不是陣列，沒有地方放"}], repr(bad))
+            self.assertEqual(d["components"][0]["properties"], bad)                                  # 不是陣列的元件原樣
+            self.assertEqual(len(d["components"][0]["licenses"]), 3)
+            # 同一份文件其他地方照常正規化
+            self.assertEqual([c["from"] for c in rec["changes"]], ["/platform", "/components/2/licenses/0"], repr(bad))
+            self.assertEqual(rec["changes"][1]["to"], ["/components/2/properties/0"])
+            self.assertEqual(d["components"][2]["licenses"], [])
+            self.assertTrue(rec["applied"])
+
+    def test_top_level_fields_still_normalized_without_usable_components(self):
+        for comps in ("absent", None, "x", {"a": 1}, [], [None, 1, "a"]):
+            d = doc14(platform="P")
+            if comps == "absent":
+                del d["components"]
+            else:
+                d["components"] = comps
+            rec = fsn.normalize(d, SHA)
+            self.assertTrue(rec["applied"], repr(comps))
+            self.assertEqual([(c["rule"], c["from"], c["to"]) for c in rec["changes"]],
+                             [("top-level-extra-field", "/platform", ["/metadata/properties/1"])], repr(comps))
+            self.assertEqual(rec["unnormalized"], [], repr(comps))
+            self.assertNotIn("platform", d)
+            if comps != "absent":
+                self.assertEqual(d["components"], comps)               # components 本身不動
+
+
 class PrepIntegration(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
@@ -341,7 +456,7 @@ class PrepIntegration(unittest.TestCase):
         props = {p["name"]: p["value"] for p in out["metadata"]["properties"]}
         self.assertEqual(props["dumpling:normalized-from-sha256"], sha_in)
         self.assertEqual(props["dumpling:normalized-changes"], "2")
-        self.assertEqual(out["metadata"]["component"]["type"], "firmware")      # prep 原本的行為不變
+        self.assertEqual(out["metadata"]["component"]["type"], "firmware")      # prep 的根元件取代照常
         rec = rj(os.path.join(o, "normalize.json"))
         self.assertEqual(rec["input_sha256"], sha_in)
         self.assertEqual(len(rec["changes"]), 2)

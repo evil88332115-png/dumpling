@@ -5,6 +5,8 @@
 https://raw.githubusercontent.com/CycloneDX/specification/1.4/schema/<檔名>
 （tag `1.4`，annotated tag 物件 043b2cf1abc229c5c736888c4ade8d979687f7df；2026-11-12 下載）
 
+授權 Apache-2.0（CycloneDX/specification）。依據：`bom-1.4.schema.json` 與 `jsf-0.82.schema.json` 的 `$comment` 都寫 published under the terms of the Apache License 2.0；`spdx.schema.json` 檔內沒有授權標示，隨同一個 repo 的 Apache-2.0。
+
 | 檔案 | SHA-256 |
 |---|---|
 | bom-1.4.schema.json | 51b79463558376e6397802cce4fd792037a941cda89f9a7cc0abd1b5cbeb67b7 |

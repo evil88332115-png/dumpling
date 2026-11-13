@@ -22,7 +22,7 @@
 
 report 讀的結果資料夾（`--dt-result`）：
 
-    dt/dt-wait.rc                          選用：dt-ephemeral wait 的結束碼（3＝GAP，所有樣本標 GAP）
+    dt/dt-wait.rc                          選用：dt-ephemeral wait 的結束碼（只認 0；3 或其他值＝GAP，所有樣本標 GAP，不會是 OK）
     dt/<專案名>/normalize.json             供應商 SBOM 的正規化紀錄（firmware-dt.sh 從 prep 複製過來；report 不讀它，只讀 prep 的 dt-project.json）
     dt/<專案名>/summary.json               dt-verify 的輸出（components、findings_total、checks）
     dt/<專案名>/scan/status.tsv            sca-scan 的 status.tsv
@@ -57,7 +57,7 @@ report 讀的結果資料夾（`--dt-result`）：
 - 元件欄位型別：`group`、`name`、`version`、`purl`、`cpe` 必須是字串（或沒有／null），`properties` 必須是陣列（或沒有／null）；不符合 → prep 失敗（`FIRMWARE-DT-PREP FAIL`，訊息寫明第幾個元件、哪個欄位），這個樣本不上傳。
   理由：不符合 CycloneDX（DT 也會拒收），後面的計數與 DT 元件身分比對都假設是字串；不猜、不轉型。
 - **重複鍵**：讀輸入 SBOM 時用 `object_pairs_hook` 偵測同一個物件裡的重複鍵（標準庫預設後值悄悄蓋掉前值，上傳的副本只剩後值）。
-  `dt-project.json` 的 `duplicate_keys`（筆數與前 50 筆：物件完成解析的序號 `object_index`、`pointer`、鍵、丟掉的前值的標準 JSON sha256）、`summary.duplicate_keys`；`kind: sbom` 另在 `normalize.json` 的 `notes` 逐筆寫出。
+  `dt-project.json` 的 `duplicate_keys`（筆數與前 50 筆：物件完成解析的序號 `object_index`、`pointer`（走訪時邊走邊截斷在 300 字元，鍵名再長處理時間也不隨鍵長增加）、鍵、丟掉的前值的標準 JSON sha256）、`summary.duplicate_keys`；`kind: sbom` 另在 `normalize.json` 的 `notes` 逐筆寫出。
   report 與 prep 狀態行都會提到；狀態至少 ATTENTION，**不直接 FAIL**：DT 不會因此拒收，上傳的內容就是我們解析到的內容，差別只是供應商原檔有被丟掉的值，要人知道並判斷。
 - **單獨代理字元**（例如 `\ud800`）：prep 先把 `sbom.cdx.json`、`normalize.json`、`dt-project.json` 都序列化並確認能編成 UTF-8，全部成功才寫檔；失敗是 `FIRMWARE-DT-PREP FAIL … 單獨代理字元…`，不留任何檔案（寫檔中途失敗也會清掉已寫的）。
   `main()` 對非預期的例外也印 FAIL 行（不印 traceback），錯誤訊息經 `md_safe` 才輸出。
@@ -84,7 +84,7 @@ D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿�
 不在必要清單內，也不能要求。本機實測四個上傳成功的樣本，11 個必要階段全部 OK。
 
 供應商 SBOM 被 DT 拒收（`expected_dt`）：**目前沒有樣本使用**——Dasharo NS5x 的 SBOM 原檔不符 CycloneDX 1.4 schema，改在 prep 做最小格式正規化後上傳（正規化規則與紀錄見 `docs/notes/c2-supplier-sbom.md`），
-它的 `firmware.yml` 已拿掉 `expected_dt`。機制本身保留給「正規化也修不了」的供應商 SBOM（不認得的違規類型）。機制如下：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
+它的 `firmware.yml` 不宣告 `expected_dt`。機制保留給「正規化也修不了」的供應商 SBOM（不認得的違規類型）。機制如下：樣本的 `firmware.yml` 可宣告 `expected_dt: {upload: rejected, reason: …}`（鍵見 `firmware/README.md`）。
 report 的判斷：宣告 rejected 且 `D-dt-upload` 是 DT 的「BOM 不符 schema」回應（`BOM_INVALID_RE`：說明開頭必須是 `http=400 {"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"`，DT 5.2.0 實測）→ 狀態照實標 FAIL，說明寫「與 firmware.yml 宣告的 expected_dt 一致」，不讓 job 失敗；
 同時 dt-verify 的「弱點分析完成」「元件數」FAIL 是同一個原因，合併成一則說明、不另外計算。**只放行「上傳被拒」這一種**：上傳之前的必要階段（A-source、B-sandbox、B-sandbox-secrets、
 B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、F-secret-scan）不是 OK、sca-scan 有別的 FAIL 階段、Grype FAIL、dt-verify 有別項 FAIL，都照常 FAIL 並註明「不放行」。
@@ -110,7 +110,7 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 | `sca-scan` 輸出位置 | `<out>/status.tsv`（欄 stage／status／detail；狀態 OK／ATTENTION／GAP／NOT_ASSESSED／FAIL／NOT_RUN）、`<out>/scan/grype.json`（matches 陣列） | `sample_result()` |
 | 階段名稱 | `D-dt-project`、`D-dt-upload`、`D-dt-bom-processing`、`C-grype`；預期 NOT_RUN 的 `E-*`、`C-kernel-config`、`C-kernel-module-map` | `UPLOAD_STAGES`、`EXPECTED_NOT_RUN_*`、`sample_result()` |
 | `--name`／`--version` 的過濾 | 名稱換掉 `[A-Za-z0-9._-]` 以外字元；版本 `^[A-Za-z0-9][A-Za-z0-9 ._+~()-]{0,99}$` | `project_name()`、`safe_version()` |
-| `dt-ephemeral.sh wait` 結束碼 3 | GAP（資料不完整） | `dt-wait.rc` |
+| `dt-ephemeral.sh wait` 結束碼 | 0＝完成；3＝GAP（資料不完整）；其他值一律 GAP（看不懂不當成完成） | `dt-wait.rc` |
 | 專案查詢 | dt-verify 用 `name`＋`version` 查，所以 expected 的名稱版本必須和 sca-scan 傳的完全相同 | `dt-project.json` |
 
 ## 本機端到端結果（2026-11-12，DT 5.2.0、Syft 1.55.0／Grype 0.121.0）
@@ -125,35 +125,40 @@ NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對�
 | NUC11 PATGL357（BIOS，合併 wp3/m3 後的新 SBOM） | 8（6） | 6 | OK | OK（0） | 通過（合併前 3 個元件、3＝3） | ATTENTION |
 | Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
 | 合成 NVIDIA vBIOS | 1 | 1 | OK | OK（0） | 通過 | ATTENTION（NVIDIA 公告對照：NOT_ASSESSED） |
-| Dasharo NS5x 供應商 SBOM（原檔直接上傳；現已改成上傳正規化副本，見後一節） | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
+| Dasharo NS5x 供應商 SBOM（原檔直接上傳，沒有正規化；對照用，正規化副本見後一節） | 10 | 0 | **FAIL（DT 回 http=400）** | OK（36 筆） | FAIL | FAIL |
 
 發現：
 - **DT 的元件合併規則不含雜湊**：Protectli 有兩組只有 sha256 不同、其他欄位相同的 FSP-M 映像，DT 合併成一個（16 → 14）。原本 `expected` 的身分含 sha256，預期 16，verify 因此 FAIL；已改成 group／name／version／purl／cpe（含測試）。
   代價：DT 看不到同版本不同映像的第二份，SBOM 原檔仍保留兩份。
 - **DT 拒收 3mdeb 的供應商 SBOM（CycloneDX 1.4）**（C2 決定：不改檔、不蓋成 GAP，由樣本宣告 `expected_dt: rejected`，見上方；宣告後 report 仍標 FAIL 但不讓 job 失敗）：`Schema validation failed`——`/components/0/licenses/18/license` 只有 `url`、沒有 `id`／`name`；以及 metadata／properties 有 schema 不允許的欄位（`platform`、`firmware_version`）。
-  這是上游檔案不符合 CycloneDX schema。當時決定不改檔、以 `expected_dt` 宣告；之後 C0 同意改成上傳前的最小格式正規化（見 `docs/notes/c2-supplier-sbom.md`），這個樣本現在上傳成功。
+  這是上游檔案不符合 CycloneDX schema；prep 對 `kind: sbom` 的樣本上傳的是最小格式正規化的副本（見 `docs/notes/c2-supplier-sbom.md`），所以現行流程上傳成功；上面這一列是原檔直接上傳的對照。
 - `firmware-dt.sh` 遇到 `--result` 已有舊結果會標 FAIL（sca-scan 不接受非空輸出資料夾，舊的 status.tsv 也不能混進 report）；第三次本機執行重用資料夾時差點被舊結果騙成「OK」，所以加了這個檢查。
 - 0 筆漏洞的 BIOS 樣本 Grype 也是 0 筆：沒有 purl／CPE 的元件兩邊都比對不到，C-grype 仍顯示 OK，所以不是「沒有漏洞」（報告已固定寫明）。
 
-## 正規化後的本機端到端（2026-11-12，同一版 DT 5.2.0、Grype 0.121.0；`wp3/supplier-normalize`）
+## 供應商 SBOM 正規化副本的本機端到端（2026-11-12，DT 5.2.0、Grype 0.121.0）
 
 `firmware-fetch` → `firmware-ci.sh`（只跑 Ubuntu OVMF）→ `dt-ephemeral.sh up／wait／env` → `firmware-dt.sh`（OVMF＋Dasharo NS5x 供應商 SBOM）→ `down`（trap）。`wait` 363 秒，兩個樣本的 sca-scan＋verify 共 29 秒（Grype 資料庫是快取的）。
 
 | 樣本 | 元件 | DT 元件數 | 上傳 | Grype | verify | report |
 |---|---|---|---|---|---|---|
 | Ubuntu OVMF（BIOS） | 1 | 1 | OK | OK（0） | 通過 | ATTENTION |
-| Dasharo NS5x 供應商 SBOM（正規化副本） | 10 | **10** | **OK（DT 收下）** | OK（36 筆） | 通過（5 項檢查全 OK；11 個必要階段全 OK） | OK（說明：已正規化 3 處） |
+| Dasharo NS5x 供應商 SBOM（正規化副本） | 10 | **10** | **OK（DT 收下）** | OK（36 筆） | 通過（5 項檢查全 OK；11 個必要階段全 OK） | **ATTENTION**（原因見下） |
 
 - 正規化 3 處：`/platform`、`/firmware_version`、`/components/0/licenses/18`；`normalize.json` 在 `<結果>/firmware-sbom-…/normalize.json`。原檔 SHA-256 不變（`5c42344d…6a44ae`）。
-- 樣本已沒有 `expected_dt`；之前（原檔直接上傳）同一個樣本是 http=400、report FAIL。
-- 注意 report 的狀態是 OK，但這份 SBOM 的 purl 全是 `pkg:generic/…`（DT 的 OSV 不比對）、5 個元件沒有 cpe、沒有 `dumpling:vuln-assessment` 標記：DT 漏洞數 0 不代表沒有漏洞，漏洞比對的依據是 Grype（36 筆）。這是當時的結果；之後 report 加嚴（沒有 `dumpling:vuln-assessment` 標記、`pkg:generic`、Grype 有比對結果、sca-scan 其他階段不是 OK 都不能是 OK），現在這個樣本是 ATTENTION。
+- 樣本沒有 `expected_dt`；原檔直接上傳的結果見上一節的表（http=400、FAIL）。
+- report 狀態依現行規則是 ATTENTION，不是 OK：這份 SBOM 沒有 `dumpling:vuln-assessment` 標記（供應商自帶的 `dumpling:` 標記也不採信）、purl 全是 `pkg:generic/…`（DT 的 OSV 不比對）、5 個元件沒有 cpe、Grype 有 36 筆比對結果、sca-scan 有其他階段不是 OK（例如 `C-sbomgate` NOT_ASSESSED）；report 另寫「已正規化 3 處」。
+  DT 漏洞數 0 不代表沒有漏洞，漏洞比對的依據是 Grype（36 筆）。
 
-## Actions 實測（run 43266687645，commit bcfef21，workflow_dispatch）
+## Actions 實測（run 43266687645，commit bcfef21，workflow_dispatch；Dasharo NS5x 以原檔上傳並宣告 `expected_dt`，沒有正規化）
 
 兩個 job 都 success（firmware-fetch、firmware-dt）。firmware-dt 各步驟：下載 64 秒、解析 4 秒、安裝工具 7 秒、`up` 32 秒、`wait` 257 秒（結束碼 0）、`env` 0 秒、
 上傳各樣本並驗證 11 分 44 秒、NVIDIA 步驟 0 秒（沒有 gpu-firmware 表 → GAP 那一行）、down 2 秒；整個 job 約 17 分 53 秒。
 五個樣本的 report 行與本機相同（Protectli／NUC／OVMF／合成 vBIOS 為 ATTENTION，Dasharo NS5x 為 FAIL 並註明與宣告一致），`firmware-dt.sh` 退出碼 0。
-前一個 run（43263224765，commit e4cadcf，還沒有 `expected_dt`）因 Dasharo NS5x 的 FAIL 而失敗，符合預期。
+
+## 限制
+
+- report 的 OK 不看 NVIDIA 公告對照（公告步驟獨立於 report）；目前沒有工具會寫 `dumpling:vuln-assessment=NONE`，所以 vbios 樣本實際上不會是 OK。
+- `summary.json` 內部的一致性不檢查（`components`、`findings_total` 與 `checks[]` 互相矛盾時不擋）：這些值由 `dt-verify.py` 自己寫，report 只檢查型別、必要檢查是否存在與狀態。
 
 ## 仍未驗證
 

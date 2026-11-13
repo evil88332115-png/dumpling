@@ -96,9 +96,12 @@ def _depth_ok(obj, limit=MAX_DEPTH):
     return True
 
 
-def _ptr(parts):
-    """RFC 6901 JSON Pointer（和 firmware_sbom_normalize.pointer 相同；這裡不載入該模組）。"""
-    return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
+POINTER_CAP = 300       # 重複鍵事件的位置只留前 300 字元（鍵名沒有長度上限）
+
+
+def _ptr_part(p):
+    """JSON Pointer（RFC 6901）的一段，最多取前 POINTER_CAP 個字元（逐字元轉義，所以前綴和完整轉義後的前綴相同）。"""
+    return "/" + str(p)[:POINTER_CAP].replace("~", "~0").replace("/", "~1")
 
 
 class DupKeys:
@@ -129,21 +132,28 @@ class DupKeys:
         return d
 
     def locate(self, doc):
-        """補上每筆事件的物件在最終文件裡的 JSON Pointer（走訪整份文件；深度已先檢查過）。"""
+        """補上每筆事件的物件在最終文件裡的 JSON Pointer（走訪整份文件；深度已先檢查過）。
+        位置一邊走一邊截斷在 POINTER_CAP 字元：不先組出完整的 Pointer，鍵名再長也只處理前 POINTER_CAP 字元。"""
         if not self._objs:
             return
         want = {}
         for d, ev in self._objs:
             want.setdefault(id(d), []).append(ev)
-        stack = [(doc, ())]
+        stack = [(doc, "")]
         while stack and want:
             o, path = stack.pop()
             if isinstance(o, dict):
                 for ev in want.pop(id(o), ()):
-                    ev["pointer"] = (_ptr(path) or "/")[:300]       # 鍵名沒有長度上限，位置只留前 300 字元
-                stack.extend((v, path + (k,)) for k, v in o.items())
+                    ev["pointer"] = path or "/"
+                if len(path) < POINTER_CAP:
+                    stack.extend((v, (path + _ptr_part(k))[:POINTER_CAP]) for k, v in o.items())
+                else:
+                    stack.extend((v, path) for v in o.values())
             elif isinstance(o, list):
-                stack.extend((v, path + (i,)) for i, v in enumerate(o))
+                if len(path) < POINTER_CAP:
+                    stack.extend((v, (path + _ptr_part(i))[:POINTER_CAP]) for i, v in enumerate(o))
+                else:
+                    stack.extend((v, path) for v in o)
 
 
 def load_json(path, limit, what, dups=None):
@@ -434,6 +444,11 @@ def dup_text(n):
     return ("輸入 SBOM 有 %d 個重複鍵（JSON 解析時後值取代前值，上傳的副本只剩後值；明細見 normalize.json 的 notes 或 dt-project.json 的 duplicate_keys）" % n)
 
 
+def _short_str(v, n=300):
+    """紀錄用：字串留前 n 字元，其他型別（含沒有）記 None。"""
+    return v[:n] if isinstance(v, str) else None
+
+
 def prep(sbom_path, sample_path, out, synthetic=False):
     # 重複鍵：標準庫的 json 預設悄悄用後值蓋掉前值；供應商可以用這個讓人看到的內容和上傳的內容不同，所以一律偵測、記錄，狀態至少 ATTENTION
     dups = DupKeys()
@@ -519,7 +534,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "duplicate_keys": ({"count": dups.total, "listed": len(dups.events),
                             "events": [{k: ev[k] for k in ("object_index", "pointer", "key_json", "dropped_value_sha256")} for ev in dups.events[:MAX_DUP_NOTES]]}
                            if dups.total else None),
-        "replaced_metadata_component": ({"name": old.get("name"), "version": old.get("version")} if isinstance(old, dict) else None),
+        "replaced_metadata_component": ({"name": old.get("name"), "version": old.get("version"), "purl": _short_str(old.get("purl"))} if isinstance(old, dict) else None),
         "summary": summary,
     }
     info_text = dumps_json(info, "dt-project.json")
@@ -810,7 +825,7 @@ def sample_result(info, dt_dir, wait_rc):
             r["notes"].append("DT 拒收上傳（http=400，BOM 不符 schema）；firmware.yml 沒有宣告 expected_dt")
         elif exp_dt:
             r["notes"].append("firmware.yml 宣告 expected_dt: rejected，但上傳失敗不是 DT 的「BOM 不符 schema」拒收（http=400 且回應為 The uploaded BOM is invalid／Schema validation failed）")
-    elif wait_rc == 3 or "GAP" in (r["upload"], r["grype"]) or r["verify_gap"]:
+    elif (wait_rc is not None and wait_rc != 0) or "GAP" in (r["upload"], r["grype"]) or r["verify_gap"]:
         # verify_gap：dt-verify 的資料不全（checks 缺漏、NOT_RUN、不認得的狀態、元件數怪）＝驗證沒有完整做完，同 wait 結束碼 3 的語意（資料不完整）→ GAP
         st = "GAP"
     elif summ is None or rows is None or r["upload"] != "OK" or r["grype"] != "OK":
@@ -821,6 +836,8 @@ def sample_result(info, dt_dir, wait_rc):
         r["notes"].extend(why)
     if wait_rc == 3:
         r["notes"].append("dt-ephemeral wait 結束碼 3（資料不完整）：0 筆漏洞不能當成沒有漏洞")
+    elif wait_rc is not None and wait_rc != 0:
+        r["notes"].append("dt-ephemeral wait 結束碼 %d（只認 0＝完成、3＝資料不完整）：看不懂的結束碼不能當成完成" % wait_rc)
     r["status"] = st
     if st in ("NOT_RUN", "GAP"):
         _unverified_declaration(r, exp_dt)
@@ -849,8 +866,7 @@ def _dup_count(s):
 def attention_reasons(s, r):
     """上傳與驗證都完成後，還需要人看的原因（空清單＝OK；OK 也不代表安全）。原則：資料不完整、有疑點、讀不到，一律不是 OK。
     除了版本 GAP、沒有 purl、NOT_ASSESSED 之外，下面幾種也不能是 OK：
-      - Grype 或 DT 的比對數：只有真的 int 且 >= 0 才算讀到（-3、null、字串 "-" 都是「讀不到」，不是 0）；> 0 要人審
-        （供應商 SBOM 的 Grype 36 筆曾因此被標 OK）。
+      - Grype 或 DT 的比對數：只有真的 int 且 >= 0 才算讀到（-3、null、字串 "-" 都是「讀不到」，不是 0）；> 0 要人審。
       - dumpling:vuln-assessment 只有「完全等於 NONE」才是已評估沒有已知漏洞；沒標、NOT_ASSESSED、其他任何值都要人看。
         供應商 SBOM（kind: sbom）自帶的 dumpling: 標記不採信，一律當作沒標。
       - dumpling:version-status 只認完全相同的 OK／GAP；沒有 version 又沒有 GAP 標記的元件也要列出。
