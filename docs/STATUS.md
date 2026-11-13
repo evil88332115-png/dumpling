@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:05 +0800（C2）
+最後更新：2026-11-14 02:05 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -274,23 +274,14 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：M5 已合併（#47，main e5d6e5d）。**監控 PR #49**：C0 的獨立驗證（02681bc）不通過 3 項＋建議 → 已修在 9f42c74（排程 real 預設 dry_run 有真值表測試守住、被略過的 Release 算降級、公開 Issue 防 @mention／連結注入、資料源步驟自己的逾時、彙總 Issue 標 ATTENTION）；CI 全綠（tests 43465637125、演練 43465634402、real dry_run 43466689897），等 C0 看 diff 合併。之後（D-040）：有正式 Release → 手動 baseline → 排程 dry_run 一天 → 回報 → C0 設 WATCH_REAL_ISSUES=on。M8 等 M7
-- 架構（已合併）：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；D-040（只開 KEV／廠商層級、超過 20 個併成彙總、示範專案＋demo、排程 real 預設 dry_run、不開 art14）
-- 分支／PR／commit：
-  - PR #32 已合併（main 26a6377），worktree 已移除
-  - `wp2/watch-m2` a4628dd（2026-11-13：release-meta 已照 C1 wp1/m2 9f1d2f0 的實際格式收斂成一種讀法——六種值照原值、reports 列每份報告、attention 寫進 Issue、kernel_versions 照欄位找附件；D-043 廠商清單端到端測試 bbcb489；141 個測試）。之前 f204260（已併 main 26a6377；worktree `$AGENT_TMP/dumpling-wt-c3-m2`，從 #32 head 開）：F1 大小警告算 ATTENTION、7 天一次；F2 修剪過的群組再出現用 open_if_closed（`dumpling.pruned_keys`）；F3 Grype DB 過期與 L4T 對應 GAP／FAIL 擋第一次基準；F4 有 Release 卻沒有基準 → 只開「還沒有基準」提醒 Issue（plan.state=null，不寫狀態、不算監控 Issue）；F5 演練三輪都可建基準；F6／concurrency：group 依 ref、compute 用 actions: read 查上一次排程 run（cancelled／失敗／超過 36 小時 → 降級）、keepalive 印最近 3 次排程。PR 未開（等 M2 的 mirrors.sh）
-  - `wp5/gitlab` b0079fc（worktree `$AGENT_TMP/dumpling-wt-c3-gitlab`）
-- M8 B1（第 14 條通報，C0 交辦：等 M2 期間先做不需要 M7 欄位的部分）：分支 `wp2/art14`（worktree `$AGENT_TMP/dumpling-wt-c3-art14`，從 main 26a6377），只推分支、M8 才開 PR。條文已核對：EUR-Lex CELEX:32024R2847（OJ L 2024/2847, 20.11.2024）第 14(1)–(4) 條、第 71 條（第 14 條自 2026-09-11 適用）；期間的法定計算規則未核對 → 工具算保守值、交法務。銷售市場欄位等 C1 的 M7 → GAP
-- 代理（上限 D-048：每對話 3 個 Sonnet 5.5，寫程式 2、驗證 1；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）：
-  - 寫程式 B1 art14（Sonnet high）：完成。`wp2/art14` e66f499（177 個測試）。**已在 GitHub 實跑 action=drill 六步兩次全綠**（run 43369037768、43369266378；暫時的分支 push 觸發已拿掉）；實跑發現依標籤列 Issue 有索引延遲 → 演練步驟重試、countdown 跳過已關閉的。ART14.md 已加 1182/71 參考（未核對、採較早保守值）與 Bot 例外理由。目前沒有代理在跑
-- CI：wp2/watch-m2 b1b236e：演練 43365208989 綠、tests 43365156856 綠（132 個 c3-watch 測試）、real＋dry_run 43366085628 綠（GAP）。main：real＋dry_run 43362385127 綠
+- 目前在做：**監控 PR #49**（`wp2/watch-m2` 7780658）。C0 聚焦複驗（02681bc..9f42c74）：上一輪 3 項都通過；新的 1 應修（md_text 沒跳脫 `&`，`&commat;everyone` 這類具名實體會解碼成 @提及）＋1 建議（tag、html_url 放進行內程式碼）→ 已修在 7780658（& 先換 &amp;、標題 & 後插零寬空白、unsafe_markdown 抓 &名稱; 與 &#、測試＋4 種突變）。CI 跑中（tests 43479141181、演練 43479147433），綠了回報 C0 看 diff 合併
+- 之後（D-040）：有正式 Release（C0 通知）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
+- 已合併：#32（每日監控架構）、#47（M5 GitLab 範本與搬移清單，main e5d6e5d；T-14 由 C0 決定 M7 後交 C1）
+- 架構：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；資料源走 `pipeline/lib/mirrors.sh`，核心 CVE 鏡像用 actions/cache 跨 run 沿用（與 pipeline.yml 同 key 前綴）
+- M8 B1（第 14 條通報）：`wp2/art14` e66f499（worktree `$AGENT_TMP/dumpling-wt-c3-art14`，177 個測試，GitHub 演練兩次全綠），等 C1 的 M7 銷售市場欄位再開 M8 PR；GitLab 版（私密 Issue、email、SRP）在 docs/ART14.md 第 10 節
+- 代理（D-048）：目前沒有代理在跑
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 下一步：
-  - M2 合併 → `wp2/watch-m2` 併 origin/main → 每日監控改用 `pipeline/lib/mirrors.sh`（kernel-cve 沿用舊鏡像時，報告與 Issue 寫出那行 ATTENTION）＋release-meta 的 `report_status`（報告整體狀態）與 `release_gate`（發行閘門）寫進 Issue 內文與報告，欄位不存在填 NOT_RUN（名稱 C1 已定案：report_status、release_gate、pipeline_result；已做在 7caa0f2；已依 C1 實際格式收斂（a4628dd），M2 合併後再對合併版核對一次）→ 演練／real dry_run → 開 PR → 驗證 → 合併
-  - 之後：手動 `mode=real`＋`baseline=true` 建第一次真實基準 → 排程 dry_run 跑一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
-  - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 驗證 → 開 PR
-- B1 art14 的待辦（M8）：等 M7 的銷售市場欄位再一起開 M8 PR；銷售市場接 M7 的 project.yml 欄位；GitLab 版（私密 Issue、email、SRP）只列在 docs/ART14.md 第 10 節，M5／M8 再做。已實測：github-actions[bot] 開的 Issue 是 author_association=NONE（#21），所以程式接受 Bot 作者是必要的
-- 卡住／等決定：無。第一次真實基準要等正式 Release（正式 tag 在等使用者；C0 會通知）
+- 卡住／等決定：無。#49 等 C0 合併；第一次真實基準等正式 Release；M8 等 M7
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
