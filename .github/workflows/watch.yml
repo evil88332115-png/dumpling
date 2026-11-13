@@ -49,6 +49,7 @@ jobs:
   drill-1-baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'drill'
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
@@ -64,6 +65,7 @@ jobs:
   drill-2-new-kev:
     needs: drill-1-baseline
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
@@ -78,6 +80,7 @@ jobs:
   drill-3-repeat:
     needs: drill-2-new-kev
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
