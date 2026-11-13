@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:17 -0500（C1）
+最後更新：2026-11-13 04:20 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,7 +12,7 @@
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1：M2 收尾（wp1/m2；含 KS 核心防護 D-044、自有軟體宣告、p1_rows、vex-rules 只留 K1/K2/U1）。下一步：重跑兩個 release → 驗證補驗 → 併 main → 開 M2 PR
+  - C1：**搬家準備完成、已停下**。wp1/m2 f11bfdb（全推，本機完整測試 OK）；PR 草稿在 wp1/m2-pr-draft d3efdc8（不合併，開 PR 後刪）。驗收 run 在 f11bfdb 上跑：release v39.2.0 43399785656、v39.2.1 43399800268、tests 43399813005。下一步見 C1 節：檢查 draft → 新的獨立驗證 → 併 main → 開 M2 PR
   - C2：D-042 CSME 完成（wp3/csme-new 61e8ef7），AMD（wp3/amd-psp）修應修 4 項中，之後合成一個 PR；D-043 接在後面；supplier-normalize（8a960c0）等 M2
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：wp7/adapters 三平台重跑中（d31c872），標準答案依結果重訂後驗證；M6 PR 草稿已備
@@ -32,6 +32,7 @@
   5. `gh auth status`：同一帳號（C4 確認）
   6. tmux 每個對話一個 window，對話名稱 C0–C4；C1、C2 的新 worktree 照 `$AGENT_TMP/dumpling-wt-<對話>-<主題>` 從推送的分支開
   7. 可清掉的舊 worktree：wt-c4-cra-survey（已併進 #15），由 C4 自己清
+  8. 新對話建議在 WSL 裡從 `$REPO_MAIN`（C0）或自己的 worktree 啟動 Claude Code，不要從 Windows 的 C: 啟動後在那裡 clone（C3 提醒）；`$AGENT_TMP` 是 `$HOME/dumpling-agent-tmp`，`HEAVY_LOCK` 是 `$AGENT_TMP/dumpling-heavy.lock`
 - 主要主機上的 C0–C2、worktree、repo：使用者確認第二台接上前不刪除、不關閉
 <!-- END C0 -->
 
