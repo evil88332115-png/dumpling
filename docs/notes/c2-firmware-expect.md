@@ -32,6 +32,12 @@ VBT 版本（`1.00`、BDB 2.28）試掃報告沒有記錄，沒有加。NUC 維�
 - 不加 `intel_vbt`：VBT 元件的 version 是 `$VBT` 表頭的格式版本（x100，NUC 樣本三份都是 `1.00`），不是發行版本，比對沒意義。
 - NUC 樣本：寫了 `intel_gop: "1070"`（映像讀到 build 1070，release notes 17.0.1070 佐證）。legacy VBIOS 映像讀到 `1003 PC 14.34`，但 release notes 沒有 VBIOS／1003／14.34 字樣（pdftotext 全文查過），沒有獨立佐證，所以沒寫進 expected。
 
+## AMD 鍵（amd_agesa、amd_microcode）
+
+- `amd_agesa` 只比 SBOM 的 `AMD AGESA` 元件 version 的最後一個符記（PI 版本號）或整串；廠商 release notes 寫 `ComboV2PI 1.2.0.B`、映像字串是 `ComboAM4v2PI 1.2.0.B`，名稱部分不比。
+- `amd_microcode` 比 `AMD CPU microcode` 元件的 equivalence id 與 patch level（version）；沒有 `amd_psp_*`：PSP 韌體條目的標頭版本沒有找到可對照的公開來源，不寫 expected。
+- 樣本 `asus-prime-b550m-a-3404` 寫了 `amd_agesa: "1.2.0.B"`（ASUS 下載頁 release notes）與兩份微碼（與 linux-firmware 位元組相同），出處寫在該檔註解與 `docs/notes/c2-amd-psp.md`。
+
 ## CI 結果（2026-11-12）
 
 - 綠燈：https://github.com/evil88332115-png/dumpling/actions/runs/43231626732

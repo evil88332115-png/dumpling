@@ -494,6 +494,67 @@ def test_not_configured_writes_nothing(tmp_path):
     assert cli("--config", write_cfg(tmp_path, ["a"]), "--configured").returncode == 0
 
 
+def test_declaration_kinds():
+    """沒有列自有軟體時的宣告：沒宣告 → undeclared；空陣列＋理由 → none；空陣列沒有理由 → undeclared；列了又寫理由 → conflict。"""
+    R = ow.NONE_REASON_KEY
+    assert ow.declaration(None)[0] == "undeclared" and "no product configuration" in ow.declaration(None)[1]
+    assert ow.declaration(MIN_CFG)[0] == "undeclared"
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": []}))[0] == "undeclared"
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": [], R: "  "}))[0] == "undeclared"
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": [], R: "only  distro\npackages"})) == ("none", "only distro packages")   # 空白正規化
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": [], R: "only distro packages"})) == ("none", "only distro packages")
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": [], R: "x" * 501}))[0] == "undeclared"
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": ["a"], R: "none"}))[0] == "conflict"
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": ["a"]})) == ("listed", None)
+    assert ow.declaration(dict(MIN_CFG, sbom={"own_software": "a"}))[0] == "undeclared"
+
+
+def test_declaration_cli(tmp_path):
+    """--declaration：沒宣告 → GAP（exit 2）、明確宣告沒有 → OK（exit 0），都寫只有宣告結果的 own-software.json；有列 → 參數錯誤。"""
+    p = cli("--declaration", "--out", tmp_path / "o1")
+    assert p.returncode == 2 and p.stdout.startswith("B-own-software\tGAP\t沒有產品設定：沒有宣告自有軟體"), p.stdout + p.stderr
+    d = json.loads((tmp_path / "o1" / "own-software.json").read_text())
+    assert d["status"] == "GAP" and d["declaration"]["kind"] == "undeclared" and "patterns" not in d
+    c = tmp_path / "none.json"
+    c.write_text(json.dumps(dict(MIN_CFG, sbom={"own_software": [], ow.NONE_REASON_KEY: "only distribution packages"})))
+    p = cli("--config", c, "--declaration", "--out", tmp_path / "o2")
+    assert p.returncode == 0 and p.stdout.startswith("B-own-software\tOK\t製造商宣告沒有自有軟體：only distribution packages"), p.stdout
+    assert cli("--config", write_cfg(tmp_path, ["a"]), "--declaration", "--out", tmp_path / "o3").returncode == 64
+    assert cli("--declaration").returncode == 64
+    assert cli("--from", "x", "--out", tmp_path / "o4").returncode == 64          # 其他模式仍要 --config
+
+
+def test_conflicting_declaration_is_a_config_error(tmp_path):
+    src = tar_of(tmp_path / "r.tar", ROOTFS)
+    c = tmp_path / "c.json"
+    c.write_text(json.dumps(dict(CFG, sbom={"own_software": ["/usr/bin/acme-agent"], ow.NONE_REASON_KEY: "none"})))
+    p = cli("--from", src, "--config", c, "--out", tmp_path / "out")
+    assert p.returncode == 2 and p.stdout.startswith("B-own-software\tGAP\t") and "contradicts" in p.stdout
+    # SBOM 文件（build()）也是 GAP，不會和狀態列互相矛盾（第二輪驗證）
+    cfg = json.loads(c.read_text())
+    info = ow.build(json.loads((tmp_path / "out" / "own-software.json").read_text()), cfg, "1.6")[2]
+    assert info["status"] == "GAP" and any("contradicts" in g for g in info["gaps"])
+
+
+def test_cra_report_reads_the_declaration(tmp_path):
+    """cra_report：沒有列自有軟體時，只有 --declaration 寫的檔案存在才在 SBOM 文件標出來；沒有那個檔案時照舊。"""
+    proj, scan = make_project(tmp_path / "p", MIN_CFG), make_scan(tmp_path / "res" / "scan")
+    r, s0, rep = run(proj, scan)
+    assert "own_software" not in s0["product_sbom"]                                    # 沒有宣告檔：輸出照舊
+    assert cli("--config", proj / "CRA" / "Config" / "config.json", "--declaration", "--out", scan.parent / "own-software").returncode == 2
+    r, s, rep = run(proj, scan)
+    assert s["product_sbom"]["own_software"]["status"] == "GAP" and s["product_sbom"]["own_software"]["declaration"] == "undeclared"
+    assert s["documents"]["sbom"]["status"] == "GAP" and any("no own software declared" in x for x in s["documents"]["sbom"]["detail"])
+    assert "no own software declared" in (rep / "sbom.md").read_text(encoding="utf-8")
+    # 明確宣告沒有：OK，sbom.md 寫出理由與「掃描沒有驗證」
+    cfg = dict(MIN_CFG, sbom={"own_software": [], ow.NONE_REASON_KEY: "only distribution packages"})
+    proj2 = make_project(tmp_path / "p2", cfg)
+    r, s2, rep2 = run(proj2, scan)
+    assert s2["product_sbom"]["own_software"]["status"] == "OK" and s2["product_sbom"]["own_software"]["none_reason"] == "only distribution packages"
+    md = (rep2 / "sbom.md").read_text(encoding="utf-8")
+    assert "only distribution packages" in md and "the scan did not verify it" in md
+
+
 def test_bad_source_fails(tmp_path):
     (tmp_path / "r.tar").write_bytes(tar_of(tmp_path / "x.tar", ROOTFS).read_bytes()[:1500])   # 截斷
     p = cli("--from", tmp_path / "r.tar", "--config", write_cfg(tmp_path, ["/usr/bin/acme-agent"]), "--out", tmp_path / "out")
