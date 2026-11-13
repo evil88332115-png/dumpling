@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:30 +0800（C0）
+最後更新：2026-11-13 21:30 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -123,6 +123,8 @@
 >
 > - 寫程式（Sonnet 5.5，effort high）：D-043 (1) 的 Intel 部分（微碼公告比對：固定 commit 的 Intel microcode release notes → 資料表 → CPUID＋rev 比對；CSME 加 NVD CPE），分支 `wp3/fw-advisory`（從 main 26a6377 開，worktree `$AGENT_TMP/dumpling-wt-c2-advisory`），暫存 `$AGENT_TMP/dumpling-tmp-c2-adv/`，狀態：**進行中**。NVIDIA vBIOS 那項要用 gpu-firmware 對照表，等 M2 進 main 才做
 >
+> - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**進行中**
+>
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
 ### 公開資料規定（D-042／D-043，重要）
@@ -168,7 +170,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 1. **D-042 AMD**：C0 已決定（**D-047**，在 wp0/docs-batch-4），照這兩點修（**寫程式代理已派出，進行中**），改完和 ebac3e9 的改動一起複驗：
    - (a) **歧義規則改窄，但要有校驗佐證**：同一位置被兩種基底讀到時，只有一種讀法的目錄通過自身的結構與校驗（目錄 checksum、條目範圍都在映像內等），就採用那一種的條目；另一種只列出來，並附上它沒通過的證據。兩種都通過而且內容衝突，或兩種都不通過 → 維持 GAP。（我的補充：子目錄要沿用被採用那一讀法的基底；測試要涵蓋「一邊 checksum 壞」「兩邊都過且內容不同」「兩邊都壞」，以及處理順序反過來結果相同；真樣本 B550M、B650M 重跑，報 SBOM 元件數的變化。）
    - (b) **拿掉 `sys._getframe`**（amd_psp.py:746、:860 附近）：原始位元組裡只要有 AGESA 標記不在走訪範圍內，就標「搜尋不完整」（complete=False）。需要精確結果的話，M7 再請 C1 提供正式回呼介面，現在不跟 C1 談
-   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**這段期間 wp3/amd-psp 不動**。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
+   - **已完成**：複驗兩次，第二次在 29a2cc9 通過；收尾 48058e1；併入 csme-new，得到 ca80b27。CI 綠、已通知 C0。**C0 回覆：PR 先不開**，等兩件事：(1) sca-center 用私有檔在本機驗 ca80b27；(2) C0 已對 ca80b27 派獨立驗證代理。兩件都沒問題，C0 會通知開 PR，驗證報告由 C0 貼。「目錄表落在自己的條目範圍裡」要不要補進 DECISIONS，C0 等驗證結果再決定。**更新**：C0 對 ca80b27 的獨立驗證「通過」；延伸證據定為 **D-050**（wp0/docs-batch-4 b5c5015）。開 PR 前要修 3 項：(1) checksum 不符的單一讀法目錄仍被標 adopted，它的 L2 子目錄版本因此進了 SBOM；(2) notes 和報告依據要寫明 D-050 的兩個前提；(3) firmware.yml 的目錄與條目數要把兩種口徑分開寫。**已派寫程式代理到 wp3/amd-psp 修**（第 1 項做法：untrusted／untrusted-path 不採用），修好後把 HEAD 告訴 C0，C0 會看 diff。PR 要等私有檔驗證有結論，或使用者決定跳過，才開（私有檔驗證的那個對話在等使用者放行權限）。PR 說明草稿在 `$AGENT_TMP/dumpling-tmp-c2/pr-body.md`
    - 把 `origin/wp3/csme-new` 併進 `wp3/amd-psp`。會衝突的有 `docs/PROVENANCE.md`、`tests/run.d/c2-x86-firmware.sh`（兩邊都改了最後的測試清單），x86_firmware.py 兩邊改的是不同段落
    - 併 origin/main（D-021：有衝突才併，開 PR 前確認只剩自己的改動）
    - 重跑 CI
