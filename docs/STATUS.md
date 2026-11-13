@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:53 +0800（C1）
+最後更新：2026-11-13 22:55 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -146,7 +146,7 @@
 >   - 應修 3：notes 有過時的地方，以及寫起因的句子
 >   - 建議：revert 註記；cpe-basis 改成列舉值（listed／inferred）；註解邊界；補測試
 >   - 已交回寫程式代理（第三輪，進行中）
->   - **待 C0**：CPE 的 major 上限 30 要補進 D-051
+>   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
 >   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
@@ -159,7 +159,7 @@
 >   - Size 逐值列舉 0x40／0x48／0x58／0x60；+0x58 之後要全 0，否則 GAP
 >   - 其他 7 個樣本改動前後逐位元相同；本機 221 passed
 >   - CI tests 43443071116、firmware 43443076668 **綠**
-> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/cse-layout-size dc7589a，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse/`，狀態：**進行中**
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/cse-layout-size dc7589a，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse/`，狀態：**進行中**（C0 同時用私有檔在本機跑 dc7589a，會給去識別化的結論；預驗通過就開 PR）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
