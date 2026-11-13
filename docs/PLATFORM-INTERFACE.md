@@ -201,7 +201,13 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…）` 結束；轉接器沒有該步驟的腳本 → `NOT_RUN`（4）。
 轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_ARCH`（platform.yml 的 `arch`，預設 `arm64`）、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）、`DUMPLING_SUPPORT_UNTIL`（project.yml 的 `support_until`，YYYY-MM-DD；還沒填是空字串）。
 
-**精靈對產品設定包複本做的事（D-039、D-055；原始的 `CRA/Config/` 不動）**：`product.version` 改成這次的版本（沒寫就填入）；有刷機包時 `product.identification` 改成這次的刷機包（沒寫而且有 MD5 就填入 `Flash package <檔名> (MD5 <md5>)`）；`support.end_date` 沒寫時由 `DUMPLING_SUPPORT_UNTIL` 產生（YYYY-MM），已寫而月份不同 → ATTENTION（project.yml 的一致性檢查會先 FAIL）。`platform_scan.collect` 之後核對每份報告設定包的 `product.version`（去掉 ` (rootfs)` 這類非版本後綴）等於 Release tag 的版本，不一致 → scan 步驟 FAIL，結果在 scan.json 的 `product_version_check`；`release-meta.py --tag` 也要等於 `<專案>/<版本>`。notes.md 開頭的 pipeline_result 由 `release-meta.py --notes` 依同一份 pipeline-steps.tsv 重寫，和 release-meta.json 一致。sbom.md 第 6 節的 BSP 說明依 list.json 的平台寫，非 Jetson 平台不出現 Jetson Linux 的文字。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
+**精靈對產品設定包複本做的事（D-039、D-055；原始的 `CRA/Config/` 不動）**：`product.version` 改成這次的版本（沒寫就填入）；有刷機包時 `product.identification` 改成這次的刷機包（沒寫而且有 MD5 就填入 `Flash package <檔名> (MD5 <md5>)`）；`support.end_date` 沒寫時由 `DUMPLING_SUPPORT_UNTIL` 產生（YYYY-MM），已寫而月份不同 → ATTENTION（project.yml 的一致性檢查會先 FAIL）。`platform_scan.collect` 之後核對每份報告設定包的 `product.version`（去掉 ` (rootfs)` 這類非版本後綴）等於 Release tag 的版本，不一致 → scan 步驟 FAIL，結果在 scan.json 的 `product_version_check`；這只是拿 tag 和 tag 自己比（tag 同時餵精靈的 `--version`），所以平台再用 `Hooks.independent_version(ctx)` 提供一個和 tag 無關的版本來源（M7b），結果在 `product_version_check.independent`：
+  - 不一致或讀到了卻無法確定 → FAIL（scan 步驟 FAIL）。
+  - 平台沒有提供，或缺少資料無法核對 → GAP。這時設定包就算等於 tag，整體也是 GAP，不是 OK。
+  - Jetson 的規則：tag → `sources.yml` 該版本的 `platform_params.l4t_release`（人寫的對應，例如 `v39.2.1-demo1` 對 `39.2.1`）→ 必須等於刷機包 rootfs 裡掃到的 L4T 版本（完整掃描那次 `scan/list.json`：`etc/nv_tegra_release`、dpkg 的 `nvidia-l4t-core`／`nvidia-l4t-kernel`，三者要一致）。
+  - 其他平台目前沒有提供，整體是 GAP。
+
+`release-meta.py --tag` 也要等於 `<專案>/<版本>`。notes.md 開頭的 pipeline_result 由 `release-meta.py --notes` 依同一份 pipeline-steps.tsv 重寫，和 release-meta.json 一致。sbom.md 第 6 節的 BSP 說明依 list.json 的平台寫，非 Jetson 平台不出現 Jetson Linux 的文字。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
 
 **平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_SCAN_PLATFORM_ARG` 原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`（`pipeline/platform.sh` 匯出：平台設定的 `scan.platform_arg`，沒寫就是平台名稱；必須是工具認得的 jetson／raspberrypi／rockchip／generic，否則平台設定驗證就失敗）。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
 

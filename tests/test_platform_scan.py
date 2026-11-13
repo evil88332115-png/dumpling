@@ -33,6 +33,14 @@ class FakeHooks(ps.Hooks):
         return ["## 平台段落", "", "- 假平台"]
 
 
+class IndependentHooks(FakeHooks):
+    def __init__(self, status, detail="x"):
+        self.status, self.detail = status, detail
+
+    def independent_version(self, ctx):
+        return {"status": self.status, "rule": "r", "expected": "1", "found": [], "detail": self.detail}
+
+
 class Generic(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dumpling-pscan-")
@@ -111,9 +119,31 @@ class ProductVersionVsTag(Generic):
 
     def test_matching_version_and_suffix_is_ok(self):
         for v in ("v1", "v1 (rootfs)", "v1 (rootfs)(gui)", " v1 "):
-            scan = ps.collect(self.args(run=["=" + self.with_config("w", v)]))
+            scan = ps.collect(self.args(run=["=" + self.with_config("w", v)]), IndependentHooks("OK"))
             self.assertEqual(scan["product_version_check"]["status"], "OK", v)
             self.assertEqual(scan["product_version_check"]["tag_version"], "v1")
+
+    def test_tag_only_is_gap_not_ok(self):
+        """M7b：設定包等於 tag 只是 tag 和 tag 自己比；平台沒有和 tag 無關的來源 → GAP（D-043），不擋。"""
+        scan = ps.collect(self.args(run=["=" + self.with_config("w", "v1")]))
+        pvc = scan["product_version_check"]
+        self.assertEqual((pvc["status"], pvc["independent"]["status"]), ("GAP", "GAP"))
+        self.assertIn("沒有和 tag 無關的版本來源", pvc["independent"]["detail"])
+        notes = open(self.p("rel", "notes.md"), encoding="utf-8").read()
+        self.assertIn("版本核對（`product_version_check`）：**GAP**", notes)
+        for st in ("GAP", "PASS", None):                                  # hook 給 GAP 或寫錯的狀態都不能變 OK
+            self.assertEqual(ps.collect(self.args(run=["=" + self.with_config("w", "v1")]), IndependentHooks(st))["product_version_check"]["status"], "GAP", st)
+
+    def test_independent_fail_fails_even_when_the_config_matches_the_tag(self):
+        with self.assertRaises(ps.ProductVersionMismatch) as cm:
+            ps.collect(self.args(run=["=" + self.with_config("w", "v1")]), IndependentHooks("FAIL", "掃到的是 2.0"))
+        self.assertIn("和 tag 無關的版本核對不通過：掃到的是 2.0", str(cm.exception))
+        sc = json.load(open(self.p("scan.json")))
+        self.assertEqual((sc["product_version_check"]["status"], sc["product_version_check"]["independent"]["status"]), ("FAIL", "FAIL"))
+
+    def test_not_set_still_wins_over_independent_ok(self):
+        scan = ps.collect(self.args(run=["=" + self.with_config("w0", False)]), IndependentHooks("OK"))
+        self.assertEqual(scan["product_version_check"]["status"], "NOT_SET")
 
     def test_mismatch_fails_after_everything_is_written(self):
         d = self.with_config("w0", "v0.9", supplier_version="v1")
@@ -177,6 +207,79 @@ class ProductVersionVsTag(Generic):
         self.assertEqual(ps.version_base("1.0 (2.0.1)"), "1.0 (2.0.1)")
         self.assertEqual(ps.version_base("v1 (rootfs)(gui)"), "v1")
         self.assertEqual(ps.product_version_status(self.p("nope.json"), "v1"), ("NOT_FOUND", None))
+
+
+
+
+class JetsonIndependentVersion(Generic):
+    """M7b：Jetson 的 tag → sources.yml 的 l4t_release → 必須等於刷機包 list.json 裡掃到的 L4T 版本。"""
+
+    def setUp(self):
+        super().setUp()
+        import jetson_scan
+        self.js = jetson_scan
+        self.proj = self.p("proj")
+        os.makedirs(self.proj)
+        shutil.copy(os.path.join(ROOT, "projects", "orin-nano-demo", "sources.yml"), self.proj)
+
+    def full_run(self, l4t=None, variant="rootfs", raw=None, name="w"):
+        d = self.p(name)
+        if raw is not None:
+            w(os.path.join(d, "scan", "list.json"), raw)
+        elif l4t is not False:
+            l4t = l4t or {"release": "39.2.1", "status": "OK", "detail": "L4T 39.2.1",
+                          "sources": {"nv_tegra_release": "39.2.1", "nvidia-l4t-core": "39.2.1", "nvidia-l4t-kernel": "39.2.1"}}
+            w(os.path.join(d, "scan", "list.json"), json.dumps({"rootfs": [{"variant": variant, "prefix": "Linux_for_Tegra/rootfs", "l4t": l4t}]}))
+        return d
+
+    def iv(self, ver="v39.2.1-demo1", project_dir=True, runs=None):
+        a = argparse.Namespace(project_dir=self.proj if project_dir else None, run=runs if runs is not None else ["=" + self.full_run()])
+        return self.js.jetson_independent_version(a, ver)
+
+    def test_matching_scanned_l4t_is_ok(self):
+        r = self.iv()
+        self.assertEqual((r["status"], r["expected"]), ("OK", "39.2.1"))
+        self.assertIn({"source": "nv_tegra_release（Linux_for_Tegra/rootfs）", "value": "39.2.1"}, r["found"])
+
+    def test_tag_typo_or_wrong_bsp_fails(self):
+        """C0 的情境：tag 寫 v39.2.1-demo1，實際掃的是 39.2.0 的刷機包。"""
+        d = self.full_run({"release": "39.2.0", "status": "OK", "sources": {"nv_tegra_release": "39.2.0"}})
+        r = self.iv(runs=["=" + d])
+        self.assertEqual(r["status"], "FAIL")
+        self.assertIn("L4T 39.2.1", r["detail"])
+        self.assertIn("L4T 39.2.0", r["detail"])
+        self.assertEqual(self.iv("v39.2.0-demo1", runs=["=" + self.full_run()])["status"], "FAIL")     # 反過來也抓得到
+
+    def test_inconsistent_or_unknown_scanned_version_fails(self):
+        for l4t in ({"release": None, "status": "ATTENTION", "detail": "來源不一致：nv_tegra_release 39.2.1、nvidia-l4t-core 39.2.0",
+                     "sources": {"nv_tegra_release": "39.2.1", "nvidia-l4t-core": "39.2.0"}},
+                    {"release": None, "status": "GAP", "detail": "無法判斷 L4T 版本", "sources": {}}, "x"):
+            self.assertEqual(self.iv(runs=["=" + self.full_run(l4t)])["status"], "FAIL", l4t)
+
+    def test_broken_list_or_missing_rootfs_fails(self):
+        for raw in ("{not json", "[]", json.dumps({"rootfs": "x"}), json.dumps({"rootfs": []})):
+            self.assertEqual(self.iv(runs=["=" + self.full_run(raw=raw)])["status"], "FAIL", raw)
+        self.assertEqual(self.iv(runs=["=" + self.full_run(variant="rootfs_gui")])["status"], "FAIL")
+
+    def test_missing_inputs_are_gap(self):
+        self.assertEqual(self.iv(project_dir=False)["status"], "GAP")                         # 沒有 --project-dir
+        self.assertEqual(self.iv(runs=["=" + self.full_run(False, name="w-plain")])["status"], "GAP")          # 不是刷機包的掃描
+        self.assertEqual(self.iv(runs=[])["status"], "GAP")
+
+    def test_sources_yml_problems_fail(self):
+        self.assertEqual(self.iv("v9.9.9-x")["status"], "FAIL")                               # sources.yml 沒有這個版本
+        w(os.path.join(self.proj, "sources.yml"), "schema: [")
+        self.assertEqual(self.iv()["status"], "FAIL")
+
+    def test_reads_the_full_scan_not_the_layer_rescans(self):
+        full = self.full_run()
+        other = self.p("w-bsp")
+        w(os.path.join(other, "scan", "list.json"), json.dumps({"rootfs": [{"variant": "rootfs", "l4t": {"release": "1.0", "status": "OK"}}]}))
+        self.assertEqual(self.iv(runs=["-bsp=" + other, "=" + full])["status"], "OK")
+
+    def test_jetson_hooks_use_it(self):
+        ctx = {"args": argparse.Namespace(project_dir=self.proj, run=["=" + self.full_run()]), "version": "v39.2.1-demo1"}
+        self.assertEqual(self.js.JetsonHooks().independent_version(ctx)["status"], "OK")
 
 
 if __name__ == "__main__":
