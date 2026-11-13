@@ -191,6 +191,20 @@ class T(Base):
         with self.assertRaises(match.Fail):
             self.run_once(NOW1)
 
+    def test_no_sbom_first_run_is_gap_without_plan(self):
+        self.inventory["releases"] = []
+        self.inventory["status"] = "GAP"
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        json.dump({"dateReleased": NOW1, "vulnerabilities": [{"cveID": "CVE-2021-44228"}]}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
+        out = os.path.join(self.w, "out-empty")
+        a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode="real",
+                               kev_overlay=None, max_new_issues=20, run_url=None, grype=None, grype_total_timeout=100, vendor_config=None,
+                               now=NOW1, demo=True)
+        st, _ = match.run(a)
+        self.assertEqual(st, "GAP")
+        self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
+        self.assertTrue(os.path.exists(os.path.join(out, "report.md")))
+
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
         txt = json.dumps(plan["state"])

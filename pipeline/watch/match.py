@@ -25,7 +25,8 @@
   - 只開「已遭利用（KEV／EUVD）」與「廠商層級」兩種 Issue；一般 CVE 候選（核心 CNA 上千筆、U-Boot 候選）不開（D-040）。
   - --demo（公開 repo）：標題與內文寫明「示範專案（公開 BSP）」、加 demo 標籤；不開 art14 Issue（第 14 條只做演練）。
 輸出：stdout 一行 WATCH-MATCH<TAB>OK|ATTENTION|FAIL<TAB>說明；<out>/plan.json、report.md、result.json。
-退出碼：OK 0、FAIL 1、ATTENTION 2、用法 64。FAIL 時不寫 plan.json（notify 不會動任何東西）。
+退出碼：OK 0、FAIL 1、ATTENTION 2、GAP 3、用法 64。FAIL 與 GAP 時不寫 plan.json（notify 跳過，不會動任何東西）。
+  GAP：還沒有狀態、也沒有任何可監控的 SBOM（例如 M2 之前）→ 不建立空的基準。
 """
 import argparse
 import datetime
@@ -46,7 +47,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools", "cra"))
 import publiccheck  # noqa: E402
 
 STAGE = "WATCH-MATCH"
-EXIT = {"OK": 0, "FAIL": 1, "ATTENTION": 2}
+EXIT = {"OK": 0, "FAIL": 1, "ATTENTION": 2, "GAP": 3}
 KEY_PREFIX = "dumpling-watch/1"
 KERNEL_CNA = os.path.join(ROOT, "tools", "pilot", "lib", "kernel_cna_version.py")
 KV_SCHEMA = "sca-center-kernel-versions/2"
@@ -478,6 +479,21 @@ def run(a, kernel_runner=None):
     if not first and (state.get("dumpling") or {}).get("mode") not in (None, a.mode):
         raise Fail(f"狀態 Issue 的 mode 是 {state['dumpling']['mode']}，這次是 {a.mode}：不混用")
     os.makedirs(a.out, exist_ok=True)
+    for name in ("plan.json", "result.json", "report.md"):      # 不留上一次的輸出
+        try:
+            os.remove(os.path.join(a.out, name))
+        except FileNotFoundError:
+            pass
+    if first and not projs:
+        # 沒有任何可監控的 SBOM（例如 M2 之前只有舊格式或 draft Release）：不建立空的基準——
+        # 空的基準會讓之後第一個真的 Release 裡既有的 KEV 全部變成「新的」。不產生 plan.json（notify 跳過、不寫狀態），GAP 不是 FAIL。
+        detail = "沒有可監控的 Release／SBOM，還沒有狀態：不建立基準、不產生 plan（GAP）" + \
+                 (f"；Release 問題：{'；'.join(inv_problems)[:300]}" if inv_problems else "")
+        with open(os.path.join(a.out, "report.md"), "w", encoding="utf-8") as f:
+            f.write(f"# 每日監控（{a.mode}）：GAP\n\n{detail}\n\n收集：{inv.get('status')}：{inv.get('detail') or ''}\n")
+        with open(os.path.join(a.out, "result.json"), "w", encoding="utf-8") as f:
+            json.dump({"status": "GAP", "detail": detail, "baseline": False, "plan": False}, f, ensure_ascii=False, indent=1)
+        return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
     try:

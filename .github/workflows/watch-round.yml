@@ -34,6 +34,8 @@ jobs:
     permissions:
       contents: read
       issues: read
+    outputs:
+      has_plan: ${{ steps.match.outputs.has_plan }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +66,7 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: python3 -I pipeline/watch/issues.py read-state --repo "$GITHUB_REPOSITORY" --mode "$MODE" --out "$RUNNER_TEMP/w/state"
       - name: 比對
+        id: match
         env:
           MODE: ${{ inputs.mode }}
           OVERLAY: ${{ inputs.overlay }}
@@ -78,7 +81,9 @@ jobs:
           set -e
           if [ -f "$RUNNER_TEMP/w/out/report.md" ]; then cat "$RUNNER_TEMP/w/out/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
           { echo; echo '```'; cat "$RUNNER_TEMP/w/feeds/feeds.tsv"; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
-          [ "$rc" = 0 ] || [ "$rc" = 2 ] || exit "$rc"
+          # 0 OK、2 ATTENTION、3 GAP（還沒有可監控的 Release：不建基準、不產生 plan）都不算失敗；只有 1 FAIL 讓 job 變紅
+          if [ -f "$RUNNER_TEMP/w/out/plan.json" ]; then echo "has_plan=true" >> "$GITHUB_OUTPUT"; else echo "has_plan=false" >> "$GITHUB_OUTPUT"; fi
+          [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: watch-plan-${{ inputs.round }}-${{ github.run_attempt }}
@@ -87,10 +92,11 @@ jobs:
             ${{ runner.temp }}/w/out/report.md
             ${{ runner.temp }}/w/out/result.json
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn
 
   notify:
     needs: compute
+    if: needs.compute.outputs.has_plan == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
