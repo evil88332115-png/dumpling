@@ -208,7 +208,7 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 
 另外在搜尋時看到公告 5561（Hopper HGX 8-GPU HMC，CVE-2024-0141 的描述提到 GPU vBIOS）：它不在 gpu-firmware 群組（群組選取是 C1 的規則，只看標題、CSAF 產品名稱與 CVE_index），不在這份鏡像的選入清單裡；版本是 HMC 版本、沒有 PCI 裝置 ID，同樣無法對應到 option ROM 版本，沒有放進表。
 
-表的內容：`reviewed_until` ＝ **null**（尚未經負責人確認）、`mirror`（commit、commit_date、fetched_utc；初審用的鏡像）、`not_applicable`＝[5674 的初審意見，`reviewed=false`，`reviewed_by`／`reviewed_at` 是 null，初審者寫在 `preliminary_by`]、`rows`＝[]。`candidates --group gpu-firmware` 對這個鏡像是 **ATTENTION**（5674：`unreviewed_not_applicable`、`after_reviewed_until`），直到負責人確認。確認後把 5674 項改成 `reviewed=true` 並填 `reviewed_by`（角色）與 `reviewed_at`，`reviewed_until` 填 gpu-firmware 群組看過的最新公告日期（目前是 5674 的 **2025-09-02**）。`reviewed_until` 是審核者看過的最新公告日期（與 C1 的 `nvidia-bulletins.md` 一致，M7a2 會寫進 C1 的文件）；鏡像的時間點另記在頂層 `mirror.commit_date`（2026-11-10），兩者分開。
+表的內容：`reviewed_until` ＝ **null**（尚未經負責人確認）、`mirror`（commit、commit_date、fetched_utc；初審用的鏡像）、`not_applicable`＝[5674 的初審意見，`reviewed=false`，`reviewed_by`／`reviewed_at` 是 null，初審者寫在 `preliminary_by`]、`rows`＝[]。`candidates --group gpu-firmware` 對這個鏡像是 **ATTENTION**（5674：`unreviewed_not_applicable`、`after_reviewed_until`），直到負責人確認。確認後把 5674 項改成 `reviewed=true` 並填 `reviewed_by`（角色）與 `reviewed_at`，`reviewed_until` 填 gpu-firmware 群組看過的最新公告日期（目前是 5674 的 **2025-09-02**）。`reviewed_until` 是審核者看過的最新公告日期；鏡像的時間點另記在頂層 `mirror.commit_date`（2026-11-10），兩者分開。
 
 **結論：目前沒有任何顯卡 vBIOS 的公開公告可以機器比對。** 所有 NVIDIA vBIOS 的結果都是 NOT_ASSESSED（`table-not-reviewed`：表尚未經負責人確認）；負責人確認 5674 之後會是 `no-row`。這不代表 vBIOS 沒有漏洞：NVIDIA 對消費型與專業型顯卡的 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知。
 
@@ -231,10 +231,10 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 輸入：inventory 裡每個 NVIDIA vBIOS（`x86_firmware.is_vbios`：vendor 0x10DE 且有 x86 或 EFI 影像）的版本、PCI vendor、各開機影像的 device ID。
 
 1. 表讀不到、不是一般檔案（symlink 也拒絕）、超過 4 MiB、不是 JSON、C1 的 `validate_table` 失敗、已審核的列欄位不對 → NOT_ASSESSED（`table-unreadable`／`table-invalid`），`vbios_advisory.status` ＝ GAP，狀態 ATTENTION。
-2. `reviewed_until` 是 null（表尚未經負責人確認）→ NOT_ASSESSED（`table-not-reviewed`；basis 寫「表尚未經負責人確認」並列出只有初審意見的公告）。
+2. `reviewed_until` 是 null，或表裡還有只有初審意見（`reviewed=false`）的公告（即使 `reviewed_until` 已填）→ 表尚未經負責人確認 → NOT_ASSESSED（`table-not-reviewed`；basis 寫「表尚未經負責人確認」並列出只有初審意見的公告）。
 3. 版本讀不到、不是五段兩位十六進位（`XX.XX.XX.XX.XX` 佔位、四或六段、多餘空白）→ NOT_ASSESSED（`version-unreadable`）；ROM 裡有兩個以上不同的 `XX.XX.XX.XX.XX` 字串（`x86_firmware` 數出來記在 `other_versions`，只有這時才有這個鍵，SBOM 元件加 `sca-center:note`）→ `version-ambiguous`，不給 fixed。
 4. vendor 不是 10de（ROM 與每個 x86／EFI 開機影像都要是 10de）→ `vendor-mismatch`；device ID 讀不到（空、非 4 位十六進位、0000、ffff）→ `device-unreadable`；x86／EFI 影像的 device ID 不一致 → `device-ambiguous`。
-5. option ROM 鏈沒有正常結束或開頭不確定 → NOT_ASSESSED（`rom-incomplete`）：版本字串可能不是這個 ROM 的。
+5. option ROM 鏈沒有正常結束（輸入沒有 `terminated` 這個鍵也算）或開頭不確定 → NOT_ASSESSED（`rom-incomplete`）：版本字串可能不是這個 ROM 的。
 6. 找表裡「已審核、vendor 與 device ID 都對得上」的列。沒有 → NOT_ASSESSED（`no-row`；表裡只有未審核的對應列時是 `unreviewed-row`）。裝置不符就是沒有對應的列，不拿別的裝置的列套用。
 7. 逐列比版本：版本 ≥ `vbios_fixed_in` → fixed；低於 `vbios_affected_below`（或不高於 `vbios_affected_max`）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → **affected**（有 gap 的列、已修補的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（`range-gap`）；全部 fixed → **fixed**。
@@ -248,7 +248,7 @@ affected 與 fixed 的 basis 寫「只比對表裡已審核的列、不是完整
 `dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`（沒有充分理由改：表只涵蓋被審核的公告）；不出現「安全」「不受影響」或整體 PASS。
 
 SBOM 的 vBIOS 元件：`dumpling:advisory-match`（affected／fixed／NOT_ASSESSED）、`dumpling:advisory-bulletins` 與 `dumpling:advisory-cves`（只有 affected／fixed）、`dumpling:advisory-basis`、`dumpling:advisory-source`
-（NVIDIA product-security 鏡像 commit 前 12 碼、下載時間、表的 `reviewed_until` 與 sha256 前 16 碼、已審核與未審核的列數、判定不適用的公告、只有初審意見的公告）、`dumpling:advisory-note`（可多筆）。
+（NVIDIA product-security 鏡像 commit 前 12 碼、下載時間、表的 `reviewed_until` 與 sha256 前 16 碼、已審核與未審核的列數、已確認無法對應的公告、初審無法對應（待確認）的公告）、`dumpling:advisory-note`（可多筆）。
 `fw-inventory.md` 的「公告比對」一節有「NVIDIA vBIOS」段落（表格加每個 vBIOS 的 basis）；沒有 BIOS 也沒有 vBIOS 時寫「沒有找到 NVIDIA vBIOS，沒有可比對的項目」。
 
 ### 樣本結果（2026-11-14）
@@ -260,12 +260,14 @@ SBOM 的 vBIOS 元件：`dumpling:advisory-match`（affected／fixed／NOT_ASSES
   版本是佔位字串（`XX.XX.XX.XX.XX`，讀不到十六進位版本）的 ROM 用測試自己組的假 ROM 驗證：`version-unreadable`。
 - **BIOS 公開樣本（對 main dde7467 與這個分支各跑一次 `firmware-bios.sh`）**：狀態行與 `fw.cdx.json`（排除 serialNumber 與 timestamp）全部相同；`fw-inventory.json` 只多一個頂層鍵 `vbios_advisory`（沒有 vBIOS 時 `vbios` ＝ 0、`counts` ＝ {}）。`fw-inventory.md` 在找到 BIOS 映像的樣本相同；沒有 BIOS 映像也沒有 vBIOS 的樣本（OVMF 的 deb、DisplayPort 更新工具）多出「沒有找到 NVIDIA vBIOS，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）」一行。
 
-### 需要 C1 提供、目前沒有的介面
+### 與 C1 的表格式與工具的介面
 
-C2 沒有改 C1 的檔案，下面是現況與建議：
-- `validate_table` 不認得 vBIOS 的裝置範圍與十六進位版本：C1 的版本欄位只收點分十進位（`vkey`），沒有 PCI vendor／device 欄位。C2 用額外欄位（上表）繞過去，C1 的 `match`（只用 Jetson 群組）不會讀 gpu-firmware 的表，所以沒有衝突。如果 C1 之後想讓 `validate_table` 檢查這些欄位，建議用 C1 的名稱接收 `pci_vendor`、`pci_devices`、`vbios_*`，或提供一個「版本比較函式可替換」的介面；在那之前 C2 的比對自己驗。
-- `candidates` 的 `reviewed_until` 是「日期比它晚的公告待審」：用審核者看過的最新公告日期（這個群組目前是 2025-09-02），鏡像的時間點記在 `mirror.commit_date`。C1 之後會正式支援 `mirror` 缺漏時回 GAP（不丟 InputError）；這和 C2 現在的做法相容（`mirror` 缺漏或日期讀不到時，fixed 降成 NOT_ASSESSED，`table-stale`），不用改程式。
-- 表沒有「對應鏡像」的欄位：C2 加了頂層 `mirror`（commit、commit_date、fetched_utc），C1 沒用到。要比對鏡像是否比表新，C1 的 `candidates` 目前只看公告編號與日期。
+C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
+- C1 的 `validate_table` 不認得 vBIOS 的裝置範圍與十六進位版本：版本欄位只收點分十進位（`vkey`），沒有 PCI vendor／device 欄位。這張表用額外欄位（上表）表達，`tools/cra/nvidia_vbios_advisory.py` 在 `validate_table` 之後自己驗已審核的列。C1 的 `match` 只讀 jetson 群組的表，不讀這張。
+  若 `validate_table` 要原生檢查這些欄位，需要接收 `pci_vendor`、`pci_devices`、`vbios_*`，以及可替換的版本比較函式。
+- `reviewed_until` 是審核者看過的最新公告日期（`candidates` 把日期比它晚的公告列為待審）；鏡像的時間點記在頂層 `mirror`（commit、commit_date、fetched_utc），`candidates` 目前不讀它。
+  `mirror` 缺漏或日期讀不到、過期、在未來：這張表的比對把 fixed 降成 NOT_ASSESSED（`table-stale`），affected 與其他結果照舊但加註。
+- 沒有 `fixed_in` 以外範圍欄位的列（只有 `vbios_fixed_in`）表示「低於這個版本都受影響」，不分版本線：審核時列的範圍要涵蓋到版本線，只適用某一條版本線的公告要寫成有 `vbios_affected_below`／`vbios_affected_max`（加 `pci_devices`）的列。
 
 ### 更新表（人工步驟）
 
@@ -275,7 +277,10 @@ C2 沒有改 C1 的檔案，下面是現況與建議：
    - 涉及顯卡 option ROM 的 vBIOS、而且公告有可機器判斷的版本線與裝置範圍 → 填 `bulletins`（編號、CVE 的嚴重度等，來自 CSAF）與 `rows`（`line: vbios`、`pci_vendor`、`pci_devices`、`vbios_*`、`source`、`reviewed: true`、`reviewed_by` 只寫角色、`reviewed_at`）。
    - 只涉及 HGX／DGX 等伺服器韌體、或範圍看不懂 → `not_applicable`（`current_release_date`、`reason` 寫技術理由、`csaf_fields`）；初審意見用 `reviewed=false`，由負責人確認後才改 `reviewed=true`。**看不懂、範圍不明的不要猜**，寫成「無法對應」並註明原因，不要寫成「不影響」，或留在待審。
 4. 更新 `mirror`（鏡像的 commit、commit_date、fetched_utc）；`reviewed_until` 填看過的最新公告日期，只有負責人確認後才填，沒確認前維持 null。
-5. `python3 -I tools/pilot/lib/nvidia_bulletins.py candidates …`（同第 2 步，不加 `--draft`）應該是 OK；再跑 `tests/run.d/c2-x86-firmware.sh`（`test_committed_table_*` 檢查進 repo 的表）。有新的 `rows` 時在 `test_nvidia_vbios_advisory.py` 加對應的測試。
+5. `python3 -I tools/pilot/lib/nvidia_bulletins.py candidates …`（同第 2 步，不加 `--draft`）應該是 OK；再跑 `tests/run.d/c2-x86-firmware.sh`。有新的 `rows` 時在 `test_nvidia_vbios_advisory.py` 加對應的測試。
+   負責人確認表（5674 改 `reviewed=true`、`reviewed_until` 有值）之後，下列測試描述的是「尚未確認」的狀態，必須一起改成確認後的預期（`table-not-reviewed` 變成 `no-row`、`candidates` 變成 OK、報告寫「已確認無法對應」）：
+   `test_committed_table_passes_c1_validation_and_is_not_yet_confirmed`、`test_committed_table_stays_pending_for_c1_candidates`、`test_committed_table_gives_not_assessed_not_reviewed_for_every_vbios`、`test_default_table_is_the_committed_one`、`test_unconfirmed_table_report_says_preliminary`、`test_synthetic_rom_end_to_end`（都在 `test_nvidia_vbios_advisory.py`）。
+   其他測試用固定時間（`tools/cra/tests/conftest.py` 的 `_fixed_vbios_clock`）與合成表，不隨表的內容或牆上時鐘改變。
 6. 超過 90 天沒有重新審核，`fixed` 會降成 NOT_ASSESSED（`table-stale`）：定期重跑第 1～5 步。
 
 ### 限制與刻意保守的地方

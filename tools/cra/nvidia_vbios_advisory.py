@@ -23,10 +23,10 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 
 比對規則（依序，第一個成立的就是結果）：
 1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
-2. 表的 reviewed_until 是 null（表尚未經負責人確認）→ NOT_ASSESSED（table-not-reviewed）。
+2. 表的 reviewed_until 是 null，或表裡還有只有初審意見（reviewed=false）的公告 → 表尚未經負責人確認 → NOT_ASSESSED（table-not-reviewed）。
 3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）；ROM 裡有兩個以上不同的版本字串 → NOT_ASSESSED（version-ambiguous）。
 4. PCI vendor 不是 10de（含任何一個 x86／EFI 開機影像的 vendor）、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
-5. option ROM 鏈沒有正常結束或開頭不確定 → NOT_ASSESSED（rom-incomplete）：版本字串可能不是這個 ROM 的。
+5. option ROM 鏈沒有正常結束（沒有 terminated 這個鍵也算）或開頭不確定 → NOT_ASSESSED（rom-incomplete）：版本字串可能不是這個 ROM 的。
 6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row；表裡只有未審核的對應列時是 unreviewed-row，列出數量）。
 7. 逐列比版本：fixed_in 以上 → fixed；低於 affected_below（或不高於 affected_max）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → affected（有 gap 的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（range-gap）；全部 fixed → fixed。
@@ -124,6 +124,8 @@ class Table:
             (self.rows if r["reviewed"] else self.unreviewed).append(r)
         self.not_applicable = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is not False]
         self.awaiting = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is False]      # 初審意見、還沒有人確認
+        # 負責人確認過：reviewed_until 有值，而且沒有只有初審意見的公告（只填了 reviewed_until、公告還是 reviewed=false 也算沒確認）
+        self.confirmed = self.reviewed_until is not None and not self.awaiting
         self.bulletins = [b["id"] for b in doc.get("bulletins", [])]
         self.parsed = []                         # (row, vendor, {devices}, {key: tuple})
         for r in self.rows:
@@ -143,9 +145,9 @@ class Table:
         f = self.mirror_fetched_text or "unknown"
         return (f"{SOURCE_URL} mirror commit {c} (fetched {f}), group gpu-firmware; table nvidia-bulletins-gpu-firmware.json "
                 f"reviewed_until {self.reviewed_until or 'null'}, sha256 {self.sha256[:16]}…; "
-                f"{len(self.rows)} reviewed vBIOS rows, {len(self.unreviewed)} unreviewed, {len(self.not_applicable)} bulletins marked not applicable"
-                + (f" ({', '.join(self.not_applicable)})" if self.not_applicable else "")
-                + (f", {len(self.awaiting)} bulletins with a preliminary opinion awaiting confirmation ({', '.join(self.awaiting)})" if self.awaiting else ""))
+                f"{len(self.rows)} reviewed vBIOS rows, {len(self.unreviewed)} unreviewed"
+                + (f", {len(self.not_applicable)} bulletins confirmed as not mappable to option ROM versions ({', '.join(self.not_applicable)})" if self.not_applicable else "")
+                + (f", {len(self.awaiting)} bulletins with a preliminary opinion (not mappable to option ROM versions) awaiting confirmation ({', '.join(self.awaiting)})" if self.awaiting else ""))
 
 
 def _parse_utc(s):
@@ -257,10 +259,10 @@ def match_vbios(table_or_err, v, now=None):
     table = table_or_err
     src = table.label()
     now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
-    if table.reviewed_until is None:
+    if not table.confirmed:
         pend = f"; bulletins with a preliminary opinion only: {', '.join(table.awaiting)}" if table.awaiting else ""
         return _na("table-not-reviewed", "the NVIDIA bulletin table has not been confirmed by the responsible reviewer yet (表尚未經負責人確認; "
-                   f"reviewed_until is null{pend})", source=src)
+                   f"{'reviewed_until is null' if table.reviewed_until is None else 'reviewed_until is set but a bulletin is still unconfirmed'}{pend})", source=src)
     ver_text = v.get("version")
     ver = parse_version(ver_text) if isinstance(ver_text, str) and len(ver_text) == 14 else None
     if ver is None:
@@ -281,7 +283,7 @@ def match_vbios(table_or_err, v, now=None):
     dev = next(iter(devs))
     if not HEX4_RE.match(dev) or dev in ("0000", "ffff"):
         return _na("device-unreadable", f"the PCI device ID could not be read from the option ROM ({dev!r})", source=src)
-    if v.get("terminated", "last-flag") != "last-flag" or v.get("start_note"):
+    if v.get("terminated") != "last-flag" or v.get("start_note"):            # 沒有 terminated 這個鍵：不知道鏈有沒有正常結束，當作不完整
         return _na("rom-incomplete", "the option ROM chain did not end normally or its start is ambiguous, so the version string may not belong to this ROM",
                    source=src)
     stale = table.stale(now)

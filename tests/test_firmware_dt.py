@@ -362,6 +362,28 @@ class ReportTests(ReportBase):
         self.assertNotIn("<b>", md)
         self.assertEqual(len([l for l in md.splitlines() if l.startswith("- 公告比對")]), 1)
 
+    def test_supplier_sbom_own_affected_and_fixed_are_not_trusted(self):
+        """kind: sbom（供應商 SBOM）自帶的 dumpling:advisory-match=affected／fixed 不採信、不進報告；其他 kind 的照計。"""
+        for i, val in enumerate(("affected", "fixed", "Fixed", "affected-candidate")):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": val}, {"name": "dumpling:advisory-bulletins", "value": "9999"}]
+            info, o = self.prep(bom(c), kind="sbom", out="s%d" % i)
+            self.assertEqual(info["summary"]["advisory_match"], {}, val)
+            rc, out, md = self.run_report([o])
+            self.assertNotIn("affected=", md)
+            self.assertNotIn("fixed=", md)
+            self.assertNotIn("公告比對（dumpling:advisory-match）", md)
+        c = comp("a", "r1", version="1.0")
+        c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}, {"name": "dumpling:vuln-assessment", "value": "OK"}]
+        info, _ = self.prep(bom(c), kind="sbom", out="s-mixed")
+        self.assertEqual(info["summary"]["advisory_match"], {})
+        self.assertIsNone(info["summary"]["vuln_assessment"].get("OK"))
+        for kind in ("bios", "vbios"):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}]
+            info, _ = self.prep(bom(c), kind=kind, out="own-" + kind)
+            self.assertEqual(info["summary"]["advisory_match"], {"fixed": 1})
+
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))
         rc, out, md = self.run_report([o])

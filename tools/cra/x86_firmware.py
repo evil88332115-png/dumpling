@@ -2385,7 +2385,7 @@ def vbios_advisory_section(inv, advisory=None, now=None):
     sec = {"status": "OK" if table is not None else "GAP", "vbios": len(results), "counts": mod.counts(results)}
     if table is not None:
         # 已審核的表過期（或日期讀不到、在未來）：fixed 會降成 NOT_ASSESSED，狀態要提醒重新審核；沒審核過的表另有 table-not-reviewed
-        sec["stale"] = bool(table.reviewed_until is not None and table.stale(now))
+        sec["stale"] = bool(table.confirmed and table.stale(now))
         sec["source"] = {"mirror_commit": table.mirror_commit, "mirror_fetched_utc": table.mirror_fetched_text, "reviewed_until": table.reviewed_until,
                          "table_sha256": table.sha256, "reviewed_rows": len(table.rows), "unreviewed_rows": len(table.unreviewed),
                          "not_applicable": list(table.not_applicable), "awaiting_confirmation": list(table.awaiting)}
@@ -2536,11 +2536,12 @@ def nvidia_vbios_advisory_markdown(inv):
          "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
     if va["status"] == "OK":
         s = va["source"]
-        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] else "**表尚未經負責人確認**（reviewed_until 為 null，所有 vBIOS 都是 NOT_ASSESSED）")
+        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] and not s.get("awaiting_confirmation")
+               else "**表尚未經負責人確認**（" + ("reviewed_until 為 null" if not s["reviewed_until"] else "還有公告只有初審意見") + "，所有 vBIOS 都是 NOT_ASSESSED）")
         L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
                  f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
-                 + (f"審核後判定不適用的公告：{e('、'.join(s['not_applicable']))}（原因見對照表的 not_applicable）；" if s["not_applicable"] else "")
-                 + (f"只有初審意見、待負責人確認的公告：{e('、'.join(s['awaiting_confirmation']))}（初審意見：無法對應到 option ROM 的版本與裝置，原因見對照表）；"
+                 + (f"已確認無法對應到 option ROM 版本與裝置的公告：{e('、'.join(s['not_applicable']))}（技術理由見對照表）；" if s["not_applicable"] else "")
+                 + (f"初審無法對應（待負責人確認）的公告：{e('、'.join(s['awaiting_confirmation']))}（初審意見：沒有 PCI 裝置 ID 與 option ROM 版本的對應，原因見對照表）；"
                     if s.get("awaiting_confirmation") else "")
                  + f"對照表檔案 SHA-256 `{s['table_sha256']}`。")
         if va.get("stale"):
