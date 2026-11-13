@@ -69,7 +69,7 @@ def bpdt(ents, version=2, count=None):
 
 
 def layout_table(layout, data, bps, size=0x58, flags=0, bad_crc=False):
-    """layout 1.7（Size 0x40／0x48／0x58，從 +0x10 起算；+0x14 是 CRC-32）或 1.6（0x48，BP1…BP5，+0x40 u64 checksum）。
+    """layout 1.7（Size 0x40／0x48／0x58／0x60，從 +0x10 起算；+0x14 是 CRC-32）或 1.6（0x48，BP1…BP5，+0x40 u64 checksum）。
     bps＝[(相對 offset, size)]（沒有的補 0）。"""
     t = bytearray(b"\xff" * 16)
     pairs = (list(bps) + [(0, 0)] * 5)[:5]
@@ -129,7 +129,7 @@ def build(layout, size, data, bps, bpv=2, hv=2, **lt_kw):
     return r
 
 
-@pytest.mark.parametrize("layout,bpv,hv,size", [("1.7", 2, 2, 0x58), ("1.7", 2, 2, 0x48), ("1.7", 2, 2, 0x40), ("1.6", 1, 1, 0x58),
+@pytest.mark.parametrize("layout,bpv,hv,size", [("1.7", 2, 2, 0x58), ("1.7", 2, 2, 0x60), ("1.7", 2, 2, 0x48), ("1.7", 2, 2, 0x40), ("1.6", 1, 1, 0x58),
                                                 ("1.7", 1, 1, 0x58), ("1.6", 2, 2, 0x58)])
 def test_rbep_and_nftp_agree_without_ftpr(layout, bpv, hv, size):
     res = found(good_region(layout, REGION, None, bpv, hv, VER, size=size))
@@ -220,7 +220,7 @@ def test_standalone_region_file_with_layout_table_at_the_start():
     mi = xf.me_info(full, regs, next(r for r in regs if r["name"] == "me"), beyond)
     assert mi["status"] == "found" and mi["standalone"] is False
     assert xf.bios_image(full)["fit"]["status"] != "not-applicable"
-    # 不在檔案開頭（例如 capsule 包著）：不處理，維持原本的結果（沒有 ME 結構 → no-me-region 或 unknown）
+    # 不在檔案開頭（例如 capsule 包著）：不處理，結果由第一條路決定（沒有 ME 結構 → no-me-region 或 unknown）
     b = xf.bios_image(b"\x00" * 0x1000 + bytes(good_region()))
     assert b["me"] is None and b["me_status"] in ("no-me-region", "unknown")
 
@@ -228,7 +228,7 @@ def test_standalone_region_file_with_layout_table_at_the_start():
 # ---------- 既有世代不變 ----------
 
 def test_fpt_generation_result_is_unchanged():
-    """$FPT 找得到 FTPR → basis、版本和以前一樣（$FPT 在區域開頭或 +0x10；新模組沒有 layout table 可看）。"""
+    """$FPT 找得到 FTPR → basis 與版本照第一條路（$FPT 在區域開頭或 +0x10；新模組沒有 layout table 可看）。"""
     for off in (0, 0x10):
         b = xf.bios_image(with_me(bytes(me_region("me11", off))))
         assert b["me"]["version"] == "16.1.30.2307" and b["me"]["basis"] == "FTPR partition ($FPT, $CPD FTPR.man)" and b["me_note"] is None
@@ -560,6 +560,15 @@ def test_layout_17_crc_is_checked_over_the_documented_range():
     r = good_region()                                                                    # checksum 欄位本身改成其他值 → 不符
     struct.pack_into("<I", r, 0x14, 0)
     assert "CRC-32 mismatch" in found(r)["note"]
+    for at in (0x12, 0x18, 0x20, 0x44, 0x48, 0x50, 0x58, 0x68, 0x6F):                 # Size 0x60 → 範圍到 0x70（多出來的 8 bytes 也入算）
+        r = good_region(size=0x60)
+        r[at] ^= 0x01
+        res = found(r)
+        assert res["status"] == "gap" and "CRC-32 mismatch" in res["note"], (hex(at), res)
+    for at in (0x00, 0x0F, 0x70, 0x80):
+        r = good_region(size=0x60)
+        r[at] ^= 0x01
+        assert found(r)["status"] == "found", hex(at)
     for size in (0x40, 0x48):                                                            # 較短的 Size：範圍跟著縮短
         r = good_region(size=size)
         r[0x10 + size] ^= 0x01
@@ -573,7 +582,7 @@ def test_layout_17_wiring_crc_mismatch_is_unknown_with_the_reason():
     assert (b["me"], b["me_status"]) == (None, "unknown") and "CRC-32 mismatch" in b["me_note"]
 
 
-@pytest.mark.parametrize("size", [0, 0x3E, 0x44, 0x50, 0x57, 0x59, 0x60, 0x68, 0x100, 0xFFFF])
+@pytest.mark.parametrize("size", [0, 0x3E, 0x44, 0x50, 0x57, 0x59, 0x5C, 0x64, 0x68, 0x70, 0x78, 0x80, 0xA0, 0x100, 0xFFFF])
 def test_layout_17_unknown_sizes_are_not_recognised(size):
     r = bytearray(good_region())
     struct.pack_into("<H", r, 0x10, size)
@@ -582,6 +591,260 @@ def test_layout_17_unknown_sizes_are_not_recognised(size):
     if res["status"] == "gap":
         assert "version" not in res
     assert res.get("status") != "found"
+
+
+@pytest.mark.parametrize("size", [0x5C, 0x64, 0x68, 0x70, 0x78, 0x80, 0xA0, 0x100])
+def test_layout_17_unknown_size_is_not_recognised_even_with_a_valid_crc(size):
+    """Size 不在清單裡：就算 CRC 照同樣的算法算對、表是用該 Size 完整建出來的，也不認（none，維持原結果）；沒有「≥ 0x40 的 8 的倍數」這種放寬。"""
+    r = good_region(size=0x58)
+    t = layout_table("1.7", (0x5000, 0x1000), [(0x1000, 0x2000), (0, 0), (0x3000, 0x2000)], size=size)
+    r[0:0x10 + size] = t
+    assert found(r)["status"] == "none"
+    b = xf.bios_image(with_me(bytes(r)))
+    assert b["me"] is None and b["me_status"] != "found"
+
+
+def test_layout_17_size_0x60_is_found_and_wired():
+    """Size 0x60（表總長 0x70）：結構與 CRC 算法同 0x58，+0x58 起的 24 bytes 全 0。"""
+    r = good_region(size=0x60)
+    assert r[0x58:0x70] == bytes(0x18) and struct.unpack_from("<H", r, 0x10)[0] == 0x60
+    res = found(r)
+    assert res["status"] == "found" and res["version"] == VERS and res["layout"] == "CSE layout table 1.7"
+    b = xf.bios_image(with_me(bytes(r)))
+    assert b["me_status"] == "found" and b["me"]["version"] == VERS
+    r = good_region(size=0x60, bad_crc=True)
+    res = found(r)
+    assert res["status"] == "gap" and "CRC-32 mismatch" in res["note"] and "version" not in res
+    b = xf.bios_image(with_me(bytes(r)))
+    assert (b["me"], b["me_status"]) == (None, "unknown")
+
+
+def test_layout_17_size_0x60_truncated_is_not_found():
+    """Size 0x60 的表被區域結尾截斷（表總長 0x70 超過區域）：CRC 無法驗 → 不採用（GAP，不報版本）；表之前就截斷也一樣。"""
+    r = bytes(good_region(size=0x60))
+    for end in (0x6F, 0x68, 0x58, 0x30, 0x21):
+        res = cl.find_cse(r, 0, end)
+        assert res["status"] in ("none", "gap") and "version" not in res, (hex(end), res)
+    assert "goes past the end" in cl.find_cse(r, 0, 0x6F)["note"]
+    for end in (0x6F, 0x68, 0x20, 0x10):
+        assert cl.find_cse(r[:end], 0, 0x6000)["status"] in ("none", "gap")
+
+
+def with_tail(size, tail_at=0x58, val=0x01, **kw):
+    """good_region（Size＝size）的 +tail_at 改成 val，CRC 重算（所以 CRC 相符）。"""
+    r = good_region(size=size, **kw)
+    r[tail_at] = val
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    return r
+
+
+def tail_raw(r, size):
+    t = bytes(r[0x58:0x10 + size])
+    return ", ".join(f"+0x{0x58 + i:x}: {t[i:i + 8].hex()}" for i in range(0, len(t), 8))
+
+
+@pytest.mark.parametrize("size,at", [(0x58, 0x58), (0x58, 0x5F), (0x58, 0x67), (0x60, 0x58), (0x60, 0x67), (0x60, 0x68), (0x60, 0x6F)])
+def test_layout_17_nonzero_tail_with_everything_else_valid_is_found_with_attention(size, at):
+    """+0x58 之後（表尾）沒有公開欄位定義：不全為 0 但 CRC 相符、BP 都通過、RBEP＋NFTP 版本相同 → found＋attention（原始值，不解讀）。"""
+    r = with_tail(size, at, 0xA5)
+    res = found(r)
+    last = 0x10 + size - 1
+    assert res["status"] == "found" and res["version"] == VERS, res
+    assert [a["code"] for a in res["attention"]] == ["layout-undocumented-fields"]
+    txt = res["attention"][0]["text"]
+    assert txt.startswith(f"layout table 有未公開欄位（+0x58～+0x{last:x}），未解讀") and tail_raw(r, size) in txt
+    assert f"{0xA5:02x}" in txt and res["basis"].endswith(f"ATTENTION layout-undocumented-fields: {txt}")
+    assert "no FTPR partition, RBEP and NFTP agree" in res["basis"]
+
+
+@pytest.mark.parametrize("size", [0x48, 0x58, 0x60])
+def test_layout_17_zero_tail_has_no_attention(size):
+    res = found(good_region(size=size))
+    assert res["status"] == "found" and res["attention"] == [] and "ATTENTION" not in res["basis"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_wiring_is_attention_in_status_sbom_and_report(size, tmp_path):
+    img = with_me(bytes(with_tail(size, 0x58, 0x01)))
+    b = xf.bios_image(img)
+    assert b["me_status"] == "found" and b["me"]["version"] == VERS
+    assert any(x.startswith("ME: layout-undocumented-fields: layout table 有未公開欄位") for x in b["incomplete"])
+    assert "ATTENTION layout-undocumented-fields" in b["me"]["basis"]
+    p = tmp_path / "BIOS.bin"
+    p.write_bytes(img)
+    inv = xf.inventory([p])
+    assert xf.status_of(inv)[0] == "ATTENTION" and "layout-undocumented-fields" in xf.status_of(inv)[1]
+    comps, deps = xf.components(inv)
+    props = [(q["name"], q["value"]) for c in comps for q in c.get("properties", [])]
+    assert any(n == "sca-center:incomplete" and "layout-undocumented-fields" in v for n, v in props)
+    assert any(n == "sca-center:version-basis" and "layout-undocumented-fields" in v for n, v in props)
+    assert "layout-undocumented-fields" in xf.markdown(inv)
+    clean = xf.bios_image(with_me(bytes(good_region(size=size))))
+    assert not any("layout-undocumented" in x for x in clean["incomplete"])
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_with_a_valid_ftpr_alone_is_found_with_attention(size):
+    r = with_tail(size, 0x58, 0x01)
+    put_bp(r, 0x3000, [(7, 0x100, 0x200)], {0x100: partition("NFTP")})
+    put_bp(r, 0x1000, [(2, 0x100, 0x200)], {0x100: partition("FTPR")})
+    res = found(r)
+    assert res["status"] == "found" and [c["name"] for c in res["sources"]] == ["FTPR", "NFTP"] and res["attention"][0]["code"] == "layout-undocumented-fields"
+    only = with_tail(size, 0x58, 0x01)
+    put_bp(only, 0x1000, [(2, 0x100, 0x200)], {0x100: partition("FTPR")})
+    only[0x3000:0x5000] = b"\xff" * 0x2000
+    lt = layout_table("1.7", (0x5000, 0x1000), [(0x1000, 0x2000)], size=size)
+    only[0:len(lt)] = lt
+    only[0x58] = 1
+    struct.pack_into("<I", only, 0x14, zlib.crc32(bytes(only[0x10:0x14]) + bytes(4) + bytes(only[0x18:0x10 + size])))
+    res = found(only)
+    assert res["status"] == "found" and [c["name"] for c in res["sources"]] == ["FTPR"] and res["attention"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_but_rbep_and_nftp_disagree_is_a_gap(size):
+    r = with_tail(size, 0x58, 0x01, ver2=(18, 0, 10, 2286))
+    res = found(r)
+    assert res["status"] == "gap" and "disagree" in res["note"] and "version" not in res
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_with_a_missing_nftp_is_a_gap(size):
+    r = with_tail(size, 0x58, 0x01)
+    put_bp(r, 0x3000, [(7, 0x100, 0x200)], {})                       # NFTP 項目指到的不是 $CPD
+    r[0x3100:0x3200] = b"\xff" * 0x100
+    res = found(r)
+    assert res["status"] == "gap" and "version" not in res
+
+
+def recrc(r, size):
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    return r
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+@pytest.mark.parametrize("only,gone", [("RBEP", 0x30), ("NFTP", 0x20)])
+def test_layout_17_nonzero_tail_with_a_single_main_partition_type_is_a_gap(size, only, gone):
+    """表尾非 0 時仍要 FTPR，或 RBEP＋NFTP 兩種都在：只有 RBEP 或只有 NFTP → GAP、不報版本、沒有 attention。"""
+    r = with_tail(size, 0x58, 0x01)
+    struct.pack_into("<II", r, gone, 0, 0)                          # 0x30＝BP3（NFTP）、0x20＝BP1（RBEP）的指標拿掉
+    recrc(r, size)
+    res = found(r)
+    assert res["status"] == "gap" and "version" not in res and "attention" not in res, res
+    assert only in res["note"] or "no FTPR" in res["note"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_wiring_carries_the_complete_raw_values(size):
+    """incomplete、SBOM 的 sca-center:incomplete 與 version-basis 都要有完整的原始值（逐 8 bytes 一組），不是只有開頭。"""
+    r = good_region(size=size)
+    n = 0x10 + size - 0x58
+    r[0x58:0x58 + n] = bytes(range(0x11, 0x11 + n))
+    recrc(r, size)
+    raw = tail_raw(r, size)
+    assert raw.count("+0x") == n // 8 and raw.split(", ")[-1].endswith(bytes(r[0x58 + n - 8:0x58 + n]).hex())
+    img = with_me(bytes(r))
+    b = xf.bios_image(img)
+    want = f"ME: layout-undocumented-fields: layout table 有未公開欄位（+0x58～+0x{0x10 + size - 1:x}），未解讀；原始值（檔案順序的 bytes，8 bytes 一組）{raw}"
+    assert want in b["incomplete"] and b["me"]["basis"].endswith(f"ATTENTION layout-undocumented-fields: {want[len('ME: layout-undocumented-fields: '):]}")
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "BIOS.bin"
+        p.write_bytes(img)
+        inv = xf.inventory([p])
+        comps, _ = xf.components(inv)
+    vals = [q["value"] for c in comps for q in c.get("properties", []) if q["name"] in ("sca-center:incomplete", "sca-center:version-basis")]
+    assert want in vals and any(raw in v for v in vals if v.startswith("BPDT"))
+    assert raw in xf.status_of(inv)[1] and raw in xf.markdown(inv)
+
+
+def test_layout_16_never_has_an_attention():
+    res = found(good_region("1.6", REGION, None, 1, 1))
+    assert res["status"] == "found" and res["layout"] == "CSE layout table 1.6" and res["attention"] == [] and "ATTENTION" not in res["basis"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_bp_end_exactly_at_the_region_end_is_normal_and_one_byte_more_is_a_gap(size):
+    def region(bp3_size):
+        r = good_region(size=size)
+        struct.pack_into("<II", r, 0x18, 0x100, 0x100)                       # data 移開，才不會壓到延長後的 BP3
+        struct.pack_into("<II", r, 0x30, 0x3000, bp3_size)
+        return recrc(r, size)
+    ok = found(region(REGION - 0x3000))
+    assert ok["status"] == "found" and ok["version"] == VERS
+    over = found(region(REGION - 0x3000 + 1))
+    assert over["status"] == "gap" and "outside the region" in over["note"] and "version" not in over
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_with_a_bad_crc_is_a_gap(size):
+    r = with_tail(size, 0x58, 0x01)
+    r[0x59] ^= 0x01                                                  # CRC 沒有跟著重算
+    res = found(r)
+    assert res["status"] == "gap" and "CRC-32 mismatch" in res["note"] and "version" not in res and "attention" not in res
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_with_a_failing_bp_is_a_gap(size):
+    r = with_tail(size, 0x58, 0x01)
+    r[0x3000:0x3004] = b"\x00\x00\x00\x00"                           # BP3 的 BPDT 簽章壞掉
+    res = found(r)
+    assert res["status"] == "gap" and "no BPDT signature" in res["note"] and "version" not in res
+    r = with_tail(size, 0x58, 0x01)                                  # BP 超出區域
+    struct.pack_into("<II", r, 0x30, 0x3000, REGION)
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    res = found(r)
+    assert res["status"] == "gap" and "outside the region" in res["note"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_nonzero_tail_is_not_read_as_a_bp_pointer(size):
+    """表尾只列原始值：就算看起來像 BP 指標（指到一個有效的 FTPR），也不採用它。"""
+    r = with_tail(size, 0x58, 0x00)
+    put_bp(r, 0x5000, [(2, 0x100, 0x200)], {0x100: partition("FTPR", (1, 2, 3, 4))})
+    struct.pack_into("<II", r, 0x58, 0x5000, 0x1000)
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    res = found(r)
+    assert res["status"] == "found" and res["version"] == VERS and res["attention"]
+
+
+@pytest.mark.parametrize("size", [0x58, 0x60])
+def test_layout_17_bp_pointer_inside_the_table_is_a_gap_and_at_the_end_is_checked_normally(size):
+    """BP 指標落在表內（Size 0x60 時 < 0x70）→ GAP；剛好從表尾（0x10＋Size）起 → 走一般的 BPDT 檢查。"""
+    for off in (0x58, 0x10 + size - 1):
+        r = good_region(size=size)
+        struct.pack_into("<II", r, 0x30, off, 0x100)
+        struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+        res = found(r)
+        assert res["status"] == "gap" and "overlaps the table" in res["note"], (hex(off), res)
+    r = good_region(size=size)
+    lo = 0x10 + size
+    put_bp(r, lo, [(7, 0x100, 0x200)], {0x100: partition("NFTP")})       # 剛好在表尾之後
+    struct.pack_into("<II", r, 0x30, lo, 0x800)
+    r[0x3000:0x3010] = b"\xff" * 0x10                                    # 原來的 BP3 內容不再被指到
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    res = found(r)
+    assert "overlaps the table" not in res.get("note", ""), res
+    assert res["status"] == "found" and [c["lbp"] for c in res["sources"]] == ["BP1", "BP3"]
+
+
+@pytest.mark.parametrize("at", [0x50, 0x54, 0x57])
+def test_layout_17_error_log_fields_do_not_affect_the_result(at):
+    """external error log（+0x50…+0x57）與 temp pages 不讀：值是什麼都 found，而且沒有 attention。"""
+    for size in (0x58, 0x60):
+        r = good_region(size=size)
+        r[at] = 0xEE
+        struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+        res = found(r)
+        assert res["status"] == "found" and res["attention"] == [], (size, res)
+
+
+@pytest.mark.parametrize("size", [0x44, 0x4C, 0x50, 0x54])
+def test_layout_17_sizes_between_the_known_values_are_none_even_with_a_valid_crc(size):
+    r = good_region(size=0x58)
+    t = layout_table("1.7", (0x5000, 0x1000), [(0x1000, 0x2000), (0, 0), (0x3000, 0x2000)], size=size)
+    r[0:0x10 + size] = t
+    assert found(r)["status"] == "none"
 
 
 def test_layout_17_flags_and_reserved_bits_do_not_matter():
