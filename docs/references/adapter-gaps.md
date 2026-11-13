@@ -14,6 +14,8 @@ C4 寫轉接器時發現、但沒有擋住 M6 的缺口。擋住的已經直接�
 | 7 | AI NAS 原始碼元件的層 | OMV 原始碼掃到的第三方相依（composer／npm／pypi）沒有路徑，分層是 unknown（當我們的待辦） | os_responsibility 是 ours，所以都算待辦（結論相同） | 依 `dumpling:origin=source` 歸 bsp（自有應用的相依） |
 | 8 | TrueNAS App 層 | D-026：TrueNAS 只做研究；App 目錄的容器映像範圍暫緩 | 未實作 | 使用者決定範圍後再評估 |
 | 9 | Radxa 的 manifest 與 SBOM 交叉核對 | 官方 manifest（role: metadata）只用來核對套件數，沒有自動比對 | 標準答案核對時人工比對 | collect 加「官方清單 vs SBOM」的差異表 |
+| 10 | metadata 檔的 sha256 不符 | 官方附的清單檔可能被重新產生（Debian 的 `debian-13-generic-amd64-20261111-2659.json` 在 2026-11-12 15:10 GMT 重新產生）；現在 fetch 會 FAIL，整個 run 停下，但這個檔不進掃描 | D-037：人工核對（官方 SHA512SUMS 相符、套件清單與映像的 dpkg status 一致）後更新 sha256；在 11 做好之前遇到就照同樣方式核對後問 C0 | role: metadata 的 sha256 不符時 fetch 回 GAP（不下載或不採用），不回 FAIL |
+| 11 | Debian SHA512SUMS 的簽章 | 目前只用 https 下載 SHA512SUMS 比對，沒有驗 GPG 簽章 | 簽章沒有驗（記在 note） | 可行的話加驗 SHA512SUMS 的簽章（Debian cloud 映像的簽章檔與金鑰來源要先確認） |
 
 ## 已在 M2 處理（C4 回報、C1 實作）
 

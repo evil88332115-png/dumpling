@@ -62,9 +62,9 @@ releases:
         '
     - name: debian-13-generic-amd64-20261111-2659.json
       url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-generic-amd64-20261111-2659.json
-      sha256: 740c5266604bc05024836a76032273be988f6f2ee13b6c594d5a80a424aa5e40
+      sha256: 59bc90c58dbd90994ac9776c46cf1e8fc59db2df5db84192476164999bec02d7
       size: 50844
       role: metadata
       version: 20261111-2659
       license_url: https://www.debian.org/legal/licenses/
-      note: 映像的建置資訊與套件清單；核心版本取自這裡；sha512 與 SHA512SUMS 相同
+      note: 官方在 2026-11-12 15:10 GMT 重新產生這個檔（大小不變、內容不同；原本記錄的 sha256 是 740c5266…）。D-037（D-027 (5) 底下的人工決定，不是自動接受）：新檔的 sha512 與同目錄官方 SHA512SUMS（2026-11-12 15:30 GMT，簽章沒有驗）相符；列出的 322 個套件（名稱去掉架構後綴）與映像 /var/lib/dpkg/status 已安裝的 322 個名稱與版本完全一致。
