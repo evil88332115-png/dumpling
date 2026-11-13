@@ -7,7 +7,8 @@
 # 結束碼規則（與 docs/PLATFORM-INTERFACE.md 的步驟結束碼一致）：
 #   0 → OK        1、64 或其他 → FAIL（這個 script 以 1 結束，job 失敗）
 #   3 → GAP       印 ::warning::，這個 script 以 0 結束（繼續下一步；結果照樣產生，但整體狀態不是 OK）
-#   4 → NOT_RUN   印 ::notice::，這個 script 以 0 結束（繼續；不能當成成功，會照實列在報告裡）
+#   4 → NOT_RUN   印 ::notice::，這個 script 以 0 結束（繼續；不能當成成功，會照實列在報告裡；整體狀態降成 GAP，見 lib/step_rows.py）
+#   --record 的 NOT_RUN 說明以「不適用」開頭時（例如 build.mode: none）＝本來就不該做，不降低整體狀態
 # 紀錄：每一步在 $DUMPLING_OUT/pipeline-steps.tsv 加一列「pipeline-<步驟>	狀態	結束碼	最後一行輸出」（$DUMPLING_OUT ＝ $DUMPLING_OUT_BASE/<專案>/<版本>）。
 # 報告（platform_scan.collect）、release-meta.json、scan-status-check 讀這個檔，所以平台的 scan 沒有讀 raw-sectors.json 之類的檔案，GAP 也不會消失。
 set -uo pipefail

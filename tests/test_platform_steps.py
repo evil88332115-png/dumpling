@@ -57,6 +57,16 @@ class RunStep(Tmp):
     def rows(self):
         return sr.read_rows(os.path.join(self.out_base, "steps-demo", "v39.2.1-demo1", "pipeline-steps.tsv"))
 
+    def test_run_step_exit_4_degrades_and_record_not_applicable_does_not(self):
+        """步驟結束碼 4（腳本自己說沒做）→ 整體 GAP；workflow 用 --record 記的「不適用」→ 不降低整體。"""
+        r = self.run_step("--record", self.proj, "v39.2.1-demo1", "build", "NOT_RUN", "4", "不適用：build.mode: none（這個平台不編譯）")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sr.overall(self.rows()), "OK")
+        r = self.run_step("scan", self.proj, "v39.2.1-demo1", rc=4)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([(x["step"], x["status"], x["detail"]) for x in self.rows()][-1], ("pipeline-scan", "NOT_RUN", "scan: 結果說明"))
+        self.assertEqual(sr.overall(self.rows()), "GAP")
+
     def test_exit_code_rules(self):
         # (步驟腳本的結束碼, run-step 的結束碼, 記錄的狀態, 輸出裡的標記)
         for rc, want_exit, status, marker in ((0, 0, "OK", None), (3, 0, "GAP", "::warning::"), (4, 0, "NOT_RUN", "::notice::"),
@@ -105,10 +115,10 @@ class Rows(Tmp):
     def test_overall_and_format(self):
         f = self.p("s.tsv")
         sr.append_row(f, "fetch", "OK", 0, "ok\twith\ttabs")
-        sr.append_row(f, "pipeline-build", "NOT_RUN", 4, "build.mode: none")
+        sr.append_row(f, "pipeline-build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）")
         rows = sr.read_rows(f)
         self.assertEqual(rows[0]["detail"], "ok with tabs")
-        self.assertEqual(sr.overall(rows), "OK")                                    # NOT_RUN 不降低整體狀態，但會列出
+        self.assertEqual(sr.overall(rows), "OK")                                    # 「不適用」的 NOT_RUN 不降低整體狀態，但會列出
         sr.append_row(f, "scan", "GAP", 3, "沒有標準答案")
         self.assertEqual(sr.overall(sr.read_rows(f)), "GAP")
         sr.append_row(f, "assemble", "FAIL", 1, "x")
@@ -149,10 +159,32 @@ class CollectShowsSteps(Tmp):
         self.assertIn("pipeline-assemble | GAP", md)
         self.assertIn("整體狀態 GAP", md)
 
+    def test_not_run_that_should_have_run_is_gap(self):
+        """NOT_RUN 分兩類：「不適用」開頭不降低整體；其他（平台沒有實作、非 aarch64 主機、舊格式沒有標示的說明）→ GAP。ATTENTION 也被它蓋過。"""
+        for detail in ("scan: NOT_RUN（平台 x 沒有實作 scan）", "build: NOT_RUN（只在 aarch64 主機原生編譯；這台是 x86_64）",
+                       "build.mode: none", "（沒有輸出）", "這一步不適用"):
+            f = self.p("nr-%d.tsv" % hash(detail))
+            sr.append_row(f, "validate", "OK", 0, "ok")
+            sr.append_row(f, "fetch", "ATTENTION", 0, "鏡像沿用快取")
+            sr.append_row(f, "build", "NOT_RUN", 4, detail)
+            rows = sr.read_rows(f)
+            self.assertFalse(sr.not_applicable(rows[-1]), detail)
+            self.assertEqual(sr.overall(rows), "GAP", detail)
+            self.assertEqual(ps.collect(self.args(f))["pipeline_status"], "GAP", detail)
+        f = self.p("na.tsv")
+        sr.append_row(f, "fetch", "ATTENTION", 0, "鏡像沿用快取")
+        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none")
+        self.assertEqual(sr.overall(sr.read_rows(f)), "ATTENTION")                  # 不適用不蓋過 ATTENTION，也不降成 GAP
+        sr.append_row(f, "assemble", "FAIL", 1, "x")
+        self.assertEqual(sr.overall(sr.read_rows(f)), "FAIL")
+        g = self.p("ok-na.tsv")
+        sr.append_row(g, "build", "OK", 0, "不適用：只是說明文字")                     # 只有 NOT_RUN 才分類
+        self.assertEqual(sr.overall(sr.read_rows(g)), "OK")
+
     def test_all_ok_and_missing_file(self):
         f = self.p("ok.tsv")
         sr.append_row(f, "validate", "OK", 0, "ok")
-        sr.append_row(f, "build", "NOT_RUN", 4, "build.mode: none")
+        sr.append_row(f, "build", "NOT_RUN", 4, "不適用：build.mode: none（這個平台不編譯）")
         self.assertEqual(ps.collect(self.args(f))["pipeline_status"], "OK")
         scan = ps.collect(self.args(self.p("missing.tsv")))                          # 有指定卻讀不到紀錄：GAP，不是 OK
         self.assertEqual((scan["pipeline_status"], scan["pipeline_steps"]), ("GAP", None))
