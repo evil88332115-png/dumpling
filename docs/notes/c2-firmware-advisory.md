@@ -11,7 +11,7 @@
 | `tools/cra/data/intel-microcode-releases.json` | 產生出來的資料表（約 80 KB，進 repo）。每個 release 的 tag、日期、INTEL-SA 清單、各 F-M-S／platform id 的 revision 變化、人工對照 `prose_rules`；附來源 URL、tag、commit、sha256、產生時間、看不懂的段落（`unparsed`，只有行號與原因）。只放事實性欄位（見「授權」） |
 | `tools/cra/fw_advisory.py` | 離線比對：載入資料表（核對 sha256 與結構）、CPUID → F-M-S、revision 比較、結果分類 |
 | `tools/cra/x86_firmware.py` | 呼叫比對、SBOM property（`dumpling:advisory-*`）、`fw-inventory.md` 的「公告比對」一節、資料表不能用時 ATTENTION；ME 的 CPE 與 `dumpling:cpe-*` |
-| `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_dt.py` | CI 摘要表多一欄「微碼公告比對」；DT 報告的說明與每個樣本的 `advisory-match` 計數 |
+| `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表多一欄「微碼公告比對」（文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
 | `tools/cra/tests/test_fw_advisory.py`、`test_x86_firmware_sbom.py`、`tests/test_firmware_dt.py` | 測試（合成資料，不連網） |
 
 ## 資料來源（固定）
@@ -132,7 +132,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 - **轉換**：CPE 版本只放 `$MN2` 版本的前三段（`14.0.47.1558` → `14.0.47`），build 號丟掉（NVD 沒有、範圍比較也只用三段）；元件的 `version` 維持四段。三段以下或非純數字的版本不帶 CPE。
 - **family**：映像分不出 CSME／TXE／SPS（`sca-center:me-family` 仍寫 `unknown`）。帶 CPE 的條件：版本清單的 me 列寫明 `CSME`（不看版本範圍）；或映像沒有清單、major 版本在 **11～30** → 由版本推定為 CSME（`dumpling:cpe-basis` 的值固定是 `listed` 或 `inferred`，說明文字在 `dumpling:cpe-basis-note`；報告寫「family 是由版本推定的，比對結果待人審」）。
   依據：NVD 上 TXE（`trusted_execution_engine_firmware`）與 SPS（`server_platform_services_firmware`）的版本都低於 11，AMT 是另一個 product 不會被這個 CPE 比到。
-  上限 30 是判斷：CSME 大約每年加一個 major（目前最高約 20），`$MN2` 裡雜散的欄位值是幾百到幾萬，超過 30 就不是版本欄位。清單寫 ME／TXE／SPS → 不帶；major < 11 或 > 30 且 family 不明、少於三段、非數字 → 不帶，`dumpling:cpe-gap` 寫原因（GAP）。
+  上限 30 是判斷：CSME 大約每年加一個 major（目前最高約 20），`$MN2` 裡雜散的欄位值是幾百到幾萬，超過 30 就不是版本欄位。清單寫 ME／TXE／SPS → 不帶；清單對同一個 ME 版本同時寫了不同 family（例如 CSME 與 TXE，自相矛盾）→ 不推定、不帶 CPE，`dumpling:cpe-gap` 寫「版本清單 family 矛盾」，狀態 ATTENTION；major < 11 或 > 30 且 family 不明、少於三段、非數字 → 不帶，`dumpling:cpe-gap` 寫原因（GAP）。
   這個推定由 C0 的決定 D-051 採用；要退回「一律不推定」，把 `csme_cpe_info` 的 11～30 那個分支拿掉即可。
 - 帶 CPE 時一定同時帶 `dumpling:cpe-note`：「NVD 對 Intel CSME 的 CPE 與版本範圍資料不完整；Grype 沒比到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；以 Intel 公告（INTEL-SA）為準」。
   臨時 DT 的設定（`pipeline/dt-ephemeral.sh`）：NVD 資料源關閉、只開 OSV 與 KEV，所以 CPE 是給 Grype（`sca-scan` 的 C-grype，使用它自己的 NVD 資料庫）用的，不是給臨時 DT 用的。

@@ -129,6 +129,27 @@ def test_cpe_family_rules_and_basis(tmp_path):
     assert props(me, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no data in the database" in props(me, "dumpling:advisory-basis")[0]
 
 
+def test_conflicting_families_in_the_version_list_are_a_gap_without_cpe(tmp_path):
+    img = with_me(me_region("me11"))
+    m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,CSME,16.1.30.2307,,Intel,", "MB-1,BIOS,1.05,me,TXE,16.1.30.2307,,Intel,")
+    p = tmp_path / "in.bin"
+    p.write_bytes(img)
+    inv = xf.inventory([p], m)
+    assert inv["bios"][0]["me"]["family"] is None and inv["bios"][0]["me"]["family_conflict"] == ["CSME", "TXE"]
+    comps, deps = xf.components(inv)
+    me = next(c for c in comps if c["name"] == "Intel CSE firmware")
+    gap = props(me, "dumpling:cpe-gap")
+    assert "cpe" not in me and len(gap) == 1 and "版本清單 family 矛盾" in gap[0] and "CSME, TXE" in gap[0] and "nothing is inferred" in gap[0]
+    assert not props(me, "dumpling:cpe-basis") and props(me, "sca-center:me-family") == ["unknown"]
+    st, detail = xf.status_of(inv)
+    assert st == "ATTENTION" and "版本清單 family 矛盾" in detail
+    # 兩列寫同一種 family（重複）不是矛盾
+    m = manifest_with(tmp_path, "MB-1,BIOS,1.05,me,CSME,16.1.30.2307,,Intel,", "MB-2,BIOS,1.06,me,CSME,16.1.30.2307,,Intel,")
+    me = next(c for c in sbom(tmp_path, img, m) if c["name"] == "Intel CSE firmware")
+    assert me["cpe"] == CSME_CPE_16 and props(me, "dumpling:cpe-basis") == ["listed"]
+    assert xf.csme_cpe_info({"family": None, "version": "16.1.30.2307", "family_conflict": ["CSME", "SPS"]})[:2] == (None, None)
+
+
 def test_csme_major_bounds_for_the_inferred_family():
     assert xf.csme_cpe({"family": None, "version": "11.0.0.1"}) and xf.csme_cpe({"family": None, "version": "30.9.9"})
     assert xf.csme_cpe({"family": None, "version": "10.9.9"}) is None and xf.csme_cpe({"family": None, "version": "31.0.0"}) is None
@@ -141,6 +162,8 @@ def test_cpe_for_standalone_me_image_without_region(tmp_path):
     me = next(c for c in sbom(tmp_path, csme12_image(), m) if c["name"] == "Intel CSE firmware")
     assert me["cpe"].endswith("converged_security_management_engine_firmware:12.0.90:*:*:*:*:*:*:*")
     assert props(me, "dumpling:vuln-assessment") == ["NOT_ASSESSED"]
+    assert props(me, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no data in the database" in props(me, "dumpling:advisory-basis")[0]      # 獨立的 ME 映像（沒有 region）也有比對結果
+    assert props(me, "dumpling:cpe-basis") == ["listed"]
 
 
 @pytest.mark.parametrize("version,cpe_version", [("16.1.30.2307", "16.1.30"), ("14.0.47.1558", "14.0.47"), ("11.8.50", "11.8.50"),

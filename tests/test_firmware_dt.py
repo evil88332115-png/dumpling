@@ -266,6 +266,21 @@ class ReportTests(Base):
         self.assertIn("affected-candidate=1", md)
         self.assertIn("沒有任何一項代表沒有漏洞", md)
 
+    def test_amd_components_are_counted_without_calling_them_intel(self):
+        """AMD 的微碼、PSP、AGESA 元件的 advisory-match（NOT_ASSESSED）：摘要標籤中性，「怎麼讀」寫明 AMD 也是資料庫沒有資料。"""
+        amd = []
+        for i, name in enumerate(("AMD CPU microcode (equivalence id 0x8082)", "AMD PSP firmware SMU (type 0x08, subprogram 0)", "AMD AGESA")):
+            c = comp(name, "a%d" % i, version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": "NOT_ASSESSED"}, {"name": "dumpling:advisory-basis", "value": "AMD-SB not matched"}]
+            amd.append(c)
+        info, o = self.prep(bom(*amd))
+        self.assertEqual(info["summary"]["advisory_match"], {"NOT_ASSESSED": 3})
+        rc, _, md = self.run_report([o])
+        self.assertIn("公告比對（dumpling:advisory-match）：NOT_ASSESSED=3", md)
+        self.assertNotIn("Intel 微碼與 ME", md)
+        self.assertIn("AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準", md)
+        self.assertNotIn("PASS", md)
+
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))
         rc, out, md = self.run_report([o])

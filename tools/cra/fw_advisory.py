@@ -41,7 +41,6 @@ SCHEMA = "dumpling-intel-microcode-releases/1"
 MAX_TABLE = 4 << 20
 MATCHES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED")
 NO_DATA = "no data in the database; the vendor advisory (Intel INTEL-SA) is authoritative"
-NO_DATA_ZH = "資料庫沒有資料，以廠商公告為準"
 CAVEAT = ("advisories are listed per release in the source, not per CPUID; a candidate advisory does not necessarily affect this CPUID")
 UP_TO_DATE = "no newer revision in the table; this does not mean there are no vulnerabilities, refer to the Intel advisories"
 CPUID_RE = re.compile(r"^[0-9A-Fa-f]{8}$")

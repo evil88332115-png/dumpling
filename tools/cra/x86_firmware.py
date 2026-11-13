@@ -1588,6 +1588,9 @@ def csme_cpe_info(me):
     要有三段以上的純數字版本；family 要是 CSME（版本清單），或 major 在 11～30（推定）；其他一律不帶並寫 gap 原因。"""
     if not me:
         return None, None, None
+    if me.get("family_conflict"):
+        return None, None, ("the version list gives conflicting families for this version (版本清單 family 矛盾): "
+                            + ", ".join(me["family_conflict"]) + "; nothing is inferred, no CPE")
     m = CPE_VERSION.fullmatch(me.get("version") or "")
     if not m:
         return None, None, "ME version is not a plain major.minor.hotfix[.build] number; no CPE"
@@ -2295,6 +2298,8 @@ def inventory(paths, manifest=None, budget=None, advisory=None):
                    and version_matches("me", norm("me", "version", r["version"]), b["me"]["version"])}
             if len(fam) == 1:
                 b["me"].update(family=fam.pop(), family_basis="version list")
+            elif len(fam) > 1:            # 清單對同一個版本寫了不同的 family（自相矛盾）：不推定，不帶 CPE
+                b["me"]["family_conflict"] = sorted(fam)
         inv["comparison"] = compare(inv, rows)
     return inv
 
@@ -2347,6 +2352,8 @@ def status_of(inv):
             att.append(f"{b['file']}：" + "；".join(b["incomplete"]))
         if b.get("me_status") == "unknown":
             att.append(f"{b['file']}：有 ME 區域但 ME 版本 unknown（{b['me_note']}）")
+        if (b.get("me") or {}).get("family_conflict"):
+            att.append(f"{b['file']}：版本清單 family 矛盾（同一個 ME 版本寫了 {'、'.join(b['me']['family_conflict'])}），不推定 family、不帶 CPE")
         if b.get("me_conflict"):
             att.append(f"{b['file']}：有不同版本的 FTPR manifest，ME 版本要確認（{b['me_conflict']}）")
         if b.get("platform") == "amd":

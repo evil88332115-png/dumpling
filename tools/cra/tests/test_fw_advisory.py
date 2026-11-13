@@ -676,7 +676,7 @@ def test_superseded_platform_mask_is_not_up_to_date():
     # 互不相交（06-ba-02/07 對 e0）：結果不變，加註
     r = fa.match_signature(t, "000B06A2", "0x07", "0x4112")
     assert r["match"] == "up-to-date" and any("disjoint" in n and "other platform mask" in n for n in r["notes"])
-    assert fa.match_signature(t, "00090672", "0x07", "0x3e")["match"] == "up-to-date"        # 最新的鍵本身不受影響
+    assert fa.match_signature(t, "00090672", "0x07", "0x3e")["match"] == "up-to-date"        # 最新的鍵本身不降級
 
 
 def test_superseded_mask_candidates_are_also_listed_when_the_revision_is_older():
@@ -1048,3 +1048,55 @@ def test_amd_parser_not_run_is_a_gap_in_the_report(tmp_path):
     sec = xf.markdown(inv)
     sec = sec[sec.index("## 公告比對"):]
     assert "PSP 目錄解析沒有執行（GAP" in sec and "以 AMD 公告為準" in sec
+
+
+# ---------- 多個 signature 的合併、note 與報告 ----------
+
+def test_signature_merge_priority_not_assessed_beats_older_no_sa_and_loses_to_candidates():
+    t = mk_table(rel("microcode-20240301", sa=["INTEL-SA-00003"], updated=[("06-bb-01", "01", "00000010", "00000030")]),
+                 rel("microcode-20240201", updated=[(FMS, "e0", "00000010", "00000020")]))
+    # 主 signature older-no-sa（0x10 → 0x20 的 release 沒有公告）、extended 在表裡找不到 → NOT_ASSESSED
+    r = fa.match_microcode(t, ucode("0x10", ext=[("000B06B9", "0x01")]))
+    assert [s["match"] for s in r["signatures"]] == ["older-no-sa", "NOT_ASSESSED"] and r["match"] == "NOT_ASSESSED" and r["reason"] == "cpuid-not-in-table"
+    # extended 有候選公告 → affected-candidate（候選只有有公告的那個 signature 的）
+    r = fa.match_microcode(t, ucode("0x10", ext=[("000B06B1", "0x01")]))
+    assert [s["match"] for s in r["signatures"]] == ["older-no-sa", "affected-candidate"] and r["match"] == "affected-candidate"
+    assert [c["id"] for c in r["candidates"]] == ["INTEL-SA-00003"]
+    # NOT_ASSESSED 加 affected-candidate → affected-candidate；reason 不留（只有整份是 NOT_ASSESSED 時才有）
+    r = fa.match_microcode(t, ucode("0x10", ext=[("000B06B1", "0x01"), ("000B06B9", "0x01")]))
+    assert r["match"] == "affected-candidate" and r["reason"] is None and [s["match"] for s in r["signatures"]][-1] == "NOT_ASSESSED"
+
+
+def test_duplicate_signatures_are_deduplicated_by_cpuid_and_platform_together():
+    t = mk_table(rel("microcode-20240201", updated=[(FMS, "e0", "00000010", "00000020"), (FMS, "03", "00000010", "00000020")]))
+    r = fa.match_microcode(t, ucode("0x20", "0xE0", ext=[(CPU, "0xE0"), (CPU.lower(), "0xe0"), (CPU, "0x03")]))
+    assert [(s["cpuid"], s["platform_id"]) for s in r["signatures"]] == [(CPU, "0xE0"), (CPU, "0x03")]       # 重複的合併；同 CPUID 不同 platform 是另一個 signature
+    assert [s["match"] for s in r["signatures"]] == ["up-to-date", "up-to-date"]
+    r = fa.match_microcode(t, ucode("0x20", "0xE0", ext=[(CPU, "0x80")]))
+    assert [s["match"] for s in r["signatures"]] == ["up-to-date", "NOT_ASSESSED"] and r["signatures"][1]["reason"] == "platform-mismatch"
+
+
+def test_notes_reach_the_sbom_and_the_report_including_unlisted(tmp_path):
+    doc = {"schema": fa.SCHEMA, "source": {"repo": "https://github.com/intel/x", "tag": "microcode-30000101", "commit": "b" * 40, "path": "releasenote.md", "sha256": "c" * 64},
+           "releases": [rel("microcode-20240201", sa=["INTEL-SA-00009"], disclosed=[(FMS, "e0", "00004100", "00004121")]),
+                        rel("microcode-20240101", updated=[(FMS, "e0", "00004100", "00004121")])],
+           "prose_rules": [{"release": "microcode-20240201", "line": 5, "quote": "q", "interpretation": "i", "ref_release": "microcode-20240101", "codes": ["ABC"],
+                            "keys": [], "gaps": [{"key": "%s/e0" % FMS, "why": "ambiguous reference"}], "unlisted": [{"key": "%s/e0" % FMS, "why": "AZB only"}]}]}
+    fa.validate(doc)
+    inv, comps, md = sbom_with(tmp_path, fa.Table(doc, "a" * 64))                     # spi_image 的 000B06A2／0xE0／0x4121 ＝ 06-ba-02/e0 的最新
+    u = next(c for c in comps if c["name"] == "Intel CPU microcode 000B06A2")
+    notes = props(u, "dumpling:advisory-note")
+    assert len(notes) == 3 and any("GAP in the hand-compiled prose mapping" in n and "ambiguous reference" in n for n in notes)
+    assert any("not mentioned there" in n and "AZB only" in n for n in notes) and any("New Disclosures" in n and "INTEL-SA-00009" in n for n in notes)
+    sec = md[md.index("## 公告比對"):]
+    for frag in ("GAP in the hand-compiled prose mapping", "not mentioned there", "New Disclosures"):
+        assert any(line.startswith("  - ") and frag in line for line in sec.splitlines()), frag
+
+
+def test_amd_report_counts_psp_microcode_and_agesa(tmp_path):
+    inv = amd_inventory(tmp_path)
+    a = inv["bios"][0]["amd"]
+    md = xf.markdown(inv)
+    sec = md[md.index("## 公告比對"):]
+    assert f"AMD 微碼已解析 {len(a['microcode'])} 份、PSP 韌體 {len(a['psp_firmware'])} 項、AGESA 字串 {len(a['agesa']['values'])} 個" in sec
+    assert len(a["agesa"]["values"]) == 1 and len(a["psp_firmware"]) >= 3
