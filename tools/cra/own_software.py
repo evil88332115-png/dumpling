@@ -190,6 +190,8 @@ def entries(cfg):
             continue
         seen[pat] = len(out)
         out.append(e)
+    if declaration(cfg)[0] == "conflict":              # 列了又寫沒有的理由：run()（狀態列）與 build()（SBOM 文件）都當設定錯誤
+        errs.append(declaration(cfg)[1])
     return out, errs
 
 
@@ -1003,8 +1005,6 @@ def run(src, prefix, config, out, file_max=FILE_MAX):
     if not configured(cfg):
         return "SKIP", "設定沒有 sbom.own_software：不執行", []
     ents, cerrs = entries(cfg)
-    if declaration(cfg)[0] == "conflict":
-        cerrs = cerrs + [declaration(cfg)[1]]
     if not ents:
         return "FAIL", "sbom.own_software 沒有可用的路徑：" + "；".join(cerrs[:5]), []
     doc = collect(src, prefix, ents, file_max)

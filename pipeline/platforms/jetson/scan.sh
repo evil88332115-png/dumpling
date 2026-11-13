@@ -103,9 +103,10 @@ while IFS=$'\x1f' read -r suffix sfile; do
   cp -a "$w0/scan" "$src/scan" && cp "$w0/wizard-steps.json" "$src/" 2> /dev/null
   cp "$out/layers/$sfile" "$src/scan/rootfs/scan/sbom/sbom.cdx.json" || fail "放不進分層 SBOM $sfile"
   echo "== 分層重跑 ${suffix:-（單一專案）}：$sfile"
-  # 分層的重跑（後綴不是空的）：核心永遠在 bsp 層，os 層的 SBOM 沒有核心，核心階段不該對映像裡的核心再跑一遍 → 告訴 sca-scan 核心在 <專案>-bsp 報告判定
-  # （只在 SBOM 真的沒有核心時才不執行；bsp 層有核心，照舊）。完整掃描和 ours 的單一專案重跑（後綴是空的，SBOM 是整個產品）不給。
-  lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")
+  # bsp 以外的分層重跑（-os）：核心永遠在 bsp 層，os 層的 SBOM 沒有核心，核心階段不該對映像裡的核心再跑一遍 → 告訴 sca-scan 核心在
+  # <專案>-bsp 報告判定（只在 SBOM 真的沒有核心時才不執行）。-bsp 自己、完整掃描、ours 的單一專案重跑（後綴是空的）不給：
+  # 給 -bsp 等於指向自己，bsp 的 SBOM 偵測不到核心時會把該做的核心判定（含 CNA 退回）壓掉（sca-scan 也會拒絕）。
+  case $suffix in ""|-bsp) lk=();; *) lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp");; esac
   wl=$(wiz "$suffix" "${lk[@]+"${lk[@]}"}" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
   if [ -z "$wl" ] || [ ! -d "$wl/報告" ]; then fail "分層 $suffix 沒有報告包"; fi
   runs+=("$suffix=$wl")

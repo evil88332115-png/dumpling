@@ -45,7 +45,9 @@ Grype 與 DT 對核心都是 0 筆，報告看起來像核心沒有弱點（Jets
        - always_off_series（linux-upstream：核心自己 make deb-pkg 的預設來源套件名稱，不是發行版建的）→ off-series（任何發行版）。
        - distro=debian-* 而且來源套件不在 debian.sources（linux、linux-latest、linux-signed-<架構>；Debian 的核心只由這些來源套件建）→ off-series。
        - distro=ubuntu-* 不看其他 linux-<flavor> 來源（linux-nvidia-tegra、linux-raspi、linux-aws… 都是 Canonical 的核心），只有 always_off_series。
-  已知沒有涵蓋的情況（要用 c 明確宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu、purl 也沒有 upstream／distro 限定詞（或限定詞也像發行版）。
+  規則 a 也看 purl 的 epoch= 限定詞；規則 d 的 Debian 是 distro=debian 或 debian-*。
+  已知沒有涵蓋的情況（要用 c 明確宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu、purl 也沒有 upstream／distro 限定詞（或限定詞也像發行版）；
+  後綴不在清單或不是 + 的寫法（~rpt、.rpt）；distro= 不是 Debian（raspbian-*）或沒有 distro= 而來源套件是自訂名稱；名稱不在 KERNEL_PACKAGE_PATTERNS 的核心套件（連核心都偵測不到）。
   這些規則抓得到的是已知的樣子，抓不到不代表核心是發行版的。核心 CVE 要以上游版本對核心 CNA（尚未實作，見 M7）。
 核心版本的來源（依序）：linux-kernel 元件的版本 → 核心模組所在的 /usr/lib/modules/<版本>/（或 /lib/modules/）路徑，
   路徑沒有時用 Syft 的 syft:metadata:kernelVersion → 核心套件的版本。
@@ -185,6 +187,12 @@ def purl_version(purl):
     return unquote(last.split("@", 1)[1]) if "@" in last else None
 
 
+def _is_debian_distro(d):
+    """purl 的 distro= 是 Debian（debian、debian-<版本>）。raspbian-* 不算：Raspbian 的核心靠規則 a、b（epoch、+rpt）。"""
+    d = (d or "").strip().lower()
+    return d == "debian" or d.startswith("debian-")
+
+
 def off_series_reasons(name, version, purl, sources=None):
     """一個 deb 核心套件不在發行版核心序列上的所有原因（OFF_SERIES_RULES 的 a、b、d；c 在 assess）→ 原因文字清單，空清單＝沒有規則成立。
 
@@ -205,9 +213,12 @@ def off_series_reasons(name, version, purl, sources=None):
             reasons.append(r)
 
     for v in versions:                                                   # 規則 a
-        m = _EPOCH_RE.match(v)
+        m = _EPOCH_RE.match(v.strip())
         if m and int(m.group(1)) >= 1:
             add(f"規則 a：版本 {v} 有 epoch {int(m.group(1))}（Debian、Ubuntu 自己的 linux 套件沒有 epoch）")
+    qe = (purl_qualifiers(purl).get("epoch") or "").strip()              # 規則 a：有些產生器把 epoch 放在 purl 的 epoch= 限定詞
+    if qe.isdigit() and int(qe) >= 1:
+        add(f"規則 a：purl 的 epoch={int(qe)}（Debian、Ubuntu 自己的 linux 套件沒有 epoch）")
     for v in versions:                                                   # 規則 b：版本
         m = _VENDOR_VER_RE.search(v)
         if m:
@@ -221,7 +232,7 @@ def off_series_reasons(name, version, purl, sources=None):
         sources = sources or load_distro_sources()
         if up in sources["always"]:
             add(f"規則 d：purl 的來源套件是 {up}（核心自己 make deb-pkg 的預設名稱，不是發行版建的；{os.path.basename(DISTRO_SOURCES_PATH)}）")
-        elif (purl_qualifiers(purl).get("distro") or "").lower().startswith("debian-") and up not in sources["debian"]:
+        elif _is_debian_distro(purl_qualifiers(purl).get("distro")) and up not in sources["debian"]:
             add(f"規則 d：purl 的來源套件是 {up}，不是 Debian 建核心用的來源套件（{', '.join(sources['debian'])}；{os.path.basename(DISTRO_SOURCES_PATH)}）")
     return reasons
 

@@ -437,7 +437,7 @@ class Scripts(Tmp):
         d = os.path.join(platforms, name)
         os.makedirs(d)
         with open(os.path.join(d, "platform.yml"), "w", encoding="utf-8") as fh:
-            fh.write("schema: 1\nplatform: %s\ndescription: test\nbuild: {mode: none}\nlayers: {default: os}\n" % name)
+            fh.write("schema: 1\nplatform: %s\ndescription: test\nbuild: {mode: none}\nlayers: {default: os}\nscan: {platform_arg: generic}\n" % name)
         for s in steps:
             with open(os.path.join(d, s + ".sh"), "w", encoding="utf-8") as fh:
                 fh.write('#!/usr/bin/env bash\necho "%s: OK（%s %s $DUMPLING_PLATFORM $DUMPLING_OS_RESPONSIBILITY $2）"\n' % (s, name, s))
@@ -586,7 +586,7 @@ class KernelWizardArgs(unittest.TestCase):
         self.assertEqual(f({}, "平台預設"), ["--kernel-not-distro", "平台預設"])
         self.assertEqual(f({"kernel_not_distro": "版本的理由"}, "平台預設"), ["--kernel-not-distro", "版本的理由"])      # 版本優先
         self.assertEqual(f({"l4t_release": "1.0"}, None), [])                                                         # Jetson：都沒有就不印
-        for bad in ("", "   ", "a\nb", "a\tb", 3, ["x"], "x" * 301):
+        for bad in ("", "   ", "a\nb", "a\tb", 3, ["x"], "x" * 301, "--evil", " -x"):            # - 開頭：精靈的 argparse 會當成選項
             with self.assertRaises(pc.ConfigError, msg=repr(bad)):
                 f({"kernel_not_distro": bad})
             with self.assertRaises(pc.ConfigError, msg=repr(bad)):
@@ -658,17 +658,17 @@ class KernelWizardArgs(unittest.TestCase):
         self.assertIn('project-info.py" --kernel-args "$proj" "$ver"', s)
         self.assertIn('"${kargs[@]+"${kargs[@]}"}"', s)
 
-    def test_jetson_layer_rescans_pass_kernel_in_other_report_only_for_non_empty_suffix(self):
-        """分層重跑（後綴不是空的）才給 --kernel-in-other-report <專案>-bsp；完整掃描與 ours 的空後綴重跑不給。"""
+    def test_jetson_layer_rescans_pass_kernel_in_other_report_only_for_non_bsp_layers(self):
+        """bsp 以外的分層重跑（-os）才給 --kernel-in-other-report <專案>-bsp；-bsp（會指向自己）、完整掃描與 ours 的空後綴重跑不給。"""
         with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
             s = fh.read()
-        self.assertIn('lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")', s)
+        self.assertIn('case $suffix in ""|-bsp) lk=();; *) lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp");; esac', s)
         self.assertIn('wiz "$suffix" "${lk[@]+"${lk[@]}"}" --rescan-from', s)
         self.assertIn('w0=$(wiz "" |', s)                                    # 完整掃描：不給
-        self.assertEqual(len(re.findall(r"^\s*lk=\(", s, re.M)), 1)
-        # 把那一行單獨執行：空後綴不給、-bsp／-os 給 <專案>-bsp
-        line = re.search(r'^\s*(lk=\(\); \[ -z "\$suffix" \] \|\| lk=\(.*\))$', s, re.M).group(1)
-        for suffix, want in (("", ""), ("-bsp", "--kernel-in-other-report demo-bsp"), ("-os", "--kernel-in-other-report demo-bsp")):
+        self.assertEqual(len(re.findall(r"^\s*case \$suffix in", s, re.M)), 1)
+        # 把那一行單獨執行：空後綴與 -bsp 不給、-os 給 <專案>-bsp
+        line = re.search(r'^\s*(case \$suffix in .*esac)$', s, re.M).group(1)
+        for suffix, want in (("", ""), ("-bsp", ""), ("-os", "--kernel-in-other-report demo-bsp")):
             r = subprocess.run(["bash", "-c", 'DUMPLING_PROJECT=demo; suffix="$1"; %s; echo "${lk[*]-}"' % line, "x", suffix], capture_output=True, text=True)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, want), r.stderr)
 

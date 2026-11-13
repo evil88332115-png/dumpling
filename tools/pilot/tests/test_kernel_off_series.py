@@ -58,6 +58,24 @@ def test_explicit_zero_epoch_is_not_flagged_by_itself(tmp_path):
     assert st == "OK" and ev["off_series"] == []
 
 
+def test_epoch_in_purl_qualifier_is_flagged(tmp_path):
+    """有些產生器把 epoch 放在 purl 的 epoch= 限定詞，版本本身不帶 N:（第二輪驗證）。"""
+    r, st, detail, ev = run(tmp_path, [pkg("linux-image-6.18.50-x", "6.18.50-1", "?arch=arm64&epoch=1&distro=debian-13")])
+    assert st == "GAP" and "epoch=1" in detail
+    (tmp_path / "z").mkdir()
+    r, st, detail, ev = run(tmp_path / "z", [pkg("linux-image-6.12.43-x", "6.12.43-1", "?arch=arm64&epoch=0&upstream=linux&distro=debian-13")])
+    assert st == "OK" and ev["off_series"] == []
+
+
+def test_bare_debian_distro_applies_rule_d(tmp_path):
+    """distro=debian（沒有版本號，sid／testing）也是 Debian：自訂的來源套件 → off-series；raspbian-* 不看規則 d（靠 a、b）。"""
+    r, st, detail, ev = run(tmp_path, [pkg("linux-image-6.1.84-8-x", "6.1.84-8", "?arch=arm64&distro=debian&upstream=mycorp-linux")])
+    assert st == "GAP" and "mycorp-linux" in detail
+    (tmp_path / "r").mkdir()
+    r, st, detail, ev = run(tmp_path / "r", [pkg("linux-image-6.1.84-8-x", "6.1.84-8", "?arch=arm64&distro=raspbian-12&upstream=mycorp-linux")])
+    assert st == "OK"                                                     # 已知的盲點（文件寫明）
+
+
 # ---------- 規則 b：廠商後綴 ----------
 
 @pytest.mark.parametrize("ver", ["6.18.50-1+rpt1", "6.12.25+rpt-rpi-v8", "1:6.6.51-1+rpt3", "6.12.25-1+RPT2", "6.1.0-1+rpi1", "6.12.25+Rpt"])

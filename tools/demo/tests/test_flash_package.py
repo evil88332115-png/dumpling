@@ -471,9 +471,9 @@ def test_script_rescan_own_software_branches(tmp_path):
     os.remove(prev / "rootfs_no_gui" / "own-software" / "own-software.json")
     _, o3, st, _ = own_run(tmp_path, OWN_CFG, *rs, out="r3")
     assert "B-own-software-rootfs_no_gui\tGAP\t上一次沒有" in st, st
-    # 4) 設定沒有 sbom.own_software
+    # 4) 設定沒有 sbom.own_software：沒給 --archive 也照樣寫宣告的結果（沒宣告 → GAP），不悄悄消失
     _, o4, st, _ = own_run(tmp_path, {k: v for k, v in OWN_CFG.items() if k != "sbom"}, *rs, out="r4")
-    assert "B-own-software" not in st and "B-rescan-rootfs_no_gui\tOK" in st, st
+    assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t沒有宣告自有軟體", st, re.M) and "B-rescan-rootfs_no_gui\tOK" in st, st
 
 
 def ownsw_function(tmp_path, fake):

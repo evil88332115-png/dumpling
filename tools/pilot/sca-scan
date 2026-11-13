@@ -189,6 +189,9 @@ kernel_layer_args(){
   if [ "$KOTHER_CLI" = 1 ] || [ -n "$KOTHER" ]; then
     [[ "$KOTHER" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] \
       || { echo "報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：${KOTHER:0:120}" >&2; exit 64; }
+    # 指向這份報告自己（例如 -bsp 層也給了 <專案>-bsp）：SBOM 偵測不到核心時會把這份報告該做的核心判定（含 CNA 退回）壓掉 → 拒絕
+    [ -z "${NAME:-}" ] || [ "$KOTHER" != "$NAME" ] \
+      || { echo "--kernel-in-other-report（SCA_KERNEL_IN_OTHER_REPORT）指向這份報告自己（--name $NAME）：核心要在這份報告判定，不要給" >&2; exit 64; }
   fi
   if [ "$KNOTDISTRO_CLI" = 1 ]; then [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-not-distro 只用於 --image 或 --sbom" >&2; exit 64; }
   elif [[ "$MODE" =~ ^(image|sbom)$ ]]; then KNOTDISTRO=${SCA_KERNEL_NOT_DISTRO:-}; fi
