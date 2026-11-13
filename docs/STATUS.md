@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:20 +0800（C0）
+最後更新：2026-11-13 23:21 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -148,7 +148,9 @@
 > - 驗證（新代理）：複驗 wp3/fw-advisory d8a20ec，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv3/`，狀態：**完成：驗證不通過**
 >   - 前一輪 3 項都修好了；oracle 差分 2417＋21 萬個案例 0 差異；四個樣本逐行核對過
 >   - 應修是 2 處 AMD 文字：DT 報告的標籤寫成「Intel 微碼與 ME」；amd 是 None 時 CI 欄寫「已解析 0 份」
->   - 已交回寫程式代理（第四輪：先併 main cc7d101，再修上面 2 項和建議），**進行中**
+>   - 寫程式代理第四輪：**完成 7ebeacc**（併入 main 時 7dbdc86 沒有衝突；2 處 AMD 文字已修；CI 欄抽成 firmware_advisory_cell.py；family 矛盾不推定；加了 .gitattributes；638＋177 passed；四個樣本 OK）。diff 由 C2 看過
+>   - CI tests 43451689061、firmware 43451693975
+>   - **待 C0 決定**：(a) CI 綠就開 PR，由 C0 的驗證一起看這輪（C2 建議）；(b) 再派一次預驗
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
