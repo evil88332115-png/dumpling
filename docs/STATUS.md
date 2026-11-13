@@ -2,17 +2,17 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:19 +0800（C3）
+最後更新：2026-11-13 23:20 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：**M2 已合併（#40，cc7d101）**；正式 tag 等使用者（C1 推 tag 被權限擋，C0 不代推）；文件批次 PR #41 已開、驗證代理在跑
-- 分支／PR／commit：main cc7d101。已合併：**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（**PR #41 已開**，已併 main；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-052＋HANDOFF「在第二台電腦（WSL2）接手」一節（#41 合併前新對話請從這個分支讀 DECISIONS／HANDOFF）
-- 代理：1 個驗證代理（Sonnet 5.5）：驗文件批次 PR #41，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-docs/report.md`。M2 的獨立驗證已完成（通過，應修 0、建議 8，已貼 #40）
+- 目前在做：M2（#40）與文件批次（#41）已合併；驗證 C1 的 [WP1] 小 PR #42；正式 tag 等使用者
+- 分支／PR／commit：main ec5b786。已合併：**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批從 main 開 `wp0/docs-batch-5`（還沒開）
+- 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 PR #42（head a475ec1，不讀 PR 說明與留言），worktree `$AGENT_TMP/dumpling-wt-c0-verify-f42`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-f42/report.md`
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：M2 #40 已合併。**推正式 tag 被 C1 的權限擋下，等使用者**（自己推，或放行 C1；C0 不代推）。tag 後 C1 用本機草稿附件核對正式 Release 再刪 wp1/m2-pr-draft。wp1/m2-followup（[WP1] 小 PR：C1 建議 1、2、5＋C0 驗證建議 1 pipeline_result 區分「不適用／未執行」）進行中
+  - C1（第二台）：M2 #40 已合併。**推正式 tag 被 C1 的權限擋下，等使用者**（自己推，或放行 C1；C0 不代推）。tag 後 C1 用本機草稿附件核對正式 Release 再刪 wp1/m2-pr-draft。**PR #42**（wp1/m2-followup a475ec1：C1 建議 1、2、5＋C0 驗證建議 1）已開；C1 的驗證代理與 C0 的獨立驗證代理都在跑
   - C2（第二台）：wp3/cse-layout-size dc7589a（CSE layout Size 0x60，公開樣本 Dasharo NovaCustom NUC BOX ARL v0.9.2，ME 18.1.18.2724）預驗中，C0 用私有檔本機複核中。wp3/fw-advisory 複驗不通過 3 項、修正中；D-051 補上限 30（a3cf183）。supplier-normalize 等 M2
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：三平台差異核對完成、標準答案定案（403fae7；rpi 90、rock 99、ai-nas 76 項，最後一輪 run rpi 43419144284、rock 43413770363、ai-nas 43416974360，併入 61d7c6f）；驗證代理只拿原始資料。#27 已由 C0 決定（D-049：lgpio 維持 os）。下一步：M2 合併後併 main 重跑，核對 rock／rpi 的 -os 項目（852b6d3 影響），再開 M6 PR
