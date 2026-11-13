@@ -742,7 +742,7 @@ def stage_anomaly_notes(an):
     out = []
     dups = sorted((an or {}).get("duplicates", {}).items())
     if dups:
-        out.append("status.tsv 有重複列：%s（同一階段多列時 report 只採最嚴重的一列；scan-status-check.py 是後值蓋前值，兩邊可能不一致）" % "、".join(
+        out.append("status.tsv 有重複列：%s（同一階段多列時 report 只採最嚴重的一列；`scan-status-check.py` 是後值蓋前值，兩邊可能不一致）" % "、".join(
             "階段 %s %d 列" % (_cell(k, 60), n) for k, n in dups[:20]) + ("…另 %d 個階段" % (len(dups) - 20) if len(dups) > 20 else ""))
     if (an or {}).get("empty_rows"):
         out.append("status.tsv 有 %d 列的階段名稱是空的或只有空白（當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))

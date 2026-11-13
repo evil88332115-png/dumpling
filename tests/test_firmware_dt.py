@@ -1067,7 +1067,7 @@ class HardeningTests(ReportBase):
         st, out, _ = self.case(rows=self.GOOD + [("X-new", "OK", "a"), ("X-new", "OK", "b"), ("X-new", "OK", "c"), ("C-grype", "OK", "again")])
         self.assertIn("階段 C-grype 2 列", out.replace("\\", ""))
         self.assertIn("階段 X-new 3 列", out.replace("\\", ""))
-        self.assertIn("scan-status-check.py 是後值蓋前值", out)
+        self.assertIn("`scan-status-check.py` 是後值蓋前值", out)
         # 重複列的階段名稱是不可信文字：經 md_safe（@ 與實體不能原樣進報告）
         st, out, _ = self.case(rows=self.GOOD + [("X @evil&#64;u", "OK", "a"), ("X @evil&#64;u", "OK", "b")])
         self.assertEqual(st, "ATTENTION")
@@ -1206,6 +1206,30 @@ class HardeningTests(ReportBase):
         self.assertEqual(st, "ATTENTION", out)
         self.assertIn("status.tsv 有 1 列的階段名稱是空的或只有空白", out)
         self.assertEqual(self.status(rows=self.GOOD + [(" ", "FAIL", "x")]), "FAIL")
+
+    def test_whole_report_fixed_text_renders_without_emphasis_or_links(self):
+        """報告裡所有固定文字（不經 md_safe 的說明）用 CommonMark 渲染：不能出現斜體、連結、圖片（需要 markdown-it-py，沒有就略過）。
+        粗體只有「怎麼讀」那一行是故意的。"""
+        try:
+            from markdown_it import MarkdownIt
+        except ImportError:
+            self.skipTest("沒有 markdown-it-py")
+        nm = fd._norm_mod()
+        self.addCleanup(setattr, nm, "MAX_CHANGES", nm.MAX_CHANGES)
+        nm.MAX_CHANGES = 3
+        d = bom(clean(), comp("g", "r2", purl="pkg:generic/g@1"), comp("nov", "r3", version=None))
+        d["metadata"]["properties"] = [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(6)]
+        d["platform"] = "x"
+        info, o = self.prep(d, slug="allfixed", out="p-allfixed", kind="sbom")
+        rows = self.GOOD + [("C-sbomgate", "NOT_ASSESSED", "x"), ("C-grype", "OK", "again"), ("", "OK", "e")]
+        dt = self.dt_sample(info, rows, self.SUMM, {"matches": [1]}, root="dt-allfixed")
+        rc, out, md = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        for want in ("status.tsv 有重複列", "只有空白", "沒有 purl", "供應商 SBOM 自帶名稱以 dumpling: 開頭的 property", "已正規化"):
+            self.assertIn(want, md)
+        html = MarkdownIt("gfm-like").render(md)                 # 預設開 fuzzy link：比 GitHub 更嚴（`scan-status-check.py` 之類的檔名也會被連結）
+        self.assertEqual(re.findall(r"<(?:em|a|img|script)[ >]", html), [])
+        self.assertEqual(html.count("<strong>"), 1)
 
     def test_duplicate_stage_rows_severity_order_all_pairs(self):
         order = ["OK", "ATTENTION", "NOT_ASSESSED", "NOT_RUN", "GAP", "FAIL"]       # 輕 → 重（測試自己寫死，不讀 fd._SEV）
