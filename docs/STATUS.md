@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:37 +0800（C1）
+最後更新：2026-11-13 23:39 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -151,7 +151,7 @@
 >   - 應修是 2 處 AMD 文字：DT 報告的標籤寫成「Intel 微碼與 ME」；amd 是 None 時 CI 欄寫「已解析 0 份」
 >   - 寫程式代理第四輪：**完成 7ebeacc**（併入 main 時 7dbdc86 沒有衝突；2 處 AMD 文字已修；CI 欄抽成 firmware_advisory_cell.py；family 矛盾不推定；加了 .gitattributes；638＋177 passed；四個樣本 OK）。diff 由 C2 看過
 >   - CI tests 43451689061、firmware 43451693975
->   - **待 C0 決定**：(a) CI 綠就開 PR，由 C0 的驗證一起看這輪（C2 建議）；(b) 再派一次預驗
+>   - **C0 選 (a)**：CI 綠就開 PR；說明寫明複驗做到 d8a20ec、7ebeacc 是作者自己看的 diff、family 矛盾不推定。PR 說明在 `$AGENT_TMP/dumpling-tmp-c2/pr-body-adv.md`
 >   - C0 已把上限補進 D-051（a3cf183）：major 11～30 才推定 CSME；cpe-basis 用列舉值 listed／inferred
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
@@ -175,7 +175,9 @@
 >   - test_intel_cse_layout 共 132 個；7 個樣本逐位元相同
 >   - 授權改指 release notes 頁，沒有出處的授權名稱拿掉了；V540TU 的 license 還沒核對
 > - C2 併入 main cc7d101 → **40bdd2f**（沒有衝突，581 passed）；CI tests 43449879817、firmware 43449885845
-> - 驗證（新代理）：預驗 wp3/cse-layout-size 40bdd2f（D-053），暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse2/`，狀態：**進行中**。通過後，新的 HEAD 給 C0 用私有檔複核，再開 PR
+> - 驗證（新代理）：預驗 wp3/cse-layout-size 40bdd2f（D-053），狀態：**完成：驗證通過**，沒有應修（差分 fuzz 12,000 次 0 不同；7 個樣本逐位元相同）
+> - **C0 私有檔複核 40bdd2f：通過**（3 份都 found；表尾非 0 的兩份有 ATTENTION 和原始值）
+> - 寫程式（cse 代理第三輪）：收尾，**只動測試和文件**（補測試、拿掉歷史口吻、V540TU license 改指 release notes 頁、notes 補 FTPR 先命中的情況），**進行中** → 附上 diff --stat 後開 PR
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
@@ -229,7 +231,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
    - **先通知 C0（sca-center 端要用私有檔在本機驗證）**，再開一個 PR，標題「[WP3] 擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，PR 說明照公開資料規定寫
    - 驗證由 C0 派，C0 合併
 1b. **CSE layout Size 0x60 的支援**（**進行中**，見上方代理）：標準答案用公開可下載的新世代 BIOS 更新檔，要確認 Size 是 0x60、CRC 相符、RBEP 和 NFTP 一致；找不到公開樣本就用合成測試，並在 notes 寫明「沒有公開真樣本核對」。順便評估更大的 Size 值。repo 裡只寫技術理由，不索取私有檔
-2. **supplier-normalize**（**M2 已合併**。C2 已併入 main cc7d101 → **1322c67**：C2 沒改過的檔案一律取 main 的版本，只有 PROVENANCE 和 run.d 是手動合併；755 passed；CI tests 43449745772、firmware 43449751297。下一步是預驗 → 開 PR）：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
+2. **supplier-normalize**（**M2 已合併**。C2 已併入 main cc7d101 → **1322c67**：C2 沒改過的檔案一律取 main 的版本，只有 PROVENANCE 和 run.d 是手動合併；755 passed；CI tests 43449745772、firmware 43449751297。**預驗進行中**（暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-norm/`）→ 開 PR）：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
 3. **D-043**（排在 D-042 之後）：韌體 SBOM 的公告比對，只用公開資料。順序是 (1) → (2)，每段完成通知 C0
    - (1) 自動比對：
      - NVIDIA vBIOS：用每日鏡像的 NVIDIA product-security CSAF 填 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED
