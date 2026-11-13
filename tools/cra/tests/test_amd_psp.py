@@ -1111,3 +1111,266 @@ def test_agesa_decompressed_raw_fallback_content_does_not_cover_an_unsearched_co
     put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, M(1))), k=0), ffs(0x07, secs(sec(0x10, M(2))), k=1)]))
     ag = run(img)["agesa"]
     assert ag["complete"] is False and any("distinct UEFI contents with AGESA markers" in p for p in ag["problems"])
+
+
+# ---------- D-047：競爭的讀法依自己的結構檢查採用或不採用；AGESA 涵蓋不讀 uefi_image 的內部變數 ----------
+
+def readings_image(a_ents, b_ents, bad_a=False, bad_b=False, blobs=True, extra=None):
+    """EFS 在 0x21000（視窗開頭 0x1000），new_psp 指標 0x30000：檔案偏移讀法（基底 0）是 0x30000 的目錄 A，視窗讀法（基底 0x1000）是 0x31000 的目錄 B。
+    條目位址用 mode 1（相對視窗開頭）：同一個原值在 A 讀到 +0，在 B 讀到 +0x1000。blob：0x50000 版本 1、0x51000 版本 2。第二種 cookie 讓 x86_firmware 認得這是 AMD 平台。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    if blobs:
+        put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+        put(img, 0x51000, psp_blob(1, (2, 2, 2, 2), 0x300))
+    put(img, 0x30000, directory(b"$PSP", a_ents, info=1 << 29, bad_checksum=bad_a))
+    put(img, 0x31000, directory(b"$PSP", b_ents, info=1 << 29, bad_checksum=bad_b))
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    for fn in (extra or ()):
+        fn(img)
+    efs(img, new_psp=0x30000, at=0x21000)
+    return img
+
+
+def one(addr, typ=1):
+    return psp_ent(typ, size=0x300, addr=addr, mode=1)
+
+
+def status_of_dirs(r):
+    return {d["offset"]: d["status"] for d in r["directories"]}
+
+
+def test_reading_with_a_bad_checksum_is_rejected_and_the_other_one_is_used(tmp_path):
+    img = readings_image([one(0x50000)], [one(0x50000)], bad_a=True)
+    r = run(img)
+    assert status_of_dirs(r) == {0x30000: "rejected", 0x31000: "adopted"}
+    a = next(d for d in r["directories"] if d["offset"] == 0x30000)
+    assert a["rejected"] is True and a["ambiguous"] is False and any("does not match the computed" in x for x in a["rejected_because"])
+    assert a["used_instead"] == ["PSP directory L1 @0x31000 (window base 0x1000)"]
+    assert [p["version"] for p in r["psp_firmware"]] == ["02.02.02.02"]                       # 視窗讀法（B）讀到 0x51000 的版本 2
+    assert r["ambiguous"]["psp_firmware"] == []                                              # 不採用的那一邊只列在目錄清單，不進任何版本清單
+    assert "reading-rejected" in codes(r) and "pointer-ambiguous" not in codes(r) and "dir-ambiguous" not in codes(r)
+    assert any("checksum" in p["text"] and "is not used" in p["text"] and "0x31000" in p["text"] for p in r["problems"] if p["code"] == "reading-rejected")
+    assert any(g.startswith("AMD: directory readings not used") for g in r["gaps"]) and any("directory readings not used" in x for x in r["attention"])    # 報告不是乾淨的
+    md = "\n".join(ap.markdown_lines(r, str))
+    assert "未採用" in md and "02.02.02.02" in md and "01.01.01.01" not in md
+    p = tmp_path / "rej.bin"
+    p.write_bytes(bytes(img))
+    inv = xf.inventory([p])
+    st, _ = xf.status_of(inv)
+    comps, _ = xf.components(inv)
+    assert st == "ATTENTION"
+    assert [c["version"] for c in comps if c["name"].startswith("AMD PSP firmware")] == ["02.02.02.02"]
+
+
+def test_reading_with_an_entry_outside_the_image_is_rejected():
+    far = psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)
+    r = run(readings_image([far], [one(0x50000)]))
+    assert status_of_dirs(r) == {0x30000: "rejected", 0x31000: "adopted"}
+    a = next(d for d in r["directories"] if d["offset"] == 0x30000)
+    assert a["checksum_ok"] is True and any("extends past the end of the file" in x for x in a["rejected_because"])
+    assert [p["version"] for p in r["psp_firmware"]] == ["02.02.02.02"] and "reading-rejected" in codes(r)
+    # 反過來：視窗那一邊超出、檔案偏移那一邊在範圍內
+    r = run(readings_image([one(0x50000)], [far]))
+    assert status_of_dirs(r) == {0x30000: "adopted", 0x31000: "rejected"}
+    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"]
+
+
+def test_both_readings_pass_with_different_contents_stays_a_gap():
+    r = run(readings_image([one(0x50000)], [one(0x50000)]))
+    assert status_of_dirs(r) == {0x30000: "ambiguous", 0x31000: "ambiguous"}
+    assert r["psp_firmware"] == [] and sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["01.01.01.01", "02.02.02.02"]
+    assert "pointer-ambiguous" in codes(r) and "reading-rejected" not in codes(r)
+    assert any("their contents differ" in p["text"] for p in r["problems"] if p["code"] == "pointer-ambiguous")
+
+
+def test_both_readings_fail_stays_a_gap():
+    r = run(readings_image([one(0x50000)], [one(0x50000)], bad_a=True, bad_b=True))
+    assert status_of_dirs(r) == {0x30000: "ambiguous", 0x31000: "ambiguous"}
+    assert r["psp_firmware"] == [] and "pointer-ambiguous" in codes(r) and "reading-rejected" not in codes(r)
+    assert any("none of the readings passes" in p["text"] for p in r["problems"] if p["code"] == "pointer-ambiguous")
+    # 一邊壞 checksum、另一邊條目超出範圍：兩邊都沒通過，不選邊
+    r = run(readings_image([psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)], [one(0x50000)], bad_b=True))
+    assert status_of_dirs(r) == {0x30000: "ambiguous", 0x31000: "ambiguous"} and r["psp_firmware"] == []
+
+
+def test_both_readings_pass_with_identical_contents_are_both_used():
+    # B（基底 0x1000）的 0x4F000 讀到 0x50000：和 A 的條目指到同一份 blob，兩邊的解讀結果完全相同
+    r = run(readings_image([one(0x50000)], [one(0x4F000)]))
+    assert status_of_dirs(r) == {0x30000: "adopted", 0x31000: "adopted"}
+    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"] and len(r["psp_firmware"][0]["locations"]) == 2
+    assert "reading-equivalent" in codes(r) and "pointer-ambiguous" not in codes(r) and "reading-rejected" not in codes(r)
+    # 指到的是內容相同但位置不同的兩份 blob：雜湊相同 → 也算相同；內容不同 → 不算
+    img = readings_image([one(0x50000)], [one(0x50000)], extra=[lambda i: put(i, 0x51000, psp_blob(1, (1, 1, 1, 1), 0x300))])
+    assert status_of_dirs(run(img)) == {0x30000: "adopted", 0x31000: "adopted"}
+    img = readings_image([one(0x50000)], [one(0x50000)], extra=[lambda i: put(i, 0x51000, psp_blob(1, (1, 1, 1, 1), 0x300, fill=0xBB))])
+    assert status_of_dirs(run(img)) == {0x30000: "ambiguous", 0x31000: "ambiguous"}          # 版本欄位相同、內容不同
+
+
+def l2_subtree_extra(img):
+    """A（基底 0）的 0x40 條目 → 0x34000 的 L2（它的條目 → 0x60000 的版本 3）；B（基底 0x1000）的 0x40 → 0x35000 的 L2（條目 → 0x61000 的版本 4）。"""
+    put(img, 0x60000, psp_blob(8, (3, 3, 3, 3), 0x300))
+    put(img, 0x61000, psp_blob(8, (4, 4, 4, 4), 0x300))
+    put(img, 0x34000, directory(b"$PL2", [psp_ent(8, size=0x300, addr=0x60000, mode=1)], info=1 << 29))
+    put(img, 0x35000, directory(b"$PL2", [psp_ent(8, size=0x300, addr=0x60000, mode=1)], info=1 << 29))
+
+
+def test_subdirectory_of_a_rejected_reading_is_not_used_and_the_adopted_ones_is():
+    ents_a, ents_b = [one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)], [one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)]
+    img = readings_image(ents_a, ents_b, bad_a=True, extra=[l2_subtree_extra, lambda i: put(i, 0x62000, b"")])
+    r = run(img)
+    k = {(d["offset"], d["base"]): d for d in r["directories"]}
+    assert k[(0x30000, 0)]["status"] == "rejected" and k[(0x31000, 0x1000)]["status"] == "adopted"
+    assert k[(0x34000, 0)]["status"] == "rejected" and k[(0x35000, 0x1000)]["status"] == "adopted"        # 子目錄沿用各自讀法的基底
+    assert k[(0x34000, 0)]["rejected_because"] == ["reached only through readings that are not used"]
+    versions = sorted(p["version"] for p in r["psp_firmware"])
+    assert versions == ["02.02.02.02", "04.04.04.04"]                                                   # 版本 3（被拒絕讀法的子目錄）不在任何清單
+    assert "03.03.03.03" not in str(r["ambiguous"]) and "03.03.03.03" not in str(r["psp_firmware"])
+    assert sum(1 for p in r["problems"] if p["code"] == "reading-rejected") == 2
+
+
+def test_subdirectory_of_contested_readings_is_ambiguous_not_rejected():
+    ents = [one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)]
+    r = run(readings_image(ents, ents, extra=[l2_subtree_extra]))
+    k = {(d["offset"], d["base"]): d["status"] for d in r["directories"]}
+    assert k == {(0x30000, 0): "ambiguous", (0x31000, 0x1000): "ambiguous", (0x34000, 0): "ambiguous", (0x35000, 0x1000): "ambiguous"}
+    assert r["psp_firmware"] == []
+
+
+def test_same_offset_with_two_bases_adopts_the_one_that_passes():
+    """兩個 EFS（基底 0 與 0x1000）各自指到 0x30000（基底 0 的 0x30000、基底 0x1000 的 0x2F000）：同一個位置兩種基底。同一個原值在視窗基底 0x1000 的讀法超出檔案。"""
+    def build():
+        img = bytearray(b"\xff" * (SIZE + 0x1000))
+        put(img, 0xFFE00, psp_blob(1, (5, 5, 5, 5), 0x300))
+        put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0xFFE00, mode=1)], info=1 << 29))
+        put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+        efs(img, new_psp=0x30000)
+        efs(img, new_psp=0x2F000, at=0x21000)
+        return img
+    r = run(build())
+    k = {(d["offset"], d["base"]): d for d in r["directories"]}
+    assert sorted(k) == [(0x30000, 0), (0x30000, 0x1000)]
+    assert k[(0x30000, 0)]["status"] == "adopted" and k[(0x30000, 0x1000)]["status"] == "rejected"
+    assert k[(0x30000, 0x1000)]["other_bases"] == ["0x0"] and any("extends past the end of the file" in x for x in k[(0x30000, 0x1000)]["rejected_because"])
+    assert [p["version"] for p in r["psp_firmware"]] == ["05.05.05.05"] and "reading-rejected" in codes(r) and "dir-ambiguous" not in codes(r)
+
+
+def test_slot_header_checksum_and_combo_children_are_part_of_the_checks():
+    # A/B 復原：基底 0 的讀法把 slot header 位址讀錯 → checksum 不符 → 不採用；基底 0x1000 的讀法 checksum 相符
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x54000, directory(b"$PL2", []))
+    put(img, 0x53000, ish_bytes(0x53000))          # pl2_location 0x53000 + 基底 0x1000 → 0x54000
+    put(img, 0x52000, b"\x11" * 0x20)                  # 基底 0 的讀法讀到這裡：不是 slot header（checksum 不符）
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(0x48, size=0, addr=0x52000, mode=1)], info=1 << 29))        # 基底 0：0x52000（空白）→ checksum 不符
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(0x48, size=0, addr=0x52000, mode=1)], info=1 << 29))        # 基底 0x1000：0x53000 → slot header
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, new_psp=0x30000, at=0x21000)
+    r = run(img)
+    st = status_of_dirs(r)
+    assert st[0x30000] == "rejected" and st[0x31000] == "adopted"
+    assert any("slot header checksum" in x for d in r["directories"] if d["offset"] == 0x30000 for x in d["rejected_because"])
+    # combo：基底 0 的讀法裡有項目沒指到目錄 → 不採用
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x40000, directory(b"$PSP", []))
+    put(img, 0x70000, combo(b"2PSP", [(0xBC0A0000, 0x40000 - 0x1000)]))                # 基底 0x1000：0x40000；基底 0：0x3F000（沒有目錄）
+    put(img, 0x71000, combo(b"2PSP", [(0xBC0A0000, 0x40000 - 0x1000)]))
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, new_psp=0x70000, at=0x21000)
+    r = run(img)
+    k = {(d["kind"], d["offset"], d["base"]): d["status"] for d in r["directories"]}
+    assert k[("combo-psp", 0x70000, 0)] == "rejected" and k[("combo-psp", 0x71000, 0x1000)] == "adopted"
+    assert k[("psp", 0x40000, 0x1000)] == "adopted"
+
+
+def test_directory_table_inside_its_own_entry_fails_the_check():
+    # 條目 1 的範圍包住目錄表本身：這種讀法不成立（條目是韌體內容，不會包著自己的目錄表）
+    img = readings_image([psp_ent(1, size=0x20000, addr=0x2F000, mode=1)], [one(0x50000)])
+    r = run(img)
+    a = next(d for d in r["directories"] if d["offset"] == 0x30000)
+    assert a["status"] == "rejected" and any("lies inside the range" in x for x in a["rejected_because"])
+
+
+def test_readings_outcome_does_not_depend_on_pointer_or_efs_order(monkeypatch):
+    sub = [one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)]
+    images = [readings_image([one(0x50000)], [one(0x50000)], bad_a=True), readings_image([psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)], [one(0x50000)]),
+              readings_image([one(0x50000)], [one(0x50000)]), readings_image([one(0x50000)], [one(0x50000)], bad_a=True, bad_b=True),
+              readings_image([one(0x50000)], [one(0x4F000)]), readings_image(sub, sub, bad_a=True, extra=[l2_subtree_extra]), readings_image(sub, sub, extra=[l2_subtree_extra]),
+              same_offset_two_bases_image(), two_readings_image()]
+    before = [norm(run(i)) for i in images]
+    monkeypatch.setattr(ap, "EFS_POINTERS", tuple(reversed(ap.EFS_POINTERS)))
+    real = ap.find_efs
+    monkeypatch.setattr(ap, "find_efs", lambda ctx: list(reversed(real(ctx))))
+    assert [norm(run(i)) for i in images] == before
+    kinds = {d[3:5] for b in before for d in b[0]}
+    assert (False, True) in kinds and (True, False) in kinds and (False, False) in kinds          # 三種結果都出現過（不是比較兩份空的）
+
+
+# ---------- AGESA：不讀 uefi_image 呼叫端的內部變數；涵蓋只靠公開介面能證明的 ----------
+
+def test_agesa_search_does_not_read_the_callers_frames_or_internals():
+    import re
+    src = Path(ap.__file__).read_text(encoding="utf-8")
+    assert not re.search(r"_getframe|f_locals|f_back|\bimport inspect\b|\binspect\.|co_name", src)
+    assert not hasattr(ap, "raw_origin")
+
+
+def test_agesa_marker_inside_walked_raw_content_and_the_raw_bytes_is_complete():
+    import lzma
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 300
+    other = b"AGESA!V9\x00ComboAM4v2PI 1.1.1.1\x00" + b"\x00" * 300
+    raw = ffs(0x07, secs(sec(0x10, M)), k=0)
+    comp = ffs(0x07, secs(guided(LZMA, lzma.compress(secs(sec(0x10, other)), format=lzma.FORMAT_ALONE))), k=1)
+    for files in ([raw], [raw, comp]):            # 原始內容在前面：搜尋它時還沒有解開任何 LZMA 層 → 一定是原始切片
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x80000, fv(files))
+        ag = run(img)["agesa"]
+        assert ag["complete"] is True and not any("could not be shown" in p for p in ag["problems"]), len(files)
+    # 壓縮的在前面：搜尋 M 時已經有一個 LZMA 層（大小不小於 M），算不出這次搜尋不是解壓縮來的 → 保守地不完整，並列出原始位元組裡的那個標記
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([comp, raw]))
+    ag = run(img)["agesa"]
+    assert [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 1.1.1.1", "ComboAM4v2PI 9.9.9.9"]
+    assert ag["complete"] is False and any(f["where"] == "image (raw bytes)" for x in ag["values"] for f in x["found"])
+
+
+def test_agesa_decompressed_content_equal_to_an_unwalked_raw_copy_never_counts_as_coverage():
+    import lzma
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 300
+    comp = ffs(0x07, secs(guided(LZMA, lzma.compress(secs(sec(0x10, M)), format=lzma.FORMAT_ALONE))), k=1)
+    ui = ffs(0x07, secs(sec(0x15, M)), k=2)       # 同樣的位元組在 UI section 裡：走訪不搜尋
+    ui2 = ffs(0x07, secs(sec(0x15, M)), k=3)
+    for files in ([ui, comp], [comp, ui], [ui, comp, ui2], [comp, ui, ui2]):
+        img = bytearray(b"\xff" * SIZE)
+        put(img, 0x80000, fv(files))
+        ag = run(img)["agesa"]
+        assert ag["complete"] is False and any("could not be shown to have been searched" in p for p in ag["problems"]), [hex(len(f)) for f in files]
+        assert any(f["where"] == "image (raw bytes)" for x in ag["values"] for f in x["found"])
+
+
+def test_agesa_coverage_needs_layer_information_from_the_scan(monkeypatch):
+    """Scan.layers 讀不到（沒有這個欄位）時不知道有沒有解壓縮 → 搜尋到的內容不拿來證明涵蓋；layers 是空的 → 切片一定是原始位元組；layers 有大層 → 算不出 → 不涵蓋。"""
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 300
+
+    class FakeScan:
+        fvs, files, parse_errors, notes, undecoded = 1, 1, 0, [], []
+
+    class FakeUi:
+        Scan = FakeScan
+
+        class Stop(Exception):
+            pass
+
+        @staticmethod
+        def parse_fvs(data, sc, depth):
+            sc.scan_bytes(bytes(data[0x1000:0x1000 + len(M)]))
+    monkeypatch.setattr(ap, "_sibling", lambda name: FakeUi)
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x1000, M)
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and ag["values"][0]["found"][-1]["where"] == "image (raw bytes)" and any("could not be shown" in p for p in ag["problems"])
+    FakeScan.layers = []                          # 沒有解開任何層：這塊內容一定是原始位元組的切片 → 涵蓋
+    ag = run(img)["agesa"]
+    assert ag["complete"] is True and not any("could not be shown" in p for p in ag["problems"])
+    FakeScan.layers = [{"size": 1 << 20}]         # 已經有一個很大的解壓縮層：這次搜尋可能是解壓縮來的 → 不涵蓋
+    assert run(img)["agesa"]["complete"] is False
+    FakeScan.layers = [{"size": "x"}]             # 欄位不合理 → 當成沒有資訊
+    assert run(img)["agesa"]["complete"] is False

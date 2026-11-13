@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """AMD 平台 BIOS 映像的 PSP／BIOS 目錄、微碼與 AGESA 版本：只讀解析（x86_firmware.py 辨識出 AMD 平台時呼叫 analyze()）。
 
-只依賴標準函式庫與同目錄的 uefi_image.py（C1；找 AGESA 字串時用它解開 firmware volume）。輸入是不可信資料：只讀、不執行、不寫磁碟；
+只依賴標準函式庫與同目錄的 uefi_image.py（C1；找 AGESA 字串時用它解開 firmware volume），而且只用它的公開介面：Scan 子類別覆寫 scan_bytes、parse_fvs、Stop、Scan 的結果欄位（fvs、files、layers、undecoded、notes、parse_errors）；不讀它呼叫端的區域變數。
+輸入是不可信資料：只讀、不執行、不寫磁碟；
 所有欄位先對照檔案範圍與上限（MAX_*）才使用；看不懂的一律記 problem（對外是 GAP），不猜。analyze() 永遠回傳 dict、不丟例外
 （soft 參數列的例外＝超時，也只記為不完整）：單一條目的解析錯誤只影響那個條目（problem `entry-error`），其他階段出錯記在 incomplete，已有的結果照給。
 
@@ -13,8 +14,9 @@
 2. 每個目錄項目：type、subprogram、instance、rom id、位置、大小、旗標。PSP 韌體條目的標頭（0x100 bytes）通過檢查才讀版本；其餘版本欄位記 GAP。
 3. BIOS 目錄 type 0x66 的 AMD 微碼：patch level（patch_id）、日期、equivalence id；微碼前面有 container 的等價表（`DMA\\0`）時才對出 CPUID，
    否則只列 equivalence id（不猜對照）。
-4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外數整個映像原始位元組裡的標記，走訪沒涵蓋到的標記（例如在 UI section、
-   空白區、被刪除的檔案裡）一律讓搜尋標為不完整並列出；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
+4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外找整個映像原始位元組裡的標記；原始位元組裡的每個標記都要能證明走訪搜尋過
+   「同一個位置」才算涵蓋，證明只用 uefi_image 的公開介面（見 agesa_search 的註解與 notes）；證明不了的（例如在 UI section、空白區、被刪除的複本，或和解壓縮出來的內容位元組相同的另一處）
+   一律讓搜尋標為不完整並列出；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
 
 ## 格式出處（只讀公開的格式說明核對欄位，沒有複製程式碼；程式是自己寫的）
 - coreboot `src/vendorcode/amd/psp/psp_efs.h`（EFS 欄位）、`psp_directory.h`（目錄標頭、項目、type 編號、cookie）、`bios_directory.h`
@@ -40,11 +42,18 @@ BIOS 項目 24 bytes：type u8、region_type u8、flags u8（位元 0 reset、1 
 combo 目錄：32 bytes 標頭（cookie、checksum、num_entries、lookup、16 bytes 保留，checksum 涵蓋 +8 起），項目 16 bytes：id_sel u32、id u32、目錄位址 u64。
 位址：address mode 0（實體）或 1（相對視窗開頭）。值在 2^32−W 以上是「映射在 4 GB 頂端的視窗」位置（W＝視窗大小，最大 16 MiB；
   偏移＝值−(2^32−W)，大於 16 MiB 的映像等於遮成 24 bits），其餘是視窗內偏移；視窗＝EFS 所在的 16 MiB 區塊。
-  mode 2＝相對目錄開頭；mode 3（相對 slot）slot 起點未知 → 不解。指向目錄的指標一定用 cookie 驗證。EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）
-  或「整個檔案的偏移」兩種解讀。**兩種解讀都在目標位置看到目錄 cookie 時不判斷哪一個才是硬體實際使用的**：兩邊都解析、都列出（各自的 checksum、項目、版本），
-  記 pointer-ambiguous（ATTENTION）；只經由這種指標（以及它們底下的子目錄）才到得了的目錄標成 ambiguous，它們的條目、版本、微碼只列在 inventory
-  （amd.ambiguous 與各目錄的 ambiguous／readings 欄位），不進 SBOM。也從別的、沒有歧義的指標到得了的目錄不算歧義。
-  目錄裡的位址（L2 指標、slot header、條目）一律用該目錄自己的基底；combo 項目和 EFS 一樣試兩種基底。
+  mode 2＝相對目錄開頭；mode 3（相對 slot）slot 起點未知 → 不解。指向目錄的指標一定用 cookie 驗證。目錄裡的位址（L2 指標、slot header、條目）一律用該目錄自己的基底。
+
+## 競爭的讀法（resolve_readings）
+EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0）；combo 項目也一樣。兩種讀法都在目標位置看到目錄 cookie，或同一個位置被不同的基底讀到，
+就有一組互相競爭的讀法：兩邊都解析、都列在 inventory。每一組依「各自的結構檢查」決定（reading_fail，保守：只收讀錯基底時才會出現的結構性證據）：
+  通過＝目錄表讀得進來且 checksum 相符、沒有任何條目的位址解不出來（超出檔案、mode 不支援、size 超過上限、指標條目沒指到目錄）、A/B 復原的 slot header checksum 相符且 pl2_location 指到目錄、
+  combo 的每個有位址的項目都指到目錄、目錄表本身不落在自己某個條目的範圍裡。不看版本欄位這類內容的判斷。
+  恰好一種通過 → 採用它，沒通過的標「未採用」（rejected，附證據，記 reading-rejected，ATTENTION）；兩種以上通過而且解讀結果完全相同（條目逐項相同、指到的內容雜湊相同、子目錄位置相同）
+  → 都採用（記 reading-equivalent）；通過的兩種以上但內容不同、或都沒通過 → 維持歧義（ambiguous，GAP：pointer-ambiguous／dir-ambiguous），條目只列在 inventory、不進 SBOM。
+  指標的那一組只作用在那一個指標的邊（同一個目錄若也從別的單一讀法的指標到得了，仍然確定）；同一個位置不同基底的那一組作用在紀錄本身。
+  確定的目錄＝從 EFS 出發只走通過的邊到得了的；被採用讀法的子目錄沿用它的基底、確定；被拒絕讀法底下只能經由它到得了的子目錄跟著不採用，經由歧義的讀法才到得了的子目錄是歧義。
+  結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關。
 
 ## 上限與放大控制（見 MAX_*）
 視窗內 EFS 數、目錄數、深度、每個目錄的項目數、全部目錄的項目總數、雜湊總量（同一段 offset＋size 只算一次）、單一項目大小、微碼數、AGESA 標記數與
@@ -938,8 +947,8 @@ def read_agesa(buf, pos):
 
 def agesa_search(data, budget=None, soft=()):
     """AGESA 字串。走訪 firmware volume（uefi_image，LZMA 等解開；FV 以外的非空白位元組它也送進來）逐塊內容找 `AGESA!V` 標記；
-    另外數整個映像原始位元組裡的標記，原始位元組裡有、走訪的內容裡沒看到的（例如在 UI section、空白區、被刪除的檔案裡）
-    也列出來並把搜尋標為不完整。uefi_image 載入不了或走訪失敗時只有原始位元組的結果（不完整）。
+    另外找整個映像原始位元組裡的標記；原始位元組裡的每個標記要能證明「同一個位置」被走訪搜尋過（規則見下面「涵蓋檢查」的註解），證明不了的（例如在 UI section、空白區、
+    被刪除的複本、或和解壓縮出來的內容位元組相同的另一處）也列出來並把搜尋標為不完整。uefi_image 載入不了或走訪失敗時只有原始位元組的結果（不完整）。
     → {"values": [{tag, value, count, found, truncated}], "problems": [文字，已去重], "complete": bool, "stats": {...}}。永遠回傳，不丟例外。"""
     r = {"values": [], "problems": [], "complete": False, "walk": False, "stats": {"markers": 0, "raw_markers": 0, "inspected_bytes": 0, "fvs": 0, "ffs_files": 0}}
     table, st = {}, r["stats"]
@@ -1089,7 +1098,7 @@ def agesa_search(data, budget=None, soft=()):
     #     它不能被算成那一處的涵蓋（post 次被 D 扣掉）；拿不到 Scan.layers 時 post 全部不算。
     #   殘餘限制：假設走訪不會對「同一段原始位元組」用同樣長度搜尋兩次（uefi_image 目前不會）；太短（≤ AGESA_DERIVED_MAX）的內容不換算位置（可能是名稱字串轉出來的）。
     layers = getattr(sc, "layers", None)
-    sizes = [x.get("size") for x in layers] if isinstance(layers, list) else None
+    sizes = [x.get("size") if isinstance(x, dict) else None for x in layers] if isinstance(layers, list) else None
     if sizes is not None and not all(isinstance(z, int) and z >= 0 for z in sizes):
         sizes = None
     covered = set()
@@ -1233,6 +1242,7 @@ def analyze(data, budget=None, soft=()):
     if len(full) > 1:
         amd["attention"].append("more than one AGESA string: " + ", ".join(f"{x['tag']} {x['value']}" for x in full))
     amd["stats"] = {"efs": len(amd["efs"]), "directories": len(ctx.dirs), "entries": ctx.entries_total,
+                    "directories_ambiguous": sum(1 for r in ctx.dirs if r["ambiguous"]), "directories_rejected": sum(1 for r in ctx.dirs if r["rejected"]),
                     "psp_firmware": len(amd["psp_firmware"]), "microcode": len(amd["microcode"]), "agesa_values": len(full),
                     "problems": dict(counts), "hashed_bytes": MAX_HASH_TOTAL - ctx.hash_left}
     return amd
@@ -1255,8 +1265,13 @@ def markdown_lines(amd, e):
         L.append("")
     for r in amd["directories"]:
         flag = "" if r["trusted"] else ("（checksum 不符，條目不採用）" if r["parsed"] else "（沒有解析）")
-        if r["ambiguous"]:
-            flag += "（**歧義**：只經由兩種解讀都成立的指標到得了，" + (f"另一種解讀在 {e(', '.join(r['readings']))}；" if r.get("readings") else f"同一個位置也用視窗開頭 {e(', '.join(r['other_bases']))} 讀過；" if r.get("other_bases") else "它在這樣的目錄底下；") + "工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）"
+        if r["rejected"]:
+            flag += ("（**未採用**：" + e("；".join(r.get("rejected_because", [])[:3])) + (f"；改用 {e('、'.join(r['used_instead']))}" if r.get("used_instead") else "")
+                     + "。條目與版本只列出，不進 SBOM）")
+        elif r["ambiguous"]:
+            flag += ("（**歧義**：" + (f"同一個指標的另一種讀法在 {e(', '.join(r['readings']))}；" if r.get("readings") else f"同一個位置也用視窗開頭 {e(', '.join(r['other_bases']))} 讀過；"
+                                     if r.get("other_bases") else "它在這樣的目錄底下；")
+                     + "兩種以上的讀法都通過結構檢查而內容不同、或都沒通過，工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）")
         L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}` @0x{r['offset']:x}（視窗開頭 0x{r['base']:x}）{flag}", "",
               f"{r['num_entries']} 項；checksum {r['checksum']}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
         if r["kind"].startswith("combo"):

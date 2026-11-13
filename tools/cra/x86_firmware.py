@@ -71,7 +71,8 @@ BIOS（Intel 平台的完整 SPI 映像）：
   （前面有 `DMA\\0` container 的等價表才對出 CPUID，沒有就不猜），AGESA 字串（`AGESA!V<n>` 後面的字串，整個映像與解開的 firmware volume 都找，不同值全部列出並 ATTENTION）。
   看不懂的（未知 type、版本欄位無法驗證、checksum 不符、超出範圍、指標找不到目錄、範圍重疊、循環、超過上限、壓縮或 size 0 的條目、slot header checksum 不符、
   Promontory 指標、AGESA 搜尋不完整或字串被截斷）一律進 b["gaps"]（SBOM 的 sca-center:gap）與 amd.problems；checksum 不符的目錄不採用它的條目；
-  指標在兩種座標解讀下都指到目錄時不判斷哪個是硬體實際使用的：兩邊都列出，只經由它到得了的目錄的條目、版本、微碼（amd.ambiguous）不進 SBOM。
+  指標在兩種座標解讀下都指到目錄（或同一個位置被不同基底讀到）時，兩邊都列出並各自做結構檢查：恰好一邊通過就採用它、另一邊標「未採用」（rejected，附證據）；兩邊都通過而內容相同 → 都採用；
+  都通過但內容不同、或都沒通過 → 不判斷哪個是硬體實際使用的，只經由它到得了的目錄的條目、版本、微碼（amd.ambiguous）不進 SBOM。
   SBOM：有版本的 PSP 韌體條目、AMD 微碼 patch、AGESA 字串各一個元件（掛在 BIOS 映像底下），dumpling:vuln-assessment 同樣是 NOT_ASSESSED（note: ASSESS_NOTES["amd"]）。
   amd_psp 載入不了或丟錯 → b["amd"] 是 None，gaps 寫「parser did not run」。
 - coreboot 類映像（例如 Dasharo）的 CBFS（見 coreboot_cbfs.py）：找到 FMAP（或 `LARCHIVE`）的 CBFS 區域時，讀 `revision`／`build_info`

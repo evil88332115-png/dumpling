@@ -22,7 +22,8 @@ notes: |
   結構（amd_psp.py 讀到的）：CAP 標頭讓 EFS 不在固定位置（0x21000、0x1021000，各視窗位移 0x1000）；兩個 EFS 各指向一個 combo 目錄（2PSP／2BHD），
   combo 再指到多個 L1 目錄（$PSP、$BHD）；較新的世代有 L1 的 0x40／0x70 指標項目指到 L2 目錄（$PL2、$BL2）。共 17 個目錄、244 個目錄項目、
   19 份 AMD 微碼（BIOS 目錄 type 0x66）、AGESA 字串 `AGESA!V9` + `ComboAM4v2PI 1.2.0.B`。第二個 EFS 的一個指標在視窗座標與檔案偏移兩種讀法下都指到目錄，
-  同一個位置因此被兩種視窗基底讀過；工具不判斷哪個是硬體實際使用的，11 個目錄紀錄（含全部 PSP 目錄，78 個 PSP 版本）列為歧義、不進 SBOM；BIOS 目錄的微碼與 AGESA 不受影響。
+  同一個位置因此被兩種視窗基底讀過；每一組競爭的讀法用自己的結構檢查決定（目錄 checksum、條目與子目錄指標是否解得出來、目錄表是否落在自己的條目裡）：這個樣本的每一組都是恰好一種通過，
+  採用它、另一種標「未採用」（19 個目錄紀錄中 17 個採用、2 個未採用，78 個 PSP 版本進 SBOM）。
   已讀出但沒有獨立佐證所以不寫進 expected：PSP 韌體條目的標頭版本（bootloader、SMU、ABL…，沒有找到可對照的公開來源）；
   其他微碼 patch（只有下面兩份在 linux-firmware 找得到位元組相同的）；equivalence id 對應的 CPUID（映像裡的微碼是單獨的 patch，沒有等價表）。
   ASUS 之後若移除舊版，網址會失效，firmware-fetch 會 FAIL，此時換同系列其他版本（BIOS 3404 的 release notes 才有 AGESA 版本佐證，換版本要重新核對）。

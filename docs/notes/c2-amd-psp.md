@@ -10,7 +10,7 @@
 |---|---|
 | `tools/cra/amd_psp.py` | 解析本體（只依賴標準函式庫與 C1 的 `uefi_image.py`）；`analyze(data, budget, soft)` 永遠回傳 dict，不丟例外 |
 | `tools/cra/x86_firmware.py` | 最小接線：`bios_image()` 在辨識出 AMD 平台時呼叫 `amd_psp.analyze`，結果放 `bios[].amd`；`amd_components()` 產 SBOM 元件；`status_of()`、`markdown()` 各一小段；`ASSESS_NOTES["amd"]` |
-| `tools/cra/tests/test_amd_psp.py` | 映像全部當場合成（D-028）；包含不丟例外、壓縮與 size 0、歧義、AGESA 邊界、EFS 位置表、位元位置等針對變異測試補的案例 |
+| `tools/cra/tests/test_amd_psp.py` | 映像全部當場合成（D-028）；包含不丟例外、壓縮與 size 0、競爭的讀法（採用／不採用／歧義）、AGESA 邊界與涵蓋、EFS 位置表、位元位置等針對變異測試補的案例 |
 | `firmware/bios/asus-prime-b550m-a-3404/firmware.yml` | 公開樣本與 expected（見下） |
 | `pipeline/firmware-expect.py` | 新鍵 `amd_agesa`、`amd_microcode`（說明見 `firmware/README.md`） |
 
@@ -26,12 +26,20 @@
    對了才採用裡面的 `pl2_location`（L2 目錄），不對記 `ish-checksum`）。其他 size 的 0x48／0x4A 不解讀（`ish-size`）。深度、目錄數、項目總數有上限，路徑上的目錄不重複走（循環）。
 4. **位址**：目錄標頭的 address mode（0 實體、1 相對視窗）優先，只有目錄是 2（相對目錄）或 3（相對 slot）才看項目自己的 mode（PSPTool 的做法）；
    mode 3 的 slot 起點未知，不解。值在 `2^32−W` 以上是映射在 4 GB 頂端的位置（W＝視窗大小，最大 16 MiB，所以大於 16 MiB 的映像相當於遮成 24 bits），其餘是視窗內偏移。
-5. **兩種解讀都成立時（歧義）**：EFS 有位移時，指標值可以讀成「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0）。**兩種讀法都在目標位置看到目錄 cookie 時，工具不判斷哪一個是硬體實際使用的**：
-   兩邊都解析、都列在 inventory（各自的 checksum、項目、版本），記 `pointer-ambiguous`（ATTENTION）；只經由這種指標（以及它們底下的子目錄）才到得了的目錄標成 `ambiguous`（`dir-ambiguous`），
-   它們的條目、版本、微碼只列在 `amd.ambiguous` 與 markdown，**不進 SBOM**，也不和確定目錄裡的同一份內容去重（兩邊各自照實列出）。同一個目錄若也從別的不歧義的指標到得了（例如另一個 EFS 單一解讀的指標），就是確定的，不算歧義。
-   **同一個位置用不同的視窗基底到達時**（例如一條路徑用基底 0x1000、另一條用基底 0）也是歧義：目錄紀錄以（位置，基底）為單位，每種讀法各自解析（條目位址依基底會讀到不同的位置），每一個都標歧義、不進 SBOM。
-   結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關（有測試把順序反過來比對）。視窗大小只由基底決定。
-   combo 項目和 EFS 指標一樣試兩種讀法；L2 指標、slot header、條目位址只用該目錄自己的基底。
+5. **競爭的讀法（D-047，`resolve_readings`）**：EFS 有位移時，指標值可以讀成「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0），combo 項目也一樣；
+   兩種讀法都在目標位置看到目錄 cookie，或同一個位置被不同的視窗基底讀到（條目位址依基底會讀到不同的地方），就有一組互相競爭的讀法。兩邊都解析、都列在 inventory
+   （目錄紀錄以（位置，基底）為單位）。每一組用**各自的結構檢查**決定，不靠猜哪個是硬體實際使用的。
+   - **通過的定義**（`reading_fail`，保守：只收「讀錯基底時才會出現、讀對時不該出現」的結構性證據）：(1) 目錄表讀得進來、checksum 相符；(2) 沒有任何條目的位址解不出來
+     （超出檔案、address mode 3、size 超過上限、指標條目沒指到目錄、A/B 復原條目的 size 不合）；(3) A/B 復原的 Image Slot Header checksum 相符，而且有 `pl2_location` 時它指到目錄；
+     (4) combo 目錄每個有位址的項目都指到目錄；(5) 目錄表本身不落在自己某個（未壓縮）條目的範圍裡。**不含**條目內容的判斷（版本標頭對不對、type 認不認得）。
+   - **結果**：恰好一種通過 → 採用它，沒通過的標「未採用」（`rejected`，`rejected_because`＝證據，`used_instead`＝改用哪個；記 `reading-rejected`，ATTENTION，所以報告不會乾淨）；
+     兩種以上通過、而且解讀結果完全相同（條目逐項相同——type、大小、旗標、指到的內容的 SHA-256、子目錄位置） → 都採用（用哪一個都一樣；記 `reading-equivalent`）；
+     兩種以上通過但內容不同、或都沒通過、或其中一種因上限沒解析出來 → 維持歧義（GAP；`pointer-ambiguous`／`dir-ambiguous`），條目只列在 `amd.ambiguous`、不進 SBOM。
+     沒通過、但同一組裡沒有任何一種通過時不算「不採用」（沒有證據說哪邊對）。
+   - **作用範圍**：指標那一組只作用在那一個指標的邊（同一個目錄若也從別的、單一讀法的指標到得了，仍然確定）；同一位置不同基底那一組作用在紀錄本身。確定的目錄＝從 EFS 出發只走
+     「通過的邊」（單一讀法的指標，或指標的讀法被採用的那一邊）到得了的；子目錄沿用被採用那一讀法的基底。被拒絕的讀法底下、只能經由它到得了的子目錄跟著標 `rejected`
+     （`reading-rejected`，說明「只經由不採用的讀法到得」）；經由歧義的讀法才到得了的子目錄是歧義。結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關（有測試把順序反過來比對）。
+   - 被拒絕讀法讀錯基底時產生的雜訊問題（`pointer-unresolved`、`entry-overlap`、`ish-checksum` 之類）仍照原樣列在 `problems`，沒有被濾掉；它們是「用那種基底讀」的後果，不代表映像壞了。
 6. **條目**：type 對照（coreboot `psp_directory.h`／`bios_directory.h`，名稱沿用上游識別字）、subprogram、instance、rom id、writable、位置、大小。
    `size=0xFFFFFFFF`（例如 soft fuse chain）的位址欄位是值，不是位置。BIOS 目錄 `compressed` 旗標的條目：size 不一定是儲存範圍（可能是解壓後大小），所以只檢查起點在檔案內
    （不在 → `entry-range`），內容**不解壓、不解析**（包括 type 0x66，不會把壓縮內容剛好像明文的東西列成微碼），一律記 `entry-compressed`。
@@ -46,9 +54,17 @@
 9. **AGESA**：走訪 firmware volume（`uefi_image.parse_fvs`，LZMA 等解開，FV 以外的非空白位元組它也送進來），在每塊內容找 `AGESA!V` 標記：`V` 加 1–4 個英數字當 tag，
    後面一定要接一個 NUL 或空白當分隔，再讀最多 64 個可列印字元。**沒有分隔符（tag 和字串黏在一起，切不出來）、分隔後是空的、字串超過 64 字元被截斷**都不當成版本：
    記 GAP，截斷的值在 SBOM 的 `AMD AGESA` 元件不寫 `version`（`dumpling:version-status=GAP`，原值前綴放在 `sca-center:note`）。
-   另外找整個映像原始位元組裡的標記，**用位置**檢查走訪有沒有涵蓋：走訪搜尋的內容若是原始位元組直接切出來的（不是 LZMA 解壓縮來的；用 uefi_image 呼叫端的 `where` 判斷，判斷不出來就當成不是），
-   就在原始位元組裡找這塊內容的位置，標記的位置＝內容的位置＋標記在內容裡的位置；同一塊內容被搜尋 k 次就只算前 k 個出現位置有被搜尋。涵蓋不到的原始標記（例如在 UI section、空白區、被刪除的檔案裡）
-   也列出來（位置標 `image (raw bytes)`），並把搜尋標為不完整；所以解壓縮出來的同樣內容或另一個沒被搜尋的複本不會替別的位置抵銷。
+   **涵蓋規則（D-047：只用 uefi_image 的公開介面，不讀它呼叫端的區域變數，不用 frame／inspect）**：另外找整個映像原始位元組裡的標記，每一個都要能證明「同一個位置」被走訪搜尋過，否則算沒涵蓋到
+   （列成位置 `image (raw bytes)`、搜尋標為不完整）。走訪（`Scan.scan_bytes` 的覆寫）不知道收到的內容是原始位元組的切片還是解壓縮出來的，所以改成記數：
+   - 每一塊有標記的內容（去重，以長度與雜湊為鍵）記：它在原始位元組出現的位置 `occ`（R 個，最多找 `MAX_AGESA_OCCURRENCES`）、走訪收到它的次數；標記的位置＝內容的位置＋標記在內容裡的位置。
+   - `pre`：收到時 `Scan.layers`（已解開的 LZMA 層）還是空的——那時還沒有任何解壓縮來的內容，所以一定是原始切片。`post`：其餘（可能是切片，也可能是解壓縮來的）。
+   - 解壓縮來的次數最多 D＝Σ（每一層的解開後大小 // 這塊內容的長度）（解壓縮來的內容都在某一層裡；同一層裡長度相同的兩塊區域不是完全重疊就是不相交）。所以至少有 `pre + max(0, post − D)` 次是原始切片，
+     它們各涵蓋一個出現位置；這個數字 ≥ R 才算 R 個位置都涵蓋，不夠就只算前幾個，其餘列為沒涵蓋。**解壓縮出來的內容剛好和一處沒被走訪的原始位元組（UI section 裡的複本、沒被搜尋的區域）相同時，
+     不能抵銷那一處**（它的 post 次被 D 扣掉）。
+   - 保守的地方：(a) 拿不到 `Scan.layers`（沒有這個欄位、不是清單、項目沒有整數 size）時 post 全部不算涵蓋；(b) 內容長度 ≤ `AGESA_DERIVED_MAX`（256）不換算位置——uefi_image 會把 UI section 的名稱字串（最多 200 字元）
+     轉成 ASCII 送進 `scan_bytes`，那不是切片；(c) 有標記的不同內容超過 `MAX_AGESA_LEAVES` 或同一內容的出現位置超過 `MAX_AGESA_OCCURRENCES` → 超出的部分算沒涵蓋；(d) 壓縮的內容排在原始切片前面時，
+     原始切片也變成 post，D 又大於零 → 只要 D 夠大就算不出，寧可不完整（代價：有原始的 AGESA 模組又有大的壓縮層的映像可能多出「不完整」，不會多出「完整」）。
+   - 殘餘限制：假設走訪不會對「同一段原始位元組」用同樣長度、同樣內容搜尋兩次（uefi_image 目前不會；會的話，涵蓋可能被高估）；標記跨在兩塊走訪內容的邊界上時兩塊都找不到它，原始位元組裡的那個標記就列為沒涵蓋。
    不同的完整值全部列出，超過一個就 ATTENTION。`uefi_image` 載入不了或走訪失敗時只有原始位元組的結果（不完整）。走訪沒有完整（有沒解開的部分、結構警告、沒有 FV、上限）→ 搜尋不完整，
    GAP「沒找到不代表不存在」。同一句問題訊息只記一次。
 
@@ -70,7 +86,9 @@
 | `ucode-unrecognised`、`ucode-cpuid`、`ucode-limit` | 微碼條目看不懂、只有 equivalence id、超過上限 | GAP |
 | `efs-pointer-unparsed` | EFS 的 imc／gec／xhci／Promontory 指標有值但沒有解析 | GAP |
 | `ish-checksum`、`ish-size` | Image Slot Header 的 checksum 不符（不採用它的 `pl2_location`）；0x48／0x4A 項目的 size 不是 0 或 0x100（不解讀） | ATTENTION（`ish-checksum`）／GAP |
-| `pointer-ambiguous`、`dir-ambiguous` | 指標在兩種座標解讀下都指到目錄：兩邊都列、都不進 SBOM（工具不判斷哪個是硬體實際使用的）；只經由這種指標到得了的目錄標 ambiguous | ATTENTION |
+| `pointer-ambiguous`、`dir-ambiguous` | 競爭的讀法（同一個指標的兩種讀法、同一個位置的不同基底）都通過結構檢查而內容不同、或都沒通過：兩邊都列、都不進 SBOM（工具不判斷哪個是硬體實際使用的）；只經由這種讀法到得了的目錄標 ambiguous | ATTENTION |
+| `reading-rejected` | 一組競爭的讀法裡恰好另一種通過：這一種「未採用」（附證據：checksum 不符的值、哪個條目超出範圍…），只經由它到得了的子目錄也不採用。條目只列在目錄清單，不進 SBOM | ATTENTION |
+| `reading-equivalent` | 競爭的讀法都通過、解讀結果完全相同：都採用 | GAP 列（說明用） |
 | `entry-compressed` | BIOS 目錄壓縮旗標的條目：不解壓、不解析（含 type 0x66），只檢查起點在檔案內 | GAP |
 | `entry-empty` | size 0 的條目（有 destination 的 APOB 除外，依據見上面第 6 點） | GAP |
 | `entry-error`、`internal-error` | 單一條目／整個階段的解析出錯（不該發生）：只影響那個條目／階段，其餘結果照給 | ATTENTION |
@@ -97,24 +115,26 @@ ASUS PRIME B550M-A BIOS 3404（2023/10/31，AMI），16.7 MB zip，裡面一個 
 EFS 因標頭位移不在固定位置（0x21000、0x1021000）；EFS 指向 combo 目錄（`2PSP`／`2BHD`），再指到多個 L1；新世代的 L1 有 0x40／0x70 指標到 L2（`$PL2`、`$BL2`）；
 AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可當出處。
 
-2026-11-13 的解析結果（`python3 -I x86_firmware.py inventory --in PRIME-B550M-A-ASUS-3404.zip`，約 2.5 秒）：
+2026-11-13 的解析結果（`python3 -I x86_firmware.py inventory --in PRIME-B550M-A-ASUS-3404.CAP`，約 2.5 秒；D-047 的規則）：
 
-- 2 個 EFS（視窗位移 0x1000）→ 17 個目錄（2 個 combo PSP、1 個 combo BIOS、5 個 L1 PSP、2 個 L2 PSP、5 個 L1 BIOS、2 個 L2 BIOS），244 個目錄項目，checksum 全部相符。
-- **歧義**：第二個 EFS 的 `new_psp_directory`（0x131000）讀成視窗座標是 0x1132000（combo），讀成檔案偏移是 0x131000（第一個視窗的 combo），兩邊都有目錄 cookie，工具不判斷。
-  讀成檔案偏移時 0x131000 是用基底 0 讀的，而第一個 EFS 用視窗開頭 0x1000 讀同一個位置：**同一個位置用兩種基底讀，條目位址會讀到不同的地方**，所以兩種讀法都標成歧義
-  （規則見流程第 5 點），它底下的目錄（L1／L2 PSP、同一個 `psp_bak`／combo 子樹）也是。結果：19 個目錄紀錄（17 個位置，其中 0x131000 與 0x15a000 各有兩種基底的讀法）中 11 個標歧義。
-  PSP 這一側（確定可用的）因此沒有任何條目；BIOS 這一側的目錄只經由不歧義的指標到達，所以不受影響（19 份微碼仍是確定的，AGESA 不受影響）。
-- 只在歧義目錄裡讀到的 PSP 版本：78 個（列在 `amd.ambiguous`，不進 SBOM）；63 個條目沒有可驗證的標頭版本（公鑰、NVRAM、SECURED_DEBUG、IKEK、token 等）。
-- 19 份 AMD 微碼（BIOS 目錄 type 0x66，全是單獨的 patch，全部來自確定的目錄）：patch level、日期、equivalence id，例如 `0x0800820d`／2019-04-16／`0x8082`。
-- AGESA：`AGESA!V9` + `ComboAM4v2PI 1.2.0.B`（6 處，只有這一個值）。
-- GAP：2 個 Promontory 指標沒解析、5 個壓縮的 BIOS 條目（type 0x62）不解析、3 個未知 type（BIOS 0x67、PSP 0x43、0x4E）、2 個歧義指標與 11 個歧義目錄（讀錯基底的那一側還會冒出
-  `pointer-unresolved`、`entry-overlap` 之類的雜訊問題，它們是「用那種基底讀」的後果，不代表映像壞了）、63 個條目沒有版本、微碼只有 equivalence id、
+- 2 個 EFS（視窗位移 0x1000）→ 19 個目錄紀錄（17 個位置：2 個 combo PSP、1 個 combo BIOS、5 個 L1 PSP、2 個 L2 PSP、5 個 L1 BIOS、2 個 L2 BIOS；0x131000 與 0x15a000 各有兩種基底的讀法），
+  checksum 全部相符。
+- **競爭的讀法與結果**（規則見流程第 5 點）：19 個紀錄中 17 個採用、2 個不採用、0 個歧義。
+  - 第二個 EFS 的 `new_psp_directory`（0x131000）讀成視窗座標是 0x1132000（combo，基底 0x1001000），讀成檔案偏移是 0x131000（基底 0）。基底 0 的讀法裡，combo 的三個項目（指標 0xff2a9000、0xff2a9000、0xff159000）
+    讀成 0x2a9000、0x159000，那裡都沒有目錄 cookie → 沒通過；視窗讀法的三個項目都指到目錄 → 採用視窗讀法。同一個位置 0x131000 也被第一個 EFS 用基底 0x1000 讀過（單一讀法），基底 0 的紀錄同樣不採用。
+  - 0x1132000 的第三個項目（指標 0x15a000）又有兩種讀法：視窗讀法 0x115b000（基底 0x1001000）通過；檔案偏移讀法 0x15a000（基底 0）的目錄表 [0x15a000, 0x15a190) 落在自己的條目 1（type 0x01）的範圍
+    [0x159700, 0x165c80) 裡 → 沒通過（結構檢查第 5 項）→ 不採用。同一個位置 0x15a000 用基底 0x1000 讀（從第一個視窗的 combo 單一讀法到得了）的紀錄通過，採用。
+  - 兩個被拒絕的紀錄各記一筆 `reading-rejected`（ATTENTION，訊息含證據與改用哪個讀法）。另外 `pointer-unresolved`（3）與 `entry-overlap`（3）是讀錯基底那一側的雜訊，照原樣列在 problems。
+  - **第 5 項檢查是這個樣本的 PSP 版本能不能全進 SBOM 的關鍵**：沒有它，0x15a000（基底 0）與 0x115b000（基底 0x1001000）都通過、內容不同 → 維持歧義，3 個目錄歧義，47 個 PSP 版本確定、31 個列在 `amd.ambiguous`。
+- PSP 版本：78 個（全部確定，進 SBOM）；63 個條目沒有可驗證的標頭版本（公鑰、NVRAM、SECURED_DEBUG、IKEK、token 等）。
+- 19 份 AMD 微碼（BIOS 目錄 type 0x66，全是單獨的 patch）：patch level、日期、equivalence id，例如 `0x0800820d`／2019-04-16／`0x8082`。
+- AGESA：`AGESA!V9` + `ComboAM4v2PI 1.2.0.B`（6 處，只有這一個值）；原始位元組裡沒有走訪沒涵蓋到的標記。
+- GAP：2 個 Promontory 指標沒解析、5 個壓縮的 BIOS 條目（type 0x62）不解析、3 個未知 type（BIOS 0x67、PSP 0x43、0x4E）、63 個條目沒有版本、微碼只有 equivalence id、
   AGESA 搜尋不完整（2 個 GUID-defined section `CE3233F5-…` 需要處理但不支援，另有一個 FFS 檔的 section 串不乾淨）。狀態 ATTENTION。
-- SBOM 元件：99（第一版）→ 55（歧義不選邊）→ **21**（同位置不同基底也算歧義：映像 1、微碼 19、AGESA 1，沒有 PSP 韌體元件）。
+- SBOM 元件：99（第一版）→ 55（歧義不選邊）→ 21（同位置不同基底也算歧義：映像 1、微碼 19、AGESA 1，沒有 PSP 韌體元件）→ **99**（D-047：映像 1、PSP 韌體 78、微碼 19、AGESA 1）。
 
-與先前版本的差異：第一版（41353d3）把這些目錄全部當成確定的，78 個 PSP 版本都進 SBOM；上一版（f41f5eb）只把 6 個目錄標歧義（34 個 PSP 版本確定）。上一版有一個錯誤：同一個位置第二次被到達時
-直接沿用第一次的紀錄，確定的目錄可能用到歧義路徑的基底；現在紀錄以（位置，基底）為單位，結果只取決於走訪到的紀錄與邊，不依賴處理順序。這是保守的選擇：
-歧義的指標會連帶讓同一個位置的另一種基底的讀法也不可用，代價是這個樣本的 PSP 版本全部只列在 inventory。如果之後要放寬（例如只讓「不歧義的路徑讀出的紀錄」確定），要由決策者決定。
+與先前版本的差異：第一版（41353d3）把這些目錄全部當成確定的；上一版（f41f5eb）只把 6 個目錄標歧義；ebac3e9 把同一個位置不同基底的讀法與歧義指標一律列為歧義（78 個 PSP 版本全部只在 inventory）。
+現在每一組競爭的讀法用自己的結構檢查決定，這個樣本的兩組都是「恰好一種通過」。這個結果依賴結構檢查的定義（尤其是第 5 項）；檢查項目是保守地只收讀錯基底時才會出現的證據，沒有拿版本欄位來選邊。
 
 ### expected（只寫有公開出處的值）
 
@@ -137,12 +157,14 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
 可用公開網址重現（下載物當不可信資料，只讀）：
 
 - ASRock B550 Phantom Gaming 4 BIOS 3.40：`https://download.asrock.com/BIOS/AM4/B550%20Phantom%20Gaming%204(3.40)ROM.zip`，15513528 位元組，SHA-256 `7128bf8417924b93b509915cfdfaedecba470f4885d7fb802c906a0ebee5e985`；
-  zip 內一個 33554432 位元組的 `B550PG43.40`（SHA-256 `19cd0d852086227e4e85e7f184baa5c23eed93abe1718462dd1079e14a6db692`）。結果：2 個 EFS（0x20000、0x1020000）、17 個目錄、246 項，沒有歧義指標；
-  AGESA 同樣是 `ComboAM4v2PI 1.2.0.B`；19 份微碼，其中同兩份與 linux-firmware 位元組相同。ASRock 的下載頁要 JavaScript 驗證，抓不到 release notes，也無法確認授權頁網址，所以沒有列為樣本。
+  zip 內一個 33554432 位元組的 `B550PG43.40`（SHA-256 `19cd0d852086227e4e85e7f184baa5c23eed93abe1718462dd1079e14a6db692`）。結果：2 個 EFS（0x20000、0x1020000）、17 個目錄、246 項，沒有競爭的讀法
+  （D-047 前後相同：17 個目錄都確定，SBOM 101 個元件＝映像 1、PSP 韌體 80、微碼 19、AGESA 1）；AGESA 同樣是 `ComboAM4v2PI 1.2.0.B`；19 份微碼，其中同兩份與 linux-firmware 位元組相同。
+  ASRock 的下載頁要 JavaScript 驗證，抓不到 release notes，也無法確認授權頁網址，所以沒有列為樣本。
 - ASUS PRIME B650M-A BIOS 1807（AM5）：`https://dlcdnets.asus.com/pub/ASUS/mb/BIOS/PRIME-B650M-A-ASUS-1807.zip`，11601928 位元組，SHA-256 `8f9202f9c88ca6124b45951b2745f9eabaa8af87d1a290ffd908a39394985cbc`。
-  結果：`psp_bak_directory` 的指標有兩種讀法（視窗座標 0x83000、檔案偏移 0x82000）；0x82000 也從 `new_psp_directory` 用視窗開頭 0x1000 讀過，所以這個位置有兩種基底的讀法，
-  整個 PSP／BIOS L2 子樹（9 個目錄紀錄）都標歧義，21 個 PSP 版本與 2 份微碼只列在 inventory，SBOM 只有 AGESA（`ComboAM5PI 1.0.8.0`）。在用基底 0 讀的那一側，A/B slot header 的 checksum 不符
-  （位址讀錯了）。另有 2 份微碼條目的格式不同（開頭是 `$PS1` 簽署標頭），記 GAP。
+  結果（D-047）：`psp_bak_directory` 的指標有兩種讀法（視窗座標 0x83000＝基底 0x1000、檔案偏移 0x82000＝基底 0）；0x82000 也從 `new_psp_directory` 用基底 0x1000 讀過。基底 0 的 0x82000 讀法裡
+  A/B slot header 的 checksum 不符（條目 0：0x00000048、條目 1：0x0000004a 不是 slot header 的 checksum，位址讀錯了）→ 沒通過 → 不採用；0x83000（基底 0x1000）與 0x82000（基底 0x1000）都通過，採用。
+  9 個目錄紀錄：8 個採用、1 個不採用、0 個歧義；21 個 PSP 版本與 2 份微碼進 SBOM（元件數 2 → 25：映像 1、PSP 韌體 21、微碼 2、AGESA 1，AGESA 是 `ComboAM5PI 1.0.8.0`）。
+  另有 2 份微碼條目的格式不同（開頭是 `$PS1` 簽署標頭），記 GAP。
   這個驗證抓到並修正了「size 0 的 0x48／0x4A 項目被當成沒有資料」的錯誤。
 - linux-firmware 的 `amd-ucode/microcode_amd_fam17h.bin`：`https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/amd-ucode/microcode_amd_fam17h.bin?id=<commit>`，
   commit 取 `git log` 該檔的前 10 筆（含 `c4586ffaac0ca0d7045e06140b6426f2e79e96e6`）；10 個版本的 container 都解得開。
@@ -152,8 +174,8 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
 - 只認得 coreboot 公開標頭列出的 type；沒有列的（例如 BIOS 0x67、PSP 0x43、0x4E、0x93）只記位置與大小，名稱和意義不猜。
 - PSP 版本是標頭欄位原值的十六進位顯示，不同 type 的欄位意義可能不同（ABL 的欄位看起來像日期，沒有佐證所以不解讀）。
 - 位址視窗假設是 16 MiB（或更小的映像整體）。映像大小不是 2 的次方又小於 16 MiB、或截斷的檔案，頂端映射的位置會算錯，結果是 `pointer-unresolved` GAP，不會誤讀。
-- **兩種座標讀法都成立時，工具不判斷哪一個是硬體實際使用的**（見流程第 5 點）：兩邊都列，都不進 SBOM；這會讓 SBOM 比「選一邊」少，但不會放進可能是錯的那一邊。
-  沒有做自動消歧，也沒有「同一個 EFS 的其他指標只在某種座標說得通」這類推論。
+- **競爭的讀法只靠結構檢查決定**（見流程第 5 點）：恰好一種通過才採用；都通過但內容不同、或都沒通過，工具不判斷哪一個是硬體實際使用的，兩邊都列、都不進 SBOM。結構檢查沒有涵蓋的錯誤
+  （例如兩種讀法都結構完整、內容不同，其實只有一種是硬體用的）仍是 GAP；結構檢查通過不等於「硬體一定用這個」，只代表另一種讀法在結構上站不住。沒有做「同一個 EFS 的其他指標只在某種座標說得通」這類推論。
 - 沒有簽章驗證（Image Slot Header 只驗 checksum）；Promontory 晶片組韌體、IMC／GEC／XHCI 沒有解析；壓縮的 BIOS 目錄條目（type 0x62）不解開。
 - AGESA 搜尋依賴 `uefi_image` 能解開的部分；EFI 標準壓縮與需要處理的 GUID-defined section 解不開（會讓搜尋不完整，沒找到不代表不存在）。
 - 微碼的 `patch_size` 是目錄項目的大小（單獨 patch 時等於 patch 區段大小）；patch 內部的 checksum、簽章沒驗證。
