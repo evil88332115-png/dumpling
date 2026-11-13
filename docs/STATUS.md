@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 07:24 +0800（C0）
+最後更新：2026-11-14 07:30 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,7 +36,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M7b 其餘項目**（D-056：meta.json／run-params.json、A-source／C-dt-feeds／C-mirror-freshness 不依賴文字、分層重跑帶原掃描狀態列、D-054、scan-status-check 重複列、C-kernel-boot、#20；加上 product_version_check GAP 降級提案、a.run[0] 退路、#58 驗證留下的三項）：調查現況中，之後向 C0 提拆法。M7b 第一項 **PR #73 已合併（main 0be7bc2）**。正式 tag 等使用者，C0 建議打在包含 #73 的最新 main（0be7bc2 或更新）
+- 目前在做：**M7b-2「判定不讀說明文字」**（wp1/m7b2＝e038b3b，worktree `$AGENT_TMP/dumpling-wt-c1-m7b2`，還沒推）：meta.json 的 source_pin／source_identity（A-source 兩種 ATTENTION）、dt_feeds_reason（cra_report 的 C-dt-feeds NOT_RUN 改看它；no_data → GAP，C0 Q1）、kernel-boot.json 改用 jget。本機完整測試中 → 推送、開 PR、Jetson 驗收 run。拆法（C0 同意）：M7b-3「刷機包層參數與分層重跑」（run-params.json、重跑帶原掃描的 B-rootfs-tar／B-uefi-binary、status.tsv 重複列統一取最嚴重）→ M7b-4「進 report_status」（D-054 bootloader-coverage，NOT_ASSESSED 也 GAP〔Q2〕；C-kernel-boot GAP／ATTENTION 進 report_status〔Q3〕；product_version_check GAP 走 scan 結束碼、platform_scan 提供共用函式〔Q4〕；#20 步驟改中性名稱 B-disk-partitions＋相容舊名或和 C4 約定切換〔Q5，清單在 origin/wp7/adapters 的 docs/references/adapter-gaps.md〕；#58 驗證三項；a.run[0] 退路）。M7b 第一項 #73 已合併（main 0be7bc2）。正式 tag 等使用者，C0 建議打在 0be7bc2 或更新的 main
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
