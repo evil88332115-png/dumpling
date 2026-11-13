@@ -95,6 +95,7 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
 8. **標準答案的漏洞數用範圍**，因為資料庫每天變；元件數、核心版本、狀態用 equals。範圍是跑第一次的實際值上下抓寬鬆，之後資料庫變化讓範圍不符時，人工看過再改範圍並寫理由。
 9. ~~L 軌的測試 `test_untagged_sbom_changes_nothing` 偶爾失敗~~：已修（測試比對風險評估文字時，VEX 檔的 SHA-256 也正規化；沒有掃描時間時 VEX 用現在時間，跨秒時 SHA 不同）。
 10. **patch 版在報告上看不出差別**：v39.2.1 的 patch 修的是一個（示範用的）CVE，但報告沒有「patch → CVE」的對應，漏洞清單與 P1 判斷表裡那個 CVE 兩版都是「受影響－有編進核心」。patch 的效果只在上游比對（被修改的檔案 1）與建置紀錄看得到；要讓報告標成已修補，要另加 VEX 規則或 patch 的 CVE 對應（M2 之後）。
+10b. **示範專案的 `vex-rules.json` 只留依證據的規則 K1、K2、U1**（C0 決定，2026-11-13）：範例的批次分流規則 R1～R5 作者只寫角色、日期是範例日期，會把 bsp 報告約 2990 列判成 accepted（沒有人做過的決定；D-035 排除要附依據），已拿掉。K1、K2、U1 要有具名作者才生效，示範專案沒有，所以實際上不判任何列。new-project.sh 不帶範例規則排在 M7。
 11. **兩版 VEX 的產品版本字串相同**：`metadata.component.version` 取自 `CRA/Config/config.json` 的 `product.version`（示範專案兩版共用一份），只能靠檔名區分版本。真實專案每一版要更新 `product.version`。
 12. **完整掃描的報告與 DT 專案含 host-tool**：完整掃描上傳的是拆分前的 SBOM；分層後的 `-bsp`／`-os` 不含 host-tool。Jetson 的 host-tool 是 0 個所以沒影響；其他平台以分層報告為準（完整那份只當對照，見第 7 點）。
 13. **步驟表的 validate、fetch 各出現兩次**：build job 與 scan job 各執行一次，`pipeline-steps.tsv` 各記一列（Release 說明與 `release-meta.json` 的 steps 照列）。結果一致，只是重複。
