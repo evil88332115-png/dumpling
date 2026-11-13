@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:21 +0800（C2）
+最後更新：2026-11-13 23:37 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -42,6 +42,7 @@
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
   - 其他 M2 子分支都已併入或不合併，不用再動
 - 開出去的代理：
+  - PR #42 驗證（Sonnet、high）：**完成，通過**
   - 第四輪獨立驗證（Sonnet、high）：**完成，通過**（應修 0、建議 6），已貼 #40 留言（報告 `$AGENT_TMP/dumpling-tmp-c1/verify4/report.md`）。建議 1（bsp_na 沒看 os_responsibility）、2（完整掃描成功路徑沒有順序測試）、5（NOT_RUN 說明）提議合併後開小 PR；3、4、6 排 M7；等 C0 決定
   - 第三輪獨立驗證（Sonnet、high）：**完成**，結論「驗證：不通過」，報告 `$AGENT_TMP/dumpling-tmp-c1/verify3/report.md`（開 PR 時貼成留言）。應修 1：-os 報告混入 bsp 的 OP-TEE Mbed TLS 11 列（另外我查到 -os 產品 SBOM 也有刷機包韌體 441 個 bsp 元件）→ 852b6d3：分層 SBOM 沒有 bsp／unknown 元件時，刷機包韌體、UEFI／OP-TEE 內建函式庫不適用（`layers.bsp_inputs_not_applicable`）；建議已處理：Release 說明成品上游比對不印 JSON、PLATFORM-INTERFACE 補 kernel_not_distro 不以 - 開頭；其餘建議（kernelcheck 上標數字 epoch 會 FAIL、完整報告 P1 沒範圍說明、步驟表沒有 pipeline-scan、標準答案沒固定 -os 核心階段）排 M7 或寫進 PR 說明
 - 驗收 run（f11bfdb）：release v39.2.0-demo1 **43399785656 綠**、v39.2.1-demo1 **43399800268 綠**、tests **43399813005 綠**；877ffbc 的 tests 43412769902 綠。
@@ -53,10 +54,10 @@
   - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
   - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
-- 本機背景工作：PR #42 的驗證代理（會用 HEAVY_LOCK）
+- 本機背景工作：沒有
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從 cc7d101 打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1` 並推送——C1 的推送被權限機制擋下，等使用者自己推或放行（本機與遠端都還沒有 tag）。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 run 編號與結果 → 刪 `wp1/m2-pr-draft`（draft Release 由 release.yml 自動刪）
-  2. **[WP1] 小 PR #42**（https://github.com/evil88332115-png/dumpling/pull/42，wp1/m2-followup＝a475ec1，從 main cc7d101）：我的第四輪建議 1、2、5（c137451）＋C0 驗證建議 1（a475ec1：step_rows.overall 的 NOT_RUN 分「不適用」與沒能執行）。驗證代理（Sonnet、high）進行中 → 報告公開資料掃描後貼 #42 留言 → 有應修就修 → 通知 C0
+  2. **[WP1] 小 PR #42**（wp1/m2-followup＝c645966）：驗證**通過**（應修 0、建議 5，已貼留言）；建議 1、2、4 在 c645966 修了（文件 NOT_RUN 新規則、scan-status-check 列出沒能執行的步驟、平台腳本不要自稱不適用），3、5 不改。等 CI 與 C0 合併。給 C4 的提醒（已請 C0 轉）：wp7 合併 main 時不要用舊的 pipeline.yml 蓋掉「不適用：」那一列
   3. M7 待辦加上 C0 驗證建議 2–8（-os 8.7 節寫明核心在 -bsp 判定、LAYERS.md 註明各層加總≠完整、check-expected 下限檢查的測試、patch 修的 CVE 在 patched 版仍 P3 的說明、Release 說明步驟表少 pipeline-scan、SBOM 的上游維護者信箱、test_layers_report.py 單獨執行缺 sys.path）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
