@@ -40,6 +40,9 @@ defaults:
 
 env:
   DUMPLING_PROJECT_DIR: projects/${{ inputs.project }}
+  # run: 裡不直接插入 workflow 輸入值的運算式，改用這兩個環境變數（呼叫端已驗證格式，仍走環境變數比較保險；不用 INPUT_* 這種名稱，action 會把它當成自己的輸入）
+  DUMPLING_IN_PROJECT: ${{ inputs.project }}
+  DUMPLING_IN_VERSION: ${{ inputs.version }}
 
 jobs:
   plan:
@@ -96,20 +99,20 @@ jobs:
           fi
 
       - name: 驗證專案設定
-        run: bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: fetch（下載並核對 sha256；只下載、不解開、不執行）
-        run: bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: build
-        run: bash pipeline/run-step.sh build "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" | tee "$RUNNER_TEMP/build-line.txt"
+        run: bash pipeline/run-step.sh build "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" | tee "$RUNNER_TEMP/build-line.txt"
 
       - name: 摘要（build.sh 寫的 handoff/build-summary.md；沒有就用最後一行）
         run: |
-          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
+          o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
           ls -l "$o/handoff"
           {
-            echo "## build（${{ inputs.project }} ${{ inputs.version }}）"
+            echo "## build（$DUMPLING_IN_PROJECT $DUMPLING_IN_VERSION）"
             if [ -f "$o/handoff/build-summary.md" ]; then cat "$o/handoff/build-summary.md"; else tail -n 1 "$RUNNER_TEMP/build-line.txt"; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -148,7 +151,7 @@ jobs:
 
       - name: 名稱
         id: names
-        run: echo "artifact=scan-${{ inputs.project }}-${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+        run: echo "artifact=scan-$DUMPLING_IN_PROJECT-$DUMPLING_IN_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: 取得 build 的 handoff 與步驟紀錄（放回 $DUMPLING_OUT/handoff、$DUMPLING_OUT/pipeline-steps.tsv）
         if: ${{ needs.plan.outputs.BUILD_MODE == 'compile' }}
@@ -164,7 +167,7 @@ jobs:
         env:
           BUILD_MODE: ${{ needs.plan.outputs.BUILD_MODE }}
         run: |
-          bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}" build NOT_RUN 4 "build.mode: $BUILD_MODE"
+          bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" build NOT_RUN 4 "build.mode: $BUILD_MODE"
 
       - name: "Go（scan.tools 是 full 才需要：govulncheck v1.9.0 要 Go 1.26 以上，runner 內建的比較舊）"
         if: ${{ needs.plan.outputs.SCAN_TOOLS == 'full' }}
@@ -192,13 +195,13 @@ jobs:
           bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true && echo "bubblewrap: OK"
 
       - name: 驗證專案設定
-        run: bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: fetch（重新從來源下載並核對）
-        run: bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: assemble（組產品映像；Jetson：核心與樹外模組換成 build 編的）
-        run: bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: 還原上一份核心 CVE 鏡像（kernel-cves.zip、SOURCE；有 cache 才有）
         id: kcve-restore
@@ -213,13 +216,13 @@ jobs:
           MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
           # 上一份核心 CVE 鏡像：上游沒變就沿用，git.kernel.org 連不上就退而求其次（≤48 小時、通過檢查；結果標 ATTENTION，不擋 Release）
           KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
-        run: bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+        run: bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 
       - name: 核心 CVE 鏡像是不是這次新抓的（只有新抓的才存 cache，頂替用的舊資料不存回去）
         id: kcve-fresh
         if: ${{ !cancelled() }}
         run: |
-          export MIRRORS_DIR="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}/mirrors"
+          export MIRRORS_DIR="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION/mirrors"
           . pipeline/lib/mirrors.sh
           if mirror_is_fresh kcve; then
             rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kcve" "$KCVE_CACHE_DIR"
@@ -238,7 +241,7 @@ jobs:
       - name: 整理結果（報告 zip、SBOM、VEX、xlsx、摘要）
         if: ${{ always() }}
         run: |
-          o="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}"
+          o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
           mkdir -p "$RUNNER_TEMP/result"
           [ -d "$o/release" ] && cp -r "$o/release/." "$RUNNER_TEMP/result/" || true
           for f in handoff/build.json assemble.json scan.json expected-check.txt pipeline-steps.tsv; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
