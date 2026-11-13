@@ -311,6 +311,21 @@ def test_p1_sheet_ours_includes_os(tmp_path):
     assert "這張表放的是我們的待辦：BSP、層未定（unknown）、OS" in flat(sh)
 
 
+def test_ours_os_p1_reaches_the_p1_sheet_end_to_end(tmp_path):
+    """缺口 24：os_responsibility: ours 時 OS 層的 P1（例如已被利用的 openssh）是我們的待辦，cra_report → report_package 一路下來
+    P1 判斷表一定要列出來（不能只有表頭）；customer 時不在這張表（在漏洞清單的 OS 工作表與「通知客戶」）。"""
+    fs = [fnd(OSP, "CVE-2026-0002", "HIGH", kev=True)]
+    for resp, want in (("ours", ["CVE-2026-0002"]), ("customer", [])):
+        r, s, rep = scenario(tmp_path, fs, resp, name="e-" + resp)
+        assert r.returncode in (0, 2), r.stdout + r.stderr
+        assert [x["layer"] for x in rows_of(rep)["rows"]] == ["os"]
+        out = tmp_path / ("e-" + resp + "-out")
+        code, msgs = rp.build(rep.parent.parent, out, allow_tmp=True)
+        assert code in (0, 2), msgs
+        cves, sh = p1_cves(out)
+        assert cves == want, (resp, cves)
+
+
 def test_p1_sheet_without_responsibility_is_conservative(tmp_path):
     rows = [dict(r, layer_todo=True) for r in MIXED]
     code, msgs, out = package(tmp_path, rows, None)

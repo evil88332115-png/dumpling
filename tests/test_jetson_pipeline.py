@@ -449,6 +449,17 @@ class ScanHelpers(Tmp):
         self.assertIsNone(js.vuln_metrics({"nope": 1}))
         self.assertIsNone(js.vuln_metrics(None))
 
+    def test_vuln_metrics_p1_follows_layer_todo(self):
+        """p1_rows＝P1 判斷表的列（我們的待辦）：依 cra_report 的 layer_todo。os_responsibility: ours 時 os 層的 P1 也算（缺口 24：
+        以前固定只算 bsp＋unknown，ours 產品的 P1 會被藏起來）；customer 時 os 層不算。"""
+        ours = {"rows": [{"id": "CVE-1", "tier": "p1", "layer": "os", "layer_todo": True},
+                         {"id": "CVE-2", "tier": "p1", "layer": "os", "layer_todo": True},
+                         {"id": "CVE-3", "tier": "p1", "layer": "bsp", "layer_todo": True},
+                         {"id": "CVE-4", "tier": "p2", "layer": "os", "layer_todo": True}]}
+        self.assertEqual(js.vuln_metrics(ours)["p1_rows"], 3)
+        customer = {"rows": [dict(r, layer_todo=r["layer"] != "os") for r in ours["rows"]]}
+        self.assertEqual(js.vuln_metrics(customer)["p1_rows"], 1)
+
     def test_sbom_layer_counts(self):
         sb = {"components": [
             {"purl": "pkg:deb/ubuntu/a@1", "properties": [{"name": "dumpling:layer", "value": "os"}]},

@@ -142,7 +142,8 @@ def run_paths(w, rootfs="rootfs"):
 
 
 def vuln_metrics(rows_doc):
-    """vulnerability-rows.json → 列數、CVE 數、各 tier、各層、P1 判斷表列數（bsp＋unknown，沒有層標記時全部）。"""
+    """vulnerability-rows.json → 列數、CVE 數、各 tier、各層、P1 判斷表列數（＝我們的待辦：每列的 layer_todo，cra_report 依
+    os_responsibility 給——bsp、unknown 一定算，os 只有 ours 或沒給時算；舊資料沒有 layer_todo 時 bsp＋unknown；沒有層標記時全部）。"""
     if not isinstance(rows_doc, dict) or not isinstance(rows_doc.get("rows"), list):
         return None
     rows = rows_doc["rows"]
@@ -150,7 +151,10 @@ def vuln_metrics(rows_doc):
     for r in rows:
         tiers[str(r.get("tier"))] = tiers.get(str(r.get("tier")), 0) + 1
         layers[str(r.get("layer"))] = layers.get(str(r.get("layer")), 0) + 1
-    p1 = {r.get("id") for r in rows if r.get("tier") == "p1" and (r.get("layer") in (None, "bsp", "unknown"))}
+    def todo(r):
+        v = r.get("layer_todo")
+        return v if isinstance(v, bool) else r.get("layer") in (None, "bsp", "unknown")
+    p1 = {r.get("id") for r in rows if r.get("tier") == "p1" and todo(r)}
     return {"rows_total": len(rows), "cves_total": len({r.get("id") for r in rows}), "tiers": tiers, "layers": layers, "p1_rows": len(p1)}
 
 
