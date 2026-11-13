@@ -54,6 +54,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
 | `bios/asus-prime-b550m-a-3404` | AMD AM4 平台、AMI：EFS 因更新包標頭不在固定位置、combo 目錄指到多個 L1、新世代的 L1 指到 L2（`$PL2`／`$BL2`）、AMD 微碼與壓縮 firmware volume 裡的 AGESA 字串；release notes 有 AGESA 版本可當出處（解析見 `docs/notes/c2-amd-psp.md`） |
 | `bios/novacustom-v540tu-mtl-v1.0.1` | Dasharo coreboot 完整 32 MiB SPI 映像，ME 區域是新世代配置：區域開頭是 CSE layout table → BPDT（version 2），`$FPT` 只在 data partition、沒有 FTPR 項目、`$CPD` header version 2。用來驗證 `tools/cra/intel_cse_layout.py`（`expected.intel_me` 依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
+| `bios/novacustom-nuc-box-arl-v0.9.2` | Dasharo coreboot 完整 32 MiB SPI 映像（Arrow Lake-U/H FSP），ME 區域開頭的 CSE layout table 是 layout 1.7 的 Size 0x60 變體（CRC-32 相符），RBEP＋NFTP 版本一致、沒有 FTPR。用來驗證 `tools/cra/intel_cse_layout.py` 的 Size 0x60（`expected.intel_me`、微碼依 Dasharo release notes，見該檔註解與 `docs/notes/c2-csme-layout.md`） |
 | `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
 | `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 

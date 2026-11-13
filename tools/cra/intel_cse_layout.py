@@ -25,10 +25,15 @@ BPDT 項目裡的 S-BPDT（type 5）不往下追（不會有循環或遞迴）�
 - CSE layout table（區域開頭；MEAnalyzer 的 CSE_Layout_Table_16／17，coreboot cse_layout.h 的 cse_layout）：
   layout 1.7＝+0 ROM bypass 16 bytes、+0x10 Size(u16)、+0x12 Flags(bit 0＝CSE redundancy：BP2 是 BP1 的備份)、+0x14 checksum(u32)、
   +0x18 data(offset,size)、+0x20…+0x44 BP1…BP5(offset,size)、+0x48 temp pages、+0x50 external error log（Size 0x48 以上才有）；欄位都是 u32，offset 相對區域開頭。
-  **Size 從 +0x10 起算**（表的總長是 0x10＋Size）。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog），公開真樣本（兩個版本）是 0x58。
+  **Size 從 +0x10 起算**（表的總長是 0x10＋Size）。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog），公開真樣本是 0x58（Meteor Lake，兩個版本）與
+  0x60（Arrow Lake-U/H FSP 的 Dasharo NovaCustom NUC BOX v0.9.2：表總長 0x70，結構與 CRC 算法同 0x58）。
   **checksum 是 CRC-32**，範圍是 d[+0x10:+0x14] ＋ 4 個 0（checksum 欄位本身不入算）＋ d[+0x18:+0x10+Size]（MEAnalyzer 的驗證程式；
-  兩個真樣本的 stored 值都相符）。本模組認 Size 0x40、0x48、0x58，CRC 不符 → GAP；Size 是其他值 → 不認（none）。
+  三個真樣本的 stored 值都相符）。本模組逐值認 Size 0x40、0x48、0x58、0x60（不用「範圍」或「8 的倍數」之類的規則：Size 決定 CRC 的涵蓋範圍，
+  未知的 Size 沒有依據，CRC 算得對也不代表欄位排列相同）；CRC 不符 → GAP；Size 是其他值（例如 0x5C、0x64、0x68、0x70）→ 不認（none）。
   0x40 與 0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。
+  公開定義（MEAnalyzer、coreboot cse_layout.h）只到 +0x58（external error log 結尾）；Size 0x58 的 +0x58…+0x67 與 Size 0x60 的 +0x58…+0x6F 沒有公開欄位定義
+  （三個真樣本都是 0）。這段只要有任何非 0 的 byte（就算 CRC 相符）就不解讀這張表，回 GAP：不知道那裡是不是另一個 boot partition 指標，
+  照讀會漏掉 FTPR／NFTP 的來源或讓「兩個來源一致」的判斷出錯。BP1…BP5 的位置固定在 +0x20…+0x44，不受 Size 影響；external error log 與 temp pages 不讀。
   layout 1.6＝同樣 16 bytes ROM bypass，+0x10 data(offset,size)、+0x18…+0x3C BP1…BP5(offset,size)、+0x40 u64 checksum，表長 0x48，
   之後到 0x1000 全是 0xFF（MEAnalyzer 也用這個填充當辨識條件之一，因為 1.6 沒有標記）。MEAnalyzer 註解說 checksum 是整張表（不含 ROM bypass）的二補數和；
   唯一的公開樣本（Comet Lake）存的是 0x22，我試過位元組、u32、u64 的加總都湊不成 0，算法沒確認，**不驗證**。
@@ -52,7 +57,9 @@ BPDT_ENTRY = 0x0C
 MAX_BP = 5                             # layout 1.7 最多 5 個 boot partition
 MAX_BPDT_ENTRIES = 48                  # 實際約 5～10 項；coreboot 的類型表到 33
 MAX_CPD_ENTRIES = 256
-LAYOUT_17_SIZES = (0x40, 0x48, 0x58)    # Size 欄位（從 +0x10 起算）：MEAnalyzer 的 0x40／0x48 與公開真樣本的 0x58
+LAYOUT_17_SIZES = (0x40, 0x48, 0x58, 0x60)    # Size 欄位（從 +0x10 起算）：MEAnalyzer 的 0x40／0x48、公開真樣本的 0x58（NovaCustom V540TU）與 0x60（NovaCustom NUC BOX v0.9.2）；
+                                              # 逐值列舉，不用範圍規則：其他值沒有依據（見模組 docstring）
+LAYOUT_17_KNOWN = 0x58                        # 公開定義（MEAnalyzer、coreboot）到 +0x58 為止（ELog 結尾）；表內再往後的位元組沒有公開欄位定義
 LAYOUT_16_SIZE = 0x48
 LAYOUT_PAD = 0x1000                      # 1.6 的表後面填 0xFF 到這裡
 MAIN_TYPES = {2: "FTPR", 1: "RBEP", 7: "NFTP"}    # BPDT 類型 → `$CPD` 名稱（ifwitool.c 與 cse_layout.h 的類型表）
@@ -87,6 +94,9 @@ def layout_table(d, base, end):
         got = zlib.crc32(d[base + 0x10:base + 0x14] + bytes(4) + d[base + 0x18:base + total])
         if got != want:
             return None, f"CSE layout table at 0x{base:x}: CRC-32 mismatch (stored 0x{want:08x}, computed 0x{got:08x})"
+        if total > LAYOUT_17_KNOWN and any(d[base + LAYOUT_17_KNOWN:base + total]):
+            return None, (f"CSE layout table at 0x{base:x} (Size 0x{sz:x}): the bytes after the defined fields "
+                          f"(0x{LAYOUT_17_KNOWN:x}-0x{total - 1:x}) are not all zero; their meaning is not publicly documented, so the table is not interpreted")
         ver, strict, head = "1.7", True, total
         pairs = [("data", u32(d, base + 0x18), u32(d, base + 0x1C))]
         pairs += [(f"BP{i + 1}", u32(d, base + 0x20 + 8 * i), u32(d, base + 0x24 + 8 * i)) for i in range(MAX_BP)]

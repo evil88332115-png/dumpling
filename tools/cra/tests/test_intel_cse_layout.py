@@ -69,7 +69,7 @@ def bpdt(ents, version=2, count=None):
 
 
 def layout_table(layout, data, bps, size=0x58, flags=0, bad_crc=False):
-    """layout 1.7（Size 0x40／0x48／0x58，從 +0x10 起算；+0x14 是 CRC-32）或 1.6（0x48，BP1…BP5，+0x40 u64 checksum）。
+    """layout 1.7（Size 0x40／0x48／0x58／0x60，從 +0x10 起算；+0x14 是 CRC-32）或 1.6（0x48，BP1…BP5，+0x40 u64 checksum）。
     bps＝[(相對 offset, size)]（沒有的補 0）。"""
     t = bytearray(b"\xff" * 16)
     pairs = (list(bps) + [(0, 0)] * 5)[:5]
@@ -129,7 +129,7 @@ def build(layout, size, data, bps, bpv=2, hv=2, **lt_kw):
     return r
 
 
-@pytest.mark.parametrize("layout,bpv,hv,size", [("1.7", 2, 2, 0x58), ("1.7", 2, 2, 0x48), ("1.7", 2, 2, 0x40), ("1.6", 1, 1, 0x58),
+@pytest.mark.parametrize("layout,bpv,hv,size", [("1.7", 2, 2, 0x58), ("1.7", 2, 2, 0x60), ("1.7", 2, 2, 0x48), ("1.7", 2, 2, 0x40), ("1.6", 1, 1, 0x58),
                                                 ("1.7", 1, 1, 0x58), ("1.6", 2, 2, 0x58)])
 def test_rbep_and_nftp_agree_without_ftpr(layout, bpv, hv, size):
     res = found(good_region(layout, REGION, None, bpv, hv, VER, size=size))
@@ -560,6 +560,15 @@ def test_layout_17_crc_is_checked_over_the_documented_range():
     r = good_region()                                                                    # checksum 欄位本身改成其他值 → 不符
     struct.pack_into("<I", r, 0x14, 0)
     assert "CRC-32 mismatch" in found(r)["note"]
+    for at in (0x12, 0x18, 0x20, 0x44, 0x48, 0x50, 0x58, 0x68, 0x6F):                 # Size 0x60 → 範圍到 0x70（多出來的 8 bytes 也入算）
+        r = good_region(size=0x60)
+        r[at] ^= 0x01
+        res = found(r)
+        assert res["status"] == "gap" and "CRC-32 mismatch" in res["note"], (hex(at), res)
+    for at in (0x00, 0x0F, 0x70, 0x80):
+        r = good_region(size=0x60)
+        r[at] ^= 0x01
+        assert found(r)["status"] == "found", hex(at)
     for size in (0x40, 0x48):                                                            # 較短的 Size：範圍跟著縮短
         r = good_region(size=size)
         r[0x10 + size] ^= 0x01
@@ -573,7 +582,7 @@ def test_layout_17_wiring_crc_mismatch_is_unknown_with_the_reason():
     assert (b["me"], b["me_status"]) == (None, "unknown") and "CRC-32 mismatch" in b["me_note"]
 
 
-@pytest.mark.parametrize("size", [0, 0x3E, 0x44, 0x50, 0x57, 0x59, 0x60, 0x68, 0x100, 0xFFFF])
+@pytest.mark.parametrize("size", [0, 0x3E, 0x44, 0x50, 0x57, 0x59, 0x5C, 0x64, 0x68, 0x70, 0x78, 0x80, 0xA0, 0x100, 0xFFFF])
 def test_layout_17_unknown_sizes_are_not_recognised(size):
     r = bytearray(good_region())
     struct.pack_into("<H", r, 0x10, size)
@@ -582,6 +591,59 @@ def test_layout_17_unknown_sizes_are_not_recognised(size):
     if res["status"] == "gap":
         assert "version" not in res
     assert res.get("status") != "found"
+
+
+@pytest.mark.parametrize("size", [0x5C, 0x64, 0x68, 0x70, 0x78, 0x80, 0xA0, 0x100])
+def test_layout_17_unknown_size_is_not_recognised_even_with_a_valid_crc(size):
+    """Size 不在清單裡：就算 CRC 照同樣的算法算對、表是用該 Size 完整建出來的，也不認（none，維持原結果）；沒有「≥ 0x40 的 8 的倍數」這種放寬。"""
+    r = good_region(size=0x58)
+    t = layout_table("1.7", (0x5000, 0x1000), [(0x1000, 0x2000), (0, 0), (0x3000, 0x2000)], size=size)
+    r[0:0x10 + size] = t
+    assert found(r)["status"] == "none"
+    b = xf.bios_image(with_me(bytes(r)))
+    assert b["me"] is None and b["me_status"] != "found"
+
+
+def test_layout_17_size_0x60_is_found_and_wired():
+    """Size 0x60（表總長 0x70）：結構與 CRC 算法同 0x58，+0x58 起的 24 bytes 全 0。"""
+    r = good_region(size=0x60)
+    assert r[0x58:0x70] == bytes(0x18) and struct.unpack_from("<H", r, 0x10)[0] == 0x60
+    res = found(r)
+    assert res["status"] == "found" and res["version"] == VERS and res["layout"] == "CSE layout table 1.7"
+    b = xf.bios_image(with_me(bytes(r)))
+    assert b["me_status"] == "found" and b["me"]["version"] == VERS
+    r = good_region(size=0x60, bad_crc=True)
+    res = found(r)
+    assert res["status"] == "gap" and "CRC-32 mismatch" in res["note"] and "version" not in res
+    b = xf.bios_image(with_me(bytes(r)))
+    assert (b["me"], b["me_status"]) == (None, "unknown")
+
+
+def test_layout_17_size_0x60_truncated_is_not_found():
+    """Size 0x60 的表被區域結尾截斷（表總長 0x70 超過區域）：CRC 無法驗 → 不採用（GAP，不報版本）；表之前就截斷也一樣。"""
+    r = bytes(good_region(size=0x60))
+    for end in (0x6F, 0x68, 0x58, 0x30, 0x21):
+        res = cl.find_cse(r, 0, end)
+        assert res["status"] in ("none", "gap") and "version" not in res, (hex(end), res)
+    assert "goes past the end" in cl.find_cse(r, 0, 0x6F)["note"]
+    for end in (0x6F, 0x68, 0x20, 0x10):
+        assert cl.find_cse(r[:end], 0, 0x6000)["status"] in ("none", "gap")
+
+
+@pytest.mark.parametrize("size,at", [(0x58, 0x58), (0x58, 0x67), (0x60, 0x58), (0x60, 0x67), (0x60, 0x68), (0x60, 0x6F)])
+def test_layout_17_nonzero_bytes_after_the_defined_fields_are_not_interpreted(size, at):
+    """+0x58 之後沒有公開欄位定義（MEAnalyzer、coreboot 都到 +0x58 為止）：不是 0 的話，CRC 就算相符也不採用（GAP），因為不知道那裡有沒有別的 boot partition 指標。"""
+    r = good_region(size=size)
+    r[at] = 0x01
+    crc = zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size]))
+    struct.pack_into("<I", r, 0x14, crc)
+    res = found(r)
+    assert res["status"] == "gap" and "not publicly documented" in res["note"] and "version" not in res, res
+    b = xf.bios_image(with_me(bytes(r)))
+    assert (b["me"], b["me_status"]) == (None, "unknown")
+    r[at] = 0
+    struct.pack_into("<I", r, 0x14, zlib.crc32(bytes(r[0x10:0x14]) + bytes(4) + bytes(r[0x18:0x10 + size])))
+    assert found(r)["status"] == "found"
 
 
 def test_layout_17_flags_and_reserved_bits_do_not_matter():
