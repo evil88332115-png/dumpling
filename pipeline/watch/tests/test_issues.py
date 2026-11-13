@@ -174,6 +174,30 @@ class TestStateTooBig(Base):
         self.assertEqual(state, [])                      # 狀態沒寫
 
 
+class TestNullState(Base):
+    """#32 驗證 F4：plan 的 state 是 null → 只執行動作，不寫狀態 Issue。"""
+
+    def test_null_state_runs_action_without_state(self):
+        p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "generated_at": "2026-01-02T00:00:00Z", "state_base": None, "state": None,
+             "actions": [self.open_act(labels=("watch-health",))], "status": "GAP", "detail": ""}
+        path = os.path.join(self.dir, "plan.json")
+        with open(path, "w") as f:
+            json.dump(p, f)
+        rc, out = self.apply(path, "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        names = lambda i: [l if isinstance(l, str) else l.get("name") for l in i.get("labels", [])]
+        self.assertEqual(len([i for i in self.gh.issues.values() if "dumpling-watch" in names(i)]), 1)
+        self.assertEqual([i for i in self.gh.issues.values() if "watch-state" in names(i)], [])
+
+    def test_null_state_with_state_base_rejected(self):
+        p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "generated_at": "x", "state": None, "actions": [], "status": "GAP", "detail": "",
+             "state_base": {"issue": 1, "updated_at": "t", "body_sha256": "s"}}
+        path = os.path.join(self.dir, "plan.json")
+        with open(path, "w") as f:
+            json.dump(p, f)
+        self.assertEqual(self.apply(path, "--mode", "real")[0], 1)
+
+
 class TestMarker(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(issues.parse_marker(mark(K1, "drill")), (K1, "drill"))
@@ -257,7 +281,7 @@ class TestReadState(Base):
         rc, out = run(["read-state", "--repo", REPO, "--mode", "real", "--out", self.dir], self.gh)
         self.assertEqual(rc, 0, out)
         base = json.load(open(os.path.join(self.dir, "state-base.json")))
-        self.assertEqual(base, {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 1})
+        self.assertEqual(base, {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 1, "watch_keys": [K1]})
         self.assertFalse(os.path.exists(os.path.join(self.dir, "state.json")))
 
     def test_with_state(self):
@@ -470,7 +494,7 @@ class TestCloseDrill(Base):
         rc, _ = run(["read-state", "--repo", REPO, "--mode", "drill", "--out", self.dir], self.gh)
         self.assertEqual(rc, 0)
         with open(os.path.join(self.dir, "state-base.json")) as f:
-            self.assertEqual(json.load(f), {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 0})
+            self.assertEqual(json.load(f), {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": 0, "watch_keys": []})
         self.assertFalse(os.path.exists(os.path.join(self.dir, "state.json")))
         before = len(self.gh.issues)
         plan = self.plan([self.open_act()], mode="drill", name="p2.json")

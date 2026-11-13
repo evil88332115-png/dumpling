@@ -1,6 +1,6 @@
 name: watch
 # 每日監控（PLAN「E. 監控與通知」、docs/WATCH.md）。排程每天一輪 real；手動觸發可選 drill（合成資料的演練：建基準 → 開 1 個 → 不重複 → 關閉）。
-# 權限照 D-012：預設唯讀；compute 只讀，notify 與 drill-close（關閉演練 Issue）有 issues: write，keepalive 只有 actions: write。
+# 權限照 D-012：預設唯讀；compute 只讀（另有 actions: read 查上一次排程的結果），notify 與 drill-close（關閉演練 Issue）有 issues: write，keepalive 只有 actions: write。
 # 呼叫 watch-round 的 job 宣告 issues: write 是給被呼叫 workflow 的上限，實際生效的是 watch-round 裡各 job 自己的宣告。
 # 公開 repo 只做演練與公開資料；GitLab 階段「已被利用」的真實案件一律用私有 Issue（docs/GITLAB-PORT.md）。
 on:
@@ -26,13 +26,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: watch
+  # 依 ref 分組：分支上的手動演練不會取消 main 的排程（同一群組只保留 1 個排隊者，新的會取消舊的排隊者）。
+  # 排程那一輪如果還是被取消，下一輪的 compute 會查到（上一次排程的結果算降級），keepalive 也會印出來。
+  group: watch-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   real:
     if: github.event_name == 'schedule' || inputs.mode == 'real'
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
@@ -46,6 +49,7 @@ jobs:
   drill-1-baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'drill'
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
@@ -61,11 +65,13 @@ jobs:
   drill-2-new-kev:
     needs: drill-1-baseline
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
     with:
       mode: drill
+      allow_baseline: true
       round: drill-2
       overlay: true
       expect_opened: ${{ inputs.dry_run == true && -1 || 2 }}
@@ -74,11 +80,13 @@ jobs:
   drill-3-repeat:
     needs: drill-2-new-kev
     permissions:
+      actions: read
       contents: read
       issues: write
     uses: ./.github/workflows/watch-round.yml
     with:
       mode: drill
+      allow_baseline: true
       round: drill-3
       overlay: true
       expect_opened: ${{ inputs.dry_run == true && -1 || 0 }}
@@ -114,5 +122,6 @@ jobs:
         run: |
           api="repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml"
           echo "watch.yml state（enable 之前）：$(gh api "$api" --jq .state)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "最近的排程 run：$(gh api "$api/runs?event=schedule&branch=main&per_page=3" --jq '[.workflow_runs[] | "\(.id) \(.status)/\(.conclusion // "-") \(.created_at)"] | join("；")')" | tee -a "$GITHUB_STEP_SUMMARY"
           gh api -X PUT "$api/enable"
           echo "watch.yml state（enable 之後）：$(gh api "$api" --jq .state)" | tee -a "$GITHUB_STEP_SUMMARY"
