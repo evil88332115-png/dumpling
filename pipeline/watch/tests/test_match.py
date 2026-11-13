@@ -460,6 +460,25 @@ class T(Base):
         bad, _ = match.prev_schedule_check(pv, "1", match.parse_now(NOW3))
         self.assertTrue(bad)
 
+    def test_issue_shows_release_results(self):
+        self.inventory["releases"][0].update(report_status="ATTENTION", release_gate="FAIL")
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2)
+        body = [x for x in plan["actions"] if x["op"] == "open"][0]["body"]
+        self.assertIn("報告狀態（report_status）ATTENTION", body)
+        self.assertIn("發行閘門（release_gate）FAIL", body)
+        self.assertIn("流程結果 NOT_RUN", body)
+
+    def test_issue_release_results_missing_is_not_run(self):
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        _, _, plan = self.run_once(NOW2)
+        body = [x for x in plan["actions"] if x["op"] == "open"][0]["body"]
+        self.assertIn("報告狀態（report_status）NOT_RUN", body)
+        self.assertIn("發行閘門（release_gate）NOT_RUN", body)
+
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
         txt = json.dumps(plan["state"])

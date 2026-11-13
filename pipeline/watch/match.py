@@ -152,6 +152,9 @@ def load_inventory(path, base):
                           "layer": layer, "status": r["status"], "tag": r.get("tag"), "kind": r.get("kind"),
                           "release_version": r.get("version"), "os_responsibility": r.get("os_responsibility"),
                           "html_url": r.get("html_url"), "sbom": os.path.join(base, rel), "sha256": s.get("sha256"),
+                          "report_status": r.get("report_status") or "NOT_RUN", "release_gate": r.get("release_gate") or "NOT_RUN",
+                          "pipeline_result": r.get("pipeline_result") or "NOT_RUN",
+                          "report_status_layers": r.get("report_status_layers") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
                           and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None})
     return inv, projs, problems
@@ -368,6 +371,16 @@ def pinfo_of(projs, uuid):
     return next((p for p in projs if p["uuid"] == uuid), None)
 
 
+def release_results(p):
+    """Release 的結論（release-meta；缺少時 NOT_RUN）。status 是生命週期，這三個才是掃描與發行的結論。"""
+    if not p:
+        return "報告狀態 NOT_RUN（找不到 Release 資訊）"
+    lay = "、".join(f"{x['layer']} {x['status']}" for x in p.get("report_status_layers") or [])
+    return (f"報告狀態（report_status）{p.get('report_status') or 'NOT_RUN'}" + (f"（{lay}）" if lay else "") +
+            f"；發行閘門（release_gate）{p.get('release_gate') or 'NOT_RUN'}；流程結果 {p.get('pipeline_result') or 'NOT_RUN'}"
+            "（取自 Release 的 release-meta.json；生命週期 shipped／development 不是掃描結論）")
+
+
 def layer_note(p):
     if not p:
         return ""
@@ -393,7 +406,8 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     lines += [f"**{e0['cve']}** 在已遭利用清單（KEV）上，比對到 **{e0['project']} {e0['version']}**（{p['layer'] if p else '?'} 層）。", ""]
     if p:
         lines += [f"- Release：{p.get('tag') or '?'}（{p.get('html_url') or '—'}）、Release 版本 {p.get('release_version') or '?'}",
-                  f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}"]
+                  f"- 狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
+                  f"- Release 的結論：{release_results(p)}"]
     lines += [f"- 第一次偵測：{min(x.get('cve_first_detected') or x['first_detected'] for x in entries)}（這次執行 {utc(now)}）", "",
               "| 元件 | purl | 依據 | 來源 |", "|---|---|---|---|"]
     for e in entries:
@@ -417,7 +431,8 @@ def vendor_body(mode, e, p, run_url, now):
               f"- KEV 加入日期：{e.get('date_added') or '?'}；來源：{e.get('source') or '?'}",
               f"- 第一次偵測：{e.get('first_detected')}（這次執行 {utc(now)}）"]
     if p:
-        lines += [f"- Release：{p.get('tag') or '?'}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}"]
+        lines += [f"- Release：{p.get('tag') or '?'}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
+                  f"- Release 的結論：{release_results(p)}"]
     lines += ["", "要人工確認：KEV 的受影響產品是不是在這個專案裡（廠商可能有很多產品）。", "", ART14_NOTE]
     if run_url:
         lines += ["", f"執行紀錄：{run_url}"]
@@ -723,6 +738,7 @@ def run(a, kernel_runner=None):
                 info, ctx = {"status": "NOT_RUN", "why": f"internal error ({type(e).__name__})"}, None
             budget -= (datetime.datetime.now() - t0).total_seconds()
             row = {"uuid": p["uuid"], "tag": p["tag"], "layer": p["layer"], "grype": info.get("status"), "why": info.get("why"),
+                   "report_status": p.get("report_status"), "release_gate": p.get("release_gate"),
                    "kernel_map": (info.get("kernel_map") or {}).get("status"), "exploited": 0, "version_unknown": 0, "kernel_cna": None}
             if row["kernel_map"] in ("GAP", "FAIL"):
                 # L4T 核心對應失敗：Grype 用原始 SBOM 比對，核心的 KEV 可能漏掉（Release 掃描這種情況也標 GAP；預驗第 3 項）
@@ -874,10 +890,11 @@ def render_report(mode, detail, status, per, gaps, attn, notes, coverage, action
     L = [f"# 每日監控（{mode}）：{status}", "", detail, ""]
     if first:
         L += ["**第一次執行：只建立基準，不開 Issue。**", ""]
-    L += ["## 各 SBOM", "", "| 專案鍵 | Release | Grype | 已遭利用 | 版本未知 | 核心 CNA | 說明 |", "|---|---|---|---|---|---|---|"]
+    L += ["## 各 SBOM", "", "| 專案鍵 | Release | 報告狀態 | 發行閘門 | Grype | 已遭利用 | 版本未知 | 核心 CNA | 說明 |",
+          "|---|---|---|---|---|---|---|---|---|"]
     for r in per.values():
-        L.append(f"| {md_cell(r['uuid'])} | {md_cell(r['tag'])} | {r['grype']} | {r['exploited']} | {r['version_unknown']} | "
-                 f"{r['kernel_cna'] or '—'} | {md_cell(r['why'])} |")
+        L.append(f"| {md_cell(r['uuid'])} | {md_cell(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
+                 f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or '不適用'} | {md_cell(r['why'])} |")
     L += ["", "## 每日沒有涵蓋的項目", ""] + [f"- {x}：{y}" for x, y in coverage]
     for title, xs in (("GAP", gaps), ("需注意", attn), ("說明", notes)):
         if xs:

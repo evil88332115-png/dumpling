@@ -468,6 +468,35 @@ def _date(s):
     return _clean(s, 40) if isinstance(s, str) else None
 
 
+# ---------------------------------------------------------------- release-meta 的結論欄位
+
+RESULT_VALUES = ("OK", "ATTENTION", "GAP", "FAIL")
+
+
+def _result(v):
+    """report_status／release_gate／pipeline_result 的值：只接受 OK／ATTENTION／GAP／FAIL，其他（缺少、型別不對、別的字）一律 NOT_RUN。"""
+    return v if isinstance(v, str) and v in RESULT_VALUES else "NOT_RUN"
+
+
+def meta_results(meta):
+    """release-meta 的結論欄位（C1 在 M2 新增；status 是生命週期 development／shipped，不是掃描結論）。
+    report_status：字串（整體＝最差那一份報告），或 {"status"／"overall": …, "layers": [{layer, status}]}；
+      另接受頂層的 report_status_layers（[{layer, status}]）。layers 只收 layer 是簡單字串、status 合法的項目。
+    release_gate：vex.gate 的值。pipeline_result：流程步驟的整體結果（舊名 result，C1 改名前兩個都讀）。"""
+    rs = meta.get("report_status")
+    layers = meta.get("report_status_layers")
+    if isinstance(rs, dict):
+        layers = rs.get("layers", layers)
+        rs = rs.get("overall", rs.get("status"))
+    lay = []
+    for x in layers if isinstance(layers, list) else []:
+        if isinstance(x, dict) and isinstance(x.get("layer"), str) and re.fullmatch(r"[a-z][a-z0-9-]{0,19}", x["layer"]):
+            lay.append({"layer": x["layer"], "status": _result(x.get("status"))})
+    pr = meta.get("pipeline_result", meta.get("result"))
+    return {"report_status": _result(rs), "report_status_layers": lay[:10], "release_gate": _result(meta.get("release_gate")),
+            "pipeline_result": _result(pr)}
+
+
 # ---------------------------------------------------------------- 單一 Release
 
 def collect_release(source, rel, kind, project, tagver, out, n):
@@ -476,7 +505,8 @@ def collect_release(source, rel, kind, project, tagver, out, n):
          "watch_version": tagver if kind == "release" else "dev",
          "status": None, "platform": None, "os_responsibility": None, "commit": None,
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
-         "sboms": {}, "kernel_versions": None, "scan_summary": None, "layers": None, "problems": []}
+         "sboms": {}, "kernel_versions": None, "scan_summary": None, "layers": None, "problems": [],
+         "report_status": "NOT_RUN", "report_status_layers": [], "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN"}
     probs = e["problems"]
     reldir = os.path.join(out, "releases", str(n))
     relpath = "releases/%d" % n
@@ -524,6 +554,7 @@ def collect_release(source, rel, kind, project, tagver, out, n):
     e["platform"] = meta.get("platform")
     e["os_responsibility"] = meta.get("os_responsibility")
     e["commit"] = meta["commit"]
+    e.update(meta_results(meta))
 
     # 2. SBOM：有分層（bsp、os）就只收分層，沒有才用整份（層名 product）
     base = "sbom-%s-%s" % (project, version)

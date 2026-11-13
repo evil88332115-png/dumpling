@@ -814,3 +814,23 @@ class TestRealHttp(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMetaResults(unittest.TestCase):
+    """release-meta 的 report_status／release_gate／pipeline_result（C1 在 M2 新增）：只接受 OK／ATTENTION／GAP／FAIL，其他一律 NOT_RUN。"""
+
+    def test_values(self):
+        r = collect.meta_results({"report_status": "ATTENTION", "release_gate": "FAIL", "pipeline_result": "OK"})
+        self.assertEqual((r["report_status"], r["release_gate"], r["pipeline_result"]), ("ATTENTION", "FAIL", "OK"))
+
+    def test_missing_or_bad_is_not_run(self):
+        r = collect.meta_results({"report_status": "SAFE", "release_gate": 1})
+        self.assertEqual((r["report_status"], r["release_gate"], r["pipeline_result"]), ("NOT_RUN", "NOT_RUN", "NOT_RUN"))
+
+    def test_old_result_name_and_layers(self):
+        r = collect.meta_results({"result": "GAP", "report_status": {"overall": "GAP",
+                                  "layers": [{"layer": "bsp", "status": "GAP"}, {"layer": "os", "status": "weird"}, {"layer": "../x", "status": "OK"}]}})
+        self.assertEqual(r["pipeline_result"], "GAP")
+        self.assertEqual(r["report_status"], "GAP")
+        self.assertEqual(r["report_status_layers"], [{"layer": "bsp", "status": "GAP"}, {"layer": "os", "status": "NOT_RUN"}])
+

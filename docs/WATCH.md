@@ -69,6 +69,10 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
  "skipped": [{"tag": "…", "why": "…"}]}
 ```
   - 路徑都是相對 `<out>` 的相對路徑（不寫絕對路徑，狀態 Issue 是公開的）。
+  - 每個 Release 另有 release-meta 的結論欄位（C1 在 M2 新增；`status` 是生命週期 development／shipped，**不是掃描結論**）：
+    `report_status`（報告整體狀態，最差那一份；分層的另有 `report_status_layers: [{layer, status}]`）、`release_gate`（vex.gate）、
+    `pipeline_result`（流程步驟的整體結果；C1 改名前也讀舊名 `result`）。值只接受 OK／ATTENTION／GAP／FAIL，缺少或其他值一律 `NOT_RUN`。
+    每個 KEV／廠商層級 Issue 與報告的各 SBOM 表都列出來。report_status 是字串還是物件，M2 合併時依 C1 的實際格式再核對一次。
   - status：API 失敗 → FAIL；有 Release 有 problem → GAP；否則 OK。stdout 一行 `WATCH-COLLECT<TAB>狀態<TAB>說明`；結束碼 OK 0、FAIL 1、GAP 3、用法 64。
 
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
