@@ -34,6 +34,7 @@ pipeline/new-project.sh <專案名> --platform <平台> --company-role <manufact
 1. 跑上面的指令（專案名只能用小寫英數與連字號）；會從 `templates/project/` 與平台的 `project_defaults` 產生專案，
    `CRA/Config/` 的三個檔從平台預設值帶入（`config.json`←`tools/cra/config.example.json`、`inputs.json`←`scan.inputs_template`
    指到的精靈範本、`vex-rules.json`←`tools/cra/vex-rules.example.json`）。不覆寫已存在的專案。
+   **`config.json` 帶入的是範本的虛構值（Example Co.、example.com、example-agent…），一定要換成真實值或刪掉**：留著的話，讀 config 的 CRA 文件（例如 user-information）會被判成完整（OK）。刪掉的欄位在文件裡標 TO BE COMPLETED、文件至少 GAP（M7 會改成開案時就不帶範本值）。產品自有軟體列在 `sbom.own_software`；真的沒有時寫 `"own_software": []` 加 `"own_software_none_reason": "<理由>"`（B-own-software 記 OK，說明寫理由）；兩個都沒寫 → B-own-software 與 SBOM 文件 GAP（沒有宣告自有軟體）。
 2. 把 `project.yml`、`sources.yml` 裡值是 `TO BE COMPLETED` 的地方填完；`python3 -I pipeline/lib/project_config.py validate projects/<專案名>` 會列出還沒填的欄位。`status` 改成 `shipped` 之前不能有待填欄位。
 3. 推上去。dev／release workflow 讀 `project.yml` 的 `platform`，打 tag `<專案>/<版本>` 就走 release。
 
