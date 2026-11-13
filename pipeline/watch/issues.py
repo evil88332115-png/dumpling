@@ -135,7 +135,9 @@ class Api:
                     msg = str(json.loads(data.decode("utf-8", "replace")).get("message", ""))[:120]
                 except Exception:
                     pass
-                raise Fail(self._scrub(f"{method} {u.path} 失敗：HTTP {status} {msg}".strip()))
+                err = Fail(self._scrub(f"{method} {u.path} 失敗：HTTP {status} {msg}".strip()))
+                err.status = status          # 呼叫端要判斷狀態碼時用這個，不要比對訊息文字（訊息含伺服器回的 message）
+                raise err
             if not data:
                 return None, hdr
             try:
@@ -403,7 +405,7 @@ class GitLabApi(Api):
         try:
             d, _ = self.request("GET", f"/projects/{repo}/members/all/{user_id}")
         except Fail as e:
-            if "HTTP 404" in str(e):
+            if getattr(e, "status", None) == 404:      # T-10 驗證建議 5：用狀態碼判斷，不比對訊息
                 return None
             raise
         if not isinstance(d, dict) or d.get("id") != user_id or type(d.get("access_level")) is not int or d.get("state") != "active":

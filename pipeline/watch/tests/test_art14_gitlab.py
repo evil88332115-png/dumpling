@@ -335,7 +335,9 @@ class TestLeakAndTrust(Base):
         ok = self.gl.add_issue(body, ["art14"], author=13)    # Owner
         ok2 = self.gl.add_issue(body, ["art14"], author=HUMAN)    # Developer（30，剛好）
         rc, out = self.countdown(False, res=self.result())
-        self.assertEqual(rc, 0, out)
+        # 真實案件有被略過的 → FAIL（倒數停了不能靜默；T-10 驗證建議 3），可信的照樣處理
+        self.assertEqual(rc, 1, out)
+        self.assertIn("沒有倒數", out)
         r = self.load(self.result())
         self.assertEqual(sorted(x["number"] for x in r["issues"]), sorted([ok, ok2]))
         self.assertEqual(sorted(x["number"] for x in r["skipped"]), sorted(skipped.values()))
@@ -345,6 +347,55 @@ class TestLeakAndTrust(Base):
         paths = self.gl.member_gets()        # 6 個不同作者，每個只查一次
         self.assertEqual(len(paths), 6)
         self.assertEqual(len(paths), len(set(paths)))
+
+    def test_drill_untrusted_is_only_skipped(self):
+        # 演練被略過不算失敗（只有真實案件要 FAIL）
+        self.gl.add_issue(self.real_body().replace("mode=real", "mode=drill"), ["art14-drill"], author=11)
+        rc, out = self.countdown(True)
+        self.assertEqual(rc, 0, out)
+
+    def test_member_api_error_404_by_status_not_message(self):
+        # T-10 驗證建議 5：用狀態碼判斷 404；500 的訊息裡就算有「HTTP 404」字樣也不能當成「不是成員」
+        orig = self.gl._raw
+        def raw(method, url, headers, body):
+            if "/members/all/" in url:
+                return 500, {}, b'{"message":"upstream said HTTP 404"}'
+            return orig(method, url, headers, body)
+        self.gl._raw = raw
+        with self.assertRaises(issues.Fail):
+            self.gl.member_access("7", HUMAN)
+        def raw404(method, url, headers, body):
+            if "/members/all/" in url:
+                return 404, {}, b'{"message":"404 Not found"}'
+            return orig(method, url, headers, body)
+        self.gl._raw = raw404
+        self.assertIsNone(self.gl.member_access("7", HUMAN))
+
+    def test_countdown_reports_leaks_of_the_other_label(self):
+        # T-10 驗證建議 2：countdown --drill 也要報出不是 confidential 的真實案件（反過來也一樣），不寫入
+        n_real = self.gl.add_issue(self.real_body(), ["art14"], confidential=False)
+        k = len(self.gl.writes)
+        rc, out = self.countdown(True, res=self.result())
+        self.assertEqual(rc, 1, out)
+        self.assertIn(n_real, self.load(self.result())["leaks"])
+        n_drill = self.gl.add_issue(self.real_body().replace("mode=real", "mode=drill"), ["art14-drill"], confidential=False)
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 1, out)
+        self.assertIn(n_drill, self.load(self.result())["leaks"])
+        self.assertFalse(any(f"/issues/{n}" in p for n in (n_real, n_drill) for _, p, _ in self.writes_since(k)))
+
+    def test_open_dedup_on_non_confidential_existing_fails(self):
+        # T-10 驗證建議 1：同一個命中已經有、但不是 confidential → FAIL（外洩疑慮），不當成「不重複開」的 OK
+        rc, out = self.open_case(real=True, res=self.result())
+        self.assertEqual(rc, 0, out)
+        n = self.load(self.result())["issue"]
+        self.gl.issues[n]["confidential"] = False
+        k = len(self.gl.writes)
+        rc, out = self.open_case(real=True, res=self.result())
+        self.assertEqual(rc, 1, out)
+        self.assertIn("不是 confidential", out)
+        self.assertEqual(self.load(self.result())["result"], "leak")
+        self.assertEqual(self.writes_since(k), [])
 
     def test_member_lookup_cached(self):
         body = self.real_body()

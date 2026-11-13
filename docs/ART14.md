@@ -132,6 +132,7 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 | `GITHUB_TOKEN`、`author_association` 過濾 | 作者與倒數留言的作者要是專案成員、`access_level` ≥ 30（Developer）（`GET /projects/:id/members/all/:user_id`）；`system` 留言不算；有 `art14` 標籤卻不是 confidential 的 Issue → FAIL、不寫入。**已實作** |
 | 公開檢查 `publiccheck`（防洩漏到公開） | 內部儲存：真實案件不跑公開檢查、不要求「演練」字樣；仍擋 quick action（`/指令` 行首）與沒淨化的 Markdown；演練照舊。**已實作** |
 | 排程每小時倒數留言 | GitLab pipeline schedule 每小時（`DUMPLING_JOB=art14`，job `art14:countdown`，token `ART14_GITLAB_TOKEN`）；留言與標籤邏輯重用 `evaluate`／`render_comment`。**已實作（`when: manual`，待內部驗證後放開）** |
+| 作者或標記不可信的案件只是略過 | GitLab 的真實案件被略過就 **FAIL**（法定倒數不能靜默停掉）；演練照舊只略過 |
 | 倒數只在 Issue 上看 | 加 **email 通知**（期限前提醒負責人與備援人；email 地址放內部設定，不進公開 repo）。**還沒做**（需要內部郵件設定／GITLAB-PORT T-08） |
 | SRP 人工提交、把編號與時間填回 Issue | 不變：SRP 沒有 API，不寫任何自動提交 |
 | 銷售市場（第 7 節，讀 `project.yml`） | 不變；`open-real`／`open-drill` 一樣傳 `--project projects/<專案>`（注意 GitLab 專案 ID 用 `--gitlab-project`） |

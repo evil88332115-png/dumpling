@@ -579,6 +579,9 @@ def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
     for i in issues.list_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "all"):
         mk = parse_marker(i.get("body"))
         if mk and mk[0] == key and mk[2] == mode:
+            if is_gitlab(api) and i.get("confidential") is not True:     # T-10 驗證建議 1：已經有、但不是 confidential → 外洩疑慮，FAIL
+                write_result(result, {"cmd": cmd, "result": "leak", "issue": i["number"], "key": key})
+                raise Fail(leak_message([i["number"]]))
             write_result(result, {"cmd": cmd, "result": "skipped", "issue": i["number"], "key": key, "markets": m["market_state"]})
             return f"已有同一個命中的{'演練' if drill else '真實'} Issue #{i['number']}，不重複開"
     issues.Labels(api, repo, False).ensure(labels)
@@ -635,6 +638,11 @@ def cmd_countdown(api, repo, drill, now, result):
     trust = Trust(api, repo)
     what = "演練" if drill else "真實"
     cases, skipped, leaks = find_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "drill" if drill else "real", trust)
+    if gl:
+        # T-10 驗證建議 2：另一種標籤（演練／真實）的 Issue 也看有沒有不是 confidential 的——不處理、不寫入，只報警
+        other = REAL_LABEL if drill else DRILL_LABEL
+        leaks = sorted(set(leaks) | {i["number"] for i in issues.list_issues(api, repo, other, "open")
+                                     if i.get("state") == "open" and i.get("confidential") is not True})
     for n, why in skipped:
         print(f"skip\t#{n}\t{why}")
     for n in leaks:
@@ -642,6 +650,13 @@ def cmd_countdown(api, repo, drill, now, result):
     out, errors, problems = [], [], []
     if leaks:
         errors.append(leak_message(leaks))
+    if gl and not drill:
+        # T-10 驗證建議 3：真實案件被略過（作者不可信、標記不合）時倒數就停了——不能靜默，FAIL 請人確認
+        # （成員 API 異常時也會全部變成「不是成員」）。剛關閉的索引延遲不算
+        stuck = [(n, why) for n, why in skipped if not why.startswith("已關閉")]
+        if stuck:
+            errors.append(f"有 {len(stuck)} 個 art14 Issue 沒有倒數（" + "；".join(f"#{n} {why}" for n, why in stuck[:5]) +
+                          "）：法定期限沒有被追蹤，請人工確認作者權限與 Issue 第一行的標記")
     for i, (key, kind, _mode) in cases:
         ev = evaluate(kind, i.get("body") or "", now)
         text = render_comment(ev, now, drill, gitlab=gl)
