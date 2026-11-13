@@ -158,6 +158,22 @@ class TestPlanHardening(Base):
         issues.Api(base="http://127.0.0.1:9", token="t")
 
 
+class TestStateTooBig(Base):
+    """PR #28 應修 2：狀態太大時，Issue 動作照樣執行，狀態不寫，明確 FAIL。"""
+
+    def test_actions_applied_state_not_written(self):
+        import random
+        r = random.Random(2)
+        big = {"schema": 1, "matches": {}, "x": "".join(r.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(80000))}
+        rc, out = self.apply(self.plan([self.open_act()], state=big), "--mode", "real")
+        self.assertEqual(rc, 1)
+        self.assertIn("狀態沒有寫入", out)
+        watch = [i for i in self.gh.issues.values() if "dumpling-watch" in [l if isinstance(l, str) else l.get("name") for l in i.get("labels", [])]]
+        state = [i for i in self.gh.issues.values() if "watch-state" in [l if isinstance(l, str) else l.get("name") for l in i.get("labels", [])]]
+        self.assertEqual(len(watch), 1)                  # KEV Issue 開出來了
+        self.assertEqual(state, [])                      # 狀態沒寫
+
+
 class TestMarker(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(issues.parse_marker(mark(K1, "drill")), (K1, "drill"))

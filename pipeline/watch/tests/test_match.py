@@ -51,7 +51,16 @@ class Base(unittest.TestCase):
         m = match.mods()
         eg = m["eg"]
         self.saved = {k: getattr(eg, k) for k in ("prepare", "find_grype", "db_status", "sandbox_check")}
+        self.saved_euvd = m["euvd"].exploited_index
+        self.euvd = {}              # EUVD 標示已遭利用的 CVE；None＝EUVD 不能用
         test = self
+
+        def exploited_index(index_dir, max_age=None, kev_max_age=None, now=None):
+            if test.euvd is None:
+                return {"status": "GAP", "usable": False, "exploited": None, "meta": None, "detail": "fake EUVD unavailable"}
+            return {"status": "OK", "usable": True, "meta": {}, "detail": "fake EUVD",
+                    "exploited": {c: {"euvd_ids": [], "sources": ["cisa_kev"], "date_added": "2026-01-01"} for c in test.euvd}}
+        m["euvd"].exploited_index = exploited_index
 
         def prepare(p, spec, *a, **k):
             pkgs = [c for c in json.load(open(spec["sbom"]))["components"]]
@@ -67,6 +76,7 @@ class Base(unittest.TestCase):
         eg = match.mods()["eg"]
         for k, v in self.saved.items():
             setattr(eg, k, v)
+        match.mods()["euvd"].exploited_index = self.saved_euvd
         shutil.rmtree(self.w, ignore_errors=True)
 
     def write_base(self, issue, n):
@@ -79,7 +89,8 @@ class Base(unittest.TestCase):
         out = os.path.join(self.w, "out-" + now[:10])
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
-                               grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=kw.get("demo", False))
+                               grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=kw.get("demo", False),
+                               allow_baseline=kw.get("allow_baseline", True))
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
@@ -212,7 +223,7 @@ class T(Base):
         out = os.path.join(self.w, "out-empty")
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode="real",
                                kev_overlay=None, max_new_issues=20, run_url=None, grype=None, grype_total_timeout=100, vendor_config=None,
-                               now=NOW1, demo=True)
+                               now=NOW1, demo=True, allow_baseline=True)
         st, _ = match.run(a)
         self.assertEqual(st, "GAP")
         self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
@@ -244,7 +255,8 @@ class T(Base):
         self.assertIn("requests@2.19.1", acts[0]["body"])
 
     def test_health_issue_after_two_degraded_runs(self):
-        self.run_once(NOW1)                                     # 測試環境沒有 EUVD：每次都降級
+        self.run_once(NOW1)
+        self.euvd = None                                        # 之後 EUVD 不能用：每次都降級
         _, _, p2 = self.run_once(NOW2)
         self.assertEqual([x for x in p2["actions"] if x["key"] == HEALTH_KEY], [])     # 第 1 次降級：還不通知
         _, _, p3 = self.run_once(NOW3)
@@ -296,8 +308,63 @@ class T(Base):
         json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
         st, _ = match.run(argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds,
                                              out=os.path.join(self.w, "o"), mode="real", kev_overlay=None, max_new_issues=20, run_url=None,
-                                             grype=None, grype_total_timeout=100, vendor_config=None, now=NOW1, demo=False))
+                                             grype=None, grype_total_timeout=100, vendor_config=None, now=NOW1, demo=False,
+                                             allow_baseline=True))
         self.assertEqual(st, "GAP")
+
+    def test_baseline_needs_explicit_allow(self):
+        """PR #28 建議 1：沒有狀態也沒有監控 Issue 時，不悄悄建基準（GAP、沒有 plan）。"""
+        out = os.path.join(self.w, "out-noallow")
+        json.dump({"dateReleased": NOW1, "vulnerabilities": [{"cveID": "CVE-2021-44228"}]}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
+        a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode="real",
+                               kev_overlay=None, max_new_issues=20, run_url=None, grype=None, grype_total_timeout=100, vendor_config=None,
+                               now=NOW1, demo=True, allow_baseline=False)
+        st, detail = match.run(a)
+        self.assertEqual(st, "GAP")
+        self.assertIn("baseline=true", detail)
+        self.assertFalse(os.path.exists(os.path.join(out, "plan.json")))
+
+    def test_baseline_fails_when_euvd_unavailable(self):
+        """PR #28 應修 1：第一次建基準時 EUVD 不能用 → FAIL。"""
+        self.euvd = None
+        with self.assertRaises(match.Fail) as cm:
+            self.run_once(NOW1)
+        self.assertIn("EUVD", str(cm.exception))
+
+    def test_baseline_fails_when_release_has_problem(self):
+        self.inventory["releases"][0]["problems"] = ["sbom-demo-v1-os.cdx.json 下載失敗（HTTP 502）"]
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        with self.assertRaises(match.Fail) as cm:
+            self.run_once(NOW1)
+        self.assertIn("Release", str(cm.exception))
+
+    def test_baseline_fails_when_kernel_cna_not_run(self):
+        kv = os.path.join(self.inv, "releases", "0", "kv.json")
+        json.dump({"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.8.12-x", "upstream_version": "6.8.12"}]}, open(kv, "w"))
+        self.inventory["releases"][0]["kernel_versions"] = "releases/0/kv.json"
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        with self.assertRaises(match.Fail):
+            self.run_once(NOW1, kernel_runner=lambda v, m: (None, "fake: mirror down"))
+
+    def test_prune_gone_after_180_days(self):
+        self.run_once(NOW1)
+        self.kev.append("CVE-2018-18074")
+        self.run_once(NOW2)
+        self.grype = self.grype[:1]
+        self.run_once(NOW3)                                     # requests 消失
+        _, _, plan = self.run_once("2027-06-01T01:00:00Z")     # 超過 180 天
+        self.assertFalse(any(e["cve"] == "CVE-2018-18074" for e in plan["state"]["matches"].values()))
+        self.assertTrue(any(e["cve"] == "CVE-2021-44228" for e in plan["state"]["matches"].values()))
+
+    def test_large_state_warns(self):
+        self.run_once(NOW1)
+        old = match.STATE_WARN_CHARS
+        match.STATE_WARN_CHARS = 10
+        try:
+            _, _, plan = self.run_once(NOW2)
+        finally:
+            match.STATE_WARN_CHARS = old
+        self.assertTrue(any("接近上限" in x["title"] for x in plan["actions"] if x["op"] == "open_if_closed"))
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
