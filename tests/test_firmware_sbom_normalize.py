@@ -427,6 +427,99 @@ class AuditRecord(unittest.TestCase):
                 self.assertEqual(d["components"], comps)               # components 本身不動
 
 
+class RecordShape(unittest.TestCase):
+    """normalize() 回傳的紀錄：每個鍵、早退路徑的內容逐一釘死。"""
+
+    @staticmethod
+    def base(**kw):
+        r = {"schema": "firmware-sbom-normalize/1", "input_sha256": SHA, "spec_version": None, "supported": False, "applied": False,
+             "changes": [], "unnormalized": [], "notes": []}
+        r.update(kw)
+        return r
+
+    def test_not_an_object_root(self):
+        for root in (None, [], "x", 1, True):
+            self.assertEqual(fsn.normalize(root, SHA), self.base(notes=["根物件不是 JSON 物件，不處理"]), repr(root))
+
+    def test_unsupported_or_odd_spec_version(self):
+        note = "specVersion 不在支援範圍（1.4, 1.5, 1.6），不處理"
+        for spec, shown in (("1.3", "1.3"), ("1.7", "1.7"), ("", ""), ("1.4 ", "1.4 "), ("x" * 20, "x" * 20)):
+            d = {"bomFormat": "CycloneDX", "specVersion": spec, "platform": "p"}
+            before = copy.deepcopy(d)
+            self.assertEqual(fsn.normalize(d, SHA), self.base(spec_version=shown, notes=[note]), repr(spec))
+            self.assertEqual(d, before)
+        for spec in (None, 1.4, ["1.4"], {"a": 1}, "x" * 21, "1" * 100):               # 不是字串或超過 20 字元：spec_version 記 None
+            d = {"bomFormat": "CycloneDX", "specVersion": spec, "platform": "p"}
+            self.assertEqual(fsn.normalize(d, SHA), self.base(notes=[note]), repr(spec))
+        d = {"bomFormat": "CycloneDX", "platform": "p"}                              # 沒有 specVersion
+        self.assertEqual(fsn.normalize(d, SHA), self.base(notes=[note]))
+
+    def test_supported_without_changes_and_with_changes(self):
+        for spec in ("1.4", "1.5", "1.6"):
+            d = doc14()
+            d["specVersion"] = spec
+            self.assertEqual(fsn.normalize(d, SHA), self.base(spec_version=spec, supported=True), spec)
+        d = doc14(platform="P")
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(set(rec), {"schema", "input_sha256", "spec_version", "supported", "applied", "changes", "unnormalized", "notes"})
+        self.assertEqual((rec["schema"], rec["input_sha256"], rec["spec_version"], rec["supported"], rec["applied"], rec["notes"]),
+                         ("firmware-sbom-normalize/1", SHA, "1.4", True, True, []))
+        self.assertEqual(set(rec["changes"][0]), {"rule", "from", "to", "property", "value_sha256"})
+        self.assertEqual(rec["changes"][0]["value_sha256"], canon("P"))
+
+    def test_bad_metadata_is_recorded_as_supported_but_untouched(self):
+        for bad in ("m", [], 5, {"properties": "x"}, {"properties": {}}, {"properties": 1}):
+            d = doc14(platform="x")
+            d["metadata"] = bad
+            before = copy.deepcopy(d)
+            self.assertEqual(fsn.normalize(d, SHA),
+                             self.base(spec_version="1.4", supported=True, notes=["metadata 或 metadata.properties 型別不對，沒有地方放紀錄，整份不處理"]), repr(bad))
+            self.assertEqual(d, before)
+        for ok in (None, {}, {"properties": None}, {"properties": []}):             # 這些可以放：照常正規化
+            d = doc14(platform="x")
+            d["metadata"] = ok
+            self.assertTrue(fsn.normalize(d, SHA)["applied"], repr(ok))
+
+    def test_exception_while_planning_leaves_document_untouched(self):
+        d = doc14(bad=True, platform="x")
+        before = copy.deepcopy(d)
+        old = fsn._plan
+        self.addCleanup(setattr, fsn, "_plan", old)
+
+        def boom(*a, **k):
+            raise ValueError("boom")
+        fsn._plan = boom
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec, self.base(spec_version="1.4", supported=True, notes=["規劃時發生 ValueError，整份不處理"]))
+        self.assertEqual(d, before)
+        fsn._plan = lambda *a, **k: 1 // 0
+        self.assertEqual(fsn.normalize(d, SHA)["notes"], ["規劃時發生 ZeroDivisionError，整份不處理"])
+        self.assertEqual(d, before)
+
+    def test_name_ok_boundaries(self):
+        ok = fsn._name_ok
+        self.assertTrue(ok("a"))
+        self.assertTrue(ok("a b"))                  # 空白（0x20）合格
+        self.assertTrue(ok(" "))
+        self.assertTrue(ok("~"))                    # 0x7E
+        self.assertTrue(ok("\u00e9\u754c"))         # 非 ASCII 合格
+        self.assertTrue(ok("a" * fsn.MAX_NAME_LEN))
+        self.assertFalse(ok("a" * (fsn.MAX_NAME_LEN + 1)))
+        self.assertFalse(ok(""))
+        self.assertFalse(ok("a\x1fb"))              # 0x1F 是控制字元
+        self.assertFalse(ok("\x00"))
+        self.assertFalse(ok("a\x7fb"))              # DEL
+        self.assertFalse(ok("\n"))
+        self.assertFalse(ok("\ud800"))              # 單獨代理字元
+        for v in (None, 1, b"a", ["a"]):
+            self.assertFalse(ok(v), repr(v))
+        # 端到端：空白名稱的頂層欄位會被搬移，DEL 的不會
+        d = doc14(**{"a b": 1, "a\x7fb": 2})
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual([c["from"] for c in rec["changes"]], ["/a b"])
+        self.assertEqual([u["at"] for u in rec["unnormalized"]], ["/a\x7fb"])
+
+
 class PrepIntegration(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()

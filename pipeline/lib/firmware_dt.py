@@ -44,6 +44,10 @@ EXPECTED_DT_KEYS = ("upload", "reason")
 # DT 改了訊息時，這裡會比對不到 → 被拒收的樣本變成一般 FAIL（安全的方向），屆時依新回應更新。
 BOM_INVALID_RE = re.compile(r'^http=400 \{"status":400,"title":"The uploaded BOM is invalid","detail":"Schema validation failed"[,}]')
 REJECT_PRE_OK = ("A-source", "B-sandbox", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "C-upload-sbom", "D-dt-project", "F-secret-scan")
+# firmware-dt.sh 要求 sca-scan 產生而且是 OK 的 11 個階段（和該檔的 need 預設清單相同，測試核對）。report 的 OK 也要求每一列都存在：
+# status.tsv 缺任何一列（階段沒跑、被刪）＝資料不完整，至少 GAP，不能因為「沒有看到不好的列」就是 OK。
+REQUIRED_STAGES = ("A-source", "B-sandbox", "B-sandbox-secrets", "B-sbom-provided", "C-grype", "C-upload-sbom",
+                   "D-dt-project", "D-dt-upload", "D-dt-bom-processing", "D-dt-vuln-analysis", "F-secret-scan")
 # 被拒收的直接後果：dt-verify 這兩項（沒有上傳成功就沒有分析、沒有元件）；名稱取自 C1 的 dt-verify.py
 REJECT_VERIFY_NAMES = ("弱點分析完成", "元件數")
 # dt-verify 的檢查名（取自 C1 的 pipeline/dt-verify.py verify；介面改了要跟著改）。OK 之前這四項都要存在而且是 OK：
@@ -96,12 +100,22 @@ def _depth_ok(obj, limit=MAX_DEPTH):
     return True
 
 
-POINTER_CAP = 300       # 重複鍵事件的位置只留前 300 字元（鍵名沒有長度上限）
+POINTER_CAP = 300       # 重複鍵事件的位置最多 300 字元（鍵名沒有長度上限）；超過時截斷並以 POINTER_MARK 結尾
+POINTER_MARK = "…"
 
 
-def _ptr_part(p):
-    """JSON Pointer（RFC 6901）的一段，最多取前 POINTER_CAP 個字元（逐字元轉義，所以前綴和完整轉義後的前綴相同）。"""
-    return "/" + str(p)[:POINTER_CAP].replace("~", "~0").replace("/", "~1")
+def _ptr_join(path, trunc, seg):
+    """JSON Pointer（RFC 6901）接上一段，回傳 (新路徑, 是否已截斷)。已截斷就不再延伸；超過 POINTER_CAP 字元時留前 POINTER_CAP-1 字元
+    （不把轉義切一半：結尾若是單獨的 "~" 就去掉）。每一段只轉義前 POINTER_CAP 字元，所以處理量不隨鍵長增加。路徑不含截斷標記（由呼叫端加）。"""
+    if trunc:
+        return path, True
+    new = path + "/" + str(seg)[:POINTER_CAP].replace("~", "~0").replace("/", "~1")
+    if len(new) <= POINTER_CAP:
+        return new, False
+    new = new[:POINTER_CAP - 1]
+    if new.endswith("~"):                # 轉義的第一個字元；完整的轉義是 ~0／~1
+        new = new[:-1]
+    return new, True
 
 
 class DupKeys:
@@ -132,28 +146,32 @@ class DupKeys:
         return d
 
     def locate(self, doc):
-        """補上每筆事件的物件在最終文件裡的 JSON Pointer（走訪整份文件；深度已先檢查過）。
-        位置一邊走一邊截斷在 POINTER_CAP 字元：不先組出完整的 Pointer，鍵名再長也只處理前 POINTER_CAP 字元。"""
+        """補上每筆事件的物件在最終文件裡的 JSON Pointer。深度優先、用 iterator 逐層走（記憶體 O(深度)，不把整個陣列的子節點一次推進堆疊），
+        位置字串只在走進容器時組一次、並邊走邊截斷（見 _ptr_join）；事件都找到了就停。深度已先檢查過（MAX_DEPTH）。"""
         if not self._objs:
             return
         want = {}
         for d, ev in self._objs:
             want.setdefault(id(d), []).append(ev)
-        stack = [(doc, "")]
-        while stack and want:
-            o, path = stack.pop()
+
+        def enter(o, path, trunc):
+            """走進一個容器：登記它的事件，回傳 (子節點 iterator, 路徑, 已截斷)。"""
             if isinstance(o, dict):
                 for ev in want.pop(id(o), ()):
-                    ev["pointer"] = path or "/"
-                if len(path) < POINTER_CAP:
-                    stack.extend((v, (path + _ptr_part(k))[:POINTER_CAP]) for k, v in o.items())
-                else:
-                    stack.extend((v, path) for v in o.values())
-            elif isinstance(o, list):
-                if len(path) < POINTER_CAP:
-                    stack.extend((v, (path + _ptr_part(i))[:POINTER_CAP]) for i, v in enumerate(o))
-                else:
-                    stack.extend((v, path) for v in o)
+                    ev["pointer"] = (path or "/") + (POINTER_MARK if trunc else "")
+                return iter(o.items()), path, trunc
+            return enumerate(o), path, trunc
+
+        stack = [enter(doc, "", False)] if isinstance(doc, (dict, list)) else []
+        while stack and want:
+            it, path, trunc = stack[-1]
+            for key, child in it:
+                if isinstance(child, (dict, list)):
+                    cp, ct = _ptr_join(path, trunc, key)
+                    stack.append(enter(child, cp, ct))
+                    break
+            else:
+                stack.pop()
 
 
 def load_json(path, limit, what, dups=None):
@@ -166,6 +184,15 @@ def load_json(path, limit, what, dups=None):
         raise DtError("%s 的 JSON 巢狀超過 %d 層" % (what, MAX_DEPTH))
     if dups is not None:
         dups.locate(doc)
+    return doc, raw
+
+
+def load_json_nodup(path, limit, what):
+    """讀 DT／Grype 的結果檔：同一個物件有重複鍵（後值蓋掉前值，檔案的意思不明）一律拒絕，不採信。"""
+    dups = DupKeys()
+    doc, raw = load_json(path, limit, what, dups)
+    if dups.total:
+        raise DtError("%s 有 %d 個重複鍵（同名的後值會蓋掉前值，不採信）" % (what, dups.total))
     return doc, raw
 
 
@@ -551,7 +578,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "duplicate_keys": ({"count": dups.total, "listed": len(dups.events),
                             "events": [{k: ev[k] for k in ("object_index", "pointer", "key_json", "dropped_value_sha256")} for ev in dups.events[:MAX_DUP_NOTES]]}
                            if dups.total else None),
-        "replaced_metadata_component": ({"name": old.get("name"), "version": old.get("version"), "purl": _short_str(old.get("purl"))} if isinstance(old, dict) else None),
+        "replaced_metadata_component": ({"name": _short_str(old.get("name")), "version": _short_str(old.get("version")), "purl": _short_str(old.get("purl"))} if isinstance(old, dict) else None),
         "summary": summary,
     }
     info_text = dumps_json(info, "dt-project.json")
@@ -660,7 +687,7 @@ def read_status_tsv(path):
     raw = _read_limited(path, MAX_BYTES, "status.tsv").decode("utf-8", "replace")
     rows = {}
     try:
-        for r in csv.DictReader(raw.splitlines(), delimiter="\t"):
+        for r in csv.DictReader(raw.splitlines(), delimiter="\t", quoting=csv.QUOTE_NONE):
             if r.get("stage"):
                 new = (r.get("status") or "", r.get("detail") or "")       # 不 strip：" OK" 不是 OK（scan-status-check.py 也是完全相等才算）
                 old = rows.get(r["stage"])
@@ -740,7 +767,7 @@ def sample_result(info, dt_dir, wait_rc):
     """回傳 dict：dt_components, dt_findings, upload, grype, grype_matches, status, notes。"""
     s = info["summary"]
     r = {"upload": "NOT_RUN", "dt_components": "-", "dt_findings": "-", "grype": "NOT_RUN", "grype_matches": "-",
-         "notes": [], "verify_fail": [], "verify_gap": [], "stage_attention": [], "accepted": False, "unverified_declaration": False}
+         "notes": [], "verify_fail": [], "verify_gap": [], "stage_attention": [], "missing_stages": [], "accepted": False, "unverified_declaration": False}
     exp_dt = info.get("expected_dt")
     rejected = False
     sd = os.path.join(dt_dir, info["project_name"]) if dt_dir else None
@@ -749,15 +776,15 @@ def sample_result(info, dt_dir, wait_rc):
     fails = []
     if sd and os.path.isdir(sd):
         st = os.path.join(sd, "scan", "status.tsv")
-        if os.path.isfile(st):
+        if os.path.lexists(st):        # 存在但不是一般檔案（資料夾、斷掉的符號連結…）也當作讀不到，不當成「沒有」
             try:
                 rows = read_status_tsv(st)
             except DtError as e:
                 r["upload"] = "FAIL"; r["notes"].append(_cell(e))
         sj = os.path.join(sd, "summary.json")
-        if os.path.isfile(sj):
+        if os.path.lexists(sj):
             try:
-                summ, _ = load_json(sj, MAX_BYTES, "summary.json")
+                summ, _ = load_json_nodup(sj, MAX_BYTES, "summary.json")
             except DtError as e:
                 r["notes"].append(_cell(e)); r["verify_fail"].append("summary.json 讀不到")
     if rows is None and summ is None and r["upload"] != "FAIL":
@@ -774,13 +801,17 @@ def sample_result(info, dt_dir, wait_rc):
             fails = [k for k in fails if k != "D-dt-upload"]              # 已宣告的拒收，不重複報 sca-scan 的這一列
         if fails:
             r["notes"].append("sca-scan FAIL 階段：" + "、".join(_cell(x, 60) for x in fails))
+        if not (exp_dt and rejected):                 # 宣告並真的被拒收時，上傳之後的階段本來就沒有（上傳之前的必要階段由下面的 REJECT_PRE_OK 核對）
+            r["missing_stages"] = [x for x in REQUIRED_STAGES if x not in rows]
+            if r["missing_stages"]:
+                r["notes"].append("缺少階段 " + "、".join(_cell(x, 60) for x in r["missing_stages"]) + "（status.tsv 沒有這一列，資料不完整）")
         r["stage_attention"] = ["%s %s" % (_cell(k, 60), _cell(st, 30) or "(空)") for k, st in other]
         g = rows.get("C-grype", ("NOT_RUN", ""))[0]
         r["grype"] = g
         gj = os.path.join(sd, "scan", "scan", "grype.json")   # sca-scan --out 是 <sd>/scan，Grype 結果在它的 scan/grype.json
         if g == "OK":
             try:
-                gd, _ = load_json(gj, MAX_GRYPE_BYTES, "grype.json")
+                gd, _ = load_json_nodup(gj, MAX_GRYPE_BYTES, "grype.json")
                 m = gd.get("matches") if isinstance(gd, dict) else None
                 if not isinstance(m, list):
                     raise DtError("grype.json 沒有 matches 陣列")
@@ -842,7 +873,7 @@ def sample_result(info, dt_dir, wait_rc):
             r["notes"].append("DT 拒收上傳（http=400，BOM 不符 schema）；firmware.yml 沒有宣告 expected_dt")
         elif exp_dt:
             r["notes"].append("firmware.yml 宣告 expected_dt: rejected，但上傳失敗不是 DT 的「BOM 不符 schema」拒收（http=400 且回應為 The uploaded BOM is invalid／Schema validation failed）")
-    elif (wait_rc is not None and wait_rc != 0) or "GAP" in (r["upload"], r["grype"]) or r["verify_gap"]:
+    elif (wait_rc is not None and wait_rc != 0) or "GAP" in (r["upload"], r["grype"]) or r["verify_gap"] or r["missing_stages"]:
         # verify_gap：dt-verify 的資料不全（checks 缺漏、NOT_RUN、不認得的狀態、元件數怪）＝驗證沒有完整做完，同 wait 結束碼 3 的語意（資料不完整）→ GAP
         st = "GAP"
     elif summ is None or rows is None or r["upload"] != "OK" or r["grype"] != "OK":
@@ -959,11 +990,11 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         if not os.path.isdir(dt_dir):
             raise DtError("--dt-result 不是資料夾")
         p = os.path.join(dt_dir, "dt-wait.rc")
-        if os.path.isfile(p):
-            try:
-                wait_rc = int(_read_limited(p, 64, "dt-wait.rc").decode().strip())
-            except (ValueError, UnicodeDecodeError):
-                raise DtError("dt-wait.rc 不是整數")
+        if os.path.lexists(p):         # 存在但不是一般檔案（斷掉的符號連結、資料夾、FIFO）：_read_limited 會拒絕 → FAIL，不當成「沒有 rc」
+            raw = _read_limited(p, 64, "dt-wait.rc").strip(b" \t\r\n")
+            if not re.fullmatch(rb"[0-9]+", raw):          # 只認 ASCII 數字：+0、-0、0_0、全形／阿拉伯數字、NBSP 都不是 0
+                raise DtError("dt-wait.rc 不是非負整數（只認 ASCII 數字）")
+            wait_rc = int(raw)
     lines, rows = [], []
     nv = None
     for d in prep_dirs:
@@ -1007,7 +1038,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
-           "- 狀態 OK 只表示：上傳與驗證都完成（dt-verify 的「專案存在」「弱點分析完成」「元件數」「漏洞總數」都在而且是 OK），每個元件都有 purl（不是 pkg:generic）、"
+           "- 狀態 OK 只表示：sca-scan 的 11 個必要階段（`REQUIRED_STAGES`）每一列都在，上傳與驗證都完成（dt-verify 的「專案存在」「弱點分析完成」「元件數」「漏洞總數」都在而且是 OK），每個元件都有 purl（不是 pkg:generic）、"
            "沒有版本缺漏、`dumpling:vuln-assessment` 都完全等於 NONE，Grype 與 DT 的比對數讀得到而且是 0，sca-scan 其他階段都是 OK（授權、核心設定那幾個預期的 NOT_RUN 除外），輸入 SBOM 沒有重複鍵。"
            "ATTENTION 表示完成但仍有需要人看的原因（逐項列在說明裡）；GAP 表示資料不完整；FAIL 表示有階段或檢查失敗。這份報告沒有整體通過或安全的結論。",
            "", "## 每個樣本的摘要", ""]

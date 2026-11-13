@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,6 +106,12 @@ class PrepTests(Base):
         doc["metadata"]["component"]["purl"] = ["not", "a", "string"]
         info, _ = self.prep(doc)
         self.assertIsNone(info["replaced_metadata_component"]["purl"])
+        doc["metadata"]["component"].update(name=["x"], version=5)
+        info, _ = self.prep(doc)
+        self.assertEqual(info["replaced_metadata_component"], {"name": None, "version": None, "purl": None})
+        doc["metadata"]["component"].update(name="n" * 1000, version="v" * 1000, purl="p" * 1000)
+        info, _ = self.prep(doc)
+        self.assertEqual(info["replaced_metadata_component"], {"name": "n" * 300, "version": "v" * 300, "purl": "p" * 300})
 
     def test_name_rules(self):
         self.assertEqual(fd.project_name("vbios", "x", True), "firmware-vbios-synthetic-x")
@@ -249,7 +256,8 @@ class ReportBase(Base):
             self.w("%s/scan/scan/grype.json" % d, grype)
         return os.path.join(self.tmp, root)
 
-    GOOD = [("D-dt-project", "OK", "x"), ("D-dt-upload", "OK", "x"), ("D-dt-bom-processing", "OK", "x"), ("C-grype", "OK", "3 matches")]
+    # sca-scan 的 11 個必要階段（和 firmware-dt.sh 的 need 清單相同，見 test_required_stages_match_firmware_dt_sh）
+    GOOD = [(st, "OK", "3 matches" if st == "C-grype" else "x") for st in fd.REQUIRED_STAGES]
     CHECKS = [{"name": n, "status": "OK", "detail": ""} for n in fd.REQUIRED_VERIFY_CHECKS] + [{"name": "依生態系的漏洞數", "status": "OK", "detail": ""}]
     SUMM = {"components": 2, "findings_total": 0, "checks": CHECKS}
 
@@ -796,14 +804,69 @@ class HardeningTests(ReportBase):
         took = time.monotonic() - t0
         self.assertLess(took, 2.0)
         self.assertEqual(d.total, fd.MAX_DUP_EVENTS)
-        want = ("/x/" + "k~1~0" * 100)[:fd.POINTER_CAP]
+        want = ("/x/" + "k~1~0" * 100)[:fd.POINTER_CAP - 1]
+        want = (want[:-1] if want.endswith("~") else want) + fd.POINTER_MARK       # 截斷處加標記，不留半個轉義
         for ev in d.events:
-            self.assertEqual(len(ev["pointer"]), fd.POINTER_CAP)
+            self.assertEqual(len(ev["pointer"]), len(want))
+            self.assertLessEqual(len(ev["pointer"]), fd.POINTER_CAP)
             self.assertEqual(ev["pointer"], want)
         # 沒有長鍵名時完整保留（含索引與轉義）；根物件的位置是 "/"
         d2 = fd.DupKeys()
         fd.load_json(self.w("shortkey.json", '{"a": 1, "a": 2, "b/c": [{"d~": {"e": 1, "e": 2}}]}'), fd.MAX_BYTES, "SBOM", d2)
         self.assertEqual([ev["pointer"] for ev in d2.events], ["/b~1c/0/d~0", "/"])      # 內層物件先完成
+
+    def test_truncated_pointer_has_marker_and_never_splits_an_escape(self):
+        for n in range(280, 304):                                  # 讓截斷點落在各個位置（含轉義的中間）
+            for ch in ("~", "/", "a"):
+                key = "a" * n + ch + "b"
+                d = fd.DupKeys()
+                fd.load_json(self.w("trunc.json", '{%s: {"v": 1, "v": 2}}' % json.dumps(key)), fd.MAX_BYTES, "SBOM", d)
+                ptr = d.events[0]["pointer"]
+                self.assertLessEqual(len(ptr), fd.POINTER_CAP, (n, ch))
+                if ptr.endswith(fd.POINTER_MARK):
+                    body = ptr[:-1]
+                    self.assertFalse(body.endswith("~"), (n, ch))
+                    self.assertEqual(len(body) + 1 <= fd.POINTER_CAP, True)
+                self.assertNotRegex(ptr.replace(fd.POINTER_MARK, ""), r"~(?![01])", (n, ch))      # 每個 ~ 後面都是 0 或 1
+        # 沒超過上限的完整保留、沒有標記
+        d = fd.DupKeys()
+        fd.load_json(self.w("short2.json", '{"%s": [0, {"v": 1, "v": 2}]}' % ("a" * 100)), fd.MAX_BYTES, "SBOM", d)
+        self.assertEqual(d.events[0]["pointer"], "/" + "a" * 100 + "/1")
+        # 長度剛好 POINTER_CAP 的完整路徑不加標記
+        key = "c" * (fd.POINTER_CAP - 1)
+        d = fd.DupKeys()
+        fd.load_json(self.w("exact.json", '{%s: {"v": 1, "v": 2}}' % json.dumps(key)), fd.MAX_BYTES, "SBOM", d)
+        self.assertEqual(d.events[0]["pointer"], "/" + key)
+        self.assertEqual(len(d.events[0]["pointer"]), fd.POINTER_CAP)
+
+    def test_locate_memory_is_bounded_by_depth_not_by_array_size(self):
+        # 重複鍵的物件在大陣列「之後」：走訪必須逐層用 iterator，不能把整個陣列的子節點一次推進堆疊（記憶體 ∝ 元素數）
+        import tracemalloc
+        n = 400000
+        text = '{"%s": {"L": [%s0]}, "dup": {"x": 1, "x": 2}}' % ("k" * 290, "0," * n)
+        d = fd.DupKeys()
+        doc = json.loads(text, object_pairs_hook=d.hook)
+        self.assertEqual(d.total, 1)
+        tracemalloc.start()
+        try:
+            d.locate(doc)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(d.events[0]["pointer"], "/dup")
+        self.assertLess(peak, 256 * 1024, peak)                  # 舊寫法約 30 MB（400000 個 tuple），這裡只有幾 KB
+        # 大陣列裡每個元素都是容器時也一樣：記憶體不隨元素數增加
+        text = '{"A": [%s{}], "dup": {"x": 1, "x": 2}}' % ("{}," * 100000)
+        d = fd.DupKeys()
+        doc = json.loads(text, object_pairs_hook=d.hook)
+        tracemalloc.start()
+        try:
+            d.locate(doc)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 256 * 1024, peak)
+        self.assertEqual(d.events[0]["pointer"], "/dup")
 
     def test_expected_not_run_stages_are_ignored(self):
         # firmware-dt.sh 固定 --no-license（E 段 NOT_RUN），沒有 --kernel-build（C-kernel-* NOT_RUN）：這些不能讓乾淨樣本變 ATTENTION
@@ -822,6 +885,131 @@ class HardeningTests(ReportBase):
         self.assertEqual(self.status(rows=[r for r in self.GOOD if r[0] != "D-dt-upload"] + [("D-dt-upload", "FAIL", "x"), ("D-dt-upload", "OK", "y")]), "FAIL")
         p = self.w("t.tsv", "stage\tstatus\tdetail\nA\tGAP\tx\nA\tOK\ty\nB\tOK\tz\n")
         self.assertEqual(fd.read_status_tsv(p), {"A": ("GAP", "x"), "B": ("OK", "z")})
+
+    def test_required_stages_match_firmware_dt_sh(self):
+        with open(os.path.join(ROOT, "pipeline", "firmware-dt.sh"), encoding="utf-8") as fh:
+            m = re.search(r"^else need=\(([^)]*)\); fi$", fh.read(), re.M)
+        self.assertIsNotNone(m)
+        self.assertEqual(tuple(m.group(1).split()), fd.REQUIRED_STAGES)
+        self.assertEqual(len(fd.REQUIRED_STAGES), 11)
+        self.assertEqual([r[0] for r in self.GOOD], list(fd.REQUIRED_STAGES))
+        self.assertEqual(self.status(), "OK")
+
+    def test_missing_required_stage_row_is_gap_never_ok(self):
+        for st in fd.REQUIRED_STAGES:
+            rows = [r for r in self.GOOD if r[0] != st]
+            s, out, rc = self.case(rows=rows)
+            self.assertEqual((s, rc), ("GAP", 0), (st, out))
+            self.assertIn("缺少階段 " + st.replace("_", "\\_"), out, st)
+        # 只留四列（以前的 GOOD）也不是 OK；缺很多列時全部列出
+        four = [r for r in self.GOOD if r[0] in ("D-dt-project", "D-dt-upload", "D-dt-bom-processing", "C-grype")]
+        s, out, _ = self.case(rows=four)
+        self.assertEqual(s, "GAP")
+        for st in fd.REQUIRED_STAGES:
+            if st not in ("D-dt-project", "D-dt-upload", "D-dt-bom-processing", "C-grype"):
+                self.assertIn(st, out)
+        # 階段名稱只差大小寫或空白，不算有這一列
+        rows = [r if r[0] != "A-source" else ("a-source", "OK", "x") for r in self.GOOD]
+        self.assertEqual(self.status(rows=rows), "GAP")
+        rows = [r if r[0] != "A-source" else ("A-source ", "OK", "x") for r in self.GOOD]
+        self.assertEqual(self.status(rows=rows), "GAP")
+        # FAIL 仍比 GAP 重；其他階段的 ATTENTION 不會把缺列蓋成 ATTENTION
+        rows = [r for r in self.GOOD if r[0] != "F-secret-scan"]
+        self.assertEqual(self.status(rows=rows + [("C-euvd", "FAIL", "x")]), "FAIL")
+        self.assertEqual(self.status(rows=rows + [("C-euvd", "GAP", "x")]), "GAP")
+        # 宣告 expected_dt: rejected 且真的被拒收：只核對上傳之前的階段（上傳之後的階段本來就沒有），不因缺少上傳之後的階段而改變
+        self.ED = ReportTests.ED
+        o, dt = ReportTests.rej_case(self, True, ReportTests.REJ, ReportTests.REJ_SUMM, "hm1")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("與 firmware.yml 宣告的 expected_dt 一致", out)
+        self.assertNotIn("缺少階段", out)
+        rows = [r for r in ReportTests.REJ if r[0] != "F-secret-scan"]                           # 上傳之前的必要階段缺列：不放行
+        o, dt = ReportTests.rej_case(self, True, rows, ReportTests.REJ_SUMM, "hm2")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("F-secret-scan", out)
+
+    def test_exactly_one_match_needs_a_person(self):
+        s = fd.summarize([clean()])
+        self.assertEqual(fd.attention_reasons(s, {"grype_matches": 0, "dt_findings": 0}), [])
+        self.assertEqual(fd.attention_reasons(s, {"grype_matches": 1, "dt_findings": 0}), ["Grype 有 1 筆比對結果，需要人審"])
+        self.assertEqual(fd.attention_reasons(s, {"grype_matches": 0, "dt_findings": 1}), ["DT 有 1 筆比對結果，需要人審"])
+        self.assertEqual(len(fd.attention_reasons(s, {"grype_matches": 1, "dt_findings": 1})), 2)
+        self.assertEqual(self.status(grype={"matches": [{}]}), "ATTENTION")
+        self.assertEqual(self.status(summ=dict(self.SUMM, findings_total=1)), "ATTENTION")
+        self.assertEqual(self.status(grype={"matches": []}), "OK")
+
+    def test_status_tsv_unreadable_without_summary_is_fail(self):
+        for kind in ("huge-field", "dir", "dangling", "binary-nul"):
+            HardeningTests.n += 1
+            slug = "u%d" % HardeningTests.n
+            info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, kind="bios", version="firmware_version: 1.0\n")
+            root = "dt-" + slug
+            tsv = os.path.join(self.tmp, root, info["project_name"], "scan", "status.tsv")
+            os.makedirs(os.path.dirname(tsv))
+            if kind == "huge-field":
+                self.w(os.path.relpath(tsv, self.tmp), "stage\tstatus\tdetail\nA\tOK\t" + "x" * 200000 + "\n")
+            elif kind == "dir":
+                os.mkdir(tsv)
+            elif kind == "dangling":
+                os.symlink(os.path.join(self.tmp, "nowhere"), tsv)
+            else:
+                with open(tsv, "wb") as fh:
+                    fh.write(b"stage\tstatus\tdetail\nA\tOK\t\x00\x00\n")
+            rc, out, _ = self.run_report([o], os.path.join(self.tmp, root))
+            if kind == "binary-nul":                       # NUL 位元組：csv 讀得動，但沒有必要階段 → 不是 OK
+                self.assertNotIn("FIRMWARE-DT\tOK", out, kind)
+                continue
+            self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), (kind, out))
+            self.assertEqual(rc, 1, kind)
+
+    def test_status_tsv_quote_characters_are_literal(self):
+        # 開頭帶 " 的 detail 不能把後面的列吞掉（csv 預設會把引號當欄位界線）
+        p = self.w("q.tsv", 'stage\tstatus\tdetail\nA-source\tOK\t"abc\nB-sandbox\tFAIL\tx\n"C-grype"\tGAP\ty\n')
+        rows = fd.read_status_tsv(p)
+        self.assertEqual(rows["A-source"], ("OK", '"abc'))
+        self.assertEqual(rows["B-sandbox"], ("FAIL", "x"))
+        self.assertEqual(rows['"C-grype"'], ("GAP", "y"))
+        # 端到端：被吞掉的列是 FAIL 時，report 仍是 FAIL
+        rows2 = [r if r[0] != "A-source" else ("A-source", "OK", '"abc') for r in self.GOOD] + [("C-euvd", "FAIL", "x")]
+        self.assertEqual(self.status(rows=rows2), "FAIL")
+
+    def test_result_files_with_duplicate_keys_are_not_trusted(self):
+        # grype.json／summary.json 的同名鍵，後值會蓋掉前值：檔案的意思不明，一律 FAIL（不讓「前面是 FAIL／有比對、後面是 OK」變成 OK）
+        st, out, _ = self.case(grype='{"matches": [{}], "matches": []}')
+        self.assertEqual(st, "FAIL", out)
+        self.assertIn("grype.json 有 1 個重複鍵", out)
+        st, out, _ = self.case(summ='{"components": 2, "components": 2, "findings_total": 0, "checks": []}')
+        self.assertEqual(st, "FAIL", out)
+        self.assertIn("summary.json 有 1 個重複鍵", out)
+        bad = json.dumps(self.SUMM)[:-1] + ', "findings_total": 0}'                 # 頂層 findings_total 重複
+        st, out, _ = self.case(summ=bad)
+        self.assertEqual(st, "FAIL", out)
+        nested = json.dumps(self.SUMM).replace('"status": "OK", "detail": ""}', '"status": "FAIL", "status": "OK", "detail": ""}', 1)   # checks 裡的重複鍵
+        st, out, _ = self.case(summ=nested)
+        self.assertEqual(st, "FAIL", out)
+        self.assertEqual(self.status(), "OK")                                       # 對照：沒有重複鍵
+
+    def test_declared_expected_dt_without_a_comparable_result_exits_1(self):
+        self.ED = ReportTests.ED
+        # GAP（上傳階段 GAP）：狀態照實是 GAP，但宣告了卻沒有結果可核對 → report 以 1 結束
+        rows = [r if r[0] != "D-dt-upload" else ("D-dt-upload", "GAP", "x") for r in self.GOOD]
+        o, dt = ReportTests.rej_case(self, True, rows, ReportTests.SUMM, "hdg1")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tGAP\t"), out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("宣告 expected_dt，但沒有上傳結果可核對宣告（狀態 GAP）", out)
+        # 沒宣告的同一組結果：GAP 不讓 report 失敗
+        o, dt = ReportTests.rej_case(self, False, rows, ReportTests.SUMM, "hdg2")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tGAP\t"), out)
+        self.assertEqual(rc, 0, out)
+        # wait 結束碼 3 造成的 GAP 也一樣
+        o, dt = ReportTests.rej_case(self, True, self.GOOD, ReportTests.SUMM, "hdg3")
+        self.w("hdg3/dt-wait.rc", "3\n")
+        rc, out, _ = self.run_report([o], dt)
+        self.assertEqual(rc, 1, out)
 
     def test_duplicate_stage_rows_severity_order_all_pairs(self):
         order = ["OK", "ATTENTION", "NOT_ASSESSED", "NOT_RUN", "GAP", "FAIL"]       # 輕 → 重（測試自己寫死，不讀 fd._SEV）
@@ -868,7 +1056,7 @@ class HardeningTests(ReportBase):
         self.assertEqual(run(None)[0], "OK")                  # 沒有 dt-wait.rc（沒有 wait 的紀錄）：照其他資料判斷
         self.assertEqual(run("0\n")[0], "OK")
         self.assertEqual(run("00\n")[0], "OK")
-        for v in ("1", "2", "-1", "4", "124", "137", "255", "256", "99999"):
+        for v in ("1", "2", "4", "124", "137", "255", "256", "99999"):
             st, out, rc = run(v + "\n")
             self.assertEqual((st, rc), ("GAP", 0), (v, out))
             self.assertIn("dt-ephemeral wait 結束碼 %s" % int(v), out)
@@ -876,10 +1064,33 @@ class HardeningTests(ReportBase):
         self.assertEqual(st, "GAP")
         self.assertIn("資料不完整", out)
         # 看不懂的內容是錯誤，不是 OK
-        for v in ("", "x", "1.5", "0x0", "\n"):
+        # 只認 ^[0-9]+$（ASCII）：+0、-0、-1、0_0、全形數字、阿拉伯數字、NBSP、數字中間有空白都不是整數（不能被當成 0）
+        for v in ("", "x", "1.5", "0x0", "\n", "+0\n", "-0\n", "-1\n", "0_0\n", "\uff10\n", "\u0660\n", "\u00a00\n", "0\u00a0\n", "0 0\n", "0\n0\n", "\u20800\n", "\u00b2\n"):
             st, out, rc = run(v)
             self.assertEqual(rc, 1, (v, out))
-            self.assertIn("dt-wait.rc 不是整數", out)
+            self.assertIn("dt-wait.rc 不是非負整數", out)
+            self.assertNotIn("FIRMWARE-DT\tOK", out)
+        # 前後的 ASCII 空白與換行可以有（echo 寫的檔案）
+        self.assertEqual(run(" 0 \r\n")[0], "OK")
+        # 路徑存在但不是一般檔案（斷掉的符號連結、資料夾、FIFO、指向真檔案的符號連結）：一律 FAIL，不當成「沒有 rc」
+        for kind in ("dangling", "dir", "fifo", "symlink"):
+            HardeningTests.n += 1
+            slug = "wn%d" % HardeningTests.n
+            info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, kind="bios", version="firmware_version: 1.0\n")
+            dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+            rcp = os.path.join(dt, "dt-wait.rc")
+            if kind == "dangling":
+                os.symlink(os.path.join(self.tmp, "nowhere"), rcp)
+            elif kind == "dir":
+                os.mkdir(rcp)
+            elif kind == "fifo":
+                os.mkfifo(rcp)
+            else:
+                open(os.path.join(self.tmp, "real-rc"), "w").write("0\n")
+                os.symlink(os.path.join(self.tmp, "real-rc"), rcp)
+            rc, out, _ = self.run_report([o], dt)
+            self.assertEqual(rc, 1, (kind, out))
+            self.assertIn("dt-wait.rc", out)
             self.assertNotIn("FIRMWARE-DT\tOK", out)
         # FAIL 仍然是 FAIL（結束碼不能把 FAIL 降成 GAP）
         for v in ("0", "1", "3", "124"):

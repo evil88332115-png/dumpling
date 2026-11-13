@@ -2,7 +2,7 @@
 # 韌體 SBOM 上傳臨時 Dependency-Track（DT）：每個樣本 prep → expected → sca-scan --sbom → scan-status-check → dt-verify，最後 report。
 # workflow（.github/workflows/firmware.yml 的 firmware-dt）與本機用同一支。臨時 DT 的 up／wait／env／down 不在這裡（由呼叫端做）：
 #   呼叫前先 `pipeline/dt-ephemeral.sh up`、`wait`、`env <自己的子資料夾>/pilot.env` 並 `export PILOT_ENV=…`；
-#   wait 的結束碼寫進 <結果>/dt-wait.rc（3＝GAP，report 會把所有樣本標 GAP）。沒有 PILOT_ENV 時 sca-scan 的上傳階段是 NOT_RUN。
+#   wait 的結束碼寫進 <結果>/dt-wait.rc（0 以外都是 GAP：3＝資料不完整，其他值看不懂；report 會把所有樣本標 GAP。內容必須是 ASCII 數字，否則 report 失敗）。沒有 PILOT_ENV 時 sca-scan 的上傳階段是 NOT_RUN。
 #
 # 用法：pipeline/firmware-dt.sh --work <工作資料夾> --result <結果資料夾>
 #          [--sample <firmware.yml> <SBOM>]...          已有 SBOM 的樣本（BIOS：firmware-ci.sh 的 fw.cdx.json；供應商 SBOM：下載的 *.sbom.json）
@@ -112,8 +112,8 @@ for p in "${preps[@]}"; do
   if [ -f "$sd/scan/status.tsv" ]; then
     if line=$(python3 -I "$root/pipeline/scan-status-check.py" "$sd/scan/status.tsv" "${need[@]}"); then
       say "FIRMWARE-DT-STEP	OK	$name	$(cell "$line")"
-    elif [ "$wait_rc" = 3 ]; then
-      say "FIRMWARE-DT-STEP	GAP	$name	必要階段不是 OK，但 dt-ephemeral wait 結束碼 3（資料不完整）：$(cell "$line")"
+    elif [ -n "$wait_rc" ] && [ "$wait_rc" != 0 ]; then
+      say "FIRMWARE-DT-STEP	GAP	$name	必要階段不是 OK，但 dt-ephemeral wait 結束碼 $(cell "$wait_rc")（不是 0；3＝資料不完整）：$(cell "$line")"
     elif [ "$declared" = 1 ]; then
       say "FIRMWARE-DT-STEP	EXPECTED	$name	必要階段不是 OK（firmware.yml 宣告 expected_dt，交給 report 核對）：$(cell "$line")"
     else

@@ -131,7 +131,7 @@ class ScriptTests(Tmp):
 while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --name) nm=$2; shift 2;; *) shift;; esac; done
 echo "$nm" >> "$(dirname "$out")/../scan-names.txt"; mkdir -p "$out/scan"; echo '{"matches": []}' > "$out/scan/grype.json"
 printf 'stage\\tstatus\\tdetail\\n' > "$out/status.tsv"
-for s in D-dt-project D-dt-upload D-dt-bom-processing C-grype; do printf '%s\\tOK\\tx\\n' "$s" >> "$out/status.tsv"; done
+for s in A-source B-sandbox B-sandbox-secrets B-sbom-provided C-grype C-upload-sbom D-dt-project D-dt-upload D-dt-bom-processing D-dt-vuln-analysis F-secret-scan; do printf '%s\\tOK\\tx\\n' "$s" >> "$out/status.tsv"; done
 exit 2
 """, 0o755)
         self.w("repo/pipeline/scan-status-check.py", "import sys\nprint('上傳: 假的 need=' + ','.join(sys.argv[2:]))\n")
@@ -175,6 +175,26 @@ sys.exit(1 if bad else 0)
         rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
         self.assertEqual(rc, 0, out)
         self.assertIn("FIRMWARE-DT\tGAP\t", out)
+
+    def test_wait_rc_other_than_zero_is_gap_and_garbage_is_fail(self):
+        for v, want in (("124\n", "GAP"), ("1\n", "GAP"), ("0\n", None)):
+            self.fakes()
+            w, res = os.path.join(self.tmp, "w" + v.strip()), os.path.join(self.tmp, "res" + v.strip())
+            y, s = self.sample("good" + v.strip())
+            self.w(os.path.join("res" + v.strip(), "dt-wait.rc"), v)
+            rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+            self.assertEqual(rc, 0, out)
+            if want:
+                self.assertIn("FIRMWARE-DT\t%s\t" % want, out, v)
+            else:
+                self.assertNotIn("FIRMWARE-DT\tGAP\t", out, v)
+        self.fakes()
+        w, res = os.path.join(self.tmp, "wg"), os.path.join(self.tmp, "resg")
+        y, s = self.sample("goodg")
+        self.w("resg/dt-wait.rc", "+0\n")
+        rc, out, _ = self.run_sh("--work", w, "--result", res, "--sample", y, s)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("FIRMWARE-DT\tOK", out)
 
     def test_supplier_sbom_normalization_record_goes_to_result_dir(self):
         self.fakes()
