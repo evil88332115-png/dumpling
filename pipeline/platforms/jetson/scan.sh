@@ -93,7 +93,10 @@ python3 -I "$root/pipeline/sbom-layers.py" split "$sbom0" "$DUMPLING_PLATFORM" "
 case $lrc in 0|3) ;; *) fail "sbom-layers split 失敗（結束碼 $lrc）";; esac
 runs=("=$w0")
 n=0
-while IFS=$'\t' read -r suffix sfile; do
+# 分隔字元是 0x1F，不是 TAB：TAB 是 IFS 空白字元，ours 的空後綴會被吃掉（檔名跑進 suffix）。後綴是空字串的那項（ours）報告取這次重跑。
+plan=$(pyl jetson_scan.py plan --layers-json "$out/layers/layers.json") || fail "讀不到掃描計畫：$(tail -1 <<< "$plan")"
+while IFS=$'\x1f' read -r suffix sfile; do
+  [ -n "$sfile" ] || continue
   n=$((n+1))
   src=$out/rescan-src/$n; mkdir -p "$src"
   cp -a "$w0/scan" "$src/scan" && cp "$w0/wizard-steps.json" "$src/" 2> /dev/null
@@ -103,8 +106,7 @@ while IFS=$'\t' read -r suffix sfile; do
   if [ -z "$wl" ] || [ ! -d "$wl/報告" ]; then fail "分層 $suffix 沒有報告包"; fi
   runs+=("$suffix=$wl")
   rm -rf "$src"
-done < <(python3 -I -c 'import json,sys
-for it in json.load(open(sys.argv[1]))["scan_plan"]: print(it["name_suffix"] + "\t" + it["sbom"])' "$out/layers/layers.json")
+done <<< "$plan"
 
 # ---------- 4. 收集與標準答案 ----------
 echo "== 收集"

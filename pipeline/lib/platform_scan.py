@@ -5,7 +5,10 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
 ## 其他平台怎麼用
 
 1. `scan.sh` 先跑精靈（完整掃描一次；分層時每個 `layers.json` 的 `scan_plan` 項目再用 `--rescan-from` 跑一次），每次的輸出資料夾是 `<名稱後綴>=<資料夾>`
-   （完整掃描的後綴是空字串；用 `newest_dir` 找出精靈剛產生的資料夾）。
+   （完整掃描的後綴是空字串；用 `newest_dir` 找出精靈剛產生的資料夾）。`scan_plan` 用 `scan_plan_lines` 讀（每行「後綴 0x1F SBOM 檔名」，
+   shell 用 `IFS=$'\x1f' read -r suffix sfile`；**不要用 TAB**：TAB 是 IFS 空白字元，開頭的空欄位會被吃掉，os_responsibility: ours 的後綴是空字串）。
+   ours 的計畫只有一項、後綴是空字串（產品 SBOM 重跑一次）：同一個後綴出現兩次時 `collect` 取**後面那次**當報告
+   （kernel-versions 仍取第一次，也就是完整掃描）。
 2. 寫一個很小的 Python 檔（參考 `pipeline/lib/jetson_scan.py`）：
 
        import platform_scan as ps
@@ -40,6 +43,7 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
 import csv
 import json
 import os
+import re
 import shutil
 import sys
 import zipfile
@@ -79,6 +83,33 @@ def site_config(out, repo, root, outroot, pilot_env, grype_cache, upstream, pyth
 
 
 # ---------------------------------------------------------------- 讀精靈的輸出
+
+PLAN_SEP = "\x1f"
+PLAN_SUFFIX_RE = re.compile(r"^(-[a-z0-9][a-z0-9_-]{0,38})?$")
+PLAN_SBOM_RE = re.compile(r"^sbom\.[a-z0-9][a-z0-9_-]{0,39}\.cdx\.json$")
+
+
+def scan_plan_lines(layers_json):
+    """layers.json 的 scan_plan → ["<後綴>\x1f<SBOM 檔名>", …]（給 scan.sh 的 `IFS=$'\x1f' read -r suffix sfile`）。
+    後綴可以是空字串（ours）；後綴或檔名格式不對、重複的後綴 → ValueError（不讓奇怪的值進 shell）。"""
+    doc = read_json(layers_json)
+    plan = doc.get("scan_plan") if isinstance(doc, dict) else None
+    if not isinstance(plan, list):
+        raise ValueError("%s 沒有 scan_plan 清單" % os.path.basename(layers_json))
+    lines, seen = [], set()
+    for it in plan:
+        suffix = it.get("name_suffix") if isinstance(it, dict) else None
+        sbom = it.get("sbom") if isinstance(it, dict) else None
+        if not (isinstance(suffix, str) and PLAN_SUFFIX_RE.match(suffix)):
+            raise ValueError("scan_plan 的 name_suffix 不合法：%r" % str(suffix)[:60])
+        if not (isinstance(sbom, str) and PLAN_SBOM_RE.match(sbom)):
+            raise ValueError("scan_plan 的 sbom 不合法：%r" % str(sbom)[:60])
+        if suffix in seen:
+            raise ValueError("scan_plan 的 name_suffix 重複：%r" % suffix)
+        seen.add(suffix)
+        lines.append(suffix + PLAN_SEP + sbom)
+    return lines
+
 
 def newest_dir(root, prefix):
     """root 底下以 prefix 開頭的資料夾，名稱最大（時間戳在名稱裡）的那個；沒有回傳 None。"""
@@ -244,8 +275,11 @@ def collect(a, hooks=None):
             add(manifest, out, dst, label)
     # --- 每個報告 ---
     runs = {}
+    last = {}   # 同一個後綴出現兩次（ours：完整掃描之後用產品 SBOM 重跑，後綴都是空字串）→ 報告取後面那次
     for spec in a.run:
         suffix, _, w = spec.partition("=")
+        last[suffix] = w
+    for suffix, w in last.items():
         p = run_paths(w, hooks.rootfs)
         runs[suffix] = run_summary(w, hooks, hooks.rootfs, hooks.detail_stages)
         if os.path.isdir(p["package"]):

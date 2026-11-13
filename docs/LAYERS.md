@@ -156,6 +156,7 @@ python3 -I "$DUMPLING_ROOT/pipeline/sbom-layers.py" split "$sbom" "$DUMPLING_PLA
 #       --os-responsibility "$DUMPLING_OS_RESPONSIBILITY"
 #   python3 -I tools/cra/report_package.py --project "$DUMPLING_PROJECT_DIR" --out "$DUMPLING_OUT/report<name_suffix>"
 ```
+- 讀 `scan_plan` 用 `pipeline/lib/platform_scan.py` 的 `scan_plan_lines`（Jetson：`jetson_scan.py plan --layers-json <檔>`），每行「後綴 0x1F 檔名」，shell 用 `IFS=$'\x1f' read -r suffix sfile`。**不要用 TAB 分隔**：TAB 是 IFS 空白字元，開頭的空欄位會被吃掉，`ours` 的後綴是空字串，檔名就跑進 suffix。`ours` 的那一項和完整掃描同一個後綴，`collect` 取後面那次（產品 SBOM 重跑）當報告。
 - `cra_report.py` 不需要 `--os-responsibility`（SBOM 的 metadata 已記），明確傳是保險；傳的值優先。
 - 拆分前的完整 SBOM 還是要留（`sboms/`、Release）：`sbom.product.cdx.json` 是標好層的完整產品 SBOM。
 - `report_package.py --p1-layers bsp,unknown,os` 可改 P1 判斷表放哪幾層（預設只放我們的待辦）。
