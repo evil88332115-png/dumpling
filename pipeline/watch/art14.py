@@ -46,6 +46,10 @@ MARK_RE = re.compile(r"<!-- dumpling-art14 key=([0-9a-f]{64}) kind=(vulnerabilit
 COMMENT_MARK = "<!-- dumpling-art14-countdown -->"
 TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 DRILL_LINE = "演練，不是真實通報"
+# D-040 (3)（C0 決定，#69 之後）：公開 repo 的演練 Issue 也寫明示範專案、加 demo 標籤，不會被當成真實出貨產品
+DEMO_LABEL = "demo"
+DEMO_TITLE = match.DEMO_TITLE
+DEMO_LINE = "> **示範專案（公開 BSP）**：dumpling 公開 repo 的示範專案與合成命中，以公開 BSP／公開資料建置，不是真的出貨產品，也不是真實通報。"
 BLANK = "未填"
 MAX_BODY_READ = 60000
 KINDS = ("vulnerability", "incident")
@@ -288,12 +292,12 @@ def render_issue(m, drill=True):
     key = issue_key(kind, mode, m["key_parts"])
     inc = kind == "incident"
     # 產品名稱來自 project.yml（任意字串，不像命中檔的 product 有白名單）：標題用 md_title、內文用 md_text（M8 預驗應修 3）
-    head = ("[演練] " if drill else "") + ("第 14 條通報（嚴重事件）：" if inc else "第 14 條通報：") + f"{match.md_title(m['product'])} {m['version']} {m['id']}"
+    head = (f"[演練] {DEMO_TITLE} " if drill else "") + ("第 14 條通報（嚴重事件）：" if inc else "第 14 條通報：") + f"{match.md_title(m['product'])} {m['version']} {m['id']}"
     if "markets" not in m:
         apply_project(m, None)
     L = [f"<!-- dumpling-art14 key={key} kind={kind} mode={mode} -->"]
     if drill:
-        L.append(DRILL_LINE)
+        L += [DRILL_LINE, "", DEMO_LINE]      # 第二行固定是 DRILL_LINE（解析與檢查的契約），示範專案說明接在後面
     L += ["", "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握。不在公開 Issue 放任何機密。", "",
           "## 預填欄位（工具帶入，請核對）", f"- 產品名稱與版本：{match.md_text(m['product'])} {m['version']}"]
     if inc:
@@ -328,7 +332,7 @@ def render_issue(m, drill=True):
           f"- 法規出處（核對）：{REG_NOTE}",
           "- 期限是工具算的保守值，法定期限的精確解釋交給法務；倒數留言只維護一則，標籤 art14-24h／art14-72h／art14-final 跟著下一個未完成的階段。"]
     body = "\n".join(L) + "\n"
-    labels = [DRILL_LABEL if drill else REAL_LABEL, STAGE_LABELS["24h"]]
+    labels = ([DRILL_LABEL, DEMO_LABEL] if drill else [REAL_LABEL]) + [STAGE_LABELS["24h"]]
     return key, head, body, labels
 
 
@@ -423,7 +427,7 @@ def evaluate(kind, body, now):
 def render_comment(ev, now, drill):
     L = [COMMENT_MARK]
     if drill:
-        L.append(DRILL_LINE)
+        L += [DRILL_LINE, DEMO_LINE]
     L += [f"倒數更新（UTC）：{fmt(now)}", ""]
     if ev["clock_started"]:
         L.append(f"時鐘已起算：知悉時間 {fmt(ev['aware'])}（負責人填寫）。")
