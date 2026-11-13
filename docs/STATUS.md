@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 00:59 -0500（C1）
+最後更新：2026-11-13 01:01 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -82,7 +82,10 @@
   - 代理 N（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` dd54722，狀態：完成。假 OK 路徑都堵住：比對數只認 int≥0；dt-verify 必要檢查缺／NOT_RUN／未知→GAP；任何 sca-scan 階段 FAIL→FAIL（expected_dt 放行規則不變），其他非 OK 階段→ATTENTION；vuln-assessment 只認 NONE、供應商 SBOM 自帶 dumpling: 標記不採信；purl 格式嚴格；缺 version 列入；型別錯→prep FAIL；重複鍵偵測→ATTENTION＋紀錄；代理字元先序列化再寫檔。CI tests 43294331473、firmware 43294338722 綠，五個真樣本全 ATTENTION（無 OK、無 FAIL）；c2-firmware 235、c2-x86-firmware 325
   - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
 - 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
-- 下一步：等 C1 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（韌體 C-sbomgate 一定 NOT_ASSESSED、沒有工具寫 vuln-assessment=NONE、C-mirror-freshness 在 CI NOT_RUN）——保守、符合原則，不放寬
+- 下一步（兩件分開進行）：
+  - supplier-normalize：等 C1 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（韌體 C-sbomgate 一定 NOT_ASSESSED、沒有工具寫 vuln-assessment=NONE、C-mirror-freshness 在 CI NOT_RUN）——保守、符合原則，不放寬
+  - D-042：擴充 AMD 平台／新世代 Intel CSME 的解析範圍（x86_firmware.py）。(1) AMD：解析 PSP 目錄（含 L2、BIOS 目錄）的條目類型與版本、AMD 微碼（patch level、CPUID）、AGESA 版本字串；(2) Intel：支援沒有 `$FPT`／FTPR `$CPD` 的分割區配置，找出對應分割區的 manifest 版本。看不懂、找不到一律 GAP。標準答案只用公開可下載的樣本（firmware/ 登記網址＋sha256，預期值附出處）。分支 `wp3/amd-psp`（worktree `$AGENT_TMP/dumpling-wt-c2-amd`）、`wp3/csme-new`（`$AGENT_TMP/dumpling-wt-c2-csme`），都從 main 26a6377；各派一個寫程式的代理，做完各自預驗，功能完成再開 PR
+  - D-043（排在 D-042 後）：韌體 SBOM 的公告比對，只用公開資料。(1) 自動比對：NVIDIA vBIOS 用每日鏡像的 NVIDIA product-security CSAF 填 `nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED；Intel 微碼用 intel/Intel-Linux-Processor-Microcode-Data-Files 的 release notes（固定 tag／commit＋sha256），SBOM 的 CPUID＋rev 比較舊就列出中間的 INTEL-SA，讀不到 GAP；Intel CSME 加 NVD CPE（converged_security_and_management_engine_firmware），註明 NVD 資料不完整。(2) 規則表（半自動，比照 D-039）：一個公告一筆（INTEL-SA、AMI-SA、AMD-SB），條件＝元件＋版本範圍，記出處、確認者（角色）、日期；結果只給建議，排除照 D-035 記 vendor-statement。(3) vendor-watch 由 C3 改，C2 不動。產出：每份韌體 SBOM 都有比對結果（受影響／不受影響／NOT_ASSESSED＋依據）寫進報告；比不到寫「資料庫沒有資料，以廠商公告為準」，不顯示成沒有漏洞。順序：D-042 → D-043 (1) → (2)，每段完成通知 C0
 - 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`、`-c1files`、`-dt`、`-gop`、`-expect`、`-norm`、`-norm2`、`-verify-norm` 被安全檢查擋下沒刪，要使用者手動刪
 <!-- END C2 -->
 
