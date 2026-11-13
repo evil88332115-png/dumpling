@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 18:53 +0800（C2）
+最後更新：2026-11-13 18:55 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -33,31 +33,29 @@
 <!-- BEGIN C1 -->
 ## C1 流程核心（WP1＋WP6）
 
-> **D-045：C1 搬到第二台電腦（2026-11-13）。** 這一節寫到新對話不用問就能接手；路徑一律用 `local.env` 的變數（`$REPO_MAIN`、`$AGENT_TMP`、`$SCA_CENTER`、`$HEAVY_LOCK`）。
-> 第一台的 worktree 與暫存在使用者確認第二台接上之前不刪。
+> **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
+> 第二台的 `python3` 是 3.14、沒有 pytest：本機測試要用 uv 建 venv（`$AGENT_TMP/dumpling-tmp-c1/venv`，還沒建）；完整測試交給 CI。
 
-- 目前在做：**M2 收尾**（PLAN「里程碑」M2：打 tag 後 Jetson 版本全程跑通、產出 Release；含平台介面與開案範本、依層分開）。M2 的程式與文件都做完了，**正在跑最後一輪驗收 run**。M1 已合併（PR #9）
+- 目前在做：**M2 收尾**（PLAN「里程碑」M2）。驗收 run 三個都綠燈、draft 已檢查；**正在跑第三輪獨立驗證**。M1 已合併（PR #9）
 - 分支與 commit：
-  - **`wp1/m2`＝f11bfdb**（已推）：M2 整合分支，含 J、P、L、K、KS 各軌與之後的修正；base 是 main 26a6377。本機完整測試（`tests/run.sh`）在 61d7c6f＋f11bfdb 上 10 組全部 OK
-  - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：`pr-draft/` 放 PR 說明草稿（head.md、mid.md 凍結例外、datasrc.md 資料來源）與逐檔對照表腳本 `m2table.py`（用法見該分支的 README）；開完 PR 後刪掉這個分支
-  - `wp1/m2-kscope`＝b671488：KS 軌，已併入 wp1/m2（ac8cd5c），不用再動
-  - 其他 M2 子分支（m2-layers、m2-platform、m2-jetson、m2-kernels*、m2-spike）都已併入或不合併，不用再動
-- **正在跑的 GitHub Actions（都在 f11bfdb；第二台的 C1 接著看結果）**：
-  - release.yml `orin-nano-demo/v39.2.0-demo1`：run **43399785656**（從新的 build；手動觸發只建 draft；約 75–90 分鐘）
-  - release.yml `orin-nano-demo/v39.2.1-demo1`：run **43399800268**
-  - tests.yml：run **43399813005**
-  - 查：`gh run view <id> -R evil88332115-png/dumpling --json status,conclusion`；kernel-cve 鏡像連不上 git.kernel.org（間歇）而失敗時，重跑那個 run
-  - 前一輪 be36327 的兩個 release run（43394028388、43394040313）是我取消的（C0 決定改 vex-rules 後要重訂標準答案）；那輪 tests 43394051461 綠燈
-- 本機背景工作：沒有（完整測試已跑完；代理都已結束）
+  - **`wp1/m2`＝877ffbc**（已推）：M2 整合分支；base 是 main 26a6377（main 目前沒動，不用併）。877ffbc 只改 docs/JETSON.md 10b（見下）
+  - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
+  - 其他 M2 子分支都已併入或不合併，不用再動
+- 開出去的代理：
+  - 第三輪獨立驗證（Sonnet、high；只給程式與 draft，不給結論）：驗兩份 draft＋`be36327..877ffbc`；報告寫到 `$AGENT_TMP/dumpling-tmp-c1/verify3/report.md`；狀態：**進行中**
+- 驗收 run（f11bfdb）：release v39.2.0-demo1 **43399785656 綠**、v39.2.1-demo1 **43399800268 綠**、tests **43399813005 綠**；877ffbc 的 tests **43412769902**（手動觸發，進行中）
+- draft 檢查結果（下一步 1，已完成）：
+  - 兩份各 20 個附件；`check-expected.py` 兩版 24 項都符合；build_record_status、kernel_boot OK；上游被修改的檔案 v39.2.1＝1、v39.2.0＝0
+  - release-meta：report_status／release_gate 都 GAP（NVD 沒開）；pipeline_result v39.2.1＝OK、**v39.2.0＝ATTENTION**：那次 git.kernel.org 連不上，kernel-cve 鏡像沿用 3 小時前的快取（設計中的退回，步驟表與 C-kernel-cve-mirror 都照實標 ATTENTION，scan 標準答案仍通過）→ 不重跑，PR 說明註明
+  - -os 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage OK；own_software GAP；三份報告 documents.user-information 都是 GAP
+  - bsp p1_rows 10（同上一輪）、accepted 2990（同上一輪）：**accepted 全部來自核心設定檢查（VEX source kconfig、code_not_present），不是 R1～R5**——R1～R5 只設 exploitable／in_triage；f11bfdb 的 commit 訊息與 JETSON.md 10b 原文說錯了，877ffbc 已更正文件。標準答案不用重訂
+  - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
+- 本機背景工作：沒有
 - **下一步（照順序）**：
-  1. 兩個 release run 綠燈後，檢查兩份 draft（`gh release view/download orin-nano-demo/<版本>`）：附件 20 個（每份報告 zip／SBOM／VEX／漏洞清單／P1 判斷表 ×3＋layers.json、build-record、scan-summary、kernel-versions、release-meta）；`python3.10 -I pipeline/check-expected.py tests/expected/orin-nano-demo/<版本>.json scan-summary-*.json` 24 項（scan.sh 已在 CI 比對，失敗會讓 run 失敗）；
-     release-meta 的 report_status／release_gate（預期 GAP，NVD 沒開）、pipeline_result OK；-os 報告包 `報告/內部存檔/scan-status.tsv` 的 C-kernel-cve-list／config／module-map 是 NOT_RUN「不適用…核心在 orin-nano-demo-bsp 報告判定」；-bsp 的 C-kernel-coverage 仍 OK（Jetson 不是 off-series）；scan-summary 的 `own_software` 是 GAP；報告 summary.json 的 documents.user-information 不是 OK；
-     上游被修改的檔案 v39.2.1＝1（inet_connection_sock.c）、v39.2.0＝0；build_record_status 與 kernel_boot OK；兩版 diff 合理（上一輪 bsp +33／−22 列、只有元件版本變動）。
-     **vex-rules 拿掉 R1～R5 之後 accepted 會變少、P1 可能變**：記下前後數字（上一輪 9f1d2f0：bsp p1_rows 10、accepted 2990），bsp.p1_rows 範圍 1–40 不符就依實際值重訂並寫理由
-  2. 請一個**新的**獨立驗證代理（Sonnet、high，只給程式與 draft，不給結論）驗這一輪的 draft 與 61d7c6f、f11bfdb 的改動；前兩輪驗證報告的結論已處理（見下面「驗證」）
-  3. 併最新 main（`git fetch && git merge origin/main`；不 rebase、不 force-push）→ 本機完整測試 → 推
-  4. 開 M2 PR（D-020 一個 PR，C0 合併）：說明用 `wp1/m2-pr-draft` 的草稿；`m2table.py` 在併 main 之後重新產生逐檔對照表；補「驗收 run」（上面三個 run 的結果）與「驗證」（第三輪的留言連結：把驗證報告貼成 PR 留言）；最後一行 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
-  5. 通知 C0（C0 會另派自己的驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者）。刪掉這輪的 draft Release 與 `wp1/m2-pr-draft`
+  1. 等第三輪驗證報告；有「應修」就修→推→（必要時）重跑 release
+  2. main 有新 commit 時才 `git fetch && git merge origin/main`（不 rebase、不 force-push）→ 測試 → 推
+  3. 開 M2 PR（D-020）：`wp1/m2-pr-draft` 的草稿；併 main 後用 `m2table.py` 重新產生逐檔對照表；補「驗收 run」（上面三個 run＋draft 檢查結果，含 v39.2.0 的 ATTENTION 原因、accepted 的更正）與「驗證」（第三輪報告貼成 PR 留言並附連結）；最後一行 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
+  4. 通知 C0（C0 另派驗證代理，兩份都過才合併；正式 tag 由 C0 問使用者）。刪掉這輪的 draft Release 與 `wp1/m2-pr-draft`
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
   - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
@@ -69,9 +67,9 @@
 - M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M7
 - 對外約定（給 C4，已通知）：分層重跑只對 -os 給 `--kernel-in-other-report <專案>-bsp`（-bsp 給了 sca-scan 以 exit 64 拒絕）；scan 腳本用 `DUMPLING_SCAN_PLATFORM_ARG`；platform_arg 只能是 jetson／raspberrypi／rockchip／generic，scan.rootfs 只能是 rootfs；
   標準答案的 Jetson 驗收項目（build_record_status、kernel_boot、upstream_source.modified）只對 platform: jetson 的專案要求（6a87c15）
-- 工作習慣（對話記憶不跨機器）：推上去的 commit 永久公開，內部原值連暫時都不能進 commit；推送前 `ci/public-check.sh --rev HEAD --private ~/.config/dumpling/forbidden.txt`；完整測試 `source ~/.config/dumpling/local.env && flock "$HEAVY_LOCK" env PYTHON=python3.12 tests/run.sh`（venv 不要放進 PATH）；
+- 工作習慣（對話記憶不跨機器）：推上去的 commit 永久公開，內部原值連暫時都不能進 commit；推送前 `ci/public-check.sh --rev HEAD --private ~/.config/dumpling/forbidden.txt`；完整測試 `flock "$HEAVY_LOCK" env PYTHON=<有相依套件的 python> tests/run.sh`（第二台要先建 venv；venv 不要放進 PATH）；
   tools/ 的 pytest 要從 repo 根目錄給資料夾（`python -m pytest tools/cra -k …`，`tools/cra/tests/conftest.py` 設路徑；給單一檔案路徑會 import 失敗）；tests/ 底下的 unittest 用 `python3.10 tests/<檔>.py`；改 `tools/` 的檔要在 PROVENANCE 那一列補 M2 的說明（`ci/provenance-check.sh`）；
-  STATUS 用 `ci/status-update.sh C1 <檔>`（timeout 給 280 秒，150 秒曾逾時）；代理：Sonnet，medium 或 high（不可信的解析與判斷用 high），寫程式與驗證分開，最多 2 個寫程式＋1 個驗證
+  STATUS 用 `ci/status-update.sh C1 <檔>`（timeout 給 280 秒，150 秒曾逾時）；代理：Sonnet，medium 或 high（不可信的解析與判斷用 high），寫程式與驗證分開，上限照 D-048
 - M2 設計備忘：
   - C4 平台研究：`wp7/platform-samples` 的 `docs/platforms-research.md`
   - `project.yml` 要有 OS 歸屬欄位（ours／customer／upstream-vendor；D-025、D-027：由角色決定，不寫死在平台設定）
