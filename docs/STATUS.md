@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 07:30 +0800（C1）
+最後更新：2026-11-14 07:38 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -280,7 +280,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：GitLab 待辦（順序 T-23／T-10 → T-16 → T-12）。#84（T-23）已合併（main 2f000be）。**PR #85**（wp5/gitlab-t10 f312599：art14 的 GitLab 版＋art14:countdown；自己的驗證通過、建議 4 項已做；art14 演練在分支上實跑綠 #86）等 C0 驗證，期間不推。下一步 T-16
+- 目前在做：GitLab 待辦（順序 T-23／T-10 → T-16 → T-12）。**PR #85**（wp5/gitlab-t10 2ee5e87）：C0 驗證不通過（最重要：GitLab 上 Planner／Reporter 能改內文、可偽造已通報）→ 倒數依據改成只取自可信成員的「art14 紀錄」留言、逐案隔離、token 權限檢查、真實案件格式錯 FAIL、等級邊界測試；CI 綠，等 C0 複驗，期間不推。下一步 T-16
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32、#47、#49、#61、#69、#71、#72（GitLab P1）、#74（T-05）、#84（T-23）
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
