@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-13，dev run 43366738948、commit 62d92b8）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對兩輪（第二輪「可以定案」，見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals（固定輸入不會變）；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-13，dev run 43378104334、commit eacb60d）。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -25,12 +25,12 @@
    "reason": "固定輸入（映像、Syft 1.55.0）下的元件數"
   },
   "components.bsp": {
-   "equals": 16332,
-   "reason": "bsp 的 50 個 deb 與它們擁有的檔案紀錄（owners.json）、核心模組、原始磁區的 2 個 firmware 元件與 4 個子元件"
+   "equals": 16376,
+   "reason": "bsp 的 53 個 deb 與它們擁有的檔案紀錄（owners.json）、核心模組、原始磁區的 2 個 firmware 元件與 4 個子元件"
   },
   "components.os": {
-   "equals": 110333,
-   "reason": "os 的 1779 個 deb 與它們擁有的檔案紀錄、dpkg 資料庫檔（var/lib/dpkg/*）、operating-system 元件"
+   "equals": 110289,
+   "reason": "os 的 1776 個 deb 與它們擁有的檔案紀錄、dpkg 資料庫檔（var/lib/dpkg/*）、operating-system 元件"
   },
   "components.unknown": {
    "equals": 31,
@@ -41,12 +41,12 @@
    "reason": "映像裡沒有主機端工具"
   },
   "components.deb_bsp": {
-   "equals": 50,
-   "reason": "platform.yml 的 bsp 套件名稱清單（D-027）：Rockchip／Radxa／核心／U-Boot 套件，加板子廠商替選購無線模組提供的 3 個 DKMS 驅動"
+   "equals": 53,
+   "reason": "platform.yml 的 bsp 套件名稱清單（D-027）：Rockchip／Radxa／核心／U-Boot 套件、選購無線模組的 3 個 DKMS 驅動，加 C0 決定的 dthelper、libmraa2、libmraa-dev（板子專屬的硬體存取工具與函式庫）"
   },
   "components.deb_os": {
-   "equals": 1779,
-   "reason": "50＋1779＝1829，與官方 manifest（rock-5b_bookworm_kde_r6.manifest）的套件名稱與版本完全相同（驗證代理逐一比對）"
+   "equals": 1776,
+   "reason": "53＋1776＝1829，與官方 manifest（rock-5b_bookworm_kde_r6.manifest）的套件名稱與版本完全相同"
   },
   "unknown_by_reason.path-no-rule": {
    "equals": 31,
@@ -283,6 +283,22 @@
   "unknown_by_purl_type.maven": {
    "equals": 1,
    "reason": "unknown 的 1 個是 Debian 的 libintl jar（缺口 12）"
+  },
+  "kernel_versions.schema": {
+   "equals": "sca-center-kernel-versions/2",
+   "reason": "C1 的 kernel-versions.json：shipped 每筆帶上游版本"
+  },
+  "kernel_upstream_crosscheck.agree": {
+   "equals": true,
+   "reason": "D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 kernel-versions /2 的 upstream_version 一致；不一致是 bug"
+  },
+  "kernel_upstream_crosscheck.c1": {
+   "equals": "6.1.84",
+   "reason": "C1 依原始碼 Makefile 與平台設定核對出的上游版本"
+  },
+  "kernel_upstream_crosscheck.c1_basis": {
+   "equals": "source-makefile+platform-param",
+   "reason": "C1 的依據：原始碼 Makefile 與 sources.yml 的 kernel_upstream_version 一致"
   }
  }
 }
