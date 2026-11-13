@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "project": "drill-demo",
+  "version": "dev-0123456",
+  "tag": "dev/drill-demo",
+  "status": "development",
+  "platform": "jetson",
+  "os_responsibility": "customer",
+  "commit": "fedcba9876543210fedcba9876543210fedcba98",
+  "built_at": "2026-11-10T00:00:00Z",
+  "workflow_run": "1000000002",
+  "steps": [
+    {
+      "name": "build",
+      "result": "OK"
+    }
+  ],
+  "result": "OK"
+}
