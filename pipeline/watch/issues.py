@@ -1,0 +1,547 @@
+#!/usr/bin/env python3
+"""issues.py：每日監控 4d（契約見 docs/WATCH.md 3.3～3.5）。讀狀態 Issue、依 plan.json 開 Issue／留言、寫回狀態 Issue、關閉演練 Issue。
+
+用法：
+  python3 -I pipeline/watch/issues.py read-state  --repo O/R --mode real|drill --out 資料夾
+  python3 -I pipeline/watch/issues.py apply       --repo O/R --plan plan.json [--dry-run]
+  python3 -I pipeline/watch/issues.py close-drill --repo O/R
+stdout 最後一行 WATCH-ISSUES<TAB>OK|FAIL<TAB>說明；結束碼 OK 0、FAIL 1、用法 64。
+
+去重規則（同一個 key 出現在多個 Issue 時選哪一個）：有開著的取開著的（多個開著的取編號最大的）；都已關閉則取編號最大的。
+這條覆蓋「取編號最小」的舊想法，因為 open_if_closed 會替同一個 key 再開新 Issue。同一個 key 有兩個以上開著的 Issue 時記 problem。
+
+安全：Token（GH_TOKEN／GITHUB_TOKEN）只放 Authorization 標頭，不進任何輸出；不經 proxy；不跟隨轉址（轉址算錯誤）；回應大小有上限。
+"""
+import argparse
+import base64
+import gzip
+import hashlib
+import http.client
+import json
+import os
+import re
+import sys
+import time
+import urllib.parse
+import zlib
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import publiccheck  # noqa: E402
+
+PLAN_SCHEMA = "dumpling-watch-plan/1"
+MAX_BODY = 60000
+MAX_RESPONSE = 8 * 1024 * 1024
+MAX_STATE_RAW = 32 * 1024 * 1024
+WRITE_GAP = 1.0
+MAX_WAIT = 60
+RETRIES = 3
+MARK_RE = re.compile(r"<!-- dumpling-watch key=([0-9a-f]{64}) mode=(real|drill) -->")
+STATE_MARK_RE = re.compile(r"<!-- dumpling-watch-state mode=(real|drill) schema=1 -->")
+KEY_RE = re.compile(r"[0-9a-f]{64}")
+REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+LABEL_COLORS = {"kev": "d73a4a", "vendor-level": "d93f0b", "drill": "6e7781",
+                "watch-state": "0075ca", "watch-state-drill": "0075ca"}
+DEFAULT_COLOR = "ededed"
+
+
+class Fail(Exception):
+    pass
+
+
+class Usage(Exception):
+    pass
+
+
+# ---------- GitHub API ----------
+class Api:
+    """所有 GitHub 呼叫都在這裡。測試只要覆寫 _raw()（回傳 (狀態碼, 標頭 dict, bytes)）。"""
+
+    def __init__(self, base=None, token=None, sleep=time.sleep, clock=time.monotonic, wall=time.time):
+        self.base = (base or os.environ.get("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
+        self.token = token if token is not None else (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "")
+        self.sleep, self.clock, self.wall = sleep, clock, wall
+        self._last_write = None
+        u = urllib.parse.urlsplit(self.base)
+        if u.scheme not in ("https", "http") or not u.hostname:
+            raise Fail("GITHUB_API_URL 不是合法的網址")
+        self.origin = (u.scheme, u.netloc)
+
+    def _scrub(self, s):
+        s = str(s)
+        return s.replace(self.token, "***") if self.token else s
+
+    def _raw(self, method, url, headers, body):
+        u = urllib.parse.urlsplit(url)
+        cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+        conn = cls(u.hostname, u.port, timeout=30)  # http.client 不看 proxy 環境變數
+        try:
+            path = u.path + ("?" + u.query if u.query else "")
+            conn.request(method, path, body=body, headers=headers)
+            r = conn.getresponse()
+            data = r.read(MAX_RESPONSE + 1)
+            return r.status, {k.lower(): v for k, v in r.getheaders()}, data
+        finally:
+            conn.close()
+
+    def request(self, method, path_or_url, payload=None):
+        url = path_or_url if path_or_url.startswith("http") else self.base + path_or_url
+        u = urllib.parse.urlsplit(url)
+        if (u.scheme, u.netloc) != self.origin:
+            raise Fail("拒絕連到別的主機")
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "dumpling-watch",
+                   "X-GitHub-Api-Version": "2022-11-28"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        body = None
+        if payload is not None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json; charset=utf-8"
+        write = method != "GET"
+        for attempt in range(RETRIES + 1):
+            if write:
+                self._space_write()
+            try:
+                status, hdr, data = self._raw(method, url, headers, body)
+            except Fail:
+                raise
+            except Exception as e:
+                raise Fail(self._scrub(f"{method} {u.path} 連線失敗（{type(e).__name__}）"))
+            if write:
+                self._last_write = self.clock()
+            if len(data) > MAX_RESPONSE:
+                raise Fail(f"{method} {u.path} 回應超過大小上限")
+            if status in (301, 302, 303, 307, 308):
+                raise Fail(f"{method} {u.path} 收到轉址（{status}），不跟隨")
+            if status in (403, 429):
+                wait = self._rate_wait(status, hdr, data)
+                if wait is not None:
+                    if attempt >= RETRIES:
+                        raise Fail(f"{method} {u.path} 遇到 rate limit，重試 {RETRIES} 次仍失敗")
+                    self.sleep(wait)
+                    continue
+            if status >= 400:
+                msg = ""
+                try:
+                    msg = str(json.loads(data.decode("utf-8", "replace")).get("message", ""))[:120]
+                except Exception:
+                    pass
+                raise Fail(self._scrub(f"{method} {u.path} 失敗：HTTP {status} {msg}".strip()))
+            if not data:
+                return None, hdr
+            try:
+                return json.loads(data.decode("utf-8")), hdr
+            except ValueError:
+                raise Fail(f"{method} {u.path} 回應不是 JSON")
+        raise Fail("不可能到這裡")
+
+    def _rate_wait(self, status, hdr, data):
+        """是 rate limit 就回傳要等的秒數（最多 60），不是就回傳 None。"""
+        ra = hdr.get("retry-after")
+        if ra is not None:
+            try:
+                return min(MAX_WAIT, max(0, int(ra)))
+            except ValueError:
+                return MAX_WAIT
+        if hdr.get("x-ratelimit-remaining") == "0":
+            try:
+                return min(MAX_WAIT, max(0, int(hdr.get("x-ratelimit-reset", "")) - int(self.wall())))
+            except ValueError:
+                return MAX_WAIT
+        if status == 429 or b"rate limit" in data.lower():
+            return MAX_WAIT
+        return None
+
+    def _space_write(self):
+        if self._last_write is not None:
+            d = WRITE_GAP - (self.clock() - self._last_write)
+            if d > 0:
+                self.sleep(d)
+
+    def get_all(self, path):
+        """跟 Link: rel="next" 分頁（只接受同主機）。"""
+        out, url, pages = [], path, 0
+        while url:
+            data, hdr = self.request("GET", url)
+            if not isinstance(data, list):
+                raise Fail("列表回應不是陣列")
+            out.extend(data)
+            pages += 1
+            if pages > 500:
+                raise Fail("分頁過多")
+            url = None
+            for m in re.finditer(r'<([^>]+)>\s*;\s*rel="([^"]+)"', hdr.get("link", "")):
+                if m.group(2) == "next":
+                    url = m.group(1)
+        return out
+
+
+# ---------- 標記、狀態 ----------
+def parse_marker(body):
+    """第一行必須完全符合標記；回傳 (key, mode) 或 None。"""
+    if not isinstance(body, str):
+        return None
+    lines = body.splitlines()
+    if not lines:
+        return None
+    m = MARK_RE.fullmatch(lines[0])
+    return (m.group(1), m.group(2)) if m else None
+
+
+def label_names(issue):
+    return [l["name"] if isinstance(l, dict) else str(l) for l in issue.get("labels", [])]
+
+
+def list_issues(api, repo, label, state="all"):
+    q = urllib.parse.urlencode({"labels": label, "state": state, "per_page": 100})
+    return [i for i in api.get_all(f"/repos/{repo}/issues?{q}") if "pull_request" not in i]
+
+
+def _note(problems, msg):
+    if msg not in problems:
+        problems.append(msg)
+
+
+def watch_index(api, repo, problems):
+    """回傳 {key: [{number,state,mode}, …]}（依編號排序）。標記不合的 Issue 記 problem、不納入。"""
+    idx = {}
+    for i in list_issues(api, repo, "dumpling-watch"):
+        mk = parse_marker(i.get("body"))
+        if not mk:
+            _note(problems, f"Issue #{i.get('number')} 有 dumpling-watch 標籤但第一行標記不合法，略過")
+            continue
+        idx.setdefault(mk[0], []).append({"number": i["number"], "state": i.get("state"), "mode": mk[1]})
+    for key, lst in idx.items():
+        lst.sort(key=lambda e: e["number"])
+        if sum(1 for e in lst if e["state"] == "open") >= 2:
+            _note(problems, f"key {key[:12]}… 同時有多個開著的 Issue：{[e['number'] for e in lst]}")
+    return idx
+
+
+def pick(entries):
+    """去重：開著的優先，再取編號最大的。"""
+    if not entries:
+        return None
+    opened = [e for e in entries if e["state"] == "open"]
+    return max(opened or entries, key=lambda e: e["number"])
+
+
+def state_label(mode):
+    return "watch-state" if mode == "real" else "watch-state-drill"
+
+
+def find_state_issue(api, repo, mode):
+    found = list_issues(api, repo, state_label(mode))
+    if len(found) > 1:
+        raise Fail(f"同一個 mode 有 {len(found)} 個狀態 Issue：{sorted(i['number'] for i in found)}")
+    return found[0] if found else None
+
+
+def encode_state(state, mode, summary):
+    raw = json.dumps(state, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    b = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
+    block = "\n".join(b[i:i + 76] for i in range(0, len(b), 76))
+    body = f"<!-- dumpling-watch-state mode={mode} schema=1 -->\n{summary}\n\n```\n{block}\n```\n"
+    if len(body) > MAX_BODY:
+        raise Fail(f"狀態內容 {len(body)} 字元，超過 {MAX_BODY} 上限（不截斷）")
+    return body
+
+
+def decode_state(body, mode=None):
+    if not isinstance(body, str):
+        raise Fail("狀態 Issue 內文是空的")
+    lines = body.splitlines()
+    m = STATE_MARK_RE.fullmatch(lines[0]) if lines else None
+    if not m or (mode and m.group(1) != mode):
+        raise Fail("狀態 Issue 第一行標記不合法或 mode 不符")
+    blocks = re.findall(r"^```[^\n]*\n(.*?)\n```[ \t]*$", body, re.S | re.M)
+    if len(blocks) != 1:
+        raise Fail("狀態 Issue 內文要剛好一個程式碼區塊")
+    try:
+        comp = base64.b64decode("".join(blocks[0].split()), validate=True)
+        d = zlib.decompressobj(31)
+        raw = d.decompress(comp, MAX_STATE_RAW + 1)
+        if len(raw) > MAX_STATE_RAW or not d.eof:
+            raise ValueError("size")
+        obj = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise Fail(f"狀態 Issue 內容解不開（{type(e).__name__}）")
+    if not isinstance(obj, dict):
+        raise Fail("狀態 JSON 不是物件")
+    return obj
+
+
+def sha(s):
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, sort_keys=True, ensure_ascii=False, indent=1)
+        f.write("\n")
+
+
+# ---------- 標籤 ----------
+class Labels:
+    def __init__(self, api, repo, dry):
+        self.api, self.repo, self.dry, self.known = api, repo, dry, None
+
+    def ensure(self, names):
+        if self.known is None:
+            self.known = {l["name"] for l in self.api.get_all(f"/repos/{self.repo}/labels?per_page=100")}
+        for n in names:
+            if n not in self.known:
+                if not self.dry:
+                    self.api.request("POST", f"/repos/{self.repo}/labels",
+                                     {"name": n, "color": LABEL_COLORS.get(n, DEFAULT_COLOR)})
+                self.known.add(n)
+
+
+# ---------- plan ----------
+def load_plan(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            plan = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail(f"plan 讀不到或不是 JSON（{type(e).__name__}）")
+
+    def bad(why):
+        raise Fail("plan 不合契約：" + why)
+    if not isinstance(plan, dict) or plan.get("schema") != PLAN_SCHEMA:
+        bad("schema")
+    if plan.get("mode") not in ("real", "drill"):
+        bad("mode")
+    if not isinstance(plan.get("state"), dict):
+        bad("state")
+    sb = plan.get("state_base")
+    if sb is not None:
+        if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
+                or not isinstance(sb.get("updated_at"), str) or not isinstance(sb.get("body_sha256"), str)):
+            bad("state_base")
+    acts = plan.get("actions")
+    if not isinstance(acts, list):
+        bad("actions")
+    for n, a in enumerate(acts):
+        if not isinstance(a, dict) or a.get("op") not in ("open", "comment", "open_if_closed"):
+            bad(f"actions[{n}].op")
+        if not isinstance(a.get("key"), str) or not KEY_RE.fullmatch(a["key"]):
+            bad(f"actions[{n}].key")
+        if not isinstance(a.get("body"), str):
+            bad(f"actions[{n}].body")
+        if a["op"] == "comment":
+            if not isinstance(a.get("reopen_if_closed", False), bool):
+                bad(f"actions[{n}].reopen_if_closed")
+        else:
+            if not isinstance(a.get("title"), str) or not a["title"].strip():
+                bad(f"actions[{n}].title")
+            if not isinstance(a.get("labels"), list) or not all(isinstance(x, str) and x for x in a["labels"]):
+                bad(f"actions[{n}].labels")
+    return plan
+
+
+def public_check(texts):
+    try:
+        rules = publiccheck.load_rules()
+    except (OSError, publiccheck.RuleError) as e:
+        raise Fail(f"公開檢查規則載入失敗：{e}")
+    hits = []
+    for name, t in texts:
+        hits += [f"{name}: {p}" for p in publiccheck.check_text(t, rules)]
+    if hits:
+        raise Fail(f"公開檢查命中 {len(hits)} 筆，什麼都沒寫：" + "；".join(hits[:3]))
+
+
+# ---------- 指令 ----------
+def cmd_read_state(api, repo, mode, out):
+    problems = []
+    idx = watch_index(api, repo, problems)
+    n = len({k for k, lst in idx.items() if any(e["mode"] == mode for e in lst)})
+    si = find_state_issue(api, repo, mode)
+    base = {"issue": None, "updated_at": None, "body_sha256": None, "watch_issues": n}
+    state = None
+    if si:
+        state = decode_state(si.get("body"), mode)  # 解不開就 FAIL，不寫任何檔
+        base.update(issue=si["number"], updated_at=si.get("updated_at"), body_sha256=sha(si.get("body")))
+    os.makedirs(out, exist_ok=True)
+    sp = os.path.join(out, "state.json")
+    if os.path.exists(sp):
+        os.remove(sp)
+    if state is not None:
+        write_json(sp, state)
+    write_json(os.path.join(out, "state-base.json"), base)
+    for p in problems:
+        print("problem\t" + p)
+    return f"狀態 Issue {'#' + str(si['number']) if si else '不存在'}；監控 Issue {n} 個"
+
+
+def cmd_apply(api, repo, plan_path, dry):
+    plan = load_plan(plan_path)
+    mode = plan["mode"]
+    problems, results = [], []
+    # 樂觀鎖
+    cur = find_state_issue(api, repo, mode)
+    sb = plan["state_base"]
+    if sb is None:
+        if cur:
+            raise Fail(f"樂觀鎖：plan 說沒有狀態 Issue，現在有 #{cur['number']}")
+    else:
+        if not cur:
+            raise Fail("樂觀鎖：plan 有狀態 Issue，現在找不到")
+        if (cur["number"], cur.get("updated_at"), sha(cur.get("body"))) != (sb["issue"], sb["updated_at"], sb["body_sha256"]):
+            raise Fail("樂觀鎖：狀態 Issue 的編號、updated_at 或內容已改變")
+    # 先組好所有要寫的文字並檢查
+    gen = plan.get("generated_at") if isinstance(plan.get("generated_at"), str) else ""
+    st = plan["state"]
+    nm = len(st["matches"]) if isinstance(st.get("matches"), (dict, list)) else 0
+    summary = f"最後執行：{gen}；比對數：{nm}"
+    state_body = encode_state(st, mode, summary)
+    texts = [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
+    prepared = []
+    for n, a in enumerate(plan["actions"]):
+        a = dict(a)
+        if a["op"] != "comment":
+            a["body"] = f"<!-- dumpling-watch key={a['key']} mode={mode} -->\n{a['body']}"
+            names = list(a["labels"]) + ["dumpling-watch"] + (["drill"] if mode == "drill" else [])
+            a["labels"] = list(dict.fromkeys(names))
+            texts.append((f"actions[{n}].title", a["title"]))
+            texts.append((f"actions[{n}].labels", "\n".join(a["labels"])))
+        texts.append((f"actions[{n}].body", a["body"]))
+        prepared.append(a)
+    public_check(texts)
+
+    labels = Labels(api, repo, dry)
+    created = set()  # dry-run 用：本次「會建立」的 key
+    ok = True
+    try:
+        for a in prepared:
+            op, key = a["op"], a["key"]
+            r = {"op": op, "key": key}
+            results.append(r)
+            if op in ("open", "open_if_closed"):
+                idx = watch_index(api, repo, problems)  # 開之前再列一次
+                ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])
+                if key in created:
+                    ent = {"number": None, "state": "open"}
+                if op == "open" and ent:
+                    r.update(result="skipped", reason="已有 Issue", issue=ent["number"])
+                elif op == "open_if_closed" and ent and ent["state"] == "open":
+                    if not dry and ent["number"]:
+                        api.request("POST", f"/repos/{repo}/issues/{ent['number']}/comments", {"body": a["body"].split("\n", 1)[1]})
+                    r.update(result="commented", reason="已有開著的 Issue，改留言", issue=ent["number"])
+                else:
+                    labels.ensure(a["labels"])
+                    num = None
+                    if not dry:
+                        d, _ = api.request("POST", f"/repos/{repo}/issues",
+                                           {"title": a["title"], "body": a["body"], "labels": a["labels"]})
+                        num = d["number"]
+                    created.add(key)
+                    r.update(result="would_open" if dry else "opened", issue=num)
+            else:
+                idx = watch_index(api, repo, problems)
+                ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])
+                if not ent:
+                    problems.append(f"comment 找不到 key {key[:12]}… 的 Issue")
+                    r.update(result="problem", reason="找不到原 Issue")
+                    continue
+                if a.get("reopen_if_closed") and ent["state"] == "closed":
+                    if not dry:
+                        api.request("PATCH", f"/repos/{repo}/issues/{ent['number']}", {"state": "open"})
+                    r["reopened"] = True
+                if not dry:
+                    api.request("POST", f"/repos/{repo}/issues/{ent['number']}/comments", {"body": a["body"]})
+                r.update(result="would_comment" if dry else "commented", issue=ent["number"])
+        # 全部做完才寫狀態 Issue
+        sres = {}
+        if dry:
+            sres = {"result": "would_update" if cur else "would_create"}
+        elif cur:
+            labels.ensure([state_label(mode)] + (["drill"] if mode == "drill" else []))
+            api.request("PATCH", f"/repos/{repo}/issues/{cur['number']}", {"body": state_body, "state": "open"})
+            sres = {"result": "updated", "issue": cur["number"]}
+        else:
+            nl = [state_label(mode)] + (["drill"] if mode == "drill" else [])
+            labels.ensure(nl)
+            d, _ = api.request("POST", f"/repos/{repo}/issues",
+                               {"title": f"dumpling-watch 狀態（{mode}）", "body": state_body, "labels": nl})
+            sres = {"result": "created", "issue": d["number"]}
+    except Fail as e:
+        ok = False
+        problems.append("中斷：" + str(e))
+        raise
+    finally:
+        res = {"schema": "dumpling-watch-apply-result/1", "mode": mode, "dry_run": dry, "ok": ok,
+               "actions": results, "problems": problems, "state_issue": locals().get("sres", {})}
+        try:
+            write_json(os.path.join(os.path.dirname(os.path.abspath(plan_path)), "apply-result.json"), res)
+        except OSError:
+            pass
+        for r in results:
+            print("action\t" + json.dumps(r, sort_keys=True, ensure_ascii=False))
+        for p in problems:
+            print("problem\t" + p)
+    cnt = {}
+    for r in results:
+        cnt[r["result"]] = cnt.get(r["result"], 0) + 1
+    return ("（dry-run）" if dry else "") + "動作 " + "、".join(f"{k}={v}" for k, v in sorted(cnt.items())) + \
+        f"；狀態 Issue {sres.get('result')}；problem {len(problems)}"
+
+
+def cmd_close_drill(api, repo):
+    closed = []
+    targets = [i for i in list_issues(api, repo, "dumpling-watch", "open")]
+    targets += list_issues(api, repo, "watch-state-drill", "open")
+    seen = set()
+    for i in targets:
+        if i["number"] in seen or "drill" not in label_names(i):
+            continue
+        seen.add(i["number"])
+        api.request("POST", f"/repos/{repo}/issues/{i['number']}/comments", {"body": "演練結束，自動關閉"})
+        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"state": "closed"})
+        closed.append(i["number"])
+    return f"關閉 {len(closed)} 個演練 Issue：{closed}"
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise Usage(message)
+
+
+def main(argv=None, api=None):
+    argv = sys.argv[1:] if argv is None else argv
+    p = Parser(prog="issues.py", add_help=False)
+    sub = p.add_subparsers(dest="cmd")
+    a = sub.add_parser("read-state", add_help=False)
+    a.add_argument("--repo", required=True)
+    a.add_argument("--mode", required=True, choices=["real", "drill"])
+    a.add_argument("--out", required=True)
+    b = sub.add_parser("apply", add_help=False)
+    b.add_argument("--repo", required=True)
+    b.add_argument("--plan", required=True)
+    b.add_argument("--dry-run", action="store_true")
+    c = sub.add_parser("close-drill", add_help=False)
+    c.add_argument("--repo", required=True)
+    try:
+        args = p.parse_args(argv)
+        if not args.cmd or not REPO_RE.fullmatch(args.repo):
+            raise Usage("需要子指令與合法的 --repo")
+    except (Usage, SystemExit) as e:
+        print("用法：issues.py read-state|apply|close-drill …（見檔頭）", file=sys.stderr)
+        print(f"WATCH-ISSUES\tFAIL\t用法錯誤：{e}" if isinstance(e, Usage) else "WATCH-ISSUES\tFAIL\t用法錯誤")
+        return 64
+    try:
+        api = api or Api()
+        if args.cmd == "read-state":
+            msg = cmd_read_state(api, args.repo, args.mode, args.out)
+        elif args.cmd == "apply":
+            msg = cmd_apply(api, args.repo, args.plan, args.dry_run)
+        else:
+            msg = cmd_close_drill(api, args.repo)
+    except Fail as e:
+        print(f"WATCH-ISSUES\tFAIL\t{e}")
+        return 1
+    print(f"WATCH-ISSUES\tOK\t{msg}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
