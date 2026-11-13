@@ -442,9 +442,8 @@ firmware:dt:
 # ---------------------------------------------------------------------------
 # watch：每日監控（排程變數 DUMPLING_JOB=watch）。compute 與 notify 分開，對應 watch-round.yml
 # ---------------------------------------------------------------------------
-# 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）目前只支援 GitHub API。
-# GitLab 版需要新增後端（--backend gitlab）；在那之前這兩個 job 都是 when: manual，不會自動跑，也不假裝能跑。
-# 下面的 --backend 旗標是「預期的介面」，現行程式沒有這個旗標。
+# 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）已有 GitLab 後端（--backend gitlab），
+# 但只用假 API 測過、沒有對真實 GitLab 驗證；所以這兩個 job 仍是 when: manual，不會自動跑（驗證完再改，見 GITLAB-PORT T-05）。
 
 .rules-watch:
   rules:
@@ -518,7 +517,7 @@ watch:notify:
       # 沒有 plan.json（GAP：不建基準、不開 Issue）→ 什麼都不做（同 watch-round.yml 的 has_plan）
       test -f watch-out/plan.json || { echo "watch: 沒有 plan.json（match 是 GAP），不動任何 Issue"; exit 0; }
       GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
-        --project "$CI_PROJECT_ID" --confidential --plan watch-out/plan.json
+        --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json
   artifacts:
     when: always
     paths: [watch-out/apply-result.json]
