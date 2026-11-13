@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 03:43 +0800（C0）
+最後更新：2026-11-14 03:43 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -58,7 +58,7 @@
 - **下一步（照順序）**：
   1. **正式 tag（D-052）**：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
   2. **M7a #58**：驗收 run 綠 → 下載 draft 核對（標準答案 24 項、設定包 version／identification／support.end_date、scan.json product_version_check、notes 與 release-meta 的 pipeline_result 一致、sbom.md 第 6 節）→ 補進 PR 說明 → 驗證報告貼留言 → 有應修就修 → C0 驗證 → 合併。兩個代理的子分支 wp1/m7a-fields、wp1/m7a-report 已併入 wp1/m7a，合併後刪
-     之後：M7a2（C2 validate_table，介面已確認，見對外介面約定）→ M7b → M7c → M7d（含 adapter-gaps #7）→ M7e（同步 sca-center #221）；M7f 從 M7b 後平行（A2 要列新增 permissions 與固定 SHA 的 action）。M7c–e 若要改 Jetson 標準答案，先跟 C0 說明原因與數字
+     之後：M7a2（C2 validate_table，介面已確認，見對外介面約定）→ **M7b（第一項，C0 指定）：「版本＝tag」加和 tag 無關的獨立來源**——現在 tag 同時餵精靈 --version 與 collect 的核對，tag 打錯或掃錯版本抓不到（C0 驗證實測 tag v2.1、實際掃 v2.0 → OK）；用 Jetson 掃描讀到的 BSP 版本字串（nv_tegra_release 等）／sources.yml 的版本段落／刷機包檔名，定義和 tag 的對應規則（例 v39.2.1-demo1 ↔ BSP 39.2.1），對不上 FAIL → M7b → M7c → M7d（含 adapter-gaps #7）→ M7e（同步 sca-center #221）；M7f 從 M7b 後平行（A2 要列新增 permissions 與固定 SHA 的 action）。M7c–e 若要改 Jetson 標準答案，先跟 C0 說明原因與數字
   3. 移除 worktree：scannr、followup 已移除；`dumpling-wt-c1-m2` 留到 tag 核對完
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
