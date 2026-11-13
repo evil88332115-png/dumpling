@@ -259,7 +259,7 @@ release:publish:
     - !reference [.setup, script]
     - !reference [.resolve-from-tag, script]
     - |
-      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" \
+      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" --notes result/notes.md \
         --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
         --scan-summary "result/scan-summary-$PROJECT-$VERSION.json" --out result/release-meta.json
       printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv

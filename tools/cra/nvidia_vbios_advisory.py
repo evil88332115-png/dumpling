@@ -206,9 +206,19 @@ def validate_ids(doc):
                 bad(f"{name}[{i}].{key}", v)
 
 
+def _valid_date(v):
+    if not (isinstance(v, str) and DATE_RE.fullmatch(v)):
+        return False
+    try:
+        datetime.date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_mirror(doc):
     """mirror 整個沒寫或是 null → 日期不明，比對時 table-stale。有寫就要是物件，commit（40 碼十六進位）、commit_date、fetched_utc 三個都有，
-    兩個時間都是有時區的 ISO 8601（見 _parse_utc），否則 table-invalid。"""
+    fetched_utc 是有時區的時間（見 _parse_utc）、commit_date 是日期或有時區的時間，否則 table-invalid（C1 的 validate_table 也檢查同樣的規則，這裡再檢查一次）。"""
     m = doc.get("mirror")
     if m is None:
         return
@@ -219,9 +229,11 @@ def validate_mirror(doc):
             raise TableError("table-invalid", f"mirror.{k} is missing (mirror needs commit, commit_date and fetched_utc)")
     if not (isinstance(m["commit"], str) and COMMIT_RE.fullmatch(m["commit"])):
         raise TableError("table-invalid", "mirror.commit must be 40 lowercase hex digits")
-    for k in ("commit_date", "fetched_utc"):
-        if _parse_utc(m[k]) is None:
-            raise TableError("table-invalid", f"mirror.{k} must be YYYY-MM-DDTHH:MM:SS with optional .fff or .ffffff and a Z or +HH:MM time zone")
+    if _parse_utc(m["fetched_utc"]) is None:
+        raise TableError("table-invalid", "mirror.fetched_utc must be YYYY-MM-DDTHH:MM:SS with optional .fff or .ffffff and a Z or +HH:MM time zone")
+    cd = m["commit_date"]
+    if _parse_utc(cd) is None and not _valid_date(cd):                           # commit_date：與 C1 的 _check_mirror 相同，YYYY-MM-DD 或帶時區的時間
+        raise TableError("table-invalid", "mirror.commit_date must be YYYY-MM-DD or a time like mirror.fetched_utc")
 
 
 def load(path=None):

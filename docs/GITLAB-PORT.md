@@ -381,7 +381,7 @@
 
 | 編號 | 內容 | 阻塞於 |
 |---|---|---|
-| T-01 | **已完成（2026-11-13，main cc7d101）**：核對 `gitlab/.gitlab-ci.yml` 呼叫的指令與 M2 合併後的版本。`project-info.py`、`run-step.sh`、`install-scan-tools.sh`、`install-tool.sh`、`firmware-*.sh` 的參數一致。獨立驗證另外找到並已修：scan 照現行 scan.sh 開臨時 DT（見 T-14）、sudo 與 platform.yml 的 apt、tag pipeline 不跑 validate 類 job（官方 job_rules：tag 的 push 也是 push）、firmware 補 sbomqs 品質檢查、watch 的 grype PATH 與結束碼。修了兩處：(1) `release-meta.py` 少了 `--scan-summary`（沒有它 report_status／release_gate 會是 NOT_RUN），已補；(2) M2 的 scan 會用 `KCVE_CACHE_DIR`（上一份核心 CVE 鏡像，`pipeline/lib/mirrors.sh`）→ 範本加 `.kcve-cache`（GitLab `cache:`，scan 與 watch:compute 共用，只存新抓的；scan 在 after_script 存、`cache:when: always`，失敗也存；watch:compute 要 `wp2/watch-m2` 合併後的 feeds.sh 才會讀 `KCVE_CACHE_DIR`）。官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內、預設存在 runner 那台機器（多台 runner 要設分散式 cache 才共用）、保護與非保護分支預設不共用。`gitlab/tests/test_gitlab_ci.py` 的 `test_t01_*` 會在 release.yml 改參數時提醒重新核對 | — |
+| T-01 | **已完成（2026-11-13，main cc7d101）**：核對 `gitlab/.gitlab-ci.yml` 呼叫的指令與 M2 合併後的版本。`project-info.py`、`run-step.sh`、`install-scan-tools.sh`、`install-tool.sh`、`firmware-*.sh` 的參數一致。獨立驗證另外找到並已修：scan 照現行 scan.sh 開臨時 DT（見 T-14）、sudo 與 platform.yml 的 apt、tag pipeline 不跑 validate 類 job（官方 job_rules：tag 的 push 也是 push）、firmware 補 sbomqs 品質檢查、watch 的 grype PATH 與結束碼。修了兩處：(1) `release-meta.py` 少了 `--scan-summary`（沒有它 report_status／release_gate 會是 NOT_RUN），已補；(2) M2 的 scan 會用 `KCVE_CACHE_DIR`（上一份核心 CVE 鏡像，`pipeline/lib/mirrors.sh`）→ 範本加 `.kcve-cache`（GitLab `cache:`，scan 與 watch:compute 共用，只存新抓的；scan 在 after_script 存、`cache:when: always`，失敗也存；watch:compute 要 `wp2/watch-m2` 合併後的 feeds.sh 才會讀 `KCVE_CACHE_DIR`）。官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內、預設存在 runner 那台機器（多台 runner 要設分散式 cache 才共用）、保護與非保護分支預設不共用。M7a（#58）之後補了 `--notes result/notes.md`（2026-11-14）：release.yml 用它重寫 notes.md 的 pipeline_result，跟 release-meta.json 一致（adapter-gaps #26），範本的 release-payload.py 拿同一份 notes.md 當 Release 說明。`gitlab/tests/test_gitlab_ci.py` 的 `test_t01_release_meta_same_flags_as_github` 從兩邊的指令抓參數名稱比對（不寫死清單），release.yml 加參數而範本沒跟上就失敗 | — |
 | T-02 | dev 版專案清單改動態產生（child pipeline），取代範本的固定 `parallel:matrix` | 內部 GitLab 版本核對 |
 | T-03 | `dev:publish`：滾動開發版 SBOM 在 GitLab 的存放（Generic Package 覆蓋行為待驗證）；每日監控 collect 讀取方式 | 內部環境驗證 |
 | T-04 | `firmware:dt`：韌體 SBOM 上傳常駐 DT 的呼叫方式（`firmware-dt.sh` 的 pilot.env 與工作目錄） | 內部環境驗證 |
@@ -403,6 +403,7 @@
 | T-20 | NOT_RUN 的 job（`dev:publish`、`firmware:dt`）目前 `exit 1`＋`allow_failure`，pipeline 會顯示黃燈；可改成 `exit 3`＋`allow_failure: {exit_codes: 3}`，跟 GitHub 版「NOT_RUN 不是失敗、但照實列出」的語意一致 | — |
 | T-21 | `release:publish` 先上傳 Generic Package、再由 `release-payload.py` 驗檔名：改成先驗再傳；`release-payload.py` 只接受 `https://` 的 API 網址，內部若是 http 要先決定（建議內部也用 https） | — |
 | T-22 | 預設映像 `DUMPLING_IMAGE: ubuntu:24.04` 是版本標籤、不是 digest，apt 套件也沒固定版本：內部換成 RD 映像時固定 digest（第 5 節、第 14 節） | 搬移時 |
+| T-23 | M8 B2 的支援期限檢查（`pipeline/watch/support.py`，WATCH.md 第 7 節）：範本的 `watch:compute` 在比對前加同一步（`--inventory`、`--out`；不加 `--demo`），`watch:notify` 用 `issues.py` 的 GitLab 版套用 stateless plan（私密 Issue）；FAIL 不擋每日監控的 Issue，另外讓 pipeline 變紅 | 跟 T-10 一起 |
 
 ---
 

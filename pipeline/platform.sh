@@ -51,6 +51,7 @@ platform=$(sed -n 's/^PLATFORM=//p' <<< "$info")
 osr=$(sed -n 's/^OS_RESPONSIBILITY=//p' <<< "$info")
 arch=$(sed -n 's/^ARCH=//p' <<< "$info")
 sparg=$(sed -n 's/^SCAN_PLATFORM_ARG=//p' <<< "$info")
+suntil=$(sed -n 's/^SUPPORT_UNTIL=//p' <<< "$info")
 pdir=$plat_root/$platform
 [ -f "$pdir/platform.yml" ] || fail "未知平台 $platform"
 python3 -I "$here/lib/project_config.py" platform "$pdir/platform.yml" > /dev/null || fail "平台設定 $platform 驗證失敗"
@@ -59,7 +60,8 @@ if [ "$step" = validate ]; then echo "validate: OK（$pname $ver，平台 $platf
 out=${out:-${DUMPLING_OUT_BASE:-$root/out}/$pname/$ver}
 mkdir -p "$out" || fail "無法建立輸出資料夾"
 export DUMPLING_ROOT=$root DUMPLING_PROJECT=$pname DUMPLING_PROJECT_DIR=$proj DUMPLING_VERSION=$ver \
-  DUMPLING_PLATFORM=$platform DUMPLING_PLATFORM_DIR=$pdir DUMPLING_OS_RESPONSIBILITY=$osr DUMPLING_ARCH=$arch DUMPLING_SCAN_PLATFORM_ARG=$sparg DUMPLING_OUT=$out
+  DUMPLING_PLATFORM=$platform DUMPLING_PLATFORM_DIR=$pdir DUMPLING_OS_RESPONSIBILITY=$osr DUMPLING_ARCH=$arch DUMPLING_SCAN_PLATFORM_ARG=$sparg DUMPLING_OUT=$out \
+  DUMPLING_SUPPORT_UNTIL=$suntil    # D-055：精靈用它產生設定包複本的 support.end_date（config.json 沒有時）
 
 script=$pdir/$step.sh
 case $step in

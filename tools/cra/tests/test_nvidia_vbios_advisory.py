@@ -555,11 +555,17 @@ def test_naive_now_and_naive_fetched_do_not_raise(tmp_path):
     assert m(t, vb(), now=datetime.datetime(2026, 11, 14))["match"] == "fixed"                         # 沒有時區的 now 當成 UTC
     assert t.stale(datetime.datetime(2027, 6, 1)) is True
     d = doc(row(vbios_fixed_in="94.04.00.00.01"))
-    for bad in ("2026-11-13T16:52:04", "2026-11-13", "yesterday", 12, "", "9999-99-99T00:00:00Z"):        # 有值但沒有時區或讀不到：載入就是 table-invalid
+    # 沒有時區或讀不到的 fetched_utc 是格式錯誤：C1 的 validate_table 擋下 → table-invalid（M7a2 與 C1 約定；原本當成過期 table-stale）
+    for bad in ("2026-11-13T16:52:04", "2026-11-13", "yesterday", 12, None, "9999-99-99T00:00:00Z"):
         d["mirror"]["fetched_utc"] = bad
         with pytest.raises(nva.TableError) as ei:
             nva.load(write(tmp_path, d, "b.json"))
-        assert ei.value.reason == "table-invalid" and "mirror.fetched_utc" in ei.value.detail, bad
+        assert ei.value.reason == "table-invalid" and "fetched_utc" in ei.value.detail
+        assert m(ei.value, vb())["match"] == "NOT_ASSESSED"
+
+
+def test_mirror_with_keys_missing_is_invalid_and_without_mirror_is_stale(tmp_path):
+    """mirror 有寫：commit、commit_date、fetched_utc 三個都要有（缺一個、null 都是 table-invalid）；整個沒寫或 null 才是 table-stale。"""
     for key in ("commit", "commit_date", "fetched_utc"):                                                # mirror 有寫：三個鍵都要有，缺一個（含 null）是 table-invalid
         for how in ("absent", "null"):
             d = doc(row(vbios_fixed_in="94.04.00.00.01"))
@@ -864,7 +870,7 @@ def test_parse_utc_values():
 
 
 @pytest.mark.parametrize("key,bad", [("fetched_utc", "2026-11-13T16:52:04+0000"), ("fetched_utc", "2026-11-13 16:52:04Z"), ("fetched_utc", "2026-11-13T16:52Z"),
-                                     ("commit_date", "2026-11-10T13:01:57"), ("commit_date", "yesterday"), ("commit_date", 7),
+                                     ("commit_date", "2026-11-10T13:01:57"), ("commit_date", "2026-13-10"), ("commit_date", "yesterday"), ("commit_date", 7),
                                      ("commit", "A" * 40), ("commit", "a" * 39), ("commit", "a" * 40 + "\n"), ("commit", 5)])
 def test_mirror_values_must_be_well_formed(tmp_path, key, bad):
     d = doc(row(vbios_fixed_in="94.04.00.00.01"))
@@ -892,3 +898,10 @@ def test_format_regexes_use_fullmatch_so_a_trailing_newline_is_rejected(tmp_path
     with pytest.raises(nva.TableError):
         nva.load(write(tmp_path, d, "c.json"))
     assert nva.BULLETIN_ID_RE.pattern == r"^[0-9]{1,8}$"
+
+
+def test_commit_date_may_be_a_date_like_c1_accepts(tmp_path):
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    for ok in ("2026-11-10", "2026-11-10T13:01:57Z", "2026-11-10T13:01:57+08:00"):
+        d["mirror"]["commit_date"] = ok
+        assert nva.load(write(tmp_path, d)).mirror_commit_date == ok
