@@ -367,6 +367,56 @@ def prepare(proj, ver, downloads, work, jpath):
     return OK, "%s → %s（%d bytes）" % (name, os.path.basename(out), doc["disk_bytes"]), doc
 
 
+LIST_RE = re.compile(r"^([a-z0-9][a-z0-9+.-]*)(?::[a-z0-9-]+)?\.list$")
+OWNERS_MAX_LIST = 32 << 20        # 一個 .list 的上限
+OWNERS_MAX_TOTAL = 512 << 20      # 全部 .list 合計的上限
+OWNERS_MAX_FILES = 20000
+
+
+def owners(img):
+    """磁碟映像 rootfs 的 dpkg .list → {路徑: 擁有它的套件}（分層用：Syft 的檔案紀錄靠它找層；格式同 Jetson 的 owners.json）。
+    唯讀 ext4（tools/demo/rpi_img.py＋rockchip_img.py 的 Ext4）；路徑上的每一層都要是目錄（不跟符號連結）；.list 只讀一般檔案。
+    同一個路徑有多個擁有者時取名稱排序的第一個（同 Jetson），數量記在回傳的統計裡。"""
+    rpi = _load("dumpling_rpi_img", os.path.join(ROOT, "tools", "demo", "rpi_img.py"))
+    im = rpi.RpiImage(img)
+    try:
+        root, why = im.rootfs()
+        if root is None:
+            raise PrepError("rootfs 讀不到（%s）" % why)
+        fs = rpi.rk().Ext4(im.fd, root["offset_in_file"], root["size"])
+        ino = 2
+        for comp in ("var", "lib", "dpkg", "info"):
+            ents, _bad = fs.entries(fs.inode(ino))
+            nxt = dict(ents).get(comp.encode())
+            if nxt is None or (fs.inode(nxt).mode & 0o170000) != 0o040000:
+                raise PrepError("rootfs 沒有 /var/lib/dpkg/info 資料夾（或路徑上有非目錄）")
+            ino = nxt
+        ents, bad = fs.entries(fs.inode(ino))
+        own, files, total = {}, 0, 0
+        for name, n in sorted(ents):
+            m = LIST_RE.match(name.decode("utf-8", "replace"))
+            if not m:
+                continue
+            i = fs.inode(n)
+            if (i.mode & 0o170000) != 0o100000 or i.size > OWNERS_MAX_LIST:
+                continue
+            files += 1
+            total += i.size
+            if files > OWNERS_MAX_FILES or total > OWNERS_MAX_TOTAL:
+                raise PrepError("dpkg 的 .list 太多或太大")
+            with fs.open(i) as f:
+                for line in f.read(i.size).decode("utf-8", "replace").splitlines():
+                    if line.startswith("/") and line not in ("/", "/."):
+                        own.setdefault(line, set()).add(m.group(1))
+        if not files:
+            raise PrepError("/var/lib/dpkg/info 沒有任何 .list")
+        flat = {k: sorted(v)[0] for k, v in own.items()}
+        return flat, {"list_files": files, "paths": len(flat), "multi_owner_paths": sum(1 for v in own.values() if len(v) > 1),
+                      "bad_dir_blocks": bad}
+    finally:
+        im.close()
+
+
 def disk_path(jpath):
     """assemble.json 記的磁碟映像（相對路徑）→ 絕對路徑；不能跳出 assemble.json 所在的資料夾、必須是一般檔案。"""
     with open(jpath, encoding="utf-8") as f:
@@ -389,6 +439,9 @@ def main(argv=None):
     f.add_argument("proj"); f.add_argument("ver"); f.add_argument("--role")
     k = sub.add_parser("disk")
     k.add_argument("json")
+    o = sub.add_parser("owners")
+    o.add_argument("json", help="assemble.json（磁碟映像的位置）")
+    o.add_argument("--out", required=True)
     r = sub.add_parser("prepare")
     r.add_argument("proj"); r.add_argument("ver")
     r.add_argument("--downloads", required=True); r.add_argument("--work", required=True); r.add_argument("--json", required=True)
@@ -415,11 +468,22 @@ def main(argv=None):
         if a.cmd == "disk":
             print(disk_path(a.json))
             return OK
+        if a.cmd == "owners":
+            try:
+                flat, st = owners(disk_path(a.json))
+            except PrepError as e:
+                print("owners: GAP（%s；分層時檔案紀錄找不到擁有的套件，會列成 unknown）" % e)
+                return GAP
+            with open(a.out + ".part", "w", encoding="utf-8") as f:
+                json.dump(flat, f, ensure_ascii=False, sort_keys=True)
+            os.replace(a.out + ".part", a.out)
+            print("owners: OK（%d 個 .list、%d 個路徑；多個擁有者 %d 個）" % (st["list_files"], st["paths"], st["multi_owner_paths"]))
+            return OK
         rc, msg, _doc = prepare(a.proj, a.ver, a.downloads, a.work, a.json)
         print("assemble: %s（%s）" % ({OK: "OK", GAP: "GAP"}[rc], msg))
         return rc
     except Exception as e:      # noqa: BLE001  設定錯誤、讀檔錯誤：FAIL 並寫原因
-        tag = "assemble" if a.cmd == "prepare" else "disk_image"
+        tag = {"prepare": "assemble", "owners": "owners"}.get(a.cmd, "disk_image")
         if isinstance(e, OSError):          # 不印完整路徑（可能含家目錄名稱）
             why = "%s（%s）" % (e.strerror or type(e).__name__, os.path.basename(e.filename or ""))
         else:

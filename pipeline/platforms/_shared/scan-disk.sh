@@ -131,7 +131,8 @@ case $arc in 0|3) ;; *) fail "補充元件失敗（結束碼 $arc）";; esac
 # ---------- 4. 分層 ----------
 echo "== 分層"
 lrc=0
-python3 -I "$root/pipeline/sbom-layers.py" split "$sbom1" "$DUMPLING_PLATFORM" "$proj" "$out/layers" --os-responsibility "$DUMPLING_OS_RESPONSIBILITY" || lrc=$?
+owargs=(); [ -f "$out/owners.json" ] && owargs=(--owners "$out/owners.json")   # assemble 從 dpkg .list 產生；沒有時檔案紀錄會是 unknown
+python3 -I "$root/pipeline/sbom-layers.py" split "$sbom1" "$DUMPLING_PLATFORM" "$proj" "$out/layers" --os-responsibility "$DUMPLING_OS_RESPONSIBILITY" ${owargs[@]+"${owargs[@]}"} || lrc=$?
 case $lrc in 0|3) ;; *) fail "sbom-layers split 失敗（結束碼 $lrc）";; esac
 runs=("=$w0")
 n=0

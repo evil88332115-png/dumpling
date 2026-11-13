@@ -720,6 +720,35 @@ class DiskImageTest(unittest.TestCase):
         self.assertEqual(rc, 1, line)
         self.assertFalse(os.path.exists(img))
 
+    @unittest.skipUnless(shutil.which("mkfs.ext4"), "需要 mkfs.ext4（e2fsprogs）")
+    def test_owners_from_dpkg_lists(self):
+        tree = os.path.join(self.tmp, "tree")
+        info = os.path.join(tree, "var", "lib", "dpkg", "info")
+        os.makedirs(info); os.makedirs(os.path.join(tree, "etc")); os.makedirs(os.path.join(tree, "usr"))
+        wb(os.path.join(info, "bash.list"), b"/.\n/usr/bin/bash\n/usr/share/doc/bash\n")
+        wb(os.path.join(info, "libc6:arm64.list"), b"/usr/lib/aarch64-linux-gnu/libc.so.6\n/usr/share/doc/bash\n")
+        wb(os.path.join(info, "bash.md5sums"), b"x\n")
+        ext = os.path.join(self.tmp, "root.ext4")
+        subprocess.run(["mkfs.ext4", "-q", "-F", "-d", tree, ext, "4M"], check=True, capture_output=True)
+        e = rb(ext)
+        img = os.path.join(self.dl, "a.img")
+        gpt_disk(img, 64 + len(e) // 512 + 40, [(64, len(e) // 512, "rootfs")], [(64, e)])
+        self.sources("a.img")
+        self.assertEqual(self.prepare()[0], 0)
+        out = os.path.join(self.tmp, "owners.json")
+        p = subprocess.run([sys.executable, "-I", DISK, "owners", os.path.join(self.tmp, "assemble.json"), "--out", out], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertIn("2 個 .list", p.stdout)
+        self.assertEqual(rj(out), {"/usr/bin/bash": "bash", "/usr/lib/aarch64-linux-gnu/libc.so.6": "libc6", "/usr/share/doc/bash": "bash"})
+
+    def test_owners_without_rootfs_is_gap(self):
+        gpt_disk(os.path.join(self.dl, "a.img"), 2048, [(1024, 512, "data")])     # 有 GPT、分割區不是 ext4：沒有 rootfs
+        self.sources("a.img")
+        self.assertEqual(self.prepare()[0], 0)
+        p = subprocess.run([sys.executable, "-I", DISK, "owners", os.path.join(self.tmp, "assemble.json"), "--out", os.path.join(self.tmp, "o.json")],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 3, p.stdout)
+
     def test_param_and_files(self):
         self.sources("a.img.xz", "      uboot_board: rock-5b\n")
         p = subprocess.run([sys.executable, "-I", DISK, "param", self.proj, "v1.0.0-t", "uboot_board"], capture_output=True, text=True)
