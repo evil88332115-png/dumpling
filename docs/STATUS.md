@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:58 +0800（C2）
+最後更新：2026-11-13 23:03 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -60,6 +60,7 @@
   3. **wp1/m2 停在 1e18ed9，不推新 commit**（C0 用 --match-head-commit 1e18ed9 合併；真的要推先告訴 C0）。C0 的驗證代理在驗 1e18ed9＋兩份 draft
   4. **D-052（使用者決定）**：兩份驗證都過、CI 綠、C0 合併後**馬上**由 C1 推 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`（從合併後的 main）。release.yml 在 tag push 時建正式 Release 之前會自動刪同名 draft（第 136–140 行），已告知 C0；本機 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 有兩份 draft 的完整附件，用來和正式 Release 核對（附件數、標準答案 24 項、各層列數）。release workflow 綠、核對過後才刪 `wp1/m2-pr-draft`
   5. VEX 發行閘門暫不分層（D-052 (2)，接受 D-030 (3)）
+  6. **#40 合併後的小 PR（C0 同意）**：建議 1、2、5 已在本機 worktree `$AGENT_TMP/dumpling-wt-c1-followup` 做好 commit 92d8e52（detached，**未推**；基底 1e18ed9）。合併後：`git switch -c wp1/m2-followup origin/main` → `git cherry-pick 92d8e52` → 測試 → 推 → 開 PR [WP1] → 派驗證代理。建議 3、4、6 排 M7（已加進 M7 待辦）
 - 驗證（這輪之前）：
   - 第一輪（7dd351c）：5／6 PASS、第 6 項附缺口；應修 3 項（間歇性測試、scan.platform_arg／rootfs 沒人讀、文件兩處）都已修，建議 6、9、10 已修，其餘寫進 `docs/JETSON.md` 第 7 節已知限制
   - 第二輪（be36327）：8／9 PASS、1 項 FAIL（小）；應修 2 項（-bsp 指向自己、沒有 scan 區塊時沒檢查 platform_arg）與建議 3–8 都在 61d7c6f 修了；draft 沒驗到（run 當時沒跑完）
@@ -67,7 +68,7 @@
   分層報告的核心不適用（`--kernel-in-other-report`，只給 -os）與核心不在發行版序列上的防護（kernelcheck 四條 OR 規則、`tools/pilot/lib/data/distro-kernel-sources.json`、`platform_params.kernel_not_distro`／platform.yml `scan.kernel_not_distro`；D-044）；沒宣告自有軟體 → B-own-software GAP（`sbom.own_software_none_reason`；scan.json `own_software`）；scan.json p1_rows 依 layer_todo；scan.platform_arg 傳到工具（`DUMPLING_SCAN_PLATFORM_ARG`）；
   orin-nano-demo 的 config.json 只留必填、vex-rules.json 只留 K1／K2／U1（C0 決定）
 - M7 待辦（M2 合併後；判斷邏輯一起驗證）：D-035 排除依據類型；D-036 逐顆核心判定與合併；D-038 出貨的 /boot/config-* 優先（C4 缺口 23）；D-039 核心可利用性三層判斷（從 sca-center 同步，PROVENANCE 更新來源 commit）與精靈以掃描版本覆寫 version／identification；
-  D-044 真正的修法：上游版本對核心 CNA、cra_report `kernel_cna_rows` 補 Grype 沒有的 CVE、「核心覆蓋 OK」的判斷條件（C4 缺口 22）；new-project.sh 不帶範本值（config.json、vex-rules.json；同 D-033 的文件骨架）；C4 缺口 7（OMV 原始碼相依依 dumpling:origin=source 歸層）、20（x86 映像的分割區訊息）；sbx-stubs 測試殘留
+  D-044 真正的修法：上游版本對核心 CNA、cra_report `kernel_cna_rows` 補 Grype 沒有的 CVE、「核心覆蓋 OK」的判斷條件（C4 缺口 22）；new-project.sh 不帶範本值（config.json、vex-rules.json；同 D-033 的文件骨架）；C4 缺口 7（OMV 原始碼相依依 dumpling:origin=source 歸層）、20（x86 映像的分割區訊息）；sbx-stubs 測試殘留；PR #40 第四輪驗證建議 3（-os sbom.md 的開機韌體一節仍寫 OP-TEE 已掃）、4（略過清單也列在風險評估 Layers 一節）、6（Release 附件說明寫明附件 SBOM 與報告包內 SBOM 的差別；標準答案加「-os 只有 os 層」）；-bsp＋-os 比完整多的 Python deb／PyPI 合併列（fonttools、pip、wheel）
 - M2 範圍已凍結（D-036）：之後的缺口沒擋住 C4 就排到 M7
 - 對外約定（給 C4，已通知）：分層重跑只對 -os 給 `--kernel-in-other-report <專案>-bsp`（-bsp 給了 sca-scan 以 exit 64 拒絕）；scan 腳本用 `DUMPLING_SCAN_PLATFORM_ARG`；platform_arg 只能是 jetson／raspberrypi／rockchip／generic，scan.rootfs 只能是 rootfs；
   標準答案的 Jetson 驗收項目（build_record_status、kernel_boot、upstream_source.modified）只對 platform: jetson 的專案要求（6a87c15）
