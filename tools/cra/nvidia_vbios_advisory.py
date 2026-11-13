@@ -17,19 +17,20 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
   vbios_affected_max    受影響版本「最高到」這個版本，含（公告 and earlier）
   vbios_fixed_in        修正版本（公告 updated version）
   版本寫成 option ROM 裡的 `XX.XX.XX.XX.XX`（每段兩位十六進位）；可只寫前幾段（例如 `94.04`），比較時只比 SBOM 版本的前幾段。
-  這三個欄位至少要有一個；已審核（reviewed=true）的列才會參與比對，未審核的列只計數。
+  這三個欄位至少要有一個；fixed_in 低於 affected_below、或不高於 affected_max（缺的段補 00／FF 後比）的列自相矛盾，整張表視為壞掉；已審核（reviewed=true）的列才會參與比對，未審核的列只計數。
 頂層另有 `mirror`：{commit（40 碼）、commit_date、fetched_utc（ISO 8601）}，記表是對哪一份鏡像審核的。
 
 比對規則（依序，第一個成立的就是結果）：
 1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
-2. 表的 reviewed_until 是 null（沒有人審核過）→ NOT_ASSESSED（table-not-reviewed）。
-3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）。
-4. PCI vendor 不是 10de、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
+2. 表的 reviewed_until 是 null（表尚未經負責人確認）→ NOT_ASSESSED（table-not-reviewed）。
+3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）；ROM 裡有兩個以上不同的版本字串 → NOT_ASSESSED（version-ambiguous）。
+4. PCI vendor 不是 10de（含任何一個 x86／EFI 開機影像的 vendor）、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
 5. option ROM 鏈沒有正常結束或開頭不確定 → NOT_ASSESSED（rom-incomplete）：版本字串可能不是這個 ROM 的。
 6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row；表裡只有未審核的對應列時是 unreviewed-row，列出數量）。
 7. 逐列比版本：fixed_in 以上 → fixed；低於 affected_below（或不高於 affected_max）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → affected（有 gap 的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（range-gap）；全部 fixed → fixed。
-8. 表的 mirror 日期超過 MAX_MIRROR_AGE_DAYS 或讀不到：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；affected 與其他結果照舊但加註。
+8. 表的 mirror 日期超過 MAX_MIRROR_AGE_DAYS、讀不到（含沒有時區的時間）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
+   affected 與其他結果照舊但加註。現在時間由呼叫端傳入（now 參數；測試一律傳固定的時間），沒給才用牆上時鐘。
 所有 NOT_ASSESSED 的 basis 都以「資料庫沒有資料，以廠商公告為準」收尾（SBOM 內是英文）。
 """
 import datetime
@@ -45,6 +46,7 @@ TABLE_PATH = HERE.parent / "pilot" / "lib" / "nvidia-bulletins-gpu-firmware.json
 C1_MODULE_PATH = HERE.parent / "pilot" / "lib" / "nvidia_bulletins.py"
 MAX_TABLE = 4 << 20
 MAX_MIRROR_AGE_DAYS = 90
+FUTURE_TOLERANCE_DAYS = 1                  # fetched_utc 比現在晚超過這麼多天 → 當成讀不到（時鐘或表有問題）
 NVIDIA_VID = "10de"
 VBIOS_CODE_TYPES = (0, 3)                  # x86_firmware.VBIOS_CODE_TYPES：顯卡開機用的影像（legacy x86、EFI）
 MATCHES = ("affected", "fixed", "NOT_ASSESSED")
@@ -93,6 +95,11 @@ def parse_version(s):
     return tuple(int(x, 16) for x in s.split("."))
 
 
+def _pad(t, fill):
+    """1～5 段的版本補成 5 段（受影響上界補 FF、其他補 00）。"""
+    return tuple(t) + (fill,) * (5 - len(t))
+
+
 def _cmp_prefix(ver, bound):
     """ver（完整版本的 tuple）與 bound（可能只有前幾段）比較，只比 bound 有的那幾段。"""
     a, b = ver[:len(bound)], bound
@@ -115,16 +122,20 @@ class Table:
         for r in doc.get("rows", []):
             (self.rows if r["reviewed"] else self.unreviewed).append(r)
         self.not_applicable = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is not False]
+        self.awaiting = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is False]      # 初審意見、還沒有人確認
         self.bulletins = [b["id"] for b in doc.get("bulletins", [])]
         self.parsed = []                         # (row, vendor, {devices}, {key: tuple})
         for r in self.rows:
             self.parsed.append((r, r["pci_vendor"], set(r["pci_devices"]), {k: parse_version(r[k]) for k in ROW_VERSION_KEYS if r.get(k)}))
 
     def stale(self, now):
-        """mirror 日期超過上限或讀不到 → True。"""
+        """mirror 日期超過上限、讀不到、或在未來（比 now 晚超過一天）→ True。now 沒有時區時當成 UTC。"""
         if self.mirror_fetched is None:
             return True
-        return (now - self.mirror_fetched).total_seconds() / 86400 > MAX_MIRROR_AGE_DAYS
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=datetime.timezone.utc)
+        age = (now - self.mirror_fetched).total_seconds() / 86400
+        return age > MAX_MIRROR_AGE_DAYS or age < -FUTURE_TOLERANCE_DAYS
 
     def label(self):
         c = self.mirror_commit[:12] if self.mirror_commit else "unknown"
@@ -132,7 +143,8 @@ class Table:
         return (f"{SOURCE_URL} mirror commit {c} (fetched {f}), group gpu-firmware; table nvidia-bulletins-gpu-firmware.json "
                 f"reviewed_until {self.reviewed_until or 'null'}, sha256 {self.sha256[:16]}…; "
                 f"{len(self.rows)} reviewed vBIOS rows, {len(self.unreviewed)} unreviewed, {len(self.not_applicable)} bulletins marked not applicable"
-                + (f" ({', '.join(self.not_applicable)})" if self.not_applicable else ""))
+                + (f" ({', '.join(self.not_applicable)})" if self.not_applicable else "")
+                + (f", {len(self.awaiting)} bulletins with a preliminary opinion awaiting confirmation ({', '.join(self.awaiting)})" if self.awaiting else ""))
 
 
 def _parse_utc(s):
@@ -164,6 +176,13 @@ def validate_rows(doc):
                 bad(i, f"{k} is not an XX.XX.XX.XX.XX version: {r[k]!r}")
         if r.get("vbios_affected_below") and r.get("vbios_affected_max"):
             bad(i, "vbios_affected_below and vbios_affected_max are mutually exclusive")
+        fixed = parse_version(r["vbios_fixed_in"]) if r.get("vbios_fixed_in") else None
+        if fixed:
+            lo = _pad(fixed, 0x00)
+            if r.get("vbios_affected_below") and lo < _pad(parse_version(r["vbios_affected_below"]), 0x00):
+                bad(i, "vbios_fixed_in is lower than vbios_affected_below (contradictory row)")
+            if r.get("vbios_affected_max") and lo <= _pad(parse_version(r["vbios_affected_max"]), 0xFF):
+                bad(i, "vbios_fixed_in is not above vbios_affected_max (contradictory row)")
 
 
 def load(path=None):
@@ -236,17 +255,25 @@ def match_vbios(table_or_err, v, now=None):
         return unavailable(table_or_err)
     table = table_or_err
     src = table.label()
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
     if table.reviewed_until is None:
-        return _na("table-not-reviewed", "the NVIDIA bulletin table has not been reviewed yet (reviewed_until is null)", source=src)
+        pend = f"; bulletins with a preliminary opinion only: {', '.join(table.awaiting)}" if table.awaiting else ""
+        return _na("table-not-reviewed", "the NVIDIA bulletin table has not been confirmed by the responsible reviewer yet (表尚未經負責人確認; "
+                   f"reviewed_until is null{pend})", source=src)
     ver_text = v.get("version")
     ver = parse_version(ver_text) if isinstance(ver_text, str) and len(ver_text) == 14 else None
     if ver is None:
         return _na("version-unreadable", f"the vBIOS version could not be read as XX.XX.XX.XX.XX ({ver_text!r}: absent or a placeholder)", source=src)
+    others = [x for x in (v.get("other_versions") or []) if isinstance(x, str)]
+    if others:
+        return _na("version-ambiguous", f"the option ROM contains more than one XX.XX.XX.XX.XX string ({', '.join([ver_text] + others)}); "
+                   "which one is the vBIOS version is not known", source=src)
     vendor = str(v.get("vendor") or "").lower()
-    if vendor != NVIDIA_VID:
-        return _na("vendor-mismatch", f"the PCI vendor ID is {vendor or 'unreadable'}, not {NVIDIA_VID}", source=src)
     imgs = [i for i in v.get("images") or [] if isinstance(i, dict) and i.get("code_type") in VBIOS_CODE_TYPES]
+    vendors = {vendor} | {str(i.get("vendor") or "").lower() for i in imgs if "vendor" in i}
+    if vendors != {NVIDIA_VID}:
+        return _na("vendor-mismatch", f"the PCI vendor ID is {', '.join(sorted(x or 'unreadable' for x in vendors))}, not only {NVIDIA_VID} "
+                   "(checked for the ROM and every x86/EFI boot image)", source=src)
     devs = {str(i.get("device") or "").lower() for i in imgs} or {str(v.get("device") or "").lower()}
     if len(devs) > 1:
         return _na("device-ambiguous", f"the boot images of the option ROM carry different PCI device IDs ({', '.join(sorted(devs))})", source=src)

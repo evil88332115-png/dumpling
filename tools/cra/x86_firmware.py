@@ -130,6 +130,7 @@ ME 版本 unknown、FIT 不能用或指到無效的 microcode、AMD 平台有 GA
 """
 import argparse
 import csv
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -666,12 +667,15 @@ def rom_at(data, p, budget=None, starts=None):
     rom = data[p:q]
     first = images[0]
     vm = VBIOS_VER.search(rom)
+    others = sorted({x.group(1).decode() for x in VBIOS_VER.finditer(rom)} - ({vm.group(1).decode()} if vm else set()))
     r = {"offset": p, "length": q - p, "vendor": f"{first['vendor']:04x}", "device": f"{first['device']:04x}",
          "class": first["class"], "version": vm.group(1).decode() if vm else None,
          "terminated": ("truncated" if images[-1].get("truncated") else "last-flag" if images[-1]["last"] else "invalid-next-image"),
          "images": [{"offset": i["offset"] - p, "code_type": i["code_type"], "length": i["length"],
                      "length_basis": i["length_basis"], "vendor": f"{i['vendor']:04x}", "device": f"{i['device']:04x}"}
                     for i in images], **hashes(rom)}
+    if others:                                  # ROM 裡有不同的版本字串：不知道哪一個是 vBIOS 版本（公告比對不給 fixed）；只有這時才寫這個鍵
+        r["other_versions"] = others
     if r["terminated"] != "last-flag":
         r["terminated_note"] = images[-1].get("truncated") or why
     if start_note:
@@ -1910,6 +1914,9 @@ def components(inv):
         if v.get("start_note"):                   # 開頭有兩個以上的候選、分不出來：offset 與雜湊可能不對
             c["properties"].append(prop("sca-center:note", f"option ROM start is ambiguous ({v['start_note']}); "
                                                            "the offset and hash may be wrong"))
+        if v.get("other_versions"):
+            c["properties"].append(prop("sca-center:note", f"the option ROM contains more than one XX.XX.XX.XX.XX string ({', '.join(v['other_versions'])} besides "
+                                                           f"{v['version']}); the first one is reported as the version, which one is the vBIOS version is not known"))
         c["properties"] += vbios_advisory_props(v.get("advisory"))
         comps.append(assessed(c, "nvidia-vbios"))
     for b in inv["bios"]:
@@ -2228,9 +2235,10 @@ def pfat_unwrap(label, data, budget, partial):
             "info": pf["info"], "notes": pf["notes"], "signature_verified": False}, pf["image"]
 
 
-def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=None):
+def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=None, vbios_now=None):
     """advisory：測試用，Table 或 TableError（fw_advisory）；沒給就載入 repo 內的 Intel 微碼發佈資料表。
-    vbios_advisory：測試用，Table 或 TableError（nvidia_vbios_advisory）；沒給就載入 repo 內的 NVIDIA 公告對照表。"""
+    vbios_advisory：測試用，Table 或 TableError（nvidia_vbios_advisory）；沒給就載入 repo 內的 NVIDIA 公告對照表。
+    vbios_now：表過期判斷用的現在時間（datetime）；測試一律傳固定的時間，沒給就用牆上時鐘。"""
     rows = read_manifest(manifest) if manifest else None
     budget = budget or Budget()
     gen, skipped = inputs(paths, budget)
@@ -2267,6 +2275,7 @@ def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=N
             e = target.setdefault(r["sha256"], {**{k: r.get(k) for k in ("vendor", "device", "class", "version", "length", "images",
                                                                       "terminated", "terminated_note", "sha256", "sha512")},
                                                 **({"start_note": r["start_note"]} if r.get("start_note") else {}),   # 沒有說明時不寫這個鍵
+                                                **({"other_versions": r["other_versions"]} if r.get("other_versions") else {}),
                                                 "locations": [], "found_at": []})
             if label not in e["locations"]:             # 同一個檔裡出現兩次：檔名記一次，位置都記
                 e["locations"].append(label)
@@ -2300,7 +2309,7 @@ def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=N
            "limits": {"time_limit_s": budget.time_limit if math.isfinite(budget.time_limit) else None, "max_file": MAX_FILE, "max_total": MAX_TOTAL, "max_checksum": MAX_CHECKSUM,
                       "max_fit_entries": MAX_FIT_ENTRIES, "max_fpt_entries": MAX_FPT_ENTRIES, "max_fv": MAX_FV, "max_ffs_items": MAX_FFS_ITEMS}}
     inv["advisory"] = advisory_section(inv, advisory)
-    inv["vbios_advisory"] = vbios_advisory_section(inv, vbios_advisory)
+    inv["vbios_advisory"] = vbios_advisory_section(inv, vbios_advisory, vbios_now)
     if rows is not None:
         bv = sorted({r["firmware_version"] for r in rows if r["component"] == "bios" and r["firmware_version"]
                      and norm("bios", "version", r["firmware_version"]) != "?"})
@@ -2354,7 +2363,7 @@ def advisory_section(inv, advisory=None):
     return sec
 
 
-def vbios_advisory_section(inv, advisory=None):
+def vbios_advisory_section(inv, advisory=None, now=None):
     """每個 NVIDIA vBIOS 比對一次（結果記在 v["advisory"]，SBOM 與報告共用）→ inv["vbios_advisory"]：對照表來源與狀態（OK／GAP）、各結果的數量。"""
     mod = load_sibling("nvidia_vbios_advisory")
     if advisory is None:
@@ -2364,18 +2373,21 @@ def vbios_advisory_section(inv, advisory=None):
     else:
         table, err = advisory, None
     results = []
+    now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
     for v in inv["vbios"]:
         try:
-            v["advisory"] = mod.match_vbios(table if table is not None else err, v)
+            v["advisory"] = mod.match_vbios(table if table is not None else err, v, now=now)
         except Exception as e:           # 比對本身出錯（對照表內容異常等）：這一個是 NOT_ASSESSED，不讓整個流程中斷
             v["advisory"] = mod._na("match-error", f"the advisory matching failed ({type(e).__name__})",
                                     source=table.label() if table is not None else None)
         results.append(v["advisory"])
     sec = {"status": "OK" if table is not None else "GAP", "vbios": len(results), "counts": mod.counts(results)}
     if table is not None:
+        # 已審核的表過期（或日期讀不到、在未來）：fixed 會降成 NOT_ASSESSED，狀態要提醒重新審核；沒審核過的表另有 table-not-reviewed
+        sec["stale"] = bool(table.reviewed_until is not None and table.stale(now))
         sec["source"] = {"mirror_commit": table.mirror_commit, "mirror_fetched_utc": table.mirror_fetched_text, "reviewed_until": table.reviewed_until,
                          "table_sha256": table.sha256, "reviewed_rows": len(table.rows), "unreviewed_rows": len(table.unreviewed),
-                         "not_applicable": list(table.not_applicable)}
+                         "not_applicable": list(table.not_applicable), "awaiting_confirmation": list(table.awaiting)}
     else:
         sec["gap"] = f"{err.reason}: {err.detail}"
     return sec
@@ -2422,6 +2434,9 @@ def status_of(inv):
     va = inv.get("vbios_advisory")
     if va and va["status"] == "GAP" and va["vbios"]:
         att.append(f"NVIDIA vBIOS 公告比對的對照表不能用（GAP，{va['gap']}）；{va['vbios']} 個 vBIOS 都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準")
+    if va and va.get("stale") and va["vbios"]:
+        att.append(f"NVIDIA vBIOS 公告對照表過期（鏡像日期超過 {load_sibling('nvidia_vbios_advisory').MAX_MIRROR_AGE_DAYS} 天、讀不到或在未來），"
+                   "已修補（fixed）的結果會降成 NOT_ASSESSED；要重新審核表")
     for v in inv["vbios"]:
         if not v["version"]:
             att.append(f"vBIOS {v['device']}：ROM 裡找不到版本")
@@ -2520,10 +2535,15 @@ def nvidia_vbios_advisory_markdown(inv):
          "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
     if va["status"] == "OK":
         s = va["source"]
-        L.append(f"- 對照表：審核到 {e(s['reviewed_until'] or '未審核')}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
+        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] else "**表尚未經負責人確認**（reviewed_until 為 null，所有 vBIOS 都是 NOT_ASSESSED）")
+        L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
                  f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
                  + (f"審核後判定不適用的公告：{e('、'.join(s['not_applicable']))}（原因見對照表的 not_applicable）；" if s["not_applicable"] else "")
+                 + (f"只有初審意見、待負責人確認的公告：{e('、'.join(s['awaiting_confirmation']))}（初審意見：無法對應到 option ROM 的版本與裝置，原因見對照表）；"
+                    if s.get("awaiting_confirmation") else "")
                  + f"對照表檔案 SHA-256 `{s['table_sha256']}`。")
+        if va.get("stale"):
+            L.append("- **對照表過期**（鏡像日期超過上限、讀不到或在未來）：fixed 會降成 NOT_ASSESSED（`table-stale`），要重新審核表。")
     else:
         L.append(f"- 對照表：**GAP（不能用）**：{e(va['gap'])}。所有 NVIDIA vBIOS 都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
     c = va["counts"]

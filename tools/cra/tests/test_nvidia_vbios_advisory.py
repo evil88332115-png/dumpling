@@ -260,35 +260,50 @@ def test_unreviewed_draft_rows_do_not_need_vbios_fields(tmp_path):
 
 # ---------- 進 repo 的表 ----------
 
-def test_committed_table_passes_c1_validation_and_has_the_reviewed_state():
+def test_committed_table_passes_c1_validation_and_is_not_yet_confirmed():
     t = nva.load(COMMITTED)
     c1 = nva._c1()
-    d = json.loads(COMMITTED.read_text(encoding="utf-8"))
+    text = COMMITTED.read_text(encoding="utf-8")
+    d = json.loads(text)
     c1.validate_table(d)
-    assert d["reviewed_until"] == "2026-11-10" and t.mirror_commit == "98dc5d70d87f6f068c38161930fcda2ae3193bb3"
+    assert d["reviewed_until"] is None and t.mirror_commit == "98dc5d70d87f6f068c38161930fcda2ae3193bb3"      # 負責人確認前維持待審
     assert d["rows"] == [] and d["bulletins"] == []
     [na] = d["not_applicable"]
-    assert na["bulletin"] == "5674" and na["reviewed"] is True and na["reviewed_by"] == "C2 代理初審，待負責人確認"
-    assert na["current_release_date"] == "2025-09-02T00:00:00Z" and na["reason"] and na["csaf_fields"]
-    assert "@" not in COMMITTED.read_text(encoding="utf-8") and "/home/" not in COMMITTED.read_text(encoding="utf-8")
+    assert na["bulletin"] == "5674" and na["reviewed"] is False and na["reviewed_by"] is None and na["reviewed_at"] is None
+    assert na["preliminary_by"] == "韌體分析（C2 角色）初審，待負責人確認"                                                  # 只寫角色
+    assert na["current_release_date"] == "2025-09-02T00:00:00Z" and na["csaf_fields"]
+    assert "無法對應" in na["reason"] and "不適用" not in na["reason"] and "5561" in na["reason"]
+    assert t.awaiting == ["5674"] and t.not_applicable == []
+    assert "@" not in text and "/home/" not in text
 
 
-def test_committed_table_closes_the_pending_bulletin_for_the_mirror_it_was_reviewed_against():
+def test_committed_table_stays_pending_for_c1_candidates():
+    """負責人確認前，C1 的 candidates 要列為待審（ATTENTION），不會因為 C2 的初審就回 OK。"""
     c1 = nva._c1()
     d = json.loads(COMMITTED.read_text(encoding="utf-8"))
     mirror_entry = {"id": "5674", "year": "2025", "current_release_date": "2025-09-02T00:00:00Z", "initial_release_date": "2025-09-02T00:00:00Z"}
-    assert c1.pending_bulletins([mirror_entry], d) == []
-    assert c1.pending_bulletins([{**mirror_entry, "id": "9999"}], d)[0]["reasons"][0] == "not_in_table"             # 新公告仍會列為待審
-    assert "revised" in c1.pending_bulletins([{**mirror_entry, "current_release_date": "2026-01-01T00:00:00Z"}], d)[0]["reasons"]
+    [p] = c1.pending_bulletins([mirror_entry], d)
+    assert "unreviewed_not_applicable" in p["reasons"] and "after_reviewed_until" in p["reasons"] and "not_in_table" not in p["reasons"]
+    # 負責人確認後（reviewed=true、reviewed_until 有值）才會關掉
+    done = json.loads(json.dumps(d))
+    done["not_applicable"][0].update(reviewed=True, reviewed_by="負責人", reviewed_at="2026-12-01")
+    done["reviewed_until"] = "2026-11-10"
+    c1.validate_table(done)
+    assert c1.pending_bulletins([mirror_entry], done) == []
+    assert c1.pending_bulletins([{**mirror_entry, "id": "9999"}], done)[0]["reasons"][0] == "not_in_table"        # 新公告仍會列為待審
 
 
-def test_committed_table_gives_not_assessed_for_every_vbios(tmp_path):
+def test_committed_table_gives_not_assessed_not_reviewed_for_every_vbios():
     t = nva.load(COMMITTED)
     for v in (vb(), vb("00.00.00.00.01", "fffe"), vb(None, "2489"), vb("94.04.5E.00.92", "2504")):
         r = m(t, v)
+        if v["version"]:
+            assert_na(r, "table-not-reviewed")
+            assert "表尚未經負責人確認" in r["basis"] and "5674" in r["basis"]
         assert r["match"] == "NOT_ASSESSED" and NO_DATA in r["basis"], r
-    assert_na(m(t, vb()), "no-row")
-    assert "5674" in t.label() and "mirror commit 98dc5d70d87f" in t.label()
+    assert "mirror commit 98dc5d70d87f" in t.label() and "awaiting confirmation (5674)" in t.label()
+    late = NOW + datetime.timedelta(days=5000)                                       # 沒審核過的表不吃時鐘
+    assert m(t, vb(), now=late) == m(t, vb(), now=NOW)
 
 
 def test_never_says_safe_or_not_affected(tmp_path):
@@ -302,10 +317,10 @@ def test_never_says_safe_or_not_affected(tmp_path):
 
 # ---------- x86_firmware.py：SBOM、報告、狀態 ----------
 
-def sbom(tmp_path, data, vbios_advisory):
+def sbom(tmp_path, data, vbios_advisory, now=NOW):
     p = tmp_path / "in.bin"
     p.write_bytes(data)
-    inv = xf.inventory([p], vbios_advisory=vbios_advisory)
+    inv = xf.inventory([p], vbios_advisory=vbios_advisory, vbios_now=now)
     st, detail = xf.status_of(inv)
     inv["status"], inv["detail"] = st, detail
     comps, deps = xf.components(inv)
@@ -333,6 +348,7 @@ def test_sbom_properties_for_affected_fixed_and_not_assessed(tmp_path):
     assert len(by) == 3
     assert inv["vbios_advisory"]["status"] == "OK" and inv["vbios_advisory"]["vbios"] == len(by)
     assert inv["vbios_advisory"]["counts"]["affected"] == 1 and inv["vbios_advisory"]["source"]["not_applicable"] == []
+    assert inv["vbios_advisory"]["stale"] is False
     assert not any(p["value"].startswith("Intel") for c in by.values() for p in c["properties"] if p["name"] == "dumpling:advisory-source")
 
 
@@ -350,12 +366,12 @@ def test_report_section_for_vbios(tmp_path):
     sec = md[md.index("## 公告比對"):]
     assert "### NVIDIA vBIOS（1 個）" in sec and "| 2489 | 94.04.5E.00.92 | affected" in sec and "9001" in sec and "CVE-2099-0001" in sec
     assert "合作夥伴通知" in sec and "資料庫沒有資料，以廠商公告" in sec and "沒有任何一項代表「沒有漏洞」" in sec
-    assert "鏡像 commit `" + COMMIT + "`" in sec and "已審核的 vBIOS 列 1 筆" in sec
+    assert "鏡像 commit `" + COMMIT + "`" in sec and "已審核的 vBIOS 列 1 筆" in sec and "審核到 2026-11-10" in sec
     assert "這一版沒有做" not in sec
     for w in ("PASS", "不受影響", "安全"):
         assert w not in sec, w
     # 沒有 vBIOS 的 BIOS 樣本：不多出 vBIOS 段落
-    assert "NVIDIA vBIOS（" not in xf.markdown(xf.inventory([_empty(tmp_path)], vbios_advisory=t))
+    assert "NVIDIA vBIOS（" not in xf.markdown(xf.inventory([_empty(tmp_path)], vbios_advisory=t, vbios_now=NOW))
 
 
 def _empty(tmp_path):
@@ -396,9 +412,12 @@ def test_match_errors_become_not_assessed_not_exceptions(tmp_path, monkeypatch):
 def test_default_table_is_the_committed_one(tmp_path):
     inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), None)
     [c] = [c for c in comps if c["name"].startswith("NVIDIA VBIOS")]
-    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "no reviewed row" in props(c, "dumpling:advisory-basis")[0]
-    assert "reviewed_until 2026-11-10" in props(c, "dumpling:advisory-source")[0] and inv["vbios_advisory"]["source"]["not_applicable"] == ["5674"]
-    assert inv["status"] == "ATTENTION" and "公告比對的對照表不能用" not in inv["detail"]            # 表可用時狀態不因為 vBIOS 公告比對而變
+    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "表尚未經負責人確認" in props(c, "dumpling:advisory-basis")[0]
+    assert "reviewed_until null" in props(c, "dumpling:advisory-source")[0] and inv["vbios_advisory"]["source"]["awaiting_confirmation"] == ["5674"]
+    assert inv["status"] == "ATTENTION" and "公告比對的對照表不能用" not in inv["detail"] and "過期" not in inv["detail"]
+    assert "表尚未經負責人確認" in md and "無法對應" in md and "不適用" not in md[md.index("### NVIDIA vBIOS"):]
+    late = xf.inventory([tmp_path / "in.bin"], vbios_now=NOW + datetime.timedelta(days=5000))["vbios_advisory"]   # 沒審核過的表：不吃時鐘，也不報過期
+    assert late["stale"] is False and late["counts"] == {"NOT_ASSESSED": 1}
 
 
 def test_synthetic_rom_end_to_end(tmp_path):
@@ -414,10 +433,167 @@ def test_synthetic_rom_end_to_end(tmp_path):
     assert not list(cdx_validator().iter_errors(d))
     [c] = d["components"]
     assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and props(c, "dumpling:vuln-assessment") == ["NOT_ASSESSED"]
-    assert "10de:fffe" in props(c, "dumpling:advisory-basis")[0] and NO_DATA in props(c, "dumpling:advisory-basis")[0]
+    assert "表尚未經負責人確認" in props(c, "dumpling:advisory-basis")[0] and NO_DATA in props(c, "dumpling:advisory-basis")[0]
     assert "mirror commit 98dc5d70d87f" in props(c, "dumpling:advisory-source")[0]
     md = (out / "fw-inventory.md").read_text(encoding="utf-8")
     assert "### NVIDIA vBIOS（1 個）" in md and "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）" in md
     inv = json.loads((out / "fw-inventory.json").read_text(encoding="utf-8"))
-    assert inv["vbios_advisory"]["counts"] == {"NOT_ASSESSED": 1} and inv["vbios"][0]["advisory"]["reason"] == "no-row"
+    assert inv["vbios_advisory"]["counts"] == {"NOT_ASSESSED": 1} and inv["vbios"][0]["advisory"]["reason"] == "table-not-reviewed"
     assert "PASS" not in r.stdout and "安全" not in r.stdout and "不受影響" not in md
+
+
+# ---------- 矛盾的列、影像 vendor、多個版本字串 ----------
+
+@pytest.mark.parametrize("kw", [
+    {"vbios_affected_max": "94.05", "vbios_fixed_in": "94.04"},                      # 修正版本低於受影響上界
+    {"vbios_affected_max": "94.04.5E.00.92", "vbios_fixed_in": "94.04.5E.00.92"},    # 修正版本等於受影響上界（上界含）：同一個版本又受影響又已修補
+    {"vbios_affected_max": "94.04", "vbios_fixed_in": "94.04.00.00.01"},             # 上界只寫前兩段（含 94.04.FF.FF.FF）
+    {"vbios_affected_below": "94.05", "vbios_fixed_in": "94.04"},                    # 修正版本低於「低於」的界線
+    {"vbios_affected_below": "94.04.5E.00.92", "vbios_fixed_in": "94.04.5E.00.91"},
+])
+def test_contradictory_rows_make_the_table_invalid(tmp_path, kw):
+    base = {"vbios_affected_below": None, "vbios_affected_max": None, "vbios_fixed_in": None}
+    base.update(kw)
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, doc(row(**base))))
+    assert ei.value.reason == "table-invalid" and "contradictory" in ei.value.detail
+    assert_na(nva.match_vbios(ei.value, vb()), "table-invalid")
+
+
+@pytest.mark.parametrize("kw", [
+    {"vbios_affected_below": "94.04", "vbios_fixed_in": "94.04"},                    # 一般的「prior to X、fixed in X」
+    {"vbios_affected_below": "94.04", "vbios_fixed_in": "94.04.00.00.01"},
+    {"vbios_affected_max": "94.04.5E.00.92", "vbios_fixed_in": "94.04.5E.00.93"},
+    {"vbios_affected_max": "94.04", "vbios_fixed_in": "94.05"},
+    {"vbios_affected_max": "94.04"}, {"vbios_affected_below": "94.04"}, {"vbios_fixed_in": "94.04"},
+])
+def test_consistent_rows_are_accepted(tmp_path, kw):
+    base = {"vbios_affected_below": None, "vbios_affected_max": None, "vbios_fixed_in": None}
+    base.update(kw)
+    assert nva.load(write(tmp_path, doc(row(**base)))).rows
+
+
+def test_unreviewed_contradictory_draft_rows_are_not_checked(tmp_path):
+    draft = row(reviewed=False, reviewed_by=None, reviewed_at=None, vbios_affected_max="94.05", vbios_fixed_in="94.04")
+    assert nva.load(write(tmp_path, doc(draft))).unreviewed
+
+
+def test_every_boot_image_must_be_nvidia(tmp_path):
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))
+    assert m(t, vb())["match"] == "fixed"
+    odd = vb()
+    odd["images"] = [{"code_type": 0, "device": "2489", "vendor": "10de"}, {"code_type": 3, "device": "2489", "vendor": "8086"}]
+    assert_na(m(t, odd), "vendor-mismatch")
+    odd["images"] = [{"code_type": 0, "device": "2489", "vendor": "8086"}, {"code_type": 3, "device": "2489", "vendor": "10de"}]
+    assert_na(m(t, odd), "vendor-mismatch")
+    other = vb()
+    other["images"] = [{"code_type": 0xE0, "device": "2489", "vendor": "8086"}, {"code_type": 3, "device": "2489", "vendor": "10de"}]   # 非開機影像不算
+    assert m(t, other)["match"] == "fixed"
+    assert_na(m(t, vb(vendor="8086")), "vendor-mismatch")
+
+
+def rom_with_versions(*versions, vendor2=0x10DE):
+    text = b"NVIDIA VBIOS Version " + b" and ".join(x.encode() for x in versions)
+    return option_image(0x10DE, 0x2489, 2, 0, False, text) + option_image(vendor2, 0x2489, 1, 3, True)
+
+
+def test_rom_with_two_different_version_strings_is_never_fixed(tmp_path):
+    t = table(tmp_path, row(devices=("2489",), vbios_affected_below="94.04.6A.00.01", vbios_fixed_in="94.04.6A.00.01"))
+    inv, comps, md = sbom(tmp_path, rom_with_versions("94.04.6A.00.01", "94.04.5E.00.92"), t)
+    [v] = inv["vbios"]
+    assert v["version"] == "94.04.6A.00.01" and v["other_versions"] == ["94.04.5E.00.92"]
+    assert v["advisory"]["match"] == "NOT_ASSESSED" and v["advisory"]["reason"] == "version-ambiguous" and NO_DATA in v["advisory"]["basis"]
+    [c] = [c for c in comps if c["name"].startswith("NVIDIA VBIOS")]
+    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and any("more than one" in x for x in props(c, "sca-center:note"))
+    # 同一個字串重複出現不算多個；只有一個版本字串時行為不變（沒有 other_versions 這個鍵）
+    inv, comps, md = sbom(tmp_path, rom_with_versions("94.04.6A.00.01", "94.04.6A.00.01"), t)
+    assert "other_versions" not in inv["vbios"][0] and inv["vbios"][0]["advisory"]["match"] == "fixed"
+    [c] = [c for c in comps if c["name"].startswith("NVIDIA VBIOS")]
+    assert not props(c, "sca-center:note")
+    inv, _, _ = sbom(tmp_path, vbios_rom(0x2489, "94.04.6A.00.01"), t)
+    assert "other_versions" not in inv["vbios"][0]
+
+
+def test_rom_whose_second_image_has_another_vendor_is_not_matched(tmp_path):
+    t = table(tmp_path, row(devices=("2489",), vbios_fixed_in="94.04.00.00.01"))
+    inv, _, _ = sbom(tmp_path, rom_with_versions("94.04.6A.00.01", vendor2=0x8086), t)
+    for v in inv["vbios"]:
+        assert v["advisory"]["match"] != "fixed" or all(i["vendor"] == "10de" for i in v["images"])
+
+
+# ---------- 過期（時鐘）----------
+
+FETCHED_DT = datetime.datetime(2026, 11, 13, 16, 52, 4, tzinfo=datetime.timezone.utc)
+
+
+@pytest.mark.parametrize("days,stale", [(0, False), (1, False), (45, False), (89, False), (90, False), (90.0001, True), (91, True), (400, True),
+                                        (-0.5, False), (-1, False), (-1.01, True), (-30, True)])
+def test_stale_boundaries(tmp_path, days, stale):
+    t = table(tmp_path, row(vbios_affected_below="94.04.6A.00.01", vbios_fixed_in="94.04.6A.00.01"))
+    now = FETCHED_DT + datetime.timedelta(days=days)
+    assert t.stale(now) is stale
+    r = m(t, vb("94.04.6A.00.01"), now=now)
+    assert (r["reason"] == "table-stale") is stale and r["match"] == ("NOT_ASSESSED" if stale else "fixed")
+    r = m(t, vb("94.04.5E.00.92"), now=now)
+    assert r["match"] == "affected" and any("refresh the table" in n for n in r["notes"]) is stale
+
+
+def test_naive_now_and_naive_fetched_do_not_raise(tmp_path):
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))
+    assert m(t, vb(), now=datetime.datetime(2026, 11, 14))["match"] == "fixed"                         # 沒有時區的 now 當成 UTC
+    assert t.stale(datetime.datetime(2027, 6, 1)) is True
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d["mirror"]["fetched_utc"] = "2026-11-13T16:52:04"                                                 # 沒有時區：讀不到，當成過期
+    t = nva.load(write(tmp_path, d, "naive.json"))
+    assert t.mirror_fetched is None and m(t, vb())["reason"] == "table-stale"
+    for bad in ("2026-11-13", "yesterday", 12, None, "9999-99-99T00:00:00Z"):
+        d["mirror"]["fetched_utc"] = bad
+        assert m(nva.load(write(tmp_path, d, "b.json")), vb())["reason"] == "table-stale"
+
+
+def test_note_texts_for_stale_gap_and_fixed(tmp_path):
+    a = row(cve="CVE-2099-0001", vbios_affected_below="94.04.6A.00.01", vbios_fixed_in="94.04.6A.00.01")
+    b = row(bulletin="9002", cve="CVE-2099-0002", vbios_affected_below="94.04.50.00.01", vbios_fixed_in="94.04.50.00.01")
+    g = row(bulletin="9003", cve="CVE-2099-0003", vbios_affected_max="94.01.00.00.01", vbios_fixed_in="94.08.00.00.01")
+    late = NOW + datetime.timedelta(days=200)
+    r = m(table(tmp_path, a, b, g), vb("94.04.5E.00.92"), now=late)
+    notes = " | ".join(r["notes"])
+    assert r["match"] == "affected" and "refresh the table" in notes and "confirm with the vendor advisory" in notes and "already at or above the fixed version" in notes
+    assert "PCIR header" in notes
+    r = m(table(tmp_path, b), vb("94.04.5E.00.92"), now=NOW)
+    assert r["match"] == "fixed" and "PCIR header" in " ".join(r["notes"]) and "refresh" not in " ".join(r["notes"])
+
+
+def test_affected_below_alone_at_the_boundary(tmp_path):
+    t = table(tmp_path, row(vbios_affected_below="94.04.5E.00.92"))
+    assert m(t, vb("94.04.5E.00.91"))["match"] == "affected"
+    assert_na(m(t, vb("94.04.5E.00.92")), "range-gap")                                                 # 剛好是界線、沒有修正版本：不猜
+    assert_na(m(t, vb("94.04.5E.00.93")), "range-gap")
+
+
+def test_not_applicable_without_a_reviewed_key(tmp_path):
+    ok = {"bulletin": "9005", "reviewed_by": "負責人", "reviewed_at": "2026-11-14"}                  # 沒有 reviewed 鍵：C1 當成已審核，要有審核人與日期
+    t = nva.load(write(tmp_path, doc(not_applicable=[ok])))
+    assert t.not_applicable == ["9005"] and t.awaiting == []
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, doc(not_applicable=[{"bulletin": "9005"}]), "na.json"))
+    assert ei.value.reason == "table-invalid"
+    t = nva.load(write(tmp_path, doc(not_applicable=[{"bulletin": "9005", "reviewed": False}]), "na2.json"))
+    assert t.not_applicable == [] and t.awaiting == ["9005"]
+
+
+def test_stale_table_makes_the_status_attention_only_with_vbios(tmp_path):
+    t = table(tmp_path, row(devices=("2489",), vbios_fixed_in="94.04.00.00.01"))
+    late = NOW + datetime.timedelta(days=400)
+    inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.6A.00.01"), t, now=late)
+    assert inv["vbios_advisory"]["stale"] is True and inv["status"] == "ATTENTION" and "NVIDIA vBIOS 公告對照表過期" in inv["detail"]
+    assert "對照表過期" in md and "table-stale" in md
+    [c] = [c for c in comps if c["name"].startswith("NVIDIA VBIOS")]
+    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"]
+    inv, _, _ = sbom(tmp_path, vbios_rom(0x2489, "94.04.6A.00.01"), t, now=NOW)
+    assert inv["vbios_advisory"]["stale"] is False and "過期" not in inv["detail"]
+    inv = xf.inventory([_empty(tmp_path)], vbios_advisory=t, vbios_now=late)                          # 沒有 vBIOS：狀態不受影響
+    assert "過期" not in xf.status_of(inv)[1]
+    future = FETCHED_DT - datetime.timedelta(days=3)
+    inv, _, _ = sbom(tmp_path, vbios_rom(0x2489, "94.04.6A.00.01"), t, now=future)                    # 鏡像日期在未來：也當成過期
+    assert inv["vbios_advisory"]["stale"] is True
