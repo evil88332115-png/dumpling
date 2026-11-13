@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:38 +0800（C1）
+最後更新：2026-11-13 22:52 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -139,7 +139,14 @@
 >   - 已交回寫程式代理修正：**完成 9e8e59e**（4 項應修和建議都修了）
 >   - C2 併入 main → **03b33cd**：3 處清單與說明衝突；648 passed；NovaCustom V540TU 現在帶 CSME CPE 18.0.10（inferred）
 >   - CI tests 43443887986、firmware 43443892464
-> - 驗證（Sonnet 5.5，effort high，新代理）：複驗 wp3/fw-advisory 03b33cd，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv2/`，狀態：**進行中**
+> - 驗證（Sonnet 5.5，effort high，新代理）：複驗 wp3/fw-advisory 03b33cd，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv2/`，狀態：**完成：驗證不通過**
+>   - 前輪 4 項確認修好；獨立 oracle 約 33 萬個案例 0 不符
+>   - 應修 1：AMD 微碼已解析 19 份，報告與 CI 摘要卻寫「沒有解析」；AMD 元件也沒有 advisory-match
+>   - 應修 2：06-be-00/19（ADL-N＋TWL）的散文對照被整組設成 GAP，候選因此漏列
+>   - 應修 3：notes 有過時的地方，以及寫起因的句子
+>   - 建議：revert 註記；cpe-basis 改成列舉值（listed／inferred）；註解邊界；補測試
+>   - 已交回寫程式代理（第三輪，進行中）
+>   - **待 C0**：CPE 的 major 上限 30 要補進 D-051
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
 >   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
@@ -151,8 +158,8 @@
 >   - 公開真樣本 Dasharo NovaCustom NUC BOX v0.9.2（Arrow Lake-U/H FSP）：Size 0x60、CRC 相符、RBEP＝NFTP＝18.1.18.2724，有 release notes 為出處；已登記成 `firmware/bios/novacustom-nuc-box-arl-v0.9.2`
 >   - Size 逐值列舉 0x40／0x48／0x58／0x60；+0x58 之後要全 0，否則 GAP
 >   - 其他 7 個樣本改動前後逐位元相同；本機 221 passed
->   - CI tests 43443071116、firmware 43443076668
->   - **預驗排在 fw-advisory 複驗之後**（同一時間只有 1 個驗證代理）
+>   - CI tests 43443071116、firmware 43443076668 **綠**
+> - 驗證（Sonnet 5.5，effort high）：預驗 wp3/cse-layout-size dc7589a，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-cse/`，狀態：**進行中**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
