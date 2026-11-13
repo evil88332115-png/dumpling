@@ -531,3 +531,15 @@ def test_compare_version_conflicting_strings(tmp_path):
     assert {x["vs_flash_package"] for x in r["version_strings"]} == {"consistent", "different"}
     assert bc.compare_version("X_R40.1.0-3", "40.1.0.3", "40.1.0") == "consistent"
     assert bc.compare_version("X_R40.1.0-2", "40.1.0", "40.1.0") == "unknown"
+
+
+def test_unspecified_platform_is_gap_not_guessed(tmp_path):
+    """沒有指定平台：標 GAP，不分類、不預設成 Raspberry Pi（平台由 project.yml 明確給定）。"""
+    res = tmp_path / "res"
+    p = subprocess.run([sys.executable, "-I", str(CLI), "coverage", "--result", str(res), "--variant", "rootfs", "--unspecified"],
+                       capture_output=True, text=True)
+    assert p.returncode == 2 and p.stdout.startswith("X-bootloader-coverage\tGAP\t"), p.stdout + p.stderr
+    assert "not guessed" in p.stdout
+    cov = json.loads((res / "rootfs/bootloader-coverage.json").read_text())
+    assert cov["status"] == "GAP" and cov["platform"] is None and cov["platform_unspecified"] is True
+    assert cov["total"] == 0 and cov["items"] == []

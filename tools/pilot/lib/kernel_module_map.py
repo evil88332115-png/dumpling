@@ -703,6 +703,7 @@ def main(argv=None):
               "--kernel-config", "--source-tree", "--cves-origin"):
         ap.add_argument(o)
     ap.add_argument("--from", dest="from_")
+    ap.add_argument("--also-list-kernel-versions", action="store_true")      # 同 kernel_config.py：讀映像的同一趟順便印出貨的核心
     ap.add_argument("--prefer-rootfs-image", action="store_true")      # 同 kernel_config.py：板子跑 rootfs/boot/Image 時兩邊用同一份設定
     ap.add_argument("--max-age-days", type=float, default=None)
     ap.add_argument("--out", required=True)

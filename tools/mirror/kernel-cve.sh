@@ -17,7 +17,14 @@
 #   KERNEL_CVE_MIN_RECORDS     至少幾筆紀錄（預設 10000），防止拿到空的或一部分
 #   KERNEL_CVE_MAX_DOWNLOAD_MB clone 寫入的單一檔案上限（預設 500；以 ulimit -f 擋，git 的 pack 超過就失敗）
 #   KERNEL_CVE_MAX_RECORD_KB   單筆紀錄上限（預設 4096；實測最大約 1 MB）；KERNEL_CVE_MAX_UNPACKED_MB 全部紀錄合計上限（預設 1500）
-#   KERNEL_CVE_GIT_TIMEOUT     clone 的時間上限秒數（預設 900）；ls-remote 固定 120 秒
+#   KERNEL_CVE_GIT_TIMEOUT     每次 clone 的時間上限秒數（預設 900）；ls-remote 固定 120 秒
+#   KERNEL_CVE_GIT_TRIES       clone 最多試幾次（預設 3；runner 連 git.kernel.org 偶爾逾時）；KERNEL_CVE_GIT_RETRY_DELAY 第一次重試前
+#                              等幾秒（預設 30，之後每次加倍：30、60…）。傳輸 60 秒低於 1 KB/s 就放棄這一次（http.lowSpeedLimit／Time）。
+#                              全部失敗、又沒有可沿用的舊資料（下一項）才 FAIL；不換來源
+#   KERNEL_CVE_FALLBACK_FROM   上游連不上（ls-remote 與 clone 都失敗）時可以沿用的上一份鏡像（例如 CI 的 actions/cache 還原的）；
+#                              它要通過 --check，而且 fetched_utc 在 KERNEL_CVE_FALLBACK_MAX_HOURS（預設 48）小時內，否則 FAIL。
+#                              沿用時 SOURCE 的 fetched_utc 維持舊值（資料沒有重新核對），另寫 fallback=yes、fallback_utc、fallback_note；
+#                              最後一行印 ATTENTION（不是 OK），sca-scan 讀到 fallback=yes 會記 C-kernel-cve-mirror ATTENTION。結束碼仍是 0
 #   KERNEL_CVE_REUSE_FROM      上一份鏡像：上游的 HEAD commit（git ls-remote）和它的 SOURCE 相同、而且 zip 的 sha256 相符時沿用，不重新 clone
 # 安全：下載的內容不可信，只讀：git 不 checkout（--no-checkout），hooks 指到 /dev/null，只允許 https 與 file 協定；
 #   紀錄以 git ls-tree＋cat-file 讀出（不用 git archive，不套用 repo 裡的 .gitattributes）；只收 cve/published/<年>/CVE-<年>-<數字>.json
@@ -25,9 +32,11 @@
 set -euo pipefail
 URL="${KERNEL_CVE_GIT_URL:-https://git.kernel.org/pub/scm/linux/security/vulns.git}"
 case $URL in https://*|file://*) ;; *) echo "FAIL KERNEL_CVE_GIT_URL 只接受 https:// 或 file://：$URL" >&2; exit 3;; esac
-for v in KERNEL_CVE_MAX_AGE_DAYS KERNEL_CVE_MIN_RECORDS KERNEL_CVE_MAX_DOWNLOAD_MB KERNEL_CVE_MAX_RECORD_KB KERNEL_CVE_MAX_UNPACKED_MB KERNEL_CVE_GIT_TIMEOUT; do
+for v in KERNEL_CVE_MAX_AGE_DAYS KERNEL_CVE_MIN_RECORDS KERNEL_CVE_MAX_DOWNLOAD_MB KERNEL_CVE_MAX_RECORD_KB KERNEL_CVE_MAX_UNPACKED_MB KERNEL_CVE_GIT_TIMEOUT \
+         KERNEL_CVE_GIT_TRIES KERNEL_CVE_GIT_RETRY_DELAY KERNEL_CVE_FALLBACK_MAX_HOURS; do
   [ -z "${!v:-}" ] || [[ "${!v}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "FAIL $v 必須是數字" >&2; exit 3; }; done
-GITC=(git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always -c protocol.file.allow=always -c core.fsmonitor=false)
+GITC=(git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always -c protocol.file.allow=always -c core.fsmonitor=false
+      -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60)
 check() {
   python3 -I - "$1" "${KERNEL_CVE_MAX_AGE_DAYS:-7}" "${KERNEL_CVE_MIN_RECORDS:-10000}" "${KERNEL_CVE_MAX_UNPACKED_MB:-1500}" "${KERNEL_CVE_MAX_RECORD_KB:-4096}" "${2:-0}" <<'PY'
 import datetime, hashlib, json, os, re, stat, sys, zipfile
@@ -99,13 +108,14 @@ if full:
     if b:
         fail(f"kernel-cves.zip 壓縮檔損壞：{b}")
 print(f"OK commit={src['commit']} commit_date={src.get('commit_date', '未取得')} fetched_utc={src['fetched_utc']} age_days={age:.1f} "
-      f"records={len(infos)} bytes={os.path.getsize(p)} unpacked_mb={unpacked >> 20}")
+      f"records={len(infos)} bytes={os.path.getsize(p)} unpacked_mb={unpacked >> 20}"
+      + (f" fallback=yes fallback_utc={src.get('fallback_utc', '?')}" if src.get("fallback") == "yes" else ""))
 PY
 }
 if [ "${1:-}" = "--check" ]; then check "${2:?缺少鏡像資料夾}" 0; exit $?; fi
 DEST="${1:?用法見檔頭}"; MANIFEST="${2:?}"
 for p in "$DEST" "$MANIFEST"; do [ ! -e "$p" ] || { echo "已存在，拒絕覆蓋：$p" >&2; exit 3; }; done
-REUSE="${KERNEL_CVE_REUSE_FROM:-}"
+REUSE="${KERNEL_CVE_REUSE_FROM:-}"; FALLBACK="${KERNEL_CVE_FALLBACK_FROM:-}"
 FETCHED="$(date -u +%FT%TZ)"
 mkdir -p "$DEST"
 work=$(mktemp -d "$(dirname "$DEST")/.kernel-cve-clone.XXXXXX")
@@ -120,10 +130,48 @@ if [ -n "$REUSE" ] && [ -n "$head" ] && [ -f "$REUSE/SOURCE" ] && [ -f "$REUSE/k
   grep -E '^(commit|commit_date|records|unpacked_bytes)=' "$REUSE/SOURCE" > "$work/meta"
   how="沿用 $REUSE（上游 HEAD 沒有變：$head）"
 fi
+FB_EXTRA=
+# 上游連不上時沿用 KERNEL_CVE_FALLBACK_FROM（見檔頭）。成功 → 0（$DEST 已放好 zip、$work/meta、FETCHED 改成舊值）；不能沿用 → 1（原因印在 stderr）
+use_fallback() {
+  local why=$1 fb=$FALLBACK info fu hours max=${KERNEL_CVE_FALLBACK_MAX_HOURS:-48}
+  [ -n "$fb" ] || return 1
+  if [ ! -f "$fb/SOURCE" ] || [ ! -f "$fb/kernel-cves.zip" ] || [ -L "$fb/kernel-cves.zip" ] || [ -L "$fb/SOURCE" ] \
+     || [ "$(sha256sum "$fb/kernel-cves.zip" | cut -d' ' -f1)" != "$(sed -n 's/^zip_sha256=//p' "$fb/SOURCE")" ]; then
+    echo "不能沿用 $fb：沒有 SOURCE／kernel-cves.zip、是符號連結，或 sha256 與 SOURCE 不符" >&2; return 1; fi
+  info=$(check "$fb" 1) || { echo "不能沿用 $fb：$info" >&2; return 1; }
+  fu=$(sed -n 's/^fetched_utc=//p' "$fb/SOURCE" | head -1)
+  hours=$(( ( $(date -u +%s) - $(date -u -d "$fu" +%s) ) / 3600 )) || return 1
+  if [ "$hours" -gt "${max%%.*}" ]; then
+    echo "不能沿用 $fb：資料下載於 $fu，已 $hours 小時，超過 KERNEL_CVE_FALLBACK_MAX_HOURS=$max" >&2; return 1; fi
+  cp --reflink=auto "$fb/kernel-cves.zip" "$DEST/kernel-cves.zip"
+  grep -E '^(commit|commit_date|records|unpacked_bytes)=' "$fb/SOURCE" > "$work/meta"
+  local c cd; c=$(sed -n 's/^commit=//p' "$fb/SOURCE"); cd=$(sed -n 's/^commit_date=//p' "$fb/SOURCE")
+  FETCHED=$fu
+  FB_EXTRA=$(printf 'fallback=yes\nfallback_utc=%s\nfallback_note=%s\n' "$(date -u +%FT%TZ)" \
+    "上游連不上（$why），沿用 vulns.git ${c:0:12}（提交時間 ${cd:-未取得}，下載於 $fu，$hours 小時前；上限 $max 小時）：這段時間新增的核心 CVE 不在清單裡")
+  how="沿用上一份鏡像 $fb（上游連不上）"
+}
 if [ "$how" = clone ]; then
-  ( ulimit -f $(( ${KERNEL_CVE_MAX_DOWNLOAD_MB:-500} * 1024 ))
-    timeout "${KERNEL_CVE_GIT_TIMEOUT:-900}" "${GITC[@]}" clone -q --depth 1 --no-checkout --single-branch --no-tags "$URL" "$work/v" ) \
-    || { echo "FAIL git clone 失敗、超過 ${KERNEL_CVE_GIT_TIMEOUT:-900} 秒或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}：$URL" >&2; exit 1; }
+  tries=${KERNEL_CVE_GIT_TRIES:-3}; tries=${tries%%.*}; [ "$tries" -ge 1 ] 2> /dev/null || tries=1
+  # ls-remote 已經連不上、又有可沿用的舊資料：clone 只再試一次（連線階段的逾時重試幾次通常也一樣）
+  [ -z "$head" ] && [ -n "$FALLBACK" ] && tries=1
+  delay=${KERNEL_CVE_GIT_RETRY_DELAY:-30}; delay=${delay%%.*}
+  n=1
+  until ( ulimit -f $(( ${KERNEL_CVE_MAX_DOWNLOAD_MB:-500} * 1024 ))
+          timeout "${KERNEL_CVE_GIT_TIMEOUT:-900}" "${GITC[@]}" clone -q --depth 1 --no-checkout --single-branch --no-tags "$URL" "$work/v" ); do
+    rm -rf "$work/v"
+    if [ "$n" -ge "$tries" ]; then
+      msg="git clone 試了 $n 次都失敗（每次超過 ${KERNEL_CVE_GIT_TIMEOUT:-900} 秒、連線失敗或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}）"
+      use_fallback "$msg" && break
+      echo "FAIL $msg：$URL" >&2
+      exit 1
+    fi
+    echo "git clone 第 $n 次失敗，$delay 秒後重試（最多 $tries 次）：$URL" >&2
+    sleep "$delay"; delay=$(( delay * 2 )); n=$(( n + 1 ))
+  done
+fi
+if [ "$how" = clone ]; then      # clone 成功（沒有改用 use_fallback）
+  [ "$n" -eq 1 ] || echo "git clone 第 $n 次成功" >&2
   # 只讀 cve/published/<年>/CVE-….json 的 blob（ls-tree＋cat-file；不 checkout，不套用 .gitattributes），打包成 zip
   python3 -I - "$work/v" "$DEST/kernel-cves.zip" "$work/meta" "${KERNEL_CVE_MAX_RECORD_KB:-4096}" "${KERNEL_CVE_MAX_UNPACKED_MB:-1500}" <<'PY'
 import os, re, subprocess, sys, zipfile
@@ -172,7 +220,8 @@ PY
   rm -rf "$work/v"
 fi
 sha=$(sha256sum "$DEST/kernel-cves.zip" | cut -d' ' -f1); sz=$(stat -c %s "$DEST/kernel-cves.zip")
-{ printf 'source=%s\nfetched_utc=%s\nzip_sha256=%s\nzip_bytes=%s\n' "$URL" "$FETCHED" "$sha" "$sz"; cat "$work/meta"; } > "$DEST/SOURCE"
+{ printf 'source=%s\nfetched_utc=%s\nzip_sha256=%s\nzip_bytes=%s\n' "$URL" "$FETCHED" "$sha" "$sz"; cat "$work/meta"
+  [ -z "$FB_EXTRA" ] || printf '%s\n' "$FB_EXTRA"; } > "$DEST/SOURCE"
 echo "kernel-cves.zip：$how，$sz bytes"
 check "$DEST" 1    # 下載時多做一次完整的 CRC 檢查（testzip）
 {
@@ -180,4 +229,5 @@ check "$DEST" 1    # 下載時多做一次完整的 CRC 檢查（testzip）
   echo "# files: $(find "$DEST" -type f | wc -l)  bytes: $(du -sb "$DEST" | cut -f1)"
   (cd "$DEST" && find . -type f -print0 | sort -z | xargs -0 sha256sum)
 } > "$MANIFEST"
-echo "OK mirror=$DEST manifest=$MANIFEST"
+if [ -n "$FB_EXTRA" ]; then echo "ATTENTION mirror=$DEST manifest=$MANIFEST $(sed -n 's/^fallback_note=//p' "$DEST/SOURCE")"
+else echo "OK mirror=$DEST manifest=$MANIFEST"; fi

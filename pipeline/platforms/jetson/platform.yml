@@ -1,0 +1,95 @@
+# Jetson（NVIDIA Jetson Linux / L4T）平台設定。欄位說明見 docs/PLATFORM-INTERFACE.md。
+schema: 1
+platform: jetson
+description: NVIDIA Jetson（Jetson Linux r39.x）：公開 BSP、範例 rootfs、public_sources；編核心與樹外模組後組刷機包
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/<arch>）
+build:
+  mode: compile            # 在 arm64 runner 原生編譯核心與樹外模組（不用交叉工具鏈）
+  runner: arm64            # ubuntu-24.04-arm
+  apt:                     # build job 的 apt 相依（--no-install-recommends；M2 試驗實測 Ubuntu 24.04 arm64）
+    - build-essential
+    - bc
+    - bison
+    - flex
+    - libssl-dev
+    - libelf-dev
+    - rsync
+    - dwarves
+    - cpio
+    - kmod
+    - device-tree-compiler
+    - python3
+    - python3-yaml
+    - xz-utils
+    - zstd
+    - lz4
+    - libncurses-dev
+    - pkg-config
+    - perl
+    - patch
+raw_sectors:
+  enabled: false           # Jetson 沒有分割區外的原始磁區要清點
+# 分層規則（D-027）：用套件名稱（不含版本）與路徑樣式，fnmatch 語法；不看版本字尾。其餘一律是 os。
+# 路徑樣式比的是元件在映像裡的路徑（去掉開頭的 /）：rootfs 映像是 usr/lib/modules/…，BSP 資料夾是 Linux_for_Tegra/…。
+# 非套件的元件（核心、樹外模組、device tree、開機程式、閉源韌體）靠路徑判斷；路徑沒有任何規則對到的標 unknown（不默默歸成 os）。
+layers:
+  bsp:
+    packages:
+      # NVIDIA 為這個平台提供的套件都算 bsp（D-030），仍是名稱清單（D-027），不看版本字尾。清單怎麼來的見 docs/LAYERS.md「NVIDIA 套件清單」：
+      - "nvidia-l4t-*"       # L4T 使用者空間套件（驅動、函式庫、工具、核心套件）：裝在 rootfs 但屬於 BSP
+      - "nvidia-igx-*"       # NVIDIA 在同一個 BSP 裡提供的 IGX 平台套件（nvidia-igx-oobe、nvidia-igx-systemd-reboot-hooks、nvidia-igx-bootloader）
+    paths:                   # 核心、樹外模組、device tree、開機程式（J 軌依實際 BSP 內容再補）
+      - "usr/lib/modules/*"  # rootfs：核心（in-tree）與樹外模組（nvidia-oot、nvgpu…），Syft 的 linux-kernel-module 元件
+      - "lib/modules/*"
+      - "boot/*"             # rootfs：核心映像、device tree、initrd
+      - "Linux_for_Tegra/kernel/*"
+      - "Linux_for_Tegra/rootfs/usr/lib/modules/*"
+      - "Linux_for_Tegra/rootfs/boot/*"
+      - "Linux_for_Tegra/bootloader/*.bin"   # UEFI、OP-TEE／TF-A、MB1／MB2、BPMP、SPE 等映像
+      - "Linux_for_Tegra/bootloader/*.dtb"
+      - "Linux_for_Tegra/bootloader/*.dtbo"
+      - "Linux_for_Tegra/bootloader/*.img"
+      - "Linux_for_Tegra/bootloader/*.fip"   # bl31_t264.fip 等
+      - "Linux_for_Tegra/bootloader/*.deb"   # nvidia-l4t-bootloader、nvidia-igx-bootloader、nvidia-l4t-kernel-partitions
+      - "Linux_for_Tegra/nv_tegra/l4t_deb_packages/*"   # NVIDIA 的 L4T 套件（apply_binaries.sh 裝進 rootfs 的來源）
+  host-tool:
+    # 主機端刷機工具：隨 BSP 提供給客戶，在客戶的主機上執行，不在產品上執行，不進產品漏洞清單。
+    # 路徑對過公開 R39.2.1 BSP 的成員清單（2026-11-12）：Linux_for_Tegra 最上層的腳本與 flash 相關資料夾。
+    # `*` 也比對 `/`，所以最上層的腳本逐一列出名稱，不用 Linux_for_Tegra/*.sh（會吃到 rootfs 裡的腳本）。
+    paths:
+      - "Linux_for_Tegra/flash.sh"
+      - "Linux_for_Tegra/apply_binaries.sh"
+      - "Linux_for_Tegra/l4t_initrd_flash.sh"
+      - "Linux_for_Tegra/l4t_generate_soc_bup.sh"
+      - "Linux_for_Tegra/l4t_sign_image.sh"
+      - "Linux_for_Tegra/l4t_uefi_sign_image.sh"
+      - "Linux_for_Tegra/build_l4t_bup.sh"
+      - "Linux_for_Tegra/nvautoflash.sh"
+      - "Linux_for_Tegra/nvsdkmanager_flash.sh"
+      - "Linux_for_Tegra/odmfuse.sh"
+      - "Linux_for_Tegra/odmfuseread.sh"
+      - "Linux_for_Tegra/nvmassfusegen.sh"
+      - "Linux_for_Tegra/create_l4t_bsp_images.py"
+      - "Linux_for_Tegra/bootloader/*.py"    # tegrasign_v3*.py 等簽署工具
+      - "Linux_for_Tegra/generate_capsule/*"
+      - "Linux_for_Tegra/unified_flash/*"
+      - "Linux_for_Tegra/tools/*"            # 含 jetson-gpio-common、python3-jetson-gpio 的 deb（主機端工具資料夾）
+      - "Linux_for_Tegra/nv_tools/*"
+  default: os
+scan:
+  runner: amd64              # ubuntu-24.04：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和 arch 無關（預設值，寫出來當說明）
+  apt: [zstd, lbzip2]        # scan job 額外的 apt 套件（組刷機包要解壓縮；bubblewrap 與 python3-yaml 由 workflow 固定裝）
+  inputs_template: jetson    # tools/wizard/platforms/jetson.json
+  platform_arg: jetson       # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform
+  rootfs: rootfs
+project_defaults:
+  platform_version: Jetson Linux r39.2.x（NVIDIA 公開 BSP）
+  bsp_os_source: NVIDIA Jetson Linux 公開 BSP、公開範例 rootfs 與 public_sources
+  kernel_source: NVIDIA public_sources 的 Linux 核心與樹外模組，加專案 patches/
+  bootloader: NVIDIA 公開 BSP 內建 UEFI（edk2-nvidia）、OP-TEE、MB1／MB2（閉源韌體以 BSP 原樣）
+  own_software: []
+  interfaces:
+    - Ethernet
+    - USB
+    - UART 除錯埠
+  platform_params: {}
