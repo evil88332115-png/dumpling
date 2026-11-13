@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:29 +0800（C0）
+最後更新：2026-11-14 05:29 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -185,7 +185,7 @@
 > - 寫程式（Sonnet 5.5，effort high）：D-043 (1) NVIDIA vBIOS 公告比對，分支 `wp3/nvidia-vbios-advisory`（從 main dde7467 開，worktree `$AGENT_TMP/dumpling-wt-c2-nvvbios`），暫存 `$AGENT_TMP/dumpling-tmp-c2-nvvbios/`：抓鏡像 → 審核 gpu-firmware 公告並填表 → 依版本與裝置 ID 比對 → 寫進報告；不改 C1 的檔案。狀態：**完成 9113d4a**
 >   - 鏡像 commit 98dc5d70（2026-11-10），gpu-firmware 群組只有 5674（HGX／DGX VBIOS、LS10）→ 判為 not_applicable（C2 代理初審，待負責人確認）；目前沒有可以機器比對的顯卡 vBIOS 公告 → 所有 vBIOS 都是 NOT_ASSESSED（no-row）
 >   - 新模組 `tools/cra/nvidia_vbios_advisory.py`：依版本、PCI vendor／device 比對；鏡像超過 90 天時 fixed 降成 NOT_ASSESSED
->   - 需要 C1 的介面：validate_table 支援十六進位版本與裝置欄位、表要記鏡像 commit → C0 已記進 M7 清單（D-056 的 M7a2，由 C1 做）；C2 已回覆 C1 欄位：validate_table／InputError、5 段十六進位版本、pci_vendor／pci_devices、頂層 mirror{commit,commit_date,fetched_utc}、reviewed_until＝看過的最新公告日期（已說定）。C1 開始做 M7a2 前確認了 6 點，C2 的回覆：commit_date 兩種格式都收、mirror 允許 note 這類額外鍵；mirror 格式錯誤 → InputError（我們這邊會變 table-invalid），缺少 → GAP；未審核列也檢查版本格式；not_applicable 允許額外欄位；subsystem 先不加；bulletin 格式規則兩邊用同一套。C1 已實作（wp1/m7a2 82f370e，尚未開 PR）：bulletin 只收 ^[0-9]{1,8}$；它直接改了我們的 test_naive_now_and_naive_fetched_do_not_raise（沒有時區 → table-invalid），並在錯誤訊息加上英文字樣。advisory-polish 會用同一條 bulletin 規則，檔頭第 8 點和 notes 改成「格式錯 → table-invalid、過期或在未來 → table-stale」，載入時就先檢查
+>   - 需要 C1 的介面：validate_table 支援十六進位版本與裝置欄位、表要記鏡像 commit → C0 已記進 M7 清單（D-056 的 M7a2，由 C1 做）；C2 已回覆 C1 欄位：validate_table／InputError、5 段十六進位版本、pci_vendor／pci_devices、頂層 mirror{commit,commit_date,fetched_utc}、reviewed_until＝看過的最新公告日期（已說定）。C1 開始做 M7a2 前確認了 6 點，C2 的回覆：commit_date 兩種格式都收、mirror 允許 note 這類額外鍵；mirror 格式錯誤 → InputError（我們這邊會變 table-invalid），缺少 → GAP；未審核列也檢查版本格式；not_applicable 允許額外欄位；subsystem 先不加；bulletin 格式規則兩邊用同一套。C1 的 M7a2 **已合併（PR #65，main d73ff86）**：bulletin 只收 ^[0-9]{1,8}$；它直接改了我們的 test_naive_now_and_naive_fetched_do_not_raise（沒有時區 → table-invalid），並在錯誤訊息加上英文字樣。advisory-polish 會用同一條 bulletin 規則，檔頭第 8 點和 notes 改成「格式錯 → table-invalid、過期或在未來 → table-stale」，載入時就先檢查
 >   - PR 說明要寫清楚：5674 判為不適用，待負責人確認
 >   - C2 在 run.d 清單補上新測試檔 → **3111d52**；本機 931 passed
 > - 驗證：預驗 wp3/nvidia-vbios-advisory 3111d52，狀態：**不通過**（應修 1 項：測試吃牆上時鐘，2027-02 起會讓 CI 轉紅；建議：5674 標成 reviewed 讓 candidates 回 OK、沒有提醒負責人，要改回待審；矛盾的列可能判成 fixed；每個影像的 vendor；多個版本字串；過期要升 ATTENTION；5561 寫進 notes）
@@ -193,7 +193,7 @@
 > - 驗證：複驗 3d270fe：**不通過**。比對規則 OK（18000 次 fuzz 沒有誤判成 fixed），3 項應修都在文字或測試：workflow 註解寫「判定不適用」與現況矛盾；輸出與文件還有「不適用」；確認後有測試吃牆上時鐘
 > - 寫程式（nvvbios 第四輪）：**完成 91a5be2**（workflow 註解照實寫；「不適用」措辭全部拿掉；conftest 固定時間；terminated 缺鍵 fail-closed；Table.confirmed；確認後要改的 6 個測試寫進 notes；1140 passed；CI tests 43490925483、firmware 43490929895）
 > - 驗證：第三次複驗 91a5be2：**通過**（2 處文字：「人工審核過的」、測試標題的歷史口吻；建議：有未審核的列也算未確認）
-> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0）；C0 的獨立驗證：**通過** → **#59 已合併（main 77ef634）**，worktree nvvbios 已移除。後續 2 項（報告的「對照表」行要算進 unreviewed_rows；md_esc／firmware_mdsafe 跳脫 @，或把 bulletin 欄限成數字）→ `wp3/advisory-polish`：**已從 main 5cf2eaa 開**（worktree `$AGENT_TMP/dumpling-wt-c2-polish`，暫存 `$AGENT_TMP/dumpling-tmp-c2-polish/`），寫程式代理**進行中**。CI 要裝 markdown-it-py 那項：不改 tests.yml（C0）和共用的 requirements（C1），改用 C2 自己的 run.d venv 加上 C2 專用、固定版本的套件。要做的項目：#59 的 2 項（對照表那行算進 unreviewed_rows；md_esc 的 @ 或把 bulletin 限成數字）；supplier-followup 複驗的建議（CI 要裝 markdown-it 或缺了就失敗，靜默 return 改成 skipTest；SPECIAL 用字面常數釘住；計數邊界測試；只有零寬或控制字元的階段名稱也算空名稱；email／xmpp 自動連結；整份不處理時 supplier_dumpling_props 也要計數；_iter_components 的 MAX_UNNORMALIZED）；#60 驗證的建議（只有零寬字元的名稱、單列 OK 時沒有說明；pedigree／services 裡的供應商 dumpling: 標記沒改名；email、mailto:、xmpp: 自動連結；CI 安裝 markdown-it-py）。scan-status-check 不一致的那項 → C0 已列入 M7b。**5674 的初審意見要由負責人確認**（C0 已問使用者，等回覆）
+> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0）；C0 的獨立驗證：**通過** → **#59 已合併（main 77ef634）**，worktree nvvbios 已移除。後續 2 項（報告的「對照表」行要算進 unreviewed_rows；md_esc／firmware_mdsafe 跳脫 @，或把 bulletin 欄限成數字）→ `wp3/advisory-polish`：**已從 main 5cf2eaa 開**（worktree `$AGENT_TMP/dumpling-wt-c2-polish`，暫存 `$AGENT_TMP/dumpling-tmp-c2-polish/`），寫程式代理**進行中**（已追加：併 main d73ff86；C2 程式的 `^…$`＋match 全面改成 fullmatch；時間格式和 C1 一致；stale／invalid 的說明 3 處與載入檢查；bulletin 用 ^[0-9]{1,8}$）。CI 要裝 markdown-it-py 那項：不改 tests.yml（C0）和共用的 requirements（C1），改用 C2 自己的 run.d venv 加上 C2 專用、固定版本的套件。要做的項目：#59 的 2 項（對照表那行算進 unreviewed_rows；md_esc 的 @ 或把 bulletin 限成數字）；supplier-followup 複驗的建議（CI 要裝 markdown-it 或缺了就失敗，靜默 return 改成 skipTest；SPECIAL 用字面常數釘住；計數邊界測試；只有零寬或控制字元的階段名稱也算空名稱；email／xmpp 自動連結；整份不處理時 supplier_dumpling_props 也要計數；_iter_components 的 MAX_UNNORMALIZED）；#60 驗證的建議（只有零寬字元的名稱、單列 OK 時沒有說明；pedigree／services 裡的供應商 dumpling: 標記沒改名；email、mailto:、xmpp: 自動連結；CI 安裝 markdown-it-py）。scan-status-check 不一致的那項 → C0 已列入 M7b。**5674 的初審意見要由負責人確認**（C0 已問使用者，等回覆）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
