@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 22:34 +0800（C1）
+最後更新：2026-11-13 22:34 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -135,7 +135,10 @@
 >   - 應修 4：cpe-basis 的依據句不實（漏了 AMT）
 >   - 建議：補邊界測試；validate 的強化；產生器超線性；授權方面（release notes 沒有明確授權）只留事實性欄位
 >   - 供應商 SBOM 的公告比對還沒做，等 supplier-normalize 合併後由 C2 處理
->   - 已交回寫程式代理修正（進行中）
+>   - 已交回寫程式代理修正：**完成 9e8e59e**（4 項應修和建議都修了）
+>   - C2 併入 main → **03b33cd**：3 處清單與說明衝突；648 passed；NovaCustom V540TU 現在帶 CSME CPE 18.0.10（inferred）
+>   - CI tests 43443887986、firmware 43443892464
+> - 驗證（Sonnet 5.5，effort high，新代理）：複驗 wp3/fw-advisory 03b33cd，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-adv2/`，狀態：**進行中**
 >
 > - 寫程式（同一個 AMD 代理，第五輪）：C0 驗證後的 3 項修正，分支 `wp3/amd-psp`，狀態：**完成 34fd4f9**
 >   - checksum 不符的目錄標 untrusted，只經由它找到的目錄標 untrusted-path（dir-untrusted-path），都不採用
@@ -143,7 +146,12 @@
 >   - 本機 532 passed，99／25／101 不變；C0 的重現由 C2 親手跑過
 >   - CI tests 43435020981、firmware 43435026101 **綠**
 >
-> - 寫程式（Sonnet 5.5，effort high）：CSE layout Size 0x60 的支援。分支 `wp3/cse-layout-size`（從 main c0a54eb 開，worktree `$AGENT_TMP/dumpling-wt-c2-cse60`），暫存 `$AGENT_TMP/dumpling-tmp-c2-cse60/`。先找公開的 Arrow Lake／Lunar Lake／Panther Lake／Wildcat Lake 樣本，找不到就做合成測試，並寫明沒有公開真樣本核對。狀態：**進行中**
+> - 寫程式（Sonnet 5.5，effort high）：CSE layout Size 0x60 的支援。分支 `wp3/cse-layout-size`（從 main c0a54eb 開，worktree `$AGENT_TMP/dumpling-wt-c2-cse60`），暫存 `$AGENT_TMP/dumpling-tmp-c2-cse60/`。先找公開的 Arrow Lake／Lunar Lake／Panther Lake／Wildcat Lake 樣本，找不到就做合成測試，並寫明沒有公開真樣本核對。狀態：**完成 dc7589a**
+>   - 公開真樣本 Dasharo NovaCustom NUC BOX v0.9.2（Arrow Lake-U/H FSP）：Size 0x60、CRC 相符、RBEP＝NFTP＝18.1.18.2724，有 release notes 為出處；已登記成 `firmware/bios/novacustom-nuc-box-arl-v0.9.2`
+>   - Size 逐值列舉 0x40／0x48／0x58／0x60；+0x58 之後要全 0，否則 GAP
+>   - 其他 7 個樣本改動前後逐位元相同；本機 221 passed
+>   - CI tests 43443071116、firmware 43443076668
+>   - **預驗排在 fw-advisory 複驗之後**（同一時間只有 1 個驗證代理）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
