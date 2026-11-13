@@ -183,7 +183,7 @@
 | `tools/pilot/tests/test_kernel_boot.py` | `scripts/pilot/tests/test_kernel_boot.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
-| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述；新增（M2）2 個 `tools/mirror/kernel-cve.sh` 的測試（clone 失敗重試、上游連不上時沿用上一份鏡像並標 ATTENTION；假的 git 與合成的鏡像） |
+| `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述；新增（M2）2 個 `tools/mirror/kernel-cve.sh` 的測試（clone 失敗重試、上游連不上時沿用上一份鏡像並標 ATTENTION；假的 git 與合成的鏡像）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
 | `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
@@ -196,7 +196,7 @@
 | `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
 | `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
+| `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
 | `tools/pilot/tests/test_pilot_l4t_kernel.py` | `scripts/pilot/tests/test_pilot_l4t_kernel.py` | 25fa89a | 路徑調整 1 處；刪段：`test_deb_sources_…` 去掉用 `scio_prep.py` 的一半（函式改名），保留 `deb_sources.py` 的檢查 |
 | `tools/pilot/tests/test_pilot_lock_sandbox.py` | `scripts/pilot/tests/test_pilot_lock_sandbox.py` | 25fa89a | 路徑調整 15 處、刪段 75 行 |
 | `tools/pilot/tests/test_pilot_nvd_mirror.py` | `scripts/pilot/tests/test_pilot_nvd_mirror.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
