@@ -2,18 +2,18 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:25 -0500（C2）
+最後更新：2026-11-13 04:25 -0500（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：**搬家準備（D-045）**：C0、C1、C2 從主要主機搬到第二台（WSL2）。已請 C1、C2 在下一個可停段落 commit＋push 並更新 STATUS；等兩者回報後，C0 寫「搬家準備完成」並停下
-- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 aaeb4f0，**未開 PR**）：D-034～D-046＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 目前在做：**搬家準備完成：可在第二台（WSL2）以原開場指令接手**（D-045，使用者已確認）。C0、C1、C2 都已推送並停下；主要主機上的對話、worktree、repo 在使用者確認第二台接上前不刪
+- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 53a3112，**未開 PR**）：D-034～D-047＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1：**搬家準備完成、已停下**。wp1/m2 f11bfdb（全推，本機完整測試 OK）；PR 草稿在 wp1/m2-pr-draft d3efdc8（不合併，開 PR 後刪）。驗收 run 在 f11bfdb 上跑：release v39.2.0 43399785656、v39.2.1 43399800268、tests 43399813005。下一步見 C1 節：檢查 draft → 新的獨立驗證 → 併 main → 開 M2 PR
-  - C2：D-042 CSME 完成（wp3/csme-new 61e8ef7），AMD（wp3/amd-psp）修應修 4 項中，之後合成一個 PR；D-043 接在後面；supplier-normalize（8a960c0）等 M2
+  - C2：**搬家準備完成、已停下**（C2 節 f48ffb2）。D-042 CSME 完成（wp3/csme-new 61e8ef7）；AMD（wp3/amd-psp ebac3e9）應修已修、**還沒複驗**；新 C2 先照 D-047 改歧義規則（需校驗佐證）與拿掉 sys._getframe，再複驗，兩半合成一個 PR（開之前請 sca-center 用私有檔本機驗）；D-043 接在後面；supplier-normalize（8a960c0）等 M2；公開樣本在第二台要照各分支 firmware.yml 重新下載
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：wp7/adapters 三平台重跑中（d31c872），標準答案依結果重訂後驗證；M6 PR 草稿已備
 - 下一步（新 C0 接手後）：
