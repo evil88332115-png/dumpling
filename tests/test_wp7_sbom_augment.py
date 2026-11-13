@@ -168,7 +168,8 @@ class AugmentTest(unittest.TestCase):
 
     def test_merge_source_app_name_and_version(self):
         img = self.path("img.json", bom([]))
-        src = self.path("src.json", {"bomFormat": "CycloneDX", "metadata": {"component": {"bom-ref": "r", "type": "application", "name": "src", "version": "0"}},
+        src = self.path("src.json", {"bomFormat": "CycloneDX", "metadata": {"component": {"bom-ref": "r", "type": "application", "name": "src", "version": "0",
+                                                                                  "purl": "pkg:npm/src@0"}},
                                      "components": []})
         out = self.path("o.json")
         rc, line = self.run_aug("merge-source", img, src, out, "--label", "app-source", "--repo", REPO, "--commit", COMMIT,
@@ -177,6 +178,10 @@ class AugmentTest(unittest.TestCase):
         app = rj(out)["components"][0]
         self.assertEqual((app["name"], app["version"]), ("openmediavault", "8.6.1-1"))
         self.assertEqual((props(app)["dumpling:source-root-name"], props(app)["dumpling:source-root-version"]), ("src", "0"))
+        # 名稱與版本改了：purl 跟著改（不能留 cdxgen 的 pkg:npm/src@0），原值留在屬性；vcs_url 指到固定 commit
+        self.assertEqual(props(app)["dumpling:source-root-purl"], "pkg:npm/src@0")
+        self.assertTrue(app["purl"].startswith("pkg:generic/openmediavault@8.6.1-1?vcs_url=git%2B"), app["purl"])
+        self.assertIn(COMMIT, app["purl"])
         rc, _ = self.run_aug("merge-source", img, src, out, "--label", "x", "--repo", REPO, "--commit", COMMIT, "--app-name", "bad name")
         self.assertEqual(rc, 64)
 

@@ -20,7 +20,8 @@ merge-source（AI NAS 的 OpenMediaVault 原始碼）：
   - 原始碼 SBOM 的元件與它的 metadata.component（應用本身）併進來，bom-ref 一律改成 `dumpling:src:<名稱>:<原本的 ref>`（不跟映像的撞），
     每個元件加 `dumpling:origin` = source、`dumpling:origin-repo`、`dumpling:origin-commit`；
     應用本身另加 `dumpling:source-vs-package` = NOT_ASSESSED（原始碼與正式 deb 是否完全相同沒有比對，D-025）；
-    給了 --app-name／--app-version 時，應用本身的名稱與版本改成這兩個值（原本的值記在 dumpling:source-root-name／-version）。
+    給了 --app-name／--app-version 時，應用本身的名稱與版本改成這兩個值（原本的值記在 dumpling:source-root-name／-version），
+    purl 改成 pkg:generic/<名稱>@<版本>?vcs_url=git+<repo>@<commit>（原本的 purl 記在 dumpling:source-root-purl）。
   - dependencies 一起合併（ref 照樣改名）；兩端都在合併後元件裡的邊才保留，丟掉的邊數寫在 metadata 的 property。
   - 產品根元件（metadata.component）加一條依賴指到應用本身。
 輸出是確定的（同樣輸入同樣位元組）。
@@ -32,6 +33,7 @@ import lzma
 import os
 import re
 import sys
+import urllib.parse
 
 MAX_SBOM = 1 << 30
 OK, FAIL, GAP, USAGE = 0, 1, 3, 64
@@ -243,6 +245,14 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None)
         if app_version:
             prop(a, "dumpling:source-root-version", a.get("version"))
             a["version"] = app_version
+        # 名稱或版本改了，cdxgen 原本的 purl（例如 pkg:npm/openmediavault-workbench@0.0.0）就不再描述這個元件：
+        # 原值留在屬性，purl 改成 pkg:generic/<名稱>@<版本>，vcs_url 指到固定的 commit（不給 CPE：版本格式對不對得上 NVD 沒有核對，不猜）
+        if app_name or app_version:
+            if a.get("purl"):
+                prop(a, "dumpling:source-root-purl", a["purl"])
+            a["purl"] = "pkg:generic/%s@%s?vcs_url=%s" % (
+                urllib.parse.quote(a.get("name") or "", safe=""), urllib.parse.quote(a.get("version") or "", safe=""),
+                urllib.parse.quote("git+%s@%s" % (repo, commit), safe=""))
         prop(a, "dumpling:source-vs-package", "NOT_ASSESSED")
         app_ref = a["bom-ref"]
         merged.append(a)

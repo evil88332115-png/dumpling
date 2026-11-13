@@ -113,3 +113,25 @@ dthelper、libmraa*（Radxa 發行、可能和硬體存取有關）目前歸 os�
 - D-038 兩邊核對：C4（兩個來源）與 C1（kernel-versions /2：upstream_version 6.1.84、basis source-makefile+platform-param）都是 6.1.84；
   agree 的計算在任一邊是 null 時是 false，不會誤判。兩邊用同一份 Makefile 與宣告值，這一項是防止實作漂移（reason 已寫明）。
 - 沒有新的「該 GAP 卻寫成正常值」。
+
+### ai-nas-demo（第一版標準答案，2026-11-13）
+
+驗證代理（Sonnet 5.5，只讀，沒有連網）不看 C4 的核對紀錄，從 artifact（dev run 43386797521）、Debian 官方清單、本機的 Debian 核心 debian.tar.xz 與 OMV 固定 commit 的 tarball 重算。
+結論：**需要修改**。60 項的值全部重算吻合（deb 322 個雙向差集為空、元件 27220 與各層、unknown 的拆分、86 個 patch、changelog 8.6.1-1、報告取 0744 那次、990 列／934 CVE／os 821／unknown 169），
+沒有「該 GAP 卻寫成正常值」；要改的是 reason 與漏項：
+
+| 嚴重度 | 發現 | 處理 |
+|---|---|---|
+| 中 | 核心的 reason 寫成「Grype 依 Debian 資料比對（已考慮 Debian 的修補）」：實際 428 列都是 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，Debian 的核心 deb 沒有列 | reason 與 notes 改寫；缺口 22 |
+| 中 | C-sbomgate 的 reason 說版本未知的主要是 OMV 相依與檔案紀錄：實際是核心模組 3847 個 UNKNOWN＋5 個 pypi | 改寫 |
+| 中 | C-kernel-config／module-map 的 GAP：映像其實有 /boot/config-*，工具只找 build/ 與 linux-headers | reason 補上；缺口 23（工具改善後要更新） |
+| 輕 | bsp 2 的組成寫得不精確；根元件的 purl 還是 cdxgen 的 pkg:npm/openmediavault-workbench@0.0.0，與名稱版本不一致；cdxgen-src 是占位元件 | sbom_augment 改了名稱或版本時 purl 改成 pkg:generic/<名稱>@<版本>?vcs_url=…，原值留在 dumpling:source-root-purl（加測試）；reason 照實寫 |
+| 輕 | cdxgen 版本沒有固定，元件數依賴它 | reason 註明 |
+| 輕 | kernel_versions.shipped 整句 equals | check-expected 不支援清單索引，保留整筆，reason 註明 |
+| 漏項 | 沒釘 os 層的漏洞列、D-dt-findings、C-dt-feeds | 加 vulnerabilities.full.layers.os（300–2500）與兩個 GAP |
+| 漏項（不屬標準答案） | ours 時 p1_rows 0、P1 判斷表沒有 OS 的 4 個 P1；notes 仍寫「分層之前」 | 缺口 24；notes 的修正（894debd）在這次 run 之後，下一次 run 生效 |
+
+追加核對（同一個代理）：缺口 21 的 own_software 四個樣式在固定 commit 都有對應的檔案（omv-*、183 個 .inc、16 個 .py、3 個 .php），出處 openmediavault.install 相符；GAP／matched 0 是正確結果。
+
+未確認：映像與官方 SHA512SUMS 的關係（本機沒有 SHA512SUMS）、/boot/config 是否真的在磁碟上（只從 SBOM 的檔案紀錄看到）、4 個 P1 的 EPSS／KEV、B-sbom-provided 寫 27219 與 27220 差 1 的原因。
+own_software 三項與各文件狀態要等下一次 CI。

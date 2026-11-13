@@ -162,6 +162,33 @@ class KernelVersionsNotesTest(unittest.TestCase):
         self.assertIn("分層**之前**", cust)
 
 
+class OwnSoftwareTest(unittest.TestCase):
+    def test_summary_and_missing_file(self):
+        tmp = tempfile.mkdtemp(prefix="wp7-own-"); self.addCleanup(shutil.rmtree, tmp, True)
+        p = os.path.join(tmp, "own-software.json")
+        self.assertIsNone(wp7_scan.own_software_summary(p))          # 沒有檔：null，不推測
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"status": "GAP", "files": [], "patterns": [{"pattern": "TO BE COMPLETED", "status": "GAP", "matched": 0, "reasons": ["x"]}]}, f)
+        self.assertEqual(wp7_scan.own_software_summary(p),
+                         {"status": "GAP", "patterns": [{"pattern": "TO BE COMPLETED", "status": "GAP", "matched": 0}], "files": 0})
+
+
+class DocumentStatusTest(unittest.TestCase):
+    def test_documents_and_missing_fields_from_summary(self):
+        tmp = tempfile.mkdtemp(prefix="wp7-doc-"); self.addCleanup(shutil.rmtree, tmp, True)
+        rep = os.path.join(tmp, "reports"); os.makedirs(rep)
+        with open(os.path.join(rep, "summary.json"), "w", encoding="utf-8") as f:
+            json.dump({"status": "GAP", "documents": {"user-information": {"status": "GAP", "detail": ["x"]}, "sbom": {"status": "OK"}},
+                       "missing_fields": ["a", "b"], "vex": {"gate": {"verdict": "GAP"}}}, f)
+        paths = {"rootfs": os.path.join(tmp, "r"), "scan": os.path.join(tmp, "s"), "reports": rep}
+        r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
+        self.assertEqual(r["documents"], {"user-information": "GAP", "sbom": "OK"})
+        self.assertEqual((r["missing_fields"], r["report_status"], r["release_gate"], r["own_software"]), (2, "GAP", "GAP", None))
+        os.remove(os.path.join(rep, "summary.json"))
+        r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
+        self.assertEqual((r["documents"], r["missing_fields"]), (None, None))     # 讀不到：null，不推測
+
+
 class ExternalServicesTest(unittest.TestCase):
     def test_platform_without_list_is_not_assessed(self):
         r = wp7_scan.services("/nonexistent", "rockchip")

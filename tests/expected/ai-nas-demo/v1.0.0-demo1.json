@@ -30,11 +30,11 @@
   },
   "components.total": {
    "equals": 27220,
-   "reason": "固定輸入（映像、Syft 1.55.0、OMV commit 9d8530ff 的 cdxgen 結果）下的元件數"
+   "reason": "固定輸入（映像、Syft 1.55.0、OMV commit 9d8530ff 的 cdxgen 結果）下的元件數。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 版本沒有固定，見 components.bsp）"
   },
   "components.bsp": {
    "equals": 2,
-   "reason": "只有 OMV 應用本身（根元件 openmediavault 8.6.1-1，own_software 對到）與它的子元件；雲端映像沒有裝 OMV 的 deb（deb_bsp 是 null）"
+   "reason": "(1) OMV 應用本身：根元件 openmediavault 8.6.1-1（type application，own_software 對到；purl 改成 pkg:generic/openmediavault@8.6.1-1，cdxgen 原本的 pkg:npm/openmediavault-workbench@0.0.0 留在 dumpling:source-root-purl）；(2) 它的子元件 cdxgen-src（版本 latest，cdxgen 自己塞的占位元件，沒有相依邊，不是真實套件）。雲端映像沒有裝 OMV 的 deb（deb_bsp 是 null）。cdxgen 的版本沒有固定（npm 全域安裝），占位元件隨 cdxgen 升級消失時這一項會變成 1"
   },
   "components.os": {
    "equals": 25493,
@@ -42,7 +42,7 @@
   },
   "components.unknown": {
    "equals": 1725,
-   "reason": "OMV 原始碼掃到的第三方相依 1691 個（npm 1679、pypi 5、composer 4、github 3；沒有路徑或路徑沒有規則，缺口 7）＋映像裡 deb 帶進來的語言套件 34 個（pypi 33、maven 1，缺口 12）；ours 時都算我們的待辦"
+   "reason": "OMV 原始碼掃到的第三方相依 1691 個（npm 1679、pypi 5、composer 4、github 3；沒有路徑或路徑沒有規則，缺口 7）＋映像裡 deb 帶進來的語言套件 34 個（pypi 33、maven 1，缺口 12）；ours 時都算我們的待辦。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 版本沒有固定，見 components.bsp）"
   },
   "components.host_tool": {
    "equals": 0,
@@ -99,7 +99,7 @@
   },
   "app_source.cdxgen_root_name": {
    "equals": "openmediavault-workbench",
-   "reason": "cdxgen 原本的根元件名稱（記錄用，不拿來當產品名稱）"
+   "reason": "cdxgen 原本的根元件名稱（記錄用，不拿來當產品名稱；原本的 purl 也留在元件的 dumpling:source-root-purl）"
   },
   "app_source.version_vs_commit": {
    "equals": "NOT_ASSESSED",
@@ -168,7 +168,7 @@
      "upstream_note": "原始碼 Makefile 是 6.12.116，與出貨核心 6.12.116+deb13-amd64 相符"
     }
    ],
-   "reason": "上游版本 6.12.116：D-035 產生的核心原始碼 Makefile"
+   "reason": "上游版本 6.12.116：D-035 產生的核心原始碼 Makefile（check-expected 的路徑不支援清單索引，只能整筆 equals；upstream_note 是 C1 產生的文字，C1 改字時要一起更新）"
   },
   "bootloader_coverage": {
    "equals": "NOT_ASSESSED",
@@ -176,15 +176,15 @@
   },
   "runs..stages.C-kernel-coverage": {
    "equals": "OK",
-   "reason": "Debian 自己的核心：Grype 依 Debian 資料比對（已考慮 Debian 的修補）；只代表有比對，不代表完整"
+   "reason": "核心有比對：428 列都來自 linux-kernel 元件（pkg:generic/linux-kernel@6.12.116+deb13-amd64），是 Grype 依 NVD 的上游版本範圍比對，不是 Debian 發行版資料（沒有考慮 Debian 的回移修補，可能有誤報；Debian 的核心 deb 本身沒有列，缺口 22）。OK 只代表有做核心比對，不代表完整"
   },
   "runs..stages.C-kernel-config": {
    "equals": "GAP",
-   "reason": "固定是 GAP：雲端映像沒有核心 headers 套件，核心 CVE 不能依 .config 判定"
+   "reason": "固定是 GAP：雲端映像沒有核心 headers 套件（322 個 deb 裡沒有 linux-headers）；映像其實有 /boot/config-6.12.116+deb13-amd64，但工具只找 /usr/lib/modules/<版本>/build 與 /usr/src/linux-headers-*（缺口 23）。工具改成也讀 /boot/config-* 之後這一項會變，到時要更新"
   },
   "runs..stages.C-kernel-module-map": {
    "equals": "GAP",
-   "reason": "固定是 GAP：同上，核心 CVE 對不到模組"
+   "reason": "固定是 GAP：同上（缺口 23），核心 CVE 對不到模組"
   },
   "runs..stages.C-pyver": {
    "equals": "GAP",
@@ -192,7 +192,7 @@
   },
   "runs..stages.C-sbomgate": {
    "equals": "GAP",
-   "reason": "固定是 GAP：版本未知的元件不比對（主要是 OMV 原始碼相依與 Syft 的檔案紀錄）"
+   "reason": "固定是 GAP：版本未知的元件不比對：核心模組 3847 個版本是 UNKNOWN（sbomgate 的 NO_VERSION 3852＝3847＋OMV 原始碼 5 個 pypi）"
   },
   "runs..stages.D-dt-data-sources": {
    "equals": "GAP",
@@ -239,7 +239,7 @@
   "report_rows.full.kernel_rows": {
    "min": 150,
    "max": 2000,
-   "reason": "Debian 13 核心 6.12.116-1 在 Debian 資料裡還沒修的 CVE；2026-11-13 是 428 列。Debian 修補會減少、新 CVE 會增加，範圍放寬"
+   "reason": "linux-kernel 元件依 NVD 上游版本範圍比對到的列（缺口 22）；2026-11-13 是 428 列（全在 os 層）。隨 NVD 的核心 CVE 增減，範圍放寬"
   },
   "report_rows.full.uboot_rows": {
    "equals": 0,
@@ -258,7 +258,7 @@
   "vulnerabilities.full.layers.unknown": {
    "min": 50,
    "max": 800,
-   "reason": "OMV 原始碼相依與映像 Python 套件的漏洞列；2026-11-13 是 169。整段消失（原始碼沒有併入）會被這項抓到"
+   "reason": "OMV 原始碼相依 129 列＋映像語言套件 40 列；2026-11-13 是 169。沒有併入原始碼時只剩約 40 列，下限 50 抓得到。OMV 的 npm 相依有 1544 個是 development 相依（不出貨），這一層的列多半要人工排除；lxml 沒有版本，7 個 CVE 沒有成列（報告上的 GAP）"
   },
   "report_status": {
    "equals": "GAP",
@@ -275,6 +275,52 @@
   "product_status.full.release_gate": {
    "equals": "GAP",
    "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未評估的列"
+  },
+  "own_software.status": {
+   "equals": "GAP",
+   "reason": "CRA 設定 sbom.own_software 的結果（B-own-software）（adapter-gaps.md 第 21 項，C0 決定）：OMV 安裝後的路徑（固定 commit 的 debian/openmediavault.install）；示範映像是 Debian 官方雲端映像、沒有裝 OMV，所以四個樣式都對不到：GAP 是正確的結果（分析的映像裡沒有我們的軟體）"
+  },
+  "own_software.patterns": {
+   "equals": [
+    {
+     "pattern": "usr/sbin/omv-*",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "usr/share/php/openmediavault/*.inc",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "usr/lib/python3/dist-packages/openmediavault/*.py",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "var/www/openmediavault/*.php",
+     "status": "GAP",
+     "matched": 0
+    }
+   ],
+   "reason": "設定的樣式與各自的結果；範本的虛構路徑（example-agent 等）不能再出現"
+  },
+  "own_software.files": {
+   "equals": 0,
+   "reason": "沒有任何檔案被當成自有軟體算雜湊"
+  },
+  "vulnerabilities.full.layers.os": {
+   "min": 300,
+   "max": 2500,
+   "reason": "Debian 322 個套件與核心的列；2026-11-13 是 821。os 層整段消失（例如分層壞掉）會被這項抓到"
+  },
+  "runs..stages.D-dt-findings": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：與 D-dt-data-sources 同源（CI 的臨時 DT 照設計關閉 NVD）"
+  },
+  "runs..stages.C-dt-feeds": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：同上"
   }
  }
 }

@@ -55,9 +55,14 @@ class Wp7Hooks(ps.Hooks):
         sm = ps.read_json(os.path.join(paths["reports"], "summary.json"), {}) or {}
         gate = ((sm.get("vex") or {}).get("gate") or {}) if isinstance(sm, dict) else {}
         return {"bootloader_coverage": bc.get("status") if isinstance(bc, dict) else None,
+                "own_software": own_software_summary(os.path.join(paths["rootfs"], "own-software", "own-software.json")),
                 "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status"),
                 "kernel_versions": kv,
                 "report_status": sm.get("status") if isinstance(sm, dict) else None,
+                # 各份文件（user-information、technical-documentation…）的狀態：範本的虛構值不能讓文件被判成 OK（缺口 21）
+                "documents": ({k: (v or {}).get("status") for k, v in sm["documents"].items() if isinstance(v, dict)}
+                              if isinstance(sm, dict) and isinstance(sm.get("documents"), dict) else None),
+                "missing_fields": len(sm["missing_fields"]) if isinstance(sm, dict) and isinstance(sm.get("missing_fields"), list) else None,
                 "release_gate": gate.get("verdict") if isinstance(gate, dict) else None}
 
     def scan_head(self, ctx):
@@ -106,10 +111,11 @@ class Wp7Hooks(ps.Hooks):
                                "uboot_rows": sum(1 for r in rows if str(r.get("component")) in ("U-Boot", "U-Boot SPL"))}
             else:
                 counts[key] = None
-        prod = {("full" if k == "" else k.lstrip("-")): {"report_status": v.get("report_status"), "release_gate": v.get("release_gate")}
+        prod = {("full" if k == "" else k.lstrip("-")): {"report_status": v.get("report_status"), "release_gate": v.get("release_gate"),
+                                                         "documents": v.get("documents"), "missing_fields": v.get("missing_fields")}
                 for k, v in ctx["runs"].items()}
         out = {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
-               "report_rows": counts, "product_status": prod}
+               "report_rows": counts, "product_status": prod, "own_software": ctx["main_run"].get("own_software")}
         # D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 的 kernel-versions.json（/2：shipped 每筆帶 upstream_version）應該一致；不一致是 bug
         ku = self.x.get("kernel_upstream")
         if ku is not None:
@@ -178,7 +184,7 @@ class Wp7Hooks(ps.Hooks):
             L += ["", "## 核心原始碼（D-035）", "",
                   "- 狀態 **%s**：%s；Debian 版本 `%s`，映像裡核心套件的版本 `%s`。" % (
                       ks["status"], ks["basis"], ks.get("debian_version"), "、".join(ks.get("image_versions") or []) or "沒有找到"),
-                  "- OS 層的套件比對以 Grype 的 Debian 發行版資料為準（已考慮 Debian 的修補）；原始碼判斷只是佐證。"]
+                  "- OS 層的 deb 套件比對以 Grype 的 Debian 發行版資料為準（已考慮 Debian 的修補）；核心的列則來自 linux-kernel 元件依 NVD 上游版本範圍的比對，沒有考慮 Debian 的回移修補（可能有誤報）。原始碼判斷只是佐證。"]
             if ks.get("reason"):
                 L.append("- 原因：%s" % ks["reason"])
         src = self.x.get("source")
@@ -211,6 +217,17 @@ class Wp7Hooks(ps.Hooks):
         if self.x.get("raw_sectors") is not None:
             L.append("- `raw-sectors-*.json`：分割區之前的原始磁區清點（區段的 sha256、身分、版本、佐證結果）。")
         return L
+
+
+def own_software_summary(path):
+    """CRA 設定 sbom.own_software 的結果（tools/cra/own_software.py 的 own-software.json）→ 狀態、各樣式、算了雜湊的檔案數。
+    沒有這個檔（設定沒有 own_software，或步驟沒跑）→ None，不推測。"""
+    d = ps.read_json(path)
+    if not isinstance(d, dict):
+        return None
+    pats = [{"pattern": x.get("pattern"), "status": x.get("status"), "matched": x.get("matched")}
+            for x in d.get("patterns") or [] if isinstance(x, dict)]
+    return {"status": d.get("status"), "patterns": pats, "files": len(d.get("files") or [])}
 
 
 def _vers(items):
