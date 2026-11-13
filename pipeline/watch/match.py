@@ -475,6 +475,15 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         actions.append({"op": "open_if_closed", "key": t, "title": f"[KEV] {e0['cve']} 在 {e0['project']} {e0['version']}：新的比對",
                         "body": "\n".join(lines), "labels": ["kev"] + (labels_for(pinfo_of(projs, e0["project_uuid"]), "kev")[1:])})
         comments += 1
+    ev_acts = [x for x in actions if x["op"] == "open_if_closed"]
+    if len(ev_acts) > max_new:      # 事件太多（例如開發版每次重建都換 purl）：併成一個彙總，不逐一開
+        actions = [x for x in actions if x["op"] != "open_if_closed"]
+        ek = issue_key(mode, "events", ts[:10], str(len(ev_acts)), ev_acts[0]["key"])
+        body = [f"這次執行有 {len(ev_acts)} 個已有 Issue 的群組出現新的比對（新增元件或再出現），超過 {max_new} 個的上限，全部列在這裡。", ""] + \
+            [f"- {md_cell(x['title'])}" for x in ev_acts] + ([f"", f"執行紀錄：{run_url}"] if run_url else [])
+        actions.append({"op": "open", "key": ek, "title": f"[KEV] 彙總：{len(ev_acts)} 個群組有新的比對（{ts[:10]}）", "body": "\n".join(body),
+                        "labels": ["kev", "summary"]})
+        comments = comments - len(ev_acts) + 1
     seen_gone = set()
     for k in gone:
         e = state["matches"][k]
@@ -501,11 +510,16 @@ def health_actions(mode, state, serious, now, run_url):
     key = issue_key(mode, "health")
     ts = utc(now)
     if not serious:
+        h["ok_streak"] = int(h.get("ok_streak") or 0) + 1
+        if h["ok_streak"] < HEALTH_AFTER_RUNS:          # 恢復也要連續 2 次正常，避免時好時壞時一直留言
+            return []
         out = []
         if h.get("notified_at"):
-            out.append({"op": "comment", "key": key, "body": f"監控已恢復正常（{ts}）。之前的降級從 {h.get('since')} 開始。", "reopen_if_closed": False})
-        dd["health"] = {"streak": 0}
+            out.append({"op": "comment", "key": key, "body": f"監控已恢復正常（連續 {h['ok_streak']} 次，{ts}）。之前的降級從 {h.get('since')} 開始。",
+                        "reopen_if_closed": False})
+        dd["health"] = {"streak": 0, "ok_streak": h["ok_streak"]}
         return out
+    h["ok_streak"] = 0
     h["streak"] = int(h.get("streak") or 0) + 1
     h.setdefault("since", ts)
     last = h.get("notified_at")
@@ -551,7 +565,9 @@ def run(a, kernel_runner=None):
         return "GAP", detail
     work = tempfile.mkdtemp(prefix=".watch-", dir=a.out)
     attn, gaps, notes = [], [], []
-    serious = []      # 降級：連續發生要通知人（健康 Issue，預驗第 5 項）
+    serious = [f"Release 問題：{x}"[:300] for x in inv_problems]     # 降級：連續發生要通知人（健康 Issue）
+    if not projs:
+        serious.append("沒有任何可監控的 Release／SBOM（已有狀態）")
     try:
         cisa, cisa_path = load_cisa(eg, a.feeds, a.kev_overlay, work, now)
         if cisa["status"] != "OK":

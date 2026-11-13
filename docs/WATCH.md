@@ -83,7 +83,9 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
 - 降級（只在 real）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
-  → 連續 2 次就在固定的健康 Issue（標籤 `watch-health`）開／留言，沒恢復時每 7 天提醒一次，恢復時留言一次。報告與 Step Summary 每次都列。
+  、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release
+  → 連續 2 次就在固定的健康 Issue（標籤 `watch-health`）開／留言，沒恢復時每 7 天提醒一次；連續 2 次正常才留言「恢復」。報告與 Step Summary 每次都列。
+- 已有 Issue 的群組的事件（新增元件、再出現）一次超過 `--max-new-issues` 個 → 併成一個彙總 Issue，不逐一開。
 - 每個 KEV Issue 列出靜態的「每日沒有涵蓋」三項，加上這個 Release 這次的 GAP（例如核心 CNA 缺附件時的 upstream_note、L4T 核心對應失敗）。
 - 正式版的版本字串是 `dev` → 不比對（會跟開發版的專案鍵相同），記成 Release 問題。一次最多開 `--max-new-issues`（預設 20）個，其餘併成一個彙總 Issue。
 - Issue 粒度：比對 (專案, 監控版本, 層, CVE) 一個 Issue（同一個 CVE 的多個元件列在同一個 Issue）；廠商層級 (專案, 監控版本, CVE, 廠商) 一個。

@@ -254,6 +254,28 @@ class T(Base):
         _, _, p4 = self.run_once("2026-11-13T01:00:00Z")
         self.assertEqual([x for x in p4["actions"] if x["key"] == HEALTH_KEY], [])     # 7 天內不重複提醒
 
+    def test_health_recovery_needs_two_ok_runs(self):
+        h = {"dumpling": {"health": {"streak": 3, "since": NOW1, "notified_at": NOW2}}}
+        now = match.parse_now(NOW3)
+        self.assertEqual(match.health_actions("real", h, [], now, None), [])             # 第 1 次正常：不留言
+        out = match.health_actions("real", h, [], now, None)
+        self.assertEqual([x["op"] for x in out], ["comment"])                            # 連續第 2 次：恢復留言
+        self.assertEqual(match.health_actions("real", h, [], now, None), [])             # 之後不再留言
+
+    def test_events_over_cap_become_summary(self):
+        self.run_once(NOW1)
+        self.grype.append(gmatch("CVE-2020-1000", "requests", "2.19.0", REQ))
+        self.kev += ["CVE-2018-18074", "CVE-2020-1000"]
+        _, _, p2 = self.run_once(NOW2, max_new=2)                 # 兩個群組各開一個 Issue
+        self.assertEqual(len([x for x in nohealth(p2) if x["op"] == "open"]), 2)
+        for cve in ("CVE-2018-18074", "CVE-2020-1000"):          # 兩個群組都出現新元件
+            self.grype.append(gmatch(cve, "requests", "2.19.1", "pkg:pypi/requests@2.19.1"))
+        _, _, plan = self.run_once(NOW3, max_new=1)
+        acts = nohealth(plan)
+        self.assertEqual([x["op"] for x in acts], ["open"])
+        self.assertIn("彙總", acts[0]["title"])
+        self.assertIn("2 個群組有新的比對", acts[0]["title"])
+
     def test_kernel_cna_sticky_when_feed_missing(self):
         kv = os.path.join(self.inv, "releases", "0", "kv.json")
         json.dump({"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.8.12-x", "upstream_version": "6.8.12"}]}, open(kv, "w"))
