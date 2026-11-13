@@ -113,7 +113,7 @@ case $kprc in
 src=dict(l.split("=",1) for l in open(sys.argv[2],encoding="utf-8").read().splitlines() if "=" in l)
 d=json.load(open(sys.argv[1],encoding="utf-8"))
 n=sum(1 for l in open(sys.argv[3],encoding="utf-8") if l.strip())
-d["cna"]={"cves":n,"result":sys.argv[4][:300],"mirror_commit":src.get("commit"),"mirror_commit_date":src.get("commit_date"),"mirror_records":src.get("records"),"mirror_fetched_utc":src.get("fetched_utc")}
+d["cna"]={"cves":n,"gap":sys.argv[4].startswith("GAP"),"result":sys.argv[4][:300],"mirror_commit":src.get("commit"),"mirror_commit_date":src.get("commit_date"),"mirror_records":src.get("records"),"mirror_fetched_utc":src.get("fetched_utc")}
 json.dump(d,open(sys.argv[1],"w",encoding="utf-8"),ensure_ascii=False,indent=1)' "$out/kernel-upstream.json" "$mir/kcve/SOURCE" "$out/kernel-cves.txt" "$(cut -f2- <<< "$cl" | tr '\t' ' ')" \
             || fail "寫回 kernel-upstream.json 的 CNA 摘要失敗"
           echo "核心 CVE 清單（上游 $kup，候選）：$(wc -l < "$out/kernel-cves.txt") 個（$(cut -f2- <<< "$cl" | tr '\t' ' ' | cut -c1-160)）"
@@ -213,7 +213,7 @@ echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 srcargs=(); [ -n "$srcjson" ] && srcargs=(--source-json "$srcjson")
-python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
+python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" --platform "$DUMPLING_PLATFORM" \
   --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} ${ksjson[@]+"${ksjson[@]}"} ${kujson[@]+"${kujson[@]}"} \
   ${srcargs[@]+"${srcargs[@]}"} ${official[@]+"${official[@]}"} || fail "收集結果失敗"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json
@@ -235,7 +235,8 @@ case $kst in ""|OK) ;; *) state=GAP; msg="$msg；核心原始碼判斷 $kst（�
   python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))
 print("- 映像 %s；元件 %s"%((d.get("image") or {}).get("file"),d.get("components")))
 if d.get("raw_sectors"): print("- 原始磁區 %s"%d["raw_sectors"].get("status"))
-if d.get("external_services"): print("- 對外連線服務 %s"%", ".join(h["name"] for h in d["external_services"]))
+es=d.get("external_services") or {}
+print("- 對外連線服務：%s %s"%(es.get("status"), ", ".join(h["name"] for h in es.get("items") or []) or es.get("reason") or ""))
 print("- 漏洞 %s"%d.get("vulnerabilities"))' "$out/scan.json"
 } > "$out/summary.md"
 # 解開的大檔用完就刪（磁碟映像可能好幾 GB；官方映像的壓縮檔留在 downloads/）

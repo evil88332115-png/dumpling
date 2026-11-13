@@ -45,7 +45,11 @@ layers:
       - "radxa-archive-keyring"
       - "rsetup*"
       - "task-rock-*"
-      - "rtk-btusb-dkms"       # 板上 Realtek 藍牙模組的驅動
+      # 板子廠商替這塊板子的選購無線模組提供的 out-of-tree 驅動（DKMS）：跟板子的硬體生態綁在一起（D-027）。
+      # ROCK 5B 板上沒有 Wi-Fi／藍牙，這些是 M.2 無線模組用的。
+      - "rtk-btusb-dkms"
+      - "rtl8852bu-dkms"
+      - "rtw89-dkms"
     paths:
       - "usr/lib/modules/*"
       - "lib/modules/*"

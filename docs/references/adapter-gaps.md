@@ -17,6 +17,9 @@ C4 寫轉接器時發現、但沒有擋住 M6 的缺口。擋住的已經直接�
 | 10 | metadata 檔的 sha256 不符 | 官方附的清單檔可能被重新產生（Debian 的 `debian-13-generic-amd64-20261111-2659.json` 在 2026-11-12 15:10 GMT 重新產生）；現在 fetch 會 FAIL，整個 run 停下，但這個檔不進掃描 | D-037：人工核對（官方 SHA512SUMS 相符、套件清單與映像的 dpkg status 一致）後更新 sha256；在 11 做好之前遇到就照同樣方式核對後問 C0 | role: metadata 的 sha256 不符時 fetch 回 GAP（不下載或不採用），不回 FAIL |
 | 11 | Debian SHA512SUMS 的簽章 | 目前只用 https 下載 SHA512SUMS 比對，沒有驗 GPG 簽章 | 簽章沒有驗（記在 note） | 可行的話加驗 SHA512SUMS 的簽章（Debian cloud 映像的簽章檔與金鑰來源要先確認） |
 | 12 | 語言套件與內嵌模組的擁有者 | owners.json（dpkg .list）只用在型別 file 的元件；deb 帶進來的 Python 套件（`usr/lib/python3/dist-packages`）與執行檔裡內嵌的 Go 模組（例如 `rpi-connect` 的 98 個）有路徑、擁有者是 deb，卻因為不是 file 型別而標 unknown（Raspberry Pi 2026-10-06：pypi 220、golang 98） | 列入我們的待辦（保守） | layers.classify_component 對有路徑的非 file 元件也查 owners，依擁有它的 deb 名稱分層；不能改用路徑規則（bsp 的 python3-rpi-lgpio 也在同一個資料夾） |
+| 13 | 分層重跑時沒有核心的那一份 | `-os` 重跑（SBOM 裡沒有核心）仍沿用完整掃描的資料夾，核心的 C-kernel-cve-list／config／module-map 標 GAP（版本像 ABI 字串），kernel-versions.json 的 judged 仍列出核心 | 照實 GAP；標準答案只釘完整與 -bsp 那兩次的核心階段 | SBOM 裡沒有核心元件時，核心階段記 NOT_RUN（不適用），judged 不列 |
+| 14 | 「完整」報告的範圍 | 完整（全部層）那份是補充元件（原始磁區的開機程式、NAS 應用原始碼）與分層之前的掃描：不含開機程式、沒有層欄位，但報告與 notes 把它跟分層報告並列 | notes 加一句說明；標準答案不釘完整報告的漏洞數 | 完整報告改用補充後的 SBOM 重跑，或在 Release 不列為一般報告 |
+| 15 | 對外連線服務清單 | 只有 Raspberry Pi 定義了清單（rpi-connect）；Rockchip、AI NAS 的映像有 ssh、avahi、samba 等服務，沒有評估 | scan.json 的 external_services 記 NOT_ASSESSED（不寫成「沒有」） | 依平台定義清單，或改用板子實測（board-test）的對外埠 |
 
 ## 已在 M2 處理（C4 回報、C1 實作）
 

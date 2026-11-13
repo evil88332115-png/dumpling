@@ -20,21 +20,27 @@ sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
 import platform_scan as ps  # noqa: E402
 
 # 對外連線服務（D-027）：分層照名稱清單（不影響待辦歸誰），但報告要標成要特別注意的項目。
-EXTERNAL_SERVICES = (("rpi-connect*", "Raspberry Pi Connect（官方遠端連線服務：裝置主動連到 Raspberry Pi 的雲端服務）"),)
+# 清單依平台定義；沒有定義清單的平台記 NOT_ASSESSED（不是「沒有」：例如 Rockchip、AI NAS 的映像有 ssh、avahi、samba 等服務，沒有評估）。
+EXTERNAL_SERVICES = {"raspberrypi": (("rpi-connect*", "Raspberry Pi Connect（官方遠端連線服務：裝置主動連到 Raspberry Pi 的雲端服務）"),)}
 
 
-def services(sbom_path):
+def services(sbom_path, platform=None):
+    """→ {"status": LISTED｜NOT_ASSESSED｜GAP, "items": [...], "reason": …}。"""
+    pats = EXTERNAL_SERVICES.get(platform)
+    if not pats:
+        return {"status": "NOT_ASSESSED", "items": [], "reason": "平台 %s 沒有定義對外連線服務清單：這一欄沒有評估（不代表沒有對外服務）" % platform}
     doc = ps.read_json(sbom_path)
     if not isinstance(doc, dict):
-        return None
+        return {"status": "GAP", "items": [], "reason": "讀不到產品 SBOM"}
     hits = []
     for c in doc.get("components") or []:
         name = str(c.get("name") or "")
-        for pat, why in EXTERNAL_SERVICES:
+        for pat, why in pats:
             if fnmatch.fnmatchcase(name, pat):
                 layer = next((p.get("value") for p in c.get("properties") or [] if p.get("name") == ps.LAYER_PROP), None)
                 hits.append({"name": name, "version": c.get("version"), "layer": layer, "why": why})
-    return sorted(hits, key=lambda h: (h["name"], str(h["version"])))
+    return {"status": "LISTED", "items": sorted(hits, key=lambda h: (h["name"], str(h["version"]))),
+            "reason": "依平台清單（%s）比對產品 SBOM 的元件名稱" % "、".join(p for p, _ in pats)}
 
 
 class Wp7Hooks(ps.Hooks):
@@ -58,7 +64,14 @@ class Wp7Hooks(ps.Hooks):
         rs = self.x.get("raw_sectors")
         out = {"external_services": self.x.get("services")}
         if rs is not None:
-            out["raw_sectors"] = {"status": rs.get("status"), "gaps": rs.get("gaps"),
+            by_slot = {}
+            for r in rs.get("regions") or []:
+                if r.get("slot"):
+                    by_slot[r["slot"]] = {"start_lba": r.get("start_lba"), "sha256": r.get("sha256"), "kind": (r.get("identity") or {}).get("kind"),
+                                          "versions": {v.get("component"): v.get("version") for v in (r.get("identity") or {}).get("versions") or []},
+                                          "corroboration_consistent": sum(1 for c in r.get("corroboration") or [] if c.get("state") == "一致"),
+                                          "corroboration_inconsistent": sum(1 for c in r.get("corroboration") or [] if c.get("state") == "不一致")}
+            out["raw_sectors"] = {"status": rs.get("status"), "gaps": rs.get("gaps"), "by_slot": by_slot,
                                   "regions": [{"slot": r.get("slot"), "start_lba": r.get("start_lba"), "sha256": r.get("sha256"),
                                                "kind": (r.get("identity") or {}).get("kind"),
                                                "versions": (r.get("identity") or {}).get("versions"),
@@ -76,7 +89,19 @@ class Wp7Hooks(ps.Hooks):
         return out
 
     def scan_tail(self, ctx):
-        return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions")}
+        # 每份報告的核心列數與 U-Boot 列數（機器可核對：OS 報告不該有核心的列；bsp 報告的 U-Boot 候選不該消失）
+        counts = {}
+        for spec in ctx["args"].run:
+            suffix, _, w = spec.partition("=")
+            rows = (ps.read_json(os.path.join(ps.run_paths(w)["reports"], "vulnerability-rows.json")) or {}).get("rows")
+            key = "full" if suffix == "" else suffix.lstrip("-")
+            if isinstance(rows, list):
+                counts[key] = {"kernel_rows": sum(1 for r in rows if r.get("is_kernel")),
+                               "uboot_rows": sum(1 for r in rows if str(r.get("component")) in ("U-Boot", "U-Boot SPL"))}
+            else:
+                counts[key] = None
+        return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
+                "report_rows": counts}
 
     def extra_attachments(self, ctx, manifest):
         out = ctx["out"]
@@ -139,13 +164,19 @@ class Wp7Hooks(ps.Hooks):
             L += ["", "## NAS 應用的原始碼", "",
                   "- `%s` commit `%s`：%s；元件帶 `dumpling:origin=source` 與 commit。原始碼與正式 deb 是否完全相同：**NOT_ASSESSED**（D-025）。" % (
                       src.get("repo"), src.get("commit"), src.get("line"))]
-        sv = self.x.get("services")
-        if sv:
-            L += ["", "## 要特別注意的對外連線服務", ""]
-            L += ["- `%s` %s（層 %s）：%s" % (h["name"], h["version"], h["layer"], h["why"]) for h in sv]
-        elif sv is not None:
-            L += ["", "## 要特別注意的對外連線服務", "", "- 清單裡的服務（%s）都不在 SBOM 裡。" % "、".join(p for p, _ in EXTERNAL_SERVICES)]
+        sv = self.x.get("services") or {}
+        L += ["", "## 要特別注意的對外連線服務", ""]
+        if sv.get("status") == "LISTED" and sv.get("items"):
+            L += ["- `%s` %s（層 %s）：%s" % (h["name"], h["version"], h["layer"], h["why"]) for h in sv["items"]]
+        elif sv.get("status") == "LISTED":
+            L.append("- %s：清單裡的服務都不在 SBOM 裡。" % sv.get("reason"))
+        else:
+            L.append("- **%s**：%s" % (sv.get("status"), sv.get("reason")))
         return L
+
+    def notes_after_vulnerabilities(self, ctx):
+        return ["", "- 「完整（全部層）」那份報告是補充元件與分層**之前**的掃描：不含原始磁區的開機程式、沒有層欄位；"
+                "待辦看 bsp／os（或 ours 時的單一份）報告。"]
 
     def notes_attachments(self, ctx):
         L = ["- `scan-summary-*.json`：標準答案比對用的掃描摘要；`assemble-*.json`：映像來源與解開方式。"]
@@ -206,6 +237,7 @@ def main(argv=None):
     n.add_argument("--prefix", required=True)
     v = sub.add_parser("services")
     v.add_argument("sbom")
+    v.add_argument("--platform", default=None)
     c = sub.add_parser("collect")
     for k in ("out", "project", "version", "layers", "assemble-json", "scan-json"):
         c.add_argument("--" + k, required=True)
@@ -215,6 +247,7 @@ def main(argv=None):
     c.add_argument("--kernel-source-json", default=None, help="assemble 的 kernel-source.json（Debian 核心原始碼，D-035）")
     c.add_argument("--kernel-upstream-json", default=None, help="scan 的 kernel-upstream.json（廠商 BSP 核心的上游版本，D-038）")
     c.add_argument("--official", action="store_true")
+    c.add_argument("--platform", default=None, help="平台名稱（對外連線服務清單依平台）")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "site-config":
@@ -226,13 +259,13 @@ def main(argv=None):
                 raise ValueError("精靈沒有產生 %s* 資料夾" % a.prefix)
             print(d)
         elif a.cmd == "services":
-            print(json.dumps(services(a.sbom), ensure_ascii=False))
+            print(json.dumps(services(a.sbom, a.platform), ensure_ascii=False))
         else:
             a.build_json = None
             x = {"assemble_path": a.assemble_json,
                  "raw_sectors": ps.read_json(a.raw_sectors) if a.raw_sectors else None, "raw_sectors_path": a.raw_sectors,
                  "source": ps.read_json(a.source_json) if a.source_json else None,
-                 "services": services(os.path.join(a.layers, "sbom.product.cdx.json")),
+                 "services": services(os.path.join(a.layers, "sbom.product.cdx.json"), a.platform),
                  "kernel_source": kernel_source(a.kernel_source_json, os.path.join(a.layers, "sbom.product.cdx.json"))
                  if a.kernel_source_json else None,
                  "kernel_upstream": ps.read_json(a.kernel_upstream_json) if a.kernel_upstream_json else None,

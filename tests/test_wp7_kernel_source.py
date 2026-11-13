@@ -146,5 +146,21 @@ class KernelVersionsNotesTest(unittest.TestCase):
         self.assertIn("讀不到 kernel-versions.json", self.notes(None))
 
 
+class ExternalServicesTest(unittest.TestCase):
+    def test_platform_without_list_is_not_assessed(self):
+        r = wp7_scan.services("/nonexistent", "rockchip")
+        self.assertEqual((r["status"], r["items"]), ("NOT_ASSESSED", []))
+
+    def test_raspberrypi_lists_rpi_connect(self):
+        tmp = tempfile.mkdtemp(prefix="wp7-svc-"); self.addCleanup(shutil.rmtree, tmp, True)
+        p = os.path.join(tmp, "s.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"components": [{"name": "rpi-connect-lite", "version": "2.13.0", "properties": [{"name": "dumpling:layer", "value": "os"}]},
+                                      {"name": "bash", "version": "5"}]}, f)
+        r = wp7_scan.services(p, "raspberrypi")
+        self.assertEqual(r["status"], "LISTED")
+        self.assertEqual([(h["name"], h["layer"]) for h in r["items"]], [("rpi-connect-lite", "os")])
+
+
 if __name__ == "__main__":
     unittest.main()
