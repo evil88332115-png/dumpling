@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 23:51 +0800（C1）
+最後更新：2026-11-13 23:54 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -267,7 +267,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**M2 已合併（main cc7d101，2026-11-13）**。`wp2/watch-m2` 已併 main（4e6084d）＋改用 `pipeline/lib/mirrors.sh`（aa68d5d：核心 CVE 用舊資料頂替時報告與 Issue 寫出 ATTENTION 那行；real 用 actions/cache 存取上一份鏡像，key 與 pipeline.yml 共用），CI 跑中 → 綠了就開監控 PR；`wp5/gitlab` 已併 main（c942ba6，PROVENANCE 衝突已解）＋T-01 核對完成（26bf348：補 release-meta 的 --scan-summary、核心 CVE 鏡像 cache），CI 跑中；本機用真實 draft Release（orin-nano-demo v39.2.1-demo1、dev/rock-5b-demo）驗證：collect 讀得到 C1 的實際格式，feeds 經 mirrors.sh 四個來源都 OK，match 跑中
+- 目前在做：**M2 已合併（main cc7d101）**。**M5 PR #47 已開**（wp5/gitlab ac2ee95；CI 綠 43454886063；獨立驗證兩輪：第一輪 6 項應修已修、第二輪 PASS；等 C0 派驗證）。T-14（scan.sh 改連既有 DT 的選項）C0 決定排給 C1、M7 之後。監控 PR：`wp2/watch-m2` 02681bc（已併 main、mirrors.sh、核心 CVE 舊資料頂替的 ATTENTION、actions/cache）；演練綠 43450669290、tests 綠（重跑）；real dry_run 第一次卡在核心 CVE clone（mirror 3 次 × kernel-cve.sh 3 次 × 900 秒）→ 已改成 mirror 只試 1 次、log 看得到進度、compute 150 分鐘，重跑中 → 綠了就開 PR。本機用真實 draft Release 跑完整比對：可建基準（OK）、70 筆已遭利用、193 筆廠商層級、GAP 0、狀態 10.5K 字元
 - 架構（已合併）：每日不開 DT；Grype＋CISA KEV＋EUVD＋核心 CNA＋廠商層級；狀態放在 `watch-state` Issue；D-040（只開 KEV／廠商層級、超過 20 個併成彙總、示範專案＋demo、排程 real 預設 dry_run、不開 art14）
 - 分支／PR／commit：
   - PR #32 已合併（main 26a6377），worktree 已移除
@@ -283,7 +283,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
   - 之後：手動 `mode=real`＋`baseline=true` 建第一次真實基準 → 排程 dry_run 跑一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
   - M5：M2 合併後核對 gitlab/.gitlab-ci.yml 的指令（T-01）→ 重跑 CI → 驗證 → 開 PR
 - B1 art14 的待辦（M8）：等 M7 的銷售市場欄位再一起開 M8 PR；銷售市場接 M7 的 project.yml 欄位；GitLab 版（私密 Issue、email、SRP）只列在 docs/ART14.md 第 10 節，M5／M8 再做。已實測：github-actions[bot] 開的 Issue 是 author_association=NONE（#21），所以程式接受 Bot 作者是必要的
-- 卡住／等決定：無。注意：目前 Release 全是 draft（每日監控略過）→ 第一次真實基準要等有正式（非 draft）Release 或 main 上的 dev/<專案> pre-release
+- 卡住／等決定：無。第一次真實基準要等正式 Release（正式 tag 在等使用者；C0 會通知）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
