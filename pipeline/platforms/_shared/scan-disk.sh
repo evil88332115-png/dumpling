@@ -231,7 +231,9 @@ kst=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print((d.get
 case $kst in ""|OK) ;; *) state=GAP; msg="$msg；核心原始碼判斷 $kst（見 scan.json 的 kernel_source）";; esac
 {
   echo "## scan（$DUMPLING_PROJECT $ver，平台 $DUMPLING_PLATFORM）"
-  echo "- 狀態：$state（$msg）"
+  echo "- 流程步驟：$state（$msg）。這不是產品的結論，產品看下一行"
+  python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))
+print("- 產品報告的狀態：" + "；".join("%s 報告 %s、發行閘門 %s"%(k,(v or {}).get("report_status"),(v or {}).get("release_gate")) for k,v in sorted((d.get("product_status") or {}).items())))' "$out/scan.json"
   python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))
 print("- 映像 %s；元件 %s"%((d.get("image") or {}).get("file"),d.get("components")))
 if d.get("raw_sectors"): print("- 原始磁區 %s"%d["raw_sectors"].get("status"))

@@ -51,9 +51,14 @@ class Wp7Hooks(ps.Hooks):
         bc = ps.read_json(os.path.join(paths["rootfs"], "bootloader-coverage.json"), {}) or {}
         kv = ps.read_json(os.path.join(paths["scan"], "scan", "kernel-versions.json"))     # D-036（C1 的工具產生；沒有就 null，不推測）
         kv = dict({k: kv.get(k) for k in ("shipped", "requested", "judged", "not_judged")}, schema=kv.get("schema")) if isinstance(kv, dict) else None
+        # 產品報告的狀態（cra_report 的 summary.json）：不是流程步驟的結果；流程 OK 時產品照樣可能是 GAP／ATTENTION
+        sm = ps.read_json(os.path.join(paths["reports"], "summary.json"), {}) or {}
+        gate = ((sm.get("vex") or {}).get("gate") or {}) if isinstance(sm, dict) else {}
         return {"bootloader_coverage": bc.get("status") if isinstance(bc, dict) else None,
                 "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status"),
-                "kernel_versions": kv}
+                "kernel_versions": kv,
+                "report_status": sm.get("status") if isinstance(sm, dict) else None,
+                "release_gate": gate.get("verdict") if isinstance(gate, dict) else None}
 
     def scan_head(self, ctx):
         asm = ctx["asm"] or {}
@@ -101,8 +106,10 @@ class Wp7Hooks(ps.Hooks):
                                "uboot_rows": sum(1 for r in rows if str(r.get("component")) in ("U-Boot", "U-Boot SPL"))}
             else:
                 counts[key] = None
+        prod = {("full" if k == "" else k.lstrip("-")): {"report_status": v.get("report_status"), "release_gate": v.get("release_gate")}
+                for k, v in ctx["runs"].items()}
         return {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
-                "report_rows": counts}
+                "report_rows": counts, "product_status": prod}
 
     def extra_attachments(self, ctx, manifest):
         out = ctx["out"]
@@ -115,7 +122,11 @@ class Wp7Hooks(ps.Hooks):
 
     def notes_build(self, ctx):
         asm = ctx["asm"] or {}
-        L = ["## 映像", "",
+        L = ["## 產品報告的狀態（不是流程步驟的結果）", "",
+             "流程步驟（scan: OK）只代表掃描跑完、標準答案比對通過；產品的結論看下面各份報告的狀態與發行閘門。", ""]
+        for k, v in sorted((ctx.get("runs") or {}).items()):
+            L.append("- %s：報告 **%s**、發行閘門 **%s**" % ({"": "完整（全部層）"}.get(k, k.lstrip("-")), v.get("report_status"), v.get("release_gate")))
+        L += ["", "## 映像", "",
              "- 官方映像 `%s`（sha256 `%s`，sources.yml 固定）；%s；解開後 sha256 `%s`。不編譯、不重組，只解開不執行。" % (
                  asm.get("image_file"), asm.get("image_sha256"), asm.get("method"), asm.get("disk_sha256"))]
         rs = self.x.get("raw_sectors")

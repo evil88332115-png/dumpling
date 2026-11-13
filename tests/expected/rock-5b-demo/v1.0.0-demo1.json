@@ -243,6 +243,30 @@
    "min": 2000,
    "max": 6000,
    "reason": "Debian 12 bookworm 的 KDE 桌面映像套件；2026-11-13 是 2812；映像固定、資料只增不減"
+  },
+  "product_status.full.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+  },
+  "product_status.full.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
+  },
+  "product_status.bsp.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+  },
+  "product_status.bsp.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
+  },
+  "product_status.os.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審、DDR／BL31 GAP、開機鏈 NOT_ASSESSED，所以一定不是 OK；釘住它，避免哪天被默默變成 OK"
+  },
+  "product_status.os.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：有未判定的列、弱點資料 GAP"
   }
  }
 }

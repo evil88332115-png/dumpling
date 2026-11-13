@@ -142,6 +142,14 @@ class KernelVersionsNotesTest(unittest.TestCase):
         self.assertIn("已出貨、未判定（GAP）**：6.18.50+rpt-rpi-v8（出貨但沒有列在 --kernel-version）", t)
         self.assertIn("映像裡的核心：6.18.50+rpt-rpi-2712、6.18.50+rpt-rpi-v8", t)
 
+    def test_product_status_is_listed_separately(self):
+        h = wp7_scan.Wp7Hooks({})
+        ctx = {"asm": {}, "main_run": {}, "runs": {"": {"report_status": "GAP", "release_gate": "GAP"},
+                                                   "-bsp": {"report_status": "GAP", "release_gate": "GAP"}}}
+        t = "\n".join(h.notes_build(ctx))
+        self.assertIn("產品報告的狀態（不是流程步驟的結果）", t)
+        self.assertIn("bsp：報告 **GAP**、發行閘門 **GAP**", t)
+
     def test_missing_file_is_gap(self):
         self.assertIn("讀不到 kernel-versions.json", self.notes(None))
 
