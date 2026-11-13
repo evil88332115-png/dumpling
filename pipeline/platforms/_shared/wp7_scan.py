@@ -44,7 +44,7 @@ class Wp7Hooks(ps.Hooks):
     def run_summary_fields(self, paths, status):
         bc = ps.read_json(os.path.join(paths["rootfs"], "bootloader-coverage.json"), {}) or {}
         kv = ps.read_json(os.path.join(paths["scan"], "scan", "kernel-versions.json"))     # D-036（C1 的工具產生；沒有就 null，不推測）
-        kv = {k: kv.get(k) for k in ("shipped", "requested", "judged", "not_judged")} if isinstance(kv, dict) else None
+        kv = dict({k: kv.get(k) for k in ("shipped", "requested", "judged", "not_judged")}, schema=kv.get("schema")) if isinstance(kv, dict) else None
         return {"bootloader_coverage": bc.get("status") if isinstance(bc, dict) else None,
                 "stage_bootloader_coverage": status.get("B-bootloader-coverage", {}).get("status"),
                 "kernel_versions": kv}
@@ -106,9 +106,11 @@ class Wp7Hooks(ps.Hooks):
         kv = (ctx["main_run"] or {}).get("kernel_versions")
         L += ["", "## 核心（D-036）", ""]
         if kv:
-            L.append("- 映像裡的核心：%s；指定判定：%s；已判定：%s。" % tuple("、".join(kv.get(k) or []) or "無" for k in ("shipped", "requested", "judged")))
+            L.append("- 映像裡的核心：%s；指定判定：%s；已判定：%s。" % tuple("、".join(_vers(kv.get(k))) or "無" for k in ("shipped", "requested", "judged")))
             if kv.get("not_judged"):
-                L.append("- **已出貨、未判定（GAP）**：%s" % "、".join(kv["not_judged"]))
+                L.append("- **已出貨、未判定（GAP）**：%s" % "、".join(
+                    "%s（%s）" % (v, x.get("reason")) if isinstance(x, dict) and x.get("reason") else v
+                    for x, v in zip(kv["not_judged"], _vers(kv["not_judged"]))))
         else:
             L.append("- 讀不到 kernel-versions.json：核心判定的範圍沒有記錄（GAP）。")
         ku = self.x.get("kernel_upstream")
@@ -150,6 +152,15 @@ class Wp7Hooks(ps.Hooks):
         if self.x.get("raw_sectors") is not None:
             L.append("- `raw-sectors-*.json`：分割區之前的原始磁區清點（區段的 sha256、身分、版本、佐證結果）。")
         return L
+
+
+def _vers(items):
+    """kernel-versions.json 的清單：字串（schema /1 的 shipped、requested、judged）或物件（not_judged、/2 的 shipped）→ 版本字串清單。"""
+    out = []
+    for x in items or []:
+        v = x if isinstance(x, str) else (x.get("version") if isinstance(x, dict) else None)
+        out.append(str(v) if v is not None else "（讀不出版本）")
+    return out
 
 
 DEB_KERNEL_RE = __import__("re").compile(r"^linux-image-[0-9][^ ]*\+deb[0-9]+-[a-z0-9-]+$")

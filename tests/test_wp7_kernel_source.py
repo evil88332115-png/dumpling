@@ -126,5 +126,25 @@ class KernelSourceVerdictTest(unittest.TestCase):
         self.assertEqual(wp7_scan.kernel_source(*self.files(ok, []))["status"], "GAP")
 
 
+class KernelVersionsNotesTest(unittest.TestCase):
+    """notes.md 的核心一節：kernel-versions.json 的清單是字串或物件（schema /1 的 not_judged、/2 的 shipped）都要能列出。"""
+
+    def notes(self, kv):
+        h = wp7_scan.Wp7Hooks({})
+        ctx = {"asm": {}, "main_run": {"kernel_versions": kv}, "project": "p", "version": "v1"}
+        return "\n".join(h.notes_build(ctx))
+
+    def test_not_judged_objects_and_shipped_objects(self):
+        kv = {"schema": "sca-center-kernel-versions/2", "shipped": [{"version": "6.18.50+rpt-rpi-2712"}, {"version": "6.18.50+rpt-rpi-v8"}],
+              "requested": ["6.18.50+rpt-rpi-2712"], "judged": ["6.18.50+rpt-rpi-2712"],
+              "not_judged": [{"version": "6.18.50+rpt-rpi-v8", "reason": "出貨但沒有列在 --kernel-version", "shipped": True}]}
+        t = self.notes(kv)
+        self.assertIn("已出貨、未判定（GAP）**：6.18.50+rpt-rpi-v8（出貨但沒有列在 --kernel-version）", t)
+        self.assertIn("映像裡的核心：6.18.50+rpt-rpi-2712、6.18.50+rpt-rpi-v8", t)
+
+    def test_missing_file_is_gap(self):
+        self.assertIn("讀不到 kernel-versions.json", self.notes(None))
+
+
 if __name__ == "__main__":
     unittest.main()
