@@ -113,3 +113,19 @@ def test_missing_value_exit_64(tmp_path):
 def test_usage_mentions_kernel_version(tmp_path):
     p = run(tmp_path, "--help")
     assert p.returncode == 0 and "--kernel-version" in p.stdout and "SCA_KERNEL_VERSIONS" in p.stdout
+
+
+def test_upstream_version_passed_to_sca_scan_and_invalid(tmp_path):
+    a, pv = prev(tmp_path)
+    sc = tool_tree(tmp_path)
+    p = run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / "res", "--no-upload", "--no-company",
+            "--kernel-version", A, "--kernel-upstream-version", f"{A}=6.1.118", script=sc)
+    args = sca_args(tmp_path)
+    assert args is not None, p.stdout + p.stderr
+    assert [args[i + 1] for i, x in enumerate(args) if x == "--kernel-upstream-version"] == [f"{A}=6.1.118"]
+    (tmp_path / "sca-args.txt").unlink()
+    for i, bad in enumerate(("6.1.118", f"{A}=6.1", "a;b=6.1.1", f"{A}=6.1.1 x")):
+        p = run(tmp_path, "--rescan-from", pv, "--archive", a, "--out", tmp_path / f"bad{i}", "--no-upload", "--no-company",
+                "--kernel-upstream-version", bad, script=sc)
+        assert p.returncode == 64 and "--kernel-upstream-version" in p.stderr, (bad, p.stdout + p.stderr)
+        assert sca_args(tmp_path) is None

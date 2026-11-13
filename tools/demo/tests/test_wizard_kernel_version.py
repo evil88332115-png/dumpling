@@ -90,3 +90,46 @@ def test_passed_to_scan_flash_package(site, monkeypatch, tmp_path):
     cmd = seen["cmd"]
     assert cmd[0] == "tools/demo/scan-flash-package.sh"
     assert [cmd[i + 1] for i, x in enumerate(cmd) if x == "--kernel-version"] == [A, B]
+
+
+def test_upstream_version_in_plan_and_invalid(site):
+    """--kernel-upstream-version <核心版本>=<X.Y.Z>：可重複、重複的算一個；格式不對或同一顆兩個值 → exit 64。"""
+    tmp, flash, src, out, cfg, _ = site
+    r = run(base(tmp, cfg, flash, src) + ["--kernel-upstream-version", f"{A}=6.1.118", "--kernel-upstream-version", f"{A}=6.1.118"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert plan_of(out)["kernel_upstream_versions"] == [f"{A}=6.1.118"]
+    for bad in ("6.1.118", f"{A}=6.1", f"{A}=x.y.z", "a;b=6.1.1", f"{A}=6.1.1;id"):
+        r = run(base(tmp, cfg, flash, src) + [f"--kernel-upstream-version={bad}"])
+        assert r.returncode == 64 and "--kernel-upstream-version" in r.stderr, bad
+    r = run(base(tmp, cfg, flash, src) + ["--kernel-upstream-version", f"{A}=6.1.118", "--kernel-upstream-version", f"{A}=6.1.119"])
+    assert r.returncode == 64
+
+
+def test_upstream_version_passed_to_scan_flash_package(site, monkeypatch):
+    tmp, flash, src, out, cfg, _ = site
+    spec = importlib.util.spec_from_file_location("cra_scan_mod2", WIZ)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    pe = tmp / "pilot.env"
+    pe.write_text("", encoding="utf-8")
+    c = json.loads(cfg.read_text(encoding="utf-8"))
+    c["pilot_env"] = str(pe)
+    cfg.write_text(json.dumps(c), encoding="utf-8")
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_run(cmd, log, env=None, cwd=None):
+        seen["cmd"] = list(cmd)
+        raise Stop
+
+    monkeypatch.setattr(mod, "resolve_tools_rev", lambda repo, rev: ("0" * 40, {"requested": rev, "worktree_dirty": False}))
+    monkeypatch.setattr(mod, "extract_tools", lambda repo, commit, dest: dest.mkdir(parents=True))
+    monkeypatch.setattr(mod, "run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["cra-scan.py", "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--role", "both",
+                                      "--generic-rules", "no", "--yes", "--kernel-version", A, "--kernel-upstream-version", f"{A}=6.1.118"])
+    with pytest.raises(Stop):
+        mod.main()
+    cmd = seen["cmd"]
+    assert [cmd[i + 1] for i, x in enumerate(cmd) if x == "--kernel-upstream-version"] == [f"{A}=6.1.118"]

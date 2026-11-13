@@ -118,14 +118,14 @@ jobs:
           tag="dev/$PROJECT"
           cd "$RUNNER_TEMP/result"
           python3 -I "$GITHUB_WORKSPACE/pipeline/release-meta.py" --project "$PROJECT" --version "$VERSION" --tag "$tag" \
-            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps pipeline-steps.tsv --out release-meta.json
-          # 只發 SBOM（完整與分層）、layers.json、release-meta.json；報告與 VEX 留在 artifact
+            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps pipeline-steps.tsv --scan-summary "scan-summary-$PROJECT-$VERSION.json" --out release-meta.json
+          # 只發 SBOM（完整與分層）、layers.json、kernel-versions、release-meta.json；報告與 VEX 留在 artifact
           files=(release-meta.json)
-          for f in "sbom-$PROJECT-$VERSION.cdx.json" "sbom-$PROJECT-$VERSION-bsp.cdx.json" "sbom-$PROJECT-$VERSION-os.cdx.json" layers.json; do
+          for f in "sbom-$PROJECT-$VERSION.cdx.json" "sbom-$PROJECT-$VERSION-bsp.cdx.json" "sbom-$PROJECT-$VERSION-os.cdx.json" layers.json "kernel-versions-$PROJECT-$VERSION.json"; do
             [ -f "$f" ] && files+=("$f")
           done
           [ -f "sbom-$PROJECT-$VERSION.cdx.json" ] || { echo "publish: FAIL（沒有 sbom-$PROJECT-$VERSION.cdx.json）"; exit 1; }
-          notes="開發版（status 見 release-meta.json）的最新 SBOM。每次 dev 流程跑完覆蓋，供每日監控讀取；不是正式出貨版本。commit $GITHUB_SHA，run $GITHUB_RUN_ID。"
+          notes="開發版的最新 SBOM。產品結論見 release-meta.json 的 report_status（報告）與 release_gate（VEX 發行閘門）；status 是生命週期（development／shipped），不是結論。每次 dev 流程跑完覆蓋，供每日監控讀取；不是正式出貨版本。commit $GITHUB_SHA，run $GITHUB_RUN_ID。"
           if [ "$GITHUB_REF" = refs/heads/main ] || [[ "$GITHUB_REF" == refs/heads/dev/* ]]; then
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
               ghx gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"

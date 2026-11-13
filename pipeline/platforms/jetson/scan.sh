@@ -33,6 +33,9 @@ bsp='' ; while IFS=$'\t' read -r role name; do [ "$role" = bsp ] && bsp=$name; d
 if [ ! -f "$out/downloads/public_sources.tbz2" ] || [ ! -f "$out/downloads/$bsp" ]; then fail "downloads/ 缺 public_sources.tbz2 或 BSP"; fi
 role_info=$(python3 -I "$root/pipeline/project-info.py" --dir "$proj" "$ver") || fail "project-info 失敗"
 crole=$(sed -n 's/^COMPANY_ROLE=//p' <<< "$role_info")
+# 平台設定（platform_params.kernel_release／kernel_upstream_version）→ 精靈的核心參數（Jetson 目前沒設定，是空的；其他平台照這樣呼叫）
+kargs_out=$(python3 -I "$root/pipeline/project-info.py" --kernel-args "$proj" "$ver") || fail "platform_params 的核心參數不合法：$(tail -1 <<< "$kargs_out")"
+mapfile -t kargs <<< "$kargs_out"; [ -n "$kargs_out" ] || kargs=()
 
 # ---------- 1. 臨時 DT 與鏡像 ----------
 trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
@@ -70,7 +73,7 @@ wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最�
   local tee=(); [ -d "$out/tee-source" ] && tee=(--tee-source "$out/tee-source")
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$pkg" --source "$out/SourceCode" --build-record "$br" \
     --name "$DUMPLING_PROJECT$suffix" --version "$ver" --rootfs rootfs --config "$out/cra-config" --role "$crole" --yes \
-    --platform "$DUMPLING_PLATFORM" "${tee[@]}" "$@" > "$out/wizard$suffix.log" 2>&1
+    --platform "$DUMPLING_PLATFORM" "${tee[@]}" "${kargs[@]+"${kargs[@]}"}" "$@" > "$out/wizard$suffix.log" 2>&1
   local rc=$?
   tail -25 "$out/wizard$suffix.log"
   [ $rc = 0 ] || return $rc

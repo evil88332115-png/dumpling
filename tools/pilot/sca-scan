@@ -22,6 +22,8 @@
 #           映像出貨的核心沒被指定就不判定：每一顆記一列 C-kernel-not-judged-<版本>（GAP），C-kernel-config 與 C-kernel-module-map 至少 GAP，
 #           並寫 scan/kernel-versions.json（shipped、requested、judged、not_judged）。指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）；
 #           只有 1 顆核心而且沒指定時照舊判定它）
+#         --kernel-upstream-version <核心版本>=<X.Y.Z>（可重複；--image、--sbom：平台設定給的上游版本，交給 kernel_versions.py --upstream-version，
+#           和核心原始碼 Makefile 核對：一致才填 upstream_version，不一致不採用；格式不對 exit 64）
 #   環境變數 KERNEL_BUILD_RECORD（選用；只用於 --image、--sbom）：這個出貨版本的核心建置紀錄（make 之後的建置資料夾，或它的
 #     .tar／.tar.gz／.tar.xz；保留 .config、每個 .*.cmd、modules.order、modules.builtin、System.map、include/config/kernel.release、
 #     include/generated/（utsversion.h、compile.h：和燒錄的 Image 的版本字串核對，證明是出貨的那一次建置）），
@@ -94,7 +96,7 @@ ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 
 usage(){ sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
-MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS= KVERS=() KVERS_CLI=0
+MODE= SRC= REF= NAME= OUT= PVER= PVER_SET=0 NOUP=0 NETRES=0 PKGSCAN=1 FILESCAN=1 LICENSE=1 KBUILD= KBUILD_PREFIX= PYVERS= KVERS=() KVERS_CLI=0 KUPS=()
 while [ $# -gt 0 ]; do case $1 in
   --git) optval "$@"; MODE=git; SRC=$2; shift 2;;
   --dir) optval "$@"; MODE=dir; SRC=$2; shift 2;;
@@ -113,6 +115,7 @@ while [ $# -gt 0 ]; do case $1 in
   --kernel-build-prefix) optval "$@"; KBUILD_PREFIX=$2; shift 2;;
   --py-versions) optval "$@"; PYVERS=$2; shift 2;;
   --kernel-version) optval "$@"; KVERS+=("$2"); KVERS_CLI=1; shift 2;;
+  --kernel-upstream-version) optval "$@"; KUPS+=("$2"); shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -158,6 +161,15 @@ kernel_versions_args(){
   KVERS=("${uniq[@]+"${uniq[@]}"}")
 }
 kernel_versions_args
+kernel_upstream_args(){   # --kernel-upstream-version：<核心版本>=<X.Y.Z>，只用於 --image、--sbom
+  local t LC_ALL=C
+  [ ${#KUPS[@]} -eq 0 ] || [[ "$MODE" =~ ^(image|sbom)$ ]] || { echo "--kernel-upstream-version 只用於 --image 或 --sbom" >&2; exit 64; }
+  for t in "${KUPS[@]+"${KUPS[@]}"}"; do
+    [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}=[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$ ]] \
+      || { echo "--kernel-upstream-version 要是 <核心版本>=<X.Y.Z>：${t:0:120}" >&2; exit 64; }
+  done
+}
+kernel_upstream_args
 if [ -z "$NAME" ]; then
   case $MODE in git) NAME=$(basename "${SRC%/}" .git);; dir) NAME=$(basename "$SRC");; image) NAME=${SRC%%@*}; NAME=${NAME##*/}; NAME=${NAME%%:*};; sbom) NAME=$(basename "$SRC"); NAME=${NAME%.json}; NAME=${NAME%.cdx};; esac
 fi
@@ -863,6 +875,7 @@ kernel_versions_finish(){
   fi
   if [ "$KSHIP_OK" = 1 ]; then for v in "${KSHIP[@]+"${KSHIP[@]}"}"; do pa+=(--shipped "$v"); done; else pa+=(--shipped-unknown); fi
   for v in "${KVERS[@]+"${KVERS[@]}"}"; do pa+=(--requested "$v"); done
+  for v in "${KUPS[@]+"${KUPS[@]}"}"; do pa+=(--upstream-version "$v"); done   # 平台設定的上游版本（kernel_versions.py 和 Makefile 核對）
   # 每顆出貨核心的上游版本：只認核心原始碼（環境變數 KERNEL_SOURCE_DIR，scan-flash-package.sh 的 --kernel-source）最上層 Makefile 的 X.Y.Z，
   # 由 kernel_versions.py 逐顆比對出貨版本字串；沒有原始碼 → upstream_version 是 null（不從版本字串推測）
   if [ -n "${KERNEL_SOURCE_DIR:-}" ]; then

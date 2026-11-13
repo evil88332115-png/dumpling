@@ -222,7 +222,7 @@ def block_text():
     return SRC[i:SRC.index("# ---- C-euvd", i)]
 
 
-def kernel_run(tmp_path, members, kvers=(), fake_status="OK", source_dir=None):
+def kernel_run(tmp_path, members, kvers=(), fake_status="OK", source_dir=None, kups=()):
     """sca-scan 的核心區段（C-kernel-config、C-kernel-module-map 與核心出貨清單）在 bash 裡執行；判定工具是假的。"""
     root = tmp_path / "root"
     lib = root / "tools" / "pilot" / "lib"
@@ -244,6 +244,7 @@ status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
 MODE=sbom; SBOM_OK=1; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=; KERNEL_CVES=; SCA_KERNEL_VERSIONS=
 {'KERNEL_SOURCE_DIR=' + str(source_dir) if source_dir else 'unset KERNEL_SOURCE_DIR'}
 KVERS=({kv})
+KUPS=({" ".join(f"'{v}'" for v in kups)})
 {block_text()}
 echo done
 """
@@ -501,3 +502,15 @@ def test_sca_scan_fills_upstream_per_kernel(tmp_path):
     rows, doc, log, p = kernel_run(sub(tmp_path, "d"), tkc.rootfs_members(kver="6.1.118-v8"), source_dir=tree)
     assert doc["judged"] == ["6.1.118-v8"] and doc["not_judged"] == [] and doc["shipped"][0]["upstream_version"] == "6.1.118"
     assert rows["C-kernel-config"][0] == "OK" and not any(k.startswith("C-kernel-not-judged") for k in rows)
+
+
+def test_sca_scan_passes_platform_upstream_version(tmp_path):
+    """--kernel-upstream-version（KUPS）→ kernel_versions.py --upstream-version：和 Makefile 一致 → source-makefile+platform-param；不一致 → null。"""
+    tree = sub(tmp_path, "tree")
+    (tree / "Makefile").write_text(MAKEFILE)
+    members = tkc.rootfs_members(kver="6.1.118-v8")
+    rows, doc, log, p = kernel_run(sub(tmp_path, "a"), members, source_dir=tree, kups=("6.1.118-v8=6.1.118",))
+    x = doc["shipped"][0]
+    assert (x["upstream_version"], x["upstream_basis"]) == ("6.1.118", "source-makefile+platform-param")
+    rows, doc, log, p = kernel_run(sub(tmp_path, "b"), members, source_dir=tree, kups=("6.1.118-v8=6.1.119",))
+    assert doc["shipped"][0]["upstream_version"] is None and "不一致" in doc["shipped"][0]["upstream_note"]

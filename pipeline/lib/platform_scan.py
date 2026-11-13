@@ -27,6 +27,9 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
    - `sbom-<專案>-<版本>.cdx.json`（`layers/sbom.product.cdx.json`）、`-bsp`／`-os` 分層 SBOM、`layers.json`（有分層時）
    - 每個 run：`report-<專案>-<版本><後綴>.zip`、`vex-…`、`vuln-list-….xlsx`、`p1-table-….xlsx`（檔名、來源路徑、顯示名稱由 `Hooks.report_files` 決定）
    - `scan-summary-<專案>-<版本>.json`（＝scan.json，標準答案比對用，見 `pipeline/check-expected.py`）、`notes.md`、`manifest.tsv`（檔名 TAB 顯示名稱）
+   - `kernel-versions-<專案>-<版本>.json`：完整掃描那次 sca-scan 的 `scan/kernel-versions.json`（有而且 schema 對才放）
+   - scan.json 的產品結論：`reports`（每份報告的 `report_status`＝cra_report summary.json 的 status、`release_gate`＝vex.gate.verdict）、
+     整體的 `report_status`／`release_gate`（最差的那份）；讀不到是 NOT_RUN。notes.md 開頭依序印 report_status、release_gate、pipeline_result
 3. **步驟紀錄**：給 `args.steps` 時，`collect` 把每個 workflow 步驟的結果（OK｜GAP｜NOT_RUN｜FAIL）放進 scan.json 的 `pipeline_steps`、`pipeline_status`
    （有 FAIL → FAIL；有 GAP → GAP；其他 OK；檔案不存在 → GAP）、notes.md 的「流程步驟」表，並寫 `args.steps_md`。整體狀態有 GAP 或 FAIL 時不是 OK——
    平台的 scan 沒有去讀 raw-sectors.json 之類的檔案，GAP 也不會消失。呼叫端（scan.sh）據此至少回報 GAP。
@@ -46,6 +49,9 @@ sys.path.insert(0, HERE)
 import step_rows  # noqa: E402
 
 LAYER_PROP = "dumpling:layer"
+# 報告結論的值，由最差到最好（同 tools/cra/cra_report.py 的 ORDER）；讀不到或不在這裡面 → NOT_RUN（不留空、不當成 OK）
+VERDICTS = ("FAIL", "NOT_ASSESSED", "GAP", "NOT_RUN", "ATTENTION", "OK")
+KV_SCHEMA_PREFIX = "sca-center-kernel-versions/"
 DETAIL_STAGES = ("C-kernel-boot", "C-kernel-config", "C-kernel-cve-list", "A-md5", "C-nvidia-bulletins")
 # 報告包裡要單獨放成 Release 附件的檔案：(報告包內的相對路徑, 附件檔名樣式, 顯示名稱樣式)；{p}＝專案、{v}＝版本、{s}＝後綴
 REPORT_FILES = (("交給PM/VEX/vex.cdx.json", "vex-{p}-{v}{s}.cdx.json", "VEX{s}"),
@@ -137,8 +143,28 @@ def run_summary(w, hooks=None, rootfs="rootfs", detail_stages=DETAIL_STAGES):
     out = {"stages": {k: v["status"] for k, v in st.items()},
            "stage_details": {k: v["detail"][:300] for k, v in st.items() if k in detail_stages}}
     out.update(hooks.run_summary_fields(p, st))
+    out["report_status"], out["release_gate"] = report_verdicts(read_json(os.path.join(p["reports"], "summary.json")))
     out["vulnerabilities"] = vuln_metrics(read_json(os.path.join(p["reports"], "vulnerability-rows.json")))
     return out
+
+
+def verdict(v):
+    return v if isinstance(v, str) and v in VERDICTS else "NOT_RUN"
+
+
+def worst_verdict(values):
+    """結論清單 → 最差的一個；清單是空的 → NOT_RUN。"""
+    vals = [verdict(v) for v in values]
+    return min(vals, key=VERDICTS.index) if vals else "NOT_RUN"
+
+
+def report_verdicts(summary):
+    """cra_report 的 summary.json（dict 或 None）→ (report_status, release_gate)。
+    report_status＝summary.json 的整體 status（每份文件最差的那個）；release_gate＝vex.gate.verdict（VEX 發行閘門）。讀不到 → NOT_RUN。"""
+    if not isinstance(summary, dict):
+        return "NOT_RUN", "NOT_RUN"
+    gate = (summary.get("vex") or {}).get("gate") if isinstance(summary.get("vex"), dict) else None
+    return verdict(summary.get("status")), verdict(gate.get("verdict") if isinstance(gate, dict) else None)
 
 
 def zip_dir(src, dst):
@@ -233,6 +259,16 @@ def collect(a, hooks=None):
                     add(manifest, out, dst, label_pat.format(p=proj, v=ver, s=suffix))
     # --- scan.json（標準答案比對用） ---
     full_name = "" if "" in runs else next(iter(runs), "")
+    # 映像出貨的核心（sca-scan 的 scan/kernel-versions.json，取完整掃描那次）→ Release 附件 kernel-versions-<專案>-<版本>.json（每日監控的核心 CNA 比對讀它）
+    kv_name = None
+    kv_spec = next((s_ for s_ in a.run if s_.partition("=")[0] == full_name), None)
+    if kv_spec is not None:
+        kv_src = os.path.join(run_paths(kv_spec.partition("=")[2], hooks.rootfs)["scan"], "scan", "kernel-versions.json")
+        kv = read_json(kv_src) if os.path.isfile(kv_src) and not os.path.islink(kv_src) else None
+        if isinstance(kv, dict) and str(kv.get("schema", "")).startswith(KV_SCHEMA_PREFIX):
+            kv_name = "kernel-versions-%s-%s.json" % (proj, ver)
+            shutil.copy2(kv_src, os.path.join(out, kv_name))
+            add(manifest, out, kv_name, "映像出貨的核心與上游版本")
     _, pk_all = sbom_layer_counts(os.path.join(a.layers, "sbom.product.cdx.json"), hooks.package_purl_prefix) if a.layers else (None, None)
     comp = layers.get("components") or {}
     ctx = {"project": proj, "version": ver, "out": out, "args": a, "build": build, "asm": asm, "layers": layers, "runs": runs,
@@ -248,6 +284,12 @@ def collect(a, hooks=None):
     ctx["scan"] = scan
     scan.update(hooks.scan_mid(ctx))
     scan["runs"] = runs
+    # 產品結論：每份報告的 report_status／release_gate，整體取最差的那份（release-meta.json 照抄；讀不到是 NOT_RUN）
+    scan["reports"] = [{"report": "full" if k == "" else k.lstrip("-"), "report_status": v["report_status"], "release_gate": v["release_gate"]}
+                       for k, v in runs.items()]
+    scan["report_status"] = worst_verdict(r["report_status"] for r in scan["reports"])
+    scan["release_gate"] = worst_verdict(r["release_gate"] for r in scan["reports"])
+    scan["kernel_versions_file"] = kv_name
     scan.update(hooks.scan_tail(ctx))
     steps_path = getattr(a, "steps", None)
     srows = step_rows.read_rows(steps_path) if steps_path else None
@@ -263,8 +305,15 @@ def collect(a, hooks=None):
     hooks.extra_attachments(ctx, manifest)
     # --- notes.md ---
     cb = scan["components"]
+    presult = scan["pipeline_status"] if steps_path else "NOT_RUN"
     L = ["# %s %s" % (proj, ver), "",
-         "由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), ""]
+         "**report_status %s**｜**release_gate %s**｜**pipeline_result %s**" % (scan["report_status"], scan["release_gate"], presult), "",
+         "- report_status：報告的整體狀態（cra_report `summary.json`；分層時每份報告各一個，這裡取最差的那份）。release_gate：VEX 發行閘門（`vex.gate`）。"
+         "pipeline_result：workflow 各步驟的結果，不是產品結論。`release-meta.json` 的 `status`（shipped／development）是生命週期，也不是結論。", ""]
+    if len(scan["reports"]) > 1:
+        L += ["| 報告 | report_status | release_gate |", "|---|---|---|"]
+        L += ["| %s | %s | %s |" % ({"full": "完整（全部層）"}.get(r["report"], r["report"]), r["report_status"], r["release_gate"]) for r in scan["reports"]] + [""]
+    L += ["由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), ""]
     if steps_path and scan.get("pipeline_attention"):
         # ATTENTION：這次用了舊資料頂替（例如 git.kernel.org 連不上，沿用上一份核心 CVE 鏡像）。不擋 Release，但要讓讀的人一眼看到
         L += ["> **ATTENTION（用了舊資料頂替，結果照樣產生，不是 OK）**", ">"] + ["> - " + t.replace("\n", " ") for t in scan["pipeline_attention"]] + [""]
@@ -288,6 +337,8 @@ def collect(a, hooks=None):
     L += ["", "## 附件", "",
           "- 檔名固定、機器可讀：`sbom-<專案>-<版本>.cdx.json`（完整，標好層；分層加 `-bsp`／`-os`）、`layers.json`、`release-meta.json`。",
           "- `report-*.zip`：報告包（漏洞清單、P1 判斷表、SBOM、VEX、內部存檔）；`vuln-list-*.xlsx`＝漏洞清單、`p1-table-*.xlsx`＝P1 判斷表、`vex-*.cdx.json`＝VEX。"]
+    if kv_name:
+        L.append("- `%s`：映像出貨的核心、有沒有判定、上游版本（每日監控的核心 CNA 比對用）。" % kv_name)
     L += hooks.notes_attachments(ctx) or ["- `scan-summary-*.json`：標準答案比對用的掃描摘要。"]
     with open(os.path.join(out, "notes.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
