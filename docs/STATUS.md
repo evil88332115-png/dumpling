@@ -2,18 +2,18 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 21:53 +0800（C2）
+最後更新：2026-11-13 21:53 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：**已在第二台（WSL2）接手**（2026-11-13，session 名 c0）。第二台檢查完成、代理上限調整為 D-048 並通知 C1–C4；等 C1 開 M2 PR
-- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 b5c5015，**未開 PR**；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-050＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
+- 分支／PR／commit：main 26a6377。已合併：M1（#9）、M3（#14）、M4（#28）＋修正 #32；文件批次 #13、#15。C0 分支 `wp0/docs-batch-4`（已推送 45de835，**未開 PR**；worktree `$AGENT_TMP/dumpling-wt-c0-docs`）：D-034～D-051＋HANDOFF「在第二台電腦（WSL2）接手」一節；**M2 合併後開 PR**（新對話請先從這個分支讀 DECISIONS／HANDOFF，main 上還沒有）
 - 代理：無。C2 ca80b27 的獨立驗證代理已完成：**驗證：通過**（應修 0、建議 5），報告在 `$AGENT_TMP/dumpling-tmp-c0-verify-c2/report.md`（已去識別化，PR 開出後貼上）；worktree `$AGENT_TMP/dumpling-wt-c0-verify-c2` 合併後清掉
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：852b6d3 三個 run 綠、draft 核對 OK；另修 078710d（UEFI／OP-TEE Grype 比對移到 sca-scan 之後，CI 新機器原本沒有資料庫 → 完整報告少 11 列）。新驗收 run：43429199382、43429215851、tests 43429232513。C0 審查後 C1 補 c08de27（import 失敗時 B-uefi-grype／B-tee-grype 仍記 NOT_RUN，只改失敗那條路，C0 已看 diff 確認），tests 43429786314；release draft 沿用 078710d 驗收、不重跑（PR 說明會註明）。之後 C1 核對 draft、獨立驗證，再開 M2 PR
-  - C2（第二台）：wp3/amd-psp ca80b27 獨立驗證通過；延伸證據定為 D-050。C0 請 C2 開 PR 前修建議 1（checksum 不符的目錄不得標 adopted）並補 D-050 的前提說明、notes 數字口徑，改好回報新 HEAD，C0 看 diff。私有檔驗證已由 C0 完成（不擋，後續加 CSE layout Size 0x60）；C2 修完建議 1、C0 看過 diff 就開 PR
+  - C2（第二台）：wp3/amd-psp 34fd4f9（ca80b27＋建議 1–3 修正，C0 已看 diff OK）；firmware 43435026101 綠就開 PR，C0 貼獨立驗證報告後合併。私有檔驗證已完成（後續另開 CSE layout Size 0x60）。wp3/fw-advisory（D-043 (1) Intel，5bddbf8）預驗中；ME family 推定定為 D-051
   - C3（第二台）：wp2/watch-m2 等 M2 後接 mirrors.sh 開 PR；wp2/art14（e66f499）等 M7 的銷售市場欄位，M8 再開；wp5/gitlab（M5）等 M2 後核對範本指令再開
   - C4（第二台）：三平台差異核對完成、標準答案定案（403fae7；rpi 90、rock 99、ai-nas 76 項，最後一輪 run rpi 43419144284、rock 43413770363、ai-nas 43416974360，併入 61d7c6f）；驗證代理只拿原始資料。#27 已由 C0 決定（D-049：lgpio 維持 os）。下一步：M2 合併後併 main 重跑，核對 rock／rpi 的 -os 項目（852b6d3 影響），再開 M6 PR
 - 下一步（新 C0 接手後）：
