@@ -124,7 +124,7 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
   結果：副本裡所有 `dumpling:` 開頭的 property 都是我們寫的，我們加的 `dumpling:normalized-from-sha256`、`dumpling:normalized-changes` 永遠是 `metadata.properties` 的最後兩個。
   改名計入 `changes`（也計入 `dumpling:normalized-changes` 的筆數）；沒有其他違規、只有改名時 `applied` 也是 true。
   report 另寫「供應商 SBOM 自帶名稱以 dumpling: 開頭的 property N 個」，狀態至少 ATTENTION（`dt-project.json` 的 `normalize.renamed`、`summary.supplier_dumpling_props`）；
-  report 本來就不讀 SBOM 裡的 property，它讀 `dt-project.json`（prep 自己算的）；元件自帶的三個評估標記本來就不採信，摘要在改名之前算，所以「供應商自帶標記的元件 N 個」仍是原本的數字。
+  report 本來就不讀 SBOM 裡的 property，它讀 `dt-project.json`（prep 自己算的）；元件自帶的三個評估標記本來就不採信，摘要在改名之前算，所以「供應商自帶標記的元件 N 個」算的是供應商原始 SBOM 裡的標記數（改名不影響這個數字）。
   範圍：只有 `metadata.properties` 與元件的 `properties`（我們只寫這兩處、report 只讀元件的）。頂層 `properties`（1.5 起）、`services`、`pedigree`／`evidence` 底下的元件不動；`metadata.component` 本來就由 prep 整個換成我們的根元件。
   `specVersion` 不在支援範圍（1.2、1.3、1.7 以後）時整份不處理，所以不改名；但那種 SBOM 的 property 一樣不被 report 採信。
   變更筆數超過上限（`MAX_CHANGES`）時剩下的不改名（副本仍帶著它們），記在 `unnormalized`（規則 `supplier-dumpling-property`，`at` 是位置；清單最多 200 筆再加一筆 `more`，所以另有真正的計數 `unnormalized_total` 與 `reserved_not_renamed`）。
@@ -150,7 +150,7 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
 
 要再確認的時機：`dt-compose.yaml` 的 DT 版本升級時，重新搜尋 `getVulnerabilities()` 的呼叫位置（上面的路徑與搜尋字串）；若 BOM 上傳開始讀 `vulnerabilities`，改成在正規化時移除，稽核紀錄記原值的 SHA-256 與筆數，report 寫明「供應商宣告的漏洞資訊沒有上傳，原值見稽核紀錄」。
 
-## 已知限制（這一輪沒有處理）
+## 已知限制
 
 - 對已經正規化過的副本再跑一次 `normalize`：我們寫的 `dumpling:normalized-*`、`dumpling:supplier-*` 會被當成「供應商自帶」而改名成 `supplier:dumpling:…`，不是冪等。pipeline 只對供應商原檔跑一次，所以不會發生。
 - 前綴比對是精確的（區分大小寫，不 strip）：`Dumpling:x`、` dumpling:x` 不改名。我們的流程讀取時也是完全相等才算，所以不會被誤讀。
