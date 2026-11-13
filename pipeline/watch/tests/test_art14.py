@@ -343,11 +343,14 @@ class TestOpenDrill(Base):
         out = self.open_drill()
         self.assertEqual(last(out)[:2], ["ART14", "OK"])
         i = self.gh.issues[1]
-        self.assertEqual(self.gh.label_set(1), {"art14-drill", "art14-24h"})
+        self.assertEqual(self.gh.label_set(1), {"art14-drill", "demo", "art14-24h"})
         lines = i["body"].splitlines()
         self.assertRegex(lines[0], r"^<!-- dumpling-art14 key=[0-9a-f]{64} kind=vulnerability mode=drill -->$")
         self.assertEqual(lines[1], "演練，不是真實通報")
         self.assertIn("[演練]", i["title"])
+        # D-040 (3)：示範專案（公開 BSP）寫在標題與內文，加 demo 標籤；倒數留言也寫明
+        self.assertIn("[示範專案（公開 BSP）]", i["title"])
+        self.assertIn(art14.DEMO_LINE, lines)
         for needle in ("CVE-2018-18074", "drill-demo v1.0.0", "requests 2.19.0", "層：bsp", "嚴重度：待填", "GAP", "沒有指定專案（--project）",
                        "階段 1", "階段 2", "階段 3", "SRP 沒有 API", "選擇協調 CSIRT", "CELEX:32024R2847", "2026-11-13",
                        "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握", "不在公開 Issue 放任何機密"):
@@ -550,6 +553,7 @@ class TestCountdown(Base):
             self.count(now="2026-11-13T%02d:00:00Z" % (6 + h))
         self.assertEqual(len(self.gh.comments[1]), 1)
         self.assertIn("2026-11-13T10:00:00Z", self.gh.comments[1][0]["body"])
+        self.assertIn(art14.DEMO_LINE, self.gh.comments[1][0]["body"])      # D-040 (3)：留言也寫明示範專案
         before = len(self.gh.writes)
         self.count(now="2026-11-13T10:00:00Z")  # 完全相同的內容：不寫
         self.assertEqual(len(self.gh.writes), before)
@@ -567,12 +571,12 @@ class TestCountdown(Base):
         self.gh.labels.add("keep-me")
         self.gh.issues[1]["labels"].append({"name": "keep-me"})
         self.count()
-        self.assertEqual(self.gh.label_set(1), {"art14-drill", "art14-24h", "keep-me"})
+        self.assertEqual(self.gh.label_set(1), {"art14-drill", "demo", "art14-24h", "keep-me"})
         body = set_field(self.gh.issues[1]["body"], art14.F_AWARE, "2026-11-13T00:00:00Z")
         body = body.replace(f"- {art14.F_SUBMIT_AT}：未填", f"- {art14.F_SUBMIT_AT}：2026-11-13T02:00:00Z", 1)
         self.gh.issues[1]["body"] = body
         self.count()
-        self.assertEqual(self.gh.label_set(1), {"art14-drill", "art14-72h", "keep-me"})
+        self.assertEqual(self.gh.label_set(1), {"art14-drill", "demo", "art14-72h", "keep-me"})
         self.assertEqual(self.load(self.result())["issues"][0]["label_changed"], True)
         # 全部完成：階段標籤全拿掉
         for stage in (2, 3):
@@ -580,7 +584,7 @@ class TestCountdown(Base):
                           self.gh.issues[1]["body"], count=1, flags=re.S)
             self.gh.issues[1]["body"] = body
         self.count()
-        self.assertEqual(self.gh.label_set(1), {"art14-drill", "keep-me"})
+        self.assertEqual(self.gh.label_set(1), {"art14-drill", "demo", "keep-me"})
         self.assertIsNone(self.load(self.result())["issues"][0]["stage_label"])
 
     def test_only_trusted_authors(self):
@@ -692,7 +696,7 @@ class TestFillAndClose(Base):
         rc, out = run(["close-drill", "--repo", REPO, "--result", self.result()], self.gh)
         self.assertEqual((rc, last(out)[1]), (0, "OK"))
         self.assertEqual(self.gh.issues[1]["state"], "closed")
-        self.assertEqual(self.gh.label_set(1), {"art14-drill-done", "keep-me"})
+        self.assertEqual(self.gh.label_set(1), {"art14-drill-done", "demo", "keep-me"})
         self.assertEqual(self.gh.issues[other]["state"], "open")
         self.assertEqual(self.load(self.result())["closed"], 1)
         self.assertEqual(run(["countdown", "--repo", REPO, "--drill", "--now", NOW_S], self.gh)[0], 0)
