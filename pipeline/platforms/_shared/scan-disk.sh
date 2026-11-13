@@ -169,10 +169,13 @@ case $augment in
     sbom1=$out/augment/sbom.cdx.json; rsargs=(--raw-sectors "$out/raw-sectors.json");;
   app-source)
     echo "== 補充：NAS 應用的原始碼（$arepo @ $acommit；只產生 SBOM，不上傳、不跑授權）"
-    if ! bash "$root/tools/pilot/sca-scan" --git "$arepo" --ref "$acommit" --name "$DUMPLING_PROJECT-app-source" --out "$out/augment/app-scan" \
-        --no-upload --no-license > "$out/augment/app-scan.log" 2>&1; then
+    ascan_rc=0
+    bash "$root/tools/pilot/sca-scan" --git "$arepo" --ref "$acommit" --name "$DUMPLING_PROJECT-app-source" --out "$out/augment/app-scan" \
+      --no-upload --no-license > "$out/augment/app-scan.log" 2>&1 || ascan_rc=$?
+    if [ "$ascan_rc" != 0 ]; then
       tail -15 "$out/augment/app-scan.log"
-      # sca-scan 有非 OK 的階段也會非 0；只要 SBOM 產生了就照樣併入，狀態記成 GAP（見 status.tsv）
+      # sca-scan 有非 OK 的階段也會非 0（2＝有 GAP／NOT_RUN 等）；只要 SBOM 產生了就照樣併入，狀態記成 GAP，
+      # 不是 OK 的階段寫進 source.json 的 scan_stages_not_ok（scan.json 的 app_source）
       arc=3
     fi
     asbom=$out/augment/app-scan/sbom/sbom.cdx.json
@@ -189,12 +192,20 @@ for c in d.get("components") or []:
     p={x.get("name"):x.get("value") for x in c.get("properties") or [] if isinstance(x,dict)}
     if "dumpling:source-vs-package" in p: app=(c,p); break
 c,p=app if app else ({},{})
+st={}
+try:
+    for row in open(sys.argv[6],encoding="utf-8"):
+        f=row.rstrip("\n").split("\t")
+        if len(f)>=3 and f[0]!="stage" and f[1]!="OK": st[f[0]]={"status":f[1],"detail":f[2][:200]}
+except OSError: st=None
 json.dump({"repo":sys.argv[1],"commit":sys.argv[2],"line":sys.argv[3],"app_name":c.get("name"),"app_version":c.get("version"),
   "cdxgen_root_name":p.get("dumpling:source-root-name"),"cdxgen_root_version":p.get("dumpling:source-root-version"),
   "name_basis":"sources.yml platform_params.app_name（要和 project.yml 的 own_software 對得上）",
   "version_basis":"sources.yml platform_params.app_version＝固定 commit 的 debian/changelog 版本（D-025）",
-  "version_vs_commit":"NOT_ASSESSED","source_vs_package":p.get("dumpling:source-vs-package")},open(sys.argv[4],"w",encoding="utf-8"),ensure_ascii=False)' \
-      "$arepo" "$acommit" "${line#sbom-augment: }" "$out/augment/source.json" "$out/augment/sbom.cdx.json" || fail "寫 source.json 失敗"
+  "version_vs_commit":"NOT_ASSESSED","source_vs_package":p.get("dumpling:source-vs-package"),
+  "scan_exit":int(sys.argv[7]),"scan_stages_not_ok":st},open(sys.argv[4],"w",encoding="utf-8"),ensure_ascii=False)' \
+      "$arepo" "$acommit" "${line#sbom-augment: }" "$out/augment/source.json" "$out/augment/sbom.cdx.json" "$out/augment/app-scan/status.tsv" "$ascan_rc" \
+      || fail "寫 source.json 失敗"
     srcjson=$out/augment/source.json
     sbom1=$out/augment/sbom.cdx.json;;
 esac
