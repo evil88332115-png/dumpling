@@ -2,20 +2,20 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 04:54 +0800（C3）
+最後更新：2026-11-14 04:55 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：M7a（#58）已合併；等 C1 的 M7a2、C3 的 gitlab-notes／M8、C2 的 advisory-polish、C4 的 M6（重跑等使用者同意）；問使用者 5674、正式 tag 等
-- 分支／PR／commit：main b56cff4。已合併：**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
+- 分支／PR／commit：main 5abdfa2。已合併：**#61**（GitLab release-meta 補 --notes，C0 直接審閱）、**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
 - 代理：無
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：#40、#42、#50、M7a #58 已合併。下一個 M7a2（validate_table 介面，先和 C2 確認），再 M7b（第一項：版本＝tag 要加獨立來源）。正式 tag 等使用者（打在 b56cff4 或更新的 main）
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
-  - C3（第二台）：M5 #47、監控 #49 已合併。M7a 已合併 → 可開工：wp5/gitlab-notes（GitLab release-meta 補 --notes）與 M8（wp2/art14：B1 第 14 條、B2 支援期限）。real Issue 等正式 Release。GitLab 待辦 T-14（C1）、T-15～T-22
-  - C4（第二台）：wp7/adapters 已併 main 9f11a90（25d3050）、獨立驗證已做（小修 107ce75）；support-lifecycle 11 筆已在 M6。**最終重跑等使用者同意**（C4 的本機派送腳本被 Claude Code 以「記憶體不足」停掉，依規定要使用者同意才能重啟）。通過後開 M6 PR
+  - C3（第二台）：#47、#49、#61 已合併。M8（wp2/art14，已併 main b56cff4，B1／B2 已 commit）CI 跑完就開 PR。real Issue 等正式 Release
+  - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
   2. M2 合併後：使用者決定合併後馬上打 tag（D-052），**等使用者自己推或放行 C1**；文件批次 #41 已合併；C2／C3／C4 已通知
@@ -24,7 +24,7 @@
   5. M7：照 D-056 拆成 M7a～M7f（C1），每個 PR C0 派獨立驗證；M7c～M7e 改 Jetson 標準答案前要先經 C0 同意
   6. M7 之後：T-14（C1：scan.sh 加選項改連既有 DT，不傳照舊臨時 DT；做好後 C3 改 GitLab 範本）；D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
-- 卡住／等決定：5674 初審意見要負責人確認（使用者）；正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
+- 卡住／等決定：已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report 要不要刪（C1、C2 刪分支都被權限擋，使用者決定）；5674 初審意見要負責人確認（使用者）；正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
 - 主要主機舊環境：使用者同意刪除（2026-11-13）。新 C1、C2 確認可以刪（分支 SHA 已在 origin 核對：wp1/m2 877ffbc、m2-pr-draft d3efdc8、amd-psp ebac3e9、csme-new 61e8ef7、supplier-normalize 8a960c0）。已通知 c1-old、c2-old 先自己檢查再移除各自的 worktree 和暫存，最後由 c0-old 檢查整個 clone 後刪 repo。**範圍只限 dumpling-* 項目**：主要主機的 `$AGENT_TMP` 和 sca-center 共用，不刪整個資料夾（c0-old 指出，HANDOFF 已補 f9e8d70）；`dumpling-heavy.lock`、`~/.config/dumpling/` 保留。c0-old 刪之前會直接向使用者確認範圍；等 c0-old 回報
