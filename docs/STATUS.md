@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:54 +0800（C0）
+最後更新：2026-11-14 06:11 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -193,7 +193,7 @@
 > - 驗證：複驗 3d270fe：**不通過**。比對規則 OK（18000 次 fuzz 沒有誤判成 fixed），3 項應修都在文字或測試：workflow 註解寫「判定不適用」與現況矛盾；輸出與文件還有「不適用」；確認後有測試吃牆上時鐘
 > - 寫程式（nvvbios 第四輪）：**完成 91a5be2**（workflow 註解照實寫；「不適用」措辭全部拿掉；conftest 固定時間；terminated 缺鍵 fail-closed；Table.confirmed；確認後要改的 6 個測試寫進 notes；1140 passed；CI tests 43490925483、firmware 43490929895）
 > - 驗證：第三次複驗 91a5be2：**通過**（2 處文字：「人工審核過的」、測試標題的歷史口吻；建議：有未審核的列也算未確認）
-> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0）；C0 的獨立驗證：**通過** → **#59 已合併（main 77ef634）**，worktree nvvbios 已移除。後續 2 項（報告的「對照表」行要算進 unreviewed_rows；md_esc／firmware_mdsafe 跳脫 @，或把 bulletin 欄限成數字）→ `wp3/advisory-polish`：**已從 main 5cf2eaa 開**（worktree `$AGENT_TMP/dumpling-wt-c2-polish`，暫存 `$AGENT_TMP/dumpling-tmp-c2-polish/`），寫程式代理**進行中**（已追加：併 main d73ff86；C2 程式的 `^…$`＋match 全面改成 fullmatch；時間格式和 C1 一致；stale／invalid 的說明 3 處與載入檢查；bulletin 用 ^[0-9]{1,8}$）。CI 要裝 markdown-it-py 那項：不改 tests.yml（C0）和共用的 requirements（C1），改用 C2 自己的 run.d venv 加上 C2 專用、固定版本的套件。要做的項目：#59 的 2 項（對照表那行算進 unreviewed_rows；md_esc 的 @ 或把 bulletin 限成數字）；supplier-followup 複驗的建議（CI 要裝 markdown-it 或缺了就失敗，靜默 return 改成 skipTest；SPECIAL 用字面常數釘住；計數邊界測試；只有零寬或控制字元的階段名稱也算空名稱；email／xmpp 自動連結；整份不處理時 supplier_dumpling_props 也要計數；_iter_components 的 MAX_UNNORMALIZED）；#60 驗證的建議（只有零寬字元的名稱、單列 OK 時沒有說明；pedigree／services 裡的供應商 dumpling: 標記沒改名；email、mailto:、xmpp: 自動連結；CI 安裝 markdown-it-py）。scan-status-check 不一致的那項 → C0 已列入 M7b。**5674 的初審意見要由負責人確認**（C0 已問使用者，等回覆）
+> - C2 自己修：**80c96ab**（7 處措辭；confirmed 也要求沒有未審核的列；補測試）→ 併入 main → **7f64fe0**（1141 passed；CI tests 43495681542、firmware 43495686116）→ CI 兩個都綠 → **PR #59 已開**（head 7f64fe0）；C0 的獨立驗證：**通過** → **#59 已合併（main 77ef634）**，worktree nvvbios 已移除。後續 2 項（報告的「對照表」行要算進 unreviewed_rows；md_esc／firmware_mdsafe 跳脫 @，或把 bulletin 欄限成數字）→ `wp3/advisory-polish`：**已從 main 5cf2eaa 開**（worktree `$AGENT_TMP/dumpling-wt-c2-polish`，暫存 `$AGENT_TMP/dumpling-tmp-c2-polish/`），寫程式代理**完成 b9e8585**（已併入 main 030edd2；CI tests 43515577897、firmware 43515583185 綠；渲染測試在 CI 實際執行，c2-x86 906 passed、0 skip；新增 tests/run.d/c2-requirements.txt；email 處理用 cmark-gfm 全枚舉約 500 萬個字串，0 個連結）→ **預驗進行中**（暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-polish/`）（追加項目：併 main d73ff86；C2 程式的 `^…$`＋match 全面改成 fullmatch；時間格式和 C1 一致；stale／invalid 的說明 3 處與載入檢查；bulletin 用 ^[0-9]{1,8}$）。CI 要裝 markdown-it-py 那項：不改 tests.yml（C0）和共用的 requirements（C1），改用 C2 自己的 run.d venv 加上 C2 專用、固定版本的套件。要做的項目：#59 的 2 項（對照表那行算進 unreviewed_rows；md_esc 的 @ 或把 bulletin 限成數字）；supplier-followup 複驗的建議（CI 要裝 markdown-it 或缺了就失敗，靜默 return 改成 skipTest；SPECIAL 用字面常數釘住；計數邊界測試；只有零寬或控制字元的階段名稱也算空名稱；email／xmpp 自動連結；整份不處理時 supplier_dumpling_props 也要計數；_iter_components 的 MAX_UNNORMALIZED）；#60 驗證的建議（只有零寬字元的名稱、單列 OK 時沒有說明；pedigree／services 裡的供應商 dumpling: 標記沒改名；email、mailto:、xmpp: 自動連結；CI 安裝 markdown-it-py）。scan-status-check 不一致的那項 → C0 已列入 M7b。**5674 的初審意見要由負責人確認**（C0 已問使用者，等回覆）
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
