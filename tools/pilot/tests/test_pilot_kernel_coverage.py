@@ -173,6 +173,6 @@ def test_sca_scan_runs_kernelcheck_after_grype_for_image_and_sbom_only():
     block = s[s.rindex("\nif ", 0, i):i]
     assert 'if [[ "$MODE" =~ ^(image|sbom)$ ]]; then' in block            # 原始碼模式不寫這一列
     # 沒有核心（kernelcheck 回 NOT_RUN）或沒有 SBOM 時不寫這一列：一般容器映像不該因此從 OK 變成非 OK
-    assert '[ "$s2" = NOT_RUN ] || status "$s1" "$s2" "$s3"' in s and 'C-kernel-coverage NOT_RUN' not in s
+    assert '[ "$s2" = NOT_RUN ] || { status "$s1" "$s2" "$s3"; KSEEN=1; }' in s and 'C-kernel-coverage NOT_RUN' not in s   # KSEEN：SBOM 有核心
     assert '--out "$OUT/scan/kernel-coverage.json"' in s and 'ka=(--grype "$GR")' in s
     assert 'status C-kernel-coverage FAIL "kernelcheck.py 失敗' in s     # 沒有狀態列（例如崩潰）時記 FAIL，不中斷掃描
