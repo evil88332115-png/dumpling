@@ -80,3 +80,99 @@ if __name__ == "__main__":
     print("PyYAML %s" % yaml.__version__)
     with open(sys.argv[3], "w", encoding="utf-8") as fh:
         json.dump(load(sys.argv[2]), fh, ensure_ascii=False)
+
+
+# ---------- rules:if 的小型求值器（只支援範本用到的語法；其他語法一律拒絕） ----------
+import re as _re
+
+_TOK = _re.compile(r'\s*(\(|\)|&&|\|\||==|!=|=~|\$[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|\'[^\']*\'|/(?:\\/|[^/])*/)')
+
+
+def _tokens(expr):
+    out, pos = [], 0
+    while pos < len(expr):
+        m = _TOK.match(expr, pos)
+        if not m:
+            if expr[pos:].strip() == "":
+                break
+            raise ValueError("rules:if 有不認得的語法：%r" % expr[pos:])
+        out.append(m.group(1))
+        pos = m.end()
+    return out
+
+
+def rule_matches(expr, ctx):
+    """GitLab rules:if → bool。ctx：{變數名: 值}；沒有的變數是「未定義」（== "" 不成立、=~ 不成立、單獨出現是 false）。"""
+    toks = _tokens(expr)
+    pos = [0]
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else None
+
+    def take():
+        t = peek()
+        pos[0] += 1
+        return t
+
+    def value(t):
+        if t.startswith("$"):
+            return ctx.get(t[1:])
+        if t[0] in "\"'":
+            return t[1:-1]
+        raise ValueError("比較的右邊要是變數或字串：%r" % t)
+
+    def atom():
+        t = take()
+        if t == "(":
+            v = disj()
+            if take() != ")":
+                raise ValueError("括號不成對")
+            return v
+        if not t or not t.startswith("$"):
+            raise ValueError("要是變數：%r" % t)
+        left = ctx.get(t[1:])
+        op = peek()
+        if op in ("==", "!="):
+            take()
+            right = value(take())
+            eq = (left == right) if right is not None else (left is None)
+            return eq if op == "==" else not eq
+        if op == "=~":
+            take()
+            r = take()
+            if not (r and r.startswith("/") and r.endswith("/")):
+                raise ValueError("=~ 右邊要是 /regex/")
+            return left is not None and _re.search(r[1:-1].replace("\\/", "/"), left) is not None
+        return bool(left)
+
+    def conj():
+        v = atom()
+        while peek() == "&&":
+            take()
+            v = atom() and v
+        return v
+
+    def disj():
+        v = conj()
+        while peek() == "||":
+            take()
+            v = conj() or v
+        return v
+
+    v = disj()
+    if peek() is not None:
+        raise ValueError("多餘的語法：%r" % toks[pos[0]:])
+    return v
+
+
+def job_when(job, ctx):
+    """job 在這個 pipeline 的 when（第一條符合的規則；沒有符合 → never；沒有 rules → on_success）。"""
+    rules = job.get("rules")
+    if rules is None:
+        return job.get("when", "on_success")
+    for r in rules:
+        if "if" not in r or rule_matches(r["if"], ctx):
+            if "changes" in r and ctx.get("CI_PIPELINE_SOURCE") not in ("push", "merge_request_event"):
+                pass        # 官方：tag、排程、手動 pipeline 的 changes 一律成立
+            return r.get("when", job.get("when", "on_success"))
+    return "never"

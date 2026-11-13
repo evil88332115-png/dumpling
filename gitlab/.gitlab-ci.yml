@@ -55,6 +55,14 @@ workflow:
 .rules-tag-release:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+    # T-17：手動試跑 release（代替 GitHub 的「只建 draft Release」；GitLab 沒有 draft Release）。網頁或 API 建立 pipeline 時帶
+    # DUMPLING_RELEASE_DRY_RUN=1 與 DUMPLING_RELEASE_TAG=<專案>/<版本>：跑 build、scan，publish 只驗證，不上傳 Package、不建 Release、不開 Issue。
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_RELEASE_DRY_RUN == "1" && $DUMPLING_RELEASE_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+
+# 只有真的 tag 才跑（簽章會寫進透明紀錄，試跑不能跑）
+.rules-tag-only:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
 
 .rules-dev:
   rules:
@@ -79,7 +87,15 @@ workflow:
 # 不用管線（|）接 project-info.py：不同 shell 的 pipefail 行為不同，失敗會被吃掉。
 .resolve-from-tag:
   script:
-    - python3 -I pipeline/project-info.py "$CI_COMMIT_TAG" > info.txt
+    # tag pipeline 用 CI_COMMIT_TAG；手動試跑（T-17）用 DUMPLING_RELEASE_TAG，而且一定要帶 DUMPLING_RELEASE_DRY_RUN=1
+    - |
+      RELEASE_TAG="${CI_COMMIT_TAG:-}"
+      if [ -z "$RELEASE_TAG" ]; then
+        [ "${DUMPLING_RELEASE_DRY_RUN:-0}" = 1 ] || { echo "release: FAIL（沒有 tag；手動試跑要帶 DUMPLING_RELEASE_DRY_RUN=1 與 DUMPLING_RELEASE_TAG）"; exit 1; }
+        RELEASE_TAG="${DUMPLING_RELEASE_TAG:-}"
+      fi
+      export RELEASE_TAG
+    - python3 -I pipeline/project-info.py "$RELEASE_TAG" > info.txt
     - cat info.txt
     - |
       PROJECT=$(sed -n 's/^PROJECT=//p' info.txt); VERSION=$(sed -n 's/^VERSION=//p' info.txt)
@@ -218,6 +234,10 @@ workflow:
 validate:unit-tests:
   stage: validate
   rules:
+    # T-19：分支有開著的 merge request 時，branch pipeline 不跑（MR pipeline 會跑），不重複。官方 workflow 的「避免重複 pipeline」寫法，
+    # 放在 job 層級：dev/** 的 build／scan 只在 branch pipeline 跑，整條 branch pipeline 不能關
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
     # tag 的 push 也是 push（官方 job_rules：push 事件含分支與 tag）：加 $CI_COMMIT_BRANCH，tag pipeline 不跑（同 tests.yml 不在 tag 跑，不擋 release）
     - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
   tags: [dumpling]
@@ -259,28 +279,13 @@ release:publish:
     - !reference [.setup, script]
     - !reference [.resolve-from-tag, script]
     - |
-      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" --notes result/notes.md \
+      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$RELEASE_TAG" --notes result/notes.md \
         --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
         --scan-summary "result/scan-summary-$PROJECT-$VERSION.json" --out result/release-meta.json
       printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv
-    - |
-      test -s result/manifest.tsv || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
-    # 附件 → Generic Package（套件名稱＝專案，套件版本＝版本；tag 含斜線，不能直接當套件版本。套件名稱與版本的字元規則官方沒寫，待內部驗證）
-    - |
-      cd result
-      while IFS=$'\t' read -r f label; do
-        [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
-        curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" \
-          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PROJECT/$VERSION/$f"
-      done < manifest.tsv
-      cd ..
-    - |
-      python3 -I gitlab/release-payload.py --manifest result/manifest.tsv --tag "$CI_COMMIT_TAG" --project "$PROJECT" --version "$VERSION" \
-        --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes result/notes.md --out release.json
-    - |
-      curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --header "Content-Type: application/json" \
-        --data @release.json "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
-      echo "release: OK（$CI_COMMIT_TAG）"
+    # 先驗再傳（T-21）：release-publish.sh 先用 release-payload.py 驗完全部附件，驗不過一個檔都不上傳；
+    # DUMPLING_RELEASE_DRY_RUN=1（T-17）只驗證，不上傳 Package、不建 Release
+    - bash gitlab/release-publish.sh result "$RELEASE_TAG" "$PROJECT" "$VERSION"
   artifacts:
     # 長期保存靠 Generic Package 與 Release；這裡只留給除錯與簽章 job 用
     paths: [result/, release.json]
@@ -290,7 +295,7 @@ release:publish:
 # 官方限制：id_tokens 要寫在被簽署的專案本身（不能 include、不能放 child pipeline）。cosign 需 2.0.1 以上。
 release:sign:
   stage: release
-  extends: [.rules-tag-release]
+  extends: [.rules-tag-only]
   needs: ["release:publish"]
   tags: [dumpling]
   allow_failure: true
@@ -302,6 +307,8 @@ release:sign:
     - !reference [.setup, script]
     - |
       test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 0; }
+    - |
+      [ "${DUMPLING_RELEASE_DRY_RUN:-0}" != 1 ] || { echo "sign: NOT_RUN（試跑不簽章：簽章會寫進透明紀錄）"; exit 0; }
     # cosign 執行檔要固定版本與 sha256：進 pipeline/lib/tools.lock（待辦 T-09，M7 的 A2 一併處理）
     - bash pipeline/install-tool.sh cosign "$DUMPLING_OUT_BASE/bin"
     - |
@@ -355,10 +362,12 @@ dev:publish:
         matrix:
           - PROJECT: ["orin-nano-demo"]
   tags: [dumpling]
-  allow_failure: true
+  # T-20：NOT_RUN 用結束碼 3，只有 3 算允許失敗（官方 allow_failure:exit_codes）；其他結束碼照常是失敗。同 GitHub 版「NOT_RUN 不是失敗、但照實列出」
+  allow_failure:
+    exit_codes: [3]
   script:
     - echo "dev:publish NOT_RUN（待辦 T-03：滾動開發版的 GitLab 版發布方式尚未定案，見 docs/GITLAB-PORT.md）"
-    - exit 1
+    - exit 3
 
 # ---------------------------------------------------------------------------
 # firmware：firmware/ 與韌體相關腳本有變動時（對應 firmware.yml 的 firmware-fetch）
@@ -371,6 +380,8 @@ firmware:fetch:
   tags: [dumpling]
   timeout: 30 minutes
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'     # T-19：同 validate:unit-tests
+      when: never
     - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - firmware/**/*
@@ -437,7 +448,7 @@ firmware:dt:
       test -n "${PILOT_ENV:-}" || { echo "firmware-dt: FAIL（沒有 PILOT_ENV）"; exit 1; }
     - |
       echo "firmware-dt: NOT_RUN（待辦 T-04：常駐 DT 版的 firmware-dt.sh 呼叫方式待內部驗證）"
-    - exit 1
+    - exit 3
 
 # ---------------------------------------------------------------------------
 # watch：每日監控（排程變數 DUMPLING_JOB=watch）。compute 與 notify 分開，對應 watch-round.yml
@@ -464,7 +475,7 @@ watch:compute:
   script:
     - !reference [.setup, script]
     - |
-      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
     # grype 要在 PATH（feeds.sh 的 grype db update、match.py；同 watch-round.yml）
     - $SUDO install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"
@@ -513,7 +524,7 @@ watch:notify:
     - |
       test -n "${WATCH_GITLAB_TOKEN:-}" || { echo "watch: FAIL（沒有 WATCH_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
     - |
-      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - |
       # 沒有 plan.json（GAP：不建基準、不開 Issue）→ 什麼都不做（同 watch-round.yml 的 has_plan）
       test -f watch-out/plan.json || { echo "watch: 沒有 plan.json（match 是 GAP），不動任何 Issue"; exit 0; }
