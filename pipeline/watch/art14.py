@@ -14,6 +14,7 @@ GitLab 後端（GITLAB-PORT T-10；只用假 API 測過，沒有對真實 GitLab
   python3 -I pipeline/watch/art14.py open-real        --backend gitlab … --match 命中.json [--project projects/<專案>] [--result 結果.json]   （只有 GitLab；GitHub 一律拒絕）
   GitLab 的 countdown 不加 --drill ＝ 真實案件（標籤 art14）；加 --drill ＝ 演練（標籤 art14-drill）。
   信任：作者與留言者要是專案成員且存取等級 >= Developer（30）；system 留言不算；Issue 不是 confidential 就 FAIL、不寫入。
+  真實案件要有登錄 Issue（CI/CD 變數 ART14_REGISTRY_ISSUE 或 --registry-issue；docs/ART14.md 4.2）：標籤被拿掉、內文被改、Issue 被刪都 FAIL。
 stdout 最後一行 ART14<TAB>OK|FAIL<TAB>說明；結束碼 OK 0、FAIL 1、用法 64。
 
 安全與範圍：
@@ -31,6 +32,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib")   # project_config（只在有 --project 時才 import）
@@ -402,23 +404,76 @@ RECORD_FIELDS0 = {"vulnerability": (F_AWARE, F_MEASURE), "incident": (F_AWARE, F
 RECORD_STAGE_FIELDS = (F_SUBMIT_NO, F_SUBMIT_BY, F_SUBMIT_AT)
 
 
-def is_record(note):
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff"))
+REGISTRY_HEAD = "art14 登錄"
+REGISTRY_LINE_RE = re.compile(r"^- 案件 #([1-9][0-9]{0,9}) key=([0-9a-f]{64}) kind=(vulnerability|incident)$")
+REGISTRY_ENV = "ART14_REGISTRY_ISSUE"
+
+
+def norm_line(s):
+    """近似比對用：NFKC、去零寬字元、去頭尾的空白與 Markdown 裝飾（# > * _ ` -）、不分大小寫。"""
+    s = unicodedata.normalize("NFKC", s).translate(_ZERO_WIDTH)
+    return s.strip(" \t#>*_`-").casefold()
+
+
+def head_kind(note, head):
+    """留言和固定開頭（art14 紀錄／art14 登錄）的關係：exact＝第一行剛好是它；near＝別的行（或第一行有多餘的空白、大小寫不同、
+    包在程式碼區塊或引用裡）近似它；None＝無關。system 留言一律 None（GitLab 自動產生的活動紀錄，不是人寫的）。"""
     b = note.get("body")
-    return isinstance(b, str) and b.splitlines()[:1] == [RECORD_HEAD] and not note.get("system")
+    if not isinstance(b, str) or note.get("system"):
+        return None
+    lines = b.splitlines()
+    if lines[:1] == [head]:
+        return "exact"
+    hn = norm_line(head)
+    return "near" if any(norm_line(l) == hn for l in lines[:2000]) else None
+
+
+def is_record(note):
+    return head_kind(note, RECORD_HEAD) == "exact"
+
+
+def field_like(line, allowed0):
+    """這一行（去掉前後空白）看起來是要人填的欄位。"""
+    t = line.strip()
+    m = RECORD_STAGE_RE.match(t)
+    if m and m.group(2) in RECORD_STAGE_FIELDS:
+        return True
+    m = FIELD_RE.match(t)
+    return bool(m and m.group(1) in allowed0)
 
 
 def record_values(kind, notes, trust):
     """可信成員的「art14 紀錄」留言 → ({(階段, 欄位): 值}, 問題)。依留言 id 由舊到新套用，同一欄位以最新的為準；值是 未填 就清掉。
-    不可信的人寫的紀錄留言不算（列成問題）；不認得的行列成問題。"""
+    不可信的人寫的紀錄留言不算（列成問題）；不認得的行列成問題。
+    近似但不合格式的紀錄（可信成員寫的；第一行有多餘空白或大小寫不同、整則包在程式碼區塊裡）：列成問題「疑似紀錄、沒有解析」，整則不解析。
+    程式碼區塊（``` 或 ~~~）裡的行、縮排的欄位行一律不解析（含問題說明）。"""
     vals, problems = {}, []
     allowed0 = RECORD_FIELDS0[kind]
-    for n in sorted((x for x in notes if is_record(x)), key=lambda x: x.get("id") or 0):
+    for n in sorted((x for x in notes if head_kind(x, RECORD_HEAD)), key=lambda x: x.get("id") or 0):
+        hk = head_kind(n, RECORD_HEAD)
+        if hk == "near":
+            if trust.ok(n):
+                problems.append(f"留言 {n.get('id')} 疑似「{RECORD_HEAD}」紀錄、沒有解析（第一行要剛好是 {RECORD_HEAD}，"
+                                "不能有多餘空白或大小寫不同，不能包在程式碼區塊或引用裡）")
+            continue
         if not trust.ok(n):
             problems.append(f"留言 {n.get('id')} 是「{RECORD_HEAD}」但作者不是 Developer 以上的成員：不算數")
             continue
+        fenced = False
         for line in n["body"].splitlines()[1:]:
             line = line.rstrip()
+            if FENCE_RE.match(line):
+                fenced = not fenced
+                continue
+            if fenced:
+                if field_like(line, allowed0):
+                    problems.append(f"留言 {n.get('id')} 的欄位行在程式碼區塊裡、沒有解析：{clean(line, 60)!r}")
+                continue
             if not line.startswith("- "):        # 「- 」開頭的才是欄位；其他行是說明（例如演練的聲明），不解析
+                if field_like(line, allowed0):
+                    problems.append(f"留言 {n.get('id')} 有縮排或不合格式的欄位行、沒有解析：{clean(line, 60)!r}")
                 continue
             m = RECORD_STAGE_RE.match(line)
             if m and m.group(2) in RECORD_STAGE_FIELDS:
@@ -605,6 +660,78 @@ def write_result(path, obj):
         issues.write_json(path, dict(obj, schema=RESULT_SCHEMA))
 
 
+def token_check(api, repo, trust, cmd, result):
+    """check_token_level，但失敗時也先把原因寫進 result.json（job 的 artifact 才看得到為什麼停）再 FAIL。"""
+    try:
+        check_token_level(api, repo, trust)
+    except Fail as e:
+        write_result(result, {"cmd": cmd, "result": "token-check-failed", "error": str(e), "count": 0, "issues": [], "skipped": []})
+        raise
+
+
+# ---------- GitLab 真實案件的登錄（registry）：標籤與內文都是 Reporter／Planner 能改的，不能當「有哪些案件」的依據 ----------
+# 官方 permissions 頁（2026-11-14）：所有角色（含 Planner、Reporter）都能編輯 Issue 的中繼資料（含移除標籤、改 confidential）與內文；
+# Planner 能刪任何 Issue（Issues API 頁同）；別人的留言只有 Maintainer／Owner 能改（推定，待內部驗證）。
+# 做法：一個固定編號的 confidential「登錄 Issue」（編號放在 CI/CD 變數 ART14_REGISTRY_ISSUE 或 --registry-issue，只有 Maintainer 能改變數），
+# 只看它的**留言**（作者是 Developer 以上的成員、非 system、第一行剛好是「art14 登錄」）：每則留言一行「- 案件 #<iid> key=<64 hex> kind=<kind>」，
+# 只追加、不編輯。Reporter／Planner 改不了別人的留言、也寫不出可信的留言；登錄 Issue 的內文、標籤、狀態一律不看。
+# 之後每輪：登錄的案件用編號直接 GET（不靠標籤列表）；不見了（404）、不是 confidential、作者不可信、沒有 art14 標籤、
+# 第一行標記和登錄不符 → 全部 FAIL；案件的 kind 以登錄為準（內文標記被改壞也照樣倒數）。
+# 殘留風險：Planner／Owner 能刪登錄 Issue 本身、Maintainer 能刪留言——登錄不見了就每輪 FAIL（不會變成沒案件）；內容要靠 result.json 的 registry 快照人工補回。
+def registry_iid(arg):
+    v = arg if arg not in (None, "") else os.environ.get(REGISTRY_ENV, "")
+    if isinstance(v, int):
+        v = str(v)
+    if not re.fullmatch(r"[1-9][0-9]{0,9}", v or ""):
+        return None
+    return int(v)
+
+
+def load_registry(api, repo, trust, arg):
+    """回傳 (iid, {案件編號: {key, kind}}, 問題)。登錄 Issue 沒設定／不見／不是 confidential → Fail（呼叫端 FAIL，但別的案件照常處理）。"""
+    rid = registry_iid(arg)
+    if rid is None:
+        raise Fail(f"沒有設定登錄 Issue（CI/CD 變數 {REGISTRY_ENV}＝登錄 Issue 的 iid，或 --registry-issue）："
+                   "不知道有哪些真實案件，標籤被拿掉的案件會被漏掉；請先建一個 confidential 的登錄 Issue（docs/ART14.md 第 4.2 節）")
+    try:
+        ri = api.get_issue(repo, rid)
+    except Fail as e:
+        if getattr(e, "status", None) == 404:
+            raise Fail(f"登錄 Issue #{rid} 不見了或看不到（404）：已登錄的真實案件無從得知，請人工從 result.json 的 registry 快照補回")
+        raise
+    if ri.get("confidential") is not True:
+        raise Fail(f"登錄 Issue #{rid} 不是 confidential：請立刻改成 confidential（登錄內容不處理）")
+    entries, problems = {}, []
+    for n in sorted(api.list_notes(repo, rid), key=lambda x: x.get("id") or 0):
+        hk = head_kind(n, REGISTRY_HEAD)
+        if hk is None or not trust.ok(n):
+            continue            # 不是登錄留言、system 留言、不可信的人寫的：一律不算（Reporter／Planner 寫不出可信的登錄）
+        if hk == "near":
+            problems.append(f"登錄留言 {n.get('id')} 疑似登錄、沒有解析（第一行要剛好是 {REGISTRY_HEAD}）")
+            continue
+        fenced = False
+        for line in n["body"].splitlines()[1:]:
+            line = line.rstrip()
+            if FENCE_RE.match(line):
+                fenced = not fenced
+                continue
+            m = None if fenced else REGISTRY_LINE_RE.match(line)
+            if m:
+                num, key, kind = int(m.group(1)), m.group(2), m.group(3)
+                if num in entries and entries[num] != {"key": key, "kind": kind}:
+                    problems.append(f"登錄裡 #{num} 有兩筆不同的內容")
+                entries.setdefault(num, {"key": key, "kind": kind})
+            elif fenced or line.strip().startswith("- "):
+                problems.append(f"登錄留言 {n.get('id')} 有看不懂或沒有解析的行：{clean(line, 60)!r}")
+    return rid, entries, problems
+
+
+def register_case(api, repo, rid, num, key, kind):
+    text = f"{REGISTRY_HEAD}\n- 案件 #{num} key={key} kind={kind}\n"
+    pre_write(api, [("登錄留言", text)], False)
+    api.create_note(repo, rid, text)
+
+
 def find_issues(api, repo, label, mode, trust, state="open"):
     """回傳 (可處理的 [(issue, marker)], 略過的 [(編號, 原因)], 外洩疑慮的 [編號])。
     外洩疑慮（只有 GitLab）：有這個標籤、卻不是 confidential 的 Issue——不處理、不寫入，呼叫端要 FAIL 並請人處理。"""
@@ -640,7 +767,7 @@ def leak_message(leaks):
 
 
 # ---------- 指令 ----------
-def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
+def cmd_open(api, repo, match_path, result, project_dir=None, drill=True, registry_issue=None):
     """開案：drill＝演練（GitHub、GitLab 都可）；真實案件只有 GitLab（私密 Issue）。"""
     cmd = "open-drill" if drill else "open-real"
     if not drill and not is_gitlab(api):
@@ -650,8 +777,13 @@ def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
         print(f"WARN\tproject.yml：{w}", file=sys.stderr)
     key, title, body, labels = render_issue(m, drill=drill, gitlab=is_gitlab(api))
     pre_write(api, [("標題", title), ("內文", body)], drill)
-    check_token_level(api, repo)                 # GitLab：token 看不到 confidential Issue 時，不重複開的判斷會失準
+    trust = Trust(api, repo)
+    token_check(api, repo, trust, cmd, result)    # GitLab：token 看不到 confidential Issue 時，不重複開的判斷會失準
     mode = "drill" if drill else "real"
+    rid, reg_hit = None, None
+    if is_gitlab(api) and not drill:
+        rid, reg, reg_problems = load_registry(api, repo, trust, registry_issue)     # 沒登錄 Issue 就不開（開了也沒人記得）
+        reg_hit = next((num for num, e in sorted(reg.items()) if e["key"] == key), None)
     for i in issues.list_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "all"):
         mk = parse_marker(i.get("body"))
         if mk and mk[0] == key and mk[2] == mode:
@@ -660,8 +792,25 @@ def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
                 raise Fail(leak_message([i["number"]]))
             write_result(result, {"cmd": cmd, "result": "skipped", "issue": i["number"], "key": key, "markets": m["market_state"]})
             return f"已有同一個命中的{'演練' if drill else '真實'} Issue #{i['number']}，不重複開"
+    if reg_hit is not None:                   # 同一個命中已登錄：標籤被拿掉也不重開（Issue 不見了就 FAIL，不悄悄重開）
+        try:
+            ri = api.get_issue(repo, reg_hit)
+        except Fail as e:
+            write_result(result, {"cmd": cmd, "result": "registered-missing", "issue": reg_hit, "key": key})
+            raise Fail(f"登錄裡這個命中的真實案件 #{reg_hit} 讀不到（{e}）：不重開，請人工確認")
+        if ri.get("confidential") is not True:
+            write_result(result, {"cmd": cmd, "result": "leak", "issue": reg_hit, "key": key})
+            raise Fail(leak_message([reg_hit]))
+        write_result(result, {"cmd": cmd, "result": "skipped", "issue": reg_hit, "key": key, "markets": m["market_state"], "via": "registry"})
+        return f"已有同一個命中的真實 Issue #{reg_hit}（登錄），不重複開"
     issues.Labels(api, repo, False).ensure(labels)
     d = api.create_issue(repo, title, body, labels)
+    if rid is not None:
+        try:
+            register_case(api, repo, rid, d["number"], key, m["kind"])
+        except Fail as e:
+            write_result(result, {"cmd": cmd, "result": "opened-unregistered", "issue": d["number"], "key": key, "markets": m["market_state"]})
+            raise Fail(f"開了真實案件 Issue #{d['number']}，但寫登錄失敗（{e}）；下一輪 countdown 會依標籤補登錄，仍請人工確認")
     write_result(result, {"cmd": cmd, "result": "opened", "issue": d["number"], "key": key, "markets": m["market_state"]})
     return f"開了{'演練' if drill else '真實案件'} Issue #{d['number']}"
 
@@ -702,7 +851,14 @@ def update_stage_label(api, repo, issue, want):
     return True
 
 
-def cmd_countdown(api, repo, drill, now, result):
+def closed_undone(kind, issue, notes, now, trust):
+    """已關閉的真實案件：還沒提交的階段 id 清單（讀紀錄留言算）。"""
+    vals, _ = record_values(kind, notes, trust)
+    ev = evaluate(kind, effective_body(kind, issue.get("body"), vals), now)
+    return [s["id"] for s in ev["stages"] if s["state"] != "done"]
+
+
+def cmd_countdown(api, repo, drill, now, result, registry_issue=None):
     gl = is_gitlab(api)
     if not drill and not gl:
         found = issues.list_issues(api, repo, REAL_LABEL, "open")
@@ -711,30 +867,93 @@ def cmd_countdown(api, repo, drill, now, result):
                        "不處理、不修改（真實案件只在 GitLab 的私密 Issue）")
         write_result(result, {"cmd": "countdown", "count": 0, "issues": [], "skipped": []})
         return "沒有 art14 Issue"
+    real = gl and not drill
     trust = Trust(api, repo)
-    check_token_level(api, repo, trust)
+    token_check(api, repo, trust, "countdown", result)
     what = "演練" if drill else "真實"
     cases, skipped, leaks = find_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "drill" if drill else "real", trust)
+    out, errors, problems, failed = [], [], [], []
+    cases = [(i, mk[0], mk[1], []) for i, mk in cases]          # (issue, key, kind, 額外問題)
+    closed_cases = []                                           # (issue, kind, 登錄的 key 或 None)
+    reg, rid, reg_problems = {}, None, []
     if gl:
         # T-10 驗證建議 2：另一種標籤（演練／真實）的 Issue 也看有沒有不是 confidential 的——不處理、不寫入，只報警
         other = REAL_LABEL if drill else DRILL_LABEL
         leaks = sorted(set(leaks) | {i["number"] for i in issues.list_issues(api, repo, other, "open")
                                      if i.get("state") == "open" and i.get("confidential") is not True})
+    if real:
+        # 登錄（registry）：標籤與內文 Reporter／Planner 都能改，所以「有哪些真實案件」以登錄為準（見 load_registry 的說明）
+        try:
+            rid, reg, reg_problems = load_registry(api, repo, trust, registry_issue)
+        except Fail as e:
+            errors.append(str(e))
+        errors.extend(reg_problems)
+        labelled_closed = {i["number"]: i for i in issues.list_issues(api, repo, REAL_LABEL, "closed") if i.get("state") == "closed"}
+        ok_nums = {i["number"] for i, *_ in cases}
+        fixed = []
+        for i, key, kind, x in cases:
+            e = reg.get(i["number"])
+            if e and (e["key"] != key or e["kind"] != kind):
+                errors.append(f"#{i['number']} 的第一行標記（key／kind）和登錄不符：以登錄的 kind 倒數，請人工確認內文有沒有被改")
+                key, kind = e["key"], e["kind"]
+            fixed.append((i, key, kind, x))
+        cases = fixed
+        for num, e in sorted(reg.items()):
+            if num in ok_nums:
+                continue
+            try:
+                i = labelled_closed.get(num) or api.get_issue(repo, num)
+                if i.get("confidential") is not True:
+                    leaks = sorted(set(leaks) | {num})
+                    continue
+                if not trust.ok(i):
+                    errors.append(f"已登錄的 #{num} 作者不是專案成員或存取等級低於 Developer（{GITLAB_MIN_LEVEL}）：不處理，請人工確認")
+                    continue
+                if REAL_LABEL not in issues.label_names(i):
+                    errors.append(f"已登錄的真實案件 #{num} 沒有 {REAL_LABEL} 標籤（可能被人拿掉）：照登錄繼續倒數，請人工確認並補回標籤")
+                mk = parse_marker(i.get("body"))
+                if (not mk or mk[0] != e["key"] or mk[1] != e["kind"] or mk[2] != "real") and not any(n == num for n, _ in skipped):
+                    errors.append(f"已登錄的 #{num} 第一行標記不合法或和登錄不符：以登錄的 kind 處理，請人工確認內文有沒有被改")
+                if i.get("state") == "open":
+                    cases.append((i, e["key"], e["kind"], []))
+                else:
+                    closed_cases.append((i, e["kind"], e["key"]))
+            except Fail as ex:
+                failed.append(num)
+                gone = getattr(ex, "status", None) == 404
+                errors.append(f"已登錄的真實案件 #{num} " + ("不見了或看不到（404：被刪除、移走、或權限不夠）" if gone else f"讀不到（{ex}）") + "：法定倒數沒有被追蹤")
+        for num, i in sorted(labelled_closed.items()):
+            if num in reg:
+                continue                  # 登錄的已在上面處理
+            if i.get("confidential") is not True:
+                leaks = sorted(set(leaks) | {num})
+                continue
+            mk = parse_marker(i.get("body"))
+            if trust.ok(i) and mk and mk[2] == "real":
+                closed_cases.append((i, mk[1], None))
+        # 標籤找到、可信、標記正確、但還沒登錄的案件：補登錄（寫不進去就 FAIL，下一輪再補）
+        if rid is not None:
+            for i, key, kind, _x in cases:
+                if i["number"] not in reg:
+                    try:
+                        register_case(api, repo, rid, i["number"], key, kind)
+                        reg[i["number"]] = {"key": key, "kind": kind}
+                    except Fail as ex:
+                        errors.append(f"#{i['number']} 補登錄失敗：{ex}")
     for n, why in skipped:
         print(f"skip\t#{n}\t{why}")
     for n in leaks:
         print(f"leak\t#{n}\t不是 confidential，不寫入")
-    out, errors, problems, failed = [], [], [], []
     if leaks:
         errors.append(leak_message(leaks))
-    if gl and not drill:
+    if real:
         # T-10 驗證建議 3：真實案件被略過（作者不可信、標記不合）時倒數就停了——不能靜默，FAIL 請人確認
         # （成員 API 異常時也會全部變成「不是成員」）。剛關閉的索引延遲不算
         stuck = [(n, why) for n, why in skipped if not why.startswith("已關閉")]
         if stuck:
             errors.append(f"有 {len(stuck)} 個 art14 Issue 沒有倒數（" + "；".join(f"#{n} {why}" for n, why in stuck[:5]) +
                           "）：法定期限沒有被追蹤，請人工確認作者權限與 Issue 第一行的標記")
-    for i, (key, kind, _mode) in cases:
+    for i, key, kind, _extra in cases:
         # 逐案隔離（#85 驗證應修 2）：一個案件寫入失敗，記下來、其他照常處理，最後整體 FAIL（result.json 一定寫出）
         try:
             notes = None
@@ -755,8 +974,9 @@ def cmd_countdown(api, repo, drill, now, result):
             errors.append(f"#{i['number']}：{e}")
             print(f"fail\t#{i['number']}\t{e}")
             continue
-        if gl and not drill and ev["problems"]:
-            # 真實案件的欄位或紀錄格式不對：倒數照樣更新（留言寫明），但整體 FAIL，不能只是 ATTENTION（#85 驗證應修 4）
+        if real and ev["problems"]:
+            # 真實案件的欄位或紀錄格式不對（含疑似紀錄沒解析）：倒數照樣更新（留言寫明），但整體 FAIL，不能只是 ATTENTION（#85 驗證應修 4）
+            # 演練只在留言與 result 的 problems 裡顯示，不 FAIL
             errors.append(f"#{i['number']} 的紀錄有問題（{ev['problems'][0]}）：請修正 {RECORD_HEAD} 留言")
         clock = "started" if ev["clock_started"] else "not_started"
         rec = {"number": i["number"], "kind": kind, "clock": clock, "comment": cres, "label_changed": lab,
@@ -766,31 +986,29 @@ def cmd_countdown(api, repo, drill, now, result):
         out.append(rec)
         print(f"case\t#{i['number']}\t{clock}\t下一階段 {rec['stage_label']}\t留言 {cres}")
     closed = []
-    if gl and not drill:
-        # 人手關閉的真實案件列在報告裡（不靜默略過）：還有沒完成的階段就特別標出（#85 驗證建議）
-        for i in issues.list_issues(api, repo, REAL_LABEL, "closed"):
-            if i.get("state") != "closed" or i.get("confidential") is not True or not trust.ok(i):
-                continue
-            mk = parse_marker(i.get("body"))
-            if not mk or mk[2] != "real":
-                continue
-            try:
-                vals, _ = record_values(mk[1], comments_of(api, repo, i["number"]), trust)
-                ev = evaluate(mk[1], effective_body(mk[1], i.get("body"), vals), now)
-                undone = [s["id"] for s in ev["stages"] if s["state"] != "done"]
-            except Fail as e:
-                undone = [f"讀不到紀錄：{e}"]
-            closed.append({"number": i["number"], "undone": undone})
-            print(f"closed\t#{i['number']}\t" + ("三個階段都已提交" if not undone else "已關閉但還有未提交的階段：" + "、".join(undone)))
+    for i, kind, _key in closed_cases:
+        # 人手關閉的真實案件：列在報告裡；還有沒完成的階段 → FAIL（法定期限還在跑，不能因為被關掉就停）。逐案隔離
+        try:
+            undone = closed_undone(kind, i, comments_of(api, repo, i["number"]), now, trust)
+        except Fail as e:
+            failed.append(i["number"])
+            errors.append(f"已關閉的 #{i['number']} 讀不到紀錄（{e}）：不知道階段有沒有完成")
+            closed.append({"number": i["number"], "undone": None})
+            continue
+        closed.append({"number": i["number"], "undone": undone})
+        if undone:
+            errors.append(f"真實案件 #{i['number']} 已關閉，但還有未提交的階段（{'、'.join(undone)}）：法定期限仍在跑，請人工重開或確認")
+        print(f"closed\t#{i['number']}\t" + ("三個階段都已提交" if not undone else "已關閉但還有未提交的階段：" + "、".join(undone)))
     for p in problems:
         print("problem\t" + p)
     res = {"cmd": "countdown", "now": fmt(now), "count": len(out), "issues": out,
            "skipped": [{"number": n, "why": w} for n, w in skipped]}
     if gl:
         res["leaks"] = sorted(leaks)
-        res["failed"] = failed
-    if gl and not drill:
+        res["failed"] = sorted(set(failed))
+    if real:
         res["closed"] = closed
+        res["registry"] = {"issue": rid, "cases": [{"number": n, **e} for n, e in sorted(reg.items())], "problems": reg_problems}
     write_result(result, res)
     if errors:
         raise Fail("；".join(errors))
@@ -801,7 +1019,7 @@ def cmd_countdown(api, repo, drill, now, result):
 
 def cmd_fill_drill_aware(api, repo, at, result):
     trust = Trust(api, repo)
-    check_token_level(api, repo, trust)          # GitLab：先確認 token 的權限（看不到 confidential Issue 就不能當「沒有案件」）
+    token_check(api, repo, trust, "fill-drill-aware", result)          # GitLab：先確認 token 的權限（看不到 confidential Issue 就不能當「沒有案件」）
     cases, _skipped, leaks = find_issues(api, repo, DRILL_LABEL, "drill", trust)
     if leaks:
         raise Fail(leak_message(leaks))
@@ -836,7 +1054,7 @@ def cmd_close_drill(api, repo, result):
     labels = issues.Labels(api, repo, False)
     trust = Trust(api, repo)
     if is_gitlab(api):
-        check_token_level(api, repo, trust)
+        token_check(api, repo, trust, "close-drill", result)
     for i in issues.list_issues(api, repo, DRILL_LABEL, "open"):
         if is_gitlab(api) and i.get("confidential") is not True:
             leaks.append(i["number"])
@@ -916,7 +1134,9 @@ def build_parser():
     r = repo_cmd("open-real")
     r.add_argument("--match", required=True)
     r.add_argument("--project", help="專案資料夾（同 open-drill）")
+    r.add_argument("--registry-issue", dest="registry_issue", help=f"登錄 Issue 的 iid（預設讀環境變數 {REGISTRY_ENV}）")
     c = repo_cmd("countdown")
+    c.add_argument("--registry-issue", dest="registry_issue", help=f"登錄 Issue 的 iid（預設讀環境變數 {REGISTRY_ENV}；GitLab 真實案件必填）")
     c.add_argument("--drill", action="store_true")
     c.add_argument("--now")
     repo_cmd("fill-drill-aware").add_argument("--at", required=True)
@@ -976,9 +1196,9 @@ def main(argv=None, api=None, clock=None):
             if args.cmd == "open-drill":
                 msg = cmd_open(api, target, args.match, args.result, args.project, True)
             elif args.cmd == "open-real":
-                msg = cmd_open(api, target, args.match, args.result, args.project, False)
+                msg = cmd_open(api, target, args.match, args.result, args.project, False, args.registry_issue)
             elif args.cmd == "countdown":
-                msg = cmd_countdown(api, target, args.drill, now, args.result)
+                msg = cmd_countdown(api, target, args.drill, now, args.result, args.registry_issue)
             elif args.cmd == "fill-drill-aware":
                 msg = cmd_fill_drill_aware(api, target, at, args.result)
             else:

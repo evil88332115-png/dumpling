@@ -354,6 +354,16 @@ class GitLabApi(Api):
         q = urllib.parse.urlencode({"labels": label, "state": st, "per_page": 100})
         return [self._issue(i) for i in self.get_all(f"/projects/{repo}/issues?{q}")]
 
+    def get_issue(self, repo, number):
+        """GET /projects/:id/issues/:issue_iid（官方 issues 頁；不存在或看不到時的狀態碼文件沒寫，呼叫端用 e.status == 404 判斷，待內部驗證）。"""
+        if type(number) is not int or number <= 0:
+            raise Fail("Issue 編號不合法")
+        d, _ = self.request("GET", f"/projects/{repo}/issues/{number}")
+        i = self._issue(d)
+        if i["number"] != number:
+            raise Fail(f"GitLab 回的 Issue 編號不符（要 #{number}）")
+        return i
+
     def create_issue(self, repo, title, body, labels):
         d, _ = self.request("POST", f"/projects/{repo}/issues",
                             {"title": self._text(title, "Issue 標題"), "description": self._text(body, "Issue 內文"),

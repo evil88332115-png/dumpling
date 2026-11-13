@@ -82,7 +82,21 @@ art14 紀錄
 - 可以分好幾則留言記；同一個欄位**以最新的留言為準**，寫 `未填` 就清掉。時間格式同上（`YYYY-MM-DDTHH:MM:SSZ`）。
 - 不可信的人（不是 Developer 以上的成員）寫的紀錄留言不算數；看不懂的欄位行、格式不對的時間，倒數留言會寫明，**真實案件整個 job FAIL**（請人修正）。
 - 演練（`fill-drill-aware`）在 GitLab 上也是新增一則紀錄留言，不改內文。
+- **近似但不合格式的紀錄不會靜默**：可信成員寫的留言，如果第一行有多餘空白或大小寫不同（`ART14 紀錄`）、整則包在 ``` 或 ~~~ 程式碼區塊或引用裡、或欄位行縮排，工具**不解析**，並報問題「疑似紀錄、沒有解析」（寫在倒數留言與 result 的 `problems`）。程式碼區塊裡的行永遠不當欄位。真實案件的紀錄問題一律 FAIL（同上），演練只顯示、不 FAIL。`system` 留言（GitLab 自動產生）永遠不當紀錄、也不當倒數留言。
+- **kind／mode 的來源**：取自 Issue 內文第一行標記；標記不合法、mode 不符的 Issue 在真實模式會 FAIL（不是靜默略過）。GitLab 真實案件有登錄（4.2）後，kind 以登錄為準，內文標記和登錄不符一樣 FAIL。
 - GitHub（公開 repo，只有演練）維持從內文讀：GitHub 上能改別人 Issue 內文的人要有 write 權限，本來就是可信作者（OWNER／MEMBER／COLLABORATOR）。
+
+### 4.2 GitLab：真實案件的登錄（registry）——標籤被拿掉也不會停
+
+Reporter／Planner 能拿掉 `art14` 標籤、改內文標記（官方 permissions 頁：編輯 Issue 含標籤與 confidential，所有角色都可）；Planner 還能刪任何 Issue。只靠標籤或內文標記找案件，法定倒數會靜默停掉。
+所以真實案件另外**登錄**在一個固定編號的 confidential「登錄 Issue」（人工建立，編號放 CI/CD 變數 `ART14_REGISTRY_ISSUE`，或 `--registry-issue`；只有 Maintainer 能改變數）。登錄只看它的**留言**：作者 Developer 以上、非 system、第一行剛好 `art14 登錄`、每行 `- 案件 #<iid> key=<64 hex> kind=vulnerability|incident`；只追加，內文、標籤、狀態都不看。
+Reporter／Planner 改不了別人的留言（推定，待內部驗證），也寫不出可信的留言。
+
+- `open-real` 開案後登錄；沒設登錄 Issue 就不開。同一個命中已登錄就不重開（標籤被拿掉也一樣；Issue 不見了就 FAIL）。
+- `countdown`（真實）每輪讀登錄，用 iid 直接取案件。**FAIL**：案件不見了（404）、不是 confidential、作者不可信、沒有 `art14` 標籤、標記和登錄不符、登錄沒設或讀不到。拿掉標籤或改壞標記的案件仍照登錄的 kind 繼續倒數。標籤找到、可信、標記正確、還沒登錄的案件由 countdown 補登錄。
+- 已關閉的真實案件（標籤找到或已登錄）還有未提交的階段 → FAIL（列在 result 的 `closed`）；逐案隔離。
+- result.json 的 `registry` 是登錄快照（登錄 Issue 被刪時人工補回用）。
+- 殘留風險：Planner／Owner 能刪登錄 Issue 本身、Maintainer 能刪留言——登錄不見了每輪 FAIL，不會變成「沒有案件」；Developer 以上本來就是可信成員。
 
 ## 5. 倒數與標籤
 
