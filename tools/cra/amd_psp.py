@@ -77,6 +77,7 @@ MAX_AGESA_INSPECT = 1 << 30            # 走訪 firmware volume 時去重後送�
 AGESA_VALUE_LEN = 64                   # AGESA 標記後面讀的字串長度上限
 MAX_AGESA_LEAVES = 256                 # 有標記、要換算位置的走訪內容（去重後）最多幾塊
 MAX_AGESA_OCCURRENCES = 64             # 同一塊內容在原始位元組裡最多找幾個出現位置
+AGESA_DERIVED_MAX = 256                # 走訪送來的內容短於或等於這個長度時不換算位置（uefi_image 的名稱字串最多 200 字元，是轉出來的，不是切片）
 AGESA_MARK = b"AGESA!V"
 
 EFS_SIG = b"\xaa\x55\xaa\x55"
@@ -145,7 +146,8 @@ class Ctx:
     def __init__(self, data, budget):
         self.data, self.n, self.budget = data, len(data), budget
         self.dirs, self.by_key, self.problems, self.counts = [], {}, [], {}
-        self.edges = []                 # (上一層目錄的 (位置, 基底) 或 None＝EFS, 這一層的 (位置, 基底), 這條邊是不是歧義的指標)
+        self.edges = []                 # (上一層目錄的 (位置, 基底) 或 None＝EFS, 這一層的 (位置, 基底), 這條邊所屬的指標讀法組（frozenset of (位置, 基底)）或 None)
+        self.groups = []                # 一個指標有兩種以上讀法時的 {"keys": [(位置, 基底)…], "via": 來源說明, "value": 指標值}
         self.entries_total = 0
         self.hash_left = MAX_HASH_TOTAL
         self.hashed = {}
@@ -278,7 +280,9 @@ def dir_mode(info):
 
 def follow(ctx, value, bases, via, depth, stack):
     """指標值（EFS 或 combo 項目）→ 驗證目錄 cookie 後解析。bases＝可用的基底清單（視窗開頭、0）。
-    兩個基底在不同位置都看到目錄 cookie → 不判斷哪個才是硬體實際使用的：兩邊都解析，邊標成歧義（pointer-ambiguous）；只有一個 → 正常；都沒有 → pointer-unresolved。"""
+    回傳 (解析出的目錄紀錄清單, 在目標位置看到目錄 cookie 的讀法數)。
+    兩個基底在不同位置都看到目錄 cookie → 這個指標有兩種讀法：兩邊都解析，記成一組互相競爭的讀法（ctx.groups），之後由 resolve_readings() 依各自的結構檢查決定採用哪一邊
+    （還是都不採用）；只有一個 → 正常；都沒有 → pointer-unresolved。"""
     cands = []
     for base, _ in bases:
         w = window_size(ctx.n, base)             # 視窗大小只由基底決定（同一個基底的讀法不能因為是從哪個 EFS 來的而不同）
@@ -287,26 +291,26 @@ def follow(ctx, value, bases, via, depth, stack):
             cands.append((off, base, w))
     if not cands:
         ctx.problem("pointer-unresolved", via, f"{via}: pointer 0x{value:x} does not resolve to a PSP/BIOS directory (no directory cookie at the target)")
-        return []
-    amb = len(cands) > 1
-    if amb:
-        ctx.problem("pointer-ambiguous", via, f"{via}: pointer 0x{value:x} reads as a directory two ways, as a window offset (0x{cands[0][0]:x}) and as a file offset (0x{cands[1][0]:x}); "
-                    "this tool does not decide which one the hardware uses: both are parsed and listed, and neither is used for the SBOM unless it is also reached by an unambiguous pointer")
+        return [], 0
+    grp = None
+    if len(cands) > 1:
+        grp = frozenset((o, b) for o, b, _ in cands)
+        ctx.groups.append({"keys": sorted(grp), "via": via, "value": value})
     out = []
     for off, base, w in cands:
-        rec = parse_dir(ctx, off, base, w, via, depth, stack, amb)
+        rec = parse_dir(ctx, off, base, w, via, depth, stack, grp)
         if rec is not None:
-            if amb:
+            if grp:
                 rec.setdefault("readings", [])
                 rec["readings"] += [f"0x{o:x}" for o, _, _ in cands if o != off and f"0x{o:x}" not in rec["readings"]]
             out.append(rec)
-    return out
+    return out, len(cands)
 
 
-def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
+def parse_dir(ctx, off, base, w, via, depth, stack, grp=None):
     d = ctx.data
     key = (off, base)                   # 同一個位置用不同基底讀是不同的紀錄（內容可能完全不同）
-    ctx.edges.append((stack[-1] if stack else None, key, amb))
+    ctx.edges.append((stack[-1] if stack else None, key, grp))
     if key in stack:
         ctx.problem("dir-loop", f"0x{off:x}", f"{via}: directory at 0x{off:x} points back into the path that led to it (loop); not followed again")
         return None
@@ -328,7 +332,8 @@ def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
     num, info = u32(d, off + 8), u32(d, off + 12)
     rec = {"kind": kind, "cookie": cookie.decode("ascii"), "offset": off, "base": base, "window_size": w, "reached_via": [via],
            "num_entries": num, "checksum": f"0x{u32(d, off + 4):08x}", "checksum_ok": None, "parsed": False, "trusted": False, "entries": [],
-           "address_mode": None, "size": None, "ambiguous": True}      # ambiguous：mark_ambiguous() 確認有不歧義的路徑到得了才改成 False
+           "address_mode": None, "size": None, "checksum_calc": None, "status": "ambiguous", "ambiguous": True, "rejected": False}
+    # status／ambiguous／rejected：resolve_readings() 依讀法與路徑決定（adopted＝確定、ambiguous＝GAP、rejected＝另一種讀法才採用）
     ctx.by_key[key] = rec
     ctx.dirs.append(rec)
     where = f"{KIND_TEXT[kind]} @0x{off:x}"
@@ -351,6 +356,7 @@ def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
     rec["size"] = end - off
     calc = fletcher32(d[off + 8:end])
     rec["checksum_ok"] = calc == u32(d, off + 4)
+    rec["checksum_calc"] = calc
     rec["parsed"] = True
     rec["trusted"] = rec["checksum_ok"]
     if not rec["checksum_ok"]:
@@ -362,17 +368,19 @@ def parse_dir(ctx, off, base, w, via, depth, stack, amb=False):
             ent = {"index": i, "id_sel": id_sel, "id": f"0x{cid:08x}", "address": f"0x{addr:x}", "child": None}
             rec["entries"].append(ent)
             if addr in (0, (1 << 64) - 1, 0xFFFFFFFF):
+                ent["no_pointer"] = True
                 continue
             # combo 的項目和 EFS 的指標一樣有兩種解讀
-            chs = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (key,))
+            chs, seen = follow(ctx, addr, [(base, w)] + ([(0, w)] if base else []), f"{where} entry {i} (id 0x{cid:08x})", depth + 1, stack + (key,))
             ent["child"] = chs[0]["offset"] if len(chs) == 1 else None
             ent["children"] = [c["offset"] for c in chs]
+            ent["directories_seen"] = seen
         else:
             try:
                 ent = entry(ctx, rec, i, e, where, depth, stack)
             except (struct.error, IndexError, ValueError, OverflowError) as ex:      # 不該發生（都有檢查邊界）；只影響這一個條目
                 ent = {"index": i, "kind": "unresolved", "type": d[e] if e < ctx.n else None, "size": 0, "offset": None, "type_name": None,
-                       "version": None, "where": f"{where} entry {i}"}
+                       "version": None, "where": f"{where} entry {i}", "why": "the entry could not be parsed"}
                 ctx.problem("entry-error", ent["where"], f"{ent['where']}: parse failed ({type(ex).__name__}); this entry is not interpreted")
             rec["entries"].append(ent)
     return rec
@@ -402,7 +410,7 @@ def entry(ctx, rec, i, e, where, depth, stack):
         return ent
     ish = not bios and typ in ISH_TYPES and size in (0, ISH_ENTRY_SIZE)
     if not bios and typ in ISH_TYPES and not ish:
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", f"A/B recovery entry with size 0x{size:x} (expected 0 or 0x{ISH_ENTRY_SIZE:x})"
         ctx.problem("ish-size", where_e, f"{where_e}: A/B recovery entry with size 0x{size:x} (expected 0 or 0x{ISH_ENTRY_SIZE:x}, the slot header entry sizes); not interpreted")
         return ent
     if size == 0 and bios and typ == APOB_TYPE and dest not in (0, (1 << 64) - 1):
@@ -417,14 +425,14 @@ def entry(ctx, rec, i, e, where, depth, stack):
     mode = rec["address_mode"] if rec["address_mode"] in (0, 1) else emode
     if mode == 3:
         ctx.problem("entry-address", where_e, f"{where_e}: address mode 3 (relative to slot) is not supported; location not resolved")
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", "address mode 3 (relative to slot) is not supported"
         return ent
     off = rec["offset"] + value if mode == 2 else to_offset(value, rec["base"], rec["window_size"])
     if ish:                                 # A/B 復原：0x48／0x4A 項目指到 Image Slot Header（0x20 bytes），裡面有 L2 目錄的位置
         return ish_entry(ctx, rec, ent, off, where_e, depth, stack)
     if off is None or off < 0:
         ctx.problem("entry-address", where_e, f"{where_e}: address 0x{value:x} cannot be resolved (mode {mode})")
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", f"address 0x{value:x} cannot be resolved (mode {mode})"
         return ent
     ent["offset"] = off
     if bios and ent["compressed"]:
@@ -432,7 +440,7 @@ def entry(ctx, rec, i, e, where, depth, stack):
         ent["kind"] = "compressed"
         if off >= ctx.n:
             ctx.problem("entry-range", where_e, f"{where_e}: compressed entry starts at 0x{off:x}, past the end of the file (0x{ctx.n:x})")
-            ent["kind"] = "unresolved"
+            ent["kind"], ent["why"] = "unresolved", f"compressed entry starts at 0x{off:x}, past the end of the file (0x{ctx.n:x})"
         else:
             past = f"; its size field (0x{size:x}) runs past the end of the file" if off + size > ctx.n else ""
             ctx.problem("entry-compressed", where_e, f"{where_e}: compressed entry, content not decompressed or interpreted{past}")
@@ -443,16 +451,16 @@ def entry(ctx, rec, i, e, where, depth, stack):
         ent["child"] = None if ch is None else ch["offset"]
         return ent
     if typ in POINTER_TYPES.get(kind, ()):
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", f"directory pointer entry does not point to a directory (no cookie at 0x{off:x})"
         ctx.problem("pointer-unresolved", where_e, f"{where_e}: directory pointer entry does not point to a directory (no cookie at 0x{off:x})")
         return ent
     if size > MAX_BLOB:
         ctx.problem("entry-size", where_e, f"{where_e}: size 0x{size:x} is larger than the limit 0x{MAX_BLOB:x}; not read")
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", f"size 0x{size:x} is larger than the limit 0x{MAX_BLOB:x}"
         return ent
     if off + size > ctx.n:
         ctx.problem("entry-range", where_e, f"{where_e}: range 0x{off:x}+0x{size:x} extends past the end of the file (0x{ctx.n:x})")
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", f"range 0x{off:x}+0x{size:x} extends past the end of the file (0x{ctx.n:x})"
     return ent
 
 
@@ -463,7 +471,7 @@ def ish_entry(ctx, rec, ent, off, where_e, depth, stack):
     d = ctx.data
     if off is None or off < 0 or off + ISH_LEN > ctx.n:
         ctx.problem("entry-address", where_e, f"{where_e}: image slot header cannot be read (address outside the file)")
-        ent["kind"] = "unresolved"
+        ent["kind"], ent["why"] = "unresolved", "image slot header cannot be read (address outside the file)"
         return ent
     ent["offset"], ent["kind"], ent["child"] = off, "ish", None
     cks, prio, retry, _, pl2, psp_id, slot_max, _ = struct.unpack_from("<IIIIIIII", d, off)
@@ -474,8 +482,9 @@ def ish_entry(ctx, rec, ent, off, where_e, depth, stack):
         ctx.problem("ish-checksum", where_e, f"{where_e}: image slot header checksum 0x{cks:08x} does not match the computed 0x{calc:08x}; its L2 directory location is not used")
         return ent
     if pl2 not in NO_POINTER:
-        chs = follow(ctx, pl2, [(rec["base"], rec["window_size"])], f"{where_e} slot header pl2_location", depth + 1, stack + ((rec["offset"], rec["base"]),))
+        chs, seen = follow(ctx, pl2, [(rec["base"], rec["window_size"])], f"{where_e} slot header pl2_location", depth + 1, stack + ((rec["offset"], rec["base"]),))
         ent["child"] = chs[0]["offset"] if chs else None
+        ent["directories_seen"] = seen
     return ent
 
 
@@ -603,7 +612,7 @@ def collect_contents(ctx, amd):
                     m["locations"].append(loc)
 
     for rec in ctx.dirs:
-        if not rec["trusted"] or rec["kind"].startswith("combo"):
+        if not rec["trusted"] or rec["rejected"] or rec["kind"].startswith("combo"):
             continue
         for ent in rec["entries"]:
             if ent["kind"] != "blob" or ent["offset"] is None:
@@ -628,38 +637,227 @@ def collect_contents(ctx, amd):
     amd["ambiguous"] = {"psp_firmware": sorted(psp_amb.values(), key=psp_key), "microcode": sorted(ucode_amb, key=uc_key)}
 
 
-def mark_ambiguous(ctx):
-    """歧義＝硬體實際用哪一種讀法不確定。只有同時滿足下列條件的目錄是確定的：
-    (1) 從 EFS 出發只走不歧義的邊（單一解讀的指標）到得了（子目錄要看自己那條邊，也要看上一層是不是確定的）；
-    (2) 同一個位置只用一種基底讀過（不同基底到達的同一個位置，內容和位址解讀都可能不同，每一種都標成歧義）。
-    結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關。其餘標 ambiguous 並各記一筆 dir-ambiguous。"""
-    bases_at = {}
-    for r in ctx.dirs:
-        bases_at.setdefault(r["offset"], set()).add(r["base"])
-    multi = {o for o, b in bases_at.items() if len(b) > 1}
-    definite, queue = set(), [c for p, c, amb in ctx.edges if p is None and not amb]
-    children = {}
-    for p, c, amb in ctx.edges:
-        if p is not None and not amb:
-            children.setdefault(p, []).append(c)
-    while queue:
-        k = queue.pop()
-        if k in definite or k[0] in multi:
+# ---------- 競爭的讀法：採用、不採用、無法判斷 ----------
+
+NO_POINTER_TEXT = ("0x00000000", "0xffffffff", "0xfffffffe")
+FAIL_SHOWN = 3                          # 一個讀法沒通過時，訊息裡最多列幾條證據（其餘只計數）
+
+
+def reading_fail(rec):
+    """一種讀法（目錄紀錄＝位置＋基底）自己的結構檢查 → 沒通過的證據文字清單；空清單＝通過。只看這一種讀法讀到的東西，檢查項目（保守：只收「讀錯基底時才會出現、
+    讀對時不該出現」的結構性證據；版本欄位對不對、type 認不認得這類不看基底的東西不算）：
+      1. 目錄表讀得進來（項目數沒超過上限、整張表在檔案內）而且 checksum 相符；
+      2. 沒有任何條目的位址解不出來（超出檔案、address mode 不支援、size 超過上限、指標條目沒有指到目錄、A/B 復原條目的 size 不合）；
+      3. A/B 復原的 Image Slot Header：checksum 相符，而且（有 pl2_location 時）它指到目錄；
+      4. combo 目錄：每一個有位址的項目都指到目錄；
+      5. 目錄表本身不落在自己某個條目的範圍裡（條目是韌體內容，不會包著它自己的目錄表）。
+    不含「條目內容看起來對不對」（例如版本標頭）：那是內容的判斷，不是這一種讀法的結構證據。"""
+    why = []
+    if not rec["parsed"]:
+        why.append("the directory table could not be read (too many entries, past the end of the file or a limit was reached)")
+    elif not rec["checksum_ok"]:
+        why.append(f"checksum {rec['checksum']} does not match the computed 0x{rec['checksum_calc']:08x}")
+    for ent in rec["entries"]:
+        i = ent["index"]
+        if rec["kind"].startswith("combo"):
+            if not ent.get("no_pointer") and not ent.get("directories_seen"):
+                why.append(f"entry {i}: pointer {ent['address']} does not lead to a directory")
             continue
-        definite.add(k)
-        queue += children.get(k, [])
-    for r in ctx.dirs:
-        k = (r["offset"], r["base"])
-        r["ambiguous"] = k not in definite
-        if r["offset"] in multi:
-            r["other_bases"] = sorted(f"0x{b:x}" for b in bases_at[r["offset"]] if b != r["base"])
-        if r["ambiguous"]:
-            w = f"{KIND_TEXT[r['kind']]} @0x{r['offset']:x} (read with window base 0x{r['base']:x})"
-            why = (f"the same offset was reached with other window bases ({', '.join(r['other_bases'])}) and its entries read differently depending on the base"
-                   if r["offset"] in multi else
-                   f"reachable only through a pointer that reads as a directory two ways (other reading{'s' if len(r.get('readings', [])) > 1 else ''}: {', '.join(r['readings'])})"
-                   if r.get("readings") else "it is below such a directory")
+        typ = "type 0x%02x" % ent["type"] if ent.get("type") is not None else "type unknown"
+        if ent.get("kind") == "unresolved":
+            why.append(f"entry {i} ({typ}): {ent.get('why') or 'not resolved'}")
+        elif ent.get("kind") == "ish":
+            ish = ent["ish"]
+            if not ish["checksum_verified"]:
+                why.append(f"entry {i} ({typ}): image slot header checksum {ish['checksum']} does not match")
+            elif ish["pl2_location"] not in NO_POINTER_TEXT and not ent.get("directories_seen"):
+                why.append(f"entry {i} ({typ}): slot header pl2_location {ish['pl2_location']} does not lead to a directory")
+    if rec["parsed"] and rec["size"]:
+        ts, te = rec["offset"], rec["offset"] + rec["size"]
+        for ent in rec["entries"]:
+            if ent.get("kind") == "blob" and ent["offset"] is not None and ent["offset"] < te and ts < ent["offset"] + ent["size"]:
+                why.append(f"the directory table [0x{ts:x}, 0x{te:x}) lies inside the range [0x{ent['offset']:x}, 0x{ent['offset'] + ent['size']:x}) of its own entry {ent['index']} (type 0x{ent['type']:02x})")
+    return why
+
+
+def entry_sig(ctx, ent):
+    """條目的「解讀結果」（不含位址欄位的原值，因為同一個原值在不同基底會指到不同的位置）；內容用雜湊（超過雜湊上限拿不到 → None，視為不同）。"""
+    k = ent.get("kind")
+    sig = (k,) + tuple(ent.get(f) for f in ("index", "type", "subprogram", "instance", "rom_id", "writable", "size", "flags", "region_type",
+                                            "reset", "copy", "read_only", "compressed", "dest"))
+    if k == "blob":
+        sha = digests(ctx, ent["offset"], ent["size"])[0]
+        return None if sha is None else sig + (sha,)
+    if k == "value":
+        return sig + (ent["value"],)
+    if k == "compressed":
+        return sig + (ent["offset"],)               # 壓縮內容不解讀、大小不可靠：要位置相同才算相同
+    if k == "directory-pointer":
+        return sig + (ent.get("child"),)
+    if k == "ish":
+        return sig + (tuple(sorted(ent["ish"].items())), ent.get("child"))
+    return sig
+
+
+def same_content(ctx, a, b):
+    """兩種都通過結構檢查的讀法，解讀結果是不是完全一樣（條目逐項相同：type／大小／旗標、條目指到的內容的雜湊、指到的子目錄的位置）。"""
+    if a["kind"] != b["kind"] or a["num_entries"] != b["num_entries"] or len(a["entries"]) != len(b["entries"]):
+        return False
+    for x, y in zip(a["entries"], b["entries"]):
+        if a["kind"].startswith("combo"):
+            sx = (x["id_sel"], x["id"], x.get("no_pointer"), tuple(sorted(x.get("children", []))))
+            sy = (y["id_sel"], y["id"], y.get("no_pointer"), tuple(sorted(y.get("children", []))))
+        else:
+            sx, sy = entry_sig(ctx, x), entry_sig(ctx, y)
+            if sx is None or sy is None:
+                return False
+        if sx != sy:
+            return False
+    return True
+
+
+def verdict(ctx, keys, fails):
+    """一組互相競爭的讀法（同一個指標的不同讀法，或同一個位置的不同基底）→ {"selected", "rejected", "contested", "equal", "why"}（都是排序過的 key 清單）。
+    恰好一種通過 → 它被採用、其餘（沒通過的）不採用；兩種以上通過且解讀結果完全相同 → 都採用（用哪一個都一樣）；通過的有兩種以上而且解讀結果不同 → 通過的都無法判斷
+    （沒通過的不採用）；沒有任何一種通過、或其中一種沒解析出來 → 全部無法判斷。"""
+    ks = sorted(keys)
+    have = [k for k in ks if k in ctx.by_key]
+    if len(have) < len(ks):
+        return {"selected": [], "rejected": [], "contested": have, "equal": False, "why": "another reading of it was not parsed (a limit was reached)"}
+    passers = [k for k in ks if not fails(k)]
+    failers = [k for k in ks if fails(k)]
+    if not passers:
+        return {"selected": [], "rejected": [], "contested": ks, "equal": False, "why": "none of the readings passes the structure checks"}
+    if len(passers) == 1:
+        return {"selected": passers, "rejected": failers, "contested": [], "equal": False, "why": ""}
+    if all(same_content(ctx, ctx.by_key[passers[0]], ctx.by_key[k]) for k in passers[1:]):
+        return {"selected": passers, "rejected": failers, "contested": [], "equal": True, "why": ""}
+    return {"selected": [], "rejected": failers, "contested": passers, "equal": False, "why": "more than one reading passes the structure checks and their contents differ"}
+
+
+def resolve_readings(ctx):
+    """每個目錄紀錄（位置，基底）標成 adopted（確定）／ambiguous（無法判斷，GAP）／rejected（另一種讀法才被採用）。
+    競爭的讀法有兩種：(a) 同一個指標（EFS 或 combo 項目）的兩種讀法（視窗開頭、0），(b) 同一個位置被不同基底讀到。每一組用 verdict() 決定：
+    通過自己的結構檢查（reading_fail）的恰好一種被採用；都通過但解讀結果相同 → 都採用；都通過但不同、或都沒通過 → 無法判斷；沒通過而有別的讀法通過的 → 不採用。
+    (a) 的結果只作用在「這個指標的那條邊」（同一個目錄若從別的、單一讀法的指標到得了，仍然確定）；(b) 的結果作用在紀錄本身。
+    確定的紀錄＝從 EFS 出發，只走「通過的邊」（單一讀法的指標，或指標的讀法被採用的那一邊）而且紀錄本身沒被 (b) 判掉，到得了的。其餘：
+    被 (b) 判為不採用、或所有進來的邊都是被判不採用的讀法／來自不採用的目錄 → rejected；剩下的 → ambiguous。結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關。"""
+    recs = ctx.by_key
+    cache = {}
+
+    def fails(k):
+        if k not in cache:
+            cache[k] = reading_fail(recs[k])
+        return cache[k]
+
+    ptr = {}
+    for g in ctx.groups:
+        ptr.setdefault(frozenset(g["keys"]), []).append(g)
+    by_off = {}
+    for k in recs:
+        by_off.setdefault(k[0], []).append(k)
+    off_groups = {o: ks for o, ks in by_off.items() if len(ks) > 1}
+    pv = {gk: verdict(ctx, gk, fails) for gk in ptr}
+    ov = {o: verdict(ctx, ks, fails) for o, ks in off_groups.items()}
+
+    def off_state(k):
+        v = ov.get(k[0])
+        return None if v is None else "selected" if k in v["selected"] else "rejected" if k in v["rejected"] else "contested"
+
+    def edge_ok(c, g):
+        return c in recs and (g is None or c in pv[g]["selected"]) and off_state(c) in (None, "selected")
+
+    kids, incoming = {}, {}
+    for p, c, g in ctx.edges:
+        if c in recs:
+            kids.setdefault(p, []).append((c, g))
+            incoming.setdefault(c, []).append((p, g))
+    definite, queue, seen_parents = set(), [None], set()
+    while queue:
+        p = queue.pop()
+        if p in seen_parents:
+            continue
+        seen_parents.add(p)
+        for c, g in kids.get(p, []):
+            if edge_ok(c, g) and c not in definite:
+                definite.add(c)
+                queue.append(c)
+    rejected = {k for k in recs if off_state(k) == "rejected"}
+    changed = True
+    while changed:
+        changed = False
+        for k in recs:
+            inc = incoming.get(k)
+            if k in rejected or k in definite or not inc:
+                continue
+            if all((g is not None and k in pv[g]["rejected"]) or (p is not None and p in rejected) for p, g in inc):
+                rejected.add(k)
+                changed = True
+
+    def desc(k):
+        r = recs[k]
+        return f"{KIND_TEXT[r['kind']]} @0x{k[0]:x} (window base 0x{k[1]:x})"
+
+    def evidence(k):
+        f = fails(k)
+        if not f:
+            return "passes the structure checks"
+        return "does not pass the structure checks: " + "; ".join(f[:FAIL_SHOWN]) + (f"; and {len(f) - FAIL_SHOWN} more" if len(f) > FAIL_SHOWN else "")
+
+    members = {}                        # 紀錄 → 它所屬的競爭組（為了訊息）
+    for gk, gl in ptr.items():
+        for k in gk:
+            members.setdefault(k, []).append(("pointer", gk, pv[gk], gl[0]))
+    for o, ks in off_groups.items():
+        for k in ks:
+            members.setdefault(k, []).append(("offset", frozenset(ks), ov[o], None))
+    for k, r in sorted(recs.items()):
+        r["status"] = "adopted" if k in definite else "rejected" if k in rejected else "ambiguous"
+        r["ambiguous"], r["rejected"] = r["status"] == "ambiguous", r["status"] == "rejected"
+        if k[0] in off_groups:
+            r["other_bases"] = sorted(f"0x{o[1]:x}" for o in off_groups[k[0]] if o != k)
+        if k in members:
+            r["reading_fail"] = fails(k)
+        w = desc(k)
+        if r["status"] == "rejected":
+            direct = [(kind, v, gl) for kind, gk, v, gl in members.get(k, []) if k in v["rejected"]]
+            if direct:
+                kind, v, gl = direct[0]
+                alt = [a for a in v["selected"]]
+                r["rejected_because"] = fails(k)
+                r["used_instead"] = [f"{KIND_TEXT[recs[a]['kind']]} @0x{a[0]:x} (window base 0x{a[1]:x})" for a in alt]
+                what = f"pointer 0x{gl['value']:x}" if kind == "pointer" else f"offset 0x{k[0]:x}"
+                ctx.problem("reading-rejected", w, f"{w}: this reading is not used, it {evidence(k)}; the other reading of the same {what} ({', '.join(desc(a) for a in alt)}) "
+                            "passes the structure checks and is used instead; the entries of this reading are listed but not used for versions, hashes or microcode")
+            else:
+                r["rejected_because"] = ["reached only through readings that are not used"]
+                ctx.problem("reading-rejected", w, f"{w}: not used, it is reached only through readings that are not used (see the reading-rejected entries above it)")
+        elif r["status"] == "ambiguous":
+            if off_state(k) == "contested":
+                v = ov[k[0]]
+                others = ", ".join(r["other_bases"])
+                why = (f"the same offset was reached with other window bases ({others}) and the readings cannot be told apart ({v['why']}); this reading {evidence(k)}")
+            else:
+                cont = [(kind, gk, v, gl) for kind, gk, v, gl in members.get(k, []) if k in v["contested"] and kind == "pointer"]
+                if cont:
+                    why = (f"reachable only through a pointer that reads as a directory in more than one way and the readings cannot be told apart ({cont[0][2]['why']}; other reading"
+                           f"{'s' if len(r.get('readings', [])) > 1 else ''}: {', '.join(r.get('readings', []))})")
+                else:
+                    why = "it is below such a directory"
             ctx.problem("dir-ambiguous", w, f"{w}: {why}; its {r['num_entries']} entries, versions and microcode are listed but not used for the SBOM")
+    for gk, gl in sorted(ptr.items(), key=lambda x: sorted(x[0])):
+        v = pv[gk]
+        for g in sorted(gl, key=lambda x: x["via"]):
+            readings = "; ".join(f"{desc(k)}: {evidence(k)}" for k in sorted(gk) if k in recs)
+            if v["contested"]:
+                ctx.problem("pointer-ambiguous", g["via"], f"{g['via']}: pointer 0x{g['value']:x} reads as a directory {len(gk)} ways ({readings}); {v['why']}; this tool does not decide which one the hardware uses: "
+                            "all readings are parsed and listed, and none of them is used for the SBOM unless it is also reached by an unambiguous pointer")
+            elif v["equal"]:
+                ctx.problem("reading-equivalent", g["via"], f"{g['via']}: pointer 0x{g['value']:x} reads as a directory {len(gk)} ways ({readings}); the readings that pass have identical contents "
+                            "(entries, sizes, flags and hashes of what they point to), so it does not matter which one the hardware uses and all of them are used")
+    for o, ks in sorted(off_groups.items()):
+        if ov[o]["equal"]:
+            ctx.problem("reading-equivalent", f"0x{o:x}", f"directory at 0x{o:x} was read with window bases {', '.join('0x%x' % k[1] for k in sorted(ks))}; the readings that pass have identical contents, so all of them are used")
 
 
 # ---------- 範圍重疊 ----------
@@ -738,22 +936,6 @@ def read_agesa(buf, pos):
     return tag, value, ("truncated" if k - j == AGESA_VALUE_LEN and k < len(buf) and 0x20 <= buf[k] < 0x7F else "ok"), k
 
 
-def raw_origin(frame):
-    """scan_bytes 的呼叫端（uefi_image 的 parse_sections／guid_defined／parse_ffs…）送進來的內容，是不是從原始位元組直接切出來的（不是解壓縮來的）。
-    解壓縮來的：呼叫端是 guid_defined 而且手上有 `out`（LZMA 解開的內容），或呼叫端的 `where` 路徑已經在解壓縮層裡（含 `>lzma`）。
-    看不出來（沒有 frame 或沒有 where）→ 當成不是（不拿來換算位置），搜尋就會因為對不上而標為不完整：失敗的方向是保守的。"""
-    try:
-        loc = frame.f_locals
-        where = loc.get("where")
-        if not isinstance(where, str) or ">lzma" in where or "lzma[" in where:
-            return False
-        if frame.f_code.co_name == "guid_defined" and "out" in loc:
-            return False
-        return True
-    except Exception:       # noqa: BLE001
-        return False
-
-
 def agesa_search(data, budget=None, soft=()):
     """AGESA 字串。走訪 firmware volume（uefi_image，LZMA 等解開；FV 以外的非空白位元組它也送進來）逐塊內容找 `AGESA!V` 標記；
     另外數整個映像原始位元組裡的標記，原始位元組裡有、走訪的內容裡沒看到的（例如在 UI section、空白區、被刪除的檔案裡）
@@ -763,7 +945,7 @@ def agesa_search(data, budget=None, soft=()):
     table, st = {}, r["stats"]
     seen_problems = set()
     walk_counts, raw_counts, raw_locs = {}, {}, {}
-    leaves = {}                            # 走訪時「原始位元組直接切出來」的內容（不是解壓縮來的）裡有標記的：{(長度, 雜湊): {buf, scans, positions}}
+    leaves = {}                            # 走訪搜尋過、而且裡面有標記的內容（去重）：{(長度, 雜湊): {n, occ（內容在原始位元組出現的位置）, positions（標記在內容裡的位置）, pre, post}}
     raw_pos = []                           # 原始位元組裡的標記：[(位置, key)]
     state = {"capped": False, "raw_capped": False, "inspect_capped": False}
 
@@ -810,7 +992,9 @@ def agesa_search(data, budget=None, soft=()):
             pos = buf.find(AGESA_MARK, pos + 1)
         return True
 
-    def walk_inspect(buf, module, raw_origin):
+    def walk_inspect(buf, module, nlayers):
+        """走訪（uefi_image.parse_fvs）每送來一塊內容就呼叫一次。nlayers＝這一刻 Scan.layers（已解開的 LZMA 層）有幾筆，None＝讀不到。
+        只用公開介面（scan_bytes 收到的內容、Scan.layers）：不知道這塊內容是原始位元組直接切出來的還是解壓縮來的，所以不判斷來源，改成記數（見檔尾的涵蓋檢查）。"""
         n = len(buf)
         if n == 0:
             return
@@ -824,15 +1008,23 @@ def agesa_search(data, budget=None, soft=()):
         st["inspected_bytes"] += n
         found = []
         scan(buf, "uefi:" + (module or "?"), walk_counts, "markers", None, found)
-        if found and raw_origin:                # 這塊內容是原始位元組直接切出來的：記下來，之後用內容在原始位元組裡的位置換算標記的位置
-            k = (n, hashlib.blake2b(buf, digest_size=16).digest())
-            e = leaves.get(k)
-            if e is None and len(leaves) < MAX_AGESA_LEAVES:
-                e = leaves[k] = {"buf": bytes(buf), "scans": 0, "positions": found}
-            if e is not None:
-                e["scans"] += 1
-            else:
+        if not found:
+            return
+        k = (n, hashlib.blake2b(buf, digest_size=16).digest())
+        e = leaves.get(k)
+        if e is None:
+            if len(leaves) >= MAX_AGESA_LEAVES:
                 state["leaves_capped"] = True
+                return
+            occ = []
+            if n > AGESA_DERIVED_MAX:                      # 太短的內容可能是 uefi_image 由名稱字串（UI section）轉出來的，不是原始位元組的切片：不拿來換算位置
+                start = data.find(buf)
+                while start >= 0 and len(occ) <= MAX_AGESA_OCCURRENCES:
+                    occ.append(start)
+                    start = data.find(buf, start + 1)
+            e = leaves[k] = {"n": n, "occ": occ, "positions": found, "pre": 0, "post": 0}
+        # pre：第一個 LZMA 層解開之前收到的（這時還沒有任何解壓縮來的內容，所以一定是原始位元組的切片）；post：其餘（可能是切片，也可能是解壓縮來的）
+        e["pre" if nlayers == 0 else "post"] += 1
 
     complete = True
     try:
@@ -857,7 +1049,8 @@ def agesa_search(data, budget=None, soft=()):
 
     class AgesaScan(ui.Scan):
         def scan_bytes(self, buf, module=None):           # 覆寫：不做函式庫指紋，只找 AGESA（和 uefi_gfx.py 同樣的做法）
-            walk_inspect(buf, module, raw_origin(sys._getframe(1)))
+            layers = getattr(self, "layers", None)
+            walk_inspect(buf, module, len(layers) if isinstance(layers, list) else None)
 
     sc = AgesaScan()
     r["walk"] = True
@@ -888,17 +1081,24 @@ def agesa_search(data, budget=None, soft=()):
         complete = False
     if state["capped"] or state["inspect_capped"]:
         complete = False
-    # 原始位元組裡的每個標記，要有「同一個位置」被走訪搜尋過：走訪搜尋的內容若是原始位元組直接切出來的（不是解壓縮來的），就在原始位元組裡找這塊內容出現的位置，
-    # 標記的位置＝內容的位置＋標記在內容裡的位置。同一塊內容被搜尋了 k 次（原始來源）就只算前 k 個出現位置有被搜尋，所以解壓縮出來的同樣內容、
-    # 或另一個沒被搜尋的同樣內容（例如 UI section 裡的複本）都不能替別的位置抵銷。
+    # 原始位元組裡的每個標記，要能證明「同一個位置」被走訪搜尋過，否則算沒涵蓋到（搜尋不完整，並把它列出來）。證明只用公開介面能看到的：
+    #   - 每一塊有標記的內容（去重）：它在原始位元組出現的位置 occ（R 個）、走訪搜尋它的次數 pre＋post；標記的位置＝內容的位置＋標記在內容裡的位置。
+    #   - pre 次一定是原始位元組的切片（那時還沒解開任何 LZMA 層）；post 次可能是解壓縮來的：解壓縮來的次數最多 D＝Σ（每個已解開的層的大小 // 這塊內容的長度）
+    #     （解壓縮來的內容都在某個層裡面，同一層裡長度相同的兩塊區域要嘛完全重疊要嘛不相交）。所以至少有 pre＋max(0, post−D) 次是原始切片，它們各涵蓋一個出現位置。
+    #   - 這個數字 ≥ R 才算 R 個出現位置都被涵蓋；不夠就只算前幾個（其餘列為沒涵蓋，搜尋不完整）。解壓縮出來的內容剛好和一處沒被走訪的原始位元組相同時，
+    #     它不能被算成那一處的涵蓋（post 次被 D 扣掉）；拿不到 Scan.layers 時 post 全部不算。
+    #   殘餘限制：假設走訪不會對「同一段原始位元組」用同樣長度搜尋兩次（uefi_image 目前不會）；太短（≤ AGESA_DERIVED_MAX）的內容不換算位置（可能是名稱字串轉出來的）。
+    layers = getattr(sc, "layers", None)
+    sizes = [x.get("size") for x in layers] if isinstance(layers, list) else None
+    if sizes is not None and not all(isinstance(z, int) and z >= 0 for z in sizes):
+        sizes = None
     covered = set()
     for e in leaves.values():
-        start = data.find(e["buf"])
-        occ = 0
-        while start >= 0 and occ < min(e["scans"], MAX_AGESA_OCCURRENCES):
+        proven = e["pre"]
+        if sizes is not None:
+            proven += max(0, e["post"] - sum(z // e["n"] for z in sizes))
+        for start in e["occ"][:min(proven, MAX_AGESA_OCCURRENCES)]:
             covered.update(start + p for p in e["positions"])
-            occ += 1
-            start = data.find(e["buf"], start + 1)
     if state.get("leaves_capped"):
         complete = False
         note(f"more than {MAX_AGESA_LEAVES} distinct UEFI contents with AGESA markers; their positions were not all checked")
@@ -908,8 +1108,8 @@ def agesa_search(data, budget=None, soft=()):
             missed.setdefault(key, []).append(pos)
     if missed:
         complete = False
-        note(f"{sum(len(v) for v in missed.values())} AGESA marker(s) in the raw image bytes were not seen in the decoded UEFI content (for example inside a UI section, free space "
-             "or a deleted file); they are listed with the location 'image (raw bytes)' and the search is not complete")
+        note(f"{sum(len(v) for v in missed.values())} AGESA marker(s) in the raw image bytes could not be shown to have been searched by the UEFI walk (for example inside a UI section, free space, "
+             "a deleted file, or the same bytes as decompressed content that was searched); they are listed with the location 'image (raw bytes)' and the search is not complete")
         if not state["capped"]:
             for key, poss in missed.items():
                 tag, value, status = key
@@ -937,7 +1137,9 @@ def finish(r, table, complete):
 
 GAP_TEXT = {
     "efs-limit": "EFS limit", "efs-pointer-unparsed": "EFS pointers present but not parsed", "pointer-unresolved": "pointers that do not resolve to a directory",
-    "pointer-ambiguous": "pointers readable as a directory in two ways", "dir-ambiguous": "directories reachable only through such pointers", "dir-loop": "directory loops", "dir-limit": "directory limits reached",
+    "pointer-ambiguous": "pointers readable as a directory in two ways that cannot be told apart", "dir-ambiguous": "directories reachable only through readings that cannot be told apart",
+    "reading-rejected": "directory readings not used (another reading of the same pointer or offset passes the structure checks)",
+    "reading-equivalent": "pointer or offset readings with identical contents (all used)", "dir-loop": "directory loops", "dir-limit": "directory limits reached",
     "dir-too-many-entries": "directories with too many entries", "dir-truncated": "directories running past the end of the file",
     "dir-checksum": "directory checksum mismatches", "type-unknown": "entries of unknown type", "entry-address": "entries whose address cannot be resolved",
     "entry-size": "entries too large", "entry-range": "entries outside the file", "entry-overlap": "overlapping ranges", "version-unverified": "entries without a version",
@@ -946,7 +1148,7 @@ GAP_TEXT = {
     "ucode-unrecognised": "microcode entries not understood", "ucode-cpuid": "microcode without CPUID", "ucode-limit": "microcode limit", "hash-limit": "hash limit",
     "ish-checksum": "image slot header checksum mismatches", "ish-size": "A/B recovery entries with an unexpected size",
 }
-ATTENTION_CODES = ("dir-checksum", "pointer-ambiguous", "dir-ambiguous", "ish-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit", "entry-error", "internal-error")
+ATTENTION_CODES = ("dir-checksum", "pointer-ambiguous", "dir-ambiguous", "reading-rejected", "ish-checksum", "dir-loop", "entry-overlap", "entry-range", "dir-limit", "entry-error", "internal-error")
 
 
 def summarize(problems, counts):
@@ -994,7 +1196,7 @@ def analyze(data, budget=None, soft=()):
                 ctx.problem("efs-no-pointer", f"EFS@0x{p:x}", f"EFS at 0x{p:x} has no PSP/BIOS directory pointer")
 
     run_stage(ctx, amd, "PSP/BIOS directory parse", directories, soft)
-    run_stage(ctx, amd, "ambiguity check", lambda: mark_ambiguous(ctx), soft)
+    run_stage(ctx, amd, "directory reading check", lambda: resolve_readings(ctx), soft)
     amd["ambiguous"] = {"psp_firmware": [], "microcode": []}
     run_stage(ctx, amd, "firmware and microcode extraction", lambda: collect_contents(ctx, amd), soft)
     run_stage(ctx, amd, "range overlap check", lambda: check_overlaps(ctx), soft)

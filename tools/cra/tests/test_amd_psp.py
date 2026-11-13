@@ -759,6 +759,7 @@ def test_agesa_tag_separator_truncation_and_dedupe():
 
 def test_agesa_marker_in_content_the_walk_does_not_search_is_found_and_incomplete():
     M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00"
+    PAD = b"\0" * 300                                 # 內容要比 AGESA_DERIVED_MAX 長才會拿來換算位置
     for name, volume in (("ui", fv([ffs(0x07, secs(sec(0x15, M + b"\0" * 8)))])), ("pad", fv([ffs(0xF0, M + b"\0" * 8)])),
                          ("deleted", fv([ffs(0x07, secs(sec(0x10, M + b"\0" * 8)), state=0x00)]))):
         img = bytearray(b"\xff" * SIZE)
@@ -768,10 +769,15 @@ def test_agesa_marker_in_content_the_walk_does_not_search_is_found_and_incomplet
         assert ag["complete"] is False or all(f["where"].startswith("uefi:") for x in ag["values"] for f in x["found"]), name
     # 一定會被走訪涵蓋的位置：沒有多餘的「沒看到」說明、而且完整
     img = bytearray(b"\xff" * SIZE)
-    put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, b"MZ" + M + b"\0" * 8)))]))
+    put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, b"MZ" + M + PAD)))]))
     ag = run(img)["agesa"]
     assert ag["complete"] is True and [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"] and ag["values"][0]["count"] >= 1
-    assert not any("not seen" in p for p in ag["problems"])
+    assert not any("could not be shown" in p for p in ag["problems"])
+    # 同樣的內容太短（≤ AGESA_DERIVED_MAX）：可能是名稱字串轉出來的，不換算位置 → 不能證明涵蓋，不完整（保守）
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, b"MZ" + M + b"\0" * 8)))]))
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and any("could not be shown" in p for p in ag["problems"])
 
 
 def test_agesa_missed_by_the_walk_makes_it_incomplete(monkeypatch):
@@ -791,7 +797,7 @@ def test_agesa_missed_by_the_walk_makes_it_incomplete(monkeypatch):
     monkeypatch.setattr(ap, "_sibling", lambda name: FakeUi)
     ag = run(agesa_image(b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00"))["agesa"]
     assert ag["complete"] is False and [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"]
-    assert ag["values"][0]["found"][0]["where"] == "image (raw bytes)" and any("not seen in the decoded UEFI content" in p for p in ag["problems"])
+    assert ag["values"][0]["found"][0]["where"] == "image (raw bytes)" and any("could not be shown to have been searched" in p for p in ag["problems"])
 
 
 def test_efs_offset_tables_depend_on_the_window_size():
@@ -904,7 +910,7 @@ def test_microcode_container_size_checks_and_date_range(monkeypatch):
 
 def norm(r):
     """結果的摘要（與處理順序無關的部分）。"""
-    return (sorted((d["kind"], d["offset"], d["base"], d["ambiguous"], d["checksum_ok"]) for d in r["directories"]),
+    return (sorted((d["kind"], d["offset"], d["base"], d["ambiguous"], d["rejected"], d["checksum_ok"]) for d in r["directories"]),
             sorted((p["type"], p["version"]) for p in r["psp_firmware"]),
             sorted((p["type"], p["version"]) for p in r["ambiguous"]["psp_firmware"]),
             sorted(m["patch_id"] for m in r["microcode"]), sorted(codes(r)))
@@ -972,16 +978,20 @@ def test_combo_entry_that_reads_both_ways_makes_its_children_ambiguous_under_a_d
 
 
 def test_ambiguous_contents_are_listed_even_when_a_definite_directory_has_the_same_blob():
+    """確定的目錄（單一讀法的 EFS 指標）和歧義的那一組讀法裡有同一份 blob：歧義那邊照實列出，不和確定的去重。
+    歧義那一組要「都通過但內容不同」才會維持歧義（D-047：內容相同的讀法會都被採用），所以 0x31000 的讀法多一個條目。"""
     img = bytearray(b"\xff" * (SIZE + 0x1000))
     put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x52000, psp_blob(8, (3, 3, 3, 3), 0x300))
     put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)], info=1 << 29))
-    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x4F000, mode=1)], info=1 << 29))
+    put(img, 0x31000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x4F000, mode=1), psp_ent(8, size=0x300, addr=0x51000, mode=1)], info=1 << 29))
     efs(img, new_psp=0x30000)
     efs(img, new_psp=0x30000, at=0x21000)
     r = run(img)
     k = {d["offset"]: d for d in r["directories"]}
     assert k[0x30000]["ambiguous"] is False and k[0x31000]["ambiguous"] is True
-    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"] and [p["version"] for p in r["ambiguous"]["psp_firmware"]] == ["01.01.01.01"]
+    assert [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"]
+    assert [p["version"] for p in r["ambiguous"]["psp_firmware"]] == ["01.01.01.01", "03.03.03.03"]
     assert [x["directory"] for x in r["psp_firmware"][0]["locations"]] == ["PSP directory L1 @0x30000"]
     assert [x["directory"] for x in r["ambiguous"]["psp_firmware"][0]["locations"]] == ["PSP directory L1 @0x31000"]
 
@@ -1000,7 +1010,7 @@ def test_slot_header_and_directory_addresses_use_only_the_directorys_own_base():
 
 def test_agesa_positions_not_counts_decide_whether_the_walk_covered_every_marker():
     import lzma
-    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 8
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 300
 
     def build(files):
         img = bytearray(b"\xff" * SIZE)
@@ -1012,7 +1022,7 @@ def test_agesa_positions_not_counts_decide_whether_the_walk_covered_every_marker
     assert build([pe])["complete"] is True and build([pe, comp])["complete"] is True and build([comp])["complete"] is True
     for files in ([pe, ui], [ui, comp], [pe, ui, comp]):
         ag = build(files)
-        assert ag["complete"] is False and any("not seen in the decoded UEFI content" in p for p in ag["problems"]), len(files)
+        assert ag["complete"] is False and any("could not be shown to have been searched" in p for p in ag["problems"]), len(files)
         assert any(f["where"] == "image (raw bytes)" for x in ag["values"] for f in x["found"])
     # 兩份原始、都有被搜尋的同樣內容（備份）：不算漏
     pe2 = ffs(0x07, secs(sec(0x10, M)), k=3)
@@ -1087,16 +1097,16 @@ def test_every_efs_directory_pointer_field_is_read():
 
 def test_agesa_decompressed_raw_fallback_content_does_not_cover_an_unsearched_copy(monkeypatch):
     import lzma
-    payload = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 8                     # 不是 section 串（開頭三個 byte 當 size 太大）：解壓縮後整塊當原始內容送進搜尋
+    payload = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 300                   # 不是 section 串（開頭三個 byte 當 size 太大）：解壓縮後整塊當原始內容送進搜尋
     comp = ffs(0x07, secs(guided(LZMA, lzma.compress(payload, format=lzma.FORMAT_ALONE))), k=2)
     ui = ffs(0x07, secs(sec(0x15, payload)), k=1)                                       # 同樣的位元組在 UI section 裡：沒有被搜尋
     img = bytearray(b"\xff" * SIZE)
     put(img, 0x80000, fv([ui, comp]))
     ag = run(img)["agesa"]
-    assert ag["complete"] is False and any("not seen in the decoded UEFI content" in p for p in ag["problems"])
+    assert ag["complete"] is False and any("could not be shown to have been searched" in p for p in ag["problems"])
     # 有標記的不同內容太多（超過 MAX_AGESA_LEAVES）：位置沒辦法全部換算 → 不完整
     monkeypatch.setattr(ap, "MAX_AGESA_LEAVES", 1)
-    M = lambda n: b"AGESA!V9\x00ComboAM4v2PI 9.9.9.%d\x00" % n + b"\x00" * 8             # noqa: E731
+    M = lambda n: b"AGESA!V9\x00ComboAM4v2PI 9.9.9.%d\x00" % n + b"\x00" * 300           # noqa: E731
     img = bytearray(b"\xff" * SIZE)
     put(img, 0x80000, fv([ffs(0x07, secs(sec(0x10, M(1))), k=0), ffs(0x07, secs(sec(0x10, M(2))), k=1)]))
     ag = run(img)["agesa"]
