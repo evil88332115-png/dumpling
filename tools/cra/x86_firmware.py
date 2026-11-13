@@ -54,7 +54,11 @@ BIOS（Intel 平台的完整 SPI 映像）：
   （CSME 12 以後：$FPT 在 +0x1000、沒有 FTPR 那一項）；都拿不到但有表頭像真的 `$FPT`、FTPR 的 `$CPD` 或候選數用完 → unknown；
   只有雜散的標記仍是 no-me-region。有兩個以上版本不同的 FTPR manifest（例如 capsule 裡兩個 ME 映像）時報第一個，
   me_conflict 列出全部、ATTENTION。沒有 ME 區域的檔案裡零散的 `$MN2`
-  不當成 CSE 版本（只記在 me_note）。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；family 是 CSME 時 SBOM 的 ME 元件才有 cpe（見 CSME_CPE），其他情況不填。
+  不當成 CSE 版本（只記在 me_note）。新世代的配置（CSME 18 這類：區域開頭是 CSE layout table，`$FPT` 只在 data partition、沒有 FTPR 那一項）
+  上面的做法都拿不到、結果是 unknown 時，再走 intel_cse_layout.py：layout table → BP 的 BPDT → FTPR（type 2）、RBEP（1）、NFTP（7）三種分割區的
+  `$CPD` → `<名稱>.man` 的 `$MN2`；有 FTPR 取它，沒有就要 RBEP 與 NFTP 等至少兩個獨立來源版本相同才採用（basis「BPDT (CSE layout table …): …」），
+  讀得到的版本互相矛盾、結構不一致、只有一個來源 → 維持 unknown（原因接在 me_note）。上面的做法有結果時完全不動。沒有 descriptor 時
+  layout table 或 BPDT 要在檔案開頭。格式與出處見 intel_cse_layout.py、docs/notes/c2-csme-layout.md。是 CSME、TXE 還是 SPS 不猜（family unknown），版本清單 me 列的 identifier 寫了、而且那一列的版本相符才帶；family 是 CSME 時 SBOM 的 ME 元件才有 cpe（見 CSME_CPE），其他情況不填。
   格式依 me_cleaner、MEAnalyzer 的結構定義（只讀它們的原始碼核對欄位位置，沒有用它們的程式）。
 - CPU microcode：Intel microcode header（header version 1、loader revision 1、BCD 日期、CPUID、platform id、大小），
   先檢查 header 欄位再算整份 checksum（為 0 才算）；每個（CPUID、platform id）一列；extended signature table 的 CPUID 另外記。
@@ -949,8 +953,9 @@ def ftpr_conflict(data, h, others):
             + f"; reported {ver} at 0x{h:x} (the first one found by the method in basis); the others are only in other_versions")
 
 
-def me_info(data, regs, me_r, beyond, budget=None):
-    """CSME／ME／TXE（不分是哪一種：family 不猜）→ {me（dict 或 None）, status, note, loose, standalone, incomplete}。
+def me_info_fpt(data, regs, me_r, beyond, budget=None):
+    """（$FPT、FTPR 的 `$CPD` 這條路；外面的 me_info 在這條路沒有結果時才試新世代的 BPDT 配置。）
+    CSME／ME／TXE（不分是哪一種：family 不猜）→ {me（dict 或 None）, status, note, loose, standalone, incomplete}。
     status：found；no-me-region（descriptor 沒有 ME 區域，或沒有 descriptor、也沒有任何 ME 的結構）；unknown（有 ME 的結構但沒有可用的 manifest）。
     有 ME 區域：先用 $FPT（區域開頭與 +0x10 都試）→ FTPR 分割區（basis「FTPR partition ($FPT…)」）；沒有 $FPT 或 FTPR 拿不到時，
     退回舊的 `$CPD` 做法：區域裡前面最近的 `$CPD` 目錄名稱是 FTPR 的 `$MN2` → found（basis「FTPR partition manifest」，原因記在 note）。
@@ -1016,6 +1021,32 @@ def me_info(data, regs, me_r, beyond, budget=None):
     r["me"] = {"version": ver, "date": date, "basis": basis, "offset": h, "family": None,
                "other_versions": sorted({x["version"] for x in mn} - {ver})}
     return {**r, "status": "found"}
+
+
+def me_info(data, regs, me_r, beyond, budget=None):
+    """ME 版本。先走 me_info_fpt（$FPT、名稱是 FTPR 的 `$CPD`；有結果就不動，既有世代的行為不變）；那條路是 unknown
+    （或沒有 descriptor 時是 no-me-region）時，再試新世代的 CSE 配置（intel_cse_layout.py：CSE layout table → BPDT → FTPR／RBEP／NFTP 的 manifest）。
+    只在那邊找到一致的版本才 found（basis 寫明走哪一條路）；認得出配置但版本不可用或互相矛盾 → 維持 unknown，原因接在 note 後面；
+    不是這種配置 → 原樣回傳。範圍：有 descriptor 時是 ME 區域，沒有時是整個檔案（layout table 或 BPDT 要在檔案開頭）。"""
+    r = me_info_fpt(data, regs, me_r, beyond, budget)
+    if r["status"] == "found" or (regs is not None and (me_r is None or r["status"] == "no-me-region")):
+        return r                                        # descriptor 沒有 ME 區域、或 ME 區域超出檔案（me_r 不存在）：沒有範圍可看
+    if regs is not None:
+        base, end = me_r["base"], min(me_r["limit"] + 1, len(data))
+    else:
+        base, end = 0, len(data)
+    cse = load_sibling("intel_cse_layout").find_cse(data, base, end, budget)
+    if cse["status"] == "none":
+        return r
+    if cse["status"] == "gap":
+        if r["status"] == "no-me-region":              # 沒有 descriptor、其他 ME 結構也沒有：開頭碰巧像 layout table 不算有 ME
+            return r
+        return {**r, "status": "unknown", "note": "; ".join(x for x in (r["note"], "CSE layout/BPDT: " + cse["note"]) if x)}
+    mn = me_manifests(data, base, end, budget, notes=r["incomplete"])
+    return {**r, "status": "found", "standalone": regs is None,
+            "note": "no usable $FPT or FTPR $CPD; the version comes from the BPDT main-program partitions (see basis)",
+            "me": {"version": cse["version"], "date": bcd_date(cse["date_raw"], "ymd"), "basis": cse["basis"], "offset": cse["offset"],
+                   "family": None, "other_versions": sorted({x["version"] for x in mn} - {cse["version"]})}}
 
 
 def me_without_fpt(data, r, ff, budget=None):

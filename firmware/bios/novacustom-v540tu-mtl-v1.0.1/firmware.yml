@@ -1,0 +1,32 @@
+kind: bios
+vendor: NovaCustom／3mdeb（Dasharo）
+model: NovaCustom V540TU（Meteor Lake，Dasharo coreboot+edk2）
+firmware_version: v1.0.1
+ibv: coreboot+edk2
+status: ok
+files:
+  - name: novacustom_v54x_mtl_igpu_v1.0.1_btg_prod.rom
+    url: https://dl.3mdeb.com/open-source-firmware/Dasharo/novacustom_v5x0_mtl/novacustom_mtl_igpu/novacustom_v540tu_mtl/uefi/v1.0.1/novacustom_v54x_mtl_igpu_v1.0.1_btg_prod.rom
+    sha256: e915ed1eae8b7b91a7a94ad7a75d57a4a077c0e7c6379234755788ca72fb1cd9
+    size: 33554432
+    role: image
+license:
+  name: Dasharo 開放原始碼韌體（coreboot GPL-2.0；edk2 BSD-2-Clause-Patent；內含 Intel ME／FSP／微碼二進位 blob）
+  url: https://docs.dasharo.com/
+  note: 3mdeb 公開下載；blob 的條款屬 Intel 所有（release notes 的 SBOM 列出 Intel OBL 授權連結）。本 repo 只在 CI 下載核對，不重新散布。
+notes: |
+  挑選的技術理由：完整 32 MiB SPI 映像，有 flash descriptor 與 ME 區域，但 ME 區域的配置是新世代的：
+  區域開頭是 CSE layout table（layout 1.7，size 欄位 0x58）→ BP1、BP3 兩個 boot partition，各有 BPDT（version 2）；
+  `$FPT` 只出現在 data partition（區域 +0x3A2000），區域開頭與 +0x10 都沒有；BPDT 沒有 FTPR（type 2）項目，沒有名稱是 FTPR 的 `$CPD`；
+  `$CPD` 都是 header version 2（長度 0x14、+0x10 是 CRC-32 checksum）。區域內有 14 個 `$CPD` 分割區、15 個 `$MN2`，各分割區的版本不同。
+  CSE 主程式在 BP1 的 RBEP（BPDT type 1）與 BP3 的 NFTP（type 7）：兩個 manifest 的版本相同（18.0.10.2285）。
+  以前的解析（只認 `$FPT`／名稱是 FTPR 的 `$CPD`）在這份映像上是 unknown；intel_cse_layout.py 之後讀到 18.0.10.2285，basis 寫明走 BPDT 的 RBEP＋NFTP。
+  格式與判定規則見 docs/notes/c2-csme-layout.md。
+  下載頁與 release notes：https://docs.dasharo.com/variants/novacustom_v540tu/releases/ （v1.0.1，2026-01-29）。
+  同目錄另有 .sha256 檔（與本檔 sha256 相符，2026-11-13 核對）、EC 版本與 .cap 更新檔；這裡只用 btg_prod 的完整 .rom。
+  上游若移除舊版，網址會失效、firmware-fetch 會 FAIL；此時換同系列其他版本（v1.0.0 的 ME 版本在 release notes 也是 18.0.10.2285）。
+expected:
+  # 只寫有公開出處的值。ME：release notes（v1.0.1、v1.0.0）的 "Intel Management Engine version v18.0.10.2285"。
+  # 映像另外讀出微碼（000A06A4／platform 0xE6／revision 0x25）、coreboot／FSP 等，release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12"
+  # 這種編號，與映像裡 FSPH 的 ImageRevision 不同格式），沒有獨立佐證，所以不寫。
+  intel_me: 18.0.10.2285
