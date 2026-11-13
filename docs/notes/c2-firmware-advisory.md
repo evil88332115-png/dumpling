@@ -13,7 +13,7 @@
 | `tools/cra/x86_firmware.py` | 呼叫比對、SBOM property（`dumpling:advisory-*`）、`fw-inventory.md` 的「公告比對」一節、資料表不能用時 ATTENTION；ME 的 CPE 與 `dumpling:cpe-*` |
 | `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表有一欄「公告比對」（微碼，有 NVIDIA vBIOS 時加一段；文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
 | `tools/cra/tests/test_fw_advisory.py`、`test_x86_firmware_sbom.py`、`tests/test_firmware_dt.py` | 測試（合成資料，不連網） |
-| `tools/cra/nvidia_vbios_advisory.py`、`tools/cra/tests/test_nvidia_vbios_advisory.py`、`tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | NVIDIA vBIOS 的離線比對、測試、人工審核過的公告對照表（見最後一節） |
+| `tools/cra/nvidia_vbios_advisory.py`、`tools/cra/tests/test_nvidia_vbios_advisory.py`、`tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | NVIDIA vBIOS 的離線比對、測試、公告對照表（是否已經負責人確認見最後一節） |
 
 ## 資料來源（固定）
 
@@ -189,7 +189,7 @@ B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項�
 |---|---|
 | `tools/mirror/nvidia-bulletins.sh`（C1，沒改） | 更新主機下載公告鏡像（人工步驟用；CI 不連網） |
 | `tools/pilot/lib/nvidia_bulletins.py`（C1，沒改） | `validate_table`（C2 的比對先用它驗表）、`candidates --group gpu-firmware`（列出待審公告） |
-| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 人工審核過的對照表（內容由 C2 依 D-043 填）。目前沒有可比對的列，有一筆 `not_applicable`（5674） |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 對照表（內容依 D-043 整理，需經負責人確認；確認前一律 NOT_ASSESSED）。目前沒有可比對的列，有一筆 `not_applicable`（5674） |
 | `tools/cra/nvidia_vbios_advisory.py` | 離線比對：讀上面的表、驗證、依 vBIOS 版本與 PCI vendor／device ID 判斷（規則在檔頭與下面） |
 | `tools/cra/x86_firmware.py` | 每個 NVIDIA vBIOS 比對一次（`inv["vbios"][i]["advisory"]`、`inv["vbios_advisory"]`）、SBOM 的 `dumpling:advisory-*`、`fw-inventory.md` 的 vBIOS 段落、表不能用時狀態 ATTENTION |
 | `pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要欄加 vBIOS 一段；DT 報告「怎麼讀」寫明 vBIOS 的 `advisory-match` |
@@ -235,7 +235,7 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 3. 版本讀不到、不是五段兩位十六進位（`XX.XX.XX.XX.XX` 佔位、四或六段、多餘空白）→ NOT_ASSESSED（`version-unreadable`）；ROM 裡有兩個以上不同的 `XX.XX.XX.XX.XX` 字串（`x86_firmware` 數出來記在 `other_versions`，只有這時才有這個鍵，SBOM 元件加 `sca-center:note`）→ `version-ambiguous`，不給 fixed。
 4. vendor 不是 10de（ROM 與每個 x86／EFI 開機影像都要是 10de）→ `vendor-mismatch`；device ID 讀不到（空、非 4 位十六進位、0000、ffff）→ `device-unreadable`；x86／EFI 影像的 device ID 不一致 → `device-ambiguous`。
 5. option ROM 鏈沒有正常結束（輸入沒有 `terminated` 這個鍵也算）或開頭不確定 → NOT_ASSESSED（`rom-incomplete`）：版本字串可能不是這個 ROM 的。
-6. 找表裡「已審核、vendor 與 device ID 都對得上」的列。沒有 → NOT_ASSESSED（`no-row`；表裡只有未審核的對應列時是 `unreviewed-row`）。裝置不符就是沒有對應的列，不拿別的裝置的列套用。
+6. 找表裡「已審核、vendor 與 device ID 都對得上」的列。沒有 → NOT_ASSESSED（`no-row`）。表裡有任何未審核的列（`rows[].reviewed=false`）時，整張表算未經負責人確認，結果是 `table-not-reviewed`（和只有初審意見的公告一樣），不會只用已審核的列給 fixed。裝置不符就是沒有對應的列，不拿別的裝置的列套用。
 7. 逐列比版本：版本 ≥ `vbios_fixed_in` → fixed；低於 `vbios_affected_below`（或不高於 `vbios_affected_max`）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → **affected**（有 gap 的列、已修補的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（`range-gap`）；全部 fixed → **fixed**。
 8. 已審核的表，`mirror.fetched_utc` 超過 90 天（正好 90 天不算）、讀不到（缺、格式錯、沒有時區）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（`table-stale`，表可能漏了較新的公告）；affected 與其他結果照舊但加註「重新審核表」；有 vBIOS 元件時 `fw-inventory` 狀態 ATTENTION（`vbios_advisory.stale`）。

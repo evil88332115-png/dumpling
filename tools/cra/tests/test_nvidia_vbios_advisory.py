@@ -149,7 +149,18 @@ def test_no_row_and_unreviewed_row(tmp_path):
     draft = row(reviewed=False, reviewed_by=None, reviewed_at=None, pci_vendor=None, pci_devices=None)
     t = table(tmp_path, draft, row(devices=("2489",), reviewed=False, reviewed_by=None, reviewed_at=None, vbios_fixed_in="94.04.00.00.01"))
     r = m(t, vb())
-    assert_na(r, "unreviewed-row") and "1 unreviewed row" in r["basis"]       # 未審核的列不產生結果，但說明有這些列
+    assert_na(r, "table-not-reviewed")             # 表裡有未審核的列：整張表算未經負責人確認（未審核的列不產生結果）
+    assert "2 unreviewed" in r["basis"]
+
+
+def test_reviewed_and_unreviewed_rows_for_the_same_device_is_not_fixed(tmp_path):
+    # 同一台裝置有已審核的列（會判 fixed）與未審核的列：表還沒確認完，不能給 fixed
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"),
+              row(reviewed=False, reviewed_by=None, reviewed_at=None, vbios_affected_below="94.05"))
+    assert not t.confirmed
+    assert_na(m(t, vb()), "table-not-reviewed")
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))
+    assert t.confirmed and m(t, vb())["match"] == "fixed"
 
 
 def test_version_unreadable_and_odd_formats(tmp_path):
@@ -600,7 +611,7 @@ def test_stale_table_makes_the_status_attention_only_with_vbios(tmp_path):
     assert inv["vbios_advisory"]["stale"] is True
 
 
-# ---------- 第三輪：fail-closed、確認流程、報告與 property 的細節 ----------
+# ---------- fail-closed、確認流程、報告與 property 的細節 ----------
 
 def test_missing_terminated_key_is_incomplete_not_complete(tmp_path):
     t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))

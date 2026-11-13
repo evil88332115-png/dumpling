@@ -1042,7 +1042,7 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
            "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。"
-           "NVIDIA vBIOS 元件另有 `advisory-match`：用 vBIOS 版本與 option ROM 的 PCI 裝置 ID 查人工審核過的 NVIDIA 公告對照表（affected／fixed／NOT_ASSESSED）；"
+           "NVIDIA vBIOS 元件另有 `advisory-match`：用 vBIOS 版本與 option ROM 的 PCI 裝置 ID 查 repo 內的 NVIDIA 公告對照表（尚未經負責人確認時一律 NOT_ASSESSED）（affected／fixed／NOT_ASSESSED）；"
            "NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是合作夥伴通知），所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；版本是佔位字串或裝置 ID 讀不到也是 NOT_ASSESSED。"
            "affected、fixed 只是對照表裡已審核的列的比對結果，fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："

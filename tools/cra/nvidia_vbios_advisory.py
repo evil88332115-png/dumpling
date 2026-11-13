@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""韌體 SBOM 的 NVIDIA vBIOS 公告比對（離線）：用人工審核過的 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json
+"""韌體 SBOM 的 NVIDIA vBIOS 公告比對（離線）：用 repo 內的 NVIDIA 公告對照表 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json（是否已經負責人確認看 reviewed_until 與表裡有沒有待審項目）
 （NVIDIA product-security 的 gpu-firmware 群組公告，由人審核後填表），依 vBIOS 版本與 PCI vendor／device ID 判斷
 affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 
@@ -27,7 +27,7 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）；ROM 裡有兩個以上不同的版本字串 → NOT_ASSESSED（version-ambiguous）。
 4. PCI vendor 不是 10de（含任何一個 x86／EFI 開機影像的 vendor）、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
 5. option ROM 鏈沒有正常結束（沒有 terminated 這個鍵也算）或開頭不確定 → NOT_ASSESSED（rom-incomplete）：版本字串可能不是這個 ROM 的。
-6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row；表裡只有未審核的對應列時是 unreviewed-row，列出數量）。
+6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row）。表裡有任何未審核的列時，整張表算未經負責人確認（見 2，table-not-reviewed，列出數量）。
 7. 逐列比版本：fixed_in 以上 → fixed；低於 affected_below（或不高於 affected_max）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → affected（有 gap 的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（range-gap）；全部 fixed → fixed。
 8. 表的 mirror 日期超過 MAX_MIRROR_AGE_DAYS、讀不到（含沒有時區的時間）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
@@ -124,8 +124,8 @@ class Table:
             (self.rows if r["reviewed"] else self.unreviewed).append(r)
         self.not_applicable = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is not False]
         self.awaiting = [x["bulletin"] for x in doc.get("not_applicable", []) if x.get("reviewed", True) is False]      # 初審意見、還沒有人確認
-        # 負責人確認過：reviewed_until 有值，而且沒有只有初審意見的公告（只填了 reviewed_until、公告還是 reviewed=false 也算沒確認）
-        self.confirmed = self.reviewed_until is not None and not self.awaiting
+        # 負責人確認過：reviewed_until 有值，而且沒有只有初審意見的公告、沒有未審核的列（只填了 reviewed_until、公告或列還是 reviewed=false 都算沒確認）
+        self.confirmed = self.reviewed_until is not None and not self.awaiting and not self.unreviewed
         self.bulletins = [b["id"] for b in doc.get("bulletins", [])]
         self.parsed = []                         # (row, vendor, {devices}, {key: tuple})
         for r in self.rows:
@@ -261,8 +261,9 @@ def match_vbios(table_or_err, v, now=None):
     now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
     if not table.confirmed:
         pend = f"; bulletins with a preliminary opinion only: {', '.join(table.awaiting)}" if table.awaiting else ""
+        unrev = f"; {len(table.unreviewed)} unreviewed rows" if table.unreviewed else ""
         return _na("table-not-reviewed", "the NVIDIA bulletin table has not been confirmed by the responsible reviewer yet (表尚未經負責人確認; "
-                   f"{'reviewed_until is null' if table.reviewed_until is None else 'reviewed_until is set but a bulletin is still unconfirmed'}{pend})", source=src)
+                   f"{'reviewed_until is null' if table.reviewed_until is None else 'reviewed_until is set but a bulletin or row is still unconfirmed'}{pend}{unrev})", source=src)
     ver_text = v.get("version")
     ver = parse_version(ver_text) if isinstance(ver_text, str) and len(ver_text) == 14 else None
     if ver is None:

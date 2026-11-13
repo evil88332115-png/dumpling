@@ -2525,14 +2525,14 @@ VB_ADV_TEXT = {"affected": "affected（對照表列為受影響；不是完整�
 
 
 def nvidia_vbios_advisory_markdown(inv):
-    """### NVIDIA vBIOS：依 vBIOS 版本與 PCI vendor／device ID 查人工審核過的 NVIDIA 公告對照表（離線）。"""
+    """### NVIDIA vBIOS：依 vBIOS 版本與 PCI vendor／device ID 查 repo 內的 NVIDIA 公告對照表（離線）。"""
     e = md_esc
     va = inv.get("vbios_advisory") or {"status": "GAP", "gap": "沒有比對（inventory 沒有 vbios_advisory 欄位）", "vbios": 0, "counts": {}}
     L = ["", f"### NVIDIA vBIOS（{len(inv['vbios'])} 個）", "",
          "- **這一段不是漏洞判定，沒有任何一項代表「沒有漏洞」。** NVIDIA 對消費型與專業型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是 NVIDIA 的合作夥伴通知），"
          "所以多數 vBIOS 的結果是 `NOT_ASSESSED` ＝ 資料庫沒有資料，以廠商公告（NVIDIA 的合作夥伴通知或 product-security 公告）為準；請向顯卡團隊或 NVIDIA 的合作夥伴管道確認。",
          "- 比對方式：用 vBIOS 版本（`XX.XX.XX.XX.XX`）與 option ROM 的 PCI vendor／device ID 查 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`"
-         "（人工審核過的 NVIDIA product-security gpu-firmware 群組公告）；版本讀不到（例如佔位字串）、裝置 ID 讀不到、表裡沒有對應的列、表不能用都是 NOT_ASSESSED。"
+         "（repo 內依 NVIDIA product-security gpu-firmware 群組公告整理的對照表；是否已經負責人確認見下一行）；版本讀不到（例如佔位字串）、裝置 ID 讀不到、表裡沒有對應的列、表不能用都是 NOT_ASSESSED。"
          "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
     if va["status"] == "OK":
         s = va["source"]
