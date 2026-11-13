@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-13；依據的 CI 是 dev run 43413770363，跑的 commit 是 8729785（已併入 wp1/m2 61d7c6f）；之前定案的 72 項依據 43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）；第 17 項（dthelper、libmraa 歸 bsp）的重訂另做差異核對。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43460933615最後核對：併上 main 7b5c6b2 之後的 dev run，跑的 commit 是 7b3bb41；之前各版依 43413770363（8729785）、43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -246,7 +246,7 @@
   },
   "product_status.full.report_status": {
    "equals": "GAP",
-   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。完整（補充與分層之前）：弱點資料不完整，核心 CNA 候選待人審、601 筆 exploitable 待決定"
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。完整（補充與分層之前）：弱點資料不完整，核心 CNA 候選待人審、8618 列未判定（vex.gate.counts.total：untriaged 8618、not_affected 3627、exploitable 0；dev run 43460933615）"
   },
   "product_status.full.release_gate": {
    "equals": "GAP",
@@ -262,11 +262,11 @@
   },
   "product_status.os.report_status": {
    "equals": "GAP",
-   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。os：弱點資料不完整（NVD 關閉），Debian 套件有 600 筆 exploitable 待決定是否出貨"
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。os：弱點資料不完整（NVD 關閉），Debian 套件 3256 列未判定（vex.gate.counts.total：untriaged 3256、exploitable 0；dev run 43460933615）"
   },
   "product_status.os.release_gate": {
    "equals": "GAP",
-   "reason": "發行閘門（vex.gate）：弱點資料 GAP、600 筆 exploitable 待決定"
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、3256 列未判定"
   },
   "runs..stages.A-source": {
    "equals": "OK",

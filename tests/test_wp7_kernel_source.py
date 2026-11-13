@@ -153,6 +153,17 @@ class KernelVersionsNotesTest(unittest.TestCase):
     def test_missing_file_is_gap(self):
         self.assertIn("讀不到 kernel-versions.json", self.notes(None))
 
+    def test_scan_tail_product_status_per_report(self):
+        # run_summary_fields 的欄位要逐份帶進 scan.json 的 product_status（full／bsp／os）
+        import types
+        h = wp7_scan.Wp7Hooks({})
+        runs = {"": {"report_status": "GAP", "release_gate": "GAP", "bsp_inputs_not_applicable": None},
+                "-bsp": {"report_status": "GAP", "release_gate": "GAP", "documents": {"sbom": "GAP"}, "missing_fields": 3, "bsp_inputs_not_applicable": []},
+                "-os": {"report_status": "GAP", "release_gate": "GAP", "bsp_inputs_not_applicable": ["flash-firmware"]}}
+        ps_ = h.scan_tail({"args": types.SimpleNamespace(run=[]), "runs": runs, "main_run": {}})["product_status"]
+        self.assertEqual({k: v["bsp_inputs_not_applicable"] for k, v in ps_.items()}, {"full": None, "bsp": [], "os": ["flash-firmware"]})
+        self.assertEqual((ps_["bsp"]["documents"], ps_["bsp"]["missing_fields"]), ({"sbom": "GAP"}, 3))
+
     def test_full_report_note_depends_on_os_responsibility(self):
         h = wp7_scan.Wp7Hooks({})
         ours = "\n".join(h.notes_after_vulnerabilities({"layers": {"os_responsibility": "ours"}}))

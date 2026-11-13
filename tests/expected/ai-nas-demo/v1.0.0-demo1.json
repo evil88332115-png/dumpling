@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "ai-nas-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43416974360，跑的 commit 是 1abab06（第一版依 43386797521／5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43467217687最後核對：併上 main 7b5c6b2 之後的 dev run，跑的 commit 是 7b3bb41；之前依 43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "ai-nas",

@@ -164,12 +164,15 @@ C4 另外核對：rpi 的核心 CVE 除了 4 個 linux-image-*，也掛在 4 個
 ### 併上 main（M2）之後的 -os 核對（2026-11-14，C4）
 
 M2 的 852b6d3（-os 那份沒有 bsp／unknown 元件時略過 BSP 專屬輸入；#42 限 customer／upstream-vendor）會改變 rock、rpi 的 -os 報告。
-用併 main 後的 dev run（rock 43449928625、rpi 43454142042、ai-nas 43457231137）逐份比對舊 run 的 summary.json 與 scan.json：
+用併 main 後的 dev run（rock 43449928625、rpi 43454142042、ai-nas 43457231137）逐份比對舊 run（rock 43413770363、rpi 43419144284、ai-nas 43416974360）的 summary.json 與 scan.json。
+下表的 SBOM 元件數是報告 SBOM 的**套件元件**數（summary.json 的 `product_sbom.tr03183.components`），不是整份 SBOM 的元件數（含檔案元件；rock -os 110302 → 110289、rpi -os 38092 → 37676，差數相同）：
 
 | 專案 | -os 報告 | -bsp 報告 | 漏洞列、文件狀態、發行閘門 |
 |---|---|---|---|
-| rock（customer） | 刷機包韌體（rootfs `lib/modules/*/updates/` 的 13 個 DKMS 驅動）不再加進來：SBOM 1791 → 1778 個元件；`layers.bsp_inputs_not_applicable.skipped` = `["flash-firmware"]` | 13 個照樣在（1334 個元件，不變） | 都不變（那 13 個元件本來就沒有漏洞列） |
-| rpi（customer） | boot 分割區的 dtb、overlay、開機韌體 416 個不再加進來：SBOM 1004 → 588 個元件；skipped = `["flash-firmware"]` | 416 個照樣在（4610 個元件，不變） | 都不變 |
+| rock（customer） | 刷機包韌體（rootfs `lib/modules/*/updates/` 的 13 個 DKMS 驅動）不再加進來：套件元件 1791 → 1778；`layers.bsp_inputs_not_applicable.skipped` = `["flash-firmware"]` | 13 個照樣在（套件元件 1334，不變） | 都不變（那 13 個元件本來就沒有漏洞列） |
+| rpi（customer） | boot 分割區的 dtb、overlay、開機韌體 416 個不再加進來：套件元件 1004 → 588；skipped = `["flash-firmware"]` | 416 個照樣在（套件元件 4610，不變） | 都不變（被略過的元件在舊 run 也沒有任何漏洞列） |
 | ai-nas（ours） | 只有一份報告（含全部層），沒有略過任何輸入（skipped 是空的） | — | 都不變 |
 
 標準答案加釘 `product_status.<報告>.bsp_inputs_not_applicable`（rock 101 項、rpi 92 項、ai-nas 77 項）；這個欄位由 wp7_scan.py 從各份報告的 summary.json 讀（8429d1f）。
+
+併上 main 7b5c6b2（#42）之後的最終 dev run（rock 43460933615、rpi 43464471719、ai-nas 43467217687，commit 7b3bb41）三個都通過標準答案。和上一輪比，差別只有漏洞資料庫的變動（-os 列數 rock 3255 → 3256、rpi 647 → 648，ai-nas 990 → 991；新增的列與被略過的元件無關），其他欄位相同。

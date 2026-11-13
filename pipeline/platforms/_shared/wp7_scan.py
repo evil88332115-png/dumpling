@@ -64,7 +64,8 @@ class Wp7Hooks(ps.Hooks):
                               if isinstance(sm, dict) and isinstance(sm.get("documents"), dict) else None),
                 "missing_fields": len(sm["missing_fields"]) if isinstance(sm, dict) and isinstance(sm.get("missing_fields"), list) else None,
                 # 這份報告略過的 BSP 專屬輸入（cra_report 的 layers.bsp_inputs_not_applicable；-os 報告沒有 bsp／unknown 元件時）：
-                # 有分層摘要但沒有這個鍵 → []（沒有略過）；讀不到 summary 或沒有分層摘要 → null（不推測）
+                # 有分層摘要但沒有這個鍵 → []（沒有略過）；讀不到 summary 或沒有分層摘要 → null（不推測）。
+                # null 有兩種：讀不到 summary.json，或報告沒有分層摘要（customer 的完整報告是分層之前的掃描，本來就沒有）
                 "bsp_inputs_not_applicable": (list(((sm["layers"].get("bsp_inputs_not_applicable") or {}).get("skipped") or []))
                                               if isinstance(sm, dict) and isinstance(sm.get("layers"), dict) else None),
                 "release_gate": gate.get("verdict") if isinstance(gate, dict) else None}
