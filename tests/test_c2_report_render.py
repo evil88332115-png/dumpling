@@ -4,10 +4,12 @@
   cmark-gfm（cmarkgfm 套件）：GitHub 實際使用的引擎（autolink、table、tagfilter 擴充）；
   markdown-it-py 的 commonmark、gfm-like＋linkify（嚴格：不開 fuzzy；寬鬆：預設，裸網域、email 都會連結，比 GitHub 更嚴）。
 檢查：沒有連結（含 email、mailto、xmpp）、圖片、非白名單標籤、斜體、HTML 註解，沒有 @ 提及，表格欄數不變，可見文字還是原文。
-缺套件時 skipTest：c2-x86-firmware.sh 設了 DUMPLING_REQUIRE_TEST_DATA=1，skip 會變成失敗（conftest.py），所以 CI 不會悄悄少跑。
+缺套件時 skipTest；c2-x86-firmware.sh 設了 DUMPLING_REQUIRE_TEST_DATA=1，這時缺套件直接失敗（不是 skip），所以 CI 不會悄悄少跑。
+檔案放在 tests/ 而不是 tools/：C1 的 c1-tools.sh 跑 `pytest tools`，那個環境沒有這些套件，放在 tools/ 會把這些測試算進它的 NOT_RUN。
 """
 import html
 import importlib.util
+import os
 import random
 import re
 import sys
@@ -15,9 +17,11 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
-sys.path.insert(0, str(HERE.parent))
-sys.path.insert(0, str(HERE))
+ROOT = HERE.parent
+CRA = ROOT / "tools" / "cra"
+sys.path.insert(0, str(CRA))                    # x86_firmware、nvidia_vbios_advisory
+sys.path.insert(0, str(CRA / "tests"))          # test_nvidia_vbios_advisory、test_x86_firmware（合成表與合成 ROM 的輔助函式）
+STRICT = os.environ.get("DUMPLING_REQUIRE_TEST_DATA", "").strip() not in ("", "0")
 
 
 def _load(name, rel):
@@ -94,7 +98,10 @@ class RenderCase(unittest.TestCase):
     def setUp(self):
         self.R = renderers()
         if self.R is None:
-            self.skipTest("沒有 markdown-it-py、linkify-it-py、cmarkgfm 或 PyYAML（見 tests/run.d/c2-requirements.txt）")
+            msg = "沒有 markdown-it-py、linkify-it-py、cmarkgfm 或 PyYAML（見 tests/run.d/c2-requirements.txt）"
+            if STRICT:                                    # DUMPLING_REQUIRE_TEST_DATA=1（c2-x86-firmware.sh）：缺套件不能靜默少跑
+                self.fail("DUMPLING_REQUIRE_TEST_DATA=1 不允許 skip：" + msg)
+            self.skipTest(msg)
 
     def check(self, text, want_visible=None, contexts=CONTEXTS, label=""):
         """text（已經過 md_safe）放進各種位置、用每個渲染器渲染：不能有問題；want_visible 去掉零寬空白後要出現在可見文字裡。"""

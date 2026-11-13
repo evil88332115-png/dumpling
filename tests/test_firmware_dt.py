@@ -1300,7 +1300,7 @@ class HardeningTests(ReportBase):
             t = fd.supplier_props_text(n, left)
             self.assertNotRegex(_re.sub(r"`[^`]*`", "", t), r"[*_<>\[\]]")                        # 行內程式碼以外沒有會被渲染的符號
             self.assertIn("`dumpling:normalized-*`", t)
-        # 渲染成 HTML 的檢查（不能有斜體、粗體，名稱在 <code> 裡）在 tools/cra/tests/test_c2_report_render.py
+        # 渲染成 HTML 的檢查（不能有斜體、粗體，名稱在 <code> 裡）在 tests/test_c2_report_render.py
 
     def test_stage_anomaly_notes_truncate_list_and_names(self):
         dups = {"S%02d" % i: 2 for i in range(25)}

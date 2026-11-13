@@ -1,4 +1,4 @@
-# C2 的整份報告渲染測試（tools/cra/tests/test_c2_report_render.py）專用的相依套件，全部固定版本。
+# C2 的整份報告渲染測試（tests/test_c2_report_render.py）專用的相依套件，全部固定版本。
 # 不放進 tools/cra/tests/requirements.txt（那個檔是其他工作包也在用的共用檔）；c2-x86-firmware.sh 在同一個 venv 裡另外安裝。
 # 版本選的是 PyPI 上發布超過兩週的正式版（發布日期取自 pypi.org 各版本的 upload_time，2026-11-14 查）：
 #   markdown-it-py 4.2.0（2026-05-07）：CommonMark／GFM 風格的渲染器；linkify 選項需要 linkify-it-py。

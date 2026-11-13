@@ -67,7 +67,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("1.https://evil.example/x", 200), "1.https\\://evil.example/x")
         self.assertEqual(ms.md_safe("a:b c:d"), "a:b c:d")                       # 沒有 // 的冒號不動
         self.assertEqual(ms.md_safe("pkg:generic/a@1.0"), "pkg:generic/a@1.0")
-        # 整份渲染（cmark-gfm、markdown-it）的檢查在 tools/cra/tests/test_c2_report_render.py（需要固定版本的渲染器套件）
+        # 整份渲染（cmark-gfm、markdown-it）的檢查在 tests/test_c2_report_render.py（需要固定版本的渲染器套件）
 
     def test_html_entities_do_not_decode(self):
         # &lt; &#64; &#x40; &commat; 渲染時會解碼成 < @ @ @，繞過後面的跳脫：& 一律換成 &amp;，渲染結果是字面的實體文字

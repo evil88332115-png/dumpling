@@ -50,4 +50,4 @@ export DUMPLING_REQUIRE_TEST_DATA=1
   "$root/tools/cra/tests/test_coreboot_cbfs.py" "$root/tools/cra/tests/test_ami_pfat.py" \
   "$root/tools/cra/tests/test_vbios_synthetic.py" "$root/tools/cra/tests/test_vbios_intel.py" \
   "$root/tools/cra/tests/test_uefi_gfx.py" "$root/tools/cra/tests/test_intel_cse_layout.py" "$root/tools/cra/tests/test_uefi_image_contract.py" \
-  "$root/tools/cra/tests/test_amd_psp.py" "$root/tools/cra/tests/test_supplier_sbom_schema.py" "$root/tools/cra/tests/test_fw_advisory.py" "$root/tools/cra/tests/test_nvidia_vbios_advisory.py" "$root/tools/cra/tests/test_c2_report_render.py"
+  "$root/tools/cra/tests/test_amd_psp.py" "$root/tools/cra/tests/test_supplier_sbom_schema.py" "$root/tools/cra/tests/test_fw_advisory.py" "$root/tools/cra/tests/test_nvidia_vbios_advisory.py" "$root/tests/test_c2_report_render.py"
