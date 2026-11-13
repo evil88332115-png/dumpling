@@ -1,0 +1,6 @@
+{
+  "_comment": "合成的 KEV 項目（演練用，不是 CISA 的真實資料）：把 requests 2.19.0 的 CVE-2018-18074 當成已遭利用。match.py --kev-overlay 只在 --mode drill 接受。",
+  "vulnerabilities": [
+    {"cveID": "CVE-2018-18074", "vendorProject": "Python Software Foundation", "product": "Requests", "dateAdded": "2026-11-13"}
+  ]
+}

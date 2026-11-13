@@ -532,8 +532,29 @@ def boot_items(kboot):
                  "（UEFI 開機模式可能改變）", "板子結果匯入後重新掃描（KERNEL_BOARD_OS_TXT）")]
 
 
-def kernel_items(krows, kstate, kcfg, status, kboot=None):
-    items = boot_items(kboot)
+def kernel_versions_items(kvers):
+    """scan/kernel-versions.json（sca-scan 的 --kernel-version）：映像出貨（或被指定）但沒有判定的核心。有 not_judged 才問；問的人是 RD。
+    C-kernel-config／C-kernel-module-map 的結論只對 judged 的核心成立，沒判定的核心不可以當作不受影響。"""
+    if not isinstance(kvers, dict) or kvers.get("schema") not in ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2"):
+        return []
+    nj = [x for x in kvers.get("not_judged") or [] if isinstance(x, dict) and isinstance(x.get("version"), str)]
+    if not nj:
+        return []
+    RD = "RD"
+    judged = [v for v in kvers.get("judged") or [] if isinstance(v, str)]
+    reasons = sorted({str(x.get("reason") or "") for x in nj} - {""})
+    return [item("作業系統核心", "kernel:not-judged",
+                 f"映像出貨的核心有 {len(kvers.get('shipped') or [])} 顆，{len(nj)} 顆沒有判定：{names(x['version'] for x in nj)}"
+                 + (f"（{'；'.join(reasons)}）" if reasons else ""),
+                 "核心設定比對（C-kernel-config）與模組對應（C-kernel-module-map）至少是 GAP；結論只對判定過的核心（"
+                 + (names(judged) if judged else "沒有") + "）成立，沒判定的核心上的漏洞不能用「程式沒有編進核心」排除", (RD,),
+                 "沒判定的核心是不是出貨給使用者、板子會不會載入它？要排除它的證據在哪裡？",
+                 "要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」）；或用 --kernel-version 指定要判定的核心（一次指定一顆；多顆逐一判定還沒實作）",
+                 "記錄證據或指定核心後重新掃描")]
+
+
+def kernel_items(krows, kstate, kcfg, status, kboot=None, kvers=None):
+    items = boot_items(kboot) + kernel_versions_items(kvers)
     st = status or {}
     if kstate == "not_assessed":
         why = "；".join(f"{k} {st[k][0]}" for k in ("C-kernel-l4t-map", "C-kernel-coverage") if k in st and st[k][0] != "OK")
@@ -700,7 +721,7 @@ def missing_items(have_findings, risk_st, risk_reasons, bom_st, sec, need_db, db
 
 def build(rows=(), sec=None, pkgs=(), krows=(), kstate=None, kcfg=None, kboot=None, status=None, expl=False, svc_info=None, missing_fields=(),
           cfg=None, role="manufacturer", have_findings=True, risk_st="OK", risk_reasons=(), bom_st="OK", pkgdb=None, human=HUMAN_DEFAULT,
-          schema=None, db=None, bom_reasons=(), author_missing=author_missing_default, no_vuln=None):
+          schema=None, db=None, bom_reasons=(), author_missing=author_missing_default, no_vuln=None, kvers=None):
     """已有的資料 → 事項清單（排好序、編好號）。pkgdb：pkg_why.py extract 的資料夾（或 None）；db：已經讀好的 load_pkgdb(pkgdb) 結果
     （(PkgDB 或 None, 原因)；給了就不再讀 pkgdb）。no_vuln：no_vuln_data.classify 的結果（或 None：不列這一類）。"""
     db, db_why = db if db is not None else load_pkgdb(pkgdb)
@@ -711,7 +732,7 @@ def build(rows=(), sec=None, pkgs=(), krows=(), kstate=None, kcfg=None, kboot=No
         "沒有漏洞資料的套件": novuln_items(no_vuln) if bom_st != "NOT_ASSESSED" else [],
         "安全測試": security_items(sec),
         "開發工具": dev_items(list(pkgs), list(rows)) if bom_st != "NOT_ASSESSED" else [],
-        "作業系統核心": kernel_items(list(krows), kstate, kcfg, status, kboot),
+        "作業系統核心": kernel_items(list(krows), kstate, kcfg, status, kboot, kvers),
         "對外服務清單": services_items(expl, svc_info),
         "公司與產品資料": company_items(missing_fields, schema or {}, role),
         "出貨紀錄": shipping_items(cfg, role),

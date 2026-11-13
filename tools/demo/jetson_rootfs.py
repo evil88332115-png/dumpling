@@ -1,7 +1,7 @@
 """Jetson Linux 範例根檔案系統＋BSP 的 NVIDIA 套件 → 兩個可以 docker import 的 tar（基礎版、模擬客製版）。
 
 用法：python3 -I jetson_rootfs.py --bsp <Jetson_Linux_*.tbz2> --rootfs <Tegra_Linux_Sample-Root-Filesystem_*.tbz2>
-        --work <暫存資料夾> --out-base <base.tar> --out-custom <custom.tar> --report <prep.json>
+        --work <暫存資料夾> --out-base <base.tar> [--out-custom <custom.tar>] --report <prep.json>
 
 取代 apply_binaries.sh 的「把 nv_tegra/l4t_deb_packages、kernel 底下的 .deb 裝進 rootfs」這一步，但**不執行任何套件內容**：
 - 下載的檔案都是不可信資料。這裡只讀 tar 與 deb（ar）的結構，不解開到主機的檔案系統，不跑 preinst／postinst，不 chroot。
@@ -288,6 +288,16 @@ def acme_overlay():
     return files, para
 
 
+class _NullTar:
+    """沒有 --out-custom 時的替身：吃掉所有寫入。"""
+
+    def addfile(self, *a, **k):
+        return None
+
+    def close(self):
+        return None
+
+
 def build(args):
     report = {"inputs": {}, "deb_rejected": [], "deb_skipped_arch": [], "deb_errors": [], "debs": [],
               "skipped_members": [], "conflicts_between_debs": 0, "conflicts": []}
@@ -303,6 +313,8 @@ def build(args):
         shutil.rmtree(work, ignore_errors=True)   # deb 解開的 data.tar（實機數 GB）
         if not ok:
             for f in (args.out_base, args.out_custom):
+                if not f:
+                    continue
                 try:
                     os.remove(f)
                 except OSError:
@@ -353,7 +365,7 @@ def _build(args, report, work):
 
     acme_files, acme_para = acme_overlay()
     base_out = tarfile.open(args.out_base, "w", format=tarfile.PAX_FORMAT)
-    cust_out = tarfile.open(args.out_custom, "w", format=tarfile.PAX_FORMAT)
+    cust_out = tarfile.open(args.out_custom, "w", format=tarfile.PAX_FORMAT) if args.out_custom else _NullTar()
     both = (base_out, cust_out)
     seen, status_text, links = set(), None, {}
     n_base = n_over = n_info = 0
@@ -476,7 +488,7 @@ def _build(args, report, work):
                         "custom_added": [f"{ACME_PKG} {ACME_VER}"]},
         "custom_extra": {"python": f"{ACME_PY[0]} {ACME_PY[1]}", "files": sorted(acme_files)},
         "outputs": {"base": {"file": os.path.basename(args.out_base), "sha256": sha256(args.out_base)},
-                    "custom": {"file": os.path.basename(args.out_custom), "sha256": sha256(args.out_custom)}},
+                    **({"custom": {"file": os.path.basename(args.out_custom), "sha256": sha256(args.out_custom)}} if args.out_custom else {})},
     })
     for k in ("deb_rejected", "skipped_members", "conflicts"):
         report[k + "_count"] = len(report[k])
@@ -489,8 +501,9 @@ def _build(args, report, work):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    for k in ("--bsp", "--rootfs", "--work", "--out-base", "--out-custom", "--report"):
+    for k in ("--bsp", "--rootfs", "--work", "--out-base", "--report"):
         ap.add_argument(k, required=True)
+    ap.add_argument("--out-custom", default=None, help="模擬客製版的 tar；不給就不產生（dumpling 的 Jetson 轉接器只要基礎版）")
     args = ap.parse_args(argv)
     build(args)
 

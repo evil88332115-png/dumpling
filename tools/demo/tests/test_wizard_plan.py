@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -62,6 +63,19 @@ def test_plan_only(site):
     assert plan["config"] is None and plan["build_record"] is None and plan["oot"] == []
     assert "沒有 .md5 檔" in r.stdout          # 使用者可見訊息維持中文
     assert not (dirs[0] / "scan").exists()      # --plan-only 不掃描
+
+
+def test_no_source_is_gap_not_cwd(site):
+    # 沒給 --source：不去目前資料夾找（即使那裡剛好有原始碼壓縮檔），核心原始碼標 GAP，其他照跑
+    tmp, flash, src, out, cfg, stable = site
+    shutil.copy(src / "widget_source.tar.gz", tmp / "widget_source.tar.gz")
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp), **{k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ}}
+    r = subprocess.run([sys.executable, "-I", WIZ, "--site-config", str(cfg), "--archive", str(flash), "--generic-rules", "no", "--yes",
+                        "--plan-only"], capture_output=True, text=True, env=env, cwd=str(tmp))
+    assert r.returncode == 0, r.stdout + r.stderr
+    plan = json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))
+    assert plan["source_archive"] is None and plan["kernel_source"] is None and plan["kernel_version"] is None
+    assert "沒有指定原始碼" in plan["source_note"] and "沒有指定原始碼" in r.stdout
 
 
 def test_env_var_config_and_no_stable(site):
@@ -588,3 +602,16 @@ def test_tools_rev_option_and_env_are_wired():
     assert '"--tools-rev"' in s and 'os.environ.get("DUMPLING_TOOLS_REV")' in s and 'or "HEAD")' in s
     body = s.split("== 1. 取工具 ==", 1)[1].split("== 2. 產品設定 ==", 1)[0]
     assert "tools-version.json" in body and 'rev-parse", "origin/main"' not in s
+
+
+def test_platform_is_explicit_and_never_guessed(site):
+    tmp, flash, src, out, cfg, stable = site
+    base = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--role", "both",
+            "--generic-rules", "no", "--yes", "--plan-only"]
+    r = run(base)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] is None
+    shutil.rmtree(out)      # 輸出資料夾名稱到分鐘，同一分鐘內重跑會被拒絕
+    r = run(base + ["--platform", "rockchip"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] == "rockchip"

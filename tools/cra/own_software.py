@@ -5,12 +5,22 @@
   python3 -I own_software.py --from <rootfs tar｜刷機包 tbz2｜rootfs 資料夾> [--prefix <rootfs 在刷機包裡的路徑>]
                              --config <產品的 config.json> --out <資料夾> [--max-file-size <bytes>]
   python3 -I own_software.py --config <config.json> --configured     （有設定 sbom.own_software → exit 0，沒有 → exit 1）
+  python3 -I own_software.py [--config <config.json>] --declaration --out <資料夾>
+                             （設定沒有列自有軟體時：宣告的結果寫成 own-software.json，印 B-own-software 那一行；見下面「沒有列自有軟體」）
 
 寫出 --out/own-software.json，stdout 第一行 `B-own-software<TAB>狀態<TAB>說明`：
 OK（每個樣式都對到檔案、都算了雜湊）；GAP（有樣式對不到檔案、符號連結被拒絕、超過大小上限、讀不到）；FAIL（來源讀取失敗）；
 SKIP（設定沒有 sbom.own_software：什麼都不寫）。之後每個 GAP 一行 `GAP<TAB>樣式或路徑<TAB>原因`，
 版本未知的檔案一行 `INFO<TAB>路徑<TAB>版本未知…`（最多 LIST_MAX 行）。退出碼：OK／SKIP 0、GAP 2、FAIL 1、參數錯誤 64。
 cra_report.py 讀 <scan>/../own-software/own-software.json（或 --own-software），用當時的設定（名稱、版本、製造商）建元件。
+
+沒有列自有軟體（sbom.own_software 沒寫或是空陣列）：檢查不可以悄悄消失（scan-flash-package.sh 用 --declaration 寫狀態列）。
+- 沒有宣告（沒寫、空陣列但沒有理由、或根本沒有產品設定）→ GAP「沒有宣告自有軟體，無法確認產品自有元件是否都在 SBOM」。
+- 明確宣告沒有：`"own_software": []` 加上 `"own_software_none_reason": "<理由>"` → OK，說明寫「製造商宣告沒有自有軟體：<理由>」
+  （是宣告，掃描沒有驗證；理由會出現在 sbom.md）。
+- 列了自有軟體又寫 own_software_none_reason → 設定矛盾，GAP（設定錯誤）。
+--declaration 寫的 own-software.json 只有 declaration 與 status（沒有 patterns／files）；cra_report.py 讀到它才在 SBOM 文件標出來，
+沒有這個檔案的流程（例如只跑 cra_report.py）輸出照舊。
 
 設定（config.schema.json 的 sbom.own_software）：字串或 {"path": …, "name": …, "version": …} 的陣列。
 - path：rootfs 裡的路徑（開頭的 / 可寫可不寫），每一層可用 fnmatch 萬用字元（* ? [..]；不跨 /、不對到 . 開頭的名稱；不支援 **）。
@@ -97,6 +107,45 @@ def configured(cfg):
     return isinstance(v, list) and len(v) > 0
 
 
+NONE_REASON_KEY = "own_software_none_reason"
+NONE_REASON_MAX = 500
+UNDECLARED = ("no own software declared (configuration sbom.own_software): it cannot be confirmed that all of the manufacturer's "
+              "own components are in the SBOM; list them, or declare that there are none with sbom.own_software = [] and "
+              "sbom.own_software_none_reason")
+
+
+def declaration(cfg):
+    """設定對自有軟體的宣告 → (kind, 說明)。kind：listed（有列）、none（明確宣告沒有，說明＝理由）、undeclared（沒宣告）、
+    conflict（列了又寫沒有的理由）。cfg 是 None（沒有產品設定）→ undeclared。"""
+    sb = cfg.get("sbom") if isinstance(cfg, dict) else None
+    sb = sb if isinstance(sb, dict) else {}
+    v, why = sb.get("own_software"), sb.get(NONE_REASON_KEY)
+    has_why = isinstance(why, str) and why.strip() != ""
+    if isinstance(v, list) and v:
+        return ("conflict", f"sbom.own_software lists entries but sbom.{NONE_REASON_KEY} is also set: the configuration contradicts itself") \
+            if has_why else ("listed", None)
+    if isinstance(v, list) and has_why:
+        w = " ".join(why.split())
+        if len(w) > NONE_REASON_MAX or any(ord(c) < 32 or ord(c) == 127 for c in w):
+            return "undeclared", f"sbom.{NONE_REASON_KEY} is too long or has control characters: " + UNDECLARED
+        return "none", w
+    if v is not None and not isinstance(v, list):
+        return "undeclared", "sbom.own_software is not a list: " + UNDECLARED
+    return "undeclared", (UNDECLARED if cfg is not None else "no product configuration: " + UNDECLARED)
+
+
+def declaration_info(cfg, doc_name="own-software.json"):
+    """沒有列自有軟體時給 cra_report.py 的 info（和 build() 的 info 同樣的鍵，text() 也能用）。"""
+    kind, why = declaration(cfg)
+    mf = (cfg.get("manufacturer") or {}) if isinstance(cfg, dict) else {}
+    info = {"status": "OK" if kind == "none" else "GAP", "file": doc_name, "supplier": mf.get("name") if isinstance(mf, dict) else None,
+            "config_errors": [], "patterns": [], "components": 0, "merged_with_flash_modules": [], "unmerged_flash_modules": [],
+            "version_unknown": 0, "gaps": [] if kind == "none" else [why], "files": [], "declaration": kind}
+    if kind == "none":
+        info["none_reason"] = why
+    return info
+
+
 def norm_pattern(p):
     """設定的路徑 → (正規化的樣式, 錯誤)。開頭的 / 拿掉；空的層與 . 拿掉；.. 、** 、控制字元、過長 → 錯誤。"""
     if not isinstance(p, str) or not p.strip():
@@ -141,6 +190,8 @@ def entries(cfg):
             continue
         seen[pat] = len(out)
         out.append(e)
+    if declaration(cfg)[0] == "conflict":              # 列了又寫沒有的理由：run()（狀態列）與 build()（SBOM 文件）都當設定錯誤
+        errs.append(declaration(cfg)[1])
     return out, errs
 
 
@@ -885,7 +936,15 @@ def build(doc, cfg, spec, flash_comps=None, flash_prefix=None, doc_name="own-sof
 
 
 def text(info, table):
-    """sbom.md 第 6 節後面的一小節（只在設定 sbom.own_software 時出現）。"""
+    """sbom.md 第 6 節後面的一小節（設定 sbom.own_software 時，或 --declaration 寫了宣告的結果時）。"""
+    if info.get("declaration") == "none":
+        return "\n".join(["### Manufacturer's own software (configuration `sbom.own_software`)", "",
+                          f"**Status: OK** (declaration). The manufacturer declares that the product has no own software "
+                          f"(configuration `sbom.own_software` = [], `sbom.{NONE_REASON_KEY}`): {info.get('none_reason')}. "
+                          "This is the manufacturer's statement; the scan did not verify it."])
+    if info.get("declaration") == "undeclared":
+        return "\n".join(["### Manufacturer's own software (configuration `sbom.own_software`)", "",
+                          "**Status: GAP**. " + (info["gaps"][0] if info.get("gaps") else UNDECLARED) + "."])
     out = ["### Manufacturer's own software (configuration `sbom.own_software`)", "",
            f"**Status: {info['status']}**. Files listed in the product configuration were hashed in the root file system "
            f"(`{info.get('file')}`, made by `own_software.py`"
@@ -995,11 +1054,39 @@ def main(argv=None):
     ap.add_argument("--version", action="version", version=f"{SCHEMA} {TOOL_VERSION}")
     ap.add_argument("--from", dest="from_")
     ap.add_argument("--prefix")
-    ap.add_argument("--config", required=True)
+    ap.add_argument("--config", help="產品的 config.json（--declaration 以外必填）")
     ap.add_argument("--out")
     ap.add_argument("--max-file-size", type=int, default=FILE_MAX, help=f"單檔上限（bytes，預設 {FILE_MAX}）")
     ap.add_argument("--configured", action="store_true", help="只看設定有沒有 sbom.own_software（有 → 0，沒有 → 1）")
+    ap.add_argument("--declaration", action="store_true",
+                    help="設定沒有列自有軟體時：把宣告的結果寫成 --out/own-software.json，印 B-own-software 那一行（OK 0、GAP 2）；有列 → 參數錯誤")
     a = ap.parse_args(argv)
+    if a.declaration:
+        if not a.out:
+            ap.error("--declaration 需要 --out")
+        try:
+            cfg = read_config(a.config) if a.config else None
+        except Fail as e:
+            print(f"B-own-software\tFAIL\t{e}")
+            return 1
+        kind, why = declaration(cfg)
+        if kind in ("listed", "conflict"):
+            ap.error("設定有列 sbom.own_software：用 --from 執行，不是 --declaration")
+        st = "OK" if kind == "none" else "GAP"
+        os.makedirs(a.out, exist_ok=True)
+        tmp = os.path.join(a.out, ".own-software.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"schema": SCHEMA, "tool_version": TOOL_VERSION, "status": st, "declaration": {"kind": kind, "detail": why}},
+                      f, ensure_ascii=False, indent=1, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, os.path.join(a.out, "own-software.json"))
+        msg = (f"製造商宣告沒有自有軟體：{why}（是宣告，掃描沒有驗證）" if kind == "none" else
+               ("沒有產品設定：" if cfg is None else "") + "沒有宣告自有軟體（sbom.own_software），無法確認產品自有元件是否都在 SBOM；"
+               f"沒有自有軟體時寫 sbom.own_software: [] 與 sbom.{NONE_REASON_KEY}")
+        print(f"B-own-software\t{st}\t{msg[:480]}")
+        return 0 if st == "OK" else 2
+    if not a.config:
+        ap.error("需要 --config（只有 --declaration 可以不給：沒有產品設定）")
     if a.configured:
         try:
             return 0 if configured(read_config(a.config)) else 1

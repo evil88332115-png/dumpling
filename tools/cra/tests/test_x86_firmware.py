@@ -1215,14 +1215,15 @@ def test_amd_platform_is_a_gap_not_no_microcode(tmp_path):
     b = xf.bios_image(bytes(img))
     assert b is not None and b["platform"] == "amd" and b["microcode"] == []
     assert b["amd_markers"] == ["AMD embedded firmware structure at 0x20000", "AMD $PSP directory at 0x20800"]
-    assert any("AMD microcode" in x and "not 'no microcode'" in x for x in b["gaps"])
+    assert any("no microcode patch was read" in x and "not 'no microcode'" in x for x in b["gaps"])
+    assert any("no usable PSP/BIOS directory" in x for x in b["gaps"])        # EFS 指標都是 0：沒有目錄可解（詳細見 test_amd_psp.py）
     p = tmp_path / "amd.bin"
     p.write_bytes(bytes(img))
     inv = xf.inventory([p])
     st, detail = xf.status_of(inv)
-    assert st == "ATTENTION" and "AMD microcode 不支援（GAP" in detail
+    assert st == "ATTENTION" and "AMD 平台（0 directories" in detail and "GAP" in detail
     md = xf.markdown(inv)
-    assert "AMD microcode 不支援（GAP）" in md and "不代表沒有 microcode" in md
+    assert "沒有讀到（GAP，不是沒有微碼）" in md and "AMD PSP／BIOS 目錄" in md
     assert xf.amd_markers(b"\xff" * 0x100 + b"$BHD" + struct.pack("<III", 0, 0, 0)) == []
 
 
@@ -1514,7 +1515,7 @@ def test_amd_bios_with_a_pxe_rom_is_still_a_bios(tmp_path):
     inv = xf.inventory([tmp_path / "amd.bin"])
     assert [(b["platform"], b["evidence"]) for b in inv["bios"]] == [("amd", ["amd"])]
     st, detail = xf.status_of(inv)
-    assert st == "ATTENTION" and "AMD microcode 不支援" in detail
+    assert st == "ATTENTION" and "AMD 平台（" in detail
 
 
 # ---------- 補充：CSME 12 型的單獨 ME 映像、$FPT 上限、_FVH 上限保留紀錄 ----------
