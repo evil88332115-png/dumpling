@@ -70,7 +70,8 @@ def test_untagged_sbom_changes_nothing(tmp_path):
     assert all("layer" not in x for x in rows_of(rep1)["rows"])
     ra = rep1.joinpath("risk-assessment.md").read_text(encoding="utf-8")
     assert "Layers (BSP" not in ra and "| Layer |" not in ra and "text.layer_section" not in ra and "{{" not in ra
-    norm = lambda t: re.sub(r"\d{4}-\d\d-\d\dT[\d:]+Z", "T", t)                       # noqa: E731
+    # 時間與 VEX 檔的 SHA-256 不比：沒有掃描時間的情境 VEX 用現在時間（vex_export.doc_timestamp），跨秒時 SHA 就不同
+    norm = lambda t: re.sub(r"SHA-256 [0-9a-f]{12,64}", "SHA-256 H", re.sub(r"\d{4}-\d\d-\d\dT[\d:]+Z", "T", t))   # noqa: E731
     assert norm(ra) == norm(rep2.joinpath("risk-assessment.md").read_text(encoding="utf-8"))
     assert s1["status"] == s2["status"] and s1["counts"] == s2["counts"]
     assert not any("text.layer_section" in w for w in s1["config_warnings"])
