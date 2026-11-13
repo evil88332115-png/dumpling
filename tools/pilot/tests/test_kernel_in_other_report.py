@@ -43,7 +43,7 @@ KC_BLOCK = block("KNONE=0 ", "# NVIDIA 安全公告")
 K_BLOCK = tkv.block_text()
 
 
-def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=()):
+def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=(), kbuild=True):
     root = tmp_path / "root"
     lib = root / "tools" / "pilot" / "lib"
     lib.mkdir(parents=True)
@@ -66,7 +66,7 @@ def layer_run(tmp_path, sbom, members, kother="", knotdistro="", kvers=()):
     script = f"""set -uo pipefail
 ROOT={root}; OUT={out}; ST=$OUT/status.tsv; printf 'stage\\tstatus\\tdetail\\n' > "$ST"
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
-MODE=sbom; SBOM_OK=1; SBOM=$OUT/sbom/sbom.cdx.json; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=/nonexistent-mirror; KERNEL_CVES=
+MODE=sbom; SBOM_OK=1; SBOM=$OUT/sbom/sbom.cdx.json; KBUILD={src if kbuild else "''"}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=/nonexistent-mirror; KERNEL_CVES=
 SCA_KERNEL_VERSIONS=; KOTHER={kother!r}; KNOTDISTRO={knotdistro!r}
 declare -A META=()
 unset KERNEL_SOURCE_DIR
@@ -147,6 +147,19 @@ def test_not_distro_declaration_reaches_kernelcheck(tmp_path):
     (tmp_path / "n").mkdir()
     rows, _, _, _ = layer_run(tmp_path / "n", NO_KERNEL_SBOM, tkc.rootfs_members(kver=A), knotdistro="x", kother=OTHER)
     assert "C-kernel-coverage" not in rows and rows["C-kernel-config"][0] == "NOT_RUN"
+
+
+def test_sbom_without_kernel_build_writes_not_run_only_when_the_sbom_has_a_kernel(tmp_path):
+    """--sbom 沒給 --kernel-build：SBOM 有核心 → C-kernel-config／module-map NOT_RUN（cra_report 算 GAP）；
+    SBOM 看不到核心 → 不寫（沒有核心的產品不該永遠 GAP；同 C-kernel-coverage 不寫）。"""
+    (tmp_path / "k").mkdir()
+    rows, _, log, out = layer_run(tmp_path / "k", KERNEL_SBOM, tkc.rootfs_members(kver=A), kbuild=False)
+    assert rows["C-kernel-config"] == ("NOT_RUN", "沒給 --kernel-build：核心的 CVE 沒有依產品核心的 .config 判定"), rows
+    assert rows["C-kernel-module-map"][0] == "NOT_RUN" and log == ""
+    (tmp_path / "n").mkdir()
+    rows, _, log, out = layer_run(tmp_path / "n", NO_KERNEL_SBOM, tkc.rootfs_members(kver=A), kbuild=False)
+    assert not any(k.startswith("C-kernel") for k in rows), rows
+    assert log == "" and (out / "meta-kother.txt").read_text() == ""
 
 
 # ---------- 參數 ----------

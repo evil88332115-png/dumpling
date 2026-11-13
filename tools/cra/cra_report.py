@@ -152,6 +152,7 @@ FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-f
 KERNEL_STAGES = ["C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map", "C-kernel-versions", "C-kernel-cve-mirror"]
 KERNEL_STAGE_PREFIX = "C-kernel-not-judged-"
 KERNEL_OTHER_REPORT_NA = ("C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map")
+REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")      # sca-scan --kernel-in-other-report 收的報告名稱
 
 
 # 刷機包層（scan-flash-package.sh 的 <結果>/status.tsv；cra_report 平常只讀 <rootfs>/scan/status.tsv）會影響弱點清單完整性的列。
@@ -162,6 +163,7 @@ KERNEL_OTHER_REPORT_NA = ("C-kernel-cve-list", "C-kernel-config", "C-kernel-modu
 # 值＝這一列是不是 BSP 專屬（分層的 -os 報告不適用，同 bsp_na）。
 FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False}
 FLASH_PRODUCT_STAGES = {"B-uefi-binary": True}
+FLASH_STATUS_MISSING = "flash-package status.tsv"
 
 
 def flash_stage_status(scan):
@@ -175,8 +177,8 @@ def flash_stage_status(scan):
         st = read_status(res / "status.tsv") if (res / "status.tsv").is_file() else None
     except (OSError, UnicodeDecodeError):
         st = None
-    if not st:
-        return {}
+    if st is None:  # 確定是刷機包的掃描（有 list.json）卻沒有或讀不到刷機包層的 status.tsv：那三列有沒有問題不知道 → GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/status.tsv of the flash package scan is missing or not readable", False)}
     v = scan.parent.name
     out = {f"{k}-{v}": st[f"{k}-{v}"] + (bsp,) for k, bsp in FLASH_ROOTFS_STAGES.items() if f"{k}-{v}" in st}
     out.update({k: st[k] + (bsp,) for k, bsp in FLASH_PRODUCT_STAGES.items() if k in st})
@@ -196,8 +198,9 @@ def kernel_stage_level(k, st, meta):
     """核心判定階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
     if st == "OK":
         return None
-    if st == "NOT_RUN" and k in KERNEL_OTHER_REPORT_NA and (meta or {}).get("kernel_in_other_report"):
-        return None                       # D-044：核心在另一份報告判定（sca-scan 在 meta.json 記的）
+    other = (meta or {}).get("kernel_in_other_report")
+    if st == "NOT_RUN" and k in KERNEL_OTHER_REPORT_NA and isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
+        return None                       # D-044：核心在另一份報告判定（sca-scan 在 meta.json 記的；格式同 sca-scan 收的報告名稱）
     return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 

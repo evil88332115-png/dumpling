@@ -168,3 +168,24 @@ def test_os_layer_report_skips_bsp_only_flash_rows(tmp_path):
     detail = _risk(s)[1]
     assert not any(x.startswith(("B-initrd-coverage", "B-uefi-binary")) for x in detail)
     assert "B-rootfs-tar-rootfs_no_gui is ATTENTION (flash package scan)" in detail
+
+
+@pytest.mark.parametrize("marker", [True, 1, "", "-x", "a;b", "x" * 101, ["demo-bsp"]])
+def test_meta_marker_must_be_a_report_name(tmp_path, marker):
+    """kernel_in_other_report 要是 sca-scan 收的報告名稱格式的字串；true、1、空字串、格式不對都不算（照樣 GAP）。"""
+    st, detail = _risk(_report(tmp_path, NA3, meta=dict(META, kernel_in_other_report=marker))[1])
+    assert sum("not fully assessed" in x for x in detail) == 3
+
+
+def test_flash_scan_without_flash_status_tsv_is_gap(tmp_path):
+    """有 list.json（確定是刷機包的掃描）卻沒有刷機包層的 status.tsv：那幾列有沒有問題不知道 → GAP，不靜默略過。"""
+    base = _risk(_flash_report(tmp_path / "b", {})[0])[0]
+    from test_cra_report import SBOM
+    res = tmp_path / "a" / "res"
+    findings = [f for f in FINDINGS if not f["vulnerability"].get("isKev") and (f["vulnerability"].get("epssPercentile") or 0) < 0.9]
+    scan = make_scan(res / "rootfs_no_gui" / "scan", findings=findings, sbom=SBOM)
+    (res / "list.json").write_text(json.dumps({"rootfs": [{"variant": "rootfs_no_gui"}]}), encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "a" / "p", json.loads(json.dumps(EXAMPLE))), scan)
+    st, detail = _risk(s)
+    assert any(x.startswith("flash-package status.tsv is GAP (flash package scan)") for x in detail), detail
+    assert st == cr.worst([base, "GAP"])
