@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "project": "drill-demo",
+  "version": "v1.0.0",
+  "tag": "drill-demo/v1.0.0",
+  "status": "shipped",
+  "platform": "jetson",
+  "os_responsibility": "customer",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "built_at": "2026-11-01T00:00:00Z",
+  "workflow_run": "1000000001",
+  "steps": [
+    {
+      "name": "build",
+      "result": "OK"
+    },
+    {
+      "name": "sbom",
+      "result": "OK"
+    }
+  ],
+  "result": "OK"
+}

@@ -345,6 +345,68 @@ def test_no_rootfs_is_gap_not_failure(tmp_path):
             pass
 
 
+def multi_fat_disk(tmp_path, fats, name="multi.img"):
+    """多個 FAT 分割區的 MBR 映像（沒有 rootfs）：fats = [(MBR 類型, 檔案樹)]。"""
+    blobs = [(typ, fat_image(tree, 16)) for typ, tree in fats]
+    parts, start = [], 2048
+    for typ, b in blobs:
+        parts.append((typ, start, len(b) // 512))
+        start += len(b) // 512 + 64
+    img = bytearray(start * 512)
+    img[0:512] = mbr(parts)
+    for (typ, st, _sec), (_t, b) in zip(parts, blobs):
+        img[st * 512:st * 512 + len(b)] = b
+    p = tmp_path / name
+    p.write_bytes(img)
+    return p
+
+
+RADXA_CONFIG = {"config.txt": b"# rsetup\n", "before.txt": b"x\n"}            # 合成：只有設定檔的小 FAT
+RADXA_ESP = {"extlinux": {"extlinux.conf": b"label l\n"}, "vmlinuz-6.1.0": b"K" * 900, "initrd.img-6.1.0": b"I" * 300}
+
+
+def boot_of(path):
+    img = rp.RpiImage(str(path))
+    try:
+        b = img.boot()
+        return (b["index"] if b else None), img.boot_why, img.table()
+    finally:
+        img.close()
+
+
+def test_boot_picked_by_content_not_order(tmp_path):
+    # Radxa 形狀：第一個 FAT 只有 config.txt，核心與 extlinux 在第二個（EFI system）
+    idx, why, t = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_CONFIG), (0xEF, RADXA_ESP)]))
+    assert idx == 2 and why is None and t["boot_partition"] == 2, t
+    assert t["partitions"][1]["boot_signs"] == ["extlinux/", "vmlinuz-6.1.0"] and t["partitions"][0]["boot_signs"] == []
+    # 順序對調、ESP 改成一般 FAT 類型：仍依內容選
+    idx, why, _ = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_ESP), (0x0C, RADXA_CONFIG)], "swap.img"))
+    assert idx == 1 and why is None
+
+
+def test_boot_rpi_firmware_and_boot_subdir(tmp_path):
+    idx, _, _ = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_CONFIG), (0x0C, {"start4.elf": b"S" * 10})]))
+    assert idx == 2
+    idx, _, t = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_CONFIG), (0x0C, {"boot": {"Image": b"K" * 10}})], "sub.img"))
+    assert idx == 2 and t["partitions"][1]["boot_signs"] == ["boot/Image"]
+
+
+def test_boot_ambiguous_is_not_guessed(tmp_path):
+    idx, why, t = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_ESP), (0x0C, RADXA_ESP)]))
+    assert idx is None and "not guessing" in why and t["boot_partition"] is None and t["boot_why"] == why
+    # 兩個都有開機檔，恰好一個是 EFI system → 選它
+    idx, why, _ = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_ESP), (0xEF, RADXA_ESP)], "esp.img"))
+    assert idx == 2 and why is None
+    # 兩個都沒有開機檔、沒有 ESP → 不猜
+    idx, why, _ = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_CONFIG), (0x0C, RADXA_CONFIG)], "none.img"))
+    assert idx is None and "none has boot files" in why
+
+
+def test_single_fat_without_boot_files_still_used(tmp_path):
+    idx, why, _ = boot_of(multi_fat_disk(tmp_path, [(0x0C, RADXA_CONFIG)]))
+    assert idx == 1 and why is None
+
+
 # ---------- 涵蓋說明 ----------
 def test_rpi_coverage_classes():
     inv = {"bootloader": [{"type": "file", "path": f"bootloader/{n}", "sha256": "a"} for n in

@@ -126,7 +126,8 @@ class Evidence:
                 for pkg in owners.get(p, ()):
                     self.used.setdefault(pkg, []).append(p)
         self.kres = {}
-        if isinstance(kcfg, dict) and kcfg.get("schema") == "sca-center-kernel-config/1":
+        # scope_incomplete（映像另有出貨但沒判定的核心）：kernel-config 的「沒編進核心」不能代表整個產品 → 不採用，這一列照「沒有結果」處理
+        if isinstance(kcfg, dict) and kcfg.get("schema") == "sca-center-kernel-config/1" and not kcfg.get("scope_incomplete"):
             for x in kcfg.get("results") or []:
                 if isinstance(x, dict) and isinstance(x.get("cve"), str):
                     self.kres[x["cve"].upper()] = x
