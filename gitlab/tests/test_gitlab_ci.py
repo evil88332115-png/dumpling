@@ -231,7 +231,7 @@ class ReleasePayload(unittest.TestCase):
 
 
 class SchemaValidatorScript(unittest.TestCase):
-    """validate_schema.py 本身（用很小的假 schema，不需要官方檔案）。需要 jsonschema，沒有就 skip。"""
+    """validate_schema.py 本身（用很小的假 schema，不需要官方檔案）。系統 python 沒有 jsonschema 就 skip（真正的驗證在 c3-gitlab-schema.sh 的 venv 裡跑）。"""
 
     def test_detects_violation(self):
         try:
@@ -242,12 +242,43 @@ class SchemaValidatorScript(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             sch = Path(d) / "s.json"
             sch.write_text(json.dumps({"$schema": "http://json-schema.org/draft-07/schema#", "type": "object", "required": ["stages"], "properties": {"stages": {"type": "array"}}}))
-            good, bad = Path(d) / "g.yml", Path(d) / "b.yml"
-            good.write_text("stages: [a]\n")
-            bad.write_text("stages: nope\n")
+            good, bad = Path(d) / "g.json", Path(d) / "b.json"
+            good.write_text('{"stages": ["a"]}')
+            bad.write_text('{"stages": "nope"}')
             script = str(HERE / "validate_schema.py")
             self.assertEqual(subprocess.run([sys.executable, "-I", script, str(sch), str(good)], capture_output=True).returncode, 0)
             self.assertEqual(subprocess.run([sys.executable, "-I", script, str(sch), str(bad)], capture_output=True).returncode, 1)
+
+
+class SchemaData(unittest.TestCase):
+    """repo 裡的 schema 資料夾：檔案齊全、sha256 與 SOURCE.md 一致、授權文件有兩種授權。"""
+    D = HERE / "data" / "gitlab-ci-schema"
+    SHA = "1c6eeb7d3a34c39996afbfe1ade220480eb05bbeae674e86d3c745dfeeded7fd"
+    COMMIT = "28aa2bf90771a11ecc2f86525bc8a70a49c4d810"
+
+    def test_files_and_hash(self):
+        import hashlib
+        for f in ("ci.json", "NOTICE", "LICENSE.md", "SOURCE.md"):
+            self.assertTrue((self.D / f).is_file(), f)
+        self.assertEqual(hashlib.sha256((self.D / "ci.json").read_bytes()).hexdigest(), self.SHA)
+        src = (self.D / "SOURCE.md").read_text(encoding="utf-8")
+        self.assertIn(self.SHA, src)
+        self.assertIn(self.COMMIT, src)
+        self.assertIn("app/assets/javascripts/editor/schema/ci.json", src)
+        for needle in ("MIT Expat", "Apache-2.0", "未證實"):
+            self.assertIn(needle, src)
+
+    def test_license_md_has_both(self):
+        t = (self.D / "LICENSE.md").read_text(encoding="utf-8")
+        for needle in ("Copyright (c) 2011-present GitLab Inc.", "Permission is hereby granted, free of charge",
+                       "Mads Kristensen", "https://www.apache.org/licenses/LICENSE-2.0"):
+            self.assertIn(needle, t)
+        self.assertIn("Mads Kristensen", (self.D / "NOTICE").read_text(encoding="utf-8"))
+
+    def test_pins_agree(self):
+        root = HERE.parent.parent
+        for f in ("gitlab/fetch-ci-schema.sh", "tests/run.d/c3-gitlab-schema.sh"):
+            self.assertIn(self.SHA, (root / f).read_text(encoding="utf-8"), f)
 
 
 if __name__ == "__main__":

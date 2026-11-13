@@ -336,3 +336,13 @@
 | `tools/cra/intel_vbt.py` 的 `parse_vbt()` | `tools/cra/coreboot_cbfs.py`（本 repo）的 `parse_vbt()` | 無（dumpling 內部搬移） | 原樣搬移，`coreboot_cbfs.py` 改成從 `intel_vbt` 取得並同名匯出；原本就是依 Linux i915 `intel_vbt_defs.h` 的欄位自己寫的，不是從 sca-center 複製 |
 
 以下是 dumpling 自己寫的（不是複製）：`pipeline/firmware-bios.sh`、`tools/cra/intel_vbios.py`、`tools/cra/tests/synthetic_vbios.py`、`tools/cra/tests/test_vbios_synthetic.py`、`tools/cra/tests/test_vbios_intel.py`、`tools/cra/tests/test_x86_firmware_sbom.py`、`tools/cra/tests/requirements.txt`、`tests/run.d/c2-x86-firmware.sh`、`tools/cra/ami_pfat.py`、`tools/cra/tests/test_ami_pfat.py`、`pipeline/firmware-expect.py`、`pipeline/firmware-ci.sh`、`pipeline/lib/firmware_plan.py`、`docs/notes/c2-ami-pfat.md`、`docs/notes/c2-coreboot-cbfs.md`、`docs/notes/c2-vbios.md`、`docs/notes/c2-firmware-expect.md`、`pipeline/firmware-sbom-check.sh`、`pipeline/lib/firmware_sbom_check.py`、`pipeline/install-tool.sh`、`pipeline/lib/tools.lock`、`docs/notes/c2-supplier-sbom.md`、`tools/cra/uefi_gfx.py`、`tools/cra/tests/test_uefi_gfx.py`、`tools/cra/tests/test_uefi_image_contract.py`（`uefi_gfx.py` 子類別化 C1 的 `tools/cra/uefi_image.py` 的 `Scan`，不複製它的程式碼；依賴的內部名稱見 `docs/notes/c2-vbios.md`）（`ami_pfat.py` 的格式欄位核對自 platomav/BIOSUtilities 的 AMI PFAT 解開工具，只讀原始碼、沒有複製程式碼，出處與授權寫在該檔檔頭）。
+
+## C3 GitLab 範本（WP5，M5）
+
+| 檔案 | 來源 | 來源 commit | 授權 | 說明 |
+|---|---|---|---|---|
+| `gitlab/tests/data/gitlab-ci-schema/ci.json` | gitlab-org/gitlab 的 `app/assets/javascripts/editor/schema/ci.json`（取檔網址與日期見同資料夾 `SOURCE.md`） | `28aa2bf90771a11ecc2f86525bc8a70a49c4d810`（sha256 `1c6eeb7d3a34c39996afbfe1ade220480eb05bbeae674e86d3c745dfeeded7fd`） | MIT Expat（GitLab Inc.，上游根目錄 LICENSE；該檔不在 `ee/`、`jh/`、`doc/` 底下）**以及** Apache-2.0（Mads Kristensen，同資料夾上游 NOTICE） | 原檔，一個位元組都沒改。**推測**源自 SchemaStore 的 gitlab-ci schema（未證實；NOTICE 沒有指名檔案），所以兩種授權都保留 |
+| `gitlab/tests/data/gitlab-ci-schema/NOTICE` | 同一 commit 的 `app/assets/javascripts/editor/schema/NOTICE` | `28aa2bf90771a11ecc2f86525bc8a70a49c4d810` | Apache-2.0（Mads Kristensen） | 上游原文 |
+| `gitlab/tests/data/gitlab-ci-schema/LICENSE.md`、`SOURCE.md` | dumpling 自己寫 | — | Apache-2.0（本專案） | `LICENSE.md` 摘錄上游根目錄 LICENSE 的 MIT Expat 條款原文並附 Apache-2.0 連結；`SOURCE.md` 記來源、sha256、日期 |
+
+以下是 dumpling 自己寫的（不是複製）：`docs/GITLAB-PORT.md`、`gitlab/.gitlab-ci.yml`、`gitlab/README.md`、`gitlab/release-payload.py`、`gitlab/fetch-ci-schema.sh`、`gitlab/tests/`（`test_gitlab_ci.py`、`validate_schema.py`、`gitlabci.py`）、`tests/run.d/c3-gitlab.sh`、`tests/run.d/c3-gitlab-schema.sh`。範本的做法參考過 sca-center 既有的 GitLab 範本，沒有複製其內容。

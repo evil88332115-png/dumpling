@@ -1,6 +1,6 @@
 # GITLAB-PORT：GitHub → 內部 GitLab 搬移對照與檢查清單（M5 第一版）
 
-範圍：PLAN「F. 搬到 GitLab」。這份文件加上 `gitlab/`（`.gitlab-ci.yml` 範本、`README.md`、`fetch-ci-schema.sh`、測試）就是搬移的全部依據。
+範圍：PLAN「F. 搬到 GitLab」。這份文件加上 `gitlab/`（`.gitlab-ci.yml` 範本、`README.md`、`fetch-ci-schema.sh`、測試、schema 資料）就是搬移的全部依據。
 **公開 repo 規則**：內部主機名、IP、路徑、產品代號一律用變數或佔位字（`<內部 GitLab 網址>`、`gitlab.example.com`、`$INTERNAL_DT_URL`），不寫真值。
 
 ## 0. 怎麼讀這份文件
@@ -55,7 +55,7 @@
 **要換的東西**：`DUMPLING_IMAGE`（編譯／掃描映像）、`tags:`（`dumpling`、`dumpling-build`、`dumpling-scan` 三種 runner 標籤，換成內部實際標籤）、`DUMPLING_APT`（映像已含就清空）、`parallel:matrix` 裡的專案清單。
 
 **驗收**：
-- [ ] `tests/run.d/c3-gitlab.sh` 全綠；設 `GITLAB_CI_SCHEMA` 時，官方 schema 驗證通過、反向測試擋下壞檔案。
+- [ ] `tests/run.d/c3-gitlab.sh`（規則測試）與 `tests/run.d/c3-gitlab-schema.sh`（官方 schema 驗證＋反向測試）全綠。
 - [ ] 內部 GitLab 的 CI Lint 通過。**CI Lint 的操作步驟我沒有查官方文件，待內部環境確認。**
 - [ ] 打一個測試 tag（`<專案>/<版本>`）得到 release 流程；推一個 `dev/test` 分支得到 dev 流程；推一般分支沒有 pipeline（除非有 merge request）。
 
@@ -344,10 +344,13 @@
 
 ## 11. 語法檢查（M5 驗收）
 
-- **官方 CI JSON schema**：gitlab-org/gitlab 的 `app/assets/javascripts/editor/schema/ci.json`，固定在 commit `28aa2bf90771a11ecc2f86525bc8a70a49c4d810`（2026-10-18），sha256 `1c6eeb7d3a34c39996afbfe1ade220480eb05bbeae674e86d3c745dfeeded7fd`。下載與核對由 `gitlab/fetch-ci-schema.sh` 負責；sha256 不符就刪檔、結束碼 1，不使用未核對的檔案。
-- **驗證**：`tests/run.d/c3-gitlab.sh` 在環境變數 `GITLAB_CI_SCHEMA` 指向已核對的 schema 時，用 `gitlab/tests/validate_schema.py` 驗證 `gitlab/.gitlab-ci.yml`（jsonschema 的 Draft7Validator，與 `tools/cra/tests/cdx_schema.py` 相同做法）；同時跑一個故意弄壞的檔案，必須被擋下。沒有設變數時印 `NOT_RUN` 與原因，不算失敗，也不連網。
+- **官方 CI JSON schema** 直接放在 repo：`gitlab/tests/data/gitlab-ci-schema/ci.json`（原檔，一個位元組都沒改），來源 gitlab-org/gitlab 的 `app/assets/javascripts/editor/schema/ci.json`，commit `28aa2bf90771a11ecc2f86525bc8a70a49c4d810`（2026-10-18），sha256 `1c6eeb7d3a34c39996afbfe1ade220480eb05bbeae674e86d3c745dfeeded7fd`（下載後核對過才放）。同資料夾有 `SOURCE.md`（來源與取檔日期）、`NOTICE`（上游原文）、`LICENSE.md`（兩種授權）。
+- **授權核對（照實）**：該 commit 的根目錄 LICENSE 寫明 `ee/`、`jh/`、`doc/` 以外的內容與 client-side JavaScript 是 MIT Expat（GitLab Inc.），`ci.json` 不在那些目錄底下；但同一上游資料夾另有 `NOTICE`：Copyright Mads Kristensen、Apache License 2.0，沒有指名檔案。**推測** `ci.json` 源自 SchemaStore 的 gitlab-ci schema（未證實），所以兩種授權都保留（`LICENSE.md`）。dumpling 本身是 Apache-2.0，相容。記錄也在 `docs/PROVENANCE.md` 的「C3 GitLab 範本」。
+- **驗證**：`tests/run.d/c3-gitlab-schema.sh` 每次都跑、執行時不連網。做法照 `tests/run.d/c2-x86-firmware.sh`：在 venv 裡裝 `tools/cra/tests/requirements.txt` 固定的 jsonschema（不另選版本；建不起 venv 或裝不起套件就 FAIL，與 c2 一致），用 `gitlab/tests/validate_schema.py`（Draft7Validator，與 `tools/cra/tests/cdx_schema.py` 相同做法）驗證；YAML 由系統 python3 的 PyYAML 轉成 JSON（測試輸出會印出 PyYAML 與 jsonschema 版本）；另跑一個故意弄壞的檔案，必須被擋下。
+- **重要限制**：官方 schema 驗證通過，**只代表語法與欄位型別符合 schema，不保證範本在 GitLab 上一定跑得起來**（runner 標籤、變數是否存在、`rules` 邏輯、內部 GitLab 版本是否支援該語法，schema 都不管）。搬到 GitLab 後，**要用該 GitLab 實例的 CI Lint 再檢查一次**（已列入第 14 節檢查清單）。
+- **更新 schema**：只由人手動做。`bash gitlab/fetch-ci-schema.sh [<commit>]` 下載到暫存資料夾、核對 sha256、印出新舊 sha256，**不覆蓋 repo 裡的檔**；步驟見 `SOURCE.md`。
 - **不連網的規則測試**（`gitlab/tests/test_gitlab_ci.py`）：YAML 可解析；每個 job 有合法 stage 與 script／trigger；`extends`／`needs`／`!reference` 的目標都存在；無 `latest`、映像固定 digest 或固定版本；自訂變數名稱用 `DUMPLING_`／`WATCH_`／`INTERNAL_`／`PILOT_`／`MIRROR_`／`DT_` 開頭；所有 artifacts 明寫 `expire_in` 且不是 `never`；tag 規則在各處一致並通過正反例；watch 的 job 在 GitLab 後端完成前必為 `when: manual` 且要印 NOT_RUN；建 Issue 一定 confidential、不用 job token、不印 token、不 `set -x`；只有簽章 job 有 `id_tokens`；沒有 token／私有 IP 字面值。
-- **CI 接法建議**（不在這次 PR 改 `.github/workflows/tests.yml`，C0 決定）：在 `tests.yml` 的 unit-tests job 加兩步：`GITLAB_CI_SCHEMA=$(bash gitlab/fetch-ci-schema.sh "$RUNNER_TEMP/gitlab-schema" | tail -n1)`，再讓 `tests/run.sh` 帶著這個環境變數跑；`jsonschema` 用 `pip install --require-hashes -r <含雜湊的需求檔>` 安裝固定版本（需求檔與雜湊在接 CI 時產生，這個 PR 沒有加，因為 GitHub runner 的 apt 套件 `python3-jsonschema` 版本與雜湊要在接 CI 時選定）。T-13。
+- **CI**：`tests/run.sh` 會執行 `c3-gitlab.sh` 與 `c3-gitlab-schema.sh`，不需要改 `.github/workflows/tests.yml`；schema 的 jsonschema 版本與 c2 共用 `tools/cra/tests/requirements.txt`。T-13 改為：確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（缺 PyYAML 時規則測試印 NOT_RUN，除非 `DUMPLING_REQUIRE_TEST_DATA=1`）。
 - 內部 GitLab 還要用該版本的 CI Lint 再驗一次（0.2 節）。
 
 ---
@@ -368,7 +371,7 @@
 | T-10 | M8：第 14 條通報與倒數的 GitLab 版（第 10 節） | M4、M7 |
 | T-11 | 簽章方案決定（第 9.2 節最後一欄） | 內部決定 |
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
-| T-13 | 把 schema 驗證接進 CI（`.github/workflows/tests.yml` 由 C0 負責）與 `--require-hashes` 的 jsonschema 需求檔 | C0 |
+| T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
 
 ---
 
@@ -409,7 +412,8 @@
 - [ ] 外部資料來源改內部鏡像（第 6 節）。驗收：外網斷線下 release:scan 成功。
 
 **流程**
-- [ ] 語法：`GITLAB_CI_SCHEMA` 驗證 OK、內部 CI Lint OK。驗收：兩者輸出。
+- [ ] 語法：官方 schema 驗證 OK（`c3-gitlab-schema.sh`）。驗收：腳本輸出。
+- [ ] **搬到 GitLab 後，用該 GitLab 實例的 CI Lint 再檢查一次**（官方 schema 驗證通過不保證範本在 GitLab 上跑得起來）。驗收：CI Lint 結果截圖或輸出。
 - [ ] 測試 tag 的完整 release：Package 檔案、Release 連結、sha256。驗收：第 2 節驗收項。
 - [ ] 10 年保存方案：儲存、備份、還原演練、禁止刪除 tag／Release、不設自動清理。驗收：備份與還原紀錄、設定截圖。
 - [ ] dev 分支與排程 dev。驗收：`dev/test` 分支與手動排程各跑一次。

@@ -6,7 +6,8 @@
 |---|---|
 | `.gitlab-ci.yml` | CI 範本。呼叫 repo 裡同一套 `pipeline/` 腳本（`run-step.sh`、`project-info.py`、`release-meta.py`、`watch/*`）。**尚未在內部 GitLab 實際執行**，只通過語法檢查與規則測試 |
 | `release-payload.py` | 產生 Releases API 的 JSON（附件 assets links 指向 Generic Package） |
-| `fetch-ci-schema.sh` | 下載 GitLab 官方 CI JSON schema（固定 commit），核對 sha256 才輸出路徑 |
+| `fetch-ci-schema.sh` | **只在更新 schema 時由人手動執行**：下載官方 CI JSON schema 到暫存資料夾、核對 sha256、印出新舊 sha256，不覆蓋 repo 裡的檔 |
+| `tests/data/gitlab-ci-schema/` | 官方 CI JSON schema（`ci.json`，固定 commit 與 sha256）、`NOTICE`、`LICENSE.md`（MIT Expat＋Apache-2.0）、`SOURCE.md` |
 | `tests/` | `test_gitlab_ci.py`（不連網的規則測試）、`validate_schema.py`（官方 schema 驗證）、`gitlabci.py`（共用的載入與 extends 展開） |
 
 ## 用法
@@ -17,12 +18,11 @@
 4. 本機檢查：
 
 ```
-bash tests/run.sh                                  # 含 c3-gitlab（不連網，沒有 GITLAB_CI_SCHEMA 時 schema 驗證印 NOT_RUN）
-schema=$(bash gitlab/fetch-ci-schema.sh "$TMPDIR/gitlab-schema" | tail -n 1)     # 需要網路；sha256 不符會失敗
-GITLAB_CI_SCHEMA="$schema" bash tests/run.d/c3-gitlab.sh                         # 含官方 schema 驗證與反向測試
+bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema（官方 schema 驗證）
 ```
 
-schema 驗證需要 `jsonschema`（Python）；CI 裡請用 `pip install --require-hashes` 安裝固定版本，不要在本機測試裡連網安裝。
+- `c3-gitlab-schema.sh` 照 `c2-x86-firmware.sh` 的做法開 venv，裝 `tools/cra/tests/requirements.txt` 固定的 jsonschema；建不起 venv 或裝不起套件就 FAIL（要有 `python3-venv` 與網路，可用 `DUMPLING_VENV_CACHE` 快取）。YAML 用系統 python3 的 PyYAML。
+- **官方 schema 驗證通過，只代表語法與欄位型別符合 schema，不保證範本在 GitLab 上一定跑得起來。搬到 GitLab 後，要用該 GitLab 實例的 CI Lint 再檢查一次。**
 
 ## 要換的變數
 

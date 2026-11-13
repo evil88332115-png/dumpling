@@ -68,3 +68,15 @@ def expand_vars(text, variables):
         v = variables.get(k)
         return str(v) if v is not None else m.group(0)
     return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", rep, text)
+
+
+if __name__ == "__main__":
+    # python3 -I gitlab/tests/gitlabci.py tojson <yml> <out.json>：轉成 JSON（給 venv 裡的 schema 驗證用；venv 沒有 PyYAML）
+    import json
+    import sys
+    if len(sys.argv) != 4 or sys.argv[1] != "tojson":
+        print("用法：gitlabci.py tojson <yml> <out.json>", file=sys.stderr)
+        sys.exit(2)
+    print("PyYAML %s" % yaml.__version__)
+    with open(sys.argv[3], "w", encoding="utf-8") as fh:
+        json.dump(load(sys.argv[2]), fh, ensure_ascii=False)
