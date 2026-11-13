@@ -84,12 +84,13 @@ class Base(unittest.TestCase):
                   open(os.path.join(self.state, "state-base.json"), "w"))
 
     def run_once(self, now, mode="real", **kw):
-        json.dump({"dateReleased": now, "vulnerabilities": [{"cveID": c, "vendorProject": "Apache", "product": "Log4j", "dateAdded": "2021-12-10"}
-                                                            for c in self.kev]}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
+        vs = [{"cveID": c, "vendorProject": "Apache", "product": "Log4j", "dateAdded": "2021-12-10"} for c in self.kev]
+        vs += getattr(self, "kev_extra", [])
+        json.dump({"dateReleased": now, "vulnerabilities": vs}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
         out = os.path.join(self.w, "out-" + now[:10])
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
-                               grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=kw.get("demo", False),
+                               grype=None, grype_total_timeout=100, vendor_config=kw.get("vendor_config"), now=now, demo=kw.get("demo", False),
                                allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999")
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
@@ -478,6 +479,25 @@ class T(Base):
         body = [x for x in plan["actions"] if x["op"] == "open"][0]["body"]
         self.assertIn("報告狀態（report_status）NOT_RUN", body)
         self.assertIn("發行閘門（release_gate）NOT_RUN", body)
+
+    def test_firmware_vendors_new_kev_opens_vendor_issue(self):
+        """D-043 第 3 點：Intel／AMD／AMI／NVIDIA（BIOS／vBIOS 韌體）新的 KEV 一律提醒（廠商層級，沒有元件比對也提醒）。
+        KEV 的 vendorProject 拼法：CISA 2026.11.10 實查 Intel、AMI；AMD、NVIDIA 目前沒有條目，以 exploited_vendor 的別名涵蓋常見拼法。"""
+        cfg = os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json")
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [
+            {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V", "dateAdded": NOW2[:10]},
+            {"cveID": "CVE-2026-90002", "vendorProject": "Advanced Micro Devices", "product": "AGESA", "dateAdded": NOW2[:10]},
+            {"cveID": "CVE-2026-90003", "vendorProject": "NVIDIA Corporation", "product": "GPU Firmware", "dateAdded": NOW2[:10]},
+            {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME", "dateAdded": NOW2[:10]},
+            {"cveID": "CVE-2026-90005", "vendorProject": "Contoso", "product": "Widget", "dateAdded": NOW2[:10]},   # 不在清單：不提醒
+        ]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        vend = [x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]]
+        cves = sorted(__import__("re").search(r"CVE-\d{4}-\d+", t["title"]).group(0) for t in vend)
+        self.assertEqual(cves, ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
+        _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天不重複
+        self.assertEqual([x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]], [])
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
