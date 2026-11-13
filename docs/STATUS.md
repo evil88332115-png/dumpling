@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 05:34 +0800（C1）
+最後更新：2026-11-14 05:34 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,9 +12,9 @@
 - 代理：無（#69 驗證完成；#65 由 C0 直接審閱並實測，因為同時只能 1 個驗證代理）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：M7a #58、M7a2 #65 已合併。進行中：M7b（第一項：版本＝tag 加獨立來源）。正式 tag 等使用者
+  - C1（第二台）：M7a #58、M7a2 #65 已合併。M7b 進行中（wp1/m7b 97d1d99）：第一項「版本＝tag」改成 tag → sources.yml 的 l4t_release（人宣告）→ 對掃描讀到的 L4T 版本；其他平台 Hooks.independent_version 預設 None → GAP（已轉 C4）。C0 同意設計，要求三個來源不一致時一律 FAIL、l4t_release 受 D-046 約束。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。下一個 wp3/advisory-polish（#59、#60 的建議）；5674 確認後再開一個 PR
-  - C3（第二台）：#47、#49、#61、M8 #69 已合併。下一步：手動跑 art14 drill 回報；後續小 PR（drill Issue 加 demo 標籤＋「示範專案」、stateless close／support 標題測試、擋 dumpling-watch 標籤）。real Issue 等正式 Release
+  - C3（第二台）：M8 #69 已合併；art14 drill run 43511176483 綠（演練 Issue #70，已關）。後續 PR #71（63d50cf）C0 看過，要求測試再加 op close 等所有非 open op，改好 CI 綠就合併。real Issue 等正式 Release
   - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
