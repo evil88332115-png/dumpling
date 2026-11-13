@@ -50,6 +50,15 @@ APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")          # apt 套件名稱�
 
 PROJECT_STRING_FIELDS = ("product_name", "brand", "platform_version", "bsp_os_source", "kernel_source", "bootloader")
 PROJECT_LIST_FIELDS = ("markets", "interfaces", "own_software")  # own_software 可以是空清單
+# 銷售市場（D-055）：歐盟 27 個會員國的 ISO 3166-1 alpha-2 代碼（希臘是 GR，不收歐盟慣用的 EL）
+EU_MEMBER_CODES = ("AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
+                   "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE")
+MARKET_EU_ALL = "EU-ALL"      # 保留值：全歐盟上市
+MARKET_UNKNOWN = "UNKNOWN"    # 保留值：明確表示不知道（和還沒填的 TO BE COMPLETED 不同；報告與第 14 條範本標 GAP）
+MARKET_LEGACY_EU = "EU"       # 舊值：驗證時在讀進來的資料裡遷移成 EU-ALL 並警告，不改檔、不展開成 27 國
+OS_DISTRO_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")      # /etc/os-release 的 ID
+OS_RELEASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")  # /etc/os-release 的 VERSION_ID（字串）
+OS_KEYS = ("distro", "release")
 PROJECT_REQUIRED = ("schema", "platform", "company_role", "status", "os_responsibility", "support_until") \
     + PROJECT_STRING_FIELDS + PROJECT_LIST_FIELDS
 
@@ -92,11 +101,66 @@ def _nonempty_str(v):
     return isinstance(v, str) and v.strip() != ""
 
 
-def validate_project(doc, platforms_dir=PLATFORMS_DIR):
-    """回傳 (錯誤清單, 待填欄位清單)。待填＝值是 'TO BE COMPLETED'；status 是 shipped 時待填算錯誤。"""
+def _check_markets(v, errs, todo, warns):
+    """markets（D-055）：會員國代碼清單，或單獨一個 EU-ALL／UNKNOWN／TO BE COMPLETED。回傳遷移後的清單（舊值 EU → EU-ALL）。"""
+    if v == [PLACEHOLDER]:
+        todo.append("markets")
+        return v
+    out = []
+    for x in v:
+        if x == MARKET_LEGACY_EU:
+            out.append(MARKET_EU_ALL)
+        else:
+            out.append(x)
+    if MARKET_LEGACY_EU in v:
+        warns.append("markets 的舊值 EU 已視為 EU-ALL（只在讀進來的資料裡，不改 project.yml；請改成 EU-ALL 或列出會員國代碼）")
+    if PLACEHOLDER in out:
+        errs.append("markets 的 TO BE COMPLETED 必須單獨一個，不可和其他值混用")
+        return out
+    if len(set(out)) != len(out):
+        errs.append("markets 有重複的值")
+    reserved = [x for x in out if x in (MARKET_EU_ALL, MARKET_UNKNOWN)]
+    if reserved and len(out) > 1:
+        errs.append("markets 的 %s 必須單獨一個，不可和其他值或會員國代碼混用" % "／".join(sorted(set(reserved))))
+    for x in out:
+        if x not in EU_MEMBER_CODES and x not in (MARKET_EU_ALL, MARKET_UNKNOWN):
+            errs.append("markets 有不認得的值（只收 27 個會員國的 ISO 3166-1 alpha-2 大寫代碼，希臘是 GR；或 EU-ALL、UNKNOWN）")
+            break
+    return out
+
+
+def _check_os(doc, errs, todo):
+    """os.distro／os.release（D-055 (4)）：ours 時 shipped 必填、development 可 TO BE COMPLETED（或省略，算待填）；其他歸屬可省略，有寫就要合格式。"""
+    ours = doc.get("os_responsibility") == "ours"
+    v = doc.get("os")
+    if v is None:
+        if ours:
+            todo.extend("os." + k for k in OS_KEYS)
+        return
+    if not isinstance(v, dict):
+        errs.append("os 必須是 mapping（distro、release）")
+        return
+    extra = sorted(str(k) for k in v if k not in OS_KEYS)
+    if extra:
+        errs.append("os 有不認得的欄位（只收 distro、release）")
+    for k, rx, hint in (("distro", OS_DISTRO_RE, "小寫發行版 ID，例如 debian"), ("release", OS_RELEASE_RE, "字串，例如 \"13\"（要加引號）")):
+        x = v.get(k)
+        if x is None:
+            if ours:
+                todo.append("os." + k)
+        elif x == PLACEHOLDER:
+            todo.append("os." + k)
+        elif not (isinstance(x, str) and rx.match(x)):
+            errs.append("os.%s 格式不合法（%s）" % (k, hint))
+
+
+def check_project(doc, platforms_dir=PLATFORMS_DIR):
+    """回傳 (錯誤清單, 待填欄位清單, 警告清單, 遷移後的 doc)。
+    遷移後的 doc 是複本（原 doc 與檔案都不改）：markets 的舊值 EU → EU-ALL。"""
     if not isinstance(doc, dict):
-        return ["project.yml 不是 mapping"], []
-    errs, todo = [], []
+        return ["project.yml 不是 mapping"], [], [], doc
+    errs, todo, warns = [], [], []
+    doc = dict(doc)
     for k in PROJECT_REQUIRED:
         if k not in doc or doc[k] is None:
             errs.append("缺欄位 " + k)
@@ -116,6 +180,8 @@ def validate_project(doc, platforms_dir=PLATFORMS_DIR):
             errs.append("%s 必須是字串清單" % k)
         elif k != "own_software" and not v:
             errs.append("%s 不可為空清單" % k)
+        elif k == "markets":
+            doc[k] = _check_markets(v, errs, todo, warns)
         elif PLACEHOLDER in v:
             todo.append(k)
     plat = doc.get("platform")
@@ -140,19 +206,75 @@ def validate_project(doc, platforms_dir=PLATFORMS_DIR):
                 datetime.date.fromisoformat(s)
             except ValueError:
                 errs.append("support_until 不是有效日期")
+    _check_os(doc, errs, todo)
     if doc.get("status") == "shipped" and todo:
         errs.append("status 是 shipped 時不可有待填欄位（%s）" % "、".join(sorted(set(todo))))
-    return errs, sorted(set(todo))
+    return errs, sorted(set(todo)), warns, doc
+
+
+def validate_project(doc, platforms_dir=PLATFORMS_DIR):
+    """回傳 (錯誤清單, 待填欄位清單)。待填＝值是 'TO BE COMPLETED'；status 是 shipped 時待填算錯誤。
+    警告（例如舊值 EU）與遷移後的資料用 check_project。"""
+    errs, todo, _warns, _doc = check_project(doc, platforms_dir)
+    return errs, todo
+
+
+def _read_cra_config(project_dir):
+    """讀 CRA/Config/config.json；不存在或讀不了回 (None, 原因或 None)。"""
+    import json
+    path = os.path.join(project_dir, "CRA", "Config", "config.json")
+    if not os.path.isfile(path):
+        return None, None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None, "CRA/Config/config.json 讀不了或不是 JSON"
+    return (doc, None) if isinstance(doc, dict) else (None, "CRA/Config/config.json 不是 JSON 物件")
+
+
+def _filled(x):
+    return isinstance(x, str) and x.strip() not in ("", PLACEHOLDER)
+
+
+def cross_check_config(project, cra_config):
+    """project.yml 為準（D-055）：和 CRA/Config/config.json 比。回傳錯誤清單。
+    - support_until（YYYY-MM-DD）與 support.end_date（YYYY-MM）：兩邊都有值時月份要相同。
+    - product_name 與 product.name：兩邊都有值時要相同（用 FAIL：名稱會原樣寫進 CRA 文件，不一致等於文件上的產品名稱和開案資料不同）。
+    任一邊沒填（缺、空字串、TO BE COMPLETED）就不比。"""
+    errs = []
+    if not isinstance(cra_config, dict):
+        return errs
+    su = project.get("support_until")
+    su = su.isoformat() if isinstance(su, datetime.date) else su
+    sup = cra_config.get("support")
+    end = sup.get("end_date") if isinstance(sup, dict) else None
+    if _filled(su) and _filled(end) and su[:7] != end:
+        errs.append("support_until（project.yml）與 CRA/Config/config.json 的 support.end_date 月份不同；以 project.yml 為準，請把 config.json 改成 %s" % su[:7])
+    prod = cra_config.get("product")
+    name = prod.get("name") if isinstance(prod, dict) else None
+    if _filled(project.get("product_name")) and _filled(name) and project["product_name"] != name:
+        errs.append("product_name（project.yml）與 CRA/Config/config.json 的 product.name 不同；以 project.yml 為準，請把 config.json 改成一致")
+    return errs
 
 
 def load_project(project_dir, platforms_dir=PLATFORMS_DIR):
-    """讀並驗證 project.yml；回傳 dict（加上 '_todo' 待填欄位清單）。"""
+    """讀並驗證 project.yml；回傳 dict（不改檔）。加上的鍵：
+    '_todo' 待填欄位清單；'_warnings' 警告清單（例如舊值 EU 已遷移）；'_markets_unknown' markets 是 UNKNOWN 時為 True（下游標 GAP）。
+    markets 的舊值 EU 在這個 dict 裡是 EU-ALL。
+    有 CRA/Config/config.json 時一併做和 project.yml 的一致性檢查（cross_check_config），不一致就 ConfigError。"""
     doc = _load_yaml(os.path.join(project_dir, "project.yml"))
-    errs, todo = validate_project(doc, platforms_dir)
+    errs, todo, warns, doc = check_project(doc, platforms_dir)
+    if not errs:
+        cfg, why = _read_cra_config(project_dir)
+        if why:
+            warns.append(why + "（沒有和 project.yml 比對）")
+        errs += cross_check_config(doc, cfg)
     if errs:
         raise ConfigError("project.yml 欄位錯誤：" + "；".join(errs))
-    doc = dict(doc)
     doc["_todo"] = todo
+    doc["_warnings"] = warns
+    doc["_markets_unknown"] = doc.get("markets") == [MARKET_UNKNOWN]
     return doc
 
 
@@ -501,6 +623,10 @@ def main(argv=None):
             p, s = load_project_all(argv[1], pdir)
             todo = p["_todo"]
             print("validate: OK（%d 個版本%s）" % (len(s["releases"]), "；待填欄位：" + "、".join(todo) if todo else ""))
+            for w in p["_warnings"]:
+                print("validate: WARN（%s）" % w)
+            if p["_markets_unknown"]:
+                print("validate: GAP（markets 是 UNKNOWN：銷售市場不明，報告與第 14 條範本標 GAP）")
             return 0
         if len(argv) == 2 and argv[0] == "platform":
             c = load_platform_config(argv[1], pdir)

@@ -1,6 +1,7 @@
 """平台介面與開案範本（pipeline/platform.sh、new-project.sh、project-info.py、lib/*）的單元測試。不連網、不下載。"""
 import hashlib
 import inspect
+import json
 import os
 import re
 import shutil
@@ -24,6 +25,10 @@ def run(cmd, env=None, cwd=None):
     e = dict(os.environ)
     e.update(env or {})
     return subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=cwd)
+
+
+def pc_json(v):
+    return json.dumps(v, ensure_ascii=False)
 
 
 def sha(data):
@@ -252,10 +257,10 @@ class PlatformFetch(Tmp):
 
 class Config(Tmp):
     def good_project(self):
-        return {"schema": 1, "product_name": "P", "brand": "B", "company_role": "manufacturer", "markets": ["EU"],
+        return {"schema": 1, "product_name": "P", "brand": "B", "company_role": "manufacturer", "markets": ["EU-ALL"],
                 "platform": "jetson", "platform_version": "x", "bsp_os_source": "x", "kernel_source": "x",
                 "bootloader": "x", "own_software": [], "interfaces": ["Ethernet"], "support_until": "2031-12-31",
-                "status": "development", "os_responsibility": "ours"}
+                "status": "development", "os_responsibility": "ours", "os": {"distro": "debian", "release": "13"}}
 
     def test_parse_tag(self):
         self.assertEqual(pc.parse_tag("orin-nano-demo/v39.2.1-demo1"), ("orin-nano-demo", "v39.2.1-demo1"))
@@ -347,6 +352,227 @@ class Config(Tmp):
         self.assertEqual(pc.classify_path("Linux_for_Tegra/flash.sh", cfg), "host-tool")
         self.assertEqual(pc.classify_path("Linux_for_Tegra/tools/kernel_flash/x.py", cfg), "host-tool")
         self.assertEqual(pc.classify_path("etc/passwd", cfg), "os")
+
+
+class ProjectFieldsD055(Tmp):
+    """D-055：markets、support_until／product_name 與 config.json 一致、os 欄位、new-project 不帶範本值。"""
+
+    def good(self, **kw):
+        d = Config.good_project(self)
+        d.update(kw)
+        if d.get("os") is None:
+            del d["os"]
+        return d
+
+    def errs(self, **kw):
+        return pc.check_project(self.good(**kw))[0]
+
+    # --- markets
+    def test_markets_codes_good(self):
+        for v in (["DE"], ["DE", "FR", "GR"], ["EU-ALL"], ["UNKNOWN"], list(pc.EU_MEMBER_CODES)):
+            self.assertEqual(self.errs(markets=v), [], v)
+        self.assertEqual(len(pc.EU_MEMBER_CODES), 27)
+        self.assertEqual(len(set(pc.EU_MEMBER_CODES)), 27)
+        self.assertIn("GR", pc.EU_MEMBER_CODES)
+        self.assertNotIn("EL", pc.EU_MEMBER_CODES)
+
+    def test_markets_rejected(self):
+        for v in (["EL"], ["EU-27"], ["de"], ["US"], ["GB"], ["DE", "DE"], ["EU-ALL", "DE"], ["DE", "EU-ALL"],
+                  ["UNKNOWN", "DE"], ["EU-ALL", "UNKNOWN"], ["EU", "DE"], ["EU", "EU-ALL"], [pc.PLACEHOLDER, "DE"], []):
+            self.assertTrue(self.errs(markets=v), v)
+
+    def test_markets_placeholder_vs_unknown(self):
+        errs, todo, warns, doc = pc.check_project(self.good(markets=[pc.PLACEHOLDER]))
+        self.assertEqual((errs, todo, warns), ([], ["markets"], []))
+        errs, todo, warns, doc = pc.check_project(self.good(markets=["UNKNOWN"]))
+        self.assertEqual((errs, todo), ([], []))   # UNKNOWN 不是待填
+        # shipped：TO BE COMPLETED 被拒，UNKNOWN 允許
+        self.assertTrue(self.errs(markets=[pc.PLACEHOLDER], status="shipped"))
+        self.assertEqual(self.errs(markets=["UNKNOWN"], status="shipped"), [])
+
+    def test_legacy_eu_migrates_with_warning_without_touching_input(self):
+        src = self.good(markets=["EU"])
+        errs, todo, warns, doc = pc.check_project(src)
+        self.assertEqual(errs, [])
+        self.assertEqual(doc["markets"], ["EU-ALL"])
+        self.assertEqual(src["markets"], ["EU"])            # 呼叫端傳進來的 dict 沒被改
+        self.assertEqual(len(warns), 1)
+        self.assertIn("EU", warns[0])
+        self.assertEqual(pc.validate_project(src), ([], []))  # 舊介面照舊
+
+    def _project_dir(self, markets_line, config=None, **over):
+        d = os.path.join(self.tmp, "p")
+        os.makedirs(os.path.join(d, "CRA", "Config"), exist_ok=True)
+        base = self.good(**over)
+        lines = ["schema: 1"] + ["%s: %s" % (k, pc_json(v)) for k, v in base.items() if k not in ("schema", "markets")]
+        text = "\n".join(lines + [markets_line]) + "\n"
+        for rel, body in (("project.yml", text), ("sources.yml", 'schema: 1\nreleases:\n  v1:\n    files:\n      - {name: a, url: "https://e.com/a", role: bsp, gap: x}\n')):
+            with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
+                fh.write(body)
+        if config is not None:
+            with open(os.path.join(d, "CRA", "Config", "config.json"), "w", encoding="utf-8") as fh:
+                json.dump(config, fh)
+        return d
+
+    def test_load_project_legacy_eu_warns_and_file_unchanged(self):
+        d = self._project_dir('markets: ["EU"]')
+        before = open(os.path.join(d, "project.yml"), "rb").read()
+        p = pc.load_project(d)
+        self.assertEqual(p["markets"], ["EU-ALL"])
+        self.assertTrue(p["_warnings"])
+        self.assertFalse(p["_markets_unknown"])
+        self.assertEqual(open(os.path.join(d, "project.yml"), "rb").read(), before)
+        # 指令列與 project-info 都看得到警告
+        v = run([sys.executable, "-I", os.path.join(LIB, "project_config.py"), "validate", d])
+        self.assertIn("validate: WARN", v.stdout)
+        i = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--dir", d, "v1"])
+        self.assertIn("project-info: WARN", i.stderr)
+        self.assertNotIn("WARN", i.stdout)                   # stdout 只有 KEY=VALUE
+        self.assertEqual(open(os.path.join(d, "project.yml"), "rb").read(), before)
+
+    def test_load_project_unknown_flag(self):
+        p = pc.load_project(self._project_dir('markets: ["UNKNOWN"]'))
+        self.assertTrue(p["_markets_unknown"])
+        i = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--dir", self._project_dir('markets: ["UNKNOWN"]'), "v1"])
+        self.assertIn("MARKETS_UNKNOWN=true", i.stdout)
+        self.assertIn("GAP", i.stderr)
+        ok = pc.load_project(self._project_dir('markets: ["DE", "FR"]'))
+        self.assertFalse(ok["_markets_unknown"])
+        self.assertEqual(ok["_warnings"], [])
+
+    # --- support_until／product_name 與 config.json
+    def test_support_until_config_mismatch_fails(self):
+        cfg = {"product": {"name": "P"}, "support": {"end_date": "2031-12"}}
+        pc.load_project(self._project_dir('markets: ["DE"]', cfg))                       # 一致：通過
+        cfg["support"]["end_date"] = "2030-12"
+        with self.assertRaises(pc.ConfigError) as cm:
+            pc.load_project(self._project_dir('markets: ["DE"]', cfg))
+        self.assertIn("support.end_date", str(cm.exception))
+        # 同一年月、不同日不算不一致
+        cfg["support"]["end_date"] = "2031-12"
+        pc.load_project(self._project_dir('markets: ["DE"]', cfg, support_until="2031-12-01"))
+        # 一邊沒填就不比
+        for sup in ({}, {"end_date": pc.PLACEHOLDER}, {"end_date": ""}):
+            pc.load_project(self._project_dir('markets: ["DE"]', {"product": {"name": "P"}, "support": sup}))
+        pc.load_project(self._project_dir('markets: ["DE"]', {"product": {"name": "P"}}, support_until=pc.PLACEHOLDER))
+        # 沒有 config.json 也不比
+        pc.load_project(self._project_dir('markets: ["DE"]'))
+
+    def test_product_name_config_mismatch_fails(self):
+        with self.assertRaises(pc.ConfigError) as cm:
+            pc.load_project(self._project_dir('markets: ["DE"]', {"product": {"name": "Other"}}))
+        self.assertIn("product.name", str(cm.exception))
+        pc.load_project(self._project_dir('markets: ["DE"]', {"product": {"name": pc.PLACEHOLDER}}))
+        # 平台 validate 步驟（platform.sh → project-info）也 FAIL
+        d = self._project_dir('markets: ["DE"]', {"product": {"name": "Other"}})
+        i = run([sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--dir", d, "v1"])
+        self.assertEqual(i.returncode, 1)
+        self.assertIn("FAIL", i.stdout)
+
+    def test_support_until_required_when_shipped(self):
+        self.assertTrue(self.errs(support_until=pc.PLACEHOLDER, status="shipped"))
+        d = self.good(status="shipped")
+        del d["support_until"]
+        self.assertIn("缺欄位 support_until", pc.check_project(d)[0])
+
+    def test_demo_project_consistent(self):
+        p = pc.load_project(os.path.join(ROOT, "projects", "orin-nano-demo"))
+        self.assertEqual(p["markets"], ["EU-ALL"])
+        self.assertEqual(p["_warnings"], [])
+
+    # --- os
+    def test_os_fields(self):
+        ok = {"distro": "debian", "release": "13"}
+        self.assertEqual(self.errs(os=ok, status="shipped"), [])
+        self.assertEqual(self.errs(os={"distro": "ubuntu", "release": "24.04"}, status="shipped"), [])
+        for bad in ({"distro": "Debian", "release": "13"}, {"distro": "debian", "release": 13}, {"distro": "", "release": "13"},
+                    {"distro": "debian", "release": ""}, {"distro": "de bian", "release": "13"}, {"distro": "debian", "release": "13", "x": "y"},
+                    "debian", {"release": "13", "distro": 5}):
+            self.assertTrue(self.errs(os=bad), bad)
+
+    def test_os_ours_development_may_be_todo_shipped_must_fill(self):
+        for os_val in (None, {"distro": pc.PLACEHOLDER, "release": pc.PLACEHOLDER}, {"distro": "debian"}):
+            kw = {"os": os_val}
+            errs, todo, _w, _d = pc.check_project(self.good(**kw))      # ours + development
+            self.assertEqual(errs, [])
+            self.assertTrue(any(t.startswith("os.") for t in todo), (os_val, todo))
+            self.assertTrue(pc.check_project(self.good(status="shipped", **kw))[0], os_val)
+
+    def test_os_not_ours_may_omit(self):
+        for r in ("customer", "upstream-vendor"):
+            errs, todo, _w, _d = pc.check_project(self.good(os_responsibility=r))
+            self.assertEqual((errs, todo), ([], []))
+            self.assertEqual(self.errs(os_responsibility=r, status="shipped"), [])
+        self.assertTrue(self.errs(os_responsibility="customer", os={"distro": "Bad", "release": "1"}))   # 有寫就要合格式
+
+    # --- new-project 不帶範本值
+    def new(self, name, extra=None, role="ours"):
+        projects = os.path.join(self.tmp, "projects")
+        r = run([os.path.join(PIPE, "new-project.sh"), name, "--platform", "jetson", "--company-role", "manufacturer",
+                 "--os-responsibility", role, "--projects-dir", projects] + (extra or []))
+        return r, os.path.join(projects, name)
+
+    def test_new_project_config_has_no_example_values(self):
+        r, d = self.new("np1", ["--brand", "Acme", "--product-name", "My Product", "--support-until", "2032-06-30", "--markets", "DE,GR"])
+        self.assertEqual(r.returncode, 0, r.stdout)
+        cfg = json.load(open(os.path.join(d, "CRA", "Config", "config.json"), encoding="utf-8"))
+        self.assertEqual(cfg["product"]["name"], "My Product")
+        self.assertEqual(cfg["manufacturer"]["name"], "Acme")
+        self.assertEqual(cfg["support"]["end_date"], "2032-06")
+        self.assertEqual(set(cfg), {"$comment", "schema_version", "manufacturer", "product", "support"})
+        self.assertEqual(set(cfg["product"]), {"name"})
+        text = open(os.path.join(d, "CRA", "Config", "config.json"), encoding="utf-8").read()
+        ex = json.load(open(os.path.join(ROOT, "tools", "cra", "config.example.json"), encoding="utf-8"))
+        for needle in ("example.com", "Example Co", "example-agent"):
+            self.assertNotIn(needle, text)
+        self.assertNotEqual(cfg["manufacturer"].get("name"), ex["manufacturer"]["name"])
+        # 必填欄位齊全（照 config.schema.json）
+        schema = json.load(open(os.path.join(ROOT, "tools", "cra", "config.schema.json"), encoding="utf-8"))
+        for k in schema["required"]:
+            self.assertIn(k, cfg)
+        rules = json.load(open(os.path.join(d, "CRA", "Config", "vex-rules.json"), encoding="utf-8"))
+        self.assertEqual(rules, {"schema": "sca-center-vex-rules/1", "rules": []})
+        sys.path.insert(0, os.path.join(ROOT, "tools", "cra"))
+        import vex_export
+        vex_export.check_rules(rules)       # 空規則是合法的
+        self.assertEqual(pc.load_project(d)["_warnings"], [])  # 開案產物和 project.yml 一致
+
+    def test_new_project_unfilled_values_are_placeholders(self):
+        r, d = self.new("np2")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        cfg = json.load(open(os.path.join(d, "CRA", "Config", "config.json"), encoding="utf-8"))
+        self.assertEqual(cfg["manufacturer"]["name"], pc.PLACEHOLDER)
+        self.assertNotIn("support", cfg)                    # schema 的 pattern 不收 TO BE COMPLETED，沒填就不寫
+        p = pc.load_project(d)
+        self.assertEqual(p["markets"], [pc.PLACEHOLDER])
+        for k in ("markets", "support_until", "os.distro", "os.release"):
+            self.assertIn(k, p["_todo"])
+
+    def test_new_project_os_block_only_for_ours(self):
+        r, d = self.new("np3", ["--os-distro", "debian", "--os-release", "13"])
+        self.assertEqual(r.returncode, 0, r.stdout)
+        p = pc.load_project(d)
+        self.assertEqual(p["os"], {"distro": "debian", "release": "13"})
+        r, d = self.new("np4", role="customer")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("os", pc.load_project(d))
+        r, _ = self.new("np5", ["--os-distro", "debian"], role="customer")
+        self.assertEqual(r.returncode, 1)
+
+    def test_new_project_rejects_legacy_eu_and_bad_markets(self):
+        for m in ("EU", "EL", "de", "EU-ALL,DE"):
+            r, d = self.new("np6", ["--markets", m])
+            self.assertEqual(r.returncode, 1, m)
+            self.assertFalse(os.path.exists(d), m)
+        r, d = self.new("np7", ["--markets", "EU-ALL"])
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_new_project_does_not_overwrite(self):
+        r, d = self.new("np8", ["--brand", "A"])
+        before = open(os.path.join(d, "CRA", "Config", "config.json"), "rb").read()
+        r2, _ = self.new("np8", ["--brand", "B"])
+        self.assertEqual(r2.returncode, 1)
+        self.assertEqual(open(os.path.join(d, "CRA", "Config", "config.json"), "rb").read(), before)
 
 
 class Scripts(Tmp):
