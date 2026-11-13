@@ -39,7 +39,7 @@
 | `tools/cra/py_dpkg_version.py` | `scripts/cra/py_dpkg_version.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_diff.py` | `scripts/cra/report_diff.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/cra/report_package.py` | `scripts/cra/report_package.py` | 25fa89a | 路徑調整 1 處、清理 2 行（其他 2）、「內部窗口」→「專案負責人」、「老闆」→「核准人」（公開版不放公司內部稱呼）；**行為修改（M2 分層）**：`vulnerability-rows.json` 有 `layers` 區塊時才動作（沒有時輸出不變）：清單多「層」欄並依層排、P1 判斷表預設只放我們的待辦（可用 `--p1-layers` 覆寫）、OS 層（customer／upstream-vendor）另開工作表與「通知客戶」、新增「分層摘要」、總覽只含我們的待辦 |
-| `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣 |
+| `tools/cra/runtime_evidence.py` | `scripts/cra/runtime_evidence.py` | 25fa89a | 原樣；**行為修改（M2）**：kernel-config 帶 `scope_incomplete`（映像另有出貨但沒判定的核心）時不採用它的「沒編進核心」 |
 | `tools/cra/security_findings.py` | `scripts/cra/security_findings.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/cra/supplier_package.py` | `scripts/cra/supplier_package.py` | 25fa89a | 清理 1 行（其他 1）、「handoff 分支的內部文件路徑」改成「專案文件「供應商資料包規格」」；客戶文字過濾用的正規表示式（含 CLAUDE\.md）沒動；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/cra/support_check.py` | `scripts/cra/support_check.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -76,6 +76,7 @@
 | `tools/cra/tests/test_image_check_modules.py` | `scripts/cra/tests/test_image_check_modules.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_initrd_coverage.py` | `scripts/cra/tests/test_initrd_coverage.py` | 25fa89a | 原樣 |
 | `tools/cra/tests/test_kernel_modules.py` | `scripts/cra/tests/test_kernel_modules.py` | 25fa89a | 路徑調整 2 處、清理 11 行（產品代號換成中性代稱 10、路徑 1）、刪段 5 行、刪 1 個測 board-on-device.sh 的測試；註解：移除上游私有 repo 的編號與內部部署描述；`consumer158()` 不再用 `git show` 讀上游另一個分支的 vex_export（dumpling 沒有那個分支，原本就回 None），直接回 None，測試行為不變 |
+| `tools/cra/tests/test_kernel_scope.py` | （dumpling 自己寫） | — | 新增（M2）：映像另有出貨但沒判定的核心時，K1／K2 的排除不採用（vex_export、runtime_evidence、cra_report 的 VEX 檔案、風險評估與核心表的標記）；沒有限制時輸出相同 |
 | `tools/cra/tests/test_kernel_versions_item.py` | （dumpling 自己寫） | — | 新增（M2）：`scan/kernel-versions.json`（出貨但沒判定的核心）→ 待確認事項 `kernel:not-judged`，沒有檔案時和以前相同。**`cra_report.py` 的行為修改（M2）記在這一列**：讀 `scan/kernel-versions.json` 交給待確認事項 |
 | `tools/cra/tests/test_layers_report.py` | （dumpling 自己寫） | — | 新增（M2 分層）：cra_report／report_package 的分層測試：三種 os_responsibility 與沒給時的 GAP、ATTENTION 與出貨關卡的計算、host-tool 不進產品清單、unknown 當待辦、P1 判斷表與工作表；測資全部合成 |
 | `tools/cra/tests/test_no_vuln_data.py` | `scripts/cra/tests/test_no_vuln_data.py` | 25fa89a | 清理 2 行（廠商信箱、免費信箱各改成已登記在 `ci/public-allow.txt` 的同網域信箱，判定只看網域）；libnvinfer 版本字串維持原值（登記在白名單，見「public-check 白名單」） |
@@ -108,7 +109,7 @@
 | `tools/cra/upstream_baseline.py` | `scripts/cra/upstream_baseline.py` | 25fa89a | 清理 1 行（產品代號換成中性代稱 1） |
 | `tools/cra/vendor-watch.example.json` | `deploy/exploited-watch/vendor-watch.example.json` | 25fa89a | 原樣 |
 | `tools/cra/vex-rules.example.json` | `scripts/cra/vex-rules.example.json` | 25fa89a | 路徑調整 1 處 |
-| `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/cra/vex_export.py` | `scripts/cra/vex_export.py` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M2）**：映像另有出貨但沒判定的核心（`scan/kernel-versions.json`）時，核心設定檢查（K1）與模組對應（K2）的排除不採用（`kernel_with_scope`、`kconfig_usable`、`module_map_of`），受影響的核心列加標記與說明；沒有限制時輸出不變 |
 | `tools/cra/xlsx_min.py` | `scripts/cra/xlsx_min.py` | 25fa89a | 原樣 |
 | `tools/demo/README.md` | `scripts/demo/README.md` | 25fa89a | 路徑調整 2 處；改寫 CI 分支流程與「已知限制」兩段（原本是 sca-center 的內部 CI 與執行編號，改成中性說明並指向 pipeline/） |
 | `tools/demo/board-import.sh` | `scripts/demo/board-import.sh` | 25fa89a | 路徑調整 7 處 |
@@ -150,10 +151,10 @@
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定） |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
-| `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：新增 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
 | `tools/pilot/lib/kernel_oot_record.py` | `scripts/pilot/lib/kernel_oot_record.py` | 25fa89a | 原樣；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
 | `tools/pilot/lib/kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：映像出貨的核心哪些有判定（`scan/kernel-versions.json`：shipped、requested、judged、not_judged 與原因）；sca-scan 的 `--kernel-version` 用 |
 | `tools/pilot/lib/kernelcheck.py` | `scripts/pilot/lib/kernelcheck.py` | 25fa89a | 路徑調整 1 處；註解裡的內部執行編號改成「Jetson R39.2.1 示範映像」（1 行） |
@@ -185,7 +186,7 @@
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_oot_sections.py` | `scripts/pilot/tests/test_kernel_oot_sections.py` | 25fa89a | 原樣（合成 ELF 字串裡的建置路徑登記在 `ci/public-allow.txt`） |
-| `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處 |
+| `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處；M2：`kernel_cve_list` 的測試外殼多抽出 `kernel_ship_from` |
 | `tools/pilot/tests/test_kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：`--kernel-version`／`SCA_KERNEL_VERSIONS` 的參數檢查，以及 sca-scan 核心區段在 1 顆／多顆沒指定／多顆指定 1 顆／指定 2 顆的狀態列與 `kernel-versions.json`（合成的 rootfs tar，判定工具用假的） |
 | `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
