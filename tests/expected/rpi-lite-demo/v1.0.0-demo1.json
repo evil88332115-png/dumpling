@@ -1,0 +1,210 @@
+{
+ "schema": 1,
+ "project": "rpi-lite-demo",
+ "version": "v1.0.0-demo1",
+ "note": "C4 的標準答案草稿（2026-11-13；依據的 CI 是 dev run 43380656858，跑的 commit 是 eacb60d）。不是直接存輸出：逐項核對過（官方 SBOM／.info 的 633 個套件）。核心的比對先不釘：(1) -os 重跑時 sca-scan 退回 CNA，OS 報告多出 2700 列核心候選；(2) bsp 報告的 1328 列核心只有 Debian 還沒修的 CVE——核心套件版本帶 epoch（1:6.18.50-1+rpt1），Grype 拿它比 Debian 6.12.x 的修補版本，約 2400 個 CVE 被當成已修補而沒有列出。兩件都已回報 C0／C1，修好後補上核心的項目。C-grype-db 不釘（Grype 上游 DB 的新舊隨時間變）。元件數、雜湊、狀態用 equals；漏洞數用範圍。",
+ "checks": {
+  "platform": {
+   "equals": "raspberrypi",
+   "reason": "平台由 project.yml 明確給定（不從映像格式推）"
+  },
+  "os_responsibility": {
+   "equals": "customer",
+   "reason": "示範專案：OS 層由客戶負責（照掃、分開列）"
+  },
+  "image.sha256": {
+   "equals": "483db18a48da399b5b7022ffae9a07bc6d99daab30e593aedac09b69ff422843",
+   "reason": "sources.yml 固定的官方映像；與官方 .sha256 相同（platform-samples 時核對）"
+  },
+  "image.disk_sha256": {
+   "equals": "b8a393dc1c3701450b5fffbfe74368a98fb6eab7415ce456cc0cead886ea8780",
+   "reason": "解開後的磁碟映像（CI 每次解開都相同）"
+  },
+  "image.disk_bytes": {
+   "equals": 3078619136,
+   "reason": "解開後的大小"
+  },
+  "components.total": {
+   "equals": 62250,
+   "reason": "固定輸入（映像、Syft 1.55.0）下的元件數"
+  },
+  "components.bsp": {
+   "equals": 24255,
+   "reason": "bsp 的 47 個 deb 與它們擁有的檔案紀錄（owners.json）、兩顆核心的模組（/usr/lib/modules）"
+  },
+  "components.os": {
+   "equals": 37676,
+   "reason": "os 的 586 個 deb 與它們擁有的檔案紀錄、dpkg 資料庫檔（var/lib/dpkg/*）、operating-system 元件"
+  },
+  "components.unknown": {
+   "equals": 319,
+   "reason": "pypi 220、golang 98（rpi-connect 執行檔內嵌的 Go 模組）、maven 1：deb 帶進來的語言套件沒查擁有者（adapter-gaps.md 第 12 項），保守列我們的待辦"
+  },
+  "components.host_tool": {
+   "equals": 0,
+   "reason": "映像裡沒有主機端工具"
+  },
+  "components.deb_bsp": {
+   "equals": 47,
+   "reason": "platform.yml 的 bsp 套件名稱清單（D-027）：核心、開機韌體、板上無線韌體、板子專屬的設定與工具、相機堆疊"
+  },
+  "components.deb_os": {
+   "equals": 586,
+   "reason": "47＋586＝633，與官方 SBOM（.sbom.xz 的 pkg:deb）和 .info 的已安裝套件數相同"
+  },
+  "unknown_by_reason.path-no-rule": {
+   "equals": 319,
+   "reason": "unknown 的原因都是「有路徑但沒有規則」（缺口 12），沒有 file-unowned"
+  },
+  "unknown_by_purl_type.pypi": {
+   "equals": 220,
+   "reason": "deb 帶進來的 Python 套件（缺口 12）"
+  },
+  "unknown_by_purl_type.golang": {
+   "equals": 98,
+   "reason": "rpi-connect／rpi-connectd 執行檔內嵌的 Go 模組（缺口 12）"
+  },
+  "layers_gaps": {
+   "equals": [],
+   "reason": "分層沒有 GAP"
+  },
+  "external_services.status": {
+   "equals": "LISTED",
+   "reason": "Raspberry Pi 有定義對外連線服務清單（rpi-connect*，D-027）"
+  },
+  "external_services.items": {
+   "equals": [
+    {
+     "name": "rpi-connect-lite",
+     "version": "2.13.0",
+     "layer": "os",
+     "why": "Raspberry Pi Connect（官方遠端連線服務：裝置主動連到 Raspberry Pi 的雲端服務）"
+    }
+   ],
+   "reason": "rpi-connect-lite 2.13.0 歸 os（不依賴硬體），但是對外連線服務，報告標出來（D-027）"
+  },
+  "kernel_versions.schema": {
+   "equals": "sca-center-kernel-versions/2",
+   "reason": "C1 的 kernel-versions.json：shipped 每筆帶上游版本"
+  },
+  "kernel_versions.requested": {
+   "equals": [
+    "6.18.50+rpt-rpi-2712"
+   ],
+   "reason": "D-036：示範專案只指定 Pi 5 的核心"
+  },
+  "kernel_versions.judged": {
+   "equals": [
+    "6.18.50+rpt-rpi-2712"
+   ],
+   "reason": "交給判定工具的核心（判定結果看 C-kernel-config）"
+  },
+  "kernel_versions.not_judged": {
+   "equals": [
+    {
+     "version": "6.18.50+rpt-rpi-v8",
+     "reason": "出貨但沒有列在 --kernel-version，這次只判定指定的核心",
+     "shipped": true
+    }
+   ],
+   "reason": "Pi 4 的核心列「已出貨、未判定」（D-036 的正確結果，GAP）"
+  },
+  "kernel_versions.shipped": {
+   "equals": [
+    {
+     "version": "6.18.50+rpt-rpi-2712",
+     "upstream_version": "6.18.50",
+     "upstream_basis": "source-makefile",
+     "upstream_note": "原始碼 Makefile 是 6.18.50，與出貨核心 6.18.50+rpt-rpi-2712 相符"
+    },
+    {
+     "version": "6.18.50+rpt-rpi-v8",
+     "upstream_version": "6.18.50",
+     "upstream_basis": "source-makefile",
+     "upstream_note": "原始碼 Makefile 是 6.18.50，與出貨核心 6.18.50+rpt-rpi-v8 相符"
+    }
+   ],
+   "reason": "兩顆核心，上游版本都是 6.18.50（依原始碼 Makefile；raspberrypi/linux stable_20260911）"
+  },
+  "bootloader_coverage": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：boot 分割區的 VideoCore 開機韌體是閉源，沒有安全公告可比對；Pi 4／5 的 EEPROM 不在映像裡（NOT_ASSESSED）"
+  },
+  "runs..stages.C-kernel-config": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：Pi 5 的核心依出貨 .config 判定，但有判斷不了的 CVE（2026-11-13：332 個中無法判斷 191）"
+  },
+  "runs.-bsp.stages.C-kernel-config": {
+   "equals": "GAP",
+   "reason": "同上"
+  },
+  "runs..stages.D-dt-data-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：CI 的臨時 DT 照設計關閉 NVD"
+  },
+  "runs..stages.D-dt-kev-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：DT 讀的 ENISA KEV 檔沒有發布日期；已遭利用的標記靠 EUVD"
+  },
+  "runs..stages.C-euvd": {
+   "equals": "OK",
+   "reason": "EUVD 鏡像比對完成"
+  },
+  "runs..stages.C-grype": {
+   "equals": "OK",
+   "reason": "Grype 比對完成"
+  },
+  "runs..stages.A-source": {
+   "equals": "OK",
+   "reason": "掃描來源讀取完成"
+  },
+  "runs..stages.B-sandbox": {
+   "equals": "OK",
+   "reason": "bwrap 沙箱探測通過"
+  },
+  "runs..stages.B-sandbox-secrets": {
+   "equals": "OK",
+   "reason": "沙箱內讀不到秘密"
+  },
+  "runs..stages.F-secret-scan": {
+   "equals": "OK",
+   "reason": "輸出沒有 pilot.env 的金鑰"
+  },
+  "report_rows.bsp.uboot_rows": {
+   "equals": 0,
+   "reason": "Raspberry Pi 沒有 U-Boot 元件"
+  },
+  "report_status": {
+   "equals": "GAP",
+   "reason": "產品結論（C1 的整體欄位，各報告取最差）：不是 OK"
+  },
+  "release_gate": {
+   "equals": "GAP",
+   "reason": "產品的發行閘門：不是 OK"
+  },
+  "product_status.bsp.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。bsp：弱點資料不完整（NVD 關閉）、核心有判斷不了的 CVE、Pi 4 核心未判定、開機韌體 GAP"
+  },
+  "product_status.bsp.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未判定或待決定的列"
+  },
+  "product_status.os.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。os：弱點資料不完整（NVD 關閉）、Debian 套件有待決定的列"
+  },
+  "product_status.os.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未判定或待決定的列"
+  },
+  "product_status.full.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。完整（分層之前）：弱點資料不完整、未判定與待決定的列"
+  },
+  "product_status.full.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未判定或待決定的列"
+  }
+ }
+}

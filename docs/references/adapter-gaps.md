@@ -22,6 +22,8 @@ C4 寫轉接器時發現、但沒有擋住 M6 的缺口。擋住的已經直接�
 | 15 | 對外連線服務清單 | 只有 Raspberry Pi 定義了清單（rpi-connect）；Rockchip、AI NAS 的映像有 ssh、avahi、samba 等服務，沒有評估 | scan.json 的 external_services 記 NOT_ASSESSED（不寫成「沒有」） | 依平台定義清單，或改用板子實測（board-test）的對外埠 |
 | 16 | D-038 的候選說明沒有進交付報告 | D-038 要求報告註明「廠商核心、依上游版本列出的候選，廠商可能已回移修補」；目前只在 notes.md 與 kernel-upstream JSON，交付的 CRA 報告（risk-assessment.md、kernel-vulnerabilities.md）只寫「CVE from an explicit list (KERNEL_CVES)」 | notes 與 scan.json 有寫 | cra_report 對 KERNEL_CVES 來源的核心列加「候選、廠商可能已回移修補」說明（C1，M7） |
 | 17 | Radxa 發行、和硬體存取有關的套件 | dthelper（device tree overlay 工具）、libmraa2／libmraa-dev（GPIO／I2C／SPI 函式庫）原本歸 os | **已處理**：C0 決定歸 bsp（D-027 的原則），加進 rockchip 的 bsp 清單、重訂標準答案 | — |
+| 18 | 分層重跑時 sca-scan 退回核心 CNA | -os 的 SBOM 沒有核心套件，Grype 對核心 0 筆，sca-scan 改用 CNA 產生 2700 列核心候選（layer bsp）進 OS 報告（Raspberry Pi） | 已回報 C0／C1；標準答案不釘 OS 報告的核心列 | SBOM 沒有核心元件時，核心階段記 NOT_RUN（不適用），不退回 CNA（缺口 13 同類） |
+| 19 | 帶 epoch 的廠商核心被 Grype 當成已修補 | Raspberry Pi 的核心套件 1:6.18.50-1+rpt1 比 Debian 6.12.x 的修補版本「新」，只對到 Debian 還沒修的 332 個 CVE；上游 6.18.50 的 CNA 候選是 2700 個，約 2400 個沒有列出（漏報） | 已回報 C0／C1；標準答案不釘 bsp 的核心比對 | 像 D-038 一樣改用上游版本對核心 CNA（kernel_upstream_version 6.18.50），sca-scan 要在 Grype 有核心比對時也能用 CNA |
 
 ## 已在 M2 處理（C4 回報、C1 實作）
 
