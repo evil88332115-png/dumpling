@@ -971,6 +971,7 @@ if [ "$KNONE" = 1 ]; then
   for _st in C-kernel-cve-list C-kernel-config C-kernel-module-map; do
     status "$_st" NOT_RUN "不適用：這份報告的 SBOM 沒有作業系統核心，核心在 $KOTHER 報告判定"
   done
+  META[kernel_in_other_report]=$KOTHER   # 結構上的標記：cra_report 只認這個（不看說明文字）決定這三個 NOT_RUN 不降低風險狀態
 elif [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
 elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")

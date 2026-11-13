@@ -50,6 +50,8 @@ stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK 
   - 選填欄位缺少 → 文件內顯示 TO BE COMPLETED，該文件至少 GAP。
   - 風險評估：沒有 DT findings 或 SBOM 為空 → NOT_ASSESSED；status.tsv 缺、DT 資料源／KEV／OSV 涵蓋／弱點分析／findings、
     sbomgate、meta.json 任一不是 OK → GAP（清單不完整）；有條件才寫的階段（COND_STAGES）有這一列而且不是 OK → GAP；
+    核心判定階段（KERNEL_STAGES、C-kernel-not-judged-*）有這一列而且不是 OK → GAP（ATTENTION 維持；meta.json 有 kernel_in_other_report 時
+    C-kernel-cve-list／config／module-map 的 NOT_RUN 是 D-044 的不適用，不降級）；
     有未處理的 P1、Grype 有 DT 沒有的 CVE、C-grype 不是 OK 或沒有 Grype 結果 → ATTENTION。
   - Grype 有、DT 沒有的比對（交叉核對的同一個判斷）成為「只有 Grype」的列（grype_only_rows；Source IDs GRYPE:…，
     元件欄 found only by Grype），和其他列一樣分級、判斷、寫 VEX；DT 的列不變。
@@ -140,6 +142,27 @@ COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
 # C-dt-feeds：GAP → GAP；NOT_RUN 只在原因是金鑰沒有權限（說明含 SYSTEM_CONFIGURATION_READ）時算 GAP——沒用 DT 的 NOT_RUN 已由 D-dt-data-sources 反映
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
+# 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
+# kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
+# 唯一的例外：分層報告的 SBOM 沒有核心、核心在另一份報告判定（sca-scan --kernel-in-other-report，D-044）時三個核心階段是 NOT_RUN「不適用」——
+# 只認 sca-scan 寫在 meta.json 的 kernel_in_other_report（結構上的標記），不看說明文字。C-kernel-cve-mirror（CNA 鏡像用了沿用的舊資料）是 ATTENTION。
+KERNEL_STAGES = ["C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map", "C-kernel-versions", "C-kernel-cve-mirror"]
+KERNEL_STAGE_PREFIX = "C-kernel-not-judged-"
+KERNEL_OTHER_REPORT_NA = ("C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map")
+
+
+def kernel_stage_keys(status):
+    """status.tsv 裡有的核心判定階段（KERNEL_STAGES 與 C-kernel-not-judged-*），照固定順序。"""
+    return [k for k in KERNEL_STAGES if k in status] + sorted(k for k in status if k.startswith(KERNEL_STAGE_PREFIX))
+
+
+def kernel_stage_level(k, st, meta):
+    """核心判定階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
+    if st == "OK":
+        return None
+    if st == "NOT_RUN" and k in KERNEL_OTHER_REPORT_NA and (meta or {}).get("kernel_in_other_report"):
+        return None                       # D-044：核心在另一份報告判定（sca-scan 在 meta.json 記的）
+    return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
 def fresh_stage_level(k, st, detail):
@@ -4745,6 +4768,12 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 # ATTENTION（例如 B-npm-no-lockfile 在連網解析時）只提醒；其他非 OK 表示資料不完整
                 risk_st = worst([risk_st, "ATTENTION" if status[k][0] == "ATTENTION" else "GAP"])
                 reasons.append(f"{k} is {status[k][0]}")
+        for k in kernel_stage_keys(status):
+            lv = kernel_stage_level(k, status[k][0], meta)
+            if lv:
+                risk_st = worst([risk_st, lv])
+                reasons.append(f"{k} is {status[k][0]}: the operating system kernel's CVEs were not fully assessed against the product kernel"
+                               if lv == "GAP" else f"{k} is {status[k][0]}")
         for k in FRESH_STAGES:
             lv = fresh_stage_level(k, status[k][0], status[k][1]) if k in status else None
             if lv:
@@ -5039,7 +5068,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         "text.completeness": completeness, "text.cross_check": cross, "text.no_vuln_data_section": nvdmod().section(nvd, table),
         "tables.data_sources": table(["Stage", "Status", "Detail (as recorded by sca-scan)"],
                                      [[k, (status.get(k) or ("NOT_RUN",))[0], en((status.get(k) or ("", "not in status.tsv"))[1])] for k in RISK_STAGES + INFO_STAGES]
-                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status])
+                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status]
+                                     + [[k, status[k][0], en(status[k][1])] for k in kernel_stage_keys(status)])
         if status is not None else "_status.tsv not available: data-source status is UNKNOWN._",
         "tables.counts": table(["Metric", "Total", "OS kernel (section 8.7)" if split else f"OS kernel (`{KERNEL_DOC[1]}`)",
                                 "Other components"] if krows else ["Metric", "Value"], counts),

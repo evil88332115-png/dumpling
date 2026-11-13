@@ -68,10 +68,12 @@ ROOT={root}; OUT={out}; ST=$OUT/status.tsv; printf 'stage\\tstatus\\tdetail\\n' 
 status(){{ printf '%s\\t%s\\t%s\\n' "$1" "$2" "${{3:-}}" >> "$ST"; }}
 MODE=sbom; SBOM_OK=1; SBOM=$OUT/sbom/sbom.cdx.json; KBUILD={src}; KBUILD_PREFIX=; GR={gr}; KERNEL_CVE_MIRROR=/nonexistent-mirror; KERNEL_CVES=
 SCA_KERNEL_VERSIONS=; KOTHER={kother!r}; KNOTDISTRO={knotdistro!r}
+declare -A META=()
 unset KERNEL_SOURCE_DIR
 KVERS=({kv}); KUPS=()
 {KC_BLOCK}
 {K_BLOCK}
+printf '%s' "${{META[kernel_in_other_report]:-}}" > "$OUT/meta-kother.txt"
 echo done
 """
     pybin = Path(sys.executable).parent
@@ -95,6 +97,7 @@ def test_no_kernel_sbom_with_option_writes_three_not_run_rows_and_runs_nothing(t
     assert "C-kernel-coverage" not in rows and not any(k.startswith("C-kernel-not-judged") for k in rows) and "C-kernel-versions" not in rows
     assert not kv_exists
     assert not (out / "scan" / "kernel-cve-list.txt").exists() and not (out / "scan" / "kernel-config.json").exists()
+    assert (out / "meta-kother.txt").read_text() == OTHER                            # 結構上的標記：cra_report 只認這個決定三個 NOT_RUN 不降級
 
 
 def test_pi_like_two_kernels_image_still_nothing_runs_and_no_not_judged_rows(tmp_path):
@@ -124,7 +127,7 @@ def test_no_kernel_sbom_without_option_is_unchanged(tmp_path):
     rows, kv_exists, log, out = layer_run(tmp_path, NO_KERNEL_SBOM, tkc.rootfs_members(kver=A))
     assert "kernel_config.py" in log and "kernel_module_map.py" in log
     assert not any("不適用" in v[1] for v in rows.values())
-    assert kv_exists
+    assert kv_exists and (out / "meta-kother.txt").read_text() == ""
 
 
 def test_coverage_not_run_row_is_not_written_and_option_without_kernelcheck_ok_does_not_apply(tmp_path):
@@ -132,6 +135,7 @@ def test_coverage_not_run_row_is_not_written_and_option_without_kernelcheck_ok_d
     rows, kv_exists, log, out = layer_run(tmp_path, KERNEL_SBOM, tkc.rootfs_members(kver=A), kother=OTHER)
     assert rows["C-kernel-coverage"][0] == "GAP"
     assert not any("不適用" in v[1] for v in rows.values()) and "kernel_config.py" in log
+    assert (out / "meta-kother.txt").read_text() == ""                               # 有核心：給了選項也不寫標記
 
 
 def test_not_distro_declaration_reaches_kernelcheck(tmp_path):

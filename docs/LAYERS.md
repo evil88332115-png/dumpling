@@ -167,8 +167,10 @@ python3 -I "$DUMPLING_ROOT/pipeline/sbom-layers.py" split "$sbom" "$DUMPLING_PLA
     不執行 CNA 版本比對、`kernel_config.py`、`kernel_module_map.py`，不記 `C-kernel-not-judged-*`，也不寫 `scan/kernel-versions.json`（出貨核心有沒有判定是 bsp 報告的事；Release 附件的 `kernel-versions` 本來就取完整掃描那次）。
   - `-bsp` 自己、完整掃描和 `ours` 的空後綴重跑**不要給**（核心就在那份報告判定）。給 `-bsp` 等於指向自己：bsp 的 SBOM 偵測不到核心時（廠商核心不是套件）會把該做的核心判定（含 CNA 退回）壓掉；sca-scan 對名稱等於自己的 `--name` 以 exit 64 拒絕。
   - **不給的話行為不變**，所以不能由「SBOM 沒有核心」自行推定：單一 SBOM 的廠商核心（不是套件）仍要走 CNA 版本比對。名稱只接受 `^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$`，否則 exit 64。
-  - `cra_report` 不需要改：它的資料狀態只看 `C-kernel-l4t-map`、`C-kernel-coverage`（有這一列且不是 OK 才 GAP；沒有核心時 sca-scan 本來就不寫 `C-kernel-coverage`），
-    `C-kernel-cve-list`、`C-kernel-config`、`C-kernel-module-map` 的 NOT_RUN 不影響 `report_status`。沒有核心的 `-os` 報告讀不到核心的列，8.7 節寫「SBOM 沒有核心」。
+  - sca-scan 同時在 `meta.json` 記 `kernel_in_other_report: <名稱>`（結構上的標記）。`cra_report` 的核心判定階段（`C-kernel-cve-list`、`C-kernel-config`、`C-kernel-module-map`、
+    `C-kernel-versions`、`C-kernel-not-judged-*`、`C-kernel-cve-mirror`）不是 OK 時資料狀態降成 GAP（ATTENTION 維持 ATTENTION；D-043：沒有 CNA 鏡像、核心版本讀不出來、
+    `kernel_config.py` 失敗、出貨的核心沒判定都算沒判定完）。**只有** `meta.json` 有 `kernel_in_other_report` 時，那三個核心階段的 NOT_RUN 不降級——不看說明文字，
+    說明寫「不適用」而沒有這個標記照樣 GAP；標記也不免除 GAP／FAIL、`C-kernel-versions`、`C-kernel-not-judged-*`。沒有核心的 `-os` 報告讀不到核心的列，8.7 節寫「SBOM 沒有核心」。
   - 平台轉接器（rpi、rock-5b、AI NAS…）自己的 `scan.sh` 要照 Jetson 的 `scan.sh` 這樣呼叫；規則見 `docs/PLATFORM-INTERFACE.md` §4（sources.yml 的平台參數）。
 - `cra_report.py` 不需要 `--os-responsibility`（SBOM 的 metadata 已記），明確傳是保險；傳的值優先。
 - 拆分前的完整 SBOM 還是要留（`sboms/`、Release）：`sbom.product.cdx.json` 是標好層的完整產品 SBOM。
