@@ -131,6 +131,22 @@ class MdSafeTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(r.stdout.decode("utf-8"), ms.md_safe("中文 [a](b) |x\nz", 30))
 
+    def test_cli_used_by_summary_scripts_defangs_mentions_and_entities(self):
+        # firmware-ci.sh、firmware-dt.sh 的 cell() 就是這個呼叫（--limit N -- 文字）
+        for script, limit in (("firmware-ci.sh", "600"), ("firmware-dt.sh", "300")):
+            with open(os.path.join(ROOT, "pipeline", script), encoding="utf-8") as fh:
+                self.assertIn('firmware_mdsafe.py" --limit %s -- "$1"' % limit, fh.read(), script)
+        raw = "ok @evil &#64;evil &lt;img&gt; a@b.c pkg:generic/x@1.0 | x"
+        r = subprocess.run([sys.executable, "-I", PATH, "--limit", "600", "--", raw], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout.decode("utf-8")
+        self.assertEqual(out, ms.md_safe(raw, 600))
+        self.assertIn("@\u200bevil", out)
+        self.assertNotIn("&#64;", out)
+        self.assertNotIn("&lt;", out)
+        self.assertIn("a@b.c pkg:generic/x@1.0", out)
+        self.assertIn("\\|", out)
+
     def test_cli_usage_error_is_64(self):
         r = subprocess.run([sys.executable, "-I", PATH], capture_output=True)
         self.assertEqual(r.returncode, 64)
