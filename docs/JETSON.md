@@ -109,6 +109,20 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
   (3) Syft 的檔案紀錄讓 unknown 變成 9 萬多個——用 dpkg `.list` 的擁有者分層（見 `docs/LAYERS.md`）；(4) l4t 核心對應列的 `mapped_from` 是「名稱 版本」，原本找不到層。
 - Release 步驟的 403：第一次兩個完整的 run（build＋scan 共約 1.5 小時），最後的 `release` job 呼叫 GitHub API（列出 release）回 `403 Resource not accessible by integration`；同一個 job 重跑也一樣。同樣的步驟在新的 run（沿用 scan artifact）和獨立探測 workflow（包含 62 分鐘之後才呼叫）都成功，原因沒查出來（排除了 token 過期、事件類型、權限設定）；之後的完整 run 見第 9 節。
 
-## 9. 最終驗證（handoff 版本的 workflow）
+## 9. 最終驗證（handoff 與 run-step 版本的 workflow，2026-11-13）
 
-（跑完後補：兩個版本各一次完整的 `release.yml` 手動觸發 run 的結果與 draft Release 附件。）
+兩個版本各做一次完整的 `release.yml` 手動觸發（build＋scan＋Release，不重用任何 artifact；手動觸發只建 draft，不建 git tag）：
+
+| | `v39.2.0-demo1` | `v39.2.1-demo1` |
+|---|---|---|
+| run | 43331496725 | 43331490342 |
+| build job | 約 34 分鐘 | 約 38 分鐘（`nvbuild.sh` 2,032 秒） |
+| scan job | 約 40 分鐘 | 約 39 分鐘（scan 步驟 1,640 秒，assemble 504 秒） |
+| 整個 run | 綠燈，含最後的 Release job（建 draft，19 個附件） | 同左（run 約 1 小時 17 分鐘，Release job 在 1 小時後照樣成功） |
+| `pipeline-steps.tsv` 整體狀態／標準答案 | OK／23 項符合 | OK／23 項符合 |
+| 建置紀錄、C-kernel-boot | OK、OK | OK、OK |
+| 上游比對（原始碼）被修改的檔案 | 0 | 1 |
+
+- Image 的 SHA-256 兩次建置都不同（建置不可重現）：v39.2.1 第一次 `d39b0e3a…`、`b220eaee…`，最終 `ce766751…`；v39.2.0 最終 `3167d1d6…`。
+- 附件 19 個：`report-*.zip`×3（完整、-bsp、-os）、`sbom-*.cdx.json`×3、`vex-*.cdx.json`×3、`vuln-list-*.xlsx`×3、`p1-table-*.xlsx`×3、`layers.json`、`build-record-*.json`、`scan-summary-*.json`、`release-meta.json`。
+- Release 的 403：最終的兩個完整 run 沒有再出現。中間有 3 次（含 dev.yml 的 publish）在列出 releases 時回 403，原因沒查出來；`release.yml` 與 `dev.yml` 的 API 呼叫現在每 30 秒重試、最多 8 次，仍失敗就印出回應標頭當診斷（`ghx`）。

@@ -40,9 +40,14 @@ export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Ubuntu,PyPI,Go,Maven}
 export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
 bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
 mir=$out/mirrors; rm -rf "$mir"; mkdir -p "$mir"
-mirror() {  # <腳本> <資料夾名>（腳本的參數：新資料夾、manifest）
-  local s=$1 d=$2
-  if ! bash "$root/tools/mirror/$s" "$mir/$d" "$mir/$d.manifest" > "$mir/$d.log" 2>&1; then tail -5 "$mir/$d.log"; fail "鏡像 $s 失敗（弱點資料不完整，不當作沒有漏洞）"; fi
+mirror() {  # <腳本> <資料夾名>（腳本的參數：新資料夾、manifest）。上游（git.kernel.org 等）偶爾逾時：最多試 3 次，每次換新資料夾；仍失敗 = FAIL
+  local s=$1 d=$2 n ok=0
+  for n in 1 2 3; do
+    rm -rf "${mir:?}/$d" "$mir/$d.manifest"
+    if bash "$root/tools/mirror/$s" "$mir/$d" "$mir/$d.manifest" > "$mir/$d.log" 2>&1; then ok=1; break; fi
+    echo "鏡像 $d 第 $n 次失敗：$(tail -1 "$mir/$d.log" | cut -c1-200)"; [ "$n" = 3 ] || sleep 60
+  done
+  if [ $ok != 1 ]; then tail -5 "$mir/$d.log"; fail "鏡像 $s 失敗（弱點資料不完整，不當作沒有漏洞）"; fi
   echo "鏡像 $d：OK（$(tail -1 "$mir/$d.log" | cut -c1-160)）"
 }
 mirror nvidia-bulletins.sh nvbul
