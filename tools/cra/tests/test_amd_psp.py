@@ -623,7 +623,7 @@ def test_wiring_when_the_parser_cannot_run(tmp_path, monkeypatch):
 # ---------- 預驗抓到的問題：不丟例外、壓縮與 size 0 的缺口、位址座標、AGESA 的邊界 ----------
 
 def test_analyze_never_raises_even_when_a_stage_or_an_entry_breaks(monkeypatch):
-    # 壓縮的微碼條目起點靠近檔尾（以前 patch_header 丟 struct.error）、一般條目的內容解析丟例外：只影響那個條目或階段
+    # 壓縮的微碼條目起點靠近檔尾（patch_header 不能丟 struct.error）、一般條目的內容解析丟例外：只影響那個條目或階段
     img = good_image()
     put(img, 0x40000, directory(b"$BHD", [bhd_ent(0x66, 0x100, SIZE - 0x10, f1=0x08), bhd_ent(0x66, 0xC80, 0x41000)], info=1 << 29))
     r = run(img)
@@ -758,8 +758,7 @@ def test_agesa_tag_separator_truncation_and_dedupe():
 
 
 def test_agesa_marker_in_raw_bytes_always_makes_the_search_incomplete_and_is_not_double_counted():
-    """D-047：原始位元組裡只要有 AGESA 標記就不完整（沒有正式介面可以證明那個位置有被走訪搜尋過）；走訪結果裡已經有的值不重複計數，只在原始位元組裡有的值照舊列出。
-    以前（位置換算）：被走訪涵蓋的原始 PE 內容可以是完整的；現在一律不完整。"""
+    """原始位元組裡只要有 AGESA 標記就不完整（沒有正式介面可以證明那個位置有被走訪搜尋過），包括走訪也找得到的原始 PE 內容；走訪結果裡已經有的值不重複計數，只在原始位元組裡有的值列出。"""
     M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00"
     for name, volume in (("ui", fv([ffs(0x07, secs(sec(0x15, M + b"\0" * 8)))])), ("pad", fv([ffs(0xF0, M + b"\0" * 8)])),
                          ("deleted", fv([ffs(0x07, secs(sec(0x10, M + b"\0" * 8)), state=0x00)])), ("pe", fv([ffs(0x07, secs(sec(0x10, b"MZ" + M + b"\0" * 8)))]))):
@@ -901,7 +900,7 @@ def test_microcode_container_size_checks_and_date_range(monkeypatch):
         assert run_ucode(patch(**kw))["microcode"] == []
 
 
-# ---------- 複驗補的案例：同一位置用不同基底讀、順序無關、AGESA 的位置比對、APOB 條件 ----------
+# ---------- 同一位置用不同基底讀、順序無關、APOB 條件 ----------
 
 def norm(r):
     """結果的摘要（與處理順序無關的部分）。"""
@@ -928,7 +927,7 @@ def test_same_offset_reached_with_different_bases_is_ambiguous_and_never_in_the_
     k = {(d["offset"], d["base"]): d for d in r["directories"]}
     assert sorted(k) == [(0x50000, 0), (0x50000, 0x1000), (0x51000, 0x1000)] and all(d["ambiguous"] for d in k.values())
     assert k[(0x50000, 0)]["other_bases"] == ["0x1000"] and k[(0x50000, 0x1000)]["other_bases"] == ["0x0"]
-    assert r["psp_firmware"] == []                                                     # 以前：不歧義的那條路徑沿用第一次讀的基底，把 01.01.01.01 放進 SBOM
+    assert r["psp_firmware"] == []                                                     # 同一個位置兩種基底都被讀到：不能把其中一種的版本放進 SBOM
     assert sorted(p["version"] for p in r["ambiguous"]["psp_firmware"]) == ["01.01.01.01", "02.02.02.02"]
     assert any("other window bases" in p["text"] for p in r["problems"] if p["code"] == "dir-ambiguous")
     md = "\n".join(ap.markdown_lines(r, str))
@@ -974,7 +973,7 @@ def test_combo_entry_that_reads_both_ways_makes_its_children_ambiguous_under_a_d
 
 def test_ambiguous_contents_are_listed_even_when_a_definite_directory_has_the_same_blob():
     """確定的目錄（單一讀法的 EFS 指標）和歧義的那一組讀法裡有同一份 blob：歧義那邊照實列出，不和確定的去重。
-    歧義那一組要「都通過但內容不同」才會維持歧義（D-047：內容相同的讀法會都被採用），所以 0x31000 的讀法多一個條目。"""
+    歧義那一組要「都通過但內容不同」才會維持歧義（內容相同的讀法會都被採用），所以 0x31000 的讀法多一個條目。"""
     img = bytearray(b"\xff" * (SIZE + 0x1000))
     put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
     put(img, 0x52000, psp_blob(8, (3, 3, 3, 3), 0x300))
@@ -1100,7 +1099,7 @@ def test_agesa_decompressed_raw_fallback_content_does_not_cover_an_unsearched_co
     assert ag["complete"] is False and any("no formal interface" in p for p in ag["problems"])
 
 
-# ---------- D-047：競爭的讀法依自己的結構檢查採用或不採用；AGESA 涵蓋不讀 uefi_image 的內部變數 ----------
+# ---------- 競爭的讀法依自己的結構檢查採用或不採用；AGESA 涵蓋不讀 uefi_image 的內部變數 ----------
 
 def readings_image(a_ents, b_ents, bad_a=False, bad_b=False, blobs=True, extra=None):
     """EFS 在 0x21000（視窗開頭 0x1000），new_psp 指標 0x30000：檔案偏移讀法（基底 0）是 0x30000 的目錄 A，視窗讀法（基底 0x1000）是 0x31000 的目錄 B。
@@ -1277,6 +1276,8 @@ def test_directory_table_inside_its_own_entry_fails_the_check():
 
 
 def test_readings_outcome_does_not_depend_on_pointer_or_efs_order(monkeypatch):
+    """EFS 與指標的處理順序顛倒。限制：程式在走訪與整理結果時自己用 sorted 排序，所以這個測試只證明「顛倒輸入順序」不影響結果；內部列舉順序被打亂的情況由
+    test_resolution_does_not_depend_on_the_order_of_records_edges_and_groups（resolve 階段）與 test_walk_processes_a_level_in_sorted_order_whatever_the_insertion_order（走訪階段）檢查。"""
     sub = [one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)]
     images = [readings_image([one(0x50000)], [one(0x50000)], bad_a=True), readings_image([psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)], [one(0x50000)]),
               readings_image([one(0x50000)], [one(0x50000)]), readings_image([one(0x50000)], [one(0x50000)], bad_a=True, bad_b=True),
@@ -1314,7 +1315,7 @@ def test_agesa_raw_only_value_is_listed_alongside_the_walked_one():
     assert any("more than one AGESA string" in a for a in r["attention"])
 
 
-# ---------- D-047 複驗後：上限／工具限制／超時不是證據，走訪不依賴處理順序，補殺變異的測試 ----------
+# ---------- 上限、工具限制、超時不是證據；走訪不依賴處理順序；各欄位與邊界 ----------
 
 def dirs_image(a_dir, b_dir, extra=(), efs_kw=None):
     """readings_image 的通用版：A（0x30000，基底 0）與 B（0x31000，基底 0x1000）直接給目錄位元組。blob：0x50000 版本 1、0x51000 版本 2。"""
@@ -1494,6 +1495,7 @@ def strict_json(r):
 
 
 def test_random_images_with_loops_and_limits_give_identical_results_in_any_order(monkeypatch):
+    """同上的限制：輸入順序被顛倒，內部排序不被打亂。含循環與各種上限。"""
     seen = {"loop": 0, "limit": 0, "adopted": 0, "rejected": 0}
     for lim in (None, ("MAX_ENTRIES_TOTAL", 9), ("MAX_DIRS", 5), ("MAX_DEPTH", 1)):
         with monkeypatch.context() as m:
@@ -1711,7 +1713,7 @@ def test_agesa_only_in_compressed_content_each_incomplete_reason_makes_the_searc
 
 
 def test_agesa_nonblank_bytes_outside_any_firmware_volume_make_the_search_incomplete():
-    """FV 以外的非空白位元組只被當原始內容搜尋，裡面的 LZMA 串流不會被解開：不能算完整（不再依賴 uefi_image 的 reason 字串）。"""
+    """FV 以外的非空白位元組只被當原始內容搜尋，裡面的 LZMA 串流不會被解開：不能算完整。"""
     lz, comp = agesa_lz()
     img = bytearray(b"\xff" * SIZE)
     put(img, 0x80000, fv([comp]))
@@ -1789,3 +1791,199 @@ def test_walk_processes_a_level_in_sorted_order_whatever_the_insertion_order(mon
         ctx.pending = {k: 0x100000 for k in order}
         ap.walk(ctx)
         assert [(r["offset"], r["base"]) for r in ctx.dirs] == [(0x30000, 0)] and ctx.uncertain, order
+
+
+# ---------- 邊界、鏈、循環、AGESA 的 complete 路徑 ----------
+
+N_IMG = SIZE + 0x1000                  # dirs_image／readings_image 的檔案大小
+
+
+def test_a_loop_of_three_directories_is_found_by_following_edges_transitively():
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(0x40, size=0x400, addr=phys(0x34000))]))
+    put(img, 0x34000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x35000))]))
+    put(img, 0x35000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x30000))]))
+    efs(img, new_psp=0x30000)
+    r = run(img)
+    loops = [p for p in r["problems"] if p["code"] == "dir-loop"]
+    assert len(loops) == 3 and {p["where"][-7:] for p in loops} == {"0x30000", "0x34000", "0x35000"}
+    assert sorted(d["offset"] for d in r["directories"]) == [0x30000, 0x34000, 0x35000]
+
+
+def test_a_rejected_chain_is_propagated_over_several_rounds():
+    """被拒絕的 Rbad 底下：X1 → X2，Rbad 也直接指到 X2。X2（位置比 X1 小，先被檢查）要等 X1 被判不採用之後才能判不採用 → 需要第二輪。"""
+    img = bytearray(b"\xff" * N_IMG)
+    put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x34000, directory(b"$PL2", [], info=1 << 29))                                   # X2
+    put(img, 0x35000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=0x34000, mode=1)], info=1 << 29))     # X1 → X2
+    put(img, 0x30000, psp_dir(one(0x50000), psp_ent(0x40, size=0x400, addr=0x35000, mode=1), psp_ent(0x40, size=0x400, addr=0x34000, mode=1),
+                              psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)))                # Rbad：基底 0，條目超出檔案
+    put(img, 0x31000, psp_dir(one(0x50000)))                                                   # Rgood：基底 0x1000
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, at=0x21000, new_psp=0x30000)
+    s = st3(run(img))
+    assert s[(0x30000, 0)] == "rejected" and s[(0x31000, 0x1000)] == "adopted"
+    assert s[(0x35000, 0)] == "rejected" and s[(0x34000, 0)] == "rejected"
+
+
+def test_range_boundaries_at_the_end_of_the_file_are_not_evidence():
+    ok = psp_dir(one(0x50000))
+    n = N_IMG
+    for size, expect in ((0x300, "ambiguous"), (0x301, "rejected")):                           # 條目結尾剛好等於檔尾：通過；多 1 byte：證據
+        r = run(dirs_image(psp_dir(psp_ent(1, size=size, addr=n - 0x300, mode=1)), ok))
+        assert st3(r)[(0x30000, 0)] == expect, size
+    for start, expect in ((n - 1, "ambiguous"), (n, "rejected")):                               # 壓縮條目的起點：檔尾前一個 byte 通過；等於檔尾是證據
+        r = bhd_dirs([bhd_ent(0x62, 0x300, start, f1=0x08)], [bhd_ent(0x62, 0x300, 0x50000, f1=0x08, mode=1)])
+        assert st3(r)[(0x30000, 0)] == expect, start
+
+
+def test_a_directory_table_ending_exactly_at_the_end_of_the_file_is_not_truncated_but_one_byte_more_is_evidence():
+    def build(num_b):
+        img = bytearray(b"\xff" * N_IMG)
+        put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+        put(img, 0xFFFE0, directory(b"$PSP", [one(0x50000)], info=1 << 29))                                     # 檔案偏移讀法（基底 0）
+        tail = directory(b"$PSP", [one(0x4F000)] if num_b else [], info=1 << 29, num=num_b)
+        put(img, N_IMG - 0x20, tail[:0x20])                                                                     # 視窗讀法（基底 0x1000）：表剛好到檔尾
+        put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+        efs(img, at=0x21000, new_psp=0xFFFE0)
+        return run(img)
+    r = build(1)                                                                                                # 1 個項目：表 [n-0x20, n)
+    b = next(d for d in r["directories"] if d["offset"] == N_IMG - 0x20)
+    assert b["parsed"] is True and "dir-truncated" not in codes(r)
+    r = build(2)                                                                                                # 2 個項目：超出檔案 → 證據
+    b = next(d for d in r["directories"] if d["offset"] == N_IMG - 0x20)
+    assert b["parsed"] is False and "dir-truncated" in codes(r)
+    s = st3(r)
+    assert s[(N_IMG - 0x20, 0x1000)] == "rejected" and s[(0xFFFE0, 0)] == "adopted"                              # 競爭組裡表超出檔案是證據：這邊被拒絕、另一邊被採用
+
+
+def test_a_directory_whose_header_ends_exactly_at_the_end_of_the_file_is_still_a_directory():
+    img = bytearray(b"\xff" * N_IMG)
+    put(img, 0xFFFF0, directory(b"$PSP", [], info=1 << 29))                                                      # 檔案偏移讀法：16 bytes 的空目錄
+    put(img, N_IMG - 0x10, directory(b"$PSP", [], info=1 << 29))                                                 # 視窗讀法：表在最後 16 bytes（cookie_at 的 off+16 == n）
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, at=0x21000, new_psp=0xFFFF0)
+    assert {(d["offset"], d["base"]) for d in run(img)["directories"]} == {(0xFFFF0, 0), (N_IMG - 0x10, 0x1000)}
+
+
+def test_entry_total_limit_boundary_exactly_equal_is_not_a_limit(monkeypatch):
+    img = readings_image([one(0x50000)], [one(0x50000)])
+    monkeypatch.setattr(ap, "MAX_ENTRIES_TOTAL", 2)
+    r = run(img)
+    assert "dir-limit" not in codes(r) and all(d["parsed"] for d in r["directories"])
+    monkeypatch.setattr(ap, "MAX_ENTRIES_TOTAL", 1)
+    assert "dir-limit" in codes(run(img))
+
+
+def test_competing_combo_with_empty_pointers_and_equal_contents_is_adopted():
+    def ex(img):
+        put(img, 0x40000, directory(b"$PSP", [], info=1 << 29))
+    a = combo(b"2PSP", [(0xBC0A0000, 0), (0xBC0A0001, 0x40000)])
+    b = combo(b"2PSP", [(0xBC0A0000, 0), (0xBC0A0001, 0x3F000)])
+    r = run(dirs_image(a, b, extra=[ex]))
+    assert st3(r)[(0x30000, 0)] == "adopted" and st3(r)[(0x31000, 0x1000)] == "adopted"
+    assert all(not d["reading_fail"] for d in r["directories"] if d["kind"] == "combo-psp") and "reading-equivalent" in codes(r)
+
+
+def test_entry_address_mode_follows_the_directory_unless_the_directory_is_relative():
+    img = good_image()
+    # 目錄 mode 1：條目自己的 mode 3 不看，照視窗開頭解
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x31000, mode=3)], info=1 << 29))
+    r = run(img)
+    e = next(d for d in r["directories"] if d["offset"] == 0x30000)["entries"][0]
+    assert e["kind"] == "blob" and e["offset"] == 0x31000
+    # 目錄 mode 0：條目的 mode 2 也不看
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=phys(0x31000), mode=2)], info=0))
+    e = next(d for d in run(img)["directories"] if d["offset"] == 0x30000)["entries"][0]
+    assert e["kind"] == "blob" and e["offset"] == 0x31000
+    # 目錄 mode 2（相對目錄）：用條目自己的 mode；mode 3（相對 slot）不解（限制，不是證據）；目錄 mode 3 同
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x1000, mode=2)], info=2 << 29))
+    e = next(d for d in run(img)["directories"] if d["offset"] == 0x30000)["entries"][0]
+    assert e["kind"] == "blob" and e["offset"] == 0x31000
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x31000, mode=3)], info=3 << 29))
+    e = next(d for d in run(img)["directories"] if d["offset"] == 0x30000)["entries"][0]
+    assert e["kind"] == "unresolved" and e["limit"] is True
+
+
+def test_known_entry_types_are_not_reported_as_unknown():
+    r = run(good_image())
+    unknown = [p for p in r["problems"] if p["code"] == "type-unknown"]
+    assert unknown and all("0x77" in p["text"] for p in unknown)                                  # good_image 只有 0x77 不在清單
+    assert all(e["type_name"] for d in r["directories"] for e in d["entries"] if e.get("type") in (0x01, 0x08, 0x12, 0x40, 0x0B, 0x66, 0x60, 0x61))
+
+
+def test_only_one_passing_reading_never_adds_a_reading_equivalent_note():
+    r = run(readings_image([one(0x50000)], [one(0x50000)], bad_a=True))
+    assert "reading-equivalent" not in codes(r) and "reading-rejected" in codes(r)
+    # 同一位置不同基底、恰好一種通過
+    img = bytearray(b"\xff" * N_IMG)
+    put(img, 0xFFE00, psp_blob(1, (5, 5, 5, 5), 0x300))
+    put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0xFFE00, mode=1)], info=1 << 29))
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, new_psp=0x30000)
+    efs(img, new_psp=0x2F000, at=0x21000)
+    r = run(img)
+    assert st3(r)[(0x30000, 0x1000)] == "rejected" and "reading-equivalent" not in codes(r)
+
+
+def test_resolution_does_not_depend_on_the_order_of_records_edges_and_groups(monkeypatch):
+    """resolve_readings 的輸入（紀錄、邊、組）列舉順序被真的打亂：結果（整份 JSON，包含訊息與 used_instead）要相同。
+    限制：走訪階段（walk／finish_walk）自己用 sorted 排序，這裡沒有辦法在不改程式的情況下打亂它的內部列舉；那一段只由「EFS 與指標順序顛倒」的測試與 walk 的單元測試間接檢查。"""
+    real = ap.resolve_readings
+    rng = random.Random(7)
+
+    def shuffled(ctx):
+        rng.shuffle(ctx.edges)
+        rng.shuffle(ctx.groups)
+        items = list(ctx.by_key.items())
+        rng.shuffle(items)
+        ctx.by_key = dict(items)
+        rng.shuffle(ctx.dirs)
+        real(ctx)
+    images = [rand_image(s) for s in range(40)] + [loop_image(), readings_image([one(0x50000)], [one(0x50000)], bad_a=True)]
+    base = [strict_json(run(i)) for i in images]
+    monkeypatch.setattr(ap, "resolve_readings", shuffled)
+    for _ in range(3):
+        assert [strict_json(run(i)) for i in images] == base
+
+
+# ---------- AGESA 的 complete=False 路徑與值上限 ----------
+
+def test_agesa_values_cap_makes_the_search_incomplete_even_when_the_markers_are_only_in_compressed_content():
+    ms = b"".join(b"AGESA!V9\x00ComboPI 1.0.0.%d\x00" % i for i in range(ap.MAX_AGESA_VALUES + 4))
+    lz = lzma.compress(secs(sec(0x10, b"MZ" + b"\x00" * 30 + ms)), format=lzma.FORMAT_ALONE)
+    ag = agesa_with(fv([ffs(0x07, secs(guided(LZMA, lz)), k=2)]))
+    assert len(ag["values"]) == ap.MAX_AGESA_VALUES and ag["complete"] is False and any("distinct AGESA strings" in p for p in ag["problems"])
+
+
+def test_agesa_incomplete_when_the_walk_is_interrupted_fails_or_finds_no_firmware_volume(monkeypatch):
+    lz, comp = agesa_lz()
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([comp]))
+
+    class Over(Exception):
+        pass
+
+    class Budget:
+        def __init__(self):
+            self.c = 0
+
+        def check(self):
+            self.c += 1
+            if self.c > 1:
+                raise Over("time limit")
+    ag = ap.analyze(bytes(img), Budget(), (Over,))["agesa"]                                          # 走訪途中超時（soft）
+    assert ag["complete"] is False and any("stopped early" in p for p in ag["problems"])
+    ui = ap._sibling("uefi_image")
+
+    real_parse = ui.parse_fvs
+
+    def boom(data, sc, depth, where="image"):
+        real_parse(data, sc, depth, where)                                                          # 整個走完、找到值之後才丟例外：只剩這個例外讓搜尋不完整
+        raise RuntimeError("boom")
+    monkeypatch.setattr(ui, "parse_fvs", boom)                                                      # parse_fvs 丟一般例外
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and any("UEFI walk failed" in p for p in ag["problems"])
+    monkeypatch.undo()
+    ag = run(bytearray(b"\xff" * SIZE))["agesa"]                                                     # 沒有 FV，原始位元組也沒有標記
+    assert ag["complete"] is False and any("no UEFI firmware volume" in p for p in ag["problems"]) and ag["values"] == []

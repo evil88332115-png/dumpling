@@ -10,12 +10,12 @@
 1. Embedded Firmware Structure（EFS，簽章 0x55AA55AA，位置照 coreboot util/amdfwtool/amdfwread.c 依 ROM 大小（≤4／≤8／其餘 MiB）分的三張 fw_header_offsets 表，每個視窗各查一次；
    視窗＝16 MiB 區塊，更新包有標頭造成位移時，指標之一要真的指到目錄 cookie 才採用）
    → 指標欄位 → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）。目錄裡的項目若指向另一個目錄
-   （PSP 的 0x40、BIOS 的 0x70、combo 的每一項……只要解出的位置開頭是目錄 cookie）就往下走，深度、目錄數、項目總數都有上限，循環不重複走。
+   （PSP 的 0x40、BIOS 的 0x70、combo 的每一項……只要解出的位置開頭是目錄 cookie）就往下走，深度、目錄數、項目總數都有上限；每個（位置，基底）只解析一次，循環只是一條指向已存在目錄的邊。
 2. 每個目錄項目：type、subprogram、instance、rom id、位置、大小、旗標。PSP 韌體條目的標頭（0x100 bytes）通過檢查才讀版本；其餘版本欄位記 GAP。
 3. BIOS 目錄 type 0x66 的 AMD 微碼：patch level（patch_id）、日期、equivalence id；微碼前面有 container 的等價表（`DMA\\0`）時才對出 CPUID，
    否則只列 equivalence id（不猜對照）。
 4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外找整個映像原始位元組裡的標記；原始位元組裡只要有任何標記就讓搜尋標為不完整
-   （公開介面沒有辦法證明那個位置有被走訪搜尋過；精確的位置涵蓋留到 M7），只在原始位元組裡有的值照舊列出（位置 `image (raw bytes)`）；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
+   （公開介面沒有辦法證明那個位置有被走訪搜尋過；精確的位置涵蓋留到 M7），只在原始位元組裡有的值列出（位置 `image (raw bytes)`）；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
 
 ## 格式出處（只讀公開的格式說明核對欄位，沒有複製程式碼；程式是自己寫的）
 - coreboot `src/vendorcode/amd/psp/psp_efs.h`（EFS 欄位）、`psp_directory.h`（目錄標頭、項目、type 編號、cookie）、`bios_directory.h`
@@ -45,18 +45,23 @@ combo 目錄：32 bytes 標頭（cookie、checksum、num_entries、lookup、16 b
 
 ## 競爭的讀法（resolve_readings）
 EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0）；combo 項目也一樣。兩種讀法都在目標位置看到目錄 cookie，或同一個位置被不同的基底讀到，
-就有一組互相競爭的讀法：兩邊都解析、都列在 inventory。每一組依「各自的結構檢查」決定（reading_fail，保守：只收讀錯基底時才會出現的結構性證據）：
-  通過＝目錄表讀得進來且 checksum 相符、沒有任何條目的位址解不出來（超出檔案、mode 不支援、size 超過上限、指標條目沒指到目錄）、A/B 復原的 slot header checksum 相符且 pl2_location 指到目錄、
-  combo 的每個有位址的項目都指到目錄、目錄表本身不落在自己某個條目的範圍裡。不看版本欄位這類內容的判斷。
-  恰好一種通過 → 採用它，沒通過的標「未採用」（rejected，附證據，記 reading-rejected，ATTENTION）；兩種以上通過而且解讀結果完全相同（條目逐項相同、指到的內容雜湊相同、子目錄位置相同）
-  → 都採用（記 reading-equivalent）；通過的兩種以上但內容不同、或都沒通過 → 維持歧義（ambiguous，GAP：pointer-ambiguous／dir-ambiguous），條目只列在 inventory、不進 SBOM。
+就有一組互相競爭的讀法：兩邊都解析、都列在 inventory。每一組依「各自的結構檢查」決定（reading_state）。原則：只有結構上的正面證據才算不通過；沒有被完整檢查過的讀法不可以被採用，也不可以替另一邊背書。
+  證據（讀錯基底時才會出現的結構性反證）：目錄表超出檔案、checksum 不符；條目的位址解不出來（超過 4 GiB、負的）、條目範圍或壓縮條目的起點超出檔案、指標條目沒指到目錄；
+  A/B 復原的 slot header checksum 不符、或 checksum 相符但 pl2_location 沒指到目錄；combo 有位址的項目沒指到目錄；目錄表本身落在自己某個條目的範圍裡。不看版本欄位這類內容的判斷。
+  限制（無法判斷，不是證據）：解析被超時或例外打斷、項目數超過 MAX_DIR_ENTRIES、項目總數超過 MAX_ENTRIES_TOTAL、目錄數或深度超過上限（那一種讀法沒有紀錄）、
+  address mode 3、條目大小超過 MAX_BLOB、A/B 復原條目的大小不是 0 或 0x100、條目解析出錯。
+  每一種讀法都有被完整檢查而且恰好一種通過 → 採用它，有證據不通過的標「未採用」（rejected，附證據，記 reading-rejected，ATTENTION）；通過的有兩種以上而且解讀結果完全相同
+  （條目逐項相同、指到的內容雜湊相同、子目錄位置相同；拿不到雜湊不算相同） → 都採用（記 reading-equivalent）；通過的有兩種以上但內容不同、都沒通過、有任何一種無法判斷（限制）、
+  或有讀法沒有紀錄 → 整組維持歧義（ambiguous，GAP：pointer-ambiguous／dir-ambiguous），條目只列在 inventory、不進 SBOM；沒有任何一種被採用時，沒通過的也不標未採用。
+  碰到任何上限（目錄數、深度、項目數、項目總數、EFS 數）、發現目錄循環、比較內容時雜湊上限用完、或目錄階段沒走完（超時或例外）時，所有競爭的讀法一律維持歧義
+  （目錄階段沒走完時所有紀錄都不採用也不拒絕）。
   指標的那一組只作用在那一個指標的邊（同一個目錄若也從別的單一讀法的指標到得了，仍然確定）；同一個位置不同基底的那一組作用在紀錄本身。
   確定的目錄＝從 EFS 出發只走通過的邊到得了的；被採用讀法的子目錄沿用它的基底、確定；被拒絕讀法底下只能經由它到得了的子目錄跟著不採用，經由歧義的讀法才到得了的子目錄是歧義。
-  結果只取決於走訪到的紀錄與邊，和 EFS、指標的處理順序無關。
+  結果只取決於走訪到的紀錄與邊（走訪依深度逐層、同層依（位置，基底）排序），和 EFS、指標的處理順序無關。
 
 ## 上限與放大控制（見 MAX_*）
 視窗內 EFS 數、目錄數、深度、每個目錄的項目數、全部目錄的項目總數、雜湊總量（同一段 offset＋size 只算一次）、單一項目大小、微碼數、AGESA 標記數與
-解開後內容總量；循環（目錄指標回到走訪路徑上的目錄）不重複走。regex 只用固定字面值；AGESA 用 bytes.find。
+送進搜尋的走訪內容總量（MAX_AGESA_INSPECT，不去重）；每個（位置，基底）只解析一次，循環不重複走。regex 只用固定字面值；AGESA 用 bytes.find。
 """
 import hashlib
 import importlib.util
@@ -81,7 +86,7 @@ MAX_PROBLEMS_SHOWN = 12                # 每種 problem 在 JSON 裡逐一列出
 MAX_AGESA_MARKERS = 4096               # 全部內容裡 `AGESA!V` 標記的總數
 MAX_AGESA_VALUES = 16                  # 不同的 AGESA 值最多記幾個
 MAX_AGESA_LOCATIONS = 8                # 每個值最多記幾個位置
-MAX_AGESA_INSPECT = 1 << 30            # 走訪 firmware volume 時去重後送進搜尋的位元組總量
+MAX_AGESA_INSPECT = 1 << 30            # 走訪 firmware volume 時送進搜尋的位元組總量（每次 scan_bytes 的內容都算，不去重）
 AGESA_VALUE_LEN = 64                   # AGESA 標記後面讀的字串長度上限
 AGESA_MARK = b"AGESA!V"
 
@@ -680,7 +685,7 @@ def collect_contents(ctx, amd):
                 if len(m["locations"]) < 16:
                     m["locations"].append(loc)
 
-    for rec in ctx.dirs:
+    for rec in sorted(ctx.dirs, key=lambda r: (r["offset"], r["base"])):       # 位置清單的順序不依賴 ctx.dirs 的順序
         if not rec["trusted"] or rec["rejected"] or rec["kind"].startswith("combo"):
             continue
         for ent in rec["entries"]:
@@ -847,6 +852,8 @@ def decide(ctx, force):
     ptr = {}
     for g in ctx.groups:
         ptr.setdefault(frozenset(g["keys"]), []).append(g)
+    for gl in ptr.values():
+        gl.sort(key=lambda g: (g["via"], g["value"]))               # 訊息與 members 的列舉不依賴處理順序
     by_off = {}
     for k in recs:
         by_off.setdefault(k[0], []).append(k)
@@ -888,11 +895,11 @@ def decide(ctx, force):
                 rejected.add(k)
                 changed = True
     members = {}                        # 紀錄 → 它所屬的競爭組（為了訊息）
-    for gk, gl in ptr.items():
-        for k in gk:
-            members.setdefault(k, []).append(("pointer", gk, pv[gk], gl[0]))
-    for o, ks in off_groups.items():
-        for k in ks:
+    for gk in sorted(ptr, key=sorted):
+        for k in sorted(gk):
+            members.setdefault(k, []).append(("pointer", gk, pv[gk], ptr[gk][0]))
+    for o, ks in sorted(off_groups.items()):
+        for k in sorted(ks):
             members.setdefault(k, []).append(("offset", frozenset(ks), ov[o], None))
     return {"definite": definite, "rejected": rejected, "ptr": ptr, "pv": pv, "off_groups": off_groups, "ov": ov, "off_state": off_state, "members": members, "state": state}
 
@@ -1044,7 +1051,7 @@ def agesa_search(data, budget=None, soft=()):
     table, st = {}, r["stats"]
     seen_problems = set()
     walk_counts, raw_counts, raw_locs = {}, {}, {}
-    state = {"capped": False, "raw_capped": False, "inspect_capped": False}
+    state = {"capped": False, "raw_capped": False, "inspect_capped": False, "values_capped": False}
 
     def note(text):
         if text not in seen_problems:
@@ -1073,6 +1080,7 @@ def agesa_search(data, budget=None, soft=()):
                     e = table.get((tag, value))
                     if e is None:
                         if len(table) >= MAX_AGESA_VALUES:
+                            state["values_capped"] = True
                             note(f"more than {MAX_AGESA_VALUES} distinct AGESA strings; the rest are not listed")
                             e = {"found": [], "count": 0}
                         else:
@@ -1153,11 +1161,11 @@ def agesa_search(data, budget=None, soft=()):
     if not sc.fvs:
         note("no UEFI firmware volume was decoded; only the raw bytes were searched for AGESA strings")
         complete = False
-    if state["capped"] or state["inspect_capped"]:
+    if state["capped"] or state["inspect_capped"] or state["values_capped"]:
         complete = False
     # 原始位元組裡只要有任何 AGESA 標記，就標不完整：沒有正式介面可以證明那個位置有被走訪搜尋過（走訪收到的內容不分原始切片或解壓縮來的，
     # 解壓縮出來的內容也可能和原始位元組裡另一處沒被搜尋的複本完全相同）。精確的位置涵蓋留到 C1 提供回呼介面之後（M7）。
-    # 原始位元組裡有、走訪結果裡沒有的 (tag, value)：照舊加進表裡，位置寫 image (raw bytes)；走訪結果裡已經有的：只標不完整，不重複計數。
+    # 原始位元組裡有、走訪結果裡沒有的 (tag, value)：加進表裡，位置寫 image (raw bytes)；走訪結果裡已經有的：只標不完整，不重複計數。
     if raw_counts:
         complete = False
         note(f"{st['raw_markers']} AGESA marker(s) in the raw image bytes: there is no formal interface that can show the UEFI walk searched those raw byte positions, "

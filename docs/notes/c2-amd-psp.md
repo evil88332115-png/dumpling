@@ -1,7 +1,6 @@
 # C2：AMD 平台的 PSP／BIOS 目錄、微碼與 AGESA（分支 wp3/amd-psp）
 
-擴充 `x86_firmware.py` 對 AMD 平台 BIOS 映像的解析範圍。以前只認得 AMD 平台並記 GAP「AMD microcode 不支援」，SBOM 裡幾乎只有映像本身；
-現在解析 Embedded Firmware Structure（EFS）→ PSP／BIOS 目錄 → 條目，讀 AMD 微碼與 AGESA 版本字串。**不是漏洞比對**：所有新元件仍是
+擴充 `x86_firmware.py` 對 AMD 平台 BIOS 映像的解析範圍：解析 Embedded Firmware Structure（EFS）→ PSP／BIOS 目錄 → 條目，讀 AMD 微碼與 AGESA 版本字串。**不是漏洞比對**：所有新元件仍是
 `dumpling:vuln-assessment=NOT_ASSESSED`（note：AMD 安全公告無法機器比對，需公告對照）。
 
 ## 檔案
@@ -20,13 +19,13 @@
    掃全檔的簽章候選（上限 `MAX_SIG_HITS`），位移是 4 KiB 的整數倍、不超過 `MAX_SHIFT`，而且指標之一真的指到目錄 cookie 才採用。
 2. **目錄**：EFS 的 `psp_directory`（+0x10）、`new_psp_directory`（+0x14）、`psp_bak_directory`（+0x2C）、`bios0`–`bios3` 指標；cookie `$PSP`、`$PL2`、`$BHD`、`$BL2`、combo `2PSP`／`2BHD`。
    標頭 checksum 是 coreboot `amdfwtool.c` 的 `fletcher32`（初值 0xFFFF、16 位元小端字、每 359 個字與最後各折疊一次），涵蓋 +8 到最後一個項目結尾。
-   三個公開 BIOS 的所有目錄（42 個）checksum 都相符，所以算法與涵蓋範圍是實測確認的（用 coreboot 的算法重跑；先前用「模 65535」的等價寫法也相符，但在某一半剛好是 0 或 0xFFFF 時兩種寫法會不同，所以改成跟 coreboot 一樣）。
+   三個公開 BIOS 的所有目錄（42 個）checksum 都相符，所以算法與涵蓋範圍是實測確認的（用 coreboot 的算法；「模 65535」的等價寫法在某一半剛好是 0 或 0xFFFF 時會和 coreboot 不同，所以不用）。
 3. **往下走**：combo 項目（lvl2 位址）、PSP 的 0x40（L2）、BIOS 的 0x70（L2）、其他解出位置開頭是目錄 cookie 的項目、A/B 復原的 Image Slot Header
    （PSP 的 0x48／0x4A，項目 size 為 0 或 0x100（coreboot 寫 `BLOB_ALIGNMENT`），指到 0x20 bytes 的 slot header；header 的 checksum 是同一個 `fletcher32`，涵蓋 +4 到 +0x20，
-   對了才採用裡面的 `pl2_location`（L2 目錄），不對記 `ish-checksum`）。其他 size 的 0x48／0x4A 不解讀（`ish-size`）。深度、目錄數、項目總數有上限，路徑上的目錄不重複走（循環）。
+   對了才採用裡面的 `pl2_location`（L2 目錄），不對記 `ish-checksum`）。其他 size 的 0x48／0x4A 不解讀（`ish-size`）。深度、目錄數、項目總數有上限；每個（位置，基底）只解析一次，循環只是一條指向已存在目錄的邊。
 4. **位址**：目錄標頭的 address mode（0 實體、1 相對視窗）優先，只有目錄是 2（相對目錄）或 3（相對 slot）才看項目自己的 mode（PSPTool 的做法）；
    mode 3 的 slot 起點未知，不解。值在 `2^32−W` 以上是映射在 4 GB 頂端的位置（W＝視窗大小，最大 16 MiB，所以大於 16 MiB 的映像相當於遮成 24 bits），其餘是視窗內偏移。
-5. **競爭的讀法（D-047，`resolve_readings`）**：EFS 有位移時，指標值可以讀成「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0），combo 項目也一樣；
+5. **競爭的讀法（`resolve_readings`）**：EFS 有位移時，指標值可以讀成「視窗座標」（加視窗開頭）或「整個檔案的偏移」（加 0），combo 項目也一樣；
    兩種讀法都在目標位置看到目錄 cookie，或同一個位置被不同的視窗基底讀到（條目位址依基底會讀到不同的地方），就有一組互相競爭的讀法。兩邊都解析、都列在 inventory
    （目錄紀錄以（位置，基底）為單位）。每一組用**各自的結構檢查**決定，不靠猜哪個是硬體實際使用的。原則：**只有結構上的正面證據才算不通過；沒有被完整檢查過的讀法不可以被採用，也不可以替另一邊背書。**
    - **證據**（`reading_state`，只收「讀錯基底時才會出現、讀對時不該出現」的結構性反證）：(1) 目錄表超出檔案、checksum 不符；(2) 條目的位址解不出來（超過 4 GiB、負的）、條目範圍或壓縮條目的起點超出檔案、
@@ -44,7 +43,7 @@
    - **作用範圍**：指標那一組只作用在那一個指標的邊（同一個目錄若也從別的、單一讀法的指標到得了，仍然確定）；同一位置不同基底那一組作用在紀錄本身。確定的目錄＝從 EFS 出發只走
      「通過的邊」（單一讀法的指標，或指標的讀法被採用的那一邊）到得了的；子目錄沿用被採用那一讀法的基底。被拒絕的讀法底下、只能經由它到得了的子目錄跟著標 `rejected`
      （`reading-rejected`，說明「只經由不採用的讀法到得」；只有進來的邊全都被拒絕才算，有一條來自歧義的就是歧義）；經由歧義的讀法才到得了的子目錄是歧義。
-   - **與處理順序無關的範圍**：走訪改成依深度逐層（`walk`）：每個（位置，基底）只解析一次，用它最淺的深度；同一層內依（位置，基底）排序；指標只登記邊，不遞迴；循環只是一條指向已存在節點的邊
+   - **與處理順序無關的範圍**：走訪依深度逐層（`walk`）：每個（位置，基底）只解析一次，用它最淺的深度；同一層內依（位置，基底）排序；指標只登記邊，不遞迴；循環只是一條指向已存在節點的邊
      （`dir-loop` 事後在圖上找）；`child`／`children`／`directories_seen` 只由 cookie 判斷的位置算出，不看目錄有沒有被解析。紀錄、問題、`reached_via`、`readings`、版本清單、EFS 的 `directories_found`
      （沿著邊算到得了的紀錄數）都用穩定的鍵排序。在合成的隨機映像（含循環、各種上限、競爭的讀法、壞 checksum、超界）上，把 EFS 與指標的處理順序打亂，整份結果（JSON）逐字相同；
      範圍只限「EFS 與指標的處理順序」，不含輸入映像本身的差異，也不含超時（超時發生的位置由時間決定）。上限造成的「沒解析的紀錄」是由內容與排序決定的，所以也不依賴順序；即使如此，碰到上限就全部維持歧義。
@@ -63,15 +62,15 @@
 9. **AGESA**：走訪 firmware volume（`uefi_image.parse_fvs`，LZMA 等解開，FV 以外的非空白位元組它也送進來），在每塊內容找 `AGESA!V` 標記：`V` 加 1–4 個英數字當 tag，
    後面一定要接一個 NUL 或空白當分隔，再讀最多 64 個可列印字元。**沒有分隔符（tag 和字串黏在一起，切不出來）、分隔後是空的、字串超過 64 字元被截斷**都不當成版本：
    記 GAP，截斷的值在 SBOM 的 `AMD AGESA` 元件不寫 `version`（`dumpling:version-status=GAP`，原值前綴放在 `sca-center:note`）。
-   **涵蓋規則（D-047：不依賴 uefi_image 對外介面約定以外的東西——只用 `Scan`／`scan_bytes`／`parse_fvs`／`Stop`／`MAX_*` 與原本就在用的 `fvs`、`files`、`undecoded`、`notes`、`parse_errors`；
+   **涵蓋規則（不依賴 uefi_image 對外介面約定以外的東西——只用 `Scan`／`scan_bytes`／`parse_fvs`／`Stop`／`MAX_*` 與原本就在用的 `fvs`、`files`、`undecoded`、`notes`、`parse_errors`；
    不讀它呼叫端的區域變數，不用 frame／inspect／`Scan.layers`）**：另外找整個映像原始位元組裡的標記。走訪的 `scan_bytes` 只收到內容，沒有辦法分辨它是原始位元組的切片還是解壓縮出來的，
    解壓縮出來的內容也可能和原始位元組裡另一處沒被搜尋的複本（UI section、被刪除的複本、空白區）位元組完全相同。沒有正式介面可以證明原始位元組的某個位置有被走訪搜尋過，所以規則是：
    - **原始位元組裡只要有任何 AGESA 標記，搜尋就標為不完整**（問題訊息寫明沒有正式介面可以證明，M7 再補精確的位置涵蓋；M7 由 C1 提供回呼介面）。
-   - 原始位元組裡有、走訪結果裡沒有的 `(tag, value)`：照舊加進結果，位置寫 `image (raw bytes)`；走訪結果裡已經有的值：只標不完整，不加位置、不重複計數。
+   - 原始位元組裡有、走訪結果裡沒有的 `(tag, value)`：加進結果，位置寫 `image (raw bytes)`；走訪結果裡已經有的值：只標不完整，不加位置、不重複計數。
    - 標記只在解壓縮內容裡、原始位元組裡沒有 → 不影響完整性（其他條件都滿足時可以完整）。
    - 代價：原始位元組裡有 AGESA 模組（沒有壓縮）的映像，AGESA 搜尋一律不完整；這是刻意保守的（不會多出「完整」，只可能多出「不完整」）。三個公開樣本的原始位元組標記數都是 0，結果不受影響。
    - 實作比 D-047 的字面更保守：原始位元組有任何標記就標不完整，理由是沒有正式介面可以證明那個位置有被走訪過（不嘗試用內容出現次數去換算）。
-   - 走訪回報的任何沒解開的部分（`Scan.undecoded`）一律讓搜尋不完整，包括最上層 FV 以外的非空白位元組：uefi_image 只把它們當原始內容搜尋，裡面的壓縮串流不會被解開；不再依賴 `reason` 字串過濾。
+   - 走訪回報的任何沒解開的部分（`Scan.undecoded`）一律讓搜尋不完整，包括最上層 FV 以外的非空白位元組：uefi_image 只把它們當原始內容搜尋，裡面的壓縮串流不會被解開。
    不同的完整值全部列出，超過一個就 ATTENTION。`uefi_image` 載入不了或走訪失敗時只有原始位元組的結果（不完整）。走訪沒有完整（有沒解開的部分、結構警告、沒有 FV、上限）→ 搜尋不完整，
    GAP「沒找到不代表不存在」。同一句問題訊息只記一次。
 
@@ -112,7 +111,7 @@
 | `MAX_DIRS`、`MAX_DEPTH`、`MAX_DIR_ENTRIES`、`MAX_ENTRIES_TOTAL` | 64、4、256、4096 | 目錄數、巢狀深度、單一目錄項目數、全部目錄項目總數（跨巢狀累計） |
 | `MAX_BLOB`、`MAX_HASH_TOTAL` | 64 MiB、256 MiB | 單一條目大小；雜湊總量（同一段 offset＋size 只算一次，所以多個目錄共用的條目不會放大） |
 | `MAX_UCODE`、`MAX_EQUIV`、`MAX_PATCHES` | 64、256、16 | 微碼數、container 等價表項目數、container 的 patch 數 |
-| `MAX_AGESA_MARKERS`、`MAX_AGESA_VALUES`、`MAX_AGESA_INSPECT`、`AGESA_VALUE_LEN` | 4096、16、1 GiB、64 | AGESA 標記總數、不同值數、解開後內容總量（同內容只搜一次）、字串長度 |
+| `MAX_AGESA_MARKERS`、`MAX_AGESA_VALUES`、`MAX_AGESA_INSPECT`、`AGESA_VALUE_LEN` | 4096、16、1 GiB、64 | AGESA 標記總數、不同值數（超過時搜尋不完整）、走訪送進搜尋的內容總量（每次 `scan_bytes` 的內容都算，不去重）、字串長度 |
 
 沒有用 regex 找 AGESA（`bytes.find` 固定字面值）；目錄 checksum 的計算量上限是 256 項 × 24 bytes。
 
@@ -122,7 +121,7 @@ ASUS PRIME B550M-A BIOS 3404（2023/10/31，AMI），16.7 MB zip，裡面一個 
 EFS 因標頭位移不在固定位置（0x21000、0x1021000）；EFS 指向 combo 目錄（`2PSP`／`2BHD`），再指到多個 L1；新世代的 L1 有 0x40／0x70 指標到 L2（`$PL2`、`$BL2`）；
 AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可當出處。
 
-2026-11-13 的解析結果（`python3 -I x86_firmware.py inventory --in PRIME-B550M-A-ASUS-3404.CAP`，約 2.5 秒；D-047 的規則）：
+2026-11-13 的解析結果（`python3 -I x86_firmware.py inventory --in PRIME-B550M-A-ASUS-3404.CAP`，約 2.5 秒）：
 
 - 2 個 EFS（視窗位移 0x1000）→ 19 個目錄紀錄（17 個位置：2 個 combo PSP、1 個 combo BIOS、5 個 L1 PSP、2 個 L2 PSP、5 個 L1 BIOS、2 個 L2 BIOS；0x131000 與 0x15a000 各有兩種基底的讀法），
   checksum 全部相符。
@@ -164,10 +163,10 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
 
 - ASRock B550 Phantom Gaming 4 BIOS 3.40：`https://download.asrock.com/BIOS/AM4/B550%20Phantom%20Gaming%204(3.40)ROM.zip`，15513528 位元組，SHA-256 `7128bf8417924b93b509915cfdfaedecba470f4885d7fb802c906a0ebee5e985`；
   zip 內一個 33554432 位元組的 `B550PG43.40`（SHA-256 `19cd0d852086227e4e85e7f184baa5c23eed93abe1718462dd1079e14a6db692`）。結果：2 個 EFS（0x20000、0x1020000）、17 個目錄、246 項，沒有競爭的讀法
-  （D-047 前後相同：17 個目錄都確定，SBOM 101 個元件＝映像 1、PSP 韌體 80、微碼 19、AGESA 1）；AGESA 同樣是 `ComboAM4v2PI 1.2.0.B`；19 份微碼，其中同兩份與 linux-firmware 位元組相同。
+  （17 個目錄都確定，SBOM 101 個元件＝映像 1、PSP 韌體 80、微碼 19、AGESA 1）；AGESA 同樣是 `ComboAM4v2PI 1.2.0.B`；19 份微碼，其中同兩份與 linux-firmware 位元組相同。
   ASRock 的下載頁要 JavaScript 驗證，抓不到 release notes，也無法確認授權頁網址，所以沒有列為樣本。
 - ASUS PRIME B650M-A BIOS 1807（AM5）：`https://dlcdnets.asus.com/pub/ASUS/mb/BIOS/PRIME-B650M-A-ASUS-1807.zip`，11601928 位元組，SHA-256 `8f9202f9c88ca6124b45951b2745f9eabaa8af87d1a290ffd908a39394985cbc`。
-  結果（D-047）：`psp_bak_directory` 的指標有兩種讀法（視窗座標 0x83000＝基底 0x1000、檔案偏移 0x82000＝基底 0）；0x82000 也從 `new_psp_directory` 用基底 0x1000 讀過。基底 0 的 0x82000 讀法裡
+  結果：`psp_bak_directory` 的指標有兩種讀法（視窗座標 0x83000＝基底 0x1000、檔案偏移 0x82000＝基底 0）；0x82000 也從 `new_psp_directory` 用基底 0x1000 讀過。基底 0 的 0x82000 讀法裡
   A/B slot header 的 checksum 不符（條目 0：0x00000048、條目 1：0x0000004a 不是 slot header 的 checksum，位址讀錯了）→ 沒通過 → 不採用；0x83000（基底 0x1000）與 0x82000（基底 0x1000）都通過，採用。
   9 個目錄紀錄：8 個採用、1 個不採用、0 個歧義；21 個 PSP 版本與 2 份微碼進 SBOM（元件數 2 → 25：映像 1、PSP 韌體 21、微碼 2、AGESA 1，AGESA 是 `ComboAM5PI 1.0.8.0`）。
   另有 2 份微碼條目的格式不同（開頭是 `$PS1` 簽署標頭），記 GAP。
@@ -184,4 +183,12 @@ AGESA 字串在壓縮的 firmware volume 裡；release notes 有 AGESA 版本可
   （例如兩種讀法都結構完整、內容不同，其實只有一種是硬體用的）仍是 GAP；結構檢查通過不等於「硬體一定用這個」，只代表另一種讀法在結構上站不住。沒有做「同一個 EFS 的其他指標只在某種座標說得通」這類推論。
 - 沒有簽章驗證（Image Slot Header 只驗 checksum）；Promontory 晶片組韌體、IMC／GEC／XHCI 沒有解析；壓縮的 BIOS 目錄條目（type 0x62）不解開。
 - AGESA 搜尋依賴 `uefi_image` 能解開的部分；EFI 標準壓縮與需要處理的 GUID-defined section 解不開（會讓搜尋不完整，沒找到不代表不存在）。
+  **`complete` 的語意**：只代表「走訪沒有回報沒解開的部分（含 FV 以外的非空白位元組）、沒有結構警告、沒有碰到標記數／內容量／不同值數的上限、沒有被超時或例外打斷、有解出 FV，而且原始位元組裡沒有 AGESA 標記」。
+  uefi_image 本來就不掃的位置不在保證範圍內：FV 標頭與 extended header、GUID-defined section 的標頭到 DataOffset 之間、RAW section 裡的 LZMA 串流（不會被當容器解開）；
+  這些位置裡的標記搜尋不到也不會讓 `complete` 變 False。這一塊要等正式的回呼介面（M7）才能補。
+- **競爭的讀法的兩個取捨**：
+  - 被拒絕的讀法和被採用的讀法各有子目錄、落在同一個位置但不同基底，而且兩邊都通過結構檢查、內容不同時，被採用那一邊的子目錄也會標歧義（同一位置的不同基底讀法是一組競爭的讀法；
+    被拒絕那邊的子目錄不會替另一邊背書）。結果是保守的：少採用，不多採用。
+  - 「條目範圍超出檔案」的證據假設映像是完整的（沒有被截斷）；截斷的檔案會讓正確的讀法被當成有證據不通過。slot header 整塊是 0 時 checksum 不符，算證據；整塊是 0xFF 時 checksum 剛好相符
+    （`pl2_location` 是 0xFFFFFFFF＝沒有指標），不算證據、也不會往下走。
 - 微碼的 `patch_size` 是目錄項目的大小（單獨 patch 時等於 patch 區段大小）；patch 內部的 checksum、簽章沒驗證。
