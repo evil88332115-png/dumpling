@@ -7,10 +7,16 @@
   python3 -I pipeline/watch/art14.py fill-drill-aware --repo O/R --at UTC時間 [--result 結果.json]
   python3 -I pipeline/watch/art14.py close-drill      --repo O/R [--result 結果.json]
   python3 -I pipeline/watch/art14.py check            --result 結果.json --expect 路徑=值 …
+GitLab 後端（GITLAB-PORT T-10；只用假 API 測過，沒有對真實 GitLab 驗證）：
+  把 --repo O/R 換成 --backend gitlab --gitlab-url <…/api/v4> --gitlab-project <數字 ID>（token 從環境變數 GITLAB_TOKEN 讀，不收 argv；
+  注意 --project 仍然是「專案資料夾」）。多一個指令：
+  python3 -I pipeline/watch/art14.py open-real        --backend gitlab … --match 命中.json [--project projects/<專案>] [--result 結果.json]   （只有 GitLab；GitHub 一律拒絕）
+  GitLab 的 countdown 不加 --drill ＝ 真實案件（標籤 art14）；加 --drill ＝ 演練（標籤 art14-drill）。
+  信任：作者與留言者要是專案成員且存取等級 >= Developer（30）；system 留言不算；Issue 不是 confidential 就 FAIL、不寫入。
 stdout 最後一行 ART14<TAB>OK|FAIL<TAB>說明；結束碼 OK 0、FAIL 1、用法 64。
 
 安全與範圍：
-  - 公開 repo 只有演練：沒有任何指令會在 GitHub 開或改 `art14`（真實案件）Issue。不加 --drill 的 countdown 找到 art14 Issue 就 FAIL、不修改。
+  - （GitHub）公開 repo 只有演練：沒有任何指令會在 GitHub 開或改 `art14`（真實案件）Issue。不加 --drill 的 countdown 找到 art14 Issue 就 FAIL、不修改。
   - 只處理作者是 repo 的 OWNER／MEMBER／COLLABORATOR（或 github-actions[bot]）的 Issue；公開 repo 任何人都能開 Issue。
   - 寫進 Issue 的文字一律先過 publiccheck.check_text()；演練的文字一定要有「演練」字樣，否則不寫。
   - GitHub API 用 issues.Api（token 只放標頭、不跟隨轉址、http 只限本機、rate limit 重試），不另寫一套。
@@ -40,6 +46,7 @@ DRILL_LABEL = "art14-drill"
 DRILL_DONE_LABEL = "art14-drill-done"
 REAL_LABEL = "art14"
 STAGE_LABELS = {"24h": "art14-24h", "72h": "art14-72h", "final": "art14-final"}
+GITLAB_MIN_LEVEL = 30   # Developer（官方 Project members API 的存取等級表：Guest 10、Planner 15、Reporter 20、Security Manager 25、Developer 30、Maintainer 40、Owner 50）
 TRUSTED_ASSOC = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 BOT_LOGIN = "github-actions[bot]"
 MARK_RE = re.compile(r"<!-- dumpling-art14 key=([0-9a-f]{64}) kind=(vulnerability|incident) mode=(real|drill) -->")
@@ -286,7 +293,7 @@ def issue_key(kind, mode, parts):
     return hashlib.sha256(("dumpling-art14/1|" + mode + "|" + kind + "|" + "|".join(parts)).encode("utf-8")).hexdigest()
 
 
-def render_issue(m, drill=True):
+def render_issue(m, drill=True, gitlab=False):
     """回傳 (key, 標題, 內文, 標籤)。內文第一行是機器標記，drill 的第二行固定是「演練，不是真實通報」。"""
     kind, mode = m["kind"], "drill" if drill else "real"
     key = issue_key(kind, mode, m["key_parts"])
@@ -298,7 +305,9 @@ def render_issue(m, drill=True):
     L = [f"<!-- dumpling-art14 key={key} kind={kind} mode={mode} -->"]
     if drill:
         L += [DRILL_LINE, "", DEMO_LINE]      # 第二行固定是 DRILL_LINE（解析與檢查的契約），示範專案說明接在後面
-    L += ["", "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握。不在公開 Issue 放任何機密。", "",
+    note = ("倒數只是輔助，GitLab 排程可能延遲，期限由負責人自己掌握。本 Issue 是私密（confidential）Issue，仍不放金鑰、密碼或個資。"
+            if gitlab and not drill else "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握。不在公開 Issue 放任何機密。")
+    L += ["", note, "",
           "## 預填欄位（工具帶入，請核對）", f"- 產品名稱與版本：{match.md_text(m['product'])} {m['version']}"]
     if inc:
         L += [f"- 事件代號：{m['incident_id']}", f"- 事件說明：{m['description']}",
@@ -424,7 +433,7 @@ def evaluate(kind, body, now):
             "hours_since_detected": hours, "stages": stages, "next_stage": nxt, "problems": problems}
 
 
-def render_comment(ev, now, drill):
+def render_comment(ev, now, drill, gitlab=False):
     L = [COMMENT_MARK]
     if drill:
         L += [DRILL_LINE, DEMO_LINE]
@@ -454,22 +463,35 @@ def render_comment(ev, now, drill):
         L.append("三個階段都已有 SRP 提交時間。")
     for p in ev["problems"]:
         L.append(f"- 注意：{p}")
-    L += ["", "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握。期限是保守值，法定期限的精確解釋交給法務。"]
+    L += ["", f"倒數只是輔助，{'GitLab' if gitlab and not drill else 'GitHub'} 排程可能延遲，期限由負責人自己掌握。期限是保守值，法定期限的精確解釋交給法務。"]
     return "\n".join(L) + "\n"
 
 
 # ---------- 寫入前的檢查 ----------
-def guard_text(texts, drill):
-    """texts: [(名稱, 文字)]。公開檢查命中或演練缺「演練」字樣 → Fail，什麼都不寫。"""
+def is_gitlab(api):
+    return getattr(api, "kind", "github") == "gitlab"
+
+
+def guard_text(texts, drill, internal=False):
+    """texts: [(名稱, 文字)]。公開檢查命中或演練缺「演練」字樣 → Fail，什麼都不寫。
+    internal：GitLab 的真實案件（私密 Issue，內部儲存）不需要公開檢查與「演練」字樣；沒淨化的 Markdown 檢查照做。"""
     if drill:
         for name, t in texts:
             if "演練" not in t:
                 raise Fail(f"{name}沒有「演練」字樣（演練的內容一定要有），不寫")
-    issues.public_check(texts)
+    if not internal:
+        issues.public_check(texts)
     # 最後一道：沒淨化的 @提及、連結、圖片、HTML 實體（標題不是 Markdown，只算 @ 與實體）
     bad = [(name, x) for name, t in texts for x in match.unsafe_markdown(t) if "標題" not in name or x[0] in "@＠&"]
     if bad:
         raise Fail(f"{bad[0][0]}有沒淨化的 Markdown（{bad[0][1]!r}），不寫")
+
+
+def pre_write(api, texts, drill):
+    """任何寫入之前的檢查：guard_text；GitLab 另外檢查 quick action（標題、內文、留言都算）。真實案件在 GitLab 才會有（internal）。"""
+    guard_text(texts, drill, internal=is_gitlab(api) and not drill)
+    if is_gitlab(api):
+        issues.GitLabApi.precheck(texts)
 
 
 def trusted_author(issue):
@@ -483,65 +505,110 @@ def trusted_commenter(c):
     return trusted_author(c)
 
 
+class Trust:
+    """誰寫的 Issue／留言可信。GitHub：author_association＋github-actions[bot]（同以前）。
+    GitLab：作者是專案成員、存取等級 >= Developer（30）；查 GET /projects/:id/members/all/:user_id，同一個 user id 一輪只查一次。
+    token 自己的使用者（project access token 的 bot 使用者）也是成員，所以工具寫的留言也算在內。"""
+
+    def __init__(self, api, repo):
+        self.api, self.repo, self.cache = api, repo, {}
+
+    def ok(self, obj):
+        if not is_gitlab(self.api):
+            return trusted_author(obj)
+        uid = (obj.get("user") or {}).get("id")
+        if type(uid) is not int:
+            return False
+        if uid not in self.cache:
+            self.cache[uid] = self.api.member_access(self.repo, uid)
+        lvl = self.cache[uid]
+        return lvl is not None and lvl >= GITLAB_MIN_LEVEL
+
+
 def write_result(path, obj):
     if path:
         issues.write_json(path, dict(obj, schema=RESULT_SCHEMA))
 
 
-def find_drill_issues(api, repo, state="open"):
-    """回傳 (可處理的 [(issue, marker)], 略過的 [(編號, 原因)])。"""
-    ok, skipped = [], []
-    for i in issues.list_issues(api, repo, DRILL_LABEL, state):
+def find_issues(api, repo, label, mode, trust, state="open"):
+    """回傳 (可處理的 [(issue, marker)], 略過的 [(編號, 原因)], 外洩疑慮的 [編號])。
+    外洩疑慮（只有 GitLab）：有這個標籤、卻不是 confidential 的 Issue——不處理、不寫入，呼叫端要 FAIL 並請人處理。"""
+    ok, skipped, leaks = [], [], []
+    for i in issues.list_issues(api, repo, label, state):
         if state == "open" and i.get("state") != "open":
-            # 依標籤列 Issue 剛關閉後有索引延遲，可能還列得到已關閉的（2026-11-13 實測 #37）：不更新已關閉的
+            # 依標籤列 Issue 剛關閉後有索引延遲（2026-11-13 實測 #37）：不更新已關閉的
             skipped.append((i["number"], "已關閉（列表索引延遲）"))
             continue
-        if not trusted_author(i):
-            skipped.append((i["number"], "作者不是 OWNER／MEMBER／COLLABORATOR"))
+        if is_gitlab(api) and i.get("confidential") is not True:
+            leaks.append(i["number"])
+            continue
+        if not trust.ok(i):
+            skipped.append((i["number"], "作者不是 OWNER／MEMBER／COLLABORATOR" if not is_gitlab(api)
+                            else f"作者不是專案成員或存取等級低於 Developer（{GITLAB_MIN_LEVEL}）"))
             continue
         mk = parse_marker(i.get("body"))
-        if not mk or mk[2] != "drill":
-            skipped.append((i["number"], "第一行標記不合法或不是 drill"))
+        if not mk or mk[2] != mode:
+            skipped.append((i["number"], f"第一行標記不合法或不是 {mode}"))
             continue
         ok.append((i, mk))
+    return ok, skipped, leaks
+
+
+def find_drill_issues(api, repo, state="open"):
+    ok, skipped, _leaks = find_issues(api, repo, DRILL_LABEL, "drill", Trust(api, repo), state)
     return ok, skipped
 
 
+def leak_message(leaks):
+    return (f"Issue {sorted(leaks)} 有 art14 標籤但不是 confidential（可能已經外洩）：不處理、不寫入；"
+            "請立刻人工改成 confidential 或刪除，並評估是否已被不該看的人看到")
+
+
 # ---------- 指令 ----------
-def cmd_open_drill(api, repo, match_path, result, project_dir=None):
+def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
+    """開案：drill＝演練（GitHub、GitLab 都可）；真實案件只有 GitLab（私密 Issue）。"""
+    cmd = "open-drill" if drill else "open-real"
+    if not drill and not is_gitlab(api):
+        raise Fail("公開 repo（GitHub）不開真實案件：open-real 只能搭配 --backend gitlab")
     m = apply_project(load_match(match_path), load_project_info(project_dir) if project_dir else None)
     for w in m["project_warnings"]:
         print(f"WARN\tproject.yml：{w}", file=sys.stderr)
-    key, title, body, labels = render_issue(m, drill=True)
-    guard_text([("標題", title), ("內文", body)], True)
-    for i in issues.list_issues(api, repo, DRILL_LABEL, "all"):
+    key, title, body, labels = render_issue(m, drill=drill, gitlab=is_gitlab(api))
+    pre_write(api, [("標題", title), ("內文", body)], drill)
+    mode = "drill" if drill else "real"
+    for i in issues.list_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "all"):
         mk = parse_marker(i.get("body"))
-        if mk and mk[0] == key and mk[2] == "drill":
-            write_result(result, {"cmd": "open-drill", "result": "skipped", "issue": i["number"], "key": key, "markets": m["market_state"]})
-            return f"已有同一個命中的演練 Issue #{i['number']}，不重複開"
+        if mk and mk[0] == key and mk[2] == mode:
+            write_result(result, {"cmd": cmd, "result": "skipped", "issue": i["number"], "key": key, "markets": m["market_state"]})
+            return f"已有同一個命中的{'演練' if drill else '真實'} Issue #{i['number']}，不重複開"
     issues.Labels(api, repo, False).ensure(labels)
-    d, _ = api.request("POST", f"/repos/{repo}/issues", {"title": title, "body": body, "labels": labels})
-    write_result(result, {"cmd": "open-drill", "result": "opened", "issue": d["number"], "key": key, "markets": m["market_state"]})
-    return f"開了演練 Issue #{d['number']}"
+    d = api.create_issue(repo, title, body, labels)
+    write_result(result, {"cmd": cmd, "result": "opened", "issue": d["number"], "key": key, "markets": m["market_state"]})
+    return f"開了{'演練' if drill else '真實案件'} Issue #{d['number']}"
+
+
+def cmd_open_drill(api, repo, match_path, result, project_dir=None):
+    return cmd_open(api, repo, match_path, result, project_dir, True)
 
 
 def comments_of(api, repo, number):
-    return api.get_all(f"/repos/{repo}/issues/{number}/comments?per_page=100")
+    return api.list_notes(repo, number)
 
 
-def update_comment(api, repo, number, text, problems):
-    """只維護一則：用固定標記找（只認可信的留言者），找到就編輯，沒有才新增。"""
+def update_comment(api, repo, number, text, problems, trust=None):
+    """只維護一則：用固定標記找（只認可信的留言者，system 留言不算），找到就編輯，沒有才新增。"""
+    trust = trust or Trust(api, repo)
     mine = [c for c in comments_of(api, repo, number)
-            if isinstance(c.get("body"), str) and c["body"].splitlines()[:1] == [COMMENT_MARK] and trusted_commenter(c)]
+            if not c.get("system") and isinstance(c.get("body"), str) and c["body"].splitlines()[:1] == [COMMENT_MARK] and trust.ok(c)]
     mine.sort(key=lambda c: c["id"])
     if len(mine) > 1:
         problems.append(f"Issue #{number} 有 {len(mine)} 則倒數留言，只更新最早的一則")
     if not mine:
-        api.request("POST", f"/repos/{repo}/issues/{number}/comments", {"body": text})
+        api.create_note(repo, number, text)
         return "created"
     if mine[0]["body"] == text:
         return "unchanged"
-    api.request("PATCH", f"/repos/{repo}/issues/comments/{mine[0]['id']}", {"body": text})
+    api.edit_note(repo, number, mine[0]["id"], text)
     return "updated"
 
 
@@ -552,31 +619,38 @@ def update_stage_label(api, repo, issue, want):
         return False
     if want:
         issues.Labels(api, repo, False).ensure([STAGE_LABELS[want]])
-    api.request("PATCH", f"/repos/{repo}/issues/{issue['number']}", {"labels": new})
+    api.edit_issue(repo, issue["number"], labels=new, was=issue.get("state"))
     return True
 
 
 def cmd_countdown(api, repo, drill, now, result):
-    if not drill:
+    gl = is_gitlab(api)
+    if not drill and not gl:
         found = issues.list_issues(api, repo, REAL_LABEL, "open")
         if found:
             raise Fail(f"公開 repo 不該有真實案件：找到 {len(found)} 個開著的 art14 Issue {sorted(i['number'] for i in found)}，"
                        "不處理、不修改（真實案件只在 GitLab 的私密 Issue）")
         write_result(result, {"cmd": "countdown", "count": 0, "issues": [], "skipped": []})
         return "沒有 art14 Issue"
-    cases, skipped = find_drill_issues(api, repo)
+    trust = Trust(api, repo)
+    what = "演練" if drill else "真實"
+    cases, skipped, leaks = find_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "drill" if drill else "real", trust)
     for n, why in skipped:
         print(f"skip\t#{n}\t{why}")
+    for n in leaks:
+        print(f"leak\t#{n}\t不是 confidential，不寫入")
     out, errors, problems = [], [], []
+    if leaks:
+        errors.append(leak_message(leaks))
     for i, (key, kind, _mode) in cases:
         ev = evaluate(kind, i.get("body") or "", now)
-        text = render_comment(ev, now, True)
+        text = render_comment(ev, now, drill, gitlab=gl)
         try:
-            guard_text([("倒數留言", text)], True)
+            pre_write(api, [("倒數留言", text)], drill)
         except Fail as e:
             errors.append(f"#{i['number']}：{e}")
             continue
-        cres = update_comment(api, repo, i["number"], text, problems)
+        cres = update_comment(api, repo, i["number"], text, problems, trust)
         lab = update_stage_label(api, repo, i, ev["next_stage"])
         clock = "started" if ev["clock_started"] else "not_started"
         rec = {"number": i["number"], "kind": kind, "clock": clock, "comment": cres, "label_changed": lab,
@@ -587,17 +661,22 @@ def cmd_countdown(api, repo, drill, now, result):
         print(f"case\t#{i['number']}\t{clock}\t下一階段 {rec['stage_label']}\t留言 {cres}")
     for p in problems:
         print("problem\t" + p)
-    write_result(result, {"cmd": "countdown", "now": fmt(now), "count": len(out), "issues": out,
-                          "skipped": [{"number": n, "why": w} for n, w in skipped]})
+    res = {"cmd": "countdown", "now": fmt(now), "count": len(out), "issues": out,
+           "skipped": [{"number": n, "why": w} for n, w in skipped]}
+    if gl:
+        res["leaks"] = sorted(leaks)
+    write_result(result, res)
     if errors:
         raise Fail("；".join(errors))
     if not cases:
-        return "沒有可處理的演練案件，立刻結束" + (f"（略過 {len(skipped)} 個：" + "；".join(f"#{n} {why}" for n, why in skipped[:5]) + "）" if skipped else "")
-    return f"更新 {len(out)} 個演練案件的倒數"
+        return f"沒有可處理的{what}案件，立刻結束" + (f"（略過 {len(skipped)} 個：" + "；".join(f"#{n} {why}" for n, why in skipped[:5]) + "）" if skipped else "")
+    return f"更新 {len(out)} 個{what}案件的倒數"
 
 
 def cmd_fill_drill_aware(api, repo, at, result):
-    cases, _skipped = find_drill_issues(api, repo)
+    cases, _skipped, leaks = find_issues(api, repo, DRILL_LABEL, "drill", Trust(api, repo))
+    if leaks:
+        raise Fail(leak_message(leaks))
     if not cases:
         raise Fail("找不到可處理的 art14-drill Issue（只允許改演練 Issue）")
     done = []
@@ -607,25 +686,33 @@ def cmd_fill_drill_aware(api, repo, at, result):
         if len(pat.findall(body)) != 1:
             raise Fail(f"#{i['number']} 的知悉時間欄位不是剛好一行")
         new = pat.sub(lambda mo: mo.group(1) + fmt(at), body)
-        guard_text([("內文", new)], True)
-        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"body": new})
+        pre_write(api, [("內文", new)], True)
+        api.edit_issue(repo, i["number"], body=new, was=i.get("state"))
         done.append(i["number"])
     write_result(result, {"cmd": "fill-drill-aware", "updated": done, "at": fmt(at)})
     return f"填入合成的知悉時間 {fmt(at)}：{done}"
 
 
 def cmd_close_drill(api, repo, result):
-    """關閉演練 Issue，art14-drill 換成 art14-drill-done、拿掉階段標籤（下一次演練從頭開始）。"""
-    closed = []
+    """關閉演練 Issue，art14-drill 換成 art14-drill-done、拿掉階段標籤（下一次演練從頭開始）。GitLab：不是 confidential 的不碰、最後 FAIL。"""
+    closed, leaks = [], []
     labels = issues.Labels(api, repo, False)
     for i in issues.list_issues(api, repo, DRILL_LABEL, "open"):
+        if is_gitlab(api) and i.get("confidential") is not True:
+            leaks.append(i["number"])
+            continue
         new = list(dict.fromkeys(DRILL_DONE_LABEL if n == DRILL_LABEL else n
                                  for n in issues.label_names(i) if n not in STAGE_LABELS.values()))
         labels.ensure([DRILL_DONE_LABEL])
-        api.request("POST", f"/repos/{repo}/issues/{i['number']}/comments", {"body": "演練結束，自動關閉"})
-        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"state": "closed", "labels": new})
+        api.create_note(repo, i["number"], "演練結束，自動關閉")
+        api.edit_issue(repo, i["number"], state="closed", labels=new, was=i.get("state"))
         closed.append(i["number"])
-    write_result(result, {"cmd": "close-drill", "closed": len(closed), "numbers": closed})
+    res = {"cmd": "close-drill", "closed": len(closed), "numbers": closed}
+    if is_gitlab(api):
+        res["leaks"] = sorted(leaks)
+    write_result(result, res)
+    if leaks:
+        raise Fail(f"關閉 {len(closed)} 個演練 Issue：{closed}；" + leak_message(leaks))
     return f"關閉 {len(closed)} 個演練 Issue：{closed}"
 
 
@@ -673,12 +760,18 @@ def build_parser():
 
     def repo_cmd(name):
         c = sub.add_parser(name, add_help=False)
-        c.add_argument("--repo", required=True)
+        c.add_argument("--repo")                                    # github：O/R（必填）
+        c.add_argument("--backend", choices=["github", "gitlab"], default="github")
+        c.add_argument("--gitlab-url", dest="gitlab_url")           # gitlab：…/api/v4（CI_API_V4_URL）
+        c.add_argument("--gitlab-project", dest="gitlab_project")   # gitlab：數字 ID（CI_PROJECT_ID）；--project 是專案資料夾，不是這個
         c.add_argument("--result")
         return c
     o = repo_cmd("open-drill")
     o.add_argument("--match", required=True)
     o.add_argument("--project", help="專案資料夾（讀 project.yml 的產品名稱、銷售市場、公司角色；沒給時銷售市場標 GAP）")
+    r = repo_cmd("open-real")
+    r.add_argument("--match", required=True)
+    r.add_argument("--project", help="專案資料夾（同 open-drill）")
     c = repo_cmd("countdown")
     c.add_argument("--drill", action="store_true")
     c.add_argument("--now")
@@ -696,30 +789,53 @@ def main(argv=None, api=None, clock=None):
         args = build_parser().parse_args(argv)
         if not args.cmd:
             raise Usage("需要子指令")
-        if args.cmd != "check" and not issues.REPO_RE.fullmatch(args.repo):
-            raise Usage("--repo 要是 owner/repo")
+        target = None
+        if args.cmd != "check":
+            if args.backend == "github":
+                if not args.repo or not issues.REPO_RE.fullmatch(args.repo):
+                    raise Usage("--repo 要是 owner/repo")
+                if args.gitlab_url or args.gitlab_project:
+                    raise Usage("--gitlab-url／--gitlab-project 只能搭配 --backend gitlab")
+                target = args.repo
+            else:
+                if args.repo:
+                    raise Usage("--backend gitlab 不用 --repo，用 --gitlab-project")
+                if not args.gitlab_url or not args.gitlab_project or not issues.PROJECT_ID_RE.fullmatch(args.gitlab_project):
+                    raise Usage("--backend gitlab 需要 --gitlab-url 與數字的 --gitlab-project")
+                why = issues.gitlab_url_problem(args.gitlab_url)
+                if why:
+                    raise Usage(why)
+                target = args.gitlab_project
         now = at = None
         if args.cmd == "countdown":
             now = _now(args.now) if args.now else (clock() if clock else dt.datetime.now(dt.timezone.utc))
         if args.cmd == "fill-drill-aware":
             at = _now(args.at)
     except (Usage, SystemExit) as e:
-        print("用法：art14.py open-drill|countdown|fill-drill-aware|close-drill|check …（見檔頭）", file=sys.stderr)
+        print("用法：art14.py open-drill|open-real|countdown|fill-drill-aware|close-drill|check …（見檔頭）", file=sys.stderr)
         print(f"ART14\tFAIL\t用法錯誤：{e}" if isinstance(e, Usage) else "ART14\tFAIL\t用法錯誤")
         return 64
     try:
         if args.cmd == "check":
             msg = cmd_check(args.result, args.expect)
         else:
-            api = api or issues.Api()
+            if api is None:
+                if args.backend == "github":
+                    api = issues.Api()
+                else:
+                    api = issues.GitLabApi(args.gitlab_url)
+                    if not api.token:
+                        raise Fail("沒有 GITLAB_TOKEN（環境變數；範本用 ART14_GITLAB_TOKEN 對應，protected＋masked）")
             if args.cmd == "open-drill":
-                msg = cmd_open_drill(api, args.repo, args.match, args.result, args.project)
+                msg = cmd_open(api, target, args.match, args.result, args.project, True)
+            elif args.cmd == "open-real":
+                msg = cmd_open(api, target, args.match, args.result, args.project, False)
             elif args.cmd == "countdown":
-                msg = cmd_countdown(api, args.repo, args.drill, now, args.result)
+                msg = cmd_countdown(api, target, args.drill, now, args.result)
             elif args.cmd == "fill-drill-aware":
-                msg = cmd_fill_drill_aware(api, args.repo, at, args.result)
+                msg = cmd_fill_drill_aware(api, target, at, args.result)
             else:
-                msg = cmd_close_drill(api, args.repo, args.result)
+                msg = cmd_close_drill(api, target, args.result)
     except Fail as e:
         print(f"ART14\tFAIL\t{e}")
         return 1

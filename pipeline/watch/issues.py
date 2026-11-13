@@ -214,7 +214,17 @@ class Api:
         return d
 
     def add_comment(self, repo, number, body):
+        self.create_note(repo, number, body)
+
+    def create_note(self, repo, number, body):
         self.request("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
+
+    def list_notes(self, repo, number):
+        """Issue 的留言（GitHub 原樣：id、body、user、author_association；沒有 system 欄位）。"""
+        return self.get_all(f"/repos/{repo}/issues/{number}/comments?per_page=100")
+
+    def edit_note(self, repo, number, note_id, body):
+        self.request("PATCH", f"/repos/{repo}/issues/comments/{note_id}", {"body": body})
 
     def list_labels(self, repo):
         return [l["name"] for l in self.get_all(f"/repos/{repo}/labels?per_page=100")]
@@ -334,7 +344,8 @@ class GitLabApi(Api):
             raise Fail("GitLab Issue 回應格式不符（沒有整數 iid）")
         return {"number": d["iid"], "title": d.get("title"), "body": d.get("description"),
                 "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"),
-                "labels": d.get("labels") or []}
+                "labels": d.get("labels") or [], "confidential": d.get("confidential"),
+                "user": d.get("author") if isinstance(d.get("author"), dict) else {}}
 
     def list_issues(self, repo, label, state="all"):
         st = {"open": "opened", "closed": "closed", "all": "all"}[state]
@@ -366,8 +377,38 @@ class GitLabApi(Api):
             raise Fail(f"GitLab Issue #{number} 修改後不是 confidential：請立刻手動改成 confidential")
         return self._issue(d)
 
-    def add_comment(self, repo, number, body):
+    def create_note(self, repo, number, body):
         self.request("POST", f"/projects/{repo}/issues/{number}/notes", {"body": self._text(body, "留言")})
+
+    # Notes：/api/notes/（GET／PUT …/issues/:issue_iid/notes[/:note_id]；回傳 id／body／author{id,username}／system／internal）。
+    # 文件的列表參數只有 activity_filter、sort、order_by；per_page 靠 /api/rest/ 的通用分頁（沒有在 notes 頁列出，待內部驗證）。
+    def list_notes(self, repo, number):
+        out = []
+        for n in self.get_all(f"/projects/{repo}/issues/{number}/notes?sort=asc&order_by=created_at&per_page=100"):
+            if not isinstance(n, dict) or type(n.get("id")) is not int:
+                raise Fail("GitLab 留言回應格式不符（沒有整數 id）")
+            out.append({"id": n["id"], "body": n.get("body"), "user": n.get("author") if isinstance(n.get("author"), dict) else {},
+                        "system": n.get("system") is True})
+        return out
+
+    def edit_note(self, repo, number, note_id, body):
+        self.request("PUT", f"/projects/{repo}/issues/{number}/notes/{note_id}", {"body": self._text(body, "留言")})
+
+    # Project members：/api/project_members/ 的 GET /projects/:id/members/all/:user_id（含繼承與受邀；回傳 access_level、state）。
+    # 存取等級（同頁表格）：Guest 10、Planner 15、Reporter 20、Security Manager 25、Developer 30、Maintainer 40、Owner 50。
+    # 不是成員時的狀態碼文件沒寫：404 當成「不是成員」（待內部驗證）；其他錯誤一律 FAIL（不猜）。
+    def member_access(self, repo, user_id):
+        if type(user_id) is not int or user_id <= 0:
+            return None
+        try:
+            d, _ = self.request("GET", f"/projects/{repo}/members/all/{user_id}")
+        except Fail as e:
+            if "HTTP 404" in str(e):
+                return None
+            raise
+        if not isinstance(d, dict) or d.get("id") != user_id or type(d.get("access_level")) is not int or d.get("state") != "active":
+            return None
+        return d["access_level"]
 
     def list_labels(self, repo):
         return [l["name"] for l in self.get_all(f"/projects/{repo}/labels?per_page=100")]
