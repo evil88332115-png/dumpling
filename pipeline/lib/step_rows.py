@@ -9,7 +9,7 @@ import os
 import sys
 
 STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL")
-MAX_DETAIL = 500
+MAX_DETAIL = 800
 
 
 def clean(text):

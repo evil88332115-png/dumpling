@@ -309,6 +309,13 @@ class MirrorsLib(Tmp):
         self.assertEqual(sr.overall(rows), "ATTENTION")
         self.assertTrue(open(os.path.join(self.mir, "kcve.result")).read().startswith("ATTENTION "))
 
+    def test_long_attention_line_is_kept_whole(self):
+        tail = "：這段時間新增的核心 CVE 不在清單裡"
+        self.script("kernel-cve.sh", 'mkdir -p "$dest"; echo "ATTENTION mirror=$dest manifest=$man %s%s"\n' % ("上游連不上" * 40, tail))
+        r = self.run_fn("mirror kernel-cve.sh kcve")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(sr.read_rows(self.steps)[0]["detail"].endswith(tail))
+
     def test_failure_and_unknown_last_line_are_fail(self):
         self.script("bad.sh", 'echo "FAIL 連不上" >&2; exit 1\n')
         self.script("odd.sh", 'mkdir -p "$dest"; echo "done"\n')                       # 結束碼 0，但最後一行不是 OK／ATTENTION

@@ -135,3 +135,9 @@ workflow 整個資料夾上傳、在 scan job 放回同一個路徑，**不指�
 - Release 的 403：最終的兩個完整 run 沒有再出現。中間有 3 次（含 dev.yml 的 publish）在列出 releases 時回 403，原因沒查出來；`release.yml` 與 `dev.yml` 的 API 呼叫現在每 30 秒重試、最多 8 次，仍失敗就印出回應標頭當診斷（`ghx`）。
 
 合併 `origin/wp1/m2`（rpi 與原始碼的變更、K 軌 `--kernel-version`）、加入 `scan.tools` 與 `scan.runner` 之後，再各跑一次（沿用同一份 build 的 handoff，只重跑 scan）：`v39.2.0-demo1`（run 43347016848）綠燈、標準答案 23 項符合，與合併前的數字相同。
+
+核心 CVE 鏡像的 cache 與 ATTENTION（C1 追加）之後的驗證（commit `b31f247`）：dev.yml 手動觸發（run 43360084178，v39.2.1，沿用 build，只跑 scan；非 main／dev 分支，所以只建 draft `dev/orin-nano-demo`，5 個附件）綠燈，cache 沒有命中，新抓的鏡像存進 `kernel-cve-mirror-43360084178-1`（35 MiB）；
+release.yml 手動觸發（run 43365351840，v39.2.0）還原了那份 cache（`Cache restored from key: kernel-cve-mirror-43360084178-1`），鏡像 `kcve` 是 OK，標準答案 23 項符合，draft 19 個附件。ATTENTION（上游連不上、沿用舊的）在 runner 上沒有實際遇到，
+用本機的 `file://` 來源加一個壞網址跑過真正的 `kernel-cve.sh`＋`mirrors.sh`：最後一行 `ATTENTION …`、`pipeline-steps.tsv` 多一列 `pipeline-kernel-cve-mirror`、整體狀態 ATTENTION、`mirror_is_fresh` 回 false（不會存回 cache）；單元測試涵蓋 OK、ATTENTION、FAIL 三種結果與 collect／release-meta 的整體狀態。
+`dev.yml` 的 `concurrency` 是同一個 ref 後面的 run 取消前面的（`cancel-in-progress`），所以在同一個分支連續手動觸發兩次 dev，第一次會被取消。
+Release 的 403 又出現兩次（run 43346232399 與 43346236827，commit `7f12e63`，重試 8 次加整個 job 重跑都失敗），在 `POST /releases` 回 403，同時間 `GET` 正常；同一個 commit 之後的 commit 重跑就成功，包括對舊 commit 的 run 重跑 Release job。原因仍不明，不是舊 commit 本身（舊 commit 的 run 重跑成功）、不是同時執行（單獨重跑也失敗）。

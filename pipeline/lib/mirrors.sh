@@ -39,8 +39,8 @@ mirror() {  # <腳本> <資料夾名>
   printf '%s\n' "$last" > "$mir/$d.result"
   case $last in
     ATTENTION*)
-      echo "鏡像 $d：ATTENTION（$(printf '%s' "$last" | cut -c1-300)）"
-      echo "::warning::鏡像 $d 用了舊資料頂替：$(printf '%s' "$last" | cut -c1-300)"
+      echo "鏡像 $d：ATTENTION（$last）"
+      echo "::warning::鏡像 $d 用了舊資料頂替：$last"
       if [ -n "${MIRRORS_STEPS:-}" ]; then
         python3 -I "$_mirrors_lib/step_rows.py" append "$MIRRORS_STEPS" "${s%.sh}-mirror" ATTENTION 0 "$last" || return 1
       fi;;
