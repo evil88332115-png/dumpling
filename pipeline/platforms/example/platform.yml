@@ -1,0 +1,29 @@
+# 最小的示範平台：證明「新增平台＝加一個資料夾＋platform.yml」，不用改 dispatcher 或 workflow。
+# 不下載真的東西，只供 tests/run.d/c1-m2-platform.sh 使用。
+schema: 1
+platform: example
+description: 最小示範平台（build 不編譯，assemble 與 scan 只印狀態）
+arch: arm64                # 預設值（目標映像的架構：arm64｜amd64）
+build:
+  mode: none               # none＝workflow 略過 build job（scan 不下載 build 的 artifact）；compile 時可再寫 runner（arm64｜amd64，預設 arm64）與 apt（build 套件清單）
+raw_sectors:
+  enabled: true
+layers:
+  bsp:
+    packages: ["example-bsp-*", "example-firmware"]
+  host-tool:
+    paths: ["tools/*"]
+  default: os
+scan:
+  platform_arg: rockchip
+  runner: amd64            # 預設值：scan 跑的 runner（amd64＝ubuntu-24.04）；scan 只匯入與讀映像，不執行目標平台的程式，不跟著 arch
+  apt: []                  # scan job 額外的 apt 套件（選填）
+  # kernel_not_distro: "<理由>"   # 選填：這個平台的核心不是發行版（Debian／Ubuntu）的核心、版本字串又看不出來時，宣告它（SBOM 有核心時 C-kernel-coverage 是 GAP）；
+  #                              版本的 sources.yml platform_params.kernel_not_distro 可以覆蓋。見 docs/PLATFORM-INTERFACE.md
+  tools: sbom-only         # 預設值：sbom-only＝Syft／Grype；full＝再加 cdxgen、govulncheck、guarddog（git／dir 模式的原始碼掃描要用）
+project_defaults:
+  platform_version: Example SoC 1.0
+  bsp_os_source: Example 公開映像
+  kernel_source: Example 公開核心原始碼
+  bootloader: Example 開機程式
+  interfaces: [Ethernet]

@@ -1,0 +1,148 @@
+name: release
+
+# 打 tag `<專案>/<版本>`（例如 orin-nano-demo/v39.2.1-demo1）→ 編譯 → 掃描 → Release（報告 zip、SBOM、VEX、漏洞清單、P1 判斷表、建置紀錄摘要）。
+# 專案與平台由 projects/<專案>/project.yml 決定；新增專案不用改這個 workflow。
+# 手動觸發（workflow_dispatch）只建 draft Release（草稿，不公開、不建 git tag）；只有真的 tag push 才發正式 Release。
+# 已出貨版本的 SBOM 不提交進 repo（main 有分支保護，CI 不能直接推；D-029）：Release 的附件就是正式來源
+# （sbom-<專案>-<版本>.cdx.json 與 release-meta.json，名稱固定、機器可讀，給每日監控讀）。
+on:
+  push:
+    tags: ["*/v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要建置的 tag 名稱 <專案>/<版本>（只建 draft Release，不會建立 git tag）"
+        required: true
+        type: string
+      stop_after:
+        description: "build｜all（開發用；build 只編譯，不建 Release）"
+        required: false
+        default: all
+        type: string
+      reuse_build_run:
+        description: "開發用：沿用另一個 run 的 build artifact（空白＝重新編譯）"
+        required: false
+        default: ""
+        type: string
+      reuse_scan_run:
+        description: "開發用：略過 build＋scan，直接用另一個 run 的 scan artifact 測試 Release 步驟（空白＝正常流程）"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  info:
+    name: 專案資訊
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      project: ${{ steps.info.outputs.PROJECT }}
+      version: ${{ steps.info.outputs.VERSION }}
+      tag: ${{ steps.info.outputs.TAG }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: project-info
+        id: info
+        env:
+          TAG_INPUT: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # tag 可能由使用者輸入：只經環境變數傳入；project-info.py 驗證格式並確認專案與版本存在
+          python3 -I pipeline/project-info.py "$TAG_INPUT" | tee info.txt
+          cat info.txt >> "$GITHUB_OUTPUT"
+
+  pipeline:
+    name: build ＋ scan
+    needs: info
+    if: ${{ (inputs.reuse_scan_run || '') == '' }}
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      project: ${{ needs.info.outputs.project }}
+      version: ${{ needs.info.outputs.version }}
+      stop_after: ${{ inputs.stop_after || 'all' }}
+      reuse_build_run: ${{ inputs.reuse_build_run || '' }}
+
+  release:
+    name: Release
+    needs: [info, pipeline]
+    if: ${{ !cancelled() && (needs.pipeline.result == 'success' || ((inputs.reuse_scan_run || '') != '' && needs.pipeline.result == 'skipped')) && (inputs.stop_after || 'all') == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # 只有這個 job 有寫入權限（D-012）
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 取得 scan 的結果
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scan-${{ needs.info.outputs.project }}-${{ needs.info.outputs.version }}
+          path: ${{ runner.temp }}/result
+          run-id: ${{ inputs.reuse_scan_run || github.run_id }}
+          github-token: ${{ github.token }}
+      # status 是生命週期（shipped／development），不是掃描結論；產品結論看 report_status（報告）與 release_gate（VEX 發行閘門），
+      # pipeline_result 是流程步驟的結果。三個都讀不到時是 NOT_RUN（見 pipeline/release-meta.py）
+      - name: release-meta.json
+        env:
+          PROJECT: ${{ needs.info.outputs.project }}
+          VERSION: ${{ needs.info.outputs.version }}
+          TAG: ${{ needs.info.outputs.tag }}
+        run: |
+          python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$TAG" \
+            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps "$RUNNER_TEMP/result/pipeline-steps.tsv" \
+            --scan-summary "$RUNNER_TEMP/result/scan-summary-$PROJECT-$VERSION.json" --out "$RUNNER_TEMP/result/release-meta.json"
+          printf 'release-meta.json\trelease-meta.json\n' >> "$RUNNER_TEMP/result/manifest.tsv"
+      - name: 建立 Release（手動觸發只建 draft；tag push 才發正式 Release）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.info.outputs.tag }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          cd "$RUNNER_TEMP/result"
+          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：每 30 秒重試、最多 8 次，仍失敗就印出回應標頭與本文當診斷
+          ghx() {
+            local n=0
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge 8 ]; then
+                echo "---- 診斷：$*"; gh api -i "repos/$GITHUB_REPOSITORY/releases?per_page=1" 2>&1 | head -30
+                return 1
+              fi
+              sleep 30
+            done
+          }
+          [ -s manifest.tsv ] || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
+          args=()
+          while IFS=$'\t' read -r f label; do
+            [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
+            args+=("$f#$label")
+          done < manifest.tsv
+          # 先清掉同名的舊草稿（手動觸發的測試草稿；草稿用 tag 名稱查不到，所以用 API 依 id 刪）
+          ids=$(ghx gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$TAG\") | .id") || exit 1
+          for id in $ids; do
+            ghx gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
+          done
+          if [ "$EVENT" = push ]; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then echo "release: FAIL（$TAG 已經有正式 Release，不覆蓋）"; exit 1; fi
+            ghx gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            echo "release: OK（正式 Release $TAG，${#args[@]} 個附件）"
+          else
+            ghx gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG（手動觸發的草稿）" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            echo "release: OK（draft $TAG，${#args[@]} 個附件；手動觸發不發正式 Release、不建 git tag）"
+          fi

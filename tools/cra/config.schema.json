@@ -113,11 +113,13 @@
         "deliverable_firmware": {"type": "array", "items": {"type": "string"}, "x-report": false,
                                  "description": "壓縮檔旁邊的交付檔中，要當成韌體元件加進 SBOM 的檔名樣式（fnmatch，不分大小寫，例如 \"*_MCU_*.zip\"）；檔名含 mcu、fw、firmware 的不用列"},
         "own_software": {"type": "array", "x-report": false,
-                         "description": "產品自有軟體（腳本、小型程式、out-of-tree .ko）在 rootfs 裡的路徑或樣式：tools/cra/own_software.py 算雜湊，cra_report.py 以 pkg:generic 元件加進產品 SBOM（supplier＝manufacturer.name）。每筆是路徑字串，或 {path, name, version}。path 從 rootfs 的根算（開頭的 / 可省略），每一層可用 * ? [..]（不跨 /，不支援 **），不可含 ..；只照這份清單，不猜。列了但 rootfs 裡找不到 → GAP。version 只在這裡給或取自 .ko 的 modinfo，沒有就是版本未知（不從檔名猜）；name 只在這一筆剛好對到一個檔案時用。沒寫或空陣列 → 不做（輸出和以前相同）",
+                         "description": "產品自有軟體（腳本、小型程式、out-of-tree .ko）在 rootfs 裡的路徑或樣式：tools/cra/own_software.py 算雜湊，cra_report.py 以 pkg:generic 元件加進產品 SBOM（supplier＝manufacturer.name）。每筆是路徑字串，或 {path, name, version}。path 從 rootfs 的根算（開頭的 / 可省略），每一層可用 * ? [..]（不跨 /，不支援 **），不可含 ..；只照這份清單，不猜。列了但 rootfs 裡找不到 → GAP。version 只在這裡給或取自 .ko 的 modinfo，沒有就是版本未知（不從檔名猜）；name 只在這一筆剛好對到一個檔案時用。沒寫或空陣列：scan-flash-package.sh 記 B-own-software GAP（沒有宣告），除非另寫 own_software_none_reason",
                          "items": {"type": ["string", "object"], "required": ["path"],
                                    "properties": {"path": {"type": "string", "description": "rootfs 裡的路徑或樣式，例如 /usr/bin/example-agent、/opt/example/bin/*、/lib/modules/*/extra/example_*.ko"},
                                                   "name": {"type": "string", "description": "元件名稱（只在剛好對到一個檔案時用；沒寫用檔名，.ko 用 modinfo 的 name）"},
-                                                  "version": {"type": "string", "description": "版本（產品自己的版本號；沒寫時 .ko 用 modinfo 的 version，其他是版本未知）"}}}}
+                                                  "version": {"type": "string", "description": "版本（產品自己的版本號；沒寫時 .ko 用 modinfo 的 version，其他是版本未知）"}}}},
+        "own_software_none_reason": {"type": "string", "x-report": false,
+                                     "description": "產品沒有自有軟體時的明確宣告（同時要寫 own_software: []）：理由會寫進 sbom.md，B-own-software 記 OK（是製造商的宣告，掃描沒有驗證）。沒有列 own_software、又沒有這個理由 → B-own-software 與 SBOM 文件 GAP（沒有宣告自有軟體，無法確認產品自有元件是否都在 SBOM）。列了 own_software 又寫這個 → 設定矛盾，GAP"}
       }
     },
     "csaf": {
