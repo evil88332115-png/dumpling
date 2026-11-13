@@ -122,7 +122,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
     - 名稱與版本取 SBOM 元件的欄位與 purl 兩邊（purl 先解碼），任何一邊成立就算。`nvidia-l4t-kernel*`（NVIDIA 的核心套件，經 `C-kernel-l4t-map` 對應 Canonical 核心比對）和 Canonical 的 Tegra 核心不會被標，Jetson 不受影響。
   - **自動規則抓不到的**（要用 `kernel_not_distro` 宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu（沒有 epoch、沒有 `+rpt`／`+rpi`），而且 purl 沒有 `upstream=`／`distro=` 限定詞，或限定詞也像發行版
     （例如把來源套件命名成 `linux` 的廠商）；非 deb 的核心（rpm、apk、Yocto 的 `linux-kernel` 元件、沒有套件的廠商核心）；後綴不在清單裡的廠商（例如其他 SoC 廠商的 `+vendor1` 後綴）或不是 `+` 的寫法（`~rpt`、`.rpt`）；`distro=` 不是 Debian（例如 `raspbian-*`）而來源套件是自訂名稱、或 purl 只有 `upstream=` 沒有 `distro=`；套件名稱不在核心套件清單（`KERNEL_PACKAGE_PATTERNS`）裡，連「SBOM 有核心」都偵測不到的套件（例如 `raspberrypi-kernel`）。這些規則抓得到已知的樣子，抓不到不代表核心是發行版的。
-  - 宣告：`sources.yml` 的 `releases.<版本>.platform_params.kernel_not_distro: "<理由>"`，或 `platform.yml` 的 `scan.kernel_not_distro: "<理由>"`（該平台所有專案、所有版本的預設；版本的值取代平台的預設）。
+  - 宣告：`sources.yml` 的 `releases.<版本>.platform_params.kernel_not_distro: "<理由>"`，或 `platform.yml` 的 `scan.kernel_not_distro: "<理由>"`（該平台所有專案、所有版本的預設；版本的值取代平台的預設）。理由字串非空、沒有控制字元、不以 `-` 開頭（精靈會當成選項）、最多 300 位元組。
     `project-info.py --kernel-args` 轉成 `--kernel-not-distro <理由>`（一行一個參數；理由不能是空的、不能有換行或控制字元、最多 300 位元組，否則 sources.yml／platform.yml 驗證就報錯），
     wizard → `scan-flash-package.sh` → `sca-scan` 一路傳（後兩者另接受 `SCA_KERNEL_NOT_DISTRO`）。SBOM 有核心時 `C-kernel-coverage` 是 GAP，說明寫出理由；SBOM 沒有核心（例如 `-os` 層）時照舊不寫這一列。Jetson 不設。
 
@@ -226,7 +226,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | `build.apt` | `[]` | build job 的 apt 相依 |
 | `scan.runner` | `amd64` | scan job 的 runner（`amd64`＝`ubuntu-24.04`）。**不跟著 `arch`**：scan 只匯入與讀映像，不執行目標平台的程式，所以 runner 的架構和映像的架構無關。目前只支援 amd64（`tools/e2e/install-tools.sh` 只裝 amd64 的 Syft／Grype） |
 | `scan.tools` | `sbom-only` | scan job 裝哪套掃描工具：`sbom-only`＝Syft、Grype、bubblewrap（`install-tools.sh --sbom-only`）；`full`＝`install-tools.sh` 不帶旗標（Syft、Grype、cdxgen、govulncheck、guarddog、bubblewrap，版本都固定在 `install-tools.sh`）。**不分項**：git／dir 模式的 sca-scan（A-tools）檢查整套工具的版本，只裝一部分會回 ATTENTION 或 FAIL。`full` 裝在 `/opt/dumpling-tools`（沙箱只遮蔽家目錄與 runner 目錄），guarddog 在 `/usr/local/bin` 是符號連結指向 `/opt` 底下的 venv；裝完用家目錄遮蔽的 bwrap 確認每個工具看得到。其他值：`project-info.py`／`platform.sh validate` 結束碼 64。實作 `pipeline/install-scan-tools.sh` |
-| `scan.kernel_not_distro` | （不設） | 理由字串（非空、沒有控制字元、最多 300 位元組）。該平台所有專案、所有版本的預設，宣告核心不是發行版的核心（`C-kernel-coverage` GAP）；`sources.yml` 的 `platform_params.kernel_not_distro` 優先。經 `project-info.py --kernel-args` 轉成精靈的 `--kernel-not-distro`，詳見 §4 sources.yml 的 `kernel_not_distro` |
+| `scan.kernel_not_distro` | （不設） | 理由字串（非空、沒有控制字元、不以 `-` 開頭、最多 300 位元組）。該平台所有專案、所有版本的預設，宣告核心不是發行版的核心（`C-kernel-coverage` GAP）；`sources.yml` 的 `platform_params.kernel_not_distro` 優先。經 `project-info.py --kernel-args` 轉成精靈的 `--kernel-not-distro`，詳見 §4 sources.yml 的 `kernel_not_distro` |
 | `scan.apt` | `[]` | scan job 額外的 apt 套件（bubblewrap、python3-yaml 由 workflow 固定裝） |
 
 **步驟的結束碼規則與紀錄**（`pipeline/run-step.sh <步驟> <專案資料夾> <版本>`，workflow 所有 `platform.sh` 呼叫的唯一入口；`--record <專案資料夾> <版本> <步驟> <狀態> <結束碼> <說明>` 只記一列）：

@@ -4065,6 +4065,10 @@ def scan_command(project, out, cfg):
 # SBOM 的元件由 pipeline/sbom-layers.py（pipeline/lib/layers.py）標 property；沒有任何元件帶 dumpling:layer 時
 # 這一節的程式全部不動作（layers_on 為 False），輸出和沒有分層功能時一樣。property 名稱要和 pipeline/lib/layers.py 一致（測試核對）。
 LAYER_PROP, LAYER_BASIS_PROP, LAYER_RESP_PROP = "dumpling:layer", "dumpling:layer-basis", "dumpling:os-responsibility"
+# 分層、這份報告的 SBOM 沒有 BSP 元件時（cra_report 的 bsp_na）：sbom.md 第 6 節與 summary.json 的 product_sbom.flash_firmware.absent
+BSP_NA_FIRMWARE = ("Not applicable to this report: its SBOM is a layer without BSP components, so the flash package firmware, the UEFI "
+                   "bundled libraries and the OP-TEE/TF-A/Mbed TLS components (all BSP) are not added here; they are in the SBOM and "
+                   "the vulnerability list of the BSP layer's report.")
 LAYER_REASON_PROP = "dumpling:unknown-reason"      # unknown 判斷不了的原因（no-path｜path-no-rule｜inherited），選用
 LAYER_VALUES = ("bsp", "os", "host-tool", "unknown")
 LAYER_PRECEDENCE = ("bsp", "unknown", "os", "host-tool")      # 同一列對到多個層時：最保守的優先（在產品上、我們負責的優先）
@@ -4290,6 +4294,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     lidx = build_layer_index(bom)
     layers_on = lidx is not None
     resp = (os_responsibility or lidx["resp"]) if layers_on else None
+    # 分層的 SBOM 沒有 bsp 也沒有 unknown 元件（customer／upstream-vendor 的 -os 那份）：BSP 專屬的附加輸入（刷機包韌體清單、UEFI 與
+    # OP-TEE 的內建函式庫）屬於 bsp 層，在 bsp 那份報告處理。這份不加它們的元件、不產生它們的列、它們的 GAP 也不算進這份——不然會和
+    # bsp 報告重複計算（-os 的漏洞清單出現 bsp 層的列、產品 SBOM 出現刷機包韌體）。有 unknown 元件時照舊（unknown 保守算 BSP 待辦，D-030）
+    bsp_na = layers_on and not (lidx["counts"]["bsp"] or lidx["counts"]["unknown"])
+    bsp_na_skipped = []
     host_info = {"findings": 0, "matches": 0, "ids": set()}
     if layers_on and lidx["host"]:
         findings, grype, host_info = drop_host_tool(findings, grype, lidx)       # host-tool 不進產品漏洞清單
@@ -4459,6 +4468,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # DT 沒有這些元件，所以比對結果只來自 Grype，成為「只有 Grype」的列（元件欄 "OpenSSL 3.4.1 (bundled in UEFI)"，修補建議是重建 UEFI）。
     # 沒有給資料夾（也沒有 <scan>/../uefi-source/）→ uefi_info 是 None，下面全部照舊
     uefi_dir = Path(uefi_source) if uefi_source else (scan.parent / "uefi-source" if (scan.parent / "uefi-source").is_dir() else None)
+    if bsp_na and uefi_dir:
+        bsp_na_skipped.append("uefi-source")     # 分層、這份沒有 BSP 元件：不適用（見 bsp_na）
+        uefi_dir = None
     uefi_info, uefi_rows = (uefimod().load(uefi_dir) if uefi_dir else None), []
     # 開機韌體涵蓋說明（scan-flash-package.sh 寫的 <rootfs>/bootloader-coverage.json）與 UEFI 映像-原始碼一致性檢查（<結果>/uefi-binary-check.json）；
     # 都沒有（舊的結果、不是 Jetson 刷機包）→ None，下面全部照舊
@@ -4481,6 +4493,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # tos-optee 映像的 OP-TEE、TF-A 與 OP-TEE 內建的 Mbed TLS（--tee-source 或 <scan>/../tee-source/）：做法同上面的 UEFI 內建函式庫（tee_source.py、tee_bundled.py grype）。
     # 沒有給資料夾（也沒有 <scan>/../tee-source/）→ tee_info 是 None，下面全部照舊
     tee_dir = Path(tee_source) if tee_source else (scan.parent / "tee-source" if (scan.parent / "tee-source").is_dir() else None)
+    if bsp_na and tee_dir:
+        bsp_na_skipped.append("tee-source")      # 同上
+        tee_dir = None
     tee_info, tee_rows = (teemod().load(tee_dir) if tee_dir else None), []
     if tee_info is not None:
         tee_info["auto_detected"] = not tee_source      # 沒給 --tee-source、由 <scan>/../tee-source 自動帶入
@@ -5100,6 +5115,10 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 "text.security_techdoc": sm.techdoc_text(sec)})
     fwc, fwd, fwt, fw_info = (flash_firmware(scan, cfg, b.get("specVersion"), flash_inventory) if b else
                               (None, None, None, {"absent": "No product SBOM (no scanner SBOM): flash firmware was not added."}))
+    if bsp_na and (fwc or not fw_info.get("absent")):
+        # 分層、這份沒有 BSP 元件（見 bsp_na）：刷機包韌體屬於 bsp 層，不加進這份的產品 SBOM
+        bsp_na_skipped.append("flash-firmware")
+        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True}
     # 產品自有軟體（設定 sbom.own_software；own_software.py）：沒有設定時 own_info 是 None，下面全部照舊
     owc, owt, own_info, fwc = own_software(scan, cfg, b.get("specVersion"), fwc, fw_info, own_software_file) if b else (None, None, None, fwc)
     if own_info is None and ownmod().configured(cfg):
@@ -5245,6 +5264,10 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 r["layer_todo"] = layer_todo(r["layer"], resp)
         notify = notify_rows(rows, resp)
         lsumm = layers_summary(rows, vrows, lidx, resp, host_info, notify)
+        # BSP 專屬的附加輸入在這份不適用時（bsp_na）：哪幾項被略過；沒有略過任何一項時不加（輸出不變）
+        if bsp_na_skipped:
+            lsumm["bsp_inputs_not_applicable"] = {"skipped": bsp_na_skipped, "reason": "this layer's SBOM has no bsp or unknown components; "
+                                                  "the BSP inputs are handled in the BSP layer's report"}
         lsection = layer_section(f"8.{9 + bool(nsection) + bool(dsection) + bool(expl)}", lsumm, rows, notify, table)
         if "text.layer_section" not in ra_ph:
             warnings = list(warnings) + ["專案的風險評估範本（CRA/templates/risk-assessment.md）沒有引用 text.layer_section：分層（BSP／OS／host tools）、"
