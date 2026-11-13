@@ -47,6 +47,10 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
    的 `product.version` 必須等於 Release tag 的版本（`args.version`；括號後綴如 ` (rootfs)` 不算）；不一致 → scan.json 的 `product_version_check.status` 是 FAIL，
    collect 把所有輸出寫完之後丟 `ProductVersionMismatch`（ValueError 的子類別，各平台的收集腳本都把它當 FAIL 結束）。設定包沒有 `product.version`（精靈沒有東西可覆寫，
    報告裡版本是 TO BE COMPLETED）是 NOT_SET，不擋；找不到設定檔（沒有跑到報告）是 NOT_RUN。
+   **和 tag 無關的來源（M7b）**：上面只是拿 tag 和 tag 自己比（tag 同時餵精靈的 --version），tag 打錯或掃錯版本抓不到。所以平台要再用
+   `Hooks.independent_version(ctx)` 提供一個不從 tag 來的版本（例如 Jetson：刷機包裡掃到的 L4T 版本），和專案宣告的對應比對，結果放在
+   `product_version_check.independent`（`status` OK｜FAIL｜GAP）。FAIL → 整體 FAIL（一樣丟 `ProductVersionMismatch`）；平台沒有提供（hook 回 None）或
+   無法核對 → GAP；設定包核對 OK 但獨立來源不是 OK 時，整體是 GAP，不是 OK（D-043：沒核對不能顯示成沒問題）。
 
 規則：缺的項目在 scan.json 記 null，**不推測**，標準答案比對會因此失敗而不是通過；附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元），中文名稱放在 manifest 的顯示標籤。
 """
@@ -269,9 +273,30 @@ def product_version_status(config_path, tag_version):
     return ("OK" if version_base(v) == tag_version else "MISMATCH"), v
 
 
-def check_product_versions(runs, tag_version):
-    """runs：{後綴: 精靈輸出資料夾}。→ {"tag_version", "status": OK｜FAIL｜NOT_SET｜NOT_RUN, "checked": [{run, role, product_version, status}], "failures": [說明]}。
-    FAIL：任何一份是 MISMATCH 或 UNREADABLE。其餘：有 OK 且沒有 NOT_SET → OK；有 NOT_SET → NOT_SET（沒有東西可核對，不擋）；一份都沒找到 → NOT_RUN。"""
+def config_version_phrase(pvc):
+    """notes.md 用：設定包版本核對的實際結果（照實寫，不固定寫「等於」）。"""
+    tag, checked = pvc["tag_version"], pvc["checked"]
+    if not checked:
+        return "找不到設定包（沒有跑到報告），沒有核對"
+    bad = [c for c in checked if c["status"] in ("MISMATCH", "UNREADABLE")]
+    if bad:
+        return "**和 tag %s 不一致**（%s）" % (tag, "、".join(
+            "%s／%s：%s" % (c["run"], c["role"], "讀不了" if c["status"] == "UNREADABLE" else repr(c["product_version"])) for c in bad))
+    if any(c["status"] == "NOT_SET" for c in checked):
+        return "有設定包沒有 product.version（報告裡是 TO BE COMPLETED），沒有東西可以和 tag %s 核對" % tag
+    return "版本等於 tag %s（%d 份）" % (tag, len(checked))
+
+
+NO_INDEPENDENT = {"status": "GAP", "rule": None, "expected": None, "found": [],
+                  "detail": "這個平台沒有和 tag 無關的版本來源：只能核對設定包的版本和 tag 是否一致，tag 本身對不對沒有核對"}
+_IND_STATUS = ("OK", "FAIL", "GAP")
+
+
+def check_product_versions(runs, tag_version, independent=None):
+    """runs：{後綴: 精靈輸出資料夾}；independent：Hooks.independent_version 的結果（None＝平台沒有）。
+    → {"tag_version", "status": OK｜FAIL｜GAP｜NOT_SET｜NOT_RUN, "checked": [{run, role, product_version, status}], "independent": {…}, "failures": [說明]}。
+    FAIL：任何一份是 MISMATCH 或 UNREADABLE，或 independent 是 FAIL。其餘：一份都沒找到 → NOT_RUN；有 NOT_SET → NOT_SET（沒有東西可核對，不擋）；
+    設定包都 OK 但 independent 不是 OK → GAP；都 OK → OK。"""
     checked, failures = [], []
     for suffix, w in sorted(runs.items()):
         for role, rel in (("manufacturer", "cra-project"), ("supplier", os.path.join("supplier", "cra-project"))):
@@ -284,9 +309,14 @@ def check_product_versions(runs, tag_version):
                 failures.append("%s 報告（%s）的 product.version 是 %r，Release tag 的版本是 %r" % (run, role, v, tag_version))
             elif st == "UNREADABLE":
                 failures.append("%s 報告（%s）的設定檔讀不了或 product.version 不是字串，不能確認版本是 %r" % (run, role, tag_version))
+    ind = dict(NO_INDEPENDENT) if independent is None else dict(independent)
+    if ind.get("status") not in _IND_STATUS:          # hook 寫錯：不能當成 OK
+        ind = {**ind, "status": "GAP", "detail": "independent_version 的 status 不是 OK／FAIL／GAP：%r" % (ind.get("status"),)}
+    if ind["status"] == "FAIL":
+        failures.append("和 tag 無關的版本核對不通過：%s" % (ind.get("detail") or "沒有說明"))
     sts = {c["status"] for c in checked}
-    status = "FAIL" if failures else "NOT_RUN" if not checked else "NOT_SET" if "NOT_SET" in sts else "OK"
-    return {"tag_version": tag_version, "status": status, "checked": checked, "failures": failures}
+    status = "FAIL" if failures else "NOT_RUN" if not checked else "NOT_SET" if "NOT_SET" in sts else "OK" if ind["status"] == "OK" else "GAP"
+    return {"tag_version": tag_version, "status": status, "checked": checked, "independent": ind, "failures": failures}
 
 
 # ---------------------------------------------------------------- 流程步驟：notes.md 與 release-meta.json 一致（adapter-gaps #26）
@@ -360,6 +390,11 @@ class Hooks:
 
     def extra_attachments(self, ctx, manifest):
         """寫平台特有的附件到 ctx["out"] 並 add(manifest, …)。"""
+
+    def independent_version(self, ctx):
+        """和 Release tag 無關的版本核對（M7b）→ dict：status（OK｜FAIL｜GAP）、rule（對應規則，一句話）、expected（依規則從 tag 得到的值）、
+        found（[{source, value}]：掃描讀到的版本與出處）、detail（說明）。None＝這個平台沒有和 tag 無關的來源（product_version_check 記 GAP）。"""
+        return None
 
     def notes_build(self, ctx):
         """notes.md 的「建置」之類的平台段落（Markdown 行清單，放在標題之後、元件與分層之前）。"""
@@ -452,7 +487,8 @@ def collect(a, hooks=None):
         scan["pipeline_status"] = step_rows.overall(srows)
         scan["pipeline_attention"] = step_rows.attention_lines(srows)
     scan["vulnerabilities"] = {("full" if k == "" else k.lstrip("-")): v.get("vulnerabilities") for k, v in runs.items()}
-    scan["product_version_check"] = pvc = check_product_versions(last, ver)       # D-055 (3)：精靈覆寫後的版本要等於 Release tag 的版本
+    # D-055 (3)：精靈覆寫後的版本要等於 Release tag 的版本；M7b：再用和 tag 無關的來源核對 tag 本身
+    scan["product_version_check"] = pvc = check_product_versions(last, ver, hooks.independent_version(ctx))
     with open(a.scan_json, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=1)
     shutil.copy2(a.scan_json, os.path.join(out, "scan-summary-%s-%s.json" % (proj, ver)))
@@ -469,6 +505,9 @@ def collect(a, hooks=None):
         L += ["| 報告 | report_status | release_gate |", "|---|---|---|"]
         L += ["| %s | %s | %s |" % ({"full": "完整（全部層）"}.get(r["report"], r["report"]), r["report_status"], r["release_gate"]) for r in scan["reports"]] + [""]
     L += ["由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), ""]
+    ind = pvc["independent"]
+    L += ["- 版本核對（`product_version_check`）：**%s**。設定包：%s；和 tag 無關的來源：**%s**，%s" % (
+        pvc["status"], config_version_phrase(pvc), ind["status"], ind.get("detail") or "沒有說明"), ""]
     if steps_path and scan.get("pipeline_attention"):
         # ATTENTION：這次用了舊資料頂替（例如 git.kernel.org 連不上，沿用上一份核心 CVE 鏡像）。不擋 Release，但要讓讀的人一眼看到
         L += ["> **ATTENTION（用了舊資料頂替，結果照樣產生，不是 OK）**", ">"] + ["> - " + t.replace("\n", " ") for t in scan["pipeline_attention"]] + [""]
