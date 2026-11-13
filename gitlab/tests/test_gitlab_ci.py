@@ -16,6 +16,8 @@ import gitlabci  # noqa: E402
 TAG_RE_YAML = r"^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$"
 VAR_PREFIXES = ("DUMPLING_", "WATCH_", "INTERNAL_", "PILOT_", "MIRROR_", "DT_")
 PREDEFINED_OK = {"GIT_DEPTH", "GIT_STRATEGY", "GIT_SUBMODULE_STRATEGY", "GIT_CLEAN_FLAGS", "FF_USE_FASTZIP"}
+# pipeline 腳本既有的環境變數名稱（不是範本自訂的）：pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR
+PIPELINE_ENV_OK = {"KCVE_CACHE_DIR"}
 DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
@@ -114,7 +116,7 @@ class CiFile(unittest.TestCase):
             for k in vs:
                 with self.subTest(where=where, var=k):
                     self.assertRegex(k, r"^[A-Z][A-Z0-9_]*$")
-                    self.assertTrue(k.startswith(VAR_PREFIXES) or k in PREDEFINED_OK, "自訂變數要用 %s 開頭" % "／".join(VAR_PREFIXES))
+                    self.assertTrue(k.startswith(VAR_PREFIXES) or k in PREDEFINED_OK or k in PIPELINE_ENV_OK, "自訂變數要用 %s 開頭" % "／".join(VAR_PREFIXES))
         check(self.vars, "top")
         for n, j in self.doc.items():
             if n not in gitlabci.RESERVED and isinstance(j, dict) and isinstance(j.get("variables"), dict):
@@ -199,6 +201,28 @@ class CiFile(unittest.TestCase):
     def test_script_lines_not_piped_through_tee_for_status(self):
         # tee 會吃掉前一個指令的結束碼（不同 shell 的 pipefail 行為不同）
         self.assertNotRegex(self.text, r"\|\s*tee\b")
+
+
+    def test_t01_release_meta_same_flags_as_github(self):
+        # T-01：release-meta.py 的參數與 .github/workflows/release.yml 相同（少了 --scan-summary，report_status／release_gate 會是 NOT_RUN）
+        gh = (HERE.parents[1] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        mine = self.lines_of("release:publish")
+        for flag in ("--project", "--version", "--tag", "--commit", "--run-id", "--steps", "--scan-summary", "--out"):
+            self.assertIn(flag, gh, "release.yml 已不用 %s：重新核對 T-01" % flag)
+            self.assertIn(flag, mine, "release:publish 的 release-meta.py 少了 %s" % flag)
+
+    def test_t01_kernel_cve_cache(self):
+        # 核心 CVE 鏡像的上一份（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：scan 與 watch:compute 都用，只存新抓的
+        kc = self.doc[".kcve-cache"]
+        self.assertTrue(kc["variables"]["KCVE_CACHE_DIR"].startswith("$CI_PROJECT_DIR/"), "cache 路徑要在專案資料夾內（官方）")
+        self.assertEqual(kc["cache"]["paths"], [".kcve-cache/kcve/"])
+        self.assertIn(".kcve-cache", self.doc[".scan"]["extends"])
+        for job in ("release:scan", "dev:scan", "watch:compute"):      # 展開 extends 後：有 cache 與變數（watch:compute 自己的變數也還在）
+            self.assertEqual(self.jobs[job]["cache"], kc["cache"], job)
+            self.assertEqual(self.jobs[job]["variables"]["KCVE_CACHE_DIR"], kc["variables"]["KCVE_CACHE_DIR"], job)
+        self.assertIn("INTERNAL_MIRROR_URL", self.jobs["watch:compute"]["variables"])
+        for job, name in (("release:scan", "kcve"), ("watch:compute", "kernel-cve")):
+            self.assertIn("mirror_is_fresh %s" % name, self.lines_of(job))
 
 
 class ReleasePayload(unittest.TestCase):

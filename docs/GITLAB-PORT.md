@@ -359,7 +359,7 @@
 
 | 編號 | 內容 | 阻塞於 |
 |---|---|---|
-| T-01 | M2 合併後，核對 `gitlab/.gitlab-ci.yml` 呼叫的指令（`project-info.py`、`run-step.sh`、`release-meta.py`、`install-scan-tools.sh` 的參數與輸出）與 `origin/wp1/m2-jetson` 合併後的版本一致 | M2 合併 |
+| T-01 | **已完成（2026-11-13，main cc7d101）**：核對 `gitlab/.gitlab-ci.yml` 呼叫的指令與 M2 合併後的版本。`project-info.py`、`run-step.sh`、`install-scan-tools.sh`、`install-tool.sh`、`firmware-*.sh` 的參數一致；修了兩處：(1) `release-meta.py` 少了 `--scan-summary`（沒有它 report_status／release_gate 會是 NOT_RUN），已補；(2) M2 的 scan 會用 `KCVE_CACHE_DIR`（上一份核心 CVE 鏡像，`pipeline/lib/mirrors.sh`）→ 範本加 `.kcve-cache`（GitLab `cache:`，scan 與 watch:compute 共用，只存新抓的）。官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內、預設存在 runner 那台機器（多台 runner 要設分散式 cache 才共用）、保護與非保護分支預設不共用。`gitlab/tests/test_gitlab_ci.py` 的 `test_t01_*` 會在 release.yml 改參數時提醒重新核對 | — |
 | T-02 | dev 版專案清單改動態產生（child pipeline），取代範本的固定 `parallel:matrix` | 內部 GitLab 版本核對 |
 | T-03 | `dev:publish`：滾動開發版 SBOM 在 GitLab 的存放（Generic Package 覆蓋行為待驗證）；每日監控 collect 讀取方式 | 內部環境驗證 |
 | T-04 | `firmware:dt`：韌體 SBOM 上傳常駐 DT 的呼叫方式（`firmware-dt.sh` 的 pilot.env 與工作目錄） | 內部環境驗證 |
@@ -434,4 +434,4 @@
 - [ ] DT parent／child 評估結論（T-07）。
 - [ ] alert_mail.py 帶回與 PROVENANCE 紀錄（T-08，需要時）。
 - [ ] 第 14 條通報的 GitLab 版（T-10，M8）。
-- [ ] 範本通過 M2 合併後的核對（T-01）。
+- [x] 範本通過 M2 合併後的核對（T-01，2026-11-13）。

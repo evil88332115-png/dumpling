@@ -133,6 +133,11 @@ workflow:
     - bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "$VERSION"
     # 常駐環境要檢查鏡像新鮮度：這裡不設 MIRROR_REFRESH_STATUS=""（GitHub 版因為是臨時 DT 才設空）
     - bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$VERSION"
+    # 核心 CVE 鏡像：只有這次新抓的才放進 cache 資料夾（頂替用的舊資料不存回去；同 pipeline.yml 的 kcve-fresh）
+    - |
+      export MIRRORS_DIR="$DUMPLING_OUT/mirrors"
+      . pipeline/lib/mirrors.sh
+      if mirror_is_fresh kcve; then rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kcve" "$KCVE_CACHE_DIR"; fi
     - |
       rm -rf result && mkdir -p result
       [ -d "$DUMPLING_OUT/release" ] && cp -r "$DUMPLING_OUT/release/." result/ || true
@@ -151,8 +156,19 @@ workflow:
     paths: [build-handoff/]
     expire_in: 1 day
 
+# 上一份核心 CVE 鏡像（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：上游沒變就沿用，git.kernel.org 連不上就用 48 小時內的上一份頂替（ATTENTION）。
+# 官方（docs.gitlab.com/ci/caching）：cache 路徑要在專案資料夾內；預設存在 runner 那台機器（設了分散式 cache 才共用）；
+# 保護與非保護分支預設不共用 cache；cache 在 after_script 之後才封存。scan 與 watch:compute 用同一個 key。
+.kcve-cache:
+  variables:
+    KCVE_CACHE_DIR: "$CI_PROJECT_DIR/.kcve-cache/kcve"
+  cache:
+    key: kernel-cve-mirror
+    paths: [.kcve-cache/kcve/]
+
 .scan:
   stage: scan
+  extends: [.kcve-cache]
   tags: [dumpling-scan]
   timeout: 4 hours
   interruptible: false
@@ -211,7 +227,8 @@ release:publish:
     - !reference [.resolve-from-tag, script]
     - |
       python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" \
-        --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv --out result/release-meta.json
+        --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
+        --scan-summary "result/scan-summary-$PROJECT-$VERSION.json" --out result/release-meta.json
       printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv
     - |
       test -s result/manifest.tsv || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
@@ -389,7 +406,7 @@ firmware:dt:
 
 watch:compute:
   stage: watch
-  extends: [.rules-watch]
+  extends: [.rules-watch, .kcve-cache]
   tags: [dumpling-scan]
   timeout: 90 minutes
   interruptible: false
@@ -402,6 +419,10 @@ watch:compute:
       python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
     - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
     - pipeline/watch/feeds.sh "$DUMPLING_OUT_BASE/w/feeds"
+    - |
+      export MIRRORS_DIR="$DUMPLING_OUT_BASE/w/feeds"
+      . pipeline/lib/mirrors.sh
+      if mirror_is_fresh kernel-cve; then rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kernel-cve" "$KCVE_CACHE_DIR"; fi
     - python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv"
     - python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
