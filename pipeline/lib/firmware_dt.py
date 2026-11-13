@@ -220,14 +220,14 @@ def safe_version(v):
         return "unknown"
     s = re.sub(r"[^A-Za-z0-9 ._+~()-]", "_", str(v).strip())
     s = re.sub(r"^[^A-Za-z0-9]+", "", s)[:100].rstrip()
-    return s if VERSION_RE.match(s or "!") else "unknown"
+    return s if VERSION_RE.fullmatch(s or "!") else "unknown"
 
 
 def project_name(kind, slug, synthetic):
     """名稱：firmware-<kind>-<slug>；合成樣本：firmware-<kind>-synthetic-<slug>。"""
     n = "firmware-%s-%s%s" % (kind, "synthetic-" if synthetic else "", slug)
     n = n[:100].rstrip("-._")
-    if not NAME_RE.match(n):
+    if not NAME_RE.fullmatch(n):
         raise DtError("無法產生安全的專案名稱：%s" % n)
     return n
 
@@ -641,7 +641,7 @@ def load_prep(d):
     info, _ = load_json(os.path.join(d, "dt-project.json"), MAX_BYTES, "dt-project.json")
     if not isinstance(info, dict) or not all(k in info for k in ("project_name", "project_version", "summary")):
         raise DtError("dt-project.json 欄位不齊：%s" % os.path.basename(d.rstrip("/")))
-    if not NAME_RE.match(str(info["project_name"])) or not VERSION_RE.match(str(info["project_version"])):
+    if not NAME_RE.fullmatch(str(info["project_name"])) or not VERSION_RE.fullmatch(str(info["project_version"])):
         raise DtError("dt-project.json 的名稱或版本不安全")
     parse_expected_dt(info.get("expected_dt"))
     return info

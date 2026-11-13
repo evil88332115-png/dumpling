@@ -23,7 +23,7 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 
 比對規則（依序，第一個成立的就是結果）：
 1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對、公告編號（bulletins[].id、rows[].bulletin、not_applicable[].bulletin）不是 1～8 位數字、
-   mirror.fetched_utc 有值但格式不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
+   mirror 有寫但三個鍵（commit、commit_date、fetched_utc）缺一個或格式不對 → NOT_ASSESSED（table-unreadable／table-invalid）。
 2. 表的 reviewed_until 是 null，或表裡還有只有初審意見（reviewed=false）的公告 → 表尚未經負責人確認 → NOT_ASSESSED（table-not-reviewed）。
 3. SBOM 的 vBIOS 版本讀不到、不是 XX.XX.XX.XX.XX（例如佔位字串）→ NOT_ASSESSED（version-unreadable）；ROM 裡有兩個以上不同的版本字串 → NOT_ASSESSED（version-ambiguous）。
 4. PCI vendor 不是 10de（含任何一個 x86／EFI 開機影像的 vendor）、device ID 讀不到（全 0 或全 f）、各影像的 device ID 不一致 → NOT_ASSESSED（vendor-mismatch／device-unreadable／device-ambiguous）。
@@ -31,9 +31,9 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
 6. 表裡已審核、vendor 與 device ID 都對得上的列：沒有 → NOT_ASSESSED（no-row）。表裡有任何未審核的列時，整張表算未經負責人確認（見 2，table-not-reviewed，列出數量）。
 7. 逐列比版本：fixed_in 以上 → fixed；低於 affected_below（或不高於 affected_max）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → affected（有 gap 的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（range-gap）；全部 fixed → fixed。
-8. 表的 mirror 缺少（沒有 mirror 或沒有 fetched_utc）、日期超過 MAX_MIRROR_AGE_DAYS 或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
-   affected 與其他結果照舊但加註。mirror.fetched_utc 有值但格式不對（不是字串、不是 ISO 8601、沒有時區）：載入時就是 table-invalid（見 1），不是 table-stale。
-   現在時間由呼叫端傳入（now 參數；測試一律傳固定的時間），沒給才用牆上時鐘。
+8. 表的 mirror 整個沒寫或是 null → fixed 降成 NOT_ASSESSED（table-stale，日期不明）；mirror 有寫但缺 commit、commit_date、fetched_utc 任一個，或格式不對（沒有時區也算）→ 載入時 table-invalid（見 1）。
+   mirror 的日期超過 MAX_MIRROR_AGE_DAYS 或在未來（比現在晚超過一天）→ 同樣 fixed 降成 NOT_ASSESSED（table-stale，表可能漏了較新的公告）；
+   affected 與其他結果照舊但加註。現在時間由呼叫端傳入（now 參數；測試一律傳固定的時間），沒給才用牆上時鐘。
 所有 NOT_ASSESSED 的 basis 都以「資料庫沒有資料，以廠商公告為準」收尾（SBOM 內是英文）。
 """
 import datetime
@@ -94,7 +94,7 @@ def _c1():
 
 def parse_version(s):
     """'94.04.5E.00.92' → (0x94, 0x04, 0x5E, 0x00, 0x92)；1～5 段、每段兩位十六進位；格式不對（含 XX 佔位）→ None。"""
-    if not isinstance(s, str) or not VER_RE.match(s):
+    if not isinstance(s, str) or not VER_RE.fullmatch(s):
         return None
     return tuple(int(x, 16) for x in s.split("."))
 
@@ -118,7 +118,7 @@ class Table:
         self.sha256 = sha256
         self.reviewed_until = doc.get("reviewed_until")
         m = doc.get("mirror") if isinstance(doc.get("mirror"), dict) else {}
-        self.mirror_commit = m.get("commit") if isinstance(m.get("commit"), str) and COMMIT_RE.match(m["commit"]) else None
+        self.mirror_commit = m.get("commit") if isinstance(m.get("commit"), str) and COMMIT_RE.fullmatch(m["commit"]) else None
         self.mirror_commit_date = m.get("commit_date") if isinstance(m.get("commit_date"), str) else None
         self.mirror_fetched = _parse_utc(m.get("fetched_utc"))
         self.mirror_fetched_text = m.get("fetched_utc") if self.mirror_fetched else None
@@ -153,14 +153,18 @@ class Table:
                 + (f", {len(self.awaiting)} bulletins with a preliminary opinion (not mappable to option ROM versions) awaiting confirmation ({', '.join(self.awaiting)})" if self.awaiting else ""))
 
 
+TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}|\.\d{6})?(?:Z|[+-]\d{2}:\d{2})")
+
+
 def _parse_utc(s):
-    if not isinstance(s, str):
+    """只收 YYYY-MM-DDTHH:MM:SS，秒後面可以有 3 或 6 位小數，時區寫 Z 或 ±HH:MM（和 C1 一致）；其他一律 None。
+    不直接丟給 fromisoformat：Python 3.10 與 3.12 能讀的格式不同（3.11 起才收 `+0000`、空白分隔、沒有秒、任意位數小數），結果不能隨直譯器版本變。"""
+    if not isinstance(s, str) or not TIME_RE.fullmatch(s):
         return None
     try:
-        d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
+        return datetime.datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
+    except ValueError:                             # 月份、日、時、分、秒超出範圍，或時區偏移超出範圍
         return None
-    return d if d.tzinfo is not None else None
 
 
 def validate_rows(doc):
@@ -173,7 +177,7 @@ def validate_rows(doc):
         if r.get("pci_vendor") != NVIDIA_VID:
             bad(i, "pci_vendor must be '10de'")
         d = r.get("pci_devices")
-        if not isinstance(d, list) or not d or not all(isinstance(x, str) and HEX4_RE.match(x) for x in d):
+        if not isinstance(d, list) or not d or not all(isinstance(x, str) and HEX4_RE.fullmatch(x) for x in d):
             bad(i, "pci_devices must be a non-empty list of 4-digit lowercase hex strings")
         if not any(r.get(k) for k in ROW_VERSION_KEYS):
             bad(i, "needs at least one of vbios_affected_below, vbios_affected_max, vbios_fixed_in")
@@ -203,15 +207,21 @@ def validate_ids(doc):
 
 
 def validate_mirror(doc):
-    """mirror.fetched_utc：沒有（沒有 mirror、或值是 null）→ 日期不明，比對時 table-stale；有值就要是有時區的 ISO 8601，否則 table-invalid。"""
+    """mirror 整個沒寫或是 null → 日期不明，比對時 table-stale。有寫就要是物件，commit（40 碼十六進位）、commit_date、fetched_utc 三個都有，
+    兩個時間都是有時區的 ISO 8601（見 _parse_utc），否則 table-invalid。"""
     m = doc.get("mirror")
     if m is None:
         return
     if not isinstance(m, dict):
         raise TableError("table-invalid", "mirror must be an object")
-    f = m.get("fetched_utc")
-    if f is not None and _parse_utc(f) is None:
-        raise TableError("table-invalid", "mirror.fetched_utc must be an ISO 8601 time with a time zone (for example 2026-11-13T16:52:04Z)")
+    for k in ("commit", "commit_date", "fetched_utc"):
+        if k not in m or m[k] is None:
+            raise TableError("table-invalid", f"mirror.{k} is missing (mirror needs commit, commit_date and fetched_utc)")
+    if not (isinstance(m["commit"], str) and COMMIT_RE.fullmatch(m["commit"])):
+        raise TableError("table-invalid", "mirror.commit must be 40 lowercase hex digits")
+    for k in ("commit_date", "fetched_utc"):
+        if _parse_utc(m[k]) is None:
+            raise TableError("table-invalid", f"mirror.{k} must be YYYY-MM-DDTHH:MM:SS with optional .fff or .ffffff and a Z or +HH:MM time zone")
 
 
 def load(path=None):
@@ -310,7 +320,7 @@ def match_vbios(table_or_err, v, now=None):
     if len(devs) > 1:
         return _na("device-ambiguous", f"the boot images of the option ROM carry different PCI device IDs ({', '.join(sorted(devs))})", source=src)
     dev = next(iter(devs))
-    if not HEX4_RE.match(dev) or dev in ("0000", "ffff"):
+    if not HEX4_RE.fullmatch(dev) or dev in ("0000", "ffff"):
         return _na("device-unreadable", f"the PCI device ID could not be read from the option ROM ({dev!r})", source=src)
     if v.get("terminated") != "last-flag" or v.get("start_note"):            # 沒有 terminated 這個鍵：不知道鏈有沒有正常結束，當作不完整
         return _na("rom-incomplete", "the option ROM chain did not end normally or its start is ambiguous, so the version string may not belong to this ROM",

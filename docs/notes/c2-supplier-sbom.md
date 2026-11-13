@@ -40,8 +40,8 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
   1. 用 `unicodedata.category` 把所有 C 類（Cc 含 C1 控制字元、Cf 如 U+202E 與零寬字元、Cs 單獨代理、Co、Cn）與 Zl／Zp（U+2028／U+2029）換成空白，連續空白壓成一個；
   2. 先截短（元件名 80、檔名 120 個字元，超過加「…」），再跳脫，不會切在跳脫序列中間；
   3. `&` 換成 `&amp;`（最先做）：`&lt;`、`&#64;`、`&#x40;`、`&commat;` 這類 HTML 實體渲染時會解碼成 `<`、`@`、`[`，等於繞過後面的跳脫；換成 `&amp;` 之後渲染結果是字面的實體文字，不靠反斜線規則（和 `pipeline/watch/match.py` 的 `md_text` 同一個寫法）。代價：stdout 與 log 裡的 `&` 顯示成 `&amp;`；
-  4. `@`（含全形 `＠`）：前面不是 ASCII 英數字的，後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織。前面是 ASCII 英數字的 `@` 不是提及，但 cmark-gfm 會把 email 形式（`a@b.c`、`mailto:a@b.com`、`xmpp:a@b.com`）連結成 mailto：
-     `@` 後面接的字元（英數字、`-`、`_`、後面接英數字的 `.`）構成含 `.`、最後一個字元是英文字母的網域形式時，`@` 前後各插一個零寬空白（只插後面時，markdown-it 的 linkify 會把 `a@<零寬>b.com` 當成 IDN 網域連結）；`mailto:`／`xmpp:` 的冒號另外加反斜線。同一串 email 字元裡前面已有 `@` 時網域不要求 `.`（cmark-gfm 的 `.` 計數沒有歸零，`x@y.z@Z` 會連結 `y.z@Z`，實測）。
+  4. `@`（含全形 `＠`）：前面不是 ASCII 英數字的，後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織。前面是 ASCII 英數字的 `@` 不是提及，但 cmark-gfm 會把 email 形式（`a@b.c`、`mailto:a@example.com`、`xmpp:a@example.com`）連結成 mailto：
+     `@` 後面接的字元（英數字、`-`、`_`、後面接英數字的 `.`）構成含 `.`、最後一個字元是英文字母的網域形式時，`@` 前後各插一個零寬空白（只插後面時，markdown-it 的 linkify 會把 `a@<零寬>example.com` 當成 IDN 網域連結）；`mailto:`／`xmpp:` 的冒號另外加反斜線。同一串 email 字元裡前面已有 `@` 時網域不要求 `.`（cmark-gfm 的 `.` 計數沒有歸零，`x@y.z@Z` 會連結 `y.z@Z`，實測）。
      不是 email 形式的 `@`（purl 的 `pkg:generic/zlib@1.2.11`、`name@host`、`a@1.0`，網域最後一個字元不是英文字母）原樣保留，可以原樣複製；網域最後一個字元是字母的（版本 `1.2.11.dfsg`）符合 email 形式，會多一個看不見的零寬空白（複製時會帶著），不插的話渲染器會把它連結；
   5. Markdown 特殊字元 `\ [ ] ( ) < > ! * _ # ~ | ` $` 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時還讀得出原字元；代價是 stdout 與 log 裡的 `_`、`(` 也會有反斜線）；
   6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線（`://` 的 `:` 一律跳脫，不看前面的字元：`1.https://x`、`-ftp://x` 渲染器也會連結），GitHub 才不會自動變成連結。

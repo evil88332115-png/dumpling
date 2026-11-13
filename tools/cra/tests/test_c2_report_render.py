@@ -109,7 +109,7 @@ class ControlTests(RenderCase):
     """對照組：沒有處理的原文真的會被這幾個渲染器連結或當成提及，上面的「沒有問題」才不是偵測器壞掉。"""
 
     def test_unprotected_text_is_detected(self):
-        for raw in ("a@b.com", "mailto:a@b.com", "xmpp:a@b.com", "https://evil.example/x", "www.evil.example"):
+        for raw in ("a@example.com", "mailto:a@example.com", "xmpp:a@example.com", "https://evil.example/x", "www.evil.example"):
             hits = [rn for rn, r in self.R.items() if link_problems(r("x %s y\n" % raw))]
             self.assertTrue(hits, raw)
         self.assertIn("cmark-gfm", [rn for rn, r in self.R.items() if link_problems(r("a@b.c\n"))])        # cmark-gfm 連結 a@b.c
@@ -119,12 +119,12 @@ class ControlTests(RenderCase):
 
 class MdSafeRenderTests(RenderCase):
     SAMPLES = [
-        "a@b.c", "a@b.com", "user.name+tag@example.org", "mailto:a@b.com", "MAILTO:a@b.com", "xmpp:a@b.com", "xmpp:a/b@c.com", "mailto:name@host",
-        "x-@y.zz", "a@b@c.d", "x@y.z@Z", "a@b.com_1.", "a@b.com_", "a@.b.c", "@user", "x @org/team (@u2)", "＠user", "a＠b.com", "@@u", "_@u",
+        "a@b.c", "a@example.com", "user.name+tag@example.org", "mailto:a@example.com", "MAILTO:a@example.com", "xmpp:a@example.com", "xmpp:a/b@example.org", "mailto:name@host",
+        "x-@y.test", "a@b@c.d", "x@y.z@Z", "a@example.com_1.", "a@example.com_", "a@.b.c", "@user", "x @org/team (@u2)", "＠user", "a＠example.com", "@@u", "_@u",
         "[click](https://evil.example/x)", "![i](http://e/x.png)", "<img src=x onerror=alert(1)>", "<https://evil.example>", "`code`", "a|b",
         "&commat;everyone", "&#64;x", "&lt;img src=x&gt;", "&amp;commat;x", "1.https://evil.example", "x-ftp://evil.example", "www.evil.example",
-        "https://evil.example", "ftp://u:p@evil.example/x", "https://u@evil.example", "mailto:@everyone", "a​@​b.com", "~~x~~", "**b** _i_ $x$",
-        "pkg:generic/zlib@1.2.11", "pkg:deb/ubuntu/zlib1g@1:1.2.11.dfsg-2ubuntu9?arch=amd64", "pkg:deb/u/zlib@1.2.11.dfsg", "pkg:npm/%40scope/x@1.2.3",
+        "https://evil.example", "ftp://u:p@evil.example/x", "https://u@evil.example", "mailto:@everyone", "a​@​example.com", "~~x~~", "**b** _i_ $x$",
+        "pkg:generic/zlib@1.2.11", "pkg:deb/ubuntu/zlib1g@1:1.2.11.dfsg-2ubuntu9?arch=amd64", "pkg:deb/u/zlib@1.2.11.p", "pkg:npm/%40scope/x@1.2.3",
         "name@host", "foo.bar@1.2.3.4.5", "pkg:rpm/fedora/openssl@3.0.7-1.fc37",
     ]
 
@@ -136,7 +136,7 @@ class MdSafeRenderTests(RenderCase):
     def test_seeded_random_strings(self):
         tok = ["\\", "[", "]", "(", ")", "<", ">", "!", "*", "_", "#", "~", "|", "`", "&", "$", "@", "＠", ":", "/", ".", "-", "+", " ", "a", "Z", "9", "é",
                "http", "https", "ftp", "www", "mailto:", "xmpp:", "//", "://", "&lt;", "&#64;", "&commat;", "&amp;", "​", "evil", "user", "org/team",
-               "[x](y)", "<b>", "<!--", "x@y.z", "a@b.com", "pkg:generic/zlib@1.2.11", "e.xyz", "1.2.3.4", "%2F", "\ud800", "\x00"]
+               "[x](y)", "<b>", "<!--", "x@y.z", "a@example.com", "pkg:generic/zlib@1.2.11", "e.xyz", "1.2.3.4", "%2F", "\ud800", "\x00"]
         rnd = random.Random(20261114)
         for _ in range(400):
             raw = "".join(rnd.choice(tok) for _ in range(rnd.randint(1, 12)))
@@ -155,7 +155,7 @@ class MdSafeRenderTests(RenderCase):
                 self.assertEqual(visible(render("x %s y\n" % out)).strip(), "x %s y" % purl, rn)         # 渲染後的可見文字就是原文
 
     def test_email_form_has_zero_width_space_and_text_is_still_readable(self):
-        for raw in ("a@b.c", "user@example.org", "pkg:deb/u/zlib@1.2.11.dfsg"):
+        for raw in ("a@b.c", "user@example.org", "pkg:deb/u/zlib@1.2.11.p"):
             out = ms.md_safe(raw, 200)
             self.assertIn(ZWSP, out, raw)
             self.assertEqual(out.replace(ZWSP, ""), raw)
@@ -203,15 +203,15 @@ class WholeReportRenderTests(dt_tests.ReportBase, RenderCase):
 
     def test_hostile_text_in_report_has_no_links_or_mentions(self):
         """不可信文字（階段名稱、檢查名稱、vuln-assessment 值）含 email／mailto／提及／連結語法：整份報告渲染後沒有連結、提及、標籤。"""
-        evil = ["a@b.com", "mailto:x@y.zz", "xmpp:x@y.zz", "@everyone", "[x](http://e.example)", "&commat;admin", "<img src=x>", "https://e.example", "www.e.example"]
+        evil = ["a@example.com", "mailto:x@y.test", "xmpp:x@y.test", "@everyone", "[x](http://e.example)", "&commat;admin", "<img src=x>", "https://e.example", "www.e.example"]
         rows = list(self.GOOD)
         for i, e in enumerate(evil):
             rows += [("X%d %s" % (i, e), "OK", "a"), ("X%d %s" % (i, e), "OK", "b")]            # 重複列：階段名稱會進說明
         comps = [dt_tests.clean()]
-        c = dt_tests.comp("h", "rh", purl="pkg:github/a/b@1", va="mailto:a@b.com")
+        c = dt_tests.comp("h", "rh", purl="pkg:github/a/b@1", va="mailto:a@example.com")
         c["properties"].append({"name": "dumpling:advisory-match", "value": "@everyone"})
         comps.append(c)
-        summ = dict(self.SUMM, checks=self.CHECKS + [{"name": "chk a@b.com @everyone", "status": "FAIL", "detail": "[x](http://e)"}])
+        summ = dict(self.SUMM, checks=self.CHECKS + [{"name": "chk a@example.com @everyone", "status": "FAIL", "detail": "[x](http://e)"}])
         out, md = self.case_md(rows, dt_tests.bom(*comps), summ=summ, slug="hostile")
         self.assertIn("X0", md.replace("\\", ""))
         for rn, render in self.R.items():
@@ -241,7 +241,7 @@ class VbiosReportRenderTests(RenderCase):
 
     def test_hostile_table_fields_in_vbios_section(self):
         import x86_firmware as xf
-        evil = "@everyone a@b.com mailto:x@y.zz [x](http://e) &commat;u <img src=x>"
+        evil = "@everyone a@example.com mailto:x@y.test [x](http://e) &commat;u <img src=x>"
         inv = {"vbios": [{"device": "10de:2489", "version": "94.04.5E.00.92",
                           "advisory": {"match": "affected", "bulletins": [evil], "cves": [evil], "basis": evil, "notes": [evil]}}],
                "vbios_advisory": {"status": "OK", "vbios": 1, "counts": {"affected": 1}, "stale": False,
@@ -267,7 +267,7 @@ class VbiosReportRenderTests(RenderCase):
                                                                    tn.row("9002", "CVE-2099-0002", reviewed=False, reviewed_by=None, reviewed_at=None,
                                                                           vbios_fixed_in="94.09.00.00.01")), "mix.json")),
                 "not-reviewed": tn.table(tmp, tn.row(vbios_fixed_in="94.04.00.00.01"), reviewed_until=None),
-                "gap": tn.nva.TableError("table-invalid", "x@y.zz @everyone"),
+                "gap": tn.nva.TableError("table-invalid", "x@y.test @everyone"),
             }
             for name, adv in states.items():
                 inv = xf.inventory([rom], vbios_advisory=adv, vbios_now=tn.NOW)

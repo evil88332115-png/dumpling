@@ -560,15 +560,26 @@ def test_naive_now_and_naive_fetched_do_not_raise(tmp_path):
         with pytest.raises(nva.TableError) as ei:
             nva.load(write(tmp_path, d, "b.json"))
         assert ei.value.reason == "table-invalid" and "mirror.fetched_utc" in ei.value.detail, bad
-    d["mirror"]["fetched_utc"] = None                                                                   # 缺少（null）：日期不明，比對時 table-stale
-    t = nva.load(write(tmp_path, d, "null.json"))
-    assert t.mirror_fetched is None and m(t, vb())["reason"] == "table-stale"
-    del d["mirror"]["fetched_utc"]
-    assert m(nva.load(write(tmp_path, d, "nokey.json")), vb())["reason"] == "table-stale"
-    d["mirror"] = "x"                                                                                    # mirror 不是物件
-    with pytest.raises(nva.TableError) as ei:
-        nva.load(write(tmp_path, d, "str.json"))
-    assert ei.value.reason == "table-invalid"
+    for key in ("commit", "commit_date", "fetched_utc"):                                                # mirror 有寫：三個鍵都要有，缺一個（含 null）是 table-invalid
+        for how in ("absent", "null"):
+            d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+            if how == "absent":
+                del d["mirror"][key]
+            else:
+                d["mirror"][key] = None
+            with pytest.raises(nva.TableError) as ei:
+                nva.load(write(tmp_path, d, "k.json"))
+            assert ei.value.reason == "table-invalid" and f"mirror.{key}" in ei.value.detail, (key, how)
+    for bad in ("x", 5, [], "", False):                                                                # mirror 不是物件
+        d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+        d["mirror"] = bad
+        with pytest.raises(nva.TableError) as ei:
+            nva.load(write(tmp_path, d, "str.json"))
+        assert ei.value.reason == "table-invalid"
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"), mirror=False)                                         # 整個沒寫：日期不明，table-stale
+    assert m(nva.load(write(tmp_path, d, "nomirror.json")), vb())["reason"] == "table-stale"
+    d["mirror"] = None                                                                                  # null：同樣是整個沒寫
+    assert m(nva.load(write(tmp_path, d, "nullmirror.json")), vb())["reason"] == "table-stale"
 
 
 def test_note_texts_for_stale_gap_and_fixed(tmp_path):
@@ -807,11 +818,11 @@ def test_md_esc_defangs_mentions_email_and_bare_urls():
     z = "\u200b"
     e = xf.md_esc
     assert e("@user") == "@" + z + "user" and e("x @org/team") == "x @" + z + "org/team" and e("＠u") == "＠" + z + "u"
-    assert e("a@b.com") == "a" + z + "@" + z + "b.com" and e("mailto:a@b.com") == "mailto\\:a" + z + "@" + z + "b.com"
+    assert e("a@example.com") == "a" + z + "@" + z + "example.com" and e("mailto:a@example.com") == "mailto\\:a" + z + "@" + z + "example.com"
     assert e("pkg:generic/zlib@1.2.11") == "pkg:generic/zlib@1.2.11" and e("name@host") == "name@host"
     assert e("&commat;u") == "&amp;commat;u"
     assert e("https://evil.example") == "https\\://evil.example" and e("www.evil.example") == "www\\.evil.example"
-    assert e("a_b@c.com") == "a\\_b" + z + "@" + z + "c.com"                       # 跳脫前看原文：_ 不會讓網域形式漏掉
+    assert e("a_b@example.org") == "a\\_b" + z + "@" + z + "example.org"                       # 跳脫前看原文：_ 不會讓網域形式漏掉
     assert e("a@b_c.com") == "a" + z + "@" + z + "b\\_c.com"
     # 原有的跳脫不變
     assert e("[x](y) <b> a|b `c` *d* #e") == "\\[x\\](y) &lt;b&gt; a\\|b \\`c\\` \\*d\\* \\#e"
@@ -823,5 +834,61 @@ def test_md_esc_uses_the_same_at_rules_as_firmware_mdsafe():
     spec = importlib.util.spec_from_file_location("mdsafe_for_parity", REPO / "pipeline" / "lib" / "firmware_mdsafe.py")
     ms = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ms)
-    for raw in ("@u", "x@y.zz", "pkg:generic/a@1.0", "a@b.c@d", "x @a.b _@u", "a＠b", "name@host", "mailto:a@b.cc", "xmpp:a/b@c.dd"):
+    for raw in ("@u", "x@y.test", "pkg:generic/a@1.0", "a@b.c@d", "x @a.b _@u", "a＠b", "name@host", "mailto:a@b.test", "xmpp:a/b@c.test"):
         assert xf.md_esc(raw).replace("\\", "") == ms.defang_links(ms.defang_at(" ".join(raw.split()))).replace("\\", ""), raw
+
+
+@pytest.mark.parametrize("text,ok", [
+    ("2026-11-13T16:52:04Z", True), ("2026-11-13T16:52:04+00:00", True), ("2026-11-13T16:52:04-05:30", True),
+    ("2026-11-13T16:52:04.123Z", True), ("2026-11-13T16:52:04.123456+08:00", True),
+    ("2026-11-13T16:52:04+0000", False),            # Python 3.11 起 fromisoformat 才收的格式
+    ("2026-11-13 16:52:04Z", False), ("2026-11-13 16:52:04+00:00", False),          # 空白分隔
+    ("2026-11-13T16:52Z", False), ("2026-11-13T16Z", False),                        # 沒有秒
+    ("2026-11-13T16:52:04", False), ("2026-11-13", False), ("20261113T165204Z", False),
+    ("2026-11-13T16:52:04.1Z", False), ("2026-11-13T16:52:04.12Z", False), ("2026-11-13T16:52:04.1234Z", False), ("2026-11-13T16:52:04.1234567Z", False),
+    ("2026-11-13T16:52:04+00", False), ("2026-11-13T16:52:04z", False), ("2026-11-13t16:52:04Z", False),
+    ("2026-11-13T16:52:04Z\n", False), (" 2026-11-13T16:52:04Z", False), ("２０２６-11-13T16:52:04Z", False),
+    ("2026-13-13T16:52:04Z", False), ("2026-02-30T16:52:04Z", False), ("2026-11-13T24:00:00Z", False), ("2026-11-13T16:60:04Z", False),
+    ("2026-11-13T16:52:04+99:00", False), ("", False), (None, False), (5, False)])
+def test_parse_utc_accepts_only_the_c1_time_format(text, ok):
+    d = nva._parse_utc(text)
+    assert (d is not None) is ok, text
+    if ok:
+        assert d.tzinfo is not None
+
+
+def test_parse_utc_values():
+    assert nva._parse_utc("2026-11-13T16:52:04Z") == datetime.datetime(2026, 11, 13, 16, 52, 4, tzinfo=datetime.timezone.utc)
+    assert nva._parse_utc("2026-11-13T16:52:04+08:00") == datetime.datetime(2026, 11, 13, 8, 52, 4, tzinfo=datetime.timezone.utc)
+    assert nva._parse_utc("2026-11-13T16:52:04.250Z").microsecond == 250000
+
+
+@pytest.mark.parametrize("key,bad", [("fetched_utc", "2026-11-13T16:52:04+0000"), ("fetched_utc", "2026-11-13 16:52:04Z"), ("fetched_utc", "2026-11-13T16:52Z"),
+                                     ("commit_date", "2026-11-10T13:01:57"), ("commit_date", "yesterday"), ("commit_date", 7),
+                                     ("commit", "A" * 40), ("commit", "a" * 39), ("commit", "a" * 40 + "\n"), ("commit", 5)])
+def test_mirror_values_must_be_well_formed(tmp_path, key, bad):
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d["mirror"][key] = bad
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, d))
+    assert ei.value.reason == "table-invalid" and f"mirror.{key}" in ei.value.detail
+
+
+def test_format_regexes_use_fullmatch_so_a_trailing_newline_is_rejected(tmp_path):
+    """Python 的 `$` 會放行字串結尾的換行：驗證格式一律 fullmatch。"""
+    assert nva.parse_version("94.04.5E.00.92\n") is None and nva.parse_version("94.04.5E.00.92") is not None
+    assert nva.parse_version("94\n") is None
+    for devices in (["2204\n"], ["2204", "2489\n"]):
+        with pytest.raises(nva.TableError) as ei:
+            nva.load(write(tmp_path, doc(row(devices=devices, vbios_fixed_in="94.04.00.00.01"))))
+        assert ei.value.reason == "table-invalid" and "pci_devices" in ei.value.detail
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))
+    for dev in ("2489\n", "\n2489"):
+        assert_na(m(t, vb(device=dev)), "device-unreadable")
+    assert_na(m(t, vb("94.04.5E.00.92\n")), "version-unreadable")
+    assert t.mirror_commit == COMMIT
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d["mirror"]["commit"] = COMMIT + "\n"
+    with pytest.raises(nva.TableError):
+        nva.load(write(tmp_path, d, "c.json"))
+    assert nva.BULLETIN_ID_RE.pattern == r"^[0-9]{1,8}$"

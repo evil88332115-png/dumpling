@@ -106,9 +106,9 @@ class MdSafeTest(unittest.TestCase):
         z = ms.ZWSP
         # cmark-gfm 會連結成 mailto 的形式：@ 前後各插零寬空白（只插後面時，markdown-it 的 linkify 仍會把網域接起來）
         for raw, want in (("a@b.c", "a" + z + "@" + z + "b.c"), ("user@example.org", "user" + z + "@" + z + "example.org"),
-                          ("pkg:deb/u/zlib@1.2.11.dfsg", "pkg:deb/u/zlib" + z + "@" + z + "1.2.11.dfsg"),
+                          ("pkg:deb/u/zlib@1.2.11.p", "pkg:deb/u/zlib" + z + "@" + z + "1.2.11.p"),
                           ("a@b.c-", "a" + z + "@" + z + "b.c-"),        # cmark-gfm 不連結，但 markdown-it 的 linkify 連結到 `-` 前為止
-                          ("a@b.com_1", "a" + z + "@" + z + "b.com\\_1")):
+                          ("a@example.com_1", "a" + z + "@" + z + "example.com\\_1")):
             with self.subTest(raw=raw):
                 self.assertEqual(ms.md_safe(raw), want)
         # 不會被連結的形式原樣（purl 與版本字串可以原樣複製）
@@ -122,7 +122,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertEqual(ms.md_safe("@user"), "@" + z + "user")
         self.assertEqual(ms.md_safe("x @a.b"), "x " + z + "@" + z + "a.b")
         self.assertEqual(ms.md_safe("＠a.b"), "＠" + z + "a.b")                   # 全形：沒有渲染器當 email，只照提及處理
-        self.assertEqual(ms.md_safe("a＠b.com"), "a＠b.com")
+        self.assertEqual(ms.md_safe("a＠example.com"), "a＠example.com")
 
     def test_defang_at_is_the_function_used_by_md_safe(self):
         z = ms.ZWSP
@@ -132,9 +132,9 @@ class MdSafeTest(unittest.TestCase):
 
     def test_mailto_and_xmpp_colon_escaped(self):
         z = ms.ZWSP
-        self.assertEqual(ms.md_safe("mailto:a@b.com"), "mailto\\:a" + z + "@" + z + "b.com")
-        self.assertEqual(ms.md_safe("XMPP:a@b.com"), "XMPP\\:a" + z + "@" + z + "b.com")
-        self.assertEqual(ms.md_safe("xmpp:a/b@c.com"), "xmpp\\:a/b" + z + "@" + z + "c.com")
+        self.assertEqual(ms.md_safe("mailto:a@example.com"), "mailto\\:a" + z + "@" + z + "example.com")
+        self.assertEqual(ms.md_safe("XMPP:a@example.com"), "XMPP\\:a" + z + "@" + z + "example.com")
+        self.assertEqual(ms.md_safe("xmpp:a/b@example.org"), "xmpp\\:a/b" + z + "@" + z + "example.org")
         self.assertEqual(ms.md_safe("mailto:name@host"), "mailto\\:name@host")          # 網域沒有 `.`：cmark-gfm 不連結，但 markdown-it 的 mailto: 會
         self.assertEqual(ms.md_safe("mailto:"), "mailto\\:")
         self.assertEqual(ms.md_safe("a:b mail:x"), "a:b mail:x")

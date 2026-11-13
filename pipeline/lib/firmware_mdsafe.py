@@ -62,7 +62,7 @@ def _email_like(t, i):
     """t[i] 是 ASCII @：後面是不是會被連結成 email 的網域形式。
     @ 後面的字元（見 _DOMAIN_RUN，到下一個 @ 為止：下一個 @ 也會被處理）最後一個字元是英文字母，而且含 `.`；同一串 email 字元裡前面已經出現過 @ 時不要求 `.`
     （cmark-gfm 處理過前一個 @ 之後，`.` 的計數沒有歸零：`x@y.z@Z`、`x@y.z-@Z` 會連結 `y.z@Z`，空白隔開的 `x@y.z @Z` 不會，實測）。
-    markdown-it 的 linkify 另外會在 `-`、`_` 之前截斷網域（`a@b.com_1` 連結 `a@b.com`），所以每個 `-`、`_` 之前的前綴也檢查一次。"""
+    markdown-it 的 linkify 另外會在 `-`、`_` 之前截斷網域（`a@example.com_1` 連結 `a@example.com`），所以每個 `-`、`_` 之前的前綴也檢查一次。"""
     run = _DOMAIN_RUN.match(t, i + 1).group()
     j = i
     while j > 0 and i - j < _LOOKBACK and t[j - 1] in _LOCAL_CHARS:
