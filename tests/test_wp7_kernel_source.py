@@ -184,9 +184,16 @@ class DocumentStatusTest(unittest.TestCase):
         r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
         self.assertEqual(r["documents"], {"user-information": "GAP", "sbom": "OK"})
         self.assertEqual((r["missing_fields"], r["report_status"], r["release_gate"], r["own_software_detail"]), (2, "GAP", "GAP", None))
+        self.assertIsNone(r["bsp_inputs_not_applicable"])     # 沒有分層摘要：null
+        with open(os.path.join(rep, "summary.json"), "w", encoding="utf-8") as f:
+            json.dump({"layers": {"bsp_inputs_not_applicable": {"skipped": ["flash-firmware"], "reason": "x"}}}, f)
+        self.assertEqual(wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})["bsp_inputs_not_applicable"], ["flash-firmware"])
+        with open(os.path.join(rep, "summary.json"), "w", encoding="utf-8") as f:
+            json.dump({"layers": {"bsp": 1}}, f)
+        self.assertEqual(wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})["bsp_inputs_not_applicable"], [])     # 分層但沒略過
         os.remove(os.path.join(rep, "summary.json"))
         r = wp7_scan.Wp7Hooks({}).run_summary_fields(paths, {})
-        self.assertEqual((r["documents"], r["missing_fields"]), (None, None))     # 讀不到：null，不推測
+        self.assertEqual((r["documents"], r["missing_fields"], r["bsp_inputs_not_applicable"]), (None, None, None))     # 讀不到：null，不推測
 
 
 class ExternalServicesTest(unittest.TestCase):

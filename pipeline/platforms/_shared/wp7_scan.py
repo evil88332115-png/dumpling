@@ -63,6 +63,10 @@ class Wp7Hooks(ps.Hooks):
                 "documents": ({k: (v or {}).get("status") for k, v in sm["documents"].items() if isinstance(v, dict)}
                               if isinstance(sm, dict) and isinstance(sm.get("documents"), dict) else None),
                 "missing_fields": len(sm["missing_fields"]) if isinstance(sm, dict) and isinstance(sm.get("missing_fields"), list) else None,
+                # 這份報告略過的 BSP 專屬輸入（cra_report 的 layers.bsp_inputs_not_applicable；-os 報告沒有 bsp／unknown 元件時）：
+                # 有分層摘要但沒有這個鍵 → []（沒有略過）；讀不到 summary 或沒有分層摘要 → null（不推測）
+                "bsp_inputs_not_applicable": (list(((sm["layers"].get("bsp_inputs_not_applicable") or {}).get("skipped") or []))
+                                              if isinstance(sm, dict) and isinstance(sm.get("layers"), dict) else None),
                 "release_gate": gate.get("verdict") if isinstance(gate, dict) else None}
 
     def scan_head(self, ctx):
@@ -112,7 +116,8 @@ class Wp7Hooks(ps.Hooks):
             else:
                 counts[key] = None
         prod = {("full" if k == "" else k.lstrip("-")): {"report_status": v.get("report_status"), "release_gate": v.get("release_gate"),
-                                                         "documents": v.get("documents"), "missing_fields": v.get("missing_fields")}
+                                                         "documents": v.get("documents"), "missing_fields": v.get("missing_fields"),
+                                                         "bsp_inputs_not_applicable": v.get("bsp_inputs_not_applicable")}
                 for k, v in ctx["runs"].items()}
         out = {"bootloader_coverage": ctx["main_run"].get("bootloader_coverage"), "kernel_versions": ctx["main_run"].get("kernel_versions"),
                "report_rows": counts, "product_status": prod, "own_software_detail": ctx["main_run"].get("own_software_detail")}
