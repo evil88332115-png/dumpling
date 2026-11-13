@@ -458,6 +458,12 @@ teesrc_step(){
     status "B-tee-source-$v" "$s" "$d"
   fi
 }
+bundled_grype_not_run(){
+  # 讀了原始碼樹（有 uefi-source／tee-source 的 SBOM）卻沒走到比對時，B-uefi-grype／B-tee-grype 照樣寫 NOT_RUN（不讓這一項悄悄消失）
+  local v=$1 why=$2
+  [ ! -s "$OUT/$v/uefi-source/uefi-source.cdx.json" ] || status "B-uefi-grype-$v" NOT_RUN "$why"
+  [ ! -s "$OUT/$v/tee-source/tee-source.cdx.json" ] || status "B-tee-grype-$v" NOT_RUN "$why"
+}
 teegrype_step(){
   # OP-TEE／TF-A／內建 Mbed TLS 的離線 Grype 比對（tee_bundled.py grype）。同 uefigrype_step：在 sca-scan 更新資料庫之後跑
   local v=$1 T=$OUT/$1/tee-source r s d x
@@ -893,7 +899,8 @@ for v in "${VARS[@]}"; do
   if [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     IID[$v]=$iid; PENDING_TAG=; status "B-import-$v" OK "$tag → $iid（$(docker image inspect --format '{{.Architecture}} {{.Size}} bytes' "$iid" 2>/dev/null)）；暫存 tar 已刪"
   else docker image rm -f "$tag" > /dev/null 2>&1; PENDING_TAG=
-    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"; continue; fi
+    status "B-import-$v" FAIL "docker import 失敗：$(tail -1 "$D/logs/import.err")；暫存 tar 已刪"
+    bundled_grype_not_run "$v" "docker import 失敗，sca-scan 沒有執行（Grype 資料庫不可用）：沒有比對"; continue; fi
 
   t0=$(date +%s); sca_args
   # 核心的建置設定與燒錄的核心（IKCONFIG）從刷機包讀（C-kernel-config）：Rockchip 讀 update.img；Jetson 讀刷機包 tbz2／資料夾加 rootfs 前綴，

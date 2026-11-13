@@ -71,3 +71,43 @@ def test_bundled_grype_runs_after_sca_scan_updates_the_database(tmp_path):
         assert m.group(1) == "OK", m.group(0)          # 排在 sca-scan 之前時這裡是 NOT_RUN（資料庫還沒更新）
         assert st.index(f"B-{k}-grype-rootfs_no_gui") > st.index("C-scan-rootfs_no_gui")
         assert st.index(f"B-{k}-source-rootfs_no_gui") < st.index("C-scan-rootfs_no_gui")    # 讀原始碼樹仍在 sca-scan 之前
+
+
+def test_sca_scan_failure_still_writes_not_run(tmp_path):
+    """sca-scan 失敗、資料庫沒更新：比對照樣跑，B-uefi-grype／B-tee-grype 記 NOT_RUN（資料庫不可用），不悄悄消失。"""
+    script = kva.tool_tree(tmp_path)
+    (Path(script).parents[1] / "pilot" / "sca-scan").write_text(FAKE_SCA.replace(': > "$DB_MARKER"\nexit 0', "exit 1"))
+    a, prev = kva.prev(tmp_path)
+    b = tmp_path / "bin"
+    b.mkdir()
+    fake_grype(b, "2026-01-01T00:00:00Z")
+    (b / "bwrap").write_text("#!/bin/sh\necho 'Version: 0.0.0'\n")
+    (b / "bwrap").chmod(0o755)
+    e = {k: v for k, v in os.environ.items() if k != "SCA_KERNEL_VERSIONS"}
+    e.update(PATH=f"{b}:{os.environ['PATH']}", FLASHPKG_ALLOW_TMP_OUT="1", SCA_TOOLS_DIR=str(tmp_path / "none"),
+             DB_MARKER=str(tmp_path / "db-updated"))
+    out = tmp_path / "r"
+    args = ["--rescan-from", prev, "--archive", a, "--rootfs", "rootfs_no_gui", "--out", out, "--no-upload",
+            "--uefi-source", uefi_tree(tmp_path), "--tee-source", tts.tree(tmp_path / "tee")]
+    p = subprocess.run(["bash", str(script), *map(str, args)], capture_output=True, text=True, env=e, timeout=300)
+    st = (out / "status.tsv").read_text()
+    assert re.search(r"^C-scan-rootfs_no_gui\tFAIL\t", st, re.M), st + p.stderr
+    for k in ("uefi", "tee"):
+        assert re.search(rf"^B-{k}-grype-rootfs_no_gui\tNOT_RUN\tGrype database not usable", st, re.M), st
+
+
+def test_import_failure_writes_not_run_for_both(tmp_path):
+    """完整掃描 docker import 失敗（沒走到 sca-scan）：有讀原始碼樹的兩種比對都記 NOT_RUN，原因寫 sca-scan 沒有執行。"""
+    import hashlib
+    import test_flash_package as tfp
+    a = str(tmp_path / "pkg.tbz2")
+    tfp.make_archive(a, gui=False)
+    (tmp_path / "pkg.tbz2.md5").write_text(f"{hashlib.md5(open(a, 'rb').read()).hexdigest()}  pkg.tbz2\n")
+    out = tmp_path / "r"
+    p = tfp.run_script(tmp_path, "--archive", a, "--rootfs", "rootfs_no_gui", "--name", "EX-J100", "--version", "V1", "--no-upload",
+                       "--out", str(out), "--uefi-source", str(uefi_tree(tmp_path)), "--tee-source", str(tts.tree(tmp_path / "tee")))
+    st = (out / "status.tsv").read_text()
+    assert re.search(r"^B-import-rootfs_no_gui\tFAIL\t", st, re.M), st + p.stderr
+    for k in ("uefi", "tee"):
+        assert re.search(rf"^B-{k}-grype-rootfs_no_gui\tNOT_RUN\tdocker import 失敗，sca-scan 沒有執行", st, re.M), st
+        assert not (out / "rootfs_no_gui" / f"{k}-source" / "grype-run.json").exists()
