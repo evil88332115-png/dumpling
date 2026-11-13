@@ -74,7 +74,7 @@ wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最�
   local tee=(); [ -d "$out/tee-source" ] && tee=(--tee-source "$out/tee-source")
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$pkg" --source "$out/SourceCode" --build-record "$br" \
     --name "$DUMPLING_PROJECT$suffix" --version "$ver" --rootfs rootfs --config "$out/cra-config" --role "$crole" --yes \
-    --platform "$DUMPLING_PLATFORM" "${tee[@]}" "${kargs[@]+"${kargs[@]}"}" "$@" > "$out/wizard$suffix.log" 2>&1
+    --platform "${DUMPLING_SCAN_PLATFORM_ARG:-$DUMPLING_PLATFORM}" "${tee[@]+"${tee[@]}"}" "${kargs[@]+"${kargs[@]}"}" "$@" > "$out/wizard$suffix.log" 2>&1
   local rc=$?
   tail -25 "$out/wizard$suffix.log"
   [ $rc = 0 ] || return $rc
@@ -117,7 +117,7 @@ echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
-  --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]}" \
+  --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]+"${official[@]}"}" \
   || fail "收集結果失敗"
 cp "$out/wizard.log" "$out/release/" 2> /dev/null; rm -f "$out/release/wizard.log"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json

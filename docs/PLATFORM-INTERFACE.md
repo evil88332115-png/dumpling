@@ -134,7 +134,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 |---|---|
 | `validate` | 驗證 project.yml、sources.yml、平台設定；不做別的 |
 | `fetch` | 共用：讀 sources.yml 下載核對到 `$DUMPLING_OUT/downloads/`。轉接器可提供 `fetch.sh` 覆寫 |
-| `build` | 平台各自（`build.sh`）。不編譯的平台印 `build: OK（不編譯）` |
+| `build` | 平台各自（`build.sh`）。不編譯的平台（`build.mode: none`）整個 build job 略過，scan job 記 `pipeline-build NOT_RUN 4`（不是 OK） |
 | `assemble` | 平台各自（`assemble.sh`）：組產品映像 |
 | `scan` | 平台各自（`scan.sh`）：呼叫共用掃描，只提供平台設定；**平台名稱由 project.yml 明確傳下去**（見下） |
 | `raw-sectors` | 選用掛點，見下 |
@@ -152,7 +152,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…）` 結束；轉接器沒有該步驟的腳本 → `NOT_RUN`（4）。
 轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_ARCH`（platform.yml 的 `arch`，預設 `arm64`）、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）。`DUMPLING_PLATFORMS_DIR` 可換掉轉接器根目錄（測試用）。
 
-**平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_PLATFORM`（或平台設定 `scan.platform_arg`）原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
+**平台一律由 project.yml 明確給定、一路傳到 scan，不從映像格式推測**：`scan.sh` 要把 `$DUMPLING_SCAN_PLATFORM_ARG` 原樣傳給 `tools/demo/scan-flash-package.sh --platform` 與 `tools/wizard/cra-scan.py --platform`（`pipeline/platform.sh` 匯出：平台設定的 `scan.platform_arg`，沒寫就是平台名稱；必須是工具認得的 jetson／raspberrypi／rockchip／generic，否則平台設定驗證就失敗）。沒給平台時，原始磁碟映像的開機程式分類標 GAP（「沒有指定平台，不推測」），不會預設成 Raspberry Pi。
 
 ### 選用掛點：raw-sectors
 
@@ -210,8 +210,8 @@ scan:                          # 選填
   tools: sbom-only             # 選填：sbom-only（預設）｜full（見下表）
   kernel_not_distro: "<理由>"  # 選填：宣告這個平台的核心不是發行版的核心（見 §4 sources.yml 的 `kernel_not_distro`）；Jetson 不設
   inputs_template: jetson      # tools/wizard/platforms/<名稱>.json，new-project.sh 複製成 CRA/Config/inputs.json
-  platform_arg: jetson         # 傳給掃描工具的 --platform
-  rootfs: rootfs
+  platform_arg: jetson         # 傳給掃描工具的 --platform（DUMPLING_SCAN_PLATFORM_ARG）；沒寫＝平台名稱；只能是 jetson／raspberrypi／rockchip／generic
+  rootfs: rootfs               # 目前只能是 rootfs（scan.sh 與 platform_scan 固定用這個名稱）；其他值驗證失敗
 project_defaults:              # 選填：new-project.sh 帶入 project.yml／sources.yml 的預設值
   platform_version: …  bsp_os_source: …  kernel_source: …  bootloader: …
   own_software: []  interfaces: […]  platform_params: {}
@@ -242,7 +242,7 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
 `platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
 `status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
-Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
+手動觸發（workflow_dispatch）只建 draft；push tag 建正式 Release（`--verify-tag`）。**GAP 不擋正式 Release**：scan 回 3（GAP）時 `run-step.sh` 記一列、以 0 繼續，Release 照樣發，結論寫在 `release-meta.json` 的 `report_status`／`release_gate`／`pipeline_result` 與 Release 說明開頭（D-033：資料缺口照實標示，不靠擋發佈）。只有 FAIL（1、64 或其他）讓 job 失敗、不發 Release。
 
 **ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。
 所有平台的 scan 都 `source pipeline/lib/mirrors.sh`，用 `mirror <tools/mirror 底下的腳本> <資料夾名>`（不要各寫一份）；`mirror_kernel_cve <名>` 會把上一份核心 CVE 鏡像（`$KCVE_CACHE_DIR`）傳給 `kernel-cve.sh` 的 `KERNEL_CVE_REUSE_FROM`（上游 HEAD 沒變就沿用）與 `KERNEL_CVE_FALLBACK_FROM`（上游連不上就退而求其次）。

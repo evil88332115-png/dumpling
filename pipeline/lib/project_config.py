@@ -43,6 +43,8 @@ LAYERS = ("bsp", "host-tool", "os")
 BUILD_MODES = ("compile", "none")
 ARCHES = ("arm64", "amd64")                                  # 目標映像的架構（platform.yml 的 arch）與 runner 架構（build.runner、scan.runner）
 RUNNER_LABELS = {"arm64": "ubuntu-24.04-arm", "amd64": "ubuntu-24.04"}
+SCAN_PLATFORM_ARGS = ("jetson", "raspberrypi", "rockchip", "generic")   # scan-flash-package.sh／cra-scan.py 的 --platform 認得的值
+SCAN_ROOTFS = "rootfs"                                       # scan.rootfs：scan.sh 與 platform_scan 目前固定用這個名稱（結果在 scan/rootfs/）
 SCAN_TOOLS = ("sbom-only", "full")                            # scan.tools：sbom-only＝Syft、Grype、bwrap；full＝install-tools.sh 不帶旗標（再加 cdxgen、govulncheck、guarddog）
 APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")          # apt 套件名稱（Debian Policy 5.6.1）；進 workflow 的指令列，所以限制字元
 
@@ -344,7 +346,9 @@ def platform_plan(config):
     b, sc = config.get("build") or {}, config.get("scan") or {}
     return {"build_mode": b["mode"], "build_runner": RUNNER_LABELS[b.get("runner", "arm64")], "build_apt": list(b.get("apt") or []),
             "scan_runner": RUNNER_LABELS[sc.get("runner", "amd64")], "scan_apt": list(sc.get("apt") or []), "scan_tools": sc.get("tools", "sbom-only"),
-            "arch": config.get("arch", "arm64")}
+            "arch": config.get("arch", "arm64"),
+            # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform：scan.platform_arg，沒寫就是平台名稱（驗證時已確認是工具認得的值）
+            "scan_platform_arg": sc.get("platform_arg") or config.get("platform")}
 
 
 def validate_platform_config(doc, name=None):
@@ -437,6 +441,11 @@ def validate_platform_config(doc, name=None):
             for k in ("inputs_template", "platform_arg", "rootfs"):
                 if k in scan and not (isinstance(scan[k], str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", scan[k])):
                     errs.append("scan.%s 不合法" % k)
+            parg = scan.get("platform_arg") or doc.get("platform")
+            if isinstance(parg, str) and parg not in SCAN_PLATFORM_ARGS:
+                errs.append("scan.platform_arg（沒寫時是平台名稱 %s）必須是掃描工具認得的 %s" % (parg, "／".join(SCAN_PLATFORM_ARGS)))
+            if "rootfs" in scan and scan["rootfs"] != SCAN_ROOTFS:
+                errs.append("scan.rootfs 目前只能是 %s（scan.sh 與 platform_scan 固定用這個名稱）" % SCAN_ROOTFS)
     return errs
 
 

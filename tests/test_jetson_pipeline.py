@@ -303,7 +303,7 @@ class ScanScript(unittest.TestCase):
         t = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
         call = t[t.index('python3 -I "$root/tools/wizard/cra-scan.py"'):]
         call = call[:call.index("> \"$out/wizard$suffix.log\"")]
-        for need in ('--source "$out/SourceCode"', '--platform "$DUMPLING_PLATFORM"', '--archive "$pkg"', '--build-record "$br"'):
+        for need in ('--source "$out/SourceCode"', '--platform "${DUMPLING_SCAN_PLATFORM_ARG:-$DUMPLING_PLATFORM}"', '--archive "$pkg"', '--build-record "$br"'):
             self.assertIn(need, call)
         self.assertEqual(t.count('"$root/tools/wizard/cra-scan.py"'), 1)
 

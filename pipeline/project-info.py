@@ -7,7 +7,7 @@
                                                    kernel_release、kernel_upstream_version、kernel_not_distro，加上 platform.yml 的 scan.kernel_not_distro 預設，
                                                    見 project_config.kernel_wizard_args；沒有就不印）
       python3 -I pipeline/project-info.py --matrix [<專案名>]    （dev.yml 用：印 JSON 陣列 [{"project","version"}…]；每個專案取 sources.yml 的最後一個版本）
-輸出另含 workflow 的規劃值（platform.yml）：BUILD_MODE（compile｜none）、BUILD_RUNNER（runner 標籤）、BUILD_APT、SCAN_RUNNER、SCAN_APT（apt 清單用空白分隔）、SCAN_TOOLS（sbom-only｜full）、ARCH。platform.yml 的 scan.tools 不是這兩個值 → 結束碼 64（用法／設定錯誤）。
+輸出另含 workflow 的規劃值（platform.yml）：BUILD_MODE（compile｜none）、BUILD_RUNNER（runner 標籤）、BUILD_APT、SCAN_RUNNER、SCAN_APT（apt 清單用空白分隔）、SCAN_TOOLS（sbom-only｜full）、ARCH、SCAN_PLATFORM_ARG（掃描工具的 --platform：scan.platform_arg，沒寫是平台名稱）。platform.yml 的 scan.tools 不是這兩個值 → 結束碼 64（用法／設定錯誤）。
 tag 格式錯、專案不存在、版本不在 sources.yml、欄位驗證失敗 → 不印 KEY=VALUE，印 "project-info: FAIL（…）" 並以 1 結束。
 """
 import os
@@ -38,7 +38,8 @@ def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
             ("OS_RESPONSIBILITY", project["os_responsibility"]), ("COMPANY_ROLE", project["company_role"]),
             ("PROJECT_DIR", _rel(project_dir)),
             ("BUILD_MODE", plan["build_mode"]), ("BUILD_RUNNER", plan["build_runner"]), ("BUILD_APT", " ".join(plan["build_apt"])),
-            ("SCAN_RUNNER", plan["scan_runner"]), ("SCAN_APT", " ".join(plan["scan_apt"])), ("SCAN_TOOLS", plan["scan_tools"]), ("ARCH", plan["arch"])]
+            ("SCAN_RUNNER", plan["scan_runner"]), ("SCAN_APT", " ".join(plan["scan_apt"])), ("SCAN_TOOLS", plan["scan_tools"]), ("ARCH", plan["arch"]),
+            ("SCAN_PLATFORM_ARG", plan["scan_platform_arg"])]
 
 
 def matrix(root, only=None):
