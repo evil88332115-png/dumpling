@@ -50,6 +50,9 @@ stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK 
   - 選填欄位缺少 → 文件內顯示 TO BE COMPLETED，該文件至少 GAP。
   - 風險評估：沒有 DT findings 或 SBOM 為空 → NOT_ASSESSED；status.tsv 缺、DT 資料源／KEV／OSV 涵蓋／弱點分析／findings、
     sbomgate、meta.json 任一不是 OK → GAP（清單不完整）；有條件才寫的階段（COND_STAGES）有這一列而且不是 OK → GAP；
+    核心判定階段（KERNEL_STAGES、C-kernel-not-judged-*）有這一列而且不是 OK → GAP（ATTENTION 維持；meta.json 有 kernel_in_other_report 時
+    C-kernel-cve-list／config／module-map 的 NOT_RUN 是 D-044 的不適用，不降級）；刷機包的掃描另讀 <結果>/status.tsv 的 FLASH_ROOTFS_STAGES／
+    FLASH_PRODUCT_STAGES（有這一列而且不是 OK／INFO → GAP，ATTENTION 維持；-os 的 bsp_na 時 BSP 專屬的不算）；
     有未處理的 P1、Grype 有 DT 沒有的 CVE、C-grype 不是 OK 或沒有 Grype 結果 → ATTENTION。
   - Grype 有、DT 沒有的比對（交叉核對的同一個判斷）成為「只有 Grype」的列（grype_only_rows；Source IDs GRYPE:…，
     元件欄 found only by Grype），和其他列一樣分級、判斷、寫 VEX；DT 的列不變。
@@ -136,10 +139,73 @@ RISK_STAGES = ["D-dt-data-sources", "D-dt-kev-sources", "D-dt-osv-coverage", "D-
 INFO_STAGES = ["C-grype-db", "C-grype"]
 # 有條件才寫的階段：有這一列而且不是 OK → GAP（沒有這一列不算缺）。核心沒比對、DT 沒補原始碼套件、BOM 處理沒確認完成
 # B-toolchain（Maven／Gradle 缺工具）、B-npm-no-lockfile（npm 沒有鎖定檔又不能連網）：依賴沒有解析出來，0 筆不代表沒有漏洞
-COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile"]
+# C-pyver（Debian 打包的 Python 模組仍有佔位值版本：比對用的版本不對）、B-php-runtime（有 PHP 卻沒認出 PHP 本體：PHP 的弱點沒比對）
+COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile",
+               "C-pyver", "B-php-runtime"]
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
 # C-dt-feeds：GAP → GAP；NOT_RUN 只在原因是金鑰沒有權限（說明含 SYSTEM_CONFIGURATION_READ）時算 GAP——沒用 DT 的 NOT_RUN 已由 D-dt-data-sources 反映
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
+# 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
+# kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
+# 唯一的例外：分層報告的 SBOM 沒有核心、核心在另一份報告判定（sca-scan --kernel-in-other-report，D-044）時三個核心階段是 NOT_RUN「不適用」——
+# 只認 sca-scan 寫在 meta.json 的 kernel_in_other_report（結構上的標記），不看說明文字。C-kernel-cve-mirror（CNA 鏡像用了沿用的舊資料）是 ATTENTION。
+KERNEL_STAGES = ["C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map", "C-kernel-versions", "C-kernel-cve-mirror"]
+KERNEL_STAGE_PREFIX = "C-kernel-not-judged-"
+KERNEL_OTHER_REPORT_NA = ("C-kernel-cve-list", "C-kernel-config", "C-kernel-module-map")
+REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")      # sca-scan --kernel-in-other-report 收的報告名稱
+
+
+# 刷機包層（scan-flash-package.sh 的 <結果>/status.tsv；cra_report 平常只讀 <rootfs>/scan/status.tsv）會影響弱點清單完整性的列。
+# 只在刷機包的掃描（<結果>/list.json 有 rootfs 清單）時讀；有這一列才處理：OK／INFO 不影響，ATTENTION 維持，其他 → GAP。
+#   B-initrd-coverage-<rootfs>：initrd 裡有沒被套件涵蓋的 ELF／腳本（不在 SBOM，弱點沒比對）或讀不懂
+#   B-rootfs-tar-<rootfs>：rootfs 有讀不到、略過的項目（裡面的套件不會在 SBOM）
+#   B-uefi-binary（整個產品一列）：刷機包的 UEFI 映像和給的原始碼不一致或沒核對（UEFI 內建函式庫的列可能不是出貨的東西）
+# 值＝這一列是不是 BSP 專屬（分層的 -os 報告不適用，同 bsp_na）。
+FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False}
+FLASH_PRODUCT_STAGES = {"B-uefi-binary": True}
+FLASH_STATUS_MISSING = "flash-package status.tsv"
+
+
+def flash_stage_status(scan):
+    """刷機包層 status.tsv 裡這個 rootfs 的 FLASH_ROOTFS_STAGES 與整個產品的 FLASH_PRODUCT_STAGES → {階段: (狀態, 說明, 是否 BSP 專屬)}。
+    沒有 list.json（不是刷機包的掃描）→ {}；list.json 壞掉或沒有 rootfs 清單、status.tsv 沒有或讀不到 → {FLASH_STATUS_MISSING: GAP}。"""
+    res = scan.parent.parent
+    if not (res / "list.json").exists():
+        return {}                     # 不是刷機包的掃描
+    lst = load_json(res / "list.json")
+    if not (isinstance(lst, dict) and isinstance(lst.get("rootfs"), list)):
+        # list.json 在（刷機包的掃描）卻壞掉或格式不對：壞掉的輸入不能當成沒事（D-043）→ GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/list.json of the flash package scan is not valid (no rootfs list): "
+                                       "the flash package status could not be read", False)}
+    try:
+        st = read_status(res / "status.tsv") if (res / "status.tsv").is_file() else None
+    except (OSError, UnicodeDecodeError):
+        st = None
+    if st is None:  # 確定是刷機包的掃描（有 list.json）卻沒有或讀不到刷機包層的 status.tsv：那三列有沒有問題不知道 → GAP
+        return {FLASH_STATUS_MISSING: ("GAP", "<result>/status.tsv of the flash package scan is missing or not readable", False)}
+    v = scan.parent.name
+    out = {f"{k}-{v}": st[f"{k}-{v}"] + (bsp,) for k, bsp in FLASH_ROOTFS_STAGES.items() if f"{k}-{v}" in st}
+    out.update({k: st[k] + (bsp,) for k, bsp in FLASH_PRODUCT_STAGES.items() if k in st})
+    return out
+
+
+def flash_stage_level(st):
+    return None if st in ("OK", "INFO") else "ATTENTION" if st == "ATTENTION" else "GAP"
+
+
+def kernel_stage_keys(status):
+    """status.tsv 裡有的核心判定階段（KERNEL_STAGES 與 C-kernel-not-judged-*），照固定順序。"""
+    return [k for k in KERNEL_STAGES if k in status] + sorted(k for k in status if k.startswith(KERNEL_STAGE_PREFIX))
+
+
+def kernel_stage_level(k, st, meta):
+    """核心判定階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
+    if st == "OK":
+        return None
+    other = (meta or {}).get("kernel_in_other_report")
+    if st == "NOT_RUN" and k in KERNEL_OTHER_REPORT_NA and isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
+        return None                       # D-044：核心在另一份報告判定（sca-scan 在 meta.json 記的；格式同 sca-scan 收的報告名稱）
+    return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
 def fresh_stage_level(k, st, detail):
@@ -4343,6 +4409,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     except (sm.SecInputError, OSError) as e:
         raise Fail(f"安全測試的人工決定檔有錯：{e}")
     status = read_status(paths["status.tsv"])
+    flash = flash_stage_status(scan)              # 刷機包層會影響清單完整性的列（不是刷機包的掃描時是空的）
     hashes = {k: sha256(p) for k, p in paths.items() if p}
     meta = meta if isinstance(meta, dict) else {}
     ctx = dict(report_fields(cfg))
@@ -4746,6 +4813,17 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 # ATTENTION（例如 B-npm-no-lockfile 在連網解析時）只提醒；其他非 OK 表示資料不完整
                 risk_st = worst([risk_st, "ATTENTION" if status[k][0] == "ATTENTION" else "GAP"])
                 reasons.append(f"{k} is {status[k][0]}")
+        for k in kernel_stage_keys(status):
+            lv = kernel_stage_level(k, status[k][0], meta)
+            if lv:
+                risk_st = worst([risk_st, lv])
+                reasons.append(f"{k} is {status[k][0]}: the operating system kernel's CVEs were not fully assessed against the product kernel"
+                               if lv == "GAP" else f"{k} is {status[k][0]}")
+        for k, (fst, _fd, bsp_only) in flash.items():
+            lv = None if (bsp_only and bsp_na) else flash_stage_level(fst)
+            if lv:
+                risk_st = worst([risk_st, lv])
+                reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
         for k in FRESH_STAGES:
             lv = fresh_stage_level(k, status[k][0], status[k][1]) if k in status else None
             if lv:
@@ -5040,7 +5118,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         "text.completeness": completeness, "text.cross_check": cross, "text.no_vuln_data_section": nvdmod().section(nvd, table),
         "tables.data_sources": table(["Stage", "Status", "Detail (as recorded by sca-scan)"],
                                      [[k, (status.get(k) or ("NOT_RUN",))[0], en((status.get(k) or ("", "not in status.tsv"))[1])] for k in RISK_STAGES + INFO_STAGES]
-                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status])
+                                     + [[k, status[k][0], en(status[k][1])] for k in [x for x in FRESH_STAGES if x != "C-grype-db"] + COND_STAGES + NOTE_STAGES if k in status]
+                                     + [[k, status[k][0], en(status[k][1])] for k in kernel_stage_keys(status)]
+                                     + [[k, v[0], en(v[1])] for k, v in flash.items()])
         if status is not None else "_status.tsv not available: data-source status is UNKNOWN._",
         "tables.counts": table(["Metric", "Total", "OS kernel (section 8.7)" if split else f"OS kernel (`{KERNEL_DOC[1]}`)",
                                 "Other components"] if krows else ["Metric", "Value"], counts),

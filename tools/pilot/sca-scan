@@ -489,6 +489,7 @@ else
   else status C-grype OK "$n matches（比對完成；不代表不存在其他弱點）"; fi
 fi
 KNONE=0      # 1＝給了 --kernel-in-other-report 而且 kernelcheck 判定這份 SBOM 沒有作業系統核心
+KSEEN=0      # 1＝kernelcheck 判定 SBOM 有作業系統核心（OK／GAP）或判定失敗（FAIL，保守當成有）
 # 作業系統核心的比對涵蓋（tools/pilot/lib/kernelcheck.py）：映像與 --sbom。SBOM 有核心（linux-kernel／linux-kernel-module 元件、
 # Linux 核心 CPE 或核心套件）但 Grype 對核心 0 筆 → GAP（核心的 CVE 未評估）。沒有核心、沒有 SBOM（B 段已記）或原始碼模式
 # 不寫這一列：一般容器映像本來就沒有核心，多一列 NOT_RUN 會讓整體退出碼從 0 變 2（同 C-govulncheck 只在 Go 專案出現）。
@@ -499,10 +500,10 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]]; then
     [ -n "$KNOTDISTRO" ] && ka+=(--not-distro-kernel "$KNOTDISTRO")   # 平台宣告核心不是發行版的核心：有核心時 GAP
     r=$(python3 -I "$ROOT/tools/pilot/lib/kernelcheck.py" --sbom "$SBOM" "${ka[@]+"${ka[@]}"}" --out "$OUT/scan/kernel-coverage.json" 2>&1)
     l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-coverage\t')
-    if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"; [ "$s2" = NOT_RUN ] || status "$s1" "$s2" "$s3"
+    if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"; [ "$s2" = NOT_RUN ] || { status "$s1" "$s2" "$s3"; KSEEN=1; }
       # 分層：給了 --kernel-in-other-report 而且這份 SBOM 沒有核心（NOT_RUN）→ 核心階段不適用（見下面的 KNONE）
       [ "$s2" = NOT_RUN ] && [ -n "$KOTHER" ] && KNONE=1
-    else status C-kernel-coverage FAIL "kernelcheck.py 失敗：$(echo "$r" | tail -1)"; fi
+    else status C-kernel-coverage FAIL "kernelcheck.py 失敗：$(echo "$r" | tail -1)"; KSEEN=1; fi
   fi
 fi
 # NVIDIA 安全公告（tools/pilot/lib/nvidia_bulletins.py，說明見 lib/nvidia-bulletins.md）：映像與 --sbom。SBOM 有 nvidia-l4t-* 套件
@@ -971,6 +972,7 @@ if [ "$KNONE" = 1 ]; then
   for _st in C-kernel-cve-list C-kernel-config C-kernel-module-map; do
     status "$_st" NOT_RUN "不適用：這份報告的 SBOM 沒有作業系統核心，核心在 $KOTHER 報告判定"
   done
+  META[kernel_in_other_report]=$KOTHER   # 結構上的標記：cra_report 只認這個（不看說明文字）決定這三個 NOT_RUN 不降低風險狀態
 elif [ "$KVMULTI" = 1 ]; then :      # 指定 2 顆以上：一顆都不判定（kernel_versions_finish 記 GAP）
 elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && { [ -s "$GR" ] || [ -s "$OUT/dt/findings.json" ] || [ -n "${KERNEL_CVES:-}" ]; }; then
   ka=(); [ -s "$GR" ] && ka+=(--grype "$GR"); [ -s "$OUT/dt/findings.json" ] && ka+=(--findings "$OUT/dt/findings.json")
@@ -1008,8 +1010,9 @@ elif [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
     case $s2 in NOT_RUN) rm -f "$KMM";; FAIL) rm -f "$KMM"; status "$s1" "$s2" "$s3（來源：$KLABEL）";; *) status "$s1" "$s2" "$s3（來源：$KLABEL）";; esac
   else rm -f "$KMM"; status C-kernel-module-map FAIL "kernel_module_map.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
-elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ]; then
-  # 沒有建置設定的來源：明示沒有執行（核心的 CVE 都沒有依 .config 判定），不是「沒有問題」
+elif [ "$MODE" = sbom ] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -eq 0 ] && [ "$KSEEN" = 1 ]; then
+  # SBOM 有核心而沒有建置設定的來源：明示沒有執行（核心的 CVE 都沒有依 .config 判定），不是「沒有問題」；cra_report 把它算成 GAP。
+  # SBOM 看不到核心時不寫（同 C-kernel-coverage：沒有核心的產品不該永遠 GAP）。廠商核心不是套件、SBOM 看不出來時要給 --kernel-build 才會判定
   status C-kernel-config NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有依產品核心的 .config 判定"
   status C-kernel-module-map NOT_RUN "沒給 --kernel-build：核心的 CVE 沒有對應到模組"
 fi
