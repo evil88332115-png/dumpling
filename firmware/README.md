@@ -40,6 +40,8 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `coreboot_revision`、`edk2_revision` | git 修訂（縮寫即可） | 一方是另一方的前綴就算相符（至少 7 碼）；edk2 取 coreboot config 的 `CONFIG_EDK2_TAG_OR_REV` |
 | `coreboot_build_date` | `YYYY-MM-DD` | 與 CBFS `build_info` 的建置日期（UTC）相同 |
 | `intel_gop`、`intel_legacy_vbios` | 字串 | 與 SBOM 的 `Intel GOP driver`／`Intel legacy VBIOS (option ROM)` 元件 version 相同；同名元件多個時任一個相符就 OK；沒有元件或都沒讀到版本＝MISSING。GOP 的 version 只有 build 編號（如 `1070`）。VBT 不提供此鍵（version 是表頭格式版本） |
+| `amd_agesa` | 字串（PI 版本號，例如 `1.2.0.B`） | SBOM 的 `AMD AGESA` 元件 version 的最後一個以空白分隔的符記相同（不分大小寫），或整串相同；映像有好幾個不同的 AGESA 字串時任一個相符就 OK；沒有元件或沒讀到版本＝MISSING。前面的名稱（`ComboAM4v2PI`、`ComboV2PI`…）各廠商寫法不同，不比 |
+| `amd_microcode` | `[{equiv_id, patch_id}]`（十六進位） | SBOM 有 `AMD CPU microcode` 元件，其 `sca-center:amd-equivalence-id` 與 `version`（patch level）相符；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING；映像多出來的微碼不比 |
 
 每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 
@@ -50,6 +52,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `bios/ubuntu-ovmf-2024.02` | PLAN B 段第一個樣本：edk2 成品（deb 內的 OVMF）加完整原始碼包與 Ubuntu patch，Launchpad 網址長期不變 |
 | `bios/dasharo-protectli-vp46xx-v1.2.0` | coreboot＋edk2，含 Intel ME、FSP、微碼；已有試掃結果可當預期值（`expected`）。附 coreboot、edk2 原始碼封存（GitHub 動態產生，雜湊可能變動，見該檔 notes） |
 | `bios/intel-nuc11-patgl357-0059` | AMI Aptio 平台、Intel 內顯（之後找 Intel GOP／VBT）。選 ASUS 的靜態 CDN 網址，因為 Intel 下載中心的 downloadmirror 網址會被導成小寫路徑而回 403；ASUS 下載頁本身是動態頁面，但頁面指向的 `dlcdnets.asus.com` 檔案網址是靜態的，可用 curl 下載 |
+| `bios/asus-prime-b550m-a-3404` | AMD AM4 平台、AMI：EFS 因更新包標頭不在固定位置、combo 目錄指到多個 L1、新世代的 L1 指到 L2（`$PL2`／`$BL2`）、AMD 微碼與壓縮 firmware volume 裡的 AGESA 字串；release notes 有 AGESA 版本可當出處（解析見 `docs/notes/c2-amd-psp.md`） |
 | `vbios/nvidia-displayport-fw-updater-1.1` | NVIDIA 官方公開的 DisplayPort 韌體更新工具。只讀分析確認**沒有完整 vBIOS**：內嵌的是三組 GPU 家族的 UEFI（GOP）驅動範本，版本是 `xx.xx.xx.xx.xx` 佔位（見 notes） |
 | `vbios/standalone-nvidia-option-rom` | **GAP**：沒有官方可合法下載的獨立 vBIOS；CI 用合成 option ROM（`tools/cra/tests/synthetic_vbios.py`）測流程，實際檔案由負責單位提供 |
 

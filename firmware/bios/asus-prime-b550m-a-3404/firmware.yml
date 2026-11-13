@@ -1,0 +1,40 @@
+kind: bios
+vendor: ASUS
+model: ASUS PRIME B550M-A（AMD AM4，BIOS 3404）
+firmware_version: "3404"
+ibv: AMI
+status: ok
+files:
+  - name: PRIME-B550M-A-ASUS-3404.zip
+    url: https://dlcdnets.asus.com/pub/ASUS/mb/BIOS/PRIME-B550M-A-ASUS-3404.zip
+    sha256: 2c0960f272256dfd49612b6b9d360bdc259ded0e870be4c24f23193b8c65e1f1
+    size: 16716653
+    role: package
+license:
+  name: ASUS 網站使用條款（Terms of Use Notice）
+  url: https://www.asus.com/terms_of_use_notice_privacy_policy/official-site/
+  note: ASUS 官方公開下載頁（見 notes），未見明確散布授權；只在 CI 下載核對、不重新散布、不放進 repo。
+notes: |
+  選它的技術理由：AMD 平台的公開 AMI BIOS 更新檔，用來驗證 AMD Embedded Firmware Structure、PSP／BIOS 目錄、AMD 微碼與 AGESA 字串的解析（tools/cra/amd_psp.py，
+  說明 docs/notes/c2-amd-psp.md）。檔案 16.7 MB，CI 下載成本低。
+  下載頁（動態頁面，直接下載網址是靜態 CDN 路徑）：https://www.asus.com/motherboards-components/motherboards/prime/prime-b550m-a/helpdesk_bios/
+  zip 內有 PRIME-B550M-A-ASUS-3404.CAP（33558528 位元組＝4 KiB 標頭＋兩個 16 MiB 視窗）和 BIOSRenamer.exe（只當資料讀，不執行）。
+  結構（amd_psp.py 讀到的）：CAP 標頭讓 EFS 不在固定位置（0x21000、0x1021000，各視窗位移 0x1000）；兩個 EFS 各指向一個 combo 目錄（2PSP／2BHD），
+  combo 再指到多個 L1 目錄（$PSP、$BHD）；較新的世代有 L1 的 0x40／0x70 指標項目指到 L2 目錄（$PL2、$BL2）。共 17 個目錄、244 個目錄項目、
+  19 份 AMD 微碼（BIOS 目錄 type 0x66）、AGESA 字串 `AGESA!V9` + `ComboAM4v2PI 1.2.0.B`。
+  已讀出但沒有獨立佐證所以不寫進 expected：PSP 韌體條目的標頭版本（bootloader、SMU、ABL…，沒有找到可對照的公開來源）；
+  其他微碼 patch（只有下面兩份在 linux-firmware 找得到位元組相同的）；equivalence id 對應的 CPUID（映像裡的微碼是單獨的 patch，沒有等價表）。
+  ASUS 之後若移除舊版，網址會失效，firmware-fetch 會 FAIL，此時換同系列其他版本（BIOS 3404 的 release notes 才有 AGESA 版本佐證，換版本要重新核對）。
+expected:
+  # AGESA：ASUS 官方下載頁 BIOS 3404（2023/10/31）的 release notes 寫 "1. Update AGESA version to ComboV2PI 1.2.0.B"
+  # （https://www.asus.com/motherboards-components/motherboards/prime/prime-b550m-a/helpdesk_bios/ ，2026-11-13 查）。
+  # 映像讀到的字串是 "ComboAM4v2PI 1.2.0.B"（名稱寫法與 ASUS 不同），所以只比 PI 版本號。
+  amd_agesa: "1.2.0.B"
+  # 微碼：映像裡這兩份 patch 與 linux-firmware（AMD 提供、LICENSE.amd-ucode 允許散布）的 amd-ucode/microcode_amd_fam17h.bin
+  # 位元組相同（patch 區段 SHA-256 c00b6b19fd5c… 與 689883cd220d…）。出處：
+  # https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/amd-ucode/microcode_amd_fam17h.bin?id=c4586ffaac0ca0d7045e06140b6426f2e79e96e6
+  # （commit c4586ffaac0c "linux-firmware: Update AMD cpu microcode"，2019-12-18；檔案 6476 位元組，SHA-256 5288d1ac…ddd2；
+  # 該檔的等價表把 0x8012 對到 CPUID 00800F12、0x8082 對到 00800F82）。
+  amd_microcode:
+    - {equiv_id: "0x8012", patch_id: "0x08001250"}
+    - {equiv_id: "0x8082", patch_id: "0x0800820d"}

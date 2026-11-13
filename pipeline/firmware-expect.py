@@ -23,6 +23,10 @@ expected 欄位（都選填，只寫有佐證的）：
   edk2_revision       字串，coreboot config 的 CONFIG_EDK2_TAG_OR_REV（前綴規則同上）
   intel_gop           字串，SBOM 裡 `Intel GOP driver` 元件的 version（目前只有 build 編號，例如 1070，不是 17.0.1070）
   intel_legacy_vbios  字串，SBOM 裡 `Intel legacy VBIOS (option ROM)` 元件的 version（例如 "1003 PC 14.34"）
+  amd_agesa           字串，SBOM 裡 `AMD AGESA` 元件的 version 的 PI 版本號（例如 1.2.0.B）：與 AGESA 字串最後一個以空白分隔的符記相同（不分大小寫），
+                      或與整串相同。前面的名稱（ComboAM4v2PI、ComboV2PI…）各廠商寫法不同，不比。
+  amd_microcode       清單，每項 {equiv_id, patch_id}（十六進位，例如 {equiv_id: "0x8082", patch_id: "0x0800820d"}）；SBOM 的 `AMD CPU microcode` 元件
+                      要有同 equivalence id、同 patch level（version）的；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING
   （沒有 intel_vbt：VBT 元件的 version 是 $VBT 表頭的格式版本（x100），不是顯示韌體的發行版本，不拿來比對）
 """
 import argparse
@@ -36,7 +40,7 @@ except ImportError:
     yaml = None
 
 KEYS = ("intel_me", "microcode", "fsp", "coreboot_version", "coreboot_revision",
-        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios")
+        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode")
 GFX_NAMES = {"intel_gop": "Intel GOP driver", "intel_legacy_vbios": "Intel legacy VBIOS (option ROM)"}
 STATUSES = ("OK", "MISMATCH", "MISSING", "NOT_RUN")
 
@@ -148,9 +152,20 @@ def compare(exp, inv, sbom):
     for k, label in (("intel_gop", "Intel GOP driver 版本"), ("intel_legacy_vbios", "Intel legacy VBIOS 版本")):
         if k in exp:
             plan.append((k, label, scalar(exp[k], k)))
+    if "amd_agesa" in exp:
+        plan.append(("amd_agesa", "AMD AGESA 版本", scalar(exp["amd_agesa"], "amd_agesa")))
+    if "amd_microcode" in exp:
+        am = exp["amd_microcode"]
+        if not isinstance(am, list) or not am:
+            raise FormatError("amd_microcode 必須是非空清單")
+        for i, m in enumerate(am):
+            if not isinstance(m, dict) or set(m) != {"equiv_id", "patch_id"}:
+                raise FormatError("amd_microcode[%d] 必須剛好有 equiv_id、patch_id" % i)
+            plan.append(("amd_microcode", "AMD 微碼 equivalence id %s" % scalar(m["equiv_id"], "equiv_id").lower(),
+                         (hexint(m["equiv_id"], "equiv_id"), hexint(m["patch_id"], "patch_id"), scalar(m["patch_id"], "patch_id"))))
     if inv is None:
-        return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）" % (p[1], p[2][3] if p[0] == "microcode" else p[2]))
-                for p in plan]
+        return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）"
+                 % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2])) for p in plan]
     bios = bios_images(inv)
     for key, label, want in plan:
         if key == "intel_me":
@@ -195,6 +210,25 @@ def compare(exp, inv, sbom):
                 items.append(result("MISMATCH", label, want, "inventory 有，但 SBOM 沒有對應的 FSP 元件"))
                 continue
             items.append(result("OK", label, want, show(got)))
+        elif key == "amd_agesa":
+            # 只看 SBOM 的 AMD AGESA 元件（映像裡可能有好幾個不同的字串，任一個相符就 OK，其餘不比；沒有元件或沒讀到版本＝MISSING）
+            comps = [c for c in sbom_components(sbom) if c.get("name") == "AMD AGESA"]
+            got = uniq(str(c.get("version")) for c in comps if c.get("version"))
+            if not got:
+                items.append(result("MISSING", label, want, "（SBOM 裡沒有 AMD AGESA 元件）" if not comps else "（有 AMD AGESA 元件，但沒讀到版本）"))
+            else:
+                w = want.casefold()
+                same = any(g.casefold() == w or (g.split() or [""])[-1].casefold() == w for g in got)
+                items.append(result("OK" if same else "MISMATCH", label, want, show(got)))
+        elif key == "amd_microcode":
+            eq, patch, patch_s = want
+            same = [c for c in sbom_components(sbom) if str(c.get("name", "")).startswith("AMD CPU microcode")
+                    and any(_hex(v) == eq for v in prop(c, "sca-center:amd-equivalence-id"))]
+            if not same:
+                items.append(result("MISSING", label, "patch level " + patch_s, "（SBOM 裡沒有這個 equivalence id 的 AMD 微碼元件）"))
+                continue
+            got = uniq(str(c.get("version")) for c in same if c.get("version"))
+            items.append(result("OK" if patch in {_hex(g) for g in got} else "MISMATCH", label, "patch level " + patch_s, "patch level " + show(got)))
         elif key in GFX_NAMES:
             # 只看 SBOM（GOP／legacy VBIOS 沒有進 inventory 的固定欄位）。映像裡可能有好幾個同名元件（例如多份 GOP），
             # 跟 fsp 一樣：任一個的 version 相符就 OK，其餘不比。元件在但沒讀到 version（GAP）→ MISSING，不猜。
