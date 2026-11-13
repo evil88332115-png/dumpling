@@ -1,7 +1,7 @@
 # C2：擴充新世代 Intel CSME 的解析範圍（分支 wp3/csme-new）
 
-x86_firmware.py 原本只有一條路找 CSE 版本：`$FPT` 分割區表 → FTPR → `$CPD` 的 FTPR.man →
-`$MN2`（退路：名稱是 FTPR 的 `$CPD`）。新世代的 ME 區域配置沒有這兩樣，結果是 unknown。這份是工作紀錄，不是驗證結論；
+x86_firmware.py 有兩條路找 CSE 版本。第一條：`$FPT` 分割區表 → FTPR → `$CPD` 的 FTPR.man →
+`$MN2`（退路：名稱是 FTPR 的 `$CPD`）。第二條（`intel_cse_layout.py`）：CSE layout table → BPDT → FTPR／RBEP／NFTP 的 manifest，只在第一條沒有結果時才走。新世代的 ME 區域配置沒有第一條要的東西（`$FPT` 只在 data partition、沒有 FTPR 那一項）。這份是工作紀錄，不是驗證結論；
 數字是 2026-11-13 對公開樣本量的，樣本不進 repo（D-028）。
 
 ## 檔案
@@ -9,9 +9,10 @@ x86_firmware.py 原本只有一條路找 CSE 版本：`$FPT` 分割區表 → FT
 | 檔案 | 內容 |
 |---|---|
 | `tools/cra/intel_cse_layout.py` | 新模組：CSE layout table → BPDT → FTPR／RBEP／NFTP 分割區的 `$CPD` → `<名稱>.man` 的 `$MN2`。只讀、無全檔掃描、無 regex、全部有固定上限 |
-| `tools/cra/x86_firmware.py` | 只動 ME 那段的接線：原來的 `me_info` 改名 `me_info_fpt`（內容沒改），新的 `me_info` 先呼叫它，結果不是 found 才試新模組；AMD 相關程式沒動 |
-| `tools/cra/tests/test_intel_cse_layout.py` | 83 個測試（pytest 計數，含參數化），測資全由測試當場合成 |
-| `firmware/bios/novacustom-v540tu-mtl-v1.0.1/firmware.yml` | 公開真樣本與 `expected.intel_me` |
+| `tools/cra/x86_firmware.py` | ME 那段的接線：`me_info_fpt` 走第一條路（`$FPT`、名稱是 FTPR 的 `$CPD`），`me_info` 先呼叫它，結果不是 found 才呼叫 `intel_cse_layout.py`；採用 layout table 的版本而表尾不全為 0 時，把 ATTENTION 加進 `incomplete` |
+| `tools/cra/tests/test_intel_cse_layout.py` | 141 個測試（pytest 計數，含參數化），測資全由測試當場合成 |
+| `firmware/bios/novacustom-v540tu-mtl-v1.0.1/firmware.yml` | 公開真樣本（Size 0x58）與 `expected.intel_me` |
+| `firmware/bios/novacustom-nuc-box-arl-v0.9.2/firmware.yml` | 公開真樣本（Size 0x60）與 `expected.intel_me`、微碼 |
 
 ## 格式（逐欄對公開出處核對）
 
@@ -23,9 +24,9 @@ coreboot `util/cbfstool/ifwitool.c`（BPDT、子分割區目錄、類型表）�
   +0x14 checksum(u32)、+0x18 data(offset,size)、+0x20…+0x44 BP1…BP5(offset,size)、+0x48 temp pages、+0x50 external error log；全是 u32，offset 相對區域開頭。
   **Size 從 +0x10 起算**：表的總長是 0x10＋Size。MEAnalyzer 的註解寫 Size 是 0x40（沒有 ELog）或 0x48（有 ELog）；公開真樣本（Meteor Lake 兩個版本）是 0x58（表總長 0x68，+0x58 起 16 bytes 全 0）。
   **checksum 是 CRC-32**，範圍＝d[+0x10:+0x14] ＋ 4 個 0（checksum 欄位本身不入算）＋ d[+0x18:+0x10+Size]（MEAnalyzer 的驗證程式碼；
-  登記的樣本 v1.0.1 與同系列 v1.0.0（btg_provisioned.rom）的 stored 值都是 0x7123699e，計算結果相符）。**這一版先前的說法「算法沒查到」是錯的，已更正。**
-  本模組認 Size 0x40、0x48、0x58；CRC 不符 → GAP；Size 是其他值 → 不認（none，維持原結果）。
-  0x40、0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。樣本讀到 data=(0x3A2000,0xA4000)、
+  登記的樣本 v1.0.1 與同系列 v1.0.0（btg_provisioned.rom）的 stored 值都是 0x7123699e，計算結果相符）。
+  本模組逐值認 Size 0x40、0x48、0x58、0x60；CRC 不符 → GAP；Size 是其他值 → 不認（none，維持原結果）。
+  0x40、0x48 只有 MEAnalyzer 的欄位定義與驗證程式為依據，沒有真樣本核對（測試用合成資料）。0x58 與 0x60 各有公開真樣本（0x60 見下一節）。0x58 的樣本（Meteor Lake）讀到 data=(0x3A2000,0xA4000)、
   BP1=(0x1000,0x3A1000)、BP3=(0x446000,0x441000)，兩個 BP 的起點確實是 BPDT 簽章。另外一律檢查「每個非空 BPn 都真的指到 BPDT、範圍不重疊、不超出區域、不壓到表本身」。
 - **layout 1.6**（較舊；MEAnalyzer 的 `CSE_Layout_Table_16`，表長 0x48）：+0 ROM bypass 16 bytes、+0x10 data(offset,size)、+0x18…+0x3C BP1…BP5(offset,size)、+0x40 u64 checksum；
   表後面到 0x1000 全是 0xFF（1.6 沒有標記，MEAnalyzer 也用這個填充當辨識條件之一，本模組照做）。BP1…BP5 都讀、都納入矛盾檢查。
@@ -52,14 +53,47 @@ Dasharo NovaCustom V540TU（Meteor Lake）v1.0.1 的 `btg_prod.rom`（32 MiB，s
 | `$CPD`／`$MN2` | 14 個 `$CPD` 分割區（都是 header version 2）、15 個 `$MN2`，各分割區版本不同（PMCP、IOMP、NPHY、TBTP、PCHC、SPHY、EFWP、DCOD、PCOD、ISHC、ADSP…） |
 | 主程式 | BP1 的 RBEP.man＝18.0.10.2285；BP3 的 NFTP.man＝18.0.10.2285（日期欄位也相同）。BPDT 表頭的 fit_tool_version 也是 18.0.10.2285 但那是 FIT 工具版本，不當依據 |
 
-改動前（main 26a6377）：ME 版本 unknown（「no $FPT at the ME region start or +0x10; no $CPD names the FTPR partition」，候選 13 個版本）。
-改動後：found 18.0.10.2285，basis「BPDT (CSE layout table 1.7): BP1 RBEP.man 18.0.10.2285 at 0x83ec, BP3 NFTP.man 18.0.10.2285 at 0x44d1ac; no FTPR partition, RBEP and NFTP agree」。
+只靠 `$FPT`／名稱是 FTPR 的 `$CPD` 這條路讀不到這份映像的 ME 版本（「no $FPT at the ME region start or +0x10; no $CPD names the FTPR partition」，候選 13 個版本）。
+本模組的結果：found 18.0.10.2285，basis「BPDT (CSE layout table 1.7): BP1 RBEP.man 18.0.10.2285 at 0x83ec, BP3 NFTP.man 18.0.10.2285 at 0x44d1ac; no FTPR partition, RBEP and NFTP agree」。
 `expected.intel_me: 18.0.10.2285` 的出處是 Dasharo 的 release notes（v1.0.1、v1.0.0 都寫 "Intel Management Engine version v18.0.10.2285"）。
 同系列 v0.9.0（release notes 沒有列 ME 版本）讀到 18.0.5.2040（RBEP＋NFTP 相符）：**已讀出但沒有佐證**，不寫進 expected、也沒有登記成樣本。
 微碼也寫進 expected：映像讀到 000A06A4／platform 0xE6／revision 0x25，Dasharo v1.0.1 release notes 的 SBOM 寫 "MTL C0 0x00000025 0x25 19/03/2025"（連結指到 `intel-ucode/06-aa-04`），Intel 微碼倉庫 microcode-20250812 的 releasenote.md 寫 "MTL | C0 | 06-aa-04/e6 | 00000024 | 00000025"（platform mask e6）。FSP、coreboot 資訊：release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12"，與映像的 FSPH ImageRevision 不同格式），**已讀出但沒有佐證**，不寫。
 
 交叉驗證（不改變任何既有結果）：Comet Lake 的 Dasharo 映像（`dasharo-protectli-vp46xx-v1.2.0`，layout 1.6、BPDT version 1、`$CPD` header version 1）用新模組讀到
-FTPR.man、RBEP.man、NFTP.man 全部是 14.0.47.1558，與既有 expected 一致。那份映像原本就由舊的退路（名稱是 FTPR 的 `$CPD`）找到，新模組不會被呼叫。
+FTPR.man、RBEP.man、NFTP.man 全部是 14.0.47.1558，與既有 expected 一致。那份映像由第一條路的退路（名稱是 FTPR 的 `$CPD`）找到，這個模組不會被呼叫。映像裡有名稱是 FTPR 的 `$CPD`、第一條路先找到版本時，不會查 layout table，所以表尾不會有 ATTENTION（表尾規則只管從 layout table 採用版本的情況）。
+
+## layout 1.7 的 Size 0x60 變體
+
+更新世代（Arrow Lake-U/H FSP）的 Dasharo NovaCustom NUC BOX v0.9.2（`firmware/bios/novacustom-nuc-box-arl-v0.9.2`，32 MiB 完整映像，sha256 見 firmware.yml）：
+
+| 項目 | 內容（位置相對 ME 區域開頭；ME 區域在檔案 0x4000–0x9FFFFF） |
+|---|---|
+| Size／Flags／CRC | +0x10 Size＝**0x60**（表總長 0x70）、+0x12 Flags＝0、+0x14 stored＝0xB8EFACAF；用現有算法（範圍到 +0x70）算出 0xB8EFACAF，相符 |
+| 指標 | data＝(0x3A1000, 0xA4000)、BP1＝(0x1000, 0x3A0000)、BP3＝(0x445000, 0x3CA000)、BP2／BP4／BP5 與 temp pages 空、external error log＝(0x423000, 0x1000) |
+| +0x58…+0x6F | 24 bytes 全 0 |
+| BPDT | BP1、BP3 開頭都是 BPDT（version 2；項目數 9 與 5）。BP1 的 type 1（RBEP）→ RBEP.man 18.1.18.2724；BP3 的 type 7（NFTP）→ NFTP.man 18.1.18.2724；沒有 FTPR（type 2）。BPDT 表頭的 FIT 工具版本是 18.1.18.2749，不當依據 |
+| `$FPT` | 只在 data partition（區域 +0x3A1000，11 個分割區），區域開頭沒有 |
+
+結果：found 18.1.18.2724（basis：BP1 RBEP＋BP3 NFTP 一致）。這份映像只靠 `$FPT`／FTPR `$CPD` 讀不到 ME 版本，Size 不是 0x60 時這張表會被當成不是 layout table。
+`expected.intel_me: 18.1.18.2724` 的出處是 Dasharo 的 v0.9.2 release notes（"Intel Management Engine version v18.1.18.2724"）；
+微碼 000A06A4／0xE6／0x28 的出處是同份 release notes 的 SBOM（寫更新到 microcode-20260512），與 Intel 微碼倉庫 microcode-20260512 tag 的 releasenote.md 裡 microcode-20260210 一節的 "MTL | C0 | 06-aa-04/e6 | 00000025 | 00000028"（0x28 沿用到 20260512）。檔名與目錄仍叫 mtl，
+同目錄 v0.9.0／v0.9.1 是 Meteor Lake FSP（ME 18.0.5.2028），沒有用。
+
+**Size 的取捨**：只逐值接受有依據的 Size（0x40、0x48 依 MEAnalyzer 欄位定義；0x58、0x60 依公開真樣本）。不用「≥ 0x40 且 8 的倍數、上限 N」這類規則，因為：
+(1) CRC-32 只能擋隨機資料（32 位元，單獨一個不認識的 Size 值配上對的 CRC 的機率約 2^-32，但輸入是對手可控的，CRC 不是密碼學保護，可以刻意算出來）；
+(2) Size 決定 CRC 的涵蓋範圍與表的長度，也決定 `head`（BP 不得壓到表）；放寬 Size 等於讓不認識的欄位排列也被當成已知結構；
+(3) 比 0x60 更大的值沒有任何公開依據。測試明確列出 0x5C、0x64、0x68、0x70、0x78、0x80、0xA0、0x100，即使 CRC 用同樣算法算對也回 none。
+
+**表尾（+0x58 到表尾）**：公開定義（MEAnalyzer 的 `CSE_Layout_Table_17`、coreboot `cse_layout.h` 的 `struct cse_layout`）都只到 +0x58（external error log 結尾）；
+Size 0x58 的 +0x58…+0x67 與 Size 0x60 的 +0x58…+0x6F 都沒有公開欄位名稱。三個公開真樣本這段全是 0。本模組**不解讀**這段（不當成 BP 指標），規則：
+- 表尾全為 0：照一般流程，沒有 ATTENTION。
+- 表尾不全為 0：下面三項**全部**成立才採用版本——(a) 整張表的 CRC-32 相符（範圍照 Size，包含表尾）；(b) BP1…BP5 都通過同樣的檢查（每個非空 BPn 指到 BPDT、不重疊、不超出區域、不壓到表本身）；
+  (c) 有 FTPR，或 RBEP 與 NFTP 都在而且版本相同。採用時另外回報 ATTENTION：代碼 `layout-undocumented-fields`，文字「layout table 有未公開欄位（+0x58～+0x<尾>），未解讀」加上原始值（檔案順序的 bytes，8 bytes 一組）。
+  這段會進三個地方：x86_firmware 的 `incomplete`（前綴 `ME:`，所以整份狀態是 ATTENTION、SBOM 的 `sca-center:incomplete`、fw-inventory.md 的「不完整」）、ME 元件的 `sca-center:version-basis`（basis 尾端 `ATTENTION layout-undocumented-fields: …`）。
+  任一項不成立 → GAP，原因照實寫（CRC 不符、BP 結構不一致、RBEP／NFTP 版本不同或只有一個來源…），不報版本。
+- 這個情況**沒有公開真樣本核對**，測試用合成資料（Size 0x58 與 0x60 都測：found＋ATTENTION＋原始值、只有 FTPR、RBEP／NFTP 版本不同、CRC 不符、BP 不通過、表尾看起來像 BP 指標也不採用）。
+- external error log（+0x50…+0x57）與 temp pages 不讀，值是什麼都不影響結果。BP 指標落在表內（Size 0x60 時小於 0x70；Size 0x58 時小於 0x68）一律 GAP（overlaps the table）；剛好從表尾起才走正常的 BPDT 檢查。
+- BP1…BP5 的位置固定在 +0x20…+0x44，與 Size 無關。
 
 ## 判定規則（不猜）
 
@@ -84,7 +118,7 @@ S-BPDT 項目不往下追（沒有遞迴，也就沒有循環）。
 ## 限制與不確定
 
 - 只處理 CSE 區域本身。IFWI 整個放在 BIOS 區域裡的平台（沒有獨立 ME 區域）、capsule 包著的 ME 區域、layout table 之外的配置不處理（維持原來的 unknown 或 no-me-region）。
-- 新世代只有一個公開真樣本（Meteor Lake，兩個版本讀過）；layout 1.6、BPDT version 1、`$CPD` header version 1 只有 Comet Lake 一個樣本交叉驗證，其餘靠合成測資與格式說明。
+- 新世代的公開真樣本：Meteor Lake（Size 0x58，兩個版本讀過）與 Arrow Lake-U/H FSP（Size 0x60，一個版本）；layout 1.6、BPDT version 1、`$CPD` header version 1 只有 Comet Lake 一個樣本交叉驗證，其餘靠合成測資與格式說明。
 - 「RBEP 與 NFTP 版本相同才採用」是依樣本的觀察（兩代樣本都符合）加上保守原則；沒有查到 Intel 文件保證 CSE 版本等於這兩個 manifest 的版本。
 - BPDT 表頭的 checksum 沒驗證（算法沒查到）；layout 1.7 的 CRC-32 與 `$CPD` 的 checksum 都有驗；layout 1.6 的 u64 checksum 不驗（算法沒確認）。
 - 版本字串是 manifest 的 major.minor.hotfix.build，是 CSME、TXE 還是 SPS 不猜（family 維持 unknown，沒有 cpe）。
