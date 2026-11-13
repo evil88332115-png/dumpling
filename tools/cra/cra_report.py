@@ -4296,8 +4296,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     resp = (os_responsibility or lidx["resp"]) if layers_on else None
     # 分層的 SBOM 沒有 bsp 也沒有 unknown 元件（customer／upstream-vendor 的 -os 那份）：BSP 專屬的附加輸入（刷機包韌體清單、UEFI 與
     # OP-TEE 的內建函式庫）屬於 bsp 層，在 bsp 那份報告處理。這份不加它們的元件、不產生它們的列、它們的 GAP 也不算進這份——不然會和
-    # bsp 報告重複計算（-os 的漏洞清單出現 bsp 層的列、產品 SBOM 出現刷機包韌體）。有 unknown 元件時照舊（unknown 保守算 BSP 待辦，D-030）
-    bsp_na = layers_on and not (lidx["counts"]["bsp"] or lidx["counts"]["unknown"])
+    # bsp 報告重複計算（-os 的漏洞清單出現 bsp 層的列、產品 SBOM 出現刷機包韌體）。有 unknown 元件時照舊（unknown 保守算 BSP 待辦，D-030）。
+    # 只限 customer／upstream-vendor：ours 或沒給時只有一份報告、沒有 bsp 那份，略過就沒有人處理這些輸入（給了 --tee-source 也會消失）
+    bsp_na = layers_on and resp in ("customer", "upstream-vendor") and not (lidx["counts"]["bsp"] or lidx["counts"]["unknown"])
     bsp_na_skipped = []
     host_info = {"findings": 0, "matches": 0, "ids": set()}
     if layers_on and lidx["host"]:
