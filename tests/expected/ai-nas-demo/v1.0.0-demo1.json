@@ -330,6 +330,39 @@
    "min": 1,
    "max": 50,
    "reason": "ours：OS 層的 P1 也是我們的待辦，p1_rows 要算進去（缺口 24，C1 23ff7a5）。2026-11-13 是 4（CVE-2022-2663、CVE-2022-3435、CVE-2026-46242 在 linux-kernel，CVE-2026-123158 在 openssh，KEV＋EUVD），全在 os 層；0 表示 OS 又沒算進去。P1 依 KEV／EPSS 變動，用範圍"
+  },
+  "product_status.full.documents.risk-assessment": {
+   "equals": "GAP",
+   "reason": "弱點資料不完整（NVD 關閉）、有未評估的列"
+  },
+  "product_status.full.documents.sbom": {
+   "equals": "GAP",
+   "reason": "自有軟體 GAP（OMV 不在映像裡）、沒有 flash_package_supplier"
+  },
+  "product_status.full.documents.user-information": {
+   "equals": "GAP",
+   "reason": "製造商地址、聯絡方式、預期用途、安全使用說明等都沒寫（TO BE COMPLETED）（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）"
+  },
+  "product_status.full.documents.technical-documentation": {
+   "equals": "GAP",
+   "reason": "技術文件的欄位沒寫（TO BE COMPLETED）"
+  },
+  "product_status.full.documents.kernel-vulnerabilities": {
+   "equals": "GAP",
+   "reason": "核心 CVE 不能依 .config 判定（缺口 23）"
+  },
+  "product_status.full.documents.security-findings": {
+   "equals": "ATTENTION",
+   "reason": "image-check 有待決定的發現（medium 1、low 3）"
+  },
+  "product_status.full.documents.vulnerability-rows": {
+   "equals": "OK",
+   "reason": "機器可讀的漏洞列，不讀 config"
+  },
+  "product_status.full.missing_fields": {
+   "min": 40,
+   "max": 80,
+   "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）。變少很多（例如又帶進範本值）時會被抓到"
   }
  }
 }
