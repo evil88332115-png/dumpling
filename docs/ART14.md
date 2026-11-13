@@ -138,4 +138,6 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 | 銷售市場（第 7 節，讀 `project.yml`） | 不變；`open-real`／`open-drill` 一樣傳 `--project projects/<專案>`（注意 GitLab 專案 ID 用 `--gitlab-project`） |
 
 GitLab 用法：`art14.py <指令> --backend gitlab --gitlab-url "$CI_API_V4_URL" --gitlab-project "$CI_PROJECT_ID"`，token 從環境變數 `GITLAB_TOKEN` 讀。
+**`--project` 與 `--gitlab-project` 不一樣**（C0 決定，2026-11-14）：art14.py 的 `--project` 是專案資料夾（`projects/<專案>`，讀 `project.yml`），GitLab 的專案 ID 用 `--gitlab-project`；`issues.py`、`collect.py` 的 `--project` 則是 GitLab 專案 ID。`art14.py --help` 也寫明這點。
+GitLab 上的演練 Issue 不是 confidential 時同樣當成外洩處理並 FAIL（C0 決定：內部演練的內容同樣可能有產品資訊）。
 GitLab 的 `countdown` 不加 `--drill` ＝ 真實案件（標籤 `art14`）、加 `--drill` ＝ 演練（標籤 `art14-drill`）；GitHub 上不加 `--drill` 仍然是「有 `art14` Issue 就 FAIL」。

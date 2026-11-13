@@ -8,8 +8,9 @@
   python3 -I pipeline/watch/art14.py close-drill      --repo O/R [--result 結果.json]
   python3 -I pipeline/watch/art14.py check            --result 結果.json --expect 路徑=值 …
 GitLab 後端（GITLAB-PORT T-10；只用假 API 測過，沒有對真實 GitLab 驗證）：
-  把 --repo O/R 換成 --backend gitlab --gitlab-url <…/api/v4> --gitlab-project <數字 ID>（token 從環境變數 GITLAB_TOKEN 讀，不收 argv；
-  注意 --project 仍然是「專案資料夾」）。多一個指令：
+  把 --repo O/R 換成 --backend gitlab --gitlab-url <…/api/v4> --gitlab-project <數字 ID>（token 從環境變數 GITLAB_TOKEN 讀，不收 argv）。
+  **注意：art14.py 的 --project 是「專案資料夾」（projects/<專案>，讀 project.yml），GitLab 的專案 ID 用 --gitlab-project；
+  這和 issues.py／collect.py 不一樣（那兩支的 --project 就是 GitLab 專案 ID）。**多一個指令：
   python3 -I pipeline/watch/art14.py open-real        --backend gitlab … --match 命中.json [--project projects/<專案>] [--result 結果.json]   （只有 GitLab；GitHub 一律拒絕）
   GitLab 的 countdown 不加 --drill ＝ 真實案件（標籤 art14）；加 --drill ＝ 演練（標籤 art14-drill）。
   信任：作者與留言者要是專案成員且存取等級 >= Developer（30）；system 留言不算；Issue 不是 confidential 就 FAIL、不寫入。
@@ -800,6 +801,9 @@ def build_parser():
 
 def main(argv=None, api=None, clock=None):
     argv = sys.argv[1:] if argv is None else argv
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)          # 用法（含 --project 與 --gitlab-project 的差別）；同 issues.py 的 --help
+        return 0
     try:
         args = build_parser().parse_args(argv)
         if not args.cmd:

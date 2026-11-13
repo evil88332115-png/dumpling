@@ -441,6 +441,17 @@ class TestLeakAndTrust(Base):
         self.assertEqual(self.gl.writes, [])
 
 
+class TestHelp(unittest.TestCase):
+    def test_help_explains_project_vs_gitlab_project(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(art14.main(["--help"]), 0)
+        t = out.getvalue()
+        self.assertIn("--gitlab-project", t)
+        self.assertIn("專案資料夾", t)
+        self.assertIn("issues.py", t)
+
+
 class TestQuickActionAndSecrets(Base):
     def test_quick_action_in_title_refused_before_any_write(self):
         orig = art14.render_issue
