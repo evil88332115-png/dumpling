@@ -33,7 +33,8 @@ bsp='' ; while IFS=$'\t' read -r role name; do [ "$role" = bsp ] && bsp=$name; d
 if [ ! -f "$out/downloads/public_sources.tbz2" ] || [ ! -f "$out/downloads/$bsp" ]; then fail "downloads/ 缺 public_sources.tbz2 或 BSP"; fi
 role_info=$(python3 -I "$root/pipeline/project-info.py" --dir "$proj" "$ver") || fail "project-info 失敗"
 crole=$(sed -n 's/^COMPANY_ROLE=//p' <<< "$role_info")
-# 平台設定（platform_params.kernel_release／kernel_upstream_version）→ 精靈的核心參數（Jetson 目前沒設定，是空的；其他平台照這樣呼叫）
+# 平台設定（platform_params.kernel_release／kernel_upstream_version／kernel_not_distro，加上 platform.yml 的 scan.kernel_not_distro 預設）→
+# 精靈的核心參數（Jetson 目前沒設定，是空的；其他平台照這樣呼叫）
 kargs_out=$(python3 -I "$root/pipeline/project-info.py" --kernel-args "$proj" "$ver") || fail "platform_params 的核心參數不合法：$(tail -1 <<< "$kargs_out")"
 mapfile -t kargs <<< "$kargs_out"; [ -n "$kargs_out" ] || kargs=()
 
@@ -102,7 +103,10 @@ while IFS=$'\x1f' read -r suffix sfile; do
   cp -a "$w0/scan" "$src/scan" && cp "$w0/wizard-steps.json" "$src/" 2> /dev/null
   cp "$out/layers/$sfile" "$src/scan/rootfs/scan/sbom/sbom.cdx.json" || fail "放不進分層 SBOM $sfile"
   echo "== 分層重跑 ${suffix:-（單一專案）}：$sfile"
-  wl=$(wiz "$suffix" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
+  # 分層的重跑（後綴不是空的）：核心永遠在 bsp 層，os 層的 SBOM 沒有核心，核心階段不該對映像裡的核心再跑一遍 → 告訴 sca-scan 核心在 <專案>-bsp 報告判定
+  # （只在 SBOM 真的沒有核心時才不執行；bsp 層有核心，照舊）。完整掃描和 ours 的單一專案重跑（後綴是空的，SBOM 是整個產品）不給。
+  lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")
+  wl=$(wiz "$suffix" "${lk[@]+"${lk[@]}"}" --rescan-from "$src/scan" | tee /dev/stderr | sed -n 's/^WIZARD_OUT=//p') || fail "精靈（分層 $suffix）失敗，見 wizard$suffix.log"
   if [ -z "$wl" ] || [ ! -d "$wl/報告" ]; then fail "分層 $suffix 沒有報告包"; fi
   runs+=("$suffix=$wl")
   rm -rf "$src"

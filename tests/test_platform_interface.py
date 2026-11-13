@@ -2,6 +2,7 @@
 import hashlib
 import inspect
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -576,6 +577,60 @@ class KernelWizardArgs(unittest.TestCase):
                                                                      "files": [{"name": "x", "url": "https://e.invalid/x", "sha256": "0" * 64, "role": "bsp"}]}}})
         self.assertTrue(any("kernel_release" in e for e in errs), errs)
 
+    def test_not_distro_shapes(self):
+        """kernel_not_distro：理由字串 → --kernel-not-distro；platform.yml 的預設（第二個參數）被版本的 platform_params 取代。"""
+        f = pc.kernel_wizard_args
+        self.assertEqual(f({"kernel_not_distro": "廠商核心，版本字串看不出來"}), ["--kernel-not-distro", "廠商核心，版本字串看不出來"])
+        self.assertEqual(f({"kernel_release": "6.1.84-8", "kernel_not_distro": "x"}), ["--kernel-version", "6.1.84-8", "--kernel-not-distro", "x"])
+        self.assertEqual(f(None, "平台預設"), ["--kernel-not-distro", "平台預設"])
+        self.assertEqual(f({}, "平台預設"), ["--kernel-not-distro", "平台預設"])
+        self.assertEqual(f({"kernel_not_distro": "版本的理由"}, "平台預設"), ["--kernel-not-distro", "版本的理由"])      # 版本優先
+        self.assertEqual(f({"l4t_release": "1.0"}, None), [])                                                         # Jetson：都沒有就不印
+        for bad in ("", "   ", "a\nb", "a\tb", 3, ["x"], "x" * 301):
+            with self.assertRaises(pc.ConfigError, msg=repr(bad)):
+                f({"kernel_not_distro": bad})
+            with self.assertRaises(pc.ConfigError, msg=repr(bad)):
+                f({}, bad)
+        errs = pc.validate_sources({"schema": 1, "releases": {"v1": {"platform_params": {"kernel_not_distro": ""},
+                                                                     "files": [{"name": "x", "url": "https://e.invalid/x", "sha256": "0" * 64, "role": "bsp"}]}}})
+        self.assertTrue(any("kernel_not_distro" in e for e in errs), errs)
+
+    def test_platform_yml_scan_kernel_not_distro_validated(self):
+        base = pc.load_platform_config("jetson")
+        self.assertNotIn("kernel_not_distro", base.get("scan", {}))                     # Jetson 不設
+        ok = dict(base, scan=dict(base["scan"], kernel_not_distro="平台的核心不是發行版建的"))
+        self.assertEqual(pc.validate_platform_config(ok, "jetson"), [])
+        for bad in ("", "a\nb", 3, "x" * 301):
+            errs = pc.validate_platform_config(dict(base, scan=dict(base["scan"], kernel_not_distro=bad)), "jetson")
+            self.assertTrue(any("kernel_not_distro" in e for e in errs), (bad, errs))
+
+    def test_project_info_platform_default_and_release_override(self):
+        tmp = tempfile.mkdtemp(prefix="dumpling-nd-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plats = os.path.join(tmp, "plats")
+        shutil.copytree(os.path.join(ROOT, "pipeline", "platforms", "jetson"), os.path.join(plats, "jetson"))
+        yml = os.path.join(plats, "jetson", "platform.yml")
+        with open(yml, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(yml, "w", encoding="utf-8") as fh:
+            self.assertIn("\nscan:\n", text)
+            fh.write(text.replace("\nscan:\n", "\nscan:\n  kernel_not_distro: \"平台預設的理由\"\n", 1))
+        dst = os.path.join(tmp, "nd-demo")
+        shutil.copytree(os.path.join(ROOT, "projects", "orin-nano-demo"), dst)
+        env = dict(os.environ, DUMPLING_PLATFORMS_DIR=plats)
+        cmd = [sys.executable, "-I", os.path.join(PIPE, "project-info.py"), "--kernel-args", dst, "v39.2.1-demo1"]
+        r = run(cmd, env=env)
+        self.assertEqual((r.returncode, r.stdout.splitlines()), (0, ["--kernel-not-distro", "平台預設的理由"]), r.stdout + r.stderr)   # 平台預設套用到每個版本
+        sp = os.path.join(dst, "sources.yml")
+        with open(sp, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(sp, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('      l4t_release: "39.2.1"\n', '      l4t_release: "39.2.1"\n      kernel_not_distro: "這一版的理由"\n', 1))
+        r = run(cmd, env=env)
+        self.assertEqual((r.returncode, r.stdout.splitlines()), (0, ["--kernel-not-distro", "這一版的理由"]), r.stdout + r.stderr)      # 版本覆蓋平台預設
+        r = run(cmd[:4] + [os.path.join(ROOT, "projects", "orin-nano-demo"), "v39.2.1-demo1"])
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stdout + r.stderr)                                                       # 真的 Jetson 平台沒設：不印
+
     def test_project_info_kernel_args(self):
         tmp = tempfile.mkdtemp(prefix="dumpling-kargs-")
         self.addCleanup(shutil.rmtree, tmp, True)
@@ -602,6 +657,20 @@ class KernelWizardArgs(unittest.TestCase):
             s = fh.read()
         self.assertIn('project-info.py" --kernel-args "$proj" "$ver"', s)
         self.assertIn('"${kargs[@]+"${kargs[@]}"}"', s)
+
+    def test_jetson_layer_rescans_pass_kernel_in_other_report_only_for_non_empty_suffix(self):
+        """分層重跑（後綴不是空的）才給 --kernel-in-other-report <專案>-bsp；完整掃描與 ours 的空後綴重跑不給。"""
+        with open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8") as fh:
+            s = fh.read()
+        self.assertIn('lk=(); [ -z "$suffix" ] || lk=(--kernel-in-other-report "$DUMPLING_PROJECT-bsp")', s)
+        self.assertIn('wiz "$suffix" "${lk[@]+"${lk[@]}"}" --rescan-from', s)
+        self.assertIn('w0=$(wiz "" |', s)                                    # 完整掃描：不給
+        self.assertEqual(len(re.findall(r"^\s*lk=\(", s, re.M)), 1)
+        # 把那一行單獨執行：空後綴不給、-bsp／-os 給 <專案>-bsp
+        line = re.search(r'^\s*(lk=\(\); \[ -z "\$suffix" \] \|\| lk=\(.*\))$', s, re.M).group(1)
+        for suffix, want in (("", ""), ("-bsp", "--kernel-in-other-report demo-bsp"), ("-os", "--kernel-in-other-report demo-bsp")):
+            r = subprocess.run(["bash", "-c", 'DUMPLING_PROJECT=demo; suffix="$1"; %s; echo "${lk[*]-}"' % line, "x", suffix], capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, want), r.stderr)
 
 
 if __name__ == "__main__":

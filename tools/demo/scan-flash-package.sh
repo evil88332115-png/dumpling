@@ -42,6 +42,12 @@
 #           指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan）
 #         [--kernel-upstream-version <核心版本>=<X.Y.Z>]（可重複；平台設定給的上游版本，原樣交給 sca-scan --kernel-upstream-version，
 #           和核心原始碼 Makefile 核對，不一致不採用；格式不對 exit 64）
+#         [--kernel-in-other-report <報告名稱>]（環境變數 SCA_KERNEL_IN_OTHER_REPORT；分層的重跑（--rescan-from，SBOM 換成某一層的）用：
+#           這份報告的 SBOM 沒有作業系統核心、核心在 <報告名稱> 那份報告判定。原樣交給 sca-scan --kernel-in-other-report：SBOM 真的沒有核心時，
+#           C-kernel-cve-list、C-kernel-config、C-kernel-module-map 記 NOT_RUN「不適用」，不跑核心階段；SBOM 有核心時照舊。名稱只接受
+#           ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64。見 docs/LAYERS.md）
+#         [--kernel-not-distro <理由>]（環境變數 SCA_KERNEL_NOT_DISTRO；平台負責人宣告核心不是發行版（Debian／Ubuntu）的核心，版本字串看不出來時用。
+#           原樣交給 sca-scan --kernel-not-distro：SBOM 有核心時 C-kernel-coverage 是 GAP。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64）
 #         [--keep-image]（不刪 docker 映像）  [--no-upload]（不上傳 DT；只用於試跑，這時不需要 PILOT_ENV）
 #         [--dt-vex]（選用，預設不做：CRA 的 VEX 寫回 DT 的 rootfs 專案，讓 DT finding 帶我們的 analysis；D-dt-vex-*-<rootfs>，讀回才算套用）
 #         [--dt-product-components]（選用，預設不做：刷機包韌體／UEFI 內建函式庫／自有軟體另開 DT 專案「<名稱> / <版本> (product components)」；D-dt-product-*-<rootfs>）
@@ -99,6 +105,8 @@ usage(){ sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 optval(){ [ $# -ge 2 ] || { echo "$1 要給值" >&2; usage >&2; exit 64; }; }   # 要值的選項在最後又沒給值時，不讓 shift 2 失敗而無窮迴圈
 KVERS=()   # --kernel-version（可重複）／SCA_KERNEL_VERSIONS：要判定的核心版本
 KUPS=()    # --kernel-upstream-version（可重複）：<核心版本>=<X.Y.Z>
+KOTHER=; KOTHER_CLI=0         # --kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT：核心在哪份報告判定（分層）
+KNOTDISTRO=; KNOTDISTRO_CLI=0 # --kernel-not-distro／SCA_KERNEL_NOT_DISTRO：平台宣告核心不是發行版的核心（理由）
 
 PLATFORM=${SCA_PLATFORM:-}
 ARCH=${SCA_ARCH:-arm64}
@@ -135,6 +143,8 @@ while [ $# -gt 0 ]; do case $1 in
   --kernel-source) optval "$@"; [ -d "$2" ] || { echo "--kernel-source 要是資料夾：$2" >&2; exit 64; }; export KERNEL_SOURCE_DIR=$(readlink -f -- "$2"); shift 2;;
   --kernel-version) optval "$@"; KVERS+=("$2"); shift 2;;
   --kernel-upstream-version) optval "$@"; KUPS+=("$2"); shift 2;;
+  --kernel-in-other-report) optval "$@"; KOTHER=$2; KOTHER_CLI=1; shift 2;;
+  --kernel-not-distro) optval "$@"; KNOTDISTRO=$2; KNOTDISTRO_CLI=1; shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "不認得的參數：$1" >&2; usage >&2; exit 64;;
 esac; done
@@ -196,6 +206,21 @@ kernel_upstream_args(){
   done
 }
 kernel_upstream_args
+# --kernel-in-other-report／--kernel-not-distro：命令列有給就不看環境變數；規則同 sca-scan（值原樣交給 sca-scan，它另有同樣的檢查）
+kernel_layer_args(){
+  local LC_ALL=C
+  [ "$KOTHER_CLI" = 1 ] || KOTHER=${SCA_KERNEL_IN_OTHER_REPORT:-}
+  if [ "$KOTHER_CLI" = 1 ] || [ -n "$KOTHER" ]; then
+    [[ "$KOTHER" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] \
+      || { echo "報告名稱只接受英數字開頭、英數字與「. _ + -」，最多 100 字元（--kernel-in-other-report／SCA_KERNEL_IN_OTHER_REPORT）：${KOTHER:0:120}" >&2; exit 64; }
+  fi
+  [ "$KNOTDISTRO_CLI" = 1 ] || KNOTDISTRO=${SCA_KERNEL_NOT_DISTRO:-}
+  if [ "$KNOTDISTRO_CLI" = 1 ] || [ -n "$KNOTDISTRO" ]; then
+    { [ -n "${KNOTDISTRO//[[:space:]]/}" ] && [ ${#KNOTDISTRO} -le 300 ] && ! [[ "$KNOTDISTRO" =~ [[:cntrl:]] ]]; } \
+      || { echo "--kernel-not-distro／SCA_KERNEL_NOT_DISTRO 的理由不能是空的、不能有控制字元、最多 300 位元組：${KNOTDISTRO:0:120}" >&2; exit 64; }
+  fi
+}
+kernel_layer_args
 [ "$(id -u)" != 0 ] || { echo "不要用 root 執行（sca-scan 的沙箱要求非 root）；用常駐環境的帳號（sudo -u <帳號>）" >&2; exit 64; }
 # sudo -u 時 HOME 可能還是呼叫者的：sca-scan 的 Grype 資料庫在 $HOME/.cache，改成這個帳號自己的家目錄
 H=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$H" ] && [ "$HOME" != "$H" ] && export HOME=$H
@@ -595,6 +620,8 @@ sca_args(){  # sca-scan 的共用選項（整個系統映像的逐套件授權�
   [ -s "$D/pkgdb/python-versions.json" ] && [ ! -L "$D/pkgdb/python-versions.json" ] && SCA_ARGS+=(--py-versions "$D/pkgdb/python-versions.json")
   local kv; for kv in "${KVERS[@]+"${KVERS[@]}"}"; do SCA_ARGS+=(--kernel-version "$kv"); done   # 核心版本原樣交給 sca-scan
   for kv in "${KUPS[@]+"${KUPS[@]}"}"; do SCA_ARGS+=(--kernel-upstream-version "$kv"); done      # 平台設定的上游版本原樣交給 sca-scan
+  [ -z "$KOTHER" ] || SCA_ARGS+=(--kernel-in-other-report "$KOTHER")         # 分層：核心在另一份報告判定
+  [ -z "$KNOTDISTRO" ] || SCA_ARGS+=(--kernel-not-distro "$KNOTDISTRO")      # 平台宣告核心不是發行版的核心
   return 0; }
 
 # ---------- A. 環境與核對 ----------

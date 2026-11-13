@@ -157,6 +157,17 @@ python3 -I "$DUMPLING_ROOT/pipeline/sbom-layers.py" split "$sbom" "$DUMPLING_PLA
 #   python3 -I tools/cra/report_package.py --project "$DUMPLING_PROJECT_DIR" --out "$DUMPLING_OUT/report<name_suffix>"
 ```
 - 讀 `scan_plan` 用 `pipeline/lib/platform_scan.py` 的 `scan_plan_lines`（Jetson：`jetson_scan.py plan --layers-json <檔>`），每行「後綴 0x1F 檔名」，shell 用 `IFS=$'\x1f' read -r suffix sfile`。**不要用 TAB 分隔**：TAB 是 IFS 空白字元，開頭的空欄位會被吃掉，`ours` 的後綴是空字串，檔名就跑進 suffix。`ours` 的那一項和完整掃描同一個後綴，`collect` 取後面那次（產品 SBOM 重跑）當報告。
+- **核心只在 bsp 層，其他層要告訴 sca-scan（`--kernel-in-other-report`）。** 每一項重跑都換上該層的 SBOM，但 sca-scan 的核心階段（`C-kernel-cve-list`、`C-kernel-config`、`C-kernel-module-map`）是從**映像**讀核心的，
+  不看分層後的 SBOM。`-os` 層的 SBOM 沒有核心，不告訴它的話：Jetson 的 `-os` 報告多 3 列假的 GAP（CNA 拒絕 ABI 風格的版本字串，加上 config 與模組對應 GAP）；Raspberry Pi 型的映像 CNA 版本比對會「成功」，
+  `-os` 報告多出約 2700 列合成的 linux-kernel 列（`cra_report` 標 `synthetic:kernel-cna`），這些是 bsp 的事。**對 `scan_plan` 裡後綴不是空的每一項重跑，給 `--kernel-in-other-report "<專案名>-bsp"`**
+  （`wiz "$suffix" --kernel-in-other-report "$DUMPLING_PROJECT-bsp" --rescan-from …`；wizard 的選項，傳到 `scan-flash-package.sh` 與 `sca-scan`，後兩者也接受環境變數 `SCA_KERNEL_IN_OTHER_REPORT`）。
+  - 效果：給了而且 kernelcheck 判定這份 SBOM 沒有核心（`C-kernel-coverage` 的 NOT_RUN）時，三個階段各記一列 `NOT_RUN`「不適用：這份報告的 SBOM 沒有作業系統核心，核心在 <名稱> 報告判定」，
+    不執行 CNA 版本比對、`kernel_config.py`、`kernel_module_map.py`，不記 `C-kernel-not-judged-*`，也不寫 `scan/kernel-versions.json`（出貨核心有沒有判定是 bsp 報告的事；Release 附件的 `kernel-versions` 本來就取完整掃描那次）。
+  - 有核心的重跑（bsp 層、`ours` 的產品 SBOM）照舊：給了也無害。完整掃描和 `ours` 的空後綴重跑**不要給**（它們的 SBOM 有核心，核心就在那份報告判定）。
+  - **不給的話行為不變**，所以不能由「SBOM 沒有核心」自行推定：單一 SBOM 的廠商核心（不是套件）仍要走 CNA 版本比對。名稱只接受 `^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$`，否則 exit 64。
+  - `cra_report` 不需要改：它的資料狀態只看 `C-kernel-l4t-map`、`C-kernel-coverage`（有這一列且不是 OK 才 GAP；沒有核心時 sca-scan 本來就不寫 `C-kernel-coverage`），
+    `C-kernel-cve-list`、`C-kernel-config`、`C-kernel-module-map` 的 NOT_RUN 不影響 `report_status`。沒有核心的 `-os` 報告讀不到核心的列，8.7 節寫「SBOM 沒有核心」。
+  - 平台轉接器（rpi、rock-5b、AI NAS…）自己的 `scan.sh` 要照 Jetson 的 `scan.sh` 這樣呼叫；規則見 `docs/PLATFORM-INTERFACE.md` §4（sources.yml 的平台參數）。
 - `cra_report.py` 不需要 `--os-responsibility`（SBOM 的 metadata 已記），明確傳是保險；傳的值優先。
 - 拆分前的完整 SBOM 還是要留（`sboms/`、Release）：`sbom.product.cdx.json` 是標好層的完整產品 SBOM。
 - `report_package.py --p1-layers bsp,unknown,os` 可改 P1 判斷表放哪幾層（預設只放我們的待辦）。
