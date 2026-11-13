@@ -755,3 +755,48 @@ def test_post_scan_pack_checks_integration(tmp_path):
     byid = {r["id"]: r for r in json.loads((out / "inputs-check.json").read_text())["inputs"]}
     assert byid["step:pack-identification-override"]["step_status"] == "OK"
     assert byid["step:pack-stale-files"]["step_status"] == "ATTENTION"
+
+
+# ---- dumpling（D-039、D-055）：設定包沒寫的版本、刷機包識別、支援期限由精靈填入 ----
+def test_missing_version_is_filled_with_the_plan_version(tmp_path):
+    w = _load_wizard()
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({"product": {"name": "DEMO_Board"}}))
+    assert w.override_pack_version(d / "config.json", "v39.2.1-demo1") == (None, "v39.2.1-demo1")
+    assert json.loads((d / "config.json").read_text())["product"]["version"] == "v39.2.1-demo1"
+    (d / "config.json").write_text(json.dumps({"product": {"name": "x", "version": 3}}))
+    with pytest.raises(ValueError):                       # 有寫但不是字串：不猜
+        w.override_pack_version(d / "config.json", "v1")
+    (d / "config.json").write_text(json.dumps({"schema_version": 1}))
+    with pytest.raises(ValueError):                       # 沒有 product：不是我們認得的設定包
+        w.override_pack_version(d / "config.json", "v1")
+
+
+def test_missing_identification_is_filled_only_with_a_valid_md5(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path)                                # 沒有 identification
+    st, info = w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", "B" * 32)
+    assert st == "FILLED" and info == (None, "Flash package DEMO_Board_V1.0.1.tbz2 (MD5 " + "B" * 32 + ")")
+    assert json.loads((pack / "config.json").read_text())["product"]["identification"] == info[1]
+    assert w.override_pack_identification(pack / "config.json", "DEMO_Board_V1.0.1.tbz2", "B" * 32)[0] == "SAME"
+    (tmp_path / "x").mkdir()
+    p2 = _pack(tmp_path / "x")
+    assert w.override_pack_identification(p2 / "config.json", "DEMO_Board_V1.0.1.tbz2", "bad")[0] == "UNRECOGNISED"   # 沒有可用的 MD5 不填
+    assert "identification" not in json.loads((p2 / "config.json").read_text())["product"]
+    assert w.override_pack_identification(p2 / "config.json", None, "b" * 32)[0] == "NO_PROVENANCE"
+
+
+def test_support_end_date_comes_from_support_until(tmp_path):
+    w = _load_wizard()
+    pack = _pack(tmp_path)
+    cfg = pack / "config.json"
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == (None, "2031-12")
+    assert json.loads(cfg.read_text())["support"]["end_date"] == "2031-12"
+    assert w.fill_pack_support_end(cfg, "2031-12-01") is None              # 同月：不動
+    with pytest.raises(ValueError):                                         # 不同月：不改，讓呼叫端記 ATTENTION（project_config 會先擋）
+        w.fill_pack_support_end(cfg, "2032-01-31")
+    for bad in (None, "", "TO BE COMPLETED", "2031-12"):
+        assert w.fill_pack_support_end(cfg, bad) is None                    # 沒給或格式不對：不猜
+    c = json.loads(cfg.read_text()); c["support"]["end_date"] = "TO BE COMPLETED"; cfg.write_text(json.dumps(c))
+    assert w.fill_pack_support_end(cfg, "2031-12-31") == ("TO BE COMPLETED", "2031-12")

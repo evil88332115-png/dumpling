@@ -297,11 +297,19 @@ _REL_TOKEN = re.compile(r"\bV\d+(?:\.\d+)+(?:_\w+)?")
 
 def override_pack_version(cfg_path, plan_version):
     """config.json 的 product.version 改成精靈的計畫版本。規則：設定包的值結尾若有括號後綴（例如 " (rootfs)"）且後綴本身不是版本號，
-    就保留後綴 → "<計畫版本> (<後綴>)"；否則直接用 "<計畫版本>"。回傳 (舊值, 新值)；已相同 → None；product.version 缺少或不是字串 → ValueError。"""
+    就保留後綴 → "<計畫版本> (<後綴>)"；否則直接用 "<計畫版本>"。回傳 (舊值, 新值)；已相同 → None；沒有 product → ValueError。
+    dumpling（D-039「設定檔不寫死版本」、D-055 (3)「版本以 Release tag 為準」）：product.version 沒有寫 → 直接填入計畫版本，回傳 (None, 新值)；
+    有寫但不是字串 → ValueError（不猜）。"""
     c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
     prod = c.get("product") if isinstance(c, dict) else None
-    if not isinstance(prod, dict) or not isinstance(prod.get("version"), str):
-        raise ValueError("product.version 缺少或不是字串")
+    if not isinstance(prod, dict):
+        raise ValueError("config.json 沒有 product")
+    if prod.get("version") is None:
+        prod["version"] = plan_version
+        Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return None, plan_version
+    if not isinstance(prod.get("version"), str):
+        raise ValueError("product.version 不是字串")
     old = prod["version"]
     base = old.strip()
     suffix = ""
@@ -318,14 +326,43 @@ def override_pack_version(cfg_path, plan_version):
     return old, new
 
 
+def fill_pack_support_end(cfg_path, support_until):
+    """dumpling（D-055 (2)）：support.end_date（YYYY-MM）由 project.yml 的 support_until（YYYY-MM-DD；platform.sh 給的 DUMPLING_SUPPORT_UNTIL）產生。
+    config.json 沒有 support.end_date 時填入 → (None, 新值)；已有而且同月 → None；已有但不同月 → ValueError（project_config 的一致性檢查也會擋）；
+    support_until 沒給或格式不對 → None（不猜）。"""
+    if not (isinstance(support_until, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", support_until)):
+        return None
+    want = support_until[:7]
+    c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+    if not isinstance(c, dict):
+        raise ValueError("config.json 不是 JSON 物件")
+    sup = c.get("support")
+    if sup is not None and not isinstance(sup, dict):
+        raise ValueError("support 不是物件")
+    cur = (sup or {}).get("end_date")
+    if cur == want:
+        return None
+    if cur not in (None, "", "TO BE COMPLETED"):
+        raise ValueError(f"support.end_date {cur} 與 project.yml 的 support_until {support_until} 月份不同")
+    c.setdefault("support", {})["end_date"] = want
+    Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return cur, want
+
+
 def override_pack_identification(cfg_path, src_file, src_md5):
     """config.json 的 product.identification 開頭若是 "Flash package <檔名> (MD5 <md5>)"，換成這次掃描的刷機包（provenance 的 source.file／md5），
-    句子其餘部分不動。回傳 (狀態, 說明)：OVERRIDDEN(舊, 新)／SAME／UNRECOGNISED／NO_PROVENANCE／NO_MD5（沒有可用的新 MD5：不改，不沿用舊 MD5）。格式認不得不猜，不改。"""
+    句子其餘部分不動。回傳 (狀態, 說明)：OVERRIDDEN(舊, 新)／FILLED(None, 新)／SAME／UNRECOGNISED／NO_PROVENANCE／NO_MD5（沒有可用的新 MD5：不改，不沿用舊 MD5）。格式認不得不猜，不改。
+    dumpling（D-039）：product.identification 沒有寫、而且有這次刷機包的檔名與 MD5 → 填入 "Flash package <檔名> (MD5 <md5>)"（FILLED）。"""
     if not src_file:
         return "NO_PROVENANCE", "scan/provenance.json 沒有刷機包檔名"
     c = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
     prod = c.get("product") if isinstance(c, dict) else None
     old = prod.get("identification") if isinstance(prod, dict) else None
+    md5_ok = isinstance(src_md5, str) and re.fullmatch(r"[0-9a-fA-F]{32}", src_md5)
+    if isinstance(prod, dict) and old is None and md5_ok:
+        prod["identification"] = f"Flash package {src_file} (MD5 {src_md5})"
+        Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return "FILLED", (None, prod["identification"])
     m = _IDENT.match(old) if isinstance(old, str) else None
     if not m:
         return "UNRECOGNISED", old
@@ -410,7 +447,11 @@ def post_scan_pack_checks(mcfg, out, scan_dir, version, pack_steps, plan_steps, 
         st_, info = override_pack_identification(mcfg / "config.json", psrc.get("file"), psrc.get("md5"))
     except (OSError, ValueError) as e:
         st_, info = "UNRECOGNISED", f"config.json 讀不了（{type(e).__name__}）"
-    if st_ == "OVERRIDDEN":
+    if st_ == "FILLED":
+        say(f"  設定包沒有 product.identification，填入這次掃描的刷機包：{info[1]}")
+        pack_steps.append({"id": "pack-identification-override", "label": "設定包刷機包識別由這次掃描的刷機包填入", "status": "OK",
+                           "note": f"（沒有）→ {info[1]}", "affects": "SBOM、VEX、客戶資料包與報告的產品識別"})
+    elif st_ == "OVERRIDDEN":
         say(f"  覆寫設定包刷機包識別：{info[0]} → {info[1]}")
         pack_steps.append({"id": "pack-identification-override", "label": "設定包刷機包識別改用這次掃描的刷機包", "status": "OK",
                            "note": f"{info[0]} → {info[1]}", "affects": "SBOM、VEX、客戶資料包與報告的產品識別"})
@@ -1084,7 +1125,23 @@ def main():
             say("  ATTENTION：" + msg)
             pack_steps.append({"id": "pack-version-override", "label": "設定包版本", "status": "ATTENTION", "note": msg,
                                "affects": "SBOM、VEX、客戶資料包與報告用的版本可能是舊版"})
-        if ov:
+        try:
+            se = fill_pack_support_end(mcfg / "config.json", os.environ.get("DUMPLING_SUPPORT_UNTIL"))
+        except (OSError, ValueError) as e:
+            se = None
+            msg = f"設定包的 support.end_date 沒有由 project.yml 的 support_until 產生（{type(e).__name__}: {e}）"
+            say("  ATTENTION：" + msg)
+            pack_steps.append({"id": "pack-support-end", "label": "設定包支援期限", "status": "ATTENTION", "note": msg,
+                               "affects": "支援期限文件與 support_check"})
+        if se:
+            say(f"  設定包的 support.end_date 由 project.yml 產生：{se[0] or '（沒有）'} → {se[1]}")
+            pack_steps.append({"id": "pack-support-end", "label": "設定包支援期限由 project.yml 的 support_until 產生", "status": "OK",
+                               "note": f"{se[0] or '（沒有）'} → {se[1]}", "affects": "支援期限文件與 support_check"})
+        if ov and ov[0] is None:
+            say(f"  設定包沒有 product.version，填入精靈的計畫版本：{ov[1]}")
+            pack_steps.append({"id": "pack-version-override", "label": "設定包版本由精靈的計畫版本填入", "status": "OK",
+                               "note": f"（沒有）→ {ov[1]}", "affects": "SBOM、VEX、客戶資料包與報告用的版本"})
+        elif ov:
             say(f"  覆寫設定包版本：{ov[0]} → {ov[1]}")
             pack_steps.append({"id": "pack-version-override", "label": "設定包版本改用精靈的計畫版本", "status": "OK",
                                "note": f"{ov[0]} → {ov[1]}", "affects": "SBOM、VEX、客戶資料包與報告用的版本"})
