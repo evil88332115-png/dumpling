@@ -248,7 +248,7 @@ jobs:
           for d in "$RESULT_DIR"/*/; do
             n=$(basename "$d"); [ "$n" = out ] || [ "$n" = report ] && continue
             mkdir -p "$o/$n"
-            for f in summary.json scan/status.tsv scan/scan/grype.json; do [ -f "$d$f" ] && cp "$d$f" "$o/$n/$(basename "$f")"; done
+            for f in summary.json scan/status.tsv scan/scan/grype.json normalize.json; do [ -f "$d$f" ] && cp "$d$f" "$o/$n/$(basename "$f")"; done
           done
           true
       - name: 上傳小型結果

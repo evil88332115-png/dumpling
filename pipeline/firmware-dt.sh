@@ -2,12 +2,12 @@
 # 韌體 SBOM 上傳臨時 Dependency-Track（DT）：每個樣本 prep → expected → sca-scan --sbom → scan-status-check → dt-verify，最後 report。
 # workflow（.github/workflows/firmware.yml 的 firmware-dt）與本機用同一支。臨時 DT 的 up／wait／env／down 不在這裡（由呼叫端做）：
 #   呼叫前先 `pipeline/dt-ephemeral.sh up`、`wait`、`env <自己的子資料夾>/pilot.env` 並 `export PILOT_ENV=…`；
-#   wait 的結束碼寫進 <結果>/dt-wait.rc（3＝GAP，report 會把所有樣本標 GAP）。沒有 PILOT_ENV 時 sca-scan 的上傳階段是 NOT_RUN。
+#   wait 的結束碼寫進 <結果>/dt-wait.rc（0 以外都是 GAP：3＝資料不完整，其他值看不懂；report 會把所有樣本標 GAP。內容必須是 ASCII 數字，否則 report 失敗）。沒有 PILOT_ENV 時 sca-scan 的上傳階段是 NOT_RUN。
 #
 # 用法：pipeline/firmware-dt.sh --work <工作資料夾> --result <結果資料夾>
 #          [--sample <firmware.yml> <SBOM>]...          已有 SBOM 的樣本（BIOS：firmware-ci.sh 的 fw.cdx.json；供應商 SBOM：下載的 *.sbom.json）
 #          [--synthetic-vbios <firmware.yml>]           用 tools/cra/tests/synthetic_vbios.py 產合成 ROM → firmware-bios.sh → SBOM（firmware.yml 是 GAP 的 vBIOS）
-# 輸出：<結果>/<專案名>/{scan/,summary.json,summary.md}（sca-scan 與 dt-verify 的輸出）、<結果>/report/firmware-dt.md、<結果>/firmware-dt.log
+# 輸出：<結果>/<專案名>/{scan/,summary.json,summary.md}（sca-scan 與 dt-verify 的輸出）、<結果>/<專案名>/normalize.json（供應商 SBOM 上傳前的格式正規化紀錄，有才有）、<結果>/report/firmware-dt.md、<結果>/firmware-dt.log
 # stdout：每個步驟的狀態行，最後是 report 的 FIRMWARE-DT 行（每個樣本一行）。沒有整體 PASS 或「安全」的結論。
 # 退出碼：0＝每個步驟都跑完且沒有 FAIL；1＝有 FAIL（prep 失敗、sca-scan 失敗、必要階段不是 OK、dt-verify FAIL、report FAIL）；64＝參數錯誤。
 #   GAP／ATTENTION／NOT_RUN 本身不讓結束碼變 1（report 的狀態行才是結果）；單一樣本失敗不中止其他樣本。
@@ -89,6 +89,10 @@ for p in "${preps[@]}"; do
     say "FIRMWARE-DT-STEP	FAIL	$name	結果資料夾已有舊結果（$sd/scan）：請用全新的 --result 資料夾"; rc=1; continue
   fi
   mkdir -p "$sd"
+  # 供應商 SBOM 的格式正規化紀錄（prep 產生；kind: sbom 才有）跟結果放在一起，workflow 的 artifact 才帶得走
+  if [ -f "$p/normalize.json" ] && ! cp "$p/normalize.json" "$sd/normalize.json"; then
+    say "FIRMWARE-DT-STEP	GAP	$name	normalize.json 複製不到結果資料夾（artifact 少一個檔）"
+  fi
   if [ ! -x "$root/tools/pilot/sca-scan" ]; then
     say "FIRMWARE-DT-STEP	NOT_RUN	$name	沒有 tools/pilot/sca-scan（C1 的工具還沒進這個分支）"; continue
   fi
@@ -108,8 +112,8 @@ for p in "${preps[@]}"; do
   if [ -f "$sd/scan/status.tsv" ]; then
     if line=$(python3 -I "$root/pipeline/scan-status-check.py" "$sd/scan/status.tsv" "${need[@]}"); then
       say "FIRMWARE-DT-STEP	OK	$name	$(cell "$line")"
-    elif [ "$wait_rc" = 3 ]; then
-      say "FIRMWARE-DT-STEP	GAP	$name	必要階段不是 OK，但 dt-ephemeral wait 結束碼 3（資料不完整）：$(cell "$line")"
+    elif [ -n "$wait_rc" ] && [ "$wait_rc" != 0 ]; then
+      say "FIRMWARE-DT-STEP	GAP	$name	必要階段不是 OK，但 dt-ephemeral wait 結束碼 $(cell "$wait_rc")（不是 0；3＝資料不完整）：$(cell "$line")"
     elif [ "$declared" = 1 ]; then
       say "FIRMWARE-DT-STEP	EXPECTED	$name	必要階段不是 OK（firmware.yml 宣告 expected_dt，交給 report 核對）：$(cell "$line")"
     else
