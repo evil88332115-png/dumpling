@@ -13,7 +13,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import gitlabci  # noqa: E402
 
-TAG_RE_YAML = r"^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$"
+# 同 GitHub release.yml 的 */v* 與 pipeline/lib/project_config.py 的 VERSION_RE（v 加數字開頭）
+TAG_RE_YAML = r"^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$"
 VAR_PREFIXES = ("DUMPLING_", "WATCH_", "INTERNAL_", "PILOT_", "MIRROR_", "DT_")
 PREDEFINED_OK = {"GIT_DEPTH", "GIT_STRATEGY", "GIT_SUBMODULE_STRATEGY", "GIT_CLEAN_FLAGS", "FF_USE_FASTZIP"}
 # pipeline 腳本既有的環境變數名稱（不是範本自訂的）：pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR
@@ -136,9 +137,10 @@ class CiFile(unittest.TestCase):
         for f in found:
             self.assertEqual(f, TAG_RE_YAML)
         rx = re.compile(TAG_RE_YAML.replace(r"\/", "/"))
-        for ok in ("orin-nano-demo/v39.2.1-demo1", "a/1", "p1/V1.0+build"):
+        for ok in ("orin-nano-demo/v39.2.1-demo1", "a/v1", "p1/v1.0+build"):
             self.assertTrue(rx.match(ok), ok)
-        for bad in ("v1.0", "Orin/v1", "p/", "p/-1", "p/v1/x", "/v1", "p q/v1"):
+        # 版本要 v 加數字開頭（同 GitHub 的 */v* 與 project_config.VERSION_RE）：a/1、V1.0 不建 release pipeline
+        for bad in ("v1.0", "Orin/v1", "p/", "p/-1", "p/v1/x", "/v1", "p q/v1", "a/1", "p1/V1.0", "p/vx"):
             self.assertFalse(rx.match(bad), bad)
 
     def test_release_flow_rules(self):
@@ -178,13 +180,19 @@ class CiFile(unittest.TestCase):
             for ln in body.splitlines():
                 if re.search(r"/issues\b", ln) and re.search(r"(-X\s*POST|--data|-d\s)", ln):
                     self.assertIn("confidential=true", ln, "直接呼叫 Issues API 建 Issue 必須帶 confidential=true：" + n)
-                self.assertNotRegex(ln, r"echo[^\n]*\$\{?(WATCH_GITLAB_TOKEN|CI_JOB_TOKEN)\b", n + " 不可印出 token")
+                self.assertNotRegex(ln, r"echo[^\n]*\$\{?(WATCH_GITLAB_TOKEN|WATCH_GITLAB_READ_TOKEN|CI_JOB_TOKEN)\b", n + " 不可印出 token")
             self.assertNotRegex(body, r"(?m)^\s*set\s+-[a-z]*x", n + " 不可 set -x（會洩漏 token）")
             if "/issues" in body:
                 self.assertNotIn("CI_JOB_TOKEN", body, "官方文件沒有列出 job token 可用 Issues API：" + n)
         for n in self.jobs:
             if n != "watch:notify":
                 self.assertNotIn("WATCH_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), "只有 watch:notify 用 WATCH_GITLAB_TOKEN：" + n)
+            txt = self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {}))
+            if n != "watch:compute":
+                self.assertNotIn("WATCH_GITLAB_READ_TOKEN", txt, "只有 watch:compute 用 WATCH_GITLAB_READ_TOKEN：" + n)
+        c = self.lines_of("watch:compute")
+        self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state', c)
+        self.assertIn('GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py', c)
 
     def test_signing_job(self):
         j = self.jobs["release:sign"]
@@ -266,6 +274,16 @@ class CiFile(unittest.TestCase):
         for x in ("install-tool.sh sbomqs", "check-tool-version.sh sbomqs", "firmware-sbom-check.sh"):
             self.assertIn(x, txt)
 
+
+    def test_ephemeral_dt_cleanup_and_isolation(self):
+        # 自架 runner：job 被取消或逾時也要收掉臨時 DT；compose 專案名與狀態資料夾每個 job 分開
+        for n in ("release:scan", "dev:scan"):
+            j = self.jobs[n]
+            self.assertIn("bash pipeline/dt-ephemeral.sh down || true", "\n".join(j["after_script"]), n)
+            self.assertLess("\n".join(j["after_script"]).index("dt-ephemeral.sh down"), "\n".join(j["after_script"]).index('rm -rf "$DUMPLING_OUT_BASE"'))
+            self.assertEqual(j["variables"]["DT_EPH_PROJECT"], "dumpling-dt-$CI_JOB_ID")
+            self.assertTrue(j["variables"]["DT_EPH_DIR"].startswith("$DUMPLING_OUT_BASE/"))
+            self.assertIn("KCVE_CACHE_DIR", j["variables"])          # 跟 .kcve-cache 的變數合併，不是取代
 
 class ReleasePayload(unittest.TestCase):
     @classmethod

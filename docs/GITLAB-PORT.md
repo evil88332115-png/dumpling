@@ -33,7 +33,7 @@
 
 | GitHub | GitLab | 範本裡的 job |
 |---|---|---|
-| `release.yml`：`on.push.tags` | `workflow:rules` 與 job `rules` 用 `$CI_COMMIT_TAG =~ /…/`（tag 格式 `<專案>/<版本>`） | `release:build`、`release:scan`、`release:publish`、`release:sign`（選用） |
+| `release.yml`：`on.push.tags` | `workflow:rules` 與 job `rules` 用 `$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/`（tag 格式 `<專案>/v<數字>…`，同 GitHub 的 `*/v*` 與 `project_config.VERSION_RE`；`proj/1.0` 不建 release pipeline） | `release:build`、`release:scan`、`release:publish`、`release:sign`（選用） |
 | `dev.yml`：`dev/**` push、cron | `rules`：`$CI_PIPELINE_SOURCE == "push"` 且分支 `^dev/`；排程 `$CI_PIPELINE_SOURCE == "schedule"` 且排程變數 `DUMPLING_JOB=dev` | `dev:build`、`dev:scan`、`dev:publish`（T-03，目前 NOT_RUN） |
 | `pipeline.yml`（reusable） | 隱藏 job 片段 `.build`、`.scan`、`.build-steps`、`.scan-steps`，用 `extends` 與 `!reference` 組合；release 與 dev 共用 | — |
 | `firmware.yml` 的路徑觸發 | `rules:changes`（只在 push、merge request 用） | `firmware:fetch`、`firmware:dt`（T-04，目前 NOT_RUN） |
@@ -45,7 +45,23 @@
 | `strategy.matrix` | `parallel:matrix`（`needs:parallel:matrix` 對應）；動態清單要改用 child pipeline（T-02） | `dev:*` |
 | `actions/upload-artifact` retention-days | `artifacts:expire_in` | 每個 artifacts 都明寫 |
 | `needs:` | `needs:`（可跨 stage；`optional: true`） | — |
-| `workflow_dispatch` | `$CI_PIPELINE_SOURCE == "web"`（網頁「Run pipeline」）或 `"api"`；手動 job 用 `when: manual` | — |
+| `workflow_dispatch` | `$CI_PIPELINE_SOURCE == "web"`（網頁「Run pipeline」）或 `"api"`；手動 job 用 `when: manual`。各 workflow 的**輸入**逐項見下表 | — |
+| `dt-smoke.yml`（`pipeline/**` 等路徑的 PR、手動；輸入 `wait_min`）：臨時 DT 冒煙測試 | **不搬（T-15）**。原因：GitLab 版的 scan 在 T-14 之前也開臨時 DT，`release:scan`／`dev:scan` 每次都會跑同一套 `dt-ephemeral.sh up/wait/env/down` 與 `dt-verify.py`，獨立的冒煙測試重複；T-14 改連常駐 DT 之後，改成「常駐 DT 連線與權限的冒煙測試」 | — |
+| `watch.yml` 的 `drill-1-baseline`／`drill-2-new-kev`／`drill-3-repeat`／`drill-close`（手動 `mode=drill`） | **不搬（T-16，阻塞於 T-05）**。原因：演練要 `issues.py` 的 GitLab 後端（開／關 Issue、狀態 Issue），T-05 之前跑不起來；`.rules-watch` 因此也只有排程、沒有 web／api 入口（不假裝能跑）。T-05 完成時一起加：web／api 入口＋pipeline 變數 `DUMPLING_WATCH_MODE=drill`，三輪與關閉照 watch.yml | — |
+| `firmware.yml` 的觸發（PR 的路徑變動、手動） | 範本是**超集**：分支 push 與 merge request 都依 `rules:changes` 跑（內部沒有「外人開 PR」的顧慮，push 就先跑）；tag pipeline 不跑 | `firmware:fetch` |
+| `pipeline.yml` scan 的診斷 artifact（`diag/wizard-out`，只在 artifact、不進 Release） | **不搬**：純除錯用；內部要除錯時把 `$DUMPLING_OUT/wizard-out` 的小檔加進 `.scan` 的 artifacts 即可 | — |
+| `pipeline.yml` 的 `setup-go`（`scan.tools: full` 的 govulncheck 需要 Go） | **待辦 T-18**：目前專案都是 `sbom-only`，範本沒裝 Go；有專案改用 `full` 前，映像要含固定版本的 Go（或範本補安裝） | — |
+
+**`workflow_dispatch` 的輸入逐項**（GitHub 手動觸發時可以填的值）：
+
+| workflow：輸入 | 用途 | GitLab 對應 |
+|---|---|---|
+| `release.yml`：`tag`（手動只建 **draft** Release，不建 git tag） | 正式 tag 之前先試整條 release 流程 | **不搬（T-17）**。範本的 `release:*` 只在 tag pipeline 跑。原因：官方 Releases API 頁沒有 draft 狀態（只有 `released_at` 設在未來的 Upcoming Release，官方沒說它不公開），不能照搬「草稿」；內部要試流程，建議用測試專案或測試 tag（第 14 節的「測試 tag 的完整 release」），或 T-17 再定一條「web／api 帶變數只跑 build＋scan、不建 Release」的路 |
+| `release.yml`：`stop_after`（build｜all）、`reuse_build_run`、`reuse_scan_run` | 開發 GitHub workflow 本身時省時間（只編譯、沿用別的 run 的 artifact） | **不搬**：開發捷徑，不是發行流程的一部分；GitLab 可以直接重試單一 job（上游 job 的 artifacts 在 `expire_in` 之內還在）。需要時再加 |
+| `dev.yml`：`project`（只跑一個專案） | 手動只跑某個專案 | 範本用 `parallel:matrix` 的固定清單（T-02）；手動觸發是 `when: manual`（`.rules-dev`），在 pipeline 頁按要跑的那一格。GitHub 的 dispatch 是直接執行，GitLab 這裡要再按一次（避免 web pipeline 一次跑全部專案的編譯） |
+| `dev.yml`：`stop_after`、`reuse_build_run` | 同 release 的開發捷徑 | **不搬**（同上） |
+| `watch.yml`：`mode`（drill｜real）、`dry_run`、`baseline` | 演練、試跑不開 Issue、第一次明確建立基準 | **T-05 一起做**：pipeline 變數 `DUMPLING_WATCH_MODE`、`DUMPLING_WATCH_DRY_RUN`、`DUMPLING_WATCH_BASELINE`（對應 `--mode`、`--dry-run`、`--allow-baseline`）。`baseline` 一定要有：第一次建立基準要人明確指定（WATCH.md 3.2），否則 GitLab 版永遠不會建基準 |
+| `dt-smoke.yml`：`wait_min` | 驗證 wait 逾時會失敗 | 不搬（同 dt-smoke，T-15） |
 
 **tag pipeline 的細節**：
 - tag 名稱 `<專案>/<版本>` 含斜線。tag 作為 Generic Package 的「版本」不適合（斜線），範本拆成套件名稱＝專案、套件版本＝版本。
@@ -173,7 +189,7 @@
   - 套件：`DUMPLING_APT` 不是空的時，範本照 GitHub 版安裝 platform.yml 的 `build.apt`（build）與 `bubblewrap python3-yaml`＋`scan.apt`（scan）。內部映像把 `DUMPLING_APT` 清空時，**映像必須自己含這些套件**（例如 Jetson 編譯要 build-essential、bc、bison、flex、libssl-dev、libelf-dev…，掃描要 zstd、lbzip2；以各專案 platform.yml 為準）。
   - 掃描 runner 要能跑 docker（臨時 DT）：shell executor 裝 docker，或 docker executor 給 docker 存取（做法內部決定；docker-in-docker 要 privileged，安全取捨要內部評估）。T-14 完成、改連常駐 DT 後才不需要。
 - executor：shell 或 docker 都可。docker executor 用 `DUMPLING_IMAGE`（RD 的編譯映像，固定 digest 或固定版本，不可用 `latest`，測試檢查）。shell executor 的沙箱需求（user namespace 設定）是整台機器的設定，要在 runner 安裝腳本處理（參考 sca-center 的 `deploy/gitlab-runner/` 的做法，**不複製內部細節**）。
-- `concurrent`／清理：編譯需要大量磁碟；範本在 `after_script` 刪除 `$DUMPLING_OUT_BASE`（輸出放在專案資料夾外，避免被掃到自己）；runner 本身需要週期清理工作資料夾與 Docker 資源（做法內部決定）。`concurrent` 的值依磁碟與 CPU 決定，**建議從 1 開始**（掃描與編譯同時跑會互搶磁碟）。
+- `concurrent`／清理：編譯需要大量磁碟；範本在 `after_script` 刪除 `$DUMPLING_OUT_BASE`（輸出放在專案資料夾外，避免被掃到自己）；runner 本身需要週期清理工作資料夾與 Docker 資源（做法內部決定）。`concurrent` 的值依磁碟與 CPU 決定，**建議從 1 開始**（掃描與編譯同時跑會互搶磁碟）。**掃描 runner 在 T-14 之前必須是 1**：臨時 DT 綁固定的 `127.0.0.1:${DT_PORT:-8080}`，同一台同時兩個 scan 會搶埠（compose 專案名與狀態資料夾範本已依 `$CI_JOB_ID` 分開，`after_script` 會 `dt-ephemeral.sh down`，job 被取消也不殘留容器）。
 - 不開 `interruptible`：build／scan／release 的 job 設 `interruptible: false`，避免新的 push 取消一個已跑一小時的編譯（`default` 設 true 是給測試類 job）。
 - 逾時：job 預設 `timeout` 範本已個別設定（編譯 2 小時、掃描 4 小時，沿用 GitHub 版的 120／240 分鐘）。官方：runner 的最大逾時只有比專案設定短時才生效，最小值 600 秒。
 - **「公開 repo 不接自架 runner」的理由在內部不適用**（內部 repo 只有受信任的成員能推 code），但仍要做：
@@ -223,6 +239,7 @@
 |---|---|---|
 | DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不適用於多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN`（通知用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**；只有 `watch:notify` 讀（測試檢查） |
+| `WATCH_GITLAB_READ_TOKEN`（每日監控讀取用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**（建議 Masked and hidden）；只有 `watch:compute` 讀。scope `read_api`（官方：唯讀 API）、角色 Planner（官方：confidential Issue 要 Planner 以上才看得到，17.7 起；之前是 Reporter）。狀態 Issue 與監控 Issue 都是 confidential，私有專案的 Release 也要權限，所以 compute 不能沒有 token |
 | `COSIGN` 金鑰（若選金鑰對方案，見第 9 節） | KMS 優先；其次 protected＋masked variable | 待內部決定 |
 | 排程變數 `DUMPLING_JOB` | Pipeline schedule 的變數 | 不是機密 |
 
@@ -242,7 +259,7 @@
 **驗收**：
 - [ ] `WATCH_GITLAB_TOKEN`（與 T-14 之後的 `PILOT_ENV`）的 protected 旗標已開；在非保護分支 pipeline 印環境變數看不到它們。
 - [ ] 在 merge request pipeline 看不到它們。
-- [ ] `watch:notify` 以外的 job 看不到 `WATCH_GITLAB_TOKEN` 的使用（測試）；log 與 artifacts 掃不到 token 字串。
+- [ ] `watch:notify` 以外的 job 看不到 `WATCH_GITLAB_TOKEN` 的使用、`watch:compute` 以外看不到 `WATCH_GITLAB_READ_TOKEN`（測試）；log 與 artifacts 掃不到 token 字串。
 - [ ] token 到期日已記入行事曆／排程提醒。
 
 **官方依據**（2026-11-13）：
@@ -368,7 +385,7 @@
 | T-02 | dev 版專案清單改動態產生（child pipeline），取代範本的固定 `parallel:matrix` | 內部 GitLab 版本核對 |
 | T-03 | `dev:publish`：滾動開發版 SBOM 在 GitLab 的存放（Generic Package 覆蓋行為待驗證）；每日監控 collect 讀取方式 | 內部環境驗證 |
 | T-04 | `firmware:dt`：韌體 SBOM 上傳常駐 DT 的呼叫方式（`firmware-dt.sh` 的 pilot.env 與工作目錄） | 內部環境驗證 |
-| T-05 | **`pipeline/watch/collect.py`（讀 Release）與 `issues.py`（讀寫狀態 Issue／監控 Issue）目前只支援 GitHub API**。GitLab 後端：Releases／Packages 讀取、Issues API（`confidential=true` 寫死）、樂觀鎖（狀態 Issue 的 `updated_at` 與內容 sha256）、標籤自動建立、`--backend gitlab` 介面。範本的 `watch:*` 在那之前 `when: manual` 並印 NOT_RUN | C2 的 WP2 後續 |
+| T-05 | **`pipeline/watch/collect.py`（讀 Release）與 `issues.py`（讀寫狀態 Issue／監控 Issue）目前只支援 GitHub API**。讀取用 `WATCH_GITLAB_READ_TOKEN`（`watch:compute`；scope `read_api`、角色 Planner），寫入用 `WATCH_GITLAB_TOKEN`（`watch:notify`；scope `api`）；手動輸入 `DUMPLING_WATCH_MODE`／`DRY_RUN`／`BASELINE` 與 web／api 入口一起做（見第 1 節）。GitLab 後端：Releases／Packages 讀取、Issues API（`confidential=true` 寫死）、樂觀鎖（狀態 Issue 的 `updated_at` 與內容 sha256）、標籤自動建立、`--backend gitlab` 介面。範本的 `watch:*` 在那之前 `when: manual` 並印 NOT_RUN | C2 的 WP2 後續 |
 | T-06 | `feeds.sh` 加內部鏡像來源（`INTERNAL_MIRROR_URL`），資料來源改讀 sca-center 的鏡像 | 內部決定 |
 | T-07 | DT parent／child 專案在常駐 DT 再評估（D-030(4)） | 常駐 DT 環境 |
 | T-08 | 從 sca-center 帶回 `scripts/cra/alert_mail.py`（與測試），放 `tools/cra/`，在 `docs/PROVENANCE.md` 記來源 commit（D-015） | 需要自訂寄信時 |
@@ -378,6 +395,14 @@
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
 | T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
 | T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案。**C0 決定（2026-11-13）**：排給 C1、放在 M7 之後；做法是 scan.sh 多一個選項，改連既有的 DT（URL＋金鑰從環境變數讀），不傳這個選項時照舊開臨時 DT | C1，M7 之後 |
+| T-15 | `dt-smoke.yml` 的 GitLab 版：T-14 之後改成「常駐 DT 連線與權限」的冒煙測試（T-14 之前 scan 本身就跑臨時 DT，不另搬） | T-14 |
+| T-16 | 每日監控的演練（drill 三輪＋關閉）與 web／api 入口 | T-05 |
+| T-17 | 手動試跑 release 流程：GitLab 沒有 draft Release（官方 Releases API 只有 Upcoming Release）；定一條 web／api 帶變數「只跑 build＋scan、不建 Release」的路，或規定用測試專案／測試 tag | 內部決定 |
+| T-18 | `scan.tools: full` 需要 Go（GitHub 版 `setup-go`，govulncheck 用）：映像含固定版本的 Go，或範本補安裝 | 有專案改用 full 時 |
+| T-19 | `dev/*` 分支有開啟的 merge request 時會有兩條 pipeline（branch＋MR），`validate:unit-tests` 重複跑：`workflow:rules` 加 `$CI_OPEN_MERGE_REQUESTS` 去重 | 內部驗證 |
+| T-20 | NOT_RUN 的 job（`dev:publish`、`firmware:dt`）目前 `exit 1`＋`allow_failure`，pipeline 會顯示黃燈；可改成 `exit 3`＋`allow_failure: {exit_codes: 3}`，跟 GitHub 版「NOT_RUN 不是失敗、但照實列出」的語意一致 | — |
+| T-21 | `release:publish` 先上傳 Generic Package、再由 `release-payload.py` 驗檔名：改成先驗再傳；`release-payload.py` 只接受 `https://` 的 API 網址，內部若是 http 要先決定（建議內部也用 https） | — |
+| T-22 | 預設映像 `DUMPLING_IMAGE: ubuntu:24.04` 是版本標籤、不是 digest，apt 套件也沒固定版本：內部換成 RD 映像時固定 digest（第 5 節、第 14 節） | 搬移時 |
 
 ---
 
@@ -414,7 +439,7 @@
 - [ ] 編譯機磁碟與清理規劃完成，一次完整編譯後磁碟回復。驗收：job 前後 `df`。
 
 **變數與機密**
-- [ ] `WATCH_GITLAB_TOKEN`（Masked and hidden，protected）建立；T-14 之後再加 `PILOT_ENV`（File，protected）。驗收：非保護分支與 MR pipeline 看不到。
+- [ ] `WATCH_GITLAB_TOKEN`（scope api，只給 watch:notify）與 `WATCH_GITLAB_READ_TOKEN`（scope read_api、角色 Planner，只給 watch:compute）都是 Masked and hidden＋protected；T-14 之後再加 `PILOT_ENV`（File，protected）。驗收：非保護分支與 MR pipeline 看不到。
 - [ ] project access token 的最小角色與 scope 確認，到期日已排提醒。驗收：記錄於交接文件。
 - [ ] 外部資料來源改內部鏡像（第 6 節，T-06、T-14 之後）。驗收：外網斷線下 release:scan 成功。
 

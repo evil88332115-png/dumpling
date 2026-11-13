@@ -38,7 +38,7 @@ default:
 workflow:
   rules:
     # 1) tag <專案>/<版本> → release
-    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$/'
+    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
     # 2) 排程：每日監控或開發版，由排程變數 DUMPLING_JOB 區分
     - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev")'
     # 3) dev/** 分支與預設分支的 push → dev、tests、firmware
@@ -54,7 +54,7 @@ workflow:
 
 .rules-tag-release:
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._+-]*$/'
+    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
 
 .rules-dev:
   rules:
@@ -189,7 +189,14 @@ workflow:
   tags: [dumpling-scan]
   timeout: 4 hours
   interruptible: false
+  variables:
+    # 臨時 DT（pipeline/dt-ephemeral.sh）：compose 專案名與狀態資料夾每個 job 分開（自架 runner 不像 GitHub 每次換新機器；
+    # 預設的 /tmp 與 dumpling-dt 會讓同一台的 job 互相干擾）。埠 DT_PORT 預設 8080：掃描 runner 的 concurrent 請設 1（第 5 節）。
+    DT_EPH_PROJECT: "dumpling-dt-$CI_JOB_ID"
+    DT_EPH_DIR: "$DUMPLING_OUT_BASE/dt-eph"
   after_script:
+    # job 被取消或逾時時 scan.sh 的 EXIT trap 不一定跑到：這裡再收一次臨時 DT（同 pipeline.yml 的 always() 的 down），容器與 volume 不殘留
+    - bash pipeline/dt-ephemeral.sh down || true
     # 核心 CVE 鏡像：只有這次新抓的才放進 cache 資料夾（頂替用的舊資料不存回去；同 pipeline.yml 的 kcve-fresh）。after_script 是新的 shell，用 glob 找
     - |
       for d in "$DUMPLING_OUT_BASE"/*/*/mirrors; do
@@ -467,11 +474,16 @@ watch:compute:
       export MIRRORS_DIR="$DUMPLING_OUT_BASE/w/feeds"
       . pipeline/lib/mirrors.sh
       if mirror_is_fresh kernel-cve; then rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kernel-cve" "$KCVE_CACHE_DIR"; fi
+    # 讀取用的 token：狀態 Issue 與監控 Issue 都是 confidential（官方：Planner 以上才看得到），私有專案的 Release 也要權限。
+    # WATCH_GITLAB_READ_TOKEN：project access token，scope read_api（官方：唯讀 API），角色 Planner（17.7 起；之前是 Reporter）；protected＋masked。
+    # 寫入用的 WATCH_GITLAB_TOKEN（scope api）只給 watch:notify。
+    - |
+      test -n "${WATCH_GITLAB_READ_TOKEN:-}" || { echo "watch: FAIL（沒有 WATCH_GITLAB_READ_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
     # 結束碼同 watch-round.yml：collect 0／3（3＝沒有可監控的 Release），match 0／2／3（ATTENTION、GAP 不算失敗；只有 1 FAIL 讓 job 變紅）
     - |
-      rc=0; python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv" || rc=$?
+      rc=0; GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
-    - python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
+    - GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
       rc=0
       python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \

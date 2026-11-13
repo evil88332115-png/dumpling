@@ -37,6 +37,7 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 | `tags:`（`dumpling`、`dumpling-build`、`dumpling-scan`） | `.gitlab-ci.yml` | 換成內部 runner 的標籤 |
 | `PILOT_ENV` | 目前由範本設定（`$DUMPLING_OUT_BASE/pilot-env/pilot.env`，臨時 DT 寫入）；**T-14 之後**改成 CI/CD 變數，File 類型、protected | 常駐 DT 的連線設定（含 `$INTERNAL_DT_URL` 與 API key），格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控通知用的 project access token（scope `api`，只給一個專案）；只有 `watch:notify` 使用 |
+| `WATCH_GITLAB_READ_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控讀取用的 project access token（scope `read_api`、角色 Planner：confidential Issue 要 Planner 以上）；只有 `watch:compute` 使用 |
 | `DUMPLING_JOB` | Pipeline schedule 的變數 | `watch`（每日監控）或 `dev`（每日開發版） |
 | `INTERNAL_MIRROR_URL` | `watch:compute` 的 `variables`，或 CI/CD 變數 | 內部資料源鏡像網址（T-06）；公開 repo 裡只放空字串 |
 
