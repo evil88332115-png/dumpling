@@ -49,7 +49,7 @@
 
 **tag pipeline 的細節**：
 - tag 名稱 `<專案>/<版本>` 含斜線。tag 作為 Generic Package 的「版本」不適合（斜線），範本拆成套件名稱＝專案、套件版本＝版本。
-- 排程、tag 與手動 pipeline 沒有 push 事件，`rules:changes` 對它們的行為不同（官方：沒有 push 事件的新分支 pipeline 永遠為 true；tag、排程、手動要用 `compare_to`）。範本的 `firmware:fetch` 只在 push 與 merge request 套用 `changes`。
+- 排程、tag 與手動 pipeline 沒有 push 事件，`rules:changes` 對它們的行為不同（官方：沒有 push 事件的新分支 pipeline 永遠為 true；tag、排程、手動要用 `compare_to`）。tag 的 push 也是 push（官方 job_rules：push 事件含分支與 tag），所以範本的 `firmware:fetch`、`validate:unit-tests`、`firmware:dt` 的條件都是 `($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH)` 或 merge request：只在**分支** push 與 merge request 套用 `changes`，tag pipeline 不跑（不擋 release）。
 - `workflow:rules` 沒有任何規則成立時，不建立 pipeline（官方）。範本的五條規則：tag、排程（watch／dev）、`dev/**` 與預設分支 push、merge request、web／api。
 
 **要換的東西**：`DUMPLING_IMAGE`（編譯／掃描映像）、`tags:`（`dumpling`、`dumpling-build`、`dumpling-scan` 三種 runner 標籤，換成內部實際標籤）、`DUMPLING_APT`（映像已含就清空）、`parallel:matrix` 裡的專案清單。
@@ -178,7 +178,7 @@
 - 逾時：job 預設 `timeout` 範本已個別設定（編譯 2 小時、掃描 4 小時，沿用 GitHub 版的 120／240 分鐘）。官方：runner 的最大逾時只有比專案設定短時才生效，最小值 600 秒。
 - **「公開 repo 不接自架 runner」的理由在內部不適用**（內部 repo 只有受信任的成員能推 code），但仍要做：
   - 掃描與發行用的 runner 設為**只跑 protected branch／protected tag**（官方：runner 可設定只跑保護分支或保護 tag，避免洩漏敏感資訊）。
-  - 對應地，`PILOT_ENV`、`WATCH_GITLAB_TOKEN` 這類變數設 protected（第 7 節），只有保護 ref 的 pipeline 拿得到。
+  - 對應地，`WATCH_GITLAB_TOKEN`（與 T-14 之後的 `PILOT_ENV`）這類變數設 protected（第 7 節），只有保護 ref 的 pipeline 拿得到。
   - merge request pipeline 不拿 protected 變數（官方：MR pipeline 預設拿不到 protected 變數，可選擇開放；**不要開**）。
 
 **要換的東西**：runner 標籤、executor、`DUMPLING_IMAGE`、arm64 編譯機（Jetson 核心編譯需要 arm64 原生；GitHub 版約 36 分鐘）、磁碟空間規劃。
@@ -376,8 +376,8 @@
 | T-10 | M8：第 14 條通報與倒數的 GitLab 版（第 10 節） | M4、M7 |
 | T-11 | 簽章方案決定（第 9.2 節最後一欄） | 內部決定 |
 | T-12 | 每日監控的「沒結果就告警」與排程巡檢（第 8 節） | T-05 |
-| T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案，經 C0 協調 | C0／C1 決定 |
 | T-13 | 確認 CI 的 unit-tests 環境有 `python3-venv` 與 PyYAML（`tests.yml` 由 C0 負責，本工作包不改）；若需要改動先回報 | C0 |
+| T-14 | **scan 的常駐 DT 模式**：`pipeline/platforms/*/scan.sh` 與 `pipeline/dt-ephemeral.sh` 目前一定開臨時 DT（要 docker）、覆寫 `PILOT_ENV`、自己抓公開鏡像、設 `MIRROR_REFRESH_STATUS=""`。要新增「連既有常駐 DT、讀 File 變數 PILOT_ENV、讀內部鏡像、檢查鏡像新鮮度」的模式；完成後範本的 `.scan-steps` 改連常駐 DT（第 4 節）。這些是 C1 的檔案，經 C0 協調 | C0／C1 決定 |
 
 ---
 

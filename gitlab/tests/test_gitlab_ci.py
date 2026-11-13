@@ -247,7 +247,7 @@ class CiFile(unittest.TestCase):
     def test_platform_apt_and_sudo(self):
         # platform.yml 的 build.apt／scan.apt 要裝（同 pipeline.yml）；非 root 用 sudo（install-scan-tools.sh 本身用 sudo）
         for n in ("release:build", "dev:build"):
-            self.assertIn("$SUDO apt-get install -y -qq --no-install-recommends $BUILD_APT", self.lines_of(n))
+            self.assertIn("$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $BUILD_APT", self.lines_of(n))
         for n in ("release:build", "release:scan", "dev:build", "dev:scan"):
             txt = self.lines_of(n)
             self.assertIn("BUILD_APT=$(sed -n 's/^BUILD_APT=//p' info.txt); SCAN_APT=$(sed -n 's/^SCAN_APT=//p' info.txt)", txt)

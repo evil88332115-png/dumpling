@@ -72,7 +72,7 @@ workflow:
     - |
       if [ -n "$DUMPLING_APT" ]; then
         # 內部映像若已含這些套件，把 DUMPLING_APT 清空即可（不需要 root 與外網）；清空時也不裝 platform.yml 的 build.apt／scan.apt（映像要自己含）
-        $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends $DUMPLING_APT > /dev/null
+        $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $DUMPLING_APT > /dev/null
       fi
 
 # 由 tag（release）或 parallel:matrix 的 PROJECT（dev）決定 PROJECT、VERSION；project-info.py 驗證格式並確認專案與版本存在。
@@ -109,7 +109,7 @@ workflow:
     # platform.yml 的 build.apt（同 pipeline.yml 的 build job；project-info.py 已驗證套件名稱）
     - |
       if [ -n "$DUMPLING_APT" ] && [ "$BUILD_MODE" = compile ] && [ -n "$BUILD_APT" ]; then
-        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends $BUILD_APT > /dev/null
+        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $BUILD_APT > /dev/null
       fi
     - bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$VERSION"
     # build.mode 是 none 的平台沒有編譯步驟：交給 scan 去記 NOT_RUN
@@ -130,13 +130,16 @@ workflow:
     # 臨時 DT（同 GitHub 版）：pipeline/platforms/*/scan.sh 目前一定用 dt-ephemeral.sh 開臨時 DT（要 docker），把連線資訊寫進 PILOT_ENV 這個路徑、
     # 自己下載鏡像、MIRROR_REFRESH_STATUS 設空。目標是改連內部常駐 DT（GITLAB-PORT 第 4 節），要等 scan.sh 有常駐 DT 模式（待辦 T-14）。
     # PILOT_ENV 放單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾；同 pipeline.yml）。
+    # install-tools.sh 只有 amd64 的 Syft／Grype（同 pipeline.yml 的 scan job 檢查）
+    - |
+      [ "$(uname -m)" = x86_64 ] || { echo "scan: FAIL（掃描 runner 要 x86_64，這台是 $(uname -m)）"; exit 1; }
     - export PILOT_ENV="$DUMPLING_OUT_BASE/pilot-env/pilot.env"
     - |
       command -v docker > /dev/null || { echo "scan: FAIL（runner 沒有 docker：臨時 DT 需要；常駐 DT 模式是待辦 T-14）"; exit 1; }
     # scan job 的 apt（同 pipeline.yml：bubblewrap、python3-yaml＋platform.yml 的 scan.apt）
     - |
       if [ -n "$DUMPLING_APT" ]; then
-        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml $SCAN_APT > /dev/null
+        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml $SCAN_APT > /dev/null
       fi
     - mkdir -p "$DUMPLING_OUT" "$DUMPLING_OUT_BASE/tools"
     - |
@@ -389,7 +392,7 @@ firmware:fetch:
       pipeline/firmware-ci.sh "$DUMPLING_OUT_BASE/firmware-dl" "$DUMPLING_OUT_BASE/firmware-work" firmware-out firmware-summary.md || rc=$?
       cat firmware-summary.md
       # 供應商 SBOM（kind: sbom）的品質檢查（同 firmware.yml）：sbomqs 固定版本與 sha256 在 pipeline/lib/tools.lock；只有 FAIL 算失敗
-      exe=$(pipeline/install-tool.sh sbomqs "$DUMPLING_OUT_BASE/bin" | tail -n 1)
+      out=$(pipeline/install-tool.sh sbomqs "$DUMPLING_OUT_BASE/bin"); exe=$(printf '%s\n' "$out" | tail -n 1)
       pipeline/check-tool-version.sh sbomqs "$exe"
       files=$(find "$DUMPLING_OUT_BASE/firmware-dl/sbom" -mindepth 2 -maxdepth 2 -name '*.sbom.json' 2>/dev/null | sort)
       if [ -z "$files" ]; then
@@ -414,7 +417,7 @@ firmware:dt:
   stage: scan
   tags: [dumpling-scan]
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+    - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
       when: manual
       allow_failure: true
   needs:
