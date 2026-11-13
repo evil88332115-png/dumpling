@@ -39,7 +39,7 @@ def row(bulletin="9001", cve="CVE-2099-0001", devices=("2489",), **kw):
     return r
 
 
-def doc(*rows, reviewed_until="2026-11-10", mirror=True, **over):
+def doc(*rows, reviewed_until="2025-09-02", mirror=True, **over):
     bulletins = sorted({r["bulletin"] for r in rows})
     d = {"schema": "sca-nvidia-bulletins-table/1", "reviewed_until": reviewed_until,
          "bulletins": [{"id": b, "cves": {}} for b in bulletins], "not_applicable": [], "rows": list(rows)}
@@ -83,7 +83,7 @@ def test_affected_below_fixed_and_boundary(tmp_path):
     r = m(t, vb("94.04.5E.00.92"))
     assert r["match"] == "affected" and r["bulletins"] == ["9001"] and r["cves"] == ["CVE-2099-0001"]
     assert "bulletin 9001 CVE-2099-0001" in r["basis"] and "PCI 10de:2489" in r["basis"] and "authoritative" in r["basis"]
-    assert r["source"] == t.label() and "mirror commit aaaaaaaaaaaa" in r["source"] and "reviewed_until 2026-11-10" in r["source"]
+    assert r["source"] == t.label() and "mirror commit aaaaaaaaaaaa" in r["source"] and "reviewed_until 2025-09-02" in r["source"]
     r = m(t, vb("94.04.6A.00.01"))                              # 剛好是修正版本 → fixed
     assert r["match"] == "fixed" and r["bulletins"] == ["9001"]
     assert m(t, vb("94.04.6A.00.02"))["match"] == "fixed" and m(t, vb("95.00.00.00.01"))["match"] == "fixed"
@@ -274,6 +274,7 @@ def test_committed_table_passes_c1_validation_and_is_not_yet_confirmed():
     assert na["current_release_date"] == "2025-09-02T00:00:00Z" and na["csaf_fields"]
     assert "無法對應" in na["reason"] and "不適用" not in na["reason"] and "5561" in na["reason"]
     assert t.awaiting == ["5674"] and t.not_applicable == []
+    assert d["mirror"]["commit_date"] == "2026-11-10T13:01:57Z" and "2025-09-02" in d["about"] and "不是鏡像 commit 的日期" in d["about"]
     assert "@" not in text and "/home/" not in text
 
 
@@ -287,7 +288,7 @@ def test_committed_table_stays_pending_for_c1_candidates():
     # 負責人確認後（reviewed=true、reviewed_until 有值）才會關掉
     done = json.loads(json.dumps(d))
     done["not_applicable"][0].update(reviewed=True, reviewed_by="負責人", reviewed_at="2026-12-01")
-    done["reviewed_until"] = "2026-11-10"
+    done["reviewed_until"] = "2025-09-02"                                        # 看過的最新公告日期（不是鏡像的日期）
     c1.validate_table(done)
     assert c1.pending_bulletins([mirror_entry], done) == []
     assert c1.pending_bulletins([{**mirror_entry, "id": "9999"}], done)[0]["reasons"][0] == "not_in_table"        # 新公告仍會列為待審
@@ -340,7 +341,7 @@ def test_sbom_properties_for_affected_fixed_and_not_assessed(tmp_path):
     assert props(a, "dumpling:advisory-cves") == ["CVE-2099-0001"] and "mirror commit aaaaaaaaaaaa" in props(a, "dumpling:advisory-source")[0]
     assert "bulletin 9001" in props(a, "dumpling:advisory-basis")[0] and any("PCIR header" in n for n in props(a, "dumpling:advisory-note"))
     assert props(b, "dumpling:advisory-match") == ["NOT_ASSESSED"] and not props(b, "dumpling:advisory-bulletins")
-    assert NO_DATA in props(b, "dumpling:advisory-basis")[0] and "reviewed_until 2026-11-10" in props(b, "dumpling:advisory-source")[0]
+    assert NO_DATA in props(b, "dumpling:advisory-basis")[0] and "reviewed_until 2025-09-02" in props(b, "dumpling:advisory-source")[0]
     for c in by.values():                                             # 狀態仍是 NOT_ASSESSED；不出現任何「沒有漏洞」的值
         assert props(c, "dumpling:vuln-assessment") == ["NOT_ASSESSED"] and props(c, "dumpling:vuln-assessment-note") == [xf.ASSESS_NOTES["nvidia-vbios"]]
     ph = by["NVIDIA VBIOS 2204"]                                      # 版本是佔位字串：讀不到版本 → NOT_ASSESSED
@@ -366,7 +367,7 @@ def test_report_section_for_vbios(tmp_path):
     sec = md[md.index("## 公告比對"):]
     assert "### NVIDIA vBIOS（1 個）" in sec and "| 2489 | 94.04.5E.00.92 | affected" in sec and "9001" in sec and "CVE-2099-0001" in sec
     assert "合作夥伴通知" in sec and "資料庫沒有資料，以廠商公告" in sec and "沒有任何一項代表「沒有漏洞」" in sec
-    assert "鏡像 commit `" + COMMIT + "`" in sec and "已審核的 vBIOS 列 1 筆" in sec and "審核到 2026-11-10" in sec
+    assert "鏡像 commit `" + COMMIT + "`" in sec and "已審核的 vBIOS 列 1 筆" in sec and "審核到 2025-09-02" in sec
     assert "這一版沒有做" not in sec
     for w in ("PASS", "不受影響", "安全"):
         assert w not in sec, w

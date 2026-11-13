@@ -1,6 +1,6 @@
 {
   "schema": "sca-nvidia-bulletins-table/1",
-  "about": "NVIDIA 安全公告「gpu-firmware」群組（顯示卡與獨顯的 vBIOS）的人工對照表。目前**尚未經負責人確認**（reviewed_until 為 null）：鏡像選入這個群組的公告只有 5674（HGX／DGX 的 VBIOS 與 LS10），C2 的初審意見是無法對應到顯卡 option ROM（沒有 PCI 裝置 ID 與 option ROM 版本的對應），寫在 not_applicable 的 5674 項（reviewed=false，等負責人確認；candidates 因此仍列為待審）。所以沒有任何可比對的列，所有 NVIDIA vBIOS 的比對結果都是 NOT_ASSESSED（表尚未經負責人確認；資料庫沒有資料，以廠商公告為準）。沒有比對到不代表沒有漏洞：消費型 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知（PLAN「C. vBIOS」）。vBIOS 的列格式（C1 欄位之外的 pci_vendor、pci_devices、vbios_affected_below、vbios_affected_max、vbios_fixed_in；line 寫 vbios）見 tools/cra/nvidia_vbios_advisory.py 檔頭；比對在 tools/cra（離線，只讀這張表）。mirror 記初審用的鏡像。負責人確認後：把 5674 項改成 reviewed=true 並填 reviewed_by（角色）、reviewed_at，reviewed_until 設成鏡像 commit 的日期。流程與欄位說明見 nvidia-bulletins.md；Jetson 用 nvidia-bulletins.json。",
+  "about": "NVIDIA 安全公告「gpu-firmware」群組（顯示卡與獨顯的 vBIOS）的人工對照表。目前**尚未經負責人確認**（reviewed_until 為 null）：鏡像選入這個群組的公告只有 5674（HGX／DGX 的 VBIOS 與 LS10），C2 的初審意見是無法對應到顯卡 option ROM（沒有 PCI 裝置 ID 與 option ROM 版本的對應），寫在 not_applicable 的 5674 項（reviewed=false，等負責人確認；candidates 因此仍列為待審）。所以沒有任何可比對的列，所有 NVIDIA vBIOS 的比對結果都是 NOT_ASSESSED（表尚未經負責人確認；資料庫沒有資料，以廠商公告為準）。沒有比對到不代表沒有漏洞：消費型 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知（PLAN「C. vBIOS」）。vBIOS 的列格式（C1 欄位之外的 pci_vendor、pci_devices、vbios_affected_below、vbios_affected_max、vbios_fixed_in；line 寫 vbios）見 tools/cra/nvidia_vbios_advisory.py 檔頭；比對在 tools/cra（離線，只讀這張表）。mirror 記初審用的鏡像。負責人確認後：把 5674 項改成 reviewed=true 並填 reviewed_by（角色）、reviewed_at，reviewed_until 填 gpu-firmware 群組看過的最新公告日期（目前是 5674 的 2025-09-02；不是鏡像 commit 的日期）。流程與欄位說明見 nvidia-bulletins.md；Jetson 用 nvidia-bulletins.json。",
   "reviewed_until": null,
   "bulletins": [],
   "not_applicable": [
@@ -30,6 +30,6 @@
     "commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
     "commit_date": "2026-11-10T13:01:57Z",
     "fetched_utc": "2026-11-13T16:52:04Z",
-    "note": "tools/mirror/nvidia-bulletins.sh 的輸出（204 則公告、選入 36 則；gpu-firmware 群組 1 則：5674）。初審看的是這份鏡像；負責人確認後 reviewed_until 取這個 commit 的日期。"
+    "note": "tools/mirror/nvidia-bulletins.sh 的輸出（204 則公告、選入 36 則；gpu-firmware 群組 1 則：5674）。初審看的是這份鏡像；鏡像的時間點是 commit_date，不是 reviewed_until。"
   }
 }

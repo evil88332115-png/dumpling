@@ -18,7 +18,8 @@ affected（受影響）／fixed（已修補）／NOT_ASSESSED。
   vbios_fixed_in        修正版本（公告 updated version）
   版本寫成 option ROM 裡的 `XX.XX.XX.XX.XX`（每段兩位十六進位）；可只寫前幾段（例如 `94.04`），比較時只比 SBOM 版本的前幾段。
   這三個欄位至少要有一個；fixed_in 低於 affected_below、或不高於 affected_max（缺的段補 00／FF 後比）的列自相矛盾，整張表視為壞掉；已審核（reviewed=true）的列才會參與比對，未審核的列只計數。
-頂層另有 `mirror`：{commit（40 碼）、commit_date、fetched_utc（ISO 8601）}，記表是對哪一份鏡像審核的。
+頂層另有 `mirror`：{commit（40 碼）、commit_date、fetched_utc（ISO 8601）}，記表是對哪一份鏡像審核的（鏡像的時間點）。
+`reviewed_until` 是審核者看過的最新公告的日期（不是鏡像 commit 的日期）；兩者分開記。
 
 比對規則（依序，第一個成立的就是結果）：
 1. 表讀不到、不是一般檔案、超過上限、JSON 或 C1 的 validate_table 驗證失敗、已審核的 vBIOS 列欄位不對 → NOT_ASSESSED（table-unreadable／table-invalid）。

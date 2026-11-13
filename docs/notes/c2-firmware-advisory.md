@@ -208,7 +208,7 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 
 另外在搜尋時看到公告 5561（Hopper HGX 8-GPU HMC，CVE-2024-0141 的描述提到 GPU vBIOS）：它不在 gpu-firmware 群組（群組選取是 C1 的規則，只看標題、CSAF 產品名稱與 CVE_index），不在這份鏡像的選入清單裡；版本是 HMC 版本、沒有 PCI 裝置 ID，同樣無法對應到 option ROM 版本，沒有放進表。
 
-表的內容：`reviewed_until` ＝ **null**（尚未經負責人確認）、`mirror`（commit、commit_date、fetched_utc；初審用的鏡像）、`not_applicable`＝[5674 的初審意見，`reviewed=false`，`reviewed_by`／`reviewed_at` 是 null，初審者寫在 `preliminary_by`]、`rows`＝[]。`candidates --group gpu-firmware` 對這個鏡像是 **ATTENTION**（5674：`unreviewed_not_applicable`、`after_reviewed_until`），直到負責人確認。確認後把 5674 項改成 `reviewed=true` 並填 `reviewed_by`（角色）與 `reviewed_at`，`reviewed_until` 設成鏡像 commit 的日期（2026-11-10）。注意：這裡的 `reviewed_until` 定義和 `nvidia-bulletins.md` 不同（C1 的文件是「人看過的最新公告的日期」；這個群組取鏡像 commit 的日期，因為群組在該 commit 沒有其他公告），已列進 M7 給 C1 的介面清單。
+表的內容：`reviewed_until` ＝ **null**（尚未經負責人確認）、`mirror`（commit、commit_date、fetched_utc；初審用的鏡像）、`not_applicable`＝[5674 的初審意見，`reviewed=false`，`reviewed_by`／`reviewed_at` 是 null，初審者寫在 `preliminary_by`]、`rows`＝[]。`candidates --group gpu-firmware` 對這個鏡像是 **ATTENTION**（5674：`unreviewed_not_applicable`、`after_reviewed_until`），直到負責人確認。確認後把 5674 項改成 `reviewed=true` 並填 `reviewed_by`（角色）與 `reviewed_at`，`reviewed_until` 填 gpu-firmware 群組看過的最新公告日期（目前是 5674 的 **2025-09-02**）。`reviewed_until` 是審核者看過的最新公告日期（與 C1 的 `nvidia-bulletins.md` 一致，M7a2 會寫進 C1 的文件）；鏡像的時間點另記在頂層 `mirror.commit_date`（2026-11-10），兩者分開。
 
 **結論：目前沒有任何顯卡 vBIOS 的公開公告可以機器比對。** 所有 NVIDIA vBIOS 的結果都是 NOT_ASSESSED（`table-not-reviewed`：表尚未經負責人確認）；負責人確認 5674 之後會是 `no-row`。這不代表 vBIOS 沒有漏洞：NVIDIA 對消費型與專業型顯卡的 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知。
 
@@ -264,7 +264,7 @@ SBOM 的 vBIOS 元件：`dumpling:advisory-match`（affected／fixed／NOT_ASSES
 
 C2 沒有改 C1 的檔案，下面是現況與建議：
 - `validate_table` 不認得 vBIOS 的裝置範圍與十六進位版本：C1 的版本欄位只收點分十進位（`vkey`），沒有 PCI vendor／device 欄位。C2 用額外欄位（上表）繞過去，C1 的 `match`（只用 Jetson 群組）不會讀 gpu-firmware 的表，所以沒有衝突。如果 C1 之後想讓 `validate_table` 檢查這些欄位，建議用 C1 的名稱接收 `pci_vendor`、`pci_devices`、`vbios_*`，或提供一個「版本比較函式可替換」的介面；在那之前 C2 的比對自己驗。
-- `candidates` 的 `reviewed_until` 是「日期比它晚的公告待審」；C2 取鏡像 commit 的日期，不是最新公告的日期（這個群組最新公告是 2025-09-02）。這樣新公告晚於 2026-11-10 才會因日期被列為待審；`not_in_table` 與 `revised` 不受影響。
+- `candidates` 的 `reviewed_until` 是「日期比它晚的公告待審」：用審核者看過的最新公告日期（這個群組目前是 2025-09-02），鏡像的時間點記在 `mirror.commit_date`。C1 之後會正式支援 `mirror` 缺漏時回 GAP（不丟 InputError）；這和 C2 現在的做法相容（`mirror` 缺漏或日期讀不到時，fixed 降成 NOT_ASSESSED，`table-stale`），不用改程式。
 - 表沒有「對應鏡像」的欄位：C2 加了頂層 `mirror`（commit、commit_date、fetched_utc），C1 沒用到。要比對鏡像是否比表新，C1 的 `candidates` 目前只看公告編號與日期。
 
 ### 更新表（人工步驟）
@@ -274,7 +274,7 @@ C2 沒有改 C1 的檔案，下面是現況與建議：
 3. 逐則讀 `<年>/<編號>/<編號>.md` 與 `<編號>.json`（CSAF 的 `product_tree`、`vulnerabilities[].product_status`、`remediations`）：
    - 涉及顯卡 option ROM 的 vBIOS、而且公告有可機器判斷的版本線與裝置範圍 → 填 `bulletins`（編號、CVE 的嚴重度等，來自 CSAF）與 `rows`（`line: vbios`、`pci_vendor`、`pci_devices`、`vbios_*`、`source`、`reviewed: true`、`reviewed_by` 只寫角色、`reviewed_at`）。
    - 只涉及 HGX／DGX 等伺服器韌體、或範圍看不懂 → `not_applicable`（`current_release_date`、`reason` 寫技術理由、`csaf_fields`）；初審意見用 `reviewed=false`，由負責人確認後才改 `reviewed=true`。**看不懂、範圍不明的不要猜**，寫成「無法對應」並註明原因，不要寫成「不影響」，或留在待審。
-4. 更新 `reviewed_until`（鏡像 commit 的日期；只有負責人確認後才填，沒確認前維持 null）與 `mirror`。
+4. 更新 `mirror`（鏡像的 commit、commit_date、fetched_utc）；`reviewed_until` 填看過的最新公告日期，只有負責人確認後才填，沒確認前維持 null。
 5. `python3 -I tools/pilot/lib/nvidia_bulletins.py candidates …`（同第 2 步，不加 `--draft`）應該是 OK；再跑 `tests/run.d/c2-x86-firmware.sh`（`test_committed_table_*` 檢查進 repo 的表）。有新的 `rows` 時在 `test_nvidia_vbios_advisory.py` 加對應的測試。
 6. 超過 90 天沒有重新審核，`fixed` 會降成 NOT_ASSESSED（`table-stale`）：定期重跑第 1～5 步。
 
