@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 01:40 -0500（C0）
+最後更新：2026-11-13 01:51 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -82,7 +82,7 @@
   - 代理 N（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` dd54722，狀態：完成。假 OK 路徑都堵住：比對數只認 int≥0；dt-verify 必要檢查缺／NOT_RUN／未知→GAP；任何 sca-scan 階段 FAIL→FAIL（expected_dt 放行規則不變），其他非 OK 階段→ATTENTION；vuln-assessment 只認 NONE、供應商 SBOM 自帶 dumpling: 標記不採信；purl 格式嚴格；缺 version 列入；型別錯→prep FAIL；重複鍵偵測→ATTENTION＋紀錄；代理字元先序列化再寫檔。CI tests 43294331473、firmware 43294338722 綠，五個真樣本全 ATTENTION（無 OK、無 FAIL）；c2-firmware 235、c2-x86-firmware 325
   - 代理 O（寫程式，Sonnet 5.5 high）：`wp3/amd-psp`，D-042 AMD 平台，狀態：進行中
   - 代理 P（寫程式，Sonnet 5.5 high）：`wp3/csme-new` 17072b5，D-042 新世代 CSME，狀態：完成。新模組 `tools/cra/intel_cse_layout.py`（CSE layout table 1.6／1.7 → BPDT v1／v2 → FTPR／RBEP／NFTP 的 `$CPD` v1／v2 → `.man` 版本；沒有 FTPR 時要 RBEP 與 NFTP 版本相同才採用，矛盾／單一來源／結構不一致→GAP；無全檔掃描、有上限）；x86_firmware.py 只在舊路徑沒結果時才試新模組。公開樣本 Dasharo NovaCustom V540TU v1.0.1（ME 區域開頭不是 `$FPT`、沒有 FTPR）：改動前 unknown → 18.0.10.2285，expected `intel_me` 依 release notes（我另外直接抓原始 HTML 核對相符）。CI firmware 43377248319、tests 43377252522 綠；本機 c2-x86-firmware 380、c2-firmware 167、c1-tools 3173
-  - 預驗 17072b5（驗證，Sonnet 5.5 high），狀態：進行中
+  - 預驗 17072b5（驗證，Sonnet 5.5 high），狀態：完成，**通過**。沒有錯誤版本、崩潰、違反 GAP 的問題（約 28 萬次 fuzz 零例外；Protectli／NUC／OVMF 新舊輸出逐位元相同；Nova 真樣本與 release notes 原始 HTML 重現 18.0.10.2285）。應修 1：layout 1.7 的 CRC-32 其實有公開定義（MEAnalyzer），文件寫成「沒查到」。建議：驗 layout CRC、沒有 FTPR 時要 RBEP＋NFTP 兩種類型（同類兩份是備份、不算獨立）、1.6 讀 BP1…BP5、「已清除」不能只看 4 bytes、補 6 個存活變異的測試、微碼的出處說法 → 交回代理 P 修，狀態：進行中
   - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
 - 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
 - 下一步（兩件分開進行）：
