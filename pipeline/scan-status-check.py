@@ -34,7 +34,7 @@ def main(argv):
         import step_rows
         rs = step_rows.read_rows(steps)
         so = step_rows.overall(rs)
-        if so != "OK":
+        if so not in ("OK", "ATTENTION"):   # ATTENTION＝用了舊資料頂替（不擋；在報告與 Release 說明裡標出來）
             print("上傳: 流程步驟的整體狀態是 %s（不是 OK）：%s" % (so, "、".join("%s=%s" % (r["step"], r["status"]) for r in (rs or []) if r["status"] in ("GAP", "FAIL")) or "沒有 pipeline-steps.tsv"))
             return 1
     if bad or fails:

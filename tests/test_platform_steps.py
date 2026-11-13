@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import platform_scan as ps  # noqa: E402
 import step_rows as sr  # noqa: E402
 
 RUN_STEP = os.path.join(ROOT, "pipeline", "run-step.sh")
+MIRRORS_SH = os.path.join(ROOT, "pipeline", "lib", "mirrors.sh")
 
 
 class Tmp(unittest.TestCase):
@@ -192,6 +194,176 @@ class ReleaseMetaAndStatusCheck(Tmp):
         self.assertEqual(r.returncode, 1)
         self.assertIn("GAP", r.stdout)
         self.assertEqual(need, "A B")
+
+
+class AttentionStatus(Tmp):
+    """ATTENTION：用了舊資料頂替（例如核心 CVE 鏡像上游連不上）。整體狀態不是 OK，但比 GAP 輕，也不是 FAIL。"""
+
+    def test_overall_ranking(self):
+        f = self.p("s.tsv")
+        sr.append_row(f, "scan", "OK", 0, "ok")
+        sr.append_row(f, "kernel-cve-mirror", "ATTENTION", 0, "ATTENTION mirror=/x 上游連不上")
+        rows = sr.read_rows(f)
+        self.assertEqual(sr.overall(rows), "ATTENTION")
+        self.assertEqual(sr.attention_lines(rows), ["ATTENTION mirror=/x 上游連不上"])
+        sr.append_row(f, "assemble", "GAP", 3, "g")
+        self.assertEqual(sr.overall(sr.read_rows(f)), "GAP")                         # GAP 蓋過 ATTENTION
+        sr.append_row(f, "build", "FAIL", 1, "f")
+        self.assertEqual(sr.overall(sr.read_rows(f)), "FAIL")
+
+    def test_collect_shows_attention_in_notes_and_summary(self):
+        f = self.p("steps.tsv")
+        sr.append_row(f, "validate", "OK", 0, "validate: OK")
+        line = "ATTENTION mirror=/m/kcve 上游連不上…沿用 vulns.git abc123（提交時間 2026-11-12，下載於 2026-11-12T01:00:00Z，5 小時前）"
+        sr.append_row(f, "kernel-cve-mirror", "ATTENTION", 0, line)
+        helper = CollectShowsSteps(methodName="test_all_ok_and_missing_file")
+        helper.tmp = self.tmp
+        scan = ps.collect(helper.args(f))
+        self.assertEqual(scan["pipeline_status"], "ATTENTION")
+        self.assertEqual(scan["pipeline_attention"], [line])
+        notes = open(self.p("rel", "notes.md"), encoding="utf-8").read()
+        self.assertIn("**ATTENTION（用了舊資料頂替", notes)
+        self.assertIn("> - " + line, notes)                                           # 那一行原文放在說明的最前面
+        self.assertLess(notes.index("ATTENTION（用了舊資料頂替"), notes.index("## 元件與分層"))
+        self.assertIn("整體狀態 **ATTENTION**", notes)
+        self.assertIn("| pipeline-kernel-cve-mirror | ATTENTION | 0 |", notes)
+        md = open(self.p("steps.md"), encoding="utf-8").read()
+        self.assertIn("**ATTENTION**：" + line, md)
+        self.assertIn("整體狀態 ATTENTION", md)
+
+    def test_no_attention_keeps_notes_unchanged(self):
+        f = self.p("ok.tsv")
+        sr.append_row(f, "validate", "OK", 0, "ok")
+        helper = CollectShowsSteps(methodName="test_all_ok_and_missing_file")
+        helper.tmp = self.tmp
+        scan = ps.collect(helper.args(f))
+        self.assertEqual(scan["pipeline_attention"], [])
+        self.assertNotIn("ATTENTION", open(self.p("rel", "notes.md"), encoding="utf-8").read())
+
+    def test_release_meta_and_status_check(self):
+        f = self.p("s.tsv")
+        sr.append_row(f, "scan", "OK", 0, "ok")
+        sr.append_row(f, "kernel-cve-mirror", "ATTENTION", 0, "ATTENTION mirror=/x 上游連不上")
+        out = self.p("m.json")
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                            "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        d = json.load(open(out))
+        self.assertEqual((d["result"], d["attention"]), ("ATTENTION", ["ATTENTION mirror=/x 上游連不上"]))
+        self.assertEqual([x["status"] for x in d["steps"]], ["OK", "ATTENTION"])
+        st = self.p("status.tsv")
+        open(st, "w").write("stage\tstatus\tdetail\nA\tOK\tx\n")
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "scan-status-check.py"), st, "A", "--pipeline-steps", f], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)                                  # ATTENTION 不擋上傳檢查
+
+    def test_release_meta_without_attention_has_no_field(self):
+        f = self.p("s.tsv")
+        sr.append_row(f, "scan", "OK", 0, "ok")
+        out = self.p("m.json")
+        subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+                        "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--out", out], capture_output=True, text=True)
+        d = json.load(open(out))
+        self.assertEqual(d["result"], "OK")
+        self.assertNotIn("attention", d)
+
+
+class MirrorsLib(Tmp):
+    """pipeline/lib/mirrors.sh：看腳本最後一行（OK／ATTENTION／其他）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.sd = self.p("mirror-scripts")
+        os.makedirs(self.sd)
+        self.mir = self.p("mirrors")
+        self.steps = self.p("pipeline-steps.tsv")
+
+    def script(self, name, body):
+        with open(os.path.join(self.sd, name), "w", encoding="utf-8") as f:
+            f.write("#!/usr/bin/env bash\ndest=$1; man=$2\n" + body)
+
+    def run_fn(self, call, **env):
+        e = dict(os.environ, MIRRORS_DIR=self.mir, MIRRORS_STEPS=self.steps, MIRRORS_SCRIPT_DIR=self.sd, MIRRORS_RETRY_DELAY="0")
+        e.pop("KCVE_CACHE_DIR", None)
+        e.update(env)
+        return subprocess.run(["bash", "-c", '. "%s"; %s' % (MIRRORS_SH, call)], capture_output=True, text=True, env=e)
+
+    def test_ok_line_is_success_and_adds_no_row(self):
+        self.script("a.sh", 'mkdir -p "$dest"; echo hello > "$dest/f"; echo "OK mirror=$dest manifest=$man"\n')
+        r = self.run_fn("mirror a.sh aa")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("鏡像 aa：OK", r.stdout)
+        self.assertTrue(open(os.path.join(self.mir, "aa.result")).read().startswith("OK "))
+        self.assertFalse(os.path.exists(self.steps))
+
+    def test_attention_line_is_success_remembered_and_recorded(self):
+        line = "ATTENTION mirror=$dest 上游連不上…沿用 vulns.git abc（提交時間 t，下載於 d，5 小時前）"
+        self.script("kernel-cve.sh", 'mkdir -p "$dest"; printf "fallback=yes\\n" > "$dest/SOURCE"; echo "%s"\n' % line)
+        r = self.run_fn("mirror kernel-cve.sh kcve")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("鏡像 kcve：ATTENTION", r.stdout)
+        rows = sr.read_rows(self.steps)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["step"], rows[0]["status"], rows[0]["exit"]), ("pipeline-kernel-cve-mirror", "ATTENTION", 0))
+        self.assertIn("上游連不上…沿用 vulns.git abc", rows[0]["detail"])
+        self.assertTrue(rows[0]["detail"].startswith("ATTENTION mirror="))             # 那一行的原文
+        self.assertEqual(sr.overall(rows), "ATTENTION")
+        self.assertTrue(open(os.path.join(self.mir, "kcve.result")).read().startswith("ATTENTION "))
+
+    def test_failure_and_unknown_last_line_are_fail(self):
+        self.script("bad.sh", 'echo "FAIL 連不上" >&2; exit 1\n')
+        self.script("odd.sh", 'mkdir -p "$dest"; echo "done"\n')                       # 結束碼 0，但最後一行不是 OK／ATTENTION
+        for name in ("bad.sh", "odd.sh"):
+            r = self.run_fn("mirror %s x; echo rc=$?" % name, MIRRORS_TRIES="2")
+            self.assertIn("rc=1", r.stdout, name)
+            self.assertNotIn("鏡像 x：OK", r.stdout)
+        self.assertFalse(os.path.exists(self.steps))                                  # 失敗不記 ATTENTION
+
+    def test_retries_then_ok(self):
+        self.script("flaky.sh", 'c="%s/count"; n=$(cat "$c" 2>/dev/null || echo 0); echo $((n+1)) > "$c"\n'
+                                '[ "$n" -ge 1 ] || { echo "timeout" >&2; exit 1; }\nmkdir -p "$dest"; echo "OK mirror=$dest"\n' % self.tmp)
+        r = self.run_fn("mirror flaky.sh f")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("第 1 次失敗", r.stdout)
+        self.assertIn("鏡像 f：OK", r.stdout)
+
+    def test_kernel_cve_passes_the_previous_mirror_only_when_it_exists(self):
+        self.script("kernel-cve.sh", 'mkdir -p "$dest"; echo "reuse=${KERNEL_CVE_REUSE_FROM:-} fallback=${KERNEL_CVE_FALLBACK_FROM:-}" > "$dest/env"\necho "OK mirror=$dest"\n')
+        r = self.run_fn("mirror_kernel_cve kcve")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(open(os.path.join(self.mir, "kcve", "env")).read().strip(), "reuse= fallback=")
+        cache = self.p("cache", "kcve")
+        os.makedirs(cache)
+        r = self.run_fn("mirror_kernel_cve kcve", KCVE_CACHE_DIR=cache)                # 資料夾在但沒有 SOURCE：不傳
+        self.assertEqual(open(os.path.join(self.mir, "kcve", "env")).read().strip(), "reuse= fallback=")
+        open(os.path.join(cache, "SOURCE"), "w").write("commit=abc\n")
+        r = self.run_fn("mirror_kernel_cve kcve", KCVE_CACHE_DIR=cache)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(open(os.path.join(self.mir, "kcve", "env")).read().strip(), "reuse=%s fallback=%s" % (cache, cache))
+
+    def test_only_fresh_data_may_be_saved_to_the_cache(self):
+        self.script("kernel-cve.sh", 'mkdir -p "$dest"; printf "%s\\n" "$SRC" > "$dest/SOURCE"; echo "$LINE"\n')
+        cases = (("OK mirror=x", "commit=abc\nfetched_utc=2026-11-12T00:00:00Z", True),
+                 ("OK mirror=x", "commit=abc\nfallback=yes\nfallback_note=上游連不上", False),     # 腳本說 OK 但 SOURCE 標了頂替：不存
+                 ("ATTENTION mirror=x 上游連不上", "commit=abc\nfallback=yes", False))
+        for line, src, want in cases:
+            r = self.run_fn("mirror kernel-cve.sh kcve && mirror_is_fresh kcve; echo fresh=$?", LINE=line, SRC=src.replace("\\n", "\n"))
+            self.assertIn("fresh=0" if want else "fresh=1", r.stdout, (line, r.stdout, r.stderr))
+        r = self.run_fn("mirror_is_fresh nothing; echo fresh=$?")
+        self.assertIn("fresh=1", r.stdout)
+
+    def test_scan_sh_and_workflow_use_the_shared_function(self):
+        scan = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
+        self.assertNotIn("mirror() {", scan)                                          # 函式只有 pipeline/lib/mirrors.sh 一份
+        self.assertIn("pipeline/lib/mirrors.sh", scan)
+        wf = open(os.path.join(ROOT, ".github", "workflows", "pipeline.yml"), encoding="utf-8").read()
+        uses = re.findall(r"uses:\s*(actions/cache/(?:restore|save))@(\S+)", wf)
+        self.assertEqual(sorted(u for u, _ in uses), ["actions/cache/restore", "actions/cache/save"])
+        for _, ref in uses:
+            self.assertRegex(ref, r"^[0-9a-f]{40}$")                                  # 第三方 action 釘 commit SHA
+        self.assertIn("restore-keys: kernel-cve-mirror-", wf)
+        save = wf[wf.index("actions/cache/save@"):]
+        self.assertIn("steps.kcve-fresh.outputs.fresh == 'true'", wf[wf.rindex("- name:", 0, wf.index("actions/cache/save@")):])
+        self.assertIn("kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}", save)
 
 
 if __name__ == "__main__":

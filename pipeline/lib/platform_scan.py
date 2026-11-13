@@ -254,6 +254,7 @@ def collect(a, hooks=None):
     if steps_path:
         scan["pipeline_steps"] = srows
         scan["pipeline_status"] = step_rows.overall(srows)
+        scan["pipeline_attention"] = step_rows.attention_lines(srows)
     scan["vulnerabilities"] = {("full" if k == "" else k.lstrip("-")): v.get("vulnerabilities") for k, v in runs.items()}
     with open(a.scan_json, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=1)
@@ -264,6 +265,9 @@ def collect(a, hooks=None):
     cb = scan["components"]
     L = ["# %s %s" % (proj, ver), "",
          "由 GitHub Actions 自動建置與掃描（%s）。缺資料、沒跑、過期一律標 GAP／NOT_RUN／NOT_ASSESSED，沒有整體 PASS。" % ("正式 Release" if a.official else "手動觸發的草稿"), ""]
+    if steps_path and scan.get("pipeline_attention"):
+        # ATTENTION：這次用了舊資料頂替（例如 git.kernel.org 連不上，沿用上一份核心 CVE 鏡像）。不擋 Release，但要讓讀的人一眼看到
+        L += ["> **ATTENTION（用了舊資料頂替，結果照樣產生，不是 OK）**", ">"] + ["> - " + t.replace("\n", " ") for t in scan["pipeline_attention"]] + [""]
     L += hooks.notes_build(ctx)
     L += ["", "## 元件與分層", "",
           "元件 %s 個：bsp %s、os %s、unknown %s、host-tool %s（unknown 的原因見 `layers.json`）。" % (cb["total"], cb["bsp"], cb["os"], cb["unknown"], cb["host_tool"]),
@@ -278,7 +282,9 @@ def collect(a, hooks=None):
         sm = getattr(a, "steps_md", None)
         if sm:
             with open(sm, "w", encoding="utf-8") as f:
-                f.write("\n".join(["### 流程步驟（整體狀態 %s）" % scan["pipeline_status"], ""] + (step_rows.markdown_table(srows) if srows is not None else ["（沒有 pipeline-steps.tsv）"])) + "\n")
+                f.write("\n".join(["### 流程步驟（整體狀態 %s）" % scan["pipeline_status"], ""]
+                                  + (["**ATTENTION**：" + t for t in scan["pipeline_attention"]] + [""] if scan["pipeline_attention"] else [])
+                                  + (step_rows.markdown_table(srows) if srows is not None else ["（沒有 pipeline-steps.tsv）"])) + "\n")
     L += ["", "## 附件", "",
           "- 檔名固定、機器可讀：`sbom-<專案>-<版本>.cdx.json`（完整，標好層；分層加 `-bsp`／`-os`）、`layers.json`、`release-meta.json`。",
           "- `report-*.zip`：報告包（漏洞清單、P1 判斷表、SBOM、VEX、內部存檔）；`vuln-list-*.xlsx`＝漏洞清單、`p1-table-*.xlsx`＝P1 判斷表、`vex-*.cdx.json`＝VEX。"]

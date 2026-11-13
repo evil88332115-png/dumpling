@@ -204,11 +204,18 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 | 4 | NOT_RUN | 印 `::notice::`，繼續（不能當成成功；照實列出） |
 | 1、64 或其他 | FAIL | job 失敗 |
 
-每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
+每一步在 `$DUMPLING_OUT/pipeline-steps.tsv` 加一列 `pipeline-<步驟>	<OK|ATTENTION|GAP|NOT_RUN|FAIL>	<結束碼>	<最後一行輸出>`。compile 的 build job 把這個檔和 `handoff/` 放進同一個 artifact（它不在 `handoff/` 裡，`handoff/` 屬於 `build.sh`），
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	build.mode: none`。
-`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `result`（`OK`｜`GAP`｜`FAIL`；有 FAIL 是 FAIL、有 GAP 至少 GAP；
+`platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；有 FAIL 是 FAIL、有 GAP 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
 `status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 不降低整體狀態。
 Release 仍然只建 draft；GAP 是否擋正式 tag 沿用 scan GAP 的既有規則，沒有新增關卡。
+
+**ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。
+所有平台的 scan 都 `source pipeline/lib/mirrors.sh`，用 `mirror <tools/mirror 底下的腳本> <資料夾名>`（不要各寫一份）；`mirror_kernel_cve <名>` 會把上一份核心 CVE 鏡像（`$KCVE_CACHE_DIR`）傳給 `kernel-cve.sh` 的 `KERNEL_CVE_REUSE_FROM`（上游 HEAD 沒變就沿用）與 `KERNEL_CVE_FALLBACK_FROM`（上游連不上就退而求其次）。
+結果看腳本輸出的最後一行：`OK …` 成功；`ATTENTION …` 也算成功，並在 `pipeline-steps.tsv` 加 `pipeline-<腳本名>-mirror	ATTENTION	0	<那一行>`（例如 `pipeline-kernel-cve-mirror`）；其他 = 這一次失敗，重試（預設 3 次、每次換新資料夾、間隔 60 秒），仍失敗 = `mirror` 回傳 1，呼叫端 FAIL。
+scan job 用 `actions/cache/restore`／`save`（釘 commit SHA）保存 `kcve/`（kernel-cves.zip、SOURCE，幾十 MB；不存 git clone）：key `kernel-cve-mirror-<run_id>-<run_attempt>`、`restore-keys: kernel-cve-mirror-`；還原與儲存用同一個路徑（cache 的版本含路徑）。
+**只有這次新抓的才存**（結果 OK 且 SOURCE 沒有 `fallback=yes`）；沿用或頂替的舊資料不存回去，免得舊資料被當成新的。
+**Release 決定（D-033 一致）**：ATTENTION 不擋 Release，正式 tag 也一樣；但 Release 說明最上面會有「ATTENTION（用了舊資料頂替）」區塊與那一行原文，`summary.md`、`scan.json`（`pipeline_attention`）、`release-meta.json`（`result`、`attention`）都看得到。
 
 **build → scan 的交接（handoff 契約）**：`build.sh` 把要交給 scan 的東西全部放在 `$DUMPLING_OUT/handoff/`（`$DUMPLING_OUT` ＝ `$DUMPLING_OUT_BASE/<專案>/<版本>`），裡面的結構自訂。
 workflow 把整個資料夾上傳成 artifact、在 scan job 放回**同一個路徑**，不指名任何個別檔案；轉接器的 `assemble.sh`／`scan.sh` 從 `$DUMPLING_OUT/handoff/` 讀。

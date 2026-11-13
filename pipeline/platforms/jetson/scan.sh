@@ -14,7 +14,7 @@
 #     （換成該層 SBOM 的複本）重跑比對 → 一個 DT 專案（<名稱>-bsp、<名稱>-os）＋一份報告包。
 #     完整掃描的那次也上傳了一個 DT 專案（<名稱>），報告當作「全部」的對照；分層的報告才是 bsp／os 各自的待辦。
 #  4. 收集：Release 附件（ASCII 檔名，中文標籤）、scan.json；與 tests/expected/<專案>/<版本>.json 比對，不符 = FAIL。
-# 最後一行：scan: OK｜GAP｜FAIL（說明）。GAP＝資料不齊（沒有標準答案、分層有 GAP）：結果照樣產生，但不當成通過。
+# 最後一行：scan: OK｜ATTENTION｜GAP｜FAIL（說明）。ATTENTION＝弱點資料鏡像用了舊資料頂替（不擋）；GAP＝資料不齊（沒有標準答案、分層有 GAP）：結果照樣產生，但不當成通過。
 set -uo pipefail
 proj=${1:?專案資料夾}; ver=${2:?版本}
 root=${DUMPLING_ROOT:?}; out=${DUMPLING_OUT:?}
@@ -39,21 +39,14 @@ trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
 export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Ubuntu,PyPI,Go,Maven}
 export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
 bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
-mir=$out/mirrors; rm -rf "$mir"; mkdir -p "$mir"
-mirror() {  # <腳本> <資料夾名>（腳本的參數：新資料夾、manifest）。上游（git.kernel.org 等）偶爾逾時：最多試 3 次，每次換新資料夾；仍失敗 = FAIL
-  local s=$1 d=$2 n ok=0
-  for n in 1 2 3; do
-    rm -rf "${mir:?}/$d" "$mir/$d.manifest"
-    if bash "$root/tools/mirror/$s" "$mir/$d" "$mir/$d.manifest" > "$mir/$d.log" 2>&1; then ok=1; break; fi
-    echo "鏡像 $d 第 $n 次失敗：$(tail -1 "$mir/$d.log" | cut -c1-200)"; [ "$n" = 3 ] || sleep 60
-  done
-  if [ $ok != 1 ]; then tail -5 "$mir/$d.log"; fail "鏡像 $s 失敗（弱點資料不完整，不當作沒有漏洞）"; fi
-  echo "鏡像 $d：OK（$(tail -1 "$mir/$d.log" | cut -c1-160)）"
-}
-mirror nvidia-bulletins.sh nvbul
-mirror kernel-cve.sh kcve
-mirror euvd.sh euvd
-OSV_DISTRO_ECOSYSTEMS=Ubuntu mirror osv-distro.sh osv
+export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
+mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
+# shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
+. "$root/pipeline/lib/mirrors.sh"   # mirror：上游偶爾逾時，最多試 3 次；最後一行 ATTENTION（用舊資料頂替）算成功並記一列，其他失敗 = FAIL
+mirror nvidia-bulletins.sh nvbul || fail "鏡像 nvidia-bulletins.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
+mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
+mirror euvd.sh euvd || fail "鏡像 euvd.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
+OSV_DISTRO_ECOSYSTEMS=Ubuntu mirror osv-distro.sh osv || fail "鏡像 osv-distro.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
 mkdir -p "$(dirname "$PILOT_ENV")"
 bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env 失敗"
@@ -130,9 +123,10 @@ fi
 sp=$(python3 -I "$root/pipeline/lib/step_rows.py" status "$out/pipeline-steps.tsv" 2> /dev/null || echo GAP)
 case $sp in
   OK) ;;
+  ATTENTION) state=ATTENTION; msg="$msg；流程步驟有 ATTENTION（用了舊資料頂替，見 pipeline-steps.tsv）";;
   *) state=GAP; msg="$msg；流程步驟的整體狀態是 $sp（見 pipeline-steps.tsv）";;
 esac
-if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi
+if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi   # GAP 比 ATTENTION 重，蓋過它
 {
   echo "## scan（$DUMPLING_PROJECT $ver）"
   echo "- 狀態：$state（$msg）"
@@ -140,4 +134,4 @@ if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_respons
   [ ! -f "$out/steps-summary.md" ] || { echo; cat "$out/steps-summary.md"; }
 } > "$out/summary.md"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
-[ "$state" = OK ] && exit 0 || exit 3
+case $state in OK|ATTENTION) exit 0;; *) exit 3;; esac   # ATTENTION 不是 GAP：scan 步驟記 OK，整體狀態由 pipeline-steps.tsv 的 ATTENTION 列表示

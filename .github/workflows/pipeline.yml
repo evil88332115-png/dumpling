@@ -143,6 +143,8 @@ jobs:
           # 輸出放 RUNNER_TEMP 底下（路徑不含 ..）；pilot.env 單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾）
           echo "DUMPLING_OUT_BASE=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
           echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env" >> "$GITHUB_ENV"
+          # 上一份核心 CVE 鏡像（actions/cache 還原到這裡；cache 的版本含路徑，存和還原要用同一個路徑）
+          echo "KCVE_CACHE_DIR=$RUNNER_TEMP/kcve-cache/kcve" >> "$GITHUB_ENV"
 
       - name: 名稱
         id: names
@@ -198,10 +200,40 @@ jobs:
       - name: assemble（組產品映像；Jetson：核心與樹外模組換成 build 編的）
         run: bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
 
+      - name: 還原上一份核心 CVE 鏡像（kernel-cves.zip、SOURCE；有 cache 才有）
+        id: kcve-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: kernel-cve-mirror-
+
       - name: scan（臨時 DT → 精靈 → 分層 → 報告 → 標準答案比對）
         env:
           MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
+          # 上一份核心 CVE 鏡像：上游沒變就沿用，git.kernel.org 連不上就退而求其次（≤48 小時、通過檢查；結果標 ATTENTION，不擋 Release）
+          KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
         run: bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "${{ inputs.version }}"
+
+      - name: 核心 CVE 鏡像是不是這次新抓的（只有新抓的才存 cache，頂替用的舊資料不存回去）
+        id: kcve-fresh
+        if: ${{ !cancelled() }}
+        run: |
+          export MIRRORS_DIR="$DUMPLING_OUT_BASE/${{ inputs.project }}/${{ inputs.version }}/mirrors"
+          . pipeline/lib/mirrors.sh
+          if mirror_is_fresh kcve; then
+            rm -rf "$KCVE_CACHE_DIR"; mkdir -p "$(dirname "$KCVE_CACHE_DIR")"; cp -a "$MIRRORS_DIR/kcve" "$KCVE_CACHE_DIR"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"; du -sh "$KCVE_CACHE_DIR"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "核心 CVE 鏡像不是這次新抓的（或沒有）：不存 cache"
+          fi
+
+      - name: 存核心 CVE 鏡像（cache；每次新抓的存一份，GitHub 會淘汰舊的）
+        if: ${{ !cancelled() && steps.kcve-fresh.outputs.fresh == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kcve-cache/kcve
+          key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 整理結果（報告 zip、SBOM、VEX、xlsx、摘要）
         if: ${{ always() }}

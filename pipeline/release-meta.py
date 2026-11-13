@@ -47,7 +47,7 @@ def main(argv=None):
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--built-at")
     ap.add_argument("--tag")
-    ap.add_argument("--steps", help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）：寫進 steps，整體結果寫進 result（有 FAIL／GAP 不是 OK）")
+    ap.add_argument("--steps", help="pipeline-steps.tsv（pipeline/run-step.sh 寫的各步驟結果）：寫進 steps，整體結果寫進 result（有 FAIL／GAP／ATTENTION 不是 OK）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--projects-dir", default=os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(HERE, "..", "projects")))
     a = ap.parse_args(argv)
@@ -57,6 +57,9 @@ def main(argv=None):
             rows = step_rows.read_rows(a.steps)
             meta["steps"] = rows if rows is not None else []
             meta["result"] = step_rows.overall(rows)
+            att = step_rows.attention_lines(rows)
+            if att:
+                meta["attention"] = att   # 用了舊資料頂替的說明（例如核心 CVE 鏡像上游連不上）；不擋 Release，但 result 不是 OK
     except pc.ConfigError as e:
         print("release-meta: FAIL（%s）" % e)
         return 1

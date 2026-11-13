@@ -1,14 +1,15 @@
 """workflow 步驟的結果紀錄：$DUMPLING_OUT/pipeline-steps.tsv（沒有標題列）。每一步一列，TAB 分隔：
-    pipeline-<步驟>   OK｜GAP｜NOT_RUN｜FAIL   <結束碼>   <最後一行輸出或說明>
+    pipeline-<步驟>   OK｜ATTENTION｜GAP｜NOT_RUN｜FAIL   <結束碼>   <最後一行輸出或說明>
 由 pipeline/run-step.sh 寫；platform_scan.collect（summary、notes、scan.json）、release-meta.py（steps／result）、scan-status-check.py 讀。
-整體狀態（overall）：有 FAIL → FAIL；沒有 FAIL 但有 GAP → GAP；其他 → OK。NOT_RUN 不降低整體狀態（例如 build.mode: none 的 build 本來就不跑），但會照實列出。
+ATTENTION：這一步完成了，但用了舊資料頂替（例如弱點資料鏡像上游連不上、沿用 48 小時內的上一份；pipeline/lib/mirrors.sh 寫）。
+整體狀態（overall）：有 FAIL → FAIL；沒有 FAIL 但有 GAP → GAP；沒有 GAP 但有 ATTENTION → ATTENTION（不是 OK，但比 GAP 輕；不擋 Release）；其他 → OK。NOT_RUN 不降低整體狀態（例如 build.mode: none 的 build 本來就不跑），但會照實列出。
 用法（python3 -I）：step_rows.py append <tsv> <步驟> <狀態> <結束碼> <說明>｜step_rows.py status <tsv>（印 OK｜GAP｜FAIL；檔案不存在印 GAP）
 """
 import os
 import sys
 
-STATUSES = ("OK", "GAP", "NOT_RUN", "FAIL")
-MAX_DETAIL = 300
+STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL")
+MAX_DETAIL = 500
 
 
 def clean(text):
@@ -47,7 +48,12 @@ def overall(rows):
     if rows is None:
         return "GAP"
     sts = {r["status"] for r in rows}
-    return "FAIL" if "FAIL" in sts else "GAP" if "GAP" in sts else "OK"
+    return "FAIL" if "FAIL" in sts else "GAP" if "GAP" in sts else "ATTENTION" if "ATTENTION" in sts else "OK"
+
+
+def attention_lines(rows):
+    """ATTENTION 列的說明（鏡像頂替的那一行等），照原文；給 notes、summary、release-meta 用。"""
+    return [r["detail"] for r in rows or [] if r["status"] == "ATTENTION"]
 
 
 def markdown_table(rows):

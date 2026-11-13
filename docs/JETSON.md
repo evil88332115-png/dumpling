@@ -51,6 +51,7 @@ tag orin-nano-demo/v39.2.1-demo1 ─► release.yml
 
 1. **臨時 DT**（`pipeline/dt-ephemeral.sh up → wait → env`）：只開 OSV 與 KEV，關 NVD。OSV 生態系 `Ubuntu,PyPI,Go,Maven`：rootfs 的 Ubuntu deb（含 `nvidia-l4t-*` 以 deb 身分比對）、Python、Go 執行檔、Java jar。
    DT 鏡像進行的同時，下載其他資料鏡像（`tools/mirror/`：NVIDIA 公告、Linux 核心 CNA、EUVD、Ubuntu 的 OSV 發行版紀錄）寫進 `pilot.env`。**任何一個鏡像失敗 = FAIL**（弱點資料不完整，不當作沒有漏洞）。
+   例外是核心 CVE 鏡像：git.kernel.org 有些 runner 連不上（TCP 約 133 秒後失敗，重試沒用），`kernel-cve.sh` 在上游連不上時會沿用 48 小時內、通過檢查的上一份（`actions/cache` 還原的 `kcve/`），最後一行是 `ATTENTION …`；`mirror` 算成功並記一列 `pipeline-kernel-cve-mirror ATTENTION`，**不擋 Release（正式 tag 也一樣），但 Release 說明、summary.md、release-meta.json 都標出來**。沒有可沿用的、或太舊 = 照舊 FAIL。實作在共用的 `pipeline/lib/mirrors.sh`（其他平台也用它），見 `docs/PLATFORM-INTERFACE.md`。
    Grype 資料庫由 Grype 自己線上更新（`GRYPE_DB_UPDATE=online`）；`MIRROR_REFRESH_STATUS=""`（不檢查常駐環境的鏡像新鮮度）。
 2. **精靈** `tools/wizard/cra-scan.py --yes`：站台設定檔（`SCA_WIZARD_CONFIG` 的替代：`--site-config`）由 `jetson_scan.py site-config` 產生；用 CI 的建置紀錄，不是自編模式；`--platform "$DUMPLING_PLATFORM"` 原樣傳下去，不從映像格式推測。
    `inputs.json` 的 `upstream_set` 與字樣依 `platform_params.l4t_release` 在複本裡改成該版本。SourceCode 是 assemble 重新做出來的、套好 patch 的原始碼樹（上游比對用）；OP-TEE／TF-A 原始碼（`atf_t234_src`、`nvidia-jetson-optee-source`）解開給 `--tee-source`。
