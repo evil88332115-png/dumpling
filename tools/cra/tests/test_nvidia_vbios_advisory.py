@@ -190,12 +190,13 @@ def test_stale_or_unknown_mirror_downgrades_fixed_but_not_affected(tmp_path):
     t = table(tmp_path, *rows)
     late = NOW + datetime.timedelta(days=nva.MAX_MIRROR_AGE_DAYS + 5)
     r = m(t, vb("94.04.6A.00.01"), now=late)
-    assert_na(r, "table-stale") and r["bulletins"] == ["9001"] and "too old" in r["basis"]       # 公告編號留著給人看，但不是 fixed
+    assert r["match"] == "NOT_ASSESSED" and r["reason"] == "table-stale" and NO_DATA in r["basis"] and "too old" in r["basis"]
+    assert r["bulletins"] == ["9001"]                                                             # 公告編號留著給人看，但不是 fixed
     r = m(t, vb("94.04.5E.00.92"), now=late)
     assert r["match"] == "affected" and "refresh the table" in " ".join(r["notes"])
     assert m(t, vb("94.04.6A.00.01"), now=NOW)["match"] == "fixed"                                # 沒過期就是 fixed
     nomirror = table(tmp_path, *rows, mirror=False)
-    assert_na(m(nomirror, vb("94.04.6A.00.01")), "table-stale")                                   # 日期不明也當成過期
+    assert m(nomirror, vb("94.04.6A.00.01"))["reason"] == "table-stale"                           # 日期不明也當成過期
     assert "unknown" in nomirror.label()
     r = m(table(tmp_path), vb(), now=late)
     assert_na(r, "no-row") and "refresh the table" in " ".join(r["notes"])

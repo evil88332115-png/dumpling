@@ -71,7 +71,9 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 
 AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：AMD-SB 的規則表還沒有做，以 AMD 公告為準。
 
-`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。`fw-inventory.md` 每次都有「公告比對」一節；CI 摘要表有「微碼公告比對」欄。
+NVIDIA vBIOS 元件另有 `dumpling:advisory-match`（`affected`／`fixed`／`NOT_ASSESSED`）：用 vBIOS 版本與 option ROM 的 PCI vendor／device ID 查 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（人工審核過的 NVIDIA product-security gpu-firmware 公告；離線，CI 不連網）。目前表裡沒有可比對的列（唯一的公告 5674 是 HGX／DGX 伺服器韌體，判定不適用），所以每個 vBIOS 都是 `NOT_ASSESSED`：資料庫沒有資料，以廠商公告為準（NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告，主要管道是合作夥伴通知）；版本是佔位字串、裝置 ID 讀不到也是 `NOT_ASSESSED`。`affected`、`fixed` 只是對照表裡已審核的列的比對結果，`fixed` 不代表沒有其他漏洞。
+
+`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。`fw-inventory.md` 每次都有「公告比對」一節；CI 摘要表有「公告比對」欄（微碼，有 NVIDIA vBIOS 時再加一段）。
 Intel ME 的 NVD CPE（`dumpling:cpe-*`）見 `docs/notes/c2-firmware-advisory.md`：只放前三段版本，NVD 對 CSME 的資料不完整，Grype 比不到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；family 讀不出來時由版本推定（major 11～30），比對結果待人審。
 規則、資料來源、重新產生資料表的步驟與限制都在那份 notes。
 
