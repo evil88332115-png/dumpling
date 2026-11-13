@@ -645,7 +645,7 @@ def test_analyze_never_raises_even_when_a_stage_or_an_entry_breaks(monkeypatch):
     assert any("internal-error" in a or "parse stages that failed" in a for a in r["attention"])
     monkeypatch.undo()
 
-    def boom3(ctx, rec, i, e, where, depth, stack):
+    def boom3(ctx, rec, i, e, where):
         raise struct.error("boom")
     monkeypatch.setattr(ap, "entry", boom3)
     r = run(good_image())
@@ -1312,3 +1312,480 @@ def test_agesa_raw_only_value_is_listed_alongside_the_walked_one():
     assert set(vals) == {"ComboAM4v2PI 1.1.1.1", "ComboAM4v2PI 2.2.2.2"} and vals["ComboAM4v2PI 2.2.2.2"] == ["image (raw bytes)"]
     assert vals["ComboAM4v2PI 1.1.1.1"][0].startswith("uefi:") and ag["complete"] is False
     assert any("more than one AGESA string" in a for a in r["attention"])
+
+
+# ---------- D-047 複驗後：上限／工具限制／超時不是證據，走訪不依賴處理順序，補殺變異的測試 ----------
+
+def dirs_image(a_dir, b_dir, extra=(), efs_kw=None):
+    """readings_image 的通用版：A（0x30000，基底 0）與 B（0x31000，基底 0x1000）直接給目錄位元組。blob：0x50000 版本 1、0x51000 版本 2。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x51000, psp_blob(1, (2, 2, 2, 2), 0x300))
+    put(img, 0x30000, a_dir)
+    put(img, 0x31000, b_dir)
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    for fn in extra:
+        fn(img)
+    efs(img, at=0x21000, **(efs_kw or {"new_psp": 0x30000}))
+    return img
+
+
+def psp_dir(*ents, **kw):
+    return directory(b"$PSP", list(ents), info=1 << 29, **kw)
+
+
+def st3(r):
+    return {(d["offset"], d["base"]): d["status"] for d in r["directories"]}
+
+
+def test_a_limit_is_not_evidence_the_reading_that_was_not_parsed_does_not_let_the_other_one_be_used(monkeypatch):
+    img = readings_image([one(0x50000)], [one(0x50000)], bad_a=True)
+    assert [p["version"] for p in run(img)["psp_firmware"]] == ["02.02.02.02"]                 # 對照：沒有上限時 A 的 checksum 是證據
+    monkeypatch.setattr(ap, "MAX_ENTRIES_TOTAL", 1)                                             # A（先解析，1 項）用掉全部額度；B 根本沒檢查
+    r = run(readings_image([one(0x50000)], [one(0x50000)], bad_a=False))
+    assert set(st3(r).values()) == {"ambiguous"} and r["psp_firmware"] == [] and "reading-rejected" not in codes(r) and "dir-limit" in codes(r)
+    b = next(d for d in r["directories"] if d["base"] == 0x1000)
+    assert b["parsed"] is False and b["unparsed"][0] == "limit" and b["reading_unknown"] and b["reading_fail"] == []
+    monkeypatch.setattr(ap, "MAX_ENTRIES_TOTAL", 4096)
+    monkeypatch.setattr(ap, "MAX_DIRS", 1)                                                      # B 沒被解析（沒有紀錄）
+    r = run(readings_image([one(0x50000)], [one(0x50000)]))
+    assert r["psp_firmware"] == [] and "reading-rejected" not in codes(r) and "pointer-ambiguous" in codes(r)
+    monkeypatch.setattr(ap, "MAX_DIRS", 64)
+    monkeypatch.setattr(ap, "MAX_DEPTH", -1)                                                    # 深度上限：什麼都沒解析
+    assert run(readings_image([one(0x50000)], [one(0x50000)]))["directories"] == []
+
+
+def test_too_many_entries_is_a_limit_but_a_table_past_the_end_of_the_file_is_evidence():
+    many = directory(b"$PSP", [], info=1 << 29, num=ap.MAX_DIR_ENTRIES + 1)
+    r = run(dirs_image(many, psp_dir(one(0x50000))))
+    assert set(st3(r).values()) == {"ambiguous"} and r["psp_firmware"] == [] and "reading-rejected" not in codes(r)
+    da = next(d for d in r["directories"] if d["base"] == 0)
+    assert da["reading_fail"] == [] and da["reading_unknown"] and da["unparsed"][0] == "limit"          # 項目數上限是限制，不是證據
+    # 項目數合理、但表超出檔案：結構上的證據 → 這一種不採用
+    n = SIZE + 0x1000
+    img = dirs_image(psp_dir(one(0x50000)), psp_dir(one(0x50000)))
+    put(img, n - 0x30, directory(b"$PSP", [], info=1 << 29, num=10))       # 0x31000 的位置換成放在檔案尾端的表不行：用 EFS 指標指到尾端
+    efs(img, at=0x21000, new_psp=n - 0x30 - 0x1000)                        # 視窗讀法 → 檔案尾端那張表（超出檔案）；檔案偏移讀法 → 沒有目錄
+    r = run(img)
+    d = [x for x in r["directories"] if x["offset"] == n - 0x30]
+    assert len(d) == 1 and d[0]["parsed"] is False and d[0]["unparsed"][0] == "evidence" and "dir-truncated" in codes(r)
+
+
+def test_tool_limits_are_unknown_not_evidence():
+    """address mode 3、size 超過 MAX_BLOB、A/B 復原條目的 size 不合：工具不解，不是反證 → 整組維持歧義；位址超出檔案才是證據。"""
+    ok = psp_dir(one(0x50000))
+    for label, ent, info in (("size over MAX_BLOB", psp_ent(1, size=0x7000000, addr=0x50000, mode=1), 1 << 29), ("mode 3", psp_ent(1, size=0x300, addr=0x50000, mode=3), 2 << 29),
+                             ("ish size", psp_ent(0x48, size=0x44, addr=0x50000, mode=1), 1 << 29)):
+        a = directory(b"$PSP", [ent], info=info)
+        r = run(dirs_image(a, ok))
+        assert set(st3(r).values()) == {"ambiguous"} and "reading-rejected" not in codes(r) and r["psp_firmware"] == [], label
+        da = next(d for d in r["directories"] if d["base"] == 0)
+        assert da["reading_unknown"] and not da["reading_fail"], label
+    r = run(dirs_image(psp_dir(psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)), ok))              # 對照：範圍超出檔案是證據
+    assert st3(r) == {(0x30000, 0): "rejected", (0x31000, 0x1000): "adopted"}
+    # 條目解析出錯（不該發生）也是無法判斷
+    r = run(dirs_image(psp_dir(psp_ent(1, size=0x300, addr=0x50000, mode=1)), ok))
+    assert set(st3(r).values()) == {"ambiguous"}
+
+
+def test_a_timeout_in_the_middle_of_the_directory_stage_never_adopts_or_rejects():
+    class Over(Exception):
+        pass
+
+    class Budget:
+        def __init__(self, k):
+            self.k, self.c = k, 0
+
+        def check(self):
+            self.c += 1
+            if self.c > self.k:
+                raise Over("time limit")
+    bad = psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)
+    img = dirs_image(psp_dir(bad, one(0x50000)), psp_dir(one(0x50000)))
+    full = ap.analyze(bytes(img))
+    assert set(st3(full).values()) == {"rejected", "adopted"}                                      # 沒有超時：A 有證據、B 被採用
+    stopped = 0
+    for k in range(0, 5):
+        r = ap.analyze(bytes(img), Budget(k), (Over,))
+        if any("directory parse stopped early" in x for x in r["incomplete"]):         # 目錄階段被打斷
+            stopped += 1
+            assert "rejected" not in st3(r).values() and "adopted" not in st3(r).values() and r["psp_firmware"] == [], k
+    assert stopped >= 2
+    # 單一紀錄沒解析完（complete=False）時 reading_state 回「無法判斷」
+    rec = {"complete": False, "unparsed": None, "parsed": True, "checksum_ok": True, "entries": [], "kind": "psp", "size": 16, "offset": 0}
+    ev, unk = ap.reading_state(rec)
+    assert ev == [] and unk and "not fully parsed" in unk[0]
+
+
+def loop_image():
+    """兩個 L1 互相指到對方（L2 指標），加上競爭的讀法：有循環時所有競爭的讀法維持歧義。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x51000, psp_blob(1, (2, 2, 2, 2), 0x300))
+    put(img, 0x30000, psp_dir(one(0x50000), psp_ent(0x40, size=0x400, addr=0x34000, mode=1)))
+    put(img, 0x31000, psp_dir(one(0x4F000), psp_ent(0x40, size=0x400, addr=0x33000, mode=1)))        # 兩邊內容相同（都到 0x50000、子目錄都到 0x34000）
+    put(img, 0x34000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=0x30000, mode=1), one(0x4F000)], info=1 << 29))
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, at=0x21000, new_psp=0x30000)
+    return img
+
+
+def test_a_loop_makes_every_competing_reading_ambiguous_and_is_order_independent(monkeypatch):
+    img = loop_image()
+    r = run(img)
+    assert "dir-loop" in codes(r)
+    comp = [d for d in r["directories"] if d["offset"] in (0x30000, 0x31000)]
+    assert comp and all(d["status"] == "ambiguous" for d in comp)
+    assert any("a directory loop was found" in p["text"] for p in r["problems"] if p["code"] == "pointer-ambiguous")
+    before = norm(r)
+    monkeypatch.setattr(ap, "EFS_POINTERS", tuple(reversed(ap.EFS_POINTERS)))
+    assert norm(run(img)) == before
+
+
+def test_each_record_is_parsed_at_its_shallowest_depth_whatever_the_pointer_order(monkeypatch):
+    """同一個目錄可以從深度 1 或深度 3 到得了：深度上限（MAX_DEPTH）下一律用最淺的深度，所以不論先走哪條路都會被解析。"""
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x50000, psp_blob(1, (7, 7, 7, 7), 0x300))
+    put(img, 0x38000, directory(b"$PL2", [psp_ent(1, size=0x300, addr=phys(0x50000))]))                                  # 目標 T
+    put(img, 0x37000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x38000))]))
+    put(img, 0x36000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x37000))]))
+    put(img, 0x35000, directory(b"$PL2", [psp_ent(0x40, size=0x400, addr=phys(0x36000))]))
+    long_first = [psp_ent(0x40, size=0x400, addr=phys(0x35000)), psp_ent(0x40, size=0x400, addr=phys(0x38000))]
+    monkeypatch.setattr(ap, "MAX_DEPTH", 1)
+    results = []
+    for ents in (long_first, long_first[::-1]):                                  # 長的路徑（深度 4）在前或在後
+        put(img, 0x30000, directory(b"$PSP", ents))
+        efs(img, new_psp=0x30000)
+        results.append(run(img))
+    assert norm(results[0]) == norm(results[1])
+    offs = {d["offset"] for d in results[0]["directories"]}
+    assert 0x38000 in offs and 0x35000 in offs and 0x36000 not in offs and "dir-limit" in codes(results[0])
+
+
+def rand_image(seed):
+    rnd = random.Random(seed)
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    slots = [0x30000 + 0x1000 * i for i in range(10)]
+    for b, v in zip((0x50000, 0x51000, 0x52000), (1, 2, 1)):
+        put(img, b, psp_blob(1, (v,) * 4, 0x300))
+    for s in slots:
+        k = rnd.choice(["psp", "l2", "combo", "none", "psp"])
+        if k == "none":
+            continue
+        if k == "combo":
+            put(img, s, combo(rnd.choice([b"2PSP", b"2BHD"]), [(0xBC0A0000 + j, rnd.choice(slots) - rnd.choice([0, 0x1000])) for j in range(rnd.randrange(1, 4))]))
+            continue
+        ents = []
+        for _ in range(rnd.randrange(1, 4)):
+            r = rnd.random()
+            tgt = max(rnd.choice([0x50000, 0x51000, 0x52000]) - rnd.choice([0, 0x1000]), 0)
+            ents.append(psp_ent(1, size=0x300, addr=tgt, mode=1) if r < 0.5 else psp_ent(0x40, size=0x400, addr=max(rnd.choice(slots) - rnd.choice([0, 0x1000]), 0), mode=1) if r < 0.85
+                        else psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1))
+        put(img, s, directory(b"$PSP" if k == "psp" else b"$PL2", ents, info=1 << 29, bad_checksum=rnd.random() < 0.15))
+    for at in (0x20000, 0x21000):
+        efs(img, at=at, new_psp=rnd.choice(slots) - rnd.choice([0, 0x1000]), extra={0x10: rnd.choice(slots) - rnd.choice([0, 0x1000]), 0x2C: rnd.choice(slots)})
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    return img
+
+
+def strict_json(r):
+    import json
+    return json.dumps(r, sort_keys=True, default=str)
+
+
+def test_random_images_with_loops_and_limits_give_identical_results_in_any_order(monkeypatch):
+    seen = {"loop": 0, "limit": 0, "adopted": 0, "rejected": 0}
+    for lim in (None, ("MAX_ENTRIES_TOTAL", 9), ("MAX_DIRS", 5), ("MAX_DEPTH", 1)):
+        with monkeypatch.context() as m:
+            if lim:
+                m.setattr(ap, lim[0], lim[1])
+            for seed in range(40):
+                img = rand_image(seed)
+                base = strict_json(run(img))
+                r0 = run(img)
+                seen["loop"] += "dir-loop" in codes(r0)
+                seen["limit"] += "dir-limit" in codes(r0)
+                seen["adopted"] += any(d["status"] == "adopted" for d in r0["directories"])
+                seen["rejected"] += any(d["status"] == "rejected" for d in r0["directories"])
+                with m.context() as m2:
+                    m2.setattr(ap, "EFS_POINTERS", tuple(reversed(ap.EFS_POINTERS)))
+                    real = ap.find_efs
+                    m2.setattr(ap, "find_efs", lambda ctx: list(reversed(real(ctx))))
+                    assert strict_json(run(img)) == base, (lim, seed)
+    assert all(seen.values()), seen                                  # 迴圈、上限、採用、不採用都真的出現過
+
+
+def test_outputs_are_sorted_by_stable_keys_including_hash_and_offset():
+    img = good_image()
+    r = run(img)
+    keys = [(p["type"], p["subprogram"], p["version"], p["sha256"] or "", p["size"]) for p in r["psp_firmware"]]
+    assert keys == sorted(keys)
+    assert [e["directories_found"] for e in r["efs"]] == [len(r["directories"])]          # 單一 EFS：到得了的紀錄數＝全部（不是處理順序算出來的計數）
+
+
+def test_three_way_competition_needs_all_passers_to_agree():
+    def build3(contents, bad=None):
+        img = bytearray(b"\xff" * (SIZE + 0x3000))
+        for i, v in enumerate(contents):
+            put(img, 0x50000 + 0x1000 * i, psp_blob(1, (v,) * 4, 0x300))
+        put(img, 0x30000, directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=1)] + ([bad] if bad else []), info=1 << 29))
+        put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+        efs(img, new_psp=0x30000, at=0x20000)
+        efs(img, new_psp=0x2F000, at=0x21000)
+        efs(img, new_psp=0x2E000, at=0x22000)
+        return run(img)
+    r = build3([1, 1, 1])
+    assert set(st3(r).values()) == {"adopted"} and [p["version"] for p in r["psp_firmware"]] == ["01.01.01.01"]
+    for contents in ([1, 1, 2], [1, 2, 1], [2, 1, 1], [1, 2, 3]):                                 # 三個讀法裡只要有兩個不同，三個都不採用
+        r = build3(contents)
+        assert set(st3(r).values()) == {"ambiguous"} and r["psp_firmware"] == [], contents
+    r = build3([1, 1, 1], bad=psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1))                  # 三個都超出檔案 → 都沒通過 → 歧義，不是三個都不採用
+    assert set(st3(r).values()) == {"ambiguous"} and "reading-rejected" not in codes(r)
+
+
+def test_a_missing_hash_never_counts_as_the_same_content(monkeypatch):
+    ctx = ap.Ctx(bytes(0x1000), None)
+    ctx.hash_left = 0
+    ent = {"kind": "blob", "index": 0, "type": 1, "size": 0x10, "offset": 0x100}
+    assert ap.entry_sig(ctx, ent) is None
+    rec = {"kind": "psp", "num_entries": 1, "entries": [ent]}
+    assert ap.same_content(ctx, rec, dict(rec)) is False
+    # 整張映像：雜湊上限用完 → 兩邊都通過、內容相同的讀法也不能被採用（不判斷）
+    monkeypatch.setattr(ap, "MAX_HASH_TOTAL", 0x100)
+    r = run(readings_image([one(0x50000)], [one(0x4F000)]))
+    assert set(st3(r).values()) == {"ambiguous"} and "hash-limit" in codes(r) and "reading-equivalent" not in codes(r)
+
+
+def bhd_dirs(a_ents, b_ents, extra=()):
+    img = dirs_image(directory(b"$BHD", a_ents, info=1 << 29), directory(b"$BHD", b_ents, info=1 << 29), extra=extra, efs_kw={"bios0": 0x30000})
+    return run(img)
+
+
+def test_every_field_of_the_entry_interpretation_decides_whether_two_readings_are_the_same():
+    same = psp_ent(1, size=0x300, addr=0x50000, mode=1)
+    same_b = psp_ent(1, size=0x300, addr=0x4F000, mode=1)                                          # 基底 0x1000 → 同一份 blob
+    assert set(st3(run(dirs_image(psp_dir(same), psp_dir(same_b)))).values()) == {"adopted"}      # 對照：完全相同
+    for label, other in (("type", psp_ent(8, size=0x300, addr=0x4F000, mode=1)), ("subprogram", psp_ent(1, sub=1, size=0x300, addr=0x4F000, mode=1)),
+                         ("instance flags", psp_ent(1, size=0x300, addr=0x4F000, mode=1, flags=0x8)), ("size", psp_ent(1, size=0x2F0, addr=0x4F000, mode=1))):
+        r = run(dirs_image(psp_dir(same), psp_dir(other)))
+        assert set(st3(r).values()) == {"ambiguous"}, label
+    # 值型條目（size 0xFFFFFFFF）：位址欄位是值，不同就不同
+    v1, v2 = psp_ent(0x0B, size=0xFFFFFFFF, addr=1), psp_ent(0x0B, size=0xFFFFFFFF, addr=2)
+    assert set(st3(run(dirs_image(psp_dir(v1), psp_dir(v1)))).values()) == {"adopted"}
+    assert set(st3(run(dirs_image(psp_dir(v1), psp_dir(v2)))).values()) == {"ambiguous"}
+    # BIOS 目錄：destination、壓縮條目的位置
+    d1, d2 = bhd_ent(0x61, 0, 0, dest=0xA200000), bhd_ent(0x61, 0, 0, dest=0xA300000)
+    assert set(st3(bhd_dirs([d1], [d1])).values()) == {"adopted"}
+    assert set(st3(bhd_dirs([d1], [d2])).values()) == {"ambiguous"}
+    c_a, c_same, c_other = bhd_ent(0x62, 0x300, 0x50000, f1=0x08, mode=1), bhd_ent(0x62, 0x300, 0x4F000, f1=0x08, mode=1), bhd_ent(0x62, 0x300, 0x50000, f1=0x08, mode=1)
+    assert set(st3(bhd_dirs([c_a], [c_same])).values()) == {"adopted"}                              # 同一個位置
+    assert set(st3(bhd_dirs([c_a], [c_other])).values()) == {"ambiguous"}                           # 位置不同（內容雖然可能相同，壓縮內容不解讀）
+
+
+def test_pointer_children_slot_headers_combo_ids_and_kinds_decide_sameness():
+    # 目錄指標條目：子目錄的位置不同 → 不同；相同 → 相同
+    def l2(img):
+        put(img, 0x34000, directory(b"$PL2", [], info=1 << 29))
+        put(img, 0x35000, directory(b"$PL2", [], info=1 << 29))
+    p_a = psp_ent(0x40, size=0x400, addr=0x34000, mode=1)
+    p_same = psp_ent(0x40, size=0x400, addr=0x33000, mode=1)       # 基底 0x1000 → 0x34000
+    p_other = psp_ent(0x40, size=0x400, addr=0x34000, mode=1)       # 基底 0x1000 → 0x35000
+    assert st3(run(dirs_image(psp_dir(p_a), psp_dir(p_same), extra=[l2])))[(0x30000, 0)] == "adopted"
+    assert st3(run(dirs_image(psp_dir(p_a), psp_dir(p_other), extra=[l2])))[(0x30000, 0)] == "ambiguous"
+    # 目錄種類不同（$PSP 與 $PL2）、其餘相同 → 不同
+    k_a, k_b = directory(b"$PSP", [one(0x50000)], info=1 << 29), directory(b"$PL2", [one(0x4F000)], info=1 << 29)
+    assert set(st3(run(dirs_image(k_a, k_b))).values()) == {"ambiguous"}
+    # Image Slot Header：兩個讀法都有效、pl2 到同一個 L2，但 slot header 的內容（欄位值）不同 → 不同
+    def ish_extra(img):
+        put(img, 0x52000, ish_bytes(0x54000, prio=1))        # 基底 0 → 0x52000
+        put(img, 0x53000, ish_bytes(0x53000, prio=2))        # 基底 0x1000 → 0x53000，pl2 0x53000 + 0x1000 → 0x54000
+        put(img, 0x54000, directory(b"$PL2", [], info=1 << 29))
+    i_ent = psp_ent(0x48, size=0, addr=0x52000, mode=1)
+    r = run(dirs_image(psp_dir(i_ent), psp_dir(i_ent), extra=[ish_extra]))
+    assert st3(r)[(0x30000, 0)] == "ambiguous" and all(not d["reading_fail"] for d in r["directories"] if d["offset"] in (0x30000, 0x31000))
+    # combo：id 不同、子目錄不同 → 不同；都相同 → 相同
+    def combo_dirs(a_id, a_addr, b_id, b_addr, also=()):
+        def ex(img):
+            for o in (0x40000, *also):
+                put(img, o, directory(b"$PSP", [], info=1 << 29))
+        return run(dirs_image(combo(b"2PSP", [(a_id, a_addr)]), combo(b"2PSP", [(b_id, b_addr)]), extra=[ex]))
+    assert st3(combo_dirs(0xBC0A0000, 0x40000, 0xBC0A0000, 0x3F000))[(0x30000, 0)] == "adopted"      # 子目錄都是 0x40000
+    assert st3(combo_dirs(0xBC0A0000, 0x40000, 0xBC0B0000, 0x3F000))[(0x30000, 0)] == "ambiguous"    # id 不同
+    assert st3(combo_dirs(0xBC0A0000, 0x40000, 0xBC0A0000, 0x3E000, also=(0x3F000,)))[(0x30000, 0)] == "ambiguous"    # 子目錄不同（B 到 0x3F000，A 到 0x40000）
+
+
+def test_directory_table_adjacent_to_its_own_entry_boundaries():
+    """目錄表 [0x30000, 0x30020)（一個項目）。條目結束在表開頭、或起點在表結尾：不重疊；多一個 byte 就是證據。"""
+    ok = psp_dir(one(0x50000))
+    def probe(start, size):
+        r = run(dirs_image(psp_dir(psp_ent(1, size=size, addr=start, mode=1)), ok))
+        return st3(r)[(0x30000, 0)]
+    assert probe(0x2FD00, 0x300) == "ambiguous"        # 結束在 0x30000：不重疊 → 通過，和 B 內容不同 → 歧義
+    assert probe(0x30020, 0x300) == "ambiguous"        # 起點在表結尾：不重疊
+    assert probe(0x2FD01, 0x300) == "rejected"          # 多進表 1 byte
+    assert probe(0x2FD00, 0x301) == "rejected"          # 結束晚 1 byte（起點在表之前、結束在表裡）
+    assert probe(0x3001F, 0x300) == "rejected"          # 起點在表的最後 1 byte 內
+    assert probe(0x2FF00, 0x400) == "rejected"          # 整張表在條目裡
+
+
+def test_slot_header_whose_pl2_does_not_lead_to_a_directory_is_evidence():
+    def ex(img):
+        put(img, 0x52000, ish_bytes(0x60000))              # 基底 0：有效的 slot header，但 pl2_location 0x60000 沒有目錄 cookie（0x60000 是 $BHD…改用別處）
+        put(img, 0x53000, ish_bytes(0x53000))              # 基底 0x1000：pl2 → 0x54000 的 L2
+        put(img, 0x54000, directory(b"$PL2", [], info=1 << 29))
+        put(img, 0x60000, b"\x11" * 32)
+    i_ent = psp_ent(0x48, size=0, addr=0x52000, mode=1)
+    r = run(dirs_image(psp_dir(i_ent), psp_dir(i_ent), extra=[ex]))
+    a = next(d for d in r["directories"] if d["offset"] == 0x30000)
+    assert a["status"] == "rejected" and any("pl2_location" in x for x in a["rejected_because"])
+
+
+def test_a_child_reached_from_a_rejected_and_an_ambiguous_parent_is_ambiguous():
+    """C 同時在被拒絕的 Y1 和歧義的 X1 底下：只有所有進來的邊都是被拒絕的才算 rejected，這裡要是 ambiguous。"""
+    img = bytearray(b"\xff" * (SIZE + 0x1000))
+    put(img, 0x50000, psp_blob(1, (1, 1, 1, 1), 0x300))
+    put(img, 0x51000, psp_blob(1, (2, 2, 2, 2), 0x300))
+    put(img, 0x34000, directory(b"$PL2", [], info=1 << 29))
+    c_ptr = psp_ent(0x40, size=0x400, addr=0x34000, mode=1)
+    put(img, 0x30000, psp_dir(one(0x50000), c_ptr))                                   # X1：基底 0
+    put(img, 0x31000, psp_dir(one(0x50000)))                                          # X2：基底 0x1000，內容不同 → X 組歧義
+    put(img, 0x38000, psp_dir(c_ptr, psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)))  # Y1：基底 0，條目超出檔案 → 沒通過
+    put(img, 0x39000, psp_dir(one(0x50000)))                                          # Y2：基底 0x1000，通過
+    put(img, 0x60000, directory(b"$BHD", [bhd_ent(0x60, 0x104, 0x43000)]))
+    efs(img, at=0x21000, new_psp=0x30000, psp=0x38000)
+    r = run(img)
+    s = st3(r)
+    assert s[(0x38000, 0)] == "rejected" and s[(0x39000, 0x1000)] == "adopted" and s[(0x30000, 0)] == "ambiguous"
+    assert s[(0x34000, 0)] == "ambiguous"
+    # 兩個父目錄都被拒絕時才是 rejected
+    put(img, 0x30000, psp_dir(one(0x50000), c_ptr, psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1)))
+    put(img, 0x31000, psp_dir(one(0x50000)))
+    s = st3(run(img))
+    assert s[(0x30000, 0)] == "rejected" and s[(0x34000, 0)] == "rejected"
+
+
+def test_a_competing_reading_that_was_never_parsed_blocks_adoption(monkeypatch):
+    """一組裡有讀法沒有紀錄（例如超過目錄數上限而沒解析）：另一邊即使通過也不能被採用。上限的全域保險關掉（只看這一道檢查）。"""
+    img = readings_image([one(0x50000)], [one(0x50000)], bad_a=True)
+    ctx_limit = ap.Ctx.limit
+    monkeypatch.setattr(ap, "MAX_DIRS", 1)
+    monkeypatch.setattr(ap.Ctx, "limit", lambda self, where, text, code="dir-limit": self.problem(code, where, text))
+    r = run(img)
+    assert "reading-rejected" not in codes(r) and r["psp_firmware"] == []
+    monkeypatch.setattr(ap.Ctx, "limit", ctx_limit)
+
+
+# ---------- AGESA：標記只在壓縮內容裡（原始位元組沒有）時，每一種「走訪沒走完」都要讓搜尋不完整 ----------
+
+def agesa_lz():
+    M = b"AGESA!V9\x00ComboAM4v2PI 9.9.9.9\x00" + b"\x00" * 8
+    lz = lzma.compress(secs(sec(0x10, b"MZ" + b"\x00" * 30 + M)), format=lzma.FORMAT_ALONE)
+    return lz, ffs(0x07, secs(guided(LZMA, lz)), k=2)
+
+
+def agesa_with(blob, off=0x80000):
+    img = bytearray(b"\xff" * SIZE)
+    put(img, off, blob)
+    assert b"AGESA!V" not in bytes(img)
+    return run(img)["agesa"]
+
+
+def test_agesa_only_in_compressed_content_each_incomplete_reason_makes_the_search_incomplete(monkeypatch):
+    lz, comp = agesa_lz()
+    ag = agesa_with(fv([comp]))
+    assert ag["complete"] is True and [x["value"] for x in ag["values"]] == ["ComboAM4v2PI 9.9.9.9"]               # 對照
+    ag = agesa_with(fv([ffs(0x07, secs(guided(LZMA, lz)) + b"\x00\x00\x00\x01", k=2)]))                            # 結構警告（notes）
+    assert ag["complete"] is False and any("structure warnings" in p for p in ag["problems"])
+    ui = ap._sibling("uefi_image")
+    monkeypatch.setattr(ui, "MAX_FILES", 0)                                                                         # Stop
+    ag = agesa_with(fv([comp]))
+    assert ag["complete"] is False and any("reached a limit" in p for p in ag["problems"])
+    monkeypatch.undo()
+    monkeypatch.setattr(ap, "MAX_AGESA_INSPECT", 10)                                                                # 搜尋量上限
+    ag = agesa_with(fv([comp]))
+    assert ag["complete"] is False and any("bytes of UEFI content" in p for p in ag["problems"])
+    monkeypatch.undo()
+    monkeypatch.setattr(ap, "MAX_AGESA_MARKERS", 0)                                                                 # 標記數上限
+    ag = agesa_with(fv([comp]))
+    assert ag["complete"] is False and any("more than 0 AGESA markers" in p for p in ag["problems"])
+
+
+def test_agesa_nonblank_bytes_outside_any_firmware_volume_make_the_search_incomplete():
+    """FV 以外的非空白位元組只被當原始內容搜尋，裡面的 LZMA 串流不會被解開：不能算完整（不再依賴 uefi_image 的 reason 字串）。"""
+    lz, comp = agesa_lz()
+    img = bytearray(b"\xff" * SIZE)
+    put(img, 0x80000, fv([comp]))
+    put(img, 0x40000, lz)
+    ag = run(img)["agesa"]
+    assert ag["complete"] is False and any("not decoded" in p for p in ag["problems"])
+    assert agesa_with(fv([comp]))["complete"] is True
+
+
+def test_an_unknown_reading_never_lets_a_failing_sibling_be_rejected_or_the_unknown_one_be_adopted():
+    mode3 = directory(b"$PSP", [psp_ent(1, size=0x300, addr=0x50000, mode=3)], info=2 << 29)           # A：條目是工具不解的 address mode 3（無法判斷）
+    r = run(dirs_image(mode3, psp_dir(one(0x50000), bad_checksum=True)))                                 # B：checksum 不符（證據）
+    assert set(st3(r).values()) == {"ambiguous"} and "reading-rejected" not in codes(r) and r["psp_firmware"] == []
+    r = run(dirs_image(mode3, psp_dir(psp_ent(1, size=0x300, addr=0x7FFFFFF0, mode=1))))                # B：範圍超出檔案（證據）
+    assert set(st3(r).values()) == {"ambiguous"} and "reading-rejected" not in codes(r)
+
+
+def test_the_reading_that_was_never_parsed_is_reported_and_blocks_adoption_without_a_crash(monkeypatch):
+    img = readings_image([one(0x50000)], [one(0x50000)], bad_a=True)
+    monkeypatch.setattr(ap, "MAX_DIRS", 1)
+    monkeypatch.setattr(ap.Ctx, "limit", lambda self, where, text, code="dir-limit": self.problem(code, where, text))      # 全域保險關掉，只看這一道檢查
+    r = run(img)
+    assert "internal-error" not in codes(r) and "reading-rejected" not in codes(r) and r["psp_firmware"] == []
+    assert any("was not parsed" in p["text"] for p in r["problems"] if p["code"] == "pointer-ambiguous")
+
+
+def test_a_directory_stage_that_stops_after_every_record_was_parsed_still_adopts_nothing(monkeypatch):
+    class Over(Exception):
+        pass
+
+    def boom(ctx):
+        raise Over("time limit")
+    monkeypatch.setattr(ap, "finish_walk", boom)
+    r = ap.analyze(bytes(readings_image([one(0x50000)], [one(0x50000)], bad_a=True)), None, (Over,))
+    assert len(r["directories"]) == 2 and all(d["complete"] for d in r["directories"]) and set(st3(r).values()) == {"ambiguous"}
+    assert r["psp_firmware"] == [] and any("directory parse stopped early" in x for x in r["incomplete"])
+
+
+def test_hash_limit_reached_while_comparing_makes_every_competing_group_ambiguous(monkeypatch):
+    """兩組內容相同的讀法：雜湊額度只夠比第一組。哪一組被比到取決於順序 → 全部不判斷（不是第一組採用、第二組歧義）。"""
+    img = dirs_image(psp_dir(one(0x50000)), psp_dir(one(0x4F000)), efs_kw={"new_psp": 0x30000, "psp": 0x32000},
+                     extra=[lambda i: put(i, 0x52000, psp_blob(1, (3, 3, 3, 3), 0x300)), lambda i: put(i, 0x32000, psp_dir(psp_ent(1, size=0x300, addr=0x52000, mode=1))),
+                            lambda i: put(i, 0x33000, psp_dir(psp_ent(1, size=0x300, addr=0x51000, mode=1)))])
+    assert set(st3(run(img)).values()) == {"adopted"}                                                        # 額度夠：兩組都相同、都採用
+    monkeypatch.setattr(ap, "MAX_HASH_TOTAL", 0x380)
+    r = run(img)
+    assert set(st3(r).values()) == {"ambiguous"} and "hash-limit" in codes(r)
+
+
+def test_a_limit_anywhere_makes_unrelated_competing_readings_ambiguous_and_levels_are_processed_in_sorted_order(monkeypatch):
+    many = directory(b"$PSP", [], info=1 << 29, num=ap.MAX_DIR_ENTRIES + 1)
+    img = readings_image([one(0x50000)], [one(0x50000)], bad_a=True, extra=[lambda i: put(i, 0x38000, many)])
+    base = run(img)
+    assert st3(base)[(0x31000, 0x1000)] == "adopted"                                                           # 對照：沒有指到那張表時，B 被採用
+    efs(img, at=0x21000, new_psp=0x30000, psp=0x38000 - 0x1000)                                                 # 另一個指標指到項目數太多的目錄
+    r = run(img)
+    assert "dir-too-many-entries" in codes(r) and st3(r)[(0x31000, 0x1000)] == "ambiguous" and "reading-rejected" not in codes(r)
+    # 同一層依（位置，基底）排序：目錄數上限只夠一個時，解析的是位置最小的那個
+    monkeypatch.setattr(ap, "MAX_DIRS", 1)
+    r = run(readings_image([one(0x50000)], [one(0x50000)]))
+    assert [(d["offset"], d["base"]) for d in r["directories"]] == [(0x30000, 0)] and "dir-limit" in codes(r)
+
+
+def test_bios_entry_instance_decides_sameness():
+    a, b = bhd_ent(0x62, 0x300, 0x50000, f1=0x00, mode=1), bhd_ent(0x62, 0x300, 0x4F000, f1=0x10, mode=1)         # 其餘相同、instance 不同（f1 的高 4 位）
+    assert set(st3(bhd_dirs([a], [b])).values()) == {"ambiguous"}
+    assert set(st3(bhd_dirs([a], [bhd_ent(0x62, 0x300, 0x4F000, f1=0x00, mode=1)])).values()) == {"adopted"}
+
+
+def test_walk_processes_a_level_in_sorted_order_whatever_the_insertion_order(monkeypatch):
+    img = dirs_image(psp_dir(one(0x50000)), psp_dir(one(0x50000)), extra=[lambda i: put(i, 0x32000, psp_dir(one(0x50000)))])
+    monkeypatch.setattr(ap, "MAX_DIRS", 1)
+    for order in ([(0x31000, 0), (0x30000, 0), (0x32000, 0)], [(0x32000, 0), (0x31000, 0), (0x30000, 0)], [(0x30000, 0), (0x32000, 0), (0x31000, 0)]):
+        ctx = ap.Ctx(bytes(img), None)
+        ctx.pending = {k: 0x100000 for k in order}
+        ap.walk(ctx)
+        assert [(r["offset"], r["base"]) for r in ctx.dirs] == [(0x30000, 0)] and ctx.uncertain, order
