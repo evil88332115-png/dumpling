@@ -1752,21 +1752,39 @@ def test_freshness_stages_reach_risk_status(tmp_path, stages, level, expect):
     assert d["status"] == level and any(expect in x for x in d["detail"]), d
 
 
-@pytest.mark.parametrize("stages", [
-    {"C-grype-db-update": "NOT_RUN"},        # GRYPE_DB_UPDATE=off：年齡由 C-grype-db 判斷
-    {"C-dt-feeds": "NOT_RUN"},               # 沒用 DT：D-dt-data-sources 已反映
-    {"C-dt-feeds": "OK", "C-mirror-freshness": "OK", "C-grype-db-update": "OK"},
+@pytest.mark.parametrize("stages,reason", [
+    ({"C-grype-db-update": "NOT_RUN"}, None),        # GRYPE_DB_UPDATE=off：年齡由 C-grype-db 判斷
+    ({"C-dt-feeds": "NOT_RUN"}, "dt_not_used"),      # 沒用 DT：D-dt-data-sources 已反映
+    ({"C-dt-feeds": "NOT_RUN"}, "dtsources_failed"),  # dtsources.py 失敗：D-dt-data-sources 是 FAIL
+    ({"C-dt-feeds": "OK", "C-mirror-freshness": "OK", "C-grype-db-update": "OK"}, None),
 ])
-def test_freshness_stages_not_gap_when_harmless(tmp_path, stages):
+def test_freshness_stages_not_gap_when_harmless(tmp_path, stages, reason):
     proj = make_project(tmp_path / "proj")
-    r, s, _ = run(proj, make_scan(tmp_path / "scan", stages=stages))
+    meta = dict(META, dt_feeds_reason=reason) if reason else META
+    r, s, _ = run(proj, make_scan(tmp_path / "scan", stages=stages, meta=meta))
     r0, s0, _ = run(make_project(tmp_path / "proj0"), make_scan(tmp_path / "scan0"))
     assert s["documents"]["risk-assessment"]["status"] == s0["documents"]["risk-assessment"]["status"], s["documents"]["risk-assessment"]
 
 
-def test_dt_feeds_not_run_for_permission_is_gap(tmp_path):
-    scan = make_scan(tmp_path / "scan")
-    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t金鑰沒有 SYSTEM_CONFIGURATION_READ，無法得知\n"
+@pytest.mark.parametrize("reason", ["permission_denied", "no_data", None, "", "bogus"])
+def test_dt_feeds_not_run_is_gap_unless_dt_was_not_used(tmp_path, reason):
+    """M7b：C-dt-feeds 的 NOT_RUN 看 meta.json 的 dt_feeds_reason（不看說明文字）。金鑰沒權限、沒讀到資料源狀態、
+    沒有原因代碼或代碼不認得 → GAP（D-043）。"""
+    meta = dict(META)
+    if reason is not None:
+        meta["dt_feeds_reason"] = reason
+    scan = make_scan(tmp_path / "scan", meta=meta)
+    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t（說明文字不影響判定）\n"
     (scan / "status.tsv").write_text(st, encoding="utf-8")
     r, s, _ = run(make_project(tmp_path / "proj"), scan)
     assert s["documents"]["risk-assessment"]["status"] == "GAP" and any("C-dt-feeds is NOT_RUN" in x for x in s["documents"]["risk-assessment"]["detail"])
+
+
+def test_dt_feeds_detail_text_no_longer_matters(tmp_path):
+    """舊做法看說明文字有沒有 SYSTEM_CONFIGURATION_READ；現在 dt_not_used 時就算說明文字含這個字也不降級。"""
+    scan = make_scan(tmp_path / "scan", meta=dict(META, dt_feeds_reason="dt_not_used"))
+    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t金鑰沒有 SYSTEM_CONFIGURATION_READ\n"
+    (scan / "status.tsv").write_text(st, encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "proj"), scan)
+    r0, s0, _ = run(make_project(tmp_path / "proj0"), make_scan(tmp_path / "scan0"))
+    assert s["documents"]["risk-assessment"]["status"] == s0["documents"]["risk-assessment"]["status"]
