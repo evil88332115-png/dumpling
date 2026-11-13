@@ -3,9 +3,6 @@ name: watch
 # 權限照 D-012：預設唯讀；compute 只讀，notify 只有 issues: write，keepalive 只有 actions: write。
 # 公開 repo 只做演練與公開資料；GitLab 階段「已被利用」的真實案件一律用私有 Issue（docs/GITLAB-PORT.md）。
 on:
-  # 暫時：讓新 workflow 在非預設分支登錄（push 時所有 job 都跳過）；開 PR 前拿掉
-  push:
-    branches: [wp2/watch]
   schedule:
     - cron: '17 1 * * *'
   workflow_dispatch:
