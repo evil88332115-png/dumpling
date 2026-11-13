@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AMD 平台 BIOS 映像的 PSP／BIOS 目錄、微碼與 AGESA 版本：只讀解析（x86_firmware.py 辨識出 AMD 平台時呼叫 analyze()）。
 
-只依賴標準函式庫與同目錄的 uefi_image.py（C1；找 AGESA 字串時用它解開 firmware volume），而且只用它的公開介面：Scan 子類別覆寫 scan_bytes、parse_fvs、Stop、Scan 的結果欄位（fvs、files、layers、undecoded、notes、parse_errors）；不讀它呼叫端的區域變數。
+只依賴標準函式庫與同目錄的 uefi_image.py（C1；找 AGESA 字串時用它解開 firmware volume），而且只用它的公開介面：Scan 子類別覆寫 scan_bytes、parse_fvs、Stop、Scan 的結果欄位（fvs、files、undecoded、notes、parse_errors）；不讀它呼叫端的區域變數。
 輸入是不可信資料：只讀、不執行、不寫磁碟；
 所有欄位先對照檔案範圍與上限（MAX_*）才使用；看不懂的一律記 problem（對外是 GAP），不猜。analyze() 永遠回傳 dict、不丟例外
 （soft 參數列的例外＝超時，也只記為不完整）：單一條目的解析錯誤只影響那個條目（problem `entry-error`），其他階段出錯記在 incomplete，已有的結果照給。
@@ -14,9 +14,8 @@
 2. 每個目錄項目：type、subprogram、instance、rom id、位置、大小、旗標。PSP 韌體條目的標頭（0x100 bytes）通過檢查才讀版本；其餘版本欄位記 GAP。
 3. BIOS 目錄 type 0x66 的 AMD 微碼：patch level（patch_id）、日期、equivalence id；微碼前面有 container 的等價表（`DMA\\0`）時才對出 CPUID，
    否則只列 equivalence id（不猜對照）。
-4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外找整個映像原始位元組裡的標記；原始位元組裡的每個標記都要能證明走訪搜尋過
-   「同一個位置」才算涵蓋，證明只用 uefi_image 的公開介面（見 agesa_search 的註解與 notes）；證明不了的（例如在 UI section、空白區、被刪除的複本，或和解壓縮出來的內容位元組相同的另一處）
-   一律讓搜尋標為不完整並列出；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
+4. AGESA 版本字串（`AGESA!V<n>` 後面接的字串）：走訪 firmware volume（LZMA 等解開）搜尋，另外找整個映像原始位元組裡的標記；原始位元組裡只要有任何標記就讓搜尋標為不完整
+   （公開介面沒有辦法證明那個位置有被走訪搜尋過；精確的位置涵蓋留到 M7），只在原始位元組裡有的值照舊列出（位置 `image (raw bytes)`）；不同值全部列出。標記後沒有分隔符、字串被截斷、字串讀不出來的都不當成版本（GAP）。
 
 ## 格式出處（只讀公開的格式說明核對欄位，沒有複製程式碼；程式是自己寫的）
 - coreboot `src/vendorcode/amd/psp/psp_efs.h`（EFS 欄位）、`psp_directory.h`（目錄標頭、項目、type 編號、cookie）、`bios_directory.h`
@@ -84,9 +83,6 @@ MAX_AGESA_VALUES = 16                  # 不同的 AGESA 值最多記幾個
 MAX_AGESA_LOCATIONS = 8                # 每個值最多記幾個位置
 MAX_AGESA_INSPECT = 1 << 30            # 走訪 firmware volume 時去重後送進搜尋的位元組總量
 AGESA_VALUE_LEN = 64                   # AGESA 標記後面讀的字串長度上限
-MAX_AGESA_LEAVES = 256                 # 有標記、要換算位置的走訪內容（去重後）最多幾塊
-MAX_AGESA_OCCURRENCES = 64             # 同一塊內容在原始位元組裡最多找幾個出現位置
-AGESA_DERIVED_MAX = 256                # 走訪送來的內容短於或等於這個長度時不換算位置（uefi_image 的名稱字串最多 200 字元，是轉出來的，不是切片）
 AGESA_MARK = b"AGESA!V"
 
 EFS_SIG = b"\xaa\x55\xaa\x55"
@@ -947,15 +943,13 @@ def read_agesa(buf, pos):
 
 def agesa_search(data, budget=None, soft=()):
     """AGESA 字串。走訪 firmware volume（uefi_image，LZMA 等解開；FV 以外的非空白位元組它也送進來）逐塊內容找 `AGESA!V` 標記；
-    另外找整個映像原始位元組裡的標記；原始位元組裡的每個標記要能證明「同一個位置」被走訪搜尋過（規則見下面「涵蓋檢查」的註解），證明不了的（例如在 UI section、空白區、
-    被刪除的複本、或和解壓縮出來的內容位元組相同的另一處）也列出來並把搜尋標為不完整。uefi_image 載入不了或走訪失敗時只有原始位元組的結果（不完整）。
+    另外找整個映像原始位元組裡的標記；原始位元組裡只要有任何標記，就把搜尋標為不完整（沒有正式介面可以證明那個位置有被走訪搜尋過；M7 再補），
+    只在原始位元組裡有的值也列出來（位置 image (raw bytes)）。uefi_image 載入不了或走訪失敗時只有原始位元組的結果（不完整）。
     → {"values": [{tag, value, count, found, truncated}], "problems": [文字，已去重], "complete": bool, "stats": {...}}。永遠回傳，不丟例外。"""
     r = {"values": [], "problems": [], "complete": False, "walk": False, "stats": {"markers": 0, "raw_markers": 0, "inspected_bytes": 0, "fvs": 0, "ffs_files": 0}}
     table, st = {}, r["stats"]
     seen_problems = set()
     walk_counts, raw_counts, raw_locs = {}, {}, {}
-    leaves = {}                            # 走訪搜尋過、而且裡面有標記的內容（去重）：{(長度, 雜湊): {n, occ（內容在原始位元組出現的位置）, positions（標記在內容裡的位置）, pre, post}}
-    raw_pos = []                           # 原始位元組裡的標記：[(位置, key)]
     state = {"capped": False, "raw_capped": False, "inspect_capped": False}
 
     def note(text):
@@ -963,7 +957,7 @@ def agesa_search(data, budget=None, soft=()):
             seen_problems.add(text)
             r["problems"].append(text)
 
-    def scan(buf, where, counts, count_key, locs=None, found_pos=None):
+    def scan(buf, where, counts, count_key, locs=None):
         """在 buf 找標記；每個標記用 (tag, value, status) 計數。回傳 False＝超過標記總數上限。"""
         pos = buf.find(AGESA_MARK)
         while pos >= 0:
@@ -978,9 +972,6 @@ def agesa_search(data, budget=None, soft=()):
             counts[key] = counts.get(key, 0) + 1
             if locs is not None:
                 locs.setdefault(key, []).append(pos)
-                raw_pos.append((pos, key))
-            elif found_pos is not None:
-                found_pos.append(pos)
             if count_key == "markers":
                 if status in ("nosep", "empty"):
                     note(f"AGESA marker without a readable version string ({'no NUL or space after the tag' if status == 'nosep' else 'nothing after the separator'}) in {where}; not used")
@@ -1001,9 +992,8 @@ def agesa_search(data, budget=None, soft=()):
             pos = buf.find(AGESA_MARK, pos + 1)
         return True
 
-    def walk_inspect(buf, module, nlayers):
-        """走訪（uefi_image.parse_fvs）每送來一塊內容就呼叫一次。nlayers＝這一刻 Scan.layers（已解開的 LZMA 層）有幾筆，None＝讀不到。
-        只用公開介面（scan_bytes 收到的內容、Scan.layers）：不知道這塊內容是原始位元組直接切出來的還是解壓縮來的，所以不判斷來源，改成記數（見檔尾的涵蓋檢查）。"""
+    def walk_inspect(buf, module):
+        """走訪（uefi_image.parse_fvs）每送來一塊內容就呼叫一次：只在內容裡找標記。不判斷內容是原始位元組的切片還是解壓縮來的（公開介面沒有這個資訊）。"""
         n = len(buf)
         if n == 0:
             return
@@ -1015,25 +1005,7 @@ def agesa_search(data, budget=None, soft=()):
                 note(f"more than {MAX_AGESA_INSPECT} bytes of UEFI content; the rest was not searched")
             return
         st["inspected_bytes"] += n
-        found = []
-        scan(buf, "uefi:" + (module or "?"), walk_counts, "markers", None, found)
-        if not found:
-            return
-        k = (n, hashlib.blake2b(buf, digest_size=16).digest())
-        e = leaves.get(k)
-        if e is None:
-            if len(leaves) >= MAX_AGESA_LEAVES:
-                state["leaves_capped"] = True
-                return
-            occ = []
-            if n > AGESA_DERIVED_MAX:                      # 太短的內容可能是 uefi_image 由名稱字串（UI section）轉出來的，不是原始位元組的切片：不拿來換算位置
-                start = data.find(buf)
-                while start >= 0 and len(occ) <= MAX_AGESA_OCCURRENCES:
-                    occ.append(start)
-                    start = data.find(buf, start + 1)
-            e = leaves[k] = {"n": n, "occ": occ, "positions": found, "pre": 0, "post": 0}
-        # pre：第一個 LZMA 層解開之前收到的（這時還沒有任何解壓縮來的內容，所以一定是原始位元組的切片）；post：其餘（可能是切片，也可能是解壓縮來的）
-        e["pre" if nlayers == 0 else "post"] += 1
+        scan(buf, "uefi:" + (module or "?"), walk_counts, "markers")
 
     complete = True
     try:
@@ -1058,8 +1030,7 @@ def agesa_search(data, budget=None, soft=()):
 
     class AgesaScan(ui.Scan):
         def scan_bytes(self, buf, module=None):           # 覆寫：不做函式庫指紋，只找 AGESA（和 uefi_gfx.py 同樣的做法）
-            layers = getattr(self, "layers", None)
-            walk_inspect(buf, module, len(layers) if isinstance(layers, list) else None)
+            walk_inspect(buf, module)
 
     sc = AgesaScan()
     r["walk"] = True
@@ -1090,49 +1061,29 @@ def agesa_search(data, budget=None, soft=()):
         complete = False
     if state["capped"] or state["inspect_capped"]:
         complete = False
-    # 原始位元組裡的每個標記，要能證明「同一個位置」被走訪搜尋過，否則算沒涵蓋到（搜尋不完整，並把它列出來）。證明只用公開介面能看到的：
-    #   - 每一塊有標記的內容（去重）：它在原始位元組出現的位置 occ（R 個）、走訪搜尋它的次數 pre＋post；標記的位置＝內容的位置＋標記在內容裡的位置。
-    #   - pre 次一定是原始位元組的切片（那時還沒解開任何 LZMA 層）；post 次可能是解壓縮來的：解壓縮來的次數最多 D＝Σ（每個已解開的層的大小 // 這塊內容的長度）
-    #     （解壓縮來的內容都在某個層裡面，同一層裡長度相同的兩塊區域要嘛完全重疊要嘛不相交）。所以至少有 pre＋max(0, post−D) 次是原始切片，它們各涵蓋一個出現位置。
-    #   - 這個數字 ≥ R 才算 R 個出現位置都被涵蓋；不夠就只算前幾個（其餘列為沒涵蓋，搜尋不完整）。解壓縮出來的內容剛好和一處沒被走訪的原始位元組相同時，
-    #     它不能被算成那一處的涵蓋（post 次被 D 扣掉）；拿不到 Scan.layers 時 post 全部不算。
-    #   殘餘限制：假設走訪不會對「同一段原始位元組」用同樣長度搜尋兩次（uefi_image 目前不會）；太短（≤ AGESA_DERIVED_MAX）的內容不換算位置（可能是名稱字串轉出來的）。
-    layers = getattr(sc, "layers", None)
-    sizes = [x.get("size") if isinstance(x, dict) else None for x in layers] if isinstance(layers, list) else None
-    if sizes is not None and not all(isinstance(z, int) and z >= 0 for z in sizes):
-        sizes = None
-    covered = set()
-    for e in leaves.values():
-        proven = e["pre"]
-        if sizes is not None:
-            proven += max(0, e["post"] - sum(z // e["n"] for z in sizes))
-        for start in e["occ"][:min(proven, MAX_AGESA_OCCURRENCES)]:
-            covered.update(start + p for p in e["positions"])
-    if state.get("leaves_capped"):
+    # 原始位元組裡只要有任何 AGESA 標記，就標不完整：沒有正式介面可以證明那個位置有被走訪搜尋過（走訪收到的內容不分原始切片或解壓縮來的，
+    # 解壓縮出來的內容也可能和原始位元組裡另一處沒被搜尋的複本完全相同）。精確的位置涵蓋留到 C1 提供回呼介面之後（M7）。
+    # 原始位元組裡有、走訪結果裡沒有的 (tag, value)：照舊加進表裡，位置寫 image (raw bytes)；走訪結果裡已經有的：只標不完整，不重複計數。
+    if raw_counts:
         complete = False
-        note(f"more than {MAX_AGESA_LEAVES} distinct UEFI contents with AGESA markers; their positions were not all checked")
-    missed = {}
-    for pos, key in raw_pos:
-        if pos not in covered:
-            missed.setdefault(key, []).append(pos)
-    if missed:
-        complete = False
-        note(f"{sum(len(v) for v in missed.values())} AGESA marker(s) in the raw image bytes could not be shown to have been searched by the UEFI walk (for example inside a UI section, free space, "
-             "a deleted file, or the same bytes as decompressed content that was searched); they are listed with the location 'image (raw bytes)' and the search is not complete")
+        note(f"{st['raw_markers']} AGESA marker(s) in the raw image bytes: there is no formal interface that can show the UEFI walk searched those raw byte positions, "
+             "so the search is marked incomplete (to be refined in M7); values found only in the raw bytes are listed with the location 'image (raw bytes)'")
         if not state["capped"]:
-            for key, poss in missed.items():
-                tag, value, status = key
-                if value is None:
+            raw_only = {}
+            for (tag, value, status), n in raw_counts.items():
+                if value is None or (tag, value) in table:
                     continue
-                e = table.get((tag, value))
-                if e is None:
-                    if len(table) >= MAX_AGESA_VALUES:
-                        continue
-                    e = table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": 0, "found": [], "truncated": status == "truncated"}
-                e["count"] += len(poss)
-                for o in poss[:MAX_AGESA_LOCATIONS]:
-                    if len(e["found"]) < MAX_AGESA_LOCATIONS:
-                        e["found"].append({"where": "image (raw bytes)", "offset": o})
+                e = raw_only.setdefault((tag, value), {"count": 0, "found": [], "truncated": False})
+                e["count"] += n
+                e["truncated"] = e["truncated"] or status == "truncated"
+                e["found"] += [{"where": "image (raw bytes)", "offset": o} for o in raw_locs[(tag, value, status)]]
+            for (tag, value), e in sorted(raw_only.items()):
+                if len(table) >= MAX_AGESA_VALUES:
+                    note(f"more than {MAX_AGESA_VALUES} distinct AGESA strings; the rest are not listed")
+                    break
+                if e["truncated"]:
+                    note(f"AGESA string longer than {AGESA_VALUE_LEN} characters (starts with '{value[:24]}…'): only the first {AGESA_VALUE_LEN} were read, so it is not used as a complete version")
+                table[(tag, value)] = {"tag": "AGESA!" + tag, "value": value, "count": e["count"], "found": e["found"][:MAX_AGESA_LOCATIONS], "truncated": e["truncated"]}
     return finish(r, table, complete)
 
 
