@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 00:35 -0500（C0）
+最後更新：2026-11-13 13:50 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -110,11 +110,11 @@
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6。rock-5b-demo 標準答案定案（68 項，兩輪驗證代理核對；d50783d）；rpi 等 J 軌 mirrors.sh；ai-nas 等 scan.tools: full
+- 目前在做：M6。rock-5b-demo 標準答案在 d50783d 定案；第 17 項（dthelper、libmraa* 歸 bsp，f9cb1c7）的重訂等 CI：dev 43373046217 卡在 git.kernel.org；三個平台都在等 J 軌（mirrors.sh、scan.tools: full）
 - 分支／PR／commit：`wp7/adapters`（最後 commit 見 git log；已併入 origin/wp1/m2 a957f90 與 origin/wp1/m2-jetson）；`wp7/platform-samples`（868f064）；`wp7/cra-survey`（122042c，已併進 PR #15，PR #15 合併後刪除）；PR 都尚未開（M6 完成才開，D-020）
 - 代理：無執行中（rock 標準答案第二輪複驗完成：可以定案）
 - CI：dev.yml 依序跑 rpi-lite-demo → rock-5b-demo（c00611b）；ai-nas 最近一次 43341204962 FAIL（cdxgen 沒裝，已由 C1 在 M2 處理）
 - 已完成：`docs/platforms-research.md`；`platform-samples/` 四份清單；`docs/references/cra-github-survey.md`、`cra-plan-proposal.md`；三個 platform.yml（arch、AI NAS 用 generic）；三個示範專案（sources.yml 含 metadata 清單檔）；sbom_augment（原始磁區元件、D-034 U-Boot CPE、OMV 原始碼併入）；支援期資料表追加 11 筆（D-033）；63 項單元測試
 - 下一步：看三個平台的結果；C1 的 D-036（--kernel-version）進來後再跑一次；標準答案逐項核對（官方 SBOM／manifest／.info）後由驗證代理獨立核對，PR 附核對紀錄；不擋路的缺口記在 docs/references/adapter-gaps.md；M6 完成開 PR
-- 卡住／等決定：rpi 等 git.kernel.org（C0／C1 決定 cache 退回或等待）；ai-nas 等 C1 的 scan.tools
+- 卡住／等決定：git.kernel.org 從 runner 連不上（rpi、rock 都卡），等 J 軌的 mirrors.sh；ai-nas 等 scan.tools: full
 <!-- END C4 -->
