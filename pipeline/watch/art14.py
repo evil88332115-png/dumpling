@@ -321,7 +321,12 @@ def render_issue(m, drill=True, gitlab=False):
               f"- 嚴重度：{m['severity'] + '（來源：' + m['severity_source'] + '）' if m['severity'] and m['severity_source'] else '待填'}"]
     L += [f"- {F_DETECTED}：{m['first_detected']}",
           f"- 銷售市場（會員國）：{m['markets']}"] + ([f"- 公司角色：{m['role_note']}"] if m["role_note"] else []) + [""]
-    L += ["## 要人填的欄位（負責人填，工具不會猜）", f"- {F_AWARE}：{BLANK}"]
+    L += ["## 要人填的欄位（負責人填，工具不會猜）"]
+    if gitlab:
+        L += [f"**GitLab：倒數只認 Developer 以上成員的「{RECORD_HEAD}」留言，這一節的欄位只當說明**（Reporter／Planner 也能改內文，內文的時間不算數）。"
+              f"記錄方式：新增一則留言，第一行寫 `{RECORD_HEAD}`，之後每行一個欄位，例如 `- {F_AWARE}：2026-11-13T00:00:00Z`、"
+              f"`- 階段 1 {F_SUBMIT_AT}：2026-11-13T20:00:00Z`；同一欄位以最新的留言為準，寫 `{BLANK}` 就清掉（格式見 ART14.md 第 4 節）。", ""]
+    L += [f"- {F_AWARE}：{BLANK}"]
     if inc:
         L += ["- 是否疑似非法或惡意行為造成：" + BLANK, f"- {F_NOTIF}：{BLANK}", "- 採取的措施（說明，不要放機密）：" + BLANK]
     else:
@@ -337,7 +342,8 @@ def render_issue(m, drill=True, gitlab=False):
           "- [ ] 登入 SRP（ENISA 單一通報平台，第 16 條）",
           "- [ ] 選擇協調 CSIRT（產品製造商主要營業地所在的會員國）",
           "- [ ] 把上面的預填欄位貼進該階段的通報",
-          "- [ ] 把 SRP 提交編號、提交人、提交時間（UTC）填回本 Issue 對應的階段", ""]
+          ("- [ ] 用「" + RECORD_HEAD + "」留言記下 SRP 提交編號、提交人、提交時間（UTC）" if gitlab else
+           "- [ ] 把 SRP 提交編號、提交人、提交時間（UTC）填回本 Issue 對應的階段"), ""]
     L += ["## 期限與出處",
           f"- 法規出處（核對）：{REG_NOTE}",
           "- 期限是工具算的保守值，法定期限的精確解釋交給法務；倒數留言只維護一則，標籤 art14-24h／art14-72h／art14-final 跟著下一個未完成的階段。"]
@@ -385,6 +391,55 @@ def get_ts(fields, sec, label):
         return "blank", None, v
     t = parse_ts(v)
     return ("ok", t, v) if t else ("bad", None, v)
+
+
+# ---------- GitLab：倒數的依據只取自可信成員的「art14 紀錄」留言（#85 驗證應修 1） ----------
+# 官方 permissions 頁：Planner（15）與 Reporter（20）都能改別人 Issue 的內文；內文的時間欄位不能當依據（否則能偽造「已通報」或延後期限）。
+# 別人的留言只有 Maintainer／Owner 能改（他們本來就是可信成員），所以知悉時間與各階段的提交，都由可信成員（>= Developer 30）的留言記錄。
+RECORD_HEAD = "art14 紀錄"
+RECORD_STAGE_RE = re.compile(r"^- 階段 ([1-3]) (.+?)：(.*)$")
+RECORD_FIELDS0 = {"vulnerability": (F_AWARE, F_MEASURE), "incident": (F_AWARE, F_NOTIF)}
+RECORD_STAGE_FIELDS = (F_SUBMIT_NO, F_SUBMIT_BY, F_SUBMIT_AT)
+
+
+def is_record(note):
+    b = note.get("body")
+    return isinstance(b, str) and b.splitlines()[:1] == [RECORD_HEAD] and not note.get("system")
+
+
+def record_values(kind, notes, trust):
+    """可信成員的「art14 紀錄」留言 → ({(階段, 欄位): 值}, 問題)。依留言 id 由舊到新套用，同一欄位以最新的為準；值是 未填 就清掉。
+    不可信的人寫的紀錄留言不算（列成問題）；不認得的行列成問題。"""
+    vals, problems = {}, []
+    allowed0 = RECORD_FIELDS0[kind]
+    for n in sorted((x for x in notes if is_record(x)), key=lambda x: x.get("id") or 0):
+        if not trust.ok(n):
+            problems.append(f"留言 {n.get('id')} 是「{RECORD_HEAD}」但作者不是 Developer 以上的成員：不算數")
+            continue
+        for line in n["body"].splitlines()[1:]:
+            line = line.rstrip()
+            if not line.startswith("- "):        # 「- 」開頭的才是欄位；其他行是說明（例如演練的聲明），不解析
+                continue
+            m = RECORD_STAGE_RE.match(line)
+            if m and m.group(2) in RECORD_STAGE_FIELDS:
+                vals[(int(m.group(1)), m.group(2))] = m.group(3).strip()
+                continue
+            m = FIELD_RE.match(line)
+            if m and m.group(1) in allowed0:
+                vals[(0, m.group(1))] = m.group(2).strip()
+                continue
+            problems.append(f"留言 {n.get('id')} 有看不懂的紀錄行：{clean(line, 60)!r}（格式見 ART14.md 第 4 節）")
+    return vals, problems
+
+
+def effective_body(kind, body, vals):
+    """給 evaluate() 的內文：要人填的欄位全部來自紀錄留言（沒有就是 未填）；只有工具預填的 first_detected 取自 Issue 內文。"""
+    det = scan_fields(body or "").get((0, F_DETECTED), [])
+    L = [f"- {F_DETECTED}：{det[0] if len(det) == 1 else BLANK}"]
+    L += [f"- {f}：{vals.get((0, f), BLANK)}" for f in RECORD_FIELDS0[kind]]
+    for n in (1, 2, 3):
+        L += [f"## 階段 {n}：", *[f"- {f}：{vals.get((n, f), BLANK)}" for f in RECORD_STAGE_FIELDS]]
+    return "\n".join(L) + "\n"
 
 
 def evaluate(kind, body, now):
@@ -517,13 +572,32 @@ class Trust:
     def ok(self, obj):
         if not is_gitlab(self.api):
             return trusted_author(obj)
-        uid = (obj.get("user") or {}).get("id")
+        lvl = self.level((obj.get("user") or {}).get("id"))
+        return lvl is not None and lvl >= GITLAB_MIN_LEVEL
+
+    def level(self, uid):
+        """成員的存取等級（不是成員、不是 active → None）；同一個 user id 一輪只查一次。"""
         if type(uid) is not int:
-            return False
+            return None
         if uid not in self.cache:
             self.cache[uid] = self.api.member_access(self.repo, uid)
-        lvl = self.cache[uid]
-        return lvl is not None and lvl >= GITLAB_MIN_LEVEL
+        return self.cache[uid]
+
+
+def check_token_level(api, repo, trust=None):
+    """GitLab：開始前確認 token 自己（project access token 的 bot 使用者）是 Developer 以上的成員（#85 驗證應修 3）。
+    權限不夠時，confidential Issue 可能根本列不出來，會變成「沒有案件、OK」——法定倒數靜默停掉，所以 FAIL。
+    GET /user（官方 /api/users/ 的 Get the current user；project access token 能不能用文件沒寫，待內部驗證）＋ members/all/:user_id。"""
+    if not is_gitlab(api):
+        return
+    try:
+        me = api.current_user()
+    except Fail as e:
+        raise Fail(f"查不到 token 自己的使用者（GET /user）：{e}；不能確認權限，不處理")
+    lvl = (trust or Trust(api, repo)).level((me or {}).get("id"))
+    if lvl is None or lvl < GITLAB_MIN_LEVEL:
+        raise Fail(f"token 的使用者不是專案成員或權限低於 Developer（{GITLAB_MIN_LEVEL}）：看不到或改不了 confidential 的 art14 Issue，"
+                   "倒數會靜默停掉；請把 ART14_GITLAB_TOKEN 換成 Developer 以上的 project access token")
 
 
 def write_result(path, obj):
@@ -576,6 +650,7 @@ def cmd_open(api, repo, match_path, result, project_dir=None, drill=True):
         print(f"WARN\tproject.yml：{w}", file=sys.stderr)
     key, title, body, labels = render_issue(m, drill=drill, gitlab=is_gitlab(api))
     pre_write(api, [("標題", title), ("內文", body)], drill)
+    check_token_level(api, repo)                 # GitLab：token 看不到 confidential Issue 時，不重複開的判斷會失準
     mode = "drill" if drill else "real"
     for i in issues.list_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "all"):
         mk = parse_marker(i.get("body"))
@@ -599,10 +674,10 @@ def comments_of(api, repo, number):
     return api.list_notes(repo, number)
 
 
-def update_comment(api, repo, number, text, problems, trust=None):
+def update_comment(api, repo, number, text, problems, trust=None, notes=None):
     """只維護一則：用固定標記找（只認可信的留言者，system 留言不算），找到就編輯，沒有才新增。"""
     trust = trust or Trust(api, repo)
-    mine = [c for c in comments_of(api, repo, number)
+    mine = [c for c in (comments_of(api, repo, number) if notes is None else notes)
             if not c.get("system") and isinstance(c.get("body"), str) and c["body"].splitlines()[:1] == [COMMENT_MARK] and trust.ok(c)]
     mine.sort(key=lambda c: c["id"])
     if len(mine) > 1:
@@ -637,6 +712,7 @@ def cmd_countdown(api, repo, drill, now, result):
         write_result(result, {"cmd": "countdown", "count": 0, "issues": [], "skipped": []})
         return "沒有 art14 Issue"
     trust = Trust(api, repo)
+    check_token_level(api, repo, trust)
     what = "演練" if drill else "真實"
     cases, skipped, leaks = find_issues(api, repo, DRILL_LABEL if drill else REAL_LABEL, "drill" if drill else "real", trust)
     if gl:
@@ -648,7 +724,7 @@ def cmd_countdown(api, repo, drill, now, result):
         print(f"skip\t#{n}\t{why}")
     for n in leaks:
         print(f"leak\t#{n}\t不是 confidential，不寫入")
-    out, errors, problems = [], [], []
+    out, errors, problems, failed = [], [], [], []
     if leaks:
         errors.append(leak_message(leaks))
     if gl and not drill:
@@ -659,15 +735,29 @@ def cmd_countdown(api, repo, drill, now, result):
             errors.append(f"有 {len(stuck)} 個 art14 Issue 沒有倒數（" + "；".join(f"#{n} {why}" for n, why in stuck[:5]) +
                           "）：法定期限沒有被追蹤，請人工確認作者權限與 Issue 第一行的標記")
     for i, (key, kind, _mode) in cases:
-        ev = evaluate(kind, i.get("body") or "", now)
-        text = render_comment(ev, now, drill, gitlab=gl)
+        # 逐案隔離（#85 驗證應修 2）：一個案件寫入失敗，記下來、其他照常處理，最後整體 FAIL（result.json 一定寫出）
         try:
+            notes = None
+            body = i.get("body") or ""
+            rec_problems = []
+            if gl:
+                notes = comments_of(api, repo, i["number"])
+                vals, rec_problems = record_values(kind, notes, trust)
+                body = effective_body(kind, body, vals)
+            ev = evaluate(kind, body, now)
+            ev["problems"] = rec_problems + ev["problems"]
+            text = render_comment(ev, now, drill, gitlab=gl)
             pre_write(api, [("倒數留言", text)], drill)
+            cres = update_comment(api, repo, i["number"], text, problems, trust, notes)
+            lab = update_stage_label(api, repo, i, ev["next_stage"])
         except Fail as e:
+            failed.append(i["number"])
             errors.append(f"#{i['number']}：{e}")
+            print(f"fail\t#{i['number']}\t{e}")
             continue
-        cres = update_comment(api, repo, i["number"], text, problems, trust)
-        lab = update_stage_label(api, repo, i, ev["next_stage"])
+        if gl and not drill and ev["problems"]:
+            # 真實案件的欄位或紀錄格式不對：倒數照樣更新（留言寫明），但整體 FAIL，不能只是 ATTENTION（#85 驗證應修 4）
+            errors.append(f"#{i['number']} 的紀錄有問題（{ev['problems'][0]}）：請修正 {RECORD_HEAD} 留言")
         clock = "started" if ev["clock_started"] else "not_started"
         rec = {"number": i["number"], "kind": kind, "clock": clock, "comment": cres, "label_changed": lab,
                "stage_label": STAGE_LABELS[ev["next_stage"]] if ev["next_stage"] else None,
@@ -675,12 +765,32 @@ def cmd_countdown(api, repo, drill, now, result):
                "stages": {s["id"]: {"due": fmt(s["due"]) if s["due"] else None, "state": s["state"]} for s in ev["stages"]}}
         out.append(rec)
         print(f"case\t#{i['number']}\t{clock}\t下一階段 {rec['stage_label']}\t留言 {cres}")
+    closed = []
+    if gl and not drill:
+        # 人手關閉的真實案件列在報告裡（不靜默略過）：還有沒完成的階段就特別標出（#85 驗證建議）
+        for i in issues.list_issues(api, repo, REAL_LABEL, "closed"):
+            if i.get("state") != "closed" or i.get("confidential") is not True or not trust.ok(i):
+                continue
+            mk = parse_marker(i.get("body"))
+            if not mk or mk[2] != "real":
+                continue
+            try:
+                vals, _ = record_values(mk[1], comments_of(api, repo, i["number"]), trust)
+                ev = evaluate(mk[1], effective_body(mk[1], i.get("body"), vals), now)
+                undone = [s["id"] for s in ev["stages"] if s["state"] != "done"]
+            except Fail as e:
+                undone = [f"讀不到紀錄：{e}"]
+            closed.append({"number": i["number"], "undone": undone})
+            print(f"closed\t#{i['number']}\t" + ("三個階段都已提交" if not undone else "已關閉但還有未提交的階段：" + "、".join(undone)))
     for p in problems:
         print("problem\t" + p)
     res = {"cmd": "countdown", "now": fmt(now), "count": len(out), "issues": out,
            "skipped": [{"number": n, "why": w} for n, w in skipped]}
     if gl:
         res["leaks"] = sorted(leaks)
+        res["failed"] = failed
+    if gl and not drill:
+        res["closed"] = closed
     write_result(result, res)
     if errors:
         raise Fail("；".join(errors))
@@ -690,12 +800,23 @@ def cmd_countdown(api, repo, drill, now, result):
 
 
 def cmd_fill_drill_aware(api, repo, at, result):
-    cases, _skipped, leaks = find_issues(api, repo, DRILL_LABEL, "drill", Trust(api, repo))
+    trust = Trust(api, repo)
+    check_token_level(api, repo, trust)          # GitLab：先確認 token 的權限（看不到 confidential Issue 就不能當「沒有案件」）
+    cases, _skipped, leaks = find_issues(api, repo, DRILL_LABEL, "drill", trust)
     if leaks:
         raise Fail(leak_message(leaks))
     if not cases:
         raise Fail("找不到可處理的 art14-drill Issue（只允許改演練 Issue）")
     done = []
+    if is_gitlab(api):
+        # GitLab：倒數只認紀錄留言（內文的時間不算數），所以演練也用留言填知悉時間
+        text = f"{RECORD_HEAD}\n- {F_AWARE}：{fmt(at)}\n演練用的合成知悉時間，不是真實通報"
+        pre_write(api, [("紀錄留言", text)], True)
+        for i, _mk in cases:
+            api.create_note(repo, i["number"], text)
+            done.append(i["number"])
+        write_result(result, {"cmd": "fill-drill-aware", "updated": done, "at": fmt(at)})
+        return f"用紀錄留言填入合成的知悉時間 {fmt(at)}：{done}"
     for i, _mk in cases:
         body = i.get("body") or ""
         pat = re.compile(r"^(- " + re.escape(F_AWARE) + r"：).*$", re.M)
@@ -711,11 +832,17 @@ def cmd_fill_drill_aware(api, repo, at, result):
 
 def cmd_close_drill(api, repo, result):
     """關閉演練 Issue，art14-drill 換成 art14-drill-done、拿掉階段標籤（下一次演練從頭開始）。GitLab：不是 confidential 的不碰、最後 FAIL。"""
-    closed, leaks = [], []
+    closed, leaks, untrusted = [], [], []
     labels = issues.Labels(api, repo, False)
+    trust = Trust(api, repo)
+    if is_gitlab(api):
+        check_token_level(api, repo, trust)
     for i in issues.list_issues(api, repo, DRILL_LABEL, "open"):
         if is_gitlab(api) and i.get("confidential") is not True:
             leaks.append(i["number"])
+            continue
+        if is_gitlab(api) and not trust.ok(i):        # 同 countdown：作者不是 Developer 以上的成員就不動（#85 驗證建議）
+            untrusted.append(i["number"])
             continue
         new = list(dict.fromkeys(DRILL_DONE_LABEL if n == DRILL_LABEL else n
                                  for n in issues.label_names(i) if n not in STAGE_LABELS.values()))
@@ -726,6 +853,7 @@ def cmd_close_drill(api, repo, result):
     res = {"cmd": "close-drill", "closed": len(closed), "numbers": closed}
     if is_gitlab(api):
         res["leaks"] = sorted(leaks)
+        res["untrusted"] = sorted(untrusted)
     write_result(result, res)
     if leaks:
         raise Fail(f"關閉 {len(closed)} 個演練 Issue：{closed}；" + leak_message(leaks))

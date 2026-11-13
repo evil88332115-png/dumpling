@@ -32,6 +32,7 @@ class FakeGitLab(issues.GitLabApi):
         super().__init__(base=BASE, token=TOKEN, sleep=lambda d: None, clock=lambda: 0.0, wall=lambda: 1000)
         self.issues, self.notes, self.labels = {}, {}, {}
         # user id -> (access_level, state)
+        self.me = BOT
         self.members = {BOT: (40, "active"), HUMAN: (30, "active"), 11: (20, "active"), 12: (10, "active"), 13: (50, "active"), 14: (30, "blocked")}
         self.n, self.nid, self.tick = 0, 0, 0
         self.writes, self.requests, self.creates = [], [], []
@@ -63,6 +64,10 @@ class FakeGitLab(issues.GitLabApi):
         data = json.loads(body) if body else None
         if method != "GET":
             self.writes.append((method, u.path, data))
+        if u.path == "/api/v4/user" and method == "GET":         # token 自己的使用者（project access token 的 bot）
+            if self.me is None:
+                return 401, {}, b'{"message":"401 Unauthorized"}'
+            return 200, {}, json.dumps({"id": self.me, "username": "bot", "bot": True}).encode()
         pre = "/api/v4/projects/%s/" % PROJ
         if not u.path.startswith(pre):
             return 404, {}, b'{"message":"404 Project Not Found"}'
@@ -198,9 +203,11 @@ class TestDrillFlow(Base):
         self.assertEqual((r["clock"], r["comment"]), ("started", "updated"))
         self.assertEqual((r["stages"]["24h"]["due"], r["stages"]["72h"]["due"], r["stages"]["final"]["due"]),
                          ("2026-11-14T00:00:00Z", "2026-11-16T00:00:00Z", None))
-        self.assertEqual(len(self.gl.notes[n]), 1)
+        self.assertEqual(len([x for x in self.gl.notes[n] if x["body"].startswith(art14.COMMENT_MARK)]), 1)   # 倒數留言一則（另有一則紀錄留言）
+        self.assertEqual(len([x for x in self.gl.notes[n] if x["body"].startswith(art14.RECORD_HEAD)]), 1)
         issue_puts = [p for m, path, p in self.gl.writes if m == "PUT" and "/notes/" not in path]
-        self.assertTrue(issue_puts and all(p["confidential"] is True for p in issue_puts))
+        self.assertTrue(all(p["confidential"] is True for p in issue_puts))
+        self.assertFalse([p for p in issue_puts if "description" in p])       # GitLab 上不改內文（知悉時間用紀錄留言）
         # 同樣的時間再跑：不寫留言
         k = len(self.gl.writes)
         rc, out = self.countdown(True, res=self.result("4b.json"))
@@ -251,13 +258,13 @@ class TestRealFlow(Base):
         self.assertNotIn(art14.DRILL_LINE, note)
         self.assertNotIn(art14.DEMO_LINE, note)
         self.assertIn("GitLab 排程", note)
-        # 負責人（Developer）填知悉時間
-        aware = art14.F_AWARE
-        self.gl.issues[1]["description"] = body.replace(f"- {aware}：未填", f"- {aware}：2026-11-13T00:00:00Z")
+        # 負責人（Developer）用「art14 紀錄」留言填知悉時間（GitLab 上內文的時間不算數，#85 驗證應修 1）
+        self.assertIn(art14.RECORD_HEAD, body)              # 內文寫明記錄方式
+        self.gl.add_note(1, f"{art14.RECORD_HEAD}\n- {art14.F_AWARE}：2026-11-13T00:00:00Z", author=HUMAN)
         rc, out = self.countdown(False, res=self.result("3.json"))
         r = self.load(self.result("3.json"))["issues"][0]
         self.assertEqual((r["clock"], r["comment"], r["stages"]["24h"]["due"]), ("started", "updated", "2026-11-14T00:00:00Z"))
-        self.assertEqual(len(self.gl.notes[1]), 1)
+        self.assertEqual(len([n for n in self.gl.notes[1] if n["body"].startswith(art14.COMMENT_MARK)]), 1)
         # 再開同一個命中：不重複
         rc, out = self.open_case(True, res=self.result("4.json"))
         self.assertEqual(self.load(self.result("4.json"))["result"], "skipped")
@@ -344,8 +351,8 @@ class TestLeakAndTrust(Base):
         for n in skipped.values():
             self.assertNotIn(n, self.gl.notes)
         self.assertFalse(any(f"/issues/{n}" in p for n in skipped.values() for _, p, _ in self.gl.writes))
-        paths = self.gl.member_gets()        # 6 個不同作者，每個只查一次
-        self.assertEqual(len(paths), 6)
+        paths = self.gl.member_gets()        # 6 個不同作者＋token 自己（檢查權限），每個只查一次
+        self.assertEqual(len(paths), 7)
         self.assertEqual(len(paths), len(set(paths)))
 
     def test_drill_untrusted_is_only_skipped(self):
@@ -405,7 +412,7 @@ class TestLeakAndTrust(Base):
         self.countdown(False)
         paths = self.gl.member_gets()
         self.assertEqual(paths.count("/api/v4/projects/7/members/all/10"), 2)    # 每次執行各一次（兩次 main），不是每個 Issue 一次
-        self.assertEqual(paths.count("/api/v4/projects/7/members/all/99"), 1)    # 第二輪才有工具自己寫的留言；同一輪只查一次
+        self.assertEqual(paths.count("/api/v4/projects/7/members/all/99"), 2)    # token 自己：每輪開始前檢查權限一次（同一輪的留言者檢查共用快取）
 
     def test_system_notes_ignored(self):
         n = self.gl.add_issue(self.real_body(), ["art14"])
@@ -439,6 +446,118 @@ class TestLeakAndTrust(Base):
         rc, out = self.countdown(False)
         self.assertEqual(rc, 1)
         self.assertEqual(self.gl.writes, [])
+
+
+class TestRecordsAndHardening(Base):
+    """#85 驗證的修正：倒數依據只取自可信成員的紀錄留言、逐案隔離、token 權限、真實案件格式錯 FAIL、存取等級邊界。"""
+
+    def real_body(self):
+        _, _, body, _ = art14.render_issue(art14.apply_project(art14.load_match(FIXTURE), None), drill=False, gitlab=True)
+        return body
+
+    def rec(self, *lines):
+        return art14.RECORD_HEAD + "\n" + "\n".join(lines)
+
+    def test_body_edit_by_anyone_cannot_fake_submission(self):
+        # 應修 1：有人（例如 Reporter）把知悉時間與三個提交時間寫進內文 → 不算數（時鐘未起算、三階段都沒完成）
+        body = self.real_body().replace(f"- {art14.F_AWARE}：未填", f"- {art14.F_AWARE}：2026-11-13T00:00:00Z")
+        body = body.replace(f"- {art14.F_SUBMIT_AT}：未填", f"- {art14.F_SUBMIT_AT}：2026-11-13T01:00:00Z")
+        n = self.gl.add_issue(body, ["art14"])
+        rc, out = self.countdown(False, res=self.result())
+        r = self.load(self.result())["issues"][0]
+        self.assertEqual(r["clock"], "not_started")
+        self.assertTrue(all(v["state"] != "done" for v in r["stages"].values()), r["stages"])
+        # Reporter 寫的紀錄留言也不算，而且真實案件要 FAIL（請人處理）
+        self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：2026-11-13T00:00:00Z", f"- 階段 1 {art14.F_SUBMIT_AT}：2026-11-13T01:00:00Z"), author=11)
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 1, out)
+        r = self.load(self.result())["issues"][0]
+        self.assertEqual(r["clock"], "not_started")
+        self.assertTrue(any("不算數" in p for p in r["problems"]))
+
+    def test_trusted_records_drive_countdown_latest_wins_and_blank_clears(self):
+        n = self.gl.add_issue(self.real_body(), ["art14"])
+        self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：2026-11-12T00:00:00Z"), author=HUMAN)
+        self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：2026-11-13T00:00:00Z", "說明行不解析",
+                                     f"- 階段 1 {art14.F_SUBMIT_NO}：SRP-1", f"- 階段 1 {art14.F_SUBMIT_AT}：2026-11-13T05:00:00Z"), author=13)
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 0, out)
+        r = self.load(self.result())["issues"][0]
+        self.assertEqual((r["clock"], r["stages"]["24h"]["due"], r["stages"]["24h"]["state"]), ("started", "2026-11-14T00:00:00Z", "done"))
+        self.gl.add_note(n, self.rec(f"- 階段 1 {art14.F_SUBMIT_AT}：未填"), author=HUMAN)       # 寫 未填 就清掉
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(self.load(self.result())["issues"][0]["stages"]["24h"]["state"], "pending")
+
+    def test_real_record_format_error_fails_but_comment_written(self):
+        # 應修 4：真實案件的紀錄格式不對 → 倒數留言照樣更新（寫明問題），整體 FAIL
+        n = self.gl.add_issue(self.real_body(), ["art14"])
+        self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：昨天晚上"), author=HUMAN)
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 1, out)
+        self.assertIn("紀錄有問題", out)
+        self.assertTrue(any(x["body"].startswith(art14.COMMENT_MARK) for x in self.gl.notes[n]))
+        self.gl.add_note(n, self.rec("- 不認得的欄位：x"), author=HUMAN)
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 1, out)
+
+    def test_one_case_failure_isolated_and_result_written(self):
+        # 應修 2：第一個案件寫留言失敗 → 記下來，第二個照常處理，result.json 照樣寫出，最後 FAIL
+        a = self.gl.add_issue(self.real_body(), ["art14"])
+        b = self.gl.add_issue(self.real_body(), ["art14"])
+        orig = self.gl._raw
+        def raw(method, url, headers, body):
+            if method == "POST" and url.endswith(f"/issues/{a}/notes"):
+                return 500, {}, b'{"message":"boom"}'
+            return orig(method, url, headers, body)
+        self.gl._raw = raw
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 1, out)
+        r = self.load(self.result())
+        self.assertEqual(r["failed"], [a])
+        self.assertEqual([x["number"] for x in r["issues"]], [b])
+
+    def test_token_without_developer_fails_before_anything(self):
+        # 應修 3：token 看不到 confidential Issue 時不能是「沒有案件、OK」
+        self.gl.add_issue(self.real_body(), ["art14"])
+        for me, why in ((None, "GET /user"), (11, "Developer"), (12, "Developer"), (77, "Developer")):
+            self.gl.me = me
+            k = len(self.gl.writes)
+            for cmd in (lambda: self.countdown(False), lambda: run(gl("fill-drill-aware", "--at", "2026-11-13T00:00:00Z"), self.gl),
+                        lambda: run(gl("close-drill"), self.gl)):
+                rc, out = cmd()
+                self.assertEqual(rc, 1, (me, out))
+                self.assertIn(why, out)
+            self.assertEqual(self.writes_since(k), [])
+
+    def test_min_level_boundaries(self):
+        # 應修 5：15（Planner）、20（Reporter）、25（Security Manager）、29 不可信；30（Developer）可信
+        self.gl.members.update({21: (15, "active"), 22: (20, "active"), 23: (25, "active"), 24: (29, "active"), 25: (30, "active")})
+        body = self.real_body().replace("mode=real", "mode=drill")
+        nums = {uid: self.gl.add_issue(body, ["art14-drill"], author=uid) for uid in (21, 22, 23, 24, 25)}
+        rc, out = self.countdown(True, res=self.result())
+        self.assertEqual(rc, 0, out)
+        r = self.load(self.result())
+        self.assertEqual([x["number"] for x in r["issues"]], [nums[25]])
+        self.assertEqual(sorted(x["number"] for x in r["skipped"]), sorted(nums[u] for u in (21, 22, 23, 24)))
+        self.assertEqual(art14.GITLAB_MIN_LEVEL, 30)
+
+    def test_closed_real_cases_listed(self):
+        n = self.gl.add_issue(self.real_body(), ["art14"], state="closed")
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual(rc, 0, out)
+        closed = self.load(self.result())["closed"]
+        self.assertEqual(closed, [{"number": n, "undone": ["24h", "72h", "final"]}])
+        self.assertIn("已關閉但還有未提交的階段", out)
+
+    def test_close_drill_skips_untrusted_author(self):
+        body = self.real_body().replace("mode=real", "mode=drill")
+        bad = self.gl.add_issue(body, ["art14-drill"], author=11)
+        good = self.gl.add_issue(body, ["art14-drill"], author=HUMAN)
+        rc, out = run(gl("close-drill", "--result", self.result()), self.gl)
+        self.assertEqual(rc, 0, out)
+        r = self.load(self.result())
+        self.assertEqual((r["numbers"], r["untrusted"]), ([good], [bad]))
+        self.assertEqual(self.gl.issues[bad]["state"], "opened")
 
 
 class TestHelp(unittest.TestCase):
@@ -480,10 +599,11 @@ class TestQuickActionAndSecrets(Base):
         self.open_case(False)
         self.gl.issues[1]["description"] += "\n/close\n"
         k = len(self.gl.writes)
+        # GitLab 的 fill-drill-aware 只新增紀錄留言、不改內文：內文裡的 /close 不會被重送
         rc, out = run(gl("fill-drill-aware", "--at", "2026-11-13T00:00:00Z"), self.gl)
-        self.assertEqual(rc, 1)
-        self.assertIn("quick action", out)
-        self.assertEqual(self.writes_since(k), [])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([(m, p.rsplit("/", 1)[-1]) for m, p, _ in self.writes_since(k)], [("POST", "notes")])
+        k = len(self.gl.writes)
         orig = art14.render_comment
         art14.render_comment = lambda ev, now, drill, gitlab=False: art14.COMMENT_MARK + "\n演練\n/close\n"
         try:

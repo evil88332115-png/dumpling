@@ -399,6 +399,13 @@ class GitLabApi(Api):
     # Project members：/api/project_members/ 的 GET /projects/:id/members/all/:user_id（含繼承與受邀；回傳 access_level、state）。
     # 存取等級（同頁表格）：Guest 10、Planner 15、Reporter 20、Security Manager 25、Developer 30、Maintainer 40、Owner 50。
     # 不是成員時的狀態碼文件沒寫：404 當成「不是成員」（待內部驗證）；其他錯誤一律 FAIL（不猜）。
+    def current_user(self):
+        """GET /user（官方 /api/users/ 的 Get the current user）：token 自己的使用者。project access token 能不能用，文件沒寫（待內部驗證）。"""
+        d, _ = self.request("GET", "/user")
+        if not isinstance(d, dict) or type(d.get("id")) is not int:
+            raise Fail("GET /user 的回應沒有整數 id")
+        return d
+
     def member_access(self, repo, user_id):
         if type(user_id) is not int or user_id <= 0:
             return None
