@@ -12,6 +12,10 @@ cmdline.txt、overlays/、*.dtb）、kernel/<kernel*.img、initramfs*>。
 - 壓縮（.xz／.gz）：隨機存取需要未壓縮的檔案，所以由 extract_image() 串流解壓到結果資料夾的暫存檔（大小上限、剩餘空間檢查、
   O_EXCL、0600、失敗即刪除）；用完由 scan-flash-package.sh 刪除。磁碟需求 ≈ 未壓縮的映像大小（Raspberry Pi OS lite 約 3 GB）。
 - Raspberry Pi 4／5 的 EEPROM 開機程式不在映像裡（在板子上）：list.json 的 disk_image.not_in_image 明列為「沒有涵蓋」。
+- boot 分割區依內容選，不依順序（Radxa 等映像的第一個 FAT 是小的 config 分割區，核心與 extlinux 在後面的 EFI system 分割區）：
+  FAT 分割區的根目錄（以及 boot/）有核心（KERNEL_RE）、extlinux/、EFI/ 或 Raspberry Pi 韌體（bootcode.bin、start*.elf）才算有開機檔；
+  恰好一個有 → 它；多個有 → 其中恰好一個是 EFI system 分割區才選它，否則不猜；都沒有 → 只有一個 FAT 時用它，
+  否則恰好一個 EFI system 分割區才選它，否則不猜。只有 config.txt 不算（Radxa 的 config 分割區也有）。不猜時 boot_why 寫原因。
 """
 import errno
 import gzip
@@ -39,6 +43,8 @@ FAT_MAX_DEPTH = 16
 FAT_MAX_FILE = 1 << 32
 PREFIX = "rootfs"
 KERNEL_RE = re.compile(r"^(kernel[A-Za-z0-9_.+-]*\.img|initramfs[A-Za-z0-9_.+-]*|Image|zImage|vmlinu[xz][A-Za-z0-9_.+-]*)$")
+BOOT_FW_RE = re.compile(r"^(bootcode\.bin|start[A-Za-z0-9_]*\.elf)$", re.I)   # Raspberry Pi 的 GPU 韌體（在 boot 分割區）
+BOOT_DIRS = ("extlinux", "efi")                                                  # 小寫比對
 GPT_TYPES = {
     "C12A7328-F81F-11D2-BA4B-00A0C93EC93B": "EFI system",
     "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7": "Microsoft basic data (FAT/NTFS)",
@@ -552,7 +558,7 @@ def _probe(fd, p):
 
 
 class RpiImage:
-    """磁碟映像：分割區表、各分割區的檔案系統種類、boot（第一個 FAT 分割區）與 rootfs（ext4）的選擇。
+    """磁碟映像：分割區表、各分割區的檔案系統種類、boot（依內容選的 FAT 分割區，見模組說明）與 rootfs（ext4）的選擇。
     rootfs() 介面與 rockchip_img.RkImage 相同（VirtualTar 用）。"""
 
     def __init__(self, path):
@@ -567,7 +573,7 @@ class RpiImage:
             for p in self.parts:
                 p["fs_kind"] = _probe(self.fd, p)
             self._root = self._pick_root()
-            self._boot = next((p for p in self.parts if p["fs_kind"] == "fat"), None)
+            self._boot = self._pick_boot()
         except BaseException:
             os.close(self.fd)
             raise
@@ -602,6 +608,50 @@ class RpiImage:
                          else f"{len(cands)} ext4 partitions look like a root file system: not guessing which one")
         return None
 
+    def _boot_signs(self, p):
+        """FAT 分割區根目錄（與 boot/）裡的開機檔名稱（最多 10 個）；讀不到 → []，原因記在 p["boot_error"]。"""
+        signs = []
+        try:
+            fat = Fat(self.fd, p["offset_in_file"], p["size"])
+            todo = [("", 0)]
+            while todo:
+                pre, cl = todo.pop(0)
+                ents, _bad = fat.entries(fat.read_dir(cl))
+                for e in ents:
+                    n, low = e["name"], e["name"].lower()
+                    if e["dir"] and low in BOOT_DIRS:
+                        signs.append(pre + n + "/")
+                    elif e["dir"] and low == "boot" and not pre and e["cluster"] >= 2:
+                        todo.append((n + "/", e["cluster"]))
+                    elif not e["dir"] and (KERNEL_RE.match(n) or BOOT_FW_RE.match(n)):
+                        signs.append(pre + n)
+        except (FatError, OSError, struct.error) as e:
+            p["boot_error"] = f"{type(e).__name__}: {e}"
+        return sorted(signs)[:10]
+
+    def _pick_boot(self):
+        self.boot_why = None
+        fats = [p for p in self.parts if p["fs_kind"] == "fat"]
+        for p in fats:
+            p["boot_signs"] = self._boot_signs(p)
+        esp = [p for p in fats if p["type_name"] == "EFI system"]
+        signed = [p for p in fats if p["boot_signs"]]
+        if len(signed) == 1:
+            return signed[0]
+        if signed:
+            esp_signed = [p for p in signed if p in esp]
+            if len(esp_signed) == 1:
+                return esp_signed[0]
+            self.boot_why = f"{len(signed)} FAT partitions have boot files (kernel, extlinux/, EFI/ or firmware): not guessing which one"
+            return None
+        if len(fats) == 1:
+            return fats[0]
+        if len(esp) == 1:
+            return esp[0]
+        self.boot_why = ("no FAT partition" if not fats else
+                         f"{len(fats)} FAT partitions and none has boot files (kernel, extlinux/, EFI/ or firmware): not guessing which one")
+        return None
+
     def rootfs(self):
         return self._root, self.root_why
 
@@ -629,8 +679,9 @@ class RpiImage:
 
     def table(self):
         keep = ("index", "slot", "type", "type_name", "name", "start_lba", "sectors", "offset_in_file", "size", "bootable", "fs_kind",
-                "truncated", "overlaps_previous", "sha256", "label", "fs", "has_root_dirs")
+                "truncated", "overlaps_previous", "sha256", "label", "fs", "has_root_dirs", "boot_signs", "boot_error")
         return {"scheme": self.scheme, "disk_id": self.disk_id, "sector_size": SECTOR,
+                "boot_partition": self._boot["index"] if self._boot is not None else None, "boot_why": self.boot_why,
                 "partitions": [{k: p[k] for k in keep if k in p} for p in self.parts]}
 
     @property

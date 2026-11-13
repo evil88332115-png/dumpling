@@ -1,0 +1,14 @@
+{
+  "$comment": "dumpling public demo (NVIDIA public Jetson Linux BSP and sample rootfs). Not a real product: manufacturer, contacts, support period, user instructions, own software and risk assessment are intentionally left out, so the CRA documents show TO BE COMPLETED and are at least GAP instead of looking complete with invented values. A real project fills every field (tools/cra/config.example.json shows the structure).",
+  "schema_version": 1,
+  "manufacturer": {
+    "name": "dumpling public demo (not a real manufacturer)"
+  },
+  "product": {
+    "name": "Orin Nano Demo",
+    "type": "Demo image: NVIDIA Jetson Orin Nano developer kit, NVIDIA public Jetson Linux BSP with the public sample rootfs (Ubuntu 24.04)"
+  },
+  "sbom": {
+    "component_type": "firmware"
+  }
+}

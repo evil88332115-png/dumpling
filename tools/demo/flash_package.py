@@ -1020,7 +1020,7 @@ def disk_image_info(img, source, container, cands, inv):
         st, notes = "GAP", [source["unusable"]]
     boot = img.boot()
     if boot is None:
-        att("沒有 FAT 的 boot 分割區：沒有 bootloader／kernel 清點")
+        att("沒有選定 boot 分割區（" + (getattr(img, "boot_why", None) or "no FAT partition") + "）：沒有 bootloader／kernel 清點")
     fat = source.get("fat") or {}
     ext4 = source.get("ext4") or {}
     if ext4.get("journal_needs_recovery"):

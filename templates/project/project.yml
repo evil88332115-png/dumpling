@@ -1,0 +1,18 @@
+# 開案資訊（《開案-CRA資訊表》的機器可讀版）。欄位說明見 docs/PLATFORM-INTERFACE.md。
+# 值是 "TO BE COMPLETED" 的欄位還沒填；status 改成 shipped 之前都要填完。
+schema: 1
+product_name: ${product_name}
+brand: ${brand}                       # 品牌或客戶
+company_role: ${company_role}         # manufacturer｜supplier｜both
+markets: ${markets}                   # 銷售市場
+platform: ${platform}
+platform_version: ${platform_version} # 平台與版本
+bsp_os_source: ${bsp_os_source}       # BSP／OS 來源
+kernel_source: ${kernel_source}       # 核心來源
+bootloader: ${bootloader}             # 開機程式
+own_software: ${own_software}         # 自有軟體（沒有就留空清單 []）
+interfaces: ${interfaces}             # 對外介面
+support_until: ${support_until}       # 支援期限 YYYY-MM-DD
+status: ${status}                     # development｜shipped
+# OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
+os_responsibility: ${os_responsibility}

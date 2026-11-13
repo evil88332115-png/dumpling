@@ -1,0 +1,16 @@
+{
+ "$comment": "dumpling public demo: only the evidence rules K1, K2 and U1 are kept (they set not_affected from product artifacts and apply only with a named author, so in this demo, which has no real project lead, they do nothing). The example bulk triage rules R1-R5 from tools/cra/vex-rules.example.json were removed: they had only a role as author and example dates, and would have turned thousands of rows into decisions nobody made (D-035: every exclusion needs a basis). A real project writes its own rules with a named author, real dates and reasons, and the image digests they were reviewed for. See tools/cra/README.md.",
+ "schema": "sca-center-vex-rules/1",
+ "author": "專案負責人",
+ "rules": [
+  {"id": "K1", "evidence": "K1", "description": "Kernel: the fix's code is not built into the product kernel",
+   "date": "2026-11-05", "images": ["sha256:<image digest>"],
+   "reason": "The kernel configuration check compares the fix's program files from the Linux kernel CNA record with the product kernel .config and Makefiles; when none of them is built, the vulnerable code is not in the product."},
+  {"id": "K2", "evidence": "K2", "description": "Kernel: the fix only changes modules that are removed from the image or blocked from loading",
+   "date": "2026-11-05", "images": ["sha256:<image digest>"],
+   "reason": "The module map (scan/kernel-module-map.json) and the image's module list and modprobe configuration (CRA/Config/kernel-modules.json) show that the code cannot run on the product."},
+  {"id": "U1", "evidence": "U1", "description": "Ubuntu package: Ubuntu marks this version not affected",
+   "date": "2026-11-05", "images": ["sha256:<image digest>"],
+   "reason": "The Ubuntu Security team's CVE Tracker marks the source package as not-affected in this release, and the installed source version has the same epoch and upstream version as the version in its note."}
+ ]
+}
