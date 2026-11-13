@@ -535,7 +535,7 @@ def boot_items(kboot):
 def kernel_versions_items(kvers):
     """scan/kernel-versions.json（sca-scan 的 --kernel-version）：映像出貨（或被指定）但沒有判定的核心。有 not_judged 才問；問的人是 RD。
     C-kernel-config／C-kernel-module-map 的結論只對 judged 的核心成立，沒判定的核心不可以當作不受影響。"""
-    if not isinstance(kvers, dict) or kvers.get("schema") != "sca-center-kernel-versions/1":
+    if not isinstance(kvers, dict) or kvers.get("schema") not in ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2"):
         return []
     nj = [x for x in kvers.get("not_judged") or [] if isinstance(x, dict) and isinstance(x.get("version"), str)]
     if not nj:
