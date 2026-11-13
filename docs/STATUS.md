@@ -2,18 +2,18 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 00:18 +0800（C3）
+最後更新：2026-11-14 00:19 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：#42、#47 已合併；等 #46、#48 的 CI 綠後合併；驗證 C3 的監控 PR #49；正式 tag 等使用者（建議從新 main 打）
-- 分支／PR／commit：main e5d6e5d。已合併：**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；自然時機再開 PR）
+- 目前在做：#42、#46、#47 已合併；#48 等 C2 併 main 解衝突；驗證 C3 的監控 PR #49；正式 tag 等使用者（建議從新 main 打）
+- 分支／PR／commit：main dde7467。已合併：**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；自然時機再開 PR）
 - 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C3 的監控 PR #49（wp2/watch-m2 02681bc），worktree `$AGENT_TMP/dumpling-wt-c0-verify-49`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-49/report.md`
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：#40、#42 已合併。掃描層 [WP1] PR（C0 #42 驗證應修 2：核心階段該跑沒跑要降級、盤點沒人消費的狀態列）進行中。正式 tag 等使用者
-  - C2（第二台）：**#46** bb649a5（補 D-043「資料庫沒有資料」，C0 看過 diff OK）CI 綠就合併。**#48**（cse-layout-size 28a008e）C0 驗證通過＋私有檔複核通過，CI 綠就合併（#46 先合併，#48 若衝突請 C2 併 main）。supplier-normalize 預驗不通過 2 項文字（CycloneDX 1.4 schema 授權、過時表格），修正中
+  - C2（第二台）：#39、#46 已合併。**#48**（cse-layout-size）C0 驗證通過、私有檔複核通過，和新 main 衝突（PROVENANCE、firmware/README、x86_firmware.py），等 C2 併 main 後 C0 看 diff、CI 綠就合併。supplier-normalize 修正中
   - C3（第二台）：M5 #47 已合併（e5d6e5d）。**監控 PR #49**（02681bc，三個 run 綠）C0 驗證中。real Issue 照 D-040：正式 Release → 手動 baseline → 一天 dry_run → C3 回報 → C0 設 WATCH_REAL_ISSUES=on。GitLab 待辦 T-15～T-22 在 GITLAB-PORT。wp2/art14 等 M7
   - C4（第二台）：wp7/adapters 已併 main cc7d101（736bbee，衝突取 main 的 C1 檔、PROVENANCE 保留 C4 節）；8429d1f 加釘 bsp_inputs_not_applicable，rock 43449928625 通過 99 項，rpi、ai-nas 在跑。等 #42 合併再併 main、三專案重跑當最終證據，獨立驗證後開 M6 PR
 - 下一步（新 C0 接手後）：
