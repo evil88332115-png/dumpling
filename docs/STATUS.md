@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 02:28 +0800（C1）
+最後更新：2026-11-14 02:30 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -189,7 +189,8 @@
 >   - PR 說明要寫清楚：5674 判為不適用，待負責人確認
 >   - C2 在 run.d 清單補上新測試檔 → **3111d52**；本機 931 passed
 > - 驗證：預驗 wp3/nvidia-vbios-advisory 3111d52，狀態：**不通過**（應修 1 項：測試吃牆上時鐘，2027-02 起會讓 CI 轉紅；建議：5674 標成 reviewed 讓 candidates 回 OK、沒有提醒負責人，要改回待審；矛盾的列可能判成 fixed；每個影像的 vendor；多個版本字串；過期要升 ATTENTION；5561 寫進 notes）
-> - 寫程式（nvvbios 代理第二輪）：修上述項目，**進行中**
+> - 寫程式（nvvbios 代理第二、三輪）：**完成 3d270fe**（時鐘可注入，假時鐘 2027／2030 年都 1130 passed；5674 改回待審，candidates 回 ATTENTION；reviewed_until＝看過的最新公告日期，與 C1 說定；矛盾的列擋下；每個影像的 vendor；version-ambiguous；過期升 ATTENTION；5561 寫進 notes；併入 main d1f57c6）
+> - 驗證（新代理）：複驗 3d270fe，暫存 `$AGENT_TMP/dumpling-tmp-c2-verify-nv2/`，狀態：**進行中**
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
