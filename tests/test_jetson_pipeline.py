@@ -352,6 +352,7 @@ class ExpectedFiles(unittest.TestCase):
         found = 0
         for proj in sorted(os.listdir(base)):
             sources = jb.pc.load_sources(os.path.join(ROOT, "projects", proj, "sources.yml"))
+            platform = jb.pc.load_project_all(os.path.join(ROOT, "projects", proj))[0]["platform"]
             for fn in sorted(os.listdir(os.path.join(base, proj))):
                 with open(os.path.join(base, proj, fn), encoding="utf-8") as fh:
                     d = json.load(fh)
@@ -364,9 +365,11 @@ class ExpectedFiles(unittest.TestCase):
                     self.assertTrue(spec.get("reason"), "%s 要寫理由（為什麼是這個值或範圍）" % path)
                     if "min" in spec and "max" in spec:
                         self.assertLessEqual(spec["min"], spec["max"], path)
-                # 驗收項目一定在：建置紀錄 OK、C-kernel-boot OK、上游比對的修改檔數
-                for must in ("build_record_status", "kernel_boot", "upstream_source.modified"):
-                    self.assertIn(must, d["checks"])
+                # Jetson 的驗收項目一定在：建置紀錄 OK、C-kernel-boot OK、上游比對的修改檔數（只有 Jetson 轉接器產生這三項；
+                # 其他平台的專案（C4 的 WP7）只做上面的格式檢查）
+                if platform == "jetson":
+                    for must in ("build_record_status", "kernel_boot", "upstream_source.modified"):
+                        self.assertIn(must, d["checks"], "%s/%s" % (proj, fn))
         self.assertGreaterEqual(found, 2)
 
     def test_patch_versions_expect_one_modified_file_and_the_others_zero(self):
