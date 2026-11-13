@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -525,6 +526,32 @@ def test_mirror_script_url_and_caps(tmp_path):
     repo = git_repo(tmp_path, RECORDS)
     r = run_mirror(tmp_path / "y", tmp_path / "y.man", env={"KERNEL_CVE_GIT_URL": repo.as_uri(), "KERNEL_CVE_MAX_RECORD_KB": "0"})
     assert r.returncode != 0 and "KERNEL_CVE_MAX_RECORD_KB" in r.stderr and not (tmp_path / "y.man").exists()
+
+
+def test_mirror_script_retries_clone(tmp_path):
+    # 假的 git 放在 PATH 前面：前 N 次 clone 失敗（模擬 runner 連不上），其他呼叫交給真的 git
+    repo = git_repo(tmp_path, RECORDS)
+    real = shutil.which("git")
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    cnt = tmp_path / "clones"
+    (fake / "git").write_text(f"""#!/bin/bash
+for a in "$@"; do if [ "$a" = clone ]; then
+  n=$(( $(cat {cnt} 2>/dev/null || echo 0) + 1 )); echo $n > {cnt}
+  [ "$n" -le "$FAIL_CLONES" ] && {{ echo "fatal: unable to connect" >&2; exit 128; }}
+fi; done
+exec {real} "$@"
+""")
+    (fake / "git").chmod(0o755)
+    env = {"KERNEL_CVE_GIT_URL": repo.as_uri(), "PATH": f"{fake}:{os.environ['PATH']}", "KERNEL_CVE_GIT_RETRY_DELAY": "0", "FAIL_CLONES": "2"}
+    r = run_mirror(tmp_path / "m", tmp_path / "m.man", env=env)
+    assert r.returncode == 0, r.stderr
+    assert cnt.read_text().strip() == "3" and "第 1 次失敗" in r.stderr and "第 3 次成功" in r.stderr
+    cnt.unlink()
+    r = run_mirror(tmp_path / "n", tmp_path / "n.man", env={**env, "FAIL_CLONES": "9", "KERNEL_CVE_GIT_TRIES": "2"})
+    assert r.returncode == 1 and "試了 2 次都失敗" in r.stderr and not (tmp_path / "n.man").exists()
+    assert cnt.read_text().strip() == "2"
+    assert run_mirror(tmp_path / "o", tmp_path / "o.man", env={**env, "KERNEL_CVE_GIT_TRIES": "x"}).returncode == 3
 
 
 @pytest.mark.parametrize("what,msg", [("stale", "過期"), ("sha", "sha256"), ("few", "可能只下載到一部分"), ("nosource", "缺少 SOURCE"),
