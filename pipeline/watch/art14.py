@@ -2,7 +2,7 @@
 """art14.py：CRA 第 14 條通報工作流程的 GitHub 演練版（M8 B1，WP2；契約與流程見 docs/ART14.md）。
 
 用法：
-  python3 -I pipeline/watch/art14.py open-drill       --repo O/R --match 合成命中.json [--result 結果.json]
+  python3 -I pipeline/watch/art14.py open-drill       --repo O/R --match 合成命中.json [--project projects/<專案>] [--result 結果.json]
   python3 -I pipeline/watch/art14.py countdown        --repo O/R [--drill] [--now UTC時間] [--result 結果.json]
   python3 -I pipeline/watch/art14.py fill-drill-aware --repo O/R --at UTC時間 [--result 結果.json]
   python3 -I pipeline/watch/art14.py close-drill      --repo O/R [--result 結果.json]
@@ -26,6 +26,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib")   # project_config（只在有 --project 時才 import）
 import issues  # noqa: E402
 import publiccheck  # noqa: E402
 
@@ -221,6 +222,61 @@ def load_match(path):
     return m
 
 
+# ---------- 專案資訊（project.yml，D-055；欄位由 C1 在 M7a 實作：pipeline/lib/project_config.py）----------
+MARKETS_NO_PROJECT = "GAP：沒有指定專案（--project），讀不到 project.yml 的 markets；請人工填寫已知販售的會員國"
+MARKETS_TODO = "GAP：project.yml 的 markets 還沒填（TO BE COMPLETED）；請人工填寫已知販售的會員國"
+MARKETS_UNKNOWN = "GAP：銷售市場不明（project.yml 的 markets 是 UNKNOWN），早期預警不能依會員國通知；請人工確認後填寫"
+
+
+def markets_text(project):
+    """(狀態, 文字)。狀態：codes｜eu-all｜unknown｜todo｜no-project。不明與還沒填都是 GAP，而且寫法不同；EU-ALL 不展開成 27 國。"""
+    if project is None:
+        return "no-project", MARKETS_NO_PROJECT
+    if LIB not in sys.path:
+        sys.path.insert(0, LIB)
+    import project_config as pc  # noqa: E402（只在有 --project 時才需要 PyYAML）
+    if "markets" in (project.get("_todo") or []):
+        return "todo", MARKETS_TODO
+    if project.get("_markets_unknown"):
+        return "unknown", MARKETS_UNKNOWN
+    mk = project.get("markets") or []
+    if mk == [pc.MARKET_EU_ALL]:
+        return "eu-all", "全歐盟（EU-ALL，不逐一列出會員國；來源 project.yml）"
+    if mk and all(isinstance(c, str) and c in pc.EU_MEMBER_CODES for c in mk):
+        return "codes", "、".join(mk) + "（ISO 3166-1 alpha-2；來源 project.yml）"
+    raise Fail("project.yml 的 markets 不是 D-055 認得的值（load_project 應該已經擋下）")
+
+
+def load_project_info(project_dir):
+    """用 project_config.load_project 讀 project.yml（含和 config.json 的一致性檢查）；錯誤一律 Fail。"""
+    if LIB not in sys.path:
+        sys.path.insert(0, LIB)
+    try:
+        import project_config as pc  # noqa: E402
+        return pc.load_project(project_dir)
+    except Exception as e:      # ConfigError、缺 PyYAML、檔案讀不到
+        raise Fail(f"project.yml 讀不到或不合格：{clean(str(e), 300)}")
+
+
+def apply_project(m, project):
+    """產品名稱以 project.yml 為準（D-055 (3)）；版本照命中（＝Release tag 的版本）。key 不變（同一個命中不因改名而重開）。"""
+    m["market_state"], m["markets"] = markets_text(project)
+    m["role_note"] = None
+    m["project_warnings"] = []
+    if project is None:
+        return m
+    name = clean(project.get("product_name") or "", 120)
+    if name and name != "TO BE COMPLETED":
+        m["product"] = name
+    role = project.get("company_role")
+    if role == "supplier":
+        m["role_note"] = "supplier（project.yml）：第 14 條是製造商的義務，供應商的角色怎麼適用交給法務判斷"
+    elif role in ("manufacturer", "both"):
+        m["role_note"] = f"{role}（project.yml）"
+    m["project_warnings"] = [clean(w, 200) for w in project.get("_warnings") or []]
+    return m
+
+
 def issue_key(kind, mode, parts):
     return hashlib.sha256(("dumpling-art14/1|" + mode + "|" + kind + "|" + "|".join(parts)).encode("utf-8")).hexdigest()
 
@@ -231,6 +287,8 @@ def render_issue(m, drill=True):
     key = issue_key(kind, mode, m["key_parts"])
     inc = kind == "incident"
     head = ("[演練] " if drill else "") + ("第 14 條通報（嚴重事件）：" if inc else "第 14 條通報：") + f"{m['product']} {m['version']} {m['id']}"
+    if "markets" not in m:
+        apply_project(m, None)
     L = [f"<!-- dumpling-art14 key={key} kind={kind} mode={mode} -->"]
     if drill:
         L.append(DRILL_LINE)
@@ -246,7 +304,7 @@ def render_issue(m, drill=True):
         L += [f"- 受影響版本：{m['affected_versions']}",
               f"- 嚴重度：{m['severity'] + '（來源：' + m['severity_source'] + '）' if m['severity'] and m['severity_source'] else '待填'}"]
     L += [f"- {F_DETECTED}：{m['first_detected']}",
-          "- 銷售市場（會員國）：GAP，project.yml 的欄位由 C1 在 M7 提供，M7 提供前讀不到；請人工填寫已知販售的會員國", ""]
+          f"- 銷售市場（會員國）：{m['markets']}"] + ([f"- 公司角色：{m['role_note']}"] if m["role_note"] else []) + [""]
     L += ["## 要人填的欄位（負責人填，工具不會猜）", f"- {F_AWARE}：{BLANK}"]
     if inc:
         L += ["- 是否疑似非法或惡意行為造成：" + BLANK, f"- {F_NOTIF}：{BLANK}", "- 採取的措施（說明，不要放機密）：" + BLANK]
@@ -440,18 +498,20 @@ def find_drill_issues(api, repo, state="open"):
 
 
 # ---------- 指令 ----------
-def cmd_open_drill(api, repo, match_path, result):
-    m = load_match(match_path)
+def cmd_open_drill(api, repo, match_path, result, project_dir=None):
+    m = apply_project(load_match(match_path), load_project_info(project_dir) if project_dir else None)
+    for w in m["project_warnings"]:
+        print(f"WARN\tproject.yml：{w}", file=sys.stderr)
     key, title, body, labels = render_issue(m, drill=True)
     guard_text([("標題", title), ("內文", body)], True)
     for i in issues.list_issues(api, repo, DRILL_LABEL, "all"):
         mk = parse_marker(i.get("body"))
         if mk and mk[0] == key and mk[2] == "drill":
-            write_result(result, {"cmd": "open-drill", "result": "skipped", "issue": i["number"], "key": key})
+            write_result(result, {"cmd": "open-drill", "result": "skipped", "issue": i["number"], "key": key, "markets": m["market_state"]})
             return f"已有同一個命中的演練 Issue #{i['number']}，不重複開"
     issues.Labels(api, repo, False).ensure(labels)
     d, _ = api.request("POST", f"/repos/{repo}/issues", {"title": title, "body": body, "labels": labels})
-    write_result(result, {"cmd": "open-drill", "result": "opened", "issue": d["number"], "key": key})
+    write_result(result, {"cmd": "open-drill", "result": "opened", "issue": d["number"], "key": key, "markets": m["market_state"]})
     return f"開了演練 Issue #{d['number']}"
 
 
@@ -606,7 +666,9 @@ def build_parser():
         c.add_argument("--repo", required=True)
         c.add_argument("--result")
         return c
-    repo_cmd("open-drill").add_argument("--match", required=True)
+    o = repo_cmd("open-drill")
+    o.add_argument("--match", required=True)
+    o.add_argument("--project", help="專案資料夾（讀 project.yml 的產品名稱、銷售市場、公司角色；沒給時銷售市場標 GAP）")
     c = repo_cmd("countdown")
     c.add_argument("--drill", action="store_true")
     c.add_argument("--now")
@@ -641,7 +703,7 @@ def main(argv=None, api=None, clock=None):
         else:
             api = api or issues.Api()
             if args.cmd == "open-drill":
-                msg = cmd_open_drill(api, args.repo, args.match, args.result)
+                msg = cmd_open_drill(api, args.repo, args.match, args.result, args.project)
             elif args.cmd == "countdown":
                 msg = cmd_countdown(api, args.repo, args.drill, now, args.result)
             elif args.cmd == "fill-drill-aware":

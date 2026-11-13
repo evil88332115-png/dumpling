@@ -49,8 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           r="$RUNNER_TEMP/art14"; mkdir -p "$r"
-          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --result "$r/1.json"
-          python3 -I pipeline/watch/art14.py check --result "$r/1.json" --expect result=opened
+          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --project projects/orin-nano-demo --result "$r/1.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/1.json" --expect result=opened --expect markets=eu-all
 
       - name: 演練 2／6：倒數（驗收：時鐘未起算、first_detected 起 6 小時、只建立一則留言、標籤 art14-24h）
         if: env.ACTION == 'drill'
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           r="$RUNNER_TEMP/art14"
-          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --result "$r/5.json"
+          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --project projects/orin-nano-demo --result "$r/5.json"
           python3 -I pipeline/watch/art14.py check --result "$r/5.json" --expect result=skipped
 
       - name: 演練 6／6：關閉（art14-drill 換成 art14-drill-done）並確認不再有案件

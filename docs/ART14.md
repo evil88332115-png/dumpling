@@ -50,7 +50,7 @@
 
 - 第一行：`<!-- dumpling-art14 key=<64 hex> kind=vulnerability|incident mode=drill -->`。key ＝ sha256(`dumpling-art14/1|mode|kind|產品|版本|層|CVE`)（嚴重事件用事件代號），同一個命中只開一個。
 - 演練的**第二行固定**是 `演練，不是真實通報`，標題有 `[演練]`；寫入前檢查沒有「演練」字樣就不寫。
-- 預填（工具帶入，人核對）：產品名稱與版本、層（bsp／os／product）、CVE 與說明、被利用的依據（KEV／EUVD／廠商公告）、受影響版本、`first_detected`（候選）、嚴重度（沒有來源寫「待填」，不猜）、銷售市場（見第 7 節）。
+- 預填（工具帶入，人核對）：產品名稱與版本、層（bsp／os／product）、CVE 與說明、被利用的依據（KEV／EUVD／廠商公告）、受影響版本、`first_detected`（候選）、嚴重度（沒有來源寫「待填」，不猜）、銷售市場與公司角色（見第 7 節）。
 - 要人填的欄位（解析器只認這些行的開頭）：
   - `- 知悉時間（UTC）：`
   - 漏洞：`- 修正或緩解措施可用時間（UTC）：`；嚴重事件：`- 事件通報送出時間（UTC）：`、`- 是否疑似非法或惡意行為造成：`
@@ -81,9 +81,22 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 
 合成命中格式（`schema: dumpling-art14-drill-match/1`）：`kind`（vulnerability｜incident）、`product`、`version`、`first_detected`；漏洞另有 `layer`、`cve`、`description`、`affected_versions`、`exploited_evidence[{source: KEV|EUVD|vendor, note, ref}]`；嚴重事件另有 `incident_id`、`summary`；選填 `severity`＋`severity_source`（沒有就寫「待填」）。範例：`tests/fixtures/watch/art14-drill-match.json`（CVE-2018-18074、requests 2.19.0、drill-demo v1.0.0、bsp）。
 
-## 7. 銷售市場（會員國）：GAP
+## 7. 專案資訊：銷售市場、產品名稱、公司角色（D-055，M7a 的 `project.yml`）
 
-規格要求預填「有在哪些會員國販售」（第 14(2)(a) 條）。這個欄位取自 `project.yml`，**由 C1 在 M7 提供**；M7 提供前讀不到，範本一律寫「GAP，project.yml 的欄位由 C1 在 M7 提供，M7 提供前讀不到；請人工填寫」。**不自己訂欄位名、不讀 `project.yml` 的任何猜測欄位**。M7 完成後，M8 才把它接進 `load_match`／範本，並補測試。
+`open-drill --project projects/<專案>` 用 `pipeline/lib/project_config.load_project` 讀 `project.yml`（含和 `CRA/Config/config.json` 的一致性檢查；不合格就 FAIL、不開 Issue）。欄位定義見 `docs/PLATFORM-INTERFACE.md` 3.1–3.2。
+
+- **銷售市場（會員國）**，第 14(2)(a) 條早期預警要寫明（適用時）：
+  | `markets` | Issue 寫的 | result 的 `markets` |
+  |---|---|---|
+  | 會員國代碼（ISO 3166-1 alpha-2，希臘 GR） | `DE、FR（ISO 3166-1 alpha-2；來源 project.yml）` | `codes` |
+  | `EU-ALL`（舊值 `EU` 由 load_project 遷移成它） | `全歐盟（EU-ALL，不逐一列出會員國；來源 project.yml）`，**不展開成 27 國** | `eu-all` |
+  | `UNKNOWN`（明確不知道） | **GAP**：銷售市場不明，早期預警不能依會員國通知；請人工確認後填寫 | `unknown` |
+  | `TO BE COMPLETED`（還沒填） | **GAP**：markets 還沒填；請人工填寫已知販售的會員國 | `todo` |
+  | 沒給 `--project` | **GAP**：沒有指定專案，讀不到 markets；請人工填寫 | `no-project` |
+- **產品名稱以 `project.yml` 的 `product_name` 為準**；版本照命中（＝Release tag 的版本，D-055 (3)）。Issue 的 key 不含名稱，改名不會讓同一個命中重開。
+- **公司角色**：`company_role` 寫進預填欄位；`supplier` 時加一句「第 14 條是製造商的義務，供應商的角色怎麼適用交給法務判斷」。
+- `load_project` 的警告（例如舊值 `EU` 已遷移）只印到日誌（`WARN`），不寫進 Issue。
+- 演練（`art14.yml`）用 `projects/orin-nano-demo`（`EU-ALL`），驗收 `markets=eu-all`。
 
 ## 8. 演練步驟（`art14.yml`，`action=drill`）
 
@@ -118,4 +131,4 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
 | 排程每小時倒數留言 | GitLab pipeline schedule 每小時；留言與標籤邏輯可重用（`evaluate`／`render_comment` 是純函式） |
 | 倒數只在 Issue 上看 | 加 **email 通知**（期限前提醒負責人與備援人；email 地址放內部設定，不進公開 repo） |
 | SRP 人工提交、把編號與時間填回 Issue | 不變：SRP 沒有 API，不寫任何自動提交 |
-| 銷售市場 GAP | M7 的 `project.yml` 欄位就緒後預填 |
+| 銷售市場（第 7 節，讀 `project.yml`） | 不變；GitLab 的 job 一樣傳 `--project` |

@@ -17,7 +17,9 @@ import issues  # noqa: E402
 
 REPO = "octo/demo"
 TOKEN = "ghp_SECRETTOKEN0123456789"
-FIXTURE = os.path.join(HERE, "..", "..", "..", "tests", "fixtures", "watch", "art14-drill-match.json")
+ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+FIXTURE = os.path.join(ROOT, "tests", "fixtures", "watch", "art14-drill-match.json")
+DEMO_PROJECT = os.path.join(ROOT, "projects", "orin-nano-demo")
 UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 11, 13, 6, 0, 0, tzinfo=UTC)
 NOW_S = "2026-11-13T06:00:00Z"
@@ -346,7 +348,7 @@ class TestOpenDrill(Base):
         self.assertRegex(lines[0], r"^<!-- dumpling-art14 key=[0-9a-f]{64} kind=vulnerability mode=drill -->$")
         self.assertEqual(lines[1], "演練，不是真實通報")
         self.assertIn("[演練]", i["title"])
-        for needle in ("CVE-2018-18074", "drill-demo v1.0.0", "requests 2.19.0", "層：bsp", "嚴重度：待填", "GAP", "M7",
+        for needle in ("CVE-2018-18074", "drill-demo v1.0.0", "requests 2.19.0", "層：bsp", "嚴重度：待填", "GAP", "沒有指定專案（--project）",
                        "階段 1", "階段 2", "階段 3", "SRP 沒有 API", "選擇協調 CSIRT", "CELEX:32024R2847", "2026-11-13",
                        "倒數只是輔助，GitHub 排程可能延遲，期限由負責人自己掌握", "不在公開 Issue 放任何機密"):
             self.assertIn(needle, i["body"], needle)
@@ -403,6 +405,98 @@ class TestOpenDrill(Base):
         self.assertEqual(len(re.findall(r"^- 知悉時間（UTC）：", body, re.M)), 1)
         self.assertEqual(body.count("<!--"), 1)
         self.assertFalse(art14.evaluate("vulnerability", body, NOW)["clock_started"])
+
+
+class TestProjectInfo(Base):
+    """D-055：銷售市場（會員國代碼／EU-ALL／UNKNOWN／待填）、產品名稱以 project.yml 為準、公司角色（M8 B1）。"""
+
+    def make_project(self, markets='["DE", "FR"]', role="manufacturer", name="Orin Nano Demo", config_name=None):
+        d = os.path.join(self.dir, "proj")
+        os.makedirs(os.path.join(d, "CRA", "Config"), exist_ok=True)
+        with open(os.path.join(DEMO_PROJECT, "project.yml"), encoding="utf-8") as f:
+            y = f.read()
+        y = re.sub(r"(?m)^markets:.*$", "markets: " + markets, y)
+        y = re.sub(r"(?m)^company_role:.*$", 'company_role: "%s"' % role, y)
+        y = re.sub(r"(?m)^product_name:.*$", 'product_name: "%s"' % name, y)
+        with open(os.path.join(d, "project.yml"), "w", encoding="utf-8") as f:
+            f.write(y)
+        with open(os.path.join(d, "CRA", "Config", "config.json"), "w", encoding="utf-8") as f:
+            json.dump({"schema_version": 1, "manufacturer": {"name": "x"}, "product": {"name": config_name or name},
+                       "support": {"end_date": "2031-12"}}, f)
+        return d
+
+    def open_with(self, project):
+        rc, out = run(["open-drill", "--repo", REPO, "--match", FIXTURE, "--project", project, "--result", self.result()], self.gh)
+        return rc, out
+
+    def body(self):
+        return self.gh.issues[1]["body"]
+
+    def test_member_codes(self):
+        rc, out = self.open_with(self.make_project())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("- 銷售市場（會員國）：DE、FR（ISO 3166-1 alpha-2；來源 project.yml）", self.body())
+        self.assertEqual(self.load(self.result())["markets"], "codes")
+        self.assertNotIn("GAP：", self.body().split("## 要人填的欄位")[0].split("銷售市場")[1].splitlines()[0])
+
+    def test_eu_all_not_expanded(self):
+        rc, out = self.open_with(DEMO_PROJECT)          # 示範專案：EU-ALL
+        self.assertEqual(rc, 0, out)
+        self.assertIn("全歐盟（EU-ALL", self.body())
+        self.assertNotIn("AT、", self.body())
+        self.assertEqual(self.load(self.result())["markets"], "eu-all")
+
+    def test_unknown_and_todo_are_different_gaps(self):
+        rc, _ = self.open_with(self.make_project('["UNKNOWN"]'))
+        self.assertEqual(rc, 0)
+        self.assertIn(art14.MARKETS_UNKNOWN, self.body())
+        self.assertIn("早期預警不能依會員國通知", self.body())
+        self.assertEqual(self.load(self.result())["markets"], "unknown")
+        self.gh = FakeGitHub()
+        rc, _ = self.open_with(self.make_project('["TO BE COMPLETED"]'))   # new-project.sh 沒給 --markets 時的寫法
+        self.assertEqual(rc, 0)
+        self.assertIn(art14.MARKETS_TODO, self.body())
+        self.assertNotIn(art14.MARKETS_UNKNOWN, self.body())
+        self.assertEqual(self.load(self.result())["markets"], "todo")
+
+    def test_legacy_eu_migrated_with_warning(self):
+        rc, out = self.open_with(self.make_project('["EU"]'))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("全歐盟（EU-ALL", self.body())
+        self.assertNotIn("WARN", self.body())                # 警告只進日誌，不寫進 Issue
+
+    def test_product_name_from_project_key_unchanged(self):
+        base_key = self.drill_body()[0]
+        rc, _ = self.open_with(self.make_project(name="Demo Box 1"))
+        self.assertEqual(rc, 0)
+        i = self.gh.issues[1]
+        self.assertIn("Demo Box 1 v1.0.0", i["title"])
+        self.assertIn("- 產品名稱與版本：Demo Box 1 v1.0.0", i["body"])
+        self.assertEqual(art14.parse_marker(i["body"])[0], base_key)    # 改名不會讓同一個命中重開
+
+    def test_supplier_note(self):
+        rc, _ = self.open_with(self.make_project(role="supplier"))
+        self.assertEqual(rc, 0)
+        self.assertIn("- 公司角色：supplier（project.yml）：第 14 條是製造商的義務", self.body())
+        self.gh = FakeGitHub()
+        self.open_with(self.make_project(role="manufacturer"))
+        self.assertIn("- 公司角色：manufacturer（project.yml）", self.body())
+
+    def test_bad_project_fails_without_issue(self):
+        for proj in (self.make_project(config_name="Other Name"),         # product_name 和 config.json 不一致（load_project FAIL）
+                     self.make_project('["DE", "EU-ALL"]'),                # 保留值混用
+                     os.path.join(self.dir, "missing")):
+            rc, out = self.open_with(proj)
+            self.assertEqual(rc, 1, proj)
+            self.assertEqual(last(out)[:2], ["ART14", "FAIL"])
+            self.assertEqual(self.gh.issues, {})
+
+    def test_markets_text_states(self):
+        self.assertEqual(art14.markets_text(None)[0], "no-project")
+        self.assertEqual(art14.markets_text({"markets": ["SE"], "_todo": [], "_markets_unknown": False}),
+                         ("codes", "SE（ISO 3166-1 alpha-2；來源 project.yml）"))
+        with self.assertRaises(art14.Fail):
+            art14.markets_text({"markets": ["EL"], "_todo": [], "_markets_unknown": False})
 
 
 class TestCountdown(Base):
