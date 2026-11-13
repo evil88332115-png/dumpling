@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 01:24 +0800（C0）
+最後更新：2026-11-14 01:34 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -182,7 +182,11 @@
 > - 寫程式（cse 代理第三輪）：收尾**完成 28a008e**（只動 4 個檔案：notes、V540TU yml、intel_cse_layout.py 兩行 docstring、測試；ast 相同；test_intel_cse_layout 共 141 個）。CI 兩個都綠 → **PR #48 已開**；C0 的獨立驗證：**通過**。和 main dde7467 有衝突 → C2 併入 → **93361c1**（只有 PROVENANCE 衝突；874 passed；五個樣本 expected 全 OK；CI tests 43466739722、firmware 43466739438）→ **#48 已合併（main 5b444ab）**；worktree `dumpling-wt-c2-cse60` 已移除
 >   - 代理的暫存 `$AGENT_TMP/dumpling-tmp-c2-cse60/tmp`、`pytest` 被安全檢查擋下沒刪，**要使用者手動刪**
 >
-> - 寫程式（Sonnet 5.5，effort high）：D-043 (1) NVIDIA vBIOS 公告比對，分支 `wp3/nvidia-vbios-advisory`（從 main dde7467 開，worktree `$AGENT_TMP/dumpling-wt-c2-nvvbios`），暫存 `$AGENT_TMP/dumpling-tmp-c2-nvvbios/`：抓鏡像 → 審核 gpu-firmware 公告並填表 → 依版本與裝置 ID 比對 → 寫進報告；不改 C1 的檔案。狀態：**進行中**
+> - 寫程式（Sonnet 5.5，effort high）：D-043 (1) NVIDIA vBIOS 公告比對，分支 `wp3/nvidia-vbios-advisory`（從 main dde7467 開，worktree `$AGENT_TMP/dumpling-wt-c2-nvvbios`），暫存 `$AGENT_TMP/dumpling-tmp-c2-nvvbios/`：抓鏡像 → 審核 gpu-firmware 公告並填表 → 依版本與裝置 ID 比對 → 寫進報告；不改 C1 的檔案。狀態：**完成 9113d4a**
+>   - 鏡像 commit 98dc5d70（2026-11-10），gpu-firmware 群組只有 5674（HGX／DGX VBIOS、LS10）→ 判為 not_applicable（C2 代理初審，待負責人確認）；目前沒有可以機器比對的顯卡 vBIOS 公告 → 所有 vBIOS 都是 NOT_ASSESSED（no-row）
+>   - 新模組 `tools/cra/nvidia_vbios_advisory.py`：依版本、PCI vendor／device 比對；鏡像超過 90 天時 fixed 降成 NOT_ASSESSED
+>   - 需要 C1 的介面（之後協調）：validate_table 支援十六進位版本與裝置欄位、表要記鏡像 commit
+>   - CI tests 43473936035、firmware 43473941851；C2 正在本機重跑完整測試，下一步派預驗
 >
 > **本機背景工作**：無。**CI**：ca80b27 的 tests 43429449008、firmware 43429452991 **綠**；firmware-expect 五個樣本全 OK（B550M 3、Protectli 11、NUC11 2、NovaCustom 2；OVMF 沒有 expected）。
 
