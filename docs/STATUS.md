@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-13 04:23 -0500（C0）
+最後更新：2026-11-13 04:24 -0500（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -105,32 +105,83 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-- 目前在做：M3 之後的收尾 PR（C0 同意合成一個）：(1) 供應商 SBOM 上傳前最小正規化（完成）；(2) `pipeline/lib/firmware_fetch.py` 改 import 共用的 `pipeline/lib/fetch_verify.py`（完成，C0 要我先併 `origin/wp1/m2` 做好，PR 等 M2 進 main）
-- **M3 已完成**：PR #14 合併（main b6d341a）。已合併 PR：#7（樣本清單＋下載核對）、#8（x86_firmware → CycloneDX）、#14（M3）
-  - M3 內容：coreboot CBFS、AMI PFAT、UEFI FV 的 Intel GOP／VBT／legacy VBIOS（`tools/cra/uefi_gfx.py`，子類別化 C1 的 `uefi_image.Scan`，契約測試 `test_uefi_image_contract.py`）、expected 驗收（新鍵 `intel_gop`、`intel_legacy_vbios`）、供應商 SBOM 品質檢查、`firmware-dt` job（臨時 DT＋Grype）
-  - DT 結果（Actions）：Protectli 16→DT 14、NUC 8→6、OVMF 1、合成 vBIOS 1，都 ATTENTION；供應商 SBOM 被 DT 拒收（schema 不符），以 `expected_dt` 宣告，只放行 DT 的「BOM 不符 schema」400
-  - 驗證：第一次不通過（issuecomment-6832127582：只看 http=400 太寬）→ 8f02635 修正（錨定 DT 回應開頭＋6 個反例），C0 複核後合併
-- 分支 `wp3/supplier-normalize` 8a960c0（worktree `$AGENT_TMP/dumpling-wt-c2-norm`，從 main b6d341a；已併 `origin/wp1/m2` 54dbf48）
-  - 8a960c0：firmware_fetch 刪掉自己的下載核對函式，改 import fetch_verify（名稱照舊匯出、`main(downloader=…)` 不變；清單仍要求 size）；新測試：共用函式身分、缺 size 仍 FAIL、`python3 -I` 從別的目錄執行。本機 c2-firmware 238、c2-x86-firmware 325、c1-m2-layers／c1-m2-platform／c1-pipeline／c1-public-check／c1-tools（3146）／c0-public-check-binary 都 OK。CI tests 43323859797、firmware 43323866206 綠：五個真樣本全 ATTENTION；NVIDIA「有表」路徑實跑 `C-nvidia-bulletins-db ATTENTION`（gpu-firmware 表 1 筆待人審 5674），不再印 GAP
-- 代理：
-  - 代理 M（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` 84ea369，狀態：完成。`pipeline/lib/firmware_sbom_normalize.py`（1.4～1.6；頂層多出欄位→`dumpling:supplier-extra:*`、只有 url 的 license→`dumpling:supplier-license-url`；normalize.json 記每筆原 JSON Pointer＋值 sha256；上限；先規劃後套用）、CycloneDX 1.4 官方 schema（tag 1.4）、樣本拿掉 expected_dt。本機真 DT：Dasharo NS5x **DT 收下**，10 元件，verify 5 項 OK；原檔 1.4 schema 2 錯→副本 0 錯
-  - 我補 38db74c：報告的 OK 太寬（Grype 36 筆、purl 全 pkg:generic、沒有評估標記仍標 OK）→ `attention_reasons()`，三種都 ATTENTION；用真 DT 結果重跑 report 確認。CI tests 43289059136、firmware 43289066571 已觸發
-  - 預驗 38db74c（驗證，Sonnet 5.5 high），狀態：完成，**通過**。正規化：2 萬份隨機文件依紀錄還原全部相等；CycloneDX 官方 1.4／1.5／1.6 valid 範例 112 份零改動；schema sha256 重新下載一致；CI tests 43289059136、firmware 43289066571 綠，供應商 SBOM DT 收下（10 元件）、ATTENTION。建議（舊有）：report 仍有假 OK 路徑（DT 漏洞數 -3／null、dt-verify checks NOT_RUN／空、其他 sca-scan 階段 FAIL 不影響狀態、標記／purl 辨識太窄、供應商可自帶 dumpling: 標記、缺 version 不算）、重複鍵靜默、代理字元殘留檔
-  - 代理 N（寫程式，Sonnet 5.5 high）：`wp3/supplier-normalize` dd54722，狀態：完成。假 OK 路徑都堵住：比對數只認 int≥0；dt-verify 必要檢查缺／NOT_RUN／未知→GAP；任何 sca-scan 階段 FAIL→FAIL（expected_dt 放行規則不變），其他非 OK 階段→ATTENTION；vuln-assessment 只認 NONE、供應商 SBOM 自帶 dumpling: 標記不採信；purl 格式嚴格；缺 version 列入；型別錯→prep FAIL；重複鍵偵測→ATTENTION＋紀錄；代理字元先序列化再寫檔。CI tests 43294331473、firmware 43294338722 綠，五個真樣本全 ATTENTION（無 OK、無 FAIL）；c2-firmware 235、c2-x86-firmware 325
-  - 代理 O（寫程式，Sonnet 5.5 high）：`wp3/amd-psp` 41353d3，D-042 AMD 平台，狀態：完成。新模組 `tools/cra/amd_psp.py`（EFS → combo／L1／L2 的 PSP 與 BIOS 目錄、A/B 復原 slot header；Fletcher-32 checksum；PSP 韌體標頭版本；AMD 微碼 patch level／日期／equivalence id，CPUID 只在有等價表時；AGESA 字串，不同值全列＋ATTENTION；未知 type、Promontory、壓縮條目等都 GAP；各種上限跨巢狀累計）。公開樣本 ASUS PRIME B550M-A 3404（更新包標頭讓 EFS 不在固定位置、combo 目錄、L2）：17 個目錄、244 項、19 份微碼、AGESA ComboAM4v2PI 1.2.0.B；SBOM 99 元件。expected 新鍵 `amd_agesa`（ASUS release notes，我另用 ASUS API 核對相符）、`amd_microcode`（兩份 patch 與 linux-firmware c4586ffaac0c 位元組相同）。CI tests 43380211347、firmware 43380207352 綠（DT 99 元件）；本機 c2-x86-firmware 346、c2-firmware 168、c1-tools OK
-  - 預驗 41353d3（驗證，Sonnet 5.5 high），狀態：完成，**不通過**。真樣本、expected 出處（ASUS API、linux-firmware 位元組比對與等價表）、Intel／OVMF 輸出不變、公開資料規則都過。應修：(1) 壓縮的 0x66 條目沒做範圍檢查 → analyze 丟 struct.error，整份 AMD 結果作廢（被 x86_firmware 接住、記 GAP，但不該發生）；(2) 兩種位址解讀都有目錄 cookie 時靜默選一邊（真樣本有 2 處）；(3) size 0 與壓縮條目沒有 GAP；(4) AGESA 截斷仍當完整版本。建議：Fletcher-32 初值照 coreboot、ISH checksum 有公開算法、AGESA 分隔、UI section、EFS 位置分表、額外驗證補來源、8 個存活變異 → 交回代理 O 修，狀態：完成（f41f5eb）：analyze 不丟例外（單一條目錯只影響該條目）、壓縮條目不解析並記 GAP、歧義指標兩邊都列並 GAP（真樣本 6 個目錄歧義 → SBOM 的 PSP 版本 78→34、元件 99→55；expected 不受影響）、size 0（有 destination 的 APOB 除外）與壓縮記 GAP、AGESA 截斷不寫版本、Fletcher-32 與 ISH checksum 照 coreboot、EFS 位置表分三張。CI tests 43389266957、firmware 43389262554 綠；本機 c2-x86-firmware 359、c1-tools 3153
-  - 複驗 f41f5eb（驗證，沿用 AMD 預驗代理），狀態：完成，**不通過**（1 項應修）：目錄去重只看 offset、不看基底 → 構造輸入下「確定」目錄可沿用歧義路徑的基底，讀錯位置的條目進 SBOM（真樣本不受影響，但依賴處理順序）。其餘都過：真樣本數字重現、expected 微碼只來自確定目錄、Fletcher-32 與 coreboot 22004 筆零差異、ISH checksum 對 B650M 8 筆相符、EFS 表與 coreboot 逐項相同、fuzz 零例外、Intel／OVMF 不變。建議：AGESA complete 改比位置、APOB dest=0 不放行、補 13 個存活突變、PROVENANCE 用詞 → 交回代理 O，狀態：進行中
-  - C0 決定：(2) 兩種位址解讀都有目錄時一律 GAP、兩邊都列，不選邊；D-042 兩半合成一個 PR，開之前通知 C0（sca-center 端另做本機驗證）
-  - 代理 P（寫程式，Sonnet 5.5 high）：`wp3/csme-new` 17072b5，D-042 新世代 CSME，狀態：完成。新模組 `tools/cra/intel_cse_layout.py`（CSE layout table 1.6／1.7 → BPDT v1／v2 → FTPR／RBEP／NFTP 的 `$CPD` v1／v2 → `.man` 版本；沒有 FTPR 時要 RBEP 與 NFTP 版本相同才採用，矛盾／單一來源／結構不一致→GAP；無全檔掃描、有上限）；x86_firmware.py 只在舊路徑沒結果時才試新模組。公開樣本 Dasharo NovaCustom V540TU v1.0.1（ME 區域開頭不是 `$FPT`、沒有 FTPR）：改動前 unknown → 18.0.10.2285，expected `intel_me` 依 release notes（我另外直接抓原始 HTML 核對相符）。CI firmware 43377248319、tests 43377252522 綠；本機 c2-x86-firmware 380、c2-firmware 167、c1-tools 3173
-  - 預驗 17072b5（驗證，Sonnet 5.5 high），狀態：完成，**通過**。沒有錯誤版本、崩潰、違反 GAP 的問題（約 28 萬次 fuzz 零例外；Protectli／NUC／OVMF 新舊輸出逐位元相同；Nova 真樣本與 release notes 原始 HTML 重現 18.0.10.2285）。應修 1：layout 1.7 的 CRC-32 其實有公開定義（MEAnalyzer），文件寫成「沒查到」。建議：驗 layout CRC、沒有 FTPR 時要 RBEP＋NFTP 兩種類型（同類兩份是備份、不算獨立）、1.6 讀 BP1…BP5、「已清除」不能只看 4 bytes、補 6 個存活變異的測試、微碼的出處說法 → 交回代理 P 修，狀態：完成（70db3f6）：layout 1.7 驗 CRC-32（Size 從 +0x10 起算，認 0x40／0x48／0x58）、沒有 FTPR 要 RBEP＋NFTP 兩類型且版本相同、1.6 讀 BP1…BP5 並納入矛盾檢查（u64 checksum 算法不確定、不驗）、整個 BP 都是 0xFF 才算清除、16 個變異全殺；expected 加微碼 000A06A4／0xE6／0x25（Dasharo v1.0.1 release notes 與 Intel microcode-20250812 releasenote，我直接抓原始檔核對）。CI firmware 43382783573、tests 43382788001 綠；本機 c2-x86-firmware 403、c2-firmware 167、c1-tools 3197
-  - 複驗 70db3f6（驗證，沿用 CSME 預驗代理），狀態：完成，**通過**，無應修（fuzz 共約 36 萬次零例外、44 個變異全殺、Protectli／NUC／OVMF 新舊輸出逐位元相同、Nova v1.0.0 另外驗證也相符）。建議的文件小修我補在 61e8ef7。**D-042 新世代 CSME 完成**（`wp3/csme-new` 61e8ef7）
-  - 已完成：代理 A～L；預驗 cbfs、pfat、4183a96（不通過→已修）、7e40fe7（通過）
-- 依賴 C1：`uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（C1 已記入對外介面約定）；`dt-verify` 檢查名稱「弱點分析完成」「元件數」；gpu-firmware 空對照表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` 隨 M2 進 main（之前 CI 印 GAP）
-- 下一步（兩件分開進行）：
-  - supplier-normalize：等 C1 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（韌體 C-sbomgate 一定 NOT_ASSESSED、沒有工具寫 vuln-assessment=NONE、C-mirror-freshness 在 CI NOT_RUN）——保守、符合原則，不放寬
-  - D-042：擴充 AMD 平台／新世代 Intel CSME 的解析範圍（x86_firmware.py）。(1) AMD：解析 PSP 目錄（含 L2、BIOS 目錄）的條目類型與版本、AMD 微碼（patch level、CPUID）、AGESA 版本字串；(2) Intel：支援沒有 `$FPT`／FTPR `$CPD` 的分割區配置，找出對應分割區的 manifest 版本。看不懂、找不到一律 GAP。標準答案只用公開可下載的樣本（firmware/ 登記網址＋sha256，預期值附出處）。分支 `wp3/amd-psp`（worktree `$AGENT_TMP/dumpling-wt-c2-amd`）、`wp3/csme-new`（`$AGENT_TMP/dumpling-wt-c2-csme`），都從 main 26a6377；各派一個寫程式的代理，做完各自預驗，功能完成再開 PR
-  - D-043（排在 D-042 後）：韌體 SBOM 的公告比對，只用公開資料。(1) 自動比對：NVIDIA vBIOS 用每日鏡像的 NVIDIA product-security CSAF 填 `nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED；Intel 微碼用 intel/Intel-Linux-Processor-Microcode-Data-Files 的 release notes（固定 tag／commit＋sha256），SBOM 的 CPUID＋rev 比較舊就列出中間的 INTEL-SA，讀不到 GAP；Intel CSME 加 NVD CPE（converged_security_and_management_engine_firmware），註明 NVD 資料不完整。(2) 規則表（半自動，比照 D-039）：一個公告一筆（INTEL-SA、AMI-SA、AMD-SB），條件＝元件＋版本範圍，記出處、確認者（角色）、日期；結果只給建議，排除照 D-035 記 vendor-statement。(3) vendor-watch 由 C3 改，C2 不動。產出：每份韌體 SBOM 都有比對結果（受影響／不受影響／NOT_ASSESSED＋依據）寫進報告；比不到寫「資料庫沒有資料，以廠商公告為準」，不顯示成沒有漏洞。順序：D-042 → D-043 (1) → (2)，每段完成通知 C0
-- 卡住／等決定：無。代理暫存資料夾 `$AGENT_TMP/dumpling-tmp-c2-cbfs`、`-pfat`、`-verify-cbfs`、`-verify-m3b`、`-supsbom`、`-sbomfix`、`-c1files`、`-dt`、`-gop`、`-expect`、`-norm`、`-norm2`、`-verify-norm` 被安全檢查擋下沒刪，要使用者手動刪
+> **交接狀態（2026-11-13，D-045 搬到第二台 WSL2）**：這台的 C2 工作已停在下面描述的位置。沒有代理在跑，沒有本機背景工作，也沒有進行中的 GitHub Actions。三條分支都已 commit＋push（沒有 force-push）。這台的 worktree 在使用者確認前不要刪。
+
+### 公開資料規定（D-042／D-043，重要）
+repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、firmware.yml、STATUS）**不能提到這兩項工作的起因**，也不能寫是哪種產品或平台需要它。一律寫成「擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，選樣本只講技術理由（例如「沒有 $FPT 的分割區配置」「有 L2 目錄的 PSP」）。只用公開可下載的樣本和公開資料；不使用、也不索取任何公司的 BIOS 檔。代理的指示也照這個寫，不要告訴代理起因。
+
+### 已完成
+- M3（C2 唯一的里程碑）：PR #14 合併（main b6d341a）。已合併的 PR：#7、#8、#14
+- D-042 新世代 Intel CSME：分支 `wp3/csme-new` **61e8ef7**，預驗＋複驗都**通過**
+  - 新模組 `tools/cra/intel_cse_layout.py`：CSE layout table（1.7 驗 CRC-32，Size 從 +0x10 起算，認 0x40／0x48／0x58；1.6 靠表長 0x48＋後面全 0xFF 辨識，讀 BP1…BP5）→ BPDT v1／v2 → FTPR，或 RBEP 與 NFTP 兩種都有且版本相同 → `.man` 的 `$MN2` 版本；矛盾、單一來源、結構不一致 → GAP；整個 BP 都是 0xFF 才算清除。`x86_firmware.py` 只在舊的 `$FPT` 路徑（`me_info_fpt`）沒找到時才走這條
+  - 公開樣本 `firmware/bios/novacustom-v540tu-mtl-v1.0.1`：改動前 unknown → 18.0.10.2285。expected 有 `intel_me`，以及微碼 000A06A4／0xE6／0x25（出處：Dasharo release notes 原始 HTML、Intel microcode-20250812 的 releasenote.md，我都直接抓原始檔核對過）
+  - 驗證：fuzz 約 36 萬次零例外，44 個變異全殺；Protectli、NUC、OVMF 新舊輸出逐位元相同。CI（70db3f6）firmware 43382783573、tests 43382788001 綠；61e8ef7 只改文件一行
+  - 文件：`docs/notes/c2-csme-layout.md`
+- supplier-normalize（M3 之後的收尾，C0 同意合成一個 PR）：分支 `wp3/supplier-normalize` **8a960c0**，內容完成
+  - (1) 供應商 SBOM 上傳前的最小正規化：`pipeline/lib/firmware_sbom_normalize.py`。報告的假 OK 路徑已堵住（`firmware_dt.py` 的 `attention_reasons`）。預驗通過
+  - (2) `firmware_fetch.py` 改 import C1 的 `pipeline/lib/fetch_verify.py`：已先併 `origin/wp1/m2`（54dbf48）
+  - CI tests 43323859797、firmware 43323866206 綠。五個真樣本全 ATTENTION；NVIDIA「有表」路徑跑出 `C-nvidia-bulletins-db ATTENTION`（5674 待人審）
+
+### 進行中：D-042 AMD 平台（分支 `wp3/amd-psp` **ebac3e9**，從 main 26a6377）
+- 新模組 `tools/cra/amd_psp.py`：
+  - 目錄：EFS（依視窗大小分三張位置表，與 coreboot 相同）→ combo／L1／L2 的 PSP 與 BIOS 目錄、A/B 復原 slot header（ISH checksum 照 coreboot amdfwtool.c:854）；目錄 checksum 是 Fletcher-32，照 coreboot 的寫法
+  - 內容：PSP 韌體標頭版本；AMD 微碼的 patch level、日期、equivalence id（CPUID 只在有等價表時才填）；AGESA 字串
+  - GAP：未知 type、size 0（有 destination 的 APOB 0x61 除外）、壓縮條目、Promontory、AGESA 截斷
+  - 歧義：同一位置只要被兩種基底讀過，就是歧義（C0 決定：一律 GAP、兩邊都列，不選邊），歧義目錄的條目不進 SBOM
+  - `analyze()` 不丟例外
+- 公開樣本 `firmware/bios/asus-prime-b550m-a-3404`。expected 有 `amd_agesa` "1.2.0.B"（我用 ASUS API GetPDBIOS 核對過）和 `amd_microcode` 兩份（與 linux-firmware c4586ffaac0c 位元組相同）
+- 驗證歷程：
+  - 預驗 41353d3 **不通過**（4 項應修）→ f41f5eb 修完
+  - 複驗 f41f5eb **不通過**（1 項應修：目錄去重只看 offset、不看基底）→ ebac3e9 修完：目錄紀錄改以（位置，基底）為單位、與處理順序無關，另做了建議 a／b／c／e
+  - **ebac3e9 還沒有複驗**
+- ebac3e9：CI tests 43397906497、firmware 43397901286 綠（expected 3 項 OK）。本機 c2-x86-firmware 372（test_amd_psp 52 個）、c2-firmware OK、c1-tools 3166
+- 驗證代理的重現腳本在這台的 `$AGENT_TMP/dumpling-tmp-c2-verify-amd/scripts/`、`scripts2/`（t1～t14、fuzz1～4、fl.py、mut3），第二台沒有這些檔案；需要時照複驗報告的描述重寫
+- **等決定（要問 C0）**：ebac3e9 的歧義規則很保守
+  - ASUS B550M 的 PSP 韌體版本 78 個全部進不了 SBOM，SBOM 只剩 21 個元件（映像、19 份微碼、AGESA）
+  - ASUS B650M-A 1807（只在 notes 做過驗證）只剩 2 個元件；ASRock B550 PG4 沒有歧義，不受影響
+  - 較窄的替代規則：只讓「不歧義路徑讀出的那筆」確定，另一種基底的讀法只列出，不連帶讓確定的那筆變歧義。代理沒有實作，notes 有寫這個取捨
+  - 我的看法：較窄的規則，前提是不歧義那條邊本身要用唯一的基底；但這要先問 C0
+- **新發現、要處理**：AGESA 搜尋的「位置比對」（建議 a）用 `sys._getframe(1)` 讀 C1 `uefi_image` 呼叫端的區域變數 `where`、`out`（amd_psp.py:746、:860 附近）
+  - 這不在 C1 的對外介面約定裡，屬於脆弱的耦合；失敗時方向是保守的（標成不完整）
+  - 處理選項：(a) 請 C1 在 `uefi_image` 提供正式的回呼或來源資訊；(b) 拿掉 frame 讀取，只要原始位元組裡有任何標記不在走訪範圍內，就一律 complete=False
+  - 我傾向 (b)，或先 (b) 再和 C1 談 (a)。複驗時一併看
+- 其他已知限制：壓縮的 BIOS 條目（0x62）和壓縮的微碼不解壓；真樣本的 AGESA 搜尋仍是「不完整」（2 個 `CE3233F5-…` GUID-defined section、1 個 FFS 檔的 section 串不乾淨）
+
+### 下一步（新對話照這個順序接手）
+1. **D-042 AMD**：先問 C0 歧義規則要不要放寬，以及 `sys._getframe` 這件事；照決定修（派一個寫程式的代理）→ 派驗證代理複驗 ebac3e9 之後的版本 → 通過後：
+   - 把 `origin/wp3/csme-new` 併進 `wp3/amd-psp`。會衝突的有 `docs/PROVENANCE.md`、`tests/run.d/c2-x86-firmware.sh`（兩邊都改了最後的測試清單），x86_firmware.py 兩邊改的是不同段落
+   - 併 origin/main（D-021：有衝突才併，開 PR 前確認只剩自己的改動）
+   - 重跑 CI
+   - **先通知 C0（sca-center 端要用私有檔在本機驗證）**，再開一個 PR，標題「[WP3] 擴充 AMD 平台／新世代 Intel CSME 的解析範圍」，PR 說明照公開資料規定寫
+   - 驗證由 C0 派，C0 合併
+2. **supplier-normalize**：等 C1 的 M2 合併進 main → 併 origin/main（確定只剩自己的改動）→ 重跑 CI → 開一個 PR → 驗證（C0 派）→ C0 合併。現況：沒有任何真樣本能到 OK（保守、符合原則，不放寬）
+3. **D-043**（排在 D-042 之後）：韌體 SBOM 的公告比對，只用公開資料。順序是 (1) → (2)，每段完成通知 C0
+   - (1) 自動比對：
+     - NVIDIA vBIOS：用每日鏡像的 NVIDIA product-security CSAF 填 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`，依 vBIOS 版本＋裝置 ID 判定受影響／已修補／NOT_ASSESSED
+     - Intel 微碼：用 intel/Intel-Linux-Processor-Microcode-Data-Files 的 release notes（固定 tag／commit＋sha256）。SBOM 的 CPUID＋rev 比較舊時，列出中間的 INTEL-SA；讀不到 → GAP
+     - Intel CSME：加 NVD CPE（converged_security_and_management_engine_firmware），並註明 NVD 資料不完整
+   - (2) 規則表：比照 D-039，一個公告一筆（INTEL-SA、AMI-SA、AMD-SB），條件＝元件＋版本範圍，記出處、確認者（角色）、日期；結果只給建議，排除照 D-035 記 vendor-statement
+   - (3) vendor-watch 由 C3 改，C2 不動
+   - 產出：每份韌體 SBOM 都要有比對結果（受影響／不受影響／NOT_ASSESSED＋依據）並寫進報告；比不到的寫「資料庫沒有資料，以廠商公告為準」，不可以顯示成沒有漏洞
+4. 代理規則：同時最多 3 個（寫程式最多 2 個、驗證 1 個，兩者分開）；Sonnet 5.5，effort 用 high（解析不可信資料、判定邏輯）。開代理前看 uptime，負載超過 6 不開新代理（D-005）。PR 的驗證由 C0 派，C2 只派 PR 前的預驗
+
+### 第二台要準備的
+- worktree：從 origin 重建三條分支 `wp3/amd-psp`（ebac3e9）、`wp3/csme-new`（61e8ef7）、`wp3/supplier-normalize`（8a960c0）
+- 公開樣本：這台的 `$PUBLIC_IMAGES/bios/` 只有 Protectli v1.2.0 和 OVMF 的原始碼包。其他樣本都在這台的代理暫存資料夾裡，第二台要重新下載。網址、sha256、size 都在各分支的 `firmware/**/firmware.yml`，可用 `pipeline/firmware-fetch.sh <firmware.yml>... --out <目錄>` 下載核對：
+  - main：`firmware/bios/dasharo-protectli-vp46xx-v1.2.0`、`intel-nuc11-patgl357-0059`、`ubuntu-ovmf-2024.02`，`firmware/vbios/*`，`firmware/sbom/dasharo-novacustom-ns5x-tgl-v1.6.0`
+  - `wp3/csme-new`：`firmware/bios/novacustom-v540tu-mtl-v1.0.1`（32 MiB）
+  - `wp3/amd-psp`：`firmware/bios/asus-prime-b550m-a-3404`（16.7 MB zip）
+  - 只做過驗證、沒登記成樣本的檔案（網址和 sha256 寫在 `wp3/amd-psp` 的 `docs/notes/c2-amd-psp.md`）：ASRock B550 PG4 3.40、ASUS B650M-A 1807
+- 依賴 C1：
+  - `uefi_image.py` 的 Scan／scan_bytes／parse_fvs／Stop／MAX_*（已記入 C1 的對外介面約定）
+  - `dt-verify` 的檢查名稱「弱點分析完成」「元件數」
+  - `fetch_verify.py`（隨 M2 進 main）
+  - gpu-firmware 對照表（隨 M2 進 main）
+
+### 卡住／等決定
+- AMD 歧義規則要不要放寬（見上），以及 `sys._getframe` 的處理方式：要問 C0
+- 這台的代理暫存資料夾被安全檢查擋下沒刪，要使用者手動刪：`$AGENT_TMP/dumpling-tmp-c2-*` 共 21 個，`dumpling-tmp-c2` 本身是 STATUS 草稿，搬完再刪
+- worktree `$AGENT_TMP/dumpling-wt-c2-amd`、`-csme`、`-norm` 等使用者確認後再刪
 <!-- END C2 -->
 
 <!-- BEGIN C3 -->
