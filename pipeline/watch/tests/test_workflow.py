@@ -119,9 +119,22 @@ class WatchWorkflow(unittest.TestCase):
         self.assertIn("needs.compute.outputs.has_support_plan == 'true'", notify.split("steps:")[0])
         sup = re.search(r"(?ms)- name: 套用支援期限的 Issue\n(.*?)(?=^      - |\Z)", notify).group(1)
         self.assertIn("if: ${{ !cancelled() && needs.compute.outputs.has_support_plan == 'true' }}", sup)   # 每日監控的 apply 失敗也照樣套用
-        self.assertRegex(sup, r"DRY:\s*\$\{\{\s*inputs\.dry_run\s*\}\}")
+        self.assertRegex(sup, r"DRY:\s*\$\{\{\s*inputs\.dry_run \|\| vars\.WATCH_REAL_ISSUES != 'on'\s*\}\}")   # 真值表見 test_support_issues_gated_until_real_issues_on
         self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', sup)
         self.assertRegex(sup, r'issues\.py apply [^\n]*support/plan\.json[^\n]*"\$\{d\[@\]\}"')
+
+    def test_support_issues_gated_until_real_issues_on(self):
+        # C0 決定：WATCH_REAL_ISSUES=on 之前，支援期限的 Issue 一律只算不寫（手動、dry_run=false 也一樣）；放行後照 dry_run
+        sup = re.search(r"(?ms)- name: 套用支援期限的 Issue\n(.*?)(?=^      - |\Z)", self.round).group(1)
+        e = re.search(r"DRY:\s*\$\{\{\s*(.+?)\s*\}\}", sup).group(1)
+        c = lambda dry, v: {"inputs.dry_run": dry, "vars.WATCH_REAL_ISSUES": v}     # noqa: E731
+        for v in ("", "off", "true", " on", "1"):
+            for dry in (True, False):
+                self.assertTrue(evaluate(e, c(dry, v)), (dry, v))
+        for v in ("on", "ON"):                          # GitHub 的字串比較不分大小寫
+            self.assertTrue(evaluate(e, c(True, v)))
+            self.assertFalse(evaluate(e, c(False, v)))
+        self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', sup)
 
     def test_translator_rejects_unknown_syntax(self):
         with self.assertRaises(AssertionError):

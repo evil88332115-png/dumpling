@@ -143,7 +143,10 @@ INFO_STAGES = ["C-grype-db", "C-grype"]
 COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile",
                "C-pyver", "B-php-runtime"]
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
-# C-dt-feeds：GAP → GAP；NOT_RUN 只在原因是金鑰沒有權限（說明含 SYSTEM_CONFIGURATION_READ）時算 GAP——沒用 DT 的 NOT_RUN 已由 D-dt-data-sources 反映
+# C-dt-feeds：GAP → GAP；NOT_RUN 看 meta.json 的 dt_feeds_reason（結構化，不看說明文字；M7b）：金鑰沒有權限（permission_denied）、
+# 沒讀到任何資料源狀態（no_data）或沒有原因代碼（舊的 meta.json、寫錯）→ GAP；沒用 DT（dt_not_used）與 dtsources.py 失敗（dtsources_failed）
+# 不降級——那兩種已由 D-dt-data-sources 反映：它在 RISK_STAGES，不是 OK 就 GAP（sca-scan 在沒用 DT 時寫 NOT_RUN、dtsources.py 失敗時寫 FAIL）。
+# 不只信 meta.json 的代碼：D-dt-data-sources 是 OK（或沒有這一列以外的其他情況使它是 OK）時，C-dt-feeds 的 NOT_RUN 照樣 GAP
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
 # 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
 # kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
@@ -208,8 +211,12 @@ def kernel_stage_level(k, st, meta):
     return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
-def fresh_stage_level(k, st, detail):
-    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
+DT_FEEDS_NOT_DOWNGRADED = ("dt_not_used", "dtsources_failed")
+
+
+def fresh_stage_level(k, st, meta=None, status=None):
+    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。meta：sca-scan 的 meta.json（C-dt-feeds 讀 dt_feeds_reason）；
+    status：read_status 的結果（C-dt-feeds 不降級時要確認 D-dt-data-sources 不是 OK）。"""
     if st == "OK":
         return None
     if st == "ATTENTION":
@@ -217,7 +224,11 @@ def fresh_stage_level(k, st, detail):
     if k == "C-grype-db-update":
         return "GAP" if st == "FAIL" else None          # NOT_RUN（GRYPE_DB_UPDATE=off）：資料庫年齡由 C-grype-db 判斷
     if k == "C-dt-feeds":
-        return "GAP" if st == "GAP" or (st == "NOT_RUN" and "SYSTEM_CONFIGURATION_READ" in (detail or "")) else None
+        if st == "NOT_RUN":
+            reason = (meta or {}).get("dt_feeds_reason") if isinstance(meta, dict) else None
+            dds = (status or {}).get("D-dt-data-sources", ("NOT_RUN",))[0]
+            return None if reason in DT_FEEDS_NOT_DOWNGRADED and dds != "OK" else "GAP"
+        return "GAP"        # GAP、FAIL（例如 config_error：DT_FEEDS_MAX_AGE_HOURS 設錯）、不認得的狀態：至少 GAP（D-043；#92 C0，原本 FAIL 回 None）
     return "GAP"
 
 
@@ -4827,7 +4838,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
         for k in FRESH_STAGES:
-            lv = fresh_stage_level(k, status[k][0], status[k][1]) if k in status else None
+            lv = fresh_stage_level(k, status[k][0], meta, status) if k in status else None
             if lv:
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {status[k][0]}: vulnerability data may be out of date")
