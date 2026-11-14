@@ -591,7 +591,7 @@ class Injection(Base):
                 self.assertNotRegex(t, r"(?<![\\\w])@(?!\u200b)[A-Za-z]", field)
                 self.assertNotIn("](https://evil", t.replace("\\]\\(", ""), field)
                 self.assertNotRegex(t, r"(?<!\\)!\[(?!\\)", field)
-                self.assertNotRegex(t, r"(?<!\\)#\d", field)          # \#1（反斜線跳脫）不會連到別的 Issue
+                self.assertNotRegex(t, r"[#＃]\d", field)          # \#1 照樣會連結（GitHub 實測），# 後面要有零寬空白
                 self.assertNotRegex(t, r"&(?!amp;)(?:[A-Za-z][A-Za-z0-9]*;|#)", field)
             self.assertEqual(match.unsafe_markdown(x["body"]), [], x["body"])
             self.assertEqual(match.unsafe_actions([x]), [], x)
@@ -619,7 +619,7 @@ class Injection(Base):
              "date_added": "2024-01-01", "source": "@src", "first_detected": NOW1}
         body = match.vendor_body("real", e, None, None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
-        self.assertNotRegex(body, r"(?<!\\)#1")                    # \#1（反斜線跳脫）不會連到別的 Issue
+        self.assertNotRegex(body, r"[#＃]1")                         # \#1 照樣會連結（GitHub 實測），# 後面要有零寬空白
         p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1", "gaps": ["upstream_note: @bob [x](https://evil.example)"]}
         body = match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                          "component": "c", "purl": "p", "basis": "b", "sources": []}], p, [], None, match.parse_now(NOW1))
@@ -687,7 +687,7 @@ class Injection(Base):
         samples = [EVIL, "see www.example.com and https://x.example/a", "mail a.b@example.com now", "xmpp:a@b/c", "mailto:x@y",
                    "lone \ud800 surrogate", "&commat;everyone #12 $x$", "pkg:generic/zlib@1.2.11", None, "x" * 400]
         for x in samples:
-            self.assertEqual(match.md_text(x), fm.md_safe("" if x is None else x, 300), repr(x)[:60])
+            self.assertEqual(match.md_text(x), match._issue_refs_off(fm.md_safe("" if x is None else x, 300)), repr(x)[:60])
         self.assertIn("www\\.example", match.md_text("www.example.com"))           # www. 不會被自動連結
         self.assertIn("https\\://", match.md_text("https://x.example"))            # scheme:// 不會被自動連結
         self.assertIn("@\u200b", match.md_text("a.b@example.com"))                  # email 自動連結斷開
@@ -695,6 +695,20 @@ class Injection(Base):
         self.assertEqual(match.md_text("pkg:generic/zlib@1.2.11"), "pkg:generic/zlib@1.2.11")      # purl 原樣（可複製）
         for x in samples[:-2]:
             self.assertEqual(match.unsafe_markdown("前文 " + match.md_text(x)), [], repr(x)[:60])
+
+    def test_issue_references_broken(self):
+        # GitHub 在渲染後的文字比對 Issue 參照：\#1 照樣連結（2026-11-14 用 POST /markdown 實測）。# 後面接數字、GH-數字都要插零寬空白
+        z = "\u200b"
+        for raw, want in (("#123", "\\#" + z + "123"), ("＃123", "＃" + z + "123"), ("owner/repo#12", "owner/repo\\#" + z + "12"),
+                          ("GH-12", "GH" + z + "-12"), ("gh-3", "gh" + z + "-3"), ("see #１２", "see \\#" + z + "１２")):
+            self.assertEqual(match.md_text(raw), want, raw)
+        for raw in ("C# code", "#tag", "BUGH-1", "GH-x", "1#2"):
+            out = match.md_text(raw)
+            self.assertNotRegex(out, r"[#＃][0-9０-９]", raw)
+            self.assertNotRegex(out, r"(?i)(?<![A-Za-z0-9])gh-[0-9]", raw)
+        self.assertEqual(match.md_text("C# code"), "C\\# code")                    # 後面不是數字：只跳脫，不插
+        self.assertIn("GH" + z + "-7", match.md_title("修正 GH-7 與 #8"))            # 標題也斷開
+        self.assertIn("#" + z + "8", match.md_title("修正 GH-7 與 #8"))
 
     def test_md_code_keeps_text_copyable(self):
         self.assertEqual(match.md_code("pkg:npm/%40types/node@1.0.0"), "` pkg:npm/%40types/node@1.0.0 `")

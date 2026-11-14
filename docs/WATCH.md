@@ -211,7 +211,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
   一次新增超過 20 個群組 → 全部併成一個彙總 Issue：標題 `[KEV][ATTENTION] 彙總：…`、加 `attention` 標籤，內文也寫 ATTENTION（已有 Issue 的群組事件太多時的彙總也一樣）。
 - **外部字串不能變成通知或連結**：元件名、purl、KEV 的廠商／產品、release-meta 的 attention、kernel-versions 的說明、鏡像訊息都是外部資料。
   識別字（元件、purl、依據、來源、廠商、Release 的 tag 與網址）放進行內程式碼（`match.md_code`：原樣可複製，裡面的 `@`、連結、圖片都不解讀；反引號用更長的分隔符號）；
-  其他文字用 `match.md_text`，**和 C2 的 `pipeline/lib/firmware_mdsafe.py` 的 `md_safe` 是同一套規則**（C0 決定，2026-11-14；細節見該檔檔頭）：去控制與格式字元（含單獨的代理字元、零寬字元、雙向覆寫）、`&` 先換成 `&amp;`（`&commat;`、`&lbrack;` 這類 HTML 實體不會渲染成 `@`、`[`）、跳脫 `\ [ ] ( ) < > ! * _ # ~ | ` $`（`\#123` 不會連到別的 Issue）、提及形式的 `@` 插零寬空白（不會通知 `@types` 這類組織）、會被 cmark-gfm／markdown-it 自動連結的 email、`scheme://`、`www.` 都斷開；`pkg:generic/zlib@1.2.11` 這類 purl 原樣保留；
+  其他文字用 `match.md_text`，**和 C2 的 `pipeline/lib/firmware_mdsafe.py` 的 `md_safe` 是同一套規則**（C0 決定，2026-11-14；細節見該檔檔頭）：去控制與格式字元（含單獨的代理字元、零寬字元、雙向覆寫）、`&` 先換成 `&amp;`（`&commat;`、`&lbrack;` 這類 HTML 實體不會渲染成 `@`、`[`）、跳脫 `\ [ ] ( ) < > ! * _ # ~ | ` $`、提及形式的 `@` 插零寬空白（不會通知 `@types` 這類組織）；**md_safe 之後再補一道 Issue 參照**：`#`／`＃` 後面接數字、`GH-` 接數字時插零寬空白（`\#123` 只在 Markdown 那一層有效，GitHub 在渲染後的文字比對 Issue 參照——2026-11-14 用 `POST /markdown` 實測 `\#1`、`owner/repo\#1`、`GH-1` 都會連結，插零寬空白就不會；連結還會在被參照的 Issue 時間軸留下一筆 cross-reference）、會被 cmark-gfm／markdown-it 自動連結的 email、`scheme://`、`www.` 都斷開；`pkg:generic/zlib@1.2.11` 這類 purl 原樣保留；
   標題用 `match.md_title`（`@`、`#`、`&` 後面插零寬空白；標題照字面顯示，不換成 `&amp;`）。產生 plan 前最後再檢查一次（`unsafe_markdown`）：行內程式碼以外還有沒淨化的 `@提及`、`](` 連結、`![` 圖片或 HTML 實體（`&名稱;`、`&#`；`&amp;` 除外）就 FAIL、不產生 plan。
 - 第一次建立基準前，先看那次 dry_run 的報告有沒有 ATTENTION（例如核心 CVE 用了 48 小時內的舊資料頂替）：基準不會擋它，但之後補進的那段時間的命中會被當成新的。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
