@@ -1,0 +1,375 @@
+{
+ "schema": 1,
+ "project": "ai-nas-demo",
+ "version": "v1.0.0-demo1",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43536522257（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43467217687（併上 main 7b5c6b2 之後，7b3bb41）、43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "checks": {
+  "platform": {
+   "equals": "ai-nas",
+   "reason": "平台由 project.yml 明確給定（不從映像格式推）"
+  },
+  "os_responsibility": {
+   "equals": "ours",
+   "reason": "自有品牌的 NAS：OS 也是我們的待辦（只有一份報告）"
+  },
+  "image.file": {
+   "equals": "debian-13-generic-amd64-20261111-2659.tar.xz",
+   "reason": "sources.yml 固定的 Debian 官方雲端映像"
+  },
+  "image.sha256": {
+   "equals": "1e10629ef3fd2b2707d5fa34637bbfae7350e1ecd4768d04d4b8429aa10b7dbe",
+   "reason": "sources.yml 固定；與官方 SHA512SUMS 同一個檔（platform-samples 時核對）"
+  },
+  "image.disk_sha256": {
+   "equals": "5b38b6ee88758cf9881cba815077ba10db4e0c66d3456e11ccdab2973fd70b55",
+   "reason": "tar.xz 裡的 disk.raw 串流取出後的 sha256；精靈的 A-provenance 也是這個值"
+  },
+  "image.disk_bytes": {
+   "equals": 3221225472,
+   "reason": "disk.raw 的大小（3 GiB）"
+  },
+  "components.total": {
+   "equals": 27220,
+   "reason": "固定輸入（映像、Syft 1.55.0、OMV commit 9d8530ff 的 cdxgen 結果）下的元件數。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 固定 12.8.7，見 components.bsp）"
+  },
+  "components.bsp": {
+   "equals": 2,
+   "reason": "(1) OMV 應用本身：根元件 openmediavault 8.6.1-1（type application，own_software 對到；purl 改成 pkg:generic/openmediavault@8.6.1-1，cdxgen 原本的 pkg:npm/openmediavault-workbench@0.0.0 留在 dumpling:source-root-purl）；(2) 它的子元件 cdxgen-src（版本 latest，cdxgen 自己塞的占位元件，沒有相依邊，不是真實套件）。雲端映像沒有裝 OMV 的 deb（deb_bsp 是 null）。cdxgen 固定 12.8.7（tools/e2e/install-tools.sh），傳遞相依可能浮動；占位元件 cdxgen-src 隨 cdxgen 升級消失時這一項會變成 1"
+  },
+  "components.os": {
+   "equals": 25493,
+   "reason": "322 個 Debian deb 與它們擁有的檔案紀錄、核心模組、dpkg 資料庫檔、operating-system 元件"
+  },
+  "components.unknown": {
+   "equals": 1725,
+   "reason": "OMV 原始碼掃到的第三方相依 1691 個（npm 1679、pypi 5、composer 4、github 3；沒有路徑或路徑沒有規則，缺口 7）＋映像裡 deb 帶進來的語言套件 34 個（pypi 33、maven 1，缺口 12）；ours 時都算我們的待辦。OMV 原始碼的部分依賴 cdxgen 的輸出（cdxgen 固定 12.8.7，見 components.bsp）"
+  },
+  "components.host_tool": {
+   "equals": 0,
+   "reason": "映像裡沒有主機端工具"
+  },
+  "components.deb_bsp": {
+   "equals": null,
+   "reason": "雲端映像沒有任何 bsp 的 deb（OMV 只從原始碼掃）"
+  },
+  "components.deb_os": {
+   "equals": 322,
+   "reason": "與 Debian 官方清單 debian-13-generic-amd64-20261111-2659.json（sha256 59bc90c5…，D-037）的 322 個套件名稱與版本完全相同"
+  },
+  "unknown_by_reason": {
+   "equals": {
+    "no-path": 1630,
+    "path-no-rule": 95
+   },
+   "reason": "no-path 1630 都是 OMV 原始碼的相依；path-no-rule 95＝原始碼相依 61＋映像的語言套件 34"
+  },
+  "unknown_by_purl_type": {
+   "equals": {
+    "composer": 4,
+    "github": 3,
+    "maven": 1,
+    "npm": 1679,
+    "pypi": 38
+   },
+   "reason": "npm 1679 是 OMV 網頁介面（workbench）的 package-lock.json；pypi 38＝映像 33＋原始碼 5；maven 1 在映像裡；composer、github 來自原始碼"
+  },
+  "layers_gaps": {
+   "equals": [],
+   "reason": "分層沒有 GAP"
+  },
+  "external_services.status": {
+   "equals": "NOT_ASSESSED",
+   "reason": "AI NAS 沒有定義對外連線服務清單（缺口 15）；不是「沒有」——映像開機就有 ssh"
+  },
+  "app_source.repo": {
+   "equals": "https://github.com/openmediavault/openmediavault.git",
+   "reason": "sources.yml 的 app_repo"
+  },
+  "app_source.commit": {
+   "equals": "9d8530ffa6912ece116bc6c74d0f3d06045b6c26",
+   "reason": "D-025 固定的 commit"
+  },
+  "app_source.app_name": {
+   "equals": "openmediavault",
+   "reason": "sources.yml 的 app_name，對得上 project.yml 的 own_software"
+  },
+  "app_source.app_version": {
+   "equals": "8.6.1-1",
+   "reason": "固定 commit 的 deb/openmediavault/debian/changelog 第一行是 openmediavault (8.6.1-1)（C4 從 GitHub 讀過）"
+  },
+  "app_source.cdxgen_root_name": {
+   "equals": "openmediavault-workbench",
+   "reason": "cdxgen 原本的根元件名稱（記錄用，不拿來當產品名稱；原本的 purl 也留在元件的 dumpling:source-root-purl）"
+  },
+  "app_source.version_vs_commit": {
+   "equals": "NOT_ASSESSED",
+   "reason": "D-025：版本與 commit 是否完全相同沒有評估"
+  },
+  "app_source.source_vs_package": {
+   "equals": "NOT_ASSESSED",
+   "reason": "D-025：原始碼與正式 deb 是否相同沒有評估（缺口 5）"
+  },
+  "app_source.scan_stages_not_ok.C-lockfiles.status": {
+   "equals": "GAP",
+   "reason": "OMV 的 Python 部分沒有鎖定檔（缺口 6）"
+  },
+  "app_source.scan_stages_not_ok.C-sbomgate.status": {
+   "equals": "GAP",
+   "reason": "原始碼 SBOM 的依賴樹不完整（pypi 沒有鎖定檔）"
+  },
+  "kernel_source.status": {
+   "equals": "OK",
+   "reason": "D-035：上游 orig＋debian/patches 依序套用全部成功"
+  },
+  "kernel_source.debian_version": {
+   "equals": "6.12.116-1",
+   "reason": "debian/changelog 的版本"
+  },
+  "kernel_source.image_versions": {
+   "equals": [
+    "6.12.116-1"
+   ],
+   "reason": "映像裡核心套件的版本，與原始碼的 Debian 版本相同"
+  },
+  "kernel_source.patches_applied": {
+   "equals": 86,
+   "reason": "debian/patches/series 的 86 個 patch 全部套用"
+  },
+  "kernel_source.patches_total": {
+   "equals": 86,
+   "reason": "同上"
+  },
+  "kernel_versions.schema": {
+   "equals": "sca-center-kernel-versions/2",
+   "reason": "C1 的 kernel-versions.json"
+  },
+  "kernel_versions.requested": {
+   "equals": [
+    "6.12.116+deb13-amd64"
+   ],
+   "reason": "D-036：指定映像裡唯一的核心"
+  },
+  "kernel_versions.judged": {
+   "equals": [
+    "6.12.116+deb13-amd64"
+   ],
+   "reason": "交給判定工具的核心"
+  },
+  "kernel_versions.not_judged": {
+   "equals": [],
+   "reason": "映像只有一顆核心（/usr/lib/modules）"
+  },
+  "kernel_versions.shipped": {
+   "equals": [
+    {
+     "version": "6.12.116+deb13-amd64",
+     "upstream_version": "6.12.116",
+     "upstream_basis": "source-makefile",
+     "upstream_note": "原始碼 Makefile 是 6.12.116，與出貨核心 6.12.116+deb13-amd64 相符"
+    }
+   ],
+   "reason": "上游版本 6.12.116：D-035 產生的核心原始碼 Makefile（check-expected 的路徑不支援清單索引，只能整筆 equals；upstream_note 是 C1 產生的文字，C1 改字時要一起更新）"
+  },
+  "bootloader_coverage": {
+   "equals": "NOT_ASSESSED",
+   "reason": "x86 沒有定義開機鏈（platform_arg generic，缺口 3）；不是 OK"
+  },
+  "runs..stages.C-kernel-coverage": {
+   "in": [
+    "OK",
+    "GAP"
+   ],
+   "reason": "已知不完整（缺口 22，M7）：OK 只代表有做核心比對，不代表涵蓋完整。2026-11-13 是 OK，428 列都來自 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，沒有用 Debian 安全追蹤，也沒有用 CNA 清單；Debian 的核心 deb 沒有列。M7 改成依發行版資料或 CNA 之後可能變 GAP，所以兩個都允許，但不允許 NOT_RUN 或 FAIL"
+  },
+  "runs..stages.C-kernel-config": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：雲端映像沒有核心 headers 套件（322 個 deb 裡沒有 linux-headers）；映像其實有 /boot/config-6.12.116+deb13-amd64，但工具只找 /usr/lib/modules/<版本>/build 與 /usr/src/linux-headers-*（缺口 23）。工具改成也讀 /boot/config-* 之後這一項會變，到時要更新"
+  },
+  "runs..stages.C-kernel-module-map": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：同上（缺口 23），核心 CVE 對不到模組"
+  },
+  "runs..stages.C-pyver": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：OMV 原始碼的 5 個 Python 相依沒有版本（cached-property、click、lxml、natsort、pyudev；缺口 6）"
+  },
+  "runs..stages.C-sbomgate": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：版本未知的元件不比對：核心模組 3847 個版本是 UNKNOWN（sbomgate 的 NO_VERSION 3852＝3847＋OMV 原始碼 5 個 pypi）"
+  },
+  "runs..stages.D-dt-data-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：CI 的臨時 DT 照設計關閉 NVD"
+  },
+  "runs..stages.D-dt-kev-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：DT 讀的 ENISA KEV 檔沒有發布日期；已遭利用的標記靠 EUVD"
+  },
+  "runs..stages.C-euvd": {
+   "equals": "OK",
+   "reason": "EUVD 鏡像比對完成"
+  },
+  "runs..stages.C-grype": {
+   "equals": "OK",
+   "reason": "Grype 比對完成"
+  },
+  "runs..stages.A-source": {
+   "equals": "OK",
+   "reason": "掃描來源讀取完成"
+  },
+  "runs..stages.B-sandbox": {
+   "equals": "OK",
+   "reason": "bwrap 沙箱探測通過"
+  },
+  "runs..stages.B-sandbox-secrets": {
+   "equals": "OK",
+   "reason": "沙箱內讀不到秘密"
+  },
+  "runs..stages.F-secret-scan": {
+   "equals": "OK",
+   "reason": "輸出沒有 pilot.env 的金鑰"
+  },
+  "reports": {
+   "equals": [
+    {
+     "report": "full",
+     "report_status": "GAP",
+     "release_gate": "GAP"
+    }
+   ],
+   "reason": "ours：只有一份報告（補充與分層之後用產品 SBOM 重跑的那次）"
+  },
+  "report_rows.full.kernel_rows": {
+   "min": 150,
+   "max": 2000,
+   "reason": "linux-kernel 元件依 NVD 上游版本範圍比對到的列（缺口 22）；2026-11-13 是 428 列（全在 os 層）。隨 NVD 的核心 CVE 增減，範圍放寬"
+  },
+  "report_rows.full.uboot_rows": {
+   "equals": 0,
+   "reason": "x86 沒有 U-Boot"
+  },
+  "vulnerabilities.full.cves_total": {
+   "min": 500,
+   "max": 3000,
+   "reason": "Debian 13 最小雲端映像＋OMV 原始碼相依；2026-11-13 是 934"
+  },
+  "vulnerabilities.full.rows_total": {
+   "min": 500,
+   "max": 3500,
+   "reason": "2026-11-13 是 990 列"
+  },
+  "vulnerabilities.full.layers.unknown": {
+   "min": 50,
+   "max": 800,
+   "reason": "OMV 原始碼相依 129 列＋映像語言套件 40 列；2026-11-13 是 169。沒有併入原始碼時只剩約 40 列，下限 50 抓得到。OMV 的 npm 相依有 1544 個是 development 相依（不出貨），這一層的列多半要人工排除；lxml 沒有版本，7 個 CVE 沒有成列（報告上的 GAP）"
+  },
+  "report_status": {
+   "equals": "GAP",
+   "reason": "產品結論（各報告取最差）：不是 OK"
+  },
+  "release_gate": {
+   "equals": "GAP",
+   "reason": "產品的發行閘門：不是 OK"
+  },
+  "product_status.full.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。弱點資料不完整（NVD 關閉）、核心不能依 .config 判定、有未評估的列"
+  },
+  "product_status.full.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、有未評估的列"
+  },
+  "vulnerabilities.full.layers.os": {
+   "min": 300,
+   "max": 2500,
+   "reason": "Debian 322 個套件與核心的列；2026-11-13 是 821。os 層整段消失（例如分層壞掉）會被這項抓到"
+  },
+  "runs..stages.D-dt-findings": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：與 D-dt-data-sources 同源（CI 的臨時 DT 照設計關閉 NVD）"
+  },
+  "runs..stages.C-dt-feeds": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：同上"
+  },
+  "own_software": {
+   "equals": "GAP",
+   "reason": "B-own-software 的狀態（C1 的 platform_scan，完整掃描那次）（adapter-gaps.md 第 21 項，C0 決定）：OMV 安裝後的路徑（固定 commit 的 debian/openmediavault.install）；示範映像是 Debian 官方雲端映像、沒有裝 OMV，所以四個樣式都對不到：GAP 是正確的結果（分析的映像裡沒有我們的軟體）"
+  },
+  "own_software_detail.status": {
+   "equals": "GAP",
+   "reason": "own-software.json 的整體狀態（C4 的明細欄位）"
+  },
+  "own_software_detail.patterns": {
+   "equals": [
+    {
+     "pattern": "usr/sbin/omv-*",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "usr/share/php/openmediavault/*.inc",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "usr/lib/python3/dist-packages/openmediavault/*.py",
+     "status": "GAP",
+     "matched": 0
+    },
+    {
+     "pattern": "var/www/openmediavault/*.php",
+     "status": "GAP",
+     "matched": 0
+    }
+   ],
+   "reason": "設定的樣式與各自的結果；範本的虛構路徑（example-agent 等）不能再出現"
+  },
+  "own_software_detail.files": {
+   "equals": 0,
+   "reason": "沒有任何檔案被當成自有軟體算雜湊"
+  },
+  "vulnerabilities.full.p1_rows": {
+   "min": 1,
+   "max": 50,
+   "reason": "ours：OS 層的 P1 也是我們的待辦，p1_rows 要算進去（缺口 24，C1 23ff7a5）。2026-11-13 是 4（CVE-2022-2663、CVE-2022-3435、CVE-2026-46242 在 linux-kernel，CVE-2026-123158 在 openssh，KEV＋EUVD），全在 os 層；0 表示 OS 又沒算進去。P1 依 KEV／EPSS 變動，用範圍"
+  },
+  "product_status.full.documents.risk-assessment": {
+   "equals": "GAP",
+   "reason": "弱點資料不完整（NVD 關閉）、有未評估的列"
+  },
+  "product_status.full.documents.sbom": {
+   "equals": "GAP",
+   "reason": "自有軟體 GAP（OMV 不在映像裡）、沒有 flash_package_supplier"
+  },
+  "product_status.full.documents.user-information": {
+   "equals": "GAP",
+   "reason": "製造商地址、聯絡方式、預期用途、安全使用說明等都沒寫（TO BE COMPLETED）（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）"
+  },
+  "product_status.full.documents.technical-documentation": {
+   "equals": "GAP",
+   "reason": "技術文件的欄位沒寫（TO BE COMPLETED）"
+  },
+  "product_status.full.documents.kernel-vulnerabilities": {
+   "equals": "GAP",
+   "reason": "核心 CVE 不能依 .config 判定（缺口 23）"
+  },
+  "product_status.full.documents.security-findings": {
+   "equals": "ATTENTION",
+   "reason": "image-check 有待決定的發現（medium 1、low 3）"
+  },
+  "product_status.full.documents.vulnerability-rows": {
+   "equals": "OK",
+   "reason": "機器可讀的漏洞列，不讀 config"
+  },
+  "product_status.full.missing_fields": {
+   "min": 40,
+   "max": 80,
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 54（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個）；2026-11-13 是 55（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）。變少很多（例如又帶進範本值）時會被抓到"
+  },
+  "product_status.full.bsp_inputs_not_applicable": {
+   "equals": [],
+   "reason": "os_responsibility 是 ours：只有一份報告、含全部層，BSP 專屬輸入照常處理、沒有略過（cra_report 的 layers.bsp_inputs_not_applicable 只用在 customer／upstream-vendor 的 -os 報告，852b6d3、#42；dev run 43457231137）"
+  }
+ }
+}

@@ -1,0 +1,34 @@
+{
+  "$comment": "WP7 示範專案（C0 決定，adapter-gaps.md 第 21 項）：new-project.sh 從 tools/cra/config.example.json 帶進來的虛構值都已移除，沒有寫的報告欄位由 cra_report 顯示 TO BE COMPLETED 並算 GAP（字面寫 TO BE COMPLETED 不會被當成缺少，所以用不寫的方式）。留下的只有：公司與產品名稱（project.yml 的 brand、product_name）、支援期限（project.yml 的 support_until，到月）、SBOM 主元件類型 firmware（掃的是整個映像）。sbom.own_software 是 OpenMediaVault 安裝後的路徑，出處：固定 commit 9d8530ffa6912ece116bc6c74d0f3d06045b6c26 的 deb/openmediavault/debian/openmediavault.install（usr/sbin/*、usr/share/php/openmediavault/*、usr/lib/python3/dist-packages/openmediavault/*、var/www/openmediavault）與 deb/openmediavault/ 底下對應的檔案；版本是同一個 commit 的 debian/changelog（8.6.1-1，D-025）。own_software 的樣式不支援 **，這裡只列各資料夾最上層的檔案，不是完整清單。示範映像是 Debian 官方雲端映像，沒有裝 OMV（OMV 只從原始碼掃，缺口 5），所以這四個樣式都對不到、B-own-software 是 GAP：這是正確的結果（分析的映像裡沒有我們的軟體）。",
+  "schema_version": 1,
+  "manufacturer": {
+    "name": "dumpling 公開示範"
+  },
+  "product": {
+    "name": "AI NAS 示範"
+  },
+  "support": {
+    "end_date": "2031-12"
+  },
+  "sbom": {
+    "component_type": "firmware",
+    "own_software": [
+      {
+        "path": "/usr/sbin/omv-*",
+        "version": "8.6.1-1"
+      },
+      {
+        "path": "/usr/share/php/openmediavault/*.inc",
+        "version": "8.6.1-1"
+      },
+      {
+        "path": "/usr/lib/python3/dist-packages/openmediavault/*.py",
+        "version": "8.6.1-1"
+      },
+      {
+        "path": "/var/www/openmediavault/*.php",
+        "version": "8.6.1-1"
+      }
+    ]
+  }
+}

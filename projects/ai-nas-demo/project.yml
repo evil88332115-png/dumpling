@@ -1,0 +1,21 @@
+# 開案資訊（《開案-CRA資訊表》的機器可讀版）。欄位說明見 docs/PLATFORM-INTERFACE.md。
+# 值是 "TO BE COMPLETED" 的欄位還沒填；status 改成 shipped 之前都要填完。
+schema: 1
+product_name: "AI NAS 示範"
+brand: "dumpling 公開示範"                       # 品牌或客戶
+company_role: "manufacturer"         # manufacturer｜supplier｜both
+markets: ["EU-ALL"]                   # 銷售市場：會員國代碼（ISO 3166-1 alpha-2，希臘 GR）清單，或單獨一個 EU-ALL（全歐盟）、UNKNOWN（明確不知道）
+platform: "ai-nas"
+platform_version: "Debian 13 trixie amd64" # 平台與版本
+bsp_os_source: "Debian 官方雲端映像（cloud.debian.org）＋ OpenMediaVault 原始碼（GitHub，固定 commit）"       # BSP／OS 來源
+kernel_source: "Debian 的 linux 原始碼包（snapshot.debian.org 的固定網址）"       # 核心來源
+bootloader: "Debian 的 GRUB／shim（EFI 分割區）；主機板 BIOS／UEFI 另外由韌體流程處理"             # 開機程式
+own_software: ["openmediavault"]         # 自有軟體（沒有就留空清單 []）
+interfaces: ["Ethernet", "網頁管理介面（HTTP／HTTPS）", "SSH", "SMB／NFS 檔案分享", "USB"]             # 對外介面
+support_until: "2031-12-31"       # 支援期限 YYYY-MM-DD
+status: "development"                     # development｜shipped
+# OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
+os_responsibility: "ours"
+os:                                   # 我們自己的 OS：distro 是 /etc/os-release 的 ID（小寫）、release 是 VERSION_ID（字串）
+  distro: "debian"
+  release: "13"

@@ -1,0 +1,425 @@
+{
+ "schema": 1,
+ "project": "rock-5b-demo",
+ "version": "v1.0.0-demo1",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43532296542（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43460933615（併上 main 7b5c6b2 之後，7b3bb41）、更早依 43413770363（8729785）、43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "checks": {
+  "platform": {
+   "equals": "rockchip",
+   "reason": "平台由 project.yml 明確給定（不從映像格式推）"
+  },
+  "os_responsibility": {
+   "equals": "customer",
+   "reason": "示範專案：OS 層由客戶負責（照掃、分開列）"
+  },
+  "image.sha256": {
+   "equals": "76f434fa936e81d587a9697b9514f69c3ed0c4e132e047728bc06023b042224e",
+   "reason": "sources.yml 固定的官方映像（與 GitHub 附件 digest、官方 sha512sum 相同，platform-samples 時核對）"
+  },
+  "image.disk_sha256": {
+   "equals": "d93a788919c5645dc9fbd1498b4264c2e83d67b6daec3d7151be1af217d4f690",
+   "reason": "解開後的磁碟映像（本機與 CI 各解一次都相同）"
+  },
+  "components.total": {
+   "equals": 126696,
+   "reason": "固定輸入（映像、Syft 1.55.0）下的元件數"
+  },
+  "components.bsp": {
+   "equals": 16376,
+   "reason": "bsp 的 53 個 deb 與它們擁有的檔案紀錄（owners.json）、核心模組、原始磁區的 2 個 firmware 元件與 4 個子元件"
+  },
+  "components.os": {
+   "equals": 110289,
+   "reason": "os 的 1776 個 deb 與它們擁有的檔案紀錄、dpkg 資料庫檔（var/lib/dpkg/*）、operating-system 元件"
+  },
+  "components.unknown": {
+   "equals": 31,
+   "reason": "pypi 30、maven 1：deb 帶進來的語言套件沒查擁有者（adapter-gaps.md 第 12 項），保守列我們的待辦；會讓 bsp 報告多 46 列（含 1 個 P1），多半是 Debian 套件"
+  },
+  "components.host_tool": {
+   "equals": 0,
+   "reason": "映像裡沒有主機端工具"
+  },
+  "components.deb_bsp": {
+   "equals": 53,
+   "reason": "platform.yml 的 bsp 套件名稱清單（D-027）：Rockchip／Radxa／核心／U-Boot 套件、選購無線模組的 3 個 DKMS 驅動，加 C0 決定的 dthelper、libmraa2、libmraa-dev（板子專屬的硬體存取工具與函式庫）"
+  },
+  "components.deb_os": {
+   "equals": 1776,
+   "reason": "53＋1776＝1829，與官方 manifest（rock-5b_bookworm_kde_r6.manifest）的套件名稱與版本完全相同"
+  },
+  "unknown_by_reason.path-no-rule": {
+   "equals": 31,
+   "reason": "unknown 的原因都是「有路徑但沒有規則」（缺口 12），沒有 file-unowned"
+  },
+  "layers_gaps": {
+   "equals": [],
+   "reason": "分層沒有 GAP（os_responsibility 有給）"
+  },
+  "raw_sectors.status": {
+   "equals": "OK",
+   "reason": "兩個區段都有佐證一致、沒有矛盾；FIT 5 個映像的 sha256 與 FIT 記載的相符"
+  },
+  "raw_sectors.gaps": {
+   "equals": [],
+   "reason": "沒有身分不明的資料、沒有槽位全零"
+  },
+  "raw_sectors.by_slot.idbloader_img.sha256": {
+   "equals": "1b8a0a84ccd637e9178f860a38149f79349dc4f3eb6a0bf65c6d68b60a6d6d86",
+   "reason": "LBA 64 起的非零磁區（635 個）；官方 deb 的 idbloader.img 是 636 個磁區、最後一個全零，所以檔案的 sha256（d4b73483…）不同但逐位元組一致"
+  },
+  "raw_sectors.by_slot.idbloader_img.versions.U-Boot SPL": {
+   "equals": "rk2410-2017.09-64-39cd993-g58d424f",
+   "reason": "磁區字串；與 u-boot-rk2410 套件版本 2017.09-64-39cd993 一致"
+  },
+  "raw_sectors.by_slot.idbloader_img.versions.Rockchip DDR init": {
+   "equals": "v1.22",
+   "reason": "rkbin 閉源成品（advisory-check GAP）"
+  },
+  "raw_sectors.by_slot.idbloader_img.corroboration_consistent": {
+   "equals": 2,
+   "reason": "官方 deb 與 rootfs 的同名檔都一致（u-boot-rock-5b 是 meta 套件，記「找不到」）"
+  },
+  "raw_sectors.by_slot.idbloader_img.corroboration_inconsistent": {
+   "equals": 0,
+   "reason": "沒有矛盾"
+  },
+  "raw_sectors.by_slot.u-boot_itb.sha256": {
+   "equals": "75cea554330f10e1b7b0ec05be32c7628d39a95bc5587905b21bfc07241e22c3",
+   "reason": "LBA 16384 起；與官方 deb 的 u-boot.itb 的 sha256 相同"
+  },
+  "raw_sectors.by_slot.u-boot_itb.versions.U-Boot": {
+   "equals": "rk2410-2017.09-64-39cd993-g58d424f",
+   "reason": "磁區字串（D-034 依它給 CPE denx:u-boot:2017.09）"
+  },
+  "raw_sectors.by_slot.u-boot_itb.versions.TF-A BL31 (Rockchip rkbin)": {
+   "equals": "v1.54",
+   "reason": "rkbin 閉源成品（advisory-check GAP）；只取版本欄位，不含建置者名稱"
+  },
+  "raw_sectors.by_slot.u-boot_itb.corroboration_consistent": {
+   "equals": 2,
+   "reason": "官方 deb 與 rootfs 的同名檔都一致"
+  },
+  "raw_sectors.by_slot.u-boot_itb.corroboration_inconsistent": {
+   "equals": 0,
+   "reason": "沒有矛盾"
+  },
+  "kernel_versions.judged": {
+   "equals": [
+    "6.1.84-8-rk2410"
+   ],
+   "reason": "D-036：交給判定工具的核心（判定結果看 C-kernel-config）；映像只有這一顆"
+  },
+  "kernel_versions.not_judged": {
+   "equals": [],
+   "reason": "映像沒有其他核心"
+  },
+  "kernel_upstream.status": {
+   "equals": "OK",
+   "reason": "D-038：上游版本有兩個獨立來源印證，且有實際出貨的 config（這只代表版本核對，不代表核心 CVE 涵蓋完整，見 cna.gap）"
+  },
+  "kernel_upstream.requested_upstream": {
+   "equals": "6.1.84",
+   "reason": "sources.yml 的 platform_params.kernel_upstream_version"
+  },
+  "kernel_upstream.upstream_verified": {
+   "equals": true,
+   "reason": "兩個來源都相同"
+  },
+  "kernel_upstream.sources.image_modules.match": {
+   "equals": true,
+   "reason": "映像模組資料夾 6.1.84-8-rk2410 → 6.1.84"
+  },
+  "kernel_upstream.sources.source_makefile.version": {
+   "equals": "6.1.84",
+   "reason": "sources.yml 固定的核心原始碼 radxa/kernel@87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9 的 Makefile"
+  },
+  "kernel_upstream.shipped_config.sha256": {
+   "equals": "cedfaa402b3cd683e5f1243dd182b031b24c2bffae56bdcb9f53884d00c0f167",
+   "reason": "映像 /boot/config-6.1.84-8-rk2410；核心 config 檢查實際讀的 /usr/src/linux-headers-6.1.84-8-rk2410/.config 與它的 sha256 相同"
+  },
+  "kernel_upstream.config_basis": {
+   "equals": "shipped-config",
+   "reason": "依 .config 排除的依據是實際出貨的 config，不是建置紀錄（名稱在 C1 的 M7 統一；VEX 的 source 目前是 kconfig）"
+  },
+  "kernel_upstream.gaps": {
+   "equals": [],
+   "reason": "版本核對與 config 都沒有缺"
+  },
+  "kernel_upstream.cna.gap": {
+   "equals": true,
+   "reason": "固定是 true：CNA 清單已知不完整，2024-02 以前其他單位發的 CVE 不在 CNA 資料裡（清單中 2021–2023 年的只有 122 個），沒有用 NVD 補查"
+  },
+  "kernel_upstream.cna.cves": {
+   "min": 8000,
+   "max": 35000,
+   "reason": "依上游 6.1.84 的 CNA 版本範圍列出的候選（affected＋unknown）。2026-11-13 是 8943 個，vulns.git commit 625c095b0b852f8b19d8d8eb68c8eac032e6706a（2026-11-11、18225 筆紀錄）；核心 CVE 約每月增加 500 個，所以上限放寬。清單是候選，全部進待人審（D-038）"
+  },
+  "runs..stages.C-kernel-cve-list": {
+   "equals": "OK",
+   "reason": "核心 CVE 清單由 KERNEL_CVES 明確給（D-038）；OK 只代表有清單，涵蓋範圍見 cna.gap"
+  },
+  "runs..stages.C-kernel-config": {
+   "equals": "OK",
+   "reason": "依實際出貨的 .config 判定"
+  },
+  "runs..stages.C-kernel-module-map": {
+   "equals": "OK",
+   "reason": "核心 CVE 對應到模組"
+  },
+  "runs..stages.C-kernel-coverage": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：Grype／DT 對這顆廠商核心的比對是 0 筆（status.tsv 的說明），核心的 CVE 改由 CNA 清單提供"
+  },
+  "runs.-bsp.stages.C-kernel-cve-list": {
+   "equals": "OK",
+   "reason": "真正的待辦報告（-bsp）也有核心 CVE 清單"
+  },
+  "runs.-bsp.stages.C-kernel-config": {
+   "equals": "OK",
+   "reason": "-bsp 報告依出貨 .config 判定"
+  },
+  "runs.-bsp.stages.C-kernel-module-map": {
+   "equals": "OK",
+   "reason": "-bsp 報告的核心 CVE 對應到模組"
+  },
+  "runs..stages.D-dt-data-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：CI 的臨時 DT 照設計關閉 NVD；保證這個 GAP 不會被默默改成 OK"
+  },
+  "runs..stages.D-dt-kev-sources": {
+   "equals": "GAP",
+   "reason": "固定是 GAP：DT 讀的 ENISA KEV 檔沒有發布日期；已遭利用的標記靠 EUVD（C-euvd）"
+  },
+  "runs..stages.C-euvd": {
+   "equals": "OK",
+   "reason": "EUVD 鏡像比對完成"
+  },
+  "runs..stages.C-grype": {
+   "equals": "OK",
+   "reason": "Grype 比對完成"
+  },
+  "runs..stages.B-sandbox-secrets": {
+   "equals": "OK",
+   "reason": "沙箱內讀不到秘密"
+  },
+  "runs..stages.F-secret-scan": {
+   "equals": "OK",
+   "reason": "輸出沒有 pilot.env 的金鑰"
+  },
+  "bootloader_coverage": {
+   "equals": "NOT_ASSESSED",
+   "reason": "Rockchip 沒有定義開機鏈分類；開機程式的身分由 raw-sectors 另外提供（adapter-gaps.md 第 3 項）"
+  },
+  "external_services.status": {
+   "equals": "NOT_ASSESSED",
+   "reason": "Rockchip 沒有定義對外連線服務清單（映像有 ssh、avahi、cups 等服務，沒有評估；adapter-gaps.md 第 15 項）"
+  },
+  "report_rows.os.kernel_rows": {
+   "equals": 0,
+   "reason": "OS 報告不含核心的列（核心只屬於 bsp；-os 重跑不帶 KERNEL_CVES）"
+  },
+  "report_rows.bsp.kernel_rows": {
+   "min": 8000,
+   "max": 35000,
+   "reason": "-bsp 報告的核心列數＝CNA 清單的候選數（範圍同 kernel_upstream.cna.cves）"
+  },
+  "report_rows.bsp.uboot_rows": {
+   "min": 80,
+   "max": 400,
+   "reason": "U-Boot 與 U-Boot SPL 的上游 CVE 候選（D-034）；2026-11-13 是 96 列（48 個 CVE × 2）。U-Boot 整段消失會被這項抓到"
+  },
+  "vulnerabilities.bsp.cves_total": {
+   "min": 8500,
+   "max": 35000,
+   "reason": "核心 CNA 候選（8943）＋U-Boot 候選 48＋unknown 的 Python／Java 46；隨資料庫變動"
+  },
+  "vulnerabilities.bsp.tiers.accepted": {
+   "min": 3000,
+   "max": 6500,
+   "reason": "依出貨 .config 判定沒編進核心而排除的核心 CVE（VEX not_affected／code_not_present）；2026-11-13 是 3627；全部來自 kconfig（accepted_by_vex kconfig 3627、rule 0）。上限 6500：核心候選才 8943，全被判 accepted 時抓得到"
+  },
+  "vulnerabilities.os.cves_total": {
+   "min": 2000,
+   "max": 6000,
+   "reason": "Debian 12 bookworm 的 KDE 桌面映像套件；2026-11-13 是 2812；映像固定、資料只增不減"
+  },
+  "product_status.full.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。完整（補充與分層之前）：弱點資料不完整，核心 CNA 候選待人審、8618 列未判定（vex.gate.counts.total：untriaged 8618、not_affected 3627、exploitable 0；dev run 43460933615）"
+  },
+  "product_status.full.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、未判定與 exploitable 待決定"
+  },
+  "product_status.bsp.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。bsp：弱點資料不完整（NVD 關閉、核心 CNA 清單已知不完整）、核心 CNA 候選與 U-Boot 候選待人審（5458 列未判定）、DDR／BL31 GAP、開機鏈 NOT_ASSESSED"
+  },
+  "product_status.bsp.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、5458 列未判定"
+  },
+  "product_status.os.report_status": {
+   "equals": "GAP",
+   "reason": "產品報告的狀態（cra_report 的 summary.json），不是流程步驟的結果；釘住它，避免哪天被默默變成 OK。os：弱點資料不完整（NVD 關閉），Debian 套件 3256 列未判定（vex.gate.counts.total：untriaged 3256、exploitable 0；dev run 43460933615）"
+  },
+  "product_status.os.release_gate": {
+   "equals": "GAP",
+   "reason": "發行閘門（vex.gate）：弱點資料 GAP、3256 列未判定"
+  },
+  "runs..stages.A-source": {
+   "equals": "OK",
+   "reason": "掃描來源（磁碟映像）讀取完成"
+  },
+  "runs..stages.B-sandbox": {
+   "equals": "OK",
+   "reason": "bwrap 沙箱探測通過"
+  },
+  "unknown_by_purl_type.pypi": {
+   "equals": 30,
+   "reason": "unknown 的 30 個是 deb 帶進來的 Python 套件（缺口 12）"
+  },
+  "unknown_by_purl_type.maven": {
+   "equals": 1,
+   "reason": "unknown 的 1 個是 Debian 的 libintl jar（缺口 12）"
+  },
+  "kernel_versions.schema": {
+   "equals": "sca-center-kernel-versions/2",
+   "reason": "C1 的 kernel-versions.json：shipped 每筆帶上游版本"
+  },
+  "kernel_upstream_crosscheck.agree": {
+   "equals": true,
+   "reason": "D-038 的兩邊核對：C4 的 kernel_upstream 與 C1 kernel-versions /2 的 upstream_version 一致。兩邊用同一份 Makefile 與同一個宣告值，所以這一項是防止兩邊實作漂移，不是多一個獨立證據；不一致是 bug"
+  },
+  "kernel_upstream_crosscheck.c1": {
+   "equals": "6.1.84",
+   "reason": "C1 依原始碼 Makefile 與平台設定核對出的上游版本"
+  },
+  "kernel_upstream_crosscheck.c1_basis": {
+   "equals": "source-makefile+platform-param",
+   "reason": "C1 的依據：原始碼 Makefile 與 sources.yml 的 kernel_upstream_version 一致"
+  },
+  "own_software": {
+   "equals": "OK",
+   "reason": "config 寫 own_software: [] 加 own_software_none_reason「示範專案只用官方映像，沒有自有軟體」（C1 在 M2 定的宣告方式；製造商宣告，掃描沒有驗證）"
+  },
+  "product_status.full.documents.risk-assessment": {
+   "equals": "GAP",
+   "reason": "弱點資料不完整（NVD 關閉）、有未評估的列"
+  },
+  "product_status.full.documents.sbom": {
+   "equals": "GAP",
+   "reason": "SBOM 文件的欄位沒寫（例如 flash_package_supplier：TO BE COMPLETED）"
+  },
+  "product_status.full.documents.user-information": {
+   "equals": "GAP",
+   "reason": "製造商地址、聯絡方式、預期用途、安全使用說明等都沒寫（TO BE COMPLETED）（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.full.documents.technical-documentation": {
+   "equals": "GAP",
+   "reason": "技術文件的欄位沒寫（TO BE COMPLETED）"
+  },
+  "product_status.full.documents.kernel-vulnerabilities": {
+   "equals": "GAP",
+   "reason": "核心有判斷不了或待人審的 CVE"
+  },
+  "product_status.full.documents.security-findings": {
+   "equals": "ATTENTION",
+   "reason": "image-check 有待決定的發現"
+  },
+  "product_status.full.documents.vulnerability-rows": {
+   "equals": "OK",
+   "reason": "機器可讀的漏洞列，不讀 config"
+  },
+  "product_status.full.missing_fields": {
+   "min": 40,
+   "max": 80,
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.bsp.documents.risk-assessment": {
+   "equals": "GAP",
+   "reason": "弱點資料不完整（NVD 關閉）、有未評估的列"
+  },
+  "product_status.bsp.documents.sbom": {
+   "equals": "GAP",
+   "reason": "SBOM 文件的欄位沒寫（例如 flash_package_supplier：TO BE COMPLETED）"
+  },
+  "product_status.bsp.documents.user-information": {
+   "equals": "GAP",
+   "reason": "製造商地址、聯絡方式、預期用途、安全使用說明等都沒寫（TO BE COMPLETED）（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.bsp.documents.technical-documentation": {
+   "equals": "GAP",
+   "reason": "技術文件的欄位沒寫（TO BE COMPLETED）"
+  },
+  "product_status.bsp.documents.kernel-vulnerabilities": {
+   "equals": "GAP",
+   "reason": "核心有判斷不了或待人審的 CVE"
+  },
+  "product_status.bsp.documents.security-findings": {
+   "equals": "ATTENTION",
+   "reason": "image-check 有待決定的發現"
+  },
+  "product_status.bsp.documents.vulnerability-rows": {
+   "equals": "OK",
+   "reason": "機器可讀的漏洞列，不讀 config"
+  },
+  "product_status.bsp.missing_fields": {
+   "min": 40,
+   "max": 80,
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.os.documents.risk-assessment": {
+   "equals": "GAP",
+   "reason": "弱點資料不完整（NVD 關閉）、有未評估的列"
+  },
+  "product_status.os.documents.sbom": {
+   "equals": "GAP",
+   "reason": "SBOM 文件的欄位沒寫（例如 flash_package_supplier：TO BE COMPLETED）"
+  },
+  "product_status.os.documents.user-information": {
+   "equals": "GAP",
+   "reason": "製造商地址、聯絡方式、預期用途、安全使用說明等都沒寫（TO BE COMPLETED）（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.os.documents.technical-documentation": {
+   "equals": "GAP",
+   "reason": "技術文件的欄位沒寫（TO BE COMPLETED）"
+  },
+  "product_status.os.documents.security-findings": {
+   "equals": "ATTENTION",
+   "reason": "image-check 有待決定的發現"
+  },
+  "product_status.os.documents.vulnerability-rows": {
+   "equals": "OK",
+   "reason": "機器可讀的漏洞列，不讀 config"
+  },
+  "product_status.os.missing_fields": {
+   "min": 40,
+   "max": 80,
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+  },
+  "product_status.os.bsp_inputs_not_applicable": {
+   "equals": [
+    "flash-firmware"
+   ],
+   "reason": "-os 那份的分層 SBOM 沒有 bsp／unknown 元件，刷機包韌體清單（rootfs 的 lib/modules/*/updates/ 13 個 DKMS 驅動）不加進這份、在 -bsp 那份（cra_report 的 layers.bsp_inputs_not_applicable，852b6d3；dev run 43449928625：-os 報告 SBOM 1791 → 1778 個元件，漏洞列與文件狀態不變）"
+  },
+  "product_status.bsp.bsp_inputs_not_applicable": {
+   "equals": [],
+   "reason": "-bsp 那份有 bsp 元件，BSP 專屬輸入照常處理、沒有略過（刷機包韌體 13 個元件仍在 -bsp 報告；dev run 43449928625）"
+  },
+  "runs.-os.stages.C-kernel-config": {
+   "equals": "NOT_RUN",
+   "reason": "D-044：-os 重跑傳 --kernel-in-other-report，OS 層的 SBOM 沒有核心，核心階段不適用（缺口 13 原本是沒有意義的 GAP）"
+  },
+  "runs.-os.stages.C-kernel-cve-list": {
+   "equals": "NOT_RUN",
+   "reason": "D-044：-os 重跑傳 --kernel-in-other-report，OS 層的 SBOM 沒有核心，核心階段不適用（缺口 13 原本是沒有意義的 GAP）"
+  },
+  "runs.-os.stages.C-kernel-module-map": {
+   "equals": "NOT_RUN",
+   "reason": "D-044：-os 重跑傳 --kernel-in-other-report，OS 層的 SBOM 沒有核心，核心階段不適用（缺口 13 原本是沒有意義的 GAP）"
+  }
+ }
+}

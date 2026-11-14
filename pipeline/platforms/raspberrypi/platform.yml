@@ -1,0 +1,80 @@
+# Raspberry Pi（Raspberry Pi OS 官方映像）平台設定。欄位說明見 docs/PLATFORM-INTERFACE.md，研究見 docs/platforms-research.md。
+schema: 1
+platform: raspberrypi
+description: Raspberry Pi OS 官方映像（MBR 原始磁碟，boot 是 FAT、root 是 ext4）；不編譯、不重組映像，直接掃官方 .img.xz
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/arm64；只匯入與讀取，不執行）
+build:
+  mode: none               # 用官方的 linux-image deb；核心原始碼（raspberrypi/linux）只當對照
+raw_sectors:
+  enabled: false           # 開機程式在 boot 分割區（FAT）或板子的 EEPROM，不在分割區外的原始磁區
+# 分層（D-027）：只用套件名稱清單，不看版本字尾（+rpt 不代表是 bsp）。跟板子硬體綁在一起的才算 bsp；其餘一律 os。
+# 清單依 2026-10-06 Lite 映像的官方 .info 整理；新版映像多出的板子專屬套件要人工補進來，不猜。
+# rpi-connect*（官方遠端連線服務）不依賴硬體，歸 os；但它是對外連線服務，scan 會在摘要特別標出（D-027）。
+layers:
+  bsp:
+    packages:
+      # 核心
+      - "linux-image-*rpi*"
+      - "linux-headers-*rpi*"
+      - "linux-base-*rpi*"
+      # 開機韌體與 bootloader（EEPROM 的更新檔；板子上實際的 EEPROM 版本不在映像裡）
+      - "raspi-firmware"
+      - "rpi-eeprom"
+      - "rpieepromab"
+      - "librpieepromab0"
+      - "rpifwcrypto"
+      - "librpifwcrypto0"
+      - "rpi-update"
+      # 板上無線網路／藍牙晶片韌體
+      - "firmware-brcm80211"
+      - "bluez-firmware"
+      # 板子專屬的系統設定
+      - "raspberrypi-sys-mods"
+      - "raspberrypi-net-mods"
+      - "raspberrypi-archive-keyring"
+      - "rpi-cloud-init-mods"
+      - "rpi-systemd-config"
+      - "rpi-swap"
+      - "rpi-loop-utils"
+      - "rpi-usb-gadget"
+      - "rpi-keyboard-config"
+      - "rpi-keyboard-fw-update"
+      - "userconf-pi"
+      # 板子專屬的工具
+      - "raspi-config"
+      - "raspi-config-core"
+      - "raspi-utils*"
+      - "raspinfo"
+      - "python3-rpi-lgpio"
+      # 相機堆疊（Raspberry Pi 版，驅動板子上的 ISP 硬體）
+      - "libcamera0.*"
+      - "libcamera-ipa"
+      - "rpicam-apps*"
+      - "librpicam-app*"
+    paths:                   # 映像裡的路徑（去掉開頭的 /）：核心模組、核心映像與 device tree
+      - "usr/lib/modules/*"
+      - "lib/modules/*"
+      - "boot/*"
+  os:
+    paths:                   # dpkg 自己的資料庫（/var/lib/dpkg/info/*.list、*.md5sums、status…）：不屬於任何套件，是 OS 套件管理的中繼資料
+      - "var/lib/dpkg/*"
+  default: os
+scan:
+  inputs_template: raspberrypi   # tools/wizard/platforms/raspberrypi.json
+  platform_arg: raspberrypi      # 傳給 scan-flash-package.sh／cra-scan.py 的 --platform（平台由 project.yml 明確給定）
+  rootfs: rootfs
+  # Raspberry Pi OS 每一版的核心都是 raspberrypi/linux 建的（套件的原始碼套件名稱是 linux，像 Debian 的），平台預設宣告；sources.yml 的值優先（D-044）
+  kernel_not_distro: "Raspberry Pi OS 的核心是 raspberrypi/linux 建的，不是 Debian 的 linux"
+project_defaults:
+  platform_version: Raspberry Pi OS Lite（arm64，Debian 系）
+  bsp_os_source: Raspberry Pi OS 官方映像（downloads.raspberrypi.com）與 Raspberry Pi apt 套件庫
+  kernel_source: Raspberry Pi 的 linux-image deb（原始碼：Raspberry Pi apt 的原始碼包與 raspberrypi/linux）
+  bootloader: boot 分割區的 VideoCore 開機韌體（閉源，raspi-firmware）；Pi 4／5 另有板子上的 EEPROM 開機程式（不在映像裡）
+  own_software: []
+  interfaces:
+    - Ethernet
+    - Wi-Fi
+    - Bluetooth
+    - USB
+    - SSH
+  platform_params: {}

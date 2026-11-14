@@ -1,0 +1,83 @@
+# Rockchip（板子廠商發行的 GPT 原始磁碟映像，例如 Radxa）平台設定。欄位說明見 docs/PLATFORM-INTERFACE.md，研究見 docs/platforms-research.md。
+schema: 1
+platform: rockchip
+description: Rockchip 開發板的官方映像（GPT 原始磁碟）；不編譯、不重組映像；分割區外的開機程式（idbloader、u-boot.itb）由 raw-sectors 清點
+arch: arm64                # 目標映像的架構（scan 的 docker import --platform linux/arm64；只匯入與讀取，不執行）
+build:
+  mode: none               # 用板子廠商的 linux-image／u-boot deb；核心與 U-Boot 原始碼只當對照
+raw_sectors:
+  enabled: true            # 開機程式在第一個分割區之前的原始磁區，以原始磁區為準（D-027）
+# 分層（D-027）：只用套件名稱清單，不看版本字尾。跟板子硬體綁在一起的才算 bsp；其餘一律 os。
+# 清單依 Radxa ROCK 5B rsdk-r6 的官方 manifest 整理；換板子或新版映像時人工補，不猜。
+# 沒放進來的 Radxa 套件（不依賴硬體）：radxa-desktop-branding、radxa-plymouth-theme、radxa-sddm-theme、radxa-xorg-wrapper → os。
+layers:
+  bsp:
+    packages:
+      # 核心（Rockchip BSP 核心，經板子廠商修改）
+      - "linux-image-*-rk*"
+      - "linux-headers-*-rk*"
+      - "linux-image-rock-*"
+      - "linux-headers-rock-*"
+      # U-Boot（rootfs 裡的套件只當佐證；實際出貨的是原始磁區裡的那份，見 raw-sectors）
+      - "u-boot-rk*"
+      - "u-boot-rock-*"
+      # Rockchip 使用者空間（驅動 SoC 的影像、視訊、NPU、ISP 硬體）
+      - "librockchip-mpp*"
+      - "librockchip-vpu*"
+      - "librga*"
+      - "libv4l-rkmpp"
+      - "gstreamer1.0-rockchip*"
+      - "camera-engine-rkaiq"
+      - "rockchip-*"
+      - "rknpu2-*"
+      - "python3-rknnlite2"
+      - "task-rockchip*"
+      - "task-rk3588*"
+      # 板子廠商的板子專屬套件
+      - "radxa-firmware"
+      - "radxa-system-config-*"
+      - "radxa-bootutils"
+      - "radxa-overlays-dkms"
+      - "radxa-udev"
+      - "radxa-otgutils"
+      - "radxa-alsa-config"
+      - "radxa-touchscreen-utils"
+      - "radxa-archive-keyring"
+      - "rsetup*"
+      - "task-rock-*"
+      # 板子廠商替這塊板子的選購無線模組提供的 out-of-tree 驅動（DKMS）：跟板子的硬體生態綁在一起（D-027）。
+      # ROCK 5B 板上沒有 Wi-Fi／藍牙，這些是 M.2 無線模組用的。
+      - "rtk-btusb-dkms"
+      - "rtl8852bu-dkms"
+      - "rtw89-dkms"
+      # 板子廠商維護的硬體存取工具與函式庫（C0 決定，D-027 的原則：板子專屬的套件算 bsp）
+      - "dthelper"             # Radxa 的 device tree overlay 工具
+      - "libmraa2"             # Radxa 維護的 GPIO／I2C／SPI 硬體存取函式庫
+      - "libmraa-dev"
+    paths:
+      - "usr/lib/modules/*"
+      - "lib/modules/*"
+      - "boot/*"
+      - "usr/lib/u-boot/*"
+  os:
+    paths:                   # dpkg 自己的資料庫（/var/lib/dpkg/info/*.list、*.md5sums、status…）：不屬於任何套件，是 OS 套件管理的中繼資料
+      - "var/lib/dpkg/*"
+  default: os
+scan:
+  inputs_template: rockchip      # tools/wizard/platforms/rockchip.json
+  platform_arg: rockchip
+  rootfs: rootfs
+project_defaults:
+  platform_version: Rockchip RK3588 開發板（板子廠商的 Debian 系映像）
+  bsp_os_source: 板子廠商在 GitHub Release 發行的 GPT 原始磁碟映像與其 apt 套件庫
+  kernel_source: Rockchip BSP 核心（板子廠商的 kernel repo，依 commit）
+  bootloader: 原始磁區的 idbloader（DDR 初始化＋SPL，閉源成品）與 u-boot.itb（U-Boot＋TF-A BL31＋OP-TEE，rkbin 成品）
+  own_software: []
+  interfaces:
+    - Ethernet
+    - Wi-Fi
+    - Bluetooth
+    - USB
+    - HDMI
+    - SSH
+  platform_params: {}
