@@ -560,15 +560,27 @@ def stage_line(p, stage):
     return None
 
 
+# status.tsv 同一階段多列（M7b）：取最嚴重的一列（不認得的狀態比 OK 嚴重），取到 OK 而且有重複列 → ATTENTION。
+# 和 dumpling 的 pipeline/lib/status_tsv.py 同一套規則（tools/ 不 import pipeline/，所以另寫一份；tests/test_platform_status_tsv.py 比對兩邊）。
+STATUS_SEVERITY = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
+
+
 def read_status(p):
     if p is None:
         return None
-    rows = {}
+    rows, count = {}, {}
     with open_text(p) as f:
         for line in f:
             parts = line.rstrip("\r\n").split("\t", 2)
             if len(parts) >= 2 and parts[0] != "stage":
-                rows[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "")
+                new = (parts[1], parts[2] if len(parts) > 2 else "")
+                count[parts[0]] = count.get(parts[0], 0) + 1
+                old = rows.get(parts[0])
+                if old is None or STATUS_SEVERITY.get(new[0], 1) >= STATUS_SEVERITY.get(old[0], 1):
+                    rows[parts[0]] = new
+    for k, n in count.items():
+        if n > 1 and rows[k][0] == "OK":
+            rows[k] = ("ATTENTION", "status.tsv 有 %d 列 %s（取最嚴重的一列是 OK；重複列代表檔案被改過或寫檔有 bug，要有人看過）：%s" % (n, k, rows[k][1]))
     return rows
 
 
