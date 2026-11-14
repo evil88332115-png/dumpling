@@ -51,7 +51,7 @@ from pathlib import Path
 TABLE_PATH = Path(__file__).resolve().parent / "data" / "fw-advisory-rules.json"
 # 規則表檔案本身的 sha256（改規則表後要一起更新：python3 tools/cra/fw_advisory_rules.py sha256；tests 會核對）。
 # 檔案被改動、截斷、少幾筆規則或換成別的內容時，所有元件一律 NOT_ASSESSED（table-sha-mismatch），報告狀態 ATTENTION。
-TABLE_SHA256 = "5d4713308ba9e3962b2e0a99e5ab5ca9f1cab479dc4b1b9fa6bcf34ecb0c56df"
+TABLE_SHA256 = "cd2433c53c49b2c40fbde48ecedf1fb1c9b4872e61ed7101076d77d2a80f1c31"
 SCHEMA = "dumpling-fw-advisory-rules/1"
 MAX_TABLE = 1 << 20
 MAX_RULES = 500
@@ -65,6 +65,13 @@ SUGGESTION_ONLY = "this is a suggestion from a hand-compiled rule table, not a v
 # independent:nvd＝除了讀官方頁面，版本門檻另經 NVD 的 CPE 版本範圍核對相符（只涵蓋 NVD 有 Intel CPE 設定的 CVE）。
 VERIFICATIONS = ("direct", "summary-tool", "independent:nvd")
 VERIFICATION_RANK = {"summary-tool": 0, "independent:nvd": 1, "direct": 2}       # 一條規則有幾個出處時取最弱的
+# 條件的 segment：公告表格的分區（client＝客戶端桌上型／行動，datacenter＝資料中心／伺服器，embedded＝嵌入式）。判定與提示只讀這個欄位，不讀 note 的文字（M7b-2）。
+SEGMENTS = ("client", "datacenter", "embedded")
+DATACENTER_CAVEAT = ("this condition comes from the advisory's data center table: the CPU of this entry may not be usable on this board "
+                     "(BIOS microcode containers often carry patches for several CPU generations, including server CPUs), "
+                     "so the suggestion does not mean the whole board is affected; the responsible unit should confirm which CPUs the board supports")
+MAPPED_CPUID_CAVEAT = ("the CPUID in the condition note is the mapping from the equivalence table of the public linux-firmware AMD microcode container, "
+                       "not a value read from this image (the image's microcode patch has no equivalence table)")
 EVIDENCE_TYPE = "vendor-statement"                  # D-035：排除（not-affected）的依據類型
 AMI_NO_CORE = "the SBOM has no AMI core version"
 AMI_REASONS = {"conflict": ("ami-core-conflict", "the Firmware ID records of the image disagree on the AMI core version; no value is chosen"),
@@ -292,7 +299,7 @@ def _validate_condition(c, rule, orderings, where):
     if want and want != rule["vendor"]:
         _bad(where, f"component {comp} belongs to a {want} advisory")
     if comp == "amd_agesa":
-        _keys(c, ("component", "family", "fixed_in"), ("affected_from", "note"), where)
+        _keys(c, ("component", "family", "fixed_in"), ("affected_from", "note", "segment"), where)
         fam = _str(c["family"], FAMILY_RE, where + ".family")
         seq = orderings.get(fam.lower())
         if seq is None:
@@ -305,12 +312,12 @@ def _validate_condition(c, rule, orderings, where):
         if "affected_from" in c and agesa_index(seq, c["affected_from"]) > agesa_index(seq, c["fixed_in"]):
             _bad(where, "affected_from is after fixed_in")
     elif comp == "amd_psp":
-        _keys(c, ("component", "psp_type", "fixed_in"), ("note",), where)
+        _keys(c, ("component", "psp_type", "fixed_in"), ("note", "segment"), where)
         if not _is_int(c["psp_type"]) or not 0 <= c["psp_type"] <= 255:
             _bad(where + ".psp_type", "must be an integer 0..255")
         _str(c["fixed_in"], PSP_VER_RE, where + ".fixed_in")
     elif comp == "amd_microcode":
-        _keys(c, ("component", "fixed_in"), ("equiv_id", "cpuid", "note"), where)
+        _keys(c, ("component", "fixed_in"), ("equiv_id", "cpuid", "note", "segment"), where)
         if ("equiv_id" in c) == ("cpuid" in c):
             _bad(where, "exactly one of equiv_id, cpuid")
         if "equiv_id" in c:
@@ -319,7 +326,7 @@ def _validate_condition(c, rule, orderings, where):
             _str(c["cpuid"], CPUID_RE, where + ".cpuid")
         _str(c["fixed_in"], PATCH_RE, where + ".fixed_in")
     elif comp == "intel_csme":
-        _keys(c, ("component", "line", "fixed_in"), ("affected_from", "note"), where)
+        _keys(c, ("component", "line", "fixed_in"), ("affected_from", "note", "segment"), where)
         line = _str(c["line"], LINE_RE, where + ".line")
         for k in ("fixed_in", "affected_from"):
             if k in c:
@@ -329,7 +336,7 @@ def _validate_condition(c, rule, orderings, where):
         if "affected_from" in c and parse_dotted(c["affected_from"], CSME_VER_RE) > parse_dotted(c["fixed_in"], CSME_VER_RE):
             _bad(where, "affected_from is after fixed_in")
     elif comp == "intel_fsp":
-        _keys(c, ("component", "line", "fixed_in"), ("affected_from", "note"), where)
+        _keys(c, ("component", "line", "fixed_in"), ("affected_from", "note", "segment"), where)
         line = _str(c["line"], LINE_RE, where + ".line")
         for k in ("fixed_in", "affected_from"):
             if k in c:
@@ -339,16 +346,18 @@ def _validate_condition(c, rule, orderings, where):
         if "affected_from" in c and parse_dotted(c["affected_from"], FSP_VER_RE) > parse_dotted(c["fixed_in"], FSP_VER_RE):
             _bad(where, "affected_from is after fixed_in")
     elif comp == "ami_core":
-        _keys(c, ("component", "product"), ("fixed_in", "note"), where)
+        _keys(c, ("component", "product"), ("fixed_in", "note", "segment"), where)
         _str(c["product"], TEXT_RE, where + ".product")
         if "fixed_in" in c:
             _str(c["fixed_in"], AMI_FIXED_RE, where + ".fixed_in")
     else:                                                              # bios_image
-        _keys(c, ("component", "name_prefix", "fixed_in"), ("note",), where)
+        _keys(c, ("component", "name_prefix", "fixed_in"), ("note", "segment"), where)
         _str(c["name_prefix"], NAME_PREFIX_RE, where + ".name_prefix")
         _str(c["fixed_in"], BIOS_VER_RE, where + ".fixed_in")
     if "note" in c:
         _str(c["note"], NOTE_RE, where + ".note")
+    if "segment" in c and not (isinstance(c["segment"], str) and c["segment"] in SEGMENTS):
+        _bad(where + ".segment", "must be one of " + ", ".join(SEGMENTS))
 
 
 def _validate_review(rv, updated, where):
@@ -742,6 +751,13 @@ def evaluate(table_or_err, kind, comp):
                 if kind == "bios_image":
                     related.append(r["id"])
             res = evaluate_condition(table, c, comp)
+            if res["result"] in ("affected", "not-affected") and c.get("note"):
+                # 條件的 note（例如「公告列的是資料中心的 CPUID」）是解讀的限制：跟著建議進 basis 與報告，不只留在規則表
+                res = {**res, "detail": res["detail"] + "; condition note: " + c["note"]}
+            if res["result"] in ("affected", "not-affected") and c.get("segment") == "datacenter":
+                res = {**res, "detail": res["detail"] + "; " + DATACENTER_CAVEAT + ("; " + MAPPED_CPUID_CAVEAT if c["component"] == "amd_microcode" and "equiv_id" in c else "")}
+            if c.get("segment"):
+                res = {**res, "segment": c["segment"]}
             if res["result"] == "not-affected" and (r["vendor"] == "AMI" or any(x["component"] == "ami_core" for x in r["match"])):
                 # AMI 的公告（廠商是 AMI，或規則有 ami_core 條件）不採用 not-affected（D-058：A1 未確認，第一版不輸出）；
                 # 不論是哪一種條件（ami_core、bios_image 或日後新增的種類）判出的 not-affected 都降級

@@ -2592,7 +2592,8 @@ def rules_section(inv, rules=None):
         items.append({**({"scan_incomplete": True} if kind == "ami_core" and not (comp.get("ami_core") or {}).get("complete") else {}),
                       "image": img, "component": label, "kind": kind, "suggestion": r["suggestion"], "reason": r.get("reason"),
                       "rule_ids": r["rule_ids"], "state": r["state"], "related": r["related"], "evidence": r["evidence"],
-                      "verification": r.get("verification", {})})
+                      "verification": r.get("verification", {}),
+                      "datacenter": any(x.get("segment") == "datacenter" and x["result"] == "affected" for x in r.get("results", []))})
     sec = {"status": "OK" if table is not None else "GAP", "components": len(results), "counts": mod.counts(results), "items": items,
            "errors": sum(1 for x in items if x["reason"] == "match-error")}
     if table is not None:
@@ -2912,6 +2913,9 @@ VERIFY_TEXT = {"direct": "直接下載原文解析",
 AMI_AFFECTED_TEXT = ("AMI 核心版本的 affected 建議（D-058）：核心版本低於公告列的修正版本。**核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；"
                      "核心版本寫法的對應（A1）尚未經 AMI 或板廠確認；這是請負責單位對照板廠公告的線索，不是漏洞判定。**核心版本不低於修正版本時一律是 NOT_ASSESSED"
                      "（ami-core-mapping-unverified），這一版不輸出 not-affected。")
+DATACENTER_AFFECTED_TEXT = ("下列 affected 建議的條件來自公告的**資料中心（伺服器）表**：BIOS 的微碼容器常同時帶好幾代 CPU 的 patch（包括伺服器 CPU），"
+                            "這個 patch 對應的 CPU 不一定能用在這塊主機板，所以**不代表整塊板子受影響**，請負責單位依主機板支援的 CPU 確認；"
+                            "條件裡的 CPUID 是 linux-firmware 公開對照表（等價表）的對應，不是從映像讀出來的（映像的微碼是單獨的 patch，沒有等價表，所以元件的 CPUID 是「未對出」）")
 RULE_DETAIL_KINDS = ("amd_agesa", "intel_csme", "intel_fsp", "ami_core", "bios_image")        # 這幾種逐項列出；其他種類（PSP、AMD 微碼）沒有適用規則時只列計數
 
 
@@ -2953,6 +2957,9 @@ def rules_markdown(inv):
         L += ["`affected` 的建議（即使規則還是初審）讓整份韌體報告狀態是 ATTENTION，請負責單位對照廠商公告確認。", "",
               "| 映像 | 元件 | 規則 | 說明 |", "|---|---|---|---|"]
         L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in aff]
+        dc = [x for x in aff if x.get("datacenter")]
+        if dc:              # 條件的 segment 是 datacenter（結構化欄位，不讀 note 的文字）
+            L += ["", "- " + DATACENTER_AFFECTED_TEXT + "：" + "、".join(f"{e(x['image'])} 的 {e(x['component'])}" for x in dc) + "。"]
         if any(x["kind"] == "ami_core" for x in aff):
             L += ["", "- " + AMI_AFFECTED_TEXT]
             inc = [x for x in aff if x["kind"] == "ami_core" and x.get("scan_incomplete")]
