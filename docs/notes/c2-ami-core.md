@@ -1,4 +1,4 @@
-# C2：AMI Aptio V 核心版本（Firmware ID 紀錄 `$FID`）與規則表比對（決定 D-058，分支 wp3/ami-core）
+# C2：AMI Aptio V 核心版本（Firmware ID 紀錄 `$FID`）與規則表比對（決定 D-058）
 
 只用公開映像與公開資料。這份是工作紀錄，不是驗證結論，也不是漏洞判定：讀不到、有多個互相矛盾的值、結構不認得一律是 GAP／NOT_ASSESSED，不猜。
 `$FID` 的結構**沒有 AMI 的公開文件**，欄位位置只從四份公開映像反推；沒有複製任何程式碼，沒有使用任何非公開或外洩的 AMI 資料。
@@ -83,7 +83,7 @@ BIOS 映像元件加 `sca-center:ami-core-search`（`read`／`not-found`／`conf
 
 affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明三件事：核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；核心版本寫法的對應（A1）尚未經 AMI 或板廠確認；這是請負責單位對照板廠公告的線索，不是漏洞判定。
 
-有 `ami_core` 元件時，`bios_image` 不再比 `ami_core` 規則（同一條規則只出一個建議）；沒有元件時 `bios_image` 照舊比（列「可能相關的 AMI 公告」，status 不是 `read` 的原因代碼會出現在 BIOS 映像的建議裡）。
+有 `ami_core` 元件時，`bios_image` 不比 `ami_core` 規則（同一條規則只出一個建議）；沒有元件時 `bios_image` 比 `ami_core` 規則（列「可能相關的 AMI 公告」，status 不是 `read` 的原因代碼會出現在 BIOS 映像的建議裡）。
 
 另有兩道保險：規則只要有任何 `ami_core` 條件（例如同一筆規則另有 `bios_image` 條件），其他條件判出的 not-affected 也一律降成 NOT_ASSESSED（`ami-core-mapping-unverified`），所以 AMI 規則不會產生 not-affected 與 vendor-statement 依據；`cond_ami` 的輸入 `status` 不是字串或欄位缺漏時回 NOT_ASSESSED，不丟例外。
 
@@ -103,7 +103,7 @@ affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明
 - Setup 畫面 Core Version 的意義：Welotec 文件「Core Version: AMI Kernel version, CRB code base, X64」https://rsaec.docs.welotec.com/latest/BIOS.html ；範例值 5.32 https://alderamin-pico-mk5.docs.welotec.com/latest/BIOS.html 。
 - Oracle x9-2 文件：「Core version number … Format is XX.YY（XX - Core major release，YY - Core minor release），Example: 5.20」https://docs.oracle.com/en/servers/x86/x9-2/exa-database/main-menu.html 。
 - AMI 公告 PDF：「If the fix version includes "Aptio," AMI's UEFI product, AptioV, was affected.」；`Fix Version` 欄寫 `AptioV_5.044`，例 https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf （2026002 同格式）。公告沒有寫怎麼從映像或 Setup 找出自己的核心版本。
-- GUID 的名稱：`3FD1D3A2-99F7-420B-BC69-8BB1D492A332` 在公開工具的 GUID 清單裡叫 `Fid`；`2EBE0275-…` 在 fwupd 的 `libfwupdplugin/fu-efi-section.c` 叫 `SignOn`（名稱不同，意義不確定）。只有名稱，沒有結構。
+- GUID 的名稱：`3FD1D3A2-99F7-420B-BC69-8BB1D492A332` 在 9elements/converged-security-suite 的 `pkg/uefi/ffs/consts/guid.go`（BSD-3-Clause） 叫 `Fid`；`2EBE0275-…` 在 fwupd 的 `libfwupdplugin/fu-efi-section.c`（LGPL-2.1-or-later） 叫 `SignOn`（名稱不同，意義不確定）。只有名稱，沒有結構。
 - FID 是可以被改的標籤：Win-RAID 討論串寫 FID（俗稱 BIOS Tag）「can be changed」https://winraid.level1techs.com/t/problem-adjust-bios-version-hp-pavilion-500-549ng-ami-aptio4/33124 。所以它和 PSP 標頭版本一樣是映像自述的值。
 - 間接佐證（只讀到搜尋結果摘要，原頁面直接抓取回 403，沒有逐字核對）：Aptio V 的 AM4 主機板在 dmidecode 有 `BIOS Revision: 5.17` 的公開傾印（openbenchmarking.org 的 dmidecode 結果頁）；NVD 的 CPE `ami:aptio_v:5.0` 與 VulDB 的「AMI AptioV up to 5.039」顯示公告的 `5.0xx` 是 Aptio V 的核心版本線。
 

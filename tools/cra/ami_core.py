@@ -16,7 +16,7 @@
   - FFS 形式：前 16 位元組是 FREEFORM_SUBTYPE_GUID section 的子類型 GUID 2EBE0275-6458-4AF9-91ED-D3F4EDB100AA
   - FIDT 形式：前 36 位元組是 ACPI 表頭，簽章 `FIDT`、表長（u32 小端，+4）在 156～4096
 
-GUID 的名稱（`Fid`、`SignOn`）只參考公開工具（fwupd 的 libfwupdplugin/fu-efi-section.c 等，LGPL-2.1-or-later）的清單，只取名稱，沒有複製程式碼。
+GUID 的名稱只參考公開工具的 GUID 清單，只取名稱，沒有複製程式碼：`Fid`（3FD1D3A2-…）見 9elements/converged-security-suite 的 `pkg/uefi/ffs/consts/guid.go`（BSD-3-Clause）；`SignOn`（2EBE0275-…）見 fwupd 的 `libfwupdplugin/fu-efi-section.c`（LGPL-2.1-or-later）。
 
 ## 結果狀態（summarize 的 status）
   read            至少一份通過結構檢查的紀錄，所有紀錄的 Core 相同
