@@ -1812,3 +1812,15 @@ def test_sca_scan_writes_dt_data_sources_not_ok_with_both_not_downgraded_reasons
     assert "for s in C-dt-feeds D-dt-data-sources" in skip and 'status "$s" NOT_RUN' in skip
     fail = next(l for l in src.splitlines() if "META[dt_feeds_reason]=dtsources_failed" in l)
     assert 'status D-dt-data-sources FAIL' in fail
+
+
+@pytest.mark.parametrize("st", ["FAIL", "GAP", "WEIRD"])
+def test_dt_feeds_fail_or_unknown_is_at_least_gap(tmp_path, st):
+    """#92 C0 驗證：C-dt-feeds 是 FAIL（dtsources 的 config_error：DT_FEEDS_MAX_AGE_HOURS 設錯）或不認得的狀態時，
+    就算 D-dt-data-sources 是 OK 也至少 GAP（原本 FAIL 回 None，報告停在 ATTENTION）。"""
+    scan = make_scan(tmp_path / "scan", meta=dict(META, dt_feeds_reason="config_error"))
+    body = (scan / "status.tsv").read_text(encoding="utf-8") + f"C-dt-feeds\t{st}\tx\n"
+    (scan / "status.tsv").write_text(body, encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "proj"), scan)
+    ra = s["documents"]["risk-assessment"]
+    assert ra["status"] == "GAP" and any(f"C-dt-feeds is {st}" in x for x in ra["detail"]), ra

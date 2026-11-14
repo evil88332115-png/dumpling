@@ -228,7 +228,7 @@ def fresh_stage_level(k, st, meta=None, status=None):
             reason = (meta or {}).get("dt_feeds_reason") if isinstance(meta, dict) else None
             dds = (status or {}).get("D-dt-data-sources", ("NOT_RUN",))[0]
             return None if reason in DT_FEEDS_NOT_DOWNGRADED and dds != "OK" else "GAP"
-        return "GAP" if st == "GAP" else None
+        return "GAP"        # GAP、FAIL（例如 config_error：DT_FEEDS_MAX_AGE_HOURS 設錯）、不認得的狀態：至少 GAP（D-043；#92 C0，原本 FAIL 回 None）
     return "GAP"
 
 
