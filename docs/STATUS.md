@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 17:30 +0800（C0）
+最後更新：2026-11-14 17:30 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -296,6 +296,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
+- **已暫停（11-14，使用者要用電腦；C0 通知恢復）**：不開代理、不跑本機重測試。第 3 步排程（11-15 01:17 UTC）照常在 GitHub 跑，結果恢復後回報
 - 目前在做：**第一次真實基準已建立**（狀態 Issue #99，main 4d015d7、兩個正式 Release；KEV 56、廠商層級 150）。第 3 步：11-15 01:17 UTC 排程 dry_run 一天 → 回報 would_open → C0 設 WATCH_REAL_ISSUES=on（11-14 第一次排程沒有觸發；再沒觸發就先回報 C0、再手動代跑）。#101（md_text 改用 C2 的 firmware_mdsafe＋斷開 #數字／GH-數字 Issue 參照，POST /markdown 實測）已合併，實測結果已轉告 C2。GitLab 線已停（#93 合併；T-12 等內部 GitLab 環境）
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32、#47、#49、#61、#69、#71、#72、#74、#84、#85、#91、#93、#94、#100、#101
@@ -303,7 +304,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑；之後派代理一律指定 model sonnet＋effort（安全／判定／驗證 high，其他 medium）
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：排程 dry_run 一天（11-15 01:17 UTC；沒觸發就先回報 C0、再手動代跑）
+- 卡住／等決定：暫停中，等 C0 通知恢復；恢復後先看排程 dry_run（11-15 01:17 UTC；沒觸發就先回報 C0、再手動代跑）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
