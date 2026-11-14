@@ -899,6 +899,13 @@ def test_verification_is_required_and_enumerated(tmp_path):
     invalid(tmp_path, d, "unknown field")
 
 
+def test_confirmed_rule_rejects_summary_tool_source(tmp_path):
+    invalid(tmp_path, doc(with_ver("INTEL-SA-01372", "summary-tool", state="confirmed")), "summary-tool")      # 沒直接對照原頁面，不能確認
+    for v in ("direct", "independent:nvd"):
+        ok(tmp_path, doc(with_ver("INTEL-SA-01372", v, state="confirmed")))
+    ok(tmp_path, doc(with_ver("INTEL-SA-01372", "summary-tool")))                                               # 初審可以
+
+
 def test_weakest_verification_of_several_sources(tmp_path):
     ami = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V"}], "AMI", url=AMI_PDF)
     ami["sources"].append({"url": fr.AMI_INDEX_URL, "read_at": UPDATED, "verification": "summary-tool"})

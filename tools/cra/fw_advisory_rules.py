@@ -448,6 +448,8 @@ def _validate(doc):
         for j, c in enumerate(m):
             _validate_condition(c, r, orderings, f"{w}.match[{j}]")
         _validate_review(r["review"], updated, w + ".review")
+        if r["review"]["state"] == "confirmed" and any(s["verification"] == "summary-tool" for s in r["sources"]):
+            _bad(w + ".review", "a confirmed rule must not have a summary-tool source: compare the version values with the vendor page directly first")
 
 
 def load(path=None, expected_sha256=None):

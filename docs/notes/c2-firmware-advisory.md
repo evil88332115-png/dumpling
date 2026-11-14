@@ -399,7 +399,7 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
 ### 確認規則的步驟（負責單位）
 
 1. 對照公告頁逐條核對 `match`（`fixed_in`、`line`／`family`、`note`）與 `cves`、`sources`；有疑問的條件改成 NOT_ASSESSED 的寫法（刪掉那個條件）或整筆刪掉。
-   **`verification` 是 `summary-tool` 的規則（目前是 INTEL-SA-01280、INTEL-SA-01372）：確認時必須直接開 Intel 的頁面對照每一個版本值**（Intel 對一般下載回 403，要用瀏覽器開），對照完把該出處改成 `direct`（或另有獨立來源時 `independent:nvd`）；沒有直接對照過就不能改成 `confirmed`。
+   **`verification` 是 `summary-tool` 的規則（目前是 INTEL-SA-01280、INTEL-SA-01372）：確認時必須直接開 Intel 的頁面對照每一個版本值**（Intel 對一般下載回 403，要用瀏覽器開），對照完把該出處改成 `direct`（或另有獨立來源時 `independent:nvd`）；沒有直接對照過就不能改成 `confirmed`（schema 也擋：`confirmed` 的規則有 `summary-tool` 出處時整張表拒收）。
 2. 把該筆的 `review` 改成 `state: "confirmed"`，加 `confirmed_by`（**角色**，不寫姓名或信箱）與 `confirmed_at`；`preliminary_by`、`preliminary_at` 保留。
 3. 更新 `table_updated`，重算 `TABLE_SHA256`，跑測試。確認之前的建議都標「依初審規則的建議（待負責單位確認）」，確認之後才標「依已確認規則的建議」；一個元件同時有兩種規則時寫 `preliminary+confirmed`。
 4. 規則表不會自己更新：`table_updated` 之後的新公告沒有收錄，報告每次都寫明這一點。
