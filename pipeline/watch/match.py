@@ -419,12 +419,39 @@ def _plain(x, limit):
     return re.sub(r"\s+", " ", _MD_CTRL.sub(" ", str(x if x is not None else ""))).strip()[:limit]
 
 
+def _load_mdsafe():
+    """C2 的 pipeline/lib/firmware_mdsafe.py（不可信文字進 Markdown 的共用規則，只用標準庫）。用檔案路徑載入，不改 sys.path。"""
+    spec = importlib.util.spec_from_file_location(
+        "firmware_mdsafe", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib", "firmware_mdsafe.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MDSAFE = _load_mdsafe()
+
+
 def md_text(x, limit=300):
-    """外部字串 → Markdown 純文字：& 先換成 &amp;（否則 &commat; 之類的 HTML 實體渲染時會解碼成 @、[ 等），
-    再跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
-    s = _plain(x, limit).replace("&", "&amp;").replace("\\", "\\\\")
-    s = re.sub(r"([\[\]()!<>`|*_~])", r"\\\1", s)
-    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, s)
+    """外部字串 → Markdown 純文字。和 C2 的 firmware_mdsafe.md_safe 用同一套規則（C0 決定，2026-11-14）：
+    去控制與格式字元（含單獨的代理字元、零寬字元、雙向覆寫）、& 先換成 &amp;、跳脫 \\ [ ] ( ) < > ! * _ # ~ | ` $、
+    提及形式的 @ 與會被 cmark-gfm／markdown-it 自動連結的 email、scheme://、www. 都斷開（細節見 firmware_mdsafe 的檔頭）。
+    以前的 md_text 擋不住 www.、email 自動連結與單獨的代理字元（C2 #96 驗證比對 3327 筆輸入，219 筆會變成連結）。
+    超過 limit 截斷時結尾加「…」。表格儲存格也用這個。
+    md_safe 之後再補一道 Issue 參照（只在進 Issue 的文字需要；C2 的韌體報告不進 Issue，firmware_mdsafe 不改）：
+    `#`／`＃` 後面接數字時插零寬空白（`\\#123` 只在 Markdown 那一層有效：GitHub 在渲染後的文字比對 Issue 參照，
+    2026-11-14 用 GitHub 的 POST /markdown 實測：`\\#1`、`owner/repo\\#1`、`GH-1` 都會變成 issue-link，`#`＋零寬空白＋`1`、`GH`＋零寬空白＋`-1` 不會），
+    `GH-123` 在 `GH` 後面插零寬空白。"""
+    return _issue_refs_off(_MDSAFE.md_safe("" if x is None else x, limit))
+
+
+_ISSUE_REF = re.compile(r"(\\?[#＃])(?=[0-9０-９])")
+_GH_REF = re.compile(r"(?i)(?<![A-Za-z0-9])(gh)(?=-[0-9])")
+
+
+def _issue_refs_off(s):
+    """`#123`、`owner/repo#123`、`\\#123`、`＃123`、`GH-123`：插零寬空白，GitHub 不會連到別的 Issue／PR，也不會在對方的時間軸留下 cross-reference。"""
+    s = _ISSUE_REF.sub(lambda m: m.group(1) + ZWSP, s)
+    return _GH_REF.sub(lambda m: m.group(1) + ZWSP, s)
 
 
 md_cell = md_text
@@ -444,7 +471,7 @@ def md_code(x, limit=300):
 def md_title(x, limit=200):
     """Issue 標題裡的外部字串：去控制字元，@ # & 後面插零寬空白（標題不解讀 Markdown 跳脫，所以不加反斜線；
     & 也不換成 &amp;，不然標題會照字面顯示 &amp;。& 後面有零寬空白就不會被當成 HTML 實體）。"""
-    return re.sub(r"([@#＠＃&＆])", "\\1" + ZWSP, _plain(x, limit))
+    return _GH_REF.sub(lambda m: m.group(1) + ZWSP, re.sub(r"([@#＠＃&＆])", "\\1" + ZWSP, _plain(x, limit)))
 
 
 _CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1", re.S)
