@@ -51,6 +51,10 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
    `Hooks.independent_version(ctx)` 提供一個不從 tag 來的版本（例如 Jetson：刷機包裡掃到的 L4T 版本），和專案宣告的對應比對，結果放在
    `product_version_check.independent`（`status` OK｜FAIL｜GAP）。FAIL → 整體 FAIL（一樣丟 `ProductVersionMismatch`）；平台沒有提供（hook 回 None）或
    無法核對 → GAP；設定包核對 OK 但獨立來源不是 OK 時，整體是 GAP，不是 OK（D-043：沒核對不能顯示成沒問題）。
+   **scan 步驟的結果（M7b-4，C0 Q4）**：`product_version_check.status` 不是 OK（GAP、NOT_SET、NOT_RUN，或 scan.json 沒有這一項）時 scan 步驟要記 GAP
+   （結束碼 3），pipeline_result 因此是 GAP。各平台的 scan 腳本不用自己判斷，在算出自己的狀態後呼叫共用的
+   `python3 -I pipeline/lib/platform_scan.py version-state <scan.json>`（印「狀態<TAB>說明」，狀態是 OK｜GAP｜FAIL；`version_state()`），
+   不是 OK 就把整體狀態設成 GAP（FAIL 在 collect 已經丟 ProductVersionMismatch）。
 
 規則：缺的項目在 scan.json 記 null，**不推測**，標準答案比對會因此失敗而不是通過；附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元），中文名稱放在 manifest 的顯示標籤。
 """
@@ -541,3 +545,40 @@ def collect(a, hooks=None):
     if pvc["status"] == "FAIL":      # 輸出都寫完才丟：留著附件與 scan.json 可以查是哪一份、什麼值
         raise ProductVersionMismatch("版本與 Release tag 不一致（D-055 (3)）：" + "；".join(pvc["failures"]))
     return scan
+
+
+def version_state(scan):
+    """scan.json（dict）→ (狀態, 說明)：scan 步驟要不要因為版本核對降成 GAP（M7b-4，C0 Q4）。
+    OK＝product_version_check 是 OK；FAIL＝是 FAIL；其他（GAP、NOT_SET、NOT_RUN、沒有這一項、格式不對）→ GAP（D-043）。"""
+    pvc = scan.get("product_version_check") if isinstance(scan, dict) else None
+    if not isinstance(pvc, dict):
+        return "GAP", "scan.json 沒有 product_version_check：版本沒有核對"
+    st = pvc.get("status")
+    ind = pvc.get("independent") if isinstance(pvc.get("independent"), dict) else {}
+    if st == "OK":
+        return "OK", "版本核對 OK"
+    if st == "FAIL":
+        return "FAIL", "版本核對 FAIL：" + "；".join(str(x) for x in (pvc.get("failures") or []))
+    why = {"GAP": "和 tag 無關的來源：%s" % (ind.get("detail") or ind.get("status") or "沒有說明"),
+           "NOT_SET": "設定包沒有 product.version，沒有東西可以和 tag 核對",
+           "NOT_RUN": "找不到設定包，沒有核對"}.get(st, "狀態 %r 不認得" % (st,))
+    return "GAP", "版本核對是 %s（%s）" % (st, why)
+
+
+def _main(argv):
+    if len(argv) == 2 and argv[0] == "version-state":
+        try:
+            with open(argv[1], encoding="utf-8") as f:
+                scan = json.load(f)
+        except (OSError, ValueError) as e:
+            print("GAP\tscan.json 讀不了（%s）：版本沒有核對" % type(e).__name__)
+            return 0
+        st, msg = version_state(scan)
+        print("%s\t%s" % (st, msg.replace("\t", " ").replace("\n", " ")))
+        return 0
+    print("用法：platform_scan.py version-state <scan.json>", file=sys.stderr)
+    return 64
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))

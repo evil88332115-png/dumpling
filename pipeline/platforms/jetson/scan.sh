@@ -139,6 +139,9 @@ case $sp in
   *) state=GAP; msg="$msg；流程步驟的整體狀態是 $sp（見 pipeline-steps.tsv）";;
 esac
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi   # GAP 比 ATTENTION 重，蓋過它
+# 版本核對（product_version_check）不是 OK → scan 步驟記 GAP（M7b-4；共用函式，各平台的 scan 腳本照這樣呼叫）
+vs=$(python3 -I "$root/pipeline/lib/platform_scan.py" version-state "$out/scan.json" 2> /dev/null) || vs=$'GAP\tversion-state 執行失敗：版本沒有核對'
+case ${vs%%$'\t'*} in OK) ;; *) state=GAP; msg="$msg；${vs#*$'\t'}";; esac
 {
   echo "## scan（$DUMPLING_PROJECT $ver）"
   echo "- 狀態：$state（$msg）"

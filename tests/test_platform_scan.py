@@ -334,5 +334,45 @@ class JetsonIndependentVersion(Generic):
         self.assertEqual(self.js.JetsonHooks().independent_version(ctx)["status"], "OK")
 
 
+class VersionState(unittest.TestCase):
+    """M7b-4（C0 Q4）：product_version_check 不是 OK → scan 步驟記 GAP；共用的 version_state／CLI，各平台的 scan 腳本呼叫。"""
+
+    def test_states(self):
+        ok = {"product_version_check": {"status": "OK", "independent": {"status": "OK"}}}
+        self.assertEqual(ps.version_state(ok)[0], "OK")
+        self.assertEqual(ps.version_state({"product_version_check": {"status": "FAIL", "failures": ["x"]}}), ("FAIL", "版本核對 FAIL：x"))
+        for pvc, word in (({"status": "GAP", "independent": {"status": "GAP", "detail": "沒有來源"}}, "沒有來源"),
+                          ({"status": "NOT_SET"}, "沒有 product.version"), ({"status": "NOT_RUN"}, "找不到設定包"),
+                          ({"status": "PASS"}, "不認得"), ({}, "不認得")):
+            st, msg = ps.version_state({"product_version_check": pvc})
+            self.assertEqual(st, "GAP", pvc)
+            self.assertIn(word, msg)
+        for bad in ({}, {"product_version_check": "OK"}, [], None):
+            self.assertEqual(ps.version_state(bad)[0], "GAP", bad)
+
+    def test_cli(self):
+        import subprocess
+        tmp = tempfile.mkdtemp(prefix="dumpling-vstate-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        cli = [sys.executable, "-I", os.path.join(ROOT, "pipeline", "lib", "platform_scan.py"), "version-state"]
+        for content, want in ((json.dumps({"product_version_check": {"status": "OK"}}), "OK\t"),
+                              (json.dumps({"product_version_check": {"status": "GAP", "independent": {"detail": "a\tb"}}}), "GAP\t"),
+                              ("{not json", "GAP\tscan.json 讀不了")):
+            f = os.path.join(tmp, "s.json")
+            w(f, content)
+            r = subprocess.run(cli + [f], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0)
+            self.assertTrue(r.stdout.startswith(want), r.stdout)
+            self.assertEqual(r.stdout.count("\t"), 1, r.stdout)                # 說明裡的 TAB 換掉，shell 只切一次
+        r = subprocess.run(cli + [os.path.join(tmp, "missing.json")], capture_output=True, text=True)
+        self.assertTrue(r.stdout.startswith("GAP\t"))
+        self.assertEqual(subprocess.run(cli[:-1], capture_output=True, text=True).returncode, 64)
+
+    def test_jetson_scan_sh_uses_it(self):
+        src = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
+        self.assertIn('platform_scan.py" version-state "$out/scan.json"', src)
+        self.assertLess(src.index("version-state"), src.index('case $state in OK|ATTENTION) exit 0;; *) exit 3;; esac'))
+
+
 if __name__ == "__main__":
     unittest.main()
