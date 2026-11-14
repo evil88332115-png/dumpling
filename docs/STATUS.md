@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 15:32 +0800（C0）
+最後更新：2026-11-14 15:34 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -13,7 +13,7 @@
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）M7b-3 #95 已合併。**M7b-4 #98 已合併**（a1fe821）。M7c 範圍已同意（D-057：M7c-1 未判定列輸出含客戶版、M7c-2 D-035 依據；Q5 路徑安全、OpenVEX 帶依據、資料結構可逐核心），**M7c-1 #105 已合併**；C0 決定：(a) 客戶版 affects.ref 懸空 → #105 後另開 M7c-1b（客戶版帶精簡 components），(b) 客戶版不另加 NOT_ASSESSED 屬性、靠 in_triage＋固定句並寫進文件；**M7c-1b #107 已合併**；M7c-2（D-035 依據）設計已同意（D-057 補充 05f45a2：客戶版只帶類型、OpenVEX 嚴格格式、design-doc 限長、閘門基準另存 before_d035），C1 在 wp1/m7c2 開工；驗收改用 #105 run 的掃描資料、cra_report 正式入口、設定複本 role=supplier（Jetson 正式流程不產客戶資料包；「沒有示範專案產客戶包」記 M7f）。M7f 並行。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
-  - C2（第二台）：#102、#103 已合併；main 10a9c82 自查 2267 passed、cmark-gfm 渲染連結／參照 0。**#104**（規則表後續：AGESA 1.2.0.12〔C0 自己抓 AMD-SB-7064 核對相符〕、firmware.yml 公告網址、PSP 標題去掉 ` @0x`）已合併（listed 是公告表格列的 AGESA 日期，和其他列一致；說明隨 AMI PR 補）。AMI 核心版本設計已同意（D-058：低於修正版給 affected 建議、第一版不給 not-affected），**#106 已合併**；AMI 後續 #108 已合併；C2 自排下一個主線（候選：規則表其餘後續、5674 對照表〔等使用者〕、D-046 BIOS 自動化準備）。5674 確認後的對照表 PR 等使用者
+  - C2（第二台）：#102、#103 已合併；main 10a9c82 自查 2267 passed、cmark-gfm 渲染連結／參照 0。**#104**（規則表後續：AGESA 1.2.0.12〔C0 自己抓 AMD-SB-7064 核對相符〕、firmware.yml 公告網址、PSP 標題去掉 ` @0x`）已合併（listed 是公告表格列的 AGESA 日期，和其他列一致；說明隨 AMI PR 補）。AMI 核心版本設計已同意（D-058：低於修正版給 affected 建議、第一版不給 not-affected），**#106 已合併**；AMI 後續 #108 已合併；C2 下一步：(1) 規則表第二批（CSME 18.0／15.x、可機器比對的 AMD 微碼／PSP、FSP 查無版本照實記），(2) D-046 BIOS 新版本來源調查＋設計（不實作，等 C1 介面；需登入／EULA 的標需人工），(3) 5674 等使用者。需人工：INTEL-SA-01280／01372 用瀏覽器直接核對、7 筆規則改 confirmed（負責單位）。5674 確認後的對照表 PR 等使用者
   - C3（第二台）：#93 已合併，**GitLab 線暫停**（等內部環境＋GITLAB-PORT 內部驗證清單）。#101 已合併。主線：基準日第 3 步（明天 01:17Z 排程 dry_run 一天 → 回報 would_open → C0 設 WATCH_REAL_ISSUES=on）；小 PR：match.py md_text 改用和 C2 md_safe 同一套規則
   - C4（第二台）：**M6 #97** C0 驗證通過（high）；驗證後的修改 9965aeb 和 shellcheck 修正 b79087f 已推，CI 五項綠。#98 合併後只有 docs/PROVENANCE.md 衝突，已請 C4 用 git merge 併 main，C0 核對差異後合併。M6 合併後另開 PR：三個平台的 scan.sh 照抄 version-state 那段，連同標準答案一起重跑，開工前先告訴 C0 會動哪些標準答案
 - 下一步（新 C0 接手後）：
