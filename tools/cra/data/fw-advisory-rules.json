@@ -118,13 +118,13 @@
      "component": "amd_agesa",
      "family": "ComboAM4v2PI",
      "fixed_in": "1.2.0.B",
-     "note": "Desktop table: Ryzen 5000 (Vermeer, Cezanne) list ComboAM4v2PI 1.2.0.B (2023-08-25); the bulletin says update to the listed version or higher"
+     "note": "Desktop table, Ryzen 5000 columns (Vermeer, Cezanne): minimum AGESA ComboAM4v2PI 1.2.0.B, dated 2023-08-25 in the table; the table gives the minimum version to update to"
     },
     {
      "component": "amd_agesa",
      "family": "ComboAM5PI",
      "fixed_in": "1.0.8.0",
-     "note": "Desktop table: Ryzen 7000 lists ComboAM5 1.0.8.0 (2023-08-25); the bulletin writes ComboAM5, the image string is ComboAM5PI"
+     "note": "Desktop table, Ryzen 7000 column: minimum AGESA 1.0.8.0, dated 2023-08-25 in the table; the table names the family ComboAM5, the image string uses ComboAM5PI"
     }
    ],
    "review": {
@@ -216,13 +216,13 @@
      "component": "intel_csme",
      "line": "14.0",
      "fixed_in": "14.0.45",
-     "note": "Affected Products: CSME and AMT versions before 14.0.45"
+     "note": "14.0 line: the bulletin lists CSME and AMT builds below 14.0.45 as affected"
     },
     {
      "component": "intel_csme",
      "line": "14.5",
      "fixed_in": "14.5.25",
-     "note": "Affected Products: CSME and AMT versions before 14.5.25"
+     "note": "14.5 line: the bulletin lists CSME and AMT builds below 14.5.25 as affected"
     }
    ],
    "review": {
@@ -230,7 +230,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Only the 14.x version lines of the bulletin's CSME sentence are in this rule. The 14.0.45 and 14.5.25 thresholds match the NVD CPE version ranges of the CVEs that NVD links to this advisory; CVE-2020-27336, CVE-2020-27337 and CVE-2020-27338 have no NVD record with an Intel CPE or a reference to this advisory (not checked). The sentence lists 11.8.82 for the 11.8 line (some CVE descriptions on the same page and the NVD CPE ranges say 11.8.80); this rule does not use the 11.x lines"
+   "note": "Only the 14.x thresholds of the bulletin's CSME version list are in this rule. The 14.0.45 and 14.5.25 thresholds match the NVD CPE version ranges of the CVEs that NVD links to this advisory; CVE-2020-27336, CVE-2020-27337 and CVE-2020-27338 have no NVD record with an Intel CPE or a reference to this advisory (not checked). The bulletin's version list gives 11.8.82 for the 11.8 line (some CVE descriptions on the same page and the NVD CPE ranges say 11.8.80); this rule does not use the 11.x lines"
   },
   {
    "id": "INTEL-SA-01280",
@@ -255,19 +255,19 @@
      "component": "intel_csme",
      "line": "14.1",
      "fixed_in": "14.1.77",
-     "note": "Chipset/SOC table, column Versions Before"
+     "note": "Chipset/SOC table: builds below this version are listed as affected"
     },
     {
      "component": "intel_csme",
      "line": "14.5",
      "fixed_in": "14.5.57",
-     "note": "Chipset/SOC table, column Versions Before"
+     "note": "Chipset/SOC table: builds below this version are listed as affected"
     },
     {
      "component": "intel_csme",
      "line": "18.1",
      "fixed_in": "18.1.18",
-     "note": "Row Core Ultra (Series 1), column Versions Before"
+     "note": "Core Ultra (Series 1) row: builds below this version are listed as affected"
     }
    ],
    "review": {
@@ -298,19 +298,19 @@
      "component": "intel_csme",
      "line": "14.1",
      "fixed_in": "14.1.80",
-     "note": "Intel 400 Series Chipset row, column Versions Before"
+     "note": "Intel 400 Series Chipset row: builds below this version are listed as affected"
     },
     {
      "component": "intel_csme",
      "line": "14.5",
      "fixed_in": "14.5.62",
-     "note": "Intel 400 Series Chipset row, column Versions Before"
+     "note": "Intel 400 Series Chipset row: builds below this version are listed as affected"
     },
     {
      "component": "intel_csme",
      "line": "18.1",
      "fixed_in": "18.1.21",
-     "note": "Row Core Ultra Processors (Series 1), column Versions Before"
+     "note": "Core Ultra Processors (Series 1) row: builds below this version are listed as affected"
     }
    ],
    "review": {
@@ -346,7 +346,7 @@
      "component": "ami_core",
      "product": "Aptio V",
      "fixed_in": "AptioV_5.044",
-     "note": "Fix Version column: AptioV_5.044"
+     "note": "The PDF table gives AptioV_5.044 as the fix version"
     }
    ],
    "review": {
@@ -354,7 +354,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Product: Aptio V (the document says: if the fix version includes Aptio, AMI's UEFI product AptioV was affected); no affected version range is given, only fix versions"
+   "note": "Product: Aptio V, AMI's UEFI firmware (the PDF ties fix versions named Aptio to that product); the PDF gives fix versions only, no affected version range"
   },
   {
    "id": "AMI-SA-2026002",
@@ -386,7 +386,7 @@
      "component": "ami_core",
      "product": "Aptio V",
      "fixed_in": "AptioV_5.044",
-     "note": "Fix Version column: AptioV_5.044 for three CVEs, AptioV_5.043 for two; fixed_in is the highest"
+     "note": "The PDF table gives AptioV_5.044 as the fix version for three CVEs and AptioV_5.043 for two; fixed_in is the highest"
     }
    ],
    "review": {
@@ -394,7 +394,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Product: Aptio V (the document says: if the fix version includes Aptio, AMI's UEFI product AptioV was affected); no affected version range is given, only fix versions"
+   "note": "Product: Aptio V, AMI's UEFI firmware (the PDF ties fix versions named Aptio to that product); the PDF gives fix versions only, no affected version range"
   }
  ]
 }
