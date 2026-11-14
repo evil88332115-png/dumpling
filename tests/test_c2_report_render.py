@@ -258,6 +258,20 @@ class VbiosReportRenderTests(RenderCase):
             out = xf.md_esc(raw)
             self.check(out, None, label=repr(raw))
 
+    # GitHub 對渲染後的文字比對 Issue 參照（反斜線擋不住）：`#`／`＃` 接數字、`GH-` 接數字都不能留著（firmware_mdsafe 檔頭第 7 點）
+    ISSUE_REFS = ("#1", "owner/repo#1", "\\#1", "GH-1", "gh-12", "＃1", "#１", "fix #1, GH-2")
+
+    def assert_no_issue_ref(self, out, label):
+        self.assertIsNone(re.search(r"[#＃](?=[0-9０-９])", out), label)
+        self.assertIsNone(re.search(r"(?i)(?<![A-Za-z0-9])gh(?=-[0-9])", out), label)
+
+    def test_md_esc_breaks_issue_refs(self):
+        import x86_firmware as xf
+        for raw in self.ISSUE_REFS:
+            out = xf.md_esc(raw)
+            self.assert_no_issue_ref(out, raw)
+            self.check(out, None, label=repr(raw))
+
     def test_md_esc_fallback_without_firmware_mdsafe_still_blocks_links(self):
         # 載不到 pipeline/lib/firmware_mdsafe.py 時的退路：網址、mailto、xmpp、www.、email 都不能變成連結（不能 fail-open）
         import x86_firmware as xf
@@ -274,6 +288,8 @@ class VbiosReportRenderTests(RenderCase):
                 out = xf.md_esc(raw)
                 self.assertIn("@\u200b", out, repr(raw))
                 self.check(out, None, label="fallback mention " + repr(raw))
+            for raw in self.ISSUE_REFS:                                   # Issue 參照：退路也要斷開
+                self.assert_no_issue_ref(xf.md_esc(raw), "fallback " + raw)
         finally:
             xf._MDSAFE_PATH = saved_path
             xf._MDSAFE.clear()

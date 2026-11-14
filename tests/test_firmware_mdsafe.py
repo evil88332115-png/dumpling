@@ -74,8 +74,8 @@ class MdSafeTest(unittest.TestCase):
         for raw in ("&lt;", "&#64;", "&#x40;", "&#X40;", "&commat;", "&amp;", "&#91;", "&lbrack;", "&#0;", "&", "&&", "A&B", "R&D;", "&lt"):
             with self.subTest(raw=raw):
                 out = ms.md_safe(raw, 100)
-                self.assertEqual(out, raw.replace("&", "&amp;").replace("#", "\\#"))
-                self.assertEqual(re.sub(r"\\(.)", r"\1", html.unescape(out)), raw)     # 解碼實體再去反斜線，得回原文（不是 <、@ 本身）
+                self.assertEqual(out, re.sub(r"#(?=[0-9])", "#\u200b", raw.replace("&", "&amp;").replace("#", "\\#")))      # `#` 接數字另插零寬空白（Issue 參照，檔頭第 7 點）
+                self.assertEqual(re.sub(r"\\(.)", r"\1", html.unescape(out)).replace("\u200b", ""), raw)     # 解碼實體再去反斜線，得回原文（不是 <、@ 本身）
                 self.assertNotRegex(out, r"&(?!amp;)")                    # 沒有未編碼的 &
         out = ms.md_safe("&#64;user &#x5b;x&#x5d;&#40;http://e&#41; &lt;img src=x&gt;", 200)
         self.assertEqual(html.unescape(out).count("@"), 0)                # 解碼一次後仍沒有 @、<、[ 這些字元
@@ -100,7 +100,7 @@ class MdSafeTest(unittest.TestCase):
         self.assertNotIn("@user", ms.md_safe("@" + z + "user"))                       # 零寬空白被濾成空白：「@ user」不是提及
         self.assertEqual(ms.md_safe(" " + z + "@user"), "@" + z + "user")
         # 實體加 @ 的組合：&#64; 本身不再解碼，字面的 @ 另外處理
-        self.assertEqual(ms.md_safe("&#64;user"), "&amp;\\#64;user")
+        self.assertEqual(ms.md_safe("&#64;user"), "&amp;\\#" + z + "64;user")
 
     def test_email_autolink_form_is_defanged_but_purl_is_not(self):
         z = ms.ZWSP
@@ -214,6 +214,44 @@ class MdSafeTest(unittest.TestCase):
         # 對照：md_text（C3 的純文字跳脫）對 & 的結果與這裡一樣
         for t in ("&lt;", "A&B", "&amp;"):
             self.assertEqual(ms.md_safe(t), w.md_text(t).replace("\\", ""), t)
+
+    # Issue 參照（檔頭第 7 點）：寫死在測試裡的檢查式，不從 ms 取
+    ISSUE_REF = re.compile(r"[#＃](?=[0-9０-９])")
+    GH_REF = re.compile(r"(?i)(?<![A-Za-z0-9])gh(?=-[0-9])")
+    ISSUE_SAMPLES = ["#1", "\\#1", "owner/repo#1", "owner/repo\\#1", "GH-1", "gh-12", "Gh-3 x", "＃1", "#１", "＃１", "a #12 b", "(#3)", "x/GH-9",
+                     "##1", "fix #1, #2 and GH-3", "-GH-4", "_GH-5"]
+
+    def test_issue_refs_defanged(self):
+        for raw in self.ISSUE_SAMPLES:
+            for out in (ms.md_safe(raw, 300), ms.defang_issue_refs(raw)):
+                with self.subTest(raw=raw, out=out):
+                    self.assertIsNone(self.ISSUE_REF.search(out))
+                    self.assertIsNone(self.GH_REF.search(out))
+                    self.assertEqual(out.replace("\u200b", "").replace("\\", ""), raw.replace("\u200b", "").replace("\\", ""))       # 可見文字不變
+
+    def test_non_issue_refs_unchanged(self):
+        for raw in ("#a", "C#", "GH-a", "aGH-1", "1GH-2", "GH1", "pkg:generic/a@1.0#sub/path", "# 1", "GH -1", "ghx-1"):
+            with self.subTest(raw=raw):
+                self.assertNotIn("\u200b", ms.defang_issue_refs(raw))
+
+    def test_issue_refs_idempotent_and_used_by_defang_links(self):
+        for raw in self.ISSUE_SAMPLES + ["#\u200b1", "GH\u200b-1"]:
+            once = ms.defang_issue_refs(raw)
+            self.assertEqual(ms.defang_issue_refs(once), once, raw)
+        self.assertEqual(ms.defang_issue_refs("#\u200b1"), "#\u200b1")
+        self.assertEqual(ms.defang_links("#1"), "#\u200b1")
+        self.assertEqual(ms.defang_links("GH-1"), "GH\u200b-1")
+
+    def test_issue_refs_agree_with_watch(self):
+        """C3 的 match._issue_refs_off 是同一份 regex：md_safe 的輸出再經過它不會再改變（md_text 等於 md_safe 的結果）。"""
+        w = _watch_match()
+        if w is None or not hasattr(w, "_issue_refs_off"):
+            self.skipTest("載入不到 pipeline/watch/match.py 的 _issue_refs_off")
+        self.assertEqual((ms._ISSUE_REF.pattern, ms._GH_REF.pattern), (w._ISSUE_REF.pattern, w._GH_REF.pattern))
+        for raw in self.ISSUE_SAMPLES + ["@user #1", "https://e/x#1", "[a](#1)"]:
+            out = ms.md_safe(raw, 300)
+            self.assertEqual(w._issue_refs_off(out), out, raw)
+            self.assertEqual(w.md_text(raw, 300), out, raw)
 
     def test_c_category_and_line_separators_removed(self):
         raw = "a\x00b\x07c\x1bd\x7fe\x85f‮g​h i j﻿kl\ud800m\tn\no\rp"

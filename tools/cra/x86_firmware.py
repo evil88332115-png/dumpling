@@ -2574,9 +2574,17 @@ _MDSAFE_PATH = Path(__file__).resolve().parent.parent.parent / "pipeline" / "lib
 _MDSAFE = []
 
 
+def _fallback_links(t):
+    """載不到 firmware_mdsafe 時的連結處理：`:`、`.` 前後插零寬空白；Issue 參照（`#`／`＃` 接數字、`GH-` 接數字）在 `#`、`GH` 後面插零寬空白
+    （`#` 前面不插：md_esc 已把 `#` 跳脫成 `\\#`，前面插會把反斜線和 `#` 拆開）。"""
+    t = re.sub(r"([:.])", "\u200b\\1\u200b", t)
+    t = re.sub(r"(\\?[#＃])(?=[0-9０-９])", "\\1\u200b", t)
+    return re.sub(r"(?i)(?<![A-Za-z0-9])(gh)(?=-[0-9])", "\\1\u200b", t)
+
+
 def _mdsafe_funcs():
     """(defang_at, defang_links)：與 pipeline/lib/firmware_mdsafe.py 同一份規則（@ 提及與 email 自動連結、裸網址、mailto／xmpp）：載入同 repo 的那個檔案。
-    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，每個 `:` 與 `.` 前後也插零寬空白（網址、mailto、xmpp、`www.` 前綴都接不起來，不會變成連結；輸出會多零寬空白，但不會漏擋）。"""
+    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，每個 `:` 與 `.` 前後也插零寬空白（網址、mailto、xmpp、`www.` 前綴都接不起來，不會變成連結；輸出會多零寬空白，但不會漏擋），Issue 參照見 _fallback_links。"""
     if not _MDSAFE:
         try:
             spec = importlib.util.spec_from_file_location("firmware_mdsafe_for_x86", _MDSAFE_PATH)
@@ -2584,7 +2592,7 @@ def _mdsafe_funcs():
             spec.loader.exec_module(mod)
             _MDSAFE.append((mod.defang_at, mod.defang_links))
         except (OSError, ImportError, AttributeError, SyntaxError):
-            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), lambda t: re.sub(r"([:.])", "\u200b\\1\u200b", t)))
+            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), _fallback_links))
     return _MDSAFE[0]
 
 
