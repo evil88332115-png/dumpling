@@ -1191,6 +1191,26 @@ def test_second_batch_amd_microcode_results(equiv, patch, want, ids, reason):
         assert "no data in the database; the vendor advisory is authoritative" in r["basis"]
 
 
+def test_condition_note_travels_with_the_suggestion_into_the_basis():
+    """條件的 note（例如「公告列的是資料中心 Naples 的 CPUID」）是解讀的限制：affected／not-affected 的 basis 要帶著，報告與 SBOM 才看得到。"""
+    t, err = fr.load_default()
+    r = fr.evaluate(t, "amd_microcode", uc_comp("0x8012", "0x08001250"))
+    assert r["suggestion"] == "affected" and r["basis"].count("condition note: ") == 2 and "Naples" in r["basis"] and "00800F12" in r["basis"]
+    r = fr.evaluate(t, "amd_microcode", uc_comp("0x8082", "0x0800820d"))
+    assert r["suggestion"] == "NOT_ASSESSED" and "condition note" not in r["basis"]                          # 沒有比到的條件不帶 note
+    c = {"component": "amd_microcode", "equiv_id": "0x8012", "fixed_in": "0x0800126f"}
+    assert "condition note" not in fr.evaluate_condition(t, c, uc_comp("0x8012", "0x08001250"))["detail"]       # 沒有 note 的條件不加
+
+
+@pytest.mark.parametrize("version", ["14.10.1.1", "15.2.1.1", "15.200.1.1", "1.15.20.9", "150.20.1.1", "18.10.0.1", "14.50.1.1"])
+def test_shipped_table_compares_whole_version_lines_only(version):
+    """版本線是整段的數字比：14.10 不會被 14.1 的條件比到、15.2／15.200 不會被 15.20 比到（數字相同的寫法如 15.020 等於 15.20，是數字比的結果）。"""
+    t, err = fr.load_default()
+    r = fr.evaluate(t, "intel_csme", {"version": version, "family": None, "family_conflict": None, "family_basis": "listed"})
+    assert (r["suggestion"], r["rule_ids"]) == ("NOT_ASSESSED", []), (version, r["basis"])
+    assert all(x["result"] != "affected" and x["result"] != "not-affected" for x in r["results"]), version
+
+
 def test_no_rule_for_psp_and_fsp_stays_not_assessed_in_basis_sbom_and_report():
     """D-043：沒有規則的元件種類（PSP 韌體、FSP）要寫「資料庫沒有資料，以廠商公告為準」，不能看起來像沒有問題。
     AMD 的公告沒有 PSP 韌體版本、Intel 的公告沒有 FSP 版本，所以規則表沒有這兩種條件。"""

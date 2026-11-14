@@ -63,7 +63,7 @@ D-046 的四步（發現新版本、共用工具下載與核對、每日監控�
 ## 3. 新版本與 firmware.yml（D-059 (3)）
 
 - 一個版本一個資料夾（`firmware/<kind>/<slug-版本>/firmware.yml`）。BIOS 樣本是互相獨立的測試資料，和 Jetson 的產品多版本不同，所以新版本是**新增一個資料夾**；既有資料夾（含 sha256 與 expected）永遠不被工具修改，目標路徑已存在就停止並回報。
-- 新資料夾的 `status` 是 `candidate`。`pipeline/lib/firmware_plan.py` 遇到 `candidate` 報 GAP「預期值未審」，不會是 OK。人審通過後才改成 `ok`。
+- 新資料夾的 `status` 是 `candidate`（D-059 (3)）。**實作時要新增這個狀態值**：目前 `pipeline/lib/firmware_fetch.py` 的 `STATUSES` 只認得 `ok` 與 `GAP`，`candidate` 會被判成格式錯誤；`pipeline/lib/firmware_plan.py` 對不是 `ok` 的樣本不輸出，`pipeline/firmware-ci.sh` 也會略過。實作後的行為：`candidate` 報 GAP「預期值未審」，不能被略過而看起來像沒有新版。人審通過後才改成 `ok`。
 - 下載與核對用共用工具（`pipeline/lib/fetch_verify.py`）；C2 只提供各來源的發現步驟。
 - PR 附下載記錄：每個檔案的網址、大小、sha256、雜湊類型與來源、下載時間（UTC）。
 
@@ -75,7 +75,7 @@ D-046 的四步（發現新版本、共用工具下載與核對、每日監控�
 ## 5. 簽章驗證與金鑰（D-059 (1)、(2)）
 
 - 要固定的金鑰全部列在 repo 的單一檔案，每把寫明：指紋、用途、出處、核對日期、核對者角色。指紋要由人對照兩個獨立來源核對後才能寫入；核對之前，那個來源只算 same-origin，不能標 signed。
-- Dasharo 的 master key：docs.dasharo.com 的簽章驗證頁寫的到期日是 2026-02-02；現行指紋要人工對照 3mdeb-secpack 確認，列入人工核對項目。每個平台的 release signing key 寫在各版本的 release notes，所以驗簽也是每個版本都要做的步驟，用到的指紋寫進 PR 說明。
+- Dasharo 的 master key：docs.dasharo.com 的簽章驗證頁寫的到期日是 2026-02-02，以 2026-11-14 看**已經過期**；是否換了新金鑰、現行指紋是什麼，要人工對照 3mdeb-secpack 確認，列入人工核對項目。過期的金鑰依 D-059 一律 FAIL。每個平台的 release signing key 寫在各版本的 release notes，所以驗簽也是每個版本都要做的步驟，用到的指紋寫進 PR 說明。
 - OpenPGP 驗簽是共用工具，放在 `pipeline/lib`：用 `gpgv`，keyring 只放固定的金鑰，不讀系統預設的 keyring，失敗就擋下。介面先給 C1 看；C4 的 apt `InRelease` 之後也會用。
 - 簽章只證明檔案由金鑰持有者簽出，不證明內容正確；ME、微碼等版本仍然靠 expected 的獨立佐證。
 

@@ -742,6 +742,9 @@ def evaluate(table_or_err, kind, comp):
                 if kind == "bios_image":
                     related.append(r["id"])
             res = evaluate_condition(table, c, comp)
+            if res["result"] in ("affected", "not-affected") and c.get("note"):
+                # 條件的 note（例如「公告列的是資料中心的 CPUID」）是解讀的限制：跟著建議進 basis 與報告，不只留在規則表
+                res = {**res, "detail": res["detail"] + "; condition note: " + c["note"]}
             if res["result"] == "not-affected" and (r["vendor"] == "AMI" or any(x["component"] == "ami_core" for x in r["match"])):
                 # AMI 的公告（廠商是 AMI，或規則有 ami_core 條件）不採用 not-affected（D-058：A1 未確認，第一版不輸出）；
                 # 不論是哪一種條件（ami_core、bios_image 或日後新增的種類）判出的 not-affected 都降級
