@@ -82,7 +82,7 @@ art14 紀錄
 - 可以分好幾則留言記；同一個欄位**以最新的留言為準**，寫 `未填` 就清掉。時間格式同上（`YYYY-MM-DDTHH:MM:SSZ`）。
 - 不可信的人（不是 Developer 以上的成員）寫的紀錄留言不算數；看不懂的欄位行、格式不對的時間，倒數留言會寫明，**真實案件整個 job FAIL**（請人修正）。
 - 演練（`fill-drill-aware`）在 GitLab 上也是新增一則紀錄留言，不改內文。
-- **近似但不合格式的紀錄不會靜默**：可信成員寫的留言，如果第一行有多餘空白或大小寫不同（`ART14 紀錄`）、整則包在 ``` 或 ~~~ 程式碼區塊或引用裡、或欄位行縮排，工具**不解析**，並報問題「疑似紀錄、沒有解析」（寫在倒數留言與 result 的 `problems`）。程式碼區塊裡的行永遠不當欄位。真實案件的紀錄問題一律 FAIL（同上），演練只顯示、不 FAIL。`system` 留言（GitLab 自動產生）永遠不當紀錄、也不當倒數留言。
+- **近似但不合格式的紀錄不會靜默**：可信成員寫的留言，如果第一行有多餘空白或大小寫不同（`ART14 紀錄`）、整則包在 ``` 或 ~~~ 程式碼區塊或引用裡、或欄位行縮排，工具**不解析**，並報問題「疑似紀錄、沒有解析」。標頭的別寫也算近似（t10c，可信成員寫的才報；不可信的人寫的別寫照舊忽略）：先做 NFKC（全形變半形）、去所有空白、去括號與冒號（`[ ] 【 】 ( ) < > 《 》 : ：`）與頭尾的 Markdown 裝飾、不分大小寫，再把「紀」「錄」都當成「記」，所以 `art14紀錄`、`art14 紀錄：`、`art14 記錄`、`[art14 紀錄]`、`【art14 紀錄】`、`ＡＲＴ１４　紀錄：` 都是「疑似紀錄」（登錄同理：`art14登錄`、`art14 登錄：`、`art14 登記`、`【art14 登記】`）。登錄的別寫最危險（那是復原的路），所以真實模式一樣 FAIL（寫在倒數留言與 result 的 `problems`）。程式碼區塊裡的行永遠不當欄位。真實案件的紀錄問題一律 FAIL（同上），演練只顯示、不 FAIL。`system` 留言（GitLab 自動產生）永遠不當紀錄、也不當倒數留言。
 - **kind／mode 的來源**：取自 Issue 內文第一行標記；標記不合法、mode 不符的 Issue 在真實模式會 FAIL（不是靜默略過）。GitLab 真實案件有登錄（4.2）後，kind 以登錄為準，內文標記和登錄不符一樣 FAIL。
 - GitHub（公開 repo，只有演練）維持從內文讀：GitHub 上能改別人 Issue 內文的人要有 write 權限，本來就是可信作者（OWNER／MEMBER／COLLABORATOR）。
 
@@ -97,7 +97,21 @@ Reporter／Planner 改不了別人的留言（推定，待內部驗證），也�
 - 已關閉的真實案件（標籤找到或已登錄）還有未提交的階段 → FAIL（列在 result 的 `closed`）；逐案隔離。
 - result.json 的 `registry` 是登錄快照（登錄 Issue 被刪時人工補回用）。
 - 殘留風險：Planner／Owner 能刪登錄 Issue 本身、Maintainer 能刪留言——登錄不見了每輪 FAIL，不會變成「沒有案件」；Developer 以上本來就是可信成員。
-- **登錄留言的作者變成不可信**（project access token 輪換、bot 使用者被刪；人員離職、降權）：那則登錄不算，但會列成問題、真實模式 FAIL，不會靜默漏掉案件（t10b 驗證應修 1）。**輪換 token 或人員異動前，先由新身分（Developer 以上）把現有登錄重貼一次**（內容取自最近一次 result.json 的 `registry` 快照）。同理，Reporter 貼的假登錄留言會讓 job 一直 FAIL：吵，但不會靜默。
+- **登錄留言的作者變成不可信**（project access token 換成新的 bot 使用者、bot 使用者被刪；人員離職、降權）：那則登錄不算，但會列成問題、真實模式 FAIL，不會靜默漏掉案件（t10b 驗證應修 1）。
+  **t10c：已登錄的案件，信任來自登錄，不再要求 Issue 的作者現在還是可信成員**——案件只要被「現在可信的成員」寫的登錄留言列到，就照常倒數（仍然檢查：用編號取、confidential、`art14` 標籤、標記的 key／kind 和登錄一致、404 FAIL）。
+  不可信的登錄留言如果**每一筆**（編號＋key＋kind）都已被現在可信的登錄涵蓋，就是「被取代」、不再是問題（result 的 `registry.superseded_notes` 列出它們的 id）；有任何一筆沒被涵蓋（新增或矛盾）、有看不懂的行、或根本沒有任何一筆，仍是問題（FAIL）。
+- **token 輪換 vs 新建 token（會不會換 bot 使用者）**——依 GitLab 官方 Project access tokens 頁（2026-11-14 讀）：建立專案存取權杖時 GitLab 會建一個 bot 使用者並和 token 綁在一起；**輪換（rotate）** token 是「建立同樣權限與範圍的新 token」，**用的是同一個 bot 使用者**；
+  bot 使用者「在最後一個 token 被撤銷或過期 30 天後」才被刪除。所以：
+  - **輪換 token（同一個 bot）**：什麼都不用做。登錄、案件作者、倒數留言的作者都還是同一個可信成員。
+  - **新建一個 token（新的 bot 使用者）**：工具之後以新 bot 的身分寫登錄與倒數留言。舊 bot 在舊 token 被撤銷／過期的 30 天內還是專案成員（舊登錄仍可信），**30 天後它被刪除，才變成不可信**——所以最晚要在這之前做完下面的復原（做早了沒有壞處；晚了 `countdown` 會 FAIL，不會靜默）。舊 bot 被刪後，它寫的登錄留言不再算、它開的案件作者也不再可信。復原步驟：
+    1. 把 `ART14_GITLAB_TOKEN` 換成新 token（新 bot 要是專案成員、Developer 以上；token 檢查會確認）。
+    2. 舊 bot 被刪之後（或在那之前，如果你已經把它移出專案），下一輪 `countdown` 會 FAIL（沒有可信的登錄就沒有案件在倒數），訊息和 result 的 `registry.problems` 會列出舊的登錄留言 id 與案件編號。
+    3. 由新身分（新 bot，或任何 Developer 以上的人）打開登錄 Issue，把舊 bot 的登錄留言（或最近一次 result.json 的 `registry` 快照）**原樣重貼成新的 `art14 登錄` 留言**（不要編輯或刪舊的；每筆 `- 案件 #<iid> key=… kind=…` 都要重貼）。
+    4. 再跑 `countdown`：案件恢復倒數（人工紀錄留言的期限照常算）；舊登錄留言被取代、不再報；舊 bot 的倒數留言因為不可信被忽略，工具會用新身分另外建一則倒數留言（不會卡在 FAIL）。
+  - 只刪掉舊登錄不能取代重貼：沒有可信的登錄，舊 bot 開的案件作者不可信，會一直 FAIL（訊息說明要在登錄 Issue 重貼）。
+  - **輪換 token 或換 bot 之前，最好先確認 result.json 的 `registry` 快照是最新的**，換完立刻由新身分重貼。
+- **沒登錄的案件不會靜默**（t10c）：(1) `open-real` 開了 Issue 但寫登錄失敗 → `open-real` FAIL（result `opened-unregistered`、`issue`＝已建立的編號；訊息說明案件已建立但未登錄）；(2) 下一輪 `countdown` 看到有 `art14` 標籤、可信、標記正確、但沒登錄的案件：照常倒數、補登錄，**但這一輪仍 FAIL**（「補登錄了 #n，上次沒有登錄成功，請確認」；result `registry.unregistered`）；再下一輪已登錄就 OK；補登錄也失敗則 FAIL 並每輪重試；(3) 標籤被拿掉又沒登錄的案件：`countdown` 另外用 Issues API 的 `search` 參數（官方：比對標題與內文）搜機器標記 `dumpling-art14`，只列「confidential、作者可信、第一行標記合法且 `mode=real`、不在登錄裡」的 Issue，列出並 FAIL（不倒數、不補登錄、不寫入；要人工補回標籤後下一輪補登錄，或由可信成員貼登錄留言）；沒登錄又不是 confidential 的歸在外洩疑慮（`leaks`）。`search` 的比對方式（子字串或斷詞）文件沒寫、confidential Issue 會不會列出也要內部驗證；搜尋失敗也 FAIL。
+- **list／get 出錯也有 result.json**（t10c，GitLab）：任何指令中途因 API 錯誤（例如 HTTP 500）FAIL、而且這次執行還沒寫出 result 時，會寫 `{"cmd": …, "result": "error", "error": …}`（和 token 檢查失敗一樣，job 的 artifact 才看得到為什麼停）；已經寫出完整 result 的不會被蓋掉。GitHub 後端行為不變。
 - 登錄留言標頭以外只能有 `- 案件 #… key=… kind=…` 行；其他任何非空白行都列成問題（打錯不能靜默漏登錄）。
 - 殘留風險（自動補登錄）：`countdown` 會替「有 `art14` 標籤、作者可信、內文標記正確但還沒登錄」的案件補登錄。Reporter 可以改別人（Developer）建的 Issue 內文、加上合法標記與標籤，讓它被補登錄成永遠追蹤的假案件（只增不減），它的 key 也可能擋掉之後同 key 的 `open-real`。這是「吵」（多一個要人處理的案件），不是「靜默」；目前沒有簡單的完整解法，發現時由 Maintainer 處理。
 - 殘留風險（登錄壞掉時）：登錄 Issue 讀不到（被刪、不是 confidential、變數錯）時，`open-real` 也開不出新案件（fail-closed）——要先人工修好登錄。

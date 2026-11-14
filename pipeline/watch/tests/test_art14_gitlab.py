@@ -74,8 +74,10 @@ class FakeGitLab(issues.GitLabApi):
             return 404, {}, b'{"message":"404 Project Not Found"}'
         tail = u.path[len(pre):].split("/")
         if tail == ["issues"] and method == "GET":
-            lab, st = q["labels"][0], q.get("state", ["all"])[0]
-            rows = [i for i in self.issues.values() if lab in i["labels"] and (st == "all" or i["state"] == st)]
+            lab, st, srch = q.get("labels", [None])[0], q.get("state", ["all"])[0], q.get("search", [None])[0]
+            # search：官方 List project issues 的 search 參數（比對標題與內文）；這裡用不分大小寫的子字串；labels 沒給就不依標籤篩
+            rows = [i for i in self.issues.values() if (lab is None or lab in i["labels"]) and (st == "all" or i["state"] == st)
+                    and (srch is None or srch.lower() in ((i["title"] or "") + "\n" + (i["description"] or "")).lower())]
             return 200, {"x-next-page": ""}, json.dumps(rows).encode()
         if tail == ["labels"] and method == "GET":
             return 200, {"x-next-page": ""}, json.dumps([{"name": n} for n in self.labels]).encode()
@@ -87,7 +89,7 @@ class FakeGitLab(issues.GitLabApi):
             names = data["labels"].split(",") if data["labels"] else []
             for l in names:
                 assert l in self.labels, "標籤沒先建立"
-            num = self.add_issue(data["description"], names, title=data["title"], author=BOT, confidential=data.get("confidential", False))
+            num = self.add_issue(data["description"], names, title=data["title"], author=self.me, confidential=data.get("confidential", False))
             return 201, {}, json.dumps(self.issues[num]).encode()
         if len(tail) == 2 and tail[0] == "issues" and method == "GET":
             if int(tail[1]) not in self.issues:
@@ -112,7 +114,7 @@ class FakeGitLab(issues.GitLabApi):
             n = int(tail[1])
             if method == "GET":
                 return 200, {"x-next-page": ""}, json.dumps(self.notes.get(n, [])).encode()
-            self.add_note(n, data["body"], author=BOT)
+            self.add_note(n, data["body"], author=self.me)
             return 201, {}, b"{}"
         if len(tail) == 4 and tail[0] == "issues" and tail[2] == "notes" and method == "PUT":
             for c in self.notes.get(int(tail[1]), []):
@@ -175,6 +177,14 @@ class Base(unittest.TestCase):
     def countdown(self, drill, now=NOW_S, res=None):
         argv = ["countdown", "--now", now] + (["--drill"] if drill else []) + (["--result", res] if res else []) + GITLAB_ARGS + ([] if drill else ["--registry-issue", str(REG)])
         return run(argv, self.gl)
+
+    def real_case(self, body, labels=("art14",), register=True, **kw):
+        """真實案件 Issue；預設同時由可信成員（HUMAN）貼登錄留言（t10c：沒登錄的案件 countdown 會補登錄並 FAIL，所以一般測試都先登錄）。"""
+        n = self.gl.add_issue(body, list(labels), **kw)
+        mk = art14.parse_marker(body)
+        if register and mk:
+            self.gl.add_note(REG, f"{art14.REGISTRY_HEAD}\n- 案件 #{n} key={mk[0]} kind={mk[1]}\n", author=HUMAN)
+        return n
 
     def writes_since(self, k):
         return self.gl.writes[k:]
@@ -424,7 +434,7 @@ class TestLeakAndTrust(Base):
         self.assertEqual(paths.count("/api/v4/projects/7/members/all/99"), 2)    # token 自己：每輪開始前檢查權限一次（同一輪的留言者檢查共用快取）
 
     def test_system_notes_ignored(self):
-        n = self.gl.add_issue(self.real_body(), ["art14"])
+        n = self.real_case(self.real_body(), ["art14"])
         self.gl.add_note(n, art14.COMMENT_MARK + "\n偽造的系統留言\n", author=HUMAN, system=True)
         rc, out = self.countdown(False, res=self.result())
         self.assertEqual(rc, 0, out)
@@ -433,7 +443,7 @@ class TestLeakAndTrust(Base):
         self.assertEqual(len(self.gl.notes[n]), 2)
 
     def test_forged_countdown_marker_by_untrusted_ignored(self):
-        n = self.gl.add_issue(self.real_body(), ["art14"])
+        n = self.real_case(self.real_body(), ["art14"])
         self.gl.add_note(n, art14.COMMENT_MARK + "\n假的\n", author=11)       # Reporter
         self.gl.add_note(n, art14.COMMENT_MARK + "\n假的二\n", author=78)    # 不是成員
         rc, out = self.countdown(False, res=self.result())
@@ -485,7 +495,7 @@ class TestRecordsAndHardening(Base):
         self.assertTrue(any("不算數" in p for p in r["problems"]))
 
     def test_trusted_records_drive_countdown_latest_wins_and_blank_clears(self):
-        n = self.gl.add_issue(self.real_body(), ["art14"])
+        n = self.real_case(self.real_body(), ["art14"])
         self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：2026-11-12T00:00:00Z"), author=HUMAN)
         self.gl.add_note(n, self.rec(f"- {art14.F_AWARE}：2026-11-13T00:00:00Z", "說明行不解析",
                                      f"- 階段 1 {art14.F_SUBMIT_NO}：SRP-1", f"- 階段 1 {art14.F_SUBMIT_AT}：2026-11-13T05:00:00Z"), author=13)
@@ -579,8 +589,12 @@ class TestRegistry(TestRecordsAndHardening):
         return f"{art14.REGISTRY_HEAD}\n- 案件 #{n} key={key} kind={kind}\n"
 
     def case(self, **kw):
-        n = self.gl.add_issue(self.real_body(), ["art14"], **kw)
-        return n
+        """已登錄的真實案件（登錄留言由 HUMAN 貼）。"""
+        return self.real_case(self.real_body(), ["art14"], **kw)
+
+    def unreg_case(self, **kw):
+        """沒登錄的真實案件（例如 open-real 寫登錄失敗、或人工建的）。"""
+        return self.real_case(self.real_body(), ["art14"], register=False, **kw)
 
     def registered(self):
         rc, out = self.countdown(False, res=self.result("reg.json"))
@@ -598,12 +612,19 @@ class TestRegistry(TestRecordsAndHardening):
         self.assertEqual(r["registry"]["cases"][0]["number"], 1)
         self.assertEqual(r["registry"]["issue"], REG)
 
-    def test_countdown_auto_registers_labelled_case_once(self):
-        n = self.case()
-        r = self.registered()
+    def test_countdown_auto_registers_labelled_case_once_but_fails_that_run(self):
+        # t10c：補登錄成功也 FAIL（請人確認為什麼上次沒登錄成功）；補登錄後下一輪就 OK、不重複登錄
+        n = self.unreg_case()
+        rc, out = self.countdown(False, res=self.result("reg.json"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"補登錄了 #{n}，上次沒有登錄成功", out)
+        r = self.load(self.result("reg.json"))
         self.assertEqual([c["number"] for c in r["registry"]["cases"]], [n])
+        self.assertEqual(r["registry"]["unregistered"], [{"number": n, "via": "label", "registered": True}])
+        self.assertEqual([x["number"] for x in r["issues"]], [n])        # 倒數照樣更新
         self.assertEqual(len(self.gl.notes[REG]), 1)
-        self.registered()
+        r = self.registered()
+        self.assertEqual(r["registry"]["unregistered"], [])
         self.assertEqual(len(self.gl.notes[REG]), 1)        # 不重複登錄
 
     def test_registry_not_configured_fails_but_labelled_cases_still_counted(self):
@@ -766,14 +787,44 @@ class TestRegistry(TestRecordsAndHardening):
         self.assertEqual(rc, 1, out)
         self.assertIn("沒有 art14 標籤", out)
 
-    def test_registered_author_untrusted_fails(self):
-        n = self.case()
+    def test_registered_case_author_untrusted_is_still_counted(self):
+        # t10c：已登錄案件的信任來自登錄（可信成員的登錄留言），不要求 Issue 作者現在還是可信成員（舊 bot 被刪、人員離職都一樣）
+        for uid in (11, 12, 14, 77):                                 # Reporter、Guest、blocked、不是成員
+            with self.subTest(uid):
+                self.setUp()
+                n = self.case(author=uid)
+                rc, out = self.countdown(False, res=self.result())
+                self.assertEqual(rc, 0, out)
+                r = self.load(self.result())
+                self.assertEqual([x["number"] for x in r["issues"]], [n])
+                self.assertEqual(r["skipped"], [])
+                self.assertEqual(self.gl.notes[n][0]["body"].splitlines()[0], art14.COMMENT_MARK)
+
+    def test_registered_untrusted_author_still_checked_for_label_confidential_marker_and_404(self):
+        n = self.case(author=77)
         self.registered()
-        self.gl.issues[n]["author"] = {"id": 11, "username": "u11", "state": "active"}
         self.gl.issues[n]["labels"] = []
         rc, out = self.countdown(False)
+        self.assertEqual((rc, "沒有 art14 標籤" in out, "作者不是專案成員" in out), (1, True, False))
+        self.gl.issues[n]["confidential"] = False
+        rc, out = self.countdown(False, res=self.result())
+        self.assertEqual((rc, self.load(self.result())["leaks"]), (1, [n]))
+        self.gl.issues[n].update(confidential=True, labels=["art14"], description="被改掉\n")
+        rc, out = self.countdown(False)
+        self.assertEqual((rc, "標記" in out), (1, True))
+        del self.gl.issues[n]
+        rc, out = self.countdown(False)
+        self.assertEqual((rc, "不見了" in out), (1, True))
+
+    def test_unregistered_untrusted_author_still_fails_and_points_to_repost(self):
+        # 沒登錄（也沒有可信的登錄）、作者又不可信：不倒數、FAIL，訊息說明怎麼救
+        n = self.unreg_case(author=77)
+        rc, out = self.countdown(False, res=self.result())
         self.assertEqual(rc, 1, out)
-        self.assertIn("作者不是專案成員", out)
+        self.assertIn(f"#{n}", out)
+        self.assertIn("登錄", out)
+        self.assertIn("新的 bot", out)
+        self.assertEqual(self.load(self.result())["count"], 0)
 
     def test_open_real_does_not_reopen_when_label_removed(self):
         self.assertEqual(self.open_case(True)[0], 0)
@@ -937,6 +988,319 @@ class TestRegistry(TestRecordsAndHardening):
                 r = self.load(rp)
                 self.assertEqual(r["result"], "token-check-failed")
                 self.assertIn("Developer", r["error"])
+
+
+class TestT10c(Base):
+    """#93 驗證的修正：bot／token 輪換、不可信登錄被取代、疑似標頭、list／get 出錯也寫 result、登錄失敗與沒登錄的案件。
+    （不繼承 TestRegistry，免得每個測試跑兩次。）"""
+    BOT_B = 98
+
+    def real_body(self):
+        _, _, body, _ = art14.render_issue(art14.apply_project(art14.load_match(FIXTURE), None), drill=False, gitlab=True)
+        return body
+
+    def rec(self, *lines):
+        return art14.RECORD_HEAD + "\n" + "\n".join(lines)
+
+    def reg_text(self, n, key=None, kind="vulnerability"):
+        key = key or art14.parse_marker(self.real_body())[0]
+        return f"{art14.REGISTRY_HEAD}\n- 案件 #{n} key={key} kind={kind}\n"
+
+    def setUp(self):
+        super().setUp()
+        self.gl.members[self.BOT_B] = (40, "active")
+
+    def unreg_case(self, **kw):
+        return self.real_case(self.real_body(), register=False, **kw)
+
+    def cd(self, now=NOW_S, res="r.json"):
+        rc, out = self.countdown(False, now=now, res=self.result(res))
+        return rc, out, self.load(self.result(res))
+
+    def fail_when(self, pred, status=500):
+        orig = self.gl._raw
+
+        def raw(method, url, headers, body):
+            if pred(method, url):
+                return status, {}, b'{"message":"boom"}'
+            return orig(method, url, headers, body)
+        self.gl._raw = raw
+
+    # --- bot／token 輪換 ---
+    def test_new_bot_user_end_to_end_repost_registry_recovers(self):
+        rc, out = self.open_case(True)                                   # bot A（BOT）開案並登錄
+        self.assertEqual(rc, 0, out)
+        self.gl.add_note(1, self.rec(f"- {art14.F_AWARE}：2026-11-13T00:00:00Z"), author=HUMAN)      # 負責人的知悉時間
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["count"], r["issues"][0]["clock"], r["issues"][0]["comment"]), (0, 1, "started", "created"))
+        a_note, a_registry = self.gl.notes[1][-1]["id"], self.gl.notes[REG][0]["id"]
+        # 換成新的 project access token ＝ 新的 bot 使用者 B；舊 bot A 不再是成員
+        del self.gl.members[BOT]
+        self.gl.me = self.BOT_B
+        k = len(self.gl.writes)
+        rc, out, r = self.cd(now="2026-11-13T07:00:00Z", res="b1.json")
+        self.assertEqual(rc, 1, out)                                     # 不靜默：FAIL，而且說明怎麼救
+        self.assertIn("重貼", out)
+        self.assertIn("新的 bot", out)
+        self.assertIn(f"#1", out)
+        self.assertEqual(r["count"], 0)
+        self.assertEqual(self.writes_since(k), [])                       # 沒有亂寫
+        self.assertTrue(any("作者不是 Developer" in p for p in r["registry"]["problems"]))
+        # B 用新身分重貼登錄（內容取自舊登錄）→ 倒數恢復，人工紀錄（知悉時間）照常算
+        self.gl.add_note(REG, self.gl.notes[REG][0]["body"], author=self.BOT_B)
+        rc, out, r = self.cd(now="2026-11-13T07:00:00Z", res="b2.json")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(r["count"], 1)
+        i = r["issues"][0]
+        self.assertEqual((i["clock"], i["stages"]["24h"]["due"], i["stages"]["24h"]["state"]), ("started", "2026-11-14T00:00:00Z", "pending"))
+        self.assertEqual(r["registry"]["problems"], [])                  # 舊 bot 的登錄被取代，不是問題
+        self.assertEqual(r["registry"]["superseded_notes"], [a_registry])
+        self.assertEqual(i["comment"], "created")                        # 舊 bot 的倒數留言不算（不可信）→ 新 bot 建一則新的
+        self.assertEqual(self.gl.notes[1][[n["id"] for n in self.gl.notes[1]].index(a_note)]["body"].splitlines()[0], art14.COMMENT_MARK)
+        # 之後穩定：同一則被編輯／不變，不再 FAIL
+        rc, out, r = self.cd(now="2026-11-13T07:00:00Z", res="b3.json")
+        self.assertEqual((rc, r["issues"][0]["comment"]), (0, "unchanged"))
+        rc, out, r = self.cd(now="2026-11-13T08:00:00Z", res="b4.json")
+        self.assertEqual((rc, r["issues"][0]["comment"]), (0, "updated"))
+        self.assertEqual(len([n for n in self.gl.notes[1] if n["body"].startswith(art14.COMMENT_MARK) and n["author"]["id"] == self.BOT_B]), 1)
+
+    def test_delete_old_registry_and_repost_as_new_bot_also_recovers(self):
+        # 審查者重現的情況：換 bot、刪掉舊登錄 → 以前永遠 FAIL（count=0）。現在：沒有可信登錄時 FAIL 並說明；新身分登錄後恢復
+        self.open_case(True)
+        body = self.gl.notes[REG][0]["body"]
+        del self.gl.members[BOT]
+        self.gl.me = self.BOT_B
+        self.gl.notes[REG] = []
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["count"]), (1, 0))
+        self.assertIn("登錄", out)
+        self.gl.add_note(REG, body, author=self.BOT_B)
+        rc, out, r = self.cd(res="r2.json")
+        self.assertEqual((rc, r["count"]), (0, 1))
+
+    def test_same_bot_token_rotation_needs_nothing(self):
+        # 輪換 token 保留同一個 bot 使用者（官方 project access tokens 頁）：什麼都不用做
+        self.open_case(True)
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["issues"][0]["comment"]), (0, "created"))
+        self.gl.token = "glpat-ROTATEDTOKEN0123456789"
+        k = len(self.gl.writes)
+        rc, out, r = self.cd(res="r2.json")
+        self.assertEqual((rc, r["count"], r["issues"][0]["comment"], r["registry"]["problems"], r["registry"]["superseded_notes"]),
+                         (0, 1, "unchanged", [], []))
+        self.assertEqual(self.writes_since(k), [])
+
+    # --- 不可信的登錄留言：被可信登錄完整涵蓋才算取代 ---
+    def test_untrusted_registry_note_superseded_only_when_fully_covered(self):
+        n = self.real_case(self.real_body())                             # 可信（HUMAN）的登錄涵蓋 #n
+        key = art14.parse_marker(self.real_body())[0]
+        other = "d" * 64
+        cases = {
+            "covered": (self.reg_text(n), 0),
+            "covered twice": (self.reg_text(n) + f"- 案件 #{n} key={key} kind=vulnerability\n", 0),
+            "adds a case": (self.reg_text(555), 1),
+            "contradicts key": (self.reg_text(n, key=other), 1),
+            "contradicts kind": (self.reg_text(n, kind="incident"), 1),
+            "partly covered": (self.reg_text(n) + f"- 案件 #556 key={key} kind=vulnerability\n", 1),
+            "covered plus junk line": (self.reg_text(n) + "隨便一行\n", 1),
+            "no entries": (art14.REGISTRY_HEAD + "\n", 1),
+        }
+        for name, (text, want_rc) in cases.items():
+            with self.subTest(name):
+                self.gl.notes[REG] = [x for x in self.gl.notes[REG] if x["author"]["id"] == HUMAN]
+                self.gl.add_note(REG, text, author=11)                   # Reporter（或舊 bot）寫的
+                rc, out, r = self.cd(res=name.replace(" ", "_") + ".json")
+                self.assertEqual(rc, want_rc, out)
+                self.assertEqual(r["count"], 1)                          # 無論如何案件照常倒數
+                if want_rc:
+                    self.assertTrue(any("作者不是 Developer" in p for p in r["registry"]["problems"]))
+                else:
+                    self.assertEqual((r["registry"]["problems"], len(r["registry"]["superseded_notes"])), ([], 1))
+
+    # --- 疑似標頭 ---
+    RECORD_NEAR = ["art14紀錄", "art14 紀錄：", "art14 紀錄:", "art14 記錄", "[art14 紀錄]", "【art14 紀錄】", "ＡＲＴ１４　紀錄：", "ＡＲＴ１４記錄",
+                   "Art14 紀錄 ", "> art14 記錄", "**art14 紀錄**", "（art14 紀錄）"]
+    REGISTRY_NEAR = ["art14登錄", "art14 登錄：", "art14 登記", "art14登記", "【art14 登記】", "[art14 登錄]", "ＡＲＴ１４　登錄：", "ＡＲＴ１４登記", "`art14 登記`"]
+
+    def test_head_kind_near_variants_and_non_near(self):
+        for h in self.RECORD_NEAR:
+            self.assertEqual(art14.head_kind({"body": h + "\n- x"}, art14.RECORD_HEAD), "near", h)
+            self.assertIsNone(art14.head_kind({"body": h + "\n- x"}, art14.REGISTRY_HEAD), h)
+        for h in self.REGISTRY_NEAR:
+            self.assertEqual(art14.head_kind({"body": h + "\n- x"}, art14.REGISTRY_HEAD), "near", h)
+            self.assertIsNone(art14.head_kind({"body": h + "\n- x"}, art14.RECORD_HEAD), h)
+        self.assertEqual(art14.head_kind({"body": art14.RECORD_HEAD + "\n- x"}, art14.RECORD_HEAD), "exact")
+        for h in ("art14 紀錄表", "art14 登記表", "art14", "art15 紀錄", "紀錄 art14", "art14 紀錄知悉時間"):
+            self.assertIsNone(art14.head_kind({"body": h}, art14.RECORD_HEAD), h)
+            self.assertIsNone(art14.head_kind({"body": h}, art14.REGISTRY_HEAD), h)
+        self.assertIsNone(art14.head_kind({"body": "【art14 紀錄】", "system": True}, art14.RECORD_HEAD))
+
+    def test_near_record_headers_fail_real_case_and_are_reported(self):
+        for h in self.RECORD_NEAR:
+            with self.subTest(h):
+                self.setUp()
+                n = self.real_case(self.real_body())
+                self.gl.add_note(n, f"{h}\n- {art14.F_AWARE}：2026-11-13T00:00:00Z", author=HUMAN)
+                rc, out, r = self.cd()
+                self.assertEqual(rc, 1, out)
+                i = r["issues"][0]
+                self.assertEqual(i["clock"], "not_started")              # 沒有被解析
+                self.assertTrue(any("疑似" in p and "沒有解析" in p for p in i["problems"]), i["problems"])
+                self.assertIn("疑似", self.gl.notes[n][-1]["body"])
+
+    def test_near_record_header_by_untrusted_is_ignored_and_in_drill_does_not_fail(self):
+        n = self.real_case(self.real_body())
+        self.gl.add_note(n, f"【art14 紀錄】\n- {art14.F_AWARE}：2026-11-13T00:00:00Z", author=11)
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["issues"][0]["problems"]), (0, []))
+        d = self.gl.add_issue(self.real_body().replace("mode=real", "mode=drill"), ["art14-drill"])
+        self.gl.add_note(d, "art14紀錄\n- x", author=HUMAN)
+        rc, out = self.countdown(True, res=self.result("d.json"))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any("疑似" in p for p in self.load(self.result("d.json"))["issues"][0]["problems"]))
+
+    def test_near_registry_headers_fail_real_countdown(self):
+        for h in self.REGISTRY_NEAR:
+            with self.subTest(h):
+                self.setUp()
+                n = self.real_case(self.real_body())
+                self.gl.add_note(REG, self.reg_text(777).replace(art14.REGISTRY_HEAD, h, 1), author=HUMAN)
+                rc, out, r = self.cd()
+                self.assertEqual(rc, 1, out)
+                self.assertTrue(any("疑似登錄" in p for p in r["registry"]["problems"]), r["registry"]["problems"])
+                self.assertEqual(r["count"], 1)
+                self.assertNotIn(777, [c["number"] for c in r["registry"]["cases"]])    # 疑似的登錄不生效
+
+    def test_near_registry_header_by_untrusted_is_ignored(self):
+        self.real_case(self.real_body())
+        self.gl.add_note(REG, self.reg_text(777).replace(art14.REGISTRY_HEAD, "【art14 登記】", 1), author=11)
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["registry"]["problems"]), (0, []))
+
+    # --- list／get 出錯也寫 result.json ---
+    def test_http_error_on_list_or_get_still_writes_error_result(self):
+        self.open_case(False)
+        self.open_case(True)
+        cases = [
+            ("countdown-real-list", lambda m, u: m == "GET" and "/issues?" in u and "labels=art14&" in u + "&", "countdown", ["--now", NOW_S, "--registry-issue", str(REG)]),
+            ("countdown-drill-list", lambda m, u: m == "GET" and "labels=art14-drill" in u, "countdown", ["--now", NOW_S, "--drill"]),
+            ("close-drill-list", lambda m, u: m == "GET" and "labels=art14-drill" in u, "close-drill", []),
+            ("fill-drill-aware-list", lambda m, u: m == "GET" and "labels=art14-drill" in u, "fill-drill-aware", ["--at", NOW_S]),
+            ("open-real-list", lambda m, u: m == "GET" and "labels=art14&" in u + "&", "open-real", ["--match", FIXTURE, "--registry-issue", str(REG)]),
+        ]
+        for name, pred, cmd, extra in cases:
+            with self.subTest(name):
+                gl = self.gl
+                orig = gl._raw
+                self.fail_when(pred)
+                rp = self.result(name + ".json")
+                rc, out = run([cmd, "--result", rp] + extra + GITLAB_ARGS, gl)
+                gl._raw = orig
+                self.assertEqual(rc, 1, out)
+                r = self.load(rp)
+                self.assertEqual((r["cmd"], r["result"], r["schema"]), (cmd, "error", art14.RESULT_SCHEMA))
+                self.assertIn("500", r["error"])
+
+    def test_registry_read_error_writes_normal_result_and_still_counts_cases(self):
+        # 登錄讀不到（500）是 countdown 自己收成 errors 的，result 是正常版（其他案件照常倒數），不是 error 版
+        self.real_case(self.real_body())
+        for name, pred in (("get", lambda m, u: m == "GET" and u.endswith(f"/issues/{REG}")),
+                           ("notes", lambda m, u: m == "GET" and f"/issues/{REG}/notes" in u)):
+            with self.subTest(name):
+                orig = self.gl._raw
+                self.fail_when(pred)
+                rc, out, r = self.cd(res=name + ".json")
+                self.gl._raw = orig
+                self.assertEqual((rc, r["cmd"], r["count"], r.get("result")), (1, "countdown", 1, None))
+
+    def test_error_result_does_not_overwrite_a_result_written_earlier_in_the_run(self):
+        # countdown 自己最後 FAIL（有寫完整的 result）時，不能被 error 版蓋掉
+        self.unreg_case()
+        rc, out, r = self.cd()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(r["count"], 1)
+        self.assertNotEqual(r.get("result"), "error")
+
+    # --- open-real 寫登錄失敗、沒登錄的案件 ---
+    def test_open_real_registry_write_failure_fails_then_countdown_flags_it(self):
+        orig = self.gl._raw
+        self.fail_when(lambda m, u: m == "POST" and u.endswith(f"/issues/{REG}/notes"))
+        rc, out = self.open_case(True, res=self.result("o.json"))
+        self.assertEqual(rc, 1, out)
+        r = self.load(self.result("o.json"))
+        self.assertEqual((r["result"], r["issue"]), ("opened-unregistered", 1))
+        self.assertIn("#1", out)
+        self.assertIn("沒有登錄成功", out)
+        self.assertEqual(self.gl.notes.get(REG, []), [])
+        # 登錄還是寫不進去：countdown 補登錄也失敗 → FAIL，案件仍倒數
+        rc, out, r = self.cd(res="c1.json")
+        self.assertEqual((rc, r["count"]), (1, 1))
+        self.assertIn("補登錄失敗", out)
+        self.assertEqual(r["registry"]["unregistered"], [{"number": 1, "via": "label", "registered": False}])
+        # 登錄能寫了：補登錄成功，但這一輪仍 FAIL；下一輪 OK
+        self.gl._raw = orig
+        rc, out, r = self.cd(res="c2.json")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("補登錄了 #1，上次沒有登錄成功", out)
+        self.assertEqual(len(self.gl.notes[REG]), 1)
+        rc, out, r = self.cd(res="c3.json")
+        self.assertEqual((rc, r["registry"]["unregistered"]), (0, []))
+
+    def test_unlabelled_unregistered_real_case_found_by_search_fails_without_writes(self):
+        n = self.unreg_case()
+        self.gl.issues[n]["labels"] = []                                 # 標籤被拿掉、又沒登錄
+        k = len(self.gl.writes)
+        rc, out, r = self.cd()
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"#{n}", out)
+        self.assertIn("沒登錄", out)
+        self.assertEqual(r["registry"]["unregistered"], [{"number": n, "via": "search", "registered": False}])
+        self.assertEqual(self.writes_since(k), [])                       # 不補登錄、不倒數、不寫
+        self.assertEqual(r["count"], 0)
+        # 人工補回標籤後：下一輪補登錄（FAIL 一次）、再下一輪 OK
+        self.gl.issues[n]["labels"] = ["art14"]
+        self.assertEqual(self.cd(res="r2.json")[0], 1)
+        self.assertEqual(self.cd(res="r3.json")[0], 0)
+
+    def test_search_only_lists_confidential_trusted_real_marker_not_in_registry(self):
+        self.real_case(self.real_body())                                 # 已登錄的：不算「沒登錄」
+        ok_tags = {
+            "untrusted author": self.gl.add_issue(self.real_body(), [], author=11),
+            "non member": self.gl.add_issue(self.real_body(), [], author=77),
+            "drill marker": self.gl.add_issue(self.real_body().replace("mode=real", "mode=drill"), []),
+            "no marker": self.gl.add_issue("dumpling-art14 只是提到而已\n", []),
+            "marker not first line": self.gl.add_issue("說明\n" + self.real_body(), []),
+        }
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["registry"]["unregistered"]), (0, []), (out, ok_tags))
+        # 沒登錄、沒標籤、又不是 confidential：不列在「沒登錄」，而是當外洩疑慮（leaks）FAIL、不寫入
+        pub = self.gl.add_issue(self.real_body(), [], confidential=False)
+        k = len(self.gl.writes)
+        rc, out, r = self.cd(res="pub.json")
+        self.assertEqual((rc, r["registry"]["unregistered"], r["leaks"]), (1, [], [pub]))
+        self.assertFalse(any(f"/issues/{pub}" in pth for _, pth, _ in self.writes_since(k)))
+
+    def test_search_failure_fails_but_cases_still_counted(self):
+        self.real_case(self.real_body())
+        self.fail_when(lambda m, u: m == "GET" and "search=" in u)
+        rc, out, r = self.cd()
+        self.assertEqual((rc, r["count"]), (1, 1))
+        self.assertIn("搜尋沒登錄的真實案件失敗", out)
+
+    def test_search_issues_sends_search_param_only_for_real_countdown(self):
+        urls = []
+        orig = self.gl._raw
+
+        def raw(method, url, headers, body):
+            urls.append(url)
+            return orig(method, url, headers, body)
+        self.gl._raw = raw
+        self.real_case(self.real_body())
+        self.cd()
+        self.assertEqual(len([u for u in urls if "search=dumpling-art14" in u]), 1)
+        urls.clear()
+        self.countdown(True)
+        self.assertEqual([u for u in urls if "search=" in u], [])
 
 
 class TestHelp(unittest.TestCase):
