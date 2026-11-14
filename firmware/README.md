@@ -70,7 +70,9 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `up-to-date` | 資料表沒有更新的 revision；**不代表沒有漏洞**，以 Intel 公告為準 |
 | `NOT_ASSESSED` | 資料庫沒有資料，以廠商公告為準（資料表讀不到或 sha256 不符＝GAP、CPUID／platform 不在表、revision 讀不到或比表新、已被移除、同 F-M-S 另有重疊的 platform 遮罩在之後還有更新＝`superseded-platform-mask`…） |
 
-AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：AMD-SB 的規則表還沒有做，以 AMD 公告為準。
+AMD 的微碼、PSP 韌體、AGESA 元件（`amd_psp.py` 解析）與 Intel ME 一樣有 `dumpling:advisory-match=NOT_ASSESSED`：沒有機器可讀的公告資料表，以廠商公告為準。
+
+另有廠商公告**規則表**（`tools/cra/data/fw-advisory-rules.json`，一個公告一筆：AMD-SB、INTEL-SA、AMI-SA，條件是元件加版本範圍，附官方公告網址、讀取日期與審核狀態；說明見 `docs/notes/c2-firmware-advisory.md` 的「規則表」）：AGESA、CSME、FSP、PSP、AMD 微碼、BIOS 版本的元件依版本比對，結果寫在 `dumpling:advisory-rule-suggestion`（`affected`／`not-affected`／`NOT_ASSESSED`），**只是建議**，`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`。規則還是初審時寫「依初審規則的建議（待負責單位確認）」，是否受影響以廠商公告為準；任何元件的建議是 `affected`，整份韌體報告就是 ATTENTION；`not-affected` 只表示版本不低於公告列的修正版本（依據 `dumpling:evidence=vendor-statement` 加公告網址），不會讓狀態變好。AMI-SA 的條件一律 NOT_ASSESSED（SBOM 沒有 AMI 核心版本），報告只列「可能相關的 AMI 公告」。
 
 NVIDIA vBIOS 元件另有 `dumpling:advisory-match`（`affected`／`fixed`／`NOT_ASSESSED`）：用 vBIOS 版本與 option ROM 的 PCI vendor／device ID 查 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（repo 內的 NVIDIA product-security gpu-firmware 公告；離線，CI 不連網）。目前表裡沒有可比對的列，而且尚未經負責人確認（唯一的公告 5674 是 HGX／DGX 伺服器韌體，初審意見是無法對應到顯卡 option ROM），所以每個 vBIOS 都是 `NOT_ASSESSED`：資料庫沒有資料，以廠商公告為準（NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告，主要管道是合作夥伴通知）；版本是佔位字串、裝置 ID 讀不到也是 `NOT_ASSESSED`。`affected`、`fixed` 只是對照表裡已審核的列的比對結果，`fixed` 不代表沒有其他漏洞。
 

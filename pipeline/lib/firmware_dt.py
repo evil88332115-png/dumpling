@@ -305,6 +305,8 @@ def classify_vs(values):
 
 AM_KEY = "dumpling:advisory-match"
 AM_VALUES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED", "affected", "fixed")     # x86_firmware.py 會寫的值（微碼；後兩個是 NVIDIA vBIOS）
+RS_KEY = "dumpling:advisory-rule-suggestion"
+RS_VALUES = ("affected", "not-affected", "NOT_ASSESSED")     # 廠商公告規則表的建議（fw_advisory_rules.py）
 
 
 def classify_am(values):
@@ -315,6 +317,15 @@ def classify_am(values):
     if len(set(values)) != 1:
         return "(多個值)"
     return values[0] if values[0] in AM_VALUES else "(不認得的值)"
+
+
+def classify_rs(values):
+    """dumpling:advisory-rule-suggestion 的值 → None（沒標）｜RS_VALUES 之一｜(多個值)｜(不認得的值)。只用來計數顯示，不影響 OK／ATTENTION。"""
+    if not values:
+        return None
+    if len(set(values)) != 1:
+        return "(多個值)"
+    return values[0] if values[0] in RS_VALUES else "(不認得的值)"
 
 
 def _nonblank(v):
@@ -343,7 +354,7 @@ def summarize(comps, trust_markers=True):
     check_component_types(comps)
     s = {"components": 0, "with_purl": 0, "bad_purl": 0, "with_cpe": 0, "distinct_identities": 0,
          "vuln_assessment": {}, "version_status": {}, "version_gap": 0, "version_status_other": 0,
-         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "advisory_match": {}, "trust_markers": bool(trust_markers), "supplier_markers": 0}
+         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "advisory_match": {}, "rule_suggestion": {}, "trust_markers": bool(trust_markers), "supplier_markers": 0}
     ids, types = set(), set()
     for c in comps:
         s["components"] += 1
@@ -360,11 +371,14 @@ def summarize(comps, trust_markers=True):
         if _nonblank(c.get("cpe")):
             s["with_cpe"] += 1
         ids.add(identity(c))
-        va, vs, am = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY), _prop_values(c, AM_KEY)
+        va, vs, am, rs = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY), _prop_values(c, AM_KEY), _prop_values(c, RS_KEY)
         if not trust_markers:
-            if va or vs or am:
+            if va or vs or am or rs:
                 s["supplier_markers"] += 1
-            va, vs, am = [], [], []
+            va, vs, am, rs = [], [], [], []
+        rl = classify_rs(rs)
+        if rl is not None:
+            s["rule_suggestion"][rl] = s["rule_suggestion"].get(rl, 0) + 1
         al = classify_am(am)
         if al is not None:
             s["advisory_match"][al] = s["advisory_match"].get(al, 0) + 1
@@ -1118,10 +1132,15 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
     md += ["", "## 怎麼讀", "",
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
-           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。"
+           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件的 `advisory-match` 也是 NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準（它們的規則表建議見下一點的 `advisory-rule-suggestion`）。"
            "NVIDIA vBIOS 元件另有 `advisory-match`：用 vBIOS 版本與 option ROM 的 PCI 裝置 ID 查 repo 內的 NVIDIA 公告對照表（尚未經負責人確認時一律 NOT_ASSESSED）（affected／fixed／NOT_ASSESSED）；"
            "NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是合作夥伴通知），所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；版本是佔位字串或裝置 ID 讀不到也是 NOT_ASSESSED。"
            "affected、fixed 只是對照表裡已審核的列的比對結果，fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞。",
+           "- **廠商公告規則表的建議（`dumpling:advisory-rule-suggestion`）**：AMD 的 AGESA、Intel 的 CSME、AMI 公告等，由人從廠商官方公告頁整理成規則（一個公告一筆，tools/cra/data/fw-advisory-rules.json），"
+           "SBOM 的元件依版本比對，結果只是建議（affected／not-affected／NOT_ASSESSED），`dumpling:vuln-assessment` 仍是 NOT_ASSESSED。"
+           "規則還是初審時是「依初審規則的建議（待負責單位確認）」，確認後才是「依已確認規則的建議」（`dumpling:advisory-rule-state`）；兩種都是「是否受影響以廠商公告為準」。"
+           "**只要有任何元件的建議是 affected，即使規則還是初審，整份韌體報告（x86_firmware 的狀態）就是 ATTENTION、列進待人審**；not-affected 只表示版本不低於公告列的修正版本（依據類型 `dumpling:evidence=vendor-statement`，附公告網址），"
+           "不會讓狀態變好；沒有適用規則、版本讀不懂、順序不確定、規則表不能用都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；規則表有最後整理日期，之後的新公告沒有收錄。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
@@ -1139,6 +1158,9 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         if s.get("advisory_match"):
             md.append("- 公告比對（dumpling:advisory-match）：%s；候選不是確定受影響，沒有任何一項代表沒有漏洞" % "、".join(
                 "%s=%d" % (k if k in AM_VALUES else _cell(k, 40), v) for k, v in sorted(s["advisory_match"].items()) if _is_count(v)))      # 固定值原樣（不加反斜線），其餘經 _cell
+        if s.get("rule_suggestion"):
+            md.append("- 規則表建議（dumpling:advisory-rule-suggestion）：%s；是依規則表的建議（初審規則待負責單位確認），affected 要待人審，沒有任何一項代表沒有漏洞，是否受影響以廠商公告為準" % "、".join(
+                "%s=%d" % (k if k in RS_VALUES else _cell(k, 40), v) for k, v in sorted(s["rule_suggestion"].items()) if _is_count(v)))
         if res.get("nvidia"):
             md.append("- " + res["nvidia"])   # 文字取自 C1 的 nvidia_bulletins.py，已經過 _cell
         for n in res["notes"]:

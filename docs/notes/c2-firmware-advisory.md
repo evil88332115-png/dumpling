@@ -13,6 +13,7 @@
 | `tools/cra/x86_firmware.py` | 呼叫比對、SBOM property（`dumpling:advisory-*`）、`fw-inventory.md` 的「公告比對」一節、資料表不能用時 ATTENTION；ME 的 CPE 與 `dumpling:cpe-*` |
 | `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表有一欄「公告比對」（微碼，有 NVIDIA vBIOS 時加一段；文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
 | `tools/cra/tests/test_fw_advisory.py`、`test_x86_firmware_sbom.py`、`tests/test_firmware_dt.py` | 測試（合成資料，不連網） |
+| `tools/cra/fw_advisory_rules.py`、`tools/cra/data/fw-advisory-rules.json`、`tools/cra/tests/test_fw_advisory_rules.py` | 廠商公告規則表（AMD-SB、INTEL-SA、AMI-SA）的比對、規則與測試；見最後的「規則表」一節 |
 | `tools/cra/nvidia_vbios_advisory.py`、`tools/cra/tests/test_nvidia_vbios_advisory.py`、`tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | NVIDIA vBIOS 的離線比對、測試、公告對照表（是否已經負責人確認見最後一節） |
 
 ## 資料來源（固定）
@@ -161,7 +162,7 @@ SBOM 的 revision 不低於基準時不加 20250812 的公告。
 
 ME：Protectli 是 `14.0.47.1558`，family 讀不出來、major 14 在 11～30 → 由版本推定 CSME（待人審），CPE `cpe:2.3:o:intel:converged_security_management_engine_firmware:14.0.47:*:*:*:*:*:*:*`（basis 與 NVD 不完整的 note 都在元件上）。
 Novacustom 的 ME 是 `18.0.10.2285`（intel_cse_layout 讀到），major 18 在 11～30，同樣由版本推定 CSME，CPE `…:18.0.10:*:*:*:*:*:*:*`。NUC11 的檔案沒有 flash descriptor／`$FPT`／FTPR（ME 讀不到）→ 沒有 CPE，報告寫明原因。
-B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項、AGESA 1 個都已解析，每個元件有 `dumpling:advisory-match=NOT_ASSESSED`（AMD-SB 的規則表還沒有做，以 AMD 公告為準）。
+B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項、AGESA 1 個都已解析，每個元件有 `dumpling:advisory-match=NOT_ASSESSED`（沒有機器可讀的 AMD 公告資料表，以 AMD 公告為準；規則表的建議見最後的「規則表」一節）。
 
 人工核對（對 commit `d71fe4e2…` 的 `releasenote.md`，行號是該檔的行號）：
 - 000806EC／0x94／0xF8：`06-8e-0c/94` 在 963–966 行（20230808，`000000f6 → 000000f8`，Purpose 897–899 行：INTEL-SA-00828／00836／00837）＝0xF8 是那個 release 的 New Ver；
@@ -176,7 +177,7 @@ B550M（AMD）沒有 Intel 微碼與 ME；AMD 微碼 19 份、PSP 韌體 78 項�
 - `up-to-date`、`older-no-sa` 都不代表沒有漏洞：資料表的「最新」是 Intel Linux 套件在 `microcode-20261110` 為止的最新；BIOS 專用的微碼不在裡面。
 - 不做 CPUID 的 platform 子集推論（只在「同 F-M-S 的遮罩有交集且較新的鍵還有更新」時降成 NOT_ASSESSED 或加候選）、不猜被 revert／移除的 revision；New Disclosures 表只用保守的上界規則（見規則 6.b），不判斷它的確切語意。
 - 20250812 的散文對照由人整理，GAP 的鍵只加註。
-- 微碼只比 Intel。AMD 的微碼、PSP 韌體、AGESA 已由 `amd_psp.py` 解析，每個元件有 `advisory-match=NOT_ASSESSED`（資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。ME／TXE／SPS 的公告沒有機器可讀資料。NVIDIA vBIOS 的比對見最後一節。
+- 微碼只比 Intel。AMD 的微碼、PSP 韌體、AGESA 已由 `amd_psp.py` 解析，每個元件有 `advisory-match=NOT_ASSESSED`（資料庫沒有資料，以 AMD 公告為準；規則表的建議見「規則表」一節）。ME／TXE／SPS 的公告沒有機器可讀資料。NVIDIA vBIOS 的比對見最後一節。
 - 資料表不隨 CI 更新：它會變舊。`microcode-20261110` 之後的 release 不在裡面（比表新的 revision 會是 `revision-newer-than-table`，不會被當成 up-to-date）。
 
 ## NVIDIA vBIOS 的公告比對（決定 D-043 的 (1)）
@@ -295,3 +296,108 @@ C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
 - vBIOS 版本是 ROM 裡第一個 `XX.XX.XX.XX.XX` 字串；NVIDIA 的版本最後一段是各板卡廠自己的修訂，公告若只寫前幾段，表裡的版本也只寫前幾段。PCI device ID 取自 PCIR 標頭，板子的實際 ID 可能不同（沒有檢查）。
 - 不跟隨公告以外的資料（NVD、廠商網站）；不判斷「已修補」以外的狀態；沒有「不受影響」這個結果。
 - HGX／DGX 的 vBIOS 版本（`1.7.1` 這種）與 option ROM 版本的對應不明：如果之後 SBOM 出現那類韌體，要由負責單位提供對應再補列。
+
+## 規則表（決定 D-043 (2)；分支 wp3/fw-advisory-rules）
+
+廠商公告（INTEL-SA、AMD-SB、AMI-SA）沒有機器可讀的資料庫可以比對，所以用**半自動的規則表**：人從廠商官方公告頁讀出「哪個元件、哪個版本以前受影響、修正版本是什麼」，
+整理成一個公告一筆規則；程式依元件版本比對，**結果只是建議**，由負責單位確認。格式比照 D-039 的規則庫（`tools/cra/vex-rules.example.json`：`schema`、`rules[]`、`id`、`match`、日期、`reason`）。
+`dumpling:vuln-assessment` 維持 `NOT_ASSESSED`，沒有任何狀態或文字表示「沒有漏洞」。
+
+### 檔案
+
+| 檔案 | 內容 |
+|---|---|
+| `tools/cra/data/fw-advisory-rules.json` | 規則表（schema `dumpling-fw-advisory-rules/1`）。只放事實性欄位，不抄公告原文 |
+| `tools/cra/fw_advisory_rules.py` | 載入、schema 驗證、版本比較、建議的合併規則（離線，CI 不連網）。`python3 tools/cra/fw_advisory_rules.py sha256｜verify [檔]` 給維護用 |
+| `tools/cra/x86_firmware.py` | `rules_section`（每個元件比對一次，結果記在 inventory 各元件的 `rule_advisory`）、`rule_props`（SBOM property）、`rules_markdown`（fw-inventory.md 的「規則表比對」一節）、`status_of`（affected → ATTENTION） |
+| `pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要欄與 DT 報告的「怎麼讀」反映規則表建議 |
+| `pipeline/firmware-expect.py` | `expected.advisory_rule`：真樣本的建議（元件名稱、版本、建議、規則編號）逐項比對 |
+| `tools/cra/tests/test_fw_advisory_rules.py` | 測試（合成資料，不連網） |
+
+### 規則的欄位
+
+```
+{"schema": "dumpling-fw-advisory-rules/1", "table_updated": "2026-11-14", "orderings": [...], "rules": [ <規則>… ]}
+規則：{"id", "vendor", "title", "published", ["revised"], "cves": [...], "sources": [{"url", "read_at"}], "match": [<條件>…],
+       "review": {"state", "preliminary_by", "preliminary_at", ["confirmed_by", "confirmed_at"]}, ["note"]}
+```
+
+- `id`：用 `fullmatch` 驗證。`AMD-SB-[0-9]{4,5}`、`INTEL-SA-[0-9]{5}`、`AMI-SA-[0-9]{7}`。依據：AMD 的公告頁網址是 `…/product-security/bulletin/amd-sb-7014.html`（2026-11-14 讀到的編號都是 4 位數，位數沒有公開規定，所以允許 4～5 位）；
+  Intel 的是 `…/security-center/advisory/intel-sa-01372.html`（`INTEL-SA-` 加 5 位數，例如 00391、01372）；AMI 的 `https://www.ami.com/security-advisories/` 列 `AMI-SA-2026003`（4 位西元年加 3 位流水號，共 7 位數），每一則連到一份 PDF。
+  `vendor` 要與 `id` 的前綴一致（`AMD`、`Intel`、`AMI`）。
+- `sources[]`：`{url, read_at}`，網址只收廠商官方公告頁（AMD 與 Intel 的網址必須是 `id` 對應的那一頁；AMI 是 PDF，或公告列表頁）；`read_at` 是人讀那一頁的日期，不能晚於 `table_updated`。
+- `match[]`：條件，每個有 `component`，必須在固定清單內（`amd_agesa`、`amd_psp`、`amd_microcode`、`intel_csme`、`intel_fsp`、`ami_core`、`bios_image`），`amd_*` 只能在 AMD 公告、`intel_*` 只能在 Intel 公告、`ami_core` 只能在 AMI 公告。
+  版本條件依元件分開（見下）。同一條規則的幾個條件是「或」：不同產品線各列一條。
+- `review`：`state` 是 `preliminary`（初審）或 `confirmed`（已確認）；`preliminary_by`／`confirmed_by` 只寫**角色**（驗證會拒收 `@`、連結、Markdown 符號）；`confirmed` 必須有 `confirmed_by`、`confirmed_at`（不早於 `preliminary_at`），`preliminary` 不能有。
+- `orderings[]`：AGESA 的版本順序（見下）。
+- 每一層都**只收列出的欄位**，不認得的欄位（含打錯字）整張表拒收；JSON 重複的鍵、`NaN`、超過 1 MiB、符號連結都拒收。
+
+### 版本比較（每一種格式一個函式）
+
+| 元件 | 條件欄位 | 比較 |
+|---|---|---|
+| `amd_agesa` | `family`（映像 AGESA 字串的名稱，例如 `ComboAM4v2PI`）、`fixed_in`、可選 `affected_from` | **依規則表的順序序列**（下一節）；family 不同 → 這條規則不適用；版本不在序列 → NOT_ASSESSED（`agesa-order-unknown`）；字串不是 `<名稱> <a.b.c.d>`（例如少一個點的 `1.2.0Cb`）→ `version-unreadable` |
+| `intel_csme` | `line`（`major.minor`，例如 `18.1`）、`fixed_in`（三或四段，開頭必須是 `line`）、可選 `affected_from` | 數字逐段比（不是字串比）；`fixed_in` 三段就只比前三段（build 號不比），四段就比四段，映像版本段數不夠 → `version-too-short`；`major.minor` 不是 `line` → 這條規則不適用（版本線是整段比，`14.1` 不會比到 `14.10`）。family 是 CSME（版本清單寫明）或由版本推定（major 11～30，結果加註）才比；TXE／SPS／ME、family 矛盾、讀不出來 → NOT_ASSESSED |
+| `intel_fsp` | `line`（前兩段）、`fixed_in`（四段）、可選 `affected_from` | 同 CSME，四段；ExtendedImageRevision 不是 0 時（版本可能偏低）不比 |
+| `amd_psp` | `psp_type`（0–255）、`fixed_in`（四個小寫十六進位 byte，與 SBOM 同格式） | 逐 byte 比；type 不同 → 不適用 |
+| `amd_microcode` | `equiv_id`（`0x` ＋ 4 位）或 `cpuid`（8 位大寫十六進位）二選一、`fixed_in`（patch level，`0x` ＋ 8 位） | 無號整數；用 `cpuid` 但映像沒有等價表（CPUID 未知）→ `cpuid-unknown`，不猜 |
+| `bios_image` | `name_prefix`（映像檔名開頭）、`fixed_in`（數字或點分數字） | 用版本清單宣告的 BIOS 版本，數字逐段比；沒宣告 → `no-declared-version`，格式怪異 → `version-unreadable` |
+| `ami_core` | `product`、可選 `fixed_in`（只記錄） | **不比較**：SBOM 沒有 AMI 核心版本，一律 NOT_ASSESSED（`no-ami-core-version`） |
+
+`affected_from`（可選）：映像版本低於它 → NOT_ASSESSED（`below-affected-from`），因為公告沒有說比起點更舊的版本怎麼樣。
+
+### AGESA 的版本順序與依據
+
+AGESA 的版本不能用數字或字串順序比：AMD 公告裡 `ComboAM4v2PI` 的順序是 `1.2.0.8`、`1.2.0.9`、`1.2.0.B`、`1.2.0.C`、`1.2.0.Ca`、`1.2.0.Cb`、`1.2.0.Cc`、`1.2.0.D`、`1.2.0.F`，**之後才是 `1.2.0.10`**（字母是十六進位的 A～F，10 在 F 之後）；
+`ComboAM5PI` 的 `1.0.0.7a` 比 `1.0.7.0` 晚發佈（2023-05-05 對 2023-04-18）。所以順序**只用 AMD 公告頁列出的發佈日期**證明：規則表的 `orderings[]` 每個 family 一份版本序列，每個版本附 AMD 公告列的日期與出處網址，
+驗證要求日期**嚴格遞增**（同一天不能證明先後）。`fixed_in`、`affected_from` 必須在序列裡（否則整張表拒收）；映像的版本不在序列裡（例如規則表沒有 `1.2.0.A`、`1.2.0.E`）→ NOT_ASSESSED，不從字母或數字推測。
+比較不分大小寫（AMD 的頁面同一版本有 `1.2.0.Ca` 與 `1.2.0.CA` 兩種寫法，日期相同；7014 把 Cc 寫成沒有點的 `1.2.0Cc`，規則表寫成 `1.2.0.Cc`）。
+新增序列時：版本與日期一定要來自 AMD 公告頁的同一個表格列，出處網址記在該筆；兩個頁面對同一版本寫了不同日期（不同 CPU 的列）時取較早的，並且只收日期能嚴格排序的。
+
+### 建議的合併規則
+
+一個元件對所有規則逐一比對（`out-of-scope` 的不算），然後：
+
+1. 規則表不能用（讀不到、sha256 不符、schema 驗證失敗）→ **所有元件 NOT_ASSESSED**（`table-unreadable`／`table-sha-mismatch`／`table-invalid`），報告與狀態都標 GAP／ATTENTION；不會悄悄少算幾筆。
+2. 任何一條規則是 `affected` → `affected`（`rule_ids` 是判 affected 的規則；同時判 `not-affected` 的規則只寫在依據裡）。
+3. 否則有 NOT_ASSESSED（版本讀不懂、順序不確定、段數不夠、family 不確定…）→ NOT_ASSESSED：有一條讀不懂就不能說 `not-affected`。
+4. 否則有 `not-affected`（版本不低於 `fixed_in`）→ `not-affected`，同時記 `dumpling:evidence=vendor-statement` 與 `dumpling:evidence-location`（公告網址；D-035）。
+5. 否則沒有任何規則適用 → NOT_ASSESSED（`no-rule`；同元件種類的規則都是別的 family／版本線時 `no-rule-for-line`）：資料庫沒有資料，以廠商公告為準。
+
+SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:advisory-rule-ids`、`dumpling:advisory-rule-state`（`preliminary`、`confirmed`，兩種都有時 `preliminary+confirmed`）、`dumpling:advisory-rule-basis`（每條規則的結果與原因）、
+`dumpling:advisory-rule-reason`（NOT_ASSESSED 的原因代碼）、`dumpling:advisory-rule-source`（規則表、最後整理日期、sha256 前綴）、`dumpling:advisory-rule-related`（BIOS 映像：可能相關的 AMI 公告）。
+**沒有規則元件種類的元件**（Intel 微碼、coreboot、edk2、GOP／VBT、NVIDIA vBIOS）不帶這些 property（Intel 微碼與 NVIDIA 有自己的比對）。
+
+### 報告與狀態
+
+- fw-inventory.md 的「規則表比對」一節：規則表的最後整理日期與「之後的新公告沒有收錄，以廠商公告為準」、規則清單（含審核狀態）、建議計數、**建議 affected（待人審）**、**建議 not-affected（單獨列出，依據類型 vendor-statement 與公告網址）**、可能相關的 AMI 公告、各元件的建議與依據。
+  文字：規則還是初審時寫「依初審規則的建議（待負責單位確認）」，確認後寫「依已確認規則的建議」；兩種都寫「是否受影響以廠商公告為準」。不出現「不受影響」、「安全」、「不適用」。
+  對不到任何規則的元件維持「資料庫沒有資料，以廠商公告為準」。
+- **狀態**：任何元件的建議是 `affected`，即使規則還是初審，`FW-INVENTORY` 狀態就是 ATTENTION，說明裡列規則編號與「待人審」；`not-affected` 不會讓狀態變好或變差；NOT_ASSESSED 照舊；規則表不能用 → ATTENTION。
+- CI 摘要欄（`firmware_advisory_cell.py`）多一段「規則表建議（整理日期）affected N、not-affected N、NOT_ASSESSED N：affected N 個待人審（規則；依初審規則的建議，待負責單位確認）」；DT 報告的「怎麼讀」與每個樣本的計數行也一樣。
+- **AMI-SA**：SBOM 目前沒有 AMI 核心版本，`ami_core` 的條件一律 NOT_ASSESSED（原因寫「SBOM 沒有 AMI 核心版本」，代碼 `no-ami-core-version`）。映像有 AMI 的線索（`ibv_hint` 有 AMI，或是 AMI PFAT 封裝）時，報告列出「可能相關的 AMI 公告」請負責單位對照，**不給建議**。
+  公告列的 `Fix Version`（例如 `AptioV_5.044`）只記在規則裡；等 SBOM 讀得到 AMI 核心版本（`AptioV_5.0xx` 形式）再加比較函式。
+
+### 完整性：為什麼固定 sha256
+
+規則表的檔案 sha256 固定在 `fw_advisory_rules.py` 的 `TABLE_SHA256`（做法與 `fw_advisory.TABLE_SHA256` 相同；`.gitattributes` 讓 `tools/cra/data/*.json` 不做換行轉換）。理由：
+(1) 這張表只有人會改，改動要同時改資料與程式裡的常數，審查的人在同一個 diff 看得到「哪些規則變了、是不是故意的」；
+(2) 檔案被截斷、少一筆規則、換行被轉換或換成別的內容時，比對一律 NOT_ASSESSED（`table-sha-mismatch`）加 ATTENTION，不會悄悄少算；
+(3) 驗證（schema）擋的是格式，sha256 擋的是「格式合法但內容被改」。限制：它擋不住「資料與常數一起被改」的 PR，那只能靠審查；而且確認規則時（`review.state` 改成 `confirmed`）也要重新計算。
+
+### 人工新增規則的步驟
+
+1. 讀廠商官方公告頁（AMD：`https://www.amd.com/en/resources/product-security/bulletin/amd-sb-NNNN.html`；Intel：`https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-NNNNN.html`；AMI：`https://www.ami.com/security-advisories/` 與該則 PDF）。**表格看不懂、版本欄的意思不確定（是「受影響」、「修正」還是「建議更新」）、儲存格對不起來的，不收**。
+2. 在 `rules` 加一筆：`id`、`vendor`、`title`、`published`（公告頁的原始發佈日）、`revised`（最後修訂日）、`cves`、`sources`（網址與你讀的日期 `read_at`）、`match`（一個產品線一個條件；`fixed_in` 抄公告列的修正版本；映像字串與公告的寫法不同時，把差異寫在條件的 `note`）、
+   `review`：`state: "preliminary"`、`preliminary_by`（角色，例如「韌體分析（C2 角色）初審」）、`preliminary_at`。AGESA 的版本若不在 `orderings[]`，先依上一節補序列（版本、AMD 公告列的日期、出處網址）。
+3. 更新 `table_updated`（今天的日期）。
+4. `python3 tools/cra/fw_advisory_rules.py verify tools/cra/data/fw-advisory-rules.json` 驗 schema；通過後 `python3 tools/cra/fw_advisory_rules.py sha256` 取得雜湊，寫進 `TABLE_SHA256`。
+5. 對公開樣本跑 `pipeline/firmware-bios.sh` 看結果；要鎖住的結果寫進樣本 `firmware.yml` 的 `expected.advisory_rule`；跑 `tests/run.d/c2-x86-firmware.sh`。
+
+### 確認規則的步驟（負責單位）
+
+1. 對照公告頁逐條核對 `match`（`fixed_in`、`line`／`family`、`note`）與 `cves`、`sources`；有疑問的條件改成 NOT_ASSESSED 的寫法（刪掉那個條件）或整筆刪掉。
+2. 把該筆的 `review` 改成 `state: "confirmed"`，加 `confirmed_by`（**角色**，不寫姓名或信箱）與 `confirmed_at`；`preliminary_by`、`preliminary_at` 保留。
+3. 更新 `table_updated`，重算 `TABLE_SHA256`，跑測試。確認之前的建議都標「依初審規則的建議（待負責單位確認）」，確認之後才標「依已確認規則的建議」；一個元件同時有兩種規則時寫 `preliminary+confirmed`。
+4. 規則表不會自己更新：`table_updated` 之後的新公告沒有收錄，報告每次都寫明這一點。
+

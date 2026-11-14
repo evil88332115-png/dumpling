@@ -1,0 +1,389 @@
+{
+ "schema": "dumpling-fw-advisory-rules/1",
+ "table_updated": "2026-11-14",
+ "$comment": "Hand-compiled from the vendors' official advisory pages (see sources and read_at); facts only, no advisory text. Every rule is a preliminary suggestion until the responsible team confirms it. See docs/notes/c2-firmware-advisory.md (Rule table).",
+ "orderings": [
+  {
+   "family": "ComboAM4v2PI",
+   "component": "amd_agesa",
+   "sequence": [
+    {
+     "version": "1.2.0.8",
+     "listed": "2022-07-29",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4002.html"
+    },
+    {
+     "version": "1.2.0.9",
+     "listed": "2023-01-24",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4002.html"
+    },
+    {
+     "version": "1.2.0.B",
+     "listed": "2023-08-25",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7009.html"
+    },
+    {
+     "version": "1.2.0.C",
+     "listed": "2024-02-07",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7009.html"
+    },
+    {
+     "version": "1.2.0.Ca",
+     "listed": "2024-03-14",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7008.html"
+    },
+    {
+     "version": "1.2.0.Cb",
+     "listed": "2024-07-30",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html"
+    },
+    {
+     "version": "1.2.0.Cc",
+     "listed": "2024-08-16",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html"
+    },
+    {
+     "version": "1.2.0.D",
+     "listed": "2024-11-07",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4012.html"
+    },
+    {
+     "version": "1.2.0.F",
+     "listed": "2025-04-30",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4018.html"
+    },
+    {
+     "version": "1.2.0.10",
+     "listed": "2025-10-31",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4018.html"
+    }
+   ]
+  },
+  {
+   "family": "ComboAM5PI",
+   "component": "amd_agesa",
+   "sequence": [
+    {
+     "version": "1.0.0.7a",
+     "listed": "2023-05-05",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4012.html"
+    },
+    {
+     "version": "1.0.8.0",
+     "listed": "2023-08-25",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html"
+    },
+    {
+     "version": "1.1.0.2",
+     "listed": "2024-01-09",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4012.html"
+    },
+    {
+     "version": "1.2.0.0",
+     "listed": "2024-06-13",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4012.html"
+    },
+    {
+     "version": "1.2.0.1",
+     "listed": "2024-08-07",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html"
+    },
+    {
+     "version": "1.2.0.2a",
+     "listed": "2024-10-05",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4012.html"
+    }
+   ]
+  }
+ ],
+ "rules": [
+  {
+   "id": "AMD-SB-7005",
+   "vendor": "AMD",
+   "title": "Return Address Security Bulletin",
+   "published": "2023-08-08",
+   "revised": "2024-12-05",
+   "cves": [
+    "CVE-2023-20569"
+   ],
+   "sources": [
+    {
+     "url": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "amd_agesa",
+     "family": "ComboAM4v2PI",
+     "fixed_in": "1.2.0.B",
+     "note": "Desktop table: Ryzen 5000 (Vermeer, Cezanne) list ComboAM4v2PI 1.2.0.B (2023-08-25); the bulletin says update to the listed version or higher"
+    },
+    {
+     "component": "amd_agesa",
+     "family": "ComboAM5PI",
+     "fixed_in": "1.0.8.0",
+     "note": "Desktop table: Ryzen 7000 lists ComboAM5 1.0.8.0 (2023-08-25); the bulletin writes ComboAM5, the image string is ComboAM5PI"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Zen 3 and Zen 4 client parts only; the bulletin also offers a standalone microcode patch as an alternative to the AGESA update, which this rule does not evaluate"
+  },
+  {
+   "id": "AMD-SB-7014",
+   "vendor": "AMD",
+   "title": "SMM Lock Bypass",
+   "published": "2024-08-09",
+   "revised": "2024-11-07",
+   "cves": [
+    "CVE-2023-31315"
+   ],
+   "sources": [
+    {
+     "url": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "amd_agesa",
+     "family": "ComboAM4v2PI",
+     "fixed_in": "1.2.0.Cc",
+     "note": "Client desktop table: Ryzen 3000 (Matisse) lists ComboAM4v2PI 1.2.0Cc (2024-08-16); Ryzen 5000 (Vermeer, Cezanne) and Ryzen 4000 (Renoir) list 1.2.0.cb (2024-07-30); fixed_in is the highest of them, so an image at 1.2.0.Cb is still reported as affected"
+    },
+    {
+     "component": "amd_agesa",
+     "family": "ComboAM5PI",
+     "fixed_in": "1.2.0.1",
+     "note": "Client desktop table: Ryzen 7000 (Raphael) lists ComboAM5PI 1.2.0.1 (2024-08-07)"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Client platforms only (the bulletin's server and embedded tables are not in this rule); the bulletin lists the fix per CPU, the image does not say which CPU it is for"
+  },
+  {
+   "id": "INTEL-SA-00391",
+   "vendor": "Intel",
+   "title": "2020.2 IPU - Intel CSME, SPS, TXE, AMT and DAL Advisory",
+   "published": "2020-11-10",
+   "revised": "2022-05-12",
+   "cves": [
+    "CVE-2020-8752",
+    "CVE-2020-8753",
+    "CVE-2020-12297",
+    "CVE-2020-12304",
+    "CVE-2020-8745",
+    "CVE-2020-8744",
+    "CVE-2020-8705",
+    "CVE-2020-8750",
+    "CVE-2020-12303",
+    "CVE-2020-12354",
+    "CVE-2020-8757",
+    "CVE-2020-8756",
+    "CVE-2020-8760",
+    "CVE-2020-12355",
+    "CVE-2020-8751",
+    "CVE-2020-8754",
+    "CVE-2020-8761",
+    "CVE-2020-8747",
+    "CVE-2020-8755",
+    "CVE-2020-12356",
+    "CVE-2020-8746",
+    "CVE-2020-8749",
+    "CVE-2020-27337",
+    "CVE-2020-27338",
+    "CVE-2020-27336"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.0",
+     "fixed_in": "14.0.45",
+     "note": "Affected Products: CSME and AMT versions before 14.0.45"
+    },
+    {
+     "component": "intel_csme",
+     "line": "14.5",
+     "fixed_in": "14.5.25",
+     "note": "Affected Products: CSME and AMT versions before 14.5.25"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the 14.x version lines of the bulletin's CSME sentence are in this rule"
+  },
+  {
+   "id": "INTEL-SA-01280",
+   "vendor": "Intel",
+   "title": "2025.3 IPU, Intel Chipset Firmware Advisory",
+   "published": "2025-08-12",
+   "revised": "2025-08-12",
+   "cves": [
+    "CVE-2025-20037",
+    "CVE-2025-20067",
+    "CVE-2025-22392"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.1",
+     "fixed_in": "14.1.77",
+     "note": "Chipset/SOC table, column Versions Before"
+    },
+    {
+     "component": "intel_csme",
+     "line": "14.5",
+     "fixed_in": "14.5.57",
+     "note": "Chipset/SOC table, column Versions Before"
+    },
+    {
+     "component": "intel_csme",
+     "line": "18.1",
+     "fixed_in": "18.1.18",
+     "note": "Row Core Ultra (Series 1), column Versions Before"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule"
+  },
+  {
+   "id": "INTEL-SA-01372",
+   "vendor": "Intel",
+   "title": "Intel Chipset Firmware Advisory (VRT0010)",
+   "published": "2026-08-11",
+   "revised": "2026-09-09",
+   "cves": [
+    "CVE-2026-6726"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.1",
+     "fixed_in": "14.1.80",
+     "note": "Intel 400 Series Chipset row, column Versions Before"
+    },
+    {
+     "component": "intel_csme",
+     "line": "14.5",
+     "fixed_in": "14.5.62",
+     "note": "Intel 400 Series Chipset row, column Versions Before"
+    },
+    {
+     "component": "intel_csme",
+     "line": "18.1",
+     "fixed_in": "18.1.21",
+     "note": "Row Core Ultra Processors (Series 1), column Versions Before"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule"
+  },
+  {
+   "id": "AMI-SA-2026001",
+   "vendor": "AMI",
+   "title": "Security Audit Reported Vulnerabilities (Aptio V)",
+   "published": "2026-09-08",
+   "revised": "2026-09-08",
+   "cves": [
+    "CVE-2026-33197"
+   ],
+   "sources": [
+    {
+     "url": "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf",
+     "read_at": "2026-11-14"
+    },
+    {
+     "url": "https://www.ami.com/security-advisories/",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "ami_core",
+     "product": "Aptio V",
+     "fixed_in": "AptioV_5.044",
+     "note": "Fix Version column: AptioV_5.044"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   }
+  },
+  {
+   "id": "AMI-SA-2026002",
+   "vendor": "AMI",
+   "title": "Security Audit Reported Vulnerabilities (Aptio V)",
+   "published": "2026-10-13",
+   "revised": "2026-10-13",
+   "cves": [
+    "CVE-2025-58771",
+    "CVE-2025-58772",
+    "CVE-2025-58773",
+    "CVE-2025-58774",
+    "CVE-2026-0893"
+   ],
+   "sources": [
+    {
+     "url": "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026002.pdf",
+     "read_at": "2026-11-14"
+    },
+    {
+     "url": "https://www.ami.com/security-advisories/",
+     "read_at": "2026-11-14"
+    }
+   ],
+   "match": [
+    {
+     "component": "ami_core",
+     "product": "Aptio V",
+     "fixed_in": "AptioV_5.044",
+     "note": "Fix Version column: AptioV_5.044 for three CVEs, AptioV_5.043 for two; fixed_in is the highest"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   }
+  }
+ ]
+}

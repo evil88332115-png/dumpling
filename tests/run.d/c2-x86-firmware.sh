@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C2 x86 韌體（BIOS／vBIOS → CycloneDX）的單元測試：tools/cra/tests/test_x86_firmware*.py、test_coreboot_cbfs.py、test_ami_pfat.py、test_vbios_synthetic.py、test_vbios_intel.py、test_amd_psp.py、test_uefi_gfx.py、test_intel_cse_layout.py、test_uefi_image_contract.py（對 C1 uefi_image 的介面契約）、test_supplier_sbom_schema.py（供應商 SBOM 正規化後的 CycloneDX 1.4 schema）、test_fw_advisory.py（Intel 微碼公告比對與發佈資料表產生器）、test_nvidia_vbios_advisory.py（NVIDIA vBIOS 公告比對）、test_c2_report_render.py（報告與 md_safe／md_esc 用 cmark-gfm 與 markdown-it 渲染）。
+# C2 x86 韌體（BIOS／vBIOS → CycloneDX）的單元測試：tools/cra/tests/test_x86_firmware*.py、test_coreboot_cbfs.py、test_ami_pfat.py、test_vbios_synthetic.py、test_vbios_intel.py、test_amd_psp.py、test_uefi_gfx.py、test_intel_cse_layout.py、test_uefi_image_contract.py（對 C1 uefi_image 的介面契約）、test_supplier_sbom_schema.py（供應商 SBOM 正規化後的 CycloneDX 1.4 schema）、test_fw_advisory.py（Intel 微碼公告比對與發佈資料表產生器）、test_nvidia_vbios_advisory.py（NVIDIA vBIOS 公告比對）、test_fw_advisory_rules.py（廠商公告規則表的 schema 驗證、版本比較與建議）、test_c2_report_render.py（報告與 md_safe／md_esc 用 cmark-gfm 與 markdown-it 渲染）。
 # 在 venv 裡裝固定版本的 pytest、jsonschema、referencing（tools/cra/tests/requirements.txt，共用檔不改）
 # 與 C2 渲染測試專用的 markdown-it-py、linkify-it-py、cmarkgfm、PyYAML（tests/run.d/c2-requirements.txt，固定版本、發布超過兩週的正式版）；
 # 不用 --user／系統 python，因為 ubuntu-24.04 的系統 python 有 PEP 668 限制（pip install 會被拒絕），
@@ -50,4 +50,4 @@ export DUMPLING_REQUIRE_TEST_DATA=1
   "$root/tools/cra/tests/test_coreboot_cbfs.py" "$root/tools/cra/tests/test_ami_pfat.py" \
   "$root/tools/cra/tests/test_vbios_synthetic.py" "$root/tools/cra/tests/test_vbios_intel.py" \
   "$root/tools/cra/tests/test_uefi_gfx.py" "$root/tools/cra/tests/test_intel_cse_layout.py" "$root/tools/cra/tests/test_uefi_image_contract.py" \
-  "$root/tools/cra/tests/test_amd_psp.py" "$root/tools/cra/tests/test_supplier_sbom_schema.py" "$root/tools/cra/tests/test_fw_advisory.py" "$root/tools/cra/tests/test_nvidia_vbios_advisory.py" "$root/tests/test_c2_report_render.py"
+  "$root/tools/cra/tests/test_amd_psp.py" "$root/tools/cra/tests/test_supplier_sbom_schema.py" "$root/tools/cra/tests/test_fw_advisory.py" "$root/tools/cra/tests/test_nvidia_vbios_advisory.py" "$root/tools/cra/tests/test_fw_advisory_rules.py" "$root/tests/test_c2_report_render.py"
