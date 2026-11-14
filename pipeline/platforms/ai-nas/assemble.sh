@@ -15,8 +15,9 @@ case $rc in 0) ;; 3) echo "assemble: GAP（映像沒有準備好）"; exit 3;; *
 ow=$(python3 -I "$di" owners "$out/assemble.json" --out "$out/owners.json"); orc=$?
 echo "$ow"
 case $orc in 0|3) ;; *) echo "assemble: FAIL（owners：${ow#owners: }）"; exit 1;; esac
-orig=$(python3 -I "$di" param "$1" "$2" kernel_orig_file 2> /dev/null) && deb=$(python3 -I "$di" param "$1" "$2" kernel_debian_file 2> /dev/null) \
-  || { echo "assemble: GAP（sources.yml 沒有 kernel_orig_file／kernel_debian_file：核心原始碼只能用上游，判斷標 PARTIAL）"; exit 3; }
+if ! orig=$(python3 -I "$di" param "$1" "$2" kernel_orig_file 2> /dev/null) || ! deb=$(python3 -I "$di" param "$1" "$2" kernel_debian_file 2> /dev/null); then
+  echo "assemble: GAP（sources.yml 沒有 kernel_orig_file／kernel_debian_file：核心原始碼只能用上游，判斷標 PARTIAL）"; exit 3
+fi
 for f in "$orig" "$deb"; do
   if [ ! -f "$out/downloads/$f" ] || [ -L "$out/downloads/$f" ]; then echo "assemble: FAIL（downloads/ 沒有 $f，先執行 fetch）"; exit 1; fi
 done
