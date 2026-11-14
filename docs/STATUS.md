@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 09:39 +0800（C2）
+最後更新：2026-11-14 09:47 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,7 +12,7 @@
 - 代理：1 個驗證代理（Sonnet 5.5、effort high）：獨立驗證 C4 的 M6 #97（6887f0c），worktree `$AGENT_TMP/dumpling-wt-c0-verify-97`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-97/report.md`；之後 #96、#93 複驗
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）C0 驗證不通過 4 項（B-uefi-binary 沿用看 json 會漏列、test_status_tsv.py 沒 CI 入口、取最嚴重沒被測試守住、README 說法不實），C1 修中。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
+  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）C0 驗證不通過 4 項 → C1 已修（2e1613b，C0 看過 diff OK），但和 main 衝突（DIRTY），等 C1 併 main。M7b-4（wp1/m7b4 d5fc12d）PR 開出中。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。**#96**（advisory-polish 4b79f22，C2 預驗 916db7a 通過、之後 2 commit 自看）排 C0 驗證（#95 之後）；規則表在 wp3/fw-advisory-rules 進行中。**D-043 (2) 規則表設計 C0 同意**（tools/cra/data/fw-advisory-rules.json；只給建議不改 vuln-assessment；affected 建議 → ATTENTION＋待人審；AMI-SA 列出但 NOT_ASSESSED；第一批 AM4／AM5 AGESA、CSME 14／18，官方頁面查證）；之後 AMI 核心版本解析另開。5674 確認後再開一個 PR
   - C3（第二台）：#47、#49、#61、#69、#71、#72、#74、#84、#85 已合併。#91 已合併；#94 已合併；**#93**（t10b）C0 驗證不通過 → C3 已修（1c5d9c3：登錄信任改看目前可信成員、疑似標頭、list/get 錯誤寫 result、open-real 未登錄 FAIL、search 找無標籤案件；C0 同意 search 到非 confidential 當外洩），排 C0 聚焦複驗（#95、#96 之後）；wp5/gitlab-t10b（T-10 上線前必做：標籤被拿掉／已關閉未完成要 FAIL、近似紀錄要 ATTENTION、system note 測試）寫程式中 → T-12。基準日檢查清單在 `$AGENT_TMP/dumpling-tmp-c3/baseline-day-checklist.md`（第 1 步 real＋baseline＋dry_run 回報數字 → C0 看過 → 第 2 步建基準 → 一天 dry_run → C0 設 WATCH_REAL_ISSUES=on）；C0 決定 A：放行前支援期限 Issue 也只算不寫（C3 開小 PR）
   - C4（第二台）：**M6 PR #97 已開**（wp7/adapters 6887f0c，50 檔；最終重跑 d12d1eb：rock 43532296542 101 項、rpi 43535044427 92 項、ai-nas 43536522257 77 項全過；之後併 #92、#94 不重跑，影響已核對）。C0 驗證中（high）
