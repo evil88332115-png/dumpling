@@ -648,8 +648,14 @@ INTERNAL_WORDS = re.compile(r"Grype|Dependency[- ]Track|\bDT\b|sca-center|sca-sc
 # 說明文字（不是整個檔案）另不可有內部狀態代號；in_triage 是 CycloneDX 的狀態值，在檔案裡是合法的
 # 發版承諾式用語：客戶可見的檔案不可以出現（對外不訂「之後會修」）
 COMMIT_WORDS = re.compile(r"(?i:later release|will be included|re-checked|every release|planned|next image)")
+# 沒有評估的陳述（M7c-1，A4／D-057 Q1）：內部 VEX 以 in_triage／under_investigation 加標記輸出；客戶版也輸出這些列，但狀態說明改成中性英文，
+# 不帶內部名稱與標記。與 tools/vexconv/vexconv.py 的 PROP_ASSESSMENT、NOT_ASSESSED、NOTE_NOT_ASSESSED、NOTE_NOT_ASSESSED_CUSTOMER 同值（測試核對）
+NOT_ASSESSED_PROP, NOT_ASSESSED_VALUE = "dumpling:assessment", "NOT_ASSESSED"
+NOTE_NOT_ASSESSED = "dumpling: not assessed"
+CUSTOMER_NOT_ASSESSED = "Not yet assessed by the manufacturer"
+DUMPLING_MARK = re.compile(r"(?i:dumpling:)")           # 內部的標記（屬性名稱、status_notes）：客戶的 VEX 檔案不可出現
 TOOL_WORDS = re.compile(r"Grype|Dependency[- ]Track|sca-center|sca-scan|bulk rule")
-TEXT_WORDS = re.compile(INTERNAL_WORDS.pattern + r"|NOT_ASSESSED|in_triage|untriaged|" + COMMIT_WORDS.pattern)
+TEXT_WORDS = re.compile(INTERNAL_WORDS.pattern + r"|NOT_ASSESSED|in_triage|untriaged|" + DUMPLING_MARK.pattern + "|" + COMMIT_WORDS.pattern)
 # SBOM 有檔案元件（*.py、scan/ 目錄都合法），所以只查工具名稱
 SBOM_WORDS = re.compile(r"Grype|Dependency[- ]Track|sca-center|sca-scan")
 BULK_SUFFIX = re.compile(r"\s*\(bulk rule .*\)\s*$", re.S)
@@ -748,10 +754,16 @@ def customer_cdx(bom, stats=None):
         if not isinstance(v, dict):
             continue
         kind = KIND.get(str((v.get("analysis") or {}).get("state")), "under_investigation")
+        # 沒有評估的陳述（內部版以屬性 dumpling:assessment＝NOT_ASSESSED 標記）：客戶版也輸出，狀態（in_triage）照抄、說明換成中性英文。
+        # 屬性本身照白名單規則不帶（下面只留 openvex:action_statement），不另開例外
+        not_assessed = any(isinstance(p, dict) and p.get("name") == NOT_ASSESSED_PROP and p.get("value") == NOT_ASSESSED_VALUE
+                           for p in v.get("properties") or [])
         o = {k: v[k] for k in CDX_VULN_KEYS if k in v}
         if isinstance(v.get("analysis"), dict):
             a = {k: v["analysis"][k] for k in CDX_ANALYSIS_KEYS if k in v["analysis"]}
-            if "detail" in a:
+            if not_assessed and kind == "under_investigation":
+                a["detail"] = CUSTOMER_NOT_ASSESSED
+            elif "detail" in a:
                 a["detail"] = customer_text(a["detail"], kind, stats=stats)
             o["analysis"] = a
         props = []
@@ -776,7 +788,10 @@ def customer_openvex(doc, stats=None):
         o = {k: s_[k] for k in OPENVEX_STMT_KEYS if k in s_}
         for k in ("status_notes", "impact_statement"):
             if k in o:
-                o[k] = customer_text(o[k], kind, stats=stats)
+                if k == "status_notes" and kind == "under_investigation" and o[k] == NOTE_NOT_ASSESSED:
+                    o[k] = CUSTOMER_NOT_ASSESSED          # 沒有評估：中性英文，不帶內部名稱（D-057 Q1）
+                else:
+                    o[k] = customer_text(o[k], kind, stats=stats)
         if "action_statement" in o:
             o["action_statement"] = customer_text(o["action_statement"], kind, action=True, stats=stats)
         if s_.get("status") == "affected" and not o.get("action_statement"):
@@ -797,7 +812,7 @@ def check_customer_text(name, text):
         bad.append("CJK")
     if name != "sbom.cdx.json" and LOCAL_PATH.search(text):       # SBOM 裡的路徑是映像裡的路徑（/opt/…），不是本機路徑
         bad.append("local path")
-    if (name.startswith("vex.") and (INTERNAL_WORDS.search(text) or "sca-center:" in text)) or \
+    if (name.startswith("vex.") and (INTERNAL_WORDS.search(text) or "sca-center:" in text or DUMPLING_MARK.search(text))) or \
             (name == "sbom.cdx.json" and SBOM_WORDS.search(text)) or (name != "sbom.cdx.json" and TOOL_WORDS.search(text)):
         bad.append("internal term")
     if name != "sbom.cdx.json" and COMMIT_WORDS.search(text):

@@ -46,6 +46,17 @@ TAG_P = "[cyclonedx:state=resolved_with_pedigree]"
 PROP_JUST = "openvex:justification"
 PROP_ACTION = "openvex:action_statement"
 PROP_NOTES = "openvex:status_notes"
+# 沒有評估（M7c-1，A4／D-057）：CycloneDX 沒有「沒評估」這個狀態，用 in_triage 加這個屬性；OpenVEX 用 under_investigation 加固定的 status_notes。
+# 客戶版的 OpenVEX 用中性英文（不帶內部名稱）。轉換時兩種句子都認得，轉回 CycloneDX 要把屬性加回去
+PROP_ASSESSMENT = "dumpling:assessment"
+NOT_ASSESSED = "NOT_ASSESSED"
+NOTE_NOT_ASSESSED = "dumpling: not assessed"
+NOTE_NOT_ASSESSED_CUSTOMER = "Not yet assessed by the manufacturer"
+NOT_ASSESSED_NOTES = (NOTE_NOT_ASSESSED, NOTE_NOT_ASSESSED_CUSTOMER)
+# 內部版 CycloneDX 的 detail：寫明這是沒評估，不是有人在調查
+DETAIL_NOT_ASSESSED = ("Not assessed: no VEX assessment has been recorded for this vulnerability on this component. "
+                       "The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that "
+                       "anyone is investigating it.")
 
 
 class VexError(ValueError):
@@ -92,6 +103,10 @@ def to_cdx(ov):
             analysis["justification"] = JUST_OV_TO_CDX[j]
             props.append({"name": PROP_JUST, "value": j})
         impact, notes = st.get("impact_statement"), st.get("status_notes")
+        # 沒有評估的標記：under_investigation 加上固定的 status_notes（內部或客戶版的句子）→ 加回 dumpling:assessment
+        not_assessed = status == "under_investigation" and notes in NOT_ASSESSED_NOTES and not impact
+        if not_assessed:
+            props.append({"name": PROP_ASSESSMENT, "value": NOT_ASSESSED})
         if notes and notes.startswith(TAG_P):
             analysis["state"] = "resolved_with_pedigree"
             notes = notes[len(TAG_P):].strip() or None
@@ -100,6 +115,8 @@ def to_cdx(ov):
             props.append({"name": PROP_NOTES, "value": notes})
         elif notes and not impact:
             props.append({"name": PROP_NOTES, "value": notes})
+        if not_assessed and detail == NOTE_NOT_ASSESSED:
+            detail = DETAIL_NOT_ASSESSED          # 內部句子還原成完整說明；客戶版的中性句子照留
         if detail:
             analysis["detail"] = detail
             # 還原 CDX 來源留下的標籤
@@ -148,7 +165,7 @@ def to_openvex(cdx, author="sca-center", lenient=False):
         a = v.get("analysis") or {}
         state = a.get("state")
         if state is None:
-            continue  # 沒有判定就沒有 VEX 陳述
+            continue  # 沒有 analysis.state 就沒有 VEX 陳述（dumpling 的「沒評估」列有 in_triage 加標記屬性，不在這裡）
         if state not in STATUS_CDX_TO_OV:
             raise VexError(f"vulnerability {i}: unknown state {state!r}")
         try:
@@ -192,6 +209,10 @@ def to_openvex(cdx, author="sca-center", lenient=False):
                 st["status_notes"] = props[PROP_NOTES]
         else:
             note = props.get(PROP_NOTES) or detail
+            if state == "in_triage" and props.get(PROP_ASSESSMENT) == NOT_ASSESSED:
+                # 沒有評估：固定的句子（原本就是客戶版的中性句子就保留）；detail 是給人讀的長說明，不放進 OpenVEX
+                note = props[PROP_NOTES] if props.get(PROP_NOTES) in NOT_ASSESSED_NOTES else (
+                    NOTE_NOT_ASSESSED_CUSTOMER if detail == NOTE_NOT_ASSESSED_CUSTOMER else NOTE_NOT_ASSESSED)
             if state == "resolved_with_pedigree":
                 note = (TAG_P + (" " + note if note else "")).strip()
             if note:

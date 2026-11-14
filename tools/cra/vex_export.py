@@ -44,7 +44,9 @@
       KEV 與被利用的列不套用（不看 P1：P1 可能只是 EPSS 高）；被人或其他來源蓋過時記 shadowed 與這一列的 rule_shadowed，
       結論不同時列為衝突。K2 沒套用的核心列加標記 K3（模組可以載入）、K4（對不到模組，GAP）。有生效的 K1 規則時 (c) 改由規則套用（沒生效時照舊）。
       另有標記 distro_no_range_upstream_excludes（upstream_exclusion_flags，只標記「可能誤報，請人確認」，不改狀態）。
-  (f) 其他：沒有判定（untriaged），VEX 檔案裡不寫這一列。
+  (f) 其他：沒有判定（untriaged）。assess 的結果不變（r["vex"] 是空的，閘門照舊算 untriaged）；只在輸出階段（cdx_vex）寫成
+      in_triage 加屬性 dumpling:assessment＝NOT_ASSESSED（OpenVEX：under_investigation、status_notes「dumpling: not assessed」），
+      意思是「沒有評估」，不是有人在調查（M7c-1，A4／D-057；客戶版也輸出，句子是中性英文）。dt_writeback 不寫回這些陳述。
   人的判定（dt、annotation）彼此不同時：dt 優先，並記為「人工判定衝突」（閘門 ATTENTION）。
 
 發行閘門：每一列的 VEX 狀態分成 resolved、not_affected（含 false_positive）、exploitable、in_triage、untriaged，核心與其他元件分開。
@@ -2663,27 +2665,43 @@ def doc_timestamp(meta, pbom):
 
 
 def cdx_vex(allrows, pbom, meta, product, gate_verdict):
-    """CycloneDX 1.6 VEX：每一列有判定的一個 vulnerability，affects 以 BOM-Link 指向產品 SBOM 的元件。回傳 (文件, 統計)。"""
+    """CycloneDX 1.6 VEX：每一列有判定的一個 vulnerability，affects 以 BOM-Link 指向產品 SBOM 的元件。回傳 (文件, 統計)。
+    沒有判定的列（含 vex_extra 裡沒有判定的別名）也各輸出一條（M7c-1，A4／D-057）：analysis.state＝in_triage，加屬性
+    dumpling:assessment＝NOT_ASSESSED，detail 寫明是沒有評估、不是有人在調查。只在這裡輸出，不改列、不改 assess 的結果，閘門的分類不受影響
+    （r["vex"] 仍是空的）。同一個 (編號, 元件, 版本) 已經有判定的陳述時，沒判定的重複列不再輸出（以判定為準）。"""
     serial, bver = pbom["serialNumber"], pbom.get("version") or 1
     main = (pbom.get("metadata") or {}).get("component") or {}
     idx = ref_index(pbom)
-    vulns, added = [], {}
-    stated = [x for r in allrows for x in [r] + (r.get("vex_extra") or []) if x.get("vex")]
+    vulns, added, bomrefs = [], {}, set()
+    vc = _vexconv()
+    everyone = [x for r in allrows for x in [r] + (r.get("vex_extra") or [])]
+    stated = [x for x in everyone if x.get("vex")]
     # 同一個編號在同一個元件版本上只能有一條陳述（兩條會互相矛盾，bom-ref 也會重複，文件無效）：不靜靜挑一條，直接失敗
     seen = Counter((x["id"], x.get("purl") or x.get("component"), x.get("version")) for x in stated)
     dup = sorted(k for k, n in seen.items() if n > 1)
     if dup:
         raise VexInputError("同一個弱點在同一個元件版本上有多條 VEX 陳述（程式錯誤，沒有產生 VEX）："
                             + "；".join(" ".join(str(v) for v in k) for k in dup[:5]))
-    for r in sorted(stated, key=lambda x: (x["id"], str(x.get("component")), str(x.get("version")), str(x.get("purl")))):
-        s = r["vex"]
+    # 沒有判定的列：同一個 (編號, 元件, 版本) 只留一條，而且已經有判定的陳述優先（bom-ref 由這三個值決定，重複會讓文件無效）
+    pending, seen_na, na_dup = [], set(seen), 0
+    for x in sorted((y for y in everyone if not y.get("vex")), key=lambda y: (y["id"], str(y.get("component")), str(y.get("version")), str(y.get("purl")))):
+        k = (x["id"], x.get("purl") or x.get("component"), x.get("version"))
+        if k in seen_na:
+            na_dup += 1
+            continue
+        seen_na.add(k)
+        pending.append(x)
+    for r in sorted(stated + pending, key=lambda x: (x["id"], str(x.get("component")), str(x.get("version")), str(x.get("purl")))):
+        s = r.get("vex")
         refs = refs_for(r, idx)
-        props = [{"name": "sca-center:vex-source", "value": s["source"]},
-                 {"name": "sca-center:component", "value": f"{r.get('component')} {r.get('version')}".strip()}]
+        props = [{"name": "sca-center:vex-source", "value": s["source"]}] if s else []
+        props.append({"name": "sca-center:component", "value": f"{r.get('component')} {r.get('version')}".strip()})
         if r.get("purl"):
             props.append({"name": "sca-center:component-purl", "value": r["purl"]})
         if r.get("source_ids"):
             props.append({"name": "sca-center:source-ids", "value": ", ".join(r["source_ids"])})
+        if not s:
+            props.append({"name": vc.PROP_ASSESSMENT, "value": vc.NOT_ASSESSED})
         links = [bomlink(serial, bver, x) for x in refs if x]
         if not links:
             # 元件不在產品 SBOM（例如只供比對的原始碼套件）：不把範圍擴大成整個產品，改把這個元件列在這份 VEX 自己的 components，
@@ -2700,13 +2718,13 @@ def cdx_vex(allrows, pbom, meta, product, gate_verdict):
             added[cref] = c
             links = [cref]
         for k in ("author", "date", "scope"):
-            if s.get(k):
+            if s and s.get(k):
                 props.append({"name": f"sca-center:annotation-{k}", "value": s[k]})
-        if s.get("inherited_from"):
+        if s and s.get("inherited_from"):
             # Ubuntu 打包的 Python 模組沿用擁有它的 deb 套件那一列的判定（inherit_deb_python）
             f = s["inherited_from"]
             props.append({"name": "sca-center:vex-inherited-from", "value": f"{f['id']} on {f.get('component')} {f.get('version')}"})
-        if s.get("rule"):
+        if s and s.get("rule"):
             # 批次規則的判定：讓客戶與稽核看得出這不是逐列的評估（規則全文在風險評估的 VEX 小節）
             props.append({"name": "sca-center:vex-rule", "value": s["rule"]})
             if s.get("rule_author"):
@@ -2716,7 +2734,7 @@ def cdx_vex(allrows, pbom, meta, product, gate_verdict):
                 props.append({"name": "sca-center:vex-rule-evidence", "value": s["evidence"]})
                 if s.get("rule_inputs"):
                     props.append({"name": "sca-center:vex-rule-inputs", "value": s["rule_inputs"]})
-        if s["state"] == "exploitable":
+        if s and s["state"] == "exploitable":
             # 沒有 response 時（批次規則：no fix yet、發行版 won't fix、資料不足）以 detail 當處理說明，OpenVEX 的 affected 一定要有
             # 舊設定檔的 can_not_fix／will_not_fix 不放進說明（客戶會讀成供應商不能修／不修），說明只用 detail
             real = [x for x in s.get("response") or [] if x not in ("can_not_fix", "will_not_fix")]
@@ -2725,19 +2743,23 @@ def cdx_vex(allrows, pbom, meta, product, gate_verdict):
                 props.append({"name": "sca-center:fix-state", "value": str(r["fix_state"])})
             if act:
                 props.append({"name": "openvex:action_statement", "value": act})
-        analysis = {"state": s["state"]}
-        if s.get("justification"):
-            analysis["justification"] = s["justification"]
-        if s.get("response"):
-            analysis["response"] = s["response"]
-        analysis["detail"] = s["detail"]
-        if r.get("runtime_note") and s["state"] in ("exploitable", "in_triage"):
-            # 板子上量到的執行中證據（runtime_evidence.py）：只附一句話，不改狀態；沒有量測時沒有這個欄位
-            analysis["detail"] = f"{s['detail']} {r['runtime_note']}".strip()
+        if not s:
+            analysis = {"state": "in_triage", "detail": vc.DETAIL_NOT_ASSESSED}
+        else:
+            analysis = {"state": s["state"]}
+            if s.get("justification"):
+                analysis["justification"] = s["justification"]
+            if s.get("response"):
+                analysis["response"] = s["response"]
+            analysis["detail"] = s["detail"]
+            if r.get("runtime_note") and s["state"] in ("exploitable", "in_triage"):
+                # 板子上量到的執行中證據（runtime_evidence.py）：只附一句話，不改狀態；沒有量測時沒有這個欄位
+                analysis["detail"] = f"{s['detail']} {r['runtime_note']}".strip()
         key = "|".join(str(x) for x in (r["id"], r.get("purl") or r.get("component"), r.get("version")))
         v = {"bom-ref": f"vex-{r['id']}-{hashlib.sha256(key.encode()).hexdigest()[:12]}", "id": r["id"]}
-        if any(x["bom-ref"] == v["bom-ref"] for x in vulns):
+        if v["bom-ref"] in bomrefs:          # set：沒有判定的列也輸出後，Jetson 約一萬條，逐條比對會太慢
             raise VexInputError(f"VEX 的 bom-ref 重複：{v['bom-ref']}（程式錯誤，沒有產生 VEX）")
+        bomrefs.add(v["bom-ref"])
         if r["id"].startswith("CVE-"):
             v["source"] = {"name": "NVD", "url": f"https://nvd.nist.gov/vuln/detail/{r['id']}"}
         v.update({"analysis": analysis, "affects": [{"ref": x} for x in links], "properties": props})
@@ -2758,7 +2780,10 @@ def cdx_vex(allrows, pbom, meta, product, gate_verdict):
                                        {"name": "sca-center:timestamp-source", "value": tsrc}]},
            **({"components": comps} if comps else {}),
            "vulnerabilities": vulns}
-    return doc, {"statements": len(vulns), "components_not_in_sbom": len(comps), "timestamp_source": tsrc}
+    # statements＝檔案裡的陳述總數（含沒有評估的）；statements_assessed＝有判定的；statements_not_assessed＝標了 NOT_ASSESSED 的（M7c-1）
+    return doc, {"statements": len(vulns), "statements_assessed": len(stated), "statements_not_assessed": len(pending),
+                 **({"not_assessed_duplicates_skipped": na_dup} if na_dup else {}),
+                 "components_not_in_sbom": len(comps), "timestamp_source": tsrc}
 
 
 def openvex(cdx, author, purl_of):
@@ -2779,6 +2804,16 @@ def openvex(cdx, author, purl_of):
     body = json.dumps(ov["statements"], sort_keys=True, ensure_ascii=False)
     ov["@id"] = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"sca-center-openvex|{cdx['serialNumber']}|{hashlib.sha256(body.encode()).hexdigest()}"))
     return ov
+
+
+def not_assessed_count(doc, name):
+    """寫出的 VEX 檔案裡「沒有評估」的陳述數（summary.json 的 vex.files 用）：CycloneDX 看 dumpling:assessment＝NOT_ASSESSED，
+    OpenVEX 看 under_investigation 加固定的 status_notes。"""
+    vc = _vexconv()
+    if name == "vex.cdx.json":
+        return sum(1 for v in doc.get("vulnerabilities") or []
+                   if any(p.get("name") == vc.PROP_ASSESSMENT and p.get("value") == vc.NOT_ASSESSED for p in v.get("properties") or []))
+    return sum(1 for st in doc.get("statements") or [] if st.get("status") == "under_investigation" and st.get("status_notes") in vc.NOT_ASSESSED_NOTES)
 
 
 def purl_by_bomlink(pbom):
@@ -2806,10 +2841,13 @@ def section(num, g, info, conflicts, files, product, table, annotations_info, ru
               "`not_affected` only from the product's artifacts – kernel configuration, kernel modules, Ubuntu CVE Tracker status – "
               "and triage rules, which set only `exploitable` (a response is optional), or `in_triage`; only for rows without a decision from "
               "(1)–(4); never for rows in a KEV catalogue; each such statement names its rule). The first source with a decision is used; a different decision from a later source "
-              "is listed as a conflict and does not override it. Rows without any decision are `untriaged`; they have no VEX "
-              "statement."),
+              "is listed as a conflict and does not override it. Rows without any decision are `untriaged`. "
+              "They are written to the VEX files as well, as `in_triage` in CycloneDX (`under_investigation` in OpenVEX) with the property "
+              "`dumpling:assessment` = `NOT_ASSESSED` (OpenVEX: status notes \"dumpling: not assessed\"). Such a statement means that the row "
+              "has not been assessed; it does not mean that anyone is investigating it. The release gate counts these rows as `untriaged`, "
+              "not as `in_triage`, and they are not written back to Dependency-Track."),
              (f"Files for customers, with the SBOM `sbom.cdx.json` (product {product}): "
-              + "; ".join(f"`{n}` ({x['statements']} statements, SHA-256 {x['sha256'][:12]})" if x else f"`{n}` not written ({why})"
+              + "; ".join(f"`{n}` ({x['statements']} statements{', ' + str(x['not_assessed']) + ' of them not assessed' if x.get('not_assessed') else ''}, SHA-256 {x['sha256'][:12]})" if x else f"`{n}` not written ({why})"
                           for n, x, why in files)
               + ". The statements refer to the components of the product SBOM. They are not imported into Dependency-Track: "
                 "importing a CycloneDX VEX overwrites existing analyses there.")]
