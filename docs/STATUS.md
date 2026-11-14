@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 16:38 +0800（C0）
+最後更新：2026-11-14 16:38 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -104,7 +104,7 @@
 ## C2 韌體（WP3＋WP4）
 
 > **目前（2026-11-14 下午）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
-> 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**完成 38d0b74** → C2 補 **8cb6fc5**（linux-firmware 等價表釘 sha256、用詞修正、加入 D-046 設計文件）。11 筆規則，新增 INTEL-SA-01315、01209、01152，以及 01280、01372 的 15.x 條件；AMD-SB-7033 新增，7014 補 7 個資料中心微碼條件。PSP 與 FSP 都不收，因為公告沒有寫版本。樣本結果：V540TU 的 ME 18.0 變 affected（01315）；B550M、ASRock 的微碼 0x8012 變 affected，這是 Naples 的 CPUID，可能是 CPUID 層級的誤報，已寫明。2422 passed；CI 綠 → 預驗（獨立代理，sonnet、high）：**通過**（AMD 15 個條件逐值一致；linux-firmware 等價表一致；Intel 只能用同一類摘要工具讀，不算獨立核對；144 個變異沒有存活）→ C2 處理建議 **3eafeb0**（條件的 note 進 basis 與報告；真表的版本線整段比測試；bios-discovery 寫明實作前提；linux-firmware 出處寫完整）→ CI 綠 → **PR #110 已開**，已通知 C0。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
+> 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**完成 38d0b74** → C2 補 **8cb6fc5**（linux-firmware 等價表釘 sha256、用詞修正、加入 D-046 設計文件）。11 筆規則，新增 INTEL-SA-01315、01209、01152，以及 01280、01372 的 15.x 條件；AMD-SB-7033 新增，7014 補 7 個資料中心微碼條件。PSP 與 FSP 都不收，因為公告沒有寫版本。樣本結果：V540TU 的 ME 18.0 變 affected（01315）；B550M、ASRock 的微碼 0x8012 變 affected，這是 Naples 的 CPUID，可能是 CPUID 層級的誤報，已寫明。2422 passed；CI 綠 → 預驗（獨立代理，sonnet、high）：**通過**（AMD 15 個條件逐值一致；linux-firmware 等價表一致；Intel 只能用同一類摘要工具讀，不算獨立核對；144 個變異沒有存活）→ C2 處理建議 **3eafeb0**（條件的 note 進 basis 與報告；真表的版本線整段比測試；bios-discovery 寫明實作前提；linux-firmware 出處寫完整）→ CI 綠 → **PR #110 已開**，已通知 C0。C0 的驗證排在 #109 之後，**這段期間 #110 不推 commit**。驗證後要改的（已記下）：0x8012 的 note 補「這個 patch 對應的 CPU（資料中心 Naples）不一定能裝在這塊主機板，不代表整塊板子受影響，請負責單位確認」；報告是否也加同一句提示，看 C0 的意見。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
 > 2. **D-046 BIOS 的準備**（只調查與設計，實作等 C1 的 Jetson 介面）：調查代理（sonnet、medium）**完成**，草案 `$AGENT_TMP/dumpling-tmp-c2-d046/design.md` 已送 C0 → **C0 決定 D-059**（wp0/docs-batch-5 18c5fd5）：金鑰列在單一檔案，由人用兩個獨立來源核對，核對前只算 same-origin；OpenPGP 用 gpgv 做成 pipeline/lib 的共用工具；新版本＝新資料夾加 `status: candidate`（firmware_plan 報 GAP「預期值未審」）；ASUS、NUC、NVIDIA 需人工；GitHub 封存照 D-027 (5)。設計文件 docs/notes/c2-bios-discovery.md 已寫好（暫存 `$AGENT_TMP/dumpling-tmp-c2/c2-bios-discovery.md`），跟規則表第二批的 PR 一起進。實作等 C1 的發現介面。
 > 3. **5674 對照表 PR**：等使用者確認後插隊做。
 >
