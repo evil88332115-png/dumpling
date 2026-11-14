@@ -250,6 +250,6 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
   - FAIL（`project.yml` 不合格、資料表壞掉、PyYAML 不在）由 `support-fail` job 讓這一輪變紅。
   - 放在比對前面，報告一定會留在 summary。比對 FAIL 時 compute 失敗、notify 不跑，支援期限的 Issue 延到下一輪（key 不變，晚一天而已）。
   - notify 裡，每日監控的 apply 失敗（例如樂觀鎖），支援期限的 apply 照樣跑（`!cancelled()`）。
-  - 用的是同一個 `dry_run`：排程預設只算不寫，C0 設 `WATCH_REAL_ISSUES=on` 之後才真的開 Issue（D-040）。
+  - **C0 放行（`WATCH_REAL_ISSUES=on`）之前一律只算不寫，手動跑、`dry_run=false` 也一樣**（C0 決定，2026-11-14；D-040 的精神：支援期限的 Issue 和監控 Issue 一起由 C0 放行）。放行之後照 `dry_run`。
 - 輸出在 artifact `watch-support-<round>-<attempt>`（`report.md`、`result.json`、`plan.json`），報告也寫進 job summary。
 - 資料表只有人工維護的項目。Debian、Raspberry Pi OS、Radxa、OMV 由 C4 補（提案 B2）；在那之前，這些平台的 OS 是 NOT_ASSESSED（SBOM 裡的元件），或 ATTENTION（`ours` 的 OS）。
