@@ -738,6 +738,7 @@ CDX_VULN_KEYS = ("bom-ref", "id", "source", "references", "ratings", "cwes", "de
                  "published", "updated", "analysis", "affects")
 CDX_ANALYSIS_KEYS = ("state", "justification", "response", "detail", "firstIssued", "lastUpdated")
 CDX_TOP_KEYS = ("bomFormat", "specVersion", "serialNumber", "version", "metadata", "vulnerabilities")
+CDX_COMPONENT_KEYS = ("type", "bom-ref", "name", "version", "purl")     # 客戶版 VEX 文件內的元件只留這幾個（M7c-1b）
 OPENVEX_TOP_KEYS = ("@context", "@id", "author", "role", "timestamp", "last_updated", "version", "statements")
 OPENVEX_STMT_KEYS = ("@id", "vulnerability", "products", "status", "justification", "impact_statement", "status_notes", "action_statement",
                      "timestamp", "last_updated", "supplier")
@@ -774,6 +775,14 @@ def customer_cdx(bom, stats=None):
             o["properties"] = props
         vulns.append(o)
     out["vulnerabilities"] = vulns
+    # 文件內的元件（內部版把不在產品 SBOM 的元件——例如只供比對的原始碼套件——列在 components，affects 指向它）：客戶版也要帶，
+    # 不然 affects.ref 指到不存在的元件，客戶的工具通常會忽略那筆陳述（M7c-1b，C0 決定）。只帶被參照到的元件、只留
+    # type／bom-ref／name／version／purl，不帶內部屬性。BOM-Link（urn:cdx:…）指向產品 SBOM，不在這份文件裡，不用帶。
+    used = {a.get("ref") for v in vulns for a in (v.get("affects") or []) if isinstance(a, dict) and isinstance(a.get("ref"), str)}
+    comps = [{k: c[k] for k in CDX_COMPONENT_KEYS if k in c} for c in bom.get("components") or []
+             if isinstance(c, dict) and c.get("bom-ref") in used]
+    if comps:
+        out["components"] = comps
     return out
 
 

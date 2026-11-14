@@ -378,3 +378,28 @@ def test_customer_vex_with_not_assessed_end_to_end_state_identical_and_no_dumpli
     assert summ["language_check"]["status"] == "OK" and "dumpling" not in json.dumps(summ).lower()
     # 內部版仍有標記
     assert "dumpling:assessment" in json.dumps(internal) and "dumpling: not assessed" in json.dumps(iv)
+
+
+def test_customer_cdx_every_affects_ref_resolves_and_passes_schema(tmp_path):
+    """M7c-1b（C0 決定）：客戶版 VEX 的每個 affects.ref 都要指得到元件——BOM-Link（urn:cdx:…）指向產品 SBOM，
+    其他（不在產品 SBOM、只供比對的原始碼套件等）要在這份文件的 components 裡，而且只留 type／bom-ref／name／version／purl。
+    原本客戶版沒帶 components，這些陳述全部懸空，客戶的工具通常會忽略它們（A4 讓這類陳述變多）。"""
+    from cdx_schema import cdx_validator
+    scan = make_scan(tmp_path / "scan")
+    _, _, rep = run(make_project(tmp_path / "p", dict(MIN_CFG, role="supplier")), scan)
+    internal = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
+    customer = json.loads((pkg(rep) / "vex.cdx.json").read_text(encoding="utf-8"))
+    local = [a["ref"] for v in internal["vulnerabilities"] for a in v.get("affects") or [] if not a["ref"].startswith("urn:cdx:")]
+    assert local, "測試資料要有不在產品 SBOM 的元件，才測得到"
+    refs = {c["bom-ref"] for c in customer.get("components") or []}
+    for v in customer["vulnerabilities"]:
+        for a in v.get("affects") or []:
+            assert a["ref"].startswith("urn:cdx:") or a["ref"] in refs, a["ref"]
+    assert all(set(c) <= {"type", "bom-ref", "name", "version", "purl"} for c in customer["components"])
+    assert refs == set(local)                                             # 只帶被參照到的元件
+    errs = sorted(e.message for e in cdx_validator().iter_errors(customer))
+    assert not errs, errs[:5]
+    assert json.loads((pkg(rep) / "summary.json").read_text(encoding="utf-8"))["language_check"]["status"] == "OK"
+    # 客戶版辨識「沒有評估」：in_triage 加 detail 的固定句（不另開屬性，D-057）
+    na = [v for v in customer["vulnerabilities"] if v["analysis"].get("detail") == sp.CUSTOMER_NOT_ASSESSED]
+    assert na and all(v["analysis"]["state"] == "in_triage" and "properties" not in v for v in na)
