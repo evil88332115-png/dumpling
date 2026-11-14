@@ -802,3 +802,18 @@ def test_support_end_date_comes_from_support_until(tmp_path):
     assert w.fill_pack_support_end(cfg, "2031-12-31") == ("TO BE COMPLETED", "2031-12")
     c["support"] = None; cfg.write_text(json.dumps(c))                     # "support": null 不讓精靈當掉
     assert w.fill_pack_support_end(cfg, "2031-12-31") == (None, "2031-12")
+
+
+def test_filled_identification_label_follows_platform(tmp_path):
+    """dumpling M7b-4（#58 驗證）：沒寫 identification 時填入的字樣依平台——Jetson 是 Flash package，Raspberry Pi／Rockchip／generic 的
+    磁碟映像不是刷機包，寫 Firmware image；沒給平台照舊 Flash package。填入的 Firmware image 之後也認得、會覆寫成新的檔名與 MD5。"""
+    w = _load_wizard()
+    for plat, label in ((None, "Flash package"), ("jetson", "Flash package"), ("raspberrypi", "Firmware image"),
+                        ("rockchip", "Firmware image"), ("generic", "Firmware image")):
+        d = tmp_path / str(plat)
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps({"product": {"name": "X"}}))
+        st, info = w.override_pack_identification(d / "config.json", "img-v1.img.xz", "c" * 32, plat)
+        assert (st, info[1]) == ("FILLED", f"{label} img-v1.img.xz (MD5 {'c' * 32})"), plat
+        st, info = w.override_pack_identification(d / "config.json", "img-v2.img.xz", "d" * 32, plat)
+        assert st == "OVERRIDDEN" and info[1] == f"{label} img-v2.img.xz (MD5 {'d' * 32})", plat

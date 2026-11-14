@@ -79,7 +79,8 @@ def jetson_independent_version(a, ver, rootfs="rootfs"):
         return {**res, "status": "FAIL", "detail": "sources.yml 版本 %s 的 platform_params.l4t_release 不是 L4T 版本：%r" % (ver, want)}
     res["expected"] = want
     # 掃描：完整掃描那次的 list.json
-    full = next((r.partition("=")[2] for r in a.run if r.partition("=")[0] == ""), None) or (a.run[0].partition("=")[2] if a.run else None)
+    # 只讀完整掃描那次（後綴是空字串）；沒有就 GAP，不退回去讀第一個 run（分層重跑的 list.json 是複製來的，不是這裡要的「掃描讀到的」；M7b-4，#73 C0）
+    full = next((r.partition("=")[2] for r in a.run if r.partition("=")[0] == ""), None)
     lj = os.path.join(full, "scan", "list.json") if full else None
     if not lj or not os.path.isfile(lj) or os.path.islink(lj):
         return {**res, "detail": "沒有刷機包的 list.json（%s）：不是刷機包的掃描，讀不到掃描的 L4T 版本" % ("沒有完整掃描" if not lj else "scan/list.json")}

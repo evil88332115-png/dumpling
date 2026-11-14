@@ -711,6 +711,34 @@ class NotesFollowReleaseMeta(Tmp):
         self.assertIn("本來就一致", out2)
         self.assertEqual(open(notes, encoding="utf-8").read(), text)
 
+    def test_release_meta_also_aligns_scan_summary(self):
+        """M7b-4（#58 驗證建議 5）：scan-summary 附件的 pipeline_status 是 collect 當下算的（少 scan 自己那一列）；
+        release-meta --notes 同時給 --scan-summary 時，用同一份紀錄重寫，三個檔一致。"""
+        import glob
+        f = self.p("steps.tsv")
+        sr.append_row(f, "validate", "OK", 0, "validate: OK")
+        ps.collect(self.ns(steps=f))
+        notes = self.p("rel", "notes.md")
+        summ = glob.glob(self.p("rel", "scan-summary-*.json"))[0]
+        self.assertEqual(json.load(open(summ))["pipeline_status"], "OK")
+        sr.append_row(f, "scan", "GAP", 3, "scan: GAP（沒有標準答案）")
+        out = self.p("m.json")
+        cmd = [sys.executable, "-I", os.path.join(ROOT, "pipeline", "release-meta.py"), "--project", "orin-nano-demo", "--version", "v39.2.1-demo1",
+               "--commit", "a" * 40, "--run-id", "1", "--steps", f, "--notes", notes, "--scan-summary", summ, "--out", out]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("scan-summary 的 pipeline_status 也一致（重寫了）", r.stdout)
+        doc = json.load(open(summ))
+        self.assertEqual((doc["pipeline_status"], json.load(open(out))["pipeline_result"]), ("GAP", "GAP"))
+        self.assertEqual([x["step"] for x in doc["pipeline_steps"]][-1], "pipeline-scan")
+        self.assertIn("**pipeline_result GAP**", self.head())
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertIn("scan-summary 的 pipeline_status 也一致（本來就一致）", r.stdout)
+        with open(summ, "w") as fh:                                                   # 壞掉的 scan-summary → FAIL，不靜默略過
+            fh.write("[1]")
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout)
+
     def test_refresh_equals_a_fresh_collect_with_the_same_rows(self):
         f = self.p("steps.tsv")
         sr.append_row(f, "validate", "OK", 0, "validate: OK")
