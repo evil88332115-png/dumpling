@@ -52,7 +52,7 @@ Project 欄位等於廠商公布的 BIOS 版本（3.40、34.04、18.07、0.59）
 | `not-searched` | 沒有走訪 UEFI 內容（沒有未壓縮的 FV、`uefi_image` 載入不了） | 沒有元件 | NOT_ASSESSED（`no-ami-core-version`） |
 
 - 同一映像內多份 `$FID`（備份 FV、A／B 兩區、FIDT 副本）Core 相同是正常現象，不算矛盾；tag 不同也不算矛盾，只記錄。
-- `read` 但另有帶前導卻不合結構的候選：狀態維持 `read`、候選不採用，但 `complete` 是 false，原因寫進 `incomplete`（SBOM 的 `sca-center:incomplete`、規則表建議的 basis），候選數與原因另寫在 `sca-center:note`。
+- `read` 但另有帶前導卻不合結構的候選：**採用可讀的那份**（D-058），狀態維持 `read`、結構不合的候選不採用，但 `complete` 是 false，原因放在 `incomplete` 的第一項（SBOM 的 `sca-center:incomplete`、規則表建議的 basis 都只取前 3 項，這一項不會被擠掉），BIOS 映像的 `sca-center:ami-core-search` 也寫明「採用了可讀的紀錄，另有 N 個候選結構不合」；候選數與原因另寫在 `sca-center:note`。
 - `complete`：`uefi_image` 的 `undecoded`、`notes`、`parse_errors`、`Stop`、時間上限、去重後內容總量上限、FID 候選數上限都沒有觸發才是完整。不完整時元件加 `sca-center:incomplete`（其他沒解開的地方可能有核心不同的紀錄）。有 coreboot CBFS 的映像一律不完整（CBFS 檔案沒有解開）。
 - Core Major 不是 5：有版本、元件名稱是 `AMI firmware core`、沒有 product（`sca-center:note` 寫明）；規則表 NOT_ASSESSED（`ami-product-unknown`）。
 - 非 AMI 的映像（沒有 AMI 的線索：`ibv_hint` 沒有 AMI、也不是 PFAT 封裝）沒有核心版本是正常的：只在 BIOS 映像元件的 `sca-center:ami-core-search` 記 `not-found`，不加 `sca-center:gap`、不影響狀態；報告的「AMI 核心版本」一節也只寫結果與說明，不寫成 GAP。有 AMI 的線索卻讀不到時才加 gap 與 ATTENTION。
@@ -85,7 +85,7 @@ affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明
 
 有 `ami_core` 元件時，`bios_image` 不比 `ami_core` 規則（同一條規則只出一個建議）；沒有元件時 `bios_image` 比 `ami_core` 規則（列「可能相關的 AMI 公告」，status 不是 `read` 的原因代碼會出現在 BIOS 映像的建議裡）。
 
-另有兩道保險：規則只要有任何 `ami_core` 條件（例如同一筆規則另有 `bios_image` 條件），其他條件判出的 not-affected 也一律降成 NOT_ASSESSED（`ami-core-mapping-unverified`），所以 AMI 規則不會產生 not-affected 與 vendor-statement 依據；`cond_ami` 的輸入 `status` 不是字串或欄位缺漏時回 NOT_ASSESSED，不丟例外。
+另有兩道保險：規則的廠商是 AMI，或規則有任何 `ami_core` 條件時，不論是哪一種條件（`ami_core`、`bios_image` 或日後新增的種類）判出的 not-affected 都降成 NOT_ASSESSED，所以 AMI 規則不會產生 not-affected 與 vendor-statement 依據。降級的原因代碼跟元件的 AMI 核心狀態走：讀到核心是 `ami-core-mapping-unverified`，沒讀到是 `no-ami-core-version`，矛盾或結構不合是 `ami-core-conflict`／`ami-fid-layout-unknown`。用廠商判斷、不在規則表驗證裡要求 AMI 規則一定要有 `ami_core` 條件：D-058 是「AMI 公告第一版不輸出 not-affected」，以廠商判斷涵蓋所有條件種類，也不限制規則表的寫法；`cond_ami` 的輸入 `status` 不是字串或欄位缺漏時回 NOT_ASSESSED，不丟例外。
 
 ## 版本清單的 `ibv-core` 核對
 
@@ -144,6 +144,6 @@ affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明
 
 - 四份 AMI 樣本的核心版本在同一映像內一致，tag 不同（ASRock 的 `…H340`／`…G340`）不算矛盾；專案版本都等於廠商公布的 BIOS 版本（3.40、34.04、18.07、0.59），NUC 的建置時間與 release notes 的 `PATGL357.0059.2026.0819.1045` 一致。核心版本本身沒有廠商公布的獨立佐證。
 - 四份的 `complete` 都是 false：有 `uefi_image` 沒解開的部分（GUID-defined section `CE3233F5-…`、EFI 標準壓縮、結構警告），但 `$FID` 在沒壓縮的開機區塊 FV 與 LZMA 內仍然讀得到。
-- NUC 的 5 份紀錄中有一份來自 `uefi_image` 對錯位資料的後備掃描（module 名稱不是真正的 GUID）；同一映像裡 Core 一致，不影響結果。所以位置只能當線索，不能用 module 名稱過濾。
+- NUC 的 5 份紀錄中有兩份來自 `uefi_image` 對錯位資料的後備掃描（`sca-center:found-in` 的兩個位置，module 名稱 `D1D3A2FF-…` 不是真正的 GUID）；同一映像裡 Core 一致，不影響結果。所以位置只能當線索，不能用 module 名稱過濾。
 - 規則表建議是比對的結果，不是漏洞判定：核心是基底版本，板廠回補的修正看不出來，A1 尚未確認。四份的 `affected` 都會讓報告狀態是 ATTENTION、待人審；AMI 核心的建議沒有 not-affected。
 - 非 AMI 樣本沒有核心版本是正常的，`sca-center:ami-core-search` 記 `not-found`，不加缺口。coreboot 映像的 `complete` 是 false（CBFS 裡的檔案沒有解開），所以 `not-found` 不代表那些檔案裡沒有。

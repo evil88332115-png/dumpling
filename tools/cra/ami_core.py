@@ -160,8 +160,9 @@ def summarize(entries, incomplete=(), truncated=False, max_found=32):
     inc = list(incomplete) + (["more Firmware ID candidates than the search limit; the rest were not looked at"] if truncated else [])
     valid = [e for e in entries if e["ok"]]
     bad = [e for e in entries if not e["ok"]]
-    if valid and bad:           # 有可讀的紀錄，同時有前導正確但結構不合的候選：狀態維持 read，但不能說「所有紀錄都讀到了」
-        inc.append(f"{len(bad)} Firmware ID candidate(s) with the expected preamble do not match the known layout ({'; '.join(sorted({e['why'] for e in bad})[:3])})")
+    if valid and bad:           # 有可讀的紀錄，同時有前導正確但結構不合的候選：狀態維持 read，但不能說「所有紀錄都讀到了」；
+        # 放在最前面：報告、SBOM 與規則表 basis 只取前 3 個原因，這一項不能被走訪層的原因擠掉
+        inc.insert(0, f"{len(bad)} Firmware ID candidate(s) with the expected preamble do not match the known layout ({'; '.join(sorted({e['why'] for e in bad})[:3])})")
     cores = sorted({tuple(e["core"]) for e in valid})
     r = {"performed": True, "complete": not inc, "incomplete": inc, "valid": len(valid), "invalid": len(bad),
          "count": sum(e["seen"] for e in valid), "candidates": [], "bad": [], "found": [], "gaps": []}
@@ -208,7 +209,10 @@ def search_text(s):
     """BIOS 映像元件的 sca-center:ami-core-search：狀態加一句說明。"""
     st = s["status"]
     if st == "read":
-        return (f"read: core {s['core']} from {s['count']} Firmware ID record(s)" + ("" if s["complete"] else "; the search was incomplete: "
+        # 有可讀的紀錄、同時有結構不合的候選時採用可讀的那份（D-058）：BIOS 層級也寫明，不只在元件與 note
+        used = (f"; the readable record(s) were used although {s['invalid']} candidate(s) with the expected preamble do not match the known layout"
+                if s.get("invalid") else "")
+        return (f"read: core {s['core']} from {s['count']} Firmware ID record(s)" + used + ("" if s["complete"] else "; the search was incomplete: "
                 + "; ".join(s["incomplete"][:3])))
     if st == "conflict":
         return "conflict: Firmware ID records disagree on the core version; no value is chosen"

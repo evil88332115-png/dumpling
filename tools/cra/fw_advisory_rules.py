@@ -6,7 +6,7 @@
 這不是漏洞判定：
 - 結果只是**建議**（affected／not-affected／NOT_ASSESSED），由負責單位確認；SBOM 的 dumpling:vuln-assessment 維持 NOT_ASSESSED，這個模組不碰它。
 - 規則是人從官方公告頁讀出來整理的；表有「最後整理日期」，之後的新公告沒有收錄。
-- not-affected 只表示「版本不低於公告列的修正版本」（依據類型 vendor-statement，D-035），不代表沒有其他漏洞（AMI 核心版本例外：D-058 第一版不輸出 not-affected）。
+- not-affected 只表示「版本不低於公告列的修正版本」（依據類型 vendor-statement，D-035），不代表沒有其他漏洞（AMI 的公告例外：D-058 第一版不輸出 not-affected，廠商是 AMI 或有 ami_core 條件的規則，任何條件判出的 not-affected 都降成 NOT_ASSESSED）。
 - 比不到（沒有規則、版本讀不到、順序不確定、版本線不同…）一律 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。
 
 元件種類（固定清單 COMPONENTS，每一種有自己的條件欄位與版本比較函式）：
@@ -713,6 +713,17 @@ def _state_of(table, ids):
     return "+".join(x for x in STATES if x in s)
 
 
+def _ami_downgrade_reason(comp):
+    """AMI 公告的 not-affected 降級時的原因代碼：元件的 AMI 核心版本沒讀到（或矛盾、結構不合）時用那個原因，讀到了才是 ami-core-mapping-unverified。"""
+    a = comp.get("ami_core")
+    st = a.get("status") if isinstance(a, dict) else None
+    if isinstance(st, str) and st in AMI_REASONS:
+        return AMI_REASONS[st][0]
+    if st != "read":
+        return "no-ami-core-version"
+    return "ami-core-mapping-unverified"
+
+
 def evaluate(table_or_err, kind, comp):
     """一個元件（kind ∈ COMPONENTS，bios_image 會同時看 ami_core）對整張表 → 建議。comp 的欄位依 kind（見檔頭與 x86_firmware 的呼叫端）。"""
     if isinstance(table_or_err, TableError):
@@ -731,10 +742,11 @@ def evaluate(table_or_err, kind, comp):
                 if kind == "bios_image":
                     related.append(r["id"])
             res = evaluate_condition(table, c, comp)
-            if res["result"] == "not-affected" and any(x["component"] == "ami_core" for x in r["match"]):
-                # 規則只要有 ami_core 條件就不採用 not-affected（D-058：A1 未確認，第一版不輸出）；其他條件（例如 bios_image）判出的 not-affected 一樣降級
-                res = _r("NOT_ASSESSED", "ami-core-mapping-unverified",
-                         "the rule has an AMI core condition and no not-affected suggestion is given for it until the mapping (A1) is confirmed; " + res["detail"])
+            if res["result"] == "not-affected" and (r["vendor"] == "AMI" or any(x["component"] == "ami_core" for x in r["match"])):
+                # AMI 的公告（廠商是 AMI，或規則有 ami_core 條件）不採用 not-affected（D-058：A1 未確認，第一版不輸出）；
+                # 不論是哪一種條件（ami_core、bios_image 或日後新增的種類）判出的 not-affected 都降級
+                res = _r("NOT_ASSESSED", _ami_downgrade_reason(comp),
+                         "AMI advisories give no not-affected suggestion until the mapping of the core's notation (A1) is confirmed (D-058); " + res["detail"])
             res.update(rule=r["id"], condition=j, state=r["review"]["state"], sources=[s["url"] for s in r["sources"]])
             if res["result"] == OUT:
                 other_scope.append(res)

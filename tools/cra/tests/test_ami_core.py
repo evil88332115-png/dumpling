@@ -80,6 +80,10 @@ def test_valid_record_fields():
     ({"fields": b"05\0" + b"1\0\0" + b"34\0" + b"04\0"}, "two ASCII digits"),
     ({"fields": "５".encode() + b"17\0" + b"34\0" + b"04\0"}, "two ASCII digits"),               # 全角數字：str.isdigit() 會收，位元組檢查不會
     ({"fields": b"05\0" + b"17\0" + b"34\0" + b"0\n\0"}, "two ASCII digits"),
+    ({"fields": b" 5\0" + b"17\0" + b"34\0" + b"04\0"}, "two ASCII digits"),                # 空白：不能當成數字
+    ({"fields": b"05\0" + b"1 \0" + b"34\0" + b"04\0"}, "two ASCII digits"),
+    ({"fields": b"05\0" + b"17\0" + b"\t4\0" + b"04\0"}, "two ASCII digits"),
+    ({"fields": b"05\0" + b"17\0" + b"34\0" + b"0\x0b\0"}, "two ASCII digits"),
 ])
 def test_invalid_records_are_refused(kw, why):
     rec = make_fid(**kw)
@@ -261,6 +265,14 @@ def test_walk_candidate_cap_is_incomplete(monkeypatch):
     assert a["valid"] == 2 and not a["complete"] and any("search limit" in x for x in a["incomplete"])
 
 
+def test_walk_block_with_too_many_fid_candidates_is_incomplete():
+    """一塊內容裡的 `$FID` 超過 MAX_PER_BLOCK：走訪層要把結果標成不完整（不只 find_fid 單元層）。"""
+    many = walk(fv([ffs_g(G1, sec(0x19, (SUB + make_fid()) * (ami.MAX_PER_BLOCK + 5)))]))["ami_core"]
+    assert many["status"] == "read" and not many["complete"] and any("search limit" in x for x in many["incomplete"])
+    few = walk(fv([ffs_g(G1, sec(0x19, (SUB + make_fid()) * (ami.MAX_PER_BLOCK - 1)))]))["ami_core"]
+    assert few["status"] == "read" and few["complete"] and not few["incomplete"]
+
+
 def test_walk_failure_to_load_ami_core_is_not_searched(monkeypatch):
     gfx = xf.load_sibling("uefi_gfx")
     real = gfx._sibling
@@ -416,6 +428,22 @@ def test_sbom_has_the_core_component_under_the_bios_image_with_basis_and_suggest
     assert props(bios, "sca-center:ami-core-search")[0].startswith("read: core 5.17 from 2 Firmware ID record(s)")
     assert props(bios, "dumpling:advisory-rule-related") == [] and props(bios, "dumpling:advisory-rule-suggestion") == ["NOT_ASSESSED"]
     assert not any(w in str(comps) for w in ("PASS", "安全", "不適用", "不受影響"))
+
+
+def test_ami_core_section_escapes_every_field():
+    """「AMI 核心版本」一節裡來自映像的字串欄位（tag、專案版本、位置、說明、原因）都要經過 md_esc：不能變成連結、提及或表格欄。
+    核心版本、產品、公告寫法、建置時間是程式從整數、固定表或日期格式化產生的，不在這個測試的範圍。"""
+    evil = "[x](http://e.test) @everyone | <b>"
+    rec = make_fid(tag=b"[a](b)")
+    a = ami.summarize(entries(rec))
+    a = {**a, "found": [evil], "note": evil, "projects": [evil], "complete": False, "incomplete": [evil]}
+    bad = {"status": "layout-unknown", "bad": [{"why": evil, "form": evil, "head": "00", "found": [evil]}], "gaps": [evil], "incomplete": [evil],
+           "complete": False}
+    conflict = {"status": "conflict", "candidates": [{"core": evil, "tag": evil, "project": evil, "found": [evil]}], "gaps": [evil], "incomplete": [], "complete": True}
+    for st in (a, conflict, bad):
+        md = "\n".join(xf.ami_core_markdown({"ami_core": st, "ibv_hint": "AMI"}))
+        assert "[x](" not in md and "[a](" not in md and "@everyone" not in md and "<b>" not in md, md
+        assert "\\[x\\]" in md and "@\u200beveryone" in md and "\\|" in md
 
 
 def test_sbom_incomplete_walk_marks_the_component(tmp_path):
@@ -582,6 +610,41 @@ def test_rule_with_an_ami_core_condition_never_gives_not_affected_from_another_c
     assert res["suggestion"] == "not-affected"
 
 
+def test_ami_rule_with_only_a_bios_image_condition_never_gives_not_affected(tmp_path):
+    """廠商是 AMI、條件只有 bios_image（沒有 ami_core）：判出的 not-affected 也降成 NOT_ASSESSED（D-058），不帶 vendor-statement。"""
+    r = rule("AMI-SA-2026001", [{"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "3000"}], "AMI", url=AMI_PDF)
+    t = build(tmp_path, doc(r))
+    for has_core, a, want in ((True, {"status": "read", "major": 5, "minor": 17, "product": "Aptio V", "complete": True}, "ami-core-mapping-unverified"),
+                              (False, {"status": "not-found", "complete": False}, "no-ami-core-version"),
+                              (False, {"status": "conflict", "complete": False}, "ami-core-conflict"),
+                              (False, {"status": "layout-unknown", "complete": False}, "ami-fid-layout-unknown"),
+                              (False, None, "no-ami-core-version")):
+        comp = {"file": "PRIME.cap", "declared_version": "3404", "ami": True, "ami_core": a, "ami_core_component": has_core}
+        res = fr.evaluate(t, "bios_image", comp)
+        assert (res["suggestion"], res["reason"], res["rule_ids"], res["evidence"]) == ("NOT_ASSESSED", want, [], []), (a, res)
+        assert not any(x["result"] == "not-affected" for x in res["results"]) and "vendor-statement" not in res["basis"]
+        res = fr.evaluate(t, "bios_image", {**comp, "declared_version": "2000"})     # 低於 3000：affected 照常
+        assert res["suggestion"] == "affected" and res["rule_ids"] == ["AMI-SA-2026001"]
+
+
+@pytest.mark.parametrize("status", [["conflict"], {"conflict": 1}, 5, None, b"read"])
+def test_downgrade_reason_with_an_odd_status_type_is_not_an_exception(tmp_path, status):
+    r = rule("AMI-SA-2026001", [{"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "1.0"}], "AMI", url=AMI_PDF)
+    res = fr.evaluate(build(tmp_path, doc(r)), "bios_image", {"file": "PRIME.cap", "declared_version": "9.0", "ami": True,
+                                                              "ami_core": {"status": status}, "ami_core_component": False})
+    assert (res["suggestion"], res["reason"], res["evidence"]) == ("NOT_ASSESSED", "no-ami-core-version", [])
+
+
+def test_mixed_rule_downgrade_reason_follows_the_core_status(tmp_path):
+    """混合條件被降級時，原因代碼跟元件的 AMI 核心狀態走：沒讀到是 no-ami-core-version，讀到才是 ami-core-mapping-unverified。"""
+    r = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V", "fixed_in": "AptioV_5.044"},
+                                {"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "1.0"}], "AMI", url=AMI_PDF)
+    t = build(tmp_path, doc(r))
+    res = fr.evaluate(t, "bios_image", {"file": "PRIME.cap", "declared_version": "9.0", "ami": False, "ami_core": {"status": "not-found"},
+                                        "ami_core_component": False})
+    assert (res["suggestion"], res["reason"]) == ("NOT_ASSESSED", "no-ami-core-version") and res["evidence"] == []
+
+
 @pytest.mark.parametrize("status", [None, 5, ["read"], {"read": 1}, b"read", 1.5, True, ("read",)])
 def test_non_string_status_is_not_assessed_not_an_exception(status):
     r = cond({"status": status, "major": 5, "minor": 17, "product": "Aptio V"})
@@ -618,6 +681,9 @@ def test_read_with_a_malformed_candidate_is_incomplete_and_says_so_in_the_basis(
     assert props(c, "dumpling:advisory-rule-suggestion") == ["affected"]
     assert "do not match the known layout" in props(c, "dumpling:advisory-rule-basis")[0]
     assert "do not match the known layout" in props(c, "sca-center:incomplete")[0]
+    bios = next(x for x in comps if props(x, "sca-center:ami-core-search"))            # BIOS 層級的揭露：SBOM 與報告都要有（不只 search_text 單元層）
+    assert "the readable record(s) were used although 1 candidate(s)" in props(bios, "sca-center:ami-core-search")[0]
+    assert "were used although 1 candidate(s)" in xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
 
 
 def test_found_in_has_no_identical_lines(tmp_path):
@@ -698,6 +764,30 @@ def test_conflict_and_layout_unknown_are_attention_even_without_an_ami_hint(tmp_
         bios = next(x for x in comps if x["name"].startswith("x"))
         assert any("AMI core version" in g for g in props(bios, "sca-center:gap"))
         assert "- GAP：" in xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
+        ra = next(p for p in props(bios, "dumpling:advisory-rule-reason"))                      # bios_image 也看得到 AMI 規則：原因代碼是 conflict／layout-unknown，不是 no-rule
+        assert ra in ("ami-core-conflict", "ami-fid-layout-unknown"), ra
+        assert "AMI-SA-2026001" in " ".join(props(bios, "dumpling:advisory-rule-related"))
+
+
+def test_bad_candidate_reason_survives_the_three_reason_cut():
+    """走訪層已有 3 個不完整的原因時，「結構不合的候選」仍要出現在 basis 與 SBOM 的 incomplete（取前 3 個）。"""
+    a = ami.summarize(entries(make_fid()) + entries(make_fid(rev=9)), incomplete=["cbfs", "undecoded", "notes"])
+    assert a["status"] == "read" and not a["complete"] and "do not match the known layout" in a["incomplete"][0]
+    assert "do not match the known layout" in cond(a)["detail"]
+
+
+def test_bios_level_search_text_discloses_that_the_readable_record_was_used():
+    a = ami.summarize(entries(make_fid()) + entries(make_fid(rev=9), make_fid(rev=8)))           # 1 份可讀、2 份結構不合：數字要是不合的那個
+    t = ami.search_text(a)
+    assert t.startswith("read: core 5.17") and "the readable record(s) were used although 2 candidate(s)" in t
+    assert "were used although" not in ami.search_text(ami.summarize(entries(make_fid())))
+
+
+def test_affected_detail_treats_a_missing_complete_flag_as_incomplete():
+    a = summ(5, 17)
+    del a["complete"]
+    r = cond(a)
+    assert r["result"] == "affected" and "different core version" in r["detail"]
 
 
 def test_cbfs_flag_reaches_the_search_through_uefi_gfx_search():
