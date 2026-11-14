@@ -295,6 +295,61 @@ scan_worst(){  # 同 jetson.sh：sca-scan 的 status.tsv → 最嚴重的狀態�
     NR>1 && !($2=="NOT_RUN" && ($1 ~ /^E-(package-scan-submit|package-scans|package-scan-update|license-sync|copyrights|files-scan)$/ || (vo && $1 ~ /^E-/))) {
       v=(($2 in r)?r[$2]:5); if(v>m){m=v;w=(($2 in r)?$2:"FAIL")} } END{print (NR<2?"FAIL":w)}' "$1"; }
 
+run_params(){
+  # <結果>/run-params.json（M7b）：這次掃描的參數，結構化記錄（原本只在 A-env 的說明文字與 log）。carried＝重跑時從上一次沿用、
+  # 這次沒有重做的狀態列（stage → 上一次的狀態）；判定與報告讀這裡，不從說明文字推「是不是沿用的」。
+  python3 -I - "$OUT/run-params.json" "${RESCAN:-}" "$NOUP" "$LICENSE" "${UEFISRC:+1}" "${TEESRC:+1}" "${PLATFORM:-}" "${KOTHER:-}" \
+      "${MIRROR_REFRESH_STATUS-/var/lib/sca-gitlab/refresh-status.tsv}" "${ARCHIVE:+archive}${SRCDIR:+dir}" "${RKFMT:-}" <<'PY'
+import json,sys
+o,rescan,noup,lic,uefi,tee,plat,kother,mrs,src,rk=sys.argv[1:12]
+json.dump({"schema":"dumpling-flash-run-params/1","rescan":bool(rescan),"rescan_from":rescan or None,"no_upload":noup=="1",
+           "license":lic=="1","uefi_source_given":uefi=="1","tee_source_given":tee=="1","platform":plat or None,
+           "kernel_in_other_report":kother or None,"mirror_freshness_checked":bool(mrs),"flash_source":src or None,
+           "disk_format":rk or None,"carried":{}},open(o,"w"),ensure_ascii=False,indent=1,sort_keys=True)
+PY
+}
+carry_row(){
+  # 重跑：上一次 status.tsv 的這一列原樣帶到這次（狀態不變，說明註明沿用），並記進 run-params.json 的 carried。
+  # 上一次同一列有多列時取最嚴重的（同 pipeline/lib/status_tsv.py）。上一次沒有這一列：第二個參數 required＝原掃描應該要有
+  # （例如有 rootfs 的 SBOM 就一定讀過 rootfs）→ 寫 GAP「原掃描沒有這一列」，carried 記 MISSING（cra_report 遇到缺列會略過，不能讓缺口沿用下去；
+  # #95 C0）；沒有 required → 不寫（不推測）。
+  # CARRIED_ST：這次寫了什麼（上一次的狀態、MISSING，或空的＝沒寫），呼叫端據此決定要不要再做那一步。
+  # 挑列的規則和 pipeline/lib/status_tsv.py 完全相同（取最嚴重、OK 有重複 → ATTENTION）；tests/test_platform_status_tsv.py 拿這段 PICK 和它比對
+  local stage=$1 required=${2:-} row st d
+  CARRIED_ST=
+  row=$(python3 -I - "$RESCAN/status.tsv" "$stage" 2>/dev/null <<'PICK'
+import sys
+SEV = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
+path, stage = sys.argv[1], sys.argv[2]
+best, n = None, 0
+with open(path, encoding="utf-8", newline="") as f:
+    for line in f:
+        p = line.rstrip("\r\n").split("\t", 2)
+        if len(p) < 2 or p[0] == "stage" or p[0] != stage:
+            continue
+        n += 1
+        new = (p[1], p[2] if len(p) > 2 else "")
+        if best is None or SEV.get(new[0], 1) >= SEV.get(best[0], 1):
+            best = new
+if best is not None:
+    if n > 1 and best[0] == "OK":
+        best = ("ATTENTION", "status.tsv 有 %d 列 %s（取最嚴重的一列是 OK；重複列代表檔案被改過或寫檔有 bug，要有人看過）：%s" % (n, stage, best[1]))
+    print("%s\t%s" % best)
+PICK
+)
+  if [ -z "$row" ]; then
+    [ -n "$required" ] || return 0
+    st=MISSING; status "$stage" GAP "上一次（--rescan-from）沒有這一列，原掃描應該要有（$required）：沒有結果可以沿用，不能當成沒問題"
+  else
+    st=${row%%$'\t'*}; d=${row#*$'\t'}
+    status "$stage" "$st" "沿用上一次（--rescan-from，這次沒有重做）：$d"
+  fi
+  CARRIED_ST=$st
+  python3 -I - "$OUT/run-params.json" "$stage" "$st" <<'PY' || status A-run-params FAIL "run-params.json 寫不進沿用的 $stage"
+import json,sys
+p,k,v=sys.argv[1:4]; d=json.load(open(p)); d.setdefault("carried",{})[k]=v; json.dump(d,open(p,"w"),ensure_ascii=False,indent=1,sort_keys=True)
+PY
+}
 cra_step(){
   # ---------- D. CRA 文件草稿（每個 rootfs；一般掃描與 --rescan-from 共用） ----------
   local v=$1 D=$OUT/$1 P ca cnote mf r x s
@@ -479,6 +534,7 @@ uefibin_step(){
   local U=$OUT/$1/uefi-source r s d x lim=${UEFIBIN_TIMEOUT:-7200} uj=()
   [ -z "$RKFMT" ] || return 0
   [ ! -f "$OUT/uefi-binary-check.json" ] || return 0
+  [ -z "${UEFIBIN_DONE:-}" ] || return 0       # 重跑：已經沿用上一次的 B-uefi-binary（或寫了 GAP），不再寫第二列
   if [ ${#SRC[@]} -eq 0 ]; then status B-uefi-binary NOT_RUN "沒有 --archive／--dir：沒有核對刷機包的 UEFI 映像與原始碼是否一致"; return 0; fi
   [ -f "$OUT/flash-inventory.json" ] || { status B-uefi-binary NOT_RUN "沒有 flash-inventory.json"; return 0; }
   [ ! -f "$U/uefi-source.json" ] || uj=(--uefi-json "$U/uefi-source.json")
@@ -665,6 +721,8 @@ else
 status A-env INFO "$(id -un)@$(hostname)；$(uname -m)；docker $(docker version --format '{{.Server.Version}}' 2>/dev/null)（資料 $droot，可用 $(gib "$(free_bytes "$droot")")）；syft $(syft version 2>/dev/null | sed -n 's/^Version:[[:space:]]*//p')；grype $(grype version 2>/dev/null | sed -n 's/^Version:[[:space:]]*//p')；python $(python3 -V 2>&1 | cut -d' ' -f2)；解壓 $unz；來源 ${ARCHIVE:-$SRCDIR}；結果 $OUT（可用 $(gib "$(free_bytes "$OUT")")）；PILOT_ENV $([ $NOUP = 1 ] && echo '不用（--no-upload）' || echo "$PILOT_ENV")；$([ $LICENSE = 1 ] && echo 含授權 || echo 只做漏洞)$PATH_NOTE"
 fi
 
+run_params || status A-run-params FAIL "寫不出 run-params.json"
+
 # ---------- 重跑比對（--rescan-from）：上一次的 SBOM → sca-scan --sbom；核心建置設定從刷機包讀 ----------
 if [ -n "$RESCAN" ]; then
   # 刷機包要是上一次的同一個（list.json 記的檔名與大小；資料夾記路徑）：不然核心的 .config 可能不是這個產品的
@@ -683,8 +741,21 @@ else:
   cp "$RESCAN/list.json" "$OUT/list.json" && { [ ! -f "$RESCAN/flash-inventory.json" ] || cp "$RESCAN/flash-inventory.json" "$OUT/"; } \
     || { status A-rescan FAIL "無法複製上一次的 list.json"; finish; }
   # 上一次的 UEFI 映像與原始碼的對照：這次有給原始碼樹時重做（uefisrc_step），否則沿用
-  { [ -n "$UEFISRC" ] || [ ! -f "$RESCAN/uefi-binary-check.json" ] || [ -L "$RESCAN/uefi-binary-check.json" ] || cp -- "$RESCAN/uefi-binary-check.json" "$OUT/"; } \
-    || status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"
+  # 沿用時 B-uefi-binary 那一列也帶過來（M7b：原本沒帶，cra_report 讀不到這一列就略過，-bsp 報告會比原掃描樂觀）
+  # 上一次有這一列就沿用（不看有沒有 uefi-binary-check.json：沒有刷機包、逾時或失敗時只寫列、不寫 json；#95 C0 驗證）；
+  # 上一次沒有這一列，但有 json 或 run-params.json 記了給過 --uefi-source → GAP（原掃描應該要有）。沿用或寫了 GAP 之後
+  # uefibin_step 不再寫第二列（UEFIBIN_DONE）。
+  if [ -z "$UEFISRC" ]; then
+    if [ -f "$RESCAN/uefi-binary-check.json" ] && [ ! -L "$RESCAN/uefi-binary-check.json" ]; then
+      cp -- "$RESCAN/uefi-binary-check.json" "$OUT/" || status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"
+    fi
+    ureq=
+    [ -f "$RESCAN/uefi-binary-check.json" ] && ureq="上一次有 uefi-binary-check.json"
+    [ "$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("uefi_source_given") is True)' "$RESCAN/run-params.json" 2>/dev/null)" = True ] \
+      && ureq="上一次給了 --uefi-source（run-params.json 的 uefi_source_given）"
+    carry_row B-uefi-binary "$ureq"
+    [ -z "$CARRIED_ST" ] || UEFIBIN_DONE=1
+  fi
   extra_step
   # Rockchip：上一次的分割區表的狀態照樣列出（MD5 結尾、沒有掃描的分割區、沒讀到的項目）；Jetson 的 list.json 沒有 rockchip，不印
   r=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --if-present 2>&1)
@@ -717,7 +788,9 @@ else:
     if [ ! -s "$sb" ] && [ -s "$sb.xz" ]; then xz -dc "$sb.xz" > "$WORK/$v.sbom.cdx.json" && sb=$WORK/$v.sbom.cdx.json; fi
     if [ ! -s "$sb" ]; then status "B-rescan-$v" FAIL "上一次沒有 $v 的 SBOM（$RESCAN/$v/scan/sbom/sbom.cdx.json）"; continue; fi
     VARS+=("$v"); D=$OUT/$v; mkdir -p "$D/logs"
+    # rootfs 沒有重讀：上一次的 B-rootfs-tar-<v>（rootfs 有讀不到、略過的項目）也帶過來（M7b：原本沒帶，-bsp／-os 會比原掃描樂觀）
     [ -f "$RESCAN/$v/rootfs-tar.json" ] && cp "$RESCAN/$v/rootfs-tar.json" "$D/"
+    carry_row "B-rootfs-tar-$v" "上一次有 $v 的 SBOM，就一定讀過 rootfs"
     # 上一次的人工判定與批次規則（CRA/Config 的 vex-*.json）與安全測試的決定帶到這次：不帶就會回到全部未評估（config.json 照樣重新產生）
     carry_decisions "$RESCAN" "$v" "B-rescan-config-$v" "上一次的" || true
     if [ -s "$RESCAN/$v/pkgdb/dpkg-status" ]; then
