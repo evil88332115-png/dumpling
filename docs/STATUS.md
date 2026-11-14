@@ -2,12 +2,12 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 08:02 +0800（C2）
+最後更新：2026-11-14 08:04 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
-- 目前在做：M8 #69、M7a2 #65 已合併；C1 做 M7b、C2 做 advisory-polish、C3 跑 art14 drill＋後續小 PR；等 C4 的 M6（重跑等使用者同意）；問使用者 5674、正式 tag、刪分支、私有檔
+- 目前在做：**正式 tag 已推**（使用者下指令，C0 執行；orin-nano-demo/v39.2.0-demo1、v39.2.1-demo1 → 0be7bc2；release run 43531550072、43531550316），等 C1 核對正式 Release → C3 第一次真實基準；驗證 #92；等 C3 的 #91、C2 的規則表
 - 分支／PR／commit：main c3d7ffe。已合併：**#85**（T-10 art14 GitLab 版：倒數只取可信成員紀錄留言、逐案隔離、token 權限先查；沒對真實 GitLab 驗證）、**M7b #73**（版本＝tag 加獨立來源：sources.yml l4t_release 對掃描 L4T 版本；Jetson 驗收 independent OK）、**#84**（T-23 GitLab 範本接 support.py；C0 直接審閱）、**#74**（T-05 GitLab 後端：confidential 寫死、quick action 擋在寫入前、token 只送 API 主機；沒有對真實 GitLab 驗證）、**#72**（GitLab 範本 P1：先驗再傳、手動試跑不寫入、NOT_RUN exit 3、MR 去重；C0 驗證不通過 3 項 → 已修、C0 複核）、**#71**（M8 後續：art14 演練標示範專案、stateless plan 限制與測試）、**M8 #69**（B1 第 14 條通報演練、B2 支援期限／EOL 每日檢查）、**M7a2 #65**（validate_table 支援 vbios 列、mirror_info、公告編號限數字；C0 直接審閱）、**#61**（GitLab release-meta 補 --notes，C0 直接審閱）、**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
 - 代理：1 個驗證代理（Sonnet 5.5）：獨立驗證 C1 的 M7b-2 #92（e038b3b），worktree `$AGENT_TMP/dumpling-wt-c0-verify-92`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-92/report.md`
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
@@ -18,7 +18,7 @@
   - C4（第二台）：wp7/adapters 已併 main b56cff4（89bb415，PROVENANCE 衝突已手動合併；c4-wp7 89 項等 OK）。M6 最終重跑在 89bb415 上，**等使用者同意重啟派送腳本**；通過後開 M6 PR
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
-  2. M2 合併後：使用者決定合併後馬上打 tag（D-052），**等使用者自己推或放行 C1**；文件批次 #41 已合併；C2／C3／C4 已通知
+  2. M2 合併後：正式 tag 已推（2026-11-14，0be7bc2，release run 43531550072、43531550316），等 C1 核對；文件批次 #41 已合併；C2／C3／C4 已通知
   3. （完成）#39、#48 已合併；私有檔驗證與複核由 C0 用使用者提供的 3 份樣本完成（暫存在 C0 的 scratchpad，待使用者決定刪除）
   4. 監控 real Issue：#49 已合併 → 等正式 Release（tag）→ 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
   5. M7：照 D-056 拆成 M7a～M7f（C1），每個 PR C0 派獨立驗證；M7c～M7e 改 Jetson 標準答案前要先經 C0 同意
