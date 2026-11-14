@@ -372,9 +372,37 @@ class VersionState(unittest.TestCase):
         self.assertEqual(subprocess.run(cli[:-1], capture_output=True, text=True).returncode, 64)
 
     def test_jetson_scan_sh_uses_it(self):
+        """scan.sh 的版本核對那一段（vs=… 到 case …）與最後的結束碼那一行，實際用 bash 執行（#98 C0 驗證 3：不只比對原始碼字串）。
+        OK → 狀態不變；GAP／NOT_SET／讀不到 → GAP（結束碼 3）；FAIL → FAIL（結束碼 1，不降成 GAP；C4 的平台會照抄這段）。"""
+        import re
+        import subprocess
         src = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
-        self.assertIn('platform_scan.py" version-state "$out/scan.json"', src)
-        self.assertLess(src.index("version-state"), src.index('case $state in OK|ATTENTION) exit 0;; *) exit 3;; esac'))
+        block = re.search(r"^vs=\$\(python3 -I \"\$root/pipeline/lib/platform_scan\.py\" version-state .*?\n^case \$\{vs%%.*?esac.*?$", src, re.M | re.S).group(0)
+        final = re.search(r"^case \$state in OK\|ATTENTION\).*?esac", src, re.M).group(0)
+        tmp = tempfile.mkdtemp(prefix="dumpling-vsnip-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        def run(pvc, state="OK"):
+            if pvc is not None:
+                w(os.path.join(tmp, "scan.json"), json.dumps({"product_version_check": pvc}))
+            elif os.path.exists(os.path.join(tmp, "scan.json")):
+                os.remove(os.path.join(tmp, "scan.json"))
+            sh = 'root=%s; out=%s; state=%s; msg=m\n%s\necho "$state|$msg"\n%s\n' % (ROOT, tmp, state, block, final)
+            r = subprocess.run(["bash", "-c", sh], capture_output=True, text=True)
+            return r.returncode, r.stdout.strip()
+
+        rc, out = run({"status": "OK"})
+        self.assertEqual((rc, out), (0, "OK|m"))
+        rc, out = run({"status": "OK"}, state="ATTENTION")
+        self.assertEqual((rc, out), (0, "ATTENTION|m"))
+        for pvc in ({"status": "GAP", "independent": {"detail": "沒有來源"}}, {"status": "NOT_SET"}, None):
+            rc, out = run(pvc)
+            self.assertEqual(rc, 3, (pvc, out))
+            self.assertTrue(out.startswith("GAP|m；"), out)
+        rc, out = run({"status": "FAIL", "failures": ["x"]})
+        self.assertEqual((rc, out.split("|")[0]), (1, "FAIL"), out)
+        rc, out = run({"status": "GAP"}, state="FAIL")                  # 前面已經是 FAIL：版本核對的 GAP 不會把它降成 GAP
+        self.assertEqual((rc, out.split("|")[0]), (1, "FAIL"), out)
 
 
 if __name__ == "__main__":

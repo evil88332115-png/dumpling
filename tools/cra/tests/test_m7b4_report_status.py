@@ -1,12 +1,16 @@
 """M7b-4 報告判定：B-bootloader-coverage（D-054）與 C-kernel-boot 進報告狀態（summary.json 的 status、documents.risk-assessment），
 但不進漏洞資料狀態（risk_st），所以不擋 VEX 發行閘門（vex.gate）；非 OK 的列進待確認事項表。合成資料。"""
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
-import cra_report as cr
-from test_cra_report import EXAMPLE, FINDINGS, SBOM, make_project, make_scan, run
-from test_confirm_items import keys, read_csv
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))      # 單獨跑這個檔也找得到 cra_report（#98 C0 驗證 2）
+sys.path.insert(0, str(Path(__file__).resolve().parent))             # test_cra_report、test_confirm_items
+import cra_report as cr  # noqa: E402
+from test_cra_report import EXAMPLE, FINDINGS, SBOM, make_project, make_scan, run  # noqa: E402
+from test_confirm_items import keys, read_csv  # noqa: E402
 
 V = "rootfs_no_gui"
 BK = f"B-bootloader-coverage-{V}"

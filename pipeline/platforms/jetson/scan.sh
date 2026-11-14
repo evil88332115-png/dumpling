@@ -141,7 +141,7 @@ esac
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi   # GAP 比 ATTENTION 重，蓋過它
 # 版本核對（product_version_check）不是 OK → scan 步驟記 GAP（M7b-4；共用函式，各平台的 scan 腳本照這樣呼叫）
 vs=$(python3 -I "$root/pipeline/lib/platform_scan.py" version-state "$out/scan.json" 2> /dev/null) || vs=$'GAP\tversion-state 執行失敗：版本沒有核對'
-case ${vs%%$'\t'*} in OK) ;; *) state=GAP; msg="$msg；${vs#*$'\t'}";; esac
+case ${vs%%$'\t'*} in OK) ;; FAIL) state=FAIL; msg="$msg；${vs#*$'\t'}";; *) [ "$state" = FAIL ] || state=GAP; msg="$msg；${vs#*$'\t'}";; esac   # FAIL 不降成 GAP（其他平台照抄這段）
 {
   echo "## scan（$DUMPLING_PROJECT $ver）"
   echo "- 狀態：$state（$msg）"
@@ -149,4 +149,4 @@ case ${vs%%$'\t'*} in OK) ;; *) state=GAP; msg="$msg；${vs#*$'\t'}";; esac
   [ ! -f "$out/steps-summary.md" ] || { echo; cat "$out/steps-summary.md"; }
 } > "$out/summary.md"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
-case $state in OK|ATTENTION) exit 0;; *) exit 3;; esac   # ATTENTION 不是 GAP：scan 步驟記 OK，整體狀態由 pipeline-steps.tsv 的 ATTENTION 列表示
+case $state in OK|ATTENTION) exit 0;; FAIL) exit 1;; *) exit 3;; esac   # ATTENTION 不是 GAP：scan 步驟記 OK，整體狀態由 pipeline-steps.tsv 的 ATTENTION 列表示
