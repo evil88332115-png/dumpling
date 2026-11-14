@@ -1893,6 +1893,8 @@ def rule_props(res):
     if res.get("reason"):
         out.append(prop("dumpling:advisory-rule-reason", res["reason"]))
     out.append(prop("dumpling:advisory-rule-basis", res["basis"]))
+    if res.get("verification"):
+        out.append(prop("dumpling:advisory-rule-verification", ", ".join(f"{k}={v}" for k, v in sorted(res["verification"].items()))))
     if res["suggestion"] == "not-affected":
         out += [prop("dumpling:evidence", "vendor-statement"), prop("dumpling:evidence-location", ", ".join(res["evidence"]))]
     if res.get("related"):
@@ -2462,14 +2464,17 @@ def rules_section(inv, rules=None):
         holder["rule_advisory"] = r
         results.append(r)
         items.append({"image": img, "component": label, "kind": kind, "suggestion": r["suggestion"], "reason": r.get("reason"),
-                      "rule_ids": r["rule_ids"], "state": r["state"], "related": r["related"], "evidence": r["evidence"]})
-    sec = {"status": "OK" if table is not None else "GAP", "components": len(results), "counts": mod.counts(results), "items": items}
+                      "rule_ids": r["rule_ids"], "state": r["state"], "related": r["related"], "evidence": r["evidence"],
+                      "verification": r.get("verification", {})})
+    sec = {"status": "OK" if table is not None else "GAP", "components": len(results), "counts": mod.counts(results), "items": items,
+           "errors": sum(1 for x in items if x["reason"] == "match-error")}
     if table is not None:
         c = table.counts()
         sec["table"] = {"schema": mod.SCHEMA, "updated": table.updated, "rules": len(table.rules), "preliminary": c["preliminary"],
                         "confirmed": c["confirmed"], "sha256": table.sha256, "ids": [r["id"] for r in table.rules],
                         "rules_info": [{"id": r["id"], "vendor": r["vendor"], "title": r["title"], "published": r["published"], "state": r["review"]["state"],
                                         "preliminary_by": r["review"]["preliminary_by"], "preliminary_at": r["review"]["preliminary_at"],
+                                        "verification": table.verification(r["id"]),
                                         "confirmed_by": r["review"].get("confirmed_by"), "confirmed_at": r["review"].get("confirmed_at"),
                                         "sources": [x["url"] for x in r["sources"]]} for r in table.rules]}
     else:
@@ -2524,6 +2529,8 @@ def status_of(inv):
     ra = inv.get("rules_advisory")
     if ra and ra["status"] == "GAP" and ra["components"]:
         att.append(f"廠商公告規則表不能用（GAP，{ra['gap']}）；{ra['components']} 個元件的規則建議都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準")
+    if ra and ra.get("errors"):         # 比對本身出錯（match-error）：那些元件是 NOT_ASSESSED，但不能當成「沒有東西」：保守標 ATTENTION
+        att.append(f"規則表比對出錯：{ra['errors']} 個元件的規則比對丟出例外（match-error，結果是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），請看 fw-inventory.json 的 rules_advisory")
     if ra:
         aff = [x for x in ra["items"] if x["suggestion"] == "affected"]
         if aff:                # affected 的建議（即使規則還是初審）一律 ATTENTION、待人審；not-affected 與 NOT_ASSESSED 不會讓狀態變好或變差
@@ -2763,7 +2770,16 @@ RULE_TEXT = {"affected": "affected（依規則的建議：版本低於公告列�
              "NOT_ASSESSED": "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）"}
 RULE_STATE_TEXT = {"preliminary": "依初審規則的建議（待負責單位確認）", "confirmed": "依已確認規則的建議",
                    "preliminary+confirmed": "依初審與已確認規則的建議（含待負責單位確認的初審規則）"}
+VERIFY_TEXT = {"direct": "直接下載原文解析",
+               "independent:nvd": "官方頁面加 NVD 的版本範圍另行核對（只涵蓋 NVD 有 Intel CPE 設定的 CVE）",
+               "summary-tool": "版本值未獨立核對（只經網頁摘要工具讀到），請負責單位對照原頁面"}
 RULE_DETAIL_KINDS = ("amd_agesa", "intel_csme", "intel_fsp", "bios_image")        # 這幾種逐項列出；其他種類（PSP、AMD 微碼）沒有適用規則時只列計數
+
+
+def unverified_text(x):
+    """建議用到的規則裡，版本值只經摘要工具讀到的（沒有獨立核對）→ 一句提醒；沒有 → 空字串。"""
+    ids = sorted(i for i, v in (x.get("verification") or {}).items() if v == "summary-tool")
+    return f"；{md_esc('、'.join(ids))} 的版本值未獨立核對，請負責單位對照原頁面" if ids else ""
 
 
 def rules_markdown(inv):
@@ -2785,11 +2801,11 @@ def rules_markdown(inv):
     c = ra["counts"]
     L.append(f"- 元件 {ra['components']} 個：" + ("、".join(f"{k} {c[k]}" for k in ("affected", "not-affected", "NOT_ASSESSED") if k in c) or "無"))
     if ra["status"] == "OK" and ra["table"].get("rules_info"):
-        L += ["", "### 規則表內容", "", "| 規則 | 廠商 | 標題 | 公告日 | 審核 | 出處 |", "|---|---|---|---|---|---|"]
+        L += ["", "### 規則表內容", "", "| 規則 | 廠商 | 標題 | 公告日 | 審核 | 版本值核對 | 出處 |", "|---|---|---|---|---|---|---|"]
         for ri in ra["table"]["rules_info"]:
             rv = (f"初審（{e(ri['preliminary_by'])}，{e(ri['preliminary_at'])}）待負責單位確認" if ri["state"] == "preliminary"
                   else f"已確認（{e(ri['confirmed_by'])}，{e(ri['confirmed_at'])}）")
-            L.append(f"| {e(ri['id'])} | {e(ri['vendor'])} | {e(ri['title'])} | {e(ri['published'])} | {rv} | {e('、'.join(ri['sources']))} |")
+            L.append(f"| {e(ri['id'])} | {e(ri['vendor'])} | {e(ri['title'])} | {e(ri['published'])} | {rv} | {VERIFY_TEXT[ri['verification']]} | {e('、'.join(ri['sources']))} |")
     items = ra["items"]
     aff = [x for x in items if x["suggestion"] == "affected"]
     notaff = [x for x in items if x["suggestion"] == "not-affected"]
@@ -2797,14 +2813,14 @@ def rules_markdown(inv):
     if aff:
         L += ["`affected` 的建議（即使規則還是初審）讓整份韌體報告狀態是 ATTENTION，請負責單位對照廠商公告確認。", "",
               "| 映像 | 元件 | 規則 | 說明 |", "|---|---|---|---|"]
-        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準 |" for x in aff]
+        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in aff]
     else:
         L.append("沒有。")
     L += ["", "### 建議 not-affected（依據類型 vendor-statement）", ""]
     if notaff:
         L += ["下列項目的版本不低於廠商公告列的修正版本（排除依據是廠商公告，D-035）；這不會讓報告狀態變好。", "",
               "| 映像 | 元件 | 規則 | 依據網址 | 說明 |", "|---|---|---|---|---|"]
-        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {e('、'.join(x['evidence']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準 |" for x in notaff]
+        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {e('、'.join(x['evidence']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in notaff]
     else:
         L.append("沒有。")
     rel = [x for x in items if x["related"]]

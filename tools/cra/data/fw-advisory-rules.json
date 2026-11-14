@@ -109,7 +109,8 @@
    "sources": [
     {
      "url": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     }
    ],
    "match": [
@@ -145,7 +146,8 @@
    "sources": [
     {
      "url": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     }
    ],
    "match": [
@@ -205,7 +207,8 @@
    "sources": [
     {
      "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "independent:nvd"
     }
    ],
    "match": [
@@ -227,7 +230,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Only the 14.x version lines of the bulletin's CSME sentence are in this rule"
+   "note": "Only the 14.x version lines of the bulletin's CSME sentence are in this rule. The 14.0.45 and 14.5.25 thresholds match the NVD CPE version ranges of the CVEs that NVD links to this advisory; CVE-2020-27336, CVE-2020-27337 and CVE-2020-27338 have no NVD record with an Intel CPE or a reference to this advisory (not checked). The sentence lists 11.8.82 for the 11.8 line (some CVE descriptions on the same page and the NVD CPE ranges say 11.8.80); this rule does not use the 11.x lines"
   },
   {
    "id": "INTEL-SA-01280",
@@ -243,7 +246,8 @@
    "sources": [
     {
      "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "summary-tool"
     }
    ],
    "match": [
@@ -271,7 +275,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product"
+   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product. The version values were read only through a page summary tool: NVD has no CPE version ranges for these CVEs, so they are not independently verified (compare with the Intel page directly before confirming)"
   },
   {
    "id": "INTEL-SA-01372",
@@ -285,7 +289,8 @@
    "sources": [
     {
      "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "summary-tool"
     }
    ],
    "match": [
@@ -313,12 +318,12 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product"
+   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product. The version values were read only through a page summary tool: NVD has no CPE version ranges for these CVEs, so they are not independently verified (compare with the Intel page directly before confirming)"
   },
   {
    "id": "AMI-SA-2026001",
    "vendor": "AMI",
-   "title": "Security Audit Reported Vulnerabilities (Aptio V)",
+   "title": "Security Audit Reported Vulnerabilities",
    "published": "2026-09-08",
    "revised": "2026-09-08",
    "cves": [
@@ -327,11 +332,13 @@
    "sources": [
     {
      "url": "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     },
     {
      "url": "https://www.ami.com/security-advisories/",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     }
    ],
    "match": [
@@ -346,12 +353,13 @@
     "state": "preliminary",
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
-   }
+   },
+   "note": "Product: Aptio V (the document says: if the fix version includes Aptio, AMI's UEFI product AptioV was affected); no affected version range is given, only fix versions"
   },
   {
    "id": "AMI-SA-2026002",
    "vendor": "AMI",
-   "title": "Security Audit Reported Vulnerabilities (Aptio V)",
+   "title": "Security Audit Reported Vulnerabilities",
    "published": "2026-10-13",
    "revised": "2026-10-13",
    "cves": [
@@ -364,11 +372,13 @@
    "sources": [
     {
      "url": "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026002.pdf",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     },
     {
      "url": "https://www.ami.com/security-advisories/",
-     "read_at": "2026-11-14"
+     "read_at": "2026-11-14",
+     "verification": "direct"
     }
    ],
    "match": [
@@ -383,7 +393,8 @@
     "state": "preliminary",
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
-   }
+   },
+   "note": "Product: Aptio V (the document says: if the fix version includes Aptio, AMI's UEFI product AptioV was affected); no affected version range is given, only fix versions"
   }
  ]
 }

@@ -66,7 +66,7 @@ def review(state="preliminary", **kw):
 
 def rule(rid="AMD-SB-7014", match=None, vendor="AMD", state="preliminary", url=None, **kw):
     r = {"id": rid, "vendor": vendor, "title": "Test advisory", "published": "2026-01-01", "cves": ["CVE-2026-0001"],
-         "sources": [{"url": url or AMD % rid[-4:], "read_at": UPDATED}],
+         "sources": [{"url": url or AMD % rid[-4:], "read_at": UPDATED, "verification": "direct"}],
          "match": match if match is not None else [{"component": "amd_agesa", "family": "ComboAM4v2PI", "fixed_in": "1.2.0.Cb"}],
          "review": review(state)}
     r.update(kw)
@@ -308,7 +308,7 @@ def test_intel_and_ami_source_urls(tmp_path):
                 "https://intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html", AMD % "7014"):
         invalid(tmp_path, intel(bad))
     ami = lambda *urls: doc(rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V"}], "AMI", url=urls[0]) |      # noqa: E731
-                            {"sources": [{"url": u, "read_at": UPDATED} for u in urls]})
+                            {"sources": [{"url": u, "read_at": UPDATED, "verification": "direct"} for u in urls]})
     ok(tmp_path, ami(AMI_PDF))
     ok(tmp_path, ami(AMI_PDF, fr.AMI_INDEX_URL))
     ok(tmp_path, ami("https://9443417.fs1.hubspotusercontent-na1.net/hubfs/9443417/Security%20Advisories/2024/AMI-SA-2026001.pdf"))
@@ -321,7 +321,7 @@ def test_intel_and_ami_source_urls(tmp_path):
     d = doc(rule())
     d["rules"][0]["sources"] = []
     invalid(tmp_path, d, "sources")
-    d["rules"][0]["sources"] = [{"url": AMD % "7014", "read_at": UPDATED}] * 2
+    d["rules"][0]["sources"] = [{"url": AMD % "7014", "read_at": UPDATED, "verification": "direct"}] * 2
     invalid(tmp_path, d, "duplicate url")
 
 
@@ -844,6 +844,10 @@ def test_repo_table_is_valid_pinned_and_first_batch_is_what_the_pages_say():
     for r in t.rules:
         assert r["review"]["state"] == "preliminary" and r["review"]["preliminary_by"] == ROLE and "confirmed_by" not in r["review"]
         assert all(s["read_at"] == UPDATED for s in r["sources"])
+    ver = {r["id"]: {s["verification"] for s in r["sources"]} for r in t.rules}
+    assert ver == {"AMD-SB-7005": {"direct"}, "AMD-SB-7014": {"direct"}, "INTEL-SA-00391": {"independent:nvd"}, "INTEL-SA-01280": {"summary-tool"},
+                   "INTEL-SA-01372": {"summary-tool"}, "AMI-SA-2026001": {"direct"}, "AMI-SA-2026002": {"direct"}}
+    assert {r["title"] for r in t.rules if r["vendor"] == "AMI"} == {"Security Audit Reported Vulnerabilities"}
     fixed = {(r["id"], c.get("family") or c.get("line")): c["fixed_in"] for r in t.rules for c in r["match"] if c["component"] != "ami_core"}
     assert fixed == {("AMD-SB-7005", "ComboAM4v2PI"): "1.2.0.B", ("AMD-SB-7005", "ComboAM5PI"): "1.0.8.0", ("AMD-SB-7014", "ComboAM4v2PI"): "1.2.0.Cc",
                      ("AMD-SB-7014", "ComboAM5PI"): "1.2.0.1", ("INTEL-SA-00391", "14.0"): "14.0.45", ("INTEL-SA-00391", "14.5"): "14.5.25",
@@ -871,3 +875,222 @@ def test_first_batch_results(comp_kind, comp, want, ids):
     t, err = fr.load_default()
     r = fr.evaluate(t, comp_kind, {"family": None, "family_conflict": None, **comp})
     assert (r["suggestion"], r["rule_ids"]) == (want, ids), r["basis"]
+
+
+# ---------- 核對狀態（sources[].verification） ----------
+
+def with_ver(rid, ver, fixed="16.1.40", state="preliminary"):
+    r = rule(rid, [{"component": "intel_csme", "line": "16.1", "fixed_in": fixed}], "Intel", state, url=INTEL % rid[-5:])
+    r["sources"][0]["verification"] = ver
+    return r
+
+
+def test_verification_is_required_and_enumerated(tmp_path):
+    for v in fr.VERIFICATIONS:
+        ok(tmp_path, doc(with_ver("INTEL-SA-01372", v)))
+    assert fr.VERIFICATIONS == ("direct", "summary-tool", "independent:nvd")
+    for bad in ("Direct", "nvd", "independent", "summary_tool", "", None, ["direct"], {"direct": 1}, 1, True):
+        invalid(tmp_path, doc(with_ver("INTEL-SA-01372", bad)), "verification")
+    d = doc(rule())
+    del d["rules"][0]["sources"][0]["verification"]
+    invalid(tmp_path, d, "missing field")
+    d = doc(rule())
+    d["rules"][0]["sources"][0]["verified"] = "direct"                                     # 欄位名稱打錯 → 不認得的欄位
+    invalid(tmp_path, d, "unknown field")
+
+
+def test_weakest_verification_of_several_sources(tmp_path):
+    ami = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V"}], "AMI", url=AMI_PDF)
+    ami["sources"].append({"url": fr.AMI_INDEX_URL, "read_at": UPDATED, "verification": "summary-tool"})
+    t = build(tmp_path, doc(ami, with_ver("INTEL-SA-00391", "independent:nvd"), with_ver("INTEL-SA-01280", "direct")))
+    assert (t.verification("AMI-SA-2026001"), t.verification("INTEL-SA-00391"), t.verification("INTEL-SA-01280")) == ("summary-tool", "independent:nvd", "direct")
+
+
+def test_unverified_values_are_flagged_in_suggestion_property_and_report(tmp_path):
+    t = build(tmp_path, doc(with_ver("INTEL-SA-01372", "summary-tool", "16.1.40"), with_ver("INTEL-SA-00391", "independent:nvd", "16.1.10"), with_ver("INTEL-SA-01280", "direct", "16.1.10")))
+    inv = ok_status_inventory(tmp_path, t)
+    r = inv["bios"][0]["me"]["rule_advisory"]
+    assert r["suggestion"] == "affected" and r["verification"] == {"INTEL-SA-01372": "summary-tool"}
+    assert "INTEL-SA-01372 were read only through a page summary tool and are not independently verified" in r["basis"]
+    me = next(c for c in xf.components(inv)[0] if c["name"] == "Intel CSE firmware")
+    assert props(me, "dumpling:advisory-rule-verification") == ["INTEL-SA-01372=summary-tool"]
+    md = xf.markdown(inv)
+    sec = md[md.index("## 規則表比對"):]
+    assert "版本值未獨立核對（只經網頁摘要工具讀到），請負責單位對照原頁面" in sec                       # 規則清單的欄位
+    assert "直接下載原文解析" in sec and "官方頁面加 NVD 的版本範圍另行核對" in sec
+    aff = sec.split("### 建議 affected（待人審）")[1].split("###")[0]
+    assert "INTEL-SA-01372 的版本值未獨立核對，請負責單位對照原頁面" in aff
+    t2 = build(tmp_path, doc(with_ver("INTEL-SA-00391", "independent:nvd", "16.1.10")), "n.json")                      # not-affected、有獨立核對的：沒有提醒
+    inv2 = ok_status_inventory(tmp_path, t2)
+    assert inv2["bios"][0]["me"]["rule_advisory"]["suggestion"] == "not-affected" and "未獨立核對" not in xf.markdown(inv2).split("### 建議 not-affected")[1].split("###")[0]
+    t3 = build(tmp_path, doc(with_ver("INTEL-SA-01280", "summary-tool", "16.1.10")), "s.json")                          # not-affected 但只經摘要工具：也要提醒
+    md3 = xf.markdown(ok_status_inventory(tmp_path, t3))
+    assert "INTEL-SA-01280 的版本值未獨立核對" in md3.split("### 建議 not-affected")[1].split("###")[0]
+
+
+# ---------- 同一條規則內的優先順序 ----------
+
+def two_conditions(fixed_a, fixed_b):
+    return rule("INTEL-SA-00391", [{"component": "intel_csme", "line": "14.0", "fixed_in": fixed_a},
+                                   {"component": "intel_csme", "line": "14.0", "fixed_in": fixed_b}], "Intel", url=INTEL % "00391")
+
+
+CSME_COMP = {"family": None, "family_conflict": None, "family_basis": "listed"}
+
+
+def test_within_one_rule_not_assessed_beats_not_affected(table):
+    t = table(two_conditions("14.0.45", "14.0.47.9999"))                    # 14.0.47：第一個條件 not-affected，第二個要四段、版本只有三段 → NOT_ASSESSED
+    r = fr.evaluate(t, "intel_csme", {**CSME_COMP, "version": "14.0.47"})
+    assert r["suggestion"] == "NOT_ASSESSED" and r["reason"] == "version-too-short" and r["rule_ids"] == [] and r["evidence"] == []
+    assert [x["result"] for x in r["results"]] == ["NOT_ASSESSED"]            # 一條規則只留一個結果
+    r = fr.evaluate(t, "intel_csme", {**CSME_COMP, "version": "14.0.47.1558"})        # 版本四段：兩個條件都能比，第二個是 affected（1558 < 9999）
+    assert r["suggestion"] == "affected"
+
+
+def test_within_one_rule_affected_beats_not_affected_and_not_assessed(table):
+    t = table(two_conditions("14.0.40", "14.0.50"))                          # 14.0.45：一個 not-affected、一個 affected
+    r = fr.evaluate(t, "intel_csme", {**CSME_COMP, "version": "14.0.45.1"})
+    assert r["suggestion"] == "affected" and r["rule_ids"] == ["INTEL-SA-00391"] and r["evidence"] == []
+    assert [x["result"] for x in r["results"]] == ["affected"]
+    t = table(two_conditions("14.0.50", "14.0.47.9999"))                     # 一個 affected、一個 NOT_ASSESSED（三段版本）
+    r = fr.evaluate(t, "intel_csme", {**CSME_COMP, "version": "14.0.47"})
+    assert r["suggestion"] == "affected" and r["rule_ids"] == ["INTEL-SA-00391"]
+    t = table(two_conditions("14.0.40", "14.0.30"))                          # 兩個都 not-affected → not-affected（單一結果）
+    r = fr.evaluate(t, "intel_csme", {**CSME_COMP, "version": "14.0.45.1"})
+    assert r["suggestion"] == "not-affected" and len(r["results"]) == 1
+
+
+# ---------- 怪型別：load() 與 validate() 直接呼叫都是 table-invalid／TableError ----------
+
+def weird_docs():
+    base = doc(rule())
+    out = {}
+
+    def mut(name, fn):
+        d = copy.deepcopy(base)
+        fn(d)
+        out[name] = d
+    mut("vendor-list", lambda d: d["rules"][0].__setitem__("vendor", ["AMD"]))
+    mut("vendor-dict", lambda d: d["rules"][0].__setitem__("vendor", {"a": 1}))
+    mut("id-list", lambda d: d["rules"][0].__setitem__("id", ["AMD-SB-7014"]))
+    mut("cves-dict-element", lambda d: d["rules"][0].__setitem__("cves", [{"a": 1}, {"a": 1}]))
+    mut("cves-list-element", lambda d: d["rules"][0].__setitem__("cves", [["x"], ["x"]]))
+    mut("title-dict", lambda d: d["rules"][0].__setitem__("title", {"a": 1}))
+    mut("sources-entry-list", lambda d: d["rules"][0].__setitem__("sources", [["x"]]))
+    mut("source-url-list", lambda d: d["rules"][0]["sources"][0].__setitem__("url", ["x"]))
+    mut("source-verification-dict", lambda d: d["rules"][0]["sources"][0].__setitem__("verification", {"a": 1}))
+    mut("match-entry-list", lambda d: d["rules"][0].__setitem__("match", [["x"]]))
+    mut("match-component-dict", lambda d: d["rules"][0]["match"][0].__setitem__("component", {"a": 1}))
+    mut("match-family-list", lambda d: d["rules"][0]["match"][0].__setitem__("family", ["x"]))
+    mut("review-list", lambda d: d["rules"][0].__setitem__("review", ["x"]))
+    mut("review-state-dict", lambda d: d["rules"][0]["review"].__setitem__("state", {"a": 1}))
+    mut("review-by-list", lambda d: d["rules"][0]["review"].__setitem__("preliminary_by", ["x"]))
+    mut("orderings-str", lambda d: d.__setitem__("orderings", "x"))
+    mut("orderings-entry-list", lambda d: d.__setitem__("orderings", [["x"]]))
+    mut("ordering-family-dict", lambda d: d["orderings"][0].__setitem__("family", {"a": 1}))
+    mut("ordering-sequence-entry-list", lambda d: d["orderings"][0].__setitem__("sequence", [["a"], ["b"]]))
+    mut("ordering-version-dict", lambda d: d["orderings"][0]["sequence"][0].__setitem__("version", {"a": 1}))
+    mut("rules-dict", lambda d: d.__setitem__("rules", {"a": 1}))
+    mut("rule-entry-str", lambda d: d.__setitem__("rules", ["x"]))
+    mut("published-list", lambda d: d["rules"][0].__setitem__("published", ["2026-01-01"]))
+    mut("table-updated-dict", lambda d: d.__setitem__("table_updated", {"a": 1}))
+    mut("schema-list", lambda d: d.__setitem__("schema", [fr.SCHEMA]))
+    mut("comment-list", lambda d: d.__setitem__("$comment", ["x"]))
+    out["list-top"] = []
+    out["none-top"] = None
+    out["int-top"] = 5
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(weird_docs()))
+def test_odd_types_are_table_invalid_through_load_and_validate(tmp_path, name):
+    d = weird_docs()[name]
+    invalid(tmp_path, d)                                                      # load()：table-invalid
+    with pytest.raises(fr.TableError) as e:                                   # validate() 直接呼叫：TableError（不是 TypeError）
+        fr.validate(d)
+    assert e.value.reason == "table-invalid"
+
+
+def test_unhashable_values_in_validate_raise_table_error_not_type_error():
+    d = doc(rule(cves=[{"a": 1}, {"a": 1}]))
+    with pytest.raises(fr.TableError):
+        fr.validate(d)
+    d = doc(rule())
+    d["rules"][0]["vendor"] = []
+    with pytest.raises(fr.TableError):
+        fr.validate(d)
+    nested = []
+    for _ in range(5000):
+        nested = [nested]
+    d = doc(rule(cves=nested))
+    with pytest.raises(fr.TableError):
+        fr.validate(d)
+
+
+def test_roles_and_text_must_not_be_blank(tmp_path):
+    for blank in (" ", "   ", "　", " ", "\t", " x", "x "):
+        invalid(tmp_path, doc(rule() | {"review": review(preliminary_by=blank)}), "preliminary_by")
+        invalid(tmp_path, doc(rule() | {"review": review("confirmed", confirmed_by=blank)}), "confirmed_by")
+    for blank in (" ", "  ", " x"):
+        invalid(tmp_path, doc(rule(title=blank)), "title")
+        invalid(tmp_path, doc(rule(note=blank)), "note")
+    ok(tmp_path, doc(rule() | {"review": review(preliminary_by="產品負責 角色")}))              # 中間的空白可以
+
+
+# ---------- 比對出錯、同時有 affected 與 not-affected、禁用詞、AMI 相關公告 ----------
+
+def test_match_error_makes_the_status_attention(tmp_path, monkeypatch):
+    t = build(tmp_path, doc(csme_rule("INTEL-SA-01372", "16.1.10", line="16.1")))
+    inv = ok_status_inventory(tmp_path, t)
+    assert xf.status_of(inv)[0] == "OK" and inv["rules_advisory"]["errors"] == 0                  # 沒出錯時 not-affected 不影響狀態
+    mod = xf.load_sibling("fw_advisory_rules")
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(mod, "evaluate", boom)
+    inv = ok_status_inventory(tmp_path, t)
+    st, detail = xf.status_of(inv)
+    assert st == "ATTENTION" and inv["rules_advisory"]["errors"] == 2 and "規則表比對出錯：2 個元件" in detail and "match-error" in detail
+    assert "規則表建議 affected" not in detail
+
+
+def test_affected_keeps_its_review_line_when_another_component_is_not_affected(tmp_path):
+    psp_ok = rule("AMD-SB-7005", [{"component": "amd_psp", "psp_type": 1, "fixed_in": "00.01.00.00"}])        # PSP type 1 的版本 00.09.00.7f 不低於 → not-affected
+    t = build(tmp_path, doc(agesa_rule(), psp_ok))
+    inv = xf.inventory([amd_file(tmp_path)], rules=t)
+    assert inv["rules_advisory"]["counts"] == {"affected": 1, "not-affected": 1, "NOT_ASSESSED": 5}
+    st, detail = xf.status_of(inv)
+    assert st == "ATTENTION" and "規則表建議 affected：1 個元件（規則 AMD-SB-7014；依初審規則的建議，待負責單位確認；是否受影響以廠商公告為準），待人審" in detail
+    assert "AMD-SB-7005" not in detail.split("規則表建議 affected：")[1].split("；沒有版本清單")[0]
+    md = xf.markdown(inv)
+    sec = md[md.index("### 建議 affected（待人審）"):]
+    aff, notaff = sec.split("### 建議 not-affected（依據類型 vendor-statement）")
+    assert "AGESA ComboAM4v2PI 1.2.0.B" in aff and "AMD-SB-7014" in aff and "待負責單位確認" in aff and "PSP type 0x01" not in aff.split("###")[0]
+    assert "PSP type 0x01" in notaff and "AMD-SB-7005" in notaff.split("###")[0]
+    assert "規則表建議（2026-11-14 整理）affected 1、not-affected 1" in cell.cell(json.loads(json.dumps(inv)))
+
+
+def test_component_table_with_only_not_affected_has_no_forbidden_words(tmp_path):
+    t = build(tmp_path, doc(rule("AMD-SB-7005", [{"component": "amd_psp", "psp_type": 1, "fixed_in": "00.01.00.00"},
+                                                 {"component": "amd_agesa", "family": "ComboAM4v2PI", "fixed_in": "1.2.0.B"}])))
+    inv = xf.inventory([amd_file(tmp_path)], rules=t)
+    assert inv["rules_advisory"]["counts"]["not-affected"] == 2 and "affected" not in inv["rules_advisory"]["counts"]
+    assert xf.status_of(inv)[1].count("規則表建議 affected") == 0
+    md = xf.markdown(inv)
+    sec = md[md.index("## 規則表比對"):]
+    table_part = sec[sec.index("### 各元件的建議"):]
+    assert "not-affected（依規則的建議：版本不低於公告列的修正版本；依據類型 vendor-statement）" in table_part and "AMD-SB-7005（preliminary）" in table_part
+    for w in FORBIDDEN:
+        assert w not in sec, w
+    assert "沒有。" in sec.split("### 建議 affected（待人審）")[1].split("###")[0]
+
+
+def test_ami_possibly_related_sentence_is_in_the_basis(table):
+    ami = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V"}], "AMI", url=AMI_PDF)
+    ami2 = rule("AMI-SA-2026002", [{"component": "ami_core", "product": "Aptio V"}], "AMI", url=AMI_PDF.replace("2026001", "2026002"))
+    t = table(ami, ami2)
+    r = fr.evaluate(t, "bios_image", {"file": "x.CAP", "declared_version": None, "ami": True})
+    assert "possibly related AMI advisories (not matched): AMI-SA-2026001, AMI-SA-2026002" in r["basis"]
+    assert r["suggestion"] == "NOT_ASSESSED" and r["rule_ids"] == []
+    r = fr.evaluate(t, "bios_image", {"file": "x.CAP", "declared_version": None, "ami": False})           # 沒有 AMI 線索：沒有這句，也不是 no-ami-core-version
+    assert "possibly related" not in r["basis"] and r["related"] == [] and r["reason"] == "no-rule"

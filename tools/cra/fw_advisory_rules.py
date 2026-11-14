@@ -47,7 +47,7 @@ from pathlib import Path
 TABLE_PATH = Path(__file__).resolve().parent / "data" / "fw-advisory-rules.json"
 # 規則表檔案本身的 sha256（改規則表後要一起更新：python3 tools/cra/fw_advisory_rules.py sha256；tests 會核對）。
 # 檔案被改動、截斷、少幾筆規則或換成別的內容時，所有元件一律 NOT_ASSESSED（table-sha-mismatch），報告狀態 ATTENTION。
-TABLE_SHA256 = "0e0a97d51bfba9d6619ffe8188c56ab01a48550c4669c2259ea1330428b439e2"
+TABLE_SHA256 = "4ed06463db6d106148e859d8b93fc19022e394cc6fdb6ee15b5192bb99c0082d"
 SCHEMA = "dumpling-fw-advisory-rules/1"
 MAX_TABLE = 1 << 20
 MAX_RULES = 500
@@ -57,6 +57,10 @@ SUGGESTIONS = ("affected", "not-affected", "NOT_ASSESSED")
 STATES = ("preliminary", "confirmed")
 NO_DATA = "no data in the database; the vendor advisory is authoritative"
 SUGGESTION_ONLY = "this is a suggestion from a hand-compiled rule table, not a vulnerability assessment; whether the product is affected is decided by the vendor advisory"
+# sources[].verification：版本值怎麼讀到的（核對狀態）。direct＝直接下載官方頁面或 PDF 的原文解析；summary-tool＝只經網頁摘要工具讀到（沒有原文、沒有第二個獨立來源，負責單位確認時必須直接對照原頁面）；
+# independent:nvd＝除了讀官方頁面，版本門檻另經 NVD 的 CPE 版本範圍核對相符（只涵蓋 NVD 有 Intel CPE 設定的 CVE）。
+VERIFICATIONS = ("direct", "summary-tool", "independent:nvd")
+VERIFICATION_RANK = {"summary-tool": 0, "independent:nvd": 1, "direct": 2}       # 一條規則有幾個出處時取最弱的
 EVIDENCE_TYPE = "vendor-statement"                  # D-035：排除（not-affected）的依據類型
 AMI_NO_CORE = "the SBOM has no AMI core version"
 
@@ -125,6 +129,8 @@ def _keys(obj, required, optional, where):
 def _str(v, rx, where):
     if not isinstance(v, str) or not rx.fullmatch(v):
         _bad(where, "bad format")
+    if v.strip() == "" or v != v.strip():
+        _bad(where, "must not be empty, whitespace only, or have leading or trailing whitespace")
     if any(unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") for ch in v):
         _bad(where, "control or format characters (including bidi overrides and zero-width) are not allowed")
     return v
@@ -224,6 +230,10 @@ class Table:
         self.ordering_names = {o["family"].lower(): o["family"] for o in doc["orderings"]}
         self.by_id = {r["id"]: r for r in self.rules}
 
+    def verification(self, rule_id):
+        """一條規則的核對狀態：所有出處裡最弱的一個。"""
+        return min((s["verification"] for s in self.by_id[rule_id]["sources"]), key=VERIFICATION_RANK.__getitem__)
+
     def counts(self):
         c = {s: 0 for s in STATES}
         for r in self.rules:
@@ -242,7 +252,9 @@ def _validate_sources(srcs, rule, updated, where):
     seen = set()
     for i, s in enumerate(srcs):
         w = f"{where}[{i}]"
-        _keys(s, ("url", "read_at"), (), w)
+        _keys(s, ("url", "read_at", "verification"), (), w)
+        if not isinstance(s["verification"], str) or s["verification"] not in VERIFICATIONS:
+            _bad(w + ".verification", "must be one of " + ", ".join(VERIFICATIONS))
         url = s["url"]
         if not isinstance(url, str) or len(url) > 300:
             _bad(w, "url")
@@ -348,7 +360,16 @@ def _validate_review(rv, updated, where):
 
 
 def validate(doc):
-    """schema 驗證；任何一條不過就丟 TableError('table-invalid')。"""
+    """schema 驗證；任何一條不過就丟 TableError('table-invalid')。型別怪到驗證程式自己出錯（不能雜湊的值、深度過深…）也一律是 TableError，不會是 TypeError。"""
+    try:
+        _validate(doc)
+    except TableError:
+        raise
+    except (TypeError, ValueError, KeyError, AttributeError, IndexError, RecursionError) as e:
+        raise TableError("table-invalid", f"validation failed ({type(e).__name__})")
+
+
+def _validate(doc):
     _keys(doc, ("schema", "table_updated", "orderings", "rules"), ("$comment",), "table")
     if doc["schema"] != SCHEMA:
         _bad("schema", f"must be {SCHEMA}")
@@ -358,6 +379,8 @@ def validate(doc):
     ords = doc["orderings"]
     if not isinstance(ords, list) or len(ords) > 32:
         _bad("orderings", "must be a list")
+    if not isinstance(doc["rules"], list):
+        _bad("rules", "must be a list")
     orderings, seen = {}, set()
     for i, o in enumerate(ords):
         w = f"orderings[{i}]"
@@ -395,8 +418,10 @@ def validate(doc):
     for i, r in enumerate(rules):
         w = f"rules[{i}]"
         _keys(r, ("id", "vendor", "title", "published", "cves", "sources", "match", "review"), ("revised", "note"), w)
-        if r["vendor"] not in ID_RES:
+        if not isinstance(r["vendor"], str) or r["vendor"] not in ID_RES:
             _bad(w + ".vendor", "must be one of " + ", ".join(ID_RES))
+        if not isinstance(r["id"], str):
+            _bad(w + ".id", "bad format")
         _str(r["id"], ID_RES[r["vendor"]], w + ".id")
         if r["id"] in ids:
             _bad(w, "duplicate id")
@@ -410,10 +435,12 @@ def validate(doc):
         if "note" in r:
             _str(r["note"], NOTE_RE, w + ".note")
         cves = r["cves"]
-        if not isinstance(cves, list) or len(cves) > 64 or len(set(cves)) != len(cves):
+        if not isinstance(cves, list) or len(cves) > 64:
             _bad(w + ".cves", "must be a list of at most 64 distinct CVE ids")
         for c in cves:
             _str(c, CVE_RE, w + ".cves")
+        if len(set(cves)) != len(cves):
+            _bad(w + ".cves", "must be a list of at most 64 distinct CVE ids")
         _validate_sources(r["sources"], r, updated, w + ".sources")
         m = r["match"]
         if not isinstance(m, list) or not 1 <= len(m) <= MAX_CONDITIONS:
@@ -616,7 +643,7 @@ def evaluate_condition(table, c, comp):
 
 
 def _na(reason, basis, table=None, **extra):
-    return {"suggestion": "NOT_ASSESSED", "reason": reason, "rule_ids": [], "state": None, "basis": basis + "; " + NO_DATA,
+    return {"suggestion": "NOT_ASSESSED", "reason": reason, "rule_ids": [], "state": None, "basis": basis + "; " + NO_DATA, "verification": {},
             "results": [], "evidence": [], "related": [], "source": table.label() if table is not None else None, **extra}
 
 
@@ -687,7 +714,11 @@ def evaluate(table_or_err, kind, comp):
     if related and sugg == "NOT_ASSESSED" and kind == "bios_image":
         basis += f"; possibly related AMI advisories (not matched): {', '.join(related)}"
     evidence = sorted({u for x in nots for u in x["sources"]}) if sugg == "not-affected" else []
-    return {"suggestion": sugg, "reason": reason, "rule_ids": ids, "state": _state_of(table, ids), "basis": basis,
+    ver = {i: table.verification(i) for i in ids}
+    if any(v == "summary-tool" for v in ver.values()):
+        basis += ("; the version values of " + ", ".join(i for i, v in ver.items() if v == "summary-tool")
+                  + " were read only through a page summary tool and are not independently verified: compare them with the vendor page directly")
+    return {"suggestion": sugg, "reason": reason, "rule_ids": ids, "state": _state_of(table, ids), "basis": basis, "verification": ver,
             "results": [{k: v for k, v in x.items() if k != "sources"} for x in chosen], "evidence": evidence,
             "related": related, "source": table.label()}
 
