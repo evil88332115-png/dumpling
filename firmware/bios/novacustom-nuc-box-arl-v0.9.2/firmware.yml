@@ -43,5 +43,6 @@ expected:
   # FSP、coreboot 資訊：release notes 的 FSP 寫 "IPU 2026.3 (6114_54)" 這種編號，與映像的 FSPH ImageRevision 不同格式，沒有可比對的獨立佐證，所以不寫。
   # 規則表建議（2026-11-14 整理）：ME 18.1.18.2724 低於 INTEL-SA-01372 的 18.1.21（版本線 18.1），不低於 INTEL-SA-01280 的 18.1.18。
   # 規則只看版本線，沒有核對平台是不是公告表列的產品；只是建議，是否受影響以 Intel 公告為準。
+  # 公告頁：INTEL-SA-01372 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html、INTEL-SA-01280 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html
   advisory_rule:
     - {component: "Intel CSE firmware", version: "18.1.18.2724", suggestion: affected, rule_ids: ["INTEL-SA-01372"]}
