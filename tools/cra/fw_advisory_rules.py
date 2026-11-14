@@ -47,7 +47,7 @@ from pathlib import Path
 TABLE_PATH = Path(__file__).resolve().parent / "data" / "fw-advisory-rules.json"
 # 規則表檔案本身的 sha256（改規則表後要一起更新：python3 tools/cra/fw_advisory_rules.py sha256；tests 會核對）。
 # 檔案被改動、截斷、少幾筆規則或換成別的內容時，所有元件一律 NOT_ASSESSED（table-sha-mismatch），報告狀態 ATTENTION。
-TABLE_SHA256 = "7e5c4f6691a1add8dce0b5bba86b5ec08f74ff7a8c15881cddd610a685362d68"
+TABLE_SHA256 = "5d4713308ba9e3962b2e0a99e5ab5ca9f1cab479dc4b1b9fa6bcf34ecb0c56df"
 SCHEMA = "dumpling-fw-advisory-rules/1"
 MAX_TABLE = 1 << 20
 MAX_RULES = 500

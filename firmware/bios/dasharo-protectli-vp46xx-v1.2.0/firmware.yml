@@ -44,5 +44,6 @@ expected:
   edk2_revision: 2a15268b36cc
   # 規則表建議（2026-11-14 整理）：ME 14.0.47.1558 不低於 INTEL-SA-00391 的 14.0.45（版本線 14.0）。這是 not-affected 的建議（依據 vendor-statement：Intel 公告頁），
   # 不是漏洞判定；版本線由版本推定為 CSME。
+  # 公告頁：INTEL-SA-00391 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html
   advisory_rule:
     - {component: "Intel CSE firmware", version: "14.0.47.1558", suggestion: not-affected, rule_ids: ["INTEL-SA-00391"]}

@@ -2,6 +2,7 @@
 
 假映像是 1 MiB（視窗 W＝1 MiB，所以「映射在 4 GB 頂端」的位址是 0xFFF00000＋偏移）。EFS 放在 0x20000（EFS_OFFSETS 裡有）。
 checksum 用測試自己的實作（逐字加總，和 amd_psp.fletcher32 刻意分開寫）。"""
+import re
 import json
 import lzma
 import random
@@ -598,6 +599,7 @@ def test_wiring_into_inventory_sbom_status_and_markdown(tmp_path):
     st, detail = xf.status_of(inv)
     assert st == "ATTENTION" and "AMD 平台（3 directories" in detail and "GAP" in detail
     md = xf.markdown(inv)
+    assert "#### PSP" in md and not re.search(r"(?<![A-Za-z0-9])@(?!\u200b)[A-Za-z0-9_-]", md)       # 目錄標題不寫 ` @0x…`（GitHub 可能當成提及）
     assert "AMD PSP／BIOS 目錄、微碼與 AGESA" in md and "ComboAM4v2PI 1.2.0.B" in md and "0x0800820d" in md and "不支援" not in md
     # 沒有 microcode 的 PSP 解析結果也不能偽裝成完整
     assert "AMD 微碼" in md

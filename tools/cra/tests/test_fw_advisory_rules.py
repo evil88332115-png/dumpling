@@ -464,6 +464,15 @@ def test_agesa_order_boundaries(table):
     assert agesa(t, "ComboAM4v2PI 1.2.0.B", fixed_in="1.2.0.B")["result"] == "not-affected"
 
 
+def test_committed_am4_sequence_tail():
+    """repo 內的表：1.2.0.12（AMD-SB-7064，2026-05-27）在 1.2.0.10 之後；1.2.0.11 沒有出現在 AMD 公告頁，不在序列裡 → 不猜。"""
+    t, err = fr.load_default()
+    assert err is None
+    assert agesa(t, "ComboAM4v2PI 1.2.0.12", fixed_in="1.2.0.10")["result"] == "not-affected"
+    assert agesa(t, "ComboAM4v2PI 1.2.0.10", fixed_in="1.2.0.12")["result"] == "affected"
+    assert agesa(t, "ComboAM4v2PI 1.2.0.11", fixed_in="1.2.0.10")["reason"] == "agesa-order-unknown"
+
+
 @pytest.mark.parametrize("value,reason", [
     ("ComboAM4v2PI 1.2.0.A", "agesa-order-unknown"),                 # 規則表的序列沒有 A（沒有 AMD 日期可證明位置）：不猜
     ("ComboAM4v2PI 1.2.0.E", "agesa-order-unknown"), ("ComboAM4v2PI 1.2.0.Cd", "agesa-order-unknown"), ("ComboAM4v2PI 1.2.0.6c", "agesa-order-unknown"),
