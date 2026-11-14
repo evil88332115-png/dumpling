@@ -310,13 +310,19 @@ PY
 }
 carry_row(){
   # 重跑：上一次 status.tsv 的這一列原樣帶到這次（狀態不變，說明註明沿用），並記進 run-params.json 的 carried。
-  # 上一次同一列有多列時取最嚴重的（同 pipeline/lib/status_tsv.py）；上一次沒有這一列就不寫（不推測）。
-  local stage=$1 row st d
+  # 上一次同一列有多列時取最嚴重的（同 pipeline/lib/status_tsv.py）。上一次沒有這一列：第二個參數 required＝原掃描應該要有
+  # （例如有 rootfs 的 SBOM 就一定讀過 rootfs）→ 寫 GAP「原掃描沒有這一列」，carried 記 MISSING（cra_report 遇到缺列會略過，不能讓缺口沿用下去；
+  # #95 C0）；沒有 required → 不寫（不推測）。
+  local stage=$1 required=${2:-} row st d
   row=$(awk -F'\t' -v k="$stage" 'BEGIN{r["OK"]=0;r["ATTENTION"]=2;r["NOT_ASSESSED"]=3;r["NOT_RUN"]=4;r["GAP"]=5;r["FAIL"]=6;m=-1}
     NR>1 && $1==k { v=(($2 in r)?r[$2]:1); if(v>=m){m=v;line=$2"\t"$3} } END{if(m>=0)print line}' "$RESCAN/status.tsv" 2>/dev/null)
-  [ -n "$row" ] || return 0
-  st=${row%%$'\t'*}; d=${row#*$'\t'}
-  status "$stage" "$st" "沿用上一次（--rescan-from，這次沒有重做）：$d"
+  if [ -z "$row" ]; then
+    [ -n "$required" ] || return 0
+    st=MISSING; status "$stage" GAP "上一次（--rescan-from）沒有這一列，原掃描應該要有（$required）：沒有結果可以沿用，不能當成沒問題"
+  else
+    st=${row%%$'\t'*}; d=${row#*$'\t'}
+    status "$stage" "$st" "沿用上一次（--rescan-from，這次沒有重做）：$d"
+  fi
   python3 -I - "$OUT/run-params.json" "$stage" "$st" <<'PY' || status A-run-params FAIL "run-params.json 寫不進沿用的 $stage"
 import json,sys
 p,k,v=sys.argv[1:4]; d=json.load(open(p)); d.setdefault("carried",{})[k]=v; json.dump(d,open(p,"w"),ensure_ascii=False,indent=1,sort_keys=True)
@@ -714,7 +720,7 @@ else:
   # 上一次的 UEFI 映像與原始碼的對照：這次有給原始碼樹時重做（uefisrc_step），否則沿用
   # 沿用時 B-uefi-binary 那一列也帶過來（M7b：原本沒帶，cra_report 讀不到這一列就略過，-bsp 報告會比原掃描樂觀）
   if [ -z "$UEFISRC" ] && [ -f "$RESCAN/uefi-binary-check.json" ] && [ ! -L "$RESCAN/uefi-binary-check.json" ]; then
-    if cp -- "$RESCAN/uefi-binary-check.json" "$OUT/"; then carry_row B-uefi-binary; else status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"; fi
+    if cp -- "$RESCAN/uefi-binary-check.json" "$OUT/"; then carry_row B-uefi-binary "上一次有 uefi-binary-check.json"; else status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"; fi
   fi
   extra_step
   # Rockchip：上一次的分割區表的狀態照樣列出（MD5 結尾、沒有掃描的分割區、沒讀到的項目）；Jetson 的 list.json 沒有 rockchip，不印
@@ -750,7 +756,7 @@ else:
     VARS+=("$v"); D=$OUT/$v; mkdir -p "$D/logs"
     # rootfs 沒有重讀：上一次的 B-rootfs-tar-<v>（rootfs 有讀不到、略過的項目）也帶過來（M7b：原本沒帶，-bsp／-os 會比原掃描樂觀）
     [ -f "$RESCAN/$v/rootfs-tar.json" ] && cp "$RESCAN/$v/rootfs-tar.json" "$D/"
-    carry_row "B-rootfs-tar-$v"
+    carry_row "B-rootfs-tar-$v" "上一次有 $v 的 SBOM，就一定讀過 rootfs"
     # 上一次的人工判定與批次規則（CRA/Config 的 vex-*.json）與安全測試的決定帶到這次：不帶就會回到全部未評估（config.json 照樣重新產生）
     carry_decisions "$RESCAN" "$v" "B-rescan-config-$v" "上一次的" || true
     if [ -s "$RESCAN/$v/pkgdb/dpkg-status" ]; then

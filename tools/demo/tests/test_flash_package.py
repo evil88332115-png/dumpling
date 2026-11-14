@@ -497,14 +497,19 @@ def test_script_rescan_carries_rootfs_tar_and_uefi_binary_rows(tmp_path):
     rp = json.loads((o / "run-params.json").read_text())
     assert rp["rescan"] is True and rp["rescan_from"] == str(prev) and rp["no_upload"] is True
     assert rp["carried"] == {"B-rootfs-tar-rootfs_no_gui": prev_tar, "B-uefi-binary": "GAP"}
-    # 上一次沒有那一列：不寫（不推測）
+    # 上一次沒有那一列，但原掃描應該要有（有 rootfs 的 SBOM、有 uefi-binary-check.json）→ GAP，carried 記 MISSING（#95 C0）
     p2 = tmp_path / "prev2"
     shutil.copytree(prev, p2)
     (p2 / "status.tsv").write_text("".join(l for l in pst.splitlines(True) if not l.startswith("B-rootfs-tar-")))
-    os.remove(p2 / "uefi-binary-check.json")
     _, o2, st2, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(p2), "--rootfs", "rootfs_no_gui", out="r2")
-    assert "B-rootfs-tar-rootfs_no_gui" not in st2 and "B-uefi-binary" not in st2, st2
-    assert json.loads((o2 / "run-params.json").read_text())["carried"] == {}
+    assert re.search(r"^B-rootfs-tar-rootfs_no_gui\tGAP\t上一次（--rescan-from）沒有這一列，原掃描應該要有", st2, re.M), st2
+    assert re.search(r"^B-uefi-binary\tGAP\t上一次（--rescan-from）沒有這一列，原掃描應該要有（上一次有 uefi-binary-check.json）", st2, re.M), st2
+    assert json.loads((o2 / "run-params.json").read_text())["carried"] == {"B-rootfs-tar-rootfs_no_gui": "MISSING", "B-uefi-binary": "MISSING"}
+    # 原掃描本來就沒做 UEFI 對照（沒有 uefi-binary-check.json、也沒有那一列）→ 不寫 B-uefi-binary（不推測）
+    os.remove(p2 / "uefi-binary-check.json")
+    _, o3, st3, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(p2), "--rootfs", "rootfs_no_gui", out="r3")
+    assert "B-uefi-binary" not in st3, st3
+    assert json.loads((o3 / "run-params.json").read_text())["carried"] == {"B-rootfs-tar-rootfs_no_gui": "MISSING"}
 
 
 def ownsw_function(tmp_path, fake):
