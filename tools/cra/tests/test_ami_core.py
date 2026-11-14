@@ -431,7 +431,8 @@ def test_sbom_has_the_core_component_under_the_bios_image_with_basis_and_suggest
 
 
 def test_ami_core_section_escapes_every_field():
-    """「AMI 核心版本」一節的欄位（tag、專案版本、位置、說明、原因）都要經過 md_esc：不能變成連結、提及或表格欄。"""
+    """「AMI 核心版本」一節裡來自映像的字串欄位（tag、專案版本、位置、說明、原因）都要經過 md_esc：不能變成連結、提及或表格欄。
+    核心版本、產品、公告寫法、建置時間是程式從整數、固定表或日期格式化產生的，不在這個測試的範圍。"""
     evil = "[x](http://e.test) @everyone | <b>"
     rec = make_fid(tag=b"[a](b)")
     a = ami.summarize(entries(rec))
@@ -626,6 +627,14 @@ def test_ami_rule_with_only_a_bios_image_condition_never_gives_not_affected(tmp_
         assert res["suggestion"] == "affected" and res["rule_ids"] == ["AMI-SA-2026001"]
 
 
+@pytest.mark.parametrize("status", [["conflict"], {"conflict": 1}, 5, None, b"read"])
+def test_downgrade_reason_with_an_odd_status_type_is_not_an_exception(tmp_path, status):
+    r = rule("AMI-SA-2026001", [{"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "1.0"}], "AMI", url=AMI_PDF)
+    res = fr.evaluate(build(tmp_path, doc(r)), "bios_image", {"file": "PRIME.cap", "declared_version": "9.0", "ami": True,
+                                                              "ami_core": {"status": status}, "ami_core_component": False})
+    assert (res["suggestion"], res["reason"], res["evidence"]) == ("NOT_ASSESSED", "no-ami-core-version", [])
+
+
 def test_mixed_rule_downgrade_reason_follows_the_core_status(tmp_path):
     """混合條件被降級時，原因代碼跟元件的 AMI 核心狀態走：沒讀到是 no-ami-core-version，讀到才是 ami-core-mapping-unverified。"""
     r = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V", "fixed_in": "AptioV_5.044"},
@@ -672,6 +681,9 @@ def test_read_with_a_malformed_candidate_is_incomplete_and_says_so_in_the_basis(
     assert props(c, "dumpling:advisory-rule-suggestion") == ["affected"]
     assert "do not match the known layout" in props(c, "dumpling:advisory-rule-basis")[0]
     assert "do not match the known layout" in props(c, "sca-center:incomplete")[0]
+    bios = next(x for x in comps if props(x, "sca-center:ami-core-search"))            # BIOS 層級的揭露：SBOM 與報告都要有（不只 search_text 單元層）
+    assert "the readable record(s) were used although 1 candidate(s)" in props(bios, "sca-center:ami-core-search")[0]
+    assert "were used although 1 candidate(s)" in xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
 
 
 def test_found_in_has_no_identical_lines(tmp_path):
@@ -765,9 +777,9 @@ def test_bad_candidate_reason_survives_the_three_reason_cut():
 
 
 def test_bios_level_search_text_discloses_that_the_readable_record_was_used():
-    a = ami.summarize(entries(make_fid()) + entries(make_fid(rev=9)))
+    a = ami.summarize(entries(make_fid()) + entries(make_fid(rev=9), make_fid(rev=8)))           # 1 份可讀、2 份結構不合：數字要是不合的那個
     t = ami.search_text(a)
-    assert t.startswith("read: core 5.17") and "the readable record(s) were used although 1 candidate(s)" in t
+    assert t.startswith("read: core 5.17") and "the readable record(s) were used although 2 candidate(s)" in t
     assert "were used although" not in ami.search_text(ami.summarize(entries(make_fid())))
 
 
