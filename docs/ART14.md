@@ -60,6 +60,30 @@
 - 值只能是 `YYYY-MM-DDTHH:MM:SSZ` 或 `未填`。**解析器嚴格**：格式不對、欄位被刪、欄位重複都當成「未填」，倒數留言寫「格式不對」。階段的**提交時間有填就標完成**（晚於期限會註明「晚於期限」）。
 - 內文有 SRP 人工檢查清單（登入 SRP、選協調 CSIRT＝主要營業地所在會員國、貼上預填欄位、把編號與時間填回）與法規出處／核對日期。
 
+### 4.1 GitLab：要人填的欄位用「art14 紀錄」留言記錄（內文的時間不算數）
+
+GitLab 的權限設計是：Planner（15）與 Reporter（20）也能改別人 Issue 的內文，但別人的留言只有 Maintainer／Owner 能改。
+如果照 GitHub 版從內文讀時間，權限低的人可以把知悉時間與三個提交時間寫進內文，偽造「已通報」，或改知悉時間延後期限（#85 驗證應修 1）。
+所以在 GitLab 上，**倒數的依據只取自 Developer（30）以上成員的「art14 紀錄」留言**；內文的「要人填的欄位」一節只當說明，工具只從內文讀它自己預填的 `first_detected`。
+
+格式（第一行固定是 `art14 紀錄`；之後以 `- ` 開頭的行是欄位，其他行是說明、不解析）：
+
+```
+art14 紀錄
+- 知悉時間（UTC）：2026-11-13T00:00:00Z
+- 修正或緩解措施可用時間（UTC）：未填
+- 階段 1 SRP 提交編號：<SRP 給的編號>
+- 階段 1 提交人：<名字>
+- 階段 1 提交時間（UTC）：2026-11-13T20:00:00Z
+負責人確認後記錄（這一行是說明，不解析）
+```
+
+- 認得的欄位：漏洞是 `知悉時間（UTC）`、`修正或緩解措施可用時間（UTC）`；嚴重事件是 `知悉時間（UTC）`、`事件通報送出時間（UTC）`；各階段是 `階段 N SRP 提交編號`、`階段 N 提交人`、`階段 N 提交時間（UTC）`（N 是 1–3）。
+- 可以分好幾則留言記；同一個欄位**以最新的留言為準**，寫 `未填` 就清掉。時間格式同上（`YYYY-MM-DDTHH:MM:SSZ`）。
+- 不可信的人（不是 Developer 以上的成員）寫的紀錄留言不算數；看不懂的欄位行、格式不對的時間，倒數留言會寫明，**真實案件整個 job FAIL**（請人修正）。
+- 演練（`fill-drill-aware`）在 GitLab 上也是新增一則紀錄留言，不改內文。
+- GitHub（公開 repo，只有演練）維持從內文讀：GitHub 上能改別人 Issue 內文的人要有 write 權限，本來就是可信作者（OWNER／MEMBER／COLLABORATOR）。
+
 ## 5. 倒數與標籤
 
 - `countdown --repo R --drill [--now UTC]`：列出開著的 `art14-drill` Issue → 解析 → 更新倒數留言與階段標籤。**沒有可處理的案件就印一行、立刻結束（OK）**。
@@ -122,14 +146,22 @@ stdout 最後一行 `ART14<TAB>OK|FAIL<TAB>說明`；結束碼 OK 0、FAIL 1、�
   能以 github-actions[bot] 身分寫 Issue 的只有本 repo 的 workflow（有 `issues: write` 的 job）；外部人士的 fork PR 拿到的是唯讀 token，repo 也沒有 `pull_request_target`。
 - 公開 repo 的 `art14-drill` 標籤只有有 triage 以上權限的人能加，這是額外的一層，但不是唯一一層（作者檢查）。
 
-## 10. GitLab 階段要改的地方（只列對應；實作在 M5／M8 的 GitLab 部分）
+## 10. GitLab 階段：GitHub → GitLab 對應（倒數已實作，T-10；email 還沒做）
 
-| GitHub 演練版 | GitLab 階段 |
+實作狀態（2026-11-14，分支 wp5/gitlab-t10）：`art14.py` 的 GitLab 後端與 `art14:countdown` job 已寫好，**只用假 API 測過，沒有對真實 GitLab 驗證**（範本的 job 仍是 `when: manual`）。詳細做法、官方文件頁面與內部驗證清單見 `docs/GITLAB-PORT.md` 的 T-10。
+
+| GitHub 演練版 | GitLab 階段（狀態） |
 |---|---|
-| 公開 Issue，標籤 `art14-drill`，內文第二行「演練，不是真實通報」 | 真實案件開**私密（confidential）Issue**，標籤 `art14`；演練也建議用私密 Issue |
-| `GITHUB_TOKEN`、`author_association` 過濾 | 私密 Issue 只有專案成員看得到；改用 GitLab 的 member access level 過濾作者 |
-| 公開檢查 `publiccheck`（防洩漏到公開） | 內部儲存可放較多細節，但仍不放機密到 Issue；公開檢查改成「不得出現在對外文件」 |
-| 排程每小時倒數留言 | GitLab pipeline schedule 每小時；留言與標籤邏輯可重用（`evaluate`／`render_comment` 是純函式） |
-| 倒數只在 Issue 上看 | 加 **email 通知**（期限前提醒負責人與備援人；email 地址放內部設定，不進公開 repo） |
+| 公開 Issue，標籤 `art14-drill`，內文第二行「演練，不是真實通報」 | 真實案件開**私密（confidential）Issue**，標籤 `art14`（`open-real --backend gitlab`，GitHub 上拒絕）；演練同樣用私密 Issue（後端寫死 confidential），標籤、第二行字樣不變。**已實作** |
+| `GITHUB_TOKEN`、`author_association` 過濾 | 作者與倒數留言的作者要是專案成員、`access_level` ≥ 30（Developer）（`GET /projects/:id/members/all/:user_id`）；`system` 留言不算；有 `art14` 標籤卻不是 confidential 的 Issue → FAIL、不寫入。**已實作** |
+| 公開檢查 `publiccheck`（防洩漏到公開） | 內部儲存：真實案件不跑公開檢查、不要求「演練」字樣；仍擋 quick action（`/指令` 行首）與沒淨化的 Markdown；演練照舊。**已實作** |
+| 排程每小時倒數留言 | GitLab pipeline schedule 每小時（`DUMPLING_JOB=art14`，job `art14:countdown`，token `ART14_GITLAB_TOKEN`）；留言與標籤邏輯重用 `evaluate`／`render_comment`。**已實作（`when: manual`，待內部驗證後放開）** |
+| 作者或標記不可信的案件只是略過 | GitLab 的真實案件被略過就 **FAIL**（法定倒數不能靜默停掉）；演練照舊只略過 |
+| 倒數只在 Issue 上看 | 加 **email 通知**（期限前提醒負責人與備援人；email 地址放內部設定，不進公開 repo）。**還沒做**（需要內部郵件設定／GITLAB-PORT T-08） |
 | SRP 人工提交、把編號與時間填回 Issue | 不變：SRP 沒有 API，不寫任何自動提交 |
-| 銷售市場（第 7 節，讀 `project.yml`） | 不變；GitLab 的 job 一樣傳 `--project` |
+| 銷售市場（第 7 節，讀 `project.yml`） | 不變；`open-real`／`open-drill` 一樣傳 `--project projects/<專案>`（注意 GitLab 專案 ID 用 `--gitlab-project`） |
+
+GitLab 用法：`art14.py <指令> --backend gitlab --gitlab-url "$CI_API_V4_URL" --gitlab-project "$CI_PROJECT_ID"`，token 從環境變數 `GITLAB_TOKEN` 讀。
+**`--project` 與 `--gitlab-project` 不一樣**（C0 決定，2026-11-14）：art14.py 的 `--project` 是專案資料夾（`projects/<專案>`，讀 `project.yml`），GitLab 的專案 ID 用 `--gitlab-project`；`issues.py`、`collect.py` 的 `--project` 則是 GitLab 專案 ID。`art14.py --help` 也寫明這點。
+GitLab 上的演練 Issue 不是 confidential 時同樣當成外洩處理並 FAIL（C0 決定：內部演練的內容同樣可能有產品資訊）。
+GitLab 的 `countdown` 不加 `--drill` ＝ 真實案件（標籤 `art14`）、加 `--drill` ＝ 演練（標籤 `art14-drill`）；GitHub 上不加 `--drill` 仍然是「有 `art14` Issue 就 FAIL」。

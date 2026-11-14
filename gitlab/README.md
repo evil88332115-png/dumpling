@@ -6,6 +6,7 @@
 |---|---|
 | `.gitlab-ci.yml` | CI 範本。呼叫 repo 裡同一套 `pipeline/` 腳本（`run-step.sh`、`project-info.py`、`release-meta.py`、`watch/*`）。**尚未在內部 GitLab 實際執行**，只通過語法檢查與規則測試 |
 | `release-payload.py` | 產生 Releases API 的 JSON（附件 assets links 指向 Generic Package）；`--files-dir` 驗每個附件都存在、是一般檔案、不重複 |
+| `watch-drill.sh` | `watch:drill` 的每日監控演練：合成資料三輪（預期開 0／2／0 個 Issue）後關閉；失敗或數量不符照樣收掉演練 Issue（T-16） |
 | `release-publish.sh` | `release:publish` 的發布步驟：**先驗完全部附件**（release-payload.py），驗過才上傳 Generic Package、建 Release（T-21）；`DUMPLING_RELEASE_DRY_RUN=1` 只驗證、不寫入（T-17） |
 | `fetch-ci-schema.sh` | **只在更新 schema 時由人手動執行**：下載官方 CI JSON schema 到暫存資料夾、核對 sha256、印出新舊 sha256，不覆蓋 repo 裡的檔 |
 | `tests/data/gitlab-ci-schema/` | 官方 CI JSON schema（`ci.json`，固定 commit 與 sha256）、`NOTICE`、`LICENSE.md`（MIT Expat＋Apache-2.0）、`SOURCE.md` |
@@ -40,6 +41,8 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 | `WATCH_GITLAB_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控通知用的 project access token（scope `api`，只給一個專案）；只有 `watch:notify` 使用 |
 | `WATCH_GITLAB_READ_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控讀取用的 project access token（scope `read_api`、角色 Planner：confidential Issue 要 Planner 以上）；只有 `watch:compute` 使用 |
 | `DUMPLING_JOB` | Pipeline schedule 的變數 | `watch`（每日監控）或 `dev`（每日開發版） |
+| `DUMPLING_WATCH_MODE`、`DUMPLING_WATCH_DRY_RUN`、`DUMPLING_WATCH_BASELINE` | 手動建 pipeline（網頁 Run pipeline 或 API）時帶 | 每日監控的手動入口（T-16）：`DUMPLING_WATCH_MODE=real` 跑一輪（`DUMPLING_WATCH_DRY_RUN=1` 只算不寫；`DUMPLING_WATCH_BASELINE=1` 還沒有狀態時建第一次的基準）；`DUMPLING_WATCH_MODE=drill` 跑演練（合成資料三輪＋關閉） |
+| `WATCH_REAL_ISSUES` | CI/CD 變數 | 排程的每日監控預設只算不寫；設成 `on` 才真的開 Issue（看過第一次真實基準「會開哪些 Issue」之後再設，同 D-040） |
 | `DUMPLING_RELEASE_DRY_RUN`、`DUMPLING_RELEASE_TAG` | 手動建 pipeline（網頁 Run pipeline 或 API）時帶 | **手動試跑 release**（T-17，代替 GitHub 的 draft Release）：`DUMPLING_RELEASE_DRY_RUN=1`＋`DUMPLING_RELEASE_TAG=<專案>/<版本>` → 跑 build、scan，publish 只驗證；不上傳 Package、不建 Release、不簽章、不開 Issue |
 | `INTERNAL_MIRROR_URL` | `watch:compute` 的 `variables`，或 CI/CD 變數 | 內部資料源鏡像網址（T-06）；公開 repo 裡只放空字串 |
 

@@ -62,6 +62,11 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   - 其他 tag → 列進 `skipped`（附原因）；draft 的 tag 列進 `drafts`（最多 50 個）
   - **match.py 怎麼看**：`skipped`（資料格式壞掉、tag 不合規則、tag 重複）每一筆都算 Release 問題 → 降級（ATTENTION、連續兩次開健康 Issue）、擋第一次基準，報告寫出是哪個 tag、為什麼；`drafts`（還沒發布）只列在報告的「說明」，不降級。
     （GitHub 的 `GITHUB_TOKEN` 只有 `contents: read` 時列不到 draft，所以排程的報告通常看不到 draft。）
+- `--backend gitlab --gitlab-url <…/api/v4> --project <數字 ID>`（GITLAB-PORT T-05，只有假 API 測試、未對真實 GitLab 驗證）：token 讀環境變數 `GITLAB_TOKEN`（`PRIVATE-TOKEN` 標頭），
+  用 `GET /projects/:id/releases` 列 Release。GitLab 沒有 draft、也沒有 prerelease：`upcoming_release: true` 當 draft（列進 `drafts`、不監控）；`prerelease` 一律 false，
+  所以 `dev/<專案>` 的滾動 Release 目前會進 `skipped`（開發版 SBOM 在 GitLab 怎麼存、怎麼收是 GITLAB-PORT T-03，這裡沒有先發明）。
+  附件只讀 `assets.links[]` 裡「本專案 Generic Package、同一個 API 主機」的檔案（`…/projects/<ID>/packages/generic/<套件>/<版本>/<檔名>`），檔名取自網址、過一樣的規則；
+  其他連結不下載、記成該 Release 的 problem；下載不跟隨轉址。
 - `--from-dir`：讀 `<資料夾>/*/release-meta.json`（合成 Release，演練與測試用）；同一個資料夾裡的附件檔名規則和真的一樣。
 - 每個 Release 下載：`release-meta.json`（必要）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、整份 `sbom-<專案>-<版本>.cdx.json`、
   `layers.json`、`kernel-versions-<專案>-<版本>.json`（C1 在 M2 提供，見下；只接受 schema `sca-center-kernel-versions/2`，其他版本 → 核心 CNA 標 GAP、寫明 schema 不符：shipped 每顆核心有 `upstream_version`（對不上是 null）、`upstream_basis`、`upstream_note`；null 或沒有附件 → 核心 CNA 標 GAP，Issue／報告寫 upstream_note）、`scan-summary-<專案>-<版本>.json`（選填）。
@@ -153,7 +158,11 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 python3 -I pipeline/watch/issues.py read-state --repo <owner/repo> --mode real|drill --out <資料夾>
 python3 -I pipeline/watch/issues.py apply      --repo <owner/repo> --plan <plan.json> [--dry-run]
 python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演練結束：關閉所有 drill Issue
+# GitLab 後端（GITLAB-PORT T-05）：--repo 換成 --backend gitlab --gitlab-url <…/api/v4> --project <數字 ID> [--confidential]；token 讀 GITLAB_TOKEN
 ```
+- 後端：預設 `--backend github`（`--repo` 必填，行為不變）。`--backend gitlab` 走 Issues／Notes／Labels API（欄位對照：內文＝`description`、編號＝`iid`、狀態 `opened`／`closed`、標籤是字串），
+  **建出來的 Issue 一律 `confidential: true`（寫死，`--confidential` 只是範本相容旗標、關不掉）**；token 放 `PRIVATE-TOKEN` 標頭，只連 `--gitlab-url` 那台（https，測試才允許本機 http），不跟隨轉址，429 照 `Retry-After`／`RateLimit-Reset` 重試。
+  只有假 API 測試、未對真實 GitLab 驗證；清單見 GITLAB-PORT T-05。內文或留言有以 `/` 開頭的行（GitLab quick action 可能被執行）→ 不送、FAIL。
 - Token：`GH_TOKEN`／`GITHUB_TOKEN`，只放 HTTP 標頭；不跟隨轉址到別的主機；只連 `api.github.com`（`GITHUB_API_URL` 可改，給 GHES／測試用）。
 - 監控 Issue 的內文第一行是標記：`<!-- dumpling-watch key=<64 hex> mode=<real|drill> -->`。
   去重：列出標籤 `dumpling-watch` 的所有 Issue（open＋closed，分頁），本地解析標記；**不用 search API**（索引有延遲）。
@@ -241,6 +250,6 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
   - FAIL（`project.yml` 不合格、資料表壞掉、PyYAML 不在）由 `support-fail` job 讓這一輪變紅。
   - 放在比對前面，報告一定會留在 summary。比對 FAIL 時 compute 失敗、notify 不跑，支援期限的 Issue 延到下一輪（key 不變，晚一天而已）。
   - notify 裡，每日監控的 apply 失敗（例如樂觀鎖），支援期限的 apply 照樣跑（`!cancelled()`）。
-  - 用的是同一個 `dry_run`：排程預設只算不寫，C0 設 `WATCH_REAL_ISSUES=on` 之後才真的開 Issue（D-040）。
+  - **C0 放行（`WATCH_REAL_ISSUES=on`）之前一律只算不寫，手動跑、`dry_run=false` 也一樣**（C0 決定，2026-11-14；D-040 的精神：支援期限的 Issue 和監控 Issue 一起由 C0 放行）。放行之後照 `dry_run`。
 - 輸出在 artifact `watch-support-<round>-<attempt>`（`report.md`、`result.json`、`plan.json`），報告也寫進 job summary。
 - 資料表只有人工維護的項目。Debian、Raspberry Pi OS、Radxa、OMV 由 C4 補（提案 B2）；在那之前，這些平台的 OS 是 NOT_ASSESSED（SBOM 裡的元件），或 ATTENTION（`ours` 的 OS）。
