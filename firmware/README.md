@@ -42,6 +42,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `intel_gop`、`intel_legacy_vbios` | 字串 | 與 SBOM 的 `Intel GOP driver`／`Intel legacy VBIOS (option ROM)` 元件 version 相同；同名元件多個時任一個相符就 OK；沒有元件或都沒讀到版本＝MISSING。GOP 的 version 只有 build 編號（如 `1070`）。VBT 不提供此鍵（version 是表頭格式版本） |
 | `amd_agesa` | 字串（PI 版本號，例如 `1.2.0.B`） | SBOM 的 `AMD AGESA` 元件 version 的最後一個以空白分隔的符記相同（不分大小寫），或整串相同；映像有好幾個不同的 AGESA 字串時任一個相符就 OK；沒有元件或沒讀到版本＝MISSING。前面的名稱（`ComboAM4v2PI`、`ComboV2PI`…）各廠商寫法不同，不比 |
 | `amd_microcode` | `[{equiv_id, patch_id}]`（十六進位） | SBOM 有 `AMD CPU microcode` 元件，其 `sca-center:amd-equivalence-id` 與 `version`（patch level）相符；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING；映像多出來的微碼不比 |
+| `advisory_rule` | `[{component, version, suggestion, rule_ids}]` | SBOM 有名稱是 `component`、version 相符的元件，其 `dumpling:advisory-rule-suggestion`（`affected`／`not-affected`／`NOT_ASSESSED`）與 `dumpling:advisory-rule-ids`（不分順序）相符；鎖的是規則表目前的內容，不是漏洞判定 |
 
 每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 

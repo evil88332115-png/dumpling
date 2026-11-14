@@ -38,6 +38,12 @@ VBT 版本（`1.00`、BDB 2.28）試掃報告沒有記錄，沒有加。NUC 維�
 - `amd_microcode` 比 `AMD CPU microcode` 元件的 equivalence id 與 patch level（version）；沒有 `amd_psp_*`：PSP 韌體條目的標頭版本沒有找到可對照的公開來源，不寫 expected。
 - 樣本 `asus-prime-b550m-a-3404` 寫了 `amd_agesa: "1.2.0.B"`（ASUS 下載頁 release notes）與兩份微碼（與 linux-firmware 位元組相同），出處寫在該檔註解與 `docs/notes/c2-amd-psp.md`。
 
+## 規則表鍵（advisory_rule）
+
+- `advisory_rule` 比 SBOM 元件（名稱＋版本）的 `dumpling:advisory-rule-suggestion` 與 `dumpling:advisory-rule-ids`（規則編號，不分順序）。它鎖的是**規則表目前的內容**對這份映像的建議（`docs/notes/c2-firmware-advisory.md` 的「規則表」）：
+  規則表新增、修改規則或改版本順序後，建議可能改變，要重新核對並更新樣本的 expected；這不是漏洞判定，建議不是結論。
+- 樣本 `asus-prime-b550m-a-3404`（AGESA affected，AMD-SB-7014）、`dasharo-protectli-vp46xx-v1.2.0`（CSME not-affected，INTEL-SA-00391）、`novacustom-nuc-box-arl-v0.9.2`（CSME affected，INTEL-SA-01372）各寫一項，兩條路徑（affected、not-affected）都有真樣本鎖住。
+
 ## CI 結果（2026-11-12）
 
 - 綠燈：https://github.com/evil88332115-png/dumpling/actions/runs/43231626732

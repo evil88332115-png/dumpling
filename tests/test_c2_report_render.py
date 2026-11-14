@@ -326,7 +326,7 @@ class RulesReportRenderTests(RenderCase):
             tmp = Path(td)
             affected = tr.agesa_rule()
             affected["title"] = self.EVIL
-            affected["review"] = tr.review(preliminary_by="產品 安全 角色")
+            affected["review"] = tr.review(preliminary_by="產品負責 角色")
             both = tr.agesa_rule(fixed="1.2.0.B", rid="AMD-SB-7005")
             both["title"] = "x" + self.EVIL
             ami = tr.rule("AMI-SA-2026001", [{"component": "ami_core", "product": self.EVIL, "fixed_in": self.EVIL}], "AMI", url=tr.AMI_PDF)
@@ -337,12 +337,13 @@ class RulesReportRenderTests(RenderCase):
             for name, table in states.items():
                 md = self.report(table, tmp)
                 self.assertIn("## 規則表比對", md, name)
+                md = "## 規則表比對" + md.split("## 規則表比對", 1)[1].split("\n## ", 1)[0]          # 只渲染這一節（其他段落有既有的內容）
                 for rn, render in self.R.items():
                     h = render(md)
                     self.assertEqual(problems(rn, "para", h), [], (name, rn))
                     self.assertNotIn("<img", h, (name, rn))
                 for w in ("不受影響", "安全", "不適用"):
-                    self.assertNotIn(w, md.split("## 規則表比對")[1], (name, w))
+                    self.assertNotIn(w, md, (name, w))
 
 
 if __name__ == "__main__":

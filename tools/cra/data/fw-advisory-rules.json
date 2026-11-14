@@ -271,12 +271,12 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule"
+   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product"
   },
   {
    "id": "INTEL-SA-01372",
    "vendor": "Intel",
-   "title": "Intel Chipset Firmware Advisory (VRT0010)",
+   "title": "VRT0010, Intel Chipset Firmware Advisory",
    "published": "2026-08-11",
    "revised": "2026-09-09",
    "cves": [
@@ -313,7 +313,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule"
+   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product"
   },
   {
    "id": "AMI-SA-2026001",

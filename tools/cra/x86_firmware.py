@@ -2830,6 +2830,7 @@ def rules_markdown(inv):
             g[(x["kind"], x.get("reason") or "-")] = g.get((x["kind"], x.get("reason") or "-"), 0) + 1
         L += ["", "- 其餘 " + str(len(rest)) + " 個元件沒有適用的規則：" + "、".join(f"{e(k)} {n} 個（{e(rs)}）" for (k, rs), n in sorted(g.items()))
               + "；都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。"]
+    L.append("")
     L.append("- 沒有規則元件種類的元件（Intel 微碼另見「公告比對」、coreboot、edk2、GOP／VBT／legacy VBIOS、NVIDIA vBIOS）：這一節沒有比對，不代表沒有漏洞。")
     return L
 

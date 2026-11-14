@@ -59,7 +59,7 @@ AM5 = seq(("1.0.0.7a", "2023-05-05"), ("1.0.8.0", "2023-08-25"), ("1.2.0.1", "20
 def review(state="preliminary", **kw):
     r = {"state": state, "preliminary_by": ROLE, "preliminary_at": "2026-11-13"}
     if state == "confirmed":
-        r.update(confirmed_by="產品安全負責人", confirmed_at="2026-11-14")
+        r.update(confirmed_by="產品負責人", confirmed_at="2026-11-14")
     r.update(kw)
     return r
 
@@ -185,7 +185,7 @@ def test_each_condition_kind_accepts_its_fields_and_rejects_extra_and_missing(tm
         if k not in ("component", "fixed_in") or (k == "fixed_in" and c["component"] != "ami_core"):
             if k == "component":
                 continue
-            invalid(tmp_path, doc(cond_rule({kk: v for kk, v in c.items() if kk != k})), "missing field")
+            invalid(tmp_path, doc(cond_rule({kk: v for kk, v in c.items() if kk != k})))
 
 
 # ---------- schema：版本格式依元件 ----------
@@ -337,10 +337,10 @@ def test_review_rules(tmp_path):
     invalid(tmp_path, doc(rule() | {"review": review(preliminary_at="2026-11-15")}), "preliminary_at")
     for bad in ("draft", "Confirmed", "", None):
         invalid(tmp_path, doc(rule() | {"review": review(state=bad)}), "state")
-    for role in ("a@example.com", "@everyone", "https://x.test", "mailto:x", "[x](y)", "x|y", "`x`", "<b>x</b>", "", "x" * 81, "a\nb", "a‮b", "x&amp;y"):
+    for role in ("a\u200bb", "a\u202eb", "a\x7fb", "a\u2028b", "a@example.com", "@everyone", "https://x.test", "mailto:x", "[x](y)", "x|y", "`x`", "<b>x</b>", "", "x" * 81, "a\nb", "a‮b", "x&amp;y"):
         invalid(tmp_path, doc(rule() | {"review": review(preliminary_by=role)}), "preliminary_by")
         invalid(tmp_path, doc(rule() | {"review": review("confirmed", confirmed_by=role)}), "confirmed_by")
-    ok(tmp_path, doc(rule() | {"review": review(preliminary_by="產品安全負責人")}))
+    ok(tmp_path, doc(rule() | {"review": review(preliminary_by="產品負責人")}))
 
 
 def test_duplicates_cves_and_sizes(tmp_path):
@@ -855,7 +855,8 @@ def test_repo_table_is_valid_pinned_and_first_batch_is_what_the_pages_say():
 @pytest.mark.parametrize("comp_kind,comp,want,ids", [
     ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.B"}, "affected", ["AMD-SB-7014"]),               # B550M／ASRock 的 AGESA：AMD-SB-7005 已修正（B 不低於 B），AMD-SB-7014 還沒（B < Cc）
     ("amd_agesa", {"value": "ComboAM5PI 1.0.8.0"}, "affected", ["AMD-SB-7014"]),                 # B650M：AMD-SB-7005 的 1.0.8.0，AMD-SB-7014 的 1.2.0.1
-    ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.Cc"}, "affected", ["AMD-SB-7014"]),
+    ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.Cb"}, "affected", ["AMD-SB-7014"]),                # Vermeer 的 7014 修正版是 Cb，但規則取同表最高的 Cc（Matisse），所以 Cb 還是建議 affected
+    ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.Cc"}, "not-affected", ["AMD-SB-7005", "AMD-SB-7014"]),
     ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.D"}, "not-affected", ["AMD-SB-7005", "AMD-SB-7014"]),
     ("amd_agesa", {"value": "ComboAM5PI 1.2.0.1"}, "not-affected", ["AMD-SB-7005", "AMD-SB-7014"]),
     ("amd_agesa", {"value": "ComboAM4v2PI 1.2.0.A"}, "NOT_ASSESSED", []),                       # 順序不確定

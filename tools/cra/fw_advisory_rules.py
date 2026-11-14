@@ -41,12 +41,13 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 TABLE_PATH = Path(__file__).resolve().parent / "data" / "fw-advisory-rules.json"
 # 規則表檔案本身的 sha256（改規則表後要一起更新：python3 tools/cra/fw_advisory_rules.py sha256；tests 會核對）。
 # 檔案被改動、截斷、少幾筆規則或換成別的內容時，所有元件一律 NOT_ASSESSED（table-sha-mismatch），報告狀態 ATTENTION。
-TABLE_SHA256 = "ce41fe3980351a32bd46b08b1556f0afffb3409e7583816987cefdb8aaeb0f96"
+TABLE_SHA256 = "0e0a97d51bfba9d6619ffe8188c56ab01a48550c4669c2259ea1330428b439e2"
 SCHEMA = "dumpling-fw-advisory-rules/1"
 MAX_TABLE = 1 << 20
 MAX_RULES = 500
@@ -124,6 +125,8 @@ def _keys(obj, required, optional, where):
 def _str(v, rx, where):
     if not isinstance(v, str) or not rx.fullmatch(v):
         _bad(where, "bad format")
+    if any(unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") for ch in v):
+        _bad(where, "control or format characters (including bidi overrides and zero-width) are not allowed")
     return v
 
 
