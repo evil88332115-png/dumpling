@@ -70,6 +70,8 @@ AMI_NO_CORE = "the SBOM has no AMI core version"
 AMI_REASONS = {"conflict": ("ami-core-conflict", "the Firmware ID records of the image disagree on the AMI core version; no value is chosen"),
                "layout-unknown": ("ami-fid-layout-unknown", "the image has a Firmware ID ($FID) record whose layout is not the known one; no AMI core version is read")}
 AMI_FIXED_RE = re.compile(r"AptioV_([0-9])\.([0-9]{3})")
+AMI_INCOMPLETE = ("the image was not fully decoded or has Firmware ID candidates that do not match the known layout ({why}); "
+                  "parts that were not decoded may hold records with a different core version")
 AMI_CAVEAT = ("the core is AMI's base version, and a fix back-ported by the board vendor cannot be seen in the image; "
               "the mapping of the core's notation to the advisory's (A1) is not yet confirmed by AMI or the board vendor "
               "(A1: the two-digit FID minor equals the last two digits of the three-digit advisory minor), and the order inside one major (A2) is assumed; "
@@ -637,11 +639,18 @@ def _ami_norm(s):
     return re.sub(r"\s+", "", str(s)).lower()
 
 
+def _ami_why(a):
+    inc = a.get("incomplete")
+    if isinstance(inc, list) and inc:
+        return "; ".join(str(x)[:160] for x in inc[:3])
+    return "no reason recorded"
+
+
 def cond_ami(c, comp):
     """AMI 核心版本（D-058）。comp["ami_core"]＝ami_core.summarize 的結果（至少 status、product、major、minor）；沒有 → 沒有核心版本資料。
     低於修正版本才給 affected 建議；不低於一律 NOT_ASSESSED（A1 未確認，不輸出 not-affected）。"""
     a = comp.get("ami_core")
-    if not isinstance(a, dict) or a.get("status") in (None, "not-found", "not-searched"):
+    if not isinstance(a, dict) or not isinstance(a.get("status"), str) or a["status"] in ("not-found", "not-searched"):
         return _r("NOT_ASSESSED", "no-ami-core-version", AMI_NO_CORE)
     if a["status"] in AMI_REASONS:
         return _r("NOT_ASSESSED", *AMI_REASONS[a["status"]])
@@ -662,7 +671,8 @@ def cond_ami(c, comp):
                   f"the image's AMI core major version is {have[0]} but fixed_in {c['fixed_in']} is in major {fixed[0]}; versions of different majors are not compared")
     if have < fixed:
         return _r("affected", None, f"AMI core {core} (Firmware ID record; self-declared by the image, unsigned) is below fixed_in {c['fixed_in']} "
-                                    f"(compared as integers: {have[0]}.{have[1]:03d} < {fixed[0]}.{fixed[1]:03d}); " + AMI_CAVEAT)
+                                    f"(compared as integers: {have[0]}.{have[1]:03d} < {fixed[0]}.{fixed[1]:03d}); " + AMI_CAVEAT
+                                    + ("" if a.get("complete") is True else "; " + AMI_INCOMPLETE.format(why=_ami_why(a))))
     return _r("NOT_ASSESSED", "ami-core-mapping-unverified",
               f"AMI core {core} is not below fixed_in {c['fixed_in']}, but the mapping of the core's notation to the advisory's (A1) is not yet confirmed by AMI "
               "or the board vendor, so no not-affected suggestion is given")
@@ -721,6 +731,10 @@ def evaluate(table_or_err, kind, comp):
                 if kind == "bios_image":
                     related.append(r["id"])
             res = evaluate_condition(table, c, comp)
+            if res["result"] == "not-affected" and any(x["component"] == "ami_core" for x in r["match"]):
+                # 規則只要有 ami_core 條件就不採用 not-affected（D-058：A1 未確認，第一版不輸出）；其他條件（例如 bios_image）判出的 not-affected 一樣降級
+                res = _r("NOT_ASSESSED", "ami-core-mapping-unverified",
+                         "the rule has an AMI core condition and no not-affected suggestion is given for it until the mapping (A1) is confirmed; " + res["detail"])
             res.update(rule=r["id"], condition=j, state=r["review"]["state"], sources=[s["url"] for s in r["sources"]])
             if res["result"] == OUT:
                 other_scope.append(res)

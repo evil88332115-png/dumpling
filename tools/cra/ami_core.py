@@ -16,6 +16,8 @@
   - FFS 形式：前 16 位元組是 FREEFORM_SUBTYPE_GUID section 的子類型 GUID 2EBE0275-6458-4AF9-91ED-D3F4EDB100AA
   - FIDT 形式：前 36 位元組是 ACPI 表頭，簽章 `FIDT`、表長（u32 小端，+4）在 156～4096
 
+GUID 的名稱（`Fid`、`SignOn`）只參考公開工具（fwupd 的 libfwupdplugin/fu-efi-section.c 等，LGPL-2.1-or-later）的清單，只取名稱，沒有複製程式碼。
+
 ## 結果狀態（summarize 的 status）
   read            至少一份通過結構檢查的紀錄，所有紀錄的 Core 相同
   not-found       沒有任何帶前導的 `$FID`（沒找到不代表不存在；完整與否看 complete）
@@ -158,6 +160,8 @@ def summarize(entries, incomplete=(), truncated=False, max_found=32):
     inc = list(incomplete) + (["more Firmware ID candidates than the search limit; the rest were not looked at"] if truncated else [])
     valid = [e for e in entries if e["ok"]]
     bad = [e for e in entries if not e["ok"]]
+    if valid and bad:           # 有可讀的紀錄，同時有前導正確但結構不合的候選：狀態維持 read，但不能說「所有紀錄都讀到了」
+        inc.append(f"{len(bad)} Firmware ID candidate(s) with the expected preamble do not match the known layout ({'; '.join(sorted({e['why'] for e in bad})[:3])})")
     cores = sorted({tuple(e["core"]) for e in valid})
     r = {"performed": True, "complete": not inc, "incomplete": inc, "valid": len(valid), "invalid": len(bad),
          "count": sum(e["seen"] for e in valid), "candidates": [], "bad": [], "found": [], "gaps": []}
@@ -175,7 +179,7 @@ def summarize(entries, incomplete=(), truncated=False, max_found=32):
         r["build_dates"] = sorted({e["build"] for e in valid if e.get("build")})
         r["evidence_sha256"] = sorted({e["sha256"] for e in valid})
         r["forms"] = {f: sum(e["seen"] for e in valid if e["form"] == f) for f in FORMS if any(e["form"] == f for e in valid)}
-        r["found"] = [where_text(w) for e in valid for w in e["found"]][:max_found]
+        r["found"] = list(dict.fromkeys(where_text(w) for e in valid for w in e["found"]))[:max_found]      # 位置相同、內容不同的紀錄只列一次（份數在 count，雜湊在 evidence_sha256）
         if bad:
             r["note"] = (f"{len(bad)} more Firmware ID candidate(s) with the expected preamble did not pass the structure check and were ignored "
                          f"({'; '.join(sorted({e['why'] for e in bad})[:3])})")
@@ -204,12 +208,12 @@ def search_text(s):
     """BIOS 映像元件的 sca-center:ami-core-search：狀態加一句說明。"""
     st = s["status"]
     if st == "read":
-        return (f"read: core {s['core']} from {s['count']} Firmware ID record(s)" + ("" if s["complete"] else "; the UEFI walk was incomplete: "
+        return (f"read: core {s['core']} from {s['count']} Firmware ID record(s)" + ("" if s["complete"] else "; the search was incomplete: "
                 + "; ".join(s["incomplete"][:3])))
     if st == "conflict":
         return "conflict: Firmware ID records disagree on the core version; no value is chosen"
     if st == "layout-unknown":
         return "layout-unknown: `$FID` with the expected preamble found, the layout is not the known one"
     if st == "not-found":
-        return "not-found: no Firmware ID record in the decoded UEFI content" + ("" if s["complete"] else "; the walk was incomplete, not found does not mean absent")
+        return "not-found: no Firmware ID record in the decoded UEFI content" + ("" if s["complete"] else "; the search was incomplete, not found does not mean absent")
     return "not-searched: " + s.get("reason", "")

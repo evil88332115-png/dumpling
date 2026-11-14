@@ -421,7 +421,7 @@ def test_sbom_has_the_core_component_under_the_bios_image_with_basis_and_suggest
 def test_sbom_incomplete_walk_marks_the_component(tmp_path):
     inv, comps, _ = sbom_of(tmp_path, bios_with(fv([ffs_g(G3, secs(comp(1, b"\x33" * 40))), ffs_fid()])))
     c = ami_comp(comps)
-    assert "UEFI walk was incomplete" in props(c, "sca-center:incomplete")[0] and "different core" in props(c, "sca-center:incomplete")[0]
+    assert "the search was incomplete" in props(c, "sca-center:incomplete")[0] and "different core" in props(c, "sca-center:incomplete")[0]
 
 
 def test_report_and_status_for_an_affected_core(tmp_path):
@@ -556,3 +556,177 @@ def test_ibv_core_comparison_is_not_made_for_conflicting_cores(tmp_path):
 def test_parse_ibv_core_formats():
     assert xf.parse_ibv_core("Aptio V 5.27") == (5, 27) and xf.parse_ibv_core("AptioV_5.044") == (5, 44) and xf.parse_ibv_core("5.2") is None
     assert xf.parse_ibv_core("Aptio V 5.27\n") is None and xf.parse_ibv_core("InsydeH2O 5.27") is None and xf.parse_ibv_core(None) is None
+
+
+# ---------- 混合條件、輸入型別、不完整的標註 ----------
+
+def test_rule_with_an_ami_core_condition_never_gives_not_affected_from_another_condition(tmp_path):
+    """同一筆規則有 ami_core 與 bios_image 條件：bios_image 條件單獨判出的 not-affected 也降成 NOT_ASSESSED，不帶 vendor-statement。"""
+    r = rule("AMI-SA-2026001", [{"component": "ami_core", "product": "Aptio V", "fixed_in": "AptioV_5.044"},
+                                {"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "1.0"}], "AMI", url=AMI_PDF)
+    t = build(tmp_path, doc(r))
+    a = {"status": "read", "major": 5, "minor": 17, "product": "Aptio V", "complete": True}
+    base = {"file": "PRIME.cap", "declared_version": "9.0", "ami": True, "ami_core": a}
+    res = fr.evaluate(t, "bios_image", {**base, "ami_core_component": True})            # 有核心元件：bios_image 條件單獨比，宣告版本 9.0 不低於 1.0
+    assert res["suggestion"] == "NOT_ASSESSED" and res["reason"] == "ami-core-mapping-unverified" and res["rule_ids"] == [] and res["evidence"] == []
+    assert not any(x["result"] == "not-affected" for x in res["results"])
+    res = fr.evaluate(t, "bios_image", {**base, "declared_version": "0.5", "ami_core_component": True})       # 宣告版本低於 1.0：affected 照舊
+    assert res["suggestion"] == "affected" and res["rule_ids"] == ["AMI-SA-2026001"]
+    res = fr.evaluate(t, "bios_image", {**base, "ami_core_component": False})
+    assert res["suggestion"] == "affected"                                          # 沒有核心元件時 ami_core 條件的 affected 照舊
+    res = fr.evaluate(t, "ami_core", {"ami": True, "ami_core": {**a, "minor": 50}})
+    assert res["suggestion"] == "NOT_ASSESSED" and res["reason"] == "ami-core-mapping-unverified"
+    # 沒有 ami_core 條件的規則：not-affected 照舊（保險只針對 AMI 規則）
+    other = rule("AMD-SB-7014", [{"component": "bios_image", "name_prefix": "PRIME", "fixed_in": "1.0"}])
+    res = fr.evaluate(build(tmp_path, doc(other), "o.json"), "bios_image", {"file": "PRIME.cap", "declared_version": "9.0"})
+    assert res["suggestion"] == "not-affected"
+
+
+@pytest.mark.parametrize("status", [None, 5, ["read"], {"read": 1}, b"read", 1.5, True, ("read",)])
+def test_non_string_status_is_not_assessed_not_an_exception(status):
+    r = cond({"status": status, "major": 5, "minor": 17, "product": "Aptio V"})
+    assert (r["result"], r["reason"]) == ("NOT_ASSESSED", "no-ami-core-version")
+    for bad in ({"status": "read"}, {"status": "read", "major": "5", "minor": 17, "product": "Aptio V"}, {"status": "read", "major": True, "minor": 1}):
+        assert cond(bad)["result"] == "NOT_ASSESSED"
+
+
+def test_affected_detail_says_when_the_search_was_incomplete():
+    r = cond({**summ(5, 17, complete=False), "incomplete": ["2 UEFI parts were not decoded (x)"]})
+    assert r["result"] == "affected" and "may hold records with a different core version" in r["detail"] and "2 UEFI parts were not decoded" in r["detail"]
+    assert "different core version" not in cond(summ(5, 17, complete=True))["detail"]
+    assert "no reason recorded" in cond(summ(5, 17, complete=False))["detail"]
+
+
+def test_sbom_and_report_say_so_for_an_affected_core_when_the_walk_was_incomplete(tmp_path):
+    inv, comps, _ = sbom_of(tmp_path, bios_with(fv([ffs_g(G3, secs(comp(1, b"\x33" * 40))), ffs_fid()])))
+    c = ami_comp(comps)
+    assert props(c, "dumpling:advisory-rule-suggestion") == ["affected"]
+    assert "may hold records with a different core version" in props(c, "dumpling:advisory-rule-basis")[0]
+    md = xf.markdown(inv)
+    assert "沒解開的部分可能還有核心版本不同的紀錄" in md
+    inv, comps, _ = sbom_of(tmp_path, bios_with(fv([ffs_fid()])), "clean.bin")
+    assert "different core version" not in props(ami_comp(comps), "dumpling:advisory-rule-basis")[0]
+    assert "沒解開的部分可能還有核心版本不同的紀錄" not in xf.markdown(inv)
+
+
+def test_read_with_a_malformed_candidate_is_incomplete_and_says_so_in_the_basis(tmp_path):
+    a = walk(fv([ffs_fid(make_fid(rev=3, core=(5, 50)), G1), ffs_fid(make_fid(), G2)]))["ami_core"]
+    assert a["status"] == "read" and a["core"] == "5.17" and a["complete"] is False
+    assert any("do not match the known layout" in x for x in a["incomplete"]) and "did not pass the structure check" in a["note"]
+    inv, comps, _ = sbom_of(tmp_path, bios_with(fv([ffs_fid(make_fid(rev=3, core=(5, 50)), G1), ffs_fid(make_fid(), G2)])))
+    c = ami_comp(comps)
+    assert props(c, "dumpling:advisory-rule-suggestion") == ["affected"]
+    assert "do not match the known layout" in props(c, "dumpling:advisory-rule-basis")[0]
+    assert "do not match the known layout" in props(c, "sca-center:incomplete")[0]
+
+
+def test_found_in_has_no_identical_lines(tmp_path):
+    """位置相同、內容不同的紀錄（例如兩個備份 FV 的 16 位元組欄位不同）：位置只列一次，份數在 count，各份雜湊在 evidence-sha256。"""
+    d = fv([ffs_fid(make_fid(tag=b"1AWQH340", filler=1), G1)])
+    d += b"\xff" * (-len(d) % 8)
+    d += fv([ffs_fid(make_fid(tag=b"1AWQG340", filler=2), G1)])
+    a = walk(d)["ami_core"]
+    assert a["count"] == 2 and len(a["evidence_sha256"]) == 2 and a["found"] == [f"{G1} ffs-section +0x10"]
+    inv, comps, _ = sbom_of(tmp_path, bios_with(d))
+    c = ami_comp(comps)
+    f = props(c, "sca-center:found-in")
+    assert len(f) == len(set(f)) == 1 and props(c, "sca-center:count") == ["2"] and len(props(c, "sca-center:evidence-sha256")) == 2
+    md = xf.markdown(inv)
+    assert md.count(f"{G1} ffs-section +0x10") == 1 or f"{G1} ffs-section +0x10、{G1}" not in md
+
+
+def test_report_section_for_non_ami_image_is_not_a_gap_but_for_ami_hint_it_is(tmp_path):
+    inv, _, _ = sbom_of(tmp_path, without_hint(bios_with(fv([ffs_g(G1, sec(0x10, b"MZ" + b"\0" * 30))]))))
+    sec_ = xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
+    assert "not-found" in sec_ and "GAP" not in sec_ and "- 說明：" in sec_
+    inv, _, _ = sbom_of(tmp_path, bios_with(fv([ffs_g(G1, sec(0x10, b"MZ" + b"\0" * 30))])), "hint.bin")
+    sec_ = xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
+    assert "- GAP：" in sec_
+
+
+# ---------- 變異測試存活項目 ----------
+
+def test_complete_is_false_for_notes_parse_errors_cap_and_no_firmware_volume(monkeypatch):
+    gfx = xf.load_sibling("uefi_gfx")
+    real = ui.parse_fvs
+
+    def with_note(data, sc, depth, *args, **kw):
+        real(data, sc, depth, *args, **kw)
+        sc.notes.append("synthetic structure note")
+    monkeypatch.setattr(ui, "parse_fvs", with_note)
+    a = walk(fv([ffs_fid()]))["ami_core"]
+    assert a["status"] == "read" and a["complete"] is False and any("structure warnings" in x for x in a["incomplete"])
+    monkeypatch.setattr(ui, "parse_fvs", real)
+
+    def with_error(data, sc, depth, *args, **kw):
+        real(data, sc, depth, *args, **kw)
+        sc.parse_errors += 1
+    monkeypatch.setattr(ui, "parse_fvs", with_error)
+    a = walk(fv([ffs_fid()]))["ami_core"]
+    assert a["status"] == "read" and a["complete"] is False and any("structure warnings" in x for x in a["incomplete"])
+    monkeypatch.setattr(ui, "parse_fvs", real)
+    monkeypatch.setattr(gfx, "MAX_INSPECT", 4096)
+    a = walk(fv([ffs_g(G1, sec(0x10, bytes([i]) * 600)) for i in range(20)] + [ffs_fid()]))["ami_core"]
+    assert a["complete"] is False and any("was not searched" in x for x in a["incomplete"])
+    monkeypatch.undo()
+    a = walk(b"\0" * 4096)["ami_core"]
+    assert a["status"] == "not-found" and a["complete"] is False and any("no valid UEFI firmware volume" in x for x in a["incomplete"])
+    assert walk(fv([ffs_fid()]))["ami_core"]["complete"] is True
+
+
+def test_component_advisory_match_is_not_assessed(tmp_path):
+    _, comps, _ = sbom_of(tmp_path, bios_with(fv([ffs_fid()])))
+    c = ami_comp(comps)
+    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "AMI-SA" in props(c, "dumpling:advisory-basis")[0]
+
+
+@pytest.mark.parametrize("junk", [b"\xc3\xa9\0", b"\xff\xfe\0", b"\xe0\xa5\0", b"\x80\x80\0"])
+def test_version_field_of_two_non_ascii_bytes_and_nul_is_refused(junk):
+    fields = b"05\0" + b"17\0" + b"34\0" + junk
+    r = ami.parse_record(make_fid(fields=fields), 0)
+    assert not r["ok"] and "two ASCII digits" in r["why"]
+    fields = junk + b"17\0" + b"34\0" + b"04\0"
+    assert not ami.parse_record(make_fid(fields=fields), 0)["ok"]
+
+
+def test_conflict_and_layout_unknown_are_attention_even_without_an_ami_hint(tmp_path):
+    for fvdata in (fv([ffs_fid(make_fid(core=(5, 17)), G1), ffs_fid(make_fid(core=(5, 26)), G2)]), fv([ffs_fid(make_fid(rev=9))])):
+        inv, comps, _ = sbom_of(tmp_path, without_hint(bios_with(fvdata)), "x%d.bin" % len(fvdata))
+        assert "AMI" not in (inv["bios"][0]["ibv_hint"] or [])
+        st, detail = xf.status_of(inv)
+        assert st == "ATTENTION" and ("互相矛盾" in detail or "結構不是已知的" in detail)
+        bios = next(x for x in comps if x["name"].startswith("x"))
+        assert any("AMI core version" in g for g in props(bios, "sca-center:gap"))
+        assert "- GAP：" in xf.markdown(inv).split("### AMI 核心版本")[1].split("\n### ")[0]
+
+
+def test_cbfs_flag_reaches_the_search_through_uefi_gfx_search():
+    b = {"uefi": {"volumes": 1}, "evidence": ["uefi", "cbfs"], "gaps": [], "file": "x", "ibv_hint": ["AMI"], "cbfs": {"fsp": []}}
+    xf.uefi_gfx_search(b, "x", fv([ffs_fid()]), None, {}, [])
+    assert b["ami_core"]["status"] == "read" and b["ami_core"]["complete"] is False and any("CBFS" in x for x in b["ami_core"]["incomplete"])
+    assert "ami_core" not in b["uefi_gfx"]
+    b2 = {"uefi": {"volumes": 1}, "evidence": ["uefi"], "gaps": [], "file": "x", "ibv_hint": ["AMI"], "cbfs": None}
+    xf.uefi_gfx_search(b2, "x", fv([ffs_fid()]), None, {}, [])
+    assert b2["ami_core"]["complete"] is True
+
+
+def test_result_does_not_depend_on_order_or_backup_copies():
+    import itertools
+
+    def sig(r):
+        a = r["ami_core"]
+        return (a["status"], a.get("core"), a["valid"], a["invalid"], a["count"], a["complete"], tuple(a.get("tags", [])), tuple(sorted(a.get("found", []))))
+    files = [ffs_fid(make_fid(tag=b"T0"), G1), fidt_file(make_fid(tag=b"T1"), G2), ffs_fid(make_fid(tag=b"T2", filler=3), G3)]
+    ref = sig(walk(fv(files)))
+    assert ref[0] == "read" and ref[1] == "5.17"
+    for perm in itertools.permutations(files):
+        assert sig(walk(fv(list(perm)))) == ref
+    one = fv(files)
+    one += b"\xff" * (-len(one) % 8)
+    back_first = walk(fv(list(reversed(files))) + b"\xff" * (-len(fv(list(reversed(files)))) % 8) + one)["ami_core"]
+    assert back_first["status"] == "read" and back_first["core"] == "5.17" and back_first["valid"] == ref[2] and back_first["count"] == 2 * ref[4]
+    # 不同核心不論順序都是 conflict
+    a, b = fv([ffs_fid(make_fid(core=(5, 17)), G1)]), fv([ffs_fid(make_fid(core=(5, 44)), G2)])
+    for d in (a + b"\xff" * (-len(a) % 8) + b, b + b"\xff" * (-len(b) % 8) + a):
+        r = walk(d)["ami_core"]
+        assert r["status"] == "conflict" and "core" not in r

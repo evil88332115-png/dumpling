@@ -10,7 +10,7 @@
 | `tools/cra/ami_core.py` | 純函式（只用標準函式庫、不碰檔案）：`$FID` 結構檢查（`parse_record`）、前導檢查（`find_fid`）、結果狀態與摘要（`summarize`） |
 | `tools/cra/uefi_gfx.py` | 同一次 UEFI 走訪（C1 的 `uefi_image.parse_fvs`）裡收 `$FID` 候選：每塊內容只多一個 `b"$FID" in body` 的檢查，沿用同一份去重（重複內容記新位置）與上限；結果在 `scan()["ami_core"]` |
 | `tools/cra/x86_firmware.py` | SBOM 元件與 property、`fw-inventory.md` 的「AMI 核心版本」一節、狀態、規則表的比對輸入、版本清單 `ibv-core` 核對 |
-| `tools/cra/fw_advisory_rules.py` | `cond_ami`（規則表 `ami_core` 條件的比較）、`fixed_in` 格式驗證；規則表內容與 `TABLE_SHA256` 沒有因為這項功能而改 |
+| `tools/cra/fw_advisory_rules.py` | `cond_ami`（規則表 `ami_core` 條件的比較）、`fixed_in` 格式驗證；`TABLE_SHA256` 固定規則表檔案的內容，不因這項功能而變 |
 | `tools/cra/tests/test_ami_core.py` | 測試：全部用測試當場組的合成 FV 與 `$FID` 紀錄，**沒有任何真實映像的位元組** |
 
 用到的 C1 公開介面與 `docs/notes/c2-vbios.md` 相同（`Scan`、`Scan.scan_bytes`、`parse_fvs`、`Stop`、上限常數、`undecoded`／`notes`／`parse_errors`），契約測試 `test_uefi_image_contract.py` 沒有改。
@@ -52,10 +52,10 @@ Project 欄位等於廠商公布的 BIOS 版本（3.40、34.04、18.07、0.59）
 | `not-searched` | 沒有走訪 UEFI 內容（沒有未壓縮的 FV、`uefi_image` 載入不了） | 沒有元件 | NOT_ASSESSED（`no-ami-core-version`） |
 
 - 同一映像內多份 `$FID`（備份 FV、A／B 兩區、FIDT 副本）Core 相同是正常現象，不算矛盾；tag 不同也不算矛盾，只記錄。
-- `read` 但另有帶前導卻不合結構的候選：照 `read`，候選數與原因寫在 `sca-center:note`（忽略它們）。
+- `read` 但另有帶前導卻不合結構的候選：狀態維持 `read`、候選不採用，但 `complete` 是 false，原因寫進 `incomplete`（SBOM 的 `sca-center:incomplete`、規則表建議的 basis），候選數與原因另寫在 `sca-center:note`。
 - `complete`：`uefi_image` 的 `undecoded`、`notes`、`parse_errors`、`Stop`、時間上限、去重後內容總量上限、FID 候選數上限都沒有觸發才是完整。不完整時元件加 `sca-center:incomplete`（其他沒解開的地方可能有核心不同的紀錄）。有 coreboot CBFS 的映像一律不完整（CBFS 檔案沒有解開）。
 - Core Major 不是 5：有版本、元件名稱是 `AMI firmware core`、沒有 product（`sca-center:note` 寫明）；規則表 NOT_ASSESSED（`ami-product-unknown`）。
-- 非 AMI 的映像（沒有 AMI 的線索：`ibv_hint` 沒有 AMI、也不是 PFAT 封裝）沒有核心版本是正常的：只在 BIOS 映像元件的 `sca-center:ami-core-search` 記 `not-found`，不加 `sca-center:gap`、不影響狀態。有 AMI 的線索卻讀不到時才加 gap 與 ATTENTION。
+- 非 AMI 的映像（沒有 AMI 的線索：`ibv_hint` 沒有 AMI、也不是 PFAT 封裝）沒有核心版本是正常的：只在 BIOS 映像元件的 `sca-center:ami-core-search` 記 `not-found`，不加 `sca-center:gap`、不影響狀態；報告的「AMI 核心版本」一節也只寫結果與說明，不寫成 GAP。有 AMI 的線索卻讀不到時才加 gap 與 ATTENTION。
 
 ## SBOM
 
@@ -69,7 +69,7 @@ BIOS 映像元件加 `sca-center:ami-core-search`（`read`／`not-found`／`conf
 
 ## 規則表比對（`cond_ami`，決定 D-058）
 
-規則 `{component: ami_core, product: "Aptio V", fixed_in: "AptioV_5.044"}`。`fixed_in` 驗證改成 `fullmatch` `AptioV_[0-9]\.[0-9]{3}`（現有兩筆都是 `AptioV_5.044`，規則表內容與 `TABLE_SHA256` 沒有變）。依序判斷：
+規則 `{component: ami_core, product: "Aptio V", fixed_in: "AptioV_5.044"}`。`fixed_in` 用 `fullmatch` `AptioV_[0-9]\.[0-9]{3}` 驗證（規則表現有的兩筆都是 `AptioV_5.044`；`TABLE_SHA256` 固定在程式裡，測試核對檔案相同）。依序判斷：
 
 1. status 不是 `read` → NOT_ASSESSED（`no-ami-core-version`／`ami-core-conflict`／`ami-fid-layout-unknown`）。
 2. 沒有 product（Core Major 不是 5）→ NOT_ASSESSED（`ami-product-unknown`）。
@@ -79,9 +79,13 @@ BIOS 映像元件加 `sca-center:ami-core-search`（`read`／`not-found`／`conf
 6. 核心**低於** `fixed_in`（整數 `(5, 17)` 對 `(5, 44)`）→ **affected 建議**（preliminary 照規則狀態，整份狀態 ATTENTION，待人審）。
 7. 核心**不低於** `fixed_in` → 一律 NOT_ASSESSED（`ami-core-mapping-unverified`），不論 `complete`。**第一版不輸出 not-affected**，等 A1 有公開依據（AMI 文件或板廠確認）再另立決策開放。
 
+`complete` 是 false（映像沒有完全解開，或有前導正確但結構不合的候選）時，affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告的 affected 列另寫一句：沒解開的部分可能還有核心版本不同的紀錄（並列出原因）。
+
 affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明三件事：核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；核心版本寫法的對應（A1）尚未經 AMI 或板廠確認；這是請負責單位對照板廠公告的線索，不是漏洞判定。
 
-有 `ami_core` 元件時，`bios_image` 不再比 `ami_core` 規則（同一條規則只出一個建議）；沒有元件時維持原狀（列「可能相關的 AMI 公告」，status 不是 `read` 的原因代碼會出現在 BIOS 映像的建議裡）。
+有 `ami_core` 元件時，`bios_image` 不再比 `ami_core` 規則（同一條規則只出一個建議）；沒有元件時 `bios_image` 照舊比（列「可能相關的 AMI 公告」，status 不是 `read` 的原因代碼會出現在 BIOS 映像的建議裡）。
+
+另有兩道保險：規則只要有任何 `ami_core` 條件（例如同一筆規則另有 `bios_image` 條件），其他條件判出的 not-affected 也一律降成 NOT_ASSESSED（`ami-core-mapping-unverified`），所以 AMI 規則不會產生 not-affected 與 vendor-statement 依據；`cond_ami` 的輸入 `status` 不是字串或欄位缺漏時回 NOT_ASSESSED，不丟例外。
 
 ## 版本清單的 `ibv-core` 核對
 
@@ -102,9 +106,8 @@ affected 建議的 detail、`dumpling:advisory-rule-basis` 與報告固定寫明
 - GUID 的名稱：`3FD1D3A2-99F7-420B-BC69-8BB1D492A332` 在公開工具的 GUID 清單裡叫 `Fid`；`2EBE0275-…` 在 fwupd 的 `libfwupdplugin/fu-efi-section.c` 叫 `SignOn`（名稱不同，意義不確定）。只有名稱，沒有結構。
 - FID 是可以被改的標籤：Win-RAID 討論串寫 FID（俗稱 BIOS Tag）「can be changed」https://winraid.level1techs.com/t/problem-adjust-bios-version-hp-pavilion-500-549ng-ami-aptio4/33124 。所以它和 PSP 標頭版本一樣是映像自述的值。
 - 間接佐證（只讀到搜尋結果摘要，原頁面直接抓取回 403，沒有逐字核對）：Aptio V 的 AM4 主機板在 dmidecode 有 `BIOS Revision: 5.17` 的公開傾印（openbenchmarking.org 的 dmidecode 結果頁）；NVD 的 CPE `ami:aptio_v:5.0` 與 VulDB 的「AMI AptioV up to 5.039」顯示公告的 `5.0xx` 是 Aptio V 的核心版本線。
-- 沒有用：AMI 的 AFU 使用手冊（多數標 NDA）與任何非公開授權的 AMI 資料。公開的 AFU「PUB」手冊有查，沒有寫 FID 或核心版本；UEFITool、BIOSUtilities、coreboot 沒有查到解析 `$FID` 的程式或文件。
 
-### 看過、不是核心版本或不能用的候選
+### 不採用的候選欄位（不是核心版本或不能用）
 
 | 候選 | 為什麼不用 |
 |---|---|

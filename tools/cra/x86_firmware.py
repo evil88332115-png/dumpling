@@ -2177,13 +2177,20 @@ def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
                          "an Intel legacy VBIOS next to them may be missing or uncertain")
 
 
+def ami_gap_applies(b):
+    """AMI 核心版本讀不到時要不要當成缺口（SBOM 的 sca-center:gap 與報告的 GAP 行同一個判斷）：結構不合、互相矛盾一定要；
+    沒找到、沒搜尋只在映像有 AMI 的線索時要。"""
+    a = b.get("ami_core") or {}
+    return a.get("status") in ("conflict", "layout-unknown") or "AMI" in (b.get("ibv_hint") or []) or bool(b.get("pfat"))
+
+
 def ami_gaps(b):
     """AMI 核心版本讀不到的原因加進 sca-center:gap：結構不合與互相矛盾一定寫；沒找到、沒搜尋只在映像有 AMI 的線索（IBV 線索或 PFAT 封裝）時寫
     （Dasharo、OVMF 這類不是 AMI 的映像沒有核心版本是正常的，不加缺口；搜尋結果仍在 sca-center:ami-core-search）。"""
     a = b.get("ami_core")
     if not a or a["status"] == "read":
         return
-    if a["status"] in ("conflict", "layout-unknown") or "AMI" in (b.get("ibv_hint") or []) or b.get("pfat"):
+    if ami_gap_applies(b):
         b["gaps"] += a["gaps"]
 
 
@@ -2265,7 +2272,7 @@ def ami_core_components(b, img, comps, sub):
                         *[prop("sca-center:found-in", w) for w in a["found"]],
                         *[prop("sca-center:evidence-sha256", x) for x in a["evidence_sha256"]],
                         *([prop("sca-center:note", a["note"])] if a.get("note") else []),
-                        *([prop("sca-center:incomplete", "the UEFI walk was incomplete (" + "; ".join(a["incomplete"][:3])
+                        *([prop("sca-center:incomplete", "the search was incomplete (" + "; ".join(a["incomplete"][:3])
                                 + "); other Firmware ID records, possibly with a different core, may exist in the parts that were not decoded")]
                           if not a["complete"] else []),
                         prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", AMI_ADVISORY_BASIS)]}
@@ -2316,6 +2323,10 @@ def ami_core_markdown(b):
     elif a["status"] == "layout-unknown":
         L += ["", "| 原因 | 形式 | 開頭位元組（十六進位） | 位置 |", "|---|---|---|---|"]
         L += [f"| {e(x['why'])} | {e(x['form'])} | `{x['head']}` | {e('、'.join(x['found']))} |" for x in a["bad"]]
+    if a["status"] == "read":
+        return L + ([f"- 不完整：{e(x)}" for x in a["incomplete"]] if not a["complete"] else [])
+    if not ami_gap_applies(b):        # 沒有 AMI 的線索（例如 coreboot、OVMF）：沒有核心版本是正常的，只寫結果與說明，不當成 GAP
+        return L + [f"- 說明：{e(x)}" for x in a["gaps"]]
     return L + [f"- GAP：{e(x)}" for x in a["gaps"]] + ([f"- 不完整：{e(x)}" for x in a["incomplete"]] if a["status"] != "not-searched" else [])
 
 
@@ -2578,7 +2589,8 @@ def rules_section(inv, rules=None):
             r = mod._na("match-error", f"the advisory rule matching failed ({type(e).__name__})", table)
         holder["rule_advisory"] = r
         results.append(r)
-        items.append({"image": img, "component": label, "kind": kind, "suggestion": r["suggestion"], "reason": r.get("reason"),
+        items.append({**({"scan_incomplete": True} if kind == "ami_core" and not (comp.get("ami_core") or {}).get("complete") else {}),
+                      "image": img, "component": label, "kind": kind, "suggestion": r["suggestion"], "reason": r.get("reason"),
                       "rule_ids": r["rule_ids"], "state": r["state"], "related": r["related"], "evidence": r["evidence"],
                       "verification": r.get("verification", {})})
     sec = {"status": "OK" if table is not None else "GAP", "components": len(results), "counts": mod.counts(results), "items": items,
@@ -2943,6 +2955,10 @@ def rules_markdown(inv):
         L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in aff]
         if any(x["kind"] == "ami_core" for x in aff):
             L += ["", "- " + AMI_AFFECTED_TEXT]
+            inc = [x for x in aff if x["kind"] == "ami_core" and x.get("scan_incomplete")]
+            if inc:
+                L.append("- 下列 AMI 核心的 affected 建議，映像沒有完全解開（或有結構不合的 Firmware ID 候選）：沒解開的部分可能還有核心版本不同的紀錄；"
+                         + "、".join(e(x["image"]) for x in inc) + "。")
     else:
         L.append("沒有。")
     L += ["", "### 建議 not-affected（依據類型 vendor-statement）", ""]
