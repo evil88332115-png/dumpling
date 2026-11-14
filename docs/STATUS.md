@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 10:21 +0800（C0）
+最後更新：2026-11-14 10:21 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -37,7 +37,7 @@
 > **D-045：C1 已在第二台電腦重開（2026-11-13，WSL2）。** worktree `$AGENT_TMP/dumpling-wt-c1-m2`（wp1/m2），暫存 `$AGENT_TMP/dumpling-tmp-c1/`。代理上限照 D-048（每對話 3 個：2 寫程式＋1 驗證；整台 10 個；負載 >12 或可用記憶體 <4 GB 不開）。
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
-- 目前在做：**M7b-3 PR #95**（wp1/m7b3＝7587d8f：run-params.json、重跑帶原掃描的 B-rootfs-tar／B-uefi-binary、status.tsv 重複列統一取最嚴重〔pipeline/lib/status_tsv.py〕；本機 tools 3995、tests/ OK；驗收 run 等正式 Release 建好再觸發）。**正式 tag 已由 C0 依使用者指示推送（0be7bc2）**，release run 43531550072、43531550316 排在驗收 run 之後（concurrency group 相同），綠燈後照 D-052 核對並刪 wp1/m2-pr-draft。M7f 待辦新增：草稿與正式 Release 的命名與 concurrency 分開；report_diff 的 7 處資料日期改讀結構化欄位；**kcve 快取沒有任何一份在 main 上（全在功能分支，tag run 讀不到 → git.kernel.org 斷就 FAIL、沒有 48 小時頂替）——要讓 main 定期存一份（C3 watch-round 或新排程）**；快取用量 9.19／10 GB，wp1/m2-spike 的 6 份約 7.5 GB 可刪（等確認）。**#92 已合併（main 94ba1ff）**：v39.2.0 驗收綠（draft9 核對：標準答案 24、狀態不變），v39.2.1 因 git.kernel.org 連不上 FAIL（外部原因，照 D-043）。**M7b-4 進行中**：wp1/m7b4（worktree `$AGENT_TMP/dumpling-wt-c1-m7b4`，未推）f724dbb version-state（Q4）、9b0eec1（#58 三項＋a.run[0] 退路）、6f29dce（#20 B-disk-partitions）；報告判定（D-054 bootloader-coverage、C-kernel-boot）由代理在 wp1/m7b4-report 做，完成後併入。#92 已修 C0 應修（4e31a1a，FAIL→GAP），#95 已修（fe74d0b，缺了應有的列 → GAP）
+- 目前在做：**M7b-4 PR #98**（https://github.com/evil88332115-png/dumpling/pull/98，wp1/m7b4，worktree `$AGENT_TMP/dumpling-wt-c1-m7b4`）：D-054 bootloader-coverage 與 C-kernel-boot 進報告狀態（不擋 VEX 閘門）、version-state（版本核對不是 OK → scan GAP）、#20 B-disk-partitions、#58 三項、a.run[0] 退路；已併 main（含 #95），本機測試中 → 推送 → Jetson 驗收 run；C0 驗證排在 C4 #97 之後。**已合併**：#92（M7b-2，main 94ba1ff）、#95（M7b-3）。**正式 Release 已建好並照 D-052 核對通過**（0be7bc2；兩版附件 20、標準答案 24、pvc independent OK、各層列數正常）。**待使用者**：刪 wp1/m2-pr-draft、wp1/m7a-fields、wp1/m7a-report（權限機制擋下）；刪 m2spike-* 快取（C0 問使用者）
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
@@ -57,7 +57,7 @@
   - 兩版差異：bsp +11／−0 列（pip、setuptools、wheel）、os +37／−235（mysql、webkit2gtk、vim 等升版修掉）、tier 沒變
 - 本機背景工作：無
 - **下一步（照順序）**：
-  1. **正式 tag（D-052）**：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
+  1. ~~正式 tag（D-052）~~ **已完成**（C0 依使用者指示推送，0be7bc2；核對通過）。原文：從最新 main（9f11a90 或更新，推之前 C0 再確認 SHA）打輕量 tag `orin-nano-demo/v39.2.0-demo1`、`orin-nano-demo/v39.2.1-demo1`——C1 推送被權限機制擋下，等使用者自己推或放行。推了之後：release run 綠 → 用 `$AGENT_TMP/dumpling-tmp-c1/draft6/` 核對正式 Release（附件數、標準答案 24 項、各層列數）→ 回報 C0 → 刪 `wp1/m2-pr-draft`
   2. **M7a #58 已合併（main b56cff4）**。子分支 worktree（m7a-fields、m7a-report）已移除；**刪除分支 wp1/m7a-fields、wp1/m7a-report（本機與遠端）被權限機制擋下，等使用者處理**
      之後：M7a2（C2 validate_table，介面已確認，見對外介面約定）→ **M7b（第一項，C0 指定）：「版本＝tag」加和 tag 無關的獨立來源**——現在 tag 同時餵精靈 --version 與 collect 的核對，tag 打錯或掃錯版本抓不到（C0 驗證實測 tag v2.1、實際掃 v2.0 → OK）；用 Jetson 掃描讀到的 BSP 版本字串（nv_tegra_release 等）／sources.yml 的版本段落／刷機包檔名，定義和 tag 的對應規則（例 v39.2.1-demo1 ↔ BSP 39.2.1），對不上 FAIL → M7b → M7c → M7d（含 adapter-gaps #7）→ M7e（同步 sca-center #221）；M7f 從 M7b 後平行（A2 要列新增 permissions 與固定 SHA 的 action）。M7c–e 若要改 Jetson 標準答案，先跟 C0 說明原因與數字
   3. 移除 worktree：scannr、followup 已移除；`dumpling-wt-c1-m2` 留到 tag 核對完
