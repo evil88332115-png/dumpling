@@ -136,7 +136,7 @@ class MdSafeRenderTests(RenderCase):
         "name@host", "foo.bar@1.2.3.4.5", "pkg:rpm/fedora/openssl@3.0.7-1.fc37",
         # xmpp:／mailto: 後面的 名稱@網域/資源：網域不含 `.` 也會被 cmark-gfm 連結（只加反斜線擋不住，要靠零寬空白）
         "xmpp:a@/.a", "xmpp:a@-/.a", "xmpp:1@a/.a", "xmpp:a@_/.a", "xmpp:a@b/c.d", "mailto:a@/.a", "MAILTO:a@-/.a", "XMPP:a/b@c/.d",
-        "_xmpp:a@/.a", "xmailto:a@/.a", "1xmpp:a@/.a", "x@y.zQ1@Z", "x@y.z1A1@Z", "x@y.zAB@Z",
+        "_xmpp:a@/.a", "xmailto:a@/.a", "1xmpp:a@/.a", "x@y.zQ1@Z", "x@y.z1A1@Z", "x@y.example1A@Z",
         # 網域掃描與同一串 email 字元的邊角
         "a@_.1@a", "a@-.a", "aa@_.a", "a@b_c.d", "a@b-c.d", "x@y.z@Z", "x@y.z-@Z",
         "x@y.z" + "1" * 252 + "@Z", "x@y.z" + "1" * 253 + "@Z", "x@y.z" + "1" * 300 + "@Z",
