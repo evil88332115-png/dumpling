@@ -41,7 +41,9 @@
 | 證據規則 U1、U2 | `vendor-statement` | Ubuntu CVE Tracker 的檔案加 commit（`active/<CVE>@<commit>`）與 `https://ubuntu.com/security/<CVE>`，每個 CVE 一筆 |
 | 發行版修補紀錄（`distro_fixed`） | `vendor-statement` | 紀錄編號（DSA、DLA、USN、`UBUNTU-CVE-…`），每個編號一筆；紀錄沒有編號時沒有類型 |
 | annotation | 人在判定檔裡寫（五種之一） | 人寫（見下） |
-| Dependency-Track 的人工判定（`source=dt`） | **一律沒有類型** | —（DT 沒有放類型的欄位；請改用 annotation 補依據） |
+| Dependency-Track 的人工判定（`source=dt`） | **一律沒有類型** | —（DT 沒有放類型的欄位；同一列又有 annotation 時見下一段） |
+
+**同一列同時有 DT 的判定和 annotation 的判定時**：照來源的優先順序以 DT 為準，那一列的陳述是 DT 的。DT 沒有放依據類型的欄位，所以這筆排除算沒有類型（原因 `dt`），會擋發行閘門；即使 annotation 寫了依據也一樣（那筆 annotation 算已使用，不會另外提示）。要解開，請在 DT 端處理：拿掉或改掉 DT 的分析，讓 annotation 的判定生效，依據才會進陳述。
 
 五種類型：`build-record`、`source`、`on-device`、`design-doc`、`vendor-statement`。發行版是 OS 的供應者，所以它的修補紀錄歸 `vendor-statement`，沒有第六種類型。規則本身的種類（`evidence`＝K1／K2／U1／U2）沒有改。plain 規則（match／set）不能排除，NVIDIA 推定只給 `in_triage`，所以沒有別的排除來源。
 

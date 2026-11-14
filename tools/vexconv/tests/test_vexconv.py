@@ -423,6 +423,22 @@ def test_evidence_properties_that_are_orphaned_or_of_unknown_type_are_not_eviden
     assert sum(1 for l in ov["statements"][0]["status_notes"].split("\n") if vc.parse_evidence_line(l)) == 1
 
 
+def test_orphaned_location_and_kernel_properties_become_evidence_invalid_lines():
+    """前面沒有 dumpling:evidence 的 dumpling:evidence-location／dumpling:evidence-kernel 不能成為依據，也不能被默默略過：
+    改成 evidence-invalid 的一行（JSON 編碼，不會被解析）留在 notes，往返之後仍然沒有依據。"""
+    props = [{"name": vc.PROP_EVIDENCE_LOCATION, "value": "orphan place"}, {"name": vc.PROP_EVIDENCE_KERNEL, "value": "5.15"}]
+    ok, bad = vc.evidence_props(props)
+    assert ok == [] and bad == [vc.NOTE_EVIDENCE_INVALID + json.dumps({"name": vc.PROP_EVIDENCE_LOCATION, "value": "orphan place"}, sort_keys=True),
+                                vc.NOTE_EVIDENCE_INVALID + json.dumps({"name": vc.PROP_EVIDENCE_KERNEL, "value": "5.15"}, sort_keys=True)]
+    ov = vc.to_openvex(ev_cdx("not_affected", props))
+    lines = ov["statements"][0]["status_notes"].split("\n")
+    assert lines == bad and not [l for l in lines if vc.parse_evidence_line(l)]
+    assert cdx_evidence(vc.to_cdx(ov)) == [[]]
+    # 孤立的屬性夾在合格的一組中間：合格的那一組照樣是依據，孤立的另外留一行
+    ok, bad = vc.evidence_props([{"name": vc.PROP_EVIDENCE_LOCATION, "value": "orphan"}] + ev_props(("source", "real", None)))
+    assert ok == [("source", None, "real")] and len(bad) == 1 and bad[0].startswith(vc.NOTE_EVIDENCE_INVALID) and "orphan" in bad[0]
+
+
 def test_evidence_only_on_exclusions_other_statuses_keep_lines_as_plain_notes():
     # CDX 的 exploitable／in_triage 帶依據屬性：不輸出依據行（依據只用在排除）
     c = ev_cdx("exploitable", ev_props(("source", "x", None)) + [{"name": vc.PROP_ACTION, "value": "update"}])

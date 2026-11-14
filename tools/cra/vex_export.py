@@ -59,7 +59,7 @@
     證據規則 U1、U2、發行版修補紀錄（distro_fixed）→ vendor-statement（發行版是 OS 的供應者，不新增第六種類型），位置是 Ubuntu CVE Tracker 的
       檔案加 commit 與 ubuntu.com 的頁面（U1、U2，每個 CVE 一筆），或紀錄編號（DSA、DLA、USN、UBUNTU-CVE-…，每個編號一筆）；
     annotation → 人寫在判定裡：evidence＋evidence_location（位置可以是清單＝多筆依據），或 evidence_basis（每筆自己的類型，可帶 kernel）；
-    dt（人在 Dependency-Track 的判定）→ 沒有放類型的欄位，一律沒有類型（請改用 annotation 補依據）。
+    dt（人在 Dependency-Track 的判定）→ 沒有放類型的欄位，一律沒有類型。annotation 蓋不過 DT 的判定：要在 DT 端清掉這筆判定，再用 annotation 補依據。
   on-device 的位置必須是專案資料夾內實際存在的檔案（相對路徑、不能有「..」、不能經符號連結指到外面）；只檢查檔案存在，沒有驗證內容。
   design-doc 的位置只要是合格的文字，不檢查文件。位置的共同限制見 vexconv.location_problem：不能空、不超過 512 字、不能有「;」、換行與控制字元
   （拒收「;」而不是編碼：OpenVEX 的依據行用「;」分隔欄位，不需要跳脫規則；輸入端與 vexconv 用同一個檢查）。
@@ -147,7 +147,7 @@ EVIDENCE_BASIS_MAX = 64                                   # 一筆判定最多�
 EVIDENCE_TABLE_MAX = 100                                  # 風險評估列出的 on-device／design-doc 排除筆數上限（summary.json 是全部）
 # 沒有類型的排除的原因代號 → 閘門與報告的說明（英文）
 EVIDENCE_MISSING = {
-    "dt": "Dependency-Track decision (no field for an evidence type)",
+    "dt": "Dependency-Track decision (an annotation cannot override it: clear it in Dependency-Track, then add evidence in an annotation)",
     "annotation_no_evidence": "annotation without evidence",
     "annotation_evidence_invalid": "annotation with invalid evidence",
     "on_device_missing": "on-device file missing",
@@ -3140,7 +3140,8 @@ def evidence_paragraphs(ev, table):
                f"Build-record evidence is the kernel configuration check, the kernel module map and the image's module list; vendor-statement "
                "evidence is a distribution or vendor record (Ubuntu CVE Tracker, DSA, DLA, USN); on-device and design-doc evidence is written by a "
                "person in `vex-annotations.json` (`evidence`, `evidence_location`, or `evidence_basis` per kernel). "
-               f"A decision made in Dependency-Track always has no evidence type (there is no field for it): record it as an annotation with evidence.")
+               f"A decision made in Dependency-Track always has no evidence type (there is no field for it), and an annotation cannot override it: "
+               "clear the decision in Dependency-Track, then record it as an annotation with evidence.")
     if wt["total"]:
         out.append(f"**{wt['total']} exclusions have no evidence type** ("
                    + ", ".join(f"{EVIDENCE_MISSING.get(k, k)} {n}" for k, n in sorted(wt["by_reason"].items(), key=lambda kv: (-kv[1], kv[0])))
@@ -3430,7 +3431,7 @@ def write_atomic(p, text):
 def on_device_warnings(a, project):
     """判定裡 on-device 依據的檔案目前不合格的說明（文字清單）：annotate、check 提醒用；這筆排除在檔案補上之前算沒有類型（閘門會擋）。"""
     return [f"on-device 依據 {e['location']!r} 不合格（{why}）：檔案要放在專案資料夾內（相對路徑、沒有 ..、不經符號連結到外面），"
-            f"補上之前這筆排除算沒有依據類型"
+            f"補檔前這筆排除算沒有依據類型，會擋發行閘門"
             for e in annotation_basis(a) if e["type"] == "on-device" and (why := on_device_problem(e["location"], project))]
 
 
@@ -3543,6 +3544,18 @@ def rules_add(a):
         return f"{'取代' if same else '新增'}規則 {new['id']}（{st['state']}）；{p} 共 {len(doc['rules'])} 條"
 
 
+def gate_line(g):
+    """rules check --scan 的 GATE 行。列出的各項加起來等於 untriaged_for_gate（gate 的算法）：untriaged ＋ 別名 CVE 沒有判定
+    （extra_cves_untriaged）＋ 規則設 in_triage ＋ 沒有類型的排除（D-035／D-057）。"""
+    a_, o = g["assessment"], g["open_affected"]
+    return (f"GATE\t{g['verdict']}\tuntriaged {a_['untriaged']}（核心 {g['counts']['kernel']['untriaged']}、其他 "
+            f"{g['counts']['non_kernel']['untriaged']}）＋別名 CVE 沒有判定 {a_.get('extra_cves_untriaged', 0)}"
+            f"＋規則設 in_triage {a_['in_triage_by_rule']}（未評估）"
+            f"＋沒有類型的排除 {a_.get('exclusions_without_evidence', 0)}＝{a_['untriaged_for_gate']}；"
+            f"規則判定 {a_['by_rule']}；"
+            f"exploitable {o['rows']}（規則 {o['by_rule']}；" + "、".join(f"{k} {n}" for k, n in o["by_response"].items()) + "）")
+
+
 def rules_check(a):
     """只檢查格式；有 --scan 時另做一次「乾跑」：用 cra_report 產生文件到暫存資料夾（同樣的列、同樣的判定順序），印出每條規則的結果。
     回傳 (退出碼, 輸出的行)。"""
@@ -3591,10 +3604,7 @@ def rules_check(a):
         for r in x["sample"]:
             lines.append(f"  例\t{r['id']}\t{r['component']} {r['version']}\t{str(r['tier']).upper()}\t{r['fix_state']}\t{r['detail']}")
     a_, o = g["assessment"], g["open_affected"]
-    lines.append(f"GATE\t{g['verdict']}\tuntriaged {a_['untriaged']}（核心 {g['counts']['kernel']['untriaged']}、其他 "
-                 f"{g['counts']['non_kernel']['untriaged']}）＋規則設 in_triage {a_['in_triage_by_rule']}（未評估）＝{a_['untriaged_for_gate']}；"
-                 f"規則判定 {a_['by_rule']}；"
-                 f"exploitable {o['rows']}（規則 {o['by_rule']}；" + "、".join(f"{k} {n}" for k, n in o["by_response"].items()) + "）")
+    lines.append(gate_line(g))
     fl = v.get("upstream_excludes") or {}
     if fl.get("basis"):
         lines.append(f"FLAG\tdistro_no_range_upstream_excludes\t可能誤報 {fl['flagged']} 列（只標記，請人確認；Grype 發行版比對沒有版本範圍的 "

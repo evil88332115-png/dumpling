@@ -171,6 +171,47 @@ def test_distro_without_a_record_id_has_no_type():
     assert info["evidence"]["without_type"]["by_reason"] == {"distro_no_record": 1}
 
 
+def test_distro_basis_drops_record_ids_that_cannot_be_a_location():
+    """紀錄編號清理之後仍然不合格（只有換行、控制字元或空白，清理後是空的）→ 不放進依據；合格的照樣放。含「;」或換行的編號清理成合格的位置。"""
+    def drc_with(*records):
+        d = recheck_doc()
+        for r in d["rows"]:
+            r["evidence"] = [{"record": rec} for rec in records]
+        return d
+    allr, _, info = vx.assess([row("CVE-2024-6119")], drc=drc_with("USN-1-1", "\n", "\x00\t ", "   "))
+    assert basis_of(allr[0]) == [{"type": "vendor-statement", "location": "USN-1-1"}]
+    for e in basis_of(allr[0]):
+        assert not VC.location_problem(e["location"])
+    # 只剩不合格的編號：沒有類型（原因 distro_no_record），不是一筆位置是空字串的依據
+    allr, _, info = vx.assess([row("CVE-2024-6119")], drc=drc_with("\n", "\x00"))
+    assert allr[0]["vex"]["source"] == "distro" and vx.exclusion_basis(allr[0]["vex"]) == ([], "distro_no_record")
+    assert info["evidence"]["without_type"]["by_reason"] == {"distro_no_record": 1}
+    # 含「;」或換行的編號不會原樣進位置：清理成通過 location_problem 的文字
+    allr, _, _ = vx.assess([row("CVE-2024-6119")], drc=drc_with("USN-1;2\nx"))
+    assert basis_of(allr[0]) == [{"type": "vendor-statement", "location": "USN-1,2 x"}]
+
+
+def test_safe_location_makes_tool_built_locations_pass_the_location_check():
+    """工具自己組的依據位置（safe_location）：「;」換成「,」、換行與控制字元換成空白（連續空白併成一個）、去掉前後空白、截到 512 字。
+    原樣回傳時，含這些字元的位置會被 vexconv 拒收（或根本不能寫成依據行）。"""
+    assert vx.safe_location("a;b") == "a,b"
+    assert vx.safe_location("a\nb\r\nc\td\x00e\u2028f\u200bg\u2029h") == "a b c d e f g h"
+    assert vx.safe_location("  padded  ") == "padded"
+    assert len(vx.safe_location("x" * 600)) == VC.LOCATION_MAX == 512
+    assert vx.safe_location("x" * 511 + " " + "y" * 20) == "x" * 511                  # 截斷後尾端的空白去掉
+    for raw in ("a;b", "line1\nline2; x", "ctrl\x07\x00", "  lead", "z" * 1000, "rtl\u202eyx"):
+        assert VC.location_problem(vx.safe_location(raw)) is None, repr(raw)
+    # 進到依據裡也一樣（basis_entry、Ubuntu tracker 的檔案名稱含「;」與換行）
+    assert vx.basis_entry("source", "fix; commit\nabc") == {"type": "source", "location": "fix, commit abc"}
+    ust = ubuntu_status_with_tracker_files()
+    ust["cve_info"]["CVE-U1"]["tracker_file"] = "active/CVE-U1;\nbad"
+    rules = rules_of(erule("U1", "U1"))
+    ctx = dict(image_ids=[IMG], today="2026-11-05", vercmp=__import__("cra_report").deb_vercmp, ubuntu_status=ust)
+    allr, _, _ = vx.assess([row("CVE-U1")], rules=rules, rule_ctx=ctx)
+    loc = basis_of(allr[0])[0]["location"]
+    assert loc.startswith("Ubuntu CVE Tracker active/CVE-U1, bad@") and VC.location_problem(loc) is None
+
+
 def test_dt_is_always_without_type_even_when_an_annotation_with_evidence_says_the_same():
     """DT 的人工判定沒有放依據類型的欄位；DT 與 annotation 結論相同時 DT 優先（來源順序），所以這一列沒有類型。"""
     a = ann("CVE-1", "not_affected", purl=P, evidence="source", evidence_location="fix commit abc123")
@@ -374,6 +415,7 @@ def test_annotate_warns_about_missing_on_device_file_and_check_repeats_it(tmp_pa
     assert vx.main(base) == 0
     out = capsys.readouterr().out
     assert "注意" in out and "CRA/evidence/later.txt" in out and "on_device_missing" in out
+    assert "補檔前這筆排除算沒有依據類型，會擋發行閘門" in out
     assert vx.main(["check", "--project", str(proj)]) == 0
     assert "WARN" in capsys.readouterr().out
     (proj / "CRA" / "evidence").mkdir(parents=True)
@@ -396,7 +438,7 @@ def test_untyped_exclusions_count_in_untriaged_for_gate_with_reason_and_breakdow
     assert g["verdict"] == "ATTENTION"
     why = [r for r in g["reasons"] if r.startswith("4 exclusions without evidence type")]
     assert len(why) == 1
-    assert "Dependency-Track decision (no field for an evidence type) 2" in why[0]
+    assert vx.EVIDENCE_MISSING["dt"] + " 2" in why[0] and "clear it in Dependency-Track" in vx.EVIDENCE_MISSING["dt"]
     assert "annotation without evidence 1" in why[0] and "on-device file missing 1" in why[0]
     assert all(x in why[0] for x in ("CVE-D1", "CVE-D2", "CVE-A1", "CVE-A2")) and "CVE-T1" not in why[0]
     # counts 與 untriaged 不變（排除仍是排除）：沒有類型只影響 untriaged_for_gate、complete 與理由
@@ -428,6 +470,47 @@ def test_extra_cve_exclusion_without_type_counts_and_typed_one_does_not():
     assert g["assessment"]["exclusions_without_evidence"] == 1 and "CVE-2026-0001" in g["reasons"][0] and "CVE-2026-0002" not in g["reasons"][0]
 
 
+def test_extra_cve_untyped_exclusion_counts_even_when_the_main_row_is_typed():
+    """主列有類型、別名列（vex_extra）沒有：只有別名列算沒有類型的排除（閘門要把 vex_extra 也算進去，不能只看主列）。"""
+    allr, conf, _ = vx.assess([two_cve_row()], annotations=[ann("CVE-2026-0001", "not_affected", purl=P, evidence="source", evidence_location="commit abc"),
+                                                            ann("CVE-2026-0002", "not_affected", purl=P)])
+    assert vx.exclusion_basis(allr[0]["vex"])[0] and vx.exclusion_basis(allr[0]["vex_extra"][0]["vex"]) == ([], "annotation_no_evidence")
+    g = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
+    a = g["assessment"]
+    assert a["exclusions_without_evidence"] == 1 and a["untriaged_for_gate"] == 1 and a["complete"] is False and g["verdict"] == "ATTENTION"
+    assert len(g["reasons"]) == 1 and "CVE-2026-0002" in g["reasons"][0] and "CVE-2026-0001" not in g["reasons"][0]
+
+
+def deb_python_rows(owner_vex_kw):
+    """擁有者 deb 列（brotli 的原始碼套件）加上 Ubuntu 打包的 Python 模組的列（deb_python 的 owner）。"""
+    src = "pkg:deb/ubuntu/brotli@1.1.0-2?arch=source"
+    owner = row("CVE-2026-0100", "brotli", "1.1.0-2", purl=src, ptype="deb", **owner_vex_kw)
+    py = row("CVE-2026-0100", "brotli", "1.1.0-2", purl="pkg:pypi/brotli@1.1.0-2", ptype="pypi",
+             deb_python={"owner": {"name": "brotli", "source": "brotli", "version": "1.1.0-2"}})
+    return [owner, py], src
+
+
+def test_inherited_deb_python_decision_carries_the_evidence_basis_of_the_owner_decision():
+    """沿用（inherit_deb_python）整個陳述：擁有者的 annotation 有依據時，沿用的列也有同一筆依據（不是沒有類型的排除）；
+    擁有者是 DT 的判定（沒有依據）時兩列都沒有類型。"""
+    rows, src = deb_python_rows({})
+    a = ann("CVE-2026-0100", "not_affected", purl=src, evidence="source", evidence_location="fix commit abc")
+    allr, conf, info = vx.assess(rows, annotations=[a])
+    owner, py = allr
+    assert py["vex"]["inherited_from"]["component"] == "brotli" and info["deb_python_inherited"] == 1
+    assert basis_of(owner) == [{"type": "source", "location": "fix commit abc"}]
+    assert basis_of(py) == basis_of(owner) and vx.exclusion_basis(py["vex"])[0]
+    assert info["evidence"]["exclusions"] == 2 and info["evidence"]["with_type"] == 2 and info["evidence"]["without_type"]["total"] == 0
+    g = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
+    assert g["assessment"]["exclusions_without_evidence"] == 0 and g["verdict"] == "OK"
+    # 擁有者是 DT 的判定：沒有依據，兩列各算一次
+    rows, _ = deb_python_rows({"analysis": dt("NOT_AFFECTED", "CODE_NOT_PRESENT", details="x")})
+    allr, conf, info = vx.assess(rows)
+    assert [r["vex"]["source"] for r in allr] == ["dt", "dt"] and allr[1]["vex"].get("inherited_from")
+    assert info["evidence"]["without_type"]["total"] == 2
+    assert vx.gate(allr, conf, grype_checked=True, not_assessed=[])["assessment"]["exclusions_without_evidence"] == 2
+
+
 def test_typed_exclusions_do_not_touch_the_gate():
     rows = [row("CVE-1"), row("CVE-2", "linux", "6.8", kernel=True, tier="p3")]
     anns = [ann("CVE-1", "not_affected", purl=P, evidence="source", evidence_location="fix commit abc"),
@@ -435,6 +518,43 @@ def test_typed_exclusions_do_not_touch_the_gate():
     allr, conf, _ = vx.assess(rows, annotations=anns)
     g = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
     assert g["verdict"] == "OK" and g["reasons"] == [] and g["assessment"]["exclusions_without_evidence"] == 0 and g["assessment"]["complete"] is True
+
+
+GATE_LINE = re.compile(r"untriaged (\d+)（[^）]*）＋別名 CVE 沒有判定 (\d+)＋規則設 in_triage (\d+)（未評估）＋沒有類型的排除 (\d+)＝(\d+)；")
+
+
+def test_gate_line_lists_every_term_of_untriaged_for_gate():
+    """GATE 行（vex_export.gate_line）列出的各項加總＝untriaged_for_gate。四種都有：沒有判定的列、併進別列而自己沒有判定的別名 CVE、
+    批次規則設的 in_triage、沒有類型的排除（DT）；每一項都不是 0，所以不是 0＝0 的巧合，少列任何一項加總就對不上。"""
+    rows = [two_cve_row(), row("CVE-D1", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT", details="x")), row("CVE-U1"), row("CVE-R1")]
+    # 主列 CVE-2026-0001 有帶依據的判定；別名 CVE-2026-0002 沒有判定（extra_cves_untriaged）
+    allr, conf, _ = vx.assess(rows, annotations=[ann("CVE-2026-0001", "not_affected", purl=P, evidence="source", evidence_location="commit abc")])
+    r1 = next(r for r in allr if r["id"] == "CVE-R1")
+    assert r1.get("vex") is None
+    r1["vex"] = vx.stmt("rule", "in_triage", "x (bulk rule R1: y)", rule="R1", rule_author="Someone")     # 批次規則設的 in_triage
+    g = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
+    a = g["assessment"]
+    assert (a["untriaged"], a["extra_cves_untriaged"], a["in_triage_by_rule"], a["exclusions_without_evidence"]) == (1, 1, 1, 1), a
+    m = GATE_LINE.search(vx.gate_line(g))
+    assert m, vx.gate_line(g)
+    n_un, n_alias, n_rule, n_exc, total = map(int, m.groups())
+    assert (n_un, n_alias, n_rule, n_exc) == (1, 1, 1, 1) and total == a["untriaged_for_gate"] == 4
+
+
+def test_rules_check_gate_line_adds_up_to_untriaged_for_gate(tmp_path):
+    """rules check --scan 的 GATE 行：untriaged ＋ 別名 CVE 沒有判定 ＋ 規則設 in_triage ＋ 沒有類型的排除 ＝ untriaged_for_gate（加起來要對得上）。"""
+    from test_vex_rules import EXAMPLE_RULES, RULE_FINDINGS, RULE_GRYPE, cli
+    proj = make_project(tmp_path / "proj")
+    scan = make_scan(tmp_path / "scan", findings=RULE_FINDINGS, grype=RULE_GRYPE)
+    write_json(proj / vx.RULES_REL, EXAMPLE_RULES)
+    r = cli("rules", "check", "--project", str(proj), "--scan", str(scan))
+    assert r.returncode == 0, r.stdout + r.stderr
+    gl = next(x for x in r.stdout.splitlines() if x.startswith("GATE"))
+    m = GATE_LINE.search(gl)
+    assert m, gl
+    n_un, n_alias, n_rule, n_exc, total = map(int, m.groups())
+    assert n_un + n_alias + n_rule + n_exc == total
+    assert n_exc >= 1, gl                       # 這份輸入有 DT 的排除（沒有依據類型），不是只有 0＝0 的巧合
 
 
 # ---------- 閘門基準：改動前 vs 改動後 ----------
@@ -732,6 +852,36 @@ def test_report_status_follows_untyped_exclusions_only_through_the_evidence_reas
     assert len(extra) == 1 and "1 exclusions" in extra[0]
     worst = {"OK": 0, "ATTENTION": 1, "GAP": 2, "NOT_ASSESSED": 3, "FAIL": 4}
     assert worst[d_u["status"]] >= max(worst[d_t["status"]], 1)
+
+
+def clean_report(tmp_path, name, anns):
+    """沒有其他 ATTENTION 的夾具（test_layers_report 的分層情境：OS 層的列、Grype 全對上、安全測試都有結果）加上 annotation。"""
+    import test_layers_report as tl
+    from test_cra_report import EXAMPLE, clean_security
+    clean_security(tmp_path / name)
+    proj = make_project(tmp_path / f"proj-{name}", EXAMPLE)
+    write_json(proj / vx.ANN_REL, {"schema": vx.ANN_SCHEMA, "annotations": anns})
+    fs = [tl.fnd(tl.OSP, "CVE-2026-0003", "LOW")]
+    scan = make_scan(tmp_path / name / "scan", findings=fs, grype=tl.grype_for(fs), sbom=tl.bom("customer", *tl.TAGGED))
+    return run(proj, scan)
+
+
+def test_risk_assessment_status_becomes_attention_only_because_of_untyped_exclusions(tmp_path):
+    """文件狀態含 D-035 的 ev_st：其餘都 OK 時，有沒有類型的排除就是 OK 與 ATTENTION 的差別（理由是唯一的那一條）；
+    漏洞資料狀態（risk_st，8.1 的資料狀態）不因此改變。"""
+    a_typed = ann("CVE-2026-0003", "not_affected", purl=P, evidence="source", evidence_location="fix commit abc")
+    a_untyped = ann("CVE-2026-0003", "not_affected", purl=P)
+    r1, s1, _ = clean_report(tmp_path, "typed", [a_typed])
+    r2, s2, rep2 = clean_report(tmp_path, "untyped", [a_untyped])
+    d1, d2 = s1["documents"]["risk-assessment"], s2["documents"]["risk-assessment"]
+    assert d1["status"] == "OK" and s1["status"] == "OK", (d1, r1.stdout)
+    assert s1["vex"]["gate"]["assessment"]["exclusions_without_evidence"] == 0
+    assert s2["vex"]["gate"]["assessment"]["exclusions_without_evidence"] == 1
+    assert d2["status"] == "ATTENTION" and s2["status"] == "ATTENTION", (d2, r2.stdout)
+    assert [x for x in d2["detail"] if x not in d1["detail"]] == [x for x in d2["detail"] if "1 exclusions" in x and "evidence type" in x]
+    assert len([x for x in d2["detail"] if x not in d1["detail"]]) == 1
+    # 漏洞資料狀態沒有因為這一條降級（和 D-054 的 fw_st 一樣只進文件狀態）
+    assert "Note (counted in this document's status, not in the vulnerability data status above)" in (rep2 / "risk-assessment.md").read_text(encoding="utf-8")
 
 
 def test_supplier_package_end_to_end_distro_and_annotation_evidence(tmp_path):
