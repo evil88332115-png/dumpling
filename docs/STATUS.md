@@ -2,20 +2,20 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 10:21 +0800（C1）
+最後更新：2026-11-14 10:24 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
 
 - 目前在做：**M2 正式驗收完成**（正式 Release orin-nano-demo/v39.2.0-demo1、v39.2.1-demo1，0be7bc2，各 20 附件，標準答案 24 項、independent OK；C1 照 D-052 核對）；C3 開始基準日第 1 步；驗證 M6 #97；之後 #98、#96、#93 複驗
 - 分支／PR／commit：main 4d015d7。已合併：**M7b-3 #95**（run-params.json、分層重跑沿用原掃描列／該有沒有寫 GAP、status.tsv 重複列取最嚴重）、**M7b-2 #92**（判定不讀說明文字；C-dt-feeds FAIL 至少 GAP）、**#94**（放行前支援期限 Issue 也只算不寫；C0 決定）、**#91**（T-16 GitLab watch 手動入口與演練；C0 驗證不通過 1 項 → 已修、C0 複核）、**#85**（T-10 art14 GitLab 版：倒數只取可信成員紀錄留言、逐案隔離、token 權限先查；沒對真實 GitLab 驗證）、**M7b #73**（版本＝tag 加獨立來源：sources.yml l4t_release 對掃描 L4T 版本；Jetson 驗收 independent OK）、**#84**（T-23 GitLab 範本接 support.py；C0 直接審閱）、**#74**（T-05 GitLab 後端：confidential 寫死、quick action 擋在寫入前、token 只送 API 主機；沒有對真實 GitLab 驗證）、**#72**（GitLab 範本 P1：先驗再傳、手動試跑不寫入、NOT_RUN exit 3、MR 去重；C0 驗證不通過 3 項 → 已修、C0 複核）、**#71**（M8 後續：art14 演練標示範專案、stateless plan 限制與測試）、**M8 #69**（B1 第 14 條通報演練、B2 支援期限／EOL 每日檢查）、**M7a2 #65**（validate_table 支援 vbios 列、mirror_info、公告編號限數字；C0 直接審閱）、**#61**（GitLab release-meta 補 --notes，C0 直接審閱）、**M7a #58**（D-055 欄位、精靈覆寫版本、new-project 不帶範本值、#25 #26；Jetson 驗收 24 項通過、missing_fields 55→52／53）、**#60**（供應商 SBOM 後續：重複列降級、供應商 dumpling: 標記改名、md_safe 跳脫 @／實體）、**#59**（D-043 (1) NVIDIA vBIOS 公告比對，對照表待負責人確認、全部 NOT_ASSESSED）、**#50**（掃描層：核心判定階段與沒人消費的狀態列沒做完時降 GAP、D-044 例外靠 meta.json 標記、list.json 壞掉算 GAP）、**#54**（供應商 BIOS SBOM 最小正規化、firmware-dt 判定改嚴）、**#49**（每日監控 M2 後續：dry_run 真值表測試、skipped Release 降級、Issue 外部字串淨化含 HTML 實體；C0 驗證兩輪＋聚焦複驗）、**#48**（CSE layout Size 0x60＋D-053 表尾，C0 驗證＋私有檔複核通過）、**#46**（D-043 (1) Intel 微碼公告比對、CSME CPE，D-051）、**M5 #47**（GitLab 範本，C0 驗證不通過 1 項已修、C0 看過 diff）、**#42**（M2 後續：BSP 輸入不適用限 customer／upstream-vendor、比對順序測試、pipeline_result 區分不適用／未執行，recorded 標記）、**文件批次 #41**（D-034～D-053＋第二台接手，驗證初版 1 項應修已修、複驗通過）、**M2 #40**（2026-11-13，兩份驗證通過、CI 綠）、M1（#9）、M3（#14）、M4（#28）＋修正 #32、**D-042 AMD／新世代 CSME #39**（2026-11-13，驗證報告貼在 PR）；文件批次 #13、#15。C0 文件批次：#41 已合併，DECISIONS／HANDOFF 以 main 為準；下一批 `wp0/docs-batch-5`（已推送 ce9d872：D-051 補「版本清單 family 矛盾時不推定」；worktree `$AGENT_TMP/dumpling-wt-c0-docs`；已推 f3b06f1：D-051 補、D-054、D-055、D-056；自然時機再開 PR）
-- 代理：1 個驗證代理（Sonnet 5.5、effort high）：獨立驗證 C4 的 M6 #97（6887f0c），worktree `$AGENT_TMP/dumpling-wt-c0-verify-97`，報告 `$AGENT_TMP/dumpling-tmp-c0-verify-97/report.md`；之後 #96、#93 複驗
+- 代理：1 個驗證代理（Sonnet 5.5、effort high）：獨立驗證 C2 的 #96（advisory-polish 4b79f22），worktree `$AGENT_TMP/dumpling-wt-c0-verify-96`；之後 #93 複驗、#98
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
   - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）M7b-3 #95 已合併。**M7b-4 #98** 待併 main、正式 Release 後跑驗收，C0 驗證排在 #97 之後。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
   - C2（第二台）：#39、#46、#48、#54、#59、#60 已合併。**#96**（advisory-polish 4b79f22，C2 預驗 916db7a 通過、之後 2 commit 自看）排 C0 驗證（#95 之後）；規則表在 wp3/fw-advisory-rules 進行中。**D-043 (2) 規則表設計 C0 同意**（tools/cra/data/fw-advisory-rules.json；只給建議不改 vuln-assessment；affected 建議 → ATTENTION＋待人審；AMI-SA 列出但 NOT_ASSESSED；第一批 AM4／AM5 AGESA、CSME 14／18，官方頁面查證）；之後 AMI 核心版本解析另開。5674 確認後再開一個 PR
   - C3（第二台）：#47、#49、#61、#69、#71、#72、#74、#84、#85 已合併。#91 已合併；#94 已合併；**#93**（t10b）C0 驗證不通過 → C3 已修（1c5d9c3：登錄信任改看目前可信成員、疑似標頭、list/get 錯誤寫 result、open-real 未登錄 FAIL、search 找無標籤案件；C0 同意 search 到非 confidential 當外洩），排 C0 聚焦複驗（#95、#96 之後）；wp5/gitlab-t10b（T-10 上線前必做：標籤被拿掉／已關閉未完成要 FAIL、近似紀錄要 ATTENTION、system note 測試）寫程式中 → T-12。基準日檢查清單在 `$AGENT_TMP/dumpling-tmp-c3/baseline-day-checklist.md`（第 1 步 real＋baseline＋dry_run 回報數字 → C0 看過 → 第 2 步建基準 → 一天 dry_run → C0 設 WATCH_REAL_ISSUES=on）；C0 決定 A：放行前支援期限 Issue 也只算不寫（C3 開小 PR）
-  - C4（第二台）：**M6 PR #97 已開**（wp7/adapters 6887f0c，50 檔；最終重跑 d12d1eb：rock 43532296542 101 項、rpi 43535044427 92 項、ai-nas 43536522257 77 項全過；之後併 #92、#94 不重跑，影響已核對）。C0 驗證中（high）
+  - C4（第二台）：**M6 #97** C0 驗證通過（high；報告已貼）；合併前修：示範專案和 new-project 輸出一致（markets EU-ALL、ai-nas os 區塊、vex-rules 空規則）、沒官方雜湊的檔標 TOFU、rpi cves_total 拿掉上限、D-049 測試；改好不用重跑
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
   2. （完成）M2 正式驗收：release run 43531550072、43531550316 綠，C1 核對通過；文件批次 #41 已合併；C2／C3／C4 已通知
