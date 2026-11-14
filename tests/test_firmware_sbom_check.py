@@ -339,7 +339,7 @@ class InjectionTest(Base):
         for bad in ("&#64;", "&#x40;", "&commat;", "&lt;", "&gt;"):
             self.assertNotIn(bad, text, bad)
         self.assertIn("@\u200bevil/pkg", md)
-        self.assertIn("&amp;#64;", md.replace("\\", ""))
+        self.assertIn("&amp;#\u200b64;", md.replace("\\", ""))        # `#` 接數字另插零寬空白（Issue 參照，firmware_mdsafe 檔頭第 7 點）
         self.assertIn("&amp;lt;img", md.replace("\\", ""))
         self.assertEqual(len(line), 4)
         # purl／版本字串裡的 @（前面是英數字）不受影響
