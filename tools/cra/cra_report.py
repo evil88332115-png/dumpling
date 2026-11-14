@@ -218,17 +218,26 @@ def firmware_reason(k, st):
             f"was not scanned; {FIRMWARE_ADVISORY}")
 
 
-def kernel_boot_findings(kboot, status, meta):
+KERNEL_BOOT_SCHEMA = "sca-center-kernel-boot/1"
+KERNEL_BOOT_STATUSES = ("OK", "ATTENTION", "GAP")
+
+
+def kernel_boot_findings(kboot, status, meta, present=False):
     """C-kernel-boot（刷機包有兩顆不同的核心；scan/kernel-boot.json 與 scan/status.tsv 的 C-kernel-boot 列）→ [(層級, 理由)]（只有 GAP／ATTENTION）。
     只進報告狀態與待確認事項表（不進漏洞資料狀態、不擋發行閘門）。沒有檔案（不是刷機包、或只有一顆核心）→ []。
-    kernel-boot.json 有而 schema 不對、讀不到：和以前一樣不處理；但 sca-scan 在 kernel_boot.py 失敗時只寫 status.tsv 的 FAIL 列、
+    present：scan/kernel-boot.json 這個檔存在。存在卻讀不懂（不是 JSON、schema 或 status 不對）→ GAP（D-043；C1 審查時改：原本不處理）。
+    sca-scan 在 kernel_boot.py 失敗時只寫 status.tsv 的 FAIL 列、
     不留 json，所以 status.tsv 的列也看：不是 OK／INFO 的 → GAP（ATTENTION 維持）。
     分層報告的 SBOM 沒有核心、核心在另一份報告判定（meta.json 的 kernel_in_other_report，D-044）時不算在這份。"""
     other = (meta or {}).get("kernel_in_other_report")
     if isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
         return []
     out = []
-    if isinstance(kboot, dict) and kboot.get("schema") == "sca-center-kernel-boot/1" and kboot.get("status") in ("ATTENTION", "GAP"):
+    usable = isinstance(kboot, dict) and kboot.get("schema") == KERNEL_BOOT_SCHEMA and kboot.get("status") in KERNEL_BOOT_STATUSES
+    if present and not usable:
+        out.append(("GAP", "C-kernel-boot: scan/kernel-boot.json exists but could not be read (not JSON, or wrong schema or status); "
+                           "whether the flash package's two kernels match is unknown"))
+    if usable and kboot["status"] in ("ATTENTION", "GAP"):
         d = str(kboot.get("detail"))[:300]
         out.append((kboot["status"], f"C-kernel-boot is {kboot['status']}: " + (
             f"the two kernels in the flash package could not be compared ({d})" if kboot["status"] == "GAP" else
@@ -4851,7 +4860,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
             fw_st = worst([fw_st, lv])
             fw_items.append({"key": k, "status": fst, "level": lv, "reason": firmware_reason(k, fst)})
             fw_reasons.append(firmware_reason(k, fst))
-    for lv, why in kernel_boot_findings(kboot, status, meta):
+    for lv, why in kernel_boot_findings(kboot, status, meta, present=paths["scan/kernel-boot.json"] is not None):
         fw_st = worst([fw_st, lv])
         fw_reasons.append(why)
     if not isinstance(findings, list):

@@ -189,14 +189,22 @@ def test_kernel_boot_does_not_touch_the_release_gate(tmp_path, kb):
     assert not any("C-kernel-boot" in x for x in s["vex"]["gate"]["reasons"])
 
 
-@pytest.mark.parametrize("kb", [None, {"schema": "sca-center-kernel-boot/1", "status": "OK", "detail": "byte-identical"},
-                                {"schema": "sca-center-kernel-boot/1", "status": "NOT_RUN", "detail": "x"},
-                                {"schema": "other/1", "status": "GAP", "detail": "x"}, {"status": "GAP"}, "{not json", "[]", "null"])
-def test_kernel_boot_ok_missing_or_unusable_file_changes_nothing(tmp_path, kb):
-    """OK、沒有檔案、schema 不對、讀不到：和以前一樣不處理（不會變成別的狀態，也不會報錯）。"""
+@pytest.mark.parametrize("kb", [None, {"schema": "sca-center-kernel-boot/1", "status": "OK", "detail": "byte-identical"}])
+def test_kernel_boot_ok_or_missing_file_changes_nothing(tmp_path, kb):
+    """OK、沒有檔案（不是刷機包、或只有一顆核心）：不處理（不會變成別的狀態，也不會報錯）。"""
     base = _base(tmp_path)
     s, _ = _report(tmp_path / "a", kboot=kb)
     assert s["status"] == base["status"] and _ra(s) == _ra(base) and keys(s) == keys(base) and s["config_warnings"] == base["config_warnings"]
+
+
+@pytest.mark.parametrize("kb", [{"schema": "sca-center-kernel-boot/1", "status": "NOT_RUN", "detail": "x"},
+                                {"schema": "other/1", "status": "GAP", "detail": "x"}, {"status": "GAP"}, "{not json", "[]", "null"])
+def test_kernel_boot_unusable_file_is_gap_without_touching_the_gate(tmp_path, kb):
+    """C1 審查（D-043）：kernel-boot.json 存在卻讀不懂（不是 JSON、schema 或 status 不對）→ GAP，不當成沒事；發行閘門照舊不受影響。"""
+    base = _base(tmp_path)
+    s, _ = _report(tmp_path / "a", kboot=kb)
+    assert s["status"] == "GAP" and any("kernel-boot.json exists but could not be read" in x for x in _ra(s)[1]), _ra(s)
+    assert _vex(s) == _vex(base)
 
 
 def test_kernel_boot_status_row_fail_is_gap_and_asks(tmp_path):
@@ -234,3 +242,14 @@ def test_kernel_boot_findings_unit():
     assert cr.kernel_boot_findings(KB_GAP, {}, {"kernel_in_other_report": "demo-bsp"}) == []
     assert cr.kernel_boot_findings(None, {"C-kernel-boot": ("FAIL", "boom")}, {})[0][0] == "GAP"
     assert cr.kernel_boot_findings(KB_ATT, {"C-kernel-boot": ("FAIL", "boom")}, {})[0][0] == "ATTENTION"      # json 優先，不重複
+
+
+def test_kernel_boot_json_present_but_unreadable_is_gap():
+    """C1 審查：kernel-boot.json 存在卻讀不懂 → GAP（D-043），不當成沒事；檔案不存在照舊不處理。"""
+    for bad in (None, [], {"schema": "other/1", "status": "OK"}, {"schema": "sca-center-kernel-boot/1", "status": "WEIRD"}):
+        f = cr.kernel_boot_findings(bad, {}, {}, present=True)
+        assert [x[0] for x in f] == ["GAP"] and "could not be read" in f[0][1], bad
+    assert cr.kernel_boot_findings(None, {}, {}, present=False) == []
+    ok = {"schema": "sca-center-kernel-boot/1", "status": "OK"}
+    assert cr.kernel_boot_findings(ok, {}, {}, present=True) == []
+    assert cr.kernel_boot_findings([], {}, {"kernel_in_other_report": "demo-bsp"}, present=True) == []     # D-044：核心在另一份報告
