@@ -2576,7 +2576,7 @@ _MDSAFE = []
 
 def _mdsafe_funcs():
     """(defang_at, defang_links)：與 pipeline/lib/firmware_mdsafe.py 同一份規則（@ 提及與 email 自動連結、裸網址、mailto／xmpp）：載入同 repo 的那個檔案。
-    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，裸網址、mailto 規則不做。"""
+    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，每個 `:` 與 `.` 前後也插零寬空白（網址、mailto、xmpp、`www.` 前綴都接不起來，不會變成連結；輸出會多零寬空白，但不會漏擋）。"""
     if not _MDSAFE:
         try:
             spec = importlib.util.spec_from_file_location("firmware_mdsafe_for_x86", _MDSAFE_PATH)
@@ -2584,7 +2584,7 @@ def _mdsafe_funcs():
             spec.loader.exec_module(mod)
             _MDSAFE.append((mod.defang_at, mod.defang_links))
         except (OSError, ImportError, AttributeError, SyntaxError):
-            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), lambda t: t))
+            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), lambda t: re.sub(r"([:.])", "\u200b\\1\u200b", t)))
     return _MDSAFE[0]
 
 

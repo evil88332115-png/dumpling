@@ -250,7 +250,20 @@ def enisa_feed_info(code, path, euvd_dir, now=None):
     return info
 
 
+# C-dt-feeds 的原因代碼（結構化；meta.json 的 dt_feeds_reason，cra_report 讀它，不看說明文字。M7b）
+FEEDS_REASONS = ("fresh", "stale", "permission_denied", "no_data", "config_error")
 FEEDS_MAX_HOURS = 26.0   # DT 每天自己排程更新（實測約 02:00–04:00 UTC）；每天一次加約 2 小時餘裕。環境變數 DT_FEEDS_MAX_AGE_HOURS 可改
+
+
+def feeds_reason(rows, status):
+    """feeds_freshness 的結果 → 原因代碼（FEEDS_REASONS）。判斷順序和 feeds_freshness 相同：設定錯 → 401／403 → 沒有資料 → OK／其他。"""
+    if status == "FAIL":
+        return "config_error"
+    if any(r["http"] in ("401", "403") for r in rows):
+        return "permission_denied"
+    if not rows:
+        return "no_data"
+    return "fresh" if status == "OK" else "stale"
 
 
 def feeds_freshness(rows, now=None, max_hours=FEEDS_MAX_HOURS):
@@ -442,7 +455,7 @@ def main(argv):
     out["vuln_status"], out["kev_status"] = vs, ks
     lines = [("D-dt-data-sources", vs, vd), ("D-dt-kev-sources", ks, kd)]
     fs, fd = feeds_freshness(rows, max_hours=feeds_max)
-    out["feeds_freshness"] = {"status": fs, "detail": fd, "max_hours": feeds_max}
+    out["feeds_freshness"] = {"status": fs, "detail": fd, "max_hours": feeds_max, "reason": feeds_reason(rows, fs)}
     lines.append(("C-dt-feeds", fs, fd))
     if osv is not None and sbom is not None:
         cs, cd, det = coverage(osv[0], osv[1], sbom)

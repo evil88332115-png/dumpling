@@ -136,6 +136,7 @@ class MdSafeRenderTests(RenderCase):
         "name@host", "foo.bar@1.2.3.4.5", "pkg:rpm/fedora/openssl@3.0.7-1.fc37",
         # xmpp:／mailto: 後面的 名稱@網域/資源：網域不含 `.` 也會被 cmark-gfm 連結（只加反斜線擋不住，要靠零寬空白）
         "xmpp:a@/.a", "xmpp:a@-/.a", "xmpp:1@a/.a", "xmpp:a@_/.a", "xmpp:a@b/c.d", "mailto:a@/.a", "MAILTO:a@-/.a", "XMPP:a/b@c/.d",
+        "_xmpp:a@/.a", "xmailto:a@/.a", "1xmpp:a@/.a", "x@y.zQ1@Z", "x@y.z1A1@Z", "x@y.example1A@Z",
         # 網域掃描與同一串 email 字元的邊角
         "a@_.1@a", "a@-.a", "aa@_.a", "a@b_c.d", "a@b-c.d", "x@y.z@Z", "x@y.z-@Z",
         "x@y.z" + "1" * 252 + "@Z", "x@y.z" + "1" * 253 + "@Z", "x@y.z" + "1" * 300 + "@Z",
@@ -256,6 +257,27 @@ class VbiosReportRenderTests(RenderCase):
                 continue                                                      # md_esc 不跳脫 ~（只會變成刪除線 <del>，不是連結或標籤）；md_safe 才跳脫
             out = xf.md_esc(raw)
             self.check(out, None, label=repr(raw))
+
+    def test_md_esc_fallback_without_firmware_mdsafe_still_blocks_links(self):
+        # 載不到 pipeline/lib/firmware_mdsafe.py 時的退路：網址、mailto、xmpp、www.、email 都不能變成連結（不能 fail-open）
+        import x86_firmware as xf
+        saved_path, saved = xf._MDSAFE_PATH, list(xf._MDSAFE)
+        try:
+            xf._MDSAFE_PATH = Path("/nonexistent/firmware_mdsafe.py")
+            xf._MDSAFE.clear()
+            for raw in ("https://evil.example/x", "www.evil.example", "mailto:a@b.example", "xmpp:a@/.a", "a@b.example", "x@y.z" + "1" * 300 + "@Z",
+                        "ftp://a.b/c", "1.https://evil.example"):
+                out = xf.md_esc(raw)
+                self.check(out, None, label="fallback " + repr(raw))
+            # 退路的 at 處理：提及形式（沒有 `:`、`.`，退路的連結處理擋不到，只靠 at 後面的零寬空白）
+            for raw in ("@everyone", "@org/team", "x @user y", "(@user)"):
+                out = xf.md_esc(raw)
+                self.assertIn("@\u200b", out, repr(raw))
+                self.check(out, None, label="fallback mention " + repr(raw))
+        finally:
+            xf._MDSAFE_PATH = saved_path
+            xf._MDSAFE.clear()
+            xf._MDSAFE.extend(saved)
 
     def test_md_esc_strips_control_characters_and_escapes_tilde(self):
         import x86_firmware as xf

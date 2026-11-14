@@ -488,7 +488,10 @@ class ScanHelpers(Tmp):
                              ("scan/rootfs/upstream-baseline-source.json", json.dumps({"status": "ATTENTION", "totals": {"modified": 1, "ours_only": 0, "same": 9, "upstream_only": 0},
                                                                                        "components": [{"modified": [{"path": "kernel/kernel-noble/net/x.c"}]}]})),
                              ("cra-project/CRA/Reports/vulnerability-rows.json", json.dumps(rows)),
-                             ("報告/交給PM/VEX/vex.cdx.json", "{}"), ("報告/交給PM/漏洞清單.xlsx", "x"), ("報告/給RD/P1判斷表.xlsx", "y")):
+                             ("報告/交給PM/VEX/vex.cdx.json", "{}"), ("報告/交給PM/漏洞清單.xlsx", "x"), ("報告/給RD/P1判斷表.xlsx", "y"),
+                             # 刷機包裡掃到的 L4T 版本（M7b：和 tag 無關的版本來源，要等於 sources.yml 宣告的 l4t_release）
+                             ("scan/list.json", json.dumps({"rootfs": [{"variant": "rootfs", "prefix": "Linux_for_Tegra/rootfs",
+                                                                        "l4t": {"release": "39.2.1", "status": "OK", "sources": {"nv_tegra_release": "39.2.1"}}}]}))):
             os.makedirs(os.path.dirname(os.path.join(w, rel)), exist_ok=True)
             open(os.path.join(w, rel), "w", encoding="utf-8").write(content)
         lay = self.p("layers")
@@ -499,9 +502,12 @@ class ScanHelpers(Tmp):
             json.dump({"components": []}, open(os.path.join(lay, n), "w"))
         json.dump({"kernel_release": "6.8.12-ci", "image_sha256": "a" * 64, "build_record_sha256": "b" * 64, "patches": []}, open(self.p("build.json"), "w"))
         json.dump({"package_sha256": "c" * 64}, open(self.p("assemble.json"), "w"))
-        args = js.argparse.Namespace(out=self.p("rel"), project="p", version="v1", layers=lay, build_json=self.p("build.json"), assemble_json=self.p("assemble.json"),
-                                     scan_json=self.p("scan.json"), run=["=" + w], build_record="/x/BuildRecord-p-v1.tar.gz", project_dir=os.path.join(ROOT, "projects", "orin-nano-demo"), official=False)
+        v = "v39.2.1-demo1"                     # sources.yml 有的版本
+        args = js.argparse.Namespace(out=self.p("rel"), project="p", version=v, layers=lay, build_json=self.p("build.json"), assemble_json=self.p("assemble.json"),
+                                     scan_json=self.p("scan.json"), run=["=" + w], build_record="/x/BuildRecord-p-%s.tar.gz" % v, project_dir=os.path.join(ROOT, "projects", "orin-nano-demo"), official=False)
         scan = js.collect(args)
+        self.assertEqual(scan["product_version_check"]["independent"]["status"], "OK")
+        self.assertEqual(scan["product_version_check"]["status"], "NOT_RUN")       # 假的 run 沒有設定包
         self.assertEqual(scan["build_record_status"], "OK")
         self.assertEqual(scan["kernel_boot"], "OK")
         self.assertEqual(scan["upstream_source"]["modified"], 1)
@@ -510,7 +516,7 @@ class ScanHelpers(Tmp):
         names = {l.split("\t")[0] for l in open(self.p("rel", "manifest.tsv"), encoding="utf-8").read().splitlines()}
         for want in ("sbom-p-v1.cdx.json", "sbom-p-v1-bsp.cdx.json", "sbom-p-v1-os.cdx.json", "layers.json", "report-p-v1.zip", "vex-p-v1.cdx.json",
                      "vuln-list-p-v1.xlsx", "p1-table-p-v1.xlsx", "build-record-p-v1.json", "scan-summary-p-v1.json"):
-            self.assertIn(want, names)
+            self.assertIn(want.replace("-v1", "-" + v), names)
         for n in names:
             self.assertTrue(n.isascii(), n)       # 附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元）
         self.assertTrue(os.path.isfile(self.p("rel", "notes.md")))

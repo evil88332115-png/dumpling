@@ -180,6 +180,9 @@ class T(Base):
         self.assertTrue(o["title"].startswith("[示範專案（公開 BSP）]"))
         self.assertIn("demo", o["labels"])
         self.assertIn("不是真的出貨產品", o["body"])
+        self.assertIs(plan["demo"], True)                  # 狀態 Issue 也加 demo 標籤（issues.py apply 依這個）
+        _, _, plan2 = self.run_once(NOW2)
+        self.assertNotIn("demo", plan2)
 
     def test_kernel_cna(self):
         kv = os.path.join(self.inv, "releases", "0", "kernel-versions-demo-v1.json")

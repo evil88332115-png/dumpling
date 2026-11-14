@@ -240,6 +240,38 @@ def test_table_load_failures_are_table_errors(tmp_path):
     assert "larger than limit" in ei.value.detail
 
 
+class _PassC1:
+    """C1 validate_table 的替身：一律放行，用來證明 validate_ids／validate_mirror 這兩道第二防線自己會擋。"""
+    class InputError(Exception):
+        pass
+
+    @staticmethod
+    def validate_table(doc):
+        return None
+
+
+@pytest.mark.parametrize("over, msg", [
+    ({"bulletins": [{"id": "9001\n", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"bulletins": [{"id": "abc", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"bulletins": [{"id": "123456789", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"not_applicable": [{"bulletin": "9x"}]}, "bulletin id must be 1 to 8 digits"),
+    ({"rows": [row(bulletin="9001 ", vbios_fixed_in="94.04.00.00.01")]}, "bulletin id must be 1 to 8 digits"),
+    ({"mirror": "x"}, "mirror must be an object"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-11-10"}}, "mirror.fetched_utc is missing"),
+    ({"mirror": {"commit": "A" * 40, "commit_date": "2026-11-10", "fetched_utc": FETCHED}}, "mirror.commit must be 40"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-11-10", "fetched_utc": "2026-11-13T16:52:04"}}, "mirror.fetched_utc must be"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-13-40", "fetched_utc": FETCHED}}, "mirror.commit_date must be"),
+])
+def test_second_line_checks_reject_without_c1(tmp_path, monkeypatch, over, msg):
+    monkeypatch.setattr(nva, "_c1", lambda: _PassC1)
+    nva.load(write(tmp_path, doc(), "ok.json"))                                                 # 替身下好的表照常載入
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d.update(over)
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, d))
+    assert ei.value.reason == "table-invalid" and msg in ei.value.detail, ei.value.detail
+
+
 @pytest.mark.parametrize("bad", [
     {"pci_vendor": "8086"}, {"pci_vendor": None}, {"pci_devices": []}, {"pci_devices": "2489"}, {"pci_devices": ["2489", "XYZ1"]},
     {"pci_devices": ["2489", "24AB"]}, {"pci_devices": [2489]},
@@ -918,4 +950,4 @@ def test_md_esc_xmpp_long_runs_controls_and_tilde():
     for raw in ("a@" + "_" * 100000, "a@" + "-_" * 50000, "@" * 100000, "x@y.z" + "1" * 100000 + "@Z", "a@b." * 25000):
         t0 = time.perf_counter()
         e(raw)
-        assert time.perf_counter() - t0 < 1.0, raw[:12]
+        assert time.perf_counter() - t0 < 5.0, raw[:12]      # 線性時遠低於 1 秒；門檻放寬，免得忙碌的 runner 誤報

@@ -5,12 +5,14 @@
   python3 -I pipeline/watch/issues.py read-state  --repo O/R --mode real|drill --out 資料夾
   python3 -I pipeline/watch/issues.py apply       --repo O/R --plan plan.json [--dry-run]
   python3 -I pipeline/watch/issues.py close-drill --repo O/R
+GitLab 後端（GITLAB-PORT T-05）：把 --repo O/R 換成 --backend gitlab --gitlab-url <…/api/v4> --project <數字 ID> [--confidential]；
+  token 從環境變數 GITLAB_TOKEN 讀（不收 argv）。GitLab 建的 Issue 一律 confidential（寫死，--confidential 只是範本相容旗標、關不掉）。
 stdout 最後一行 WATCH-ISSUES<TAB>OK|FAIL<TAB>說明；結束碼 OK 0、FAIL 1、用法 64。
 
 去重規則（同一個 key 出現在多個 Issue 時選哪一個）：有開著的取開著的（多個開著的取編號最大的）；都已關閉則取編號最大的。
 這條覆蓋「取編號最小」的舊想法，因為 open_if_closed 會替同一個 key 再開新 Issue。同一個 key 有兩個以上開著的 Issue 時記 problem。
 
-安全：Token（GH_TOKEN／GITHUB_TOKEN）只放 Authorization 標頭，不進任何輸出；不經 proxy；不跟隨轉址（轉址算錯誤）；回應大小有上限。
+安全：Token（GH_TOKEN／GITHUB_TOKEN；GitLab 是 GITLAB_TOKEN，放 PRIVATE-TOKEN 標頭）只放標頭，不進任何輸出；不經 proxy；不跟隨轉址（轉址算錯誤）；回應大小有上限。
 """
 import argparse
 import base64
@@ -58,7 +60,12 @@ class Usage(Exception):
 
 # ---------- GitHub API ----------
 class Api:
-    """所有 GitHub 呼叫都在這裡。測試只要覆寫 _raw()（回傳 (狀態碼, 標頭 dict, bytes)）。"""
+    """所有 GitHub 呼叫都在這裡。測試只要覆寫 _raw()（回傳 (狀態碼, 標頭 dict, bytes)）。
+    後端抽象：下面「Issue 層」的 list_issues／create_issue／edit_issue／add_comment／list_labels／create_label 是各後端要實作的介面；
+    指令函式（cmd_*）只用這一層，不直接拼路徑。GitLabApi 繼承這個類別，覆寫標頭、分頁、rate limit 與這一層。"""
+
+    kind = "github"
+    url_label = "GITHUB_API_URL"
 
     def __init__(self, base=None, token=None, sleep=time.sleep, clock=time.monotonic, wall=time.time):
         self.base = (base or os.environ.get("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
@@ -67,9 +74,9 @@ class Api:
         self._last_write = None
         u = urllib.parse.urlsplit(self.base)
         if u.scheme not in ("https", "http") or not u.hostname:
-            raise Fail("GITHUB_API_URL 不是合法的網址")
+            raise Fail(f"{self.url_label} 不是合法的網址")
         if u.scheme == "http" and u.hostname not in ("127.0.0.1", "localhost", "::1"):
-            raise Fail("GITHUB_API_URL 只有本機（測試）可以用 http：token 不能以明文送到別台")
+            raise Fail(f"{self.url_label} 只有本機（測試）可以用 http：token 不能以明文送到別台")
         self.origin = (u.scheme, u.netloc)
 
     def _scrub(self, s):
@@ -94,10 +101,7 @@ class Api:
         u = urllib.parse.urlsplit(url)
         if (u.scheme, u.netloc) != self.origin:
             raise Fail("拒絕連到別的主機")
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "dumpling-watch",
-                   "X-GitHub-Api-Version": "2022-11-28"}
-        if self.token:
-            headers["Authorization"] = "Bearer " + self.token
+        headers = self._headers()
         body = None
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -131,7 +135,9 @@ class Api:
                     msg = str(json.loads(data.decode("utf-8", "replace")).get("message", ""))[:120]
                 except Exception:
                     pass
-                raise Fail(self._scrub(f"{method} {u.path} 失敗：HTTP {status} {msg}".strip()))
+                err = Fail(self._scrub(f"{method} {u.path} 失敗：HTTP {status} {msg}".strip()))
+                err.status = status          # 呼叫端要判斷狀態碼時用這個，不要比對訊息文字（訊息含伺服器回的 message）
+                raise err
             if not data:
                 return None, hdr
             try:
@@ -139,6 +145,13 @@ class Api:
             except ValueError:
                 raise Fail(f"{method} {u.path} 回應不是 JSON")
         raise Fail("不可能到這裡")
+
+    def _headers(self):
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "dumpling-watch",
+                   "X-GitHub-Api-Version": "2022-11-28"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        return headers
 
     def _rate_wait(self, status, hdr, data):
         """是 rate limit 就回傳要等的秒數（最多 60），不是就回傳 None。"""
@@ -180,6 +193,238 @@ class Api:
                     url = m.group(1)
         return out
 
+    # ---- Issue 層（GitHub 實作；GitLabApi 覆寫）。state 一律用 "open"／"closed"／"all"；Issue 一律回 GitHub 形狀的 dict
+    # （number、title、body、state、updated_at、labels）。
+    def list_issues(self, repo, label, state="all"):
+        q = urllib.parse.urlencode({"labels": label, "state": state, "per_page": 100})
+        return [i for i in self.get_all(f"/repos/{repo}/issues?{q}") if "pull_request" not in i]
+
+    def create_issue(self, repo, title, body, labels):
+        d, _ = self.request("POST", f"/repos/{repo}/issues", {"title": title, "body": body, "labels": labels})
+        return d
+
+    def edit_issue(self, repo, number, body=None, state=None, labels=None, was=None):
+        """was＝呼叫端知道的目前狀態（GitLab 用它避免對已開著的 Issue 送 reopen）；GitHub 不用。"""
+        payload = {}
+        if body is not None:
+            payload["body"] = body
+        if state is not None:
+            payload["state"] = state
+        if labels is not None:
+            payload["labels"] = labels
+        d, _ = self.request("PATCH", f"/repos/{repo}/issues/{number}", payload)
+        return d
+
+    def add_comment(self, repo, number, body):
+        self.create_note(repo, number, body)
+
+    def create_note(self, repo, number, body):
+        self.request("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
+
+    def list_notes(self, repo, number):
+        """Issue 的留言（GitHub 原樣：id、body、user、author_association；沒有 system 欄位）。"""
+        return self.get_all(f"/repos/{repo}/issues/{number}/comments?per_page=100")
+
+    def edit_note(self, repo, number, note_id, body):
+        self.request("PATCH", f"/repos/{repo}/issues/comments/{note_id}", {"body": body})
+
+    def list_labels(self, repo):
+        return [l["name"] for l in self.get_all(f"/repos/{repo}/labels?per_page=100")]
+
+    def create_label(self, repo, name, color):
+        self.request("POST", f"/repos/{repo}/labels", {"name": name, "color": color})
+
+
+# ---------- GitLab API ----------
+# 只用官方文件（docs.gitlab.com）有寫的端點與欄位；各頁對照見 docs/GITLAB-PORT.md T-05：
+#   Issues：/api/issues/（列表 labels 逗號字串、state=opened|closed|all、回傳 iid／description／labels 字串陣列／updated_at；
+#           新增 title／description／labels 逗號字串／confidential 預設 false；修改 description／state_event=close|reopen／labels 整組取代）
+#   Notes：/api/notes/（POST …/issues/:issue_iid/notes，body 必填）　Labels：/api/labels/（POST name＋color，color 要 # 開頭）
+#   分頁：/api/rest/（per_page 最大 100；Link rel=next；x-next-page）　rate limit：/administration/settings/user_and_ip_rate_limits/（429、Retry-After、RateLimit-Reset 是 epoch 秒）
+# 行首（允許縮排：官方只說要「獨立一行」，沒說縮排行算不算）是 /指令 的行。驗證 S1：放寬到縮排也擋
+# 行首的判定從嚴（#74 驗證建議 4）：\n 以外，\r、\v、\f、NEL、U+2028／U+2029 之後也算行首；縮排可以是空白、tab、NBSP、全形空白。
+# 寧可誤擋。零寬字元、全形 ／ 開頭會不會被 GitLab 當成 quick action 沒有核對（GITLAB-PORT T-05 的內部驗證清單）
+QUICK_ACTION_RE = re.compile(r"(?:^|[\r\x0b\x0c\x85\u2028\u2029])[ \t\u00a0\u3000]*/[A-Za-z_]+(\s|$)", re.M)
+GITLAB_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/api/v4$")
+LOOPBACK_URL_RE = re.compile(r"^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/api/v4$")
+
+
+def gitlab_url_problem(url):
+    """--gitlab-url 的格式檢查（同 collect.py 的規則：https，或測試用的本機 http；不收 userinfo、query、fragment；結尾是 /api/v4）。
+    回傳問題說明，沒問題回傳 None。用法錯誤（結束碼 64），在連線之前就擋下。"""
+    if not isinstance(url, str) or not (GITLAB_URL_RE.fullmatch(url) or LOOPBACK_URL_RE.fullmatch(url)):
+        return "--gitlab-url 要是 https://<主機>[:埠][/路徑]/api/v4（即 CI_API_V4_URL；不含帳密、?、#）"
+    return None
+
+
+class GitLabApi(Api):
+    kind = "gitlab"
+    url_label = "--gitlab-url"
+    # 每個 Issue 一律 confidential：寫死，沒有參數可以關（官方：confidential 預設 false，不帶就是專案成員都看得到）
+    CONFIDENTIAL = True
+
+    def __init__(self, base=None, token=None, **kw):
+        if not base:
+            raise Fail("GitLab 後端需要 --gitlab-url")
+        token = token if token is not None else os.environ.get("GITLAB_TOKEN", "")
+        super().__init__(base=base, token=token, **kw)
+        if not urllib.parse.urlsplit(self.base).path.endswith("/api/v4"):
+            raise Fail("--gitlab-url 要是 API 網址（…/api/v4，即 CI_API_V4_URL）")
+
+    def _headers(self):
+        headers = {"Accept": "application/json", "User-Agent": "dumpling-watch"}
+        if self.token:
+            headers["PRIVATE-TOKEN"] = self.token
+        return headers
+
+    def _rate_wait(self, status, hdr, data):
+        # GitLab 的限流是 429（官方）；403 是權限不足，不重試。
+        if status != 429:
+            return None
+        ra = hdr.get("retry-after")
+        if ra is not None:
+            try:
+                return min(MAX_WAIT, max(0, int(ra)))
+            except ValueError:
+                return MAX_WAIT
+        try:
+            return min(MAX_WAIT, max(0, int(hdr.get("ratelimit-reset", "")) - int(self.wall())))
+        except ValueError:
+            return MAX_WAIT
+
+    def get_all(self, path):
+        """官方分頁：x-next-page（下一頁的頁碼）優先——只改 page 參數、不用伺服器給的網址（反向代理後 Link 可能是別的主機）；
+        沒有 x-next-page 才用 Link rel=next（request() 仍會拒絕別的主機）。"""
+        out, url, pages = [], path, 0
+        while url:
+            data, hdr = self.request("GET", url)
+            if not isinstance(data, list):
+                raise Fail("列表回應不是陣列")
+            out.extend(data)
+            pages += 1
+            if pages > 500:
+                raise Fail("分頁過多")
+            url = None
+            nxt = (hdr.get("x-next-page") or "").strip()
+            if nxt:
+                if not nxt.isdigit() or int(nxt) < 2:
+                    raise Fail("x-next-page 不合法")
+                u = urllib.parse.urlsplit(path)
+                q = [(k, v) for k, v in urllib.parse.parse_qsl(u.query) if k != "page"] + [("page", nxt)]
+                url = urllib.parse.urlunsplit(("", "", u.path, urllib.parse.urlencode(q), ""))
+                continue
+            for m in re.finditer(r'<([^>]+)>\s*;\s*rel="([^"]+)"', hdr.get("link", "")):
+                if m.group(2) == "next":
+                    url = m.group(1)
+        return out
+
+    @staticmethod
+    def _text(s, what):
+        """description／note 的 body：GitLab 會執行以 / 開頭的 quick action（官方 notes 頁：送出時執行並移除）。
+        文件沒說程式碼區塊內會不會執行，所以含有這種行就不送（fail closed），不靠猜。"""
+        if QUICK_ACTION_RE.search(s):
+            raise Fail(f"{what}有以 / 開頭的行（GitLab quick action，可能被執行）：不送")
+        return s
+
+    @staticmethod
+    def precheck(texts):
+        """apply 在任何寫入之前呼叫：要送出的標題與內文都不能有 quick action 行（dry-run 也檢查；驗證 F1、#74 驗證應修 1）。"""
+        for what, t in texts:
+            if isinstance(t, str) and QUICK_ACTION_RE.search(t):
+                raise Fail(f"{what}有以 / 開頭的行（GitLab quick action，可能被執行）：什麼都沒寫")
+
+    @staticmethod
+    def _labels(labels):
+        for l in labels:
+            if "," in l:
+                raise Fail("標籤名稱不能含逗號（GitLab 的 labels 參數是逗號分隔）")
+        return ",".join(labels)
+
+    @staticmethod
+    def _issue(d):
+        if not isinstance(d, dict) or type(d.get("iid")) is not int:
+            raise Fail("GitLab Issue 回應格式不符（沒有整數 iid）")
+        return {"number": d["iid"], "title": d.get("title"), "body": d.get("description"),
+                "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"),
+                "labels": d.get("labels") or [], "confidential": d.get("confidential"),
+                "user": d.get("author") if isinstance(d.get("author"), dict) else {}}
+
+    def list_issues(self, repo, label, state="all"):
+        st = {"open": "opened", "closed": "closed", "all": "all"}[state]
+        q = urllib.parse.urlencode({"labels": label, "state": st, "per_page": 100})
+        return [self._issue(i) for i in self.get_all(f"/projects/{repo}/issues?{q}")]
+
+    def create_issue(self, repo, title, body, labels):
+        d, _ = self.request("POST", f"/projects/{repo}/issues",
+                            {"title": self._text(title, "Issue 標題"), "description": self._text(body, "Issue 內文"),
+                             "labels": self._labels(labels), "confidential": True})
+        # 伺服器沒照做（例如參數被忽略）就不能當作沒事：Issue 已建立但不是 confidential → FAIL，讓人去處理（驗證 S4）
+        if not isinstance(d, dict) or d.get("confidential") is not True:
+            raise Fail(f"GitLab 建立的 Issue #{d.get('iid') if isinstance(d, dict) else '?'} 不是 confidential：請立刻手動改成 confidential 或刪除")
+        return self._issue(d)
+
+    def edit_issue(self, repo, number, body=None, state=None, labels=None, was=None):
+        payload = {}
+        if body is not None:
+            payload["description"] = self._text(body, "Issue 內文")
+        if state is not None and state != was:
+            payload["state_event"] = {"open": "reopen", "closed": "close"}[state]
+        if labels is not None:
+            payload["labels"] = self._labels(labels)
+        if not payload:
+            return None
+        payload["confidential"] = True      # 改既有 Issue 時也確保是 confidential（例如狀態 Issue 是別人手動建的；驗證 S4）
+        d, _ = self.request("PUT", f"/projects/{repo}/issues/{number}", payload)
+        if not isinstance(d, dict) or d.get("confidential") is not True:      # 同建立：回應不是 confidential 就 FAIL（#74 驗證應修 3）
+            raise Fail(f"GitLab Issue #{number} 修改後不是 confidential：請立刻手動改成 confidential")
+        return self._issue(d)
+
+    def create_note(self, repo, number, body):
+        self.request("POST", f"/projects/{repo}/issues/{number}/notes", {"body": self._text(body, "留言")})
+
+    # Notes：/api/notes/（GET／PUT …/issues/:issue_iid/notes[/:note_id]；回傳 id／body／author{id,username}／system／internal）。
+    # 文件的列表參數只有 activity_filter、sort、order_by；per_page 靠 /api/rest/ 的通用分頁（沒有在 notes 頁列出，待內部驗證）。
+    def list_notes(self, repo, number):
+        out = []
+        for n in self.get_all(f"/projects/{repo}/issues/{number}/notes?sort=asc&order_by=created_at&per_page=100"):
+            if not isinstance(n, dict) or type(n.get("id")) is not int:
+                raise Fail("GitLab 留言回應格式不符（沒有整數 id）")
+            out.append({"id": n["id"], "body": n.get("body"), "user": n.get("author") if isinstance(n.get("author"), dict) else {},
+                        "system": n.get("system") is True})
+        return out
+
+    def edit_note(self, repo, number, note_id, body):
+        self.request("PUT", f"/projects/{repo}/issues/{number}/notes/{note_id}", {"body": self._text(body, "留言")})
+
+    # Project members：/api/project_members/ 的 GET /projects/:id/members/all/:user_id（含繼承與受邀；回傳 access_level、state）。
+    # 存取等級（同頁表格）：Guest 10、Planner 15、Reporter 20、Security Manager 25、Developer 30、Maintainer 40、Owner 50。
+    # 不是成員時的狀態碼文件沒寫：404 當成「不是成員」（待內部驗證）；其他錯誤一律 FAIL（不猜）。
+    def current_user(self):
+        """GET /user（官方 /api/users/ 的 Get the current user）：token 自己的使用者。project access token 能不能用，文件沒寫（待內部驗證）。"""
+        d, _ = self.request("GET", "/user")
+        if not isinstance(d, dict) or type(d.get("id")) is not int:
+            raise Fail("GET /user 的回應沒有整數 id")
+        return d
+
+    def member_access(self, repo, user_id):
+        if type(user_id) is not int or user_id <= 0:
+            return None
+        try:
+            d, _ = self.request("GET", f"/projects/{repo}/members/all/{user_id}")
+        except Fail as e:
+            if getattr(e, "status", None) == 404:      # T-10 驗證建議 5：用狀態碼判斷，不比對訊息
+                return None
+            raise
+        if not isinstance(d, dict) or d.get("id") != user_id or type(d.get("access_level")) is not int or d.get("state") != "active":
+            return None
+        return d["access_level"]
+
+    def list_labels(self, repo):
+        return [l["name"] for l in self.get_all(f"/projects/{repo}/labels?per_page=100")]
+
+    def create_label(self, repo, name, color):
+        self.request("POST", f"/projects/{repo}/labels", {"name": name, "color": "#" + color.lstrip("#")})
+
 
 # ---------- 標記、狀態 ----------
 def parse_marker(body, mark_re=MARK_RE):
@@ -198,8 +443,7 @@ def label_names(issue):
 
 
 def list_issues(api, repo, label, state="all"):
-    q = urllib.parse.urlencode({"labels": label, "state": state, "per_page": 100})
-    return [i for i in api.get_all(f"/repos/{repo}/issues?{q}") if "pull_request" not in i]
+    return api.list_issues(repo, label, state)
 
 
 def _note(problems, msg):
@@ -243,9 +487,12 @@ def find_state_issue(api, repo, mode):
     return found[0] if found else None
 
 
-def encode_state(state, mode, summary):
+def encode_state(state, mode, summary, urlsafe=False):
+    """urlsafe：GitLab 用 URL-safe base64（- _ 取代 + /）：標準 base64 的行可能以 / 開頭，會被當成 quick action（驗證 F1）。
+    GitHub 照舊用標準 base64（狀態格式不變）。decode_state 兩種都讀。"""
     raw = json.dumps(state, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    b = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
+    comp = gzip.compress(raw, mtime=0)
+    b = (base64.urlsafe_b64encode(comp) if urlsafe else base64.b64encode(comp)).decode("ascii")
     block = "\n".join(b[i:i + 76] for i in range(0, len(b), 76))
     body = f"<!-- dumpling-watch-state mode={mode} schema=1 -->\n{summary}\n\n```\n{block}\n```\n"
     if len(body) > MAX_BODY:
@@ -264,7 +511,12 @@ def decode_state(body, mode=None):
     if len(blocks) != 1:
         raise Fail("狀態 Issue 內文要剛好一個程式碼區塊")
     try:
-        comp = base64.b64decode("".join(blocks[0].split()), validate=True)
+        enc = "".join(blocks[0].split())
+        if re.search(r"[-_]", enc):         # URL-safe（GitLab 寫的）：不能同時有標準字母表的 + /
+            if re.search(r"[+/]", enc):
+                raise ValueError("混用兩種 base64 字母表")
+            enc = enc.translate(str.maketrans("-_", "+/"))
+        comp = base64.b64decode(enc, validate=True)
         d = zlib.decompressobj(31)
         raw = d.decompress(comp, MAX_STATE_RAW + 1)
         if len(raw) > MAX_STATE_RAW or not d.eof:
@@ -294,12 +546,11 @@ class Labels:
 
     def ensure(self, names):
         if self.known is None:
-            self.known = {l["name"] for l in self.api.get_all(f"/repos/{self.repo}/labels?per_page=100")}
+            self.known = set(self.api.list_labels(self.repo))
         for n in names:
             if n not in self.known:
                 if not self.dry:
-                    self.api.request("POST", f"/repos/{self.repo}/labels",
-                                     {"name": n, "color": LABEL_COLORS.get(n, DEFAULT_COLOR)})
+                    self.api.create_label(self.repo, n, LABEL_COLORS.get(n, DEFAULT_COLOR))
                 self.known.add(n)
 
 
@@ -334,6 +585,8 @@ def load_plan(path, want_mode=None):
         bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
     # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）；
     # Issue 用 dumpling-support 標記與 support-period 標籤（不是監控 Issue）
+    if "demo" in plan and not isinstance(plan["demo"], bool):
+        bad("demo")
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
     if plan.get("stateless"):
@@ -437,7 +690,7 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     too_big, state_body = None, None
     try:
         if not no_state:
-            state_body = encode_state(st, mode, summary)
+            state_body = encode_state(st, mode, summary, urlsafe=getattr(api, "kind", "github") == "gitlab")
     except Fail as e:
         # 狀態太大：Issue 動作照樣執行（新的 KEV 與彙總 Issue 要開得出來），狀態不寫，最後明確 FAIL（PR #28 驗證應修 2）。
         # 下一輪從舊狀態重算：open 會因標記跳過，不會重複開；留言類可能重複。
@@ -456,6 +709,9 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
         texts.append((f"actions[{n}].body", a["body"]))
         prepared.append(a)
     public_check(texts)
+    if getattr(api, "kind", "github") == "gitlab":      # quick action：寫入前全部檢查（狀態內文＋每個動作的內文；dry-run 也是）
+        GitLabApi.precheck([("狀態 Issue 內文", state_body)] + [(f"actions[{n}].body", a["body"]) for n, a in enumerate(prepared)]
+                           + [(f"actions[{n}].title", a.get("title")) for n, a in enumerate(prepared)])
 
     labels = Labels(api, repo, dry)
     created = set()  # dry-run 用：本次「會建立」的 key
@@ -474,14 +730,13 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                     r.update(result="skipped", reason="已有 Issue", issue=ent["number"])
                 elif op == "open_if_closed" and ent and ent["state"] == "open":
                     if not dry and ent["number"]:
-                        api.request("POST", f"/repos/{repo}/issues/{ent['number']}/comments", {"body": a["body"].split("\n", 1)[1]})
+                        api.add_comment(repo, ent["number"], a["body"].split("\n", 1)[1])
                     r.update(result="commented", reason="已有開著的 Issue，改留言", issue=ent["number"])
                 else:
                     labels.ensure(a["labels"])
                     num = None
                     if not dry:
-                        d, _ = api.request("POST", f"/repos/{repo}/issues",
-                                           {"title": a["title"], "body": a["body"], "labels": a["labels"]})
+                        d = api.create_issue(repo, a["title"], a["body"], a["labels"])
                         num = d["number"]
                     created.add(key)
                     r.update(result="would_open" if dry else "opened", issue=num)
@@ -494,10 +749,10 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                     continue
                 if a.get("reopen_if_closed") and ent["state"] == "closed":
                     if not dry:
-                        api.request("PATCH", f"/repos/{repo}/issues/{ent['number']}", {"state": "open"})
+                        api.edit_issue(repo, ent["number"], state="open", was=ent["state"])
                     r["reopened"] = True
                 if not dry:
-                    api.request("POST", f"/repos/{repo}/issues/{ent['number']}/comments", {"body": a["body"]})
+                    api.add_comment(repo, ent["number"], a["body"])
                 r.update(result="would_comment" if dry else "commented", issue=ent["number"])
         # 全部做完才寫狀態 Issue
         sres = {}
@@ -512,13 +767,13 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
             sres = {"result": "would_update" if cur else "would_create"}
         elif cur:
             labels.ensure([state_label(mode)] + (["drill"] if mode == "drill" else []))
-            api.request("PATCH", f"/repos/{repo}/issues/{cur['number']}", {"body": state_body, "state": "open"})
+            api.edit_issue(repo, cur["number"], body=state_body, state="open", was=cur.get("state"))
             sres = {"result": "updated", "issue": cur["number"]}
         else:
-            nl = [state_label(mode)] + (["drill"] if mode == "drill" else [])
+            # 公開 repo（plan 的 demo）：狀態 Issue 也加 demo 標籤；標題與內文格式不變（read-state 靠 watch-state 標籤與第一行標記找）
+            nl = [state_label(mode)] + (["drill"] if mode == "drill" else []) + (["demo"] if plan.get("demo") is True else [])
             labels.ensure(nl)
-            d, _ = api.request("POST", f"/repos/{repo}/issues",
-                               {"title": f"dumpling-watch 狀態（{mode}）", "body": state_body, "labels": nl})
+            d = api.create_issue(repo, f"dumpling-watch 狀態（{mode}）", state_body, nl)
             sres = {"result": "created", "issue": d["number"]}
     except Fail as e:
         ok = False
@@ -558,8 +813,8 @@ def cmd_close_drill(api, repo):
         seen.add(i["number"])
         new = list(dict.fromkeys(swap.get(n, n) for n in names))
         labels.ensure([n for n in new if n.endswith("-done")])
-        api.request("POST", f"/repos/{repo}/issues/{i['number']}/comments", {"body": "演練結束，自動關閉"})
-        api.request("PATCH", f"/repos/{repo}/issues/{i['number']}", {"state": "closed", "labels": new})
+        api.add_comment(repo, i["number"], "演練結束，自動關閉")
+        api.edit_issue(repo, i["number"], state="closed", labels=new, was=i.get("state"))
         closed.append(i["number"])
     return f"關閉 {len(closed)} 個演練 Issue：{closed}"
 
@@ -569,37 +824,66 @@ class Parser(argparse.ArgumentParser):
         raise Usage(message)
 
 
+PROJECT_ID_RE = re.compile(r"[0-9]{1,18}")
+
+
 def main(argv=None, api=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in ("--help", "-h"):
+        print(__doc__)      # 範本的 watch:* 用 `issues.py --help | grep -- --backend` 判斷有沒有 GitLab 後端
+        return 0
     p = Parser(prog="issues.py", add_help=False)
     sub = p.add_subparsers(dest="cmd")
+
+    def common(sp):
+        sp.add_argument("--backend", choices=["github", "gitlab"], default="github")
+        sp.add_argument("--repo")                          # github：O/R（必填）
+        sp.add_argument("--gitlab-url", dest="gitlab_url")  # gitlab：…/api/v4（CI_API_V4_URL）
+        sp.add_argument("--project")                       # gitlab：數字 ID（CI_PROJECT_ID）
+        sp.add_argument("--confidential", action="store_true")  # 範本相容旗標；GitLab 一律 confidential，這個旗標關不掉也不需要
     a = sub.add_parser("read-state", add_help=False)
-    a.add_argument("--repo", required=True)
+    common(a)
     a.add_argument("--mode", required=True, choices=["real", "drill"])
     a.add_argument("--out", required=True)
     b = sub.add_parser("apply", add_help=False)
-    b.add_argument("--repo", required=True)
+    common(b)
     b.add_argument("--plan", required=True)
     b.add_argument("--dry-run", action="store_true")
     b.add_argument("--mode", choices=["real", "drill"], help="這一輪的 mode：plan 的 mode 不同就 FAIL（workflow 一律給）")
     c = sub.add_parser("close-drill", add_help=False)
-    c.add_argument("--repo", required=True)
+    common(c)
     try:
         args = p.parse_args(argv)
-        if not args.cmd or not REPO_RE.fullmatch(args.repo):
-            raise Usage("需要子指令與合法的 --repo")
+        if not args.cmd:
+            raise Usage("需要子指令")
+        if args.backend == "github":
+            if not args.repo or not REPO_RE.fullmatch(args.repo):
+                raise Usage("需要合法的 --repo")
+            if args.gitlab_url or args.project:
+                raise Usage("--gitlab-url／--project 只能搭配 --backend gitlab")
+            target = args.repo
+        else:
+            if args.repo:
+                raise Usage("--backend gitlab 不用 --repo，用 --project")
+            if not args.gitlab_url or not args.project or not PROJECT_ID_RE.fullmatch(args.project):
+                raise Usage("--backend gitlab 需要 --gitlab-url 與數字的 --project")
+            why = gitlab_url_problem(args.gitlab_url)
+            if why:
+                raise Usage(why)
+            target = args.project
     except (Usage, SystemExit) as e:
-        print("用法：issues.py read-state|apply|close-drill …（見檔頭）", file=sys.stderr)
+        print("用法：issues.py read-state|apply|close-drill [--backend github|gitlab] …（見檔頭）", file=sys.stderr)
         print(f"WATCH-ISSUES\tFAIL\t用法錯誤：{e}" if isinstance(e, Usage) else "WATCH-ISSUES\tFAIL\t用法錯誤")
         return 64
     try:
-        api = api or Api()
+        if api is None:
+            api = Api() if args.backend == "github" else GitLabApi(args.gitlab_url)
         if args.cmd == "read-state":
-            msg = cmd_read_state(api, args.repo, args.mode, args.out)
+            msg = cmd_read_state(api, target, args.mode, args.out)
         elif args.cmd == "apply":
-            msg = cmd_apply(api, args.repo, args.plan, args.dry_run, args.mode)
+            msg = cmd_apply(api, target, args.plan, args.dry_run, args.mode)
         else:
-            msg = cmd_close_drill(api, args.repo)
+            msg = cmd_close_drill(api, target)
     except Fail as e:
         print(f"WATCH-ISSUES\tFAIL\t{e}")
         return 1
