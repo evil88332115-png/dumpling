@@ -43,8 +43,13 @@ expected:
   # 規則表建議（tools/cra/data/fw-advisory-rules.json，2026-11-14 整理）：AGESA ComboAM4v2PI 1.2.0.B 不低於 AMD-SB-7005 的 1.2.0.B，
   # 低於 AMD-SB-7014 的 1.2.0.Cc（取同表最高；Cb 以上的列另有 Ryzen 5000 的 1.2.0.Cb）。只是建議，是否受影響以 AMD 公告為準；規則表改了要重新核對。
   # 公告頁：AMD-SB-7005 https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html、AMD-SB-7014 https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html
+  # 微碼（第二批）：equivalence id 0x8012 的 patch 0x08001250 低於 AMD-SB-7014（0x0800126F）與 AMD-SB-7033（0x08001278）列的最低 patch level；公告把這兩個值列在資料中心 Naples 的 CPUID 00800F12 底下，
+  # equivalence id 0x8012 對 CPUID 00800F12 的依據是上面的 linux-firmware 等價表；規則只按 equivalence id 比，公告沒有說這個映像的 CPU 是不是 Naples，所以只是建議。
+  # 0x8082（CPUID 00800F82）公告沒有列，維持 NOT_ASSESSED（no-rule-for-line）。公告頁：AMD-SB-7033 https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7033.html
   advisory_rule:
     - {component: "AMD AGESA", version: "ComboAM4v2PI 1.2.0.B", suggestion: affected, rule_ids: ["AMD-SB-7014"]}
+    - {component: "AMD CPU microcode (equivalence id 0x8012)", version: "0x08001250", suggestion: affected, rule_ids: ["AMD-SB-7014", "AMD-SB-7033"]}
+    - {component: "AMD CPU microcode (equivalence id 0x8082)", version: "0x0800820d", suggestion: NOT_ASSESSED, rule_ids: []}
     - {component: "AMI Aptio V core", version: "5.17", suggestion: affected, rule_ids: ["AMI-SA-2026001", "AMI-SA-2026002"]}
   # AMI 核心版本（映像的 Firmware ID 紀錄 $FID；結構從公開映像反推，值是映像自述、沒有簽章；說明 docs/notes/c2-ami-core.md）：
   # 專案版本 34.04 與 ASUS 的 BIOS 版本 3404 一致，所以欄位順序有佐證；核心版本 5.17 本身沒有廠商公布的獨立佐證，這裡只鎖定工具讀到的值。

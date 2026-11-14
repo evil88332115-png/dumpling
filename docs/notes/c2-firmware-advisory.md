@@ -343,7 +343,7 @@ C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
 | `intel_csme` | `line`（`major.minor`，例如 `18.1`）、`fixed_in`（三或四段，開頭必須是 `line`）、可選 `affected_from` | 數字逐段比（不是字串比）；`fixed_in` 三段就只比前三段（build 號不比），四段就比四段，映像版本段數不夠 → `version-too-short`；`major.minor` 不是 `line` → 這條規則不適用（版本線是整段比，`14.1` 不會比到 `14.10`）。family 是 CSME（版本清單寫明）或由版本推定（major 11～30，結果加註）才比；TXE／SPS／ME、family 矛盾、讀不出來 → NOT_ASSESSED |
 | `intel_fsp` | `line`（前兩段）、`fixed_in`（四段）、可選 `affected_from` | 同 CSME，四段；ExtendedImageRevision 不是 0 時（版本可能偏低）不比 |
 | `amd_psp` | `psp_type`（0–255）、`fixed_in`（四個小寫十六進位 byte，與 SBOM 同格式） | 逐 byte 比；type 不同 → 不適用 |
-| `amd_microcode` | `equiv_id`（`0x` ＋ 4 位）或 `cpuid`（8 位大寫十六進位）二選一、`fixed_in`（patch level，`0x` ＋ 8 位） | 無號整數；用 `cpuid` 但映像沒有等價表（CPUID 未知）→ `cpuid-unknown`，不猜 |
+| `amd_microcode` | `equiv_id`（`0x` ＋ 4 位）或 `cpuid`（8 位大寫十六進位）二選一、`fixed_in`（patch level，`0x` ＋ 8 位） | 無號整數；用 `cpuid` 但映像沒有等價表（CPUID 未知）→ `cpuid-unknown`，不猜；第二批的條件都用 `equiv_id`（樣本的微碼是單獨的 patch，沒有等價表），`equiv_id` 與 CPUID 的對應寫在條件的 `note`；公告沒有列的 equivalence id → 這條規則不適用（`no-rule-for-line`） |
 | `bios_image` | `name_prefix`（映像檔名開頭）、`fixed_in`（數字或點分數字） | 用版本清單宣告的 BIOS 版本，數字逐段比；沒宣告 → `no-declared-version`，格式怪異 → `version-unreadable` |
 | `ami_core` | `product`、可選 `fixed_in`（`AptioV_<主>.<三位數次版號>`，`fullmatch` 驗證） | 映像的 AMI 核心版本（Firmware ID 紀錄，`ami_core.py`）與 `fixed_in` 比整數 `(主, 次)`：核心**低於**修正版本 → `affected` 建議（preliminary，待人審，固定附「基底版本、回補看不出來／A1 未確認／線索不是判定」三件事）；**不低於** → 一律 NOT_ASSESSED（`ami-core-mapping-unverified`），**第一版不輸出 not-affected**；status 不是 `read`、沒有 product、product 不同、跨 major 的處理見 `docs/notes/c2-ami-core.md`（D-058） |
 
@@ -401,7 +401,7 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
 ### 確認規則的步驟（負責單位）
 
 1. 對照公告頁逐條核對 `match`（`fixed_in`、`line`／`family`、`note`）與 `cves`、`sources`；有疑問的條件改成 NOT_ASSESSED 的寫法（刪掉那個條件）或整筆刪掉。
-   **`verification` 是 `summary-tool` 的規則（目前是 INTEL-SA-01280、INTEL-SA-01372）：確認時必須直接開 Intel 的頁面對照每一個版本值**（Intel 對一般下載回 403，要用瀏覽器開），對照完把該出處改成 `direct`（或另有獨立來源時 `independent:nvd`）；沒有直接對照過就不能改成 `confirmed`（schema 也擋：`confirmed` 的規則有 `summary-tool` 出處時整張表拒收）。
+   **`verification` 是 `summary-tool` 的規則（目前是 INTEL-SA-01152、01209、01280、01315、01372）：確認時必須直接開 Intel 的頁面對照每一個版本值**（Intel 對一般下載回 403，要用瀏覽器開），對照完把該出處改成 `direct`（或另有獨立來源時 `independent:nvd`）；沒有直接對照過就不能改成 `confirmed`（schema 也擋：`confirmed` 的規則有 `summary-tool` 出處時整張表拒收）。
 2. 把該筆的 `review` 改成 `state: "confirmed"`，加 `confirmed_by`（**角色**，不寫姓名或信箱）與 `confirmed_at`；`preliminary_by`、`preliminary_at` 保留。
 3. 更新 `table_updated`，重算 `TABLE_SHA256`，跑測試。確認之前的建議都標「依初審規則的建議（待負責單位確認）」，確認之後才標「依已確認規則的建議」；一個元件同時有兩種規則時寫 `preliminary+confirmed`。
 4. 規則表不會自己更新：`table_updated` 之後的新公告沒有收錄，報告每次都寫明這一點。
@@ -413,10 +413,10 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
 | 規則 | 網址（`read_at` 2026-11-14） | 收錄的條件 | 為什麼這樣解讀 |
 |---|---|---|---|
 | AMD-SB-7005 Return Address Security Bulletin（CVE-2023-20569；發佈 2023-08-08，最後修訂 2024-12-05） | https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html | AGESA：`ComboAM4v2PI` `fixed_in` 1.2.0.B（Ryzen 5000 桌上型）；`ComboAM5PI` `fixed_in` 1.0.8.0（Ryzen 7000 桌上型） | 頁面桌上型表格列的是要更新到的最低版本，欄位寫 `ComboAM4v2PI 1.2.0.B (2023-08-25)`、`ComboAM5 1.0.8.0 (2023-08-25)`；Ryzen 3000 的格子是 Not applicable。頁面寫 `ComboAM5`，映像字串是 `ComboAM5PI`，規則用映像的寫法（見規則的 `note`）。頁面另說可以用獨立微碼代替 AGESA 更新，規則不評估這一條 |
-| AMD-SB-7014 SMM Lock Bypass（CVE-2023-31315；發佈 2024-08-09，最後修訂 2024-11-07） | https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html | AGESA：`ComboAM4v2PI` `fixed_in` 1.2.0.Cc；`ComboAM5PI` `fixed_in` 1.2.0.1（客戶端桌上型表） | 頁面桌上型表：Matisse 的 `ComboAM4v2PI` 是 `1.2.0Cc (2024-08-16)`、Vermeer／Cezanne／Renoir 是 `1.2.0.cb (2024-07-30)`、Raphael 的 `ComboAM5PI` 是 `1.2.0.1 (2024-08-07)`；映像不知道是給哪顆 CPU，取同表最高的 Cc（所以停在 Cb 的映像也建議 affected，偏保守）。伺服器與嵌入式的表沒收 |
+| AMD-SB-7014 SMM Lock Bypass（CVE-2023-31315；發佈 2024-08-09，最後修訂 2024-11-07） | https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html | AGESA：`ComboAM4v2PI` `fixed_in` 1.2.0.Cc；`ComboAM5PI` `fixed_in` 1.2.0.1（客戶端桌上型表） | 頁面桌上型表：Matisse 的 `ComboAM4v2PI` 是 `1.2.0Cc (2024-08-16)`、Vermeer／Cezanne／Renoir 是 `1.2.0.cb (2024-07-30)`、Raphael 的 `ComboAM5PI` 是 `1.2.0.1 (2024-08-07)`；映像不知道是給哪顆 CPU，取同表最高的 Cc（所以停在 Cb 的映像也建議 affected，偏保守）。伺服器與嵌入式的 AGESA 沒收（資料中心的微碼列是第二批，見下）|
 | INTEL-SA-00391 2020.2 IPU（發佈 2020-11-10，修訂 2022-05-12） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html | CSME：版本線 `14.0` `fixed_in` 14.0.45、版本線 `14.5` `fixed_in` 14.5.25（`verification: independent:nvd`） | 受影響產品只寫成一份版本清單（CSME 與 AMT，低於各版本線的門檻就受影響）：11.8.82、11.12.82、11.22.82、12.0.70、13.0.40、13.30.10、14.0.45、14.5.25。只收 14.x 兩條。NVD 的 CPE 版本範圍（有 Intel CPE 的 CVE）的 14.x 上界是 14.0.45 與 14.5.25，相符；**11.x 的門檻兩邊不同**：Intel 頁面的版本清單寫 11.8.82（同頁的某些 CVE 描述寫 11.8.80），NVD 寫 11.8.80，兩邊都記在這裡，規則不用 11.x。25 個 CVE 裡 CVE-2020-27336、-27337、-27338 在 NVD 沒有 Intel 的 CPE 設定也沒有連到這則公告，這三個沒有獨立核對 |
-| INTEL-SA-01280 2025.3 IPU（2025-08-12） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html | CSME：`14.1`→14.1.77、`14.5`→14.5.57、`18.1`→18.1.18（`verification: summary-tool`） | 表格的版本欄是「低於這個版本受影響」的門檻（CVE-2025-20037、-20067、-22392）；只收 14.x、18.x 的列。**版本值只經網頁摘要工具讀到，NVD 對這些 CVE 沒有 CPE 版本範圍，無法獨立核對** |
-| INTEL-SA-01372（2026-08-11，修訂 2026-09-09；CVE-2026-6726） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html | CSME：`14.1`→14.1.80、`14.5`→14.5.62、`18.1`→18.1.21 | 同上，版本欄是受影響的門檻；只收 14.x、18.x 的列（`verification: summary-tool`，同樣無法獨立核對）。Intel 的表依產品列，規則只看版本線，**沒有核對平台是不是那一列的產品**（寫在規則的 `note`） |
+| INTEL-SA-01280 2025.3 IPU（2025-08-12） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html | CSME：`14.1`→14.1.77、`14.5`→14.5.57、`18.1`→18.1.18（`verification: summary-tool`） | 表格的版本欄是「低於這個版本受影響」的門檻（CVE-2025-20037、-20067、-22392）；只收 14.x、18.x 的列（15.x 是第二批補的）。**版本值只經網頁摘要工具讀到，NVD 對這些 CVE 沒有 CPE 版本範圍，無法獨立核對** |
+| INTEL-SA-01372（2026-08-11，修訂 2026-09-09；CVE-2026-6726） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html | CSME：`14.1`→14.1.80、`14.5`→14.5.62、`18.1`→18.1.21 | 同上，版本欄是受影響的門檻；只收 14.x、18.x 的列（15.x 是第二批補的；`verification: summary-tool`，同樣無法獨立核對）。Intel 的表依產品列，規則只看版本線，**沒有核對平台是不是那一列的產品**（寫在規則的 `note`） |
 | AMI-SA-2026001（2026-09-08；CVE-2026-33197）、AMI-SA-2026002（2026-10-13；CVE-2025-58771／-58772／-58773／-58774、CVE-2026-0893）；兩份的標題都是 PDF 的「Security Audit Reported Vulnerabilities」，產品（Aptio V）寫在 `note` 與條件的 `product` | 該則 PDF（`go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf`、`…002.pdf`）與 https://www.ami.com/security-advisories/ | `ami_core`：Aptio V，`Fix Version` 欄 `AptioV_5.044`（2026002 同一份文件裡另有 `AptioV_5.043`，取最高） | 文件說明修正版本名稱有 Aptio 的，對應的是 AMI 的 UEFI 產品 Aptio V；沒有受影響版本範圍，只有修正版本；核心版本讀得到時與 `Fix Version` 比整數（低於 → affected 建議，不低於 → NOT_ASSESSED），讀不到時只列「可能相關」 |
 
 AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、7008、7009、7014、7064 的表格列，2026-11-14 讀）：`ComboAM4v2PI`：1.2.0.8（2022-07-29）、1.2.0.9（2023-01-24）、1.2.0.B（2023-08-25）、1.2.0.C（2024-02-07）、1.2.0.Ca（2024-03-14）、1.2.0.Cb（2024-07-30）、
@@ -427,7 +427,7 @@ AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、700
 | 公告 | 原因 |
 |---|---|
 | INTEL-SA-00473（14.0.48） | 頁面的 `Version` 欄是「建議更新到」的版本，頁面沒有「受影響範圍」的敘述，所以不能判受影響；不收 |
-| INTEL-SA-01209（Core Ultra `18.0.10`） | 取得的頁面文字把表格壓成一行一格，Core Ultra 與 `18.0.10` 的配對只靠相鄰，頁面沒有確認；表格看不清楚，不收（NovaCustom 的 18.0.10.2285 因此沒有適用的規則） |
+| INTEL-SA-01209（Core Ultra `18.0.10`） | 第一批沒收（頁面文字把表格壓成一行一格，配對只靠相鄰）；第二批重讀後收錄，理由與限制見「第二批規則」 |
 | INTEL-SA-00241（14.0.10）、00295（14.0.33）、00307（14.0.11） | 只在搜尋結果的摘錄看到版本，沒有讀過頁面；14.0 版本線的閾值都低於 14.0.47，不影響這批樣本；不收 |
 | AMD-SB-4002、4007、4008、4012、4013、4018、7008、7009 | 讀過，只用來證明 AGESA 的版本順序與發佈日期；每份是多個 CVE、逐 CPU 的表，沒有逐 CVE 整理成規則（範圍），不是查不到 |
 | AMI-SA-2024001…2025009、2026003 | 讀過 PDF（Aptio V 的 `Fix Version` 都是 `AptioV_5.0xx`），這批只收 1～2 則（2026001、2026002） |
@@ -435,7 +435,58 @@ AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、700
 **資料取得的限制**：AMD 與 AMI 的頁面直接下載後解析（`verification: direct`）。Intel 的官方頁面對一般的下載（curl）回 403，只能透過網頁擷取工具（它會先做摘要）讀頁面文字，不是逐字的原始 HTML。INTEL-SA-00391 的 14.0.45、14.5.25 另用 NVD 的 CPE 版本範圍核對相符（`independent:nvd`，涵蓋 NVD 有 Intel CPE 的 22 個 CVE）；**INTEL-SA-01280、INTEL-SA-01372 的版本值沒有獨立來源**（NVD 對這些 CVE 沒有 CPE 版本範圍），標 `summary-tool`，報告與 SBOM 都會標示，負責單位確認時必須直接對照 Intel 的頁面。
 負責單位確認規則時請直接對照 Intel 的頁面。
 
-### 公開樣本的結果（規則表 2026-11-14、7 筆）
+### 第二批規則（2026-11-14 讀官方頁面查證）
+
+目標是公開樣本還空著的地方：NovaCustom V540TU 的 CSME 18.0、三份 AMD 樣本的 AMD 微碼與 PSP、Intel FSP。同樣只收「頁面上看得懂、版本欄意思確定」的條件；每一筆都是 `preliminary`，`preliminary_by` 是「韌體分析（C2 角色）初審」，`read_at` 2026-11-14。
+
+**Intel CSME**（Intel 頁面對下載回 403，全部用網頁擷取工具讀，`verification: summary-tool`；本批用到的 CVE（CVE-2025-32008、CVE-2025-20080、CVE-2025-27708、CVE-2025-2884、CVE-2024-26021、CVE-2024-30211、CVE-2024-38307）在 NVD 都沒有 CPE 版本範圍〔狀態 Deferred，2026-11-14 查 NVD API〕，第一批的 01280、01372 也一樣，沒有獨立來源）。
+版本欄的標題一律是 `Versions Before`＝低於這個版本受影響，與第一批的解讀相同。每個版本線一個條件，只看版本線、不核對平台是不是列出的產品。
+
+| 規則 | 網址 | 收錄的條件 | 備註 |
+|---|---|---|---|
+| INTEL-SA-01280（補） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html | `15.0`→15.0.52、`15.20`→15.20.23、`15.40`→15.40.37 | 列：500 Series／C250 Series、C740 series、Atom x6000E series 等。頁面沒有 18.0 的列（Core Ultra Series 1 的列是 18.1.18），**18.0 沒有適用的條件** |
+| INTEL-SA-01372（補） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html | `15.0`→15.0.56、`15.20`→15.20.26、`15.40`→15.40.42 | 頁面沒有 18.0 的列（Core Ultra Series 1 是 18.1.21） |
+| INTEL-SA-01315（新；2026.1 IPU，2026-02-10，沒有修訂；CVE-2025-32008、CVE-2025-20080、CVE-2025-27708） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01315.html | `14.1`→14.1.79、`15.0`→15.0.55、`15.20`→15.20.25、**`18.0`→18.0.18**（Core Ultra Processors（Series 1）列） | 沒有 14.5、15.40 的列。**V540TU 的 18.0.10.2285 因這一筆得到建議** |
+| INTEL-SA-01209（新；Intel PTT and SPS Advisory，2025-06-10，沒有修訂；CVE-2025-2884，頁面標「非 Intel 發佈」） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01209.html | `14.1`→14.1.75、`14.5`→14.5.55、`15.0`→15.0.50、`15.20`→15.20.20、`15.40`→15.40.35、`18.0`→18.0.10（Core Ultra 列） | 第一批沒收這則，因為頁面文字把表格壓平，產品與版本的配對只靠相鄰。第二批用同一個工具對同一頁問了兩次（整張表、與「18.0 旁邊是哪個產品標籤」）；兩次的版本值一致，18.0.10 旁邊的標籤是 Core Ultra（沒寫 Series 幾）。另外數字與 01152、01280、01315、01372 的同一版本線的門檻依公告日期單調遞增（見下）。配對仍是頁面版面的讀法，不是頁面明文，所以只是建議，負責單位確認時要對照原頁面 |
+| INTEL-SA-01152（新；2025.1 IPU Intel Chipset Firmware，2025-02-11，修訂 2025-02-18；CVE-2024-38307、CVE-2024-30211、CVE-2024-26021） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01152.html | `14.1`→14.1.75、`14.5`→14.5.55、`15.0`→15.0.50、`15.20`→15.20.20、`15.40`→15.40.35 | 頁面沒有 18.x。CVE-2024-30211 是 ME 驅動程式安裝程式的問題，頁面把它與這些列放在同一張表，規則只用版本欄 |
+
+交叉檢查（只能證明數字彼此一致，不是獨立來源）：同一版本線的門檻隨公告日期遞增：14.1：75（2025-02、2025-06）、77（2025-08）、79（2026-02）、80（2026-08）；15.0：50、50、52、55、56；15.20：20、20、23、25、26；15.40：35、35、37、—、42；18.0：10（2025-06）、18（2026-02）。
+INTEL-SA-00391（2020）沒有 15.x 與 18.x 的列；INTEL-SA-01371（VRT0011，CVE-2026-6727）與 INTEL-SA-00999（2024-08）：01371 的表沒有 14.x、15.x、18.x；00999 的 14.1.74、15.0.49、15.40.34 是兩年前的公告，不收。
+
+**AMD 微碼**（AMD 頁面直接下載，`verification: direct`）：2026-11-14 下載 AMD-SB-3001～3030、4001～4028、7005～7090 裡能下載到的頁面，逐頁搜尋微碼 patch level（`0x0…` 八位數）與 PSP／ASP 版本。
+**只有資料中心（EPYC）的表同時寫了 CPUID 與 patch level**；客戶端、工作站、行動、嵌入式的表只寫 PI（AGESA）版本，沒有微碼 patch level。收錄的條件（都用 `equiv_id`，因為映像的微碼是單獨的 patch、沒有等價表，`cpuids` 是空的）：
+
+| 規則 | 網址 | 條件（equivalence id → 最低 patch level；CPUID） | 解讀 |
+|---|---|---|---|
+| AMD-SB-7014（補） | https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html | `0x8012`→0x0800126F（00800F12 Naples）、`0x8310`→0x0830107C（00830F10 Rome）、`0xa011`→0x0A0011D5（00A00F11 Milan）、`0xa012`→0x0A001238（00A00F12 Milan-X）、`0xa111`→0x0A101148（00A10F11 Genoa）、`0xa112`→0x0A101248（00A10F12 Genoa-X）、`0xaa02`→0x0AA00215（00AA0F02 Bergamo／Siena） | 資料中心表的「mitigation option 2」（可熱載入的微碼）：欄位是 Code Name、CPUID、Version、日期（2024-05-03）；版本是各 CPUID 的最低 patch level，另一條路是更新 PI。規則的 `note` 寫明微碼列只是替代路徑 |
+| AMD-SB-7033（新；AMD CPU Microcode Signature Verification Vulnerability，CVE-2024-36347；發佈 2025-03-05，修訂 2025-06-03） | https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7033.html | `0x8012`→0x08001278（Naples B2）、`0x8310`→0x0830107D（Rome B0）、`0xa011`→0x0A0011DB（Milan）、`0xa012`→0x0A001244（Milan-X）、`0xa111`→0x0A101154（Genoa）、`0xa112`→0x0A10124F（Genoa-X）、`0xaa02`→0x0AA00219（Bergamo／Siena）、`0xb021`→0x0B002147（Turin，CPUID 00B00F21） | 資料中心表的「Mitigation (Minimum Versions)」列，頁面先列各 Code Name 的 CPUID，再列各系列的 ucode 最低版本與帶這個微碼的 PI 版本。客戶端的 Ryzen 表只寫 ComboAM4v2PI／ComboAM5PI 等 PI 版本，沒有微碼值，不收 |
+
+**equivalence id 與 CPUID 的對應**（AMD 公告只寫 CPUID，映像的微碼只有 equivalence id，所以需要公開依據）：用 linux-firmware 倉庫公開的 AMD 微碼容器的等價表（2026-11-14 下載 `amd-ucode/microcode_amd_fam17h.bin`、`fam19h.bin`、`fam1ah.bin`；AMD 提供、散布授權見該倉庫的 LICENSE.amd-ucode；最近一次改動 commit 依序是 `48bb90cceb88…`、`ad9154476766…`、`de45f8bef2ce…`）：`00800F12`→`0x8012`、`00830F10`→`0x8310`、`00A00F11`→`0xa011`、`00A00F12`→`0xa012`、`00A10F11`→`0xa111`、`00A10F12`→`0xa112`、`00AA0F02`→`0xaa02`、`00B00F21`→`0xb021`。
+獨立核對：同一個容器裡各 equivalence id 的 patch 的 patch level，等於 AMD-SB-7014 在該 CPUID 列的值（0x800126f／0x830107c／0xa0011d5／0xa001238／0xa101148／0xa101248／0xaa00215），所以 CPUID、equivalence id、patch level 三者互相印證（容器裡也有比公告列的值更新的 patch，例如 `0xa0011de`，它們不是公告列的值，不用於對照）。`verification` 仍標 `direct`（版本值直接取自 AMD 頁面），對應關係的出處寫在每個條件的 `note`。
+
+這個解讀的限制（寫在規則的 `note`）：
+- 規則按 equivalence id 比，**不知道映像是給哪顆 CPU**：公告把 Naples 的 CPUID 00800F12 列在資料中心表，客戶端的 Ryzen 1000 也可能用同一個 equivalence id，公告沒有說客戶端是否受影響。B550M 與 ASRock 映像的 equivalence id `0x8012` 因此得到 affected 建議，這是 CPUID 層級的對應，請負責單位對照 AMD 公告確認。
+- 微碼的 patch level 在映像裡低於最低版本，不代表系統一定沒有更新（作業系統可以熱載入微碼，公告的 PI 更新是另一條路）。
+- `not-affected` 只表示映像裡這份 patch 不低於公告列的最低 patch level。
+
+**AMD PSP 韌體：這批不收。** 所有下載到的 AMD-SB 公告頁，客戶端與資料中心的修正都以 PI（AGESA）版本交付；沒有任何一則寫出 PSP／ASP 的 type 與四段版本（樣本的 PSP 元件是 type＋`00.09.00.7f` 這種格式）。唯一像韌體版本的是 AMD-SB-7005 資料中心表的 SEV 韌體（`01.01.37.08` 等），那是 SEV 韌體、不是樣本裡的 PSP 目錄項目，也是資料中心。所以規則表沒有 `amd_psp` 條件，樣本的 PSP 元件（B550M 78 個、ASRock 80 個、B650M 21 個）一律 NOT_ASSESSED（`no-rule`）。
+
+**AMD 微碼：沒收的公告與列**（公告格式無法機器比對，或缺 CPUID／equivalence id 的對應）：
+
+| 公告 | 原因 |
+|---|---|
+| AMD-SB-7008（Zenbleed，CVE-2023-20593） | 只在資料中心寫了 Rome 的 `0x0830107B`，這一列沒有寫 CPUID（頁面別處與其他公告的 Rome 是 00830F10，但這一頁沒寫，不跨頁推論）；客戶端（Matisse、Renoir、Lucienne 等）只寫 AGESA 版本，沒有微碼值。不收 |
+| AMD-SB-7005（Return Address） | 資料中心的微碼值寫成「Milan B0 / B1 / Milan-X B2」這種 stepping 名稱與兩個值（`0x0A0011CF or 0x0A0011D1`），沒有 CPUID；頁面不能機器比對到 equivalence id。不收（AGESA 部分是第一批） |
+| AMD-SB-7029（TSA）、AMD-SB-7055（RDSEED，Zen 5） | 7029 只寫 PI 版本與作業系統更新，沒有微碼 patch level；7055 的 Turin 微碼值（`0x0B00215A`、`0x0B101054`）以 stepping 名稱（Turin C1、Turin Dense B0）列出，頁面沒有 CPUID 表。不收 |
+| AMD-SB-3002、3003、3005、3007、3009、3011、3019、3020、3023、3027、3029、3030 等資料中心（EPYC）公告 | 搜尋確認它們有微碼值，但表是每個 CVE 一列、PI／微碼／SEV 韌體各一欄，多數儲存格是 N/A 或 PI 版本，也有 stepping 名稱；我沒有逐列整理，這批不收（不是查不到、也不是判斷過不適合，是沒做）。樣本是客戶端主機板，除了 Naples 的 equivalence id 之外對不到這些列 |
+| 客戶端（Ryzen）各公告：4001～4028 | 只寫 PI 版本，沒有微碼 patch level，公告格式無法機器比對 |
+
+**Intel FSP：這批不收。** 讀過的 Intel 公告（INTEL-SA-01152、01209、01280、01315、01371、01372、00999、01325）都沒有 FSP（Firmware Support Package）版本，另外搜尋 Intel 的 Security Center 也沒有找到寫 FSP 版本的公告。公告沒有寫 FSP 版本，這批不收，規則表沒有 `intel_fsp` 條件；樣本的 FSP 元件（Protectli 的 9.0.123.32、9.2.123.32 等）一律 NOT_ASSESSED（`no-rule`）。
+（比較函式 `intel_fsp` 仍在程式裡，等有公告寫版本再用。）
+
+**沒有規則的元件仍是「資料庫沒有資料，以廠商公告為準」**（D-043）：規則表沒有 PSP 與 FSP 條件時，這兩種元件的建議是 NOT_ASSESSED（`no-rule`），SBOM 的 `dumpling:advisory-rule-basis` 結尾寫「no data in the database; the vendor advisory is authoritative」、`dumpling:advisory-rule-reason` 是 `no-rule`；`fw-inventory.md`「規則表比對」一節的 FSP 逐項列出（NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）），PSP 與微碼沒有適用規則時寫「其餘 N 個元件沒有適用的規則：…；都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準」，沒有任何地方顯示成沒有問題。`test_no_rule_for_psp_and_fsp_stays_not_assessed_in_basis_sbom_and_report` 鎖住這幾句。
+
+### 公開樣本的結果（規則表 2026-11-14、第二批後 11 筆）
 
 | 樣本 | 元件 | 建議 | 規則 |
 |---|---|---|---|
@@ -443,16 +494,28 @@ AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、700
 | ASUS PRIME B650M-A 1807 | AGESA `ComboAM5PI 1.0.8.0` | affected | AMD-SB-7014（AMD-SB-7005 的 1.0.8.0 不低於） |
 | Protectli VP46xx（Dasharo v1.2.0） | ME 14.0.47.1558 | **not-affected**（依據 vendor-statement：INTEL-SA-00391 的 14.0.45） | INTEL-SA-00391；FSP 9.x 沒有規則 |
 | NovaCustom NUC box ARL v0.9.2 | ME 18.1.18.2724 | affected | INTEL-SA-01372（INTEL-SA-01280 的 18.1.18 不低於，記在依據） |
-| NovaCustom V540TU MTL v1.0.1 | ME 18.0.10.2285 | NOT_ASSESSED（`no-rule-for-line`：規則只有 14.x、18.1 版本線） | — |
+| NovaCustom V540TU MTL v1.0.1 | ME 18.0.10.2285 | **第二批前** NOT_ASSESSED（`no-rule-for-line`：規則只有 14.x、18.1 版本線）；**第二批後 affected** | INTEL-SA-01315 的 18.0.18（INTEL-SA-01209 的 18.0.10 不低於，記在依據；版本值只經網頁摘要工具讀到、沒有獨立核對）；FSP 沒有規則 |
 | Intel NUC11 PATGL357.0059 | AMI 核心 5.19（`AMI Aptio V core`） | affected（核心低於 `AptioV_5.044`；preliminary；基底版本、回補看不出來、A1 未確認，是線索不是判定） | AMI-SA-2026001、AMI-SA-2026002；有核心元件時 BIOS 映像不比 AMI 規則 |
 
 ASUS B550M（核心 5.17）、ASRock B550（5.17）、ASUS B650M（5.26）的映像同樣讀得到 AMI 核心版本，結果同 NUC11：`AMI Aptio V core` 元件是 affected 建議（AMI-SA-2026001、2026002），BIOS 映像元件是 NOT_ASSESSED（`no-rule`）。核心版本的讀法、四份樣本的欄位與限制見 `docs/notes/c2-ami-core.md`。
 
-每個樣本的狀態都是 ATTENTION（既有原因：沒有版本清單、解析缺口等）；有 affected 建議的樣本多一句「規則表建議 affected：… 待人審」。`expected.advisory_rule` 鎖住 B550M、NUC11、Protectli、NovaCustom ARL 四個樣本。
+第二批在 AMD 微碼的結果：B550M、ASRock 的 `equivalence id 0x8012`（patch `0x08001250`）→ **affected**（AMD-SB-7014、AMD-SB-7033；兩則的最低 patch level `0x0800126F`、`0x08001278` 都更高）；其餘 18 份微碼（`0x8000`、`0x8010`、`0x8011`、`0x8082`、`0x8100`…`0xa500`）→ NOT_ASSESSED（`no-rule-for-line`：公告沒有這些 equivalence id 的微碼列）。B650M 的兩份微碼（`0xa611` patch `0x0a601119`、`0xa612` patch `0x0a601206`）→ NOT_ASSESSED（`no-rule-for-line`：Raphael 在客戶端表只寫 PI 版本）。三份 AMD 樣本的 PSP 元件（B550M 78、ASRock 80、B650M 21）與 FSP 一律 NOT_ASSESSED（`no-rule`）。
+
+第二批前後對照（建議的元件數）：
+
+| 樣本 | 第一批後 | 第二批後 |
+|---|---|---|
+| ASUS PRIME B550M-A 3404 | affected：AGESA、AMI core（共 2）；NOT_ASSESSED：其餘 | affected：AGESA、AMI core、**微碼 `0x8012`**（共 3） |
+| ASRock B550 PG4 3.40（`firmware-bios.sh`，沒有 `firmware.yml`） | affected 2（AGESA、AMI core） | affected 3（加微碼 `0x8012`） |
+| ASUS PRIME B650M-A 1807（`firmware-bios.sh`，沒有 `firmware.yml`） | affected 2（AGESA、AMI core） | 不變（2）：微碼與 PSP 都 NOT_ASSESSED |
+| NovaCustom V540TU MTL v1.0.1 | NOT_ASSESSED（ME 18.0.10.2285，`no-rule-for-line`） | **affected**（ME，INTEL-SA-01315） |
+| Protectli、NovaCustom ARL、NUC11 | — | 不變 |
+
+每個樣本的狀態都是 ATTENTION（既有原因：沒有版本清單、解析缺口等）；有 affected 建議的樣本多一句「規則表建議 affected：… 待人審」。`expected.advisory_rule` 鎖住 B550M（含兩份微碼）、NUC11、Protectli、NovaCustom ARL、NovaCustom V540TU 五個樣本；ASRock 與 B650M 沒有 `firmware.yml`，結果是用 `pipeline/firmware-bios.sh` 跑出來的（上表），沒有鎖。
 
 ### 限制與沒做的事
 
-- 規則表只有 7 筆，**不是完整的公告資料庫**；沒有規則的元件、版本線、family 一律 NOT_ASSESSED（`no-rule`、`no-rule-for-line`）。
+- 規則表只有 11 筆（第一批 7、第二批新增 INTEL-SA-01152、01209、01315、AMD-SB-7033），**不是完整的公告資料庫**；沒有規則的元件、版本線、family 一律 NOT_ASSESSED（`no-rule`、`no-rule-for-line`）。
 - AGESA 取同表最高的修正版本、CSME 只看版本線、不知道映像是給哪顆 CPU 或哪個產品，所以 `affected` 偏保守；`not-affected` 只是「版本不低於公告列的修正版本」。
 - AMI 核心版本讀的是映像自述的 Firmware ID 紀錄（沒有簽章、結構從公開映像反推）；核心是基底版本，板廠回補的修正看不出來；核心版本寫法與公告寫法的對應（A1）沒有明文，所以 `affected` 只是線索、不輸出 not-affected。
 - 沒有規則的元件種類：Intel 微碼（另有發佈資料表的比對）、coreboot、edk2、GOP／VBT、NVIDIA vBIOS。

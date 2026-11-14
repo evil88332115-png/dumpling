@@ -36,5 +36,10 @@ expected:
     - {cpuid: "000A06A4", platform_mask: "0xE6", revision: "0x25"}
   # 映像另外讀出 FSP、coreboot 資訊，release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12" 這種編號，與映像裡 FSPH 的 ImageRevision 不同格式），
   # 沒有獨立佐證，所以不寫。
+  # 規則表建議（2026-11-14 整理，第二批）：ME 18.0.10.2285 低於 INTEL-SA-01315 的 18.0.18（版本線 18.0），不低於 INTEL-SA-01209 的 18.0.10（比到第三段，build 號不比）。
+  # 規則只看版本線，沒有核對平台是不是公告表列的產品（公告的列寫 Core Ultra Processors (Series 1)／Core Ultra）；版本值只經網頁摘要工具讀到，沒有獨立核對；只是建議，是否受影響以 Intel 公告為準。
+  # 公告頁：INTEL-SA-01315 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01315.html、INTEL-SA-01209 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01209.html
+  advisory_rule:
+    - {component: "Intel CSE firmware", version: "18.0.10.2285", suggestion: affected, rule_ids: ["INTEL-SA-01315"]}
   # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
   ami_core: {status: not-found}

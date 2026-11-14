@@ -167,6 +167,48 @@
      "family": "ComboAM5PI",
      "fixed_in": "1.2.0.1",
      "note": "Client desktop table: Ryzen 7000 (Raphael) lists ComboAM5PI 1.2.0.1 (2024-08-07)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0x8012",
+     "fixed_in": "0x0800126f",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Naples row; the page names CPUID 0x00800F12; equivalence id 0x8012 is CPUID 00800F12 in the equivalence table of the public linux-firmware AMD microcode container (fam17h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0x8310",
+     "fixed_in": "0x0830107c",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Rome row; the page names CPUID 0x00830F10; equivalence id 0x8310 is CPUID 00830F10 in the equivalence table of the public linux-firmware AMD microcode container (fam17h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa011",
+     "fixed_in": "0x0a0011d5",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Milan row; the page names CPUID 0x00A00F11; equivalence id 0xa011 is CPUID 00A00F11 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa012",
+     "fixed_in": "0x0a001238",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Milan-X row; the page names CPUID 0x00A00F12; equivalence id 0xa012 is CPUID 00A00F12 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa111",
+     "fixed_in": "0x0a101148",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Genoa row; the page names CPUID 0x00A10F11; equivalence id 0xa111 is CPUID 00A10F11 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa112",
+     "fixed_in": "0x0a101248",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Genoa-X row; the page names CPUID 0x00A10F12; equivalence id 0xa112 is CPUID 00A10F12 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xaa02",
+     "fixed_in": "0x0aa00215",
+     "note": "Data Center table, mitigation option 2 (hot-loadable microcode), Bergamo and Siena row; the page names CPUID 0x00AA0F02; equivalence id 0xaa02 is CPUID 00AA0F02 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
     }
    ],
    "review": {
@@ -174,7 +216,80 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Client platforms only (the bulletin's server and embedded tables are not in this rule); the bulletin lists the fix per CPU, the image does not say which CPU it is for"
+   "note": "AGESA conditions: client platforms only (the bulletin's embedded tables are not in this rule); the bulletin lists the fix per CPU, the image does not say which CPU it is for. Microcode conditions: only the data center rows, which name a CPUID and a patch level; the client tables list no microcode level and are not machine-comparable. The microcode conditions are keyed by equivalence id, so they also hit a client-board image that carries the same equivalence id; the bulletin presents the microcode as an alternative to the PI update"
+  },
+  {
+   "id": "AMD-SB-7033",
+   "vendor": "AMD",
+   "title": "AMD CPU Microcode Signature Verification Vulnerability",
+   "published": "2025-03-05",
+   "revised": "2025-06-03",
+   "cves": [
+    "CVE-2024-36347"
+   ],
+   "sources": [
+    {
+     "url": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7033.html",
+     "read_at": "2026-11-14",
+     "verification": "direct"
+    }
+   ],
+   "match": [
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0x8012",
+     "fixed_in": "0x08001278",
+     "note": "Data Center table, minimum versions, Naples B2 ucode; the page names CPUID 0x00800F12; equivalence id 0x8012 is CPUID 00800F12 in the equivalence table of the public linux-firmware AMD microcode container (fam17h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0x8310",
+     "fixed_in": "0x0830107d",
+     "note": "Data Center table, minimum versions, Rome B0 ucode; the page names CPUID 0x00830F10; equivalence id 0x8310 is CPUID 00830F10 in the equivalence table of the public linux-firmware AMD microcode container (fam17h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa011",
+     "fixed_in": "0x0a0011db",
+     "note": "Data Center table, minimum versions, Milan ucode; the page names CPUID 0x00A00F11; equivalence id 0xa011 is CPUID 00A00F11 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa012",
+     "fixed_in": "0x0a001244",
+     "note": "Data Center table, minimum versions, Milan-X ucode; the page names CPUID 0x00A00F12; equivalence id 0xa012 is CPUID 00A00F12 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa111",
+     "fixed_in": "0x0a101154",
+     "note": "Data Center table, minimum versions, Genoa ucode; the page names CPUID 0x00A10F11; equivalence id 0xa111 is CPUID 00A10F11 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xa112",
+     "fixed_in": "0x0a10124f",
+     "note": "Data Center table, minimum versions, Genoa-X ucode; the page names CPUID 0x00A10F12; equivalence id 0xa112 is CPUID 00A10F12 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xaa02",
+     "fixed_in": "0x0aa00219",
+     "note": "Data Center table, minimum versions, Bergamo and Siena ucode; the page names CPUID 0x00AA0F02; equivalence id 0xaa02 is CPUID 00AA0F02 in the equivalence table of the public linux-firmware AMD microcode container (fam19h)"
+    },
+    {
+     "component": "amd_microcode",
+     "equiv_id": "0xb021",
+     "fixed_in": "0x0b002147",
+     "note": "Data Center table, minimum versions, Turin ucode; the page names CPUID 0x00B00F21; equivalence id 0xb021 is CPUID 00B00F21 in the equivalence table of the public linux-firmware AMD microcode container (fam1ah)"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the data center microcode levels (EPYC 7001, 7002, 7003, 9004, 9005), each tied to a CPUID in the page's CPUID table. The client, workstation, mobile and embedded tables list platform initialization versions only, no microcode level, so they are not machine-comparable and not in this rule. The conditions are keyed by equivalence id, so they also hit a client-board image that carries the same equivalence id (for example Naples B2, CPUID 00800F12); the page lists the level as the minimum version, with PI releases as the way to deliver it"
   },
   {
    "id": "INTEL-SA-00391",
@@ -238,6 +353,124 @@
    "note": "Only the 14.x thresholds of the bulletin's CSME version list are in this rule. The 14.0.45 and 14.5.25 thresholds match the NVD CPE version ranges of the CVEs that NVD links to this advisory; CVE-2020-27336, CVE-2020-27337 and CVE-2020-27338 have no NVD record with an Intel CPE or a reference to this advisory (not checked). The bulletin's version list gives 11.8.82 for the 11.8 line (some CVE descriptions on the same page and the NVD CPE ranges say 11.8.80); this rule does not use the 11.x lines"
   },
   {
+   "id": "INTEL-SA-01152",
+   "vendor": "Intel",
+   "title": "2025.1 IPU, Intel Chipset Firmware Advisory",
+   "published": "2025-02-11",
+   "revised": "2025-02-18",
+   "cves": [
+    "CVE-2024-38307",
+    "CVE-2024-30211",
+    "CVE-2024-26021"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01152.html",
+     "read_at": "2026-11-14",
+     "verification": "summary-tool"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.1",
+     "fixed_in": "14.1.75",
+     "note": "400 Series Chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "14.5",
+     "fixed_in": "14.5.55",
+     "note": "400 Series Chipset row (second row for that chipset): builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.0",
+     "fixed_in": "15.0.50",
+     "note": "500 Series and C250 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.20",
+     "fixed_in": "15.20.20",
+     "note": "C740 series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.40",
+     "fixed_in": "15.40.35",
+     "note": "Atom x6000E series row: builds below this version are listed as affected"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the 14.x and 15.x rows of the chipset table are in this rule; the table has no 18.x row. Version values read only through a page summary tool (more than once, same values), NVD has no CPE ranges for these CVEs: not independently verified, compare with the Intel page before confirming. The rule is keyed by version line only and does not check the platform against the product column"
+  },
+  {
+   "id": "INTEL-SA-01209",
+   "vendor": "Intel",
+   "title": "Intel PTT and SPS Advisory",
+   "published": "2025-06-10",
+   "revised": "2025-06-10",
+   "cves": [
+    "CVE-2025-2884"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01209.html",
+     "read_at": "2026-11-14",
+     "verification": "summary-tool"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.1",
+     "fixed_in": "14.1.75",
+     "note": "400 Series Chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "14.5",
+     "fixed_in": "14.5.55",
+     "note": "400 Series Chipset row (second row for that chipset): builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.0",
+     "fixed_in": "15.0.50",
+     "note": "500 Series and C250 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.20",
+     "fixed_in": "15.20.20",
+     "note": "C740 series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.40",
+     "fixed_in": "15.40.35",
+     "note": "Atom x6000E series row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "18.0",
+     "fixed_in": "18.0.10",
+     "note": "Core Ultra row: builds below this version are listed as affected; the label next to 18.0.10 is only 'Core Ultra' (no series number)"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the 14.x, 15.x and 18.x rows are in this rule; the CVE is marked non-Intel-issued; product-to-version pairing is a reading of the flattened page layout. Version values read only through a page summary tool (more than once, same values), NVD has no CPE ranges for these CVEs: not independently verified, compare with the Intel page before confirming. The rule is keyed by version line only and does not check the platform against the product column"
+  },
+  {
    "id": "INTEL-SA-01280",
    "vendor": "Intel",
    "title": "2025.3 IPU, Intel Chipset Firmware Advisory",
@@ -273,6 +506,24 @@
      "line": "18.1",
      "fixed_in": "18.1.18",
      "note": "Core Ultra (Series 1) row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.0",
+     "fixed_in": "15.0.52",
+     "note": "Chipset/SOC table, 500 Series and C250 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.20",
+     "fixed_in": "15.20.23",
+     "note": "Chipset/SOC table, C740 series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.40",
+     "fixed_in": "15.40.37",
+     "note": "Chipset/SOC table, Atom x6000E series row: builds below this version are listed as affected"
     }
    ],
    "review": {
@@ -280,7 +531,58 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product. The version values were read only through a page summary tool: NVD has no CPE version ranges for these CVEs, so they are not independently verified (compare with the Intel page directly before confirming)"
+   "note": "Only the 14.x, 15.x and 18.x rows of the CSME table are in this rule; the table has no 18.0 row (an 18.0 image gets no result from this rule). The rule is keyed by version line only and does not check the platform against the product column. Version values read only through a page summary tool; NVD has no CPE ranges for these CVEs: not independently verified, compare with the Intel page before confirming"
+  },
+  {
+   "id": "INTEL-SA-01315",
+   "vendor": "Intel",
+   "title": "2026.1 IPU, Intel Chipset Firmware Advisory",
+   "published": "2026-02-10",
+   "revised": "2026-02-10",
+   "cves": [
+    "CVE-2025-32008",
+    "CVE-2025-20080",
+    "CVE-2025-27708"
+   ],
+   "sources": [
+    {
+     "url": "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01315.html",
+     "read_at": "2026-11-14",
+     "verification": "summary-tool"
+    }
+   ],
+   "match": [
+    {
+     "component": "intel_csme",
+     "line": "14.1",
+     "fixed_in": "14.1.79",
+     "note": "400 Series Chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.0",
+     "fixed_in": "15.0.55",
+     "note": "500 Series and C250 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.20",
+     "fixed_in": "15.20.25",
+     "note": "C740 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "18.0",
+     "fixed_in": "18.0.18",
+     "note": "Core Ultra Processors (Series 1) row: builds below this version are listed as affected"
+    }
+   ],
+   "review": {
+    "state": "preliminary",
+    "preliminary_by": "韌體分析（C2 角色）初審",
+    "preliminary_at": "2026-11-14"
+   },
+   "note": "Only the 14.x, 15.x and 18.x rows of the CSME table are in this rule (no 14.5 or 15.40 row on the page). Version values read only through a page summary tool (more than once, same values), NVD has no CPE ranges for these CVEs: not independently verified, compare with the Intel page before confirming. The rule is keyed by version line only and does not check the platform against the product column"
   },
   {
    "id": "INTEL-SA-01372",
@@ -316,6 +618,24 @@
      "line": "18.1",
      "fixed_in": "18.1.21",
      "note": "Core Ultra Processors (Series 1) row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.0",
+     "fixed_in": "15.0.56",
+     "note": "500 Series and C250 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.20",
+     "fixed_in": "15.20.26",
+     "note": "C740 Series chipset row: builds below this version are listed as affected"
+    },
+    {
+     "component": "intel_csme",
+     "line": "15.40",
+     "fixed_in": "15.40.42",
+     "note": "Atom x6000E series row: builds below this version are listed as affected"
     }
    ],
    "review": {
@@ -323,7 +643,7 @@
     "preliminary_by": "韌體分析（C2 角色）初審",
     "preliminary_at": "2026-11-14"
    },
-   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x and 18.x rows of the CSME table are in this rule; the advisory table is keyed by product, the rule is keyed by the version line only and does not check that the platform is the listed product. The version values were read only through a page summary tool: NVD has no CPE version ranges for these CVEs, so they are not independently verified (compare with the Intel page directly before confirming)"
+   "note": "Revision 1.1 (2026-09-09) updated the affected product versions; only the 14.x, 15.x and 18.x rows of the CSME table are in this rule; the table has no 18.0 row. The rule is keyed by version line only and does not check the platform against the product column. Version values read only through a page summary tool; NVD has no CPE ranges for these CVEs: not independently verified, compare with the Intel page before confirming"
   },
   {
    "id": "AMI-SA-2026001",

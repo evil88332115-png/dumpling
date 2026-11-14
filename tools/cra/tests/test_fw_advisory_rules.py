@@ -842,6 +842,26 @@ def test_cell_reflects_rules(tmp_path):
         assert w not in text and w not in t2 and w not in t3
 
 
+# 第二批（2026-11-14 讀頁面）新增的條件：Intel 15.x 與 18.0 的列，AMD 資料中心的微碼列（equiv_id → patch level）
+SECOND_BATCH_FIXED = {
+    ("INTEL-SA-01280", "15.0"): "15.0.52", ("INTEL-SA-01280", "15.20"): "15.20.23", ("INTEL-SA-01280", "15.40"): "15.40.37",
+    ("INTEL-SA-01372", "15.0"): "15.0.56", ("INTEL-SA-01372", "15.20"): "15.20.26", ("INTEL-SA-01372", "15.40"): "15.40.42",
+    ("INTEL-SA-01152", "14.1"): "14.1.75", ("INTEL-SA-01152", "14.5"): "14.5.55", ("INTEL-SA-01152", "15.0"): "15.0.50",
+    ("INTEL-SA-01152", "15.20"): "15.20.20", ("INTEL-SA-01152", "15.40"): "15.40.35",
+    ("INTEL-SA-01209", "14.1"): "14.1.75", ("INTEL-SA-01209", "14.5"): "14.5.55", ("INTEL-SA-01209", "15.0"): "15.0.50",
+    ("INTEL-SA-01209", "15.20"): "15.20.20", ("INTEL-SA-01209", "15.40"): "15.40.35", ("INTEL-SA-01209", "18.0"): "18.0.10",
+    ("INTEL-SA-01315", "14.1"): "14.1.79", ("INTEL-SA-01315", "15.0"): "15.0.55", ("INTEL-SA-01315", "15.20"): "15.20.25", ("INTEL-SA-01315", "18.0"): "18.0.18",
+    ("AMD-SB-7014", "0x8012"): "0x0800126f", ("AMD-SB-7014", "0x8310"): "0x0830107c", ("AMD-SB-7014", "0xa011"): "0x0a0011d5",
+    ("AMD-SB-7014", "0xa012"): "0x0a001238", ("AMD-SB-7014", "0xa111"): "0x0a101148", ("AMD-SB-7014", "0xa112"): "0x0a101248", ("AMD-SB-7014", "0xaa02"): "0x0aa00215",
+    ("AMD-SB-7033", "0x8012"): "0x08001278", ("AMD-SB-7033", "0x8310"): "0x0830107d", ("AMD-SB-7033", "0xa011"): "0x0a0011db",
+    ("AMD-SB-7033", "0xa012"): "0x0a001244", ("AMD-SB-7033", "0xa111"): "0x0a101154", ("AMD-SB-7033", "0xa112"): "0x0a10124f",
+    ("AMD-SB-7033", "0xaa02"): "0x0aa00219", ("AMD-SB-7033", "0xb021"): "0x0b002147",
+}
+# 公開的 linux-firmware AMD 微碼容器（microcode_amd_fam17h／fam19h／fam1ah.bin）的等價表：equivalence id → CPUID。AMD 公告列的是 CPUID，映像的微碼只有 equivalence id
+EQUIV_TO_CPUID = {"0x8012": "00800F12", "0x8310": "00830F10", "0xa011": "00A00F11", "0xa012": "00A00F12", "0xa111": "00A10F11", "0xa112": "00A10F12",
+                  "0xaa02": "00AA0F02", "0xb021": "00B00F21"}
+
+
 # ---------- 進 repo 的規則表 ----------
 
 def test_repo_table_is_valid_pinned_and_first_batch_is_what_the_pages_say():
@@ -849,19 +869,22 @@ def test_repo_table_is_valid_pinned_and_first_batch_is_what_the_pages_say():
     assert hashlib.sha256(DATA.read_bytes()).hexdigest() == fr.TABLE_SHA256
     t, err = fr.load_default()
     assert err is None and t.updated == UPDATED
-    assert [r["id"] for r in t.rules] == ["AMD-SB-7005", "AMD-SB-7014", "INTEL-SA-00391", "INTEL-SA-01280", "INTEL-SA-01372", "AMI-SA-2026001", "AMI-SA-2026002"]
+    assert [r["id"] for r in t.rules] == ["AMD-SB-7005", "AMD-SB-7014", "AMD-SB-7033", "INTEL-SA-00391", "INTEL-SA-01152", "INTEL-SA-01209", "INTEL-SA-01280",
+                                          "INTEL-SA-01315", "INTEL-SA-01372", "AMI-SA-2026001", "AMI-SA-2026002"]
     for r in t.rules:
         assert r["review"]["state"] == "preliminary" and r["review"]["preliminary_by"] == ROLE and "confirmed_by" not in r["review"]
         assert all(s["read_at"] == UPDATED for s in r["sources"])
     ver = {r["id"]: {s["verification"] for s in r["sources"]} for r in t.rules}
-    assert ver == {"AMD-SB-7005": {"direct"}, "AMD-SB-7014": {"direct"}, "INTEL-SA-00391": {"independent:nvd"}, "INTEL-SA-01280": {"summary-tool"},
-                   "INTEL-SA-01372": {"summary-tool"}, "AMI-SA-2026001": {"direct"}, "AMI-SA-2026002": {"direct"}}
+    assert ver == {"AMD-SB-7005": {"direct"}, "AMD-SB-7014": {"direct"}, "AMD-SB-7033": {"direct"}, "INTEL-SA-00391": {"independent:nvd"}, "INTEL-SA-01152": {"summary-tool"},
+                   "INTEL-SA-01209": {"summary-tool"}, "INTEL-SA-01280": {"summary-tool"}, "INTEL-SA-01315": {"summary-tool"}, "INTEL-SA-01372": {"summary-tool"},
+                   "AMI-SA-2026001": {"direct"}, "AMI-SA-2026002": {"direct"}}
     assert {r["title"] for r in t.rules if r["vendor"] == "AMI"} == {"Security Audit Reported Vulnerabilities"}
-    fixed = {(r["id"], c.get("family") or c.get("line")): c["fixed_in"] for r in t.rules for c in r["match"] if c["component"] != "ami_core"}
+    fixed = {(r["id"], c.get("family") or c.get("line") or c.get("equiv_id")): c["fixed_in"] for r in t.rules for c in r["match"] if c["component"] != "ami_core"}
     assert fixed == {("AMD-SB-7005", "ComboAM4v2PI"): "1.2.0.B", ("AMD-SB-7005", "ComboAM5PI"): "1.0.8.0", ("AMD-SB-7014", "ComboAM4v2PI"): "1.2.0.Cc",
                      ("AMD-SB-7014", "ComboAM5PI"): "1.2.0.1", ("INTEL-SA-00391", "14.0"): "14.0.45", ("INTEL-SA-00391", "14.5"): "14.5.25",
                      ("INTEL-SA-01280", "14.1"): "14.1.77", ("INTEL-SA-01280", "14.5"): "14.5.57", ("INTEL-SA-01280", "18.1"): "18.1.18",
-                     ("INTEL-SA-01372", "14.1"): "14.1.80", ("INTEL-SA-01372", "14.5"): "14.5.62", ("INTEL-SA-01372", "18.1"): "18.1.21"}
+                     ("INTEL-SA-01372", "14.1"): "14.1.80", ("INTEL-SA-01372", "14.5"): "14.5.62", ("INTEL-SA-01372", "18.1"): "18.1.21",
+                     **SECOND_BATCH_FIXED}
     assert {c["product"] for r in t.rules for c in r["match"] if c["component"] == "ami_core"} == {"Aptio V"}
 
 
@@ -877,7 +900,16 @@ def test_repo_table_is_valid_pinned_and_first_batch_is_what_the_pages_say():
     ("intel_csme", {"version": "14.0.47.1558", "family_basis": "inferred"}, "not-affected", ["INTEL-SA-00391"]),       # Protectli
     ("intel_csme", {"version": "18.1.18.2724", "family_basis": "inferred"}, "affected", ["INTEL-SA-01372"]),           # 18.1.18：01280 的 Versions Before 18.1.18 修正了，01372 的 18.1.21 還沒
     ("intel_csme", {"version": "18.1.21.1", "family_basis": "inferred"}, "not-affected", ["INTEL-SA-01280", "INTEL-SA-01372"]),
-    ("intel_csme", {"version": "18.0.10.2285", "family_basis": "inferred"}, "NOT_ASSESSED", []),                      # 18.0 版本線沒有收規則
+    ("intel_csme", {"version": "18.0.10.2285", "family_basis": "inferred"}, "affected", ["INTEL-SA-01315"]),          # V540TU：01209 的 18.0.10 不低於，01315 的 18.0.18 還沒
+    ("intel_csme", {"version": "18.0.18.1", "family_basis": "inferred"}, "not-affected", ["INTEL-SA-01209", "INTEL-SA-01315"]),
+    ("intel_csme", {"version": "18.0.9.1", "family_basis": "inferred"}, "affected", ["INTEL-SA-01209", "INTEL-SA-01315"]),
+    ("intel_csme", {"version": "18.2.1.1", "family_basis": "inferred"}, "NOT_ASSESSED", []),                          # 18.2 版本線沒有收規則
+    ("intel_csme", {"version": "15.0.51.1", "family_basis": "listed"}, "affected", ["INTEL-SA-01280", "INTEL-SA-01315", "INTEL-SA-01372"]),     # 01152、01209 的 15.0.50 已不低於
+    ("intel_csme", {"version": "15.0.56.1", "family_basis": "listed"}, "not-affected", ["INTEL-SA-01152", "INTEL-SA-01209", "INTEL-SA-01280", "INTEL-SA-01315", "INTEL-SA-01372"]),
+    ("intel_csme", {"version": "15.20.22.9", "family_basis": "listed"}, "affected", ["INTEL-SA-01280", "INTEL-SA-01315", "INTEL-SA-01372"]),
+    ("intel_csme", {"version": "15.40.36.9", "family_basis": "listed"}, "affected", ["INTEL-SA-01280", "INTEL-SA-01372"]),               # 01315 沒有 15.40 的列
+    ("intel_csme", {"version": "15.40.42", "family_basis": "listed"}, "not-affected", ["INTEL-SA-01152", "INTEL-SA-01209", "INTEL-SA-01280", "INTEL-SA-01372"]),
+    ("intel_csme", {"version": "15.60.1.1", "family_basis": "listed"}, "NOT_ASSESSED", []),
     ("intel_csme", {"version": "16.1.30.2307", "family_basis": "inferred"}, "NOT_ASSESSED", []),
 ])
 def test_first_batch_results(comp_kind, comp, want, ids):
@@ -1110,3 +1142,77 @@ def test_ami_possibly_related_sentence_is_in_the_basis(table):
     assert r["suggestion"] == "NOT_ASSESSED" and r["rule_ids"] == []
     r = fr.evaluate(t, "bios_image", {"file": "x.CAP", "declared_version": None, "ami": False})           # 沒有 AMI 線索：沒有這句，也不是 no-ami-core-version
     assert "possibly related" not in r["basis"] and r["related"] == [] and r["reason"] == "no-rule"
+
+
+# ---------- 第二批（2026-11-14）：Intel 15.x／18.0、AMD 資料中心微碼；PSP、FSP 沒有規則 ----------
+
+def uc_comp(equiv, patch):
+    return {"equiv_id": equiv, "cpuids": None, "patch_id": patch}                       # 映像的微碼是單獨的 patch、沒有等價表（cpuids 是 None）
+
+
+def test_second_batch_microcode_conditions_are_tied_to_the_cpuid_the_bulletin_names():
+    t, err = fr.load_default()
+    assert err is None
+    seen = set()
+    for r in t.rules:
+        for c in r["match"]:
+            if c["component"] != "amd_microcode":
+                continue
+            assert "equiv_id" in c and "cpuid" not in c                                  # 映像沒有 CPUID，只能用 equivalence id
+            assert f"CPUID 0x{EQUIV_TO_CPUID[c['equiv_id']]}" in c["note"] and "linux-firmware" in c["note"], (r["id"], c)
+            seen.add((r["id"], c["equiv_id"]))
+            fx = int(c["fixed_in"], 16)
+            lo, hi = "0x%08x" % (fx - 1), c["fixed_in"]                                  # 低一階 → affected、剛好 → not-affected
+            res = {rid: fr.evaluate_condition(t, c, uc_comp(c["equiv_id"], p))["result"] for rid, p in ((r["id"] + "-lo", lo), (r["id"] + "-hi", hi))}
+            assert list(res.values()) == ["affected", "not-affected"], (r["id"], c, res)
+            assert fr.evaluate_condition(t, c, uc_comp("0x8082" if c["equiv_id"] != "0x8082" else "0x8012", "0x00000001"))["result"] == fr.OUT
+            assert fr.evaluate_condition(t, c, uc_comp(c["equiv_id"], "0x1"))["reason"] == "version-unreadable"
+    assert seen == {k for k in SECOND_BATCH_FIXED if k[1].startswith("0x")}
+
+
+@pytest.mark.parametrize("equiv,patch,want,ids,reason", [
+    ("0x8012", "0x08001250", "affected", ["AMD-SB-7014", "AMD-SB-7033"], None),         # B550M／ASRock 的 Naples B2 patch：兩則公告的最低版本（…6f、…78）都更高
+    ("0x8012", "0x08001270", "affected", ["AMD-SB-7033"], None),                          # 7014 的 0x0800126f 已達到，7033 的 0x08001278 還沒
+    ("0x8012", "0x08001278", "not-affected", ["AMD-SB-7014", "AMD-SB-7033"], None),
+    ("0x8310", "0x0830107c", "affected", ["AMD-SB-7033"], None),
+    ("0xaa02", "0x0aa00219", "not-affected", ["AMD-SB-7014", "AMD-SB-7033"], None),
+    ("0xb021", "0x0b002146", "affected", ["AMD-SB-7033"], None),
+    ("0x8082", "0x0800820d", "NOT_ASSESSED", [], "no-rule-for-line"),                      # B550M 的另一份 patch：公告沒有這個 equivalence id
+    ("0xa612", "0x0a601206", "NOT_ASSESSED", [], "no-rule-for-line"),                      # B650M：Raphael 的客戶端列只有 PI 版本，沒有微碼 patch level
+    ("0xa611", "0x0a601119", "NOT_ASSESSED", [], "no-rule-for-line"),
+])
+def test_second_batch_amd_microcode_results(equiv, patch, want, ids, reason):
+    t, err = fr.load_default()
+    r = fr.evaluate(t, "amd_microcode", uc_comp(equiv, patch))
+    assert (r["suggestion"], r["rule_ids"], r["reason"]) == (want, ids, reason), r["basis"]
+    if want == "not-affected":
+        assert r["evidence"] and all(u.startswith("https://www.amd.com/en/resources/product-security/bulletin/amd-sb-") for u in r["evidence"])
+    if want == "NOT_ASSESSED":
+        assert "no data in the database; the vendor advisory is authoritative" in r["basis"]
+
+
+def test_no_rule_for_psp_and_fsp_stays_not_assessed_in_basis_sbom_and_report():
+    """D-043：沒有規則的元件種類（PSP 韌體、FSP）要寫「資料庫沒有資料，以廠商公告為準」，不能看起來像沒有問題。
+    AMD 的公告沒有 PSP 韌體版本、Intel 的公告沒有 FSP 版本，所以規則表沒有這兩種條件。"""
+    t, err = fr.load_default()
+    assert err is None
+    assert not {c["component"] for r in t.rules for c in r["match"]} & {"amd_psp", "intel_fsp"}
+    inv = {"bios": [{"file": "x.rom", "declared_version": None, "ami_core": None, "me": None,
+                     "amd": {"psp_firmware": [{"type": 1, "version": "00.09.00.7f"}, {"type": 8, "version": "00.40.47.00"}],
+                             "microcode": [{"equiv_id": "0x8082", "cpuids": None, "patch_id": "0x0800820d"}], "agesa": {"values": []}},
+                     "cbfs": {"fsp": [{"revision": "9.0.1.1", "extended_image_revision": 0}]}}]}
+    inv["rules_advisory"] = xf.rules_section(inv, t)
+    b = inv["bios"][0]
+    for holder in (b["amd"]["psp_firmware"][0], b["amd"]["psp_firmware"][1], b["amd"]["microcode"][0], b["cbfs"]["fsp"][0]):
+        r = holder["rule_advisory"]
+        assert r["suggestion"] == "NOT_ASSESSED" and r["rule_ids"] == [] and "no data in the database; the vendor advisory is authoritative" in r["basis"]
+        props_ = {p["name"]: p["value"] for p in xf.rule_props(r)}
+        assert props_["dumpling:advisory-rule-suggestion"] == "NOT_ASSESSED" and "dumpling:evidence" not in props_
+        assert props_["dumpling:advisory-rule-reason"] in ("no-rule", "no-rule-for-line")
+    assert b["cbfs"]["fsp"][0]["rule_advisory"]["reason"] == "no-rule" and b["amd"]["microcode"][0]["rule_advisory"]["reason"] == "no-rule-for-line"
+    md = "\n".join(xf.rules_markdown(inv))
+    assert "FSP 9.0.1.1" in md and "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）" in md                    # FSP 逐項列出
+    assert "其餘 3 個元件沒有適用的規則" in md and "amd\\_psp 2 個（no-rule）" in md and "amd\\_microcode 1 個（no-rule-for-line）" in md
+    assert "都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準" in md
+    for w in FORBIDDEN:
+        assert w not in md
