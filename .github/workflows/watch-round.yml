@@ -238,11 +238,12 @@ jobs:
         with:
           name: watch-support-${{ inputs.round }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/support
+      # C0 決定（D-040 的精神，2026-11-14）：C0 放行（repo 變數 WATCH_REAL_ISSUES=on）之前，支援期限的 Issue 一律只算不寫——手動跑、dry_run=false 也一樣
       - name: 套用支援期限的 Issue
         if: ${{ !cancelled() && needs.compute.outputs.has_support_plan == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY: ${{ inputs.dry_run }}
+          DRY: ${{ inputs.dry_run || vars.WATCH_REAL_ISSUES != 'on' }}
         run: |
           d=()
           if [ "$DRY" = true ]; then d=(--dry-run); fi
