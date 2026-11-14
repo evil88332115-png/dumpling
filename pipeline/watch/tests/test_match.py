@@ -591,7 +591,7 @@ class Injection(Base):
                 self.assertNotRegex(t, r"(?<![\\\w])@(?!\u200b)[A-Za-z]", field)
                 self.assertNotIn("](https://evil", t.replace("\\]\\(", ""), field)
                 self.assertNotRegex(t, r"(?<!\\)!\[(?!\\)", field)
-                self.assertNotRegex(t, r"#\d", field)
+                self.assertNotRegex(t, r"(?<!\\)#\d", field)          # \#1（反斜線跳脫）不會連到別的 Issue
                 self.assertNotRegex(t, r"&(?!amp;)(?:[A-Za-z][A-Za-z0-9]*;|#)", field)
             self.assertEqual(match.unsafe_markdown(x["body"]), [], x["body"])
             self.assertEqual(match.unsafe_actions([x]), [], x)
@@ -619,7 +619,7 @@ class Injection(Base):
              "date_added": "2024-01-01", "source": "@src", "first_detected": NOW1}
         body = match.vendor_body("real", e, None, None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
-        self.assertNotIn("#1", body)
+        self.assertNotRegex(body, r"(?<!\\)#1")                    # \#1（反斜線跳脫）不會連到別的 Issue
         p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1", "gaps": ["upstream_note: @bob [x](https://evil.example)"]}
         body = match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                          "component": "c", "purl": "p", "basis": "b", "sources": []}], p, [], None, match.parse_now(NOW1))
@@ -677,6 +677,24 @@ class Injection(Base):
         self.assertTrue([x for x in nohealth(plan) if x["op"] == "open"])
         self.assertTrue(any("&amp;commat;" in x["body"] for x in plan["actions"]))   # attention 有寫進 Issue，而且是跳脫過的
         self.assert_safe(plan)
+
+    def test_md_text_same_rules_as_firmware_mdsafe(self):
+        # C0 決定：md_text 和 C2 的 firmware_mdsafe.md_safe 用同一套規則（以前的 md_text 擋不住 www.、email 自動連結、單獨的代理字元）
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib", "firmware_mdsafe.py"))
+        fm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fm)
+        samples = [EVIL, "see www.example.com and https://x.example/a", "mail a.b@example.com now", "xmpp:a@b/c", "mailto:x@y",
+                   "lone \ud800 surrogate", "&commat;everyone #12 $x$", "pkg:generic/zlib@1.2.11", None, "x" * 400]
+        for x in samples:
+            self.assertEqual(match.md_text(x), fm.md_safe("" if x is None else x, 300), repr(x)[:60])
+        self.assertIn("www\\.example", match.md_text("www.example.com"))           # www. 不會被自動連結
+        self.assertIn("https\\://", match.md_text("https://x.example"))            # scheme:// 不會被自動連結
+        self.assertIn("@\u200b", match.md_text("a.b@example.com"))                  # email 自動連結斷開
+        self.assertNotIn("\ud800", match.md_text("a\ud800b"))                       # 單獨的代理字元拿掉
+        self.assertEqual(match.md_text("pkg:generic/zlib@1.2.11"), "pkg:generic/zlib@1.2.11")      # purl 原樣（可複製）
+        for x in samples[:-2]:
+            self.assertEqual(match.unsafe_markdown("前文 " + match.md_text(x)), [], repr(x)[:60])
 
     def test_md_code_keeps_text_copyable(self):
         self.assertEqual(match.md_code("pkg:npm/%40types/node@1.0.0"), "` pkg:npm/%40types/node@1.0.0 `")

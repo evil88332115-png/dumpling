@@ -419,12 +419,25 @@ def _plain(x, limit):
     return re.sub(r"\s+", " ", _MD_CTRL.sub(" ", str(x if x is not None else ""))).strip()[:limit]
 
 
+def _load_mdsafe():
+    """C2 的 pipeline/lib/firmware_mdsafe.py（不可信文字進 Markdown 的共用規則，只用標準庫）。用檔案路徑載入，不改 sys.path。"""
+    spec = importlib.util.spec_from_file_location(
+        "firmware_mdsafe", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib", "firmware_mdsafe.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MDSAFE = _load_mdsafe()
+
+
 def md_text(x, limit=300):
-    """外部字串 → Markdown 純文字：& 先換成 &amp;（否則 &commat; 之類的 HTML 實體渲染時會解碼成 @、[ 等），
-    再跳脫 \\ [ ] ( ) ! < > ` | * _ ~，@ 與 # 後面插零寬空白（不通知人、不連到 Issue）。表格儲存格也用這個。"""
-    s = _plain(x, limit).replace("&", "&amp;").replace("\\", "\\\\")
-    s = re.sub(r"([\[\]()!<>`|*_~])", r"\\\1", s)
-    return re.sub(r"([@#＠＃])", "\\1" + ZWSP, s)
+    """外部字串 → Markdown 純文字。和 C2 的 firmware_mdsafe.md_safe 用同一套規則（C0 決定，2026-11-14）：
+    去控制與格式字元（含單獨的代理字元、零寬字元、雙向覆寫）、& 先換成 &amp;、跳脫 \\ [ ] ( ) < > ! * _ # ~ | ` $、
+    提及形式的 @ 與會被 cmark-gfm／markdown-it 自動連結的 email、scheme://、www. 都斷開（細節見 firmware_mdsafe 的檔頭）。
+    以前的 md_text 擋不住 www.、email 自動連結與單獨的代理字元（C2 #96 驗證比對 3327 筆輸入，219 筆會變成連結）。
+    \\# 用反斜線跳脫（不會連到別的 Issue）；超過 limit 截斷時結尾加「…」。表格儲存格也用這個。"""
+    return _MDSAFE.md_safe("" if x is None else x, limit)
 
 
 md_cell = md_text
