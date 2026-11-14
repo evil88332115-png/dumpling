@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 09:11 +0800（C0）
+最後更新：2026-11-14 09:27 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -295,11 +295,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：M6 收尾。`wp7/adapters` 已用 merge 併上 main 7b5c6b2（M2 #40、#42；7b3bb41）；併 main 後的 -os 核對完成（rock／rpi 的 -os 報告略過刷機包韌體 13／416 個元件，漏洞列與文件狀態不變；ai-nas 不受影響），標準答案加釘 bsp_inputs_not_applicable（rock 101、rpi 92、ai-nas 77 項）；三個專案最終重跑中（PR 證據）
-- 分支／PR／commit：`wp7/adapters`（7b3bb41）；`wp7/platform-samples`（868f064）；PR 尚未開（M6 完成才開，D-020）
-- 代理：0 個（重跑完、標準答案更新後派 1 個驗證代理；D-048 上限 3）
-- CI：單元測試 c4-wp7 88、c1-m2-jetson 40、c1-m2-platform 63、c1-m2-layers 35 都通過；上一輪 dev run rock 43449928625、rpi 43454142042、ai-nas 43457231137 都通過標準答案；最終重跑中
-- 今天處理：缺口 21、D-044、D-038 的 +rpt 版本讀法、三專案標準答案定案（403fae7）；adapter-gaps #25～#27 依 C0 決定（#27 D-049 維持現狀）
-- 下一步：最終重跑通過 → 獨立驗證（1 個 Sonnet，只讀）→ 完成 PR 草稿 → 開 M6 PR、通知 C0
-- 卡住／等決定：無。缺口 19（rpi 核心 CNA 候選沒有成列）、7、20、22、23、25、26 排 M7
+- 目前在做：M6 PR #97 已開（wp7/adapters，6887f0c；併上 main 94ba1ff），等 C0 派的獨立驗證代理
+- 分支／PR／commit：`wp7/adapters`（6887f0c）→ PR #97；`wp7/platform-samples`（868f064）
+- 代理：0 個（D-048 上限 3）
+- CI：M6 最終重跑（d12d1eb，併 main d67ef47 後）rock 43532296542、rpi 43535044427、ai-nas 43536522257 都通過標準答案（101／92／77 項）；report_status／release_gate 不變；missing_fields 54（-os 53），原因逐份核對；notes.md pipeline_result OK（#26）；product_version_check GAP（沒有和 tag 無關的版本來源）。之後併 #92、#94 沒有重跑，用產出核對過不受影響。單元測試 c4-wp7 89、c1-m2-platform 100、c1-m2-layers 35、c1-pipeline 都通過
+- 今天處理：併 main（#50、#58、#59、#60、#73、#92 等）、adapter-gaps #21 #25 #26 記 #58 的修正並核對、M6 最終重跑、開 M6 PR
+- 下一步：處理驗證結果；M7b-4 合併後：三個平台 scan 呼叫 version-state、核對 #20 的步驟改名；示範專案 markets: EU → EU-ALL；評估覆寫 independent_version
+- 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
