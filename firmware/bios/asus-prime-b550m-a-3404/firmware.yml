@@ -42,5 +42,6 @@ expected:
     - {equiv_id: "0x8082", patch_id: "0x0800820d"}
   # 規則表建議（tools/cra/data/fw-advisory-rules.json，2026-11-14 整理）：AGESA ComboAM4v2PI 1.2.0.B 不低於 AMD-SB-7005 的 1.2.0.B，
   # 低於 AMD-SB-7014 的 1.2.0.Cc（取同表最高；Cb 以上的列另有 Ryzen 5000 的 1.2.0.Cb）。只是建議，是否受影響以 AMD 公告為準；規則表改了要重新核對。
+  # 公告頁：AMD-SB-7005 https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html、AMD-SB-7014 https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html
   advisory_rule:
     - {component: "AMD AGESA", version: "ComboAM4v2PI 1.2.0.B", suggestion: affected, rule_ids: ["AMD-SB-7014"]}

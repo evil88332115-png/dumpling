@@ -56,6 +56,11 @@
      "version": "1.2.0.10",
      "listed": "2025-10-31",
      "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-4018.html"
+    },
+    {
+     "version": "1.2.0.12",
+     "listed": "2026-05-27",
+     "source": "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7064.html"
     }
    ]
   },
