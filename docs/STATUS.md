@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 09:02 +0800（C0）
+最後更新：2026-11-14 09:02 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -282,7 +282,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C3 -->
 ## C3 監控＋GitLab（WP2＋WP5）
 
-- 目前在做：**第一次真實基準**準備好（檢查清單已交 C0：`$AGENT_TMP/dumpling-tmp-c3/baseline-day-checklist.md`），等 C1 核對完正式 Release（C0 通知）。#94（支援期限 Issue 在 WATCH_REAL_ISSUES=on 前一律只算不寫）、#91（T-16）已合併。GitLab 線只剩 **#93**（T-10 後續）等 C0 驗證，之後停（T-12 等內部 GitLab）
+- 目前在做：**第一次真實基準**準備好（檢查清單已交 C0），等 C1 核對完正式 Release（C0 通知）。GitLab 線只剩 **#93**（wp5/gitlab-t10b 1c5d9c3：換新 bot 後登錄能恢復、疑似標頭、沒登錄的案件不靜默），C0 排第三個聚焦複驗（#95、#96 之後），期間不推；合併後 GitLab 線先停
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
 - 已合併：#32、#47、#49、#61、#69、#71、#72、#74、#84、#85、#91、#94
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
