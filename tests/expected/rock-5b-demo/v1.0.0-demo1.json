@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "rock-5b-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43460933615最後核對：併上 main 7b5c6b2 之後的 dev run，跑的 commit 是 7b3bb41；之前各版依 43413770363（8729785）、43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43532296542（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43460933615（併上 main 7b5c6b2 之後，7b3bb41）、更早依 43413770363（8729785）、43378104334（eacb60d））。不是直接存輸出：逐項核對過，並由驗證代理獨立核對（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數與核心 CNA 清單隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "rockchip",
@@ -335,7 +335,7 @@
   "product_status.full.missing_fields": {
    "min": 40,
    "max": 80,
-   "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
   },
   "product_status.bsp.documents.risk-assessment": {
    "equals": "GAP",
@@ -368,7 +368,7 @@
   "product_status.bsp.missing_fields": {
    "min": 40,
    "max": 80,
-   "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
   },
   "product_status.os.documents.risk-assessment": {
    "equals": "GAP",
@@ -397,7 +397,7 @@
   "product_status.os.missing_fields": {
    "min": 40,
    "max": 80,
-   "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 full／bsp 54、-os 53（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個，-os 沒有這一行）；2026-11-13 是 55（dev run 43399358937：拿掉範本虛構值之後，缺口 21；不可以因為範本值被判成 OK）"
   },
   "product_status.os.bsp_inputs_not_applicable": {
    "equals": [

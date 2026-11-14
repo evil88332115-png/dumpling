@@ -176,3 +176,15 @@ M2 的 852b6d3（-os 那份沒有 bsp／unknown 元件時略過 BSP 專屬輸入
 標準答案加釘 `product_status.<報告>.bsp_inputs_not_applicable`（rock 101 項、rpi 92 項、ai-nas 77 項）；這個欄位由 wp7_scan.py 從各份報告的 summary.json 讀（8429d1f）。
 
 併上 main 7b5c6b2（#42）之後的最終 dev run（rock 43460933615、rpi 43464471719、ai-nas 43467217687，commit 7b3bb41）三個都通過標準答案。和上一輪比，差別只有漏洞資料庫的變動（-os 列數 rock 3255 → 3256、rpi 647 → 648，ai-nas 990 → 991；新增的列與被略過的元件無關），其他欄位相同。
+
+## M6 最終重跑（2026-11-14，C4）
+
+開 M6 PR 前再併 main（最後是 d67ef47，含 #50 的 kernel 階段降級、#58 M7a、#73 M7b），在合併 commit d12d1eb 上重跑三個專案：rock 43532296542、rpi 43535044427、ai-nas 43536522257，三個都通過標準答案（101／92／77 項）。和上一輪（7b3bb41）逐欄比對 scan.json：
+
+| 項目 | 結果 |
+|---|---|
+| report_status、release_gate（每份報告） | 都不變（全部 GAP；#50 只在 kernel 階段不是 OK 時把 OK 降成 GAP，這三個專案本來就是 GAP） |
+| missing_fields | full／bsp 55 → 54、-os 55 → 53。逐份比對 summary.json 各文件的 missing_fields：#58 同步的精靈會填入 product.version 與 product.identification（少 2 個），adapter-gaps #25 把第 6 節的 sbom.flash_package_supplier 算進去（多 1 個；-os 報告沒有刷機包韌體，沒有這一行）。標準答案釘的是 40–80 的範圍，reason 已註明 |
+| notes.md 的 pipeline_result（adapter-gaps #26） | 三個都是 OK（舊的 run 是 NOT_RUN）；scan.json 新增 pipeline_status OK 與 pipeline_steps（build 是 NOT_RUN：build.mode none）。dev run 不產生 release-meta.json，這邊沒有兩者並排的比對 |
+| product_version_check（#58、#73） | 三個都是 GAP：設定包的版本等於 tag（rock、rpi 各 3 份，ai-nas 1 份），但這三個平台沒有和 tag 無關的版本來源（沒有覆寫 independent_version）。標準答案沒有釘這個欄位 |
+| 漏洞數 | 只有資料庫的小幅變動（例：-os 列數 rock 3256 → 3257、rpi 648 → 650，ai-nas 全部 991 → 992），都在範圍內 |

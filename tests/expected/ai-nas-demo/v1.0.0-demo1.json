@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "ai-nas-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43467217687最後核對：併上 main 7b5c6b2 之後的 dev run，跑的 commit 是 7b3bb41；之前依 43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-14 定案；依據的 CI 是 dev run 43536522257（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43467217687（併上 main 7b5c6b2 之後，7b3bb41）、43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "ai-nas",
@@ -365,7 +365,7 @@
   "product_status.full.missing_fields": {
    "min": 40,
    "max": 80,
-   "reason": "config 沒寫的報告欄位數；2026-11-13 是 55（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）。變少很多（例如又帶進範本值）時會被抓到"
+   "reason": "config 沒寫的報告欄位數；2026-11-14 最終重跑是 54（#58 之後精靈填入 product.version／product.identification 少 2 個，刷機包韌體的 sbom.flash_package_supplier 多 1 個）；2026-11-13 是 55（dev run 43391065039：拿掉範本虛構值之後；之前 user-information 是 OK、missing_fields 0，是虛構值撐起來的，缺口 21）。變少很多（例如又帶進範本值）時會被抓到"
   },
   "product_status.full.bsp_inputs_not_applicable": {
    "equals": [],
