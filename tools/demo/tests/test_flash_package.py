@@ -512,6 +512,46 @@ def test_script_rescan_carries_rootfs_tar_and_uefi_binary_rows(tmp_path):
     assert json.loads((o3 / "run-params.json").read_text())["carried"] == {"B-rootfs-tar-rootfs_no_gui": "MISSING"}
 
 
+def test_script_rescan_uefi_binary_survives_consecutive_rescans(tmp_path):
+    """#95 C0 驗證 1：給 --uefi-source、不給 --archive 的重跑只寫 B-uefi-binary NOT_RUN（沒有 json）；從那次結果再重跑、再重跑，
+    這一列都要沿用下來（原本以「上一次有 uefi-binary-check.json」為條件，第二次重跑這一列就消失，-bsp 會比原掃描樂觀）。"""
+    prev, a = rescan_prev(tmp_path)
+    tree = tmp_path / "uefi-tree"
+    tree.mkdir()
+    rs = ["--rootfs", "rootfs_no_gui"]
+    _, r1, st1, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(prev), *rs, "--uefi-source", str(tree), out="r1")
+    m = re.search(r"^B-uefi-binary\t(\w+)\t", st1, re.M)
+    assert m and m.group(1) != "OK" and not (r1 / "uefi-binary-check.json").exists(), st1
+    assert json.loads((r1 / "run-params.json").read_text())["uefi_source_given"] is True
+    first = m.group(1)
+    last = r1
+    for n in ("r2", "r3"):
+        _, o, st, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(last), *rs, out=n)
+        assert re.search(r"^B-uefi-binary\t%s\t沿用上一次" % first, st, re.M), (n, st)
+        assert st.count("B-uefi-binary\t") == 1, st                                   # uefibin_step 不再寫第二列
+        assert json.loads((o / "run-params.json").read_text())["carried"]["B-uefi-binary"] == first
+        last = o
+    # 上一次給過 --uefi-source（run-params.json）卻沒有這一列 → GAP
+    p4 = tmp_path / "p4"
+    shutil.copytree(r1, p4)
+    (p4 / "status.tsv").write_text("".join(l for l in (r1 / "status.tsv").read_text().splitlines(True) if not l.startswith("B-uefi-binary")))
+    _, o4, st4, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(p4), *rs, out="r4")
+    assert re.search(r"^B-uefi-binary\tGAP\t上一次（--rescan-from）沒有這一列，原掃描應該要有（上一次給了 --uefi-source", st4, re.M), st4
+
+
+def test_script_rescan_carry_takes_the_worst_row_not_the_last(tmp_path):
+    """#95 C0 驗證 3：上一次同一列 GAP 在前、OK 在後 → 沿用 GAP（取最嚴重，不是取最後一列）；OK 兩列 → ATTENTION。"""
+    prev, a = rescan_prev(tmp_path)
+    (prev / "uefi-binary-check.json").write_text("{}")
+    base = (prev / "status.tsv").read_text()
+    (prev / "status.tsv").write_text(base + "B-uefi-binary\tGAP\tfirst\nB-uefi-binary\tOK\tlast\n")
+    _, o, st, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(prev), "--rootfs", "rootfs_no_gui", out="w1")
+    assert re.search(r"^B-uefi-binary\tGAP\t沿用上一次（--rescan-from，這次沒有重做）：first", st, re.M), st
+    (prev / "status.tsv").write_text(base + "B-uefi-binary\tOK\tfirst\nB-uefi-binary\tOK\tlast\n")
+    _, o, st, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(prev), "--rootfs", "rootfs_no_gui", out="w2")
+    assert re.search(r"^B-uefi-binary\tATTENTION\t沿用上一次（--rescan-from，這次沒有重做）：status.tsv 有 2 列 B-uefi-binary", st, re.M), st
+
+
 def ownsw_function(tmp_path, fake):
     """scan-flash-package.sh 的 ownsw_step 單獨執行：ROOT 指到假的 tools/cra/own_software.py（stdout 與退出碼照 fake）。"""
     text = open(SCRIPT, encoding="utf-8").read()

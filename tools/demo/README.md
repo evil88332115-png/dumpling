@@ -37,5 +37,5 @@ CI（sca-center 原本的做法）：推送特定分支 → 在有 Docker 的 ru
 Rockchip 的 `update.img`（或裝著它的 zip）也用同一支腳本（`--rootfs rootfs`）：分割區表與 32 位元溢位的修正、ext4 的唯讀讀取、boot 分割區
 的核心見 `flash-package.md` 的「Rockchip 的 update.img」與 `rockchip_img.py`。
 資料或對照表更新後用 `--rescan-from <上一次的結果資料夾>` 只重跑比對（沿用上一次的 SBOM，不再解壓、不 docker import）。
-- 沒有重做的檢查會把上一次的狀態列原樣帶過來，說明註明「沿用上一次」：`B-rootfs-tar-<v>`（rootfs 沒有重讀），以及 `B-uefi-binary`（沒給 `--uefi-source`）。帶過來的列記在 `<結果>/run-params.json` 的 `carried`。上一次缺了那一列、但原掃描應該要有（例如有 rootfs 的 SBOM 卻沒有 `B-rootfs-tar-<v>`）時，寫 GAP，`carried` 記 `MISSING`，不讓缺口沿用下去。
-- 每次掃描的參數都記在 `run-params.json`（`dumpling-flash-run-params/1`）：重跑來源、`--no-upload`、平台、UEFI／OP-TEE 原始碼有沒有給、鏡像新鮮度有沒有檢查等。判定和報告讀這個檔，不從 A-env 的說明文字推。
+- 沒有重做的檢查會把上一次的狀態列原樣帶過來，說明註明「沿用上一次」：`B-rootfs-tar-<v>`（rootfs 沒有重讀），以及 `B-uefi-binary`（沒給 `--uefi-source`；上一次有這一列就沿用，連續重跑也不會消失）。帶過來的列記在 `<結果>/run-params.json` 的 `carried`。上一次缺了那一列、但原掃描應該要有（例如有 rootfs 的 SBOM 卻沒有 `B-rootfs-tar-<v>`）時，寫 GAP，`carried` 記 `MISSING`，不讓缺口沿用下去。
+- 每次掃描的參數都記在 `run-params.json`（`dumpling-flash-run-params/1`）：重跑來源、`--no-upload`、平台、UEFI／OP-TEE 原始碼有沒有給、鏡像新鮮度有沒有檢查等。目前是紀錄用，判定和報告還沒有讀它。唯一的例外是重跑：上一次的 `uefi_source_given` 用來判斷 `B-uefi-binary` 這一列是不是應該要有。

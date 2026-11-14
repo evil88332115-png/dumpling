@@ -550,7 +550,7 @@ def stage_line(p, stage):
 
 
 # status.tsv 同一階段多列（M7b）：取最嚴重的一列（不認得的狀態比 OK 嚴重），取到 OK 而且有重複列 → ATTENTION。
-# 和 dumpling 的 pipeline/lib/status_tsv.py 同一套規則（tools/ 不 import pipeline/，所以另寫一份；tests/test_status_tsv.py 比對兩邊）。
+# 和 dumpling 的 pipeline/lib/status_tsv.py 同一套規則（tools/ 不 import pipeline/，所以另寫一份；tests/test_platform_status_tsv.py 比對兩邊）。
 STATUS_SEVERITY = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
 
 

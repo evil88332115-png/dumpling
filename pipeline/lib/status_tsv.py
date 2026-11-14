@@ -2,7 +2,7 @@
 
 同一個階段出現多列時，各讀取者原本做法不一致：scan-status-check、platform_scan 取最後一列，firmware_dt 取最嚴重的一列。
 現在統一成以下規則（tools/cra/cra_report.py 的 read_status 照同一套規則另寫一份：tools/ 不 import pipeline/；
-tests/test_status_tsv.py 比對兩邊的結果）：
+tests/test_platform_status_tsv.py 比對兩邊的結果）：
 - 取最嚴重的一列（SEVERITY；不認得的狀態比 OK 嚴重）：前面的 FAIL 不能被後面的 OK 蓋掉。
 - 取到的是 OK 而且有重複列 → 改成 ATTENTION（說明加上「status.tsv 有 N 列」）：sca-scan 每個階段只寫一列，
   重複列代表檔案被改過或寫檔有 bug，有人看過之前不能顯示 OK（同 firmware_dt 的 stage_anomaly_notes）。

@@ -313,9 +313,30 @@ carry_row(){
   # 上一次同一列有多列時取最嚴重的（同 pipeline/lib/status_tsv.py）。上一次沒有這一列：第二個參數 required＝原掃描應該要有
   # （例如有 rootfs 的 SBOM 就一定讀過 rootfs）→ 寫 GAP「原掃描沒有這一列」，carried 記 MISSING（cra_report 遇到缺列會略過，不能讓缺口沿用下去；
   # #95 C0）；沒有 required → 不寫（不推測）。
+  # CARRIED_ST：這次寫了什麼（上一次的狀態、MISSING，或空的＝沒寫），呼叫端據此決定要不要再做那一步。
+  # 挑列的規則和 pipeline/lib/status_tsv.py 完全相同（取最嚴重、OK 有重複 → ATTENTION）；tests/test_platform_status_tsv.py 拿這段 PICK 和它比對
   local stage=$1 required=${2:-} row st d
-  row=$(awk -F'\t' -v k="$stage" 'BEGIN{r["OK"]=0;r["ATTENTION"]=2;r["NOT_ASSESSED"]=3;r["NOT_RUN"]=4;r["GAP"]=5;r["FAIL"]=6;m=-1}
-    NR>1 && $1==k { v=(($2 in r)?r[$2]:1); if(v>=m){m=v;line=$2"\t"$3} } END{if(m>=0)print line}' "$RESCAN/status.tsv" 2>/dev/null)
+  CARRIED_ST=
+  row=$(python3 -I - "$RESCAN/status.tsv" "$stage" 2>/dev/null <<'PICK'
+import sys
+SEV = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
+path, stage = sys.argv[1], sys.argv[2]
+best, n = None, 0
+with open(path, encoding="utf-8", newline="") as f:
+    for line in f:
+        p = line.rstrip("\r\n").split("\t", 2)
+        if len(p) < 2 or p[0] == "stage" or p[0] != stage:
+            continue
+        n += 1
+        new = (p[1], p[2] if len(p) > 2 else "")
+        if best is None or SEV.get(new[0], 1) >= SEV.get(best[0], 1):
+            best = new
+if best is not None:
+    if n > 1 and best[0] == "OK":
+        best = ("ATTENTION", "status.tsv 有 %d 列 %s（取最嚴重的一列是 OK；重複列代表檔案被改過或寫檔有 bug，要有人看過）：%s" % (n, stage, best[1]))
+    print("%s\t%s" % best)
+PICK
+)
   if [ -z "$row" ]; then
     [ -n "$required" ] || return 0
     st=MISSING; status "$stage" GAP "上一次（--rescan-from）沒有這一列，原掃描應該要有（$required）：沒有結果可以沿用，不能當成沒問題"
@@ -323,6 +344,7 @@ carry_row(){
     st=${row%%$'\t'*}; d=${row#*$'\t'}
     status "$stage" "$st" "沿用上一次（--rescan-from，這次沒有重做）：$d"
   fi
+  CARRIED_ST=$st
   python3 -I - "$OUT/run-params.json" "$stage" "$st" <<'PY' || status A-run-params FAIL "run-params.json 寫不進沿用的 $stage"
 import json,sys
 p,k,v=sys.argv[1:4]; d=json.load(open(p)); d.setdefault("carried",{})[k]=v; json.dump(d,open(p,"w"),ensure_ascii=False,indent=1,sort_keys=True)
@@ -512,6 +534,7 @@ uefibin_step(){
   local U=$OUT/$1/uefi-source r s d x lim=${UEFIBIN_TIMEOUT:-7200} uj=()
   [ -z "$RKFMT" ] || return 0
   [ ! -f "$OUT/uefi-binary-check.json" ] || return 0
+  [ -z "${UEFIBIN_DONE:-}" ] || return 0       # 重跑：已經沿用上一次的 B-uefi-binary（或寫了 GAP），不再寫第二列
   if [ ${#SRC[@]} -eq 0 ]; then status B-uefi-binary NOT_RUN "沒有 --archive／--dir：沒有核對刷機包的 UEFI 映像與原始碼是否一致"; return 0; fi
   [ -f "$OUT/flash-inventory.json" ] || { status B-uefi-binary NOT_RUN "沒有 flash-inventory.json"; return 0; }
   [ ! -f "$U/uefi-source.json" ] || uj=(--uefi-json "$U/uefi-source.json")
@@ -719,8 +742,19 @@ else:
     || { status A-rescan FAIL "無法複製上一次的 list.json"; finish; }
   # 上一次的 UEFI 映像與原始碼的對照：這次有給原始碼樹時重做（uefisrc_step），否則沿用
   # 沿用時 B-uefi-binary 那一列也帶過來（M7b：原本沒帶，cra_report 讀不到這一列就略過，-bsp 報告會比原掃描樂觀）
-  if [ -z "$UEFISRC" ] && [ -f "$RESCAN/uefi-binary-check.json" ] && [ ! -L "$RESCAN/uefi-binary-check.json" ]; then
-    if cp -- "$RESCAN/uefi-binary-check.json" "$OUT/"; then carry_row B-uefi-binary "上一次有 uefi-binary-check.json"; else status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"; fi
+  # 上一次有這一列就沿用（不看有沒有 uefi-binary-check.json：沒有刷機包、逾時或失敗時只寫列、不寫 json；#95 C0 驗證）；
+  # 上一次沒有這一列，但有 json 或 run-params.json 記了給過 --uefi-source → GAP（原掃描應該要有）。沿用或寫了 GAP 之後
+  # uefibin_step 不再寫第二列（UEFIBIN_DONE）。
+  if [ -z "$UEFISRC" ]; then
+    if [ -f "$RESCAN/uefi-binary-check.json" ] && [ ! -L "$RESCAN/uefi-binary-check.json" ]; then
+      cp -- "$RESCAN/uefi-binary-check.json" "$OUT/" || status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"
+    fi
+    ureq=
+    [ -f "$RESCAN/uefi-binary-check.json" ] && ureq="上一次有 uefi-binary-check.json"
+    [ "$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("uefi_source_given") is True)' "$RESCAN/run-params.json" 2>/dev/null)" = True ] \
+      && ureq="上一次給了 --uefi-source（run-params.json 的 uefi_source_given）"
+    carry_row B-uefi-binary "$ureq"
+    [ -z "$CARRIED_ST" ] || UEFIBIN_DONE=1
   fi
   extra_step
   # Rockchip：上一次的分割區表的狀態照樣列出（MD5 結尾、沒有掃描的分割區、沒讀到的項目）；Jetson 的 list.json 沒有 rockchip，不印

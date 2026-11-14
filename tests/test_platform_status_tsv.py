@@ -59,6 +59,19 @@ class StatusTsv(unittest.TestCase):
             self.assertEqual({k: (v["status"], v["detail"]) for k, v in platform_scan.read_status_tsv(p).items()}, rows, name)
         self.assertEqual(self.cra.STATUS_SEVERITY, status_tsv.SEVERITY)
 
+    def test_scan_flash_package_carry_pick_agrees(self):
+        """scan-flash-package.sh 的 carry_row 挑列（PICK 那段，第四份實作）和 status_tsv 結果相同（#95 C0 驗證）。"""
+        import re
+        src = open(os.path.join(ROOT, "tools", "demo", "scan-flash-package.sh"), encoding="utf-8").read()
+        pick = re.search(r"<<'PICK'\n(.*?)\nPICK\n", src, re.S).group(1)
+        for name, (body, want, dups) in CASES.items():
+            p = self.write("carry-" + name, body)
+            rows, _ = status_tsv.read(p)
+            for stage in set(rows) | {"NOPE"}:
+                r = subprocess.run([sys.executable, "-I", "-c", pick, p, stage], capture_output=True, text=True, check=True)
+                got = tuple(r.stdout.rstrip("\n").split("\t", 1)) if r.stdout else None
+                self.assertEqual(got, rows.get(stage), (name, stage))
+
     def test_missing_file(self):
         self.assertEqual(status_tsv.read(os.path.join(self.tmp, "nope.tsv")), ({}, {}))
         self.assertEqual(platform_scan.read_status_tsv(os.path.join(self.tmp, "nope.tsv")), {})
