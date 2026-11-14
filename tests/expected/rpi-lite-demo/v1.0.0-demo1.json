@@ -402,8 +402,7 @@
   },
   "vulnerabilities.bsp.cves_total": {
    "min": 150,
-   "max": 1500,
-   "reason": "bsp 報告的 CVE 數；2026-11-13 是 398（缺口 19 修好後會到 2700 以上，到時要重訂）"
+   "reason": "bsp 報告的 CVE 數；2026-11-13 是 398、M6 最終重跑是 399。只釘下限：目前的數字少算了缺口 19（帶 epoch 的 Raspberry Pi 核心被 Grype 當成已修補，約 2700 個上游 6.18.50 的 CNA 候選沒有成列），不能釘上限把漏報固定成正確；缺口 19 修好後重訂下限（bsp 核心候選 ≥ CNA 清單）"
   },
   "vulnerabilities.os.cves_total": {
    "min": 200,

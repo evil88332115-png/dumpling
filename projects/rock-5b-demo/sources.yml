@@ -52,7 +52,7 @@ releases:
       repo: https://github.com/radxa/kernel.git
       version: commit 87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9（radxa-pkg/linux-rk2410 tag 6.1.84-8 的 src 子模組；Makefile 6.1.84）
       license_url: https://github.com/radxa/kernel/blob/87ba2c6cbc16dd2ddfe10248fd45220d2d25a6f9/COPYING
-      note: GitHub 動態封存檔的 sha256 可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256
+      note: GitHub 動態封存檔的 sha256 是首次下載記錄（TOFU，2026-11-13），可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256
     - name: radxa-u-boot-39cd993e5d6296635438e84f4576b3a9bf76f86e.tar.gz
       url: https://github.com/radxa/u-boot/archive/39cd993e5d6296635438e84f4576b3a9bf76f86e.tar.gz
       sha256: 94b22a1f9c2178a27dfee77e438b780052703879971dc7547fae384697f174c8
@@ -62,7 +62,7 @@ releases:
       repo: https://github.com/radxa/u-boot.git
       version: commit 39cd993e5d6296635438e84f4576b3a9bf76f86e（u-boot-rk2410 版本字串 2017.09-64-39cd993 的 commit）
       license_url: https://github.com/radxa/u-boot/blob/39cd993e5d6296635438e84f4576b3a9bf76f86e/Licenses/README
-      note: GitHub 動態封存檔的 sha256 可能變動；處理方式同上
+      note: GitHub 動態封存檔的 sha256 是首次下載記錄（TOFU，2026-11-13），可能變動；處理方式同上
     - name: rock-5b_bookworm_kde_r6.manifest
       url: https://github.com/radxa-build/rock-5b/releases/download/rsdk-r6/rock-5b_bookworm_kde_r6.manifest
       sha256: 0fdfd533eab82ff32f28c3705bfda06f929db3eda893d505531a155a11009a93

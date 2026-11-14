@@ -4,7 +4,7 @@ schema: 1
 product_name: "AI NAS 示範"
 brand: "dumpling 公開示範"                       # 品牌或客戶
 company_role: "manufacturer"         # manufacturer｜supplier｜both
-markets: ["EU"]                   # 銷售市場
+markets: ["EU-ALL"]                   # 銷售市場：會員國代碼（ISO 3166-1 alpha-2，希臘 GR）清單，或單獨一個 EU-ALL（全歐盟）、UNKNOWN（明確不知道）
 platform: "ai-nas"
 platform_version: "Debian 13 trixie amd64" # 平台與版本
 bsp_os_source: "Debian 官方雲端映像（cloud.debian.org）＋ OpenMediaVault 原始碼（GitHub，固定 commit）"       # BSP／OS 來源
@@ -16,3 +16,6 @@ support_until: "2031-12-31"       # 支援期限 YYYY-MM-DD
 status: "development"                     # development｜shipped
 # OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
 os_responsibility: "ours"
+os:                                   # 我們自己的 OS：distro 是 /etc/os-release 的 ID（小寫）、release 是 VERSION_ID（字串）
+  distro: "debian"
+  release: "13"

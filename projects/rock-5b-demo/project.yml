@@ -4,7 +4,7 @@ schema: 1
 product_name: "ROCK 5B 示範"
 brand: "dumpling 公開示範"                       # 品牌或客戶
 company_role: "manufacturer"         # manufacturer｜supplier｜both
-markets: ["EU"]                   # 銷售市場
+markets: ["EU-ALL"]                   # 銷售市場：會員國代碼（ISO 3166-1 alpha-2，希臘 GR）清單，或單獨一個 EU-ALL（全歐盟）、UNKNOWN（明確不知道）
 platform: "rockchip"
 platform_version: "Rockchip RK3588 開發板（板子廠商的 Debian 系映像）" # 平台與版本
 bsp_os_source: "板子廠商在 GitHub Release 發行的 GPT 原始磁碟映像與其 apt 套件庫"       # BSP／OS 來源

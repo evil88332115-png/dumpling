@@ -179,7 +179,7 @@
     "OK",
     "GAP"
    ],
-   "reason": "已知不完整（缺口 22，M7）：OK 只代表有做核心比對。2026-11-13 是 OK，428 列都來自 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，沒有用 Debian 安全追蹤，也沒有用 CNA 清單；Debian 的核心 deb 沒有列。M7 改成依發行版資料或 CNA 之後可能變 GAP，所以兩個都允許，但不允許 NOT_RUN 或 FAIL"
+   "reason": "已知不完整（缺口 22，M7）：OK 只代表有做核心比對，不代表涵蓋完整。2026-11-13 是 OK，428 列都來自 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，沒有用 Debian 安全追蹤，也沒有用 CNA 清單；Debian 的核心 deb 沒有列。M7 改成依發行版資料或 CNA 之後可能變 GAP，所以兩個都允許，但不允許 NOT_RUN 或 FAIL"
   },
   "runs..stages.C-kernel-config": {
    "equals": "GAP",

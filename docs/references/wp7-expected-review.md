@@ -188,3 +188,19 @@ M2 的 852b6d3（-os 那份沒有 bsp／unknown 元件時略過 BSP 專屬輸入
 | notes.md 的 pipeline_result（adapter-gaps #26） | 三個都是 OK（舊的 run 是 NOT_RUN）；scan.json 新增 pipeline_status OK 與 pipeline_steps（build 是 NOT_RUN：build.mode none）。dev run 不產生 release-meta.json，這邊沒有兩者並排的比對 |
 | product_version_check（#58、#73） | 三個都是 GAP：設定包的版本等於 tag（rock、rpi 各 3 份，ai-nas 1 份），但這三個平台沒有和 tag 無關的版本來源（沒有覆寫 independent_version）。標準答案沒有釘這個欄位 |
 | 漏洞數 | 只有資料庫的小幅變動（例：-os 列數 rock 3256 → 3257、rpi 648 → 650，ai-nas 全部 991 → 992），都在範圍內 |
+
+## PR #97 獨立驗證之後的修改（2026-11-14，C4）
+
+C0 派的獨立驗證（effort high，6887f0c）結論是通過，另列應修與建議。C4 逐項打開原檔核對後修改（沒有重跑；改動不影響掃描輸出，三份標準答案用最終重跑的 scan.json 再比對一次都通過）：
+
+| 項目 | 修改 | 對輸出的影響 |
+|---|---|---|
+| 應修 1(a) | 三個 project.yml 的 markets 改成 `["EU-ALL"]`（D-055；舊值 EU 只會警告） | 無（舊值本來就遷移成 EU-ALL） |
+| 應修 1(b) | ai-nas-demo 補 `os: {distro: "debian", release: "13"}`（Debian 13 的 /etc/os-release：ID=debian、VERSION_ID="13"；SBOM 的 OS 元件是 debian 13.7，來自 debian_version） | 無（WP7 的掃描沒有讀這個欄位） |
+| 應修 1(c) | 三個專案的 vex-rules.json 改成空規則（和 new-project.sh 的輸出一致），$comment 改寫 | 無：K1、K2、U1 的作者只寫角色，本來就沒生效；vex_export 對沒生效的 K1 輸出和沒有 K1 相同（rock 的 accepted 全來自 kconfig、rule 0） |
+| 應修 2 | 官方沒有公布雜湊的檔案照實標 TOFU（D-046）：rpi 的 .dsc、核心封存檔、.sbom.xz、.info，ai-nas 的 .dsc，以及 rock、ai-nas 依 commit 固定的 GitHub 封存檔（sha256 本身也是首次下載記錄）；日期是 sha256 第一次寫進 sources.yml 的日子（2026-11-13）。rpi 核心封存檔補 `commit`／`repo`（commit 原本就寫在 version 欄位） | 無（sha256 不變；有 commit 之後 sha256 不符時 fetch 改用 git clone，不接受新的 sha256） |
+| 建議 | rpi 的 `vulnerabilities.bsp.cves_total` 拿掉上限 1500，只留下限（上限等於把缺口 19 的漏報固定成正確） | 無 |
+| 建議 | `test_layer_examples` 加 python3-rpi-lgpio＝bsp、liblgpio1＝os、python3-lgpio＝os（D-049） | 無（守住現狀） |
+| 建議 | ai-nas 的 C-kernel-coverage reason 加「OK 不代表涵蓋完整」 | 無 |
+
+其他建議（missing_fields 範圍收窄、路徑測試、kernel-source.json 的路徑、lstrip）列為後續。

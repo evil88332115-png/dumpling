@@ -779,7 +779,9 @@ class PlatformConfigTest(unittest.TestCase):
     def test_layer_examples(self):
         rpi = self.pc.load_platform_config("raspberrypi")
         for name, want in (("linux-image-6.18.50+rpt-rpi-2712", "bsp"), ("raspi-firmware", "bsp"), ("libcamera0.6", "bsp"),
-                           ("alsa-utils", "os"), ("rpi-connect-lite", "os"), ("firmware-realtek", "os"), ("bluez", "os")):
+                           ("alsa-utils", "os"), ("rpi-connect-lite", "os"), ("firmware-realtek", "os"), ("bluez", "os"),
+                           # D-049：分層看元件本身，不跟相依走——RPi.GPIO 相容層綁板子（bsp），它依賴的 lgpio 函式庫是通用的（os）
+                           ("python3-rpi-lgpio", "bsp"), ("liblgpio1", "os"), ("python3-lgpio", "os")):
             self.assertEqual(self.pc.classify_package(name, rpi), want, name)
         rk = self.pc.load_platform_config("rockchip")
         for name, want in (("linux-image-6.1.84-8-rk2410", "bsp"), ("u-boot-rk2410", "bsp"), ("u-boot-menu", "os"),

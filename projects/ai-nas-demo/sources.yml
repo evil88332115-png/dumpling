@@ -30,6 +30,7 @@ releases:
       role: source
       version: 6.12.116-1
       license_url: https://www.debian.org/legal/licenses/
+      note: 首次下載記錄（TOFU，2026-11-13）：sha256 沒有和官方來源核對（沒有對 Debian 的 Sources 索引核對）；下面 orig 與 debian.tar.xz 的 sha256 是對這份 .dsc 核對的
     - name: linux_6.12.116.orig.tar.xz
       url: https://snapshot.debian.org/archive/debian-security/20261108T202647Z/pool/updates/main/l/linux/linux_6.12.116.orig.tar.xz
       sha256: 84f07a9eb2779253d11aefb8b6ee1cd2dd9aa80406cad111b04702ca9208d24e
@@ -57,7 +58,7 @@ releases:
       license_url: https://github.com/openmediavault/openmediavault/blob/9d8530ffa6912ece116bc6c74d0f3d06045b6c26/LICENSE-GPL3
       note: 'OMV 不打 git tag，這個 commit 跟正式發行的 8.6.1-1 deb 是否完全相同：NOT_ASSESSED。
 
-        GitHub 動態封存檔的 sha256 可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256。
+        GitHub 動態封存檔的 sha256 是首次下載記錄（TOFU，2026-11-13），可能變動；以 commit SHA 為準，核對失敗時改用 git clone 到這個 commit，或標 GAP，不自動接受新的 sha256。
 
         內含 deb/openmediavault/workbench/package-lock.json、composer.lock、requirements.txt，給 cdxgen 掃相依套件。
 
