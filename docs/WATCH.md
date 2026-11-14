@@ -62,6 +62,11 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   - 其他 tag → 列進 `skipped`（附原因）；draft 的 tag 列進 `drafts`（最多 50 個）
   - **match.py 怎麼看**：`skipped`（資料格式壞掉、tag 不合規則、tag 重複）每一筆都算 Release 問題 → 降級（ATTENTION、連續兩次開健康 Issue）、擋第一次基準，報告寫出是哪個 tag、為什麼；`drafts`（還沒發布）只列在報告的「說明」，不降級。
     （GitHub 的 `GITHUB_TOKEN` 只有 `contents: read` 時列不到 draft，所以排程的報告通常看不到 draft。）
+- `--backend gitlab --gitlab-url <…/api/v4> --project <數字 ID>`（GITLAB-PORT T-05，只有假 API 測試、未對真實 GitLab 驗證）：token 讀環境變數 `GITLAB_TOKEN`（`PRIVATE-TOKEN` 標頭），
+  用 `GET /projects/:id/releases` 列 Release。GitLab 沒有 draft、也沒有 prerelease：`upcoming_release: true` 當 draft（列進 `drafts`、不監控）；`prerelease` 一律 false，
+  所以 `dev/<專案>` 的滾動 Release 目前會進 `skipped`（開發版 SBOM 在 GitLab 怎麼存、怎麼收是 GITLAB-PORT T-03，這裡沒有先發明）。
+  附件只讀 `assets.links[]` 裡「本專案 Generic Package、同一個 API 主機」的檔案（`…/projects/<ID>/packages/generic/<套件>/<版本>/<檔名>`），檔名取自網址、過一樣的規則；
+  其他連結不下載、記成該 Release 的 problem；下載不跟隨轉址。
 - `--from-dir`：讀 `<資料夾>/*/release-meta.json`（合成 Release，演練與測試用）；同一個資料夾裡的附件檔名規則和真的一樣。
 - 每個 Release 下載：`release-meta.json`（必要）、`sbom-<專案>-<版本>-bsp.cdx.json`、`-os.cdx.json`、整份 `sbom-<專案>-<版本>.cdx.json`、
   `layers.json`、`kernel-versions-<專案>-<版本>.json`（C1 在 M2 提供，見下；只接受 schema `sca-center-kernel-versions/2`，其他版本 → 核心 CNA 標 GAP、寫明 schema 不符：shipped 每顆核心有 `upstream_version`（對不上是 null）、`upstream_basis`、`upstream_note`；null 或沒有附件 → 核心 CNA 標 GAP，Issue／報告寫 upstream_note）、`scan-summary-<專案>-<版本>.json`（選填）。
@@ -153,7 +158,11 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 python3 -I pipeline/watch/issues.py read-state --repo <owner/repo> --mode real|drill --out <資料夾>
 python3 -I pipeline/watch/issues.py apply      --repo <owner/repo> --plan <plan.json> [--dry-run]
 python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演練結束：關閉所有 drill Issue
+# GitLab 後端（GITLAB-PORT T-05）：--repo 換成 --backend gitlab --gitlab-url <…/api/v4> --project <數字 ID> [--confidential]；token 讀 GITLAB_TOKEN
 ```
+- 後端：預設 `--backend github`（`--repo` 必填，行為不變）。`--backend gitlab` 走 Issues／Notes／Labels API（欄位對照：內文＝`description`、編號＝`iid`、狀態 `opened`／`closed`、標籤是字串），
+  **建出來的 Issue 一律 `confidential: true`（寫死，`--confidential` 只是範本相容旗標、關不掉）**；token 放 `PRIVATE-TOKEN` 標頭，只連 `--gitlab-url` 那台（https，測試才允許本機 http），不跟隨轉址，429 照 `Retry-After`／`RateLimit-Reset` 重試。
+  只有假 API 測試、未對真實 GitLab 驗證；清單見 GITLAB-PORT T-05。內文或留言有以 `/` 開頭的行（GitLab quick action 可能被執行）→ 不送、FAIL。
 - Token：`GH_TOKEN`／`GITHUB_TOKEN`，只放 HTTP 標頭；不跟隨轉址到別的主機；只連 `api.github.com`（`GITHUB_API_URL` 可改，給 GHES／測試用）。
 - 監控 Issue 的內文第一行是標記：`<!-- dumpling-watch key=<64 hex> mode=<real|drill> -->`。
   去重：列出標籤 `dumpling-watch` 的所有 Issue（open＋closed，分頁），本地解析標記；**不用 search API**（索引有延遲）。
@@ -206,7 +215,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
   標題用 `match.md_title`（`@`、`#`、`&` 後面插零寬空白；標題照字面顯示，不換成 `&amp;`）。產生 plan 前最後再檢查一次（`unsafe_markdown`）：行內程式碼以外還有沒淨化的 `@提及`、`](` 連結、`![` 圖片或 HTML 實體（`&名稱;`、`&#`；`&amp;` 除外）就 FAIL、不產生 plan。
 - 第一次建立基準前，先看那次 dry_run 的報告有沒有 ATTENTION（例如核心 CVE 用了 48 小時內的舊資料頂替）：基準不會擋它，但之後補進的那段時間的命中會被當成新的。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
-- 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8）。
+- 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 
@@ -217,3 +226,30 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - `watch.yml` 手動觸發 `mode=drill`：inventory 用 `tests/fixtures/watch/drill/`（合成 Release：合成的 SBOM，元件是公開套件的真實版本），
   KEV 用合成的 KEV 檔（`--kev-overlay`：把指定 CVE 加進 CISA KEV 清單），狀態用 `watch-state-drill`，跟真實狀態完全分開。
 - 驗收步驟：(1) 沒有 overlay → 建立基準、0 個 Issue；(2) overlay 加一個 CVE（requests 2.19.0 的 CVE-2018-18074，正式版 bsp 層與開發版各有一份）→ 開 2 個 Issue（每個 Release 一個）；(3) 再跑一次 → 0 個新 Issue；(4) `close-drill`。
+
+## 7. 支援期限與 EOL（M8 B2，`pipeline/watch/support.py`）
+
+每日監控的 real 那一輪在 compute 多跑一步（`watch-round.yml` 的「支援期限與 EOL（real）」），不連網，只讀 `projects/*/project.yml`、collect 收集到的 Release SBOM 與 `tools/cra/data/support-lifecycle.json`。演練不跑。
+
+- **產品支援期限以 `project.yml` 的 `support_until` 為準**（D-055；`config.json` 的 `support.end_date` 由它產生，`load_project` 比對月份，不一致就 FAIL）。
+  - 期限前 180／90／30 天各開一次提醒 Issue。只開當下最近的那一級：第一次跑時如果已經剩 20 天，就不補開 180、90 天那兩次。期限當天還算在支援期內。
+  - 過了期限：狀態 EOL，開一次 Issue，報告寫 GAP「支援期已結束」。
+  - 還沒填（只有 development 可能）：NOT_ASSESSED，不是 OK。
+- **元件的維護期**：每個 Release 把各層 SBOM 合併後，用 `tools/cra/support_check.py` 比對資料表。
+  - 比對用的設定是複本：`support.end_date` 由 `support_until` 產生，`support.subscriptions` 照 `config.json`。
+  - 元件比產品先停止維護、維護期沒有公開、或需要的訂閱沒有設定：ATTENTION。同一個專案的同一個元件問題只開一個 Issue，列出受影響的 Release；之後的新版本有同樣問題不重開。
+  - 元件版本不在資料表：NOT_ASSESSED，只寫進報告。
+- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。
+- **資料表的查核日期**超過 `max_age_days`（或在未來）：這些項目併成一個提醒 Issue。
+- **不重複開**：每個 Issue 的 key 由專案、門檻或元件、日期組成，同一個 key 已經有 Issue（含已關閉）就不再開。支援期限改了，key 就會變，會重新提醒。
+  - plan 是 `stateless`：`issues.py apply` 不碰監控的狀態 Issue，也不做樂觀鎖，而且只能有 `open`。
+  - Issue 用自己的標記 `<!-- dumpling-support key=… -->` 和標籤 `support-period`，**不是監控 Issue**：`read-state` 不會把它算進 `watch_keys`，所以不會擋住第一次基準。ATTENTION 類另加 `attention`；公開 repo 另加 `demo`。
+  - 寫進 Issue 的 `project.yml` 與資料表的值一律經過 `md_text`、`md_code`、`md_title`，寫入前再跑 publiccheck 與 `unsafe_actions`。
+  - 一個專案檢查時出錯，只有那個專案記 FAIL（它的 Issue 這次不送出），其他專案照做。`support_until` 沒加引號（YAML 讀成日期）也照常處理。
+- **跟每日監控的關係**：失敗不擋每日監控的 Issue（`continue-on-error`）。
+  - FAIL（`project.yml` 不合格、資料表壞掉、PyYAML 不在）由 `support-fail` job 讓這一輪變紅。
+  - 放在比對前面，報告一定會留在 summary。比對 FAIL 時 compute 失敗、notify 不跑，支援期限的 Issue 延到下一輪（key 不變，晚一天而已）。
+  - notify 裡，每日監控的 apply 失敗（例如樂觀鎖），支援期限的 apply 照樣跑（`!cancelled()`）。
+  - 用的是同一個 `dry_run`：排程預設只算不寫，C0 設 `WATCH_REAL_ISSUES=on` 之後才真的開 Issue（D-040）。
+- 輸出在 artifact `watch-support-<round>-<attempt>`（`report.md`、`result.json`、`plan.json`），報告也寫進 job summary。
+- 資料表只有人工維護的項目。Debian、Raspberry Pi OS、Radxa、OMV 由 C4 補（提案 B2）；在那之前，這些平台的 OS 是 NOT_ASSESSED（SBOM 裡的元件），或 ATTENTION（`ours` 的 OS）。

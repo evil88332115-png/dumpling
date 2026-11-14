@@ -55,6 +55,57 @@ def jetson_site_config(out, repo, root, outroot, pilot_env, grype_cache, upstrea
 
 # ---------------------------------------------------------------- collect（Jetson 特有的欄位與說明）
 
+L4T_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
+INDEPENDENT_RULE = ("tag → sources.yml 該版本的 platform_params.l4t_release（人寫的對應）→ 必須等於刷機包 rootfs 裡掃到的 L4T 版本"
+                    "（etc/nv_tegra_release、dpkg 的 nvidia-l4t-core／nvidia-l4t-kernel，三者要一致）")
+
+
+def jetson_independent_version(a, ver, rootfs="rootfs"):
+    """→ Hooks.independent_version 的格式。不推測：宣告或掃描結果缺少 → GAP；讀到了但對不上、或掃描的來源互相不一致 → FAIL。"""
+    res = {"status": "GAP", "rule": INDEPENDENT_RULE, "expected": None, "found": [], "detail": None}
+    # 宣告：sources.yml
+    pdir = getattr(a, "project_dir", None)
+    if not pdir:
+        return {**res, "detail": "沒有給 --project-dir：讀不到 sources.yml 的 l4t_release，不能核對"}
+    import project_config as pc
+    try:
+        rel = pc.load_sources(os.path.join(pdir, "sources.yml"))["releases"].get(ver)
+    except (OSError, ValueError, pc.ConfigError) as e:
+        return {**res, "status": "FAIL", "detail": "sources.yml 讀不了：%s" % e}
+    if not isinstance(rel, dict):
+        return {**res, "status": "FAIL", "detail": "sources.yml 沒有版本 %s" % ver}
+    want = (rel.get("platform_params") or {}).get("l4t_release")
+    if not (isinstance(want, str) and L4T_RE.fullmatch(want)):
+        return {**res, "status": "FAIL", "detail": "sources.yml 版本 %s 的 platform_params.l4t_release 不是 L4T 版本：%r" % (ver, want)}
+    res["expected"] = want
+    # 掃描：完整掃描那次的 list.json
+    full = next((r.partition("=")[2] for r in a.run if r.partition("=")[0] == ""), None) or (a.run[0].partition("=")[2] if a.run else None)
+    lj = os.path.join(full, "scan", "list.json") if full else None
+    if not lj or not os.path.isfile(lj) or os.path.islink(lj):
+        return {**res, "detail": "沒有刷機包的 list.json（%s）：不是刷機包的掃描，讀不到掃描的 L4T 版本" % ("沒有完整掃描" if not lj else "scan/list.json")}
+    doc = read_json(lj)
+    cands = [c for c in (doc.get("rootfs") if isinstance(doc, dict) else None) or [] if isinstance(c, dict) and c.get("variant") == rootfs]
+    if not cands:
+        return {**res, "status": "FAIL", "detail": "list.json 壞掉或沒有 rootfs %s：讀不到掃描的 L4T 版本" % rootfs}
+    found, bad = [], []
+    for c in cands:
+        l4t = c.get("l4t") if isinstance(c.get("l4t"), dict) else {}
+        for k, v in sorted((l4t.get("sources") or {}).items()):
+            if isinstance(v, str) and v:
+                found.append({"source": "%s（%s）" % (k, c.get("prefix") or rootfs), "value": v})
+        # 三個來源不一致（ATTENTION）或都沒有（GAP）：版本確定不了，不能宣稱等於 tag → FAIL，不停在 ATTENTION（C0）
+        if l4t.get("status") != "OK" or not isinstance(l4t.get("release"), str):
+            bad.append("%s：%s" % (c.get("prefix") or rootfs, l4t.get("detail") or "沒有 L4T 版本"))
+    res["found"] = found
+    if bad:
+        return {**res, "status": "FAIL", "detail": "掃描的 L4T 版本無法確定（" + "；".join(bad) + "）"}
+    got = sorted({c["l4t"]["release"] for c in cands})
+    if got != [want]:
+        return {**res, "status": "FAIL",
+                "detail": "sources.yml 宣告版本 %s 是 L4T %s，刷機包裡掃到的是 L4T %s" % (ver, want, "、".join(got))}
+    return {**res, "status": "OK", "detail": "sources.yml 宣告版本 %s 是 L4T %s，刷機包裡掃到的也是 L4T %s" % (ver, want, want)}
+
+
 class JetsonHooks(Hooks):
     """核心、建置紀錄、C-kernel-boot、上游比對（原始碼與成品）、刷機包組裝、patch、元件 SHA-1；檔名與欄位都和 M2 第一次跑通時相同。"""
 
@@ -72,6 +123,11 @@ class JetsonHooks(Hooks):
                                 "modified_files": [m["path"] for c in src.get("components", []) for m in c.get("modified", [])][:20]} if src else None,
             "upstream_artifacts": {"status": art.get("status"), "detail": art.get("detail")} if art else None,
         }
+
+    def independent_version(self, ctx):
+        """M7b：tag 對應的 L4T 版本（sources.yml 這個版本的 platform_params.l4t_release，人寫的宣告）要等於刷機包裡掃到的 L4T 版本
+        （完整掃描那次 scan-flash-package.sh 的 list.json：rootfs 的 etc/nv_tegra_release、dpkg 的 nvidia-l4t-core／nvidia-l4t-kernel）。"""
+        return jetson_independent_version(ctx["args"], ctx["version"], self.rootfs)
 
     def scan_head(self, ctx):
         b = ctx["build"]
