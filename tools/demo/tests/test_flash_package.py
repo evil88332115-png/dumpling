@@ -4,6 +4,7 @@ import io
 import json
 import re
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -474,6 +475,36 @@ def test_script_rescan_own_software_branches(tmp_path):
     # 4) 設定沒有 sbom.own_software：沒給 --archive 也照樣寫宣告的結果（沒宣告 → GAP），不悄悄消失
     _, o4, st, _ = own_run(tmp_path, {k: v for k, v in OWN_CFG.items() if k != "sbom"}, *rs, out="r4")
     assert re.search(r"^B-own-software-rootfs_no_gui\tGAP\t沒有宣告自有軟體", st, re.M) and "B-rescan-rootfs_no_gui\tOK" in st, st
+
+
+def test_script_rescan_carries_rootfs_tar_and_uefi_binary_rows(tmp_path):
+    """M7b：重跑沒有重讀 rootfs、沒有重做 UEFI 對照時，上一次的 B-rootfs-tar-<v>、B-uefi-binary 原樣帶過來（原本沒帶，
+    cra_report 讀不到就略過，-bsp／-os 會比原掃描樂觀），並記在 run-params.json 的 carried（結構化，不從說明文字推）。"""
+    prev, a = rescan_prev(tmp_path)
+    pst = (prev / "status.tsv").read_text()
+    m = re.search(r"^B-rootfs-tar-rootfs_no_gui\t(\w+)\t", pst, re.M)
+    assert m, pst
+    prev_tar = m.group(1)
+    pp = json.loads((prev / "run-params.json").read_text())
+    assert pp["schema"] == "dumpling-flash-run-params/1" and pp["rescan"] is False and pp["carried"] == {} and pp["flash_source"] == "archive"
+    # 上一次的 UEFI 對照是 GAP（有兩列時取最嚴重的那一列）
+    (prev / "uefi-binary-check.json").write_text("{}")
+    with open(prev / "status.tsv", "a") as f:
+        f.write("B-uefi-binary\tOK\tfirst\nB-uefi-binary\tGAP\tUEFI 映像和原始碼不一致\n")
+    _, o, st, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(prev), "--rootfs", "rootfs_no_gui", out="r")
+    assert re.search(r"^B-rootfs-tar-rootfs_no_gui\t%s\t沿用上一次（--rescan-from，這次沒有重做）：" % prev_tar, st, re.M), st
+    assert re.search(r"^B-uefi-binary\tGAP\t沿用上一次（--rescan-from，這次沒有重做）：UEFI 映像和原始碼不一致", st, re.M), st
+    rp = json.loads((o / "run-params.json").read_text())
+    assert rp["rescan"] is True and rp["rescan_from"] == str(prev) and rp["no_upload"] is True
+    assert rp["carried"] == {"B-rootfs-tar-rootfs_no_gui": prev_tar, "B-uefi-binary": "GAP"}
+    # 上一次沒有那一列：不寫（不推測）
+    p2 = tmp_path / "prev2"
+    shutil.copytree(prev, p2)
+    (p2 / "status.tsv").write_text("".join(l for l in pst.splitlines(True) if not l.startswith("B-rootfs-tar-")))
+    os.remove(p2 / "uefi-binary-check.json")
+    _, o2, st2, _ = own_run(tmp_path, OWN_CFG, "--rescan-from", str(p2), "--rootfs", "rootfs_no_gui", out="r2")
+    assert "B-rootfs-tar-rootfs_no_gui" not in st2 and "B-uefi-binary" not in st2, st2
+    assert json.loads((o2 / "run-params.json").read_text())["carried"] == {}
 
 
 def ownsw_function(tmp_path, fake):
