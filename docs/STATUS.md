@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 17:30 +0800（C4）
+最後更新：2026-11-14 17:32 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -109,6 +109,11 @@
 
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
+
+> **已暫停（2026-11-14，使用者要用電腦；C0 恢復時會通知）**
+> - **#110** 已推 **9101bfa**（C0 驗證通過後要求的修正）：條件加 `segment` 列舉欄位（client／datacenter／embedded，validate 只收這三個值；AGESA 是 client、AMD 微碼是 datacenter、Intel 不填）；datacenter 時 basis 加固定提示句（CPU 不一定能用在這塊主機板、CPUID 是 linux-firmware 對照表的對應、不是從映像讀出來的），報告的「建議 affected」也另列一段；判定只讀欄位、不讀 note。另補兩個存活變異的測試：沒有 equiv_id 的微碼不符合任何規則、sha 只差最後一個字元要不符。TABLE_SHA256 已更新。本機只跑相關測試（516 passed）與 public-check、provenance-check（OK）；全套留給 PR 的 CI（tests 43581004516、firmware 43581004589，**結果還沒看**）。C0 會直接看 diff。
+> - 恢復後先看那兩個 CI 的結果，綠的話通知 C0；沒有在跑的代理，也沒有進行中的下載或 firmware-ci。
+> - 之後的排序不變：等 #110 合併；D-046 的實作等 C1 的發現介面；5674 等使用者確認。
 
 > **目前（2026-11-14 下午）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
 > 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**完成 38d0b74** → C2 補 **8cb6fc5**（linux-firmware 等價表釘 sha256、用詞修正、加入 D-046 設計文件）。11 筆規則，新增 INTEL-SA-01315、01209、01152，以及 01280、01372 的 15.x 條件；AMD-SB-7033 新增，7014 補 7 個資料中心微碼條件。PSP 與 FSP 都不收，因為公告沒有寫版本。樣本結果：V540TU 的 ME 18.0 變 affected（01315）；B550M、ASRock 的微碼 0x8012 變 affected，這是 Naples 的 CPUID，可能是 CPUID 層級的誤報，已寫明。2422 passed；CI 綠 → 預驗（獨立代理，sonnet、high）：**通過**（AMD 15 個條件逐值一致；linux-firmware 等價表一致；Intel 只能用同一類摘要工具讀，不算獨立核對；144 個變異沒有存活）→ C2 處理建議 **3eafeb0**（條件的 note 進 basis 與報告；真表的版本線整段比測試；bios-discovery 寫明實作前提；linux-firmware 出處寫完整）→ CI 綠 → **PR #110 已開**，已通知 C0。C0 的驗證排在 #109 之後，**這段期間 #110 不推 commit**。驗證後要改的（已記下）：0x8012 的 note 補「這個 patch 對應的 CPU（資料中心 Naples）不一定能裝在這塊主機板，不代表整塊板子受影響，請負責單位確認」；C0 決定 (2) 也要做，但不能靠比對 note 的文字（M7b-2 原則）：條件加結構化欄位 `segment`，值只收列舉 client／datacenter／embedded，和公告表格的分區對應（notes 寫明怎麼對）；validate 檢查列舉值；值是 datacenter 時，報告加固定的提示句；改表要更新 TABLE_SHA256。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
