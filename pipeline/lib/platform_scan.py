@@ -58,7 +58,6 @@ Jetson 以外的平台（Raspberry Pi、Rockchip、AI NAS…）的 `scan.sh` 也
 
 規則：缺的項目在 scan.json 記 null，**不推測**，標準答案比對會因此失敗而不是通過；附件檔名一律 ASCII（GitHub 會改掉非 ASCII 字元），中文名稱放在 manifest 的顯示標籤。
 """
-import csv
 import json
 import os
 import re
@@ -138,15 +137,10 @@ def newest_dir(root, prefix):
 
 
 def read_status_tsv(path):
-    out = {}
-    try:
-        with open(path, encoding="utf-8", newline="") as f:
-            for row in csv.reader(f, delimiter="\t"):
-                if len(row) >= 3 and row[0] != "stage":
-                    out[row[0]] = {"status": row[1], "detail": row[2]}
-    except OSError:
-        pass
-    return out
+    """status.tsv → {stage: {status, detail}}。同一階段多列時取最嚴重的一列、OK 有重複改 ATTENTION（status_tsv.py，M7b）。"""
+    import status_tsv
+    rows, _ = status_tsv.read(path)
+    return {k: {"status": s, "detail": d} for k, (s, d) in rows.items()}
 
 
 def run_paths(w, rootfs="rootfs"):
