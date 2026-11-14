@@ -27,7 +27,11 @@ tools/pilot/sca-scan --sbom <CycloneDX JSON> [--name N]
 → GAP，不論更新是否成功；更新失敗但仍在上限內 → ATTENTION 並寫原因）、`C-mirror-freshness`（讀 `MIRROR_REFRESH_STATUS`，預設
 `/var/lib/sca-gitlab/refresh-status.tsv`，與每日監控同一個剖析器：狀態檔 24.5 小時內完成、每個鏡像最後成功都在各自上限內 → OK；
 有過期或不在狀態檔的鏡像、狀態檔讀不到 → GAP 並列出名稱；只有「最近一次更新失敗但沿用的上一份仍在上限內」→ ATTENTION；
-設成空字串＝不檢查 → NOT_RUN，不是 OK）。`C-dt-feeds`（有用 DT 時；`dtsources.py` 讀 DT 的 `/api/v2/{vuln,kev}-data-sources/{nvd,osv,cisa,enisa}/mirror-runs/latest`，需要 SYSTEM_CONFIGURATION_READ；GitHub 關閉不看）：四個來源最近一次都 COMPLETED 且完成在 `DT_FEEDS_MAX_AGE_HOURS`（預設 26 小時）內 → OK；有 FAILED、不是 COMPLETED、過期或沒有紀錄 → GAP 並列出名稱；沒用 DT 或金鑰沒有權限 → NOT_RUN 並寫原因，不是 OK。
+設成空字串＝不檢查 → NOT_RUN，不是 OK）。`C-dt-feeds`（有用 DT 時；`dtsources.py` 讀 DT 的 `/api/v2/{vuln,kev}-data-sources/{nvd,osv,cisa,enisa}/mirror-runs/latest`，需要 SYSTEM_CONFIGURATION_READ；GitHub 關閉不看）：四個來源最近一次都 COMPLETED 且完成在 `DT_FEEDS_MAX_AGE_HOURS`（預設 26 小時）內 → OK；有 FAILED、不是 COMPLETED、過期或沒有紀錄 → GAP 並列出名稱；沒用 DT 或金鑰沒有權限 → NOT_RUN 並寫原因，不是 OK。原因另外記成代碼，寫在 `meta.json` 的 `dt_feeds_reason`：`dt_not_used`、`dtsources_failed`、`fresh`、`stale`、`permission_denied`、`no_data`、`config_error`。報告看的是這個代碼，不看說明文字：
+  - `dt_not_used`、`dtsources_failed` 不降級：沒用 DT 與 dtsources.py 失敗，已由 D-dt-* 反映。
+  - 其他 NOT_RUN 都降成 GAP，包括金鑰沒有權限、沒讀到任何資料源狀態、沒有原因代碼。
+
+`A-source` 的 ATTENTION 有兩種原因：身分不符，或沒有用 `@sha256` 固定。兩種都寫成結構化欄位，記在 `meta.json` 的 `source_pin`（`image-id`｜`digest`｜`none`）和 `source_identity`（`match`｜`mismatch`｜`not_checked`）。
 GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
 
 ## 需求

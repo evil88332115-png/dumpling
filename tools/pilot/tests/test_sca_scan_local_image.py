@@ -57,3 +57,51 @@ def test_local_image_with_version(tmp_path):
     assert st["A-source"][0] == "OK"
     assert meta["version"] == "V1.0.2_a (rootfs_no_gui)" and meta["content_version"] == IID and meta["image_id"] == IID
     assert meta["version_from"] == "--version"
+
+
+# ---------- M7b：A-source 的兩種 ATTENTION 結構化（meta.json 的 source_pin／source_identity，下游不看說明文字） ----------
+FAKE_REGISTRY = """#!/bin/sh
+echo "$*" >> "$DOCKER_LOG"
+case "$1 $2" in
+  "image inspect")
+    case "$*" in *RepoDigests*) [ -n "$REPODIGEST" ] && echo "$REPODIGEST";; *'{{.Id}}'*) echo "$KNOWN";; *Env*) ;; esac; exit 0;;
+esac
+case "$1" in
+  pull) exit 0;;
+  save) shift; [ "$1" = -o ] && : > "$2"; exit 0;;
+esac
+exit 0
+"""
+DG = "sha256:" + "12" * 32
+
+
+def scan_registry(tmp_path, src, repodigest):
+    fake = tmp_path / "bin"
+    fake.mkdir(parents=True)
+    (fake / "docker").write_text(FAKE_REGISTRY)
+    (fake / "docker").chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "DOCKER_LOG": str(tmp_path / "docker.log"), "KNOWN": IID,
+           "REPODIGEST": repodigest, "PILOT_ENV": str(tmp_path / "none.env"), "HOME": str(tmp_path / "home")}
+    out = tmp_path / "out"
+    subprocess.run(["bash", os.path.join(ROOT, "tools/pilot/sca-scan"), "--image", src, "--name", "t", "--out", str(out), "--no-upload"],
+                   env=env, capture_output=True, timeout=300)
+    rows = [l.split("\t") for l in (out / "status.tsv").read_text(encoding="utf-8").splitlines()[1:]]
+    return {r[0]: (r[1], r[2]) for r in rows}, json.loads((out / "meta.json").read_text(encoding="utf-8"))
+
+
+def test_source_pin_and_identity_are_structured(tmp_path):
+    (tmp_path / "local").mkdir()
+    st, meta = scan(tmp_path / "local", IID)[:2]
+    assert (st["A-source"][0], meta["source_pin"], meta["source_identity"]) == ("OK", "image-id", "match")
+    st, meta = scan_registry(tmp_path / "tag", "example.invalid/x:1", "example.invalid/x@" + DG)
+    assert (st["A-source"][0], meta["source_pin"], meta["source_identity"]) == ("ATTENTION", "none", "not_checked")
+    st, meta = scan_registry(tmp_path / "ok", "example.invalid/x@" + DG, "example.invalid/x@" + DG)
+    assert (st["A-source"][0], meta["source_pin"], meta["source_identity"]) == ("OK", "digest", "match")
+    st, meta = scan_registry(tmp_path / "bad", "example.invalid/x@" + DG, "example.invalid/x@sha256:" + "34" * 32)
+    assert (st["A-source"][0], meta["source_pin"], meta["source_identity"]) == ("ATTENTION", "digest", "mismatch")
+
+
+def test_dt_not_used_reason_is_recorded(tmp_path):
+    """--no-upload：C-dt-feeds NOT_RUN，原因代碼 dt_not_used（cra_report 不降級）。"""
+    st, meta = scan(tmp_path, IID)[:2]
+    assert st["C-dt-feeds"][0] == "NOT_RUN" and meta["dt_feeds_reason"] == "dt_not_used"

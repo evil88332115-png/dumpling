@@ -243,3 +243,19 @@ def test_wizard_extracts_only_os_txt_from_board_tarball(tmp_path):
     assert out and UTS_A in out.read_text() and [p.name for p in (tmp_path / "o").iterdir()] == ["os.txt"]
     evil = tkc.write_tar(tmp_path / "board-test-y.tar.gz", [("../os.txt", b"x", None), ("os.txt", None, "/etc/passwd")], mode="w:gz")
     assert w.extract_board_os_txt([evil], tmp_path / "o2" / "os.txt") is None
+
+
+def test_sca_scan_reads_k1_kernel_as_json_not_text(tmp_path):
+    """M7b：sca-scan 用 jget 讀 kernel-boot.json 的 k1_kernel（不是 grep '"k1_kernel": "rootfs"'：沒有空白或縮排不同就讀錯）。"""
+    import re
+    import subprocess
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sca-scan"), encoding="utf-8").read()
+    assert '"k1_kernel": "rootfs"' not in src
+    assert '[ "$(jget "$KBF" k1_kernel 2>/dev/null)" = rootfs ]' in src
+    jget = re.search(r"^jget\(\)\{.*?\"\$1\" \"\$2\"; \}$", src, re.S | re.M).group(0)
+    for text, want in (('{"k1_kernel":"rootfs"}', "rootfs"), ('{\n  "k1_kernel" :  "rootfs"\n}', "rootfs"),
+                       ('{"k1_kernel": "partition"}', "partition"), ("not json", ""), ('{"other": 1}', "")):
+        f = tmp_path / "kb.json"
+        f.write_text(text, encoding="utf-8")
+        r = subprocess.run(["bash", "-c", jget + '\njget "$0" k1_kernel', str(f)], capture_output=True, text=True, check=True)
+        assert r.stdout.strip() == want, text
