@@ -1016,10 +1016,13 @@ def cmd_countdown(api, repo, drill, now, result, registry_issue=None):
             handled = set(reg) | {i["number"] for i, *_ in cases} | set(labelled_closed)
             for i in sorted(found, key=lambda x: x["number"]):
                 mk = parse_marker(i.get("body"))
-                if i["number"] in handled or not mk or mk[2] != "real" or not trust.ok(i):
+                if i["number"] in handled or not mk or mk[2] != "real":
                     continue
+                # 先查 confidential、再查作者（同標籤路徑的順序）：不是 confidential 的真實案件不管誰開的都是外洩疑慮（#93 複驗應修）
                 if i.get("confidential") is not True:
                     leaks = sorted(set(leaks) | {i["number"]})        # 沒登錄、沒標籤、又不是 confidential：外洩疑慮，不寫入（列在 leaks）
+                    continue
+                if not trust.ok(i):
                     continue
                 unregistered.append({"number": i["number"], "via": "search", "registered": False})
                 errors.append(f"發現沒登錄、也沒有 {REAL_LABEL} 標籤的真實案件 #{i['number']}（第一行標記 key={mk[0][:12]}… kind={mk[1]}，{'已關閉' if i.get('state') != 'open' else '開著'}）："

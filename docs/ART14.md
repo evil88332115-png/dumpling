@@ -114,6 +114,7 @@ Reporter／Planner 改不了別人的留言（推定，待內部驗證），也�
 - **list／get 出錯也有 result.json**（t10c，GitLab）：任何指令中途因 API 錯誤（例如 HTTP 500）FAIL、而且這次執行還沒寫出 result 時，會寫 `{"cmd": …, "result": "error", "error": …}`（和 token 檢查失敗一樣，job 的 artifact 才看得到為什麼停）；已經寫出完整 result 的不會被蓋掉。GitHub 後端行為不變。
 - 登錄留言標頭以外只能有 `- 案件 #… key=… kind=…` 行；其他任何非空白行都列成問題（打錯不能靜默漏登錄）。
 - 殘留風險（自動補登錄）：`countdown` 會替「有 `art14` 標籤、作者可信、內文標記正確但還沒登錄」的案件補登錄。Reporter 可以改別人（Developer）建的 Issue 內文、加上合法標記與標籤，讓它被補登錄成永遠追蹤的假案件（只增不減），它的 key 也可能擋掉之後同 key 的 `open-real`。這是「吵」（多一個要人處理的案件），不是「靜默」；目前沒有簡單的完整解法，發現時由 Maintainer 處理。
+- 殘留風險（標籤與標記都被拿掉、又沒登錄）：`countdown` 找沒登錄的案件靠兩條路——`art14` 標籤，以及用 Issues API 的 `search` 找內文第一行的機器標記 `<!-- dumpling-art14 key=… mode=real -->`。如果一個**沒登錄**的案件標籤被拿掉、內文的標記也被拿掉或改壞（刪掉、改成全形、不在第一行），兩條路都找不到，倒數會停掉而不報。所以 `open-real` 一定要登錄成功（寫登錄失敗就 FAIL，見上），登錄過的案件不受這個影響（用 iid 直接查）。
 - 殘留風險（登錄壞掉時）：登錄 Issue 讀不到（被刪、不是 confidential、變數錯）時，`open-real` 也開不出新案件（fail-closed）——要先人工修好登錄。
 
 ## 5. 倒數與標籤

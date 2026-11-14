@@ -1280,6 +1280,20 @@ class TestT10c(Base):
         self.assertEqual((rc, r["registry"]["unregistered"], r["leaks"]), (1, [], [pub]))
         self.assertFalse(any(f"/issues/{pub}" in pth for _, pth, _ in self.writes_since(k)))
 
+    def test_search_non_confidential_by_untrusted_author_is_a_leak(self):
+        # #93 複驗應修：作者不可信（Reporter）、非 confidential、沒標籤、沒登錄、有 mode=real 標記 → 也要列進 leaks（先查 confidential）
+        self.real_case(self.real_body())
+        for author in (11, 77):                                          # Reporter、不是成員
+            self.setUp()
+            self.real_case(self.real_body())
+            pub = self.gl.add_issue(self.real_body(), [], author=author, confidential=False)
+            k = len(self.gl.writes)
+            rc, out, r = self.cd(res="pub.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn(pub, r["leaks"], (author, out))
+            self.assertEqual(r["registry"]["unregistered"], [])
+            self.assertFalse(any(f"/issues/{pub}" in pth for _, pth, _ in self.writes_since(k)))
+
     def test_search_failure_fails_but_cases_still_counted(self):
         self.real_case(self.real_body())
         self.fail_when(lambda m, u: m == "GET" and "search=" in u)
