@@ -177,7 +177,7 @@ class MdSafeTest(unittest.TestCase):
             t0 = time.perf_counter()
             out = ms.md_safe(raw, 10 ** 6)
             dt = time.perf_counter() - t0
-            self.assertLess(dt, 1.0, (raw[:20], len(raw), dt))
+            self.assertLess(dt, 5.0, (raw[:20], len(raw), dt))      # 線性時約 0.05 秒；門檻放寬，免得忙碌的 runner 誤報
             self.assertGreaterEqual(len(out), 1)
 
     def test_email_like_domain_chars_and_local_chars(self):

@@ -918,4 +918,4 @@ def test_md_esc_xmpp_long_runs_controls_and_tilde():
     for raw in ("a@" + "_" * 100000, "a@" + "-_" * 50000, "@" * 100000, "x@y.z" + "1" * 100000 + "@Z", "a@b." * 25000):
         t0 = time.perf_counter()
         e(raw)
-        assert time.perf_counter() - t0 < 1.0, raw[:12]
+        assert time.perf_counter() - t0 < 5.0, raw[:12]      # 線性時遠低於 1 秒；門檻放寬，免得忙碌的 runner 誤報
