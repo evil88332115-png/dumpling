@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 11:15 +0800（C0）
+最後更新：2026-11-14 11:17 +0800（C1）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -38,7 +38,7 @@
 > 第二台的 `python3` 是 3.14、沒有 pytest：本機測試用 uv 建的 venv `$AGENT_TMP/dumpling-tmp-c1/venv/bin/python`（3.12＋pytest、pyyaml；已建）。`tools/cra` 的 test_kernel_modules 有 3 個在本機失敗（沒有 zstd 解碼器，改動前就失敗，CI 綠燈）。完整測試交給 CI。
 
 - 目前在做：**M7b-4 PR #98**（https://github.com/evil88332115-png/dumpling/pull/98，wp1/m7b4，worktree `$AGENT_TMP/dumpling-wt-c1-m7b4`）：D-054 bootloader-coverage 與 C-kernel-boot 進報告狀態（不擋 VEX 閘門）、version-state（版本核對不是 OK → scan GAP）、#20 B-disk-partitions、#58 三項、a.run[0] 退路；已併 main（含 #95），本機測試中 → 推送 → Jetson 驗收 run；C0 驗證排在 C4 #97 之後。**已合併**：#92（M7b-2，main 94ba1ff）、#95（M7b-3）。**正式 Release 已建好並照 D-052 核對通過**（0be7bc2；兩版附件 20、標準答案 24、pvc independent OK、各層列數正常）。**待使用者**：刪 wp1/m2-pr-draft、wp1/m7a-fields、wp1/m7a-report（權限機制擋下）；刪 m2spike-* 快取（C0 問使用者）
-- M7f 待辦（C1 記錄，獨立一行，改「目前在做」時不要動）：(1) 草稿與正式 Release 的命名與 concurrency 分開（同 tag 的手動觸發與 tag push 同一 concurrency group，會互相排隊；已有正式 Release 的 tag 再建草稿可能 422）；(2) report_diff.py 的 7 處資料日期（A-tools、D-dt-project、C-grype-db Built=、D-ubuntu-*、D-dt-data-sources、C-euvd、C-mirror-freshness finished=）改讀結構化欄位（報告包沒有 meta.json，要先決定放哪）；(3) **正式 Release 的可靠性：kcve 快取沒有任何一份在 main 上（全在功能分支），tag run 讀不到 → git.kernel.org 斷就 FAIL、沒有 48 小時頂替**——修法看 C3 查 watch-round 在 main 上的排程結果再定；(4) 快取用量 9.19／10 GB，wp1/m2-spike 的 m2spike-* 6 份約 7.5 GB 可刪（C0 問使用者，同意後 C1 刪）；(5) c1-tools 的 test_report_diff 比對 xlsx 時 zip 時間戳跨秒差 1 秒而間歇失敗（C2 回報）——比對時忽略 zip 時間戳，或產生時固定 date_time（SOURCE_DATE_EPOCH）；(6) #92 驗證建議 2（kernel-boot 測試比對原始碼字串）、3（source_pin／source_identity 目前沒有讀者）
+- M7f 待辦（C1 記錄，獨立一行，改「目前在做」時不要動）：(1) 草稿與正式 Release 的命名與 concurrency 分開（同 tag 的手動觸發與 tag push 同一 concurrency group，會互相排隊；已有正式 Release 的 tag 再建草稿可能 422）；(2) report_diff.py 的 7 處資料日期（A-tools、D-dt-project、C-grype-db Built=、D-ubuntu-*、D-dt-data-sources、C-euvd、C-mirror-freshness finished=）改讀結構化欄位（報告包沒有 meta.json，要先決定放哪）；(3) **正式 Release 的可靠性：kcve 快取沒有任何一份在 main 上（全在功能分支），tag run 讀不到 → git.kernel.org 斷就 FAIL、沒有 48 小時頂替**——修法看 C3 查 watch-round 在 main 上的排程結果再定；(4) 快取用量 9.19／10 GB，wp1/m2-spike 的 m2spike-* 6 份約 7.5 GB 可刪（C0 問使用者，同意後 C1 刪）；(5) c1-tools 的 test_report_diff 比對 xlsx 時 zip 時間戳跨秒差 1 秒而間歇失敗（C2 回報）——比對時忽略 zip 時間戳，或產生時固定 date_time（SOURCE_DATE_EPOCH）；(6) #92 驗證建議 2（kernel-boot 測試比對原始碼字串）、3（source_pin／source_identity 目前沒有讀者）；(7) #98 驗證建議 4（kernel-boot.json 壞掉時是 GAP 卻沒列入待人審）、6（end_date 2031-13 的訊息）、7（flash_package.py:1447 的最小設定寫死 Flash package）
 - 分支與 commit：
   - **`wp1/m2`＝1e18ed9**（已推，**已合併為 main cc7d101**，內容相同）：M2 整合分支；1e18ed9 併入 main c0a54eb（C2 #39，沒有衝突；本機 tools pytest 3607 通過）。877ffbc 改 docs/JETSON.md 10b；852b6d3 修第三輪驗證的應修（見下）；078710d：scan-flash-package.sh 的 UEFI／OP-TEE Grype 比對移到 sca-scan 之後（原本排在前面，CI 全新機器還沒有資料庫 → 完整報告 tee Grype 一定 NOT_RUN、Mbed TLS 0 列，-bsp＋-os 與完整報告列數對不上；新測試 test_bundled_grype_order.py，舊順序 NOT_RUN）；c08de27（C0 審查）：import 失敗沒走到比對時 B-uefi-grype／B-tee-grype 照樣記 NOT_RUN（D-043），tests 43429786314。只改失敗路徑，078710d 的 release draft 照樣用來驗收
   - `wp1/m2-pr-draft`＝d3efdc8（已推，**不合併**）：PR 說明草稿與 `m2table.py`；開完 PR 後刪掉
