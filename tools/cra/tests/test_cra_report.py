@@ -1752,21 +1752,75 @@ def test_freshness_stages_reach_risk_status(tmp_path, stages, level, expect):
     assert d["status"] == level and any(expect in x for x in d["detail"]), d
 
 
-@pytest.mark.parametrize("stages", [
-    {"C-grype-db-update": "NOT_RUN"},        # GRYPE_DB_UPDATE=off：年齡由 C-grype-db 判斷
-    {"C-dt-feeds": "NOT_RUN"},               # 沒用 DT：D-dt-data-sources 已反映
-    {"C-dt-feeds": "OK", "C-mirror-freshness": "OK", "C-grype-db-update": "OK"},
+@pytest.mark.parametrize("stages,reason", [
+    ({"C-grype-db-update": "NOT_RUN"}, None),        # GRYPE_DB_UPDATE=off：年齡由 C-grype-db 判斷
+    ({"C-dt-feeds": "OK", "C-mirror-freshness": "OK", "C-grype-db-update": "OK"}, None),
 ])
-def test_freshness_stages_not_gap_when_harmless(tmp_path, stages):
+def test_freshness_stages_not_gap_when_harmless(tmp_path, stages, reason):
     proj = make_project(tmp_path / "proj")
-    r, s, _ = run(proj, make_scan(tmp_path / "scan", stages=stages))
+    meta = dict(META, dt_feeds_reason=reason) if reason else META
+    r, s, _ = run(proj, make_scan(tmp_path / "scan", stages=stages, meta=meta))
     r0, s0, _ = run(make_project(tmp_path / "proj0"), make_scan(tmp_path / "scan0"))
     assert s["documents"]["risk-assessment"]["status"] == s0["documents"]["risk-assessment"]["status"], s["documents"]["risk-assessment"]
 
 
-def test_dt_feeds_not_run_for_permission_is_gap(tmp_path):
-    scan = make_scan(tmp_path / "scan")
-    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t金鑰沒有 SYSTEM_CONFIGURATION_READ，無法得知\n"
+@pytest.mark.parametrize("reason", ["permission_denied", "no_data", None, "", "bogus"])
+def test_dt_feeds_not_run_is_gap_unless_dt_was_not_used(tmp_path, reason):
+    """M7b：C-dt-feeds 的 NOT_RUN 看 meta.json 的 dt_feeds_reason（不看說明文字）。金鑰沒權限、沒讀到資料源狀態、
+    沒有原因代碼或代碼不認得 → GAP（D-043）。"""
+    meta = dict(META)
+    if reason is not None:
+        meta["dt_feeds_reason"] = reason
+    scan = make_scan(tmp_path / "scan", meta=meta)
+    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t（說明文字不影響判定）\n"
     (scan / "status.tsv").write_text(st, encoding="utf-8")
     r, s, _ = run(make_project(tmp_path / "proj"), scan)
     assert s["documents"]["risk-assessment"]["status"] == "GAP" and any("C-dt-feeds is NOT_RUN" in x for x in s["documents"]["risk-assessment"]["detail"])
+
+
+def test_dt_feeds_detail_text_no_longer_matters(tmp_path):
+    """舊做法看說明文字有沒有 SYSTEM_CONFIGURATION_READ；現在 dt_not_used 時就算說明文字含這個字，C-dt-feeds 也不列為原因
+    （整體照樣因 D-dt-data-sources 不是 OK 而 GAP）。"""
+    scan = make_scan(tmp_path / "scan", meta=dict(META, dt_feeds_reason="dt_not_used"), stages={"D-dt-data-sources": "NOT_RUN"})
+    st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\t金鑰沒有 SYSTEM_CONFIGURATION_READ\n"
+    (scan / "status.tsv").write_text(st, encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "proj"), scan)
+    assert not any("C-dt-feeds" in x for x in s["documents"]["risk-assessment"]["detail"])
+
+
+@pytest.mark.parametrize("reason", ["dt_not_used", "dtsources_failed"])
+def test_dt_feeds_not_downgraded_only_while_dt_data_sources_is_not_ok(tmp_path, reason):
+    """#92 C0：dt_not_used／dtsources_failed 不降級的依據是 D-dt-data-sources 已經不是 OK（RISK_STAGES → GAP）。
+    前提不成立（D-dt-data-sources 是 OK）時，C-dt-feeds 的 NOT_RUN 照樣 GAP，不只信 meta.json 的代碼。"""
+    for dds, want_feeds_reason in (("FAIL", False), ("NOT_RUN", False), ("OK", True)):
+        d = tmp_path / dds
+        scan = make_scan(d / "scan", meta=dict(META, dt_feeds_reason=reason), stages={"D-dt-data-sources": dds})
+        st = (scan / "status.tsv").read_text(encoding="utf-8") + "C-dt-feeds\tNOT_RUN\tx\n"
+        (scan / "status.tsv").write_text(st, encoding="utf-8")
+        r, s, _ = run(make_project(d / "proj"), scan)
+        ra = s["documents"]["risk-assessment"]
+        assert ra["status"] == "GAP", (dds, ra)                                   # 兩種情況整體都是 GAP
+        assert any("C-dt-feeds is NOT_RUN" in x for x in ra["detail"]) == want_feeds_reason, (dds, ra["detail"])
+        if dds != "OK":
+            assert any(x.startswith("D-dt-data-sources is %s" % dds) for x in ra["detail"]), ra["detail"]
+
+
+def test_sca_scan_writes_dt_data_sources_not_ok_with_both_not_downgraded_reasons():
+    """sca-scan 寫 dt_not_used／dtsources_failed 的同一個分支，D-dt-data-sources 一定不是 OK（NOT_RUN／FAIL）。"""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "pilot", "sca-scan"), encoding="utf-8").read()
+    skip = next(l for l in src.splitlines() if "META[dt_feeds_reason]=dt_not_used" in l)
+    assert "for s in C-dt-feeds D-dt-data-sources" in skip and 'status "$s" NOT_RUN' in skip
+    fail = next(l for l in src.splitlines() if "META[dt_feeds_reason]=dtsources_failed" in l)
+    assert 'status D-dt-data-sources FAIL' in fail
+
+
+@pytest.mark.parametrize("st", ["FAIL", "GAP", "WEIRD"])
+def test_dt_feeds_fail_or_unknown_is_at_least_gap(tmp_path, st):
+    """#92 C0 驗證：C-dt-feeds 是 FAIL（dtsources 的 config_error：DT_FEEDS_MAX_AGE_HOURS 設錯）或不認得的狀態時，
+    就算 D-dt-data-sources 是 OK 也至少 GAP（原本 FAIL 回 None，報告停在 ATTENTION）。"""
+    scan = make_scan(tmp_path / "scan", meta=dict(META, dt_feeds_reason="config_error"))
+    body = (scan / "status.tsv").read_text(encoding="utf-8") + f"C-dt-feeds\t{st}\tx\n"
+    (scan / "status.tsv").write_text(body, encoding="utf-8")
+    r, s, _ = run(make_project(tmp_path / "proj"), scan)
+    ra = s["documents"]["risk-assessment"]
+    assert ra["status"] == "GAP" and any(f"C-dt-feeds is {st}" in x for x in ra["detail"]), ra
