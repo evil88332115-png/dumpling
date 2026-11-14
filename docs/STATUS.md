@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 12:12 +0800（C1）
+最後更新：2026-11-14 12:12 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -15,7 +15,7 @@
   - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）M7b-3 #95 已合併。**M7b-4 #98 已合併**（a1fe821）。下一步 M7c（開工前先給 C0 範圍與驗收條件），M7f 並行。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
   - C2（第二台）：#102、#103 已合併。下一步：AMI 核心版本解析（先給設計）、規則表後續（1.2.0.11／.12、firmware.yml 網址）；5674 確認後的對照表 PR 等使用者
   - C3（第二台）：#93 已合併，**GitLab 線暫停**（等內部環境＋GITLAB-PORT 內部驗證清單）。#101 已合併。主線：基準日第 3 步（明天 01:17Z 排程 dry_run 一天 → 回報 would_open → C0 設 WATCH_REAL_ISSUES=on）；小 PR：match.py md_text 改用和 C2 md_safe 同一套規則
-  - C4（第二台）：**M6 #97** C0 驗證通過（high；報告已貼）；合併前修：示範專案和 new-project 輸出一致（markets EU-ALL、ai-nas os 區塊、vex-rules 空規則）、沒官方雜湊的檔標 TOFU、rpi cves_total 拿掉上限、D-049 測試；改好不用重跑
+  - C4（第二台）：**M6 #97** C0 驗證通過（high）；驗證後的修改 9965aeb 和 shellcheck 修正 b79087f 已推，CI 五項綠。#98 合併後只有 docs/PROVENANCE.md 衝突，已請 C4 用 git merge 併 main，C0 核對差異後合併。M6 合併後另開 PR：三個平台的 scan.sh 照抄 version-state 那段，連同標準答案一起重跑，開工前先告訴 C0 會動哪些標準答案
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
   2. （完成）M2 正式驗收：release run 43531550072、43531550316 綠，C1 核對通過；文件批次 #41 已合併；C2／C3／C4 已通知
