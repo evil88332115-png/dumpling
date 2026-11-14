@@ -986,7 +986,8 @@ def _do_list(out, inventory, archive, directory, product_version, deliverables_d
                       if rkinfo is not None else {}),
                    **({"disk_image": diskimg,
                        "disk_image_note": "Raw disk image (MBR/GPT): partition table, per-partition sha256, boot (FAT) files under bootloader/, kernel images "
-                                          "under kernel/. The Raspberry Pi 4/5 EEPROM bootloader is not in the image (disk_image.not_in_image)."}
+                                          "under kernel/. Boot firmware kept outside the image (for example the Raspberry Pi 4/5 EEPROM) is not covered "
+                                          "(disk_image.not_in_image)."}
                       if diskimg is not None else {})},
                   f, ensure_ascii=False, indent=1)
     with open(out, "w", encoding="utf-8") as f:
@@ -1044,7 +1045,8 @@ def disk_image_info(img, source, container, cands, inv):
         head.append(f"boot：p{boot['index']} {fat.get('fat_kind') or 'FAT'}（label 見 partitions）")
     bf = [x for x in inv if x["path"].startswith("bootloader/") and x["type"] == "file"]
     kf = [x for x in inv if x["path"].startswith("kernel/") and x["type"] == "file"]
-    head.append(f"bootloader 檔案 {len(bf)} 個、kernel 檔案 {len(kf)} 個；Raspberry Pi 4/5 的 EEPROM 開機程式不在映像裡（沒有涵蓋）")
+    # Raspberry Pi 4/5 的 EEPROM 那句只在 raspberrypi 平台出現（rk-status --platform；adapter-gaps #20：x86 的磁碟映像也走這裡）
+    head.append(f"bootloader 檔案 {len(bf)} 個、kernel 檔案 {len(kf)} 個")
     out = {"status": st, "detail": "；".join(notes + head), "image": hashes, "reader": source.get("reader"),
            "fat": fat, "not_in_image": rp.NOT_IN_IMAGE, "boot_files": len(bf), "kernel_files": [x["path"] for x in kf],
            "container": ({"file": os.path.basename(container), "bytes": os.path.getsize(container)} if container else None),
@@ -1628,6 +1630,8 @@ def main(argv=None):
     a = sub.add_parser("rk-status")
     a.add_argument("--list", required=True)
     a.add_argument("--if-present", action="store_true", help="list.json 沒有 rockchip 時什麼都不印（不是 Rockchip 的刷機包）")
+    a.add_argument("--platform", default="", help="project.yml 的平台：raspberrypi 時磁碟映像的說明加上「EEPROM 開機程式不在映像裡」（adapter-gaps #20）")
+    a.add_argument("--stage", action="store_true", help="只印狀態列的名稱：Rockchip update.img → B-rockchip，原始磁碟映像 → B-disk-partitions（沒有就不印）")
     a = sub.add_parser("pick")
     a.add_argument("--list", required=True)
     a.add_argument("--rootfs", required=True)
@@ -1704,12 +1708,21 @@ def main(argv=None):
         if a.cmd == "rk-status":
             r = read_json(a.list)
             x = (r or {}).get("rockchip") or (r or {}).get("disk_image")
+            if a.stage:      # adapter-gaps #20：原始磁碟映像（x86、Raspberry Pi…）不叫 B-rockchip
+                if isinstance(r, dict) and isinstance(r.get("rockchip"), dict):
+                    print("B-rockchip")
+                elif isinstance(r, dict) and isinstance(r.get("disk_image"), dict):
+                    print("B-disk-partitions")
+                return 0
             if x is None and r is not None and a.if_present:
                 return 0
             if not isinstance(x, dict) or x.get("status") not in ("OK", "ATTENTION", "GAP"):
                 print(f"FAIL\t{a.list} 沒有 Rockchip／磁碟映像的分割區表")
                 return 1
-            print(f"{x['status']}\t{x.get('detail') or ''}")
+            detail = x.get("detail") or ""
+            if a.platform == "raspberrypi" and (r or {}).get("rockchip") is None and (r or {}).get("disk_image") is not None:
+                detail += "；Raspberry Pi 4/5 的 EEPROM 開機程式不在映像裡（沒有涵蓋）"
+            print(f"{x['status']}\t{detail}")
             return 0
         if a.cmd == "pick":
             r = read_json(a.list)

@@ -687,8 +687,9 @@ else:
     || status B-uefi-binary ATTENTION "無法複製上一次的 uefi-binary-check.json"
   extra_step
   # Rockchip：上一次的分割區表的狀態照樣列出（MD5 結尾、沒有掃描的分割區、沒讀到的項目）；Jetson 的 list.json 沒有 rockchip，不印
-  r=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --if-present 2>&1)
-  if [ -n "$r" ]; then s=${r%%$'\t'*}; case $s in OK|ATTENTION|GAP) ;; *) s=FAIL;; esac; status B-rockchip "$s" "上一次的分割區表：${r#*$'\t'}"; fi
+  r=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --if-present --platform "$PLATFORM" 2>&1)
+  pst=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --stage 2>/dev/null); pst=${pst:-B-rockchip}
+  if [ -n "$r" ]; then s=${r%%$'\t'*}; case $s in OK|ATTENTION|GAP) ;; *) s=FAIL;; esac; status "$pst" "$s" "上一次的分割區表：${r#*$'\t'}"; fi
   MD5SUM=$(awk -F'\t' '$1=="A-md5" && $2=="OK"{print $3}' "$RESCAN/status.tsv" 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1)
   prov_step "$RESCAN/provenance.json"
   [ "$PROV_ST" = FAIL ] && { status A-rescan FAIL "刷機包身分（A-provenance）：不是上一次的刷機包，或讀不到"; finish; }
@@ -824,8 +825,10 @@ else status B-list FAIL "flash_package.py list：$(tail -1 "$WORK/list.err")"; f
 extra_step
 if [ -n "$RKFMT" ]; then
   # 分割區表（溢位修正、MD5 結尾、其他 ext4 分割區）：位置無法證明或沒有 ext4 的 rootfs → GAP，不掃描
-  r=$(python3 -I "$FP" rk-status --list "$OUT/list.json" 2>&1); s=${r%%$'\t'*}; case $s in OK|ATTENTION|GAP) ;; *) s=FAIL;; esac
-  status B-rockchip "$s" "${r#*$'\t'}；分割區表見 list.json 的 rockchip／disk_image"
+  r=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --platform "$PLATFORM" 2>&1); s=${r%%$'\t'*}; case $s in OK|ATTENTION|GAP) ;; *) s=FAIL;; esac
+  # 狀態列的名稱（adapter-gaps #20）：Rockchip update.img 是 B-rockchip；原始磁碟映像（Raspberry Pi、x86…）是 B-disk-partitions
+  pst=$(python3 -I "$FP" rk-status --list "$OUT/list.json" --stage 2>/dev/null); pst=${pst:-B-rockchip}
+  status "$pst" "$s" "${r#*$'\t'}；分割區表見 list.json 的 rockchip／disk_image"
   case $s in OK|ATTENTION) ;; *) finish;; esac
 fi
 if [ -n "$PREFIX" ]; then
