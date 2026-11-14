@@ -349,12 +349,16 @@ def test_gate_label_and_cdx_properties():
     assert vx.label(r["CVE-RM"]) == "not_affected (rule K2)"
     from test_vex_export import PBOM
     cdx, _ = vx.cdx_vex(allr, PBOM, {}, {"name": "EX"}, g["verdict"])
-    props = {p["name"]: p["value"] for p in cdx["vulnerabilities"][0]["properties"]}
+    # M7c-1（A4）：沒有判定的 CVE-LD、CVE-NOMAP 也寫成 in_triage 加 NOT_ASSESSED，所以不能再用「第一條」找 CVE-RM
+    rm = next(v for v in cdx["vulnerabilities"] if v["id"] == "CVE-RM")
+    assert sorted(v["id"] for v in cdx["vulnerabilities"]) == ["CVE-LD", "CVE-NOMAP", "CVE-RM"]
+    assert all({"name": "dumpling:assessment", "value": "NOT_ASSESSED"} in v["properties"] and v["analysis"]["state"] == "in_triage"
+               for v in cdx["vulnerabilities"] if v["id"] != "CVE-RM")
+    props = {p["name"]: p["value"] for p in rm["properties"]}
     assert props["sca-center:vex-rule"] == "K2" and props["sca-center:vex-rule-evidence"] == "K2"
     assert props["sca-center:vex-rule-inputs"] == ("kernel-modules.json SHA-256 efefefefefef; module map SHA-256 ?; "
                                                    "modules.order SHA-256 bbbbbbbbbbbb")
-    assert cdx["vulnerabilities"][0]["analysis"] == {"state": "not_affected", "justification": "code_not_present",
-                                                     "detail": cdx["vulnerabilities"][0]["analysis"]["detail"]}
+    assert rm["analysis"] == {"state": "not_affected", "justification": "code_not_present", "detail": rm["analysis"]["detail"]}
 
 
 # ---------- cra_report 的整合 ----------
@@ -627,7 +631,8 @@ def test_manual_exploitation_evidence_excludes_rules_in_both_schemes(tmp_path):
         k2 = next(x for x in s["vex"]["rules"]["rules"] if x["id"] == "K2")
         assert k2["applied"] == 0 and k2["excluded_kev"] == 1, scheme                 # CVE-2025-0104：模組已移除，但有被利用的證據
         cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
-        assert not any(x["id"] == "CVE-2025-0104" for x in cdx["vulnerabilities"])
+        # 規則沒有套用 → 這一列沒有判定：沒有 not_affected 陳述；A4（M7c-1）起寫成 in_triage 加 NOT_ASSESSED（沒有評估）
+        assert [(x["analysis"]["state"], "dumpling:assessment" in json.dumps(x)) for x in cdx["vulnerabilities"] if x["id"] == "CVE-2025-0104"] == [("in_triage", True)]
 
 
 # ---------- 審查：M1（名稱要在建置的 modules.order）、L1、L2、L4、L6 ----------

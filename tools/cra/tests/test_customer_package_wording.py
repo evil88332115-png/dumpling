@@ -295,3 +295,86 @@ def test_sbom_md_counts_unknown_versions_in_product_sbom(tmp_path):
     assert int(m.group(1)) == len(list(fb.flatten(bom.get("components")))) and int(m.group(2)) == len(comps)
     assert int(m.group(3)) == sum(1 for c in comps if fb.version_missing(c))
     assert "Scanner SBOM (" in md                                # 兩個 SBOM 的數字各自標明來源
+
+
+# ---- M7c-1（A4／D-057 Q1）：沒有評估的陳述客戶版也輸出，說明用中性英文，檔案裡沒有內部名稱與標記
+
+NA_NOTE = "Not yet assessed by the manufacturer"
+
+
+def na_vuln(vid="CVE-NA"):
+    return {"bom-ref": f"vex-{vid}", "id": vid, "source": {"name": "NVD"},
+            "analysis": {"state": "in_triage", "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. "
+                                                         "The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean "
+                                                         "that anyone is investigating it."},
+            "affects": [{"ref": "pkg:deb/ubuntu/x@1"}],
+            "properties": [prop("sca-center:component", "x 1"), prop("sca-center:source-ids", "NVD:" + vid), prop("dumpling:assessment", "NOT_ASSESSED")]}
+
+
+def test_not_assessed_marker_constants_match_vexconv():
+    import vex_export as vx
+    vc = vx._vexconv()
+    assert (sp.NOT_ASSESSED_PROP, sp.NOT_ASSESSED_VALUE, sp.NOTE_NOT_ASSESSED, sp.CUSTOMER_NOT_ASSESSED) == \
+           (vc.PROP_ASSESSMENT, vc.NOT_ASSESSED, vc.NOTE_NOT_ASSESSED, vc.NOTE_NOT_ASSESSED_CUSTOMER) and sp.CUSTOMER_NOT_ASSESSED == NA_NOTE
+
+
+def test_customer_cdx_not_assessed_is_in_triage_with_neutral_detail_and_no_dumpling_property():
+    bom = dict(CDX, vulnerabilities=CDX["vulnerabilities"] + [na_vuln()])
+    out = sp.customer_cdx(bom)
+    v = next(x for x in out["vulnerabilities"] if x["id"] == "CVE-NA")
+    # 狀態與內部一致（in_triage）；說明是中性英文；屬性照白名單規則不帶（不另開例外），客戶版 CDX 只剩 openvex:action_statement
+    assert v["analysis"] == {"state": "in_triage", "detail": NA_NOTE} and "properties" not in v
+    assert decisions_cdx(out) == decisions_cdx(bom)
+    text = json.dumps(out, ensure_ascii=False)
+    assert "dumpling" not in text.lower() and "NOT_ASSESSED" not in text and "sca-center:" not in text
+    assert sp.check_customer_text("vex.cdx.json", text) == []
+    # 有判定的 in_triage（人或規則設的）不受影響
+    assert next(x for x in out["vulnerabilities"] if x["id"] == "CVE-3")["analysis"]["detail"] == "Under assessment."
+
+
+def test_customer_openvex_not_assessed_uses_neutral_english_note():
+    ov = dict(OPENVEX, statements=OPENVEX["statements"] + [
+        {"vulnerability": {"name": "CVE-NA"}, "products": [{"@id": "pkg:deb/x@1"}], "status": "under_investigation", "status_notes": "dumpling: not assessed"}])
+    out = sp.customer_openvex(ov)
+    na = next(s for s in out["statements"] if s["vulnerability"]["name"] == "CVE-NA")
+    assert na["status"] == "under_investigation" and na["status_notes"] == NA_NOTE
+    text = json.dumps(out, ensure_ascii=False)
+    assert "dumpling" not in text.lower() and sp.check_customer_text("vex.openvex.json", text) == []
+    # 內部版的句子本身不能出現在客戶檔案：檢查會擋
+    assert sp.check_customer_text("vex.openvex.json", json.dumps(ov)) == ["vex.openvex.json: internal term"]
+    assert sp.check_customer_text("vex.cdx.json", '{"properties":[{"name":"dumpling:assessment"}]}') == ["vex.cdx.json: internal term"]
+    # 一般的 under_investigation 說明不受影響
+    assert next(s for s in out["statements"] if s["vulnerability"]["name"] == "CVE-3")["status_notes"] == "Under assessment."
+    # 其他狀態不會因為說明文字相同被改寫
+    odd = {"statements": [{"vulnerability": {"name": "X"}, "products": [], "status": "not_affected", "justification": "component_not_present",
+                           "status_notes": "dumpling: not assessed"}]}
+    assert sp.customer_openvex(odd)["statements"][0]["status_notes"] == sp.FALLBACK["not_affected"]     # 不當成「沒評估」：走一般的過濾（含 dumpling: 的句子換成一般句子）
+
+
+def test_customer_vex_with_not_assessed_end_to_end_state_identical_and_no_dumpling(tmp_path):
+    scan = make_scan(tmp_path / "scan")
+    _, s, rep = run(make_project(tmp_path / "p", dict(MIN_CFG, role="supplier")), scan)
+    internal = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
+    customer = json.loads((pkg(rep) / "vex.cdx.json").read_text(encoding="utf-8"))
+    n_na = s["vex"]["statements_not_assessed"]
+    assert n_na > 0
+    # 客戶版也有這些列，每一筆的 state／affects 與內部一致
+    assert len(customer["vulnerabilities"]) == len(internal["vulnerabilities"]) and decisions_cdx(customer) == decisions_cdx(internal)
+    na_refs = {v["bom-ref"] for v in internal["vulnerabilities"] if prop("dumpling:assessment", "NOT_ASSESSED") in v.get("properties", [])}
+    assert len(na_refs) == n_na
+    assert sum(1 for v in customer["vulnerabilities"] if v["bom-ref"] in na_refs) == n_na
+    for v in customer["vulnerabilities"]:
+        if v["bom-ref"] in na_refs:
+            assert v["analysis"] == {"state": "in_triage", "detail": NA_NOTE} and "properties" not in v
+    iv = json.loads((rep / "vex.openvex.json").read_text(encoding="utf-8"))
+    cv = json.loads((pkg(rep) / "vex.openvex.json").read_text(encoding="utf-8"))
+    assert sum(1 for x in iv["statements"] if x.get("status_notes") == "dumpling: not assessed") == n_na
+    assert sum(1 for x in cv["statements"] if x["status"] == "under_investigation" and x.get("status_notes") == NA_NOTE) == n_na
+    assert [(x["vulnerability"], x["status"], x["products"]) for x in cv["statements"]] == [(x["vulnerability"], x["status"], x["products"]) for x in iv["statements"]]
+    for n in ("vex.cdx.json", "vex.openvex.json"):
+        t = (pkg(rep) / n).read_text(encoding="utf-8")
+        assert "dumpling" not in t.lower() and "NOT_ASSESSED" not in t and sp.check_customer_text(n, t) == [], n
+    summ = json.loads((pkg(rep) / "summary.json").read_text(encoding="utf-8"))
+    assert summ["language_check"]["status"] == "OK" and "dumpling" not in json.dumps(summ).lower()
+    # 內部版仍有標記
+    assert "dumpling:assessment" in json.dumps(internal) and "dumpling: not assessed" in json.dumps(iv)

@@ -20,6 +20,8 @@ DT 5.2 實測（TEST 專案，2026-11-11）的 VEX 匹配規則，不能用文�
   - 不覆蓋人在 DT 已經做的分析：finding 有 analysis state（NOT_SET 與空白算沒有）、而 detail 不是我們寫的、沒被改過的 → 略過並計數（ATTENTION）。
   - 寫回的 detail 一律以 `[sca-center:vex-writeback state=<狀態> sha=<內容雜湊>]` 開頭；標記的狀態等於 DT 現在的狀態、內容雜湊對得上才算「我們的」；cra_report.py 讀 DT 的 analysis 時看到標記就不當成人工判定
     （否則規則判的 not_affected 下次掃描會被當成 DT 上的人工決定，自己證明自己）。
+  - 帶 dumpling:assessment＝NOT_ASSESSED 的陳述（沒有評估的列，vex.cdx.json 以 in_triage 輸出；M7c-1）不是判定，一律略過、不寫回；
+    否則 DT 裡所有沒判定的 finding 都會被改成 IN_TRIAGE。略過的數量記在 dt-writeback.json 的 vex.not_assessed_skipped。
   - 同一個 DT finding 有多條不同狀態的陳述 → 取最保守的（exploitable > in_triage > resolved > not_affected）並計入 conflicts。
   - API key 只從環境（DT_API_KEY）或 --env 檔的 DT_API_KEY 讀，不印、不寫進輸出。
   - 規則 13：產品元件上傳到 DT 前，版本不是真版本的（file modification time、cdx:*:versionSpecifiers）移除版本，不猜。
@@ -55,6 +57,9 @@ JUSTIFICATIONS = {"code_not_present", "code_not_reachable", "requires_configurat
                   "protected_by_compiler", "protected_at_runtime", "protected_at_perimeter", "protected_by_mitigating_control"}
 NON_DT_SOURCES = {"GRYPE", "NVIDIA"}
 PAGE = 500
+# 沒有評估的陳述（M7c-1，A4／D-057）：vex.cdx.json 把沒有判定的列寫成 in_triage 加這個屬性。那不是判定，不寫回 DT，
+# 否則 DT 裡所有沒判定的 finding 都會被改成 IN_TRIAGE。與 tools/vexconv/vexconv.py 的 PROP_ASSESSMENT／NOT_ASSESSED 同值（測試核對）
+NOT_ASSESSED_PROP, NOT_ASSESSED_VALUE = "dumpling:assessment", "NOT_ASSESSED"
 
 
 class WbError(Exception):
@@ -336,6 +341,9 @@ def match_statements(vex, product_sbom, targets, alt_keys):
     matched, unmatched = 0, []
     basis = {"source-id": 0, "alias": 0}
     stmts = [v for v in vex.get("vulnerabilities") or [] if isinstance(v, dict)]
+    # 沒有評估的陳述不是判定：整個略過（不算陳述、不算沒對上、不參與同一個 finding 的合併），DT 的狀態因此不會改變
+    n_na = sum(1 for v in stmts if NOT_ASSESSED_VALUE in prop(v, NOT_ASSESSED_PROP))
+    stmts = [v for v in stmts if NOT_ASSESSED_VALUE not in prop(v, NOT_ASSESSED_PROP)]
     for v in stmts:
         if (v.get("analysis") or {}).get("state") not in STATE_RANK:
             unmatched.append({"id": v.get("id"), "state": (v.get("analysis") or {}).get("state"), "component": (prop(v, "sca-center:component") or [""])[0],
@@ -417,7 +425,7 @@ def match_statements(vex, product_sbom, targets, alt_keys):
                 f"({judged}). Not written as {cons['state']} because these packages are not judged: {', '.join(unjudged)}.")
         applies[kk] = {"state": "in_triage", "detail": make_detail("in_triage", body)}
         partial.append({"vuln": kk[2], "judged": sorted(key_label(b) for b in per), "unjudged": unjudged, "would_be": cons["state"]})
-    return applies, {"statements": len(stmts), "matched": matched, "unmatched": len(unmatched), "conflicts": cnt["conflicts"],
+    return applies, {"statements": len(stmts), "not_assessed_skipped": n_na, "matched": matched, "unmatched": len(unmatched), "conflicts": cnt["conflicts"],
                      "basis": basis, "unmatched_list": unmatched, "partial_shared": len(partial), "partial_shared_list": partial[:200]}
 
 

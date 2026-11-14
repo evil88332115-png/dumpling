@@ -1,0 +1,751 @@
+{
+ "e2e": {
+  "annotations_unused": [],
+  "annotations_without_author": [],
+  "assessment": {
+   "by_rule": 0,
+   "complete": false,
+   "extra_cves_untriaged": 0,
+   "in_triage_by_rule": 0,
+   "untriaged": 9,
+   "untriaged_for_gate": 9
+  },
+  "conflicts": 0,
+  "counts": {
+   "kernel": {
+    "exploitable": 0,
+    "in_triage": 0,
+    "not_affected": 0,
+    "resolved": 0,
+    "rows": 0,
+    "untriaged": 0
+   },
+   "non_kernel": {
+    "exploitable": 0,
+    "in_triage": 0,
+    "not_affected": 1,
+    "resolved": 0,
+    "rows": 10,
+    "untriaged": 9
+   },
+   "total": {
+    "exploitable": 0,
+    "in_triage": 0,
+    "not_affected": 1,
+    "resolved": 0,
+    "rows": 10,
+    "untriaged": 9
+   }
+  },
+  "dt_without_justification": [
+   {
+    "component": "libbar1",
+    "id": "CVE-2025-0005",
+    "states": [
+     "FALSE_POSITIVE"
+    ],
+    "version": "2.0-1"
+   }
+  ],
+  "exploitable_without_response": 0,
+  "extra_cves": 0,
+  "extra_cves_untriaged": 0,
+  "extra_cves_untriaged_list": [],
+  "grype_cross_check": true,
+  "grype_only_advisories": 0,
+  "human_conflicts": 0,
+  "in_triage": 0,
+  "kev_without_human_decision": 0,
+  "not_assessed": [],
+  "open_affected": {
+   "by_response": {},
+   "by_rule": 0,
+   "individual": 0,
+   "rows": 0
+  },
+  "open_components": [
+   {
+    "component": "accountsservice",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/accountsservice@23.13.9-2ubuntu6?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p2": 1
+    },
+    "type": "deb",
+    "version": "23.13.9-2ubuntu6"
+   },
+   {
+    "component": "brotli",
+    "installed_as": [],
+    "purl": "pkg:pypi/brotli@1.1.0",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p1": 1
+    },
+    "type": "pypi",
+    "version": "1.1.0"
+   },
+   {
+    "component": "example.com/tool",
+    "installed_as": [],
+    "purl": "pkg:golang/example.com/tool@0.1",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p3": 1
+    },
+    "type": "golang",
+    "version": "0.1"
+   },
+   {
+    "component": "libbar1",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/libbar1@2.0-1?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "other": 1
+    },
+    "type": "deb",
+    "version": "2.0-1"
+   },
+   {
+    "component": "libbaz1",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/libbaz1@3.0-1?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p2": 1
+    },
+    "type": "deb",
+    "version": "3.0-1"
+   },
+   {
+    "component": "libsrc-bin",
+    "installed_as": [],
+    "purl": "",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p3": 1
+    },
+    "type": "none",
+    "version": "1.0"
+   },
+   {
+    "component": "openssl",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p3": 1
+    },
+    "type": "deb",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "openssl",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.12?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p3": 1
+    },
+    "type": "deb",
+    "version": "3.0.13-0ubuntu3.12"
+   },
+   {
+    "component": "paramiko",
+    "installed_as": [],
+    "purl": "pkg:pypi/paramiko@2.12.0",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p1": 1
+    },
+    "type": "pypi",
+    "version": "2.12.0"
+   }
+  ],
+  "reasons": [
+   "9 untriaged (P1 2, P2 2, P3 4, other 1)",
+   "1 Dependency-Track analyses without justification (NOT_AFFECTED without justification or details, FALSE_POSITIVE without justification; not used): CVE-2025-0005 on libbar1 2.0-1"
+  ],
+  "rules_without_author": [],
+  "top_untriaged": [
+   {
+    "component": "brotli",
+    "cves": [
+     "CVE-2026-111497"
+    ],
+    "epss_percentile": 0.99,
+    "id": "CVE-2026-111497",
+    "kernel": false,
+    "kev": true,
+    "kev_by_cve": false,
+    "severity": "CRITICAL",
+    "tier": "p1",
+    "version": "1.1.0"
+   },
+   {
+    "component": "paramiko",
+    "cves": [
+     "CVE-2023-48795"
+    ],
+    "epss_percentile": 0.95,
+    "id": "CVE-2023-48795",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "MEDIUM",
+    "tier": "p1",
+    "version": "2.12.0"
+   },
+   {
+    "component": "libbaz1",
+    "cves": [
+     "CVE-2025-0006"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2025-0006",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p2",
+    "version": "3.0-1"
+   },
+   {
+    "component": "accountsservice",
+    "cves": [
+     "CVE-2026-61897"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2026-61897",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p2",
+    "version": "23.13.9-2ubuntu6"
+   },
+   {
+    "component": "openssl",
+    "cves": [
+     "CVE-2025-0003"
+    ],
+    "epss_percentile": 0.2,
+    "id": "CVE-2025-0003",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "LOW",
+    "tier": "p3",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "openssl",
+    "cves": [
+     "CVE-2025-0003"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2025-0003",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "LOW",
+    "tier": "p3",
+    "version": "3.0.13-0ubuntu3.12"
+   },
+   {
+    "component": "libsrc-bin",
+    "cves": [
+     "CVE-2025-9999"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2025-9999",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "UNASSIGNED",
+    "tier": "p3",
+    "version": "1.0"
+   },
+   {
+    "component": "example.com/tool",
+    "cves": [],
+    "epss_percentile": null,
+    "id": "GHSA-aaaa-bbbb-cccc",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "UNASSIGNED",
+    "tier": "p3",
+    "version": "0.1"
+   },
+   {
+    "component": "libbar1",
+    "cves": [
+     "CVE-2025-0005"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2025-0005",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "accepted",
+    "version": "2.0-1"
+   }
+  ],
+  "untriaged_breakdown": {
+   "components": [
+    {
+     "component": "openssl",
+     "fix_states": {
+      "no Grype data": 2
+     },
+     "rows": 2,
+     "tiers": {
+      "p3": 2
+     },
+     "type": "deb"
+    },
+    {
+     "component": "accountsservice",
+     "fix_states": {
+      "not-fixed": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p2": 1
+     },
+     "type": "deb"
+    },
+    {
+     "component": "brotli",
+     "fix_states": {
+      "fixed": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p1": 1
+     },
+     "type": "pypi"
+    },
+    {
+     "component": "example.com/tool",
+     "fix_states": {
+      "no Grype data": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "golang"
+    },
+    {
+     "component": "libbar1",
+     "fix_states": {
+      "no Grype data": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "other": 1
+     },
+     "type": "deb"
+    },
+    {
+     "component": "libbaz1",
+     "fix_states": {
+      "no Grype data": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p2": 1
+     },
+     "type": "deb"
+    },
+    {
+     "component": "libsrc-bin",
+     "fix_states": {
+      "wont-fix": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "none"
+    },
+    {
+     "component": "paramiko",
+     "fix_states": {
+      "no Grype data": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p1": 1
+     },
+     "type": "pypi"
+    }
+   ],
+   "components_total": 8,
+   "groups": [
+    {
+     "fix_state": "no Grype data",
+     "rows": 4,
+     "tiers": {
+      "other": 1,
+      "p2": 1,
+      "p3": 2
+     },
+     "type": "deb"
+    },
+    {
+     "fix_state": "not-fixed",
+     "rows": 1,
+     "tiers": {
+      "p2": 1
+     },
+     "type": "deb"
+    },
+    {
+     "fix_state": "no Grype data",
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "golang"
+    },
+    {
+     "fix_state": "wont-fix",
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "none"
+    },
+    {
+     "fix_state": "fixed",
+     "rows": 1,
+     "tiers": {
+      "p1": 1
+     },
+     "type": "pypi"
+    },
+    {
+     "fix_state": "no Grype data",
+     "rows": 1,
+     "tiers": {
+      "p1": 1
+     },
+     "type": "pypi"
+    }
+   ]
+  },
+  "untriaged_by_tier": {
+   "other": 1,
+   "p1": 2,
+   "p2": 2,
+   "p3": 4
+  },
+  "untriaged_high": 4,
+  "untriaged_markers": {},
+  "verdict": "ATTENTION"
+ },
+ "unit": {
+  "annotations_unused": [],
+  "annotations_without_author": [],
+  "assessment": {
+   "by_rule": 0,
+   "complete": false,
+   "extra_cves_untriaged": 1,
+   "in_triage_by_rule": 0,
+   "untriaged": 4,
+   "untriaged_for_gate": 5
+  },
+  "conflicts": 0,
+  "counts": {
+   "kernel": {
+    "exploitable": 0,
+    "in_triage": 0,
+    "not_affected": 1,
+    "resolved": 0,
+    "rows": 2,
+    "untriaged": 1
+   },
+   "non_kernel": {
+    "exploitable": 2,
+    "in_triage": 1,
+    "not_affected": 1,
+    "resolved": 2,
+    "rows": 9,
+    "untriaged": 3
+   },
+   "total": {
+    "exploitable": 2,
+    "in_triage": 1,
+    "not_affected": 2,
+    "resolved": 2,
+    "rows": 11,
+    "untriaged": 4
+   }
+  },
+  "dt_without_justification": [],
+  "exploitable_without_response": 0,
+  "extra_cves": 1,
+  "extra_cves_untriaged": 1,
+  "extra_cves_untriaged_list": [
+   {
+    "component": "openssl",
+    "id": "CVE-2026-0002",
+    "row": "CVE-2026-0001",
+    "version": "3.0.13-0ubuntu3.11"
+   }
+  ],
+  "grype_cross_check": true,
+  "grype_only_advisories": 0,
+  "human_conflicts": 0,
+  "in_triage": 1,
+  "kev_without_human_decision": 0,
+  "not_assessed": [],
+  "open_affected": {
+   "by_response": {
+    "update": 2
+   },
+   "by_rule": 0,
+   "individual": 2,
+   "rows": 2
+  },
+  "open_components": [
+   {
+    "component": "openssl",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04",
+    "rows": 3,
+    "states": {
+     "exploitable": 1,
+     "untriaged": 2
+    },
+    "tiers": {
+     "p2": 3
+    },
+    "type": "deb",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "linux",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/linux@6.8?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p3": 1
+    },
+    "type": "kernel",
+    "version": "6.8"
+   },
+   {
+    "component": "notinsbom",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/notinsbom@1?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "in_triage": 1
+    },
+    "tiers": {
+     "p2": 1
+    },
+    "type": "deb",
+    "version": "1"
+   },
+   {
+    "component": "openssl",
+    "installed_as": [
+     "libssl3t64"
+    ],
+    "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=source&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "exploitable": 1
+    },
+    "tiers": {
+     "p2": 1
+    },
+    "type": "deb",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "zlib1g",
+    "installed_as": [],
+    "purl": "pkg:deb/ubuntu/zlib1g@1.3?arch=arm64&distro=ubuntu-24.04",
+    "rows": 1,
+    "states": {
+     "untriaged": 1
+    },
+    "tiers": {
+     "p1": 1
+    },
+    "type": "deb",
+    "version": "1.3"
+   }
+  ],
+  "reasons": [
+   "4 untriaged (P1 1, P2 2, P3 1, other 0)",
+   "1 further CVEs merged into a row of another CVE (aliases of the same advisory) have no VEX statement of their own: CVE-2026-0002 (row CVE-2026-0001) on openssl 3.0.13-0ubuntu3.11",
+   "2 affected rows (exploitable; 0 by bulk rules) need a release decision by a person (fixed before placing on the market, or a documented risk-based justification): by response update 2"
+  ],
+  "rules_without_author": [],
+  "top_untriaged": [
+   {
+    "component": "zlib1g",
+    "cves": [
+     "CVE-9"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-9",
+    "kernel": false,
+    "kev": true,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p1",
+    "version": "1.3"
+   },
+   {
+    "component": "openssl",
+    "cves": [
+     "CVE-2026-0001",
+     "CVE-2026-0002"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-2026-0001",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p2",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "openssl",
+    "cves": [
+     "CVE-5"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-5",
+    "kernel": false,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p2",
+    "version": "3.0.13-0ubuntu3.11"
+   },
+   {
+    "component": "linux",
+    "cves": [
+     "CVE-10"
+    ],
+    "epss_percentile": null,
+    "id": "CVE-10",
+    "kernel": true,
+    "kev": false,
+    "kev_by_cve": false,
+    "severity": "HIGH",
+    "tier": "p3",
+    "version": "6.8"
+   }
+  ],
+  "untriaged_breakdown": {
+   "components": [
+    {
+     "component": "openssl",
+     "fix_states": {
+      "none": 2
+     },
+     "rows": 2,
+     "tiers": {
+      "p2": 2
+     },
+     "type": "deb"
+    },
+    {
+     "component": "linux",
+     "fix_states": {
+      "none": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "kernel"
+    },
+    {
+     "component": "zlib1g",
+     "fix_states": {
+      "none": 1
+     },
+     "rows": 1,
+     "tiers": {
+      "p1": 1
+     },
+     "type": "deb"
+    }
+   ],
+   "components_total": 3,
+   "groups": [
+    {
+     "fix_state": "none",
+     "rows": 3,
+     "tiers": {
+      "p1": 1,
+      "p2": 2
+     },
+     "type": "deb"
+    },
+    {
+     "fix_state": "none",
+     "rows": 1,
+     "tiers": {
+      "p3": 1
+     },
+     "type": "kernel"
+    }
+   ]
+  },
+  "untriaged_by_tier": {
+   "other": 0,
+   "p1": 1,
+   "p2": 2,
+   "p3": 1
+  },
+  "untriaged_high": 3,
+  "untriaged_markers": {},
+  "verdict": "ATTENTION"
+ }
+}

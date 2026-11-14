@@ -65,7 +65,7 @@ software components build on or feed into each other and integrate into the over
 | Coordinated vulnerability disclosure policy | {{ vulnerability_contact.cvd_policy_url }} |
 | Contact address for reporting vulnerabilities | {{ vulnerability_contact.contact }} |
 | Vulnerability list and handling rules applied | `risk-assessment.md`, section 8 (generated) |
-| Vulnerability status per release (VEX) | `vex.cdx.json` (CycloneDX) and `vex.openvex.json` (OpenVEX), generated; release gate {{ vex.gate }} |
+| Vulnerability status per release (VEX) | `vex.cdx.json` (CycloneDX) and `vex.openvex.json` (OpenVEX), generated; release gate {{ vex.gate }}; rows that have not been assessed are included as `in_triage` (OpenVEX `under_investigation`) with the marker `NOT_ASSESSED`, which does not mean that anyone is investigating them |
 
 Technical solutions chosen for the secure distribution of updates (_owner: software engineering_):
 

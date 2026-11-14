@@ -102,7 +102,9 @@ The rows in this section are **candidate vulnerabilities**: automated matching o
 databases reported them. A row is not by itself a known exploitable vulnerability of the product. The tiers (P1/P2/P3) only set
 the order of handling (KEV, EPSS, severity). The **VEX status** column records the assessment of each row (`resolved`,
 `not_affected`, `in_triage`, `exploitable`, or `untriaged` when nothing has been decided yet; the source is in brackets); the
-subsection "Vulnerability status (VEX) and release gate" summarises it and the release gate. Open issues for point (2)(a) are
+subsection "Vulnerability status (VEX) and release gate" summarises it and the release gate. Rows that have not been assessed are
+also written to the VEX files, as `in_triage` (OpenVEX `under_investigation`) with the marker `NOT_ASSESSED`; this does not mean
+that anyone is investigating them. Open issues for point (2)(a) are
 the rows with VEX status `exploitable` and the untriaged rows in P1 or P2; every other untriaged row still needs an assessment
 before the release gate is OK.
 

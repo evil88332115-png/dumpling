@@ -441,7 +441,9 @@ def test_source_owner_keeps_severity_tier_and_human_decisions(tmp_path):
     write_json(sc / "dt" / "findings.json", f2)
     r, s, rep = run(proj, sc)
     vex = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
-    st = [x["analysis"] for x in vex["vulnerabilities"] if x["id"] == "CVE-2026-7001"]
+    # A4（M7c-1）：沒有判定的列（pillow 的各個 python3-pil* 二進位套件列）現在也有 in_triage＋NOT_ASSESSED 的陳述；這裡只看有判定的
+    st = [x["analysis"] for x in vex["vulnerabilities"] if x["id"] == "CVE-2026-7001"
+          and {"name": "dumpling:assessment", "value": "NOT_ASSESSED"} not in x.get("properties", [])]
     assert st == [{"state": "not_affected", "justification": "code_not_reachable", "detail": "not used"}] or \
         (len(st) == 1 and st[0]["state"] == "not_affected" and "inherited" not in st[0]["detail"])        # 只有 deb 列自己的
     assert s["vex"]["deb_python_inherited"] == 0 and s["counts"]["p2"] == 1 and s["counts"]["accepted"] == 1

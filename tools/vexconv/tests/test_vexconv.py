@@ -183,3 +183,78 @@ def test_cdx_not_affected_without_justification_or_detail():
 def test_not_openvex_doc():
     with pytest.raises(vc.VexError):
         vc.to_cdx({"foo": 1})
+
+
+# ---- M7c-1（A4／D-057）：沒有評估的陳述（in_triage 加 dumpling:assessment＝NOT_ASSESSED ↔ under_investigation 加固定的 status_notes）
+
+def na_cdx(n=3, extra=()):
+    vs = [{"id": f"CVE-2026-{i:04d}", "affects": [{"ref": P1}],
+           "analysis": {"state": "in_triage", "detail": vc.DETAIL_NOT_ASSESSED},
+           "properties": [{"name": vc.PROP_ASSESSMENT, "value": vc.NOT_ASSESSED}]} for i in range(n)]
+    return {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "vulnerabilities": vs + list(extra)}
+
+def na_count_cdx(c):
+    return sum(1 for v in c["vulnerabilities"] if {"name": vc.PROP_ASSESSMENT, "value": vc.NOT_ASSESSED} in v.get("properties", []))
+
+def na_count_ov(o):
+    return sum(1 for s in o["statements"] if s["status"] == "under_investigation" and s.get("status_notes") in vc.NOT_ASSESSED_NOTES)
+
+def test_not_assessed_constants():
+    assert (vc.PROP_ASSESSMENT, vc.NOT_ASSESSED, vc.NOTE_NOT_ASSESSED) == ("dumpling:assessment", "NOT_ASSESSED", "dumpling: not assessed")
+    assert vc.NOTE_NOT_ASSESSED_CUSTOMER == "Not yet assessed by the manufacturer" and "dumpling" not in vc.NOTE_NOT_ASSESSED_CUSTOMER.lower()
+    assert "not mean that anyone is investigating" in vc.DETAIL_NOT_ASSESSED      # 寫明是沒評估，不是調查中
+
+def test_not_assessed_cdx_to_openvex_n_statements():
+    ov = vc.to_openvex(na_cdx(3))
+    assert len(ov["statements"]) == 3 and na_count_ov(ov) == 3
+    assert {s["status_notes"] for s in ov["statements"]} == {"dumpling: not assessed"}
+    assert all(s["status"] == "under_investigation" and "impact_statement" not in s for s in ov["statements"])
+    valid_ov(ov)
+
+def test_not_assessed_cdx_ov_cdx_keeps_marker():
+    c = vc.to_cdx(vc.to_openvex(na_cdx(3)))
+    assert na_count_cdx(c) == 3 and all(v["analysis"]["state"] == "in_triage" for v in c["vulnerabilities"])
+    assert all(v["analysis"]["detail"] == vc.DETAIL_NOT_ASSESSED for v in c["vulnerabilities"])
+    valid_cdx(c)
+
+def test_not_assessed_ov_cdx_ov_keeps_note_internal_and_customer_sentence():
+    for note in vc.NOT_ASSESSED_NOTES:       # 內部的句子與客戶版的中性英文，轉兩輪都不變
+        d = ov_doc([{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": P1}], "status": "under_investigation", "status_notes": note}])
+        c = vc.to_cdx(d)
+        assert na_count_cdx(c) == 1 and c["vulnerabilities"][0]["analysis"]["state"] == "in_triage"
+        out = vc.to_openvex(c)
+        assert out["statements"][0]["status_notes"] == note and out["statements"][0]["status"] == "under_investigation"
+        assert na_count_cdx(vc.to_cdx(out)) == 1
+
+def test_customer_cdx_without_marker_but_neutral_detail_stays_not_assessed():
+    # 客戶版 CDX 照白名單不帶 dumpling:assessment，說明是中性句子：轉 OpenVEX 再轉回來，標記仍補回去
+    c = {"bomFormat": "CycloneDX", "version": 1, "vulnerabilities": [
+        {"id": "CVE-1", "affects": [{"ref": P1}], "analysis": {"state": "in_triage", "detail": vc.NOTE_NOT_ASSESSED_CUSTOMER}}]}
+    o = vc.to_openvex(c)
+    assert o["statements"][0]["status_notes"] == vc.NOTE_NOT_ASSESSED_CUSTOMER
+    assert na_count_cdx(vc.to_cdx(o)) == 1
+
+def test_other_under_investigation_gets_no_marker():
+    d = ov_doc([{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": P1}], "status": "under_investigation"},
+                {"vulnerability": {"name": "CVE-2"}, "products": [{"@id": P1}], "status": "under_investigation", "status_notes": "waiting for vendor"}])
+    c = vc.to_cdx(d)
+    assert na_count_cdx(c) == 0
+    # 一般的 in_triage（有人在調查）轉 OpenVEX 不會變成「沒評估」
+    o = vc.to_openvex({"bomFormat": "CycloneDX", "vulnerabilities": [{"id": "X", "affects": [{"ref": P1}], "analysis": {"state": "in_triage", "detail": "looking"}}]})
+    assert o["statements"][0]["status_notes"] == "looking" and na_count_ov(o) == 0
+
+def test_not_assessed_mixed_with_assessed_keeps_each_statement():
+    real = {"id": "CVE-9", "affects": [{"ref": P2}], "analysis": {"state": "exploitable", "response": ["update"]},
+            "properties": [{"name": vc.PROP_ACTION, "value": "Upgrade"}]}
+    c = na_cdx(2, [real])
+    ov = vc.to_openvex(c)
+    assert [s["status"] for s in ov["statements"]] == ["under_investigation", "under_investigation", "affected"]
+    back = vc.to_cdx(ov)
+    assert na_count_cdx(back) == 2 and back["vulnerabilities"][2]["analysis"]["state"] == "exploitable"
+
+def test_empty_cdx_still_rejected_but_not_assessed_rows_count_as_statements():
+    with pytest.raises(vc.VexError):
+        vc.to_openvex({"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "vulnerabilities": []})
+    with pytest.raises(vc.VexError):          # 沒有 analysis.state、沒有標記的列照舊不是陳述
+        vc.to_openvex({"bomFormat": "CycloneDX", "vulnerabilities": [{"id": "X", "affects": [{"ref": P1}]}]})
+    assert len(vc.to_openvex(na_cdx(1))["statements"]) == 1

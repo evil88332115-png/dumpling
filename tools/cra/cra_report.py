@@ -5398,8 +5398,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     vex_out = {}
     for n in ("vex.cdx.json", "vex.openvex.json"):
         t = vex_texts.get(n)
+        # statements＝檔案裡的陳述總數；M7c-1（A4）起含沒有評估的列（in_triage／under_investigation 加 NOT_ASSESSED 標記），
+        # not_assessed＝其中沒有評估的（有判定的陳述數＝兩者相減）
         vex_out[n] = {"file": n, "sha256": hashlib.sha256(t.encode("utf-8")).hexdigest(),
-                      "statements": len(json.loads(t).get("vulnerabilities" if n == "vex.cdx.json" else "statements"))} if t else None
+                      "statements": len(json.loads(t).get("vulnerabilities" if n == "vex.cdx.json" else "statements")),
+                      "not_assessed": vx.not_assessed_count(json.loads(t), n)} if t else None
         vex_files.append((n, vex_out[n], why_not))
     vnum = f"8.{8 + bool(nsection) + bool(dsection)}"
     vsection = vx.section(vnum, vgate, vinfo, vconf, vex_files, f"{pname}, SBOM serial {pbom['serialNumber']}" if pbom else pname,
