@@ -249,7 +249,11 @@ def cross_check_config(project, cra_config):
     su = su.isoformat() if isinstance(su, datetime.date) else su
     sup = cra_config.get("support")
     end = sup.get("end_date") if isinstance(sup, dict) else None
-    if _filled(su) and _filled(end) and su[:7] != end:
+    # 格式不對（例如 2031-12-31、整數）時訊息照實寫「格式不對」，不寫成「月份不同」；整數原本直接不比（M7b-4，#58 驗證建議 4）
+    end_blank = end is None or (isinstance(end, str) and not _filled(end))
+    if _filled(su) and not end_blank and not (isinstance(end, str) and re.fullmatch(r"\d{4}-\d{2}", end)):
+        errs.append("CRA/Config/config.json 的 support.end_date 格式不對（要是 YYYY-MM）：%r；以 project.yml 的 support_until 為準，請改成 %s" % (end, su[:7]))
+    elif _filled(su) and not end_blank and su[:7] != end:
         errs.append("support_until（project.yml）與 CRA/Config/config.json 的 support.end_date 月份不同；以 project.yml 為準，請把 config.json 改成 %s" % su[:7])
     prod = cra_config.get("product")
     name = prod.get("name") if isinstance(prod, dict) else None

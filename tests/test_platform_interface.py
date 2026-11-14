@@ -905,5 +905,25 @@ class KernelWizardArgs(unittest.TestCase):
             self.assertEqual((r.returncode, r.stdout.strip()), (0, want), r.stderr)
 
 
+class CrossCheckEndDate(unittest.TestCase):
+    """M7b-4（#58 驗證建議 4）：support.end_date 格式不對時訊息寫「格式不對」，不寫「月份不同」；整數也會被抓到（原本不比）。"""
+
+    def errs(self, end, su="2031-12-31"):
+        return pc.cross_check_config({"support_until": su}, {"support": {"end_date": end}})
+
+    def test_messages(self):
+        self.assertEqual(self.errs("2031-12"), [])
+        self.assertIn("月份不同", self.errs("2031-11")[0])
+        for bad in ("2031-12-31", 203112, "Dec 2031", True, ["2031-12"]):
+            e = self.errs(bad)
+            self.assertEqual(len(e), 1, bad)
+            self.assertIn("格式不對（要是 YYYY-MM）", e[0])
+            self.assertIn("請改成 2031-12", e[0])
+            self.assertNotIn("月份不同", e[0])
+        for blank in (None, "", "TO BE COMPLETED"):           # 沒填不比
+            self.assertEqual(self.errs(blank), [], blank)
+        self.assertEqual(self.errs("2031-12-31", su=""), [])   # project.yml 沒填也不比
+
+
 if __name__ == "__main__":
     unittest.main()

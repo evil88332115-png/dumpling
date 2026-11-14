@@ -341,6 +341,22 @@ def default_steps_path():
     return os.path.join(out, "pipeline-steps.tsv") if out else None
 
 
+def refresh_scan_summary(path, rows):
+    """用完整的步驟紀錄 rows 重寫 scan-summary-*.json（Release 附件）的 pipeline_steps／pipeline_status／pipeline_attention：
+    collect 寫它的時候 scan 這一步自己的列還沒記，和 release-meta.json、notes.md 可能差一列（M7b-4，#58 驗證建議 5）。
+    檔案沒有這幾個鍵（collect 沒有步驟紀錄）也照樣補上。→ True＝有改、False＝本來就一致。讀不了或不是 JSON 物件 → OSError／ValueError。"""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    if not isinstance(doc, dict):
+        raise ValueError("scan-summary 不是 JSON 物件")
+    new = dict(doc, pipeline_steps=rows, pipeline_status=step_rows.overall(rows), pipeline_attention=step_rows.attention_lines(rows))
+    if new == doc:
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(new, f, ensure_ascii=False, indent=1)
+    return True
+
+
 def refresh_notes(notes_path, rows):
     """用完整的步驟紀錄 rows 重寫 notes.md：開頭一行的 pipeline_result，以及「流程步驟」一節（沒有就插在「附件」前）。
     collect 在 scan 步驟自己的列寫進去之前就產生 notes.md，所以兩者可能差一列；release-meta.py 以同一份紀錄、同一個算法（step_rows.overall）重寫，

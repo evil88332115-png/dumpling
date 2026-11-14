@@ -317,6 +317,9 @@ class JetsonIndependentVersion(Generic):
         self.assertEqual(self.iv(project_dir=False)["status"], "GAP")                         # 沒有 --project-dir
         self.assertEqual(self.iv(runs=["=" + self.full_run(False, name="w-plain")])["status"], "GAP")          # 不是刷機包的掃描
         self.assertEqual(self.iv(runs=[])["status"], "GAP")
+        r = self.iv(runs=["-bsp=" + self.full_run(name="w-bsp-only")])                    # 只有分層重跑、沒有完整掃描：不退回去讀它
+        self.assertEqual(r["status"], "GAP")
+        self.assertIn("沒有完整掃描", r["detail"])
 
     def test_sources_yml_problems_fail(self):
         self.assertEqual(self.iv("v9.9.9-x")["status"], "FAIL")                               # sources.yml 沒有這個版本
