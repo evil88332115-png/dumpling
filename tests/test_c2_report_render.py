@@ -327,5 +327,46 @@ class VbiosReportRenderTests(RenderCase):
                     self.assertNotIn("<img", render(md), (name, rn))
 
 
+class RulesReportRenderTests(RenderCase):
+    """fw-inventory.md 的「規則表比對」一節（md_esc）：規則的標題等自由文字、規則表 GAP 的原因，渲染後沒有連結、提及、標籤；每一種表的狀態都試。"""
+
+    EVIL = "@everyone a@example.com mailto:x@y.test [x](http://e) &commat;u <img src=x> https://evil.test www.evil.test `x` | y"
+
+    def report(self, rules, tmp):
+        import test_fw_advisory_rules as tr
+        import x86_firmware as xf
+        p = tmp / "amd.bin"
+        img = tr.good_image()
+        tr.put(img, 0x80000, b"AGESA!V9\x00ComboAM4v2PI 1.2.0.B\x00")
+        p.write_bytes(bytes(img))
+        return xf.markdown(xf.inventory([p], rules=rules))
+
+    def test_hostile_rule_text_and_every_table_state(self):
+        import tempfile
+        import test_fw_advisory_rules as tr
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            affected = tr.agesa_rule()
+            affected["title"] = self.EVIL
+            affected["review"] = tr.review(preliminary_by="產品負責 角色")
+            both = tr.agesa_rule(fixed="1.2.0.B", rid="AMD-SB-7005")
+            both["title"] = "x" + self.EVIL
+            ami = tr.rule("AMI-SA-2026001", [{"component": "ami_core", "product": self.EVIL, "fixed_in": self.EVIL}], "AMI", url=tr.AMI_PDF)
+            states = {"affected+not-affected": tr.build(tmp, tr.doc(affected, both), "a.json"),
+                      "confirmed": tr.build(tmp, tr.doc(tr.agesa_rule("confirmed")), "c.json"),
+                      "ami": tr.build(tmp, tr.doc(ami), "m.json"),
+                      "gap": tr.fr.TableError("table-invalid", "rules[0]: " + self.EVIL)}
+            for name, table in states.items():
+                md = self.report(table, tmp)
+                self.assertIn("## 規則表比對", md, name)
+                md = "## 規則表比對" + md.split("## 規則表比對", 1)[1].split("\n## ", 1)[0]          # 只渲染這一節（其他段落有既有的內容）
+                for rn, render in self.R.items():
+                    h = render(md)
+                    self.assertEqual(problems(rn, "para", h), [], (name, rn))
+                    self.assertNotIn("<img", h, (name, rn))
+                for w in ("不受影響", "安全", "不適用"):
+                    self.assertNotIn(w, md, (name, w))
+
+
 if __name__ == "__main__":
     unittest.main()
