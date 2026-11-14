@@ -379,7 +379,7 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
   對不到任何規則的元件維持「資料庫沒有資料，以廠商公告為準」。
 - **狀態**：任何元件的建議是 `affected`，即使規則還是初審，`FW-INVENTORY` 狀態就是 ATTENTION，說明裡列規則編號與「待人審」；`not-affected` 不會讓狀態變好或變差；NOT_ASSESSED 照舊；規則表不能用 → ATTENTION。
 - CI 摘要欄（`firmware_advisory_cell.py`）多一段「規則表建議（整理日期）affected N、not-affected N、NOT_ASSESSED N：affected N 個待人審（規則；依初審規則的建議，待負責單位確認）」；DT 報告的「怎麼讀」與每個樣本的計數行也一樣。
-- **AMI-SA**（D-058）：SBOM 讀得到 AMI 核心版本時（映像的 Firmware ID 紀錄，說明與限制見 `docs/notes/c2-ami-core.md`）多一個 `AMI Aptio V core` 元件，`ami_core` 的條件對它比：核心低於 `Fix Version`（例如 `AptioV_5.044`）→ `affected` 建議，不低於 → NOT_ASSESSED（`ami-core-mapping-unverified`，不輸出 not-affected）。
+- **AMI-SA**（D-058）：SBOM 讀得到 AMI 核心版本時（映像的 Firmware ID 紀錄，說明與限制見 `docs/notes/c2-ami-core.md`）多一個 `AMI Aptio V core` 元件，`ami_core` 的條件對它比：核心低於 `Fix Version`（例如 `AptioV_5.044`）→ `affected` 建議，不低於 → NOT_ASSESSED（`ami-core-mapping-unverified`，不輸出 not-affected）。廠商是 AMI 或有 `ami_core` 條件的規則，其他條件（例如 `bios_image`）判出的 not-affected 也降成 NOT_ASSESSED（見 `docs/notes/c2-ami-core.md`）。
   讀不到、結構不合、互相矛盾 → NOT_ASSESSED；映像有 AMI 的線索（`ibv_hint` 有 AMI，或是 AMI PFAT 封裝）卻沒有核心版本元件時，報告列出「可能相關的 AMI 公告」請負責單位對照，**不給建議**。有核心版本元件時 `bios_image` 不比 `ami_core` 規則。
 
 ### 完整性：為什麼固定 sha256
@@ -444,7 +444,7 @@ AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、700
 | Protectli VP46xx（Dasharo v1.2.0） | ME 14.0.47.1558 | **not-affected**（依據 vendor-statement：INTEL-SA-00391 的 14.0.45） | INTEL-SA-00391；FSP 9.x 沒有規則 |
 | NovaCustom NUC box ARL v0.9.2 | ME 18.1.18.2724 | affected | INTEL-SA-01372（INTEL-SA-01280 的 18.1.18 不低於，記在依據） |
 | NovaCustom V540TU MTL v1.0.1 | ME 18.0.10.2285 | NOT_ASSESSED（`no-rule-for-line`：規則只有 14.x、18.1 版本線） | — |
-| Intel NUC11 PATGL357.0059 | AMI 核心 5.19（`AMI Aptio V core`） | affected（核心低於 `AptioV_5.044`；preliminary；基底版本、回補看不出來、A1 未確認，是線索不是判定） | AMI-SA-2026001、AMI-SA-2026002；BIOS 映像本身不再比 AMI 規則 |
+| Intel NUC11 PATGL357.0059 | AMI 核心 5.19（`AMI Aptio V core`） | affected（核心低於 `AptioV_5.044`；preliminary；基底版本、回補看不出來、A1 未確認，是線索不是判定） | AMI-SA-2026001、AMI-SA-2026002；有核心元件時 BIOS 映像不比 AMI 規則 |
 
 ASUS B550M（核心 5.17）、ASRock B550（5.17）、ASUS B650M（5.26）的映像同樣讀得到 AMI 核心版本，結果同 NUC11：`AMI Aptio V core` 元件是 affected 建議（AMI-SA-2026001、2026002），BIOS 映像元件是 NOT_ASSESSED（`no-rule`）。核心版本的讀法、四份樣本的欄位與限制見 `docs/notes/c2-ami-core.md`。
 
