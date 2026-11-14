@@ -145,7 +145,8 @@ COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
 # C-dt-feeds：GAP → GAP；NOT_RUN 看 meta.json 的 dt_feeds_reason（結構化，不看說明文字；M7b）：金鑰沒有權限（permission_denied）、
 # 沒讀到任何資料源狀態（no_data）或沒有原因代碼（舊的 meta.json、寫錯）→ GAP；沒用 DT（dt_not_used）與 dtsources.py 失敗（dtsources_failed）
-# 不降級——那兩種已由 D-dt-data-sources 反映（沒用 DT 是 NOT_RUN 的 D-dt-*，失敗是 FAIL）
+# 不降級——那兩種已由 D-dt-data-sources 反映：它在 RISK_STAGES，不是 OK 就 GAP（sca-scan 在沒用 DT 時寫 NOT_RUN、dtsources.py 失敗時寫 FAIL）。
+# 不只信 meta.json 的代碼：D-dt-data-sources 是 OK（或沒有這一列以外的其他情況使它是 OK）時，C-dt-feeds 的 NOT_RUN 照樣 GAP
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
 # 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
 # kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
@@ -213,8 +214,9 @@ def kernel_stage_level(k, st, meta):
 DT_FEEDS_NOT_DOWNGRADED = ("dt_not_used", "dtsources_failed")
 
 
-def fresh_stage_level(k, st, meta=None):
-    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。meta：sca-scan 的 meta.json（C-dt-feeds 讀 dt_feeds_reason）。"""
+def fresh_stage_level(k, st, meta=None, status=None):
+    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。meta：sca-scan 的 meta.json（C-dt-feeds 讀 dt_feeds_reason）；
+    status：read_status 的結果（C-dt-feeds 不降級時要確認 D-dt-data-sources 不是 OK）。"""
     if st == "OK":
         return None
     if st == "ATTENTION":
@@ -224,7 +226,8 @@ def fresh_stage_level(k, st, meta=None):
     if k == "C-dt-feeds":
         if st == "NOT_RUN":
             reason = (meta or {}).get("dt_feeds_reason") if isinstance(meta, dict) else None
-            return None if reason in DT_FEEDS_NOT_DOWNGRADED else "GAP"
+            dds = (status or {}).get("D-dt-data-sources", ("NOT_RUN",))[0]
+            return None if reason in DT_FEEDS_NOT_DOWNGRADED and dds != "OK" else "GAP"
         return "GAP" if st == "GAP" else None
     return "GAP"
 
@@ -4835,7 +4838,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
         for k in FRESH_STAGES:
-            lv = fresh_stage_level(k, status[k][0], meta) if k in status else None
+            lv = fresh_stage_level(k, status[k][0], meta, status) if k in status else None
             if lv:
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {status[k][0]}: vulnerability data may be out of date")
