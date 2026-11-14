@@ -702,10 +702,53 @@ class TestRegistry(TestRecordsAndHardening):
 
     def test_untrusted_registry_note_cannot_add_or_remove(self):
         n = self.case()
-        self.gl.add_note(REG, self.reg_line(555), author=11)             # Reporter 偽造登錄：不算（不會因為不存在的 #555 而 FAIL）
+        self.gl.add_note(REG, self.reg_line(555), author=11)             # Reporter 偽造登錄：不算（不會去追不存在的 #555）
         self.gl.add_note(REG, self.reg_line(556), author=78)
-        r = self.registered()
+        # 但不可信的登錄留言要列成問題（真實模式 FAIL）：作者之後變成不可信時，登錄不能靜默消失（t10b 驗證應修 1）
+        rc, out = self.countdown(False, res=self.result("reg.json"))
+        self.assertEqual(rc, 1, out)
+        r = self.load(self.result("reg.json"))
         self.assertEqual([c["number"] for c in r["registry"]["cases"]], [n])
+        self.assertEqual(len([p for p in r["registry"]["problems"] if "作者不是 Developer" in p]), 2)
+        self.assertEqual([x["number"] for x in r["issues"]], [n])        # 真的案件照常倒數
+
+    def test_registry_author_becomes_untrusted_then_unlabel_is_not_silent(self):
+        # t10b 驗證應修 1 的重現：登錄留言的作者（例如輪換掉的 token 的 bot）不再是成員，又有人拿掉案件標籤 → 不能是「沒有案件、OK」
+        n = self.case()
+        self.registered()
+        for note in self.gl.notes[REG]:
+            note["author"]["id"] = 4242                                    # 不是成員（404）
+        self.gl.issues[n]["labels"] = []
+        rc, out = self.countdown(False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("作者不是 Developer", out)
+
+    def test_registry_unparsed_lines_reported(self):
+        # t10b 驗證建議 3：標頭以外不是「- 案件 …」的非空白行都列成問題（打錯不能靜默漏登錄）
+        n = self.case()
+        self.registered()
+        k = "c" * 64
+        for bad in (f"* 案件 #{n} key={k} kind=vulnerability", f"案件 #{n} key={k} kind=vulnerability", "- 案件 #x"):
+            self.gl.add_note(REG, f"{art14.REGISTRY_HEAD}\n{bad}", author=HUMAN)
+        rc, out = self.countdown(False, res=self.result("reg.json"))
+        self.assertEqual(rc, 1, out)
+        r = self.load(self.result("reg.json"))
+        self.assertEqual(len([p for p in r["registry"]["problems"] if "看不懂" in p]), 3)
+
+    def test_record_list_style_fields_not_silently_ignored(self):
+        # t10b 驗證應修 2：可信成員把欄位寫成 * …、> - …、1. …（看起來像清單）→ 列成問題（真實 FAIL），不能靜默 not_started
+        for line in (f"* {art14.F_AWARE}：2026-11-13T00:00:00Z", f"> - {art14.F_AWARE}：2026-11-13T00:00:00Z",
+                     f"1. {art14.F_AWARE}：2026-11-13T00:00:00Z", f"+ 階段 1 {art14.F_SUBMIT_AT}：2026-11-13T05:00:00Z",
+                     "・知悉時間:2026-11-13T00:00:00Z", "1) 階段1 提交時間（UTC）：2026-11-13T05:00:00Z"):
+            self.setUp()                     # 每一種寫法都用新的假 GitLab（含登錄 Issue）
+            n = self.case()
+            self.gl.add_note(n, f"{art14.RECORD_HEAD}\n{line}", author=HUMAN)
+            rc, out = self.countdown(False, res=self.result("r.json"))
+            self.assertEqual(rc, 1, (line, out))
+            r = self.load(self.result("r.json"))["issues"][0]
+            self.assertEqual(r["clock"], "not_started", line)
+            self.assertTrue(any("沒有解析" in p for p in r["problems"]), (line, r["problems"]))
+        self.assertFalse(art14.field_like("負責人確認後記錄", art14.RECORD_FIELDS0["vulnerability"]))     # 說明行不算
 
     def test_system_registry_note_ignored(self):
         n = self.case()

@@ -97,6 +97,10 @@ Reporter／Planner 改不了別人的留言（推定，待內部驗證），也�
 - 已關閉的真實案件（標籤找到或已登錄）還有未提交的階段 → FAIL（列在 result 的 `closed`）；逐案隔離。
 - result.json 的 `registry` 是登錄快照（登錄 Issue 被刪時人工補回用）。
 - 殘留風險：Planner／Owner 能刪登錄 Issue 本身、Maintainer 能刪留言——登錄不見了每輪 FAIL，不會變成「沒有案件」；Developer 以上本來就是可信成員。
+- **登錄留言的作者變成不可信**（project access token 輪換、bot 使用者被刪；人員離職、降權）：那則登錄不算，但會列成問題、真實模式 FAIL，不會靜默漏掉案件（t10b 驗證應修 1）。**輪換 token 或人員異動前，先由新身分（Developer 以上）把現有登錄重貼一次**（內容取自最近一次 result.json 的 `registry` 快照）。同理，Reporter 貼的假登錄留言會讓 job 一直 FAIL：吵，但不會靜默。
+- 登錄留言標頭以外只能有 `- 案件 #… key=… kind=…` 行；其他任何非空白行都列成問題（打錯不能靜默漏登錄）。
+- 殘留風險（自動補登錄）：`countdown` 會替「有 `art14` 標籤、作者可信、內文標記正確但還沒登錄」的案件補登錄。Reporter 可以改別人（Developer）建的 Issue 內文、加上合法標記與標籤，讓它被補登錄成永遠追蹤的假案件（只增不減），它的 key 也可能擋掉之後同 key 的 `open-real`。這是「吵」（多一個要人處理的案件），不是「靜默」；目前沒有簡單的完整解法，發現時由 Maintainer 處理。
+- 殘留風險（登錄壞掉時）：登錄 Issue 讀不到（被刪、不是 confidential、變數錯）時，`open-real` 也開不出新案件（fail-closed）——要先人工修好登錄。
 
 ## 5. 倒數與標籤
 

@@ -434,14 +434,22 @@ def is_record(note):
     return head_kind(note, RECORD_HEAD) == "exact"
 
 
+_FIELD_LIKE_LEAD = re.compile(r"^[\s>*+\-•·・\d.)、]*")
+_NO_SPACE = re.compile(r"\s+")
+
+
+def _field_key(s):
+    """比對用：NFKC、去零寬字元、去空白、去「(UTC)」。"""
+    s = unicodedata.normalize("NFKC", s).translate(_ZERO_WIDTH)
+    return _NO_SPACE.sub("", s).replace("(UTC)", "").casefold()
+
+
 def field_like(line, allowed0):
-    """這一行（去掉前後空白）看起來是要人填的欄位。"""
-    t = line.strip()
-    m = RECORD_STAGE_RE.match(t)
-    if m and m.group(2) in RECORD_STAGE_FIELDS:
-        return True
-    m = FIELD_RE.match(t)
-    return bool(m and m.group(1) in allowed0)
+    """這一行看起來是要人填的欄位（寬鬆判斷，寧可多報）：去掉行首的清單、引用、編號符號（- * + > 1. 1) 等）與空白後，
+    以已知欄位名稱開頭（不管全形半形、空白、有沒有「（UTC）」）。t10b 驗證應修 2：* 知悉時間…、> - 知悉時間…、1. 知悉時間… 不能靜默忽略。"""
+    t = _field_key(_FIELD_LIKE_LEAD.sub("", line))
+    names = list(allowed0) + [f"階段{n}{f}" for n in (1, 2, 3) for f in RECORD_STAGE_FIELDS]
+    return any(t.startswith(_field_key(x)) for x in names)
 
 
 def record_values(kind, notes, trust):
@@ -704,8 +712,15 @@ def load_registry(api, repo, trust, arg):
     entries, problems = {}, []
     for n in sorted(api.list_notes(repo, rid), key=lambda x: x.get("id") or 0):
         hk = head_kind(n, REGISTRY_HEAD)
-        if hk is None or not trust.ok(n):
-            continue            # 不是登錄留言、system 留言、不可信的人寫的：一律不算（Reporter／Planner 寫不出可信的登錄）
+        if hk is None:
+            continue            # 不是登錄留言、system 留言
+        if not trust.ok(n):
+            # 不可信的人寫的登錄不算（Reporter／Planner 寫不出可信的登錄）。但不能靜默：登錄留言的作者之後變成不可信
+            # （project access token 輪換、bot 使用者被刪；人員離職、降權）時，整份登錄會消失（#t10b 驗證應修 1）。
+            # 所以列成問題（真實模式 FAIL）：吵，但不會靜默停掉倒數
+            problems.append(f"登錄留言 {n.get('id')} 的作者不是 Developer 以上的成員（例如 token 輪換、人員離職，或有人偽造）：這則不算；"
+                            "如果它原本是有效的登錄，請由可信成員重貼（docs/ART14.md 第 4.2 節）")
+            continue
         if hk == "near":
             problems.append(f"登錄留言 {n.get('id')} 疑似登錄、沒有解析（第一行要剛好是 {REGISTRY_HEAD}）")
             continue
@@ -721,7 +736,8 @@ def load_registry(api, repo, trust, arg):
                 if num in entries and entries[num] != {"key": key, "kind": kind}:
                     problems.append(f"登錄裡 #{num} 有兩筆不同的內容")
                 entries.setdefault(num, {"key": key, "kind": kind})
-            elif fenced or line.strip().startswith("- "):
+            elif line.strip():
+                # 標頭以外只能有「- 案件 #… key=… kind=…」；其他任何非空白行都列成問題（打錯不能靜默漏登錄；t10b 驗證建議 3）
                 problems.append(f"登錄留言 {n.get('id')} 有看不懂或沒有解析的行：{clean(line, 60)!r}")
     return rid, entries, problems
 
