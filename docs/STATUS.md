@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 15:34 +0800（C0）
+最後更新：2026-11-14 15:35 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -102,6 +102,14 @@
 
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
+
+> **目前（2026-11-14 下午）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
+> 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**進行中**。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
+> 2. **D-046 BIOS 的準備**（只調查與設計，實作等 C1 的 Jetson 介面）：調查代理（sonnet、medium）**進行中**（暫存 `$AGENT_TMP/dumpling-tmp-c2-d046/`）。每個來源要列出新版本來源、官方雜湊（signed／same-origin／TOFU），以及登入、EULA 等限制；有限制的只標「需人工」。草案送 C0。
+> 3. **5674 對照表 PR**：等使用者確認後插隊做。
+>
+> **需人工（C0 會轉給使用者）**：(a) INTEL-SA-01280／01372 的版本值要用瀏覽器直接對照 Intel 頁面，才能把出處改成 `direct`；(b) 規則表 7 筆規則從 preliminary 改成 confirmed，要負責單位逐筆確認（步驟見 `docs/notes/c2-firmware-advisory.md` 的「確認規則的步驟」）。
+>
 
 > **現況（2026-11-13，第二台 WSL2 重開後）**：C2 已在第二台接手（D-045）。worktree `$AGENT_TMP/dumpling-wt-c2-amd`（wp3/amd-psp，從 origin ebac3e9 重建）。AMD 三個公開樣本（B550M 3404、B650M 1807、ASRock PG4 3.40）已在第二台重新下載並核對 sha256 OK，放 `$PUBLIC_IMAGES/bios/`；main 的 Protectli、NUC11、OVMF、vbios、供應商 SBOM，以及 csme-new 的 NovaCustom V540TU 也都用 firmware-fetch 下載核對 OK（放 `$PUBLIC_IMAGES/<bios|vbios|sbom>/<名稱>/`）。代理上限照 D-048（每對話 3 個：2 寫＋1 驗；整台 10；負載 >12 或可用記憶體 <4 GB 不開）。
 >
