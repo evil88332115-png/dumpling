@@ -585,6 +585,8 @@ def load_plan(path, want_mode=None):
         bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
     # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）；
     # Issue 用 dumpling-support 標記與 support-period 標籤（不是監控 Issue）
+    if "demo" in plan and not isinstance(plan["demo"], bool):
+        bad("demo")
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
     if plan.get("stateless"):
@@ -768,7 +770,8 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
             api.edit_issue(repo, cur["number"], body=state_body, state="open", was=cur.get("state"))
             sres = {"result": "updated", "issue": cur["number"]}
         else:
-            nl = [state_label(mode)] + (["drill"] if mode == "drill" else [])
+            # 公開 repo（plan 的 demo）：狀態 Issue 也加 demo 標籤；標題與內文格式不變（read-state 靠 watch-state 標籤與第一行標記找）
+            nl = [state_label(mode)] + (["drill"] if mode == "drill" else []) + (["demo"] if plan.get("demo") is True else [])
             labels.ensure(nl)
             d = api.create_issue(repo, f"dumpling-watch 狀態（{mode}）", state_body, nl)
             sres = {"result": "created", "issue": d["number"]}

@@ -986,6 +986,8 @@ def run(a, kernel_runner=None):
     plan = {"schema": "dumpling-watch-plan/1", "mode": a.mode, "generated_at": utc(now), "run_url": a.run_url,
             "state_base": None if sbase.get("issue") is None else {k: sbase.get(k) for k in ("issue", "updated_at", "body_sha256")},
             "state": clean, "actions": actions, "status": status, "detail": detail}
+    if a.demo:
+        plan["demo"] = True        # 公開 repo（D-040）：狀態 Issue 建立時也加 demo 標籤（標題與內文格式不變；C0 決定，2026-11-14）
     report = render_report(a.mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep)
     rules = publiccheck.load_rules()
     probs = publiccheck.check_text(json.dumps(clean, ensure_ascii=False, indent=0), rules) + \

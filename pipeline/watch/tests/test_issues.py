@@ -198,6 +198,44 @@ class TestNullState(Base):
         self.assertEqual(self.apply(path, "--mode", "real")[0], 1)
 
 
+class TestStateDemoLabel(Base):
+    """公開 repo（--demo）：狀態 Issue 建立時加 demo 標籤（C0 決定）；多了標籤，read-state 照樣找得到、解得開。"""
+
+    def plan_demo(self, demo):
+        p = {"schema": issues.PLAN_SCHEMA, "mode": "real", "generated_at": "2026-01-02T00:00:00Z", "state_base": None,
+             "state": {"schema": 1, "matches": {"k": {"x": 1}}, "runs": []}, "actions": [], "status": "OK", "detail": ""}
+        if demo is not None:
+            p["demo"] = demo
+        path = os.path.join(self.dir, "plan.json")
+        with open(path, "w") as f:
+            json.dump(p, f)
+        return path
+
+    def labels_of(self, i):
+        return {l if isinstance(l, str) else l.get("name") for l in i.get("labels", [])}
+
+    def test_state_issue_gets_demo_label_and_read_state_still_finds_it(self):
+        rc, out = self.apply(self.plan_demo(True), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        st = [i for i in self.gh.issues.values() if "watch-state" in self.labels_of(i)]
+        self.assertEqual(len(st), 1)
+        self.assertEqual(self.labels_of(st[0]), {"watch-state", "demo"})
+        self.assertEqual(st[0]["title"], "dumpling-watch 狀態（real）")            # 標題不變
+        out_dir = os.path.join(self.dir, "state")
+        rc, out = run(["read-state", "--repo", REPO, "--mode", "real", "--out", out_dir], self.gh)
+        self.assertEqual(rc, 0, out)
+        with open(os.path.join(out_dir, "state.json")) as f:
+            self.assertEqual(json.load(f)["matches"], {"k": {"x": 1}})
+
+    def test_no_demo_no_label_and_bad_value_rejected(self):
+        rc, out = self.apply(self.plan_demo(None), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        st = [i for i in self.gh.issues.values() if "watch-state" in self.labels_of(i)]
+        self.assertNotIn("demo", self.labels_of(st[0]))
+        with self.assertRaises(issues.Fail):
+            issues.load_plan(self.plan_demo("yes"))
+
+
 class TestMarker(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(issues.parse_marker(mark(K1, "drill")), (K1, "drill"))

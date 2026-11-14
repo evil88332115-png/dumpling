@@ -216,6 +216,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 第一次建立基準前，先看那次 dry_run 的報告有沒有 ATTENTION（例如核心 CVE 用了 48 小時內的舊資料頂替）：基準不會擋它，但之後補進的那段時間的命中會被當成新的。
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
+- 狀態 Issue（`watch-state`）不是通知：標題與內文格式不變，但公開 repo（`--demo`）建立時也加 `demo` 標籤（C0 決定，2026-11-14；第一次真實基準的 #99 是手動補的）。read-state 靠 `watch-state` 標籤與第一行標記找，多了標籤不影響。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 
