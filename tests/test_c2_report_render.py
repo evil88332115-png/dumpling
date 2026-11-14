@@ -269,6 +269,11 @@ class VbiosReportRenderTests(RenderCase):
                         "ftp://a.b/c", "1.https://evil.example"):
                 out = xf.md_esc(raw)
                 self.check(out, None, label="fallback " + repr(raw))
+            # 退路的 at 處理：提及形式（沒有 `:`、`.`，退路的連結處理擋不到，只靠 at 後面的零寬空白）
+            for raw in ("@everyone", "@org/team", "x @user y", "(@user)"):
+                out = xf.md_esc(raw)
+                self.assertIn("@\u200b", out, repr(raw))
+                self.check(out, None, label="fallback mention " + repr(raw))
         finally:
             xf._MDSAFE_PATH = saved_path
             xf._MDSAFE.clear()
