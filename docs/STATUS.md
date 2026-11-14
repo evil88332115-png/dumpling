@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 10:32 +0800（C3）
+最後更新：2026-11-14 10:33 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -20,7 +20,7 @@
   1. （完成）M2 #40 合併（cc7d101）
   2. （完成）M2 正式驗收：release run 43531550072、43531550316 綠，C1 核對通過；文件批次 #41 已合併；C2／C3／C4 已通知
   3. （完成）#39、#48 已合併；私有檔驗證與複核由 C0 用使用者提供的 3 份樣本完成（暫存在 C0 的 scratchpad，待使用者決定刪除）
-  4. 監控 real Issue：基準日第 1 步完成（run 43545897997：feeds 全 OK、4 份 SBOM、KEV 56、廠商 150、would 開 0、狀態 12.9%；C0 核對 artifact）→ C0 同意第 2 步建基準 → 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
+  4. 監控 real Issue：基準日第 1 步完成（run 43545897997：feeds 全 OK、4 份 SBOM、KEV 56、廠商 150、would 開 0、狀態 12.9%；C0 核對 artifact）→ **第 2 步基準已建立**（run 43546430781，狀態 Issue #99，4d015d7＋兩個正式 Release，KEV 56；沒有開出其他 Issue；支援期限閘門生效；#99 補 demo 標籤＋小 PR 讓公開版狀態 Issue 自動加 demo）→ 第 3 步排程 dry_run 一天（明天 01:17Z）→ 手動 baseline → 排程 dry_run 一天 → C3 回報會開哪些 Issue → C0 才設 repo 變數 `WATCH_REAL_ISSUES=on`
   5. M7：照 D-056 拆成 M7a～M7f（C1），每個 PR C0 派獨立驗證；M7c～M7e 改 Jetson 標準答案前要先經 C0 同意
   6. M7 之後：T-14（C1：scan.sh 加選項改連既有 DT，不傳照舊臨時 DT；做好後 C3 改 GitLab 範本）；D-046 新版本加入逐步自動化（先 Jetson／C1，再 C4 其他平台、C2 BIOS、C3 監控偵測；附手動步驟手冊）
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
