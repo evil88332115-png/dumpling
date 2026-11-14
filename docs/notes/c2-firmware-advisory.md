@@ -331,6 +331,7 @@ C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
   `independent:nvd`＝除了讀官方頁面，版本門檻另經 NVD 的 CPE 版本範圍核對相符。一條規則有幾個出處時取最弱的。報告的「規則表內容」表有一欄「版本值核對」，`summary-tool` 的規則用到建議時（affected、not-affected 的說明）寫「版本值未獨立核對，請負責單位對照原頁面」，SBOM 元件加 `dumpling:advisory-rule-verification`。
 - `match[]`：條件，每個有 `component`，必須在固定清單內（`amd_agesa`、`amd_psp`、`amd_microcode`、`intel_csme`、`intel_fsp`、`ami_core`、`bios_image`），`amd_*` 只能在 AMD 公告、`intel_*` 只能在 Intel 公告、`ami_core` 只能在 AMI 公告。
   版本條件依元件分開（見下）。同一條規則的幾個條件是「或」：不同產品線各列一條。
+- `segment`（條件，可選）：條件取自公告表格的哪一個分區，只收 `client`（客戶端桌上型、行動）、`datacenter`（資料中心、伺服器）、`embedded`（嵌入式），其他值整張表拒收。對應方式：AMD-SB 的表格本身就分「Client／Desktop」「Data Center」「Embedded」等區，照條件所在的那一區填；Intel 的表依產品列、沒有分區，不填。目前的值：AGESA 的條件是 `client`（客戶端桌上型表），AMD 微碼的條件是 `datacenter`（資料中心表），Intel 的條件不填。**判定與提示只讀這個欄位，不讀 `note` 的文字**：`datacenter` 的條件判出 affected／not-affected 時，basis 加固定提示句（這個項目對應的 CPU 不一定能用在這塊主機板，BIOS 的微碼容器常帶好幾代 CPU 的 patch，所以不代表整塊板子受影響，請負責單位確認；AMD 微碼條件另寫明條件 note 裡的 CPUID 是 linux-firmware 對照表的對應，不是從映像讀出來的），報告的「建議 affected」一節也另列一段說明與受影響的元件。兩份 AM4 公開樣本（B550M、ASRock）的 `0x8012` 都是這種情況，所以在 AM4 上是常態。
 - `review`：`state` 是 `preliminary`（初審）或 `confirmed`（已確認）；`preliminary_by`／`confirmed_by` 只寫**角色**（驗證會拒收 `@`、連結、Markdown 符號）；`confirmed` 必須有 `confirmed_by`、`confirmed_at`（不早於 `preliminary_at`），`preliminary` 不能有。
 - `orderings[]`：AGESA 的版本順序（見下）。
 - 每一層都**只收列出的欄位**，不認得的欄位（含打錯字）整張表拒收；JSON 重複的鍵、`NaN`、超過 1 MiB、符號連結都拒收；自由文字欄位（標題、備註、角色）不能有控制字元、雙向覆寫與零寬字元。

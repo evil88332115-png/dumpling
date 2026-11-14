@@ -400,6 +400,10 @@ def test_load_failure_modes(tmp_path):
     with pytest.raises(fr.TableError) as e:
         fr.load(p, expected_sha256="0" * 64)
     assert e.value.reason == "table-sha-mismatch"
+    last = "0" if sha[-1] != "0" else "1"                                                       # 只差最後一個字元也要不符
+    with pytest.raises(fr.TableError) as e:
+        fr.load(p, expected_sha256=sha[:-1] + last)
+    assert e.value.reason == "table-sha-mismatch"
     for bad in (tmp_path / "missing.json", tmp_path):
         with pytest.raises(fr.TableError) as e:
             fr.load(bad, expected_sha256=sha)
@@ -1209,6 +1213,62 @@ def test_shipped_table_compares_whole_version_lines_only(version):
     r = fr.evaluate(t, "intel_csme", {"version": version, "family": None, "family_conflict": None, "family_basis": "listed"})
     assert (r["suggestion"], r["rule_ids"]) == ("NOT_ASSESSED", []), (version, r["basis"])
     assert all(x["result"] != "affected" and x["result"] != "not-affected" for x in r["results"]), version
+
+
+@pytest.mark.parametrize("bad", ["server", "Datacenter", "", " client", ["client"], 1, None])
+def test_segment_is_an_enumerated_field(tmp_path, bad):
+    c = {"component": "amd_microcode", "equiv_id": "0x8012", "fixed_in": "0x0800126f", "segment": bad}
+    invalid(tmp_path, doc(rule("AMD-SB-7014", [c])), "segment")
+
+
+def test_segment_values_and_shipped_table_assignment(tmp_path):
+    for v in fr.SEGMENTS:
+        ok(tmp_path, doc(rule("AMD-SB-7014", [{"component": "amd_microcode", "equiv_id": "0x8012", "fixed_in": "0x0800126f", "segment": v}])))
+    assert fr.SEGMENTS == ("client", "datacenter", "embedded")
+    t, err = fr.load_default()
+    seg = {c["component"]: set() for r in t.rules for c in r["match"]}
+    for r in t.rules:
+        for c in r["match"]:
+            seg[c["component"]].add(c.get("segment"))
+    assert seg["amd_microcode"] == {"datacenter"} and seg["amd_agesa"] == {"client"} and seg["intel_csme"] == {None}
+
+
+def test_datacenter_caveat_comes_from_the_field_not_the_note(tmp_path):
+    """segment 是 datacenter 時 basis 加固定提示句（含「CPUID 是 linux-firmware 對照表的對應，不是從映像讀出來的」）；判定只讀欄位，note 寫什麼都不影響。"""
+    t, err = fr.load_default()
+    r = fr.evaluate(t, "amd_microcode", uc_comp("0x8012", "0x08001250"))
+    assert r["suggestion"] == "affected" and fr.DATACENTER_CAVEAT in r["basis"] and fr.MAPPED_CPUID_CAVEAT in r["basis"]
+    assert all(x.get("segment") == "datacenter" for x in r["results"])
+    base = {"component": "amd_microcode", "equiv_id": "0x8012", "fixed_in": "0x0800126f"}
+    plain = fr.evaluate(build(tmp_path, doc(rule("AMD-SB-7014", [{**base, "note": "Data Center table, Naples row"}])), "p.json"), "amd_microcode", uc_comp("0x8012", "0x08001250"))
+    assert plain["suggestion"] == "affected" and fr.DATACENTER_CAVEAT not in plain["basis"]                  # note 寫資料中心、沒有 segment：不加
+    cl = fr.evaluate(build(tmp_path, doc(rule("AMD-SB-7014", [{**base, "segment": "client"}])), "c.json"), "amd_microcode", uc_comp("0x8012", "0x08001250"))
+    assert cl["suggestion"] == "affected" and fr.DATACENTER_CAVEAT not in cl["basis"]
+    out = fr.evaluate(t, "amd_microcode", uc_comp("0x8082", "0x0800820d"))
+    assert fr.DATACENTER_CAVEAT not in out["basis"]                                             # 沒有比到的條件不加
+
+
+def test_microcode_without_equivalence_id_matches_no_rule():
+    t, err = fr.load_default()
+    for equiv in (None, "", "0x"):
+        r = fr.evaluate(t, "amd_microcode", {"equiv_id": equiv, "cpuids": None, "patch_id": "0x08001250"})
+        assert r["suggestion"] == "NOT_ASSESSED" and r["rule_ids"] == [] and not any(x["result"] in ("affected", "not-affected") for x in r["results"]), equiv
+
+
+def test_report_explains_datacenter_affected_suggestions(tmp_path):
+    inv = {"bios": [], "rules_advisory": None}
+    t, err = fr.load_default()
+    r = fr.evaluate(t, "amd_microcode", uc_comp("0x8012", "0x08001250"))
+    item = {"image": "B550M.CAP", "component": "AMD microcode equiv 0x8012", "kind": "amd_microcode", "suggestion": "affected", "reason": None,
+            "rule_ids": r["rule_ids"], "state": r["state"], "related": [], "evidence": [], "verification": r["verification"],
+            "datacenter": any(x.get("segment") == "datacenter" and x["result"] == "affected" for x in r["results"])}
+    assert item["datacenter"]
+    inv["rules_advisory"] = {"status": "OK", "components": 1, "counts": {"affected": 1}, "items": [item], "errors": 0,
+                             "table": {"schema": fr.SCHEMA, "updated": t.updated, "rules": len(t.rules), "preliminary": 11, "confirmed": 0,
+                                       "sha256": t.sha256, "ids": [], "rules_info": []}}
+    md = "\n".join(xf.rules_markdown(inv))
+    sec = md.split("### 建議 affected（待人審）")[1].split("\n### ")[0]
+    assert "資料中心（伺服器）表" in sec and "不代表整塊板子受影響" in sec and "不是從映像讀出來的" in sec and "B550M.CAP" in sec
 
 
 def test_no_rule_for_psp_and_fsp_stays_not_assessed_in_basis_sbom_and_report():
