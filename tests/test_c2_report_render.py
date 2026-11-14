@@ -367,7 +367,7 @@ class RulesReportRenderTests(RenderCase):
             affected["review"] = tr.review(preliminary_by="產品負責 角色")
             both = tr.agesa_rule(fixed="1.2.0.B", rid="AMD-SB-7005")
             both["title"] = "x" + self.EVIL
-            ami = tr.rule("AMI-SA-2026001", [{"component": "ami_core", "product": self.EVIL, "fixed_in": self.EVIL}], "AMI", url=tr.AMI_PDF)
+            ami = tr.rule("AMI-SA-2026001", [{"component": "ami_core", "product": self.EVIL, "fixed_in": "AptioV_5.044"}], "AMI", url=tr.AMI_PDF)
             states = {"affected+not-affected": tr.build(tmp, tr.doc(affected, both), "a.json"),
                       "confirmed": tr.build(tmp, tr.doc(tr.agesa_rule("confirmed")), "c.json"),
                       "ami": tr.build(tmp, tr.doc(ami), "m.json"),

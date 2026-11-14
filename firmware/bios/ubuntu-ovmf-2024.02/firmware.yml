@@ -35,3 +35,6 @@ license:
 notes: |
   成品是 deb 內的 OVMF_CODE_4M.fd／.secboot.fd；.dsc、.orig.tar.xz、.debian.tar.xz 是對應原始碼（role: source）。
   Launchpad 網址會 303 轉到 launchpadlibrarian.net，檔案內容固定。
+expected:
+  # AMI 核心版本：OVMF（edk2）不是 AMI 韌體，沒有 Firmware ID 紀錄；只鎖定「沒讀到」。
+  ami_core: {status: not-found}
