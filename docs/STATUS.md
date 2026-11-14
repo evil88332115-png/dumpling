@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-14 11:17 +0800（C1）
+最後更新：2026-11-14 11:17 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -12,9 +12,9 @@
 - 代理：無（#98 驗證完成：通過，應修 0；合併前小修 3 項）
 - CI：C0 無。C1 的兩個 Jetson release run 與 C3／C4 的 dev run 由各自的 STATUS 記錄
 - 各對話現況（細節看各節）：
-  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）M7b-3 #95 已合併。**M7b-4 #98**（dde971d，已併 main）驗收 run 43547239404、43547241948（已有正式 Release 的 tag 上建草稿可能 422 失敗，不影響正式 Release；失敗改用 run artifact 核對），C0 驗證通過（high）；合併前小修：scan.sh case 加 FAIL、測試 sys.path、version-state 行為測試。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
+  - C1（第二台）：M7a #58、M7a2 #65、M7b 第一項 #73 已合併。M7b-2 #92 已合併；M7b-4 在 wp1/m7b4 進行中（Q4 version_state、#58 三項、#20 B-disk-partitions 已 commit；D-054／C-kernel-boot 代理做中；對 WP7 的影響已轉 C4）；**M7b-3 PR #95**（7587d8f：run-params.json、分層重跑沿用原掃描列、status.tsv 重複列取最嚴重）M7b-3 #95 已合併。**M7b-4 #98**（dde971d，已併 main）驗收 run 43547239404、43547241948（已有正式 Release 的 tag 上建草稿可能 422 失敗，不影響正式 Release；失敗改用 run artifact 核對），C0 驗證通過（high）；小修已在 0bb1766（C0 看過），等驗收核對＋CI 後合併。M7b 其餘拆成 M7b-2（判定不讀說明文字：A-source／C-dt-feeds／C-mirror-freshness＋report_diff 7 處／kernel-boot.json）→ M7b-3（刷機包 run-params.json、分層重跑帶原掃描列、status.tsv 重複列統一取最嚴重）→ M7b-4（D-054 bootloader GAP、C-kernel-boot GAP／ATTENTION、product_version_check GAP 走 scan 結束碼（platform_scan 共用函式）、#58 三項、a.run[0]、#20 步驟改名＋相容）。C0 回覆 Q1–Q5 全同意；C4 平台會變 GAP，合併前 C0 轉告 C4。正式 tag 等使用者
   - C2（第二台）：#96 已合併。D-043 (2) 規則表（wp3/fw-advisory-rules d7f4444）併 main 後開 PR，C0 派 high 驗證
-  - C3（第二台）：#93 已合併，**GitLab 線暫停**（等內部環境＋GITLAB-PORT 內部驗證清單）。主線：基準日第 3 步（明天 01:17Z 排程 dry_run 一天 → 回報 would_open → C0 設 WATCH_REAL_ISSUES=on）；小 PR：match.py md_text 改用和 C2 md_safe 同一套規則
+  - C3（第二台）：#93 已合併，**GitLab 線暫停**（等內部環境＋GITLAB-PORT 內部驗證清單）。**#101**（md_text 改用 md_safe）C0 要求補：# 後面接數字插零寬空白（反斜線跳脫擋不住 GitHub 的 Issue 參照）。主線：基準日第 3 步（明天 01:17Z 排程 dry_run 一天 → 回報 would_open → C0 設 WATCH_REAL_ISSUES=on）；小 PR：match.py md_text 改用和 C2 md_safe 同一套規則
   - C4（第二台）：**M6 #97** C0 驗證通過（high；報告已貼）；合併前修：示範專案和 new-project 輸出一致（markets EU-ALL、ai-nas os 區塊、vex-rules 空規則）、沒官方雜湊的檔標 TOFU、rpi cves_total 拿掉上限、D-049 測試；改好不用重跑
 - 下一步（新 C0 接手後）：
   1. （完成）M2 #40 合併（cc7d101）
