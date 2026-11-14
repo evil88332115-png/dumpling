@@ -143,6 +143,7 @@ import stat
 import struct
 import sys
 import time
+import unicodedata
 import uuid
 import zipfile
 import zlib
@@ -2469,13 +2470,40 @@ def status_of(inv):
     return ("ATTENTION" if att else "OK"), detail + "".join("；" + x for x in att)
 
 
+_MDSAFE_PATH = Path(__file__).resolve().parent.parent.parent / "pipeline" / "lib" / "firmware_mdsafe.py"
+_MDSAFE = []
+
+
+def _mdsafe_funcs():
+    """(defang_at, defang_links)：與 pipeline/lib/firmware_mdsafe.py 同一份規則（@ 提及與 email 自動連結、裸網址、mailto／xmpp）：載入同 repo 的那個檔案。
+    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，每個 `:` 與 `.` 前後也插零寬空白（網址、mailto、xmpp、`www.` 前綴都接不起來，不會變成連結；輸出會多零寬空白，但不會漏擋）。"""
+    if not _MDSAFE:
+        try:
+            spec = importlib.util.spec_from_file_location("firmware_mdsafe_for_x86", _MDSAFE_PATH)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _MDSAFE.append((mod.defang_at, mod.defang_links))
+        except (OSError, ImportError, AttributeError, SyntaxError):
+            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), lambda t: re.sub(r"([:.])", "\u200b\\1\u200b", t)))
+    return _MDSAFE[0]
+
+
+def _plain(x):
+    """C 類字元（控制、格式如 U+202E 與零寬、單獨代理、私用、未指派）與 Zl／Zp 換成空白，連續空白壓成一個（firmware_mdsafe.plain 同一份規則；
+    單獨代理字元留著會讓寫檔時 UTF-8 編碼失敗）。"""
+    s = "".join(" " if (unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")) else ch for ch in str(x))
+    return " ".join(s.split())
+
+
 def md_esc(x):
-    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構。"""
-    s = " ".join(str(x).split())
-    for a, b in (("&", "&amp;"), ("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("*", "\\*"), ("_", "\\_"), ("[", "\\["), ("]", "\\]"),
-                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#")):
+    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構（含 @ 提及、email 與裸網址的自動連結）。
+    與 firmware_mdsafe.md_safe 的差別：不截短；`<`、`>` 用 &lt;、&gt;；`!`、`$`、`(`、`)` 不跳脫（報告裡的 `$FPT`、`(…)` 是固定寫法，沒有 `[` 就不會變成連結或圖片）。"""
+    at, links = _mdsafe_funcs()
+    s = at(_plain(x).replace("&", "&amp;"))        # @ 的判斷看原文（跳脫之前），和 firmware_mdsafe.md_safe 的順序相同
+    for a, b in (("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("*", "\\*"), ("_", "\\_"), ("[", "\\["), ("]", "\\]"),
+                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#"), ("~", "\\~")):
         s = s.replace(a, b)
-    return s
+    return links(s)
 
 
 ME_STATUS_TEXT = {"found": "found（找到）", "no-me-region": "no-me-region（沒有 ME 區域）", "unknown": "unknown（有 ME 區域，版本拿不到）"}
@@ -2536,8 +2564,11 @@ def nvidia_vbios_advisory_markdown(inv):
          "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
     if va["status"] == "OK":
         s = va["source"]
-        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] and not s.get("awaiting_confirmation")
-               else "**表尚未經負責人確認**（" + ("reviewed_until 為 null" if not s["reviewed_until"] else "還有公告只有初審意見") + "，所有 vBIOS 都是 NOT_ASSESSED）")
+        # 判斷與 nvidia_vbios_advisory.Table.confirmed 相同：reviewed_until 有值、沒有只有初審意見的公告、沒有未審核的列（三個條件缺一個都是尚未確認）
+        why = ([] if s["reviewed_until"] else ["reviewed_until 為 null"]) + (["還有公告只有初審意見"] if s.get("awaiting_confirmation") else []) \
+            + ([f"還有 {s['unreviewed_rows']} 筆未審核的列"] if s["unreviewed_rows"] else [])
+        who = (f"審核到 {e(s['reviewed_until'])}" if not why
+               else "**表尚未經負責人確認**（" + "、".join(why) + "，所有 vBIOS 都是 NOT_ASSESSED）")
         L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
                  f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
                  + (f"已確認無法對應到 option ROM 版本與裝置的公告：{e('、'.join(s['not_applicable']))}（技術理由見對照表）；" if s["not_applicable"] else "")

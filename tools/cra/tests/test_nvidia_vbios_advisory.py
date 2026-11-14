@@ -240,6 +240,38 @@ def test_table_load_failures_are_table_errors(tmp_path):
     assert "larger than limit" in ei.value.detail
 
 
+class _PassC1:
+    """C1 validate_table 的替身：一律放行，用來證明 validate_ids／validate_mirror 這兩道第二防線自己會擋。"""
+    class InputError(Exception):
+        pass
+
+    @staticmethod
+    def validate_table(doc):
+        return None
+
+
+@pytest.mark.parametrize("over, msg", [
+    ({"bulletins": [{"id": "9001\n", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"bulletins": [{"id": "abc", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"bulletins": [{"id": "123456789", "cves": {}}]}, "bulletin id must be 1 to 8 digits"),
+    ({"not_applicable": [{"bulletin": "9x"}]}, "bulletin id must be 1 to 8 digits"),
+    ({"rows": [row(bulletin="9001 ", vbios_fixed_in="94.04.00.00.01")]}, "bulletin id must be 1 to 8 digits"),
+    ({"mirror": "x"}, "mirror must be an object"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-11-10"}}, "mirror.fetched_utc is missing"),
+    ({"mirror": {"commit": "A" * 40, "commit_date": "2026-11-10", "fetched_utc": FETCHED}}, "mirror.commit must be 40"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-11-10", "fetched_utc": "2026-11-13T16:52:04"}}, "mirror.fetched_utc must be"),
+    ({"mirror": {"commit": COMMIT, "commit_date": "2026-13-40", "fetched_utc": FETCHED}}, "mirror.commit_date must be"),
+])
+def test_second_line_checks_reject_without_c1(tmp_path, monkeypatch, over, msg):
+    monkeypatch.setattr(nva, "_c1", lambda: _PassC1)
+    nva.load(write(tmp_path, doc(), "ok.json"))                                                 # 替身下好的表照常載入
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d.update(over)
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, d))
+    assert ei.value.reason == "table-invalid" and msg in ei.value.detail, ei.value.detail
+
+
 @pytest.mark.parametrize("bad", [
     {"pci_vendor": "8086"}, {"pci_vendor": None}, {"pci_devices": []}, {"pci_devices": "2489"}, {"pci_devices": ["2489", "XYZ1"]},
     {"pci_devices": ["2489", "24AB"]}, {"pci_devices": [2489]},
@@ -564,6 +596,30 @@ def test_naive_now_and_naive_fetched_do_not_raise(tmp_path):
         assert m(ei.value, vb())["match"] == "NOT_ASSESSED"
 
 
+def test_mirror_with_keys_missing_is_invalid_and_without_mirror_is_stale(tmp_path):
+    """mirror 有寫：commit、commit_date、fetched_utc 三個都要有（缺一個、null 都是 table-invalid）；整個沒寫或 null 才是 table-stale。"""
+    for key in ("commit", "commit_date", "fetched_utc"):                                                # mirror 有寫：三個鍵都要有，缺一個（含 null）是 table-invalid
+        for how in ("absent", "null"):
+            d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+            if how == "absent":
+                del d["mirror"][key]
+            else:
+                d["mirror"][key] = None
+            with pytest.raises(nva.TableError) as ei:
+                nva.load(write(tmp_path, d, "k.json"))
+            assert ei.value.reason == "table-invalid" and f"mirror.{key}" in ei.value.detail, (key, how)
+    for bad in ("x", 5, [], "", False):                                                                # mirror 不是物件
+        d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+        d["mirror"] = bad
+        with pytest.raises(nva.TableError) as ei:
+            nva.load(write(tmp_path, d, "str.json"))
+        assert ei.value.reason == "table-invalid"
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"), mirror=False)                                         # 整個沒寫：日期不明，table-stale
+    assert m(nva.load(write(tmp_path, d, "nomirror.json")), vb())["reason"] == "table-stale"
+    d["mirror"] = None                                                                                  # null：同樣是整個沒寫
+    assert m(nva.load(write(tmp_path, d, "nullmirror.json")), vb())["reason"] == "table-stale"
+
+
 def test_note_texts_for_stale_gap_and_fixed(tmp_path):
     a = row(cve="CVE-2099-0001", vbios_affected_below="94.04.6A.00.01", vbios_fixed_in="94.04.6A.00.01")
     b = row(bulletin="9002", cve="CVE-2099-0002", vbios_affected_below="94.04.50.00.01", vbios_fixed_in="94.04.50.00.01")
@@ -728,3 +784,170 @@ def test_report_rows_and_count_line_for_affected_and_fixed(tmp_path):
     assert "NOT_ASSESSED（資料庫沒有資料" not in sec.split("| PCI device")[1].split("- `")[0]
     inv2, _, md2 = sbom(tmp_path, data, table(tmp_path, a, b), now=NOW)
     assert inv2["vbios_advisory"]["counts"] == {"affected": 1, "fixed": 1}
+
+
+# ---------- 公告編號格式、mirror 日期格式、報告的確認狀態、md_esc 的 @ ----------
+
+@pytest.mark.parametrize("where", ["bulletins", "rows", "not_applicable", "unreviewed-row"])
+@pytest.mark.parametrize("bad", ["@everyone", "9001@x", "&commat;", "[x](http://e)", "<b>", "", "12345678 ", "123456789", "9a", "９００１", "-1", "9001\n", " 9001"])
+def test_bulletin_id_must_be_digits(tmp_path, where, bad):
+    """公告編號會寫進報告與 SBOM：只收 1～8 位 ASCII 數字（與 C1 nvidia_bulletins.py 的 BULLETIN_ID_RE 相同），任何位置不合都是 table-invalid。"""
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    if where == "bulletins":
+        d["bulletins"][0]["id"] = bad
+        d["rows"][0]["bulletin"] = bad                                              # C1 的 validate_table 要求 rows 的公告在 bulletins 裡
+    elif where == "rows":
+        d["bulletins"].append({"id": bad, "cves": {}})
+        d["rows"][0]["bulletin"] = bad
+    elif where == "not_applicable":
+        d["not_applicable"] = [{"bulletin": bad, "reviewed": False}]
+    else:
+        d["bulletins"].append({"id": bad, "cves": {}})
+        d["rows"].append(row(bad, "CVE-2099-0009", vbios_fixed_in="94.09.00.00.01", reviewed=False, reviewed_by=None, reviewed_at=None))
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, d))
+    assert ei.value.reason == "table-invalid" and "bulletin" in ei.value.detail
+    assert nva.match_vbios(ei.value, vb(), now=NOW)["reason"] == "table-invalid"
+
+
+@pytest.mark.parametrize("good", ["1", "9001", "5674", "12345678", "00123"])
+def test_bulletin_id_boundaries_accepted(tmp_path, good):
+    d = doc(row(good, vbios_fixed_in="94.04.00.00.01"), not_applicable=[{"bulletin": good, "reviewed": False}])
+    assert nva.load(write(tmp_path, d)).rows[0]["bulletin"] == good
+
+
+def test_report_confirmed_state_counts_unreviewed_rows(tmp_path):
+    """「對照表」那一行：reviewed_until 有值、沒有初審意見，但還有未審核的列時也是「尚未經負責人確認」，並寫出未審核的筆數。"""
+    unrev = row("9002", "CVE-2099-0002", reviewed=False, reviewed_by=None, reviewed_at=None, vbios_fixed_in="94.09.00.00.01")
+    rom = vbios_rom(0x2489, "94.04.5E.00.92")
+    for rows, extra, want_confirmed, want in (
+            ((row(vbios_fixed_in="94.04.00.00.01"),), {}, True, None),
+            ((row(vbios_fixed_in="94.04.00.00.01"), unrev), {}, False, ["還有 1 筆未審核的列"]),
+            ((row(vbios_fixed_in="94.04.00.00.01"), unrev, dict(unrev, bulletin="9003", cve="CVE-2099-0003")), {}, False, ["還有 2 筆未審核的列"]),
+            ((row(vbios_fixed_in="94.04.00.00.01"),), {"reviewed_until": None}, False, ["reviewed_until 為 null"]),
+            ((row(vbios_fixed_in="94.04.00.00.01"), unrev), {"reviewed_until": None}, False, ["reviewed_until 為 null", "還有 1 筆未審核的列"]),
+    ):
+        d = doc(*rows, **extra)
+        t = nva.load(write(tmp_path, d))
+        assert t.confirmed is want_confirmed
+        inv, comps, md = sbom(tmp_path, rom, t)
+        line = [l for l in md.splitlines() if l.startswith("- 對照表：")][0]
+        assert inv["vbios_advisory"]["vbios"] == 1
+        if want_confirmed:
+            assert "審核到 2025-09-02" in line and "尚未經負責人確認" not in line
+        else:
+            assert "審核到" not in line and "**表尚未經負責人確認**" in line and "所有 vBIOS 都是 NOT_ASSESSED" in line
+            for w in want:
+                assert w in line, (w, line)
+            assert inv["vbios"][0]["advisory"]["match"] == "NOT_ASSESSED"          # 報告與比對結果一致
+        assert "未審核 %d 筆" % len(t.unreviewed) in line
+
+
+def test_report_awaiting_and_unreviewed_reasons_together(tmp_path):
+    na = {"bulletin": "5674", "reason": "初審", "reviewed": False, "reviewed_by": None, "reviewed_at": None}
+    unrev = row("9002", "CVE-2099-0002", reviewed=False, reviewed_by=None, reviewed_at=None, vbios_fixed_in="94.09.00.00.01")
+    t = nva.load(write(tmp_path, doc(row(vbios_fixed_in="94.04.00.00.01"), unrev, not_applicable=[na])))
+    inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), t)
+    line = [l for l in md.splitlines() if l.startswith("- 對照表：")][0]
+    assert "還有公告只有初審意見、還有 1 筆未審核的列" in line
+
+
+def test_md_esc_defangs_mentions_email_and_bare_urls():
+    z = "\u200b"
+    e = xf.md_esc
+    assert e("@user") == "@" + z + "user" and e("x @org/team") == "x @" + z + "org/team" and e("＠u") == "＠" + z + "u"
+    assert e("a@example.com") == "a" + z + "@" + z + "example.com" and e("mailto:a@example.com") == "mailto\\:" + z + "a" + z + "@" + z + "example.com"
+    assert e("pkg:generic/zlib@1.2.11") == "pkg:generic/zlib@1.2.11" and e("name@host") == "name@host"
+    assert e("&commat;u") == "&amp;commat;u"
+    assert e("https://evil.example") == "https\\://evil.example" and e("www.evil.example") == "www\\.evil.example"
+    assert e("a_b@example.org") == "a\\_b" + z + "@" + z + "example.org"                       # 跳脫前看原文：_ 不會讓網域形式漏掉
+    assert e("a@b_c.com") == "a" + z + "@" + z + "b\\_c.com"
+    # 原有的跳脫不變
+    assert e("[x](y) <b> a|b `c` *d* #e") == "\\[x\\](y) &lt;b&gt; a\\|b \\`c\\` \\*d\\* \\#e"
+    assert e("a\n  b") == "a b" and e(5) == "5"
+
+
+def test_md_esc_uses_the_same_at_rules_as_firmware_mdsafe():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("mdsafe_for_parity", REPO / "pipeline" / "lib" / "firmware_mdsafe.py")
+    ms = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ms)
+    for raw in ("@u", "x@y.test", "pkg:generic/a@1.0", "a@b.c@d", "x @a.b _@u", "a＠b", "name@host", "mailto:a@b.test", "xmpp:a/b@c.test"):
+        assert xf.md_esc(raw).replace("\\", "") == ms.defang_links(ms.defang_at(" ".join(raw.split()))).replace("\\", ""), raw
+
+
+@pytest.mark.parametrize("text,ok", [
+    ("2026-11-13T16:52:04Z", True), ("2026-11-13T16:52:04+00:00", True), ("2026-11-13T16:52:04-05:30", True),
+    ("2026-11-13T16:52:04.123Z", True), ("2026-11-13T16:52:04.123456+08:00", True),
+    ("2026-11-13T16:52:04+0000", False),            # Python 3.11 起 fromisoformat 才收的格式
+    ("2026-11-13 16:52:04Z", False), ("2026-11-13 16:52:04+00:00", False),          # 空白分隔
+    ("2026-11-13T16:52Z", False), ("2026-11-13T16Z", False),                        # 沒有秒
+    ("2026-11-13T16:52:04", False), ("2026-11-13", False), ("20261113T165204Z", False),
+    ("2026-11-13T16:52:04.1Z", False), ("2026-11-13T16:52:04.12Z", False), ("2026-11-13T16:52:04.1234Z", False), ("2026-11-13T16:52:04.1234567Z", False),
+    ("2026-11-13T16:52:04+00", False), ("2026-11-13T16:52:04z", False), ("2026-11-13t16:52:04Z", False),
+    ("2026-11-13T16:52:04Z\n", False), (" 2026-11-13T16:52:04Z", False), ("２０２６-11-13T16:52:04Z", False),
+    ("2026-13-13T16:52:04Z", False), ("2026-02-30T16:52:04Z", False), ("2026-11-13T24:00:00Z", False), ("2026-11-13T16:60:04Z", False),
+    ("2026-11-13T16:52:04+99:00", False), ("", False), (None, False), (5, False)])
+def test_parse_utc_accepts_only_the_c1_time_format(text, ok):
+    d = nva._parse_utc(text)
+    assert (d is not None) is ok, text
+    if ok:
+        assert d.tzinfo is not None
+
+
+def test_parse_utc_values():
+    assert nva._parse_utc("2026-11-13T16:52:04Z") == datetime.datetime(2026, 11, 13, 16, 52, 4, tzinfo=datetime.timezone.utc)
+    assert nva._parse_utc("2026-11-13T16:52:04+08:00") == datetime.datetime(2026, 11, 13, 8, 52, 4, tzinfo=datetime.timezone.utc)
+    assert nva._parse_utc("2026-11-13T16:52:04.250Z").microsecond == 250000
+
+
+@pytest.mark.parametrize("key,bad", [("fetched_utc", "2026-11-13T16:52:04+0000"), ("fetched_utc", "2026-11-13 16:52:04Z"), ("fetched_utc", "2026-11-13T16:52Z"),
+                                     ("commit_date", "2026-11-10T13:01:57"), ("commit_date", "2026-13-10"), ("commit_date", "yesterday"), ("commit_date", 7),
+                                     ("commit", "A" * 40), ("commit", "a" * 39), ("commit", "a" * 40 + "\n"), ("commit", 5)])
+def test_mirror_values_must_be_well_formed(tmp_path, key, bad):
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d["mirror"][key] = bad
+    with pytest.raises(nva.TableError) as ei:
+        nva.load(write(tmp_path, d))
+    assert ei.value.reason == "table-invalid" and f"mirror.{key}" in ei.value.detail
+
+
+def test_format_regexes_use_fullmatch_so_a_trailing_newline_is_rejected(tmp_path):
+    """Python 的 `$` 會放行字串結尾的換行：驗證格式一律 fullmatch。"""
+    assert nva.parse_version("94.04.5E.00.92\n") is None and nva.parse_version("94.04.5E.00.92") is not None
+    assert nva.parse_version("94\n") is None
+    for devices in (["2204\n"], ["2204", "2489\n"]):
+        with pytest.raises(nva.TableError) as ei:
+            nva.load(write(tmp_path, doc(row(devices=devices, vbios_fixed_in="94.04.00.00.01"))))
+        assert ei.value.reason == "table-invalid" and "pci_devices" in ei.value.detail
+    t = table(tmp_path, row(vbios_fixed_in="94.04.00.00.01"))
+    for dev in ("2489\n", "\n2489"):
+        assert_na(m(t, vb(device=dev)), "device-unreadable")
+    assert_na(m(t, vb("94.04.5E.00.92\n")), "version-unreadable")
+    assert t.mirror_commit == COMMIT
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    d["mirror"]["commit"] = COMMIT + "\n"
+    with pytest.raises(nva.TableError):
+        nva.load(write(tmp_path, d, "c.json"))
+    assert nva.BULLETIN_ID_RE.pattern == r"^[0-9]{1,8}$"
+
+
+def test_commit_date_may_be_a_date_like_c1_accepts(tmp_path):
+    d = doc(row(vbios_fixed_in="94.04.00.00.01"))
+    for ok in ("2026-11-10", "2026-11-10T13:01:57Z", "2026-11-10T13:01:57+08:00"):
+        d["mirror"]["commit_date"] = ok
+        assert nva.load(write(tmp_path, d)).mirror_commit_date == ok
+
+
+def test_md_esc_xmpp_long_runs_controls_and_tilde():
+    z = "\u200b"
+    e = xf.md_esc
+    assert e("xmpp:a@/.a") == "xmpp\\:" + z + "a@/.a" and e("mailto:a@-/.a") == "mailto\\:" + z + "a@-/.a"
+    assert e("x@y.z" + "1" * 300 + "@Z").endswith("1" * 300 + z + "@" + z + "Z")                   # 沒有回看上限
+    assert e("a\u202eb\ud800c\x00d") == "a b c d" and e("~~x~~") == "\\~\\~x\\~\\~"
+    e("\ud800").encode("utf-8")                                                                     # 單獨代理字元不會留著
+    import time
+    for raw in ("a@" + "_" * 100000, "a@" + "-_" * 50000, "@" * 100000, "x@y.z" + "1" * 100000 + "@Z", "a@b." * 25000):
+        t0 = time.perf_counter()
+        e(raw)
+        assert time.perf_counter() - t0 < 5.0, raw[:12]      # 線性時遠低於 1 秒；門檻放寬，免得忙碌的 runner 誤報
