@@ -13,7 +13,8 @@ steps（每個 workflow 步驟）、attention（用了舊資料頂替的說明�
 tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev/<專案>）；給了 tag 又不是 dev/ 開頭時必須是 <專案>/<版本>，否則 FAIL（D-055 (3)：版本以 Release tag 為準）。
 專案或版本不合法 → 不寫檔、結束碼 1。
 --notes（要有 --steps）：用同一份步驟紀錄、同一個算法重寫 notes.md 開頭的 pipeline_result 與「流程步驟」一節，讓 notes.md 與 release-meta.json 一致
-（scan 步驟產生 notes.md 時，它自己的那一列還沒寫進紀錄；adapter-gaps #26）。
+（scan 步驟產生 notes.md 時，它自己的那一列還沒寫進紀錄；adapter-gaps #26）。同時給 --scan-summary 時，也用同一份紀錄重寫那個檔的
+pipeline_steps／pipeline_status／pipeline_attention（M7b-4），三個檔的 pipeline 結果一致。
 """
 import argparse
 import datetime
@@ -26,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import project_config as pc  # noqa: E402
 import step_rows  # noqa: E402
-from platform_scan import refresh_notes, verdict, worst_verdict  # noqa: E402
+from platform_scan import refresh_notes, refresh_scan_summary, verdict, worst_verdict  # noqa: E402
 
 REPORT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 
@@ -115,6 +116,14 @@ def main(argv=None):
             return 1
         notes_msg = ("；注意：notes.md 開頭沒有 pipeline_result 那一行，沒有重寫" if changed is None else
                      "；notes.md 的 pipeline_result 已與這個檔一致" + ("（重寫了）" if changed else "（本來就一致）"))
+        # 同一份紀錄也重寫 scan-summary 附件的 pipeline_status（M7b-4，#58 驗證建議 5）：三個檔的 pipeline 結果一致
+        if a.scan_summary and os.path.isfile(a.scan_summary):
+            try:
+                ch2 = refresh_scan_summary(a.scan_summary, step_rows.read_rows(a.steps))
+            except (OSError, ValueError) as e:
+                print("release-meta: FAIL（讀不了或寫不了 %s：%s）" % (os.path.basename(a.scan_summary), type(e).__name__))
+                return 1
+            notes_msg += "；scan-summary 的 pipeline_status 也一致" + ("（重寫了）" if ch2 else "（本來就一致）")
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=1)
         f.write("\n")

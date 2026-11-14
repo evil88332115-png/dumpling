@@ -89,6 +89,32 @@ class CompareTest(unittest.TestCase):
             with self.assertRaises(fe.FormatError):
                 fe.compare(bad, INV, sb)
 
+    def test_advisory_rule(self):
+        """規則表建議（dumpling:advisory-rule-*）：元件名稱＋版本找到的元件，建議與規則編號要相同。"""
+        def ag(sug, ids):
+            c = comp("AMD AGESA", "ComboAM4v2PI 1.2.0.B")
+            c["properties"] = [{"name": "dumpling:advisory-rule-suggestion", "value": sug}] + (
+                [{"name": "dumpling:advisory-rule-ids", "value": ids}] if ids else [])
+            return {"components": [c]}
+        want = {"advisory_rule": [{"component": "AMD AGESA", "version": "ComboAM4v2PI 1.2.0.B", "suggestion": "affected", "rule_ids": ["AMD-SB-7014"]}]}
+        self.assertEqual(statuses(want, INV, ag("affected", "AMD-SB-7014")), ["OK"])
+        self.assertEqual(statuses(want, INV, ag("affected", "AMD-SB-7014, AMD-SB-7005")), ["MISMATCH"])        # 規則編號不同
+        self.assertEqual(statuses(want, INV, ag("not-affected", "AMD-SB-7014")), ["MISMATCH"])
+        self.assertEqual(statuses(want, INV, ag("NOT_ASSESSED", "")), ["MISMATCH"])
+        self.assertEqual(statuses(want, INV, {"components": [comp("AMD AGESA", "ComboAM4v2PI 1.2.0.B")]}), ["MISSING"])      # 沒有這個 property
+        self.assertEqual(statuses(want, INV, {"components": [comp("AMD AGESA", "ComboAM4v2PI 1.2.0.C")]}), ["MISSING"])      # 版本不同
+        self.assertEqual(statuses(want, None, None), ["NOT_RUN"])
+        multi = {"advisory_rule": [{"component": "AMD AGESA", "version": "ComboAM4v2PI 1.2.0.B", "suggestion": "affected", "rule_ids": ["AMD-SB-7014", "AMD-SB-7005"]}]}
+        self.assertEqual(statuses(multi, INV, ag("affected", "AMD-SB-7005, AMD-SB-7014")), ["OK"])             # 順序不影響
+        none = {"advisory_rule": [{"component": "AMD AGESA", "version": "ComboAM4v2PI 1.2.0.B", "suggestion": "NOT_ASSESSED", "rule_ids": []}]}
+        self.assertEqual(statuses(none, INV, ag("NOT_ASSESSED", "")), ["OK"])
+        for bad in ({"advisory_rule": []}, {"advisory_rule": [{"component": "a", "version": "1", "suggestion": "safe", "rule_ids": []}]},
+                    {"advisory_rule": [{"component": "a", "version": "1", "suggestion": "affected"}]},
+                    {"advisory_rule": [{"component": "a", "version": "1", "suggestion": "affected", "rule_ids": "x"}]},
+                    {"advisory_rule": [{"component": "a", "version": "1", "suggestion": "affected", "rule_ids": [], "x": 1}]}):
+            with self.assertRaises(fe.FormatError):
+                fe.compare(bad, INV, SBOM)
+
     def test_mismatch(self):
         r = dict(fe.compare({"intel_me": "14.0.47.1559"}, INV, SBOM))
         self.assertEqual(list(r), ["MISMATCH"])

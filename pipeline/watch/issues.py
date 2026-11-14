@@ -354,6 +354,23 @@ class GitLabApi(Api):
         q = urllib.parse.urlencode({"labels": label, "state": st, "per_page": 100})
         return [self._issue(i) for i in self.get_all(f"/projects/{repo}/issues?{q}")]
 
+    def search_issues(self, repo, text, state="all"):
+        """GET /projects/:id/issues?search=…（官方 /api/issues/ 的 List project issues：search＝「Search project issues against their title and description」；
+        不依標籤找，用來找標籤被拿掉的案件）。比對方式（子字串、斷詞、大小寫）文件沒寫，呼叫端要自己再過濾；confidential Issue 會不會列出來待內部驗證。"""
+        st = {"open": "opened", "closed": "closed", "all": "all"}[state]
+        q = urllib.parse.urlencode({"search": text, "state": st, "per_page": 100})
+        return [self._issue(i) for i in self.get_all(f"/projects/{repo}/issues?{q}")]
+
+    def get_issue(self, repo, number):
+        """GET /projects/:id/issues/:issue_iid（官方 issues 頁；不存在或看不到時的狀態碼文件沒寫，呼叫端用 e.status == 404 判斷，待內部驗證）。"""
+        if type(number) is not int or number <= 0:
+            raise Fail("Issue 編號不合法")
+        d, _ = self.request("GET", f"/projects/{repo}/issues/{number}")
+        i = self._issue(d)
+        if i["number"] != number:
+            raise Fail(f"GitLab 回的 Issue 編號不符（要 #{number}）")
+        return i
+
     def create_issue(self, repo, title, body, labels):
         d, _ = self.request("POST", f"/projects/{repo}/issues",
                             {"title": self._text(title, "Issue 標題"), "description": self._text(body, "Issue 內文"),
@@ -585,6 +602,8 @@ def load_plan(path, want_mode=None):
         bad("state 是 null（不寫狀態）時 state_base 也必須是 null")
     # stateless：跟監控狀態無關的 plan（支援期限檢查 support.py，M8 B2）：不寫狀態、不做樂觀鎖，只執行 open（已經有含已關閉就不重複）；
     # Issue 用 dumpling-support 標記與 support-period 標籤（不是監控 Issue）
+    if "demo" in plan and not isinstance(plan["demo"], bool):
+        bad("demo")
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
     if plan.get("stateless"):
@@ -768,7 +787,8 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
             api.edit_issue(repo, cur["number"], body=state_body, state="open", was=cur.get("state"))
             sres = {"result": "updated", "issue": cur["number"]}
         else:
-            nl = [state_label(mode)] + (["drill"] if mode == "drill" else [])
+            # 公開 repo（plan 的 demo）：狀態 Issue 也加 demo 標籤；標題與內文格式不變（read-state 靠 watch-state 標籤與第一行標記找）
+            nl = [state_label(mode)] + (["drill"] if mode == "drill" else []) + (["demo"] if plan.get("demo") is True else [])
             labels.ensure(nl)
             d = api.create_issue(repo, f"dumpling-watch 狀態（{mode}）", state_body, nl)
             sres = {"result": "created", "issue": d["number"]}

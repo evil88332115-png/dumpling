@@ -27,6 +27,9 @@ expected 欄位（都選填，只寫有佐證的）：
                       或與整串相同。前面的名稱（ComboAM4v2PI、ComboV2PI…）各廠商寫法不同，不比。
   amd_microcode       清單，每項 {equiv_id, patch_id}（十六進位，例如 {equiv_id: "0x8082", patch_id: "0x0800820d"}）；SBOM 的 `AMD CPU microcode` 元件
                       要有同 equivalence id、同 patch level（version）的；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING
+  advisory_rule       清單，每項 {component, version, suggestion, rule_ids}：SBOM 要有名稱是 component、version 相符的元件，它的 `dumpling:advisory-rule-suggestion`
+                      等於 suggestion（affected／not-affected／NOT_ASSESSED），`dumpling:advisory-rule-ids` 的規則編號與 rule_ids 相同（沒有規則寫 []）；
+                      這是對 tools/cra/data/fw-advisory-rules.json 目前內容的預期（規則表新增或修改規則後要重新核對），不是漏洞判定
   （沒有 intel_vbt：VBT 元件的 version 是 $VBT 表頭的格式版本（x100），不是顯示韌體的發行版本，不拿來比對）
 """
 import argparse
@@ -40,7 +43,7 @@ except ImportError:
     yaml = None
 
 KEYS = ("intel_me", "microcode", "fsp", "coreboot_version", "coreboot_revision",
-        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode")
+        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode", "advisory_rule")
 GFX_NAMES = {"intel_gop": "Intel GOP driver", "intel_legacy_vbios": "Intel legacy VBIOS (option ROM)"}
 STATUSES = ("OK", "MISMATCH", "MISSING", "NOT_RUN")
 
@@ -163,9 +166,20 @@ def compare(exp, inv, sbom):
                 raise FormatError("amd_microcode[%d] 必須剛好有 equiv_id、patch_id" % i)
             plan.append(("amd_microcode", "AMD 微碼 equivalence id %s" % scalar(m["equiv_id"], "equiv_id").lower(),
                          (hexint(m["equiv_id"], "equiv_id"), hexint(m["patch_id"], "patch_id"), scalar(m["patch_id"], "patch_id"))))
+    if "advisory_rule" in exp:
+        ar = exp["advisory_rule"]
+        if not isinstance(ar, list) or not ar:
+            raise FormatError("advisory_rule 必須是非空清單")
+        for i, m in enumerate(ar):
+            if (not isinstance(m, dict) or set(m) != {"component", "version", "suggestion", "rule_ids"} or not isinstance(m["rule_ids"], list)
+                    or m["suggestion"] not in ("affected", "not-affected", "NOT_ASSESSED")):
+                raise FormatError("advisory_rule[%d] 必須剛好有 component、version、suggestion（affected／not-affected／NOT_ASSESSED）、rule_ids（清單）" % i)
+            ids = tuple(sorted(scalar(x, "rule_ids") for x in m["rule_ids"])) if m["rule_ids"] else ()
+            plan.append(("advisory_rule", "規則表建議 %s %s" % (scalar(m["component"], "component"), scalar(m["version"], "version")),
+                         (m["component"], m["version"], m["suggestion"], ids)))
     if inv is None:
         return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）"
-                 % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2])) for p in plan]
+                 % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2][2] if p[0] == "advisory_rule" else p[2])) for p in plan]
     bios = bios_images(inv)
     for key, label, want in plan:
         if key == "intel_me":
@@ -229,6 +243,21 @@ def compare(exp, inv, sbom):
                 continue
             got = uniq(str(c.get("version")) for c in same if c.get("version"))
             items.append(result("OK" if patch in {_hex(g) for g in got} else "MISMATCH", label, "patch level " + patch_s, "patch level " + show(got)))
+        elif key == "advisory_rule":
+            comp_name, ver, sug, ids = want
+            same = [c for c in sbom_components(sbom) if c.get("name") == comp_name and str(c.get("version")) == str(ver)]
+            expect = "%s（規則 %s）" % (sug, "、".join(ids) if ids else "無")
+            if not same:
+                items.append(result("MISSING", label, expect, "（SBOM 裡沒有名稱 %s、版本 %s 的元件）" % (comp_name, ver)))
+                continue
+            got = []
+            for c in same:
+                s_ = prop(c, "dumpling:advisory-rule-suggestion")
+                r_ = tuple(sorted(x.strip() for v in prop(c, "dumpling:advisory-rule-ids") for x in str(v).split(",") if x.strip()))
+                got.append(("、".join(map(str, s_)) or "（沒有標）", r_))
+            ok = any(g[0] == sug and g[1] == ids for g in got)
+            items.append(result("OK" if ok else ("MISMATCH" if any(g[0] != "（沒有標）" for g in got) else "MISSING"), label, expect,
+                                "；".join("%s（規則 %s）" % (g[0], "、".join(g[1]) if g[1] else "無") for g in got)))
         elif key in GFX_NAMES:
             # 只看 SBOM（GOP／legacy VBIOS 沒有進 inventory 的固定欄位）。映像裡可能有好幾個同名元件（例如多份 GOP），
             # 跟 fsp 一樣：任一個的 version 相符就 OK，其餘不比。元件在但沒讀到 version（GAP）→ MISSING，不猜。

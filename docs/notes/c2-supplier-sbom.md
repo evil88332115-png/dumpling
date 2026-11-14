@@ -40,9 +40,15 @@ sbomqs 類別：Identification 9.65、Provenance 2.50、Integrity 0、Completene
   1. 用 `unicodedata.category` 把所有 C 類（Cc 含 C1 控制字元、Cf 如 U+202E 與零寬字元、Cs 單獨代理、Co、Cn）與 Zl／Zp（U+2028／U+2029）換成空白，連續空白壓成一個；
   2. 先截短（元件名 80、檔名 120 個字元，超過加「…」），再跳脫，不會切在跳脫序列中間；
   3. `&` 換成 `&amp;`（最先做）：`&lt;`、`&#64;`、`&#x40;`、`&commat;` 這類 HTML 實體渲染時會解碼成 `<`、`@`、`[`，等於繞過後面的跳脫；換成 `&amp;` 之後渲染結果是字面的實體文字，不靠反斜線規則（和 `pipeline/watch/match.py` 的 `md_text` 同一個寫法）。代價：stdout 與 log 裡的 `&` 顯示成 `&amp;`；
-  4. `@`（含全形 `＠`）後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織；前面緊接 ASCII 英數字的 `@`（purl 的 `a@1.0`、`name@host`）不是提及，原樣保留（和 `match.unsafe_markdown` 的判斷一致，這裡更嚴）；
+  4. `@`（含全形 `＠`）：前面不是 ASCII 英數字的，後面插零寬空白 U+200B，GitHub 才不會把 `@名稱` 當成提及而通知使用者或組織。前面是 ASCII 英數字的 `@` 不是提及，但 cmark-gfm 會把 email 形式（`a@b.c`、`mailto:a@example.com`、`xmpp:a@example.com`）連結成 mailto：
+     `@` 後面接的字元（英數字、`-`、`_`、後面接英數字的 `.`）構成含 `.`、最後一個字元是英文字母的網域形式時，`@` 前後各插一個零寬空白（只插後面時，markdown-it 的 linkify 會把 `a@<零寬>example.com` 當成 IDN 網域連結）；`mailto:`／`xmpp:` 的冒號另外加反斜線並在冒號後插一個零寬空白（cmark-gfm 先合併文字節點再做 autolink，`xmpp:a@/.a` 這類網域不含 `.` 的形式只加反斜線擋不住）。同一串 email 字元裡前面已有 `@` 時網域不要求 `.`（cmark-gfm 的 `.` 計數沒有歸零，`x@y.z@Z` 會連結 `y.z@Z`，實測）。
+     「同一串 email 字元裡前面已有 `@`」的判斷是單次線性掃描，沒有回看上限，長度與時間成正比（`x@y.z` 接幾百個 `1` 再接 `@Z` 也會被隔開）。IDN email（`a@<零寬>example.com` 被 markdown-it 的 fuzzy_email 當 IDN）只有 markdown-it 會連結，cmark-gfm 不會，所以不在檢查範圍。
+     不是 email 形式的 `@`（purl 的 `pkg:generic/zlib@1.2.11`、`name@host`、`a@1.0`，網域最後一個字元不是英文字母）原樣保留，可以原樣複製；網域最後一個字元是字母的（版本 `1.2.11.dfsg`）符合 email 形式，會多一個看不見的零寬空白（複製時會帶著），不插的話渲染器會把它連結；
   5. Markdown 特殊字元 `\ [ ] ( ) < > ! * _ # ~ | ` $` 一律加反斜線跳脫（選跳脫、不換全形：純文字檢視時還讀得出原字元；代價是 stdout 與 log 裡的 `_`、`(` 也會有反斜線）；
-  6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線（`://` 的 `:` 一律跳脫，不看前面的字元：`1.https://x`、`-ftp://x` 渲染器也會連結），GitHub 才不會自動變成連結。沒處理 email 自動連結（只會變成 mailto 連結）。
+  6. 裸網址開頭 `scheme://`、`www.` 在 `:`／`.` 前加反斜線（`://` 的 `:` 一律跳脫，不看前面的字元：`1.https://x`、`-ftp://x` 渲染器也會連結），GitHub 才不會自動變成連結。
+  7. Issue 參照：`#`／`＃` 接數字（含全形數字）時在 `#` 後面插零寬空白，`GH-` 接數字（不分大小寫、前面不是英數字）時在 `GH` 後面插零寬空白。GitHub 是對渲染後的文字比對 Issue 參照，`\#1`、`owner/repo\#1` 也會連到別的 Issue／PR，放在 Issue、PR、Release 說明時還會在對方的時間軸留下 cross-reference；`#<零寬>1`、`＃1`、`GH<零寬>-1` 不會（C3 用 GitHub 的 POST /markdown 實測）。regex 與 `pipeline/watch/match.py` 的 `_issue_refs_off` 相同，`x86_firmware.py` 的 `md_esc`（含退路）也套用。
+  `tests/test_c2_report_render.py` 用 cmark-gfm（`cmarkgfm`，GitHub 用的同一套 autolink／table 擴充）與 markdown-it-py（commonmark、gfm-like 嚴格與寬鬆 linkify）把 `md_safe` 的輸出放進表格儲存格、清單、段落、引用、標題渲染：沒有連結（含 email、mailto、xmpp）、圖片、標籤、提及，表格欄數不變，可見文字還是原文；整份 `firmware-dt.md` 與 vBIOS 段落也各渲染一次。版本固定在 `tests/run.d/c2-requirements.txt`，CI 在 `c2-x86-firmware.sh` 的 venv 裡跑；沒裝這些套件時 skip，而那支腳本設了 `DUMPLING_REQUIRE_TEST_DATA=1`，skip 算失敗。`c1-tools.sh` 也會收集 `tools/` 底下的這個檔，那個環境沒有裝這些套件，測試 skip 並列在它的 NOT_RUN 數量裡（不算通過）；真正執行與把關的是 `c2-x86-firmware.sh`。
+  還沒做：提及與連結沒有用 GitHub 的真實渲染器驗證（GitHub 另有 html-pipeline 的提及、Issue 編號、commit SHA 轉換；cmark-gfm 只涵蓋 markdown 那一層）。Issue 編號依 C3 的 POST /markdown 實測處理（第 7 點）；commit SHA 的轉換沒有處理。
   和 `md_text` 的差別、不直接 import `match.py` 的理由寫在 `firmware_mdsafe.py` 檔頭；`tests/test_firmware_mdsafe.py` 載入 `match.py`，用它的 `unsafe_markdown` 檢查 `md_safe` 的輸出（規則不一致時測試失敗）。
   跳脫只做一次：`md_cell` 只處理換行；workflow 摘要表的 awk 用 `\\?\|` 規則，已跳脫的 `\|` 不會被再跳脫成 `\\|`。
   `firmware-ci.sh` 的摘要表儲存格（狀態行、expected 說明）與 `firmware_dt.py` 報告裡的檢查名、階段名、錯誤訊息也走同一個函式。
@@ -125,8 +131,10 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
   改名計入 `changes`（也計入 `dumpling:normalized-changes` 的筆數）；沒有其他違規、只有改名時 `applied` 也是 true。
   report 另寫「供應商 SBOM 自帶名稱以 dumpling: 開頭的 property N 個」，狀態至少 ATTENTION（`dt-project.json` 的 `normalize.renamed`、`summary.supplier_dumpling_props`）；
   report 本來就不讀 SBOM 裡的 property，它讀 `dt-project.json`（prep 自己算的）；元件自帶的三個評估標記本來就不採信，摘要在改名之前算，所以「供應商自帶標記的元件 N 個」算的是供應商原始 SBOM 裡的標記數（改名不影響這個數字）。
-  範圍：只有 `metadata.properties` 與元件的 `properties`（我們只寫這兩處、report 只讀元件的）。頂層 `properties`（1.5 起）、`services`、`pedigree`／`evidence` 底下的元件不動；`metadata.component` 本來就由 prep 整個換成我們的根元件。
-  `specVersion` 不在支援範圍（1.2、1.3、1.7 以後）時整份不處理，所以不改名；但那種 SBOM 的 property 一樣不被 report 採信。
+  範圍：文件裡任何位置的 `properties` 陣列：`metadata.properties`、元件（含巢狀）、`pedigree` 的 ancestors／descendants／variants、`services`（含巢狀）、`metadata.tools`、`formulation`、頂層 `properties`（1.5 起）…，不論多深（走訪不遞迴）。
+  DT 5.2.0 讀哪些位置（`ModelConverter.java`）：元件的 `properties`（`convertComponent`，`metadata.tools` 的元件也走這個）；`convertService` 不讀 `properties`，也沒有任何地方讀 `pedigree`；所以 pedigree 與 services 底下的 `dumpling:` property 沒有工具讀，改名只是讓「副本裡所有 `dumpling:` 開頭的 property 都是我們寫的」這句話成立。
+  不動的位置：`metadata.component`（prep 整個換成我們的根元件，裡面的 `dumpling:sample-*` 是我們寫的）；因為不在該 specVersion 的 schema 而被整個搬進 `dumpling:supplier-extra:*` 的頂層欄位（成為字串值，不再是 property）。
+  整份不處理的情形（`specVersion` 不在支援範圍〔1.2、1.3、1.7 以後〕、`metadata.properties` 型別不對〔`metadata` 本身不是物件時 prep 在更前面就以 DtError 停下，走不到這裡〕、規劃時發生例外）：不改名，副本原樣帶著供應商的 `dumpling:` property；`normalize.json` 的 `processed` 是 false，`reserved_not_renamed` 記副本裡帶著幾個（同樣的走訪，`metadata.component` 不算），`notes` 寫「副本沒有改名，原樣帶著 N 個…」；report 的 `supplier_dumpling_props` 照常計數，說明寫「這份 SBOM 沒有正規化…所以一個都沒有改名」，另有一則「這份 SBOM 沒有正規化」的說明（沒有 `dumpling:` property 時也寫）。那種 SBOM 的 property 一樣不被 report 採信。
   變更筆數超過上限（`MAX_CHANGES`）時剩下的不改名（副本仍帶著它們），記在 `unnormalized`（規則 `supplier-dumpling-property`，`at` 是位置；清單最多 200 筆再加一筆 `more`，所以另有真正的計數 `unnormalized_total` 與 `reserved_not_renamed`）。
   report 與 `dt-project.json` 用真正的計數：`summary.supplier_dumpling_props` 是全部（已改名加沒改名）、`supplier_dumpling_props_left` 是沒改名的；說明寫「N 個：R 個已改名、M 個超過變更筆數上限沒有改名（上傳副本仍帶有 dumpling: 開頭的供應商 property）」，「另有 N 處已知違規無法正規化」的 N 也是真正的筆數。
   改名紀錄的 `property`、`original_name` 都最多留 200 字元（完整原值以 `value_sha256` 為準），所以 `normalize.json` 的大小不隨供應商的 property 名稱長度放大。
@@ -160,5 +168,5 @@ runner 沒有 jsonschema，也不應讓 pipeline 因此失敗。
 - 上傳 DT、Grype 漏洞比對：已由 `firmware-dt`（`docs/notes/c2-firmware-dt.md`）做完；這份檢查本身仍是 `漏洞比對：NOT_RUN`。
 - sbomqs 的 sigstore 簽章驗證（目前只固定 sha256）。
 - 其他 `--profile`（ntia、bsi…）未跑；要不要納入是政策問題。
-- email 自動連結沒有中和（只會變成 mailto 連結）；`firmware_mdsafe` 沒有用真正的 markdown 轉換器驗證，測試是字串層級。
+- `firmware_mdsafe` 用 cmark-gfm 與 markdown-it 驗證，沒有用 GitHub 的真實渲染器（見上）。
 - 授權：3mdeb 未聲明，只在 CI 讀取、不散布；是否需向 3mdeb 確認仍待決定。

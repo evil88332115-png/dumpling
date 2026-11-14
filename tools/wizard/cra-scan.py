@@ -289,7 +289,15 @@ def merge_step_status(out, steps, inputs_check_name="inputs-check.json"):
 
 # ---- 設定包的版本與刷機包識別：精靈覆寫，設定包不要寫死 ----
 _VER_LIKE = re.compile(r"^[Vv]?\d+(\.\d+)+")
-_IDENT = re.compile(r"^(Flash package )([^\s,(]+)(?: \(MD5 ([0-9a-fA-F]{32})\))?(,.*)?$", re.S)
+_IDENT = re.compile(r"^((?:Flash package|Firmware image) )([^\s,(]+)(?: \(MD5 ([0-9a-fA-F]{32})\))?(,.*)?$", re.S)
+# dumpling（M7b-4，#58 驗證）：填入的識別字樣依平台——Jetson 是刷機包（Flash package），其他平台（Raspberry Pi、Rockchip、x86 的磁碟映像）
+# 不是刷機包，寫 Firmware image。沒有平台（呼叫端沒給）照舊寫 Flash package。
+IDENT_LABEL = {"jetson": "Flash package"}
+IDENT_LABEL_DEFAULT = "Firmware image"
+
+
+def ident_label(platform):
+    return "Flash package" if not platform else IDENT_LABEL.get(platform, IDENT_LABEL_DEFAULT)
 _ARCHIVE_NAME = re.compile(r"[\w.+\-]+\.(?:tbz2|tar\.bz2|tar\.gz|tgz|tar\.xz|zip|7z)(?![\w.])")
 _IMAGE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
 _REL_TOKEN = re.compile(r"\bV\d+(?:\.\d+)+(?:_\w+)?")
@@ -349,7 +357,7 @@ def fill_pack_support_end(cfg_path, support_until):
     return cur, want
 
 
-def override_pack_identification(cfg_path, src_file, src_md5):
+def override_pack_identification(cfg_path, src_file, src_md5, platform=None):
     """config.json 的 product.identification 開頭若是 "Flash package <檔名> (MD5 <md5>)"，換成這次掃描的刷機包（provenance 的 source.file／md5），
     句子其餘部分不動。回傳 (狀態, 說明)：OVERRIDDEN(舊, 新)／FILLED(None, 新)／SAME／UNRECOGNISED／NO_PROVENANCE／NO_MD5（沒有可用的新 MD5：不改，不沿用舊 MD5）。格式認不得不猜，不改。
     dumpling（D-039）：product.identification 沒有寫、而且有這次刷機包的檔名與 MD5 → 填入 "Flash package <檔名> (MD5 <md5>)"（FILLED）。"""
@@ -360,7 +368,7 @@ def override_pack_identification(cfg_path, src_file, src_md5):
     old = prod.get("identification") if isinstance(prod, dict) else None
     md5_ok = isinstance(src_md5, str) and re.fullmatch(r"[0-9a-fA-F]{32}", src_md5)
     if isinstance(prod, dict) and old is None and md5_ok:
-        prod["identification"] = f"Flash package {src_file} (MD5 {src_md5})"
+        prod["identification"] = f"{ident_label(platform)} {src_file} (MD5 {src_md5})"
         Path(cfg_path).write_text(json.dumps(c, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         return "FILLED", (None, prod["identification"])
     m = _IDENT.match(old) if isinstance(old, str) else None
@@ -434,7 +442,7 @@ def stale_pack_files(cfg_dir, archive_name, plan_version, image_ids):
     return warn, notes
 
 
-def post_scan_pack_checks(mcfg, out, scan_dir, version, pack_steps, plan_steps, steps, labels, say=print):
+def post_scan_pack_checks(mcfg, out, scan_dir, version, pack_steps, plan_steps, steps, labels, say=print, platform=None):
     """掃描後對輸出資料夾裡的設定包複本做：刷機包識別覆寫（依 <out>/scan/provenance.json）、過期檔案檢查；
     把 pack_steps（含掃描前的版本覆寫）連同其他步驟寫進 <out>/inputs-check.json。"""
     prov = {}
@@ -444,7 +452,7 @@ def post_scan_pack_checks(mcfg, out, scan_dir, version, pack_steps, plan_steps, 
         pass
     psrc = prov.get("source") if isinstance(prov, dict) and isinstance(prov.get("source"), dict) else {}
     try:
-        st_, info = override_pack_identification(mcfg / "config.json", psrc.get("file"), psrc.get("md5"))
+        st_, info = override_pack_identification(mcfg / "config.json", psrc.get("file"), psrc.get("md5"), platform)
     except (OSError, ValueError) as e:
         st_, info = "UNRECOGNISED", f"config.json 讀不了（{type(e).__name__}）"
     if st_ == "FILLED":
@@ -1295,7 +1303,7 @@ def main():
             (mcfg / "vex-rules.json").write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
             say(f"  套用通用處理規則 {len(keep)} 條（來源 {RULES_TEMPLATE}）")
     if cfg_dir:
-        post_scan_pack_checks(mcfg, OUT, scan_dir, version, pack_steps, plan_steps, steps, labels, say)
+        post_scan_pack_checks(mcfg, OUT, scan_dir, version, pack_steps, plan_steps, steps, labels, say, platform=a.platform)
     projects = []
     if role in ("both", "manufacturer"):
         projects.append(("製造商", OUT / "cra-project"))

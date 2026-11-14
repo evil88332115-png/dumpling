@@ -71,7 +71,7 @@ def validate(doc):
                 errs.append("files[%d] 缺 %s" % (i, k))
         name = f.get("name")
         if name:
-            if not isinstance(name, str) or not NAME_RE.match(name):
+            if not isinstance(name, str) or not NAME_RE.fullmatch(name):
                 errs.append("files[%d] name 不合法" % i)
             elif name in names:
                 errs.append("files[%d] name 重複" % i)
@@ -80,7 +80,7 @@ def validate(doc):
         if url and not (isinstance(url, str) and url.startswith("https://")):
             errs.append("files[%d] url 必須是 https" % i)
         sha = f.get("sha256")
-        if sha and not (isinstance(sha, str) and SHA256_RE.match(sha)):
+        if sha and not (isinstance(sha, str) and SHA256_RE.fullmatch(sha)):
             errs.append("files[%d] sha256 必須是 64 位小寫十六進位" % i)
         size = f.get("size")
         if size not in (None, "") and (not isinstance(size, int) or isinstance(size, bool) or size <= 0):

@@ -220,14 +220,14 @@ def safe_version(v):
         return "unknown"
     s = re.sub(r"[^A-Za-z0-9 ._+~()-]", "_", str(v).strip())
     s = re.sub(r"^[^A-Za-z0-9]+", "", s)[:100].rstrip()
-    return s if VERSION_RE.match(s or "!") else "unknown"
+    return s if VERSION_RE.fullmatch(s or "!") else "unknown"
 
 
 def project_name(kind, slug, synthetic):
     """名稱：firmware-<kind>-<slug>；合成樣本：firmware-<kind>-synthetic-<slug>。"""
     n = "firmware-%s-%s%s" % (kind, "synthetic-" if synthetic else "", slug)
     n = n[:100].rstrip("-._")
-    if not NAME_RE.match(n):
+    if not NAME_RE.fullmatch(n):
         raise DtError("無法產生安全的專案名稱：%s" % n)
     return n
 
@@ -305,6 +305,8 @@ def classify_vs(values):
 
 AM_KEY = "dumpling:advisory-match"
 AM_VALUES = ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED", "affected", "fixed")     # x86_firmware.py 會寫的值（微碼；後兩個是 NVIDIA vBIOS）
+RS_KEY = "dumpling:advisory-rule-suggestion"
+RS_VALUES = ("affected", "not-affected", "NOT_ASSESSED")     # 廠商公告規則表的建議（fw_advisory_rules.py）
 
 
 def classify_am(values):
@@ -315,6 +317,15 @@ def classify_am(values):
     if len(set(values)) != 1:
         return "(多個值)"
     return values[0] if values[0] in AM_VALUES else "(不認得的值)"
+
+
+def classify_rs(values):
+    """dumpling:advisory-rule-suggestion 的值 → None（沒標）｜RS_VALUES 之一｜(多個值)｜(不認得的值)。只用來計數顯示，不影響 OK／ATTENTION。"""
+    if not values:
+        return None
+    if len(set(values)) != 1:
+        return "(多個值)"
+    return values[0] if values[0] in RS_VALUES else "(不認得的值)"
 
 
 def _nonblank(v):
@@ -343,7 +354,7 @@ def summarize(comps, trust_markers=True):
     check_component_types(comps)
     s = {"components": 0, "with_purl": 0, "bad_purl": 0, "with_cpe": 0, "distinct_identities": 0,
          "vuln_assessment": {}, "version_status": {}, "version_gap": 0, "version_status_other": 0,
-         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "advisory_match": {}, "trust_markers": bool(trust_markers), "supplier_markers": 0}
+         "no_version": 0, "no_version_unmarked": 0, "purl_types": [], "advisory_match": {}, "rule_suggestion": {}, "trust_markers": bool(trust_markers), "supplier_markers": 0}
     ids, types = set(), set()
     for c in comps:
         s["components"] += 1
@@ -360,11 +371,14 @@ def summarize(comps, trust_markers=True):
         if _nonblank(c.get("cpe")):
             s["with_cpe"] += 1
         ids.add(identity(c))
-        va, vs, am = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY), _prop_values(c, AM_KEY)
+        va, vs, am, rs = _prop_values(c, VA_KEY), _prop_values(c, VS_KEY), _prop_values(c, AM_KEY), _prop_values(c, RS_KEY)
         if not trust_markers:
-            if va or vs or am:
+            if va or vs or am or rs:
                 s["supplier_markers"] += 1
-            va, vs, am = [], [], []
+            va, vs, am, rs = [], [], [], []
+        rl = classify_rs(rs)
+        if rl is not None:
+            s["rule_suggestion"][rl] = s["rule_suggestion"].get(rl, 0) + 1
         al = classify_am(am)
         if al is not None:
             s["advisory_match"][al] = s["advisory_match"].get(al, 0) + 1
@@ -490,10 +504,14 @@ def renamed_count(norm):
     return sum(1 for c in norm["changes"] if c.get("rule") == nm.RULE_RESERVED)
 
 
-def supplier_props_text(n, left=0):
+def supplier_props_text(n, left=0, unprocessed=False):
     """供應商自帶 dumpling: 開頭的 property 的說明（固定文字加數字；`*`、`_` 的名稱放在行內程式碼裡，不被渲染成斜體）。
-    n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數。"""
+    n＝全部個數（已改名加沒改名），left＝因為超過變更筆數上限等原因沒改名、上傳副本仍帶著的個數；
+    unprocessed＝整份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 不是物件或 metadata.properties 型別不對、規劃失敗），所以一個都沒有改名（left 等於 n）。"""
     ns = ("那是我們自己的命名空間：`dumpling:normalized-*`、`dumpling:supplier-*` 是正規化的紀錄，`dumpling:vuln-assessment` 等是評估標記；供應商可以自己塞")
+    if unprocessed:
+        return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：這份 SBOM 沒有正規化（specVersion 不在支援範圍、metadata 不是物件或 metadata.properties 型別不對、規劃失敗，原因見 normalize.json 的 notes），"
+                "所以一個都沒有改名，上傳副本仍帶有這些 dumpling: 開頭的供應商 property（%s）" % (n, ns))
     if left > 0:
         return ("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property %d 個：%d 個已改名成 `supplier:dumpling:…`、%d 個超過變更筆數上限沒有改名"
                 "（上傳副本仍帶有 dumpling: 開頭的供應商 property；原名、位置與值的 SHA-256 見 normalize.json，沒改名的另見 unnormalized）（%s）" % (n, n - left, left, ns))
@@ -584,6 +602,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
     if norm:
         summary["supplier_dumpling_props"] = renamed_count(norm) + norm["reserved_not_renamed"]     # 全部（已改名加沒改名）
         summary["supplier_dumpling_props_left"] = norm["reserved_not_renamed"]
+        summary["supplier_dumpling_props_unprocessed"] = not norm["processed"]
     # 先把所有要寫的檔案序列化完（失敗就什麼都不寫，不會留下只有一半的輸出），全部成功才寫檔。
     sbom_text = dumps_json(out_doc, "上傳用 SBOM")
     sbom_sha = hashlib.sha256(sbom_text.encode("utf-8")).hexdigest()
@@ -595,7 +614,7 @@ def prep(sbom_path, sample_path, out, synthetic=False):
         "sbom_file": "sbom.cdx.json", "sbom_sha256": sbom_sha, "input_sbom_sha256": input_sha,
         "normalize": ({"file": "normalize.json", "applied": norm["applied"], "changes": len(norm["changes"]),
                        "unnormalized": norm["unnormalized_total"], "renamed": renamed_count(norm),
-                       "not_renamed": norm["reserved_not_renamed"]} if norm else None),
+                       "not_renamed": norm["reserved_not_renamed"], "processed": norm["processed"]} if norm else None),
         "duplicate_keys": ({"count": dups.total, "listed": len(dups.events),
                             "events": [{k: ev[k] for k in ("object_index", "pointer", "key_json", "dropped_value_sha256")} for ev in dups.events[:MAX_DUP_NOTES]]}
                            if dups.total else None),
@@ -636,7 +655,7 @@ def load_prep(d):
     info, _ = load_json(os.path.join(d, "dt-project.json"), MAX_BYTES, "dt-project.json")
     if not isinstance(info, dict) or not all(k in info for k in ("project_name", "project_version", "summary")):
         raise DtError("dt-project.json 欄位不齊：%s" % os.path.basename(d.rstrip("/")))
-    if not NAME_RE.match(str(info["project_name"])) or not VERSION_RE.match(str(info["project_version"])):
+    if not NAME_RE.fullmatch(str(info["project_name"])) or not VERSION_RE.fullmatch(str(info["project_version"])):
         raise DtError("dt-project.json 的名稱或版本不安全")
     parse_expected_dt(info.get("expected_dt"))
     return info
@@ -688,12 +707,16 @@ def _load_mdsafe():
 _MDSAFE = []
 
 
+def _mdsafe():
+    if not _MDSAFE:
+        _MDSAFE.append(_load_mdsafe())
+    return _MDSAFE[0]
+
+
 def _cell(s, limit=300):
     """寫進 markdown 或狀態行的不可信文字（dt-verify／sca-scan 的檢查名與階段名、錯誤訊息、樣本名…）：一律經共用的 md_safe。
     只在文字產生時呼叫一次（notes、verify_fail 存的就是清理過的），輸出 markdown 時不要再呼叫，否則會跳脫兩次。"""
-    if not _MDSAFE:
-        _MDSAFE.append(_load_mdsafe())
-    return _MDSAFE[0].md_safe(s, limit)
+    return _mdsafe().md_safe(s, limit)
 
 
 _SEV = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
@@ -708,7 +731,7 @@ EMPTY_STAGE = "(空的階段名稱)"
 
 def read_status_tsv_checked(path):
     """(rows, anomalies)。rows：stage → (status, detail)，同一個階段出現多列時留「最嚴重」的那一列（不是最後一列：前面的 FAIL 不能被後面的 OK 蓋掉）。
-    anomalies：{"duplicates": {階段: 列數（>= 2）}, "empty_rows": 階段名稱是空的或只有空白的列數}。這兩種在 sca-scan 的正常輸出不會出現（每個階段一列、都有名稱），
+    anomalies：{"duplicates": {階段: 列數（>= 2）}, "empty_rows": 階段名稱看不到內容的列數（firmware_mdsafe.is_blank：空、空白、零寬字元、控制字元、Hangul filler 等）}。這兩種在 sca-scan 的正常輸出不會出現（每個階段一列、都有名稱），
     出現就代表檔案被改過或工具有 bug；即使採最嚴重那一列後狀態是 OK，report 也不能當作沒看到（見 stage_anomaly_notes）。"""
     raw = _read_limited(path, MAX_BYTES, "status.tsv").decode("utf-8", "replace")
     rows, count, empty = {}, {}, 0
@@ -717,7 +740,7 @@ def read_status_tsv_checked(path):
             stage = r.get("stage")
             if stage is None:
                 continue
-            if not stage.strip():           # 階段名稱是空的（或只有空白）的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
+            if _mdsafe().is_blank(stage):   # 階段名稱看不到內容（空、只有空白、零寬字元、控制字元、Hangul filler…）的列不丟掉（不然空名稱的 FAIL 會被略過而得到 OK）：當成一個不認得的階段照常判定
                 stage = EMPTY_STAGE
                 empty += 1
             else:
@@ -745,7 +768,7 @@ def stage_anomaly_notes(an):
         out.append("status.tsv 有重複列：%s（同一階段多列時 report 只採最嚴重的一列；`scan-status-check.py` 是後值蓋前值，兩邊可能不一致）" % "、".join(
             "階段 %s %d 列" % (_cell(k, 60), n) for k, n in dups[:20]) + ("…另 %d 個階段" % (len(dups) - 20) if len(dups) > 20 else ""))
     if (an or {}).get("empty_rows"):
-        out.append("status.tsv 有 %d 列的階段名稱是空的或只有空白（當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))
+        out.append("status.tsv 有 %d 列的階段名稱是空的或看不到內容（只有空白、零寬字元、控制字元等；當成不認得的階段「%s」照常判定）" % (an["empty_rows"], _cell(EMPTY_STAGE, 60)))
     return out
 
 
@@ -953,6 +976,8 @@ def _normalize_note(info):
         return ""
     ch, un = n.get("changes"), n.get("unnormalized")
     out = ""
+    if n.get("processed") is False:
+        out += "；這份 SBOM 沒有做正規化（specVersion 不在支援範圍、metadata 不是物件或 metadata.properties 型別不對、規劃失敗；原因見 normalize.json 的 notes；metadata.component 仍會換成本工具的根元件）"
     if isinstance(ch, int) and ch > 0:
         out += "；已正規化 %d 處（見 normalize.json；上傳的是正規化副本，原檔不變）" % ch
     if isinstance(un, int) and un > 0:
@@ -964,6 +989,14 @@ def _left_count(s):
     """沒改名的供應商 dumpling: property 個數（不超過全部個數；讀不到當 0）。"""
     n, left = s.get("supplier_dumpling_props"), s.get("supplier_dumpling_props_left")
     return left if _is_count(left) and _is_count(n) and left <= n else 0
+
+
+def _props_text(s):
+    """供應商 dumpling: property 的說明（summary 讀不到個數時回空字串）。"""
+    n = s.get("supplier_dumpling_props")
+    if not (_is_count(n) and n > 0):
+        return ""
+    return supplier_props_text(n, _left_count(s), s.get("supplier_dumpling_props_unprocessed") is True)
 
 
 def _dup_count(s):
@@ -1012,8 +1045,8 @@ def attention_reasons(s, r):
         why.append("sca-scan 其他階段不是 OK（%d 個，OK 之前都要有人看過）：%s%s" % (
             len(lst), "、".join(lst[:20]), "…另 %d 個" % (len(lst) - 20) if len(lst) > 20 else ""))
     why.extend(r.get("status_anomalies") or [])
-    if _is_count(s.get("supplier_dumpling_props")) and s["supplier_dumpling_props"] > 0:
-        why.append(supplier_props_text(s["supplier_dumpling_props"], _left_count(s)))
+    if _props_text(s):
+        why.append(_props_text(s))
     if _dup_count(s):
         why.append(dup_text(_dup_count(s)))
     return why
@@ -1069,9 +1102,8 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         s = info["summary"]
         if _dup_count(s) and dup_text(_dup_count(s)) not in res["notes"]:
             res["notes"].append(dup_text(_dup_count(s)))      # 狀態不是 ATTENTION／OK 時 attention_reasons 沒跑到，這裡補上，重複鍵不能靜默
-        sp = s.get("supplier_dumpling_props")
-        if _is_count(sp) and sp > 0 and supplier_props_text(sp, _left_count(s)) not in res["notes"]:
-            res["notes"].append(supplier_props_text(sp, _left_count(s)))      # 同上：不是 ATTENTION／OK 的狀態也不能靜默
+        if _props_text(s) and _props_text(s) not in res["notes"]:
+            res["notes"].append(_props_text(s))      # 同上：不是 ATTENTION／OK 的狀態也不能靜默
         rows.append((info, res))
         va = "、".join("%s=%d" % (_cell(k, 40), v) for k, v in sorted(s["vuln_assessment"].items()))
         detail = "DT 專案 %s@%s；元件 %d（purl %d、cpe %d）；上傳 %s；DT 元件 %s；漏洞 %s；Grype %s（%s）；NOT_ASSESSED 與版本 GAP：%s／%d" % (
@@ -1093,17 +1125,22 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
           "|---|---|---|---|---|---|---|---|"]
     for info, res in rows:
         g = res["grype"] if res["grype"] != "OK" else "OK（%s 筆）" % res["grype_matches"]
-        md.append("| %s | %s@%s%s | %d | %s | %s | %s | %s | %s |" % (
-            _cell(info["slug"]), _cell(info["project_name"]), _cell(info["project_version"]),
+        md.append("| %s | %s%s | %d | %s | %s | %s | %s | %s |" % (
+            _cell(info["slug"]), _cell("%s@%s" % (info["project_name"], info["project_version"])),      # 整串一起過 md_safe：版本以字母結尾又含 `.` 時，name@version 是 email 形式
             "（合成）" if info.get("synthetic") else "", info["summary"]["components"], res["upload"],
             res["dt_components"], res["dt_findings"], g, res["status"]))
     md += ["", "## 怎麼讀", "",
            "- **漏洞數 0 筆不代表沒有漏洞。** 臨時 DT 只開 OSV、KEV（NVD 關閉），只比對有 purl 的元件，`pkg:github/...` 與只有 CPE 的元件在 DT 完全比對不到；"
            "DT 在這裡只負責收件與留存，韌體的漏洞比對以 Grype（sca-scan 的 C-grype）為主。沒有 purl 也沒有 CPE 的元件 Grype 也比對不到，"
-           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（AMD-SB 的規則表還沒有做）。"
+           "但 C-grype 仍會顯示 OK（比對完成），所以要看每個元件的 `dumpling:vuln-assessment`：Intel（ME、微碼、FSP、GOP／VBT）與 NVIDIA 元件為 NOT_ASSESSED（公告無法機器比對，需公告對照）。Intel 微碼另有 `dumpling:advisory-match`（離線比對 Intel 公開的微碼發佈資料表：affected-candidate／older-no-sa／up-to-date／NOT_ASSESSED；候選公告列在 release 層級、不是確定受影響，up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞）；ME 的 CPE 是 NVD 的 Intel CSME 資料，NVD 的資料不完整，比不到不代表沒有漏洞。AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準（規則表的建議見下面的 `advisory-rule-suggestion`）。"
            "NVIDIA vBIOS 元件另有 `advisory-match`：用 vBIOS 版本與 option ROM 的 PCI 裝置 ID 查 repo 內的 NVIDIA 公告對照表（尚未經負責人確認時一律 NOT_ASSESSED）（affected／fixed／NOT_ASSESSED）；"
            "NVIDIA 對消費型顯卡的 vBIOS 幾乎沒有公開公告（主要管道是合作夥伴通知），所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；版本是佔位字串或裝置 ID 讀不到也是 NOT_ASSESSED。"
            "affected、fixed 只是對照表裡已審核的列的比對結果，fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞。",
+           "- 廠商公告規則表的建議（`dumpling:advisory-rule-suggestion`）：AMD 的 AGESA、Intel 的 CSME、AMI 公告等，由人從廠商官方公告頁整理成規則（一個公告一筆，tools/cra/data/fw-advisory-rules.json），"
+           "SBOM 的元件依版本比對，結果只是建議（affected／not-affected／NOT_ASSESSED），`dumpling:vuln-assessment` 仍是 NOT_ASSESSED。"
+           "規則還是初審時是「依初審規則的建議（待負責單位確認）」，確認後才是「依已確認規則的建議」（`dumpling:advisory-rule-state`）；兩種都是「是否受影響以廠商公告為準」。"
+           "只要有任何元件的建議是 affected，即使規則還是初審，整份韌體報告（x86_firmware 的狀態）就是 ATTENTION、列進待人審；not-affected 只表示版本不低於公告列的修正版本（依據類型 `dumpling:evidence=vendor-statement`，附公告網址），"
+           "不會讓狀態變好；沒有適用規則、版本讀不懂、順序不確定、規則表不能用都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；規則表有最後整理日期，之後的新公告沒有收錄。",
            "- firmware.yml 的 `expected_dt: {upload: rejected}` 是樣本自己宣告「DT 會拒收這份 SBOM」（供應商 SBOM 不符 schema，dumpling 不修改供應商的檔案）："
            "真的被拒收仍標 FAIL，但說明寫「與宣告一致」且不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。其他失敗不受宣告影響。",
            "- 上傳狀態 NOT_RUN＝沒有 DT 結果（沒起 DT 或沒跑到上傳）；GAP＝資料不完整（例如 DT 鏡像 wait 結束碼 3），不能當成沒有漏洞。",
@@ -1121,6 +1158,9 @@ def report(prep_dirs, dt_dir, out, nvidia_root=None):
         if s.get("advisory_match"):
             md.append("- 公告比對（dumpling:advisory-match）：%s；候選不是確定受影響，沒有任何一項代表沒有漏洞" % "、".join(
                 "%s=%d" % (k if k in AM_VALUES else _cell(k, 40), v) for k, v in sorted(s["advisory_match"].items()) if _is_count(v)))      # 固定值原樣（不加反斜線），其餘經 _cell
+        if s.get("rule_suggestion"):
+            md.append("- 規則表建議（dumpling:advisory-rule-suggestion）：%s；是依規則表的建議（初審規則待負責單位確認），affected 要待人審，沒有任何一項代表沒有漏洞，是否受影響以廠商公告為準" % "、".join(
+                "%s=%d" % (k if k in RS_VALUES else _cell(k, 40), v) for k, v in sorted(s["rule_suggestion"].items()) if _is_count(v)))
         if res.get("nvidia"):
             md.append("- " + res["nvidia"])   # 文字取自 C1 的 nvidia_bulletins.py，已經過 _cell
         for n in res["notes"]:

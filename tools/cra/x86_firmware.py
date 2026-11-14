@@ -143,6 +143,7 @@ import stat
 import struct
 import sys
 import time
+import unicodedata
 import uuid
 import zipfile
 import zlib
@@ -1761,6 +1762,7 @@ def cbfs_components(b, img, comps, sub):
             c["properties"] += [prop("sca-center:fsp-extended-image-revision", it["extended_image_revision"]),
                                 prop("sca-center:note", "FSP ExtendedImageRevision is non-zero: the high bytes of the revision/build fields "
                                                         "are there, so the version above (from ImageRevision only) may be too low")]
+        c["properties"] += rule_props(it.get("rule_advisory"))
         comps.append(assessed(c, "intel"))
         sub.append(ref)
     for it in cb["vbt"]:
@@ -1799,7 +1801,7 @@ def amd_components(b, img, comps, sub):
                             prop("sca-center:size", p["size"]), *[prop("sca-center:found-in", amd_where(x)) for x in p["locations"]]]}
         if p["sha256"]:
             c["hashes"] = hlist(p)
-        c["properties"] += amd_advisory_props()
+        c["properties"] += amd_advisory_props() + rule_props(p.get("rule_advisory"))
         comps.append(assessed(c, "amd"))
         sub.append(ref)
     for m in a["microcode"]:
@@ -1813,7 +1815,7 @@ def amd_components(b, img, comps, sub):
                             *[prop("sca-center:found-in", amd_where(x)) for x in m["locations"]]]}
         if m["sha256"]:
             c["hashes"] = hlist(m)
-        c["properties"] += amd_advisory_props()
+        c["properties"] += amd_advisory_props() + rule_props(m.get("rule_advisory"))
         comps.append(assessed(c, "amd"))
         sub.append(ref)
     ag = a["agesa"]
@@ -1831,7 +1833,7 @@ def amd_components(b, img, comps, sub):
         else:
             c["version"] = g["value"]
             c["properties"].insert(0, prop("sca-center:version-basis", f"string after the {g['tag']} marker in the image"))
-        c["properties"] += amd_advisory_props()
+        c["properties"] += amd_advisory_props() + rule_props(g.get("rule_advisory"))
         comps.append(assessed(c, "amd"))
         sub.append(ref)
 
@@ -1856,12 +1858,12 @@ def me_advisory_props():
     return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", ME_ADVISORY_BASIS)]
 
 
-AMD_ADVISORY_BASIS = ("AMD security bulletins (AMD-SB) are not matched by this tool: the AMD-SB rule table has not been built; "
+AMD_ADVISORY_BASIS = ("AMD security bulletins (AMD-SB) are not matched by this property; the suggestion of the advisory rule table, if any, is in dumpling:advisory-rule-*; "
                       "no data in the database; the vendor advisory (AMD-SB) is authoritative")
 
 
 def amd_advisory_props():
-    """AMD 的微碼、PSP 韌體、AGESA 元件的公告比對：AMD-SB 的規則表還沒有，NOT_ASSESSED（不是沒有漏洞）。"""
+    """AMD 的微碼、PSP 韌體、AGESA 元件的 advisory-match：沒有機器可讀的 AMD 公告資料表，NOT_ASSESSED（不是沒有漏洞）；規則表的建議另寫在 dumpling:advisory-rule-*。"""
     return [prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", AMD_ADVISORY_BASIS)]
 
 
@@ -1877,6 +1879,27 @@ def advisory_props(res):
         out.append(prop("dumpling:advisory-latest-revision", f"{res['latest_revision']} ({res['latest_release']})"))
     out.append(prop("dumpling:advisory-source", res["source"] or "advisory table not available"))
     out += [prop("dumpling:advisory-note", n) for n in res.get("notes", [])]
+    return out
+
+
+def rule_props(res):
+    """規則表的建議（fw_advisory_rules.evaluate 的結果）→ property；沒有結果 → 不加。這只是建議，dumpling:vuln-assessment 維持 NOT_ASSESSED。
+    not-affected 同時記依據類型 vendor-statement 與公告網址（D-035）。"""
+    if not res:
+        return []
+    out = [prop("dumpling:advisory-rule-suggestion", res["suggestion"])]
+    if res["rule_ids"]:
+        out += [prop("dumpling:advisory-rule-ids", ", ".join(res["rule_ids"])), prop("dumpling:advisory-rule-state", res["state"])]
+    if res.get("reason"):
+        out.append(prop("dumpling:advisory-rule-reason", res["reason"]))
+    out.append(prop("dumpling:advisory-rule-basis", res["basis"]))
+    if res.get("verification"):
+        out.append(prop("dumpling:advisory-rule-verification", ", ".join(f"{k}={v}" for k, v in sorted(res["verification"].items()))))
+    if res["suggestion"] == "not-affected":
+        out += [prop("dumpling:evidence", "vendor-statement"), prop("dumpling:evidence-location", ", ".join(res["evidence"]))]
+    if res.get("related"):
+        out.append(prop("dumpling:advisory-rule-related", ", ".join(res["related"])))
+    out.append(prop("dumpling:advisory-rule-source", res["source"] or "advisory rule table not available"))
     return out
 
 
@@ -1943,6 +1966,7 @@ def components(inv):
         if b.get("declared_version"):
             c["version"] = b["declared_version"]
             c["properties"].append(prop("sca-center:version-basis", "version list (declared by the BIOS team)"))
+        c["properties"] += rule_props(b.get("rule_advisory"))
         comps.append(assessed(c, "image"))
         me_props = [prop("sca-center:me-status", b["me_status"])]
         if b["me"]:
@@ -1961,7 +1985,7 @@ def components(inv):
                 if r["name"] == "me":
                     rc["properties"] += me_props
                     if b["me"]:
-                        rc["properties"] += cpe_props(b["me"]) + me_advisory_props()
+                        rc["properties"] += cpe_props(b["me"]) + me_advisory_props() + rule_props(b["me"].get("rule_advisory"))
                         rc["name"], rc["version"] = ME_NAME, b["me"]["version"]
                         rc["manufacturer"] = {"name": "Intel Corporation"}
                         if csme_cpe(b["me"]):
@@ -1971,7 +1995,7 @@ def components(inv):
         if b["me"] and not any(r["name"] == "me" for r in b["regions"]):
             ref = f"{img}:me"
             mc = {"type": "firmware", "bom-ref": ref, "name": ME_NAME, "version": b["me"]["version"],
-                  "manufacturer": {"name": "Intel Corporation"}, "properties": me_props + cpe_props(b["me"]) + me_advisory_props()}
+                  "manufacturer": {"name": "Intel Corporation"}, "properties": me_props + cpe_props(b["me"]) + me_advisory_props() + rule_props(b["me"].get("rule_advisory"))}
             if csme_cpe(b["me"]):
                 mc["cpe"] = csme_cpe(b["me"])
             comps.append(assessed(mc, "intel"))
@@ -2236,8 +2260,9 @@ def pfat_unwrap(label, data, budget, partial):
             "info": pf["info"], "notes": pf["notes"], "signature_verified": False}, pf["image"]
 
 
-def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=None, vbios_now=None):
+def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=None, vbios_now=None, rules=None):
     """advisory：測試用，Table 或 TableError（fw_advisory）；沒給就載入 repo 內的 Intel 微碼發佈資料表。
+    rules：測試用，Table 或 TableError（fw_advisory_rules）；沒給就載入 repo 內的廠商公告規則表。
     vbios_advisory：測試用，Table 或 TableError（nvidia_vbios_advisory）；沒給就載入 repo 內的 NVIDIA 公告對照表。
     vbios_now：表過期判斷用的現在時間（datetime）；測試一律傳固定的時間，沒給就用牆上時鐘。"""
     rows = read_manifest(manifest) if manifest else None
@@ -2330,6 +2355,7 @@ def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=N
             elif len(fam) > 1:            # 清單對同一個版本寫了不同的 family（自相矛盾）：不推定，不帶 CPE
                 b["me"]["family_conflict"] = sorted(fam)
         inv["comparison"] = compare(inv, rows)
+    inv["rules_advisory"] = rules_section(inv, rules)          # 要在版本清單的 declared_version 與 ME family 設好之後
     return inv
 
 
@@ -2394,6 +2420,68 @@ def vbios_advisory_section(inv, advisory=None, now=None):
     return sec
 
 
+def _rules_targets(inv):
+    """規則表比對的每個元件：(持有結果的 dict, 元件種類, 比對輸入, 映像檔名, 元件說明)。x86_firmware 的 SBOM 與報告共用同一份結果（結果記在 holder["rule_advisory"]）。"""
+    for b in inv["bios"]:
+        img = fname(b["file"])
+        yield (b, "bios_image", {"file": b["file"], "declared_version": b.get("declared_version"),
+                                 "ami": "AMI" in (b.get("ibv_hint") or []) or bool(b.get("pfat"))}, img, "BIOS image")
+        me = b.get("me")
+        if me:
+            _cpe, basis, _gap = csme_cpe_info(me)
+            yield (me, "intel_csme", {"version": me.get("version"), "family": me.get("family"), "family_conflict": me.get("family_conflict"),
+                                      "family_basis": basis}, img, f"ME {me.get('version')}")
+        a = b.get("amd")
+        if a:
+            for p in a["psp_firmware"]:
+                yield (p, "amd_psp", {"type": p["type"], "version": p["version"]}, img, f"PSP type 0x{p['type']:02x} {p['version']}")
+            for m in a["microcode"]:
+                yield (m, "amd_microcode", {"equiv_id": m["equiv_id"], "cpuids": m["cpuids"], "patch_id": m["patch_id"]}, img,
+                       f"AMD microcode equiv {m['equiv_id']} patch {m['patch_id']}")
+            for g in a["agesa"]["values"]:
+                yield (g, "amd_agesa", {"value": None if g.get("truncated") else g["value"]}, img, f"AGESA {g['value']}")
+        for it in (b.get("cbfs") or {}).get("fsp", []):
+            yield (it, "intel_fsp", {"version": None if it.get("extended_image_revision") else it["revision"]}, img, f"FSP {it['revision']}")
+
+
+def rules_section(inv, rules=None):
+    """每個有規則元件種類的元件比對一次規則表（結果記在各元件的 ["rule_advisory"]）→ inv["rules_advisory"]：表的來源與狀態（OK／GAP）、各建議的數量、affected 與 not-affected 的清單。
+    建議只是建議（dumpling:vuln-assessment 維持 NOT_ASSESSED）。"""
+    mod = load_sibling("fw_advisory_rules")
+    if rules is None:
+        table, err = mod.load_default()
+    elif isinstance(rules, mod.TableError):
+        table, err = None, rules
+    else:
+        table, err = rules, None
+    target = table if table is not None else err
+    results, items = [], []
+    for holder, kind, comp, img, label in _rules_targets(inv):
+        try:
+            r = mod.evaluate(target, kind, comp)
+        except Exception as e:           # 比對本身出錯：這一個是 NOT_ASSESSED，不讓整個流程中斷
+            r = mod._na("match-error", f"the advisory rule matching failed ({type(e).__name__})", table)
+        holder["rule_advisory"] = r
+        results.append(r)
+        items.append({"image": img, "component": label, "kind": kind, "suggestion": r["suggestion"], "reason": r.get("reason"),
+                      "rule_ids": r["rule_ids"], "state": r["state"], "related": r["related"], "evidence": r["evidence"],
+                      "verification": r.get("verification", {})})
+    sec = {"status": "OK" if table is not None else "GAP", "components": len(results), "counts": mod.counts(results), "items": items,
+           "errors": sum(1 for x in items if x["reason"] == "match-error")}
+    if table is not None:
+        c = table.counts()
+        sec["table"] = {"schema": mod.SCHEMA, "updated": table.updated, "rules": len(table.rules), "preliminary": c["preliminary"],
+                        "confirmed": c["confirmed"], "sha256": table.sha256, "ids": [r["id"] for r in table.rules],
+                        "rules_info": [{"id": r["id"], "vendor": r["vendor"], "title": r["title"], "published": r["published"], "state": r["review"]["state"],
+                                        "preliminary_by": r["review"]["preliminary_by"], "preliminary_at": r["review"]["preliminary_at"],
+                                        "verification": table.verification(r["id"]),
+                                        "confirmed_by": r["review"].get("confirmed_by"), "confirmed_at": r["review"].get("confirmed_at"),
+                                        "sources": [x["url"] for x in r["sources"]]} for r in table.rules]}
+    else:
+        sec["gap"] = f"{err.reason}: {err.detail}"
+    return sec
+
+
 def status_of(inv):
     att = []
     n_skipped = len({x["file"] for x in inv["skipped"]})          # 兩邊都以檔案數計（同一個檔案可能有多筆原因）
@@ -2438,6 +2526,19 @@ def status_of(inv):
     if va and va.get("stale") and va["vbios"]:
         att.append(f"NVIDIA vBIOS 公告對照表過期（鏡像日期超過 {load_sibling('nvidia_vbios_advisory').MAX_MIRROR_AGE_DAYS} 天、讀不到或在未來），"
                    "已修補（fixed）的結果會降成 NOT_ASSESSED；要重新審核表")
+    ra = inv.get("rules_advisory")
+    if ra and ra["status"] == "GAP" and ra["components"]:
+        att.append(f"廠商公告規則表不能用（GAP，{ra['gap']}）；{ra['components']} 個元件的規則建議都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準")
+    if ra and ra.get("errors"):         # 比對本身出錯（match-error）：那些元件是 NOT_ASSESSED，但不能當成「沒有東西」：保守標 ATTENTION
+        att.append(f"規則表比對出錯：{ra['errors']} 個元件的規則比對丟出例外（match-error，結果是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），請看 fw-inventory.json 的 rules_advisory")
+    if ra:
+        aff = [x for x in ra["items"] if x["suggestion"] == "affected"]
+        if aff:                # affected 的建議（即使規則還是初審）一律 ATTENTION、待人審；not-affected 與 NOT_ASSESSED 不會讓狀態變好或變差
+            ids = sorted({i for x in aff for i in x["rule_ids"]})
+            states = sorted({x["state"] for x in aff})
+            att.append(f"規則表建議 affected：{len(aff)} 個元件（規則 {'、'.join(ids)}；"
+                       + ("依初審規則的建議，待負責單位確認" if "preliminary" in "".join(states) else "依已確認規則的建議")
+                       + "；是否受影響以廠商公告為準），待人審")
     for v in inv["vbios"]:
         if not v["version"]:
             att.append(f"vBIOS {v['device']}：ROM 裡找不到版本")
@@ -2469,13 +2570,48 @@ def status_of(inv):
     return ("ATTENTION" if att else "OK"), detail + "".join("；" + x for x in att)
 
 
+_MDSAFE_PATH = Path(__file__).resolve().parent.parent.parent / "pipeline" / "lib" / "firmware_mdsafe.py"
+_MDSAFE = []
+
+
+def _fallback_links(t):
+    """載不到 firmware_mdsafe 時的連結處理：`:`、`.` 前後插零寬空白；Issue 參照（`#`／`＃` 接數字、`GH-` 接數字）在 `#`、`GH` 後面插零寬空白
+    （`#` 前面不插：md_esc 已把 `#` 跳脫成 `\\#`，前面插會把反斜線和 `#` 拆開）。"""
+    t = re.sub(r"([:.])", "\u200b\\1\u200b", t)
+    t = re.sub(r"(\\?[#＃])(?=[0-9０-９])", "\\1\u200b", t)
+    return re.sub(r"(?i)(?<![A-Za-z0-9])(gh)(?=-[0-9])", "\\1\u200b", t)
+
+
+def _mdsafe_funcs():
+    """(defang_at, defang_links)：與 pipeline/lib/firmware_mdsafe.py 同一份規則（@ 提及與 email 自動連結、裸網址、mailto／xmpp）：載入同 repo 的那個檔案。
+    載不到時退回保守做法：每個 @／＠ 後面都插零寬空白，每個 `:` 與 `.` 前後也插零寬空白（網址、mailto、xmpp、`www.` 前綴都接不起來，不會變成連結；輸出會多零寬空白，但不會漏擋），Issue 參照見 _fallback_links。"""
+    if not _MDSAFE:
+        try:
+            spec = importlib.util.spec_from_file_location("firmware_mdsafe_for_x86", _MDSAFE_PATH)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _MDSAFE.append((mod.defang_at, mod.defang_links))
+        except (OSError, ImportError, AttributeError, SyntaxError):
+            _MDSAFE.append((lambda t: re.sub(r"([@＠])", "\\1\u200b", t), _fallback_links))
+    return _MDSAFE[0]
+
+
+def _plain(x):
+    """C 類字元（控制、格式如 U+202E 與零寬、單獨代理、私用、未指派）與 Zl／Zp 換成空白，連續空白壓成一個（firmware_mdsafe.plain 同一份規則；
+    單獨代理字元留著會讓寫檔時 UTF-8 編碼失敗）。"""
+    s = "".join(" " if (unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")) else ch for ch in str(x))
+    return " ".join(s.split())
+
+
 def md_esc(x):
-    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構。"""
-    s = " ".join(str(x).split())
-    for a, b in (("&", "&amp;"), ("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("*", "\\*"), ("_", "\\_"), ("[", "\\["), ("]", "\\]"),
-                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#")):
+    """表格與內文用：檔名、字串都是不可信資料，不能變成 markdown／HTML 結構（含 @ 提及、email 與裸網址的自動連結）。
+    與 firmware_mdsafe.md_safe 的差別：不截短；`<`、`>` 用 &lt;、&gt;；`!`、`$`、`(`、`)` 不跳脫（報告裡的 `$FPT`、`(…)` 是固定寫法，沒有 `[` 就不會變成連結或圖片）。"""
+    at, links = _mdsafe_funcs()
+    s = at(_plain(x).replace("&", "&amp;"))        # @ 的判斷看原文（跳脫之前），和 firmware_mdsafe.md_safe 的順序相同
+    for a, b in (("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("*", "\\*"), ("_", "\\_"), ("[", "\\["), ("]", "\\]"),
+                 ("<", "&lt;"), (">", "&gt;"), ("#", "\\#"), ("~", "\\~")):
         s = s.replace(a, b)
-    return s
+    return links(s)
 
 
 ME_STATUS_TEXT = {"found": "found（找到）", "no-me-region": "no-me-region（沒有 ME 區域）", "unknown": "unknown（有 ME 區域，版本拿不到）"}
@@ -2536,8 +2672,11 @@ def nvidia_vbios_advisory_markdown(inv):
          "`fixed` 只表示表裡某一則已審核的公告把這個版本列為已修補，`affected` 只表示表裡有已審核的列把它列為受影響。比對在本機離線完成，沒有連網。"]
     if va["status"] == "OK":
         s = va["source"]
-        who = (f"審核到 {e(s['reviewed_until'])}" if s["reviewed_until"] and not s.get("awaiting_confirmation")
-               else "**表尚未經負責人確認**（" + ("reviewed_until 為 null" if not s["reviewed_until"] else "還有公告只有初審意見") + "，所有 vBIOS 都是 NOT_ASSESSED）")
+        # 判斷與 nvidia_vbios_advisory.Table.confirmed 相同：reviewed_until 有值、沒有只有初審意見的公告、沒有未審核的列（三個條件缺一個都是尚未確認）
+        why = ([] if s["reviewed_until"] else ["reviewed_until 為 null"]) + (["還有公告只有初審意見"] if s.get("awaiting_confirmation") else []) \
+            + ([f"還有 {s['unreviewed_rows']} 筆未審核的列"] if s["unreviewed_rows"] else [])
+        who = (f"審核到 {e(s['reviewed_until'])}" if not why
+               else "**表尚未經負責人確認**（" + "、".join(why) + "，所有 vBIOS 都是 NOT_ASSESSED）")
         L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
                  f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
                  + (f"已確認無法對應到 option ROM 版本與裝置的公告：{e('、'.join(s['not_applicable']))}（技術理由見對照表）；" if s["not_applicable"] else "")
@@ -2607,7 +2746,7 @@ def advisory_markdown(inv):
             a = b.get("amd")
             if a:
                 L.append(f"AMD 平台：AMD 微碼已解析 {len(a['microcode'])} 份、PSP 韌體 {len(a['psp_firmware'])} 項、AGESA 字串 {len(a['agesa']['values'])} 個，"
-                         "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準；AMD-SB 的規則表還沒有做）。映像裡沒有 Intel 微碼。")
+                         "沒有做公告比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準；規則表的建議見「規則表比對」一節）。映像裡沒有 Intel 微碼。")
             else:
                 L.append("AMD 平台：PSP 目錄解析沒有執行（GAP，原因見映像元件的 sca-center:gap），AMD 微碼、PSP 韌體、AGESA 都沒有列出，"
                          "沒有比對（NOT_ASSESSED：資料庫沒有資料，以 AMD 公告為準）。")
@@ -2621,7 +2760,7 @@ def advisory_markdown(inv):
                      if cpe else f"沒有 CPE（GAP）：{e(gap)}。")]
         else:
             L += ["", f"- ME：{e(b['me_note'] or '沒有讀到 ME 版本')}；沒有 ME 版本可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），SBOM 不帶 CPE。"]
-        L.append("- 其他元件（FSP、GOP／VBT／legacy VBIOS、coreboot、edk2、BIOS 映像本身）：沒有公告比對，NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
+        L.append("- 其他元件（GOP／VBT／legacy VBIOS、coreboot、edk2）：沒有公告比對，NOT_ASSESSED：資料庫沒有資料，以廠商公告為準；FSP 與 BIOS 映像本身只有「規則表比對」一節的建議。")
     if not inv["bios"]:
         L += ["", "沒有 BIOS 映像，沒有微碼與 ME 可比對（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）。"]
     if inv["vbios"]:
@@ -2631,6 +2770,92 @@ def advisory_markdown(inv):
     if inv.get("intel_vbios"):
         L += ["", f"### Intel legacy VBIOS（{len(inv['intel_vbios'])} 個）", "",
               "公告比對：沒有做（NOT_ASSESSED）：資料庫沒有資料，以廠商公告為準。"]
+    return L
+
+
+RULE_TEXT = {"affected": "affected（依規則的建議：版本低於公告列的修正版本）",
+             "not-affected": "not-affected（依規則的建議：版本不低於公告列的修正版本；依據類型 vendor-statement）",
+             "NOT_ASSESSED": "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）"}
+RULE_STATE_TEXT = {"preliminary": "依初審規則的建議（待負責單位確認）", "confirmed": "依已確認規則的建議",
+                   "preliminary+confirmed": "依初審與已確認規則的建議（含待負責單位確認的初審規則）"}
+VERIFY_TEXT = {"direct": "直接下載原文解析",
+               "independent:nvd": "官方頁面加 NVD 的版本範圍另行核對（只涵蓋 NVD 有 Intel CPE 設定的 CVE）",
+               "summary-tool": "版本值未獨立核對（只經網頁摘要工具讀到），請負責單位對照原頁面"}
+RULE_DETAIL_KINDS = ("amd_agesa", "intel_csme", "intel_fsp", "bios_image")        # 這幾種逐項列出；其他種類（PSP、AMD 微碼）沒有適用規則時只列計數
+
+
+def unverified_text(x):
+    """建議用到的規則裡，版本值只經摘要工具讀到的（沒有獨立核對）→ 一句提醒；沒有 → 空字串。"""
+    ids = sorted(i for i, v in (x.get("verification") or {}).items() if v == "summary-tool")
+    return f"；{md_esc('、'.join(ids))} 的版本值未獨立核對，請負責單位對照原頁面" if ids else ""
+
+
+def rules_markdown(inv):
+    """## 規則表比對：每份韌體 SBOM 都有這一節（D-043 (2)）。依 tools/cra/data/fw-advisory-rules.json 的建議，不是漏洞判定。"""
+    e = md_esc
+    ra = inv.get("rules_advisory") or {"status": "GAP", "gap": "沒有比對（inventory 沒有 rules_advisory 欄位）", "components": 0, "counts": {}, "items": []}
+    L = ["", "## 規則表比對", "",
+         "- **這一節是依規則表的建議，不是漏洞判定，沒有任何一項代表「沒有漏洞」；是否受影響以廠商公告為準。** 規則表是人從廠商官方公告頁整理的"
+         "（`tools/cra/data/fw-advisory-rules.json`，一個公告一筆，條件是元件加版本範圍，附出處與審核狀態）；結果只是建議，由負責單位確認；"
+         "SBOM 的 `dumpling:vuln-assessment` 仍然是 NOT_ASSESSED。建議寫在元件的 `dumpling:advisory-rule-*` property。",
+         "- 審核狀態：規則還是初審時寫「依初審規則的建議（待負責單位確認）」；確認後才寫「依已確認規則的建議」。"
+         "`not-affected` 只表示版本不低於公告列的修正版本，不代表沒有其他漏洞；依據是廠商公告（`dumpling:evidence=vendor-statement`）。"]
+    if ra["status"] == "OK":
+        t = ra["table"]
+        L.append(f"- 規則表：{t['rules']} 筆（初審 {t['preliminary']}、已確認 {t['confirmed']}），最後整理日期 **{e(t['updated'])}**；"
+                 f"之後的新公告沒有收錄，以廠商公告為準。檔案 SHA-256 `{t['sha256']}`；比對在本機離線完成，沒有連網。")
+    else:
+        L.append(f"- 規則表：**GAP（不能用）**：{e(ra['gap'])}。所有元件的規則建議都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準（報告狀態 ATTENTION）。")
+    c = ra["counts"]
+    L.append(f"- 元件 {ra['components']} 個：" + ("、".join(f"{k} {c[k]}" for k in ("affected", "not-affected", "NOT_ASSESSED") if k in c) or "無"))
+    if ra["status"] == "OK" and ra["table"].get("rules_info"):
+        L += ["", "### 規則表內容", "", "| 規則 | 廠商 | 標題 | 公告日 | 審核 | 版本值核對 | 出處 |", "|---|---|---|---|---|---|---|"]
+        for ri in ra["table"]["rules_info"]:
+            rv = (f"初審（{e(ri['preliminary_by'])}，{e(ri['preliminary_at'])}）待負責單位確認" if ri["state"] == "preliminary"
+                  else f"已確認（{e(ri['confirmed_by'])}，{e(ri['confirmed_at'])}）")
+            L.append(f"| {e(ri['id'])} | {e(ri['vendor'])} | {e(ri['title'])} | {e(ri['published'])} | {rv} | {VERIFY_TEXT[ri['verification']]} | {e('、'.join(ri['sources']))} |")
+    items = ra["items"]
+    aff = [x for x in items if x["suggestion"] == "affected"]
+    notaff = [x for x in items if x["suggestion"] == "not-affected"]
+    L += ["", "### 建議 affected（待人審）", ""]
+    if aff:
+        L += ["`affected` 的建議（即使規則還是初審）讓整份韌體報告狀態是 ATTENTION，請負責單位對照廠商公告確認。", "",
+              "| 映像 | 元件 | 規則 | 說明 |", "|---|---|---|---|"]
+        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in aff]
+    else:
+        L.append("沒有。")
+    L += ["", "### 建議 not-affected（依據類型 vendor-statement）", ""]
+    if notaff:
+        L += ["下列項目的版本不低於廠商公告列的修正版本（排除依據是廠商公告，D-035）；這不會讓報告狀態變好。", "",
+              "| 映像 | 元件 | 規則 | 依據網址 | 說明 |", "|---|---|---|---|---|"]
+        L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {e('、'.join(x['evidence']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in notaff]
+    else:
+        L.append("沒有。")
+    rel = [x for x in items if x["related"]]
+    L += ["", "### 可能相關的 AMI 公告（沒有建議）", ""]
+    if rel:
+        L += ["SBOM 沒有 AMI 核心版本，AMI-SA 的條件一律是 NOT_ASSESSED（原因：SBOM 沒有 AMI 核心版本）；下列公告只是請負責單位對照，不是建議。", "",
+              "| 映像 | 可能相關的 AMI 公告 |", "|---|---|"]
+        L += [f"| {e(x['image'])} | {e('、'.join(x['related']))} |" for x in rel]
+    else:
+        L.append("沒有（映像沒有 AMI 的線索，或規則表沒有 AMI 公告）。")
+    detail = [x for x in items if x["kind"] in RULE_DETAIL_KINDS or x["suggestion"] != "NOT_ASSESSED"]
+    rest = [x for x in items if x not in detail]
+    L += ["", "### 各元件的建議", "", "| 映像 | 元件 | 建議 | 規則 | 依據 |", "|---|---|---|---|---|"]
+    for holder, kind, _comp, img, label in _rules_targets(inv):
+        r = holder.get("rule_advisory")
+        if r is None or (kind not in RULE_DETAIL_KINDS and r["suggestion"] == "NOT_ASSESSED"):
+            continue
+        ids = e("、".join(r["rule_ids"])) + (f"（{r['state']}）" if r["rule_ids"] else "")
+        L.append(f"| {e(img)} | {e(label)} | {RULE_TEXT[r['suggestion']]} | {ids} | {e(r['basis'])} |")
+    if rest:
+        g = {}
+        for x in rest:
+            g[(x["kind"], x.get("reason") or "-")] = g.get((x["kind"], x.get("reason") or "-"), 0) + 1
+        L += ["", "- 其餘 " + str(len(rest)) + " 個元件沒有適用的規則：" + "、".join(f"{e(k)} {n} 個（{e(rs)}）" for (k, rs), n in sorted(g.items()))
+              + "；都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。"]
+    L.append("")
+    L.append("- 沒有規則元件種類的元件（Intel 微碼另見「公告比對」、coreboot、edk2、GOP／VBT／legacy VBIOS、NVIDIA vBIOS）：這一節沒有比對，不代表沒有漏洞。")
     return L
 
 
@@ -2722,6 +2947,7 @@ def markdown(inv):
         L += [f"| {c['component']} | {e(c['identifier'] or '')} | {e(c['declared'] or '')} | {e(c['extracted'] or '')} | {c['result']}"
               + ("" if c["verifiable"] else "（映像拆不出來）") + " |" for c in inv["comparison"]]
     L += advisory_markdown(inv)
+    L += rules_markdown(inv)
     if inv["skipped"] or inv["partial"]:
         L += ["", "## 略過與只解析一部分", ""] + [f"- 略過 {e(x['file'])}：{e(x['reason'])}" for x in inv["skipped"]] \
             + [f"- 只解析一部分 {e(x['file'])}：{e(x['reason'])}" for x in inv["partial"]]

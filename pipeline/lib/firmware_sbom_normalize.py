@@ -10,14 +10,18 @@
         若這一筆還有其他欄位（text 等）或 url 不是字串，整個 license 物件以 JSON 字串存進 `dumpling:supplier-license-entry`。
         不把 url 填成 name、不猜授權。
 
-  3. 供應商自帶、名稱以 `dumpling:` 開頭的 property（`metadata.properties` 與 components[] 含巢狀的 properties）
+  3. 供應商自帶、名稱以 `dumpling:` 開頭的 property（文件裡任何位置的 `properties` 陣列：`metadata.properties`、components[] 含巢狀、
+     components[].pedigree 的 ancestors／descendants／variants、services[]（含巢狀）、metadata.tools、formulation、頂層 properties（1.5 起）…）
      → 就地改名成 `supplier:` + 原名（例如 `supplier:dumpling:normalized-changes`），值與位置不變。
      理由：`dumpling:` 是我們自己的命名空間（`dumpling:normalized-*`、`dumpling:supplier-*` 是這個模組寫的紀錄，`dumpling:vuln-assessment`、
      `dumpling:version-status`、`dumpling:advisory-match` 是 report 讀的標記）。供應商如果原本就有同名 property，會和我們加的混在一起，
      被誤當成我們的紀錄或評估結果；改名後副本裡所有 `dumpling:` 開頭的 property 都是我們寫的。改名不是違規修正，是命名空間隔離，所以不管 schema 驗不驗得過都做。
-     只處理這兩處：report 只讀元件的 properties，我們只寫 `metadata.properties` 與元件的 properties；
-     頂層 properties（1.5 起）、services、metadata.component（prep 已整個換成我們的根元件）、元件的 pedigree／evidence 底下的元件不動
-     （沒有任何 dumpling 工具讀或寫那些位置；DT 5.2.0 也不用它們）。specVersion 不在支援範圍時整份不處理（見下），所以不改名。
+     哪些位置有人讀：report 只讀元件的 properties；Dependency-Track 5.2.0 的 ModelConverter 只讀元件（含 metadata.tools 的元件）的 properties，
+     不讀 pedigree 與 services 底下的（pedigree、services 的 property 沒有工具讀；改名只是讓「副本裡所有 dumpling: property 都是我們寫的」成立）。
+     不動的位置：metadata.component（prep 已整個換成我們的根元件，裡面的 `dumpling:sample-*` 是我們寫的）、
+     因為頂層欄位不在該 specVersion 的 schema 而被搬進 `dumpling:supplier-extra:*` 的欄位（搬成字串值，不再是 property）。
+     整份不處理時（specVersion 不在支援範圍、metadata 型別不對、規劃失敗，見下），不會改名，但仍數出副本裡有幾個 `dumpling:` 開頭的供應商 property
+     （記在 reserved_not_renamed，processed 為 false）。
 
 原則：不刪資料（搬到 property）、不補猜的值、每一筆留紀錄、只處理已知的違規類型、不認得的違規不動。
 紀錄（normalize 回傳值，寫成 normalize.json）：每筆有原 JSON Pointer、新位置、原值的 SHA-256
@@ -129,8 +133,9 @@ def reserved_indices(props):
     return [i for i, p in enumerate(props) if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].startswith(RESERVED_PREFIX)]
 
 
-def _iter_components(doc, unnorm):
-    """依文件順序走訪 components（含巢狀；不遞迴），產生 (指標前綴, 元件 dict)。"""
+def _iter_components(doc, on_deep):
+    """依文件順序走訪 components（含巢狀；不遞迴），產生 (指標前綴, 元件 dict)。
+    巢狀超過 MAX_NEST 層時呼叫 on_deep(rule, at, reason)（只呼叫一次；呼叫端的 skip 負責計數與 MAX_UNNORMALIZED 上限）。"""
     stack = [("/components", doc.get("components"), 1)]
     seen_deep = False
     while stack:
@@ -140,7 +145,7 @@ def _iter_components(doc, unnorm):
         if depth > MAX_NEST:
             if not seen_deep:
                 seen_deep = True
-                unnorm.append({"rule": "nesting-too-deep", "at": prefix, "reason": "元件巢狀超過 %d 層，以下不處理" % MAX_NEST})
+                on_deep("nesting-too-deep", prefix, "元件巢狀超過 %d 層，以下不處理" % MAX_NEST)
             continue
         for i, c in enumerate(lst):
             if isinstance(c, dict):
@@ -151,17 +156,61 @@ def _iter_components(doc, unnorm):
                 stack.append(("%s/%d/components" % (prefix, i), c["components"], depth + 1))
 
 
+def _property_lists(doc, exclude_root=(), exclude_ids=()):
+    """走訪整份文件（不遞迴，深度不限），對每個「dict 的 properties 是陣列」產生 (指標用的路徑片段 list, 該 dict, 該陣列)。
+    exclude_root：根物件上不走的鍵；exclude_ids：不進入的 dict／list（id）。路徑用 (上一層, 鍵) 串起來，只在產生時才展開，深的文件不會 O(深度²)。"""
+    stack = [(doc, None)]
+    while stack:
+        node, path = stack.pop()
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, list) and not (path is None and "properties" in exclude_root):
+                parts, p = [], path
+                while p is not None:
+                    p, k = p
+                    parts.append(k)
+                yield parts[::-1], node, props
+            for k, v in reversed(list(node.items())):
+                if (path is None and k in exclude_root) or not isinstance(v, (dict, list)) or id(v) in exclude_ids:
+                    continue
+                stack.append((v, (path, k)))
+        elif isinstance(node, list):
+            for i in range(len(node) - 1, -1, -1):
+                v = node[i]
+                if isinstance(v, (dict, list)) and id(v) not in exclude_ids:
+                    stack.append((v, (path, i)))
+
+
+def count_reserved(doc):
+    """文件裡名稱以 `dumpling:` 開頭的 property 個數（metadata.component 不算：prep 換成我們自己的根元件）。整份不處理時用來記「副本仍帶著幾個」。"""
+    meta = doc.get("metadata") if isinstance(doc, dict) else None
+    skip = {id(meta["component"])} if isinstance(meta, dict) and isinstance(meta.get("component"), (dict, list)) else set()
+    return sum(len(reserved_indices(plist)) for _, _, plist in _property_lists(doc, exclude_ids=skip))
+
+
 def normalize(doc, input_sha256):
     """就地正規化 doc（CycloneDX JSON 的 dict），回傳紀錄 dict。先完整規劃、通過才套用；規劃中出任何例外都不改 doc。
 
-    紀錄：{schema, input_sha256, spec_version, applied, supported, changes: [...], unnormalized: [...], unnormalized_total, reserved_not_renamed, notes: [...]}。
+    紀錄：{schema, input_sha256, spec_version, applied, supported, processed, changes: [...], unnormalized: [...], unnormalized_total, reserved_not_renamed, notes: [...]}。
+    processed＝規劃有跑完（false：整份不處理，reserved_not_renamed 是副本裡原樣留著的供應商 dumpling: property 個數）。
     unnormalized_total＝無法正規化的真正筆數（unnormalized 清單最多留 MAX_UNNORMALIZED 筆，之後只有一筆「more」）；
-    reserved_not_renamed＝供應商自帶的 dumpling: property 因為上限或無法序列化而沒有改名的個數（副本仍帶著它們）。
+    reserved_not_renamed＝供應商自帶的 dumpling: property 因為上限、無法序列化或整份不處理而沒有改名的個數（副本仍帶著它們）。
     changes[]（property、original_name 最多留 MAX_NAME_RECORD 字元，完整原值以 value_sha256 為準）: {rule, from, to[], property[], value_sha256}（每個搬移的項目一筆；to／property 是陣列，license 項目可能同時寫 url 與整個物件；
     license 項目另有 component_properties_before：元件的 properties 鍵原本是 absent／null／array，副本一律是陣列）；unnormalized[]: {rule, at, reason}（已知違規但無法搬移，欄位原樣保留）。
     """
-    rec = {"schema": SCHEMA_ID, "input_sha256": input_sha256, "spec_version": None, "supported": False, "applied": False,
+    rec = {"schema": SCHEMA_ID, "input_sha256": input_sha256, "spec_version": None, "supported": False, "applied": False, "processed": False,
            "changes": [], "unnormalized": [], "unnormalized_total": 0, "reserved_not_renamed": 0, "notes": []}
+
+    def left_alone():
+        """整份不處理：副本原樣帶著供應商的 dumpling: property，數出來讓報告寫明（不是 0 而且不提）。"""
+        try:
+            rec["reserved_not_renamed"] = count_reserved(doc)
+        except Exception as e:
+            rec["notes"].append("供應商 dumpling: property 的個數無法計算（%s）" % type(e).__name__)
+        if rec["reserved_not_renamed"]:
+            rec["notes"].append("副本沒有改名，原樣帶著 %d 個名稱以 dumpling: 開頭的供應商 property" % rec["reserved_not_renamed"])
+        return rec
+
     if not isinstance(doc, dict):
         rec["notes"].append("根物件不是 JSON 物件，不處理")
         return rec
@@ -169,19 +218,20 @@ def normalize(doc, input_sha256):
     rec["spec_version"] = spec if isinstance(spec, str) and len(spec) <= 20 else None
     if rec["spec_version"] not in TOP_KEYS:
         rec["notes"].append("specVersion 不在支援範圍（%s），不處理" % ", ".join(sorted(TOP_KEYS)))
-        return rec
+        return left_alone()
     rec["supported"] = True
     meta = doc.get("metadata")
     if meta is None:
         meta = {}
     if not isinstance(meta, dict) or not (meta.get("properties") is None or isinstance(meta.get("properties"), list)):
         rec["notes"].append("metadata 或 metadata.properties 型別不對，沒有地方放紀錄，整份不處理")
-        return rec
+        return left_alone()
     try:
         plan = _plan(doc, meta, rec["spec_version"])
     except Exception as e:                           # 惡意輸入造成的任何意外：放棄正規化，文件不動
         rec["notes"].append("規劃時發生 %s，整份不處理" % type(e).__name__)
-        return rec
+        return left_alone()
+    rec["processed"] = True
     rec["changes"], rec["unnormalized"] = plan["changes"], plan["unnormalized"]
     rec["unnormalized_total"], rec["reserved_not_renamed"] = plan["unnormalized_total"], plan["reserved_not_renamed"]
     if not plan["changes"]:
@@ -195,7 +245,8 @@ def _plan(doc, meta, spec):
     changes, unnorm = [], []
     top_moves = []       # (key, 值字串)
     meta_ren = []        # metadata.properties 要改名的索引
-    comp_ren = []        # (元件 dict, 元件指標, [索引…])
+    comp_ren = []        # (擁有 properties 的 dict, 它的指標, [索引…])：元件、pedigree／services 底下等所有 properties 陣列（metadata.properties 另外處理）
+    done = set()         # 已規劃過的 properties 陣列（id）
     lic_moves = []       # (元件 dict, 元件指標, 要移除的 licenses 索引集合, [(name, value)…])
     budget = [MAX_TOTAL_BYTES]
     count = [0]
@@ -258,10 +309,14 @@ def _plan(doc, meta, spec):
         return idxs
 
     meta_ren.extend(plan_rename(meta.get("properties"), pointer("metadata", "properties")))
+    if isinstance(meta.get("properties"), list):
+        done.add(id(meta["properties"]))
 
     # 規則 2：license 物件沒有 id 也沒有 name；規則 3 的元件 properties 部分在同一個走訪裡
-    for cptr, comp in _iter_components(doc, unnorm):
+    for cptr, comp in _iter_components(doc, skip):
         ren = plan_rename(comp.get("properties"), cptr + "/properties")
+        if isinstance(comp.get("properties"), list):
+            done.add(id(comp["properties"]))
         if ren:
             comp_ren.append((comp, cptr, ren))
         lic = comp.get("licenses")
@@ -303,6 +358,17 @@ def _plan(doc, meta, spec):
             adds.append((at, sha, vals, pstate))
         if remove:
             lic_moves.append((comp, cptr, remove, adds))
+    # 規則 3 的其餘位置：pedigree、services、metadata.tools、formulation、頂層 properties…（metadata.component 不動；搬去 supplier-extra 的頂層欄位已是字串）
+    mc = meta.get("component")
+    skip_ids = {id(mc)} if isinstance(mc, (dict, list)) else set()
+    for parts, owner, plist in _property_lists(doc, exclude_root={k for k, _ in top_moves}, exclude_ids=skip_ids):
+        if id(plist) in done:
+            continue
+        done.add(id(plist))
+        ptr = pointer(*parts, "properties")
+        ren = plan_rename(plist, ptr)
+        if ren:
+            comp_ren.append((owner, pointer(*parts), ren))
     # 計算「新位置」的索引並組紀錄（改名的紀錄 to 就是 from，不在這裡處理）
     for ch in changes:
         if "_idx" in ch:
@@ -316,8 +382,7 @@ def _plan(doc, meta, spec):
                 pos += 1
             changes.append({"rule": "license-without-id-or-name", "from": at, "to": tos,
                             "property": [n for n, _ in vals], "value_sha256": sha, "component_properties_before": pstate})
-    deep = sum(1 for u in unnorm if u["rule"] == "nesting-too-deep")       # 這種直接由 _iter_components 加進清單，不經 skip
-    return {"changes": changes, "unnormalized": unnorm, "unnormalized_total": stat["unnorm"] + deep, "reserved_not_renamed": stat["reserved_left"], "top_moves": top_moves, "lic_moves": lic_moves,
+    return {"changes": changes, "unnormalized": unnorm, "unnormalized_total": stat["unnorm"], "reserved_not_renamed": stat["reserved_left"], "top_moves": top_moves, "lic_moves": lic_moves,
             "meta_ren": meta_ren, "comp_ren": comp_ren}
 
 

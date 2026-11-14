@@ -53,8 +53,8 @@ report 讀的結果資料夾（`--dt-result`）：
     上傳三階段與 C-grype 另有專屬判斷，不重複列。**預期的 NOT_RUN 不列**：`E-*`（`firmware-dt.sh` 固定 `--no-license`，授權與版權整段 NOT_RUN）、`C-kernel-config`、`C-kernel-module-map`（沒給 `--kernel-build`，韌體沒有產品核心的 `.config`）。
     其餘 NOT_RUN（沒檢查鏡像新鮮度、DT 資料源、EUVD…）代表該做的檢查沒做，要列。`scan-status-check.py` 只擋「必要階段」與 FAIL；report 也要求必要階段的每一列都存在（缺列＝GAP），並且列出其他非 OK 階段，所以比它嚴：它回答「必要的有沒有做到」，report 回答「能不能顯示 OK」。
     同一階段在 `status.tsv` 出現多列時留最嚴重的一列（前面的 FAIL 不會被後面的 OK 蓋掉）。
-  - **`status.tsv` 有重複列或空名稱列**：各階段的狀態不變（重複的取最嚴重的一列；名稱是空的當成一個不認得的階段「(空的階段名稱)」照常判定），但**只要有這兩種，OK 就降成 ATTENTION**，說明寫「status.tsv 有重複列：階段 X N 列」與「有 N 列的階段名稱是空的」；
-    階段名稱只有空白（含 NBSP、全形空白）也算空名稱。FAIL／GAP 等其他狀態也加同一則說明，不靜默。理由：`sca-scan` 每個階段只寫一列、每列都有名稱，出現這兩種代表檔案被改過或寫檔有 bug；取最嚴重的一列只保證「不會往好的方向誤判」，不代表檔案可信，所以選保守的 ATTENTION 而不是只記 note。
+  - **`status.tsv` 有重複列或空名稱列**：各階段的狀態不變（重複的取最嚴重的一列；名稱是空的當成一個不認得的階段「(空的階段名稱)」照常判定），但**只要有這兩種，OK 就降成 ATTENTION**，說明寫「status.tsv 有重複列：階段 X N 列」與「有 N 列的階段名稱是空的或看不到內容」；
+    階段名稱看不到內容也算空名稱：空、只有空白（含 NBSP、全形空白）、零寬字元、控制字元、組合記號或變體選擇符、顯示成空白的字元（Hangul filler、點字空白）；判斷是 `firmware_mdsafe.is_blank`（`plain()` 只換掉 C 類，Hangul filler 是 Lo 類，濾不掉）。FAIL／GAP 等其他狀態也加同一則說明，不靜默。理由：`sca-scan` 每個階段只寫一列、每列都有名稱，出現這兩種代表檔案被改過或寫檔有 bug；取最嚴重的一列只保證「不會往好的方向誤判」，不代表檔案可信，所以選保守的 ATTENTION 而不是只記 note。
     `scan-status-check.py` 是 C1 的檔案、這裡不改；它對重複列是後值蓋前值，與 report 取最嚴重不一致（前面是 FAIL、後面是 OK 時它看到 OK）。
   - **輸入 SBOM 有重複鍵**：見下一節。
   - **供應商 SBOM 自帶 `dumpling:` 開頭的 property**（`kind: sbom`）：prep 把它們就地改名成 `supplier:dumpling:…`（值不動、`normalize.json` 逐筆記原名與位置；規則見 `docs/notes/c2-supplier-sbom.md`），

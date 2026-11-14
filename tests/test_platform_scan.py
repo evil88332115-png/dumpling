@@ -317,6 +317,9 @@ class JetsonIndependentVersion(Generic):
         self.assertEqual(self.iv(project_dir=False)["status"], "GAP")                         # 沒有 --project-dir
         self.assertEqual(self.iv(runs=["=" + self.full_run(False, name="w-plain")])["status"], "GAP")          # 不是刷機包的掃描
         self.assertEqual(self.iv(runs=[])["status"], "GAP")
+        r = self.iv(runs=["-bsp=" + self.full_run(name="w-bsp-only")])                    # 只有分層重跑、沒有完整掃描：不退回去讀它
+        self.assertEqual(r["status"], "GAP")
+        self.assertIn("沒有完整掃描", r["detail"])
 
     def test_sources_yml_problems_fail(self):
         self.assertEqual(self.iv("v9.9.9-x")["status"], "FAIL")                               # sources.yml 沒有這個版本
@@ -332,6 +335,74 @@ class JetsonIndependentVersion(Generic):
     def test_jetson_hooks_use_it(self):
         ctx = {"args": argparse.Namespace(project_dir=self.proj, run=["=" + self.full_run()]), "version": "v39.2.1-demo1"}
         self.assertEqual(self.js.JetsonHooks().independent_version(ctx)["status"], "OK")
+
+
+class VersionState(unittest.TestCase):
+    """M7b-4（C0 Q4）：product_version_check 不是 OK → scan 步驟記 GAP；共用的 version_state／CLI，各平台的 scan 腳本呼叫。"""
+
+    def test_states(self):
+        ok = {"product_version_check": {"status": "OK", "independent": {"status": "OK"}}}
+        self.assertEqual(ps.version_state(ok)[0], "OK")
+        self.assertEqual(ps.version_state({"product_version_check": {"status": "FAIL", "failures": ["x"]}}), ("FAIL", "版本核對 FAIL：x"))
+        for pvc, word in (({"status": "GAP", "independent": {"status": "GAP", "detail": "沒有來源"}}, "沒有來源"),
+                          ({"status": "NOT_SET"}, "沒有 product.version"), ({"status": "NOT_RUN"}, "找不到設定包"),
+                          ({"status": "PASS"}, "不認得"), ({}, "不認得")):
+            st, msg = ps.version_state({"product_version_check": pvc})
+            self.assertEqual(st, "GAP", pvc)
+            self.assertIn(word, msg)
+        for bad in ({}, {"product_version_check": "OK"}, [], None):
+            self.assertEqual(ps.version_state(bad)[0], "GAP", bad)
+
+    def test_cli(self):
+        import subprocess
+        tmp = tempfile.mkdtemp(prefix="dumpling-vstate-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        cli = [sys.executable, "-I", os.path.join(ROOT, "pipeline", "lib", "platform_scan.py"), "version-state"]
+        for content, want in ((json.dumps({"product_version_check": {"status": "OK"}}), "OK\t"),
+                              (json.dumps({"product_version_check": {"status": "GAP", "independent": {"detail": "a\tb"}}}), "GAP\t"),
+                              ("{not json", "GAP\tscan.json 讀不了")):
+            f = os.path.join(tmp, "s.json")
+            w(f, content)
+            r = subprocess.run(cli + [f], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0)
+            self.assertTrue(r.stdout.startswith(want), r.stdout)
+            self.assertEqual(r.stdout.count("\t"), 1, r.stdout)                # 說明裡的 TAB 換掉，shell 只切一次
+        r = subprocess.run(cli + [os.path.join(tmp, "missing.json")], capture_output=True, text=True)
+        self.assertTrue(r.stdout.startswith("GAP\t"))
+        self.assertEqual(subprocess.run(cli[:-1], capture_output=True, text=True).returncode, 64)
+
+    def test_jetson_scan_sh_uses_it(self):
+        """scan.sh 的版本核對那一段（vs=… 到 case …）與最後的結束碼那一行，實際用 bash 執行（#98 C0 驗證 3：不只比對原始碼字串）。
+        OK → 狀態不變；GAP／NOT_SET／讀不到 → GAP（結束碼 3）；FAIL → FAIL（結束碼 1，不降成 GAP；C4 的平台會照抄這段）。"""
+        import re
+        import subprocess
+        src = open(os.path.join(ROOT, "pipeline", "platforms", "jetson", "scan.sh"), encoding="utf-8").read()
+        block = re.search(r"^vs=\$\(python3 -I \"\$root/pipeline/lib/platform_scan\.py\" version-state .*?\n^case \$\{vs%%.*?esac.*?$", src, re.M | re.S).group(0)
+        final = re.search(r"^case \$state in OK\|ATTENTION\).*?esac", src, re.M).group(0)
+        tmp = tempfile.mkdtemp(prefix="dumpling-vsnip-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        def run(pvc, state="OK"):
+            if pvc is not None:
+                w(os.path.join(tmp, "scan.json"), json.dumps({"product_version_check": pvc}))
+            elif os.path.exists(os.path.join(tmp, "scan.json")):
+                os.remove(os.path.join(tmp, "scan.json"))
+            sh = 'root=%s; out=%s; state=%s; msg=m\n%s\necho "$state|$msg"\n%s\n' % (ROOT, tmp, state, block, final)
+            r = subprocess.run(["bash", "-c", sh], capture_output=True, text=True)
+            return r.returncode, r.stdout.strip()
+
+        rc, out = run({"status": "OK"})
+        self.assertEqual((rc, out), (0, "OK|m"))
+        rc, out = run({"status": "OK"}, state="ATTENTION")
+        self.assertEqual((rc, out), (0, "ATTENTION|m"))
+        for pvc in ({"status": "GAP", "independent": {"detail": "沒有來源"}}, {"status": "NOT_SET"}, None):
+            rc, out = run(pvc)
+            self.assertEqual(rc, 3, (pvc, out))
+            self.assertTrue(out.startswith("GAP|m；"), out)
+        rc, out = run({"status": "FAIL", "failures": ["x"]})
+        self.assertEqual((rc, out.split("|")[0]), (1, "FAIL"), out)
+        rc, out = run({"status": "GAP"}, state="FAIL")                  # 前面已經是 FAIL：版本核對的 GAP 不會把它降成 GAP
+        self.assertEqual((rc, out.split("|")[0]), (1, "FAIL"), out)
 
 
 if __name__ == "__main__":
