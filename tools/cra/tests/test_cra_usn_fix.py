@@ -106,9 +106,13 @@ def test_report_applies_r3_to_usn_rows(tmp_path):
     assert r.returncode in (0, 2), r.stdout + r.stderr
     assert {x["id"]: x["applied"] for x in s["vex"]["rules"]["rules"]}["R3"] == 3 and s["usn_fix"]["derived"] == 4
     assert {k: s["counts"][k] for k in ("p1", "p2", "p3", "accepted")} == {k: s0["counts"][k] for k in ("p1", "p2", "p3", "accepted")}
-    det = {v["id"]: v["analysis"].get("detail", "") for v in json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))["vulnerabilities"]}
+    allv = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))["vulnerabilities"]
+    na = {"name": "dumpling:assessment", "value": "NOT_ASSESSED"}
+    # A4（M7c-1）：沒有判定的列也有陳述（in_triage＋NOT_ASSESSED）；這裡看的是有判定（規則套用）的陳述
+    det = {v["id"]: v["analysis"].get("detail", "") for v in allv if na not in v.get("properties", [])}
     assert det["USN-8996-1"].startswith("Fixed in apt 2.8.3ubuntu0.1 (installed 2.8.3). Fix state from Ubuntu security notice USN-8996-1")
     assert det["USN-8996-1"].endswith("(bulk rule R3: Ubuntu package: newer fixed package available)")
     assert "USN-8525-1" not in det                                    # 已修好：R3 沒有 {fix_version}，不套用
+    assert [v["analysis"]["state"] for v in allv if v["id"] == "USN-8525-1" and na in v.get("properties", [])] == ["in_triage"]      # 沒有判定：沒評估的陳述
     md = (rep / "risk-assessment.md").read_text(encoding="utf-8")
     assert "Fix state for 4 Ubuntu security notice rows without a CVE is taken from the fixed version in the notice" in md
