@@ -14,7 +14,8 @@ sys.path.insert(0, str(HERE.parent))
 import vex_export as vx  # noqa: E402
 from test_cra_distro import recheck_doc  # noqa: E402
 from test_cra_report import make_project, make_scan, run  # noqa: E402
-from test_vex_export import PBOM, assessed, dt, is_na, row, sample_rows, two_cve_row  # noqa: E402
+from test_vex_export import PBOM, assessed, dt, is_na, row, sample_rows, two_cve_row, typed  # noqa: E402
+from vex_gate_scenarios import d035_unexplained  # noqa: E402
 
 MARK = {"name": "dumpling:assessment", "value": "NOT_ASSESSED"}
 NOTE = "dumpling: not assessed"
@@ -169,10 +170,22 @@ def test_gate_equals_the_output_recorded_before_a4(tmp_path):
     data/vex_gate_before_a4.json 是在改動前的程式碼上產生的，不隨這次改動重生。"""
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     allr, conf, _ = vx.assess(gate_rows(), drc=recheck_doc())
+    # 因 D-035 而變：這份輸入有 DT 的排除（DT 沒有放依據類型的欄位，D-057），新程式碼把它們算進 untriaged_for_gate。
+    # 原本是「閘門輸出全等」；現在分兩段：(1) 沒有補依據時，差異只有 D-035 的效果（d035_unexplained 逐項核對）；
+    # (2) 在補上依據類型的輸入下（typed），新程式碼的閘門輸出與舊基準全等（連新欄位 exclusions_without_evidence 都是 0 之外沒有差別）。
+    g0 = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
+    n_dt = g0["assessment"]["exclusions_without_evidence"]
+    assert n_dt == sum(1 for x in allr if vx.is_exclusion(x.get("vex")) and x["vex"]["source"] == "dt") > 0     # distro 的那筆有類型（vendor-statement）
+    assert d035_unexplained(golden["unit"], json.loads(json.dumps(g0, sort_keys=True, ensure_ascii=False))) == []
+    typed(allr)
     g = vx.gate(allr, conf, grype_checked=True, not_assessed=[])
-    assert json.loads(json.dumps(g, sort_keys=True, ensure_ascii=False)) == golden["unit"]
+    new = json.loads(json.dumps(g, sort_keys=True, ensure_ascii=False))
+    assert new["assessment"].pop("exclusions_without_evidence") == 0
+    assert new == golden["unit"]
     r, s, rep = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s"))
-    assert json.loads(json.dumps(s["vex"]["gate"], sort_keys=True, ensure_ascii=False)) == golden["e2e"]
+    e2e = json.loads(json.dumps(s["vex"]["gate"], sort_keys=True, ensure_ascii=False))
+    assert e2e["assessment"]["exclusions_without_evidence"] == 1                  # 端對端的那一筆 DT 排除
+    assert d035_unexplained(golden["e2e"], e2e) == []
     # 同一份輸入，VEX 多了沒有判定的陳述，但閘門的分類與 verdict 沒有因此改變
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
     assert sum(1 for v in cdx["vulnerabilities"] if is_na(v)) == golden["e2e"]["counts"]["total"]["untriaged"]

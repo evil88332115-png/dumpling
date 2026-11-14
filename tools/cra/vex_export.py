@@ -8,8 +8,10 @@
 用法：
   文件產生時由 cra_report.py 呼叫（同一份列，與風險評估第 8 節一致），輸出 <Reports>/vex.cdx.json、vex.openvex.json。
   python3 -I vex_export.py annotate --project <專案> --cve CVE-… --state not_affected --justification code_not_reachable \
-      --detail "…" --author "姓名" [--purl pkg:deb/ubuntu/openssl[@版本]] [--version 版本] [--response update …] [--date YYYY-MM-DD] [--replace]
+      --detail "…" --author "姓名" [--purl pkg:deb/ubuntu/openssl[@版本]] [--version 版本] [--response update …] [--date YYYY-MM-DD] [--replace] \
+      [--evidence build-record|source|on-device|design-doc|vendor-statement --evidence-location 位置 […] | --evidence-basis '[{"type":…,"location":…,"kernel":…}]']
       在 <專案>/CRA/Config/vex-annotations.json 加一筆人工判定（先驗證整份檔案，寫到暫存檔再換上，不會留下寫一半的檔案）。
+      resolved、not_affected、false_positive 這類排除要寫依據（見下面「排除的依據」）；沒有寫的排除算沒有類型，擋發行閘門。
   python3 -I vex_export.py check --project <專案>：只檢查 vex-annotations.json 的格式。
   python3 -I vex_export.py rules check --project <專案> [--scan <掃描輸出>]：檢查 CRA/Config/vex-rules.json；有 --scan 時乾跑
       （用 cra_report 產生到暫存資料夾），印出每條規則套用的列數、例子、因 KEV／P1／已有判定／範本缺值而不套用的列與閘門。
@@ -49,6 +51,23 @@
       意思是「沒有評估」，不是有人在調查（M7c-1，A4／D-057；客戶版也輸出，句子是中性英文）。dt_writeback 不寫回這些陳述。
   人的判定（dt、annotation）彼此不同時：dt 優先，並記為「人工判定衝突」（閘門 ATTENTION）。
 
+排除的依據（M7c-2，D-035／D-057）：每一筆排除（BUCKET 是 resolved 或 not_affected 的陳述，含 false_positive、resolved_with_pedigree）記依據的
+  類型（build-record、source、on-device、design-doc、vendor-statement）與位置，放在陳述的 evidence_basis（[{"type", "location", "kernel"（選填）}]）。
+  規則的 evidence 欄位（K1、K2、U1、U2，也就是規則種類）不動。各來源：
+    kconfig、證據規則 K1 → build-record，位置 scan/kernel-config.json 加核心版本與 config 的 SHA-256；
+    證據規則 K2 → build-record，位置 scan/kernel-module-map.json 與 CRA/Config/kernel-modules.json（各附 SHA-256；有核心設定檢查時再加 scan/kernel-config.json）；
+    證據規則 U1、U2、發行版修補紀錄（distro_fixed）→ vendor-statement（發行版是 OS 的供應者，不新增第六種類型），位置是 Ubuntu CVE Tracker 的
+      檔案加 commit 與 ubuntu.com 的頁面（U1、U2，每個 CVE 一筆），或紀錄編號（DSA、DLA、USN、UBUNTU-CVE-…，每個編號一筆）；
+    annotation → 人寫在判定裡：evidence＋evidence_location（位置可以是清單＝多筆依據），或 evidence_basis（每筆自己的類型，可帶 kernel）；
+    dt（人在 Dependency-Track 的判定）→ 沒有放類型的欄位，一律沒有類型。annotation 蓋不過 DT 的判定：要在 DT 端清掉這筆判定，再用 annotation 補依據。
+  on-device 的位置必須是專案資料夾內實際存在的檔案（相對路徑、不能有「..」、不能經符號連結指到外面）；只檢查檔案存在，沒有驗證內容。
+  design-doc 的位置只要是合格的文字，不檢查文件。位置的共同限制見 vexconv.location_problem：不能空、不超過 512 字、不能有「;」、換行與控制字元
+  （拒收「;」而不是編碼：OpenVEX 的依據行用「;」分隔欄位，不需要跳脫規則；輸入端與 vexconv 用同一個檢查）。
+  沒有類型的排除：算進 assessment.untriaged_for_gate 與 exclusions_without_evidence、assessment.complete 變 false、reasons 加一條
+  "N exclusions without evidence type"（和批次規則設的 in_triage 一樣）；其他數字（counts、untriaged、verdict 的算法）不變。
+  輸出：內部 CycloneDX 的屬性 dumpling:evidence／dumpling:evidence-location／dumpling:evidence-kernel（沒有類型：dumpling:evidence＝none）；
+  內部 OpenVEX 的 status_notes 一筆一行；客戶版只帶類型（supplier_package）。
+
 發行閘門：每一列的 VEX 狀態分成 resolved、not_affected（含 false_positive）、exploitable、in_triage、untriaged，核心與其他元件分開。
   分開報告兩件事：(1) 評估是否完整（untriaged；規則判定的列算已評估）；(2) 仍受影響（exploitable，含規則判定的，依 response 分）。
   批次規則設的 in_triage 算沒有評估（擋閘門，另列一行）；NVIDIA 推定的 in_triage 照舊不擋。
@@ -78,6 +97,7 @@ import stat
 import string
 import sys
 import tempfile
+import unicodedata
 import urllib.parse
 import uuid
 from collections import Counter
@@ -118,7 +138,24 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # 對 not_affected 這種結論太廣（使用者 2026-11-02 決定）。只有 CVE 的範圍只允許 in_triage、exploitable（保守的方向）
 PURL_REQUIRED = ("not_affected", "false_positive", "resolved", "resolved_with_pedigree")
 CVE_ID = re.compile(r"^(?:[A-Z]+-)?(CVE-\d{4}-\d{4,})$")    # CVE-…、UBUNTU-CVE-…（與 cra_report 的 CVE_RE 相同）
-ANN_KEYS = {"cve", "purl", "version", "state", "justification", "response", "detail", "action_statement", "author", "date"}
+ANN_KEYS = {"cve", "purl", "version", "state", "justification", "response", "detail", "action_statement", "author", "date",
+            "evidence", "evidence_location", "evidence_basis"}
+# 排除的依據（M7c-2，D-035／D-057）。類型與 tools/vexconv/vexconv.py 的 EVIDENCE_TYPES 同值（測試核對）
+EVIDENCE_TYPES = ("build-record", "source", "on-device", "design-doc", "vendor-statement")
+EVIDENCE_BUCKETS = ("resolved", "not_affected")          # 要有依據的分類（BUCKET 的值）
+EVIDENCE_BASIS_MAX = 64                                   # 一筆判定最多幾筆依據
+EVIDENCE_TABLE_MAX = 100                                  # 風險評估列出的 on-device／design-doc 排除筆數上限（summary.json 是全部）
+# 沒有類型的排除的原因代號 → 閘門與報告的說明（英文）
+EVIDENCE_MISSING = {
+    "dt": "Dependency-Track decision (an annotation cannot override it: clear it in Dependency-Track, then add evidence in an annotation)",
+    "annotation_no_evidence": "annotation without evidence",
+    "annotation_evidence_invalid": "annotation with invalid evidence",
+    "on_device_missing": "on-device file missing",
+    "on_device_unsafe_path": "on-device path not allowed",
+    "on_device_no_project": "on-device file not checked (no project folder)",
+    "distro_no_record": "distribution record without an ID",
+    "no_basis": "no evidence recorded by the tool",
+}
 # 批次規則（CRA/Config/vex-rules.json）：只能設 exploitable（response 可省略）或 in_triage。說「沒有影響／已修好」要逐列的證據
 # （發行版覆核、核心設定檢查，或判定檔裡限定 purl 的逐個 CVE 判定），規則不能設
 RULES_REL = Path("CRA") / "Config" / "vex-rules.json"
@@ -191,6 +228,20 @@ class VexInputError(ValueError):
     pass
 
 
+_VEXCONV = []
+
+
+def _vexconv():
+    """tools/vexconv/vexconv.py（依路徑載入，只載入一次）。"""
+    if not _VEXCONV:
+        p = ROOT / "tools" / "vexconv" / "vexconv.py"
+        spec = importlib.util.spec_from_file_location("sca_center_vexconv", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _VEXCONV.append(m)
+    return _VEXCONV[0]
+
+
 # ---------- 人工判定檔（CRA/Config/vex-annotations.json） ----------
 
 def purl_split(purl):
@@ -250,7 +301,163 @@ def validate_annotation(a, where):
         errs.append(f"{where}：purl 的版本和 version 不同")
     if a.get("action_statement") is not None and (not isinstance(a["action_statement"], str) or not a["action_statement"].strip()):
         errs.append(f"{where}.action_statement：要是文字")
+    errs += annotation_evidence_errors(a, where)
     return errs
+
+
+def _basis_entry_errors(e, where):
+    """一筆依據 {type, location, kernel?} 的格式問題（不看檔案；on-device 的檔案另在 on_device_problem 檢查）。"""
+    vc = _vexconv()
+    if not isinstance(e, dict):
+        return [f"{where}：要是物件 {{type, location, kernel（選填）}}"]
+    errs = [f"{where}.{k}：不認得的鍵" for k in sorted(set(e) - {"type", "location", "kernel"})]
+    if e.get("type") not in EVIDENCE_TYPES:
+        errs.append(f"{where}.type：只能是 {', '.join(EVIDENCE_TYPES)}")
+    p = vc.location_problem(e.get("location"))
+    if p:
+        errs.append(f"{where}.location：{p}")
+    if e.get("kernel") is not None and vc.kernel_problem(e["kernel"]):
+        errs.append(f"{where}.kernel：{vc.kernel_problem(e['kernel'])}")
+    return errs
+
+
+def annotation_evidence_errors(a, where):
+    """判定的依據欄位（選填，只對 resolved、not_affected 等排除有作用）的格式：
+      evidence：五種類型之一（EVIDENCE_TYPES）；evidence_location：位置（文字），或文字清單（清單＝同一個類型的多筆依據）。
+        兩個要一起寫。
+      evidence_basis：{type, location, kernel（選填，這一筆是哪一顆核心的）} 的清單，每一筆依據自己一個類型；映像有多顆核心時
+        每顆各一筆。不能和 evidence／evidence_location 一起用。
+    位置的限制（vexconv.location_problem）：不能空、前後沒有空白、不超過 512 字、不能有「;」、換行與控制字元。"""
+    errs = []
+    has = [k for k in ("evidence", "evidence_location", "evidence_basis") if k in a]
+    if not has:
+        return errs
+    if "evidence_basis" in a and ("evidence" in a or "evidence_location" in a):
+        return [f"{where}.evidence_basis：不能和 evidence、evidence_location 一起用"]
+    if "evidence_basis" in a:
+        b = a["evidence_basis"]
+        if not isinstance(b, list) or not b or len(b) > EVIDENCE_BASIS_MAX:
+            return [f"{where}.evidence_basis：要是 1–{EVIDENCE_BASIS_MAX} 筆依據的清單"]
+        for i, e in enumerate(b):
+            errs += _basis_entry_errors(e, f"{where}.evidence_basis[{i}]")
+        return errs
+    if "evidence" not in a or "evidence_location" not in a:
+        return [f"{where}：evidence 與 evidence_location 要一起寫（類型加位置）"]
+    if a["evidence"] not in EVIDENCE_TYPES:
+        errs.append(f"{where}.evidence：只能是 {', '.join(EVIDENCE_TYPES)}")
+    loc = a["evidence_location"]
+    locs = loc if isinstance(loc, list) else [loc]
+    if not locs or len(locs) > EVIDENCE_BASIS_MAX:
+        return errs + [f"{where}.evidence_location：清單要有 1–{EVIDENCE_BASIS_MAX} 筆"]
+    for i, x in enumerate(locs):
+        p = _vexconv().location_problem(x)
+        if p:
+            errs.append(f"{where}.evidence_location{f'[{i}]' if isinstance(loc, list) else ''}：{p}")
+    return errs
+
+
+def annotation_basis(a):
+    """（已驗證的）判定 → 依據清單 [{type, location, kernel?}]（去掉重複、保留順序）；沒有依據欄位 → []。"""
+    if isinstance(a.get("evidence_basis"), list):
+        raw = [dict(e) for e in a["evidence_basis"]]
+    elif "evidence" in a:
+        loc = a.get("evidence_location")
+        raw = [{"type": a["evidence"], "location": x} for x in (loc if isinstance(loc, list) else [loc])]
+    else:
+        return []
+    out = []
+    for e in raw:
+        e = {k: e[k] for k in ("type", "location", "kernel") if e.get(k) is not None}
+        if e not in out:
+            out.append(e)
+    return out
+
+
+def on_device_problem(loc, project):
+    """on-device 依據的位置檢查 → None（通過）或原因代號。只檢查「專案資料夾內有這個檔案」，沒有驗證檔案的內容。
+    位置只收相對路徑，不能是絕對路徑（含磁碟機代號、~）、不能有「\\」、任何一段都不能是「..」→ on_device_unsafe_path；
+    resolve（跟著符號連結）之後必須是專案資料夾內的一般檔案：不存在、是資料夾、經符號連結指到專案資料夾外 → on_device_missing；
+    沒有專案資料夾可以檢查 → on_device_no_project。"""
+    if not isinstance(loc, str) or not loc or "\\" in loc or loc.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", loc) \
+            or any(seg == ".." for seg in loc.split("/")):
+        return "on_device_unsafe_path"
+    if project is None:
+        return "on_device_no_project"
+    try:
+        root = Path(project).resolve()
+        real = (root / loc).resolve(strict=True)
+        ok = real.is_file() and root in real.parents
+    except (OSError, RuntimeError, ValueError):
+        return "on_device_missing"
+    return None if ok else "on_device_missing"
+
+
+def annotation_evidence(a, project):
+    """判定的依據 → (依據清單, None)；沒有可用的依據 → ([], 原因代號)。沒有寫依據 → annotation_no_evidence；格式不合（呼叫端沒經過
+    check_annotations 時）→ annotation_evidence_invalid；on-device 的檔案不合格 → on_device_*。有任何一筆不合格，整筆都算沒有類型
+    （不留一半：說有上機核對、檔案卻不存在的排除，不能靠另一筆依據過關）。"""
+    basis = annotation_basis(a)
+    if not basis:
+        return [], "annotation_no_evidence"
+    if annotation_evidence_errors(a, "x"):
+        return [], "annotation_evidence_invalid"
+    for e in basis:
+        if e["type"] == "on-device":
+            why = on_device_problem(e["location"], project)
+            if why:
+                return [], why
+    return basis, None
+
+
+def safe_location(text):
+    """工具自己組的依據位置 → 通過 vexconv.location_problem 的文字（「;」換成「,」、換行與控制字元換成空白、去掉前後空白、截到 512 字）。"""
+    vc = _vexconv()
+    t = "".join(" " if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else "," if c == ";" else c for c in str(text))
+    return re.sub(r" {2,}", " ", t).strip()[:vc.LOCATION_MAX].strip()
+
+
+def basis_entry(typ, location, kernel=None):
+    """一筆依據 {type, location, kernel?}。核心版本不是核心版本的寫法時不放 kernel（位置照樣寫）。"""
+    e = {"type": typ, "location": safe_location(location)}
+    if kernel and not _vexconv().kernel_problem(str(kernel)):
+        e["kernel"] = str(kernel)
+    return e
+
+
+def sha_part(path, sha, label="SHA-256"):
+    return f"{path} ({label} {sha})" if sha else path
+
+
+def kcfg_basis(kcfg):
+    """核心設定檢查（scan/kernel-config.json）的依據：build-record，位置寫檔案、核心版本與 config 的 SHA-256。"""
+    k = (kcfg or {}).get("kernel") or {}
+    ver, sha = k.get("version"), k.get("config_sha256")
+    inner = ", ".join(x for x in (f"kernel {ver}" if ver else "", f"config SHA-256 {sha}" if sha else "") if x)
+    return basis_entry("build-record", "scan/kernel-config.json" + (f" ({inner})" if inner else ""), ver)
+
+
+def k2_basis(mm, ec, km):
+    """K2 的依據：build-record，位置寫核心設定檢查（有 config 的 SHA-256 時）、模組對應與映像模組清單（各附 SHA-256）。"""
+    parts = []
+    if ec.get("kcfg_sha"):
+        parts.append(sha_part("scan/kernel-config.json", ec["kcfg_sha"], "config SHA-256"))
+    parts += [sha_part("scan/kernel-module-map.json", ec.get("mm_sha")), sha_part(KMOD_REL.as_posix(), km.get("sha256"))]
+    return basis_entry("build-record", ", ".join(parts), ((mm or {}).get("kernel") or {}).get("version"))
+
+
+def ubuntu_basis(ev, cve_info=None):
+    """U1、U2 的依據（rule_evidence）：vendor-statement，每個 CVE 一筆，位置寫 tracker 的檔案（active/<CVE> 或 retired/<CVE>；
+    cve_info 或這個 CVE 的紀錄沒有時寫 CVE 編號）與 commit，加 ubuntu.com 的頁面。"""
+    commit = (ev.get("tracker") or {}).get("commit")
+    return [basis_entry("vendor-statement", f"Ubuntu CVE Tracker {c.get('tracker_file') or ((cve_info or {}).get(c['cve']) or {}).get('tracker_file') or c['cve']}"
+                        + (f"@{commit}" if commit else " (commit not recorded)") + f", {c['url']}") for c in ev.get("cves") or []]
+
+
+def distro_basis(x):
+    """發行版修補紀錄（distro_fixed）的依據：vendor-statement，每個紀錄編號（DSA、DLA、USN、UBUNTU-CVE-…）一筆。"""
+    recs = sorted({str(e["record"]) for e in x.get("evidence") or [] if isinstance(e, dict) and e.get("record") not in (None, "", "?")})
+    out = [basis_entry("vendor-statement", r) for r in recs]
+    return [e for e in out if not _vexconv().location_problem(e["location"])]
 
 
 def scope_of(a):
@@ -1074,7 +1281,8 @@ def ev_k1(v, ec):
     if not s:
         return None
     return {"decision": "not_affected", "justification": "code_not_present", "detail": s["detail"],
-            "inputs": f"kernel {'IKCONFIG' if kconfig_ikconfig(ec['kcfg']) or kconfig_toolchain_only(ec['kcfg']) else '.config'} SHA-256 {str(ec['kcfg_sha'] or '?')[:12]}"}
+            "inputs": f"kernel {'IKCONFIG' if kconfig_ikconfig(ec['kcfg']) or kconfig_toolchain_only(ec['kcfg']) else '.config'} SHA-256 {str(ec['kcfg_sha'] or '?')[:12]}",
+            "basis": [kcfg_basis(ec["kcfg"])]}
 
 
 def present_problem(mm):
@@ -1202,7 +1410,7 @@ def ev_k2(v, ec):
             "inputs": f"{KMOD_REL.name} SHA-256 {str(km['sha256'] or '?')[:12]}; module map SHA-256 {str(ec['mm_sha'] or '?')[:12]}; "
                       f"modules.order SHA-256 {str(ec['mm_order_sha'] or '?')[:12]}"
                       + (f"; blocking line(s): {' | '.join(sorted(set(block_lines)))[:300]}" if block_lines else ""),
-            "kcfg_affected": kaff}
+            "kcfg_affected": kaff, "basis": [k2_basis(mm, ec, km)]}
 
 
 def ev_u1(v, ec):
@@ -1276,7 +1484,7 @@ def ev_u1(v, ec):
     ev = {"source_package": src, "source_version": sver, "release": rel, "purl": v["purl"], "cves": per_cve,
           "tracker": {"source": m.get("source"), "commit": m.get("commit"), "commit_date": m.get("commit_date"),
                       "fetched_utc": m.get("fetched_utc")}}
-    return {"decision": "not_affected", "justification": "code_not_present", "evidence": ev,
+    return {"decision": "not_affected", "justification": "code_not_present", "evidence": ev, "basis": ubuntu_basis(ev),
             "detail": f"Ubuntu CVE Tracker (commit {str(m.get('commit') or '?')[:12]}, {str(m.get('commit_date') or '?')[:10]}) for source package "
                       f"{src} in {rel}: " + "; ".join(notes) + ". The installed source version has the same upstream version as the "
                       "version Ubuntu marks not-affected; the justification is inferred from Ubuntu's status.",
@@ -1331,7 +1539,7 @@ def ev_u2(v, ec):
     m = us.get("mirror") or {}
     ev = {"source_package": src, "source_version": sver, "release": rel, "purl": o.get("purl"), "cves": per_cve,
           "tracker": {"source": m.get("source"), "commit": m.get("commit"), "commit_date": m.get("commit_date"), "fetched_utc": m.get("fetched_utc")}}
-    return {"decision": "resolved", "justification": None, "evidence": ev,
+    return {"decision": "resolved", "justification": None, "evidence": ev, "basis": ubuntu_basis(ev, us.get("cve_info")),
             "detail": f"Ubuntu CVE Tracker (commit {str(m.get('commit') or '?')[:12]}, {str(m.get('commit_date') or '?')[:10]}) for source package "
                       f"{src} in {rel}: " + "; ".join(notes) + f". The installed source version {sver} of the Ubuntu package {o.get('name')}, which "
                       "installed this Python module, is not older than the release that fixes it; the PyPI fix versions do not apply to it.",
@@ -1396,7 +1604,8 @@ def apply_evidence(row, rules, stats, existing, ec, exploited=frozenset()):
             continue
         tag = f"(bulk rule {ru['id']} [{ru['evidence']}]: {ru['description'].strip()})"
         s = stmt("rule", res["decision"], f"{res['detail']} {tag}", res["justification"], rule=ru["id"], rule_author=ru.get("author"),
-                 evidence=ru["evidence"], rule_inputs=res.get("inputs"), rule_evidence=res.get("evidence"))
+                 evidence=ru["evidence"], rule_inputs=res.get("inputs"), rule_evidence=res.get("evidence"),
+                 evidence_basis=res.get("basis"))
         if existing:
             st["shadowed"][existing["source"]] += 1
             st["shadowed_rows"].append((row, existing))
@@ -1767,7 +1976,7 @@ def from_dt(row):
         len(got) < len(row.get("analysis") or []), bad
 
 
-def from_annotations(row, anns, used):
+def from_annotations(row, anns, used, project=None):
     hits = [(scope_of(a)[1], i, a) for i, a in enumerate(anns) if annotation_matches(a, row)]
     if not hits:
         return None, []
@@ -1775,9 +1984,16 @@ def from_annotations(row, anns, used):
     best = [h for h in hits if h[0] == top]
     for _, i, _ in hits:
         used.add(i)
-    ss = [stmt("annotation", a["state"], a["detail"].strip(), a.get("justification"), a.get("response") or (),
-               author=a["author"], date=a["date"], action_statement=a.get("action_statement"),
-               scope=" ".join(x for x in (a["cve"], a.get("purl"), a.get("version")) if x)) for _, _, a in best]
+    ss = []
+    for _, _, a in best:
+        # 排除（resolved、not_affected）才看依據；on-device 的檔案在這裡檢查（需要專案資料夾）
+        basis, why = annotation_evidence(a, project) if BUCKET[a["state"]] in EVIDENCE_BUCKETS else ([], None)
+        ss.append(stmt("annotation", a["state"], a["detail"].strip(), a.get("justification"), a.get("response") or (),
+                       author=a["author"], date=a["date"], action_statement=a.get("action_statement"),
+                       scope=" ".join(x for x in (a["cve"], a.get("purl"), a.get("version")) if x),
+                       evidence_basis=basis,
+                       # annotation_no_evidence 是預設原因（exclusion_basis），只有其他原因才記在陳述上
+                       evidence_missing=why if why not in (None, "annotation_no_evidence") else None))
     ss.sort(key=lambda g: (RANK[g["state"]], json.dumps(g, sort_keys=True)))
     others = ss[1:] if len({(g["state"], g.get("justification")) for g in ss}) > 1 else []
     return ss[0], others
@@ -1802,7 +2018,8 @@ def from_distro(row, idx):
     src, sver = x.get("source_package"), x.get("source_version")
     srcnote = f" (source package {src} {sver})" if src and sver and (src, sver) != (row.get("name"), inst) else ""
     return stmt("distro", "resolved", f"fixed by {dname or 'the distribution'} in {fixes}; installed {inst}{srcnote}. "
-                                      "Reported only via NVD/GitHub data, which does not know the distribution's backported fix.")
+                                      "Reported only via NVD/GitHub data, which does not know the distribution's backported fix.",
+                evidence_basis=distro_basis(x), evidence_missing=None if distro_basis(x) else "distro_no_record")
 
 
 def kconfig_index(kcfg):
@@ -1859,7 +2076,7 @@ def from_kconfig(row, kidx, kcfg):
     det = " / ".join(str(h.get("detail") or "all files of the fix are only built with kernel options that are not set") for h in hits)
     det = kconfig_source_note(kcfg) + det
     return stmt("kconfig", "not_affected", f"Kernel configuration check ({where or 'see scan/kernel-config.json'}): {det}",
-                "code_not_present")
+                "code_not_present", evidence_basis=[kcfg_basis(kcfg)])
 
 
 UB_ABSENT, UB_PRESENT = "UB1", "UB2"       # 建議的代號（不是會套用的規則）
@@ -2185,10 +2402,12 @@ def deb_python_rules(rows, rules, stats, ctx, exploited=frozenset()):
     return st
 
 
-def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_ctx=None):
+def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_ctx=None, project=None):
     """每一列加上 row["vex"]（判定或 None）與 row["vex_note"]。回傳 (全部的列（含 NVIDIA 另加的列）, 衝突清單, 摘要)。
     rules：vex-rules.json 的規則，只用在其他來源都沒有判定的列（apply_rules）。rule_ctx：{"kernel_fix_all": {核心元件: 版本},
-    "exploited": CVE 集合（scan/euvd.json 標示已遭利用）}。"""
+    "exploited": CVE 集合（scan/euvd.json 標示已遭利用）}。
+    project：專案資料夾（cra_report 的 --project）。annotation 的 on-device 依據要檢查檔案是否在專案資料夾內（on_device_problem）；
+    沒給時 on-device 依據不通過（原因 on_device_no_project）。"""
     didx, kidx = distro_rows(drc), kconfig_index(kcfg)
     kall = kconfig_all(kcfg) if rules else {}
     # 證據規則（evidence）在 match 規則之前、依檔案順序；有生效的 K1 時，核心設定檢查的 not_affected 改由規則 K1 套用（不再是自動的來源 (c)）
@@ -2225,7 +2444,7 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
         d, dconf, partial, dbad = from_dt(r)
         if d:
             cands.append(d)
-        a, aconf = from_annotations(r, list(annotations), used)
+        a, aconf = from_annotations(r, list(annotations), used, project)
         if a:
             cands.append(a)
         for s in (from_distro(r, didx), from_kconfig(r, kidx_src, kcfg or {})):
@@ -2363,6 +2582,7 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
             **({"u2_resolved": u2_resolved(allrows + ext, erules)} if any(r["evidence"] == "U2" for r in erules) else {}),
             "markers": marker_counts(allrows + ext),
             "rule_shadowed_rows": sum(1 for x in allrows + ext if x.get("rule_shadowed")),
+            "evidence": exclusion_evidence(allrows + ext),
             "evidence_inputs": None if ec is None else {
                 "kernel_config_sha256": ec["kcfg_sha"], "module_map": ec["mm_problem"] or "OK", "kernel_modules": ec["km_problem"] or "OK",
                 "kernel_modules_sha256": (ec["km"] or {}).get("sha256"), "ubuntu_status": ec["us_problem"] or "OK",
@@ -2371,6 +2591,57 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
                 "ubuntu_tracker_age_days": snapshot_age_days(((ec["us"] or {}).get("mirror") or {}).get("fetched_utc"), ec["today"]),
                 "ubuntu_mirror_counts": (ec["us"] or {}).get("mirror_counts"), "images": sorted(ec["images"])}, **notes}
     return allrows, conflicts, info
+
+
+# ---------- 排除的依據（M7c-2，D-035／D-057） ----------
+
+def is_exclusion(s):
+    """排除＝BUCKET 是 resolved 或 not_affected 的陳述（含 false_positive、resolved_with_pedigree）。"""
+    return bool(s) and BUCKET[s["state"]] in EVIDENCE_BUCKETS
+
+
+def exclusion_basis(s):
+    """一筆排除的陳述 → (依據清單, None)；沒有類型 → ([], 原因代號)。
+    有類型＝陳述帶 evidence_basis（工具來源在建立陳述時算好；annotation 在 annotation_evidence，on-device 通過檔案檢查才有）。
+    dt（人在 Dependency-Track 的判定）沒有放依據的欄位，一律沒有類型。"""
+    if s.get("evidence_basis"):
+        return s["evidence_basis"], None
+    return [], s.get("evidence_missing") or {"dt": "dt", "annotation": "annotation_no_evidence"}.get(s.get("source"), "no_basis")
+
+
+def exclusions_without_type(rows):
+    """沒有依據類型的排除 → [(列, 原因代號)]，依優先順序排序（rows＝所有列加上 vex_extra 的別名列）。"""
+    out = [(x, exclusion_basis(x["vex"])[1]) for x in rows if is_exclusion(x.get("vex")) and not exclusion_basis(x["vex"])[0]]
+    return sorted(out, key=lambda t: priority_key(t[0]))
+
+
+def exclusion_evidence(rows):
+    """排除的依據統計（summary.json 的 vex.evidence、風險評估的 VEX 小節）。
+    exclusions：排除的陳述數；by_type：五種類型各有幾筆排除（一筆排除有多種類型時每種各算一次，同一種類型的多筆依據只算一次）；
+    with_type：至少有一種類型的排除；without_type：沒有類型的排除（total、by_reason、sample 前 10 筆）；
+    on_device、design_doc：依據是 on-device／design-doc 的每一筆（id、component、version、source、location、kernel），全部列出
+    （D-035：靠上機核對或設計文件的排除要單獨看）。on-device 只檢查專案資料夾內有這個檔案，沒有驗證內容。"""
+    ex = sorted((x for x in rows if is_exclusion(x.get("vex"))), key=lambda x: (x["id"], str(x.get("component")), str(x.get("version"))))
+    by_type, untyped, on_dev, design = Counter(), Counter(), [], []
+    wt = []
+    for x in ex:
+        basis, why = exclusion_basis(x["vex"])
+        if not basis:
+            untyped[why] += 1
+            wt.append((x, why))
+            continue
+        by_type.update({e["type"] for e in basis})
+        for e in basis:
+            if e["type"] in ("on-device", "design-doc"):
+                (on_dev if e["type"] == "on-device" else design).append(
+                    {"id": x["id"], "component": x.get("component"), "version": x.get("version"), "source": x["vex"]["source"],
+                     "location": e["location"], **({"kernel": e["kernel"]} if e.get("kernel") else {})})
+    return {"exclusions": len(ex), "by_type": {t: by_type[t] for t in EVIDENCE_TYPES}, "with_type": len(ex) - len(wt),
+            "without_type": {"total": len(wt), "by_reason": dict(sorted(untyped.items())),
+                             "sample": [{"id": x["id"], "component": x.get("component"), "version": x.get("version"),
+                                         "source": x["vex"]["source"], "reason": why} for x, why in
+                                        sorted(wt, key=lambda t: priority_key(t[0]))[:10]]},
+            "on_device": on_dev, "design_doc": design}
 
 
 # ---------- 發行閘門 ----------
@@ -2441,7 +2712,10 @@ def gate(allrows, conflicts, data_status="OK", grype_only=0, have_findings=True,
     not_assessed：不在任何一列、也沒有 VEX 狀態的「沒有評估」項目（說明字串的清單，例如 sbomgate 的 SELF_NO_VERSION：Grype 比對到產品本身、
     沒有版本）。None＝呼叫端沒說 → 當作不知道，不能是 OK；空清單＝確認沒有。
     在 KEV 目錄裡、只靠發行版紀錄判 resolved（沒有人的判定）的列也擋：已知被利用，要人確認（cra_report 的資料狀態同樣是 ATTENTION）。
-    一列併了多個 CVE 時，row["vex_extra"] 是其他 CVE 各自的判定：沒有判定的另外點名（不能因為 row["id"] 有判定就算整列已評估）。"""
+    一列併了多個 CVE 時，row["vex_extra"] 是其他 CVE 各自的判定：沒有判定的另外點名（不能因為 row["id"] 有判定就算整列已評估）。
+    沒有依據類型的排除（M7c-2，D-035／D-057；exclusions_without_type：dt 的判定、沒寫依據的 annotation、on-device 的檔案不合格…）和規則設的
+    in_triage 一樣算「沒有處理完」：算進 assessment.untriaged_for_gate 與 exclusions_without_evidence、complete 變 false、reasons 加一條
+    「N exclusions without evidence type …」（原因分項與前 10 筆）；counts、untriaged、untriaged_by_tier 等其他數字不變。"""
     def cnt(rs):
         c = Counter(bucket_of(r) for r in rs)
         return {"rows": len(rs), **{b: c[b] for b in BUCKETS}}
@@ -2452,6 +2726,8 @@ def gate(allrows, conflicts, data_status="OK", grype_only=0, have_findings=True,
     ext_un = sorted((x for x in ext if not x.get("vex")), key=priority_key)
     # 批次規則設的 in_triage：沒有人逐列看過，算「沒有評估」（擋評估完整）。NVIDIA 推定的 in_triage 有公告日期當證據，照舊不擋
     rule_tri = [r for r in allrows + ext if r.get("vex") and r["vex"]["source"] == "rule" and r["vex"]["state"] == "in_triage"]
+    # 沒有依據類型的排除（D-035／D-057）：和 rule_tri 一樣算「沒有處理完」（擋評估完整），原因與前 10 筆寫在 reasons
+    exc = exclusions_without_type(allrows + ext)
     # 批次規則的 exploitable 可以沒有 response（處理說明在 detail／action_statement）；人工判定仍要寫處理方式
     exp_nr = [r for r in allrows + ext if r.get("vex") and r["vex"]["state"] == "exploitable" and not r["vex"].get("response")
               and r["vex"]["source"] != "rule"]
@@ -2485,6 +2761,13 @@ def gate(allrows, conflicts, data_status="OK", grype_only=0, have_findings=True,
                                                                   for x in ext_un[:10]) + (", …" if len(ext_un) > 10 else ""))
         if rule_tri:
             reasons.append(f"set to in_triage by bulk rule, not individually assessed: {len(rule_tri)}")
+        if exc:
+            by = Counter(why for _, why in exc)
+            reasons.append(f"{len(exc)} exclusions without evidence type ("
+                           + ", ".join(f"{EVIDENCE_MISSING.get(k, k)} {n}" for k, n in sorted(by.items(), key=lambda kv: (-kv[1], kv[0])))
+                           + "): " + ", ".join(f"{x['id']} on {x.get('component')} {x.get('version')} ({x['vex']['source']})" for x, _ in exc[:10])
+                           + (", …" if len(exc) > 10 else "")
+                           + "; every resolved or not_affected statement needs an evidence type")
         if mk["K4"]:
             reasons.append(f"{mk['K4']} untriaged kernel rows cannot be mapped to a kernel module (K4: treated as built into the kernel "
                            "and affected; GAP for these rows)")
@@ -2500,7 +2783,7 @@ def gate(allrows, conflicts, data_status="OK", grype_only=0, have_findings=True,
         if exp_nr:
             reasons.append(f"{len(exp_nr)} exploitable without a response")
         if aff:
-            reasons.append(("assessment complete; " if not untri and not ext_un and not rule_tri else "")
+            reasons.append(("assessment complete; " if not untri and not ext_un and not rule_tri and not exc else "")
                            + f"{len(aff)} affected rows (exploitable; {aff_rule} by bulk rules) need a release decision by a person "
                              "(fixed before placing on the market, or a documented risk-based justification): by response "
                            + ", ".join(f"{k} {n}" for k, n in sorted(aff_resp.items())))
@@ -2532,8 +2815,9 @@ def gate(allrows, conflicts, data_status="OK", grype_only=0, have_findings=True,
             reasons.insert(0, f"vulnerability data status is {data_status}: the list of candidate vulnerabilities is incomplete")
     return {"verdict": verdict, "reasons": reasons,
             # (a) 評估是否完整（規則判定的列算已評估）；(b) 仍受影響、要有人做出貨決定的列。兩者分開報告
-            "assessment": {"complete": not untri and not ext_un and not rule_tri, "untriaged": len(untri), "extra_cves_untriaged": len(ext_un),
-                           "untriaged_for_gate": len(untri) + len(ext_un) + len(rule_tri),
+            "assessment": {"complete": not untri and not ext_un and not rule_tri and not exc, "untriaged": len(untri), "extra_cves_untriaged": len(ext_un),
+                           "untriaged_for_gate": len(untri) + len(ext_un) + len(rule_tri) + len(exc),
+                           "exclusions_without_evidence": len(exc),
                            "by_rule": sum(1 for r in allrows + ext if r.get("vex") and r["vex"]["source"] == "rule"),
                            "in_triage_by_rule": sum(1 for r in allrows + ext if r.get("vex") and r["vex"]["source"] == "rule"
                                                     and r["vex"]["state"] == "in_triage")},
@@ -2577,14 +2861,6 @@ def label(r):
 
 
 # ---------- 文件 ----------
-
-def _vexconv():
-    p = ROOT / "tools" / "vexconv" / "vexconv.py"
-    spec = importlib.util.spec_from_file_location("sca_center_vexconv", p)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
 
 def bomlink(serial, version, ref):
     return f"urn:cdx:{serial[len('urn:uuid:'):]}/{version}#{urllib.parse.quote(ref, safe=chr(47) + '?:@!$&()*+,;=-._~')}"
@@ -2734,6 +3010,17 @@ def cdx_vex(allrows, pbom, meta, product, gate_verdict):
                 props.append({"name": "sca-center:vex-rule-evidence", "value": s["evidence"]})
                 if s.get("rule_inputs"):
                     props.append({"name": "sca-center:vex-rule-inputs", "value": s["rule_inputs"]})
+        if is_exclusion(s):
+            # 排除的依據（M7c-2，D-035／D-057）：每一筆依據依序一組屬性（類型、位置、選填的核心）；沒有類型的排除只有 dumpling:evidence＝none
+            # （明寫「沒有」，下游分得出「沒記」和「這個版本的工具不寫依據」）。vexconv 轉成 OpenVEX 時變成 status_notes 的依據行
+            basis, _why = exclusion_basis(s)
+            if not basis:
+                props.append({"name": vc.PROP_EVIDENCE, "value": vc.EVIDENCE_NONE})
+            for e in basis:
+                props.append({"name": vc.PROP_EVIDENCE, "value": e["type"]})
+                props.append({"name": vc.PROP_EVIDENCE_LOCATION, "value": e["location"]})
+                if e.get("kernel"):
+                    props.append({"name": vc.PROP_EVIDENCE_KERNEL, "value": e["kernel"]})
         if s and s["state"] == "exploitable":
             # 沒有 response 時（批次規則：no fix yet、發行版 won't fix、資料不足）以 detail 當處理說明，OpenVEX 的 affected 一定要有
             # 舊設定檔的 can_not_fix／will_not_fix 不放進說明（客戶會讀成供應商不能修／不修），說明只用 detail
@@ -2827,6 +3114,61 @@ def dumps(doc):
 
 # ---------- 風險評估的小節（英文） ----------
 
+def md_code(text):
+    """Markdown 的行內程式碼（code span）：位置是人寫的文字，不能被當成 Markdown 或 HTML 解讀（連結、強調、標籤、表格分隔）。
+    反引號框的長度比文字裡最長的連續反引號多一個；開頭或結尾是反引號時兩側補空白。表格儲存格的「|」由 cra_report.cell 跳脫。"""
+    t = str(text)
+    n = max((len(m) for m in re.findall(r"`+", t)), default=0)
+    pad = " " if t.startswith("`") or t.endswith("`") else ""
+    return "`" * (n + 1) + pad + t + pad + "`" * (n + 1)
+
+
+EVIDENCE_TYPE_TEXT = {"build-record": "build-record (kernel configuration, module map, build output)", "source": "source (source code or backported fix commit)",
+                      "on-device": "on-device (checked on the device)", "design-doc": "design-doc (product design document)",
+                      "vendor-statement": "vendor-statement (vendor or distribution advisory)"}
+
+
+def evidence_paragraphs(ev, table):
+    """風險評估 VEX 小節的「排除的依據」：各類型筆數、沒有類型的排除（擋閘門）、靠 on-device 或 design-doc 的排除（D-035，單獨列出）。"""
+    out = []
+    if not ev["exclusions"]:
+        return ["Evidence for exclusions (D-035): there is no `resolved` or `not_affected` statement, so no evidence is recorded."]
+    wt = ev["without_type"]
+    out.append(f"Evidence for exclusions (D-035): {ev['exclusions']} statements are `resolved` or `not_affected` (including `false_positive`); each needs "
+               "an evidence type and a location. By evidence type (a statement with several types counts once per type): "
+               + ", ".join(f"{t} {ev['by_type'][t]}" for t in EVIDENCE_TYPES) + ". "
+               f"Build-record evidence is the kernel configuration check, the kernel module map and the image's module list; vendor-statement "
+               "evidence is a distribution or vendor record (Ubuntu CVE Tracker, DSA, DLA, USN); on-device and design-doc evidence is written by a "
+               "person in `vex-annotations.json` (`evidence`, `evidence_location`, or `evidence_basis` per kernel). "
+               f"A decision made in Dependency-Track always has no evidence type (there is no field for it), and an annotation cannot override it: "
+               "clear the decision in Dependency-Track, then record it as an annotation with evidence.")
+    if wt["total"]:
+        out.append(f"**{wt['total']} exclusions have no evidence type** ("
+                   + ", ".join(f"{EVIDENCE_MISSING.get(k, k)} {n}" for k, n in sorted(wt["by_reason"].items(), key=lambda kv: (-kv[1], kv[0])))
+                   + "). They are treated as not assessed: they count in the release gate's untriaged-for-gate number, the gate cannot be OK, and this "
+                     "document's status is at least ATTENTION. In the files for customers they carry `Evidence: not recorded`. First "
+                     f"{len(wt['sample'])}: "
+                   + ", ".join(f"{x['id']} on {x['component']} {x['version']} ({x['source']})" for x in wt["sample"]) + ".")
+    for key, title, note in (
+            ("on_device", "Exclusions based on an on-device check",
+             "The location must be a file inside the project folder (relative path, no `..`, not through a symbolic link to outside the "
+             "project). The tool only checks that the file exists; it does not verify the file's content. A person must review the file "
+             "(for example, output of read-only commands run on the device) before the release."),
+            ("design_doc", "Exclusions based on a design document",
+             "The location is free text written by a person (document name, version, section); the tool does not check that the document "
+             "exists or what it says. A person must review these exclusions before the release.")):
+        rows = ev[key]
+        if not rows:
+            continue
+        shown = rows[:EVIDENCE_TABLE_MAX]
+        out.append(f"#### {title} ({len(rows)})\n\n{note}"
+                   + (f" The first {EVIDENCE_TABLE_MAX} are shown; the full list is `vex.evidence.{key}` in summary.json." if len(rows) > len(shown) else "")
+                   + "\n\n" + table(["#", "ID", "Component", "Version", "Kernel", "Location", "Decided by"],
+                                    [[i, x["id"], x["component"], x["version"], x.get("kernel"), md_code(x["location"]), SRC_LABEL.get(x["source"], x["source"])]
+                                     for i, x in enumerate(shown, 1)]))
+    return out
+
+
 def section(num, g, info, conflicts, files, product, table, annotations_info, rules_info=None):
     """風險評估「Vulnerability status (VEX) and release gate」小節的 Markdown（前面帶空行）。"""
     c = g["counts"]
@@ -2845,7 +3187,11 @@ def section(num, g, info, conflicts, files, product, table, annotations_info, ru
               "They are written to the VEX files as well, as `in_triage` in CycloneDX (`under_investigation` in OpenVEX) with the property "
               "`dumpling:assessment` = `NOT_ASSESSED` (OpenVEX: status notes \"dumpling: not assessed\"). Such a statement means that the row "
               "has not been assessed; it does not mean that anyone is investigating it. The release gate counts these rows as `untriaged`, "
-              "not as `in_triage`, and they are not written back to Dependency-Track."),
+              "not as `in_triage`, and they are not written back to Dependency-Track. Every `resolved` or `not_affected` statement "
+              "(an exclusion) also records the type and location of its evidence (D-035): in CycloneDX the properties `dumpling:evidence`, "
+              "`dumpling:evidence-location` and, for a specific kernel, `dumpling:evidence-kernel`; in OpenVEX one line "
+              "`dumpling: evidence=<type>; location=<location>` per piece of evidence in the status notes. The files for customers "
+              "carry the type only, as a fixed sentence (`Evidence: …`), never the location."),
              (f"Files for customers, with the SBOM `sbom.cdx.json` (product {product}): "
               + "; ".join(f"`{n}` ({x['statements']} statements{', ' + str(x['not_assessed']) + ' of them not assessed' if x.get('not_assessed') else ''}, SHA-256 {x['sha256'][:12]})" if x else f"`{n}` not written ({why})"
                           for n, x, why in files)
@@ -2892,6 +3238,9 @@ def section(num, g, info, conflicts, files, product, table, annotations_info, ru
                         f"package (purl): {', '.join(ann['ignored'][:10])}" if ann.get("ignored") else "") + ".")
     else:
         parts.append("Annotations: no `CRA/Config/vex-annotations.json` in the project.")
+    ev = info.get("evidence")
+    if ev:
+        parts += evidence_paragraphs(ev, table)
     rs_all = info.get("rules") or []
     ers, rs = [x for x in rs_all if x.get("evidence")], [x for x in rs_all if not x.get("evidence")]
     rules_block = None
@@ -3016,14 +3365,16 @@ def section(num, g, info, conflicts, files, product, table, annotations_info, ru
                                  x["ubuntu_status"], x["ubuntu_changelog"]] for i, x in enumerate(fl["rows"][:50], 1)]))
     parts.append(f"**Release gate: {g['verdict']}**" + (" – " + "; ".join(g["reasons"]) + "." if g["reasons"] else
                  " – every row has a VEX status and no row is affected.")
-                 + " Rule: OK only when no row is untriaged, every further CVE merged into a row has its own VEX status, no row is "
+                 + " Rule: OK only when no row is untriaged, every `resolved` or `not_affected` row has an evidence type, every further CVE merged into a row has its own VEX status, no row is "
                    "`exploitable` (affected), people's decisions do not conflict, Grype was run and has no vulnerability "
                    "outside this list, and the list is complete (data status not GAP or NOT_ASSESSED). `in_triage` rows do not block the gate but must be followed up. OK does not mean the product is secure.")
     a, o = g["assessment"], g["open_affected"]
     parts.append(f"(a) Assessment completeness: {a['untriaged']} untriaged rows ({g['untriaged_high']} in P1 or P2)"
                  + (f" and {a['extra_cves_untriaged']} further merged CVEs without a statement" if a["extra_cves_untriaged"] else "")
                  + f"; set to in_triage by bulk rule, not individually assessed: {a['in_triage_by_rule']} (counted as not assessed); "
-                 f"{a['untriaged_for_gate']} not assessed in total. Rows set by a bulk rule to `exploitable`, or to `not_affected` by an evidence rule, count as assessed "
+                 + (f"{a['exclusions_without_evidence']} exclusions (`resolved` or `not_affected`) without an evidence type, counted as not assessed; "
+                    if a.get("exclusions_without_evidence") else "")
+                 + f"{a['untriaged_for_gate']} not assessed in total. Rows set by a bulk rule to `exploitable`, or to `not_affected` by an evidence rule, count as assessed "
                  f"({a['by_rule'] - a['in_triage_by_rule']}). "
                  f"(b) Open affected: {o['rows']} rows are `exploitable` ({o['individual']} decided individually, {o['by_rule']} by bulk rules)"
                  + (": by response " + ", ".join(f"{k} {n}" for k, n in o["by_response"].items()) if o["rows"] else "")
@@ -3077,6 +3428,13 @@ def write_atomic(p, text):
         raise
 
 
+def on_device_warnings(a, project):
+    """判定裡 on-device 依據的檔案目前不合格的說明（文字清單）：annotate、check 提醒用；這筆排除在檔案補上之前算沒有類型（閘門會擋）。"""
+    return [f"on-device 依據 {e['location']!r} 不合格（{why}）：檔案要放在專案資料夾內（相對路徑、沒有 ..、不經符號連結到外面），"
+            f"補檔前這筆排除算沒有依據類型，會擋發行閘門"
+            for e in annotation_basis(a) if e["type"] == "on-device" and (why := on_device_problem(e["location"], project))]
+
+
 def annotate(a):
     """讀、改、寫期間持有同資料夾 .vex-annotations.json.lock 的排他鎖（fcntl.flock，建議性），兩個人同時加判定不會互相蓋掉。"""
     import fcntl
@@ -3103,6 +3461,15 @@ def _annotate(a, p):
             new[k] = getattr(a, k).strip()
     if a.response:
         new["response"] = list(dict.fromkeys(a.response))
+    if a.evidence:
+        new["evidence"] = a.evidence
+    if a.evidence_location:
+        new["evidence_location"] = a.evidence_location[0] if len(a.evidence_location) == 1 else list(a.evidence_location)
+    if a.evidence_basis:
+        try:
+            new["evidence_basis"] = json.loads(a.evidence_basis)
+        except ValueError as e:
+            raise VexInputError(f"--evidence-basis 不是 JSON：{e}（沒有修改）")
     errs = validate_annotation(new, "新的判定")
     if not errs and unscoped(new):
         errs.append(f"{new['state']} 至少要用 --purl 限定套件（例如 pkg:deb/ubuntu/openssl）；只寫 CVE 的範圍只允許 in_triage、exploitable")
@@ -3117,7 +3484,8 @@ def _annotate(a, p):
     doc["annotations"].sort(key=lambda x: (scope_of(x)[0][0], scope_of(x)[0][1] or "", scope_of(x)[0][2] or ""))
     check_annotations(doc, str(p))
     write_atomic(p, json.dumps(doc, ensure_ascii=False, indent=1) + "\n")
-    return f"{'取代' if same else '新增'} {new['cve']}（{new['state']}）；{p} 共 {len(doc['annotations'])} 筆"
+    warn = "".join(f"；注意：{x}" for x in on_device_warnings(new, a.project))
+    return f"{'取代' if same else '新增'} {new['cve']}（{new['state']}）；{p} 共 {len(doc['annotations'])} 筆{warn}"
 
 
 def rules_add(a):
@@ -3176,6 +3544,18 @@ def rules_add(a):
         return f"{'取代' if same else '新增'}規則 {new['id']}（{st['state']}）；{p} 共 {len(doc['rules'])} 條"
 
 
+def gate_line(g):
+    """rules check --scan 的 GATE 行。列出的各項加起來等於 untriaged_for_gate（gate 的算法）：untriaged ＋ 別名 CVE 沒有判定
+    （extra_cves_untriaged）＋ 規則設 in_triage ＋ 沒有類型的排除（D-035／D-057）。"""
+    a_, o = g["assessment"], g["open_affected"]
+    return (f"GATE\t{g['verdict']}\tuntriaged {a_['untriaged']}（核心 {g['counts']['kernel']['untriaged']}、其他 "
+            f"{g['counts']['non_kernel']['untriaged']}）＋別名 CVE 沒有判定 {a_.get('extra_cves_untriaged', 0)}"
+            f"＋規則設 in_triage {a_['in_triage_by_rule']}（未評估）"
+            f"＋沒有類型的排除 {a_.get('exclusions_without_evidence', 0)}＝{a_['untriaged_for_gate']}；"
+            f"規則判定 {a_['by_rule']}；"
+            f"exploitable {o['rows']}（規則 {o['by_rule']}；" + "、".join(f"{k} {n}" for k, n in o["by_response"].items()) + "）")
+
+
 def rules_check(a):
     """只檢查格式；有 --scan 時另做一次「乾跑」：用 cra_report 產生文件到暫存資料夾（同樣的列、同樣的判定順序），印出每條規則的結果。
     回傳 (退出碼, 輸出的行)。"""
@@ -3224,10 +3604,7 @@ def rules_check(a):
         for r in x["sample"]:
             lines.append(f"  例\t{r['id']}\t{r['component']} {r['version']}\t{str(r['tier']).upper()}\t{r['fix_state']}\t{r['detail']}")
     a_, o = g["assessment"], g["open_affected"]
-    lines.append(f"GATE\t{g['verdict']}\tuntriaged {a_['untriaged']}（核心 {g['counts']['kernel']['untriaged']}、其他 "
-                 f"{g['counts']['non_kernel']['untriaged']}）＋規則設 in_triage {a_['in_triage_by_rule']}（未評估）＝{a_['untriaged_for_gate']}；"
-                 f"規則判定 {a_['by_rule']}；"
-                 f"exploitable {o['rows']}（規則 {o['by_rule']}；" + "、".join(f"{k} {n}" for k, n in o["by_response"].items()) + "）")
+    lines.append(gate_line(g))
     fl = v.get("upstream_excludes") or {}
     if fl.get("basis"):
         lines.append(f"FLAG\tdistro_no_range_upstream_excludes\t可能誤報 {fl['flagged']} 列（只標記，請人確認；Grype 發行版比對沒有版本範圍的 "
@@ -3265,6 +3642,13 @@ def main(argv=None):
     an.add_argument("--purl", help="只用在這個套件（pkg:類型/名稱，可加 @版本）")
     an.add_argument("--version", help="只用在這個版本")
     an.add_argument("--replace", action="store_true", help="取代同一範圍已有的判定")
+    an.add_argument("--evidence", choices=EVIDENCE_TYPES, help="排除（not_affected、resolved…）的依據類型；要和 --evidence-location 一起寫")
+    an.add_argument("--evidence-location", nargs="+", metavar="LOCATION",
+                    help="依據的位置（不能空、不超過 512 字、不能有 ; 與換行）；給多個＝同一類型的多筆依據。on-device：專案資料夾內的相對路徑，檔案要存在；"
+                         "design-doc：文件名稱、版本、章節")
+    an.add_argument("--evidence-basis", metavar="JSON",
+                    help="每一筆依據自己的類型（映像有多顆核心時每顆各一筆）：'[{\"type\": \"build-record\", \"location\": \"…\", \"kernel\": \"5.15.136\"}]'；"
+                         "不能和 --evidence 一起用")
     ck = sub.add_parser("check", help="只檢查 vex-annotations.json")
     ck.add_argument("--project", required=True)
     ru = sub.add_parser("rules", help="批次規則（CRA/Config/vex-rules.json）")
@@ -3313,6 +3697,9 @@ def main(argv=None):
             return rc
         else:
             anns, info = load_annotations(a.project)
+            for x in anns:
+                for w in on_device_warnings(x, a.project):
+                    print(f"WARN\t{x['cve']}：{w}")
             if info and info["warnings"]:
                 for w in info["warnings"]:
                     print(f"WARN\t{w}")

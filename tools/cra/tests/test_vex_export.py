@@ -45,6 +45,16 @@ def ann(cve, state="not_affected", **kw):
     return a
 
 
+def typed(allr, typ="source", loc="synthetic evidence"):
+    """D-035：測試用。給每一筆沒有依據的排除補上依據類型（只動 evidence_basis），讓測試只看它原本要看的東西
+    （沒有類型的排除會算進 untriaged_for_gate 並擋閘門）。D-035 本身的測試在 test_vex_evidence_basis.py。"""
+    for r in allr:
+        for x in [r] + (r.get("vex_extra") or []):
+            if vx.is_exclusion(x.get("vex")) and not x["vex"].get("evidence_basis"):
+                x["vex"]["evidence_basis"] = [{"type": typ, "location": loc}]
+    return allr
+
+
 def kcfg(results, status="OK"):
     return {"schema": "sca-center-kernel-config/1", "status": status, "detail": "x",
             "kernel": {"version": "6.8.12-1021-tegra", "config_source": "/boot/config", "config_sha256": "ab" * 32},
@@ -240,6 +250,7 @@ def test_annotate_cli_appends_safely(tmp_path):
 def test_gate_verdicts():
     def g(rs, **kw):
         allr, conf, _ = vx.assess(rs)
+        typed(allr)           # 因 D-035 而變：DT 的排除沒有依據類型會擋閘門；這裡要看的是其他規則，所以補上類型
         return vx.gate(allr, conf, **{"grype_checked": True, "not_assessed": [], **kw})
     ok = g([row("CVE-1", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT")), row("CVE-2", "linux", "6.8", kernel=True, analysis=dt("RESOLVED")),
             row("CVE-3", analysis=dt("IN_TRIAGE")), row("CVE-4", analysis=dt("EXPLOITABLE", response="UPDATE"))])
@@ -717,6 +728,7 @@ def test_extra_cve_dt_finding_for_that_cve_is_used():
 
 def test_gate_without_grype_cross_check_is_not_ok():
     allr, conf, _ = vx.assess([row("CVE-2026-0001", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT"))])
+    typed(allr)                                                                  # 因 D-035 而變：補上依據類型
     assert vx.gate(allr, conf, grype_checked=True, not_assessed=[])["verdict"] == "OK"
     assert vx.gate(allr, conf)["verdict"] == "ATTENTION"                       # 預設偏保守：呼叫端要明確說 Grype 有跑
     g = vx.gate(allr, conf, grype_checked=False)
@@ -837,6 +849,7 @@ def test_report_self_no_version_match_blocks_gate(tmp_path):
 
 def test_gate_not_assessed_default_is_fail_safe():
     allr, conf, _ = vx.assess([row("CVE-2026-0001", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT"))])
+    typed(allr)                                                                  # 因 D-035 而變：補上依據類型
     assert vx.gate(allr, conf, grype_checked=True, not_assessed=[])["verdict"] == "OK"
     g = vx.gate(allr, conf, grype_checked=True)                                  # 呼叫端沒說 → 不知道
     assert g["verdict"] == "ATTENTION" and g["not_assessed"] is None
