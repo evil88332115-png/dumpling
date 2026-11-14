@@ -4792,7 +4792,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 rctx["nvidia_distro"] = rm
             nvd_info = {"checked": ri["checked"], "reason": ri["reason"], "db": ri["db"], "cves": len(nvd_cves), "remapped": rm,
                         "file_list": ri["file_list"]}
-    vrows, vconf, vinfo = vx.assess(rows, drc, kcfg, nvb, anns, vrules, rctx)
+    # project：annotation 的 on-device 依據要檢查檔案在專案資料夾內（D-035／D-057）
+    vrows, vconf, vinfo = vx.assess(rows, drc, kcfg, nvb, anns, vrules, rctx, project=project)
     # 可能誤報（只標記）：發行版紀錄沒有版本範圍、grype.json 裡同一個 CVE 的上游 CPE 範圍不含安裝的上游版本
     vinfo["upstream_excludes"] = vx.upstream_exclusion_flags(vrows, grype if have_grype else None, vx.ubuntu_status_of(ustatus_doc)[0])
     # 可能誤報的標記是 assess 之後才加的：標記的計數重算（含 NVIDIA 另加的列與拆出來的 CVE）
@@ -5256,6 +5257,14 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                     annotations_without_author=sorted({ann_label(a) for a in anns if vx.author_missing(a.get("author"))}),
                     # 沒有 DT findings 時每一筆都「沒對到」，不另外點名（閘門本來就是 NOT_ASSESSED）
                     annotations_unused=[ann_label(anns[i]) for i in vinfo["annotations_unused"]] if isinstance(findings, list) else [])
+    # D-035／D-057：沒有依據類型的排除（resolved、not_affected 沒有類型、或 on-device 的檔案不合格）→ 這份文件的狀態至少 ATTENTION。
+    # 和 D-054 的 fw_st 一樣只進文件狀態（summary.json 的 status），不進上面的漏洞資料狀態 risk_st；發行閘門由 vex_export.gate 自己擋
+    ev_n = vgate["assessment"]["exclusions_without_evidence"]
+    ev_st = "ATTENTION" if ev_n else "OK"
+    ev_reasons = [f"{ev_n} exclusions (resolved or not_affected) without an evidence type (D-035): they count as not assessed in the release gate; "
+                  "see the VEX section and vex.evidence in summary.json"] if ev_n else []
+    ctx["risk.data_status_detail"] = list(ctx["risk.data_status_detail"]) + [
+        f"Note (counted in this document's status, not in the vulnerability data status above): {x}" for x in ev_reasons]
     # 安全測試（風險評估第 9 節、技術文件第 6 項、security-findings.md）：掃描資料夾旁邊的 image-check／board-test，或 --image-check／--board-test
     img_p = Path(image_check) if image_check else (scan.parent / "image-check" / "image-check.json")
     brd_p = Path(board_test) if board_test else (scan.parent / "board-test" / "board-test.json")
@@ -5497,7 +5506,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     docs, rendered = {}, {}
     # 風險評估的文件狀態＝漏洞資料狀態（第 8 節）與安全測試狀態（第 9 節）較差的那個；risk.data_status 仍只講第 8 節
     # 分級方式 exploitation：沒有對外服務清單（必須判斷的範圍不完整）→ GAP，依日期的出貨關卡擋住 → ATTENTION（current 時 est 是 OK）
-    data_st = {"risk-assessment": (worst([risk_st, sec_st, est, fw_st]), reasons + sec_reasons + ereasons + fw_reasons), "sbom": (bom_st, bom_reasons),
+    data_st = {"risk-assessment": (worst([risk_st, sec_st, est, fw_st, ev_st]), reasons + sec_reasons + ereasons + fw_reasons + ev_reasons),
+               "sbom": (bom_st, bom_reasons),
                "user-information": ("OK", [])}
     # 缺的欄位不只看實際用的範本：內建範本引用的欄位（專案範本少引用時也算缺）、Annex I 的逐項表、技術文件檢查清單的 config 欄位
     extra_missing = {"risk-assessment": set(annex_missing),
@@ -5650,6 +5660,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 "kernel_modules": kmods_info, "upstream_excludes": vinfo["upstream_excludes"],
                 # 被證據規則 U1 設成 not_affected 的每一列與理由、證據（vex_export.u1_exclusions；報告的「被排除清單」用）
                 "u1_excluded": vinfo.get("u1_excluded", []),
+                # 排除的依據（D-035／D-057；vex_export.exclusion_evidence）：exclusions、by_type（五種類型各幾筆排除）、with_type、
+                # without_type（total、by_reason、sample）、on_device／design_doc（每一筆依據：id、component、version、source、location、kernel）
+                "evidence": vinfo["evidence"],
                 # NVIDIA 公告列的 CVE 其實是發行版套件的（nvidia_distro.py）：checked＝有沒有查（沒給 Grype DB 就沒查）、remapped＝每個 CVE 的結果
                 "nvidia_distro": nvd_info,
                 # 被證據規則 U2 設成 resolved 的每一列（只有設定了 U2 時才有這個鍵；tier 是最後的層級，distro_fixed＝已移到發行版已修補小節）

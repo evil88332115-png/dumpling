@@ -104,7 +104,8 @@ the order of handling (KEV, EPSS, severity). The **VEX status** column records t
 `not_affected`, `in_triage`, `exploitable`, or `untriaged` when nothing has been decided yet; the source is in brackets); the
 subsection "Vulnerability status (VEX) and release gate" summarises it and the release gate. Rows that have not been assessed are
 also written to the VEX files, as `in_triage` (OpenVEX `under_investigation`) with the marker `NOT_ASSESSED`; this does not mean
-that anyone is investigating them. Open issues for point (2)(a) are
+that anyone is investigating them. Every `resolved` or `not_affected` row records the type and location of its evidence; a row
+without an evidence type is treated as not assessed. Open issues for point (2)(a) are
 the rows with VEX status `exploitable` and the untriaged rows in P1 or P2; every other untriaged row still needs an assessment
 before the release gate is OK.
 

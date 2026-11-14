@@ -21,7 +21,7 @@ def prop(name, value):
     return {"name": name, "value": value}
 
 
-def vuln(vid, state, detail, rule=None, justification=None, response=None, action=None, ref="pkg:deb/ubuntu/x@1"):
+def vuln(vid, state, detail, rule=None, justification=None, response=None, action=None, ref="pkg:deb/ubuntu/x@1", evidence=()):
     a = {"state": state, "detail": detail}
     if justification:
         a["justification"] = justification
@@ -31,6 +31,10 @@ def vuln(vid, state, detail, rule=None, justification=None, response=None, actio
              prop("sca-center:vex-rule-author", "Staff Name"), prop("sca-center:vex-rule-evidence", "IKCONFIG sha cd2363 /mnt/data/x")]
     if rule:
         props.append(prop("sca-center:vex-rule", rule))
+    for t, loc in evidence:               # 排除的依據（M7c-2）：內部版的屬性（類型、位置）；t＝"none" 時沒有位置
+        props.append(prop("dumpling:evidence", t))
+        if loc:
+            props.append(prop("dumpling:evidence-location", loc))
     if state == "exploitable":
         props.append(prop("sca-center:fix-state", "not-fixed"))
         props.append(prop("openvex:action_statement", action or "Track x; it is fixed when the distribution publishes a fix. (bulk rule R6: x)"))
@@ -46,16 +50,18 @@ CDX = {"bomFormat": "CycloneDX", "specVersion": "1.6", "serialNumber": "urn:uuid
                     "tools": {"components": [{"type": "application", "group": "sca-center", "name": "vex_export.py"}]},
                     "properties": [prop("sca-center:release-gate", "GAP")]},
        "vulnerabilities": [
-           vuln("CVE-1", "not_affected", KERNEL, "K1", "code_not_present"),
+           vuln("CVE-1", "not_affected", KERNEL, "K1", "code_not_present", evidence=[("build-record", "/mnt/data/x/scan/kernel-config.json (kernel 6.8)")]),
            vuln("CVE-2", "exploitable", "Insufficient data: no fix information is available for fuse; treated as affected. "
                                         "(bulk rule R8: No fix information available: treated as affected, insufficient data)", "R8"),
            vuln("CVE-3", "in_triage", "人工分析顯示沒有編進 UEFI；工具無法確認 (bulk rule R9m: Bundled Mbed TLS (UEFI): built-in not confirmed)", "R9m"),
            vuln("CVE-4", "exploitable", "Fixed in curl 8.5 (installed 8.4). (bulk rule R3: Distribution package: newer fixed package available)",
                 "R3", response=["update"], action="Fixed by updating curl to 8.5 or later in the next image. (bulk rule R3: x)"),
            vuln("CVE-5", "resolved", "fixed by Ubuntu 24.04 (noble) in 3.0.13-0ubuntu3.5 (UBUNTU-CVE-2024-1); installed 3.0.13-0ubuntu3.11. "
-                                     "Reported only via NVD/GitHub data, which does not know the distribution's backported fix."),
+                                     "Reported only via NVD/GitHub data, which does not know the distribution's backported fix.",
+                evidence=[("none", None)]),
            vuln("CVE-6", "not_affected", "Ubuntu CVE Tracker (commit 1234, 2026-01-01) for source package pkgconf in noble: CVE-6: not-affected",
-                "U1", "code_not_present"),
+                "U1", "code_not_present",
+                evidence=[("vendor-statement", "Ubuntu CVE Tracker active/CVE-6@1234"), ("on-device", "CRA/evidence/dev-check.txt")]),
            vuln("CVE-7", "exploitable", "Grype reports a match; Dependency-Track agrees", "R2"),
            vuln("CVE-8", "in_triage", "Version unknown: the SBOM reads 0.0.0, which is a placeholder. NOT_ASSESSED; no version is guessed "
                                       "(draft vulnerability-handling rule 10).")]}
@@ -86,18 +92,21 @@ def test_customer_cdx_whitelist_keeps_decisions_and_drops_internal():
     for w in FORBIDDEN + ("vex_export.py", "Staff Name", "/media/"):
         assert w not in text, w
     assert not CJK.search(text) and "sca-center:" not in text
+    assert "dev-check.txt" not in text and "/mnt/data" not in text and "kernel-config.json" not in text      # 依據的位置不帶（D-057）
     for v in out["vulnerabilities"]:
         assert set(v) - {"properties"} <= set(sp.CDX_VULN_KEYS)
         assert all(p["name"] == "openvex:action_statement" for p in v.get("properties", []))
     assert set(out["metadata"]) == {"timestamp", "component"}
     by = {v["id"]: v for v in out["vulnerabilities"]}
-    assert by["CVE-1"]["analysis"]["detail"] == "The affected code is not built into the shipped kernel (kernel build configuration)."
+    # 因 D-035 而變：排除的 detail 後面多一句依據類型的固定英文（沒有類型寫 Evidence: not recorded）；位置不帶
+    assert by["CVE-1"]["analysis"]["detail"] == "The affected code is not built into the shipped kernel (kernel build configuration). Evidence: build artifacts."
     assert by["CVE-2"]["analysis"]["detail"].startswith("Insufficient data: no fix information is available for fuse")
     assert "bulk rule" not in by["CVE-2"]["analysis"]["detail"]
     assert by["CVE-3"]["analysis"]["detail"] == "Under assessment."
     assert by["CVE-4"]["properties"][0]["value"] == "Apply curl 8.5 or later when it is included in a release."
     assert "distribution has already fixed" in by["CVE-5"]["analysis"]["detail"] or "already contains the fix" in by["CVE-5"]["analysis"]["detail"]
-    assert by["CVE-6"]["analysis"]["detail"] == sp.DISTRO_NOT_AFFECTED
+    assert by["CVE-5"]["analysis"]["detail"].endswith(" Evidence: not recorded.")          # 因 D-035 而變（沒有類型）
+    assert by["CVE-6"]["analysis"]["detail"] == sp.DISTRO_NOT_AFFECTED + " Evidence: on-device check. Evidence: vendor statement."   # 因 D-035 而變
     assert by["CVE-7"]["analysis"]["detail"] == sp.FALLBACK["affected"]          # 工具名稱 → 一般句子
     assert by["CVE-8"]["analysis"]["detail"] == sp.VERSION_UNKNOWN
 
@@ -348,7 +357,8 @@ def test_customer_openvex_not_assessed_uses_neutral_english_note():
     # 其他狀態不會因為說明文字相同被改寫
     odd = {"statements": [{"vulnerability": {"name": "X"}, "products": [], "status": "not_affected", "justification": "component_not_present",
                            "status_notes": "dumpling: not assessed"}]}
-    assert sp.customer_openvex(odd)["statements"][0]["status_notes"] == sp.FALLBACK["not_affected"]     # 不當成「沒評估」：走一般的過濾（含 dumpling: 的句子換成一般句子）
+    # 不當成「沒評估」：走一般的過濾（含 dumpling: 的句子換成一般句子）；因 D-035 而變：排除後面多一句 Evidence: not recorded
+    assert sp.customer_openvex(odd)["statements"][0]["status_notes"] == sp.FALLBACK["not_affected"] + " Evidence: not recorded."
 
 
 def test_customer_vex_with_not_assessed_end_to_end_state_identical_and_no_dumpling(tmp_path):
