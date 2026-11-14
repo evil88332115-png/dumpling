@@ -46,3 +46,5 @@ expected:
   # 公告頁：INTEL-SA-01372 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html、INTEL-SA-01280 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html
   advisory_rule:
     - {component: "Intel CSE firmware", version: "18.1.18.2724", suggestion: affected, rule_ids: ["INTEL-SA-01372"]}
+  # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
+  ami_core: {status: not-found}

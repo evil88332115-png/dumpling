@@ -13,6 +13,7 @@
 | `tools/cra/x86_firmware.py` | 呼叫比對、SBOM property（`dumpling:advisory-*`）、`fw-inventory.md` 的「公告比對」一節、資料表不能用時 ATTENTION；ME 的 CPE 與 `dumpling:cpe-*` |
 | `pipeline/firmware-ci.sh`、`pipeline/lib/firmware_advisory_cell.py`、`pipeline/lib/firmware_dt.py` | CI 摘要表有一欄「公告比對」（微碼，有 NVIDIA vBIOS 時加一段；文字由 `firmware_advisory_cell.py` 從 `fw-inventory.json` 產生：每個 BIOS 映像各一段，Intel 計數、AMD 已解析份數或 PSP 解析沒有執行的 GAP、資料表 GAP）；DT 報告的說明與每個樣本的 `advisory-match` 計數（標籤中性，含 AMD 元件） |
 | `tools/cra/tests/test_fw_advisory.py`、`test_x86_firmware_sbom.py`、`tests/test_firmware_dt.py` | 測試（合成資料，不連網） |
+| `tools/cra/ami_core.py`、`tools/cra/tests/test_ami_core.py` | AMI 核心版本（Firmware ID 紀錄）的解析、比對與測試；見 `docs/notes/c2-ami-core.md` |
 | `tools/cra/fw_advisory_rules.py`、`tools/cra/data/fw-advisory-rules.json`、`tools/cra/tests/test_fw_advisory_rules.py` | 廠商公告規則表（AMD-SB、INTEL-SA、AMI-SA）的比對、規則與測試；見最後的「規則表」一節 |
 | `tools/cra/nvidia_vbios_advisory.py`、`tools/cra/tests/test_nvidia_vbios_advisory.py`、`tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | NVIDIA vBIOS 的離線比對、測試、公告對照表（是否已經負責人確認見最後一節） |
 
@@ -344,7 +345,7 @@ C2 沒有改 C1 的程式；下面是現行規則與格式上的需求：
 | `amd_psp` | `psp_type`（0–255）、`fixed_in`（四個小寫十六進位 byte，與 SBOM 同格式） | 逐 byte 比；type 不同 → 不適用 |
 | `amd_microcode` | `equiv_id`（`0x` ＋ 4 位）或 `cpuid`（8 位大寫十六進位）二選一、`fixed_in`（patch level，`0x` ＋ 8 位） | 無號整數；用 `cpuid` 但映像沒有等價表（CPUID 未知）→ `cpuid-unknown`，不猜 |
 | `bios_image` | `name_prefix`（映像檔名開頭）、`fixed_in`（數字或點分數字） | 用版本清單宣告的 BIOS 版本，數字逐段比；沒宣告 → `no-declared-version`，格式怪異 → `version-unreadable` |
-| `ami_core` | `product`、可選 `fixed_in`（只記錄） | **不比較**：SBOM 沒有 AMI 核心版本，一律 NOT_ASSESSED（`no-ami-core-version`） |
+| `ami_core` | `product`、可選 `fixed_in`（`AptioV_<主>.<三位數次版號>`，`fullmatch` 驗證） | 映像的 AMI 核心版本（Firmware ID 紀錄，`ami_core.py`）與 `fixed_in` 比整數 `(主, 次)`：核心**低於**修正版本 → `affected` 建議（preliminary，待人審，固定附「基底版本、回補看不出來／A1 未確認／線索不是判定」三件事）；**不低於** → 一律 NOT_ASSESSED（`ami-core-mapping-unverified`），**第一版不輸出 not-affected**；status 不是 `read`、沒有 product、product 不同、跨 major 的處理見 `docs/notes/c2-ami-core.md`（D-058） |
 
 `affected_from`（可選）：映像版本低於它 → NOT_ASSESSED（`below-affected-from`），因為公告沒有說比起點更舊的版本怎麼樣。
 
@@ -354,6 +355,7 @@ AGESA 的版本不能用數字或字串順序比：AMD 公告裡 `ComboAM4v2PI` 
 `ComboAM5PI` 的 `1.0.0.7a` 比 `1.0.7.0` 晚發佈（2023-05-05 對 2023-04-18）。所以順序**只用 AMD 公告頁列出的發佈日期**證明：規則表的 `orderings[]` 每個 family 一份版本序列，每個版本附 AMD 公告列的日期與出處網址，
 驗證要求日期**嚴格遞增**（同一天不能證明先後）。`fixed_in`、`affected_from` 必須在序列裡（否則整張表拒收）；映像的版本不在序列裡（例如規則表沒有 `1.2.0.A`、`1.2.0.E`）→ NOT_ASSESSED，不從字母或數字推測。
 比較不分大小寫（AMD 的頁面同一版本有 `1.2.0.Ca` 與 `1.2.0.CA` 兩種寫法，日期相同；7014 把 Cc 寫成沒有點的 `1.2.0Cc`，規則表寫成 `1.2.0.Cc`）。
+序列裡的 `listed` 是 AMD 公告表格那一列寫的 AGESA 日期，**不是公告的發佈日**：例如 AMD-SB-7005 發佈 2023-08-08，表格的 1.2.0.B 是 2023-08-25；AMD-SB-7064 發佈 2026-08-11、2026-08-25 更新，表格的 1.2.0.12 是 2026-05-27。
 新增序列時：版本與日期一定要來自 AMD 公告頁的同一個表格列，出處網址記在該筆；兩個頁面對同一版本寫了不同日期（不同 CPU 的列）時取較早的，並且只收日期能嚴格排序的。
 
 ### 建議的合併規則
@@ -377,8 +379,8 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
   對不到任何規則的元件維持「資料庫沒有資料，以廠商公告為準」。
 - **狀態**：任何元件的建議是 `affected`，即使規則還是初審，`FW-INVENTORY` 狀態就是 ATTENTION，說明裡列規則編號與「待人審」；`not-affected` 不會讓狀態變好或變差；NOT_ASSESSED 照舊；規則表不能用 → ATTENTION。
 - CI 摘要欄（`firmware_advisory_cell.py`）多一段「規則表建議（整理日期）affected N、not-affected N、NOT_ASSESSED N：affected N 個待人審（規則；依初審規則的建議，待負責單位確認）」；DT 報告的「怎麼讀」與每個樣本的計數行也一樣。
-- **AMI-SA**：SBOM 目前沒有 AMI 核心版本，`ami_core` 的條件一律 NOT_ASSESSED（原因寫「SBOM 沒有 AMI 核心版本」，代碼 `no-ami-core-version`）。映像有 AMI 的線索（`ibv_hint` 有 AMI，或是 AMI PFAT 封裝）時，報告列出「可能相關的 AMI 公告」請負責單位對照，**不給建議**。
-  公告列的 `Fix Version`（例如 `AptioV_5.044`）只記在規則裡；等 SBOM 讀得到 AMI 核心版本（`AptioV_5.0xx` 形式）再加比較函式。
+- **AMI-SA**（D-058）：SBOM 讀得到 AMI 核心版本時（映像的 Firmware ID 紀錄，說明與限制見 `docs/notes/c2-ami-core.md`）多一個 `AMI Aptio V core` 元件，`ami_core` 的條件對它比：核心低於 `Fix Version`（例如 `AptioV_5.044`）→ `affected` 建議，不低於 → NOT_ASSESSED（`ami-core-mapping-unverified`，不輸出 not-affected）。
+  讀不到、結構不合、互相矛盾 → NOT_ASSESSED；映像有 AMI 的線索（`ibv_hint` 有 AMI，或是 AMI PFAT 封裝）卻沒有核心版本元件時，報告列出「可能相關的 AMI 公告」請負責單位對照，**不給建議**。有核心版本元件時 `bios_image` 不再比 `ami_core` 規則。
 
 ### 完整性：為什麼固定 sha256
 
@@ -415,7 +417,7 @@ SBOM 元件的 property：`dumpling:advisory-rule-suggestion`、`dumpling:adviso
 | INTEL-SA-00391 2020.2 IPU（發佈 2020-11-10，修訂 2022-05-12） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html | CSME：版本線 `14.0` `fixed_in` 14.0.45、版本線 `14.5` `fixed_in` 14.5.25（`verification: independent:nvd`） | 受影響產品只寫成一份版本清單（CSME 與 AMT，低於各版本線的門檻就受影響）：11.8.82、11.12.82、11.22.82、12.0.70、13.0.40、13.30.10、14.0.45、14.5.25。只收 14.x 兩條。NVD 的 CPE 版本範圍（有 Intel CPE 的 CVE）的 14.x 上界是 14.0.45 與 14.5.25，相符；**11.x 的門檻兩邊不同**：Intel 頁面的版本清單寫 11.8.82（同頁的某些 CVE 描述寫 11.8.80），NVD 寫 11.8.80，兩邊都記在這裡，規則不用 11.x。25 個 CVE 裡 CVE-2020-27336、-27337、-27338 在 NVD 沒有 Intel 的 CPE 設定也沒有連到這則公告，這三個沒有獨立核對 |
 | INTEL-SA-01280 2025.3 IPU（2025-08-12） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html | CSME：`14.1`→14.1.77、`14.5`→14.5.57、`18.1`→18.1.18（`verification: summary-tool`） | 表格的版本欄是「低於這個版本受影響」的門檻（CVE-2025-20037、-20067、-22392）；只收 14.x、18.x 的列。**版本值只經網頁摘要工具讀到，NVD 對這些 CVE 沒有 CPE 版本範圍，無法獨立核對** |
 | INTEL-SA-01372（2026-08-11，修訂 2026-09-09；CVE-2026-6726） | https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html | CSME：`14.1`→14.1.80、`14.5`→14.5.62、`18.1`→18.1.21 | 同上，版本欄是受影響的門檻；只收 14.x、18.x 的列（`verification: summary-tool`，同樣無法獨立核對）。Intel 的表依產品列，規則只看版本線，**沒有核對平台是不是那一列的產品**（寫在規則的 `note`） |
-| AMI-SA-2026001（2026-09-08；CVE-2026-33197）、AMI-SA-2026002（2026-10-13；CVE-2025-58771／-58772／-58773／-58774、CVE-2026-0893）；兩份的標題都是 PDF 的「Security Audit Reported Vulnerabilities」，產品（Aptio V）寫在 `note` 與條件的 `product` | 該則 PDF（`go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf`、`…002.pdf`）與 https://www.ami.com/security-advisories/ | `ami_core`：Aptio V，`Fix Version` 欄 `AptioV_5.044`（2026002 同一份文件裡另有 `AptioV_5.043`，取最高） | 文件說明修正版本名稱有 Aptio 的，對應的是 AMI 的 UEFI 產品 Aptio V；沒有受影響版本範圍，只有修正版本；SBOM 沒有 AMI 核心版本，所以只列「可能相關」，不比較 |
+| AMI-SA-2026001（2026-09-08；CVE-2026-33197）、AMI-SA-2026002（2026-10-13；CVE-2025-58771／-58772／-58773／-58774、CVE-2026-0893）；兩份的標題都是 PDF 的「Security Audit Reported Vulnerabilities」，產品（Aptio V）寫在 `note` 與條件的 `product` | 該則 PDF（`go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf`、`…002.pdf`）與 https://www.ami.com/security-advisories/ | `ami_core`：Aptio V，`Fix Version` 欄 `AptioV_5.044`（2026002 同一份文件裡另有 `AptioV_5.043`，取最高） | 文件說明修正版本名稱有 Aptio 的，對應的是 AMI 的 UEFI 產品 Aptio V；沒有受影響版本範圍，只有修正版本；核心版本讀得到時與 `Fix Version` 比整數（低於 → affected 建議，不低於 → NOT_ASSESSED），讀不到時只列「可能相關」 |
 
 AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、7008、7009、7014、7064 的表格列，2026-11-14 讀）：`ComboAM4v2PI`：1.2.0.8（2022-07-29）、1.2.0.9（2023-01-24）、1.2.0.B（2023-08-25）、1.2.0.C（2024-02-07）、1.2.0.Ca（2024-03-14）、1.2.0.Cb（2024-07-30）、
 1.2.0.Cc（2024-08-16）、1.2.0.D（2024-11-07）、1.2.0.F（2025-04-30）、1.2.0.10（2025-10-31）、1.2.0.12（2026-05-27，AMD-SB-7064 的客戶端表；2026-11-14 下載 AMD 公告索引列出的 4019 以後與 7015 以後的公告逐頁搜尋，`1.2.0.11` 沒有出現，所以不收）；`ComboAM5PI`（Raphael 的列）：1.0.0.7a（2023-05-05）、1.0.8.0（2023-08-25）、1.1.0.2（2024-01-09）、1.2.0.0（2024-06-13）、1.2.0.1（2024-08-07）、1.2.0.2a（2024-10-05）。
@@ -442,16 +444,16 @@ AGESA 的 `orderings[]` 的日期出處（AMD-SB-4002、4012、4018、7005、700
 | Protectli VP46xx（Dasharo v1.2.0） | ME 14.0.47.1558 | **not-affected**（依據 vendor-statement：INTEL-SA-00391 的 14.0.45） | INTEL-SA-00391；FSP 9.x 沒有規則 |
 | NovaCustom NUC box ARL v0.9.2 | ME 18.1.18.2724 | affected | INTEL-SA-01372（INTEL-SA-01280 的 18.1.18 不低於，記在依據） |
 | NovaCustom V540TU MTL v1.0.1 | ME 18.0.10.2285 | NOT_ASSESSED（`no-rule-for-line`：規則只有 14.x、18.1 版本線） | — |
-| Intel NUC11 PATGL357.0059 | BIOS 映像 | NOT_ASSESSED（`no-ami-core-version`；列出可能相關的 AMI-SA-2026001、2026002） | — |
+| Intel NUC11 PATGL357.0059 | AMI 核心 5.19（`AMI Aptio V core`） | affected（核心低於 `AptioV_5.044`；preliminary；基底版本、回補看不出來、A1 未確認，是線索不是判定） | AMI-SA-2026001、AMI-SA-2026002；BIOS 映像本身不再比 AMI 規則 |
 
-AMI 的線索（`ibv_hint` 有 AMI）也出現在 ASUS B550M、ASRock B550、ASUS B650M 的映像：這三個的 BIOS 映像元件同樣是 NOT_ASSESSED（`no-ami-core-version`），報告同樣列出可能相關的 AMI-SA-2026001、2026002，不給建議（上表只在 NUC11 列出是因為其他列在講別的元件）。
+ASUS B550M（核心 5.17）、ASRock B550（5.17）、ASUS B650M（5.26）的映像同樣讀得到 AMI 核心版本，結果同 NUC11：`AMI Aptio V core` 元件是 affected 建議（AMI-SA-2026001、2026002），BIOS 映像元件是 NOT_ASSESSED（`no-rule`）。核心版本的讀法、四份樣本的欄位與限制見 `docs/notes/c2-ami-core.md`。
 
-每個樣本的狀態一直是 ATTENTION（既有原因：沒有版本清單、解析缺口等）；有 affected 建議的樣本多一句「規則表建議 affected：… 待人審」。`expected.advisory_rule` 鎖住 B550M、Protectli、NovaCustom ARL 三個樣本。
+每個樣本的狀態一直是 ATTENTION（既有原因：沒有版本清單、解析缺口等）；有 affected 建議的樣本多一句「規則表建議 affected：… 待人審」。`expected.advisory_rule` 鎖住 B550M、NUC11、Protectli、NovaCustom ARL 四個樣本。
 
 ### 限制與沒做的事
 
 - 規則表只有 7 筆，**不是完整的公告資料庫**；沒有規則的元件、版本線、family 一律 NOT_ASSESSED（`no-rule`、`no-rule-for-line`）。
 - AGESA 取同表最高的修正版本、CSME 只看版本線、不知道映像是給哪顆 CPU 或哪個產品，所以 `affected` 偏保守；`not-affected` 只是「版本不低於公告列的修正版本」。
-- AMI 核心版本讀不到（沒有 AMI 的版本字串解析器），`ami_core` 只列相關公告；之後讀得到了再加比較函式與規則。
+- AMI 核心版本讀的是映像自述的 Firmware ID 紀錄（沒有簽章、結構從公開映像反推）；核心是基底版本，板廠回補的修正看不出來；核心版本寫法與公告寫法的對應（A1）沒有明文，所以 `affected` 只是線索、不輸出 not-affected。
 - 沒有規則的元件種類：Intel 微碼（另有發佈資料表的比對）、coreboot、edk2、GOP／VBT、NVIDIA vBIOS。
 - 規則表不隨 CI 更新；Intel 頁面的內容要人工對照。

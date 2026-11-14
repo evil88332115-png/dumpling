@@ -92,6 +92,10 @@ BIOS（Intel 平台的完整 SPI 映像）：
   找 Intel GOP 驅動（intel_vbios.gop_driver）、獨立 VBT（intel_vbt）、legacy VBIOS option ROM（掛在 `<映像位置>!uefi/<FFS GUID>` 位置）；
   結果在 bios[].uefi_gfx，SBOM 元件掛在 BIOS 映像底下。沒解開的部分（EFI 標準壓縮等）、FV 結構警告、coreboot CBFS、上限、走訪失敗、uefi_image.py 載入不了
   → 記 sca-center:gap 與狀態 ATTENTION（沒找到不代表不存在）。細節與依賴的 uefi_image 內部名稱見 docs/notes/c2-vbios.md。
+- AMI Aptio V 核心版本（ami_core.py，D-058）：同一次 UEFI 走訪裡收 Firmware ID 紀錄（`$FID`；結構只從公開映像反推，值是映像自述、沒有簽章），
+  結果在 bios[].ami_core（status：read／not-found／conflict／layout-unknown／not-searched）。讀到時 SBOM 有 `AMI Aptio V core` 元件（Core Major 不是 5 時是
+  `AMI firmware core`、沒有 product），掛在 BIOS 映像底下；多份紀錄的 Core 互相矛盾時不選一個、不產元件。核心版本是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；
+  公告 `AptioV_5.0NN` 與 FID 兩位數的對應（A1）沒有 AMI 或板廠的明文，所以規則表只在核心低於修正版本時給 affected 建議、不輸出 not-affected。細節見 docs/notes/c2-ami-core.md。
 - IBV 線索：BIOS 區域裡未壓縮的字串（AMI：American Megatrends、ALASKA；Insyde：InsydeH2O；Phoenix）。只是線索，以版本清單為準。
 - UEFI 壓縮統計（**不解壓**，見 FvStats）：走未壓縮的 firmware volume／FFS 檔案／section，依壓縮方式計數（efi-standard、lzma、
   lzma-f86、brotli、tiano-custom，其他需要處理的 GUID-defined 依 GUID），記在 uefi 與 GAP（「N 個壓縮 section 沒有解析」）。
@@ -173,7 +177,8 @@ ARCHIVES = ((b"PK\x03\x04", "zip"), (b"7z\xbc\xaf\x27\x1c", "7z"), (b"Rar!\x1a\x
 DOC_EXT = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp")   # 更新包裡的文件：ZIP 格式但不是要展開的壓縮檔
 ME_FAMILIES = ("CSME", "ME", "TXE", "SPS")   # 版本清單 me 列的 identifier 可以寫這些（映像分不出來，不猜）
 COMPONENTS = ("bios", "ibv-core", "me", "fsp", "agesa", "psp", "microcode", "ec", "gbe", "module", "vbios", "vbios-base")
-EXTRACTABLE = {"me", "microcode", "vbios"}          # 目前映像拆得出來、可以核對的
+EXTRACTABLE = {"me", "microcode", "vbios", "ibv-core"}          # 目前映像拆得出來、可以核對的（ibv-core 只有 AMI 核心版本：ami_core.py 讀到時）
+IBV_CORE_RE = re.compile(r"(?:Aptio\s*V?[ _]*)?([0-9])\.([0-9]{2,3})")        # 版本清單 ibv-core 的寫法：`Aptio V 5.27`、`AptioV_5.027`、`5.27`
 MANIFEST_COLS = ("product", "firmware", "firmware_version", "component", "identifier", "version", "date", "vendor", "note")
 UNKNOWN = {"不知道", "unknown", "?"}
 ZIP_ERRORS = (ValueError, OSError, EOFError, RuntimeError, NotImplementedError, struct.error, zlib.error, lzma.LZMAError,
@@ -1454,6 +1459,8 @@ def extracted_items(inv):
         items.append({"component": "vbios", "identifier": norm("vbios", "identifier", v["device"]), "platform_id": None,
                       "version": norm("vbios", "version", v["version"]), "sources": v["locations"]})
     for b in inv["bios"]:
+        if (b.get("ami_core") or {}).get("status") == "read":
+            items.append({"component": "ibv-core", "identifier": "", "platform_id": None, "version": b["ami_core"]["core"], "sources": b["locations"]})
         if b["me"]:
             items.append({"component": "me", "identifier": "", "platform_id": None, "version": b["me"]["version"], "sources": b["locations"]})
         for u in b["microcode"]:
@@ -1474,10 +1481,19 @@ def ident_matches(comp, ident, item):
     return item["identifier"] == ident
 
 
+def parse_ibv_core(v):
+    """ibv-core 的版本字串 → (主, 次) 整數；格式讀不懂 → None。AMI 核心版本的次版號在公告是三位數（5.044）、映像是兩位數（5.17），所以比整數。"""
+    m = IBV_CORE_RE.fullmatch(str(v or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def version_matches(comp, declared, extracted):
-    """ME 可以只填到 hotfix（16.1.30 對 16.1.30.2307）；其他要完全相同（已正規化）。"""
+    """ME 可以只填到 hotfix（16.1.30 對 16.1.30.2307）；ibv-core 比（主, 次）整數；其他要完全相同（已正規化）。"""
     if not extracted:
         return False
+    if comp == "ibv-core":
+        d, x = parse_ibv_core(declared), parse_ibv_core(extracted)
+        return d is not None and d == x
     return declared == extracted or (comp == "me" and extracted.startswith(declared + "."))
 
 
@@ -1498,7 +1514,7 @@ def compare(inv, rows):
             accounted.update(cands)
             out.append({**base, "result": "unknown", "extracted": extracted, "found": found, "verifiable": comp in EXTRACTABLE})
             continue
-        if comp not in EXTRACTABLE:
+        if comp not in EXTRACTABLE or (comp == "ibv-core" and parse_ibv_core(ver) is None):    # 清單的核心版本寫法讀不懂：不比、映像拆得出來也不算可核對
             out.append({**base, "result": "declared-only", "extracted": None, "found": [], "verifiable": False})
             continue
         declared_keys.append((comp, ident))
@@ -1562,6 +1578,8 @@ ASSESS_NOTES = {
            "(the VBT is a display configuration data table, not executable code)",
     "amd": "AMD security bulletins cannot be matched by machine; manual cross-check against AMD product security bulletins is required "
            "(the version is the one read from the image: PSP firmware header, microcode patch level or AGESA string)",
+    "ami": "AMI security advisories (AMI-SA) cannot be matched by machine; manual cross-check against AMI and board vendor advisories is required "
+           "(the version is the core read from the image's Firmware ID record)",
     "image": "no vulnerability matching at this level; this tool only reports the parsed structure, versions and hashes",
 }
 # Intel CSME 的 CPE。查證（NVD 公開 API，2026-11-13）：
@@ -1962,7 +1980,8 @@ def components(inv):
                                     ", ".join(f"{k}={v}" for k, v in sorted(b["uefi"]["compressed"].items())))]
                               if b["uefi"]["compressed"] else []),
                             *[prop("sca-center:gap", x) for x in b["gaps"]],
-                            *([prop("sca-center:uefi-gfx-search", uefi_gfx_summary(b["uefi_gfx"]))] if b.get("uefi_gfx") else [])]}
+                            *([prop("sca-center:uefi-gfx-search", uefi_gfx_summary(b["uefi_gfx"]))] if b.get("uefi_gfx") else []),
+                            *([prop("sca-center:ami-core-search", load_sibling("ami_core").search_text(b["ami_core"]))] if b.get("ami_core") else [])]}
         if b.get("declared_version"):
             c["version"] = b["declared_version"]
             c["properties"].append(prop("sca-center:version-basis", "version list (declared by the BIOS team)"))
@@ -2015,6 +2034,7 @@ def components(inv):
         cbfs_components(b, img, comps, sub)
         amd_components(b, img, comps, sub)
         uefi_gfx_components(b, img, comps, sub)
+        ami_core_components(b, img, comps, sub)
         deps[img] = sub
     intel_gfx_components(inv, comps, deps)
     return comps, deps
@@ -2122,6 +2142,8 @@ def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
                    "was found in the image; compressed containers such as CBFS payloads are not unpacked for this search)")
             b["uefi_gfx"] = {"performed": False, "complete": False, "reason": why, "gaps": [why], "gop": [], "vbt": [], "stats": {}}
             b["gaps"].append(why)
+            b["ami_core"] = load_sibling("ami_core").not_searched("no uncompressed UEFI firmware volume with FFS files was found in the image")
+            ami_gaps(b)
         return
     notes = []
 
@@ -2138,12 +2160,14 @@ def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
             return
         intel_gfx_collect(roms, body, lab, intel_vb)
 
-    g = load_sibling("uefi_gfx").scan(data, find_roms, budget, (OverBudget,))
+    g = load_sibling("uefi_gfx").scan(data, find_roms, budget, (OverBudget,), cbfs=bool(b.get("cbfs")))
     if b.get("cbfs"):      # coreboot：CBFS 的檔案（例如壓縮的 edk2 payload）不在這次走訪裡，沒找到不能說不存在
         g["gaps"].append("coreboot CBFS found: files inside the CBFS (for example a compressed UEFI payload) were not unpacked for this search; "
                          "the Intel GOP / VBT / legacy VBIOS search is incomplete (not found does not mean absent)")
         g["complete"] = False
     b["uefi_gfx"] = g
+    b["ami_core"] = g.pop("ami_core")
+    ami_gaps(b)
     b["gaps"] += g["gaps"]
     if g["stopped"] and g["stopped"].startswith("stopped early"):
         partial.append((label, f"UEFI 顯示韌體走訪：{g['stopped']}"))
@@ -2151,6 +2175,16 @@ def uefi_gfx_search(b, label, data, budget, intel_vb, partial):
         g["rom_notes"] = notes[:MAX_GFX_NOTES]
         b["gaps"].append(f"{len(g['rom_notes'])} option ROM notes inside UEFI content (see fw-inventory.json uefi_gfx.rom_notes); "
                          "an Intel legacy VBIOS next to them may be missing or uncertain")
+
+
+def ami_gaps(b):
+    """AMI 核心版本讀不到的原因加進 sca-center:gap：結構不合與互相矛盾一定寫；沒找到、沒搜尋只在映像有 AMI 的線索（IBV 線索或 PFAT 封裝）時寫
+    （Dasharo、OVMF 這類不是 AMI 的映像沒有核心版本是正常的，不加缺口；搜尋結果仍在 sca-center:ami-core-search）。"""
+    a = b.get("ami_core")
+    if not a or a["status"] == "read":
+        return
+    if a["status"] in ("conflict", "layout-unknown") or "AMI" in (b.get("ibv_hint") or []) or b.get("pfat"):
+        b["gaps"] += a["gaps"]
 
 
 def uefi_gfx_summary(g):
@@ -2202,11 +2236,87 @@ def uefi_gfx_components(b, img, comps, sub):
         sub.append(ref)
 
 
+AMI_NAME = "AMI Aptio V core"
+AMI_NAME_NO_PRODUCT = "AMI firmware core"
+AMI_ADVISORY_BASIS = ("AMI security advisories (AMI-SA) are not matched by this property; the suggestion of the advisory rule table, if any, is in dumpling:advisory-rule-*; "
+                      "no data in the database; the vendor advisory (AMI-SA) and the board vendor's advisory are authoritative")
+
+
+def ami_core_components(b, img, comps, sub):
+    """b["ami_core"]（status read）→ 一個元件，掛在 BIOS 映像底下。版本是映像讀到的原值（主、次兩個整數）；公告寫法是推導（A1）。
+    讀不到、結構不合、互相矛盾 → 沒有元件（原因在 BIOS 映像元件的 sca-center:ami-core-search 與 sca-center:gap）。"""
+    a = b.get("ami_core")
+    if not a or a["status"] != "read":
+        return
+    ami = load_sibling("ami_core")
+    key = hashlib.sha256((a["core"] + "|" + str(a["product"])).encode()).hexdigest()[:12]
+    ref = f"{img}:ami-core:{key}:0"
+    c = {"type": "firmware", "bom-ref": ref, "name": AMI_NAME if a["product"] else AMI_NAME_NO_PRODUCT, "version": a["core"],
+         "manufacturer": {"name": ami.AMI_VENDOR},
+         "properties": [prop("sca-center:version-basis", ami.BASIS), prop("sca-center:ami-core-fid", a["core_fid"]),
+                        *([prop("sca-center:ami-core-product", a["product"]), prop("sca-center:ami-core-product-basis", ami.PRODUCT_BASIS)] if a["product"] else
+                          [prop("sca-center:note", f"core major version {a['major']} does not name a known AMI product line; no product is assumed")]),
+                        *([prop("sca-center:ami-core-advisory-form", a["advisory_form"]), prop("sca-center:ami-core-advisory-form-basis", ami.ADVISORY_FORM_BASIS)]
+                          if a["advisory_form"] else []),
+                        *[prop("sca-center:ami-fid-bios-tag", t) for t in a["tags"]],
+                        *[prop("sca-center:ami-fid-project-version", v) for v in a["projects"]],
+                        *[prop("sca-center:build-date", d) for d in a["build_dates"]],
+                        prop("sca-center:count", a["count"]),
+                        *[prop("sca-center:found-in", w) for w in a["found"]],
+                        *[prop("sca-center:evidence-sha256", x) for x in a["evidence_sha256"]],
+                        *([prop("sca-center:note", a["note"])] if a.get("note") else []),
+                        *([prop("sca-center:incomplete", "the UEFI walk was incomplete (" + "; ".join(a["incomplete"][:3])
+                                + "); other Firmware ID records, possibly with a different core, may exist in the parts that were not decoded")]
+                          if not a["complete"] else []),
+                        prop("dumpling:advisory-match", NOT_ASSESSED), prop("dumpling:advisory-basis", AMI_ADVISORY_BASIS)]}
+    c["properties"] += rule_props(a.get("rule_advisory"))
+    comps.append(assessed(c, "ami"))
+    sub.append(ref)
+
+
+def ami_core_status(b):
+    a = b.get("ami_core")
+    if not a or a["status"] == "read":
+        return []
+    if a["status"] == "conflict":
+        return [f"{b['file']}：AMI Firmware ID 紀錄的核心版本互相矛盾（{'、'.join(c['core'] for c in a['candidates'][:4])}），不選一個、沒有核心版本（待人確認）"]
+    if a["status"] == "layout-unknown":
+        return [f"{b['file']}：有 AMI Firmware ID（$FID）紀錄但結構不是已知的（GAP，沒有核心版本；原始位元組在 fw-inventory.json）"]
+    return []              # 沒找到、沒搜尋：GAP 寫在 sca-center:gap（有 AMI 線索時），不改變整份狀態
+
+
 def uefi_gfx_status(b):
     g = b.get("uefi_gfx")
     if g and not g["complete"]:
         return [f"{b['file']}：UEFI 內的 Intel GOP／VBT／legacy VBIOS 搜尋不完整（GAP，沒找到不代表不存在；原因見 SBOM 的 sca-center:gap）"]
     return []
+
+
+def ami_core_markdown(b):
+    """### AMI 核心版本（Firmware ID 紀錄）：狀態、值、位置、依據與限制。"""
+    a = b.get("ami_core")
+    if not a:
+        return []
+    e = md_esc
+    ami = load_sibling("ami_core")
+    L = ["", "### AMI 核心版本（Firmware ID 紀錄 `$FID`）", "",
+         f"- 搜尋結果：**{e(a['status'])}**（{e(ami.search_text(a))}）",
+         "- 依據：映像的 Firmware ID 紀錄，欄位位置只從公開映像反推、AMI 沒有公開文件；**值是映像自述的欄位，沒有簽章驗證**（映像被改過就讀不出來）；結構說明見 docs/notes/c2-ami-core.md。"]
+    if a["status"] == "read":
+        L += ["", "| 核心版本 | 產品 | 公告寫法（推導） | BIOS tag | 專案版本 | 建置時間 | 紀錄數 | 位置 |", "|---|---|---|---|---|---|---|---|",
+              f"| {e(a['core'])}（FID `{e(a['core_fid'])}`） | {e(a['product'] or '不確定（Core Major 不是 5）')} | {e(a['advisory_form'] or '無')} | {e('、'.join(a['tags']))} | "
+              f"{e('、'.join(a['projects']))} | {e('、'.join(a['build_dates']) or '無')} | {a['count']} | {e('、'.join(a['found']))} |", "",
+              "- 公告寫法是推導的（A1：FID 兩位數的次版號補成公告的三位數），AMI 與板廠都沒有明文；同一個 major 內次版號隨發行遞增（A2）也是假設。"
+              "核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；這一節不是漏洞判定。"]
+        if a.get("note"):
+            L.append(f"- 說明：{e(a['note'])}")
+    elif a["status"] == "conflict":
+        L += ["", "| 核心版本 | BIOS tag | 專案版本 | 位置 |", "|---|---|---|---|"]
+        L += [f"| {e(c['core'])} | {e(c['tag'])} | {e(c['project'])} | {e('、'.join(c['found']))} |" for c in a["candidates"]]
+    elif a["status"] == "layout-unknown":
+        L += ["", "| 原因 | 形式 | 開頭位元組（十六進位） | 位置 |", "|---|---|---|---|"]
+        L += [f"| {e(x['why'])} | {e(x['form'])} | `{x['head']}` | {e('、'.join(x['found']))} |" for x in a["bad"]]
+    return L + [f"- GAP：{e(x)}" for x in a["gaps"]] + ([f"- 不完整：{e(x)}" for x in a["incomplete"]] if a["status"] != "not-searched" else [])
 
 
 def uefi_gfx_markdown(b):
@@ -2424,8 +2534,13 @@ def _rules_targets(inv):
     """規則表比對的每個元件：(持有結果的 dict, 元件種類, 比對輸入, 映像檔名, 元件說明)。x86_firmware 的 SBOM 與報告共用同一份結果（結果記在 holder["rule_advisory"]）。"""
     for b in inv["bios"]:
         img = fname(b["file"])
+        ami = b.get("ami_core")
+        has_ami = bool(ami) and ami["status"] == "read"          # 有核心版本元件時由那個元件比 ami_core 規則，bios_image 不再比
         yield (b, "bios_image", {"file": b["file"], "declared_version": b.get("declared_version"),
-                                 "ami": "AMI" in (b.get("ibv_hint") or []) or bool(b.get("pfat"))}, img, "BIOS image")
+                                 "ami": "AMI" in (b.get("ibv_hint") or []) or bool(b.get("pfat")) or bool(ami and ami["status"] in ("read", "conflict", "layout-unknown")),
+                                 "ami_core": ami, "ami_core_component": has_ami}, img, "BIOS image")
+        if has_ami:
+            yield (ami, "ami_core", {"ami": True, "ami_core": ami}, img, f"AMI core {ami['core']}")
         me = b.get("me")
         if me:
             _cpe, basis, _gap = csme_cpe_info(me)
@@ -2511,6 +2626,7 @@ def status_of(inv):
                 att.append(f"{b['file']}：AMD 平台（" + load_sibling("amd_psp").summary_text(a) + f"）；{len(a['gaps'])} 項 GAP"
                            + ("；" + "、".join(a["attention"]) if a["attention"] else "") + "（見 fw-inventory.json 的 amd）")
         att += uefi_gfx_status(b)
+        att += ami_core_status(b)
         n = sum(b.get("uefi", {}).get("compressed", {}).values())
         g = sum(b.get("uefi", {}).get("guided_other", {}).values())
         if n:                              # 工具知道自己略過了內容：不能顯示完整，至少 ATTENTION
@@ -2781,7 +2897,10 @@ RULE_STATE_TEXT = {"preliminary": "依初審規則的建議（待負責單位確
 VERIFY_TEXT = {"direct": "直接下載原文解析",
                "independent:nvd": "官方頁面加 NVD 的版本範圍另行核對（只涵蓋 NVD 有 Intel CPE 設定的 CVE）",
                "summary-tool": "版本值未獨立核對（只經網頁摘要工具讀到），請負責單位對照原頁面"}
-RULE_DETAIL_KINDS = ("amd_agesa", "intel_csme", "intel_fsp", "bios_image")        # 這幾種逐項列出；其他種類（PSP、AMD 微碼）沒有適用規則時只列計數
+AMI_AFFECTED_TEXT = ("AMI 核心版本的 affected 建議（D-058）：核心版本低於公告列的修正版本。**核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；"
+                     "核心版本寫法的對應（A1）尚未經 AMI 或板廠確認；這是請負責單位對照板廠公告的線索，不是漏洞判定。**核心版本不低於修正版本時一律是 NOT_ASSESSED"
+                     "（ami-core-mapping-unverified），這一版不輸出 not-affected。")
+RULE_DETAIL_KINDS = ("amd_agesa", "intel_csme", "intel_fsp", "ami_core", "bios_image")        # 這幾種逐項列出；其他種類（PSP、AMD 微碼）沒有適用規則時只列計數
 
 
 def unverified_text(x):
@@ -2822,6 +2941,8 @@ def rules_markdown(inv):
         L += ["`affected` 的建議（即使規則還是初審）讓整份韌體報告狀態是 ATTENTION，請負責單位對照廠商公告確認。", "",
               "| 映像 | 元件 | 規則 | 說明 |", "|---|---|---|---|"]
         L += [f"| {e(x['image'])} | {e(x['component'])} | {e('、'.join(x['rule_ids']))} | {RULE_STATE_TEXT[x['state']]}；是否受影響以廠商公告為準{unverified_text(x)} |" for x in aff]
+        if any(x["kind"] == "ami_core" for x in aff):
+            L += ["", "- " + AMI_AFFECTED_TEXT]
     else:
         L.append("沒有。")
     L += ["", "### 建議 not-affected（依據類型 vendor-statement）", ""]
@@ -2834,7 +2955,7 @@ def rules_markdown(inv):
     rel = [x for x in items if x["related"]]
     L += ["", "### 可能相關的 AMI 公告（沒有建議）", ""]
     if rel:
-        L += ["SBOM 沒有 AMI 核心版本，AMI-SA 的條件一律是 NOT_ASSESSED（原因：SBOM 沒有 AMI 核心版本）；下列公告只是請負責單位對照，不是建議。", "",
+        L += ["這些映像沒有可用的 AMI 核心版本（Firmware ID 紀錄讀不到、結構不合或互相矛盾），AMI-SA 的條件一律是 NOT_ASSESSED；下列公告只是請負責單位對照，不是建議。", "",
               "| 映像 | 可能相關的 AMI 公告 |", "|---|---|"]
         L += [f"| {e(x['image'])} | {e('、'.join(x['related']))} |" for x in rel]
     else:
@@ -2927,6 +3048,7 @@ def markdown(inv):
         if b.get("cbfs"):
             L += cbfs_markdown(b["cbfs"])
         L += uefi_gfx_markdown(b)
+        L += ami_core_markdown(b)
         if b["gaps"] or b["incomplete"]:
             L += ["", "### 缺口與不完整", ""] + [f"- GAP：{e(x)}" for x in b["gaps"]] + [f"- 不完整：{e(x)}" for x in b["incomplete"]]
         L.append("")

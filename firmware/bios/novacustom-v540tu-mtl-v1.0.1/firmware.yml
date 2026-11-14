@@ -36,3 +36,5 @@ expected:
     - {cpuid: "000A06A4", platform_mask: "0xE6", revision: "0x25"}
   # 映像另外讀出 FSP、coreboot 資訊，release notes 沒有可比對的值（FSP 寫的是 "2024/04/30 v4122_12" 這種編號，與映像裡 FSPH 的 ImageRevision 不同格式），
   # 沒有獨立佐證，所以不寫。
+  # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
+  ami_core: {status: not-found}

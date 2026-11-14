@@ -177,10 +177,10 @@ def test_manifest_comparison(tmp_path):
                    ("microcode", "000906EA"): "declared-only", ("fsp", None): "unknown", ("vbios", "2489"): "match",
                    ("vbios", "2488"): "extracted-only"}
     verif = {(c["component"], c["identifier"]): c["verifiable"] for c in inv["comparison"]}
-    assert not verif[("ibv-core", None)] and verif[("microcode", "000906EA")]
+    assert verif[("ibv-core", None)] and verif[("microcode", "000906EA")]       # ibv-core：清單寫法讀得懂（Aptio V 5.27）、映像沒有 Firmware ID 紀錄
     assert inv["bios"][0]["declared_version"] == "1.05"
     st, detail = xf.status_of(inv)
-    assert st == "ATTENTION" and "待確認 3 項" in detail and "不知道」1 項" in detail
+    assert st == "ATTENTION" and "待確認 4 項" in detail and "不知道」1 項" in detail
 
 
 def test_template_parses_and_bad_manifest(tmp_path):

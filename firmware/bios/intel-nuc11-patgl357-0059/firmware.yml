@@ -36,3 +36,11 @@ expected:
   # 與 release notes 的 "Integrated Graphics GOP UEFI Driver: 17.0.1070" 的最後一段一致才寫進來。
   intel_gop: "1070"
   # legacy VBIOS：映像讀到 "1003 PC 14.34"，但 release notes 查無獨立佐證（pdftotext 全文無 VBIOS／1003／14.34），不寫 intel_legacy_vbios。
+  # AMI 核心版本（PFAT 組回映像裡的 Firmware ID 紀錄 $FID；結構從公開映像反推，值是映像自述、沒有簽章；說明 docs/notes/c2-ami-core.md）：
+  # BIOS tag PATGL357 與專案版本 0.59 和 release notes 的 BIOS 版本 PATGL357.0059 一致（建置時間 2026-08-19 10:45 也與 release notes 的 PATGL357.0059.2026.0819.1045 一致），
+  # 所以欄位順序有佐證；核心版本 5.19 本身沒有廠商公布的獨立佐證，這裡只鎖定工具讀到的值。
+  # 規則表建議：核心低於 AMI-SA-2026001／2026002 的 AptioV_5.044 → affected 建議；核心是基底版本，板廠回補的修正看不出來，
+  # 核心寫法的對應（A1）尚未經 AMI 或板廠確認，這是請負責單位對照板廠公告的線索，不是漏洞判定。
+  ami_core: {status: read, version: "5.19", product: "Aptio V", bios_tag: ["PATGL357"], project_version: "0.59"}
+  advisory_rule:
+    - {component: "AMI Aptio V core", version: "5.19", suggestion: affected, rule_ids: ["AMI-SA-2026001", "AMI-SA-2026002"]}

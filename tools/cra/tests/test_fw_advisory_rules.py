@@ -790,7 +790,7 @@ def test_ami_related_advisories_listed_without_a_suggestion(tmp_path):
     assert props(img, "dumpling:advisory-rule-related") == ["AMI-SA-2026001"] and props(img, "dumpling:advisory-rule-suggestion") == ["NOT_ASSESSED"]
     md = xf.markdown(inv)
     section = md.split("### 可能相關的 AMI 公告（沒有建議）")[1].split("###")[0]
-    assert "AMI-SA-2026001" in section and "SBOM 沒有 AMI 核心版本" in section
+    assert "AMI-SA-2026001" in section and "沒有可用的 AMI 核心版本" in section
 
 
 def test_report_text(tmp_path):

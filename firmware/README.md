@@ -43,6 +43,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `amd_agesa` | 字串（PI 版本號，例如 `1.2.0.B`） | SBOM 的 `AMD AGESA` 元件 version 的最後一個以空白分隔的符記相同（不分大小寫），或整串相同；映像有好幾個不同的 AGESA 字串時任一個相符就 OK；沒有元件或沒讀到版本＝MISSING。前面的名稱（`ComboAM4v2PI`、`ComboV2PI`…）各廠商寫法不同，不比 |
 | `amd_microcode` | `[{equiv_id, patch_id}]`（十六進位） | SBOM 有 `AMD CPU microcode` 元件，其 `sca-center:amd-equivalence-id` 與 `version`（patch level）相符；同 equivalence id 但 patch level 不同＝MISMATCH，沒有該 equivalence id＝MISSING；映像多出來的微碼不比 |
 | `advisory_rule` | `[{component, version, suggestion, rule_ids}]` | SBOM 有名稱是 `component`、version 相符的元件，其 `dumpling:advisory-rule-suggestion`（`affected`／`not-affected`／`NOT_ASSESSED`）與 `dumpling:advisory-rule-ids`（不分順序）相符；鎖的是規則表目前的內容，不是漏洞判定 |
+| `ami_core` | 映射：`status`、`version`、`product`、`bios_tag`（清單）、`project_version`（至少一項） | AMI 核心版本（Firmware ID 紀錄，值是映像自述、沒有簽章；`docs/notes/c2-ami-core.md`）：`status` 與 `fw-inventory.json` 每個 BIOS 映像的 `ami_core.status` 相同（`read`／`not-found`／`conflict`／`layout-unknown`／`not-searched`；非 AMI 映像寫 `not-found`）；`version`、`product`、`bios_tag`、`project_version` 比 SBOM 的 `AMI Aptio V core`（或 `AMI firmware core`）元件，沒有元件＝MISSING；鎖的是工具讀到的值，不是漏洞判定 |
 
 每項印一行 `FIRMWARE-EXPECT<TAB>OK|MISMATCH|MISSING|NOT_RUN<TAB><樣本><TAB>…`，最後一行只是計數（不是整體通過）；有 MISMATCH 或 MISSING 就以非 0 結束。
 

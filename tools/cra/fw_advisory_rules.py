@@ -6,7 +6,7 @@
 這不是漏洞判定：
 - 結果只是**建議**（affected／not-affected／NOT_ASSESSED），由負責單位確認；SBOM 的 dumpling:vuln-assessment 維持 NOT_ASSESSED，這個模組不碰它。
 - 規則是人從官方公告頁讀出來整理的；表有「最後整理日期」，之後的新公告沒有收錄。
-- not-affected 只表示「版本不低於公告列的修正版本」（依據類型 vendor-statement，D-035），不代表沒有其他漏洞。
+- not-affected 只表示「版本不低於公告列的修正版本」（依據類型 vendor-statement，D-035），不代表沒有其他漏洞（AMI 核心版本例外：D-058 第一版不輸出 not-affected）。
 - 比不到（沒有規則、版本讀不到、順序不確定、版本線不同…）一律 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。
 
 元件種類（固定清單 COMPONENTS，每一種有自己的條件欄位與版本比較函式）：
@@ -19,8 +19,12 @@
   intel_csme     line（版本線 major.minor，例如 16.1）、fixed_in（三或四段數字，開頭必須是 line）、可選 affected_from；
                  image 的 major.minor 不是 line → 這條規則不適用（out-of-scope）；family 讀不出來是 CSME 才比（TXE、SPS、ME 不比；矛盾 → NOT_ASSESSED）
   intel_fsp      line（FSP ImageRevision 的前兩段）、fixed_in（四段數字）、可選 affected_from
-  ami_core       product、可選 fixed_in（AMI 核心版本字串，只記錄，不比較）；SBOM 沒有 AMI 核心版本 → 一律 NOT_ASSESSED（no-ami-core-version），
-                 只把「可能相關的 AMI 公告」列給負責單位對照，不給建議
+  ami_core       product、可選 fixed_in（`AptioV_<主>.<三位數次版號>`，例如 AptioV_5.044）；比對輸入是 ami_core.py 從映像的 Firmware ID 紀錄讀到的核心版本（D-058）：
+                 核心版本讀不到、結構不合、互相矛盾 → NOT_ASSESSED（no-ami-core-version／ami-fid-layout-unknown／ami-core-conflict）；Core Major 不是 5（沒有產品）→
+                 NOT_ASSESSED（ami-product-unknown）；product 不同 → out-of-scope；跨 major 不比 → NOT_ASSESSED（ami-core-line-differs）；
+                 核心**低於** fixed_in → affected 建議（preliminary；核心是 AMI 的基底版本，板廠回補的修正看不出來，對應的寫法 A1 尚未確認，這是線索不是判定）；
+                 核心**不低於** fixed_in → 一律 NOT_ASSESSED（ami-core-mapping-unverified）：第一版不輸出 not-affected，等 A1 有公開依據再另立決策開放。
+                 沒有核心版本資料（只有映像的 AMI 線索）時，只把「可能相關的 AMI 公告」列給負責單位對照，不給建議
   bios_image     name_prefix（映像檔名開頭）、fixed_in（數字或點分數字）；用版本清單宣告的 BIOS 版本比；沒有宣告 → NOT_ASSESSED
 
 單一規則對單一元件的結果（evaluate_condition）：affected｜not-affected｜NOT_ASSESSED｜out-of-scope（條件的 family／line／type／equiv_id／cpuid／檔名與這個元件不同，
@@ -63,6 +67,13 @@ VERIFICATIONS = ("direct", "summary-tool", "independent:nvd")
 VERIFICATION_RANK = {"summary-tool": 0, "independent:nvd": 1, "direct": 2}       # 一條規則有幾個出處時取最弱的
 EVIDENCE_TYPE = "vendor-statement"                  # D-035：排除（not-affected）的依據類型
 AMI_NO_CORE = "the SBOM has no AMI core version"
+AMI_REASONS = {"conflict": ("ami-core-conflict", "the Firmware ID records of the image disagree on the AMI core version; no value is chosen"),
+               "layout-unknown": ("ami-fid-layout-unknown", "the image has a Firmware ID ($FID) record whose layout is not the known one; no AMI core version is read")}
+AMI_FIXED_RE = re.compile(r"AptioV_([0-9])\.([0-9]{3})")
+AMI_CAVEAT = ("the core is AMI's base version, and a fix back-ported by the board vendor cannot be seen in the image; "
+              "the mapping of the core's notation to the advisory's (A1) is not yet confirmed by AMI or the board vendor "
+              "(A1: the two-digit FID minor equals the last two digits of the three-digit advisory minor), and the order inside one major (A2) is assumed; "
+              "this is a lead for the responsible unit to compare with the board vendor's advisory, not a vulnerability determination")
 
 # ── id、廠商、網址（對照官方頁面）────────────────────────────────────────────────────────────────────────────────
 # AMD：https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html（編號 4 位數；允許 4～5 位，因為 AMD 的編號沒有公開的位數規定）
@@ -329,7 +340,7 @@ def _validate_condition(c, rule, orderings, where):
         _keys(c, ("component", "product"), ("fixed_in", "note"), where)
         _str(c["product"], TEXT_RE, where + ".product")
         if "fixed_in" in c:
-            _str(c["fixed_in"], TEXT_RE, where + ".fixed_in")
+            _str(c["fixed_in"], AMI_FIXED_RE, where + ".fixed_in")
     else:                                                              # bios_image
         _keys(c, ("component", "name_prefix", "fixed_in"), ("note",), where)
         _str(c["name_prefix"], NAME_PREFIX_RE, where + ".name_prefix")
@@ -622,8 +633,39 @@ def cond_bios(c, comp):
     return _r("not-affected", None, f"declared BIOS version {comp['declared_version']} is not below fixed_in {c['fixed_in']}")
 
 
+def _ami_norm(s):
+    return re.sub(r"\s+", "", str(s)).lower()
+
+
 def cond_ami(c, comp):
-    return _r("NOT_ASSESSED", "no-ami-core-version", AMI_NO_CORE)
+    """AMI 核心版本（D-058）。comp["ami_core"]＝ami_core.summarize 的結果（至少 status、product、major、minor）；沒有 → 沒有核心版本資料。
+    低於修正版本才給 affected 建議；不低於一律 NOT_ASSESSED（A1 未確認，不輸出 not-affected）。"""
+    a = comp.get("ami_core")
+    if not isinstance(a, dict) or a.get("status") in (None, "not-found", "not-searched"):
+        return _r("NOT_ASSESSED", "no-ami-core-version", AMI_NO_CORE)
+    if a["status"] in AMI_REASONS:
+        return _r("NOT_ASSESSED", *AMI_REASONS[a["status"]])
+    if a["status"] != "read" or not (_is_int(a.get("major")) and _is_int(a.get("minor"))):
+        return _r("NOT_ASSESSED", "no-ami-core-version", AMI_NO_CORE)
+    core = f"{a['major']}.{a['minor']}"
+    if not a.get("product"):
+        return _r("NOT_ASSESSED", "ami-product-unknown", f"the image's AMI core version is {core} but its major version does not name a known AMI product line; no product is assumed")
+    if _ami_norm(a["product"]) != _ami_norm(c["product"]):
+        return _r(OUT, "product-mismatch", f"rule covers product {c['product']}, this is {a['product']}")
+    if "fixed_in" not in c:
+        return _r("NOT_ASSESSED", "rule-has-no-fixed-in", f"the rule gives no fixed version; the image's AMI core version is {core}")
+    m = AMI_FIXED_RE.fullmatch(c["fixed_in"])
+    fixed = (int(m.group(1)), int(m.group(2)))
+    have = (a["major"], a["minor"])
+    if have[0] != fixed[0]:
+        return _r("NOT_ASSESSED", "ami-core-line-differs",
+                  f"the image's AMI core major version is {have[0]} but fixed_in {c['fixed_in']} is in major {fixed[0]}; versions of different majors are not compared")
+    if have < fixed:
+        return _r("affected", None, f"AMI core {core} (Firmware ID record; self-declared by the image, unsigned) is below fixed_in {c['fixed_in']} "
+                                    f"(compared as integers: {have[0]}.{have[1]:03d} < {fixed[0]}.{fixed[1]:03d}); " + AMI_CAVEAT)
+    return _r("NOT_ASSESSED", "ami-core-mapping-unverified",
+              f"AMI core {core} is not below fixed_in {c['fixed_in']}, but the mapping of the core's notation to the advisory's (A1) is not yet confirmed by AMI "
+              "or the board vendor, so no not-affected suggestion is given")
 
 
 def evaluate_condition(table, c, comp):
@@ -666,7 +708,8 @@ def evaluate(table_or_err, kind, comp):
     if isinstance(table_or_err, TableError):
         return unavailable(table_or_err)
     table = table_or_err
-    kinds = (kind, "ami_core") if kind == "bios_image" else (kind,)
+    # bios_image 同時看 ami_core 規則（只在沒有 AMI 核心版本元件時；有 ami_core 元件時由那個元件比，同一條規則不出兩個建議）
+    kinds = (kind, "ami_core") if kind == "bios_image" and not comp.get("ami_core_component") else (kind,)
     results, related, other_scope = [], [], []
     for r in table.rules:
         for j, c in enumerate(r["match"]):
@@ -675,7 +718,8 @@ def evaluate(table_or_err, kind, comp):
             if c["component"] == "ami_core":
                 if not comp.get("ami"):
                     continue
-                related.append(r["id"])
+                if kind == "bios_image":
+                    related.append(r["id"])
             res = evaluate_condition(table, c, comp)
             res.update(rule=r["id"], condition=j, state=r["review"]["state"], sources=[s["url"] for s in r["sources"]])
             if res["result"] == OUT:

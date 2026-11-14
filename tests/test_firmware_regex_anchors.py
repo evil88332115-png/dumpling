@@ -11,7 +11,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = ["tools/cra/fw_advisory.py", "tools/cra/nvidia_vbios_advisory.py", "tools/cra/intel_ucode_releases.py", "tools/cra/x86_firmware.py",
-         "tools/cra/intel_cse_layout.py", "tools/cra/amd_psp.py", "tools/cra/ami_pfat.py", "tools/cra/uefi_gfx.py", "tools/cra/intel_vbios.py",
+         "tools/cra/intel_cse_layout.py", "tools/cra/amd_psp.py", "tools/cra/ami_pfat.py", "tools/cra/uefi_gfx.py", "tools/cra/ami_core.py", "tools/cra/intel_vbios.py",
          "pipeline/lib/firmware_dt.py", "pipeline/lib/firmware_fetch.py", "pipeline/lib/firmware_plan.py", "pipeline/lib/firmware_sbom_normalize.py",
          "pipeline/lib/firmware_sbom_check.py", "pipeline/lib/firmware_mdsafe.py", "pipeline/lib/firmware_advisory_cell.py"]
 ANCHORED = re.compile(r"^(\w+)\s*=\s*re\.compile\(\s*r?([\"'])\^.*\$\2", re.M)

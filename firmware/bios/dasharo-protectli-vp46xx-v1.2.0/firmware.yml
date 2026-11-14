@@ -47,3 +47,5 @@ expected:
   # 公告頁：INTEL-SA-00391 https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html
   advisory_rule:
     - {component: "Intel CSE firmware", version: "14.0.47.1558", suggestion: not-affected, rule_ids: ["INTEL-SA-00391"]}
+  # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
+  ami_core: {status: not-found}
