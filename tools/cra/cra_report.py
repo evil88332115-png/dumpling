@@ -53,6 +53,7 @@ stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK 
     核心判定階段（KERNEL_STAGES、C-kernel-not-judged-*）有這一列而且不是 OK → GAP（ATTENTION 維持；meta.json 有 kernel_in_other_report 時
     C-kernel-cve-list／config／module-map 的 NOT_RUN 是 D-044 的不適用，不降級）；刷機包的掃描另讀 <結果>/status.tsv 的 FLASH_ROOTFS_STAGES／
     FLASH_PRODUCT_STAGES（有這一列而且不是 OK／INFO → GAP，ATTENTION 維持；-os 的 bsp_na 時 BSP 專屬的不算）；
+    其中 B-bootloader-coverage（D-054）與 C-kernel-boot（kernel-boot.json）只進報告狀態（summary.json 的 status）與待確認事項表，不進漏洞資料狀態、不擋發行閘門；
     有未處理的 P1、Grype 有 DT 沒有的 CVE、C-grype 不是 OK 或沒有 Grype 結果 → ATTENTION。
   - Grype 有、DT 沒有的比對（交叉核對的同一個判斷）成為「只有 Grype」的列（grype_only_rows；Source IDs GRYPE:…，
     元件欄 found only by Grype），和其他列一樣分級、判斷、寫 VEX；DT 的列不變。
@@ -160,8 +161,12 @@ REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")      # sca-scan
 #   B-initrd-coverage-<rootfs>：initrd 裡有沒被套件涵蓋的 ELF／腳本（不在 SBOM，弱點沒比對）或讀不懂
 #   B-rootfs-tar-<rootfs>：rootfs 有讀不到、略過的項目（裡面的套件不會在 SBOM）
 #   B-uefi-binary（整個產品一列）：刷機包的 UEFI 映像和給的原始碼不一致或沒核對（UEFI 內建函式庫的列可能不是出貨的東西）
+#   B-bootloader-coverage-<rootfs>（D-054）：開機程式／閉源韌體沒有被掃到（GAP）、沒有定義開機鏈（NOT_ASSESSED：Rockchip、generic）、讀不懂（FAIL）。
+#     閉源韌體本來就無法用 SCA 掃描，所以這一列只進報告狀態（report_status＝summary.json 的 status）與待確認事項表，不進漏洞資料狀態（risk_st），
+#     所以也不擋 VEX 發行閘門（vex_export.gate 只收 risk_st）；報告寫明「閉源韌體以廠商公告為準」。見 FLASH_FIRMWARE_STAGES
 # 值＝這一列是不是 BSP 專屬（分層的 -os 報告不適用，同 bsp_na）。
-FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False}
+FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False, "B-bootloader-coverage": True}
+FLASH_FIRMWARE_STAGES = ("B-bootloader-coverage",)      # FLASH_ROOTFS_STAGES 裡只進報告狀態、不進漏洞資料狀態（不擋發行閘門）的列
 FLASH_PRODUCT_STAGES = {"B-uefi-binary": True}
 FLASH_STATUS_MISSING = "flash-package status.tsv"
 
@@ -191,6 +196,57 @@ def flash_stage_status(scan):
 
 def flash_stage_level(st):
     return None if st in ("OK", "INFO") else "ATTENTION" if st == "ATTENTION" else "GAP"
+
+
+def flash_stage_is_firmware(k):
+    """flash_stage_status 的鍵（<階段>-<rootfs>）是不是 FLASH_FIRMWARE_STAGES 的列：只進報告狀態，不進漏洞資料狀態。"""
+    return any(k.startswith(f"{b}-") for b in FLASH_FIRMWARE_STAGES)
+
+
+FIRMWARE_ADVISORY = "the vendor's security advisories are authoritative for closed-source firmware"
+
+
+def firmware_reason(k, st):
+    """B-bootloader-coverage-<rootfs> 非 OK／INFO 的列 → 報告裡的理由（英文；閉源韌體沒有被掃描，以廠商公告為準，D-054）。"""
+    if st == "ATTENTION":
+        return f"{k} is ATTENTION (flash package scan): the boot firmware coverage needs review; {FIRMWARE_ADVISORY}"
+    if st == "NOT_ASSESSED":
+        return f"{k} is NOT_ASSESSED (flash package scan): the boot chain was not assessed; {FIRMWARE_ADVISORY}"
+    if st == "GAP":
+        return f"{k} is GAP (flash package scan): closed-source boot firmware was not scanned; {FIRMWARE_ADVISORY}"
+    return (f"{k} is {st} (flash package scan): the boot firmware coverage was not determined, so closed-source boot firmware "
+            f"was not scanned; {FIRMWARE_ADVISORY}")
+
+
+KERNEL_BOOT_SCHEMA = "sca-center-kernel-boot/1"
+KERNEL_BOOT_STATUSES = ("OK", "ATTENTION", "GAP")
+
+
+def kernel_boot_findings(kboot, status, meta, present=False):
+    """C-kernel-boot（刷機包有兩顆不同的核心；scan/kernel-boot.json 與 scan/status.tsv 的 C-kernel-boot 列）→ [(層級, 理由)]（只有 GAP／ATTENTION）。
+    只進報告狀態與待確認事項表（不進漏洞資料狀態、不擋發行閘門）。沒有檔案（不是刷機包、或只有一顆核心）→ []。
+    present：scan/kernel-boot.json 這個檔存在。存在卻讀不懂（不是 JSON、schema 或 status 不對）→ GAP（D-043；C1 審查時改：原本不處理）。
+    sca-scan 在 kernel_boot.py 失敗時只寫 status.tsv 的 FAIL 列、
+    不留 json，所以 status.tsv 的列也看：不是 OK／INFO 的 → GAP（ATTENTION 維持）。
+    分層報告的 SBOM 沒有核心、核心在另一份報告判定（meta.json 的 kernel_in_other_report，D-044）時不算在這份。"""
+    other = (meta or {}).get("kernel_in_other_report")
+    if isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
+        return []
+    out = []
+    usable = isinstance(kboot, dict) and kboot.get("schema") == KERNEL_BOOT_SCHEMA and kboot.get("status") in KERNEL_BOOT_STATUSES
+    if present and not usable:
+        out.append(("GAP", "C-kernel-boot: scan/kernel-boot.json exists but could not be read (not JSON, or wrong schema or status); "
+                           "whether the flash package's two kernels match is unknown"))
+    if usable and kboot["status"] in ("ATTENTION", "GAP"):
+        d = str(kboot.get("detail"))[:300]
+        out.append((kboot["status"], f"C-kernel-boot is {kboot['status']}: " + (
+            f"the two kernels in the flash package could not be compared ({d})" if kboot["status"] == "GAP" else
+            f"{d}; which kernel actually boots has to be confirmed on a board")))
+    row = (status or {}).get("C-kernel-boot")
+    lv = flash_stage_level(row[0]) if row else None
+    if lv and not out:
+        out.append((lv, f"C-kernel-boot is {row[0]}: the comparison of the flash package's kernels did not complete ({str(row[1])[:300]})"))
+    return out
 
 
 def kernel_stage_keys(status):
@@ -4795,6 +4851,18 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         warnings = list(warnings) + [f"專案的風險評估範本（CRA/templates/risk-assessment.md）沒有引用 text.kernel_section：作業系統核心的 "
                                      f"{len(krows)} 列照舊列在主清單（另有 {KERNEL_DOC[1]}）；要分開列請在範本加上 {{{{ text.kernel_section }}}}"]
     reasons, risk_st = [], "OK"
+    # 只進報告狀態、不進 risk_st（risk_st 會交給 vex_export.gate：進去就擋 VEX 發行閘門）的項目：
+    # B-bootloader-coverage（D-054；-os 的 bsp_na 不算）與 C-kernel-boot（C0 決定）。報告狀態用 fw_st／fw_reasons，待確認事項表用 fw_items
+    fw_st, fw_reasons, fw_items = "OK", [], []
+    for k, (fst, _fd, bsp_only) in flash.items():
+        lv = None if (bsp_only and bsp_na) or not flash_stage_is_firmware(k) else flash_stage_level(fst)
+        if lv:
+            fw_st = worst([fw_st, lv])
+            fw_items.append({"key": k, "status": fst, "level": lv, "reason": firmware_reason(k, fst)})
+            fw_reasons.append(firmware_reason(k, fst))
+    for lv, why in kernel_boot_findings(kboot, status, meta, present=paths["scan/kernel-boot.json"] is not None):
+        fw_st = worst([fw_st, lv])
+        fw_reasons.append(why)
     if not isinstance(findings, list):
         risk_st = "NOT_ASSESSED"
         reasons.append("no readable Dependency-Track findings (dt/findings.json): the vulnerability list could not be produced")
@@ -4822,7 +4890,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 reasons.append(f"{k} is {status[k][0]}: the operating system kernel's CVEs were not fully assessed against the product kernel"
                                if lv == "GAP" else f"{k} is {status[k][0]}")
         for k, (fst, _fd, bsp_only) in flash.items():
-            lv = None if (bsp_only and bsp_na) else flash_stage_level(fst)
+            lv = None if (bsp_only and bsp_na) or flash_stage_is_firmware(k) else flash_stage_level(fst)
             if lv:
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
@@ -5116,7 +5184,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
              f"Vulnerability rows (vulnerability × component version): {ta['rows']} in total; {tk['rows']} for the operating system "
              f"kernel{f' (`{KERNEL_DOC[1]}`)' if krows else ''}, {tm['rows']} for other components.")
     ctx.update({
-        "risk.data_status": risk_st, "risk.data_status_detail": (reasons or ["no issue recorded"]) + notes,
+        "risk.data_status": risk_st,
+        "risk.data_status_detail": (reasons or ["no issue recorded"]) + notes
+        # D-054：只進文件狀態（summary.json 的 status、report_status），不改上面的漏洞資料狀態，也不擋發行閘門
+        + [f"Note (counted in this document's status, not in the vulnerability data status above, and not blocking the release gate): {x}"
+           for x in fw_reasons],
         "text.completeness": completeness, "text.cross_check": cross, "text.no_vuln_data_section": nvdmod().section(nvd, table),
         "tables.data_sources": table(["Stage", "Status", "Detail (as recorded by sca-scan)"],
                                      [[k, (status.get(k) or ("NOT_RUN",))[0], en((status.get(k) or ("", "not in status.tsv"))[1])] for k in RISK_STAGES + INFO_STAGES]
@@ -5399,7 +5471,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     docs, rendered = {}, {}
     # 風險評估的文件狀態＝漏洞資料狀態（第 8 節）與安全測試狀態（第 9 節）較差的那個；risk.data_status 仍只講第 8 節
     # 分級方式 exploitation：沒有對外服務清單（必須判斷的範圍不完整）→ GAP，依日期的出貨關卡擋住 → ATTENTION（current 時 est 是 OK）
-    data_st = {"risk-assessment": (worst([risk_st, sec_st, est]), reasons + sec_reasons + ereasons), "sbom": (bom_st, bom_reasons),
+    data_st = {"risk-assessment": (worst([risk_st, sec_st, est, fw_st]), reasons + sec_reasons + ereasons + fw_reasons), "sbom": (bom_st, bom_reasons),
                "user-information": ("OK", [])}
     # 缺的欄位不只看實際用的範本：內建範本引用的欄位（專案範本少引用時也算缺）、Annex I 的逐項表、技術文件檢查清單的 config 欄位
     extra_missing = {"risk-assessment": set(annex_missing),
@@ -5624,7 +5696,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()
-        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, status=status, expl=expl, svc_info=svc_info,
+        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, fw=fw_items, status=status, expl=expl, svc_info=svc_info,
                           missing_fields=summary["missing_fields"], cfg=cfg, role=role, have_findings=isinstance(findings, list),
                           risk_st=risk_st, risk_reasons=reasons, bom_st=bom_st, bom_reasons=bom_reasons, human=vx.HUMAN,
                           author_missing=vx.author_missing, schema=SCHEMA, db=pdb, no_vuln=nvd)
