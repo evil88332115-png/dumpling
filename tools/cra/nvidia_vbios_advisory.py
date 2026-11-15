@@ -158,8 +158,10 @@ TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}|\.\d{6})?(?
 
 def _parse_utc(s):
     """只收 YYYY-MM-DDTHH:MM:SS，秒後面可以有 3 或 6 位小數，時區寫 Z 或 ±HH:MM（和 C1 一致）；其他一律 None。
-    不直接丟給 fromisoformat：Python 3.10 與 3.12 能讀的格式不同（3.11 起才收 `+0000`、空白分隔、沒有秒、任意位數小數），結果不能隨直譯器版本變。"""
+    不直接丟給 fromisoformat：Python 3.10 與 3.12 能讀的格式不同（3.11 起才收 `+0000`、空白分隔、沒有秒、任意位數小數；3.14 收 24 時），結果不能隨直譯器版本變。"""
     if not isinstance(s, str) or not TIME_RE.fullmatch(s):
+        return None
+    if int(s[11:13]) > 23:                         # Python 3.14 的 fromisoformat 把 24:00:00 收成隔天 00:00；格式只收 00～23 時，不隨直譯器版本變
         return None
     try:
         return datetime.datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
