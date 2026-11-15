@@ -2,7 +2,7 @@ name: dev
 
 # 開發版：開發分支 push（dev/**）、每日排程、手動觸發 → 對每個專案的最新版本跑同一套 build／scan（pipeline.yml），不發正式 Release。
 # 結果只放 Actions artifact（短期保存）。另外，在 main 或 dev/** 分支上跑完時，把最新的開發版 SBOM 與 release-meta.json 發到
-# 每個專案一個「滾動的 pre-release」（tag dev/<專案>，每次覆蓋附件），給每日監控讀（D-029）。其他分支（例如功能分支上的手動測試）不發布。
+# 每個專案一個「滾動的 pre-release」（tag dev/<專案>，每次覆蓋附件），給每日監控讀（D-029）。其他分支（例如功能分支上的手動測試）只建草稿，不公開。
 # 專案與平台由 projects/<專案>/project.yml 決定；新增專案不用改這個 workflow。
 on:
   push:
@@ -103,18 +103,6 @@ jobs:
           VERSION: ${{ matrix.version }}
         run: |
           set -euo pipefail
-          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：每 30 秒重試、最多 8 次，仍失敗就印出回應標頭與本文當診斷
-          ghx() {
-            local n=0
-            until "$@"; do
-              n=$((n+1))
-              if [ "$n" -ge 8 ]; then
-                echo "---- 診斷：$*"; gh api -i "repos/$GITHUB_REPOSITORY/releases?per_page=1" 2>&1 | head -30
-                return 1
-              fi
-              sleep 30
-            done
-          }
           tag="dev/$PROJECT"
           cd "$RUNNER_TEMP/result"
           python3 -I "$GITHUB_WORKSPACE/pipeline/release-meta.py" --project "$PROJECT" --version "$VERSION" --tag "$tag" \
@@ -126,24 +114,6 @@ jobs:
           done
           [ -f "sbom-$PROJECT-$VERSION.cdx.json" ] || { echo "publish: FAIL（沒有 sbom-$PROJECT-$VERSION.cdx.json）"; exit 1; }
           notes="開發版的最新 SBOM。產品結論見 release-meta.json 的 report_status（報告）與 release_gate（VEX 發行閘門）；status 是生命週期（development／shipped），不是結論。每次 dev 流程跑完覆蓋，供每日監控讀取；不是正式出貨版本。commit $GITHUB_SHA，run $GITHUB_RUN_ID。"
-          if [ "$GITHUB_REF" = refs/heads/main ] || [[ "$GITHUB_REF" == refs/heads/dev/* ]]; then
-            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-              ghx gh release edit "$tag" --prerelease --notes "$notes" --repo "$GITHUB_REPOSITORY"
-              # 先上傳（同名的覆蓋），成功後才刪舊版本留下的附件（檔名不同）：上傳失敗時舊的附件還在，滾動版不會變空
-              ghx gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
-              for a in $(ghx gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
-                keep=0; for f in "${files[@]}"; do [ "$a" = "$f" ] && keep=1; done
-                [ $keep = 1 ] || ghx gh release delete-asset "$tag" "$a" --yes --repo "$GITHUB_REPOSITORY"
-              done
-            else
-              ghx gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" --title "$tag（滾動的開發版）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
-            fi
-            echo "publish: OK（滾動 pre-release $tag，${#files[@]} 個附件）"
-          else
-            ids=$(ghx gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name==\"$tag\") | .id")
-            for id in $ids; do
-              ghx gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" > /dev/null
-            done
-            ghx gh release create "$tag" "${files[@]}" --draft --target "$GITHUB_SHA" --title "$tag（草稿，非 main／dev 分支）" --notes "$notes" --repo "$GITHUB_REPOSITORY"
-            echo "publish: OK（draft $tag；$GITHUB_REF 不是 main 或 dev/**，不更新公開的滾動 pre-release）"
-          fi
+          # 規則（main／dev/** → 公開的 pre-release；同 tag 只有功能分支的草稿時先依 id 刪掉草稿再新建；其他分支 → 草稿）見腳本開頭
+          printf '%s' "$notes" > "$RUNNER_TEMP/dev-release-notes.txt"
+          GH_REPO="$GITHUB_REPOSITORY" bash "$GITHUB_WORKSPACE/pipeline/dev-release-publish.sh" "$tag" "$RUNNER_TEMP/dev-release-notes.txt" "${files[@]}"
