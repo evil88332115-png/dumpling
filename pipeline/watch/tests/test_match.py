@@ -511,6 +511,96 @@ class T(Base):
         _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天不重複
         self.assertEqual([x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]], [])
 
+    # ---- 廠商層級：同一個廠商 × CVE 只開一個 Issue（D-064 B，C0 決定 2026-11-15）----
+    def add_sbom(self, version, layer, new_release=False):
+        """在 inventory 加一份 SBOM（同一個 demo 專案）：new_release=True 時另加一個 Release（demo/<version>）。"""
+        comps = [("log4j-core", "2.14.1", LOG4J), ("requests", "2.19.0", REQ)]
+        raw = json.dumps(sbom(comps)).encode()
+        rel = f"releases/0/sbom-demo-{version}-{layer}.cdx.json"
+        open(os.path.join(self.inv, rel), "wb").write(raw)
+        ent = {"file": rel, "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)}
+        if new_release:
+            r = dict(self.inventory["releases"][0], tag=f"demo/{version}", version=version, watch_version=version,
+                     html_url=f"https://github.com/o/r/releases/tag/demo/{version}", sboms={})
+            self.inventory["releases"].append(r)
+        r = next(x for x in self.inventory["releases"] if x["watch_version"] == version)
+        r["sboms"][layer] = ent
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+
+    def vendor_cfg(self):
+        path = os.path.join(self.w, "vendor-watch-test.json")
+        json.dump({"vendors": ["intel", "ami"]}, open(path, "w"))
+        return path
+
+    INTEL = {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME"}
+    AMI = {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V"}
+
+    def vendor_acts(self, plan, op=None):
+        return [x for x in plan["actions"] if "vendor-level" in x["labels"] and (op is None or x["op"] == op)]
+
+    def test_vendor_issue_one_per_vendor_and_cve(self):
+        """同一個 CVE 出現在多份 SBOM（v1 的 bsp、os 與 v2 的 bsp）：一個廠商 × CVE 只開一個 Issue，內文列出全部受影響的版本。"""
+        self.add_sbom("v1", "os")
+        self.add_sbom("v2", "bsp", new_release=True)
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10]), dict(self.AMI, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        opens = self.vendor_acts(plan, "open")
+        self.assertEqual(len(opens), 2, [x["title"] for x in opens])                  # Intel 一個、AMI 一個（不是 3 份 SBOM × 2）
+        self.assertEqual(self.vendor_acts(plan, "open_if_closed"), [])
+        intel = next(x for x in opens if "CVE-2026-90004" in x["title"])
+        self.assertEqual(intel["key"], match.issue_key("real", "vendor", "CVE-2026-90004", "intel"))
+        self.assertIn("等 2 個版本", intel["title"])
+        for ver, layer in (("v1", "bsp"), ("v1", "os"), ("v2", "bsp")):
+            self.assertRegex(intel["body"], rf"\| demo \| {ver} \| {layer} \|")
+        self.assertIn("3 份 SBOM", intel["body"])
+        self.assertIn("layer-bsp", intel["labels"])
+        self.assertIn("layer-os", intel["labels"])
+        self.assertEqual(match.unsafe_markdown(intel["body"]), [])
+        _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天：不重複、也不留言
+        self.assertEqual(self.vendor_acts(plan), [])
+
+    def test_vendor_new_version_comments_on_existing_issue(self):
+        """已開 Issue 的廠商 × CVE，之後新的版本加入也命中：在原 Issue 留言（open_if_closed，原 Issue 關閉時開新的），不另開一個。"""
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        opens = self.vendor_acts(plan, "open")
+        self.assertEqual(len(opens), 1)
+        key = opens[0]["key"]
+        self.assertNotIn("等", opens[0]["title"])                                  # 只有一個版本：標題寫版本，不寫「等 n 個版本」
+        self.add_sbom("v2", "bsp", new_release=True)
+        _, _, plan = self.run_once(NOW3, vendor_config=cfg)
+        self.assertEqual(self.vendor_acts(plan, "open"), [])
+        com = self.vendor_acts(plan, "open_if_closed")
+        self.assertEqual(len(com), 1)
+        self.assertEqual(com[0]["key"], key)
+        self.assertRegex(com[0]["body"], r"\| demo \| v2 \| bsp \|")
+        self.assertNotRegex(com[0]["body"], r"\| demo \| v1 \|")                 # 留言只列新的版本
+        self.assertEqual(match.unsafe_markdown(com[0]["body"]), [])
+        _, _, plan = self.run_once("2026-11-13T01:00:00Z", vendor_config=cfg)
+        self.assertEqual(self.vendor_acts(plan), [])
+
+    def test_vendor_state_format_unchanged(self):
+        """狀態格式不變：vendor_matches 的鍵仍是 [專案 UUID, CVE, 廠商]（每份 SBOM 一筆），欄位照 VENDOR_FIELDS；
+        只有 Issue 群組（dumpling.issues 的鍵）改成廠商 × CVE。"""
+        self.add_sbom("v1", "os")
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        st = plan["state"]
+        self.assertEqual(st["schema"], 1)
+        keys = sorted(json.loads(k) for k in st["vendor_matches"] if "CVE-2026-90004" in k)
+        self.assertEqual(keys, [["dumpling:demo/v1#bsp", "CVE-2026-90004", "intel"], ["dumpling:demo/v1#os", "CVE-2026-90004", "intel"]])
+        for k, e in st["vendor_matches"].items():
+            self.assertLessEqual(set(e), set(match.VENDOR_FIELDS), k)
+        gk = match.issue_key("real", "vendor", "CVE-2026-90004", "intel")
+        self.assertEqual(st["dumpling"]["issues"][gk]["kind"], "vendor")
+        self.assertEqual([k for k, r in st["dumpling"]["issues"].items() if r["kind"] == "vendor"], [gk])
+
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
         txt = json.dumps(plan["state"])
@@ -617,7 +707,7 @@ class Injection(Base):
         e = {"cve": "CVE-2024-0001", "kev_vendor": "@acme [x](https://evil.example)", "kev_product": "![i](https://evil.example/a.png) #1",
              "project": "demo", "version": "v1", "vendor": "acme`x", "watch_via": ["@x"], "component_count": 1,
              "date_added": "2024-01-01", "source": "@src", "first_detected": NOW1}
-        body = match.vendor_body("real", e, None, None, match.parse_now(NOW1))
+        body = match.vendor_body("real", [e], [None], None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
         self.assertNotRegex(body, r"[#＃]1")                         # \#1 照樣會連結（GitHub 實測），# 後面要有零寬空白
         p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1", "gaps": ["upstream_note: @bob [x](https://evil.example)"]}
@@ -658,7 +748,7 @@ class Injection(Base):
              "date_added": "2024-01-01", "source": "&excl;&lbrack;i&rbrack;(https://evil.example/a.png)", "first_detected": NOW1}
         p = {"layer": "bsp", "status": "shipped", "tag": "&commat;everyone/v1", "html_url": "&lbrack;x&rbrack;(https://evil.example)",
              "release_version": "&commat;x", "gaps": ["&commat;bob &lbrack;x&rbrack;(https://evil.example)"]}
-        for body in (match.vendor_body("real", e, p, None, match.parse_now(NOW1)),
+        for body in (match.vendor_body("real", [e], [p], None, match.parse_now(NOW1)),
                      match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                               "component": "&commat;c", "purl": "p", "basis": "b", "sources": ["&#64;s"]}], p, [], None,
                                     match.parse_now(NOW1))):
