@@ -691,7 +691,7 @@ def test_summary_matches_the_interface_example(tmp_path, tbl):
     bad["inventory_sha256"] = "d" * 64
     rc, lines, o, summary = go(tmp_path, [ok, bad], tabs(r_now, v_now))
     ex = json.loads((REPO / "pipeline" / "watch" / "tests" / "data" / "firmware-rematch-summary.example.json").read_text(encoding="utf-8"))
-    assert set(summary) - {"meta_status"} == set(ex) - {"_note"}
+    assert set(summary) == set(ex) - {"_note"}
     assert summary["schema"] == ex["schema"] and set(summary["tables"]) == set(ex["tables"])
     for name in summary["tables"]:
         assert set(ex["tables"][name]) <= set(summary["tables"][name])
