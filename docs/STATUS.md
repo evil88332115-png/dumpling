@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:09 +0800（C2）
+最後更新：2026-11-15 12:10 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -26,6 +26,7 @@
 - 給 PM／法務的待決定：VEX 發行閘門要不要分層（D-030）；附件 III／IV 分類、CVD 政策內容、單一聯絡窗口（D-032）；第 14 條期間計算（1182/71，C3 的 ART14.md）
 - 方向檢查（2026-11-14，對照 PLAN 目標與 M1–M8）：M2 的驗收「打 tag 後全程跑通、產出正式 Release」還沒做到（沒有任何正式 tag），M6 也卡在重跑，兩者都在等使用者。調整：C2 在 advisory-polish 之後改做 D-043 (2) 規則表（AMD-SB／AMI-SA／INTEL-SA，現在 AMD 全 NOT_ASSESSED）；C3 的 GitLab 程式收在 #91、t10b，之後等內部環境，主線回到公開 repo 的第一次真實基準；C1 的 M7 照舊。C0 自省：PLAN 要求派代理時指定 effort（判定邏輯與其驗證用 high），之前的驗證代理都沒有指定，從現在起補上
 - 機器：2026-11-14 使用者反映 CPU 近 80°C；查到 C0 的 #95 驗證代理留下的 python3 空轉約 8 小時（cwd dumpling-tmp-c0-verify-95），已停掉；之後每個驗證代理結束都檢查殘留程序。
+- 使用者決定（2026-11-15）：同意 5674 初審（NVIDIA 5674 判 not_applicable，已通知 C2 插隊做對照表 PR）；**已刪** wp1/m2-spike 的 6 份 actions 快取（快取總量剩約 1.7 GB）與已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft（C0 執行）。
 - 卡住／等決定：D-059 金鑰指紋（3mdeb、Ubuntu archive）實作時要人工對照兩個獨立來源核對（使用者或負責人）；刪 wp1/m2-spike 的 6 份 actions 快取（約 7.5 GB，使用者決定）；已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft 要不要刪（C1、C2 刪分支都被權限擋，使用者決定）；5674 初審意見要負責人確認（使用者）；正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
