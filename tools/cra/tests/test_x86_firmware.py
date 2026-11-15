@@ -429,7 +429,7 @@ def test_other_roms_record_offsets_and_found_lists_all_sources(tmp_path):
 def test_bios_stage_timeout_keeps_vbios(tmp_path, monkeypatch):
     (tmp_path / "v.exe").write_bytes(nvflash_exe(vbios_rom(0x2489, "94.04.5E.00.92")))
 
-    def slow(data, budget=None):
+    def slow(data, budget=None, **_kw):
         raise xf.OverBudget("超過時間上限 1 秒，沒有解析完")
     monkeypatch.setattr(xf, "bios_image", slow)
     inv = xf.inventory([tmp_path / "v.exe"])

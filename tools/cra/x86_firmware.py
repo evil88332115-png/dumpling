@@ -72,6 +72,12 @@ BIOS（Intel 平台的完整 SPI 映像）：
   這個辨識規則的代價（都不會靜默）：只有一種 cookie 的 AMD 檔案（例如 capsule 標頭讓 EFS 不在固定位置、只剩一種 cookie，或兩個都是 $PSP）
   認不出來，沒有其他結構時是 GAP；構造的情況：AMD 映像裡剛好有一份 checksum 對的 Intel 格式 microcode → platform 不是 amd，
   沒有 microcode 的 Intel BIOS 區域檔在 0x20000 剛好是 0x55AA55AA → 誤判 AMD；兩種都是 ATTENTION。
+- 程式碼完整性的結構證據（bios[].integrity；實作說明 docs/notes/c2-code-integrity.md）：FIT 的每個項目（類型、位址、大小欄位、位址是否落在映像內）進
+  integrity.fit.entries，Boot Guard 結構（Key Manifest type 0x0B、Boot Policy Manifest 0x0C、startup ACM 0x02）與除錯政策項目（0x2F）各成一個項目
+  {id, state, evidence, basis, reason}，state 是 observed／not-found／GAP／NOT_ASSESSED。not-found 只在整張 FIT 完整讀完時成立；FIT 指標找不到或壞掉、
+  容器不支援（AMI PFAT 組回的映像、沒有 descriptor 的 capsule、單獨的 ME 更新檔）、表的長度或 checksum 不合、項目位址落在映像外都是 GAP。
+  平台有沒有照這些結構執行（熔絲）映像裡沒有，CI-02 固定 NOT_ASSESSED；值是映像自述、沒有簽章驗證。這一段不影響 status_of() 與 fw-inventory.md；
+  SBOM 的 BIOS 映像元件有 dumpling:integrity-* property（每項一個，值是 state，另有 dumpling:integrity-basis）。AMD 平台沒有 FIT，不產生項目。
 - AMD 平台（解析在 amd_psp.py，格式與出處見該檔檔頭與 docs/notes/c2-amd-psp.md；結果在 bios[].amd）：EFS（每個 16 MiB 視窗各找、容許 capsule 標頭造成的位移）
   → PSP 目錄（L1 `$PSP`、L2 `$PL2`、combo `2PSP`）與 BIOS 目錄（`$BHD`、`$BL2`、`2BHD`）→ 每個項目的 type、subprogram、instance、位置、大小；
   PSP 韌體標頭（fw_type 與 size_total 和目錄項目相符）通過才讀版本，BIOS 目錄 type 0x66 的 AMD 微碼列 patch level、日期、equivalence id
@@ -200,6 +206,14 @@ MAX_FFS_ITEMS = 1 << 17                # 走訪的 FFS 檔案＋section 總數
 MAX_SECTION_DEPTH = 8                  # 不用解壓就能往下走的封裝 section（不壓縮、不需處理的 GUID-defined）巢狀深度
 FIT_POINTER = 0xFFFFFFC0               # 4 GB − 0x40（edk2-platforms FirmwareInterfaceTable.h、coreboot fit.md）
 FIT_LOWEST = (1 << 32) - (16 << 20)    # FIT 要在 4 GB 以下 16 MB 內（同上；coreboot cbfstool/fit.c 也這樣檢查）
+# FIT 項目類型的名稱：Intel FIT BIOS Specification（文件 599500）rev 1.6 的 Table 4-2；coreboot util/cbfstool/fit.h 的 enum 是同樣的編號（0x2D 的名稱兩邊不同，這裡用 Intel 的）
+FIT_TYPE_NAMES = {0x00: "FIT header", 0x01: "microcode update", 0x02: "startup ACM", 0x03: "diagnostic ACM", 0x04: "platform boot policy",
+                  0x05: "memory microcontroller firmware", 0x06: "FIT reset state", 0x07: "BIOS startup module", 0x08: "TPM policy", 0x09: "BIOS policy",
+                  0x0A: "TXT policy", 0x0B: "key manifest", 0x0C: "boot policy manifest", 0x0D: "FSP boot manifest", 0x10: "CSE secure boot",
+                  0x1A: "vendor authorized boot provisioning table", 0x1B: "vendor authorized boot key manifest", 0x1C: "vendor authorized boot image manifest",
+                  0x1D: "vendor authorized boot image hash (deprecated)", 0x1E: "VAB authorization code patch image manifest", 0x2C: "SACM debug record",
+                  0x2D: "feature policy delivery record", 0x2E: "granular SCRTM error record", 0x2F: "JMP $ debug policy", 0x7F: "unused entry (skip)"}
+FIT_ID_STRINGS = {0x0B: b"__KEYM__", 0x0C: b"__ACBP__"}   # KM／BPM 結構的第一個欄位（8 bytes 識別字串）：公開依據是 Slim Bootloader 的結構定義，Intel FIT 規格沒有列；只當觀察值（見 docs/notes/c2-code-integrity.md）
 AMD_EFS_OFFSETS = (0xFA0000, 0xF20000, 0xE20000, 0xC20000, 0x820000, 0x020000, 0x7A0000, 0x720000, 0x620000, 0x420000,
                    0x3A0000, 0x320000, 0x220000)        # coreboot util/amdfwtool/amdfwread.c 的 fw_header_offsets（16／8／4 MB）
 AMD_EFS_SIG = b"\xaa\x55\xaa\x55"      # EMBEDDED_FW_SIGNATURE 0x55AA55AA（little endian）
@@ -1112,9 +1126,12 @@ def fit_table(data, lo, hi, budget=None, where="file"):
     只有 BIOS 區域的檔案是整個檔案）。指標在 4 GB−0x40（8 bytes，高 32 bits 要是 0、位址在 4 GB 以下 16 MB 內），
     表頭 Address 欄位是 "_FIT_   "、type 0；表頭的 size 是項目數（含表頭），每項 16 bytes，type 0x01 是 microcode
     （位址指到 microcode header）。依 edk2-platforms IntelSiliconPkg FirmwareInterfaceTable.h、coreboot cbfstool/fit.c 與
-    Documentation/soc/intel/fit.md；Intel FIT 規格本身沒有讀到（未核對），top swap 的配置不處理。
-    status：found；not-found（沒有像 FIT 的指標，例如舊平台或 capsule）；invalid（指標像 FIT、但指到檔案外或不是 FIT 表頭）。"""
-    out = {"status": "not-found", "offset": None, "entries": 0, "microcode": [], "note": None, "incomplete": []}
+    Documentation/soc/intel/fit.md，項目類型與表頭規則核對自 Intel FIT BIOS Specification rev 1.6（docs/notes/c2-code-integrity.md）；top swap 的配置不處理。
+    status：found；not-found（沒有像 FIT 的指標，例如舊平台或 capsule）；invalid（指標像 FIT、但指到檔案外或不是 FIT 表頭）。
+    另外回傳兩個給 integrity_section 用的鍵（bios_image 取走後從 fit 拿掉，所以 fit 本身的內容和輸出沒有變）：
+    items＝每一個項目（type 0x7F 也列）的類型、位址、大小欄位、位址是否落在映像內；table＝表頭自己的長度、版本、checksum 檢查結果與不完整的原因。
+    項目類型的名稱依 Intel FIT BIOS Specification rev 1.6 與 coreboot cbfstool/fit.h；項目的位址只算「對到 4 GB 以下之後有沒有落在 lo–hi 內」，不解讀內容。"""
+    out = {"status": "not-found", "offset": None, "entries": 0, "microcode": [], "note": None, "incomplete": [], "items": [], "table": None}
 
     def off(addr, need):
         o = hi - ((1 << 32) - addr)
@@ -1137,18 +1154,35 @@ def fit_table(data, lo, hi, budget=None, where="file"):
         return out
     n = (u32(data, t + 8) & 0xFFFFFF) - 1
     out.update(status="found", offset=t, entries=max(n, 0))
-    if struct.unpack_from("<H", data, t + 12)[0] != 0x0100:
-        out["note"] = f"FIT header version 0x{struct.unpack_from('<H', data, t + 12)[0]:04x} (expected 0x0100)"
+    hver = struct.unpack_from("<H", data, t + 12)[0]
+    tbl = {"declared_entries": max(n, 0), "read_entries": 0, "header_version": f"0x{hver:04x}", "checksum": "not-checked", "issues": []}
+    out["table"] = tbl
+    if hver != 0x0100:
+        out["note"] = f"FIT header version 0x{hver:04x} (expected 0x0100)"
+        tbl["issues"].append(out["note"])
+    if n < 0:
+        tbl["issues"].append("FIT header size field is 0 (the table length is not valid)")
+    decl = n
     if n > MAX_FIT_ENTRIES:
         out["incomplete"].append(f"FIT declares {n} entries; only the first {MAX_FIT_ENTRIES} were read")
+        tbl["issues"].append(f"FIT declares {n} entries; only the first {MAX_FIT_ENTRIES} were read")
         n = MAX_FIT_ENTRIES
     if t + 16 * (n + 1) > hi:
         n = max((hi - t) // 16 - 1, 0)
         out["incomplete"].append(f"FIT entries go past the end of the {where}; read {n}")
+        tbl["issues"].append(f"FIT entries go past the end of the {where}; read {n}")
+    if decl >= 0 and decl == n:         # 表完整讀進來了：C_V 有設的話整張表的 bytes 加總要是 0（Intel FIT BIOS Specification 4.2）
+        total = sum(data[t:t + 16 * (decl + 1)]) & 0xFF
+        cv = bool(data[t + 14] & 0x80)
+        tbl["checksum"] = "valid" if total == 0 and cv else "invalid" if cv else "not-set"
+        if tbl["checksum"] == "invalid":
+            tbl["issues"].append("FIT header has the checksum-valid bit set but the table bytes do not sum to 0")
+    tbl["read_entries"] = n
     spent = 0
     for i in range(1, n + 1):
         tick(budget, i)
         e = t + 16 * i
+        out["items"].append(fit_item(data, e, i, off))
         if data[e + 14] & 0x7F != 0x01:
             continue
         a_lo, a_hi = struct.unpack_from("<II", data, e)
@@ -1171,6 +1205,144 @@ def fit_table(data, lo, hi, budget=None, where="file"):
             out["incomplete"].append(f"FIT entry {i} (type 0x01 microcode, address {rec['address']}): {rec['note']}")
         out["microcode"].append(rec)
     return out
+
+
+def fit_item(data, e, i, off):
+    """FIT 在 e 的 16 bytes 項目（第 i 項）→ 記錄。off 是 fit_table 的位址轉檔案位置（沒落在範圍內回 None）。
+    in_image：位址（高 32 bits 要是 0）對到 4 GB 以下後，從位址起算「大小欄位 × 16 bytes（至少 8 bytes）」都在範圍內；type 0x7F（skip）的位址沒有意義，記 None。
+    id_string：KM／BPM 位址開頭 8 bytes（可印字元，其他換成 .），只是觀察值，不解讀。"""
+    a_lo, a_hi = struct.unpack_from("<II", data, e)
+    size_f, ver, tcv = struct.unpack_from("<IHB", data, e + 8)
+    typ = tcv & 0x7F
+    rec = {"entry": i, "type": f"0x{typ:02x}", "name": FIT_TYPE_NAMES.get(typ, "platform manufacturer use" if 0x30 <= typ <= 0x70
+                                                                                   else "reserved or unknown"),
+           "address": f"0x{a_hi:08x}{a_lo:08x}" if a_hi else f"0x{a_lo:08x}", "size_field": size_f & 0xFFFFFF,
+           "version": f"0x{ver:04x}", "checksum_valid_bit": bool(tcv & 0x80), "offset": None, "in_image": None}
+    if typ != 0x7F:
+        o = off(a_lo, max((size_f & 0xFFFFFF) * 16, 8)) if a_hi == 0 else None
+        rec["offset"], rec["in_image"] = o, o is not None
+        if o is not None and typ in FIT_ID_STRINGS:
+            rec["id_string"] = "".join(chr(c) if 32 <= c < 127 else "." for c in data[o:o + 8])
+    return rec
+
+
+# ---------- 程式碼完整性的結構證據（FIT 的 Boot Guard 項目與除錯政策項目） ----------
+
+INTEGRITY_STATEMENT = "structure observed; enforcement not assessed"
+INTEGRITY_BASIS = ("self-declared by the image: FIT entry types follow the Intel FIT BIOS Specification rev 1.6 and coreboot util/cbfstool/fit.h; "
+                   "no signature was verified; assumes the image was not modified")
+INTEGRITY_FUSE_BASIS = ("whether the platform acts on this structure is held in fuses and chipset state, which an image does not contain; "
+                        "an on-device source is needed")
+CI_OBSERVED = "ci-structure-observed-enforcement-unknown"
+CI_NOT_FOUND = "ci-not-found-parse-complete"
+CI_INCOMPLETE = "ci-not-found-parse-incomplete"
+CI_CONTAINER = "ci-container-unsupported"
+CI_FUSE = "ci-needs-fuse-state"
+INTEGRITY_STATES = ("observed", "not-found", "GAP", "NOT_ASSESSED")
+# （item id, FIT type）：id 的 CI 編號見 docs/notes/c2-code-integrity-survey.md 第 2 節；CI-01 是 KM 與 BPM 的合併
+FIT_INTEGRITY_TYPES = (("CI-01.km", "Key Manifest", 0x0B), ("CI-01.bpm", "Boot Policy Manifest", 0x0C),
+                       ("CI-01.acm", "startup ACM", 0x02), ("CI-07", "JMP $ debug policy", 0x2F))
+
+
+def ci_item(id_, state, evidence, reason, basis=INTEGRITY_BASIS):
+    return {"id": id_, "state": state, "evidence": evidence, "basis": basis, "reason": reason}
+
+
+def fit_entry_text(e):
+    return (f"entry {e['entry']} address {e['address']}" + (f" (file offset 0x{e['offset']:x})" if e["in_image"] else " (outside the image)")
+            + f", size field {e['size_field']} x 16 bytes")
+
+
+def fit_type_item(id_, label, typ, entries, blanket, table):
+    """FIT 的一種項目類型 → integrity 項目。
+    observed：有這個類型的項目，位址落在映像內（只看 FIT 項目，id_string 只是附帶的觀察）。
+    not-found：整張 FIT 完整讀完（table 沒有任何不完整的原因）而且沒有這個類型的項目。
+    GAP：FIT 找不到／在不支援的容器裡／沒讀完，或項目的位址落在映像外：不能寫 not-found。"""
+    if blanket:
+        return ci_item(id_, "GAP", f"{label}: {blanket[1]}", blanket[0])
+    hexn = f"0x{typ:02x}"
+    mine = [e for e in entries if e["type"] == hexn]
+    inside = [e for e in mine if e["in_image"]]
+    if inside:
+        txt = f"{len(mine)} FIT entr{'y' if len(mine) == 1 else 'ies'} of type {hexn} ({label}): " + "; ".join(fit_entry_text(e) for e in mine[:4])
+        if len(mine) > 4:
+            txt += f"; {len(mine) - 4} more"
+        ids = sorted({e["id_string"] for e in inside if "id_string" in e})
+        if typ in FIT_ID_STRINGS:
+            want = FIT_ID_STRINGS[typ].decode()
+            txt += f"; the first 8 bytes at an address read {want} (seen)" if want in ids else f"; {want} not seen at the address (the bytes at the address are not interpreted)"
+        return ci_item(id_, "observed", txt, CI_OBSERVED)
+    if mine:
+        return ci_item(id_, "GAP", f"{len(mine)} FIT entr{'y' if len(mine) == 1 else 'ies'} of type {hexn} ({label}), none with an address inside the image: "
+                       + "; ".join(fit_entry_text(e) for e in mine[:4]) + "; the structure is not located", CI_INCOMPLETE)
+    if table["issues"]:
+        return ci_item(id_, "GAP", f"no entry of type {hexn} ({label}) among the {table['read_entries']} entr{'y' if table['read_entries'] == 1 else 'ies'} read, but the FIT was not read completely ("
+                       + "; ".join(table["issues"]) + "); this is not 'not-found'", CI_INCOMPLETE)
+    return ci_item(id_, "not-found", f"the FIT was read completely ({table['read_entries']} entr{'y' if table['read_entries'] == 1 else 'ies'}, header checksum {table['checksum']}) "
+                   f"and has no entry of type {hexn} ({label})", CI_NOT_FOUND)
+
+
+def integrity_section(fit, items, table, *, amd=False, descriptor_bios=False, container=None, truncated=None):
+    """映像的完整性結構證據（資料層；報告接線另做）。只回答「FIT 裡有沒有這些項目」；平台有沒有照這些結構執行不在映像裡，固定 NOT_ASSESSED。
+    amd：AMD 平台沒有 FIT，這一段不產生項目（PSP 目錄另有結構）。descriptor_bios：有 flash descriptor 而且有 BIOS 區域（完整 SPI 映像）。
+    container：映像是 AMI PFAT 等封裝組回來的（位移不是 SPI 位址）。truncated：descriptor 的區域超出檔案的說明（檔案被截短）。
+    FIT 沒有讀到、容器不支援、表沒讀完一律是 GAP，不寫 not-found。"""
+    sec = {"scope": "Intel FIT: Boot Guard manifests, startup ACM and debug policy entries", "statement": INTEGRITY_STATEMENT, "fit": None, "items": []}
+    if amd:
+        sec["note"] = "AMD platform: no FIT; the Intel FIT items are not produced (AMD PSP directory entries are listed under amd)"
+        return sec
+    st = fit["status"]
+    sec["fit"] = {"status": st, "offset": fit["offset"], "complete": False, "issues": [], "declared_entries": None, "read_entries": None,
+                  "header_version": None, "checksum": None, "entries": []}
+    blanket = None
+    if st == "not-applicable":
+        blanket = (CI_CONTAINER, "standalone ME image: no BIOS region, no FIT")
+    elif container:
+        blanket = (CI_CONTAINER, f"the image was assembled from the container {container}, so offsets are not an SPI address map and the FIT pointer position is not meaningful")
+    elif st == "not-found":
+        blanket = ((CI_INCOMPLETE, f"{fit['note']}; with a flash descriptor and a BIOS region the pointer is expected at the end of the region, so a FIT this reader does not locate "
+                    "cannot be told apart from a platform without one")
+                   if descriptor_bios else
+                   (CI_CONTAINER, f"{fit['note']}; no flash descriptor, so the file may be a capsule or another file that is not a full SPI image"))
+    elif st == "invalid":
+        blanket = (CI_INCOMPLETE, fit["note"])
+    if st == "found" and table:
+        sec["fit"].update({k: table[k] for k in ("declared_entries", "read_entries", "header_version", "checksum")}, entries=items)
+        issues = list(table["issues"]) + ([f"image truncated: {truncated}"] if truncated else [])
+        sec["fit"].update(issues=issues, complete=not issues)
+        table = {**table, "issues": issues}
+    elif st == "found":                         # fit_table 一定會回 table；沒有的話當成沒讀完，不寫 not-found
+        blanket = blanket or (CI_INCOMPLETE, "the FIT table information is missing")
+    else:
+        sec["fit"]["issues"] = [fit["note"]] if fit.get("note") else []
+    by_id = {}
+    for id_, label, typ in FIT_INTEGRITY_TYPES:
+        by_id[id_] = fit_type_item(id_, label, typ, items if st == "found" else [], blanket, table or {"issues": [], "read_entries": 0, "checksum": None})
+    km, bpm = by_id["CI-01.km"], by_id["CI-01.bpm"]
+    states = (km["state"], bpm["state"])
+    text = (f"Key Manifest (type 0x0b): {km['state']}; Boot Policy Manifest (type 0x0c): {bpm['state']}; "
+            f"startup ACM (type 0x02): {by_id['CI-01.acm']['state']}; enforcement not assessed (CI-02)")
+    if "observed" in states:
+        agg = ci_item("CI-01", "observed", text, CI_OBSERVED)
+    elif states == ("not-found", "not-found"):
+        agg = ci_item("CI-01", "not-found", text, CI_NOT_FOUND)
+    else:
+        agg = ci_item("CI-01", "GAP", text, next(x["reason"] for x in (km, bpm) if x["state"] == "GAP"))
+    sec["items"] = [agg, km, bpm, by_id["CI-01.acm"],
+                    ci_item("CI-02", "NOT_ASSESSED", "Boot Guard enablement and the OEM key hash are held in platform fuses and chipset state; the image does not contain them",
+                            CI_FUSE, INTEGRITY_FUSE_BASIS),
+                    by_id["CI-07"],
+                    ci_item("CI-07.lock", "NOT_ASSESSED", "whether debug access is locked is held in fuses and platform state; the image does not contain it",
+                            CI_FUSE, INTEGRITY_FUSE_BASIS)]
+    return sec
+
+
+def integrity_props(sec):
+    """BIOS 映像元件的完整性 property：每個項目一個（值是 state），加一個固定說明。名稱用 dumpling:integrity-*（不放進 sca-center: 命名空間）。"""
+    if not sec or not sec.get("items"):
+        return []
+    return [*[prop("dumpling:integrity-" + x["id"].lower().replace(".", "-"), x["state"]) for x in sec["items"]],
+            prop("dumpling:integrity-basis", f"{INTEGRITY_STATEMENT}; {INTEGRITY_BASIS}")]
 
 
 def amd_markers(data, budget=None):
@@ -1322,7 +1494,8 @@ def uefi_stats(data, lo, hi, budget=None):
     return FvStats(data, lo, hi, budget).r
 
 
-def bios_image(data, budget=None):
+def bios_image(data, budget=None, container=None):
+    """container：映像是從封裝（例如 AMI PFAT）組回來的，值是封裝格式名稱；FIT 的位置在這種映像裡沒有意義（見 integrity_section）。"""
     regs, why, beyond = descriptor(data)
     me_r = next((r for r in regs or () if r["name"] == "me"), None)
     bios_r = next((r for r in regs or () if r["name"] == "bios"), None)
@@ -1336,6 +1509,7 @@ def bios_image(data, budget=None):
                "note": "standalone ME image (no BIOS region)"}
     else:
         fit = fit_table(data, lo, hi, budget, "BIOS region" if bios_r else "file")
+    fit_items, fit_info = fit.pop("items", []), fit.pop("table", None)     # 給 integrity_section；fit 本身的內容維持原樣
     by_off = {x["offset"]: x for x in mc}
     for e in fit["microcode"]:         # FIT 指到、但全檔掃描沒有列的（例如 checksum 上限）：照樣列出
         if e["valid"] and e["offset"] not in by_off:
@@ -1398,6 +1572,8 @@ def bios_image(data, budget=None):
         gaps.append(f"{n_other} GUID-defined UEFI sections that need processing (unknown GUID) not parsed")
     return {"descriptor": regs is not None, "descriptor_note": why, "regions": regs or [], "me": mi["me"], "me_status": mi["status"],
             "me_note": mi["note"], "me_conflict": mi["conflict"], "microcode": ucodes, "fit": fit, "platform": "amd" if amd else None, "amd_markers": amd, "amd": amd_r,
+            "integrity": integrity_section(fit, fit_items, fit_info, amd=bool(amd), descriptor_bios=bios_r is not None, container=container,
+                                           truncated="; ".join(beyond) if beyond else None),
             "uefi": uefi, "cbfs": cbfs, "ibv_hint": ibv, "incomplete": incomplete, "gaps": gaps, "evidence": evidence}
 
 
@@ -1970,6 +2146,7 @@ def components(inv):
                             *[prop("sca-center:found-in", loc) for loc in b["locations"]],
                             *([prop("sca-center:ibv-hint", ", ".join(b["ibv_hint"]))] if b["ibv_hint"] else []),
                             *pfat_props(b.get("pfat")),
+                            *integrity_props(b.get("integrity")),
                             *([prop("sca-center:note", b["descriptor_note"])] if b["descriptor_note"] else []),
                             *[prop("sca-center:incomplete", x) for x in b["incomplete"]],
                             prop("sca-center:me-status", b["me_status"]),
@@ -2405,7 +2582,7 @@ def inventory(paths, manifest=None, budget=None, advisory=None, vbios_advisory=N
                     finally:                    # 超時或解析失敗時，已經記下的原因也要保留
                         partial += [(label, f"vBIOS 解析：{x}") for x in notes]
                 else:
-                    b = bios_image(data, budget)
+                    b = bios_image(data, budget, container=pfat["format"] if pfat else None)
             except OverBudget as e:
                 if stage == "vBIOS":          # 中途超時：已經找到的 vBIOS 照樣列出，檔案記在 partial（ATTENTION）
                     roms = getattr(e, "partial", [])

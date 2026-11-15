@@ -49,3 +49,13 @@ expected:
     - {component: "Intel CSE firmware", version: "14.0.47.1558", suggestion: not-affected, rule_ids: ["INTEL-SA-00391"]}
   # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
   ami_core: {status: not-found}
+  # 程式碼完整性的結構證據（說明 docs/notes/c2-code-integrity.md）。依據：另寫的獨立腳本直接讀映像位元組——檔尾 −0x40 的 FIT 指標 0xFFBE2B30 指到 `_FIT_   `
+  # （檔案位置 0xBE2B30），表頭 C_V 位元有設、整張表加總為 0、版本 0x0100，共 3 個項目，三個都是 type 0x01（微碼）。表完整讀完、沒有 0x02／0x0B／0x0C／0x2F，
+  # 所以這四類都是 not-found（只表示這張 FIT 沒有這些項目；映像裡其他地方有沒有、平台怎麼設定，這裡不回答）。
+  integrity:
+    boot_guard_structure: not-found
+    key_manifest: not-found
+    boot_policy_manifest: not-found
+    startup_acm: not-found
+    fit_debug_policy: not-found
+    boot_guard_enforcement: NOT_ASSESSED
