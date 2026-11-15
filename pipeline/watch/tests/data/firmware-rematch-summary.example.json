@@ -1,8 +1,9 @@
 {
   "schema": "dumpling-firmware-rematch-summary/1",
-  "_note": "介面範例（C2 維護，C3 只讀）。不在 samples 裡的 kind=bios 樣本，watch-round 標 NOT_RUN；kind=sbom 不重跑，不列在這裡。",
+  "_note": "介面範例（C2 維護，C3 只讀）。內容是實際輸出：ubuntu-ovmf 的 inventory sha256 與 firmware-meta 不符所以 GAP。不在 samples 裡的 kind=bios 樣本，watch-round 標 NOT_RUN；kind=sbom 不重跑，不列在這裡。meta_status 是 firmware-meta.json 本身的檢查結果（GAP 時 samples 是空的，reasons 寫原因）。",
   "release_tag": "firmware-demo/2026.11.20",
   "now": "2026-11-21T02:00:00Z",
+  "meta_status": "OK",
   "tables": {
     "fw_advisory_rules": {
       "sha256": "cd2433c53c49b2c40fbde48ecedf1fb1c9b4872e61ed7101076d77d2a80f1c31",

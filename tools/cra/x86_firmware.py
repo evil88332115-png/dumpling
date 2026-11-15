@@ -6,6 +6,10 @@
   輸出 <資料夾>/fw-inventory.json（解析結果與比對）、<資料夾>/fw.cdx.json（CycloneDX 1.6 的韌體元件）、
   <資料夾>/fw-inventory.md（給人看的 BIOS 元件版本與 vBIOS 摘要，內容同 JSON），stdout 一行 `FW-INVENTORY<TAB>OK|ATTENTION|GAP|FAIL<TAB>說明`。
 
+  python3 -I x86_firmware.py --rematch --meta <firmware-meta.json> --dir <附件資料夾> --now <UTC，YYYY-MM-DDTHH:MM:SSZ> --out <資料夾>
+  每天重跑公告比對（入口是 pipeline/firmware-rematch.sh；邏輯在 fw_rematch.py）：讀 Release 的 fw-inventory-<slug>.json，用 repo 當下的三張表
+  （Intel 微碼、NVIDIA vBIOS、廠商公告規則）重新比對，重新產生狀態、SBOM 與報告；不讀映像、不連網。輸出與狀態見 docs/notes/c2-firmware-rematch.md。
+
 輸入是不可信資料（官網下載的更新包、廠商或團隊提供的映像）：
 - 只讀；**不執行**任何東西（更新包裡的 .exe、.efi、.nsh 都只當資料讀），不解開到磁碟。
 - 資料夾不跟隨符號連結；ZIP 只讀一般檔案成員到記憶體，宣告大小與實際讀到的都有上限（MAX_FILE），不展開巢狀壓縮檔（記在 skipped）。
@@ -2611,6 +2615,12 @@ def rules_section(inv, rules=None):
 
 
 def status_of(inv):
+    st, detail, att = status_parts(inv)
+    return st, detail + "".join("；" + x for x in att)
+
+
+def status_parts(inv):
+    """status_of 的內容：(狀態, 說明的主體, 讓狀態變成 ATTENTION 的各項)。status_of 把它們接成一個字串；重跑公告比對（fw_rematch）逐項列出原因。"""
     att = []
     n_skipped = len({x["file"] for x in inv["skipped"]})          # 兩邊都以檔案數計（同一個檔案可能有多筆原因）
     n_partial = len({x["file"] for x in inv.get("partial", [])})
@@ -2619,7 +2629,7 @@ def status_of(inv):
         return "GAP", ("沒有找到 NVIDIA vBIOS 或 BIOS 結構"
                        + (f"（只有其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個，沒有 x86／EFI 影像）" if inv["other_roms"] else "")
                        + (f"；略過 {n_skipped} 個檔案" if n_skipped else "")
-                       + (f"；{partial_txt}" if partial_txt else ""))
+                       + (f"；{partial_txt}" if partial_txt else "")), []
     for b in inv["bios"]:
         if not b["descriptor"]:
             att.append(f"{b['file']}：沒有 flash descriptor")
@@ -2696,7 +2706,7 @@ def status_of(inv):
     if inv["other_roms"]:                 # 燒錄工具自帶的其他 NVIDIA 映像：不算產品元件，只列出來
         detail += (f"、其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個（裝置 ID "
                    f"{', '.join(sorted({x['device'] for x in inv['other_roms']}))}，沒有 x86／EFI 影像，不列入 SBOM）")
-    return ("ATTENTION" if att else "OK"), detail + "".join("；" + x for x in att)
+    return ("ATTENTION" if att else "OK"), detail, att
 
 
 _MDSAFE_PATH = Path(__file__).resolve().parent.parent.parent / "pipeline" / "lib" / "firmware_mdsafe.py"
@@ -3141,7 +3151,20 @@ def seconds(v):
     return x
 
 
+def rematch_main(argv):
+    """`--rematch ...`：每天用 repo 當下的三張公告表重跑 Release 上的 fw-inventory.json（fw_rematch.py；只吃 inventory，不讀映像、不連網）。"""
+    try:
+        mod = load_sibling("fw_rematch")
+    except Fail as e:
+        print(f"FIRMWARE-REMATCH\tFAIL\t-\t{e}")
+        return 1
+    return mod.main(argv, xf=sys.modules[__name__])
+
+
 def main(argv=None):
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args and args[0] == "--rematch":
+        return rematch_main(args[1:])
     # allow_abbrev=False：不接受縮寫（例如 --ou）。否則縮寫的 --out 能用，但參數錯誤時 out_arg 找不到它，上一次的輸出不會被清掉
     ap = Parser(description=__doc__.splitlines()[0], allow_abbrev=False)
     sub = ap.add_subparsers(dest="cmd", required=True)
