@@ -1226,3 +1226,59 @@ class ExampleFiles(FW):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateSizeGuard(FW):
+    """C0 裁定 (A)（2026-11-15）：加上韌體會超過狀態上限 → 只有韌體停下來；KEV 照常（#28）；每筆公告數上限 20。"""
+
+    def patch_size(self):
+        real = self._real_size = match.state_size
+
+        def fake(st):
+            fw = st.get("firmware") if isinstance(st, dict) else None
+            has_adv = isinstance(fw, dict) and any((x or {}).get("advisory") for x in (fw.get("samples") or {}).values())
+            return 10 ** 6 if has_adv else real(st)
+        match.state_size = fake
+        self.addCleanup(setattr, match, "state_size", real)
+
+    def test_firmware_stops_kev_continues(self):
+        self.baseline()
+        old_fw = json.load(open(os.path.join(self.state, "state.json")))["firmware"]
+        self.set_results("bios-a", [rule("rule:a", ("AMI-SA-1",))], "ATTENTION")
+        self.set_results("bios-b", [], "OK")
+        self.kev.append("CVE-2018-18074")                                     # 同一輪有新的 KEV
+        self.patch_size()
+        _, _, plan = self.go(NOW2)
+        self.assertEqual(self.fw_opens(plan), [])                             # 不開公告 Issue
+        kev = [x for x in plan["actions"] if x["op"] == "open" and "kev" in x["labels"]]
+        self.assertTrue(kev, "KEV 照常開 Issue")
+        fw = plan["state"]["firmware"]
+        self.assertEqual(fw["samples"], old_fw["samples"])                    # 沿用上一輪，不寫這一輪的韌體結果
+        self.assertIn("size_stopped_at", fw)
+        res_ = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        self.assertEqual(res_["per_sbom"][self.uuid("bios-a")]["advisory"], "GAP")
+        self.assertTrue(any("韌體因狀態大小上限停止" in g for g in res_["gaps"]))
+        health = [x for x in plan["actions"] if "watch-health" in x["labels"] and "韌體因狀態大小上限停止" in x.get("title", "")]
+        self.assertEqual(len(health), 1)
+        line = match.mods()["issues"].state_summary("g", 1, plan["state"]) if "issues" in match.mods() else None
+        if line is None:
+            import importlib.util as iu
+            spec = iu.spec_from_file_location("_issues_sz", os.path.join(os.path.dirname(__file__), "..", "issues.py"))
+            m = iu.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            line = m.state_summary("g", 1, plan["state"])
+        self.assertIn("韌體因狀態大小上限停止（" + fw["size_stopped_at"] + "）", line)
+        # 隔一天、大小恢復：韌體照常、停止標記清掉、公告 Issue 開出來
+        match.state_size = self._real_size
+        _, _, plan = self.go(NOW3)
+        self.assertNotIn("size_stopped_at", plan["state"]["firmware"])
+        self.assertTrue(self.fw_opens(plan))
+
+    def test_bulletins_cap_20(self):
+        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(21)))], "ATTENTION")
+        self.set_results("bios-b", [rule("rule:b", tuple("AMI-SA-%d" % i for i in range(20)))], "ATTENTION")
+        self.write_rm()
+        _, projs, _ = match.load_inventory(os.path.join(self.inv, "inventory.json"), self.inv)
+        rm = match.load_rematch(self.rmdir, [p for p in projs if match.is_fw(p)])
+        self.assertEqual(rm["adv"][self.uuid("bios-a")]["state"], "GAP")
+        self.assertEqual(rm["adv"][self.uuid("bios-b")]["state"], "ATTENTION")
