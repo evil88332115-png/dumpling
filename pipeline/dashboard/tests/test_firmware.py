@@ -884,3 +884,15 @@ class TestTriggerFirmware(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerSbomCap(unittest.TestCase):
+    def test_over_200_rows_is_gap_not_silent(self):
+        row = {"uuid": "u1", "tag": "demo/v1.0", "layer": "bsp", "grype": "OK", "report_status": "GAP", "release_gate": "GAP",
+               "kernel_map": "OK", "exploited": 1, "kernel_cna": "OK"}
+        plan = {"per_sbom": [row], "per_sbom_cut": 5}
+        ctx = render.Ctx(REPO)
+        html = render.render_per_sbom(ctx, plan)
+        self.assertIn("另有 5 份沒有列出", html)
+        self.assertNotIn("另有", render.render_per_sbom(render.Ctx(REPO), {"per_sbom": [row], "per_sbom_cut": 0}))
+

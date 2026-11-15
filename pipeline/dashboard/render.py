@@ -802,6 +802,9 @@ def render_per_sbom(ctx, plan):
             return '<p class="muted">這一輪只有韌體的列，見「韌體示範」。</p>'
         return "<p>%s</p>" % ctx.gap("沒有各 SBOM 的監控狀態")
     note = '<p class="muted">韌體樣本（%d 列）不在這張表，見「韌體示範」。</p>' % fw_rows if fw_rows else ""
+    cut = plan.get("per_sbom_cut")
+    if isinstance(cut, int) and not isinstance(cut, bool) and cut > 0:          # 不靜默截斷（硬性限制 5）
+        note += "<p>%s</p>" % ctx.gap("每份 SBOM 的監控狀態只列前 200 份，另有 %d 份沒有列出（見 watch run 的 result.json）" % cut)
     return table(["Release", "層", "核心對應 kernel_map", "核心 CNA", "已遭利用（KEV）命中數（含狀態）", "說明"], rows, "每份 SBOM 的監控狀態") + note
 
 

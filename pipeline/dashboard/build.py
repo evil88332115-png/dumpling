@@ -643,7 +643,10 @@ def plan_result(d):
         v = d.get(k)
         return [c(x, 600) for x in v if isinstance(x, str)][:50] if isinstance(v, list) else []
     stats = d.get("stats") if isinstance(d.get("stats"), dict) else {}
-    return {"gap": None, "status": cs(d.get("status")), "detail": c(d.get("detail"), 400), "per_sbom": per, "notes": strs("notes"),
+    # 超過 200 份不靜默截斷：記下實際份數，頁面寫 GAP（硬性限制 5）
+    cut = max(0, len(ps) - 200)
+    return {"gap": None, "status": cs(d.get("status")), "detail": c(d.get("detail"), 400), "per_sbom": per, "per_sbom_cut": cut,
+            "notes": strs("notes"),
             "attention": strs("attention"), "gaps": strs("gaps"),
             "stats": {k: ci(v) for k, v in stats.items() if isinstance(k, str) and ci(v) is not None and len(k) < 40}}
 
