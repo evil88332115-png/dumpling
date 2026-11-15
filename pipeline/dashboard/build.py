@@ -715,7 +715,8 @@ def fw_daily(watch, state, fw_st):
         st = {"gap": "狀態 Issue 的內容沒有 firmware 欄位（韌體還沒進過監控，或還沒寫進狀態）"}
     else:
         st = dict(fw_st, gap=None)
-    return {"rows": rows, "rows_gap": rows_gap, "state": st}
+    cut = plan.get("per_sbom_cut") if isinstance(plan.get("per_sbom_cut"), int) and not isinstance(plan.get("per_sbom_cut"), bool) else 0
+    return {"rows": rows, "rows_gap": rows_gap, "state": st, "per_sbom_cut": cut, "per_sbom_read": len(plan.get("per_sbom") or [])}
 
 
 def fw_warnings(fw, warnings):

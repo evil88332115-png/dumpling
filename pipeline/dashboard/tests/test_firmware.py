@@ -896,3 +896,38 @@ class PerSbomCap(unittest.TestCase):
         self.assertIn("另有 5 份沒有列出", html)
         self.assertNotIn("另有", render.render_per_sbom(render.Ctx(REPO), {"per_sbom": [row], "per_sbom_cut": 0}))
 
+    def test_only_firmware_rows_early_return_still_shows_cut(self):
+        """全部是韌體列時 render_per_sbom 提前 return：截斷說明也要在。"""
+        html = render.render_per_sbom(render.Ctx(REPO), {"per_sbom": [{"uuid": "u", "fw": True}], "per_sbom_cut": 3})
+        self.assertIn("另有 3 份沒有列出", html)
+
+    def test_firmware_daily_cut_is_gap_not_all_listed(self):
+        fw = {"daily": {"rows": [], "state": {"gap": "x"}, "per_sbom_cut": 3, "per_sbom_read": 200}, "samples": []}
+        html = render.render_fw_daily(render.Ctx(REPO), fw)
+        self.assertIn("共 203 份，只讀了前 200 份，另有 3 份沒有讀", html)
+        self.assertNotIn("全部列在上面", html)
+        fw["daily"]["per_sbom_cut"] = 0
+        self.assertIn("全部列在上面", render.render_fw_daily(render.Ctx(REPO), fw))
+
+    def test_state_samples_over_cap_is_gap(self):
+        fw = {"daily": {"rows": [], "state": {"advisory": {}, "samples_read": 200, "samples_total": 250}, "per_sbom_cut": 0}, "samples": []}
+        self.assertIn("只讀狀態裡前 200 個樣本條目，共 250 個", render.render_fw_daily(render.Ctx(REPO), fw))
+
+
+class OlderReleasesCap(unittest.TestCase):
+    def test_older_over_50_says_gap_with_total(self):
+        older = ["firmware-demo/2026.01.%02d" % i for i in range(1, 51)]
+        data = {"firmware": {"gap": None, "tag": "firmware-demo/2026.11.20", "older": older, "older_total": 73, "meta_gap": "x"}}
+        html = render.render_firmware(render.Ctx(REPO), data)
+        self.assertIn("只列前 50 筆，共 73 筆", html)
+        data["firmware"]["older_total"] = 50
+        self.assertNotIn("只列前", render.render_firmware(render.Ctx(REPO), data))
+
+    def test_build_older_total_is_real_count(self):
+        """build 的 older_total 是實際份數，不是截斷後的（截斷後的數字會讓上面的 GAP 說明消失）。"""
+        cands = [({"tag": "firmware-demo/2026.01.%02d" % i, "published_at": "2026-01-%02dT00:00:00Z" % i, "assets": {}},
+                  "firmware-demo", "2026.01.%02d" % i) for i in range(1, 62)]
+        fw = build.gather_firmware(td.collect, td.FakeSource([], {}), cands, True)
+        self.assertEqual(fw["older_total"], 60)
+        self.assertEqual(len(fw["older"]), build.FW_OLDER_MAX)
+

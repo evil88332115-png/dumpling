@@ -288,7 +288,7 @@ reason 只檢查型別與長度，不比對固定字串。`dt` 是 `null`（key 
 
 ### 12.4 每日監控的結果
 - 取自最近一輪 watch 的 `result.json`：`per_sbom` 裡 uuid 是 `dumpling:firmware-demo/…#firmware` 的列（`grype`、`why`、`exploited`、`advisory`、`advisory_why`、`advisory_reasons`），以及狀態 Issue 解開後的 `firmware`（`tables`、`size_stopped_at`、各樣本的 affected 紀錄）。各自缺就各自 GAP。
-- 每日結果裡的韌體列**一列都不丟**：對得到樣本的列在樣本表；每日結果有、但最新 Release 的樣本沒有的列（舊 Release 或新 tag 還沒跑過監控），另列一張表，標「不在最新的韌體 Release 樣本裡（可能是舊 Release 或新 tag 還沒跑過監控）」，欄位有 uuid、KEV 數加 grype 狀態、公告比對、狀態裡的紀錄；uuid 重複的列也列出。狀態裡有 affected 紀錄、卻沒有樣本也沒有每日結果的監控鍵，同一張表列出。板子的表上方「韌體樣本（N 列）」的 N 等於韌體區列出的列數（韌體區最後一行也寫總數）。
+- 每日結果裡的韌體列**讀到的一列都不丟**（每日結果超過 200 份 SBOM 時只讀前 200 份，韌體區與板子區都寫 GAP 和實際總數，不寫「全部列出」）：對得到樣本的列在樣本表；每日結果有、但最新 Release 的樣本沒有的列（舊 Release 或新 tag 還沒跑過監控），另列一張表，標「不在最新的韌體 Release 樣本裡（可能是舊 Release 或新 tag 還沒跑過監控）」，欄位有 uuid、KEV 數加 grype 狀態、公告比對、狀態裡的紀錄；uuid 重複的列也列出。狀態裡有 affected 紀錄、卻沒有樣本也沒有每日結果的監控鍵，同一張表列出。板子的表上方「韌體樣本（N 列）」的 N 等於韌體區列出的列數（韌體區最後一行也寫總數）。
 - 韌體的列不再出現在「每份 SBOM 的監控狀態」那張板子用的表（那裡的核心對應、報告狀態對韌體是「沒有這一項」）。
 - **狀態一律附在數字旁邊**：KEV 命中數和 grype 狀態同一格；公告比對的狀態與說明同一格。GAP、NOT_RUN、NOT_ASSESSED 照原值顯示。match.py 寫的 `NOT_ASSESSED（原因）` 這種「狀態＋說明」拆成徽章與說明，不會被當成不認得的狀態值。
 - 對照表（`fw_advisory_rules`、`intel_microcode`、`nvidia_vbios`）：列出 Release 當時的識別（firmware-meta）、最近一輪重跑的識別、`status`、`stale`。`stale` 是 `true` 標「對照表過期」（頁首也有警告）；缺少寫 GAP。

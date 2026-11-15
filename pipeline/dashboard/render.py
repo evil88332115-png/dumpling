@@ -649,7 +649,14 @@ def render_fw_daily(ctx, fw):
         sr, stt = st.get("samples_read"), st.get("samples_total")
         if isinstance(sr, int) and isinstance(stt, int) and not isinstance(stt, bool) and stt > sr:
             out.append("<p>%s</p>" % ctx.gap("只讀狀態裡前 %d 個樣本條目，共 %d 個" % (sr, stt)))
-    out.append('<p class="muted">每日結果的韌體列共 %d 列，全部列在上面（對到樣本 %d 列、對不到 %d 列）。</p>' % (len(plan_rows), len(used), len(plan_rows) - len(used)))
+    cut = d.get("per_sbom_cut") if isinstance(d.get("per_sbom_cut"), int) and not isinstance(d.get("per_sbom_cut"), bool) else 0
+    if cut > 0:          # 每日結果超過 200 份：只讀了前面的，韌體列可能不完整（硬性限制 5：不能寫成「全部列在上面」）
+        out.append("<p>%s</p>" % ctx.gap("每日結果的 SBOM 共 %d 份，只讀了前 %d 份，另有 %d 份沒有讀：韌體的列可能不完整，"
+                                         "上面標成「沒有每日結果」的樣本可能在沒讀的那部分（見 watch run 的 result.json）"
+                                         % (d.get("per_sbom_read", 0) + cut, d.get("per_sbom_read", 0), cut)))
+        out.append('<p class="muted">讀到的每日結果裡，韌體列共 %d 列（對到樣本 %d 列、對不到 %d 列）。</p>' % (len(plan_rows), len(used), len(plan_rows) - len(used)))
+    else:
+        out.append('<p class="muted">每日結果的韌體列共 %d 列，全部列在上面（對到樣本 %d 列、對不到 %d 列）。</p>' % (len(plan_rows), len(used), len(plan_rows) - len(used)))
     return "\n".join(out)
 
 
@@ -695,8 +702,10 @@ def render_firmware(ctx, data):
     older = [x for x in lst(fw.get("older")) if isinstance(x, str)]
     if older:
         total = fw.get("older_total") if isinstance(fw.get("older_total"), int) and not isinstance(fw.get("older_total"), bool) else len(older)
-        out.append("<details><summary>舊的韌體 Release（不監控，只留紀錄；%d）</summary><ul>%s</ul></details>" % (
-            total, "".join("<li>%s</li>" % ext(x, 120) for x in older[:50])))
+        shown = older[:50]
+        more = ("<li>%s</li>" % ctx.gap("只列前 %d 筆，共 %d 筆" % (len(shown), total))) if total > len(shown) else ""
+        out.append("<details><summary>舊的韌體 Release（不監控，只留紀錄；%d）</summary><ul>%s%s</ul></details>" % (
+            total, "".join("<li>%s</li>" % ext(x, 120) for x in shown), more))
     if fw.get("meta_gap"):
         out.append("<p>%s</p>" % ctx.gap("整個韌體區無法列出：" + str(fw["meta_gap"])))
         return "\n".join(out)
@@ -797,14 +806,15 @@ def render_per_sbom(ctx, plan):
             num(r.get("exploited")), ctx.st(r.get("grype")), ctx.st(r.get("report_status")), ctx.st(r.get("release_gate")))
         rows.append([ext(r.get("tag"), 100), ext(r.get("layer"), 20), ctx.st(r.get("kernel_map")) if r.get("kernel_map") else "—",
                      ctx.st(r.get("kernel_cna")) if r.get("kernel_cna") else "—", cell, ext(r.get("why"), 200) if r.get("why") else ""])
+    cut = plan.get("per_sbom_cut")
+    cut_note = ("<p>%s</p>" % ctx.gap("每份 SBOM 的監控狀態只列前 200 份，另有 %d 份沒有列出（見 watch run 的 result.json）" % cut)
+                if isinstance(cut, int) and not isinstance(cut, bool) and cut > 0 else "")
     if not rows:
         if fw_rows:
-            return '<p class="muted">這一輪只有韌體的列，見「韌體示範」。</p>'
-        return "<p>%s</p>" % ctx.gap("沒有各 SBOM 的監控狀態")
+            return '<p class="muted">這一輪只有韌體的列，見「韌體示範」。</p>' + cut_note
+        return "<p>%s</p>" % ctx.gap("沒有各 SBOM 的監控狀態") + cut_note
     note = '<p class="muted">韌體樣本（%d 列）不在這張表，見「韌體示範」。</p>' % fw_rows if fw_rows else ""
-    cut = plan.get("per_sbom_cut")
-    if isinstance(cut, int) and not isinstance(cut, bool) and cut > 0:          # 不靜默截斷（硬性限制 5）
-        note += "<p>%s</p>" % ctx.gap("每份 SBOM 的監控狀態只列前 200 份，另有 %d 份沒有列出（見 watch run 的 result.json）" % cut)
+    note += cut_note          # 不靜默截斷（硬性限制 5）
     return table(["Release", "層", "核心對應 kernel_map", "核心 CNA", "已遭利用（KEV）命中數（含狀態）", "說明"], rows, "每份 SBOM 的監控狀態") + note
 
 
