@@ -42,9 +42,9 @@ MAX_VEX = 32 * 1024 * 1024
 MAX_WATCH_FILE = 4 * 1024 * 1024
 MAX_ISSUES = 500
 DOWNLOAD_RE = re.compile(r"^(report-.+\.zip|vuln-list-.+\.xlsx|p1-table-.+\.xlsx|sbom-.+\.cdx\.json|vex-.+\.cdx\.json|"
-                         r"build-record-.+\.json|release-meta\.json|scan-summary-.+\.json)$", re.S)
-SCAN_RE = re.compile(r"^scan-summary-.+\.json$", re.S)
-VEX_RE = re.compile(r"^vex-.+\.cdx\.json$", re.S)
+                         r"build-record-.+\.json|release-meta\.json|scan-summary-.+\.json)\Z", re.S)
+SCAN_RE = re.compile(r"^scan-summary-.+\.json\Z", re.S)
+VEX_RE = re.compile(r"^vex-.+\.cdx\.json\Z", re.S)
 RUN_KEY = {"": "full", "-bsp": "bsp", "-os": "os"}
 # CycloneDX 1.6 的 vulnerability analysis 列舉值（其他值一律歸成「不明」）
 VEX_STATES = ("resolved", "resolved_with_pedigree", "exploitable", "in_triage", "false_positive", "not_affected")

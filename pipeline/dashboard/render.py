@@ -20,12 +20,12 @@ STATUSES = ("OK", "GAP", "ATTENTION", "NOT_RUN", "NOT_ASSESSED", "FAIL")
 LIFECYCLES = ("development", "shipped")
 CSP = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
 BASE = "https://github.com/"
-REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$")
-CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$")
-ASSET_RE = re.compile(r"^[A-Za-z0-9._+-]{1,200}$")
-DOWNLOAD_SEG_RE = re.compile(r"^[A-Za-z0-9._~%+-]{1,300}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}\Z")
+CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}\Z")
+ASSET_RE = re.compile(r"^[A-Za-z0-9._+-]{1,200}\Z")
+DOWNLOAD_SEG_RE = re.compile(r"^[A-Za-z0-9._~%+-]{1,300}\Z")
 LOCAL_HREFS = ("style.css", "data.json")
-ANCHOR_RE = re.compile(r"^#[a-z0-9-]{1,40}$")
+ANCHOR_RE = re.compile(r"^#[a-z0-9-]{1,40}\Z")
 CTRL_RE = re.compile("[\x00-\x1f\x7f-\x9f​-‏ -‮⁠-⁩﻿]")
 DEFAULT_LEN = 200
 
