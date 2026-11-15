@@ -27,6 +27,7 @@ CI（`firmware.yml` 工作流程的 `firmware-fetch` job）每次都真的下載
 | `notes` | 挑選理由與限制 |
 | `analyze[]` | 選填；`{from, member}`：`from` 是 `files` 裡 `role: package` 的 .deb 檔名，`member` 是要取出的成員路徑（例如 `usr/share/OVMF/OVMF_CODE_4M.fd`）。CI 只取出這一個一般檔案、不執行；沒列的 `image`／`package` 整檔解析 |
 | `expected` | 選填；解析結果要跟它一致，CI 逐項比對（`pipeline/firmware-expect.py`）。只寫有佐證的，不猜；沒寫的項目不比，寫了不認得的鍵會報格式錯誤 |
+| `watch` | 選填；明確宣告樣本**不進每日監控**：`{monitored: false, why: <原因，單行、非空、最多 300 字>}`（格式見 `pipeline/lib/firmware_watch.py`，打錯字或空的 `why` 會讓讀 firmware.yml 的步驟失敗）。目前只有兩份 vbios 樣本使用（沒有 vBIOS 元件、GAP）。`kind: vbios` 的樣本一定要宣告；`status` 不是 `ok` 的樣本不用宣告，也一律列進 Release 的 `not_watched`。說明見 `docs/notes/c2-firmware-release.md` |
 | `expected_dt` | 選填；樣本自己宣告上傳臨時 DT 的預期結果（`pipeline/lib/firmware_dt.py`，說明見 `docs/notes/c2-firmware-dt.md`）。目前只有 `{upload: rejected, reason: <依據，必填>}`＝DT 會拒收這份 SBOM（例如供應商 SBOM 有 prep 的格式正規化修不了的 CycloneDX schema 違規，DT 回 http=400「The uploaded BOM is invalid／Schema validation failed」；dumpling 不修改供應商的原檔）。目前沒有樣本使用。真的被拒收（只認這個回應，其他 400 不算）：report 仍標 FAIL、註明與宣告一致、不讓 job 失敗；宣告了卻上傳成功＝MISMATCH（job 失敗，請更新樣本）；沒宣告卻被拒收＝一般 FAIL。宣告了卻沒有上傳結果（NOT_RUN／GAP）＝report 以 1 結束。其他失敗不受宣告影響。寫了不認得的鍵或值會報格式錯誤 |
 
 ### `expected` 的鍵
@@ -96,6 +97,20 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
 - 狀態：任何一張表不能用就整份 GAP；NVIDIA 對照表過期，`fixed` 降成 `NOT_ASSESSED` 並 ATTENTION；規則表的 `affected` 建議 ATTENTION；**結果和 Release 當時不同，整份至少 ATTENTION**。
 - 限制：只反映表的更新，不重新解析映像（解析器的改進要重新打 Release）；舊版程式產生的 inventory 缺新的鍵是 GAP，不猜預設值。rematch 不輸出 NOT_RUN（沒跑、沒有輸出由呼叫端標）。
 - 輸出格式、key、輸入驗證與狀態規則見 `docs/notes/c2-firmware-rematch.md`；範例檔在 `pipeline/watch/tests/data/`。
+
+## 示範用 Release（`firmware-demo/<YYYY.MM.DD>`）
+
+`firmware.yml` 工作流程在 push tag `firmware-demo/<YYYY.MM.DD>`（同一天第二次起加 `.2`～`.99`；格式與日期不合就失敗）時建一個正式版 Release，是示範用的公開韌體樣本分析結果，不是產品。
+附件只有 JSON，沒有映像或其他二進位檔：
+
+- 每個進每日監控的樣本：`fw-<slug>.cdx.json`（BIOS 樣本是 `fw.cdx.json`；供應商 SBOM 是正規化後的上傳副本）。
+- 每個 BIOS 樣本：`fw-inventory-<slug>.json`。供應商 SBOM 沒有 inventory。
+- `firmware-meta.json`（schema `dumpling-firmware-meta/1`）：tag、commit、建置時間、各樣本的檔名與 sha256、狀態、expected 比對結果、`not_watched`（不進監控的樣本與原因）、三張公告表的識別。
+  產生器是 `pipeline/lib/firmware_meta.py`；不進監控的樣本由 `firmware.yml` 的 `watch` 欄位宣告。
+
+每次 PR、手動觸發與 tag 觸發都會先產生這些附件並自我檢查（meta 符合每日監控 collect 的檢查、附件的檔名與 sha256 一致、`firmware-rematch.sh` 重跑的 `changed` 是空的、整個資料夾通過 `ci/public-check.sh`）；
+只有 tag push 才會建 Release，而且只有最後的 `firmware-release` job 有 `contents: write`。
+tag、附件、meta 欄位、自我檢查與限制見 `docs/notes/c2-firmware-release.md`。第一個 tag 由 C2 在 C0 同意後打。
 
 ## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
 

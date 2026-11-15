@@ -1,7 +1,7 @@
 """列出某個樣本要交給 firmware-bios.sh 的輸入檔（CI 用）。只讀、不執行下載檔的內容。
 
 用法：python3 -I firmware_plan.py <firmware.yml> --dl <下載資料夾> --work <工作資料夾>
-輸出：每行一個輸入檔路徑；沒有可解析的檔案（status 不是 ok、kind 不是 bios、沒有 image／package）就什麼都不印。
+輸出：每行一個輸入檔路徑；選用欄位 watch（宣告不進每日監控，見 firmware_watch.py）格式不對就以 64 結束；沒有可解析的檔案（status 不是 ok、kind 不是 bios、沒有 image／package）就什麼都不印。
 firmware.yml 的 analyze 欄位：[{from: <files 裡的 package 檔名>, member: <deb 內的成員路徑>}]，
 該 package 會先用 dpkg-deb --fsys-tarfile 搭配 tar 只取出這一個成員（拒絕 symlink／非一般檔案）到 work 資料夾，改用取出的檔案。
 """
@@ -11,6 +11,11 @@ import re
 import stat
 import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)  # Python 3.11 起 -I 含 -P，不會自動把腳本所在目錄放進 sys.path
+from firmware_watch import parse_watch  # noqa: E402
 
 try:
     import yaml
@@ -42,6 +47,7 @@ def extract_member(deb, member, dest_dir, run=subprocess.run):
 
 
 def plan(doc, dl_dir, work_dir, extract=extract_member):
+    parse_watch(doc)      # 選用欄位 watch 的格式錯誤（ValueError）在這裡就擋下，不等到產生 firmware-meta.json
     if doc.get("kind") != "bios" or doc.get("status") != "ok":
         return []
     files = doc.get("files") or []
