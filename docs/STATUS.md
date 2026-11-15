@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:08 +0800（C0）
+最後更新：2026-11-15 12:09 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -112,8 +112,8 @@
 > **目前（2026-11-15，C0 通知恢復）**
 > - **#110 已合併（main 4f64db7）**，main CI 綠。本機 worktree `dumpling-wt-c2-rules2` 與本機分支已移除，遠端分支已自動刪除。
 > - **合併順序（使用者已同意）**：#97（C4 的 M6）合併前，C0 不合併其他 PR；C2 的 PR 可以照常開，排在 #97 之後。
-> - C2 手上沒有可以開工的項目：D-046 的實作等 C1 的發現介面（main 與 wp1 分支目前都還沒有）；5674 對照表 PR 照原計畫，等使用者確認初審意見後再插隊做。沒有在跑的代理，也沒有下載或 firmware-ci。
-> - **M7f（排最後，只記下、還沒開工）**：評估韌體報告要不要加「程式碼完整性／驗證開機」的檢查。參考 ETSI EN 304-623（Boot Managers，涵蓋 UEFI 韌體與多段 bootloader）的公開草稿，來源用 ETSI 官方的 docbox；也參考 jetm/shipcheck（Apache-2.0）的 code-integrity 項目（UEFI／sbsign 簽章、FIT 簽章、dm-verity、IMA/EVM）。只借概念、不搬程式碼，標準草稿不照抄原文。代理上限照 D-048。
+> - D-046 的實作等 C1 的發現介面（main 與 wp1 分支目前都還沒有）；5674 對照表 PR 照原計畫，等使用者確認初審意見後再插隊做。沒有在跑的代理，也沒有下載或 firmware-ci。
+> - **M7f (c) 程式碼完整性／驗證開機的調查**（C0 同意提早開始，只做調查與設計筆記、不寫程式；照 D-060 排在 M7d／M7e 之後合併）：分支 `wp3/code-integrity-survey`（worktree `$AGENT_TMP/dumpling-wt-c2-cisurvey`，從 main 4f64db7 開；暫存 `$AGENT_TMP/dumpling-tmp-c2-cisurvey/`）。調查代理（sonnet、high，因為要解析下載的草稿檔）**進行中**。範圍：ETSI EN 304-623 的公開草稿（只從 ETSI docbox 取得；記版本、日期、網址、sha256；條文只摘要）＋ jetm/shipcheck（Apache-2.0）的 code-integrity 項目（只讀說明與定義，不搬程式碼）。產出 `docs/notes/c2-code-integrity-survey.md`：每項要求能不能從公開 BIOS／vBIOS／Jetson 映像自動判斷，判斷不了的照硬性限制 5 標 GAP／NOT_ASSESSED，哪些已被現有報告涵蓋，以及建議的 PR 切法與規模。寫好先傳給 C0。
 
 > **2026-11-14 下午的排序（#110 已合併，第 1 項完成）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
 > 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**完成 38d0b74** → C2 補 **8cb6fc5**（linux-firmware 等價表釘 sha256、用詞修正、加入 D-046 設計文件）。11 筆規則，新增 INTEL-SA-01315、01209、01152，以及 01280、01372 的 15.x 條件；AMD-SB-7033 新增，7014 補 7 個資料中心微碼條件。PSP 與 FSP 都不收，因為公告沒有寫版本。樣本結果：V540TU 的 ME 18.0 變 affected（01315）；B550M、ASRock 的微碼 0x8012 變 affected，這是 Naples 的 CPUID，可能是 CPUID 層級的誤報，已寫明。2422 passed；CI 綠 → 預驗（獨立代理，sonnet、high）：**通過**（AMD 15 個條件逐值一致；linux-firmware 等價表一致；Intel 只能用同一類摘要工具讀，不算獨立核對；144 個變異沒有存活）→ C2 處理建議 **3eafeb0**（條件的 note 進 basis 與報告；真表的版本線整段比測試；bios-discovery 寫明實作前提；linux-firmware 出處寫完整）→ CI 綠 → **PR #110 已開**，已通知 C0。C0 的驗證排在 #109 之後，**這段期間 #110 不推 commit**。驗證後要改的（已記下）：0x8012 的 note 補「這個 patch 對應的 CPU（資料中心 Naples）不一定能裝在這塊主機板，不代表整塊板子受影響，請負責單位確認」；C0 決定 (2) 也要做，但不能靠比對 note 的文字（M7b-2 原則）：條件加結構化欄位 `segment`，值只收列舉 client／datacenter／embedded，和公告表格的分區對應（notes 寫明怎麼對）；validate 檢查列舉值；值是 datacenter 時，報告加固定的提示句；改表要更新 TABLE_SHA256。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
