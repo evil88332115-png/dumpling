@@ -18,6 +18,7 @@
 """
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,8 @@ import watchlib  # noqa: E402
 
 MAIN_REF = "refs/heads/main"
 EVENTS_MAIN = ("schedule", "workflow_dispatch", "push")
+# dev.yml 在 dev/** 分支 push 時也會更新滾動的開發版（C0 決定 2026-11-15 收進來；workflow 定義讀預設分支，fork 碰不到）
+DEV_BRANCH_RE = re.compile(r"dev/[A-Za-z0-9._/-]{1,200}")
 
 
 def _str(x):
@@ -51,6 +54,12 @@ def decide(event_name, event, repository, ref):
     name = _str(wr.get("name"))
     run_event = _str(wr.get("event"))
     branch = _str(wr.get("head_branch"))
+    if name == "dev" and branch is not None and branch != "main":
+        if not DEV_BRANCH_RE.fullmatch(branch) or ".." in branch.split("/"):
+            return False, "dev 的來源分支不是 main 也不是 dev/**，跳過"
+        if run_event != "push":
+            return False, "dev/** 分支的 dev run 不是 push 觸發，跳過"
+        return True, "dev 在 dev/** 分支 push 完成"
     if name in ("watch", "dev"):
         if branch != "main":
             return False, "watch／dev 的來源分支不是 main，跳過"

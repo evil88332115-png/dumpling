@@ -66,7 +66,7 @@
 - 最近一輪：時間、結果，連到 run。資料來源 CISA KEV、EUVD、核心 CVE、Grype DB 的狀態與時間。
 - 每份 SBOM 的監控狀態，以及「每日沒有涵蓋的項目」（NOT_RUN 原文）。
 - 監控 Issue 分三組列：KEV／廠商層級、支援期限、監控健康。每列有編號（連到 Issue）、標題、開／關、建立時間。預設只列開著的，已關閉的另外摺起來。
-- 監控資料超過 48 小時沒更新：頁首加 `GAP：監控資料超過 48 小時沒更新`。這段由產生器判斷；頁面沒有 JS，所以也寫明產生時間，讓人自己看。
+- 監控資料超過 36 小時沒更新（C0 決定，2026-11-15；原本 48 小時）：頁首加 `GAP：監控資料過期（超過 36 小時沒更新）`，比對數與開著的監控 Issue 數旁邊也標「監控資料過期」。這段由產生器判斷；頁面沒有 JS，所以也寫明產生時間，讓人自己看。
 
 **頁尾**
 - 權威來源是 Release 附件與 Issue。
@@ -130,6 +130,7 @@
 | 來源 | `workflow_run.event` | `workflow_run.head_branch` |
 |---|---|---|
 | watch、dev | `schedule`、`workflow_dispatch` 或 `push` | 必須是 `main` |
+| dev（另一種） | 必須是 `push` | 符合 `dev/**`（`dev/` 後接 `[A-Za-z0-9._/-]`，不能有 `..`）。dev.yml 在 dev/** 分支 push 時也會更新滾動的開發版（C0 決定 2026-11-15 收進來；workflow 定義讀預設分支，fork 碰不到） |
 | release | 必須是 `push` | 必須符合 `<專案>/<版本>` 的 tag 格式，而且不是 `dev/…`。驗證用 `pipeline/watch/collect.py` 的 `PROJECT_RE`、`VERSION_RE`（`classify` 回 `release` 的那種），與 release.yml 的 `*/v*` 觸發條件一致；不在 workflow 裡另寫一份 regex |
 
 三種來源還有兩條共同規定：

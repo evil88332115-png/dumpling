@@ -199,8 +199,18 @@ class TestTrigger(unittest.TestCase):
 
     def test_watch_dev_other_branch_skipped(self):
         for name in ("watch", "dev"):
-            for br in ("feature/x", "dev/orin-nano-demo", "wp2/dashboard", "", None):
+            for br in ("feature/x", "wp2/dashboard", "", None, "dev", "dev/", "dev/../main", "xdev/a"):
                 self.assertFalse(self.go(event=wr(name, "push", br)), (name, br))
+        self.assertFalse(self.go(event=wr("watch", "push", "dev/orin-nano-demo")))          # dev/** 只收 dev workflow
+
+    def test_dev_branch_push_updates(self):
+        """C0 決定：dev.yml 在 dev/** 分支 push 時也會更新滾動的開發版 → 也更新頁面；只收 push、同一個 repo。"""
+        for br in ("dev/orin-nano-demo", "dev/rpi-lite-demo", "dev/a/b"):
+            self.assertTrue(self.go(event=wr("dev", "push", br)), br)
+        for ev in ("schedule", "workflow_dispatch", "pull_request", None):
+            self.assertFalse(self.go(event=wr("dev", ev, "dev/orin-nano-demo")), ev)
+        self.assertFalse(self.go(event=wr("dev", "push", "dev/orin-nano-demo", repo="evil/fork")))
+        self.assertFalse(self.go(event=wr("dev", "push", "dev/orin-nano-demo", conclusion="cancelled")))
 
     def test_watch_dev_other_event_skipped(self):
         for ev in ("pull_request", "workflow_run", "release", None):
@@ -509,9 +519,12 @@ class TestPage(unittest.TestCase):
 
     def test_stale_watch_warning(self):
         e = Env(self, watch_kw={"created": "2026-11-12T00:00:00Z"})
-        self.assertIn("GAP：監控資料超過 48 小時沒更新", e.html)
+        self.assertIn("GAP：監控資料過期（超過 36 小時沒更新）", e.html)
+        self.assertIn('<span class="st st-GAP">監控資料過期</span>', e.html)
+        e = Env(self, watch_kw={"created": "2026-11-13T19:00:00Z"})            # 35 小時：還沒過期
+        self.assertNotIn("監控資料過期", e.html)
         e = Env(self)
-        self.assertNotIn("超過 48 小時", e.html)
+        self.assertNotIn("監控資料過期", e.html)
         e = Env(self, watch=False)
         self.assertIn("GAP：沒有找到最近一輪監控資料", e.html)
         self.assertIn("GAP", e.html)
@@ -821,4 +834,26 @@ class PreVerifyFixes(unittest.TestCase):
         import sys as _s
         if hasattr(_s, "set_int_max_str_digits"):
             self.assertEqual(render.clean(10 ** 5000), "（數值過大）")
+
+
+class CountsWithStatus(unittest.TestCase):
+    """C0 決定（2026-11-15）：數量旁邊要有狀態或時間，讓人知道數字新不新。"""
+
+    def test_vex_counts_have_release_gate(self):
+        e = Env(self)
+        sec = e.html[e.html.index("VEX 判定統計"):]
+        sec = sec[:sec.index("</table>")]
+        rows = [r for r in sec.split("<tr>")[2:]]
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertRegex(r, r'<span class="st st-[A-Z_]+">', r)               # 每一列都附上該報告的 release_gate
+
+    def test_state_issue_counts_and_project_open_issues_have_freshness(self):
+        api = FakeApi({"watch-state": [issue(114, "s", labels=("watch-state",), body=state_body())]})
+        e = Env(self, api=api)
+        i = e.html.index("<dt>比對數</dt>")
+        self.assertIn("最近一輪監控", e.html[i:i + 400])
+        j = e.html.index("開著的監控 Issue")
+        self.assertIn("最近一輪監控", e.html[j:j + 3000])
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
 

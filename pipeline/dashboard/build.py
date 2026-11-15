@@ -34,7 +34,7 @@ import watchlib  # noqa: E402
 SCHEMA = "dumpling-dashboard/1"
 LABELS = {"state": "watch-state", "kev": "dumpling-watch", "support": "support-period", "health": "watch-health"}
 DRILL_RE = re.compile(r"(^drill$|-drill$|-drill-done$)")
-STALE_HOURS = 48
+STALE_HOURS = 36      # C0 決定（2026-11-15）：最近一輪監控超過 36 小時沒更新就顯示「監控資料過期」
 MAX_RELEASES = 200
 MAX_META = 1024 * 1024
 MAX_SCAN = 8 * 1024 * 1024
@@ -512,7 +512,11 @@ def build_data(source, api, repo, projects_dir="projects", watch_dir=None, now=N
     elif created is None:
         warnings.append("GAP：最近一輪監控的時間讀不出來")
     elif now - created > datetime.timedelta(hours=STALE_HOURS):
-        warnings.append("GAP：監控資料超過 48 小時沒更新")
+        warnings.append("GAP：監控資料過期（超過 %d 小時沒更新）" % STALE_HOURS)
+    # 最近一輪監控的時間與狀態：比對數、開著的監控 Issue 數旁邊都要寫（C0：讓人知道這個數字新不新）
+    plan = watch.get("plan") if isinstance(watch.get("plan"), dict) and not watch["plan"].get("gap") else None
+    watch["freshness"] = {"at": run.get("created_at") if run else None, "status": plan.get("status") if plan else None,
+                          "stale": None if created is None else (now - created > datetime.timedelta(hours=STALE_HOURS))}
     if releases.get("skipped"):
         warnings.append("有 %d 個已發布的 Release 不合規則，沒有列入（見版本區塊最下方）" % len(releases["skipped"]))
     # 專案列：補上最新正式版、開發版、支援期限檢查結果、開著的監控 Issue 數

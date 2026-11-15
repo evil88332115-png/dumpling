@@ -205,6 +205,19 @@ def dct(v):
 
 # ---------------------------------------------------------------- 專案（A）
 
+def fresh_html(ctx, data):
+    """最近一輪監控的時間與狀態（數字旁邊用）。超過 36 小時沒更新 → 「監控資料過期」；讀不到 → GAP。"""
+    f = dct(dct(data.get("watch")).get("freshness"))
+    if not f.get("at"):
+        return ctx.gap("沒有最近一輪監控資料")
+    out = "最近一輪監控 %s %s" % (ext(f.get("at"), 40), ctx.st(f.get("status")))
+    if f.get("stale") is True:
+        out += ' <span class="st st-GAP">監控資料過期</span>'
+    elif f.get("stale") is None:
+        out += " " + ctx.gap("監控時間讀不出來")
+    return out
+
+
 def render_projects(ctx, data):
     sec = dct(data.get("projects"))
     g = section_gap(ctx, data.get("projects"), "專案清單")
@@ -231,7 +244,7 @@ def render_projects(ctx, data):
                      ctx.life(p.get("status")), sup, chk_html,
                      ext(p.get("latest_release")) if p.get("latest_release") else "—",
                      ext(p.get("dev_release")) if p.get("dev_release") else "—",
-                     num(p.get("open_issues"))])
+                     '%s<br><span class="muted">%s</span>' % (num(p.get("open_issues")), fresh_html(ctx, data))])
     if not rows:
         return "<p>%s</p>" % ctx.gap("沒有任何專案")
     return table(["產品名（專案鍵）", "專案狀態", "支援期限", "支援期限檢查", "最新正式版", "開發版", "開著的監控 Issue（標題含專案名）"],
@@ -335,12 +348,25 @@ def render_vex(ctx, rel):
             rows.append([ext(n, 20), ctx.gap(v["gap"]), "", ""])
             continue
         cs = lst(v.get("counts"))
+        g = gate_of(ctx, rel, n)
         if not cs:
-            rows.append([ext(n, 20), "—", "—", "0（vulnerabilities 是空的）"])
+            rows.append([ext(n, 20), "—", "—", "0（vulnerabilities 是空的）", g])
         for c in cs:
             if isinstance(c, (list, tuple)) and len(c) == 3:
-                rows.append([ext(n, 20), ext(c[0], 40), ext(c[1], 40), num(c[2])])
-    return table(["報告", "analysis.state", "justification", "數量"], rows, "VEX 判定統計")
+                rows.append([ext(n, 20), ext(c[0], 40), ext(c[1], 40), num(c[2]), g])
+    return table(["報告", "analysis.state", "justification", "數量", "該報告的 release_gate（vex.gate 結論）"], rows, "VEX 判定統計")
+
+
+def gate_of(ctx, rel, report):
+    """release-meta 裡這份報告的 release_gate（VEX 判定的數量旁邊要附上 vex.gate 的結論；C0 決定）。"""
+    meta = dct(rel.get("meta"))
+    if meta.get("gap"):
+        return ctx.gap("release-meta：" + str(meta["gap"]))
+    for r in lst(meta.get("reports")):
+        r = dct(r)
+        if r.get("report") == report:
+            return ctx.st(r.get("release_gate"))
+    return ctx.gap("release-meta 沒有這份報告的 release_gate")
 
 
 def render_release(ctx, rel, i):
@@ -430,7 +456,7 @@ def render_issue_group(ctx, data, key, title, with_cve=False):
     return "\n".join(out)
 
 
-def render_state_issue(ctx, w):
+def render_state_issue(ctx, w, data=None):
     s = w.get("state_issue")
     if not isinstance(s, dict) or s.get("gap"):
         return "<p>%s</p>" % ctx.gap(dct(s).get("gap") or "找不到狀態 Issue")
@@ -440,7 +466,8 @@ def render_state_issue(ctx, w):
     dl = ["<dt>狀態 Issue</dt><dd>%s（%s）</dd>" % (ctx.a(url, "#%s" % esc(n, 12)) if url else ext(n, 12),
                                                   esc(s.get("state") if s.get("state") in ("open", "closed") else "?", 10)),
           "<dt>基準時間</dt><dd>%s</dd>" % ext(s.get("baseline_at"), 40),
-          "<dt>比對數</dt><dd>KEV %s、廠商層級 %s</dd>" % (num(s.get("matches")), num(s.get("vendor_matches")))]
+          "<dt>比對數</dt><dd>KEV %s、廠商層級 %s；%s</dd>" % (num(s.get("matches")), num(s.get("vendor_matches")),
+                                                         fresh_html(ctx, data or {"watch": w}))]
     if last:
         rl = run_url(ctx.repo, last.get("run_id"))
         dl.append("<dt>狀態裡最後一輪</dt><dd>%s %s %s %s</dd>" % (
@@ -494,7 +521,7 @@ def render_watch(ctx, data):
         out.append("<h4>每日沒有涵蓋的項目</h4><p>%s</p>" % ctx.gap(w.get("coverage_gap") or "沒有資料"))
     out.append("<p>%s</p>" % ctx.gap("CISA KEV、EUVD、核心 CVE、Grype DB 逐項的狀態與時間：result.json 沒有這個欄位，第一版不列（權威來源是 watch run 的 summary）"))
     out.append("<h4>監控狀態 Issue</h4>")
-    out.append(render_state_issue(ctx, w))
+    out.append(render_state_issue(ctx, w, data))
     sup = w.get("support")
     out.append("<h4>支援期限與 EOL（最近一輪）</h4>")
     if isinstance(sup, dict) and not sup.get("gap"):
