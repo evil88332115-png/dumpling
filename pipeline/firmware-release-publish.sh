@@ -8,9 +8,10 @@
 #   - 草稿用 tag 名稱查不到，所以用 API 依 id 找、刪。
 #   - 每個 GitHub API 呼叫都用 ghx 重試（API 偶爾回 403）；建立草稿與核對是一組，失敗就整組重來（先清掉上一次留下的草稿）。
 # 退出碼：0＝已發布；1＝失敗（可能留下草稿，下次執行會先清掉）；2＝同一個 tag 已有非草稿的 Release；64＝參數錯誤。
+# shellcheck disable=SC2317  # plan、delete_drafts、attempt 由 ghx 當參數間接呼叫（重試）
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=firmware-ghx.sh
+# shellcheck disable=SC1091  # 同資料夾的 firmware-ghx.sh（路徑在執行時才知道）
 . "$here/firmware-ghx.sh"
 api="$here/lib/firmware_release_api.py"
 [ -n "${GH_REPO:-}" ] || { echo "firmware-release: 缺少 GH_REPO"; exit 64; }
@@ -47,7 +48,7 @@ if [ "${1:-}" = "--cleanup" ]; then
 fi
 [ $# -eq 3 ] || { echo "用法：firmware-release-publish.sh <tag> <附件資料夾> <說明文字檔>"; exit 64; }
 tag=$1; assets=$2; notes=$3
-[ -d "$assets" ] && [ -f "$notes" ] || { echo "firmware-release: 附件資料夾或說明文字檔不存在"; exit 64; }
+if [ ! -d "$assets" ] || [ ! -f "$notes" ]; then echo "firmware-release: 附件資料夾或說明文字檔不存在"; exit 64; fi
 shopt -s nullglob
 files=("$assets"/*)
 [ ${#files[@]} -gt 0 ] || { echo "firmware-release: 附件資料夾是空的"; exit 64; }

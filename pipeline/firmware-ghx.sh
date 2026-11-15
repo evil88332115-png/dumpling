@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # 供 source：ghx＝帶重試的指令（照 .github/workflows/release.yml 的做法）。
 # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：每 GHX_SLEEP 秒（預設 30）重試、最多 GHX_TRIES 次（預設 8），
 # 仍失敗就印出 API 回應標頭與本文當診斷，回傳 1。用法：ghx gh api …；ghx 函式名稱 參數…（函式也可以）。
