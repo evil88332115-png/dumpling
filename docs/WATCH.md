@@ -97,6 +97,10 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
     不是規則檔名 → problem、不讀；列了但 Release 沒有這個附件 → problem。開發版 `dev/<專案>` 也有這個附件。
   - status：API 失敗 → FAIL；有 Release 有 problem → GAP；否則 OK。stdout 一行 `WATCH-COLLECT<TAB>狀態<TAB>說明`；結束碼 OK 0、FAIL 1、GAP 3、用法 64。
 
+- **韌體 Release**（`docs/FIRMWARE-WATCH.md`）：tag `firmware-demo/<版本>`（不是 prerelease）分類成 `firmware`，**不進 `releases`**（不要求 release-meta），放在 inventory 的 `firmware`；只收最新的一個（`published_at`），其他列在 `firmware_older`（第一階段示範的限制）。
+  讀 `firmware-meta.json`（schema `dumpling-firmware-meta/1`、tag 要一致；壞掉 → 整個韌體 Release 的 problem、inventory GAP），依它下載每個樣本的 `fw-<slug>.cdx.json` 與（bios）`fw-inventory-<slug>.json`，**每個附件都核對 meta 列的 sha256**；單一樣本的問題只讓那一份 GAP。
+  監控鍵的版本部分 `watch_version`：`<slug>@<firmware_version>`；版本讀不到或是佔位字串（空、`xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`…）→ `<slug>@sha256-<映像雜湊前 16 碼>` 並標 GAP；兩者都沒有 → 不監控、列進 `not_watched`。meta 的 `tables` 只留三張表的字串欄位。match.py／support.py 目前還不讀 `firmware`（下一個 PR 接上）。
+
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
 
 讀 inventory、feeds、state.json → 呼叫既有工具 → 產生 `plan.json`。規則：
@@ -126,6 +130,8 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   不在別名裡就補進 `vendor-watch.json` 的 `aliases`（在那之前，`AMD`／`Advanced Micro Devices`／`NVIDIA`／`NVIDIA Corporation` 已涵蓋）。
   C2 的韌體 SBOM 公告比對會用到這裡的廠商層級結果。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
+  **一個廠商 × CVE 只開一個 Issue**（D-064 B，C0 決定 2026-11-15）：群組鍵是 `issue_key(mode, "vendor", CVE, 廠商)`，不含專案 UUID；內文的表格列出這次命中的每份 SBOM（專案、版本、分層、狀態、Release、監看來源），標籤取各版本狀態與分層的聯集。之後新的版本也命中（KEV 加入不到 `BASELINE_DAYS`＝7 天的條目，新版本第一次監看時不算基準）→ 在原 Issue 留言、只列新的版本（`open_if_closed`：原 Issue 已關閉就開新的）。狀態格式不變：`vendor_matches` 的鍵仍是 `[專案 UUID, CVE, 廠商]`，每份 SBOM 一筆。
+  升級前如果已經有「每份 SBOM 一個」的廠商層級 Issue（舊的群組鍵含專案 UUID），升級後新的命中用新的鍵，會另開一個 Issue，不會對到舊的；舊鍵的群組紀錄在 PRUNE_DAYS 後修剪。合併這個改動時（2026-11-15）還沒有任何廠商層級 Issue，所以不會發生。
 - 降級（只在 real；核心 CNA 缺附件、schema 不符、upstream_version 為 null 也算）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
   、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release、
   **上一次排程 run 被取消／失敗／逾時或超過 36 小時沒有排程**（compute 用 `actions: read` 查 watch.yml 的排程 run；keepalive 也印出最近 3 次）
