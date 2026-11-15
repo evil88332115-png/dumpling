@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 15:22 +0800（C2）
+最後更新：2026-11-15 15:22 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -385,7 +385,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：WATCH_REAL_ISSUES 暫時 off（C0，04:44Z：三個新平台的 dev 會帶進一批 Issue）；C4 發布後跑 dry_run 回報（KEV／支援期限分開）
 - 開著的 PR：#120（D-064 A，等 C4 確認板子廠商）、#133（T-12 死人開關，等 C0 獨立驗證，head 233f7ad）
-- 韌體進監控：#122、#123、#128、#132 已合併；待辦：vendor-watch 的 firmware-demo（等 #120）→ C2 的 rematch 入口與 firmware.yml 建 Release 合併 → C2 打第一個 tag → dry_run 給 C0
+- 韌體進監控：#122、#123、#128、#132 已合併；#134（rematch rejected、步驟 20 分鐘）C0 已看過；待辦：vendor-watch 的 firmware-demo（等 #120）、meta 的 dt 欄位（C2 PR 2 範例更新後：collect 讀、報告顯示、不降級）、儀表板的韌體示範區（設計 §5，含 DT 狀態）→ C2 #135＋PR 2 合併 → C2 打第一個 tag → dry_run 給 C0
 - 儀表板：#126、#129 已合併（Pages 設定已由 C0 轉使用者）；C1 的 vuln_metrics（wp1/tiers-fixed）合併後新格式自動生效
 <!-- END C3 -->
 
