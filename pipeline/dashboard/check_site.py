@@ -30,9 +30,21 @@ BAD_TAGS = re.compile(r"<\s*(script|style|iframe|object|embed|form|base|img|svg|
 SUMMARY_RE = re.compile(r"安全|(?<![A-Za-z0-9_])PASS(?![A-Za-z0-9_])", re.I)
 
 
+# 設計規定的 CSP（寫死一份，不讀 render.CSP：只改 render.py 的常數也要被擋下；預驗建議 1）
+EXPECTED_CSP = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+# ext 的內容必須是已跳脫的文字：不能有 < > " '，& 只能是這幾個實體（預驗必修 2：ext 豁免要有根據，esc 壞掉時這關要擋得住）
+EXT_BODY_RE = re.compile(r'<span class="ext">(.*?)</span>', re.S)
+EXT_BAD_RE = re.compile(r"""[<>"']|&(?!(?:amp|lt|gt|quot|#x27);)""")
+
+
 def check_html(text, repo):
     """→ 問題清單（空＝通過）。"""
     probs = []
+    for m in EXT_BODY_RE.finditer(text):
+        bad = EXT_BAD_RE.search(m.group(1))
+        if bad:
+            probs.append("ext 的內容沒有跳脫（%r）：%s" % (bad.group(0), m.group(1)[:60]))
+            break
     if re.search(r"<\s*script", text, re.I):
         probs.append("出現 <script")
     rest = EXT_RE.sub("<ext/>", text)               # ext 以外的部分
@@ -46,12 +58,12 @@ def check_html(text, repo):
         probs.append("出現 javascript:")
     if re.search(r"\bstyle\s*=", rest, re.I):
         probs.append("出現 inline style")
-    if re.search(r"\bsrcdoc\s*=|\bsrc\s*=|\bformaction\s*=|\bxlink:href\s*=", rest, re.I):
-        probs.append("出現 src／srcdoc／formaction 屬性")
+    if re.search(r"\bsrcdoc\s*=|\bsrc\s*=|\bsrcset\s*=|\bformaction\s*=|\bxlink:href\s*=|\bping\s*=", rest, re.I):
+        probs.append("出現 src／srcset／srcdoc／formaction／ping 屬性")
     meta = CSP_RE.search(text)
     if not meta:
         probs.append("沒有 Content-Security-Policy 的 meta")
-    elif html.unescape(meta.group(1)) != render.CSP:
+    elif html.unescape(meta.group(1)) != EXPECTED_CSP:
         probs.append("Content-Security-Policy 內容不是設計規定的那一條")
     n_href = 0
     for m in HREF_RE.finditer(rest):

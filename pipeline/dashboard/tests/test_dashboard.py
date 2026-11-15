@@ -549,9 +549,10 @@ class TestPage(unittest.TestCase):
                                env={}, source=FakeSource([], {}, boom=collect.ApiError("API 回 HTTP 500")), api=FakeApi(fail=fail), load_projects=boom)
             self.assertEqual(rc, 1)
             self.assertFalse(os.path.exists(out))
-            self.assertIn("全部來源都抓不到", buf.getvalue())
+            self.assertIn("Releases API 與 Issues API 都抓不到", buf.getvalue())
 
-    def test_partial_failure_still_builds(self):
+    def test_api_sources_failing_exits_nonzero_even_if_projects_ok(self):
+        """預驗必修 1：CI 裡專案清單讀 checkout，一定成功；Releases 與 Issues 兩個 API 都抓不到就不能部署空頁。"""
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "site")
             fail = {k: issues.Fail("HTTP 500") for k in build.LABELS.values()}
@@ -560,7 +561,20 @@ class TestPage(unittest.TestCase):
                 rc = build.run(["--repo", REPO, "--out", out, "--now", "2026-11-15T06:00:00Z"], env={},
                                source=FakeSource([], {}, boom=collect.ApiError("API 回 HTTP 500")), api=FakeApi(fail=fail),
                                load_projects=projects_loader())
-            self.assertEqual(rc, 0)
+            self.assertEqual(rc, 1)
+            self.assertFalse(os.path.exists(out))
+            self.assertIn("Releases API 與 Issues API 都抓不到", buf.getvalue())
+
+    def test_partial_failure_still_builds(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "site")
+            fail = {k: issues.Fail("HTTP 500") for k in build.LABELS.values()}
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = build.run(["--repo", REPO, "--out", out, "--now", "2026-11-15T06:00:00Z"], env={},
+                               source=FakeSource([], {}, boom=collect.ApiError("API 回 HTTP 500")), api=FakeApi(fail=dict(list(fail.items())[:1])),
+                               load_projects=projects_loader())
+            self.assertEqual(rc, 0)       # Releases 抓不到、Issues 部分可讀 → 照常產生（那幾格 GAP）
             self.assertEqual(sorted(os.listdir(out)), ["data.json", "index.html", "style.css"])
             with open(os.path.join(out, "index.html"), encoding="utf-8") as f:
                 h = f.read()
@@ -763,3 +777,48 @@ class TestCheckSite(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreVerifyFixes(unittest.TestCase):
+    """wp2/dashboard 預驗（a9aa4c1）的必修 2 與建議 1、2、4、5。"""
+
+    def test_ext_content_must_be_escaped(self):
+        good = '<p><span class="ext">a &amp; b &lt;x&gt; &quot;q&quot; &#x27;</span></p>'
+        self.assertEqual([p for p in check_site.check_html(good, REPO) if "ext 的內容" in p], [])
+        for raw in ('"><img src=x onerror=alert(1)>', "<a href=//evil.example>x</a>", "<svg onload=1>", "&commat;bob", "it's"):
+            with self.subTest(raw=raw):
+                h = '<p><span class="ext">%s</span></p>' % raw
+                self.assertTrue([p for p in check_site.check_html(h, REPO) if "ext 的內容" in p], raw)
+
+    def test_esc_broken_is_caught_by_check_site(self):
+        """突變：ext() 不跳脫時，只帶 <img onerror> 的敵意資料也要被 check_site 擋下（不能只靠單元測試）。"""
+        orig = render.ext
+        try:
+            render.ext = lambda s, n=render.DEFAULT_LEN: '<span class="ext">%s</span>' % render.clean(s, n)
+            h = render.ext('"><img src=x onerror=alert(1)>')
+        finally:
+            render.ext = orig
+        self.assertTrue(check_site.check_html('<meta http-equiv="Content-Security-Policy" content="%s">%s'
+                                              % (check_site.EXPECTED_CSP, h), REPO))
+
+    def test_csp_hardcoded_in_check_site(self):
+        self.assertEqual(check_site.EXPECTED_CSP, render.CSP)
+        weak = check_site.EXPECTED_CSP.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'")
+        probs = check_site.check_html('<meta http-equiv="Content-Security-Policy" content="%s">' % weak, REPO)
+        self.assertTrue([p for p in probs if "Content-Security-Policy" in p])
+
+    def test_ping_and_srcset_rejected(self):
+        for attr in ('<a href="#a" ping="https://evil.example/">x</a>', '<a href="#a" srcset="x 1x">x</a>'):
+            with self.subTest(attr=attr):
+                self.assertTrue([p for p in check_site.check_html(attr, REPO) if "屬性" in p])
+
+    def test_clean_surrogates_invisible_and_huge_int(self):
+        self.assertNotIn("\ud800", render.clean("a\ud800b"))
+        "x".join([render.esc("a\ud800b")]).encode("utf-8")                    # 寫檔不會 UnicodeEncodeError
+        for ch in ("\u061c", "\u00ad", "\u034f", "\u180e", "\U000e0041", "\u202e", "\u200b"):
+            with self.subTest(ch=hex(ord(ch))):
+                self.assertNotIn(ch, render.clean("a" + ch + "b"))
+        import sys as _s
+        if hasattr(_s, "set_int_max_str_digits"):
+            self.assertEqual(render.clean(10 ** 5000), "（數值過大）")
+

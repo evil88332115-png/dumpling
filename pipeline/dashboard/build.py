@@ -12,7 +12,7 @@
      專案（support.load_projects）、watch 資料夾。每一筆來源都有「抓不到」的處理：那一格寫 GAP（原因），整頁照常產生。
   2. 組 data dict（build_data）：只放白名單欄位；字串清掉控制字元、限制長度；不放環境變數、不放 API 回應原文。
   3. 輸出 HTML（render.py，純函式）。
-全部來源都抓不到 → 結束碼 1、不產生 site（避免用空頁蓋掉舊頁）。結束碼：OK 0、全部來源失敗 1、用法 64。
+Releases API 與 Issues API 都抓不到 → 結束碼 1、不產生 site（避免用空頁蓋掉舊頁；專案清單讀 checkout，一定成功，不算）。結束碼：OK 0、失敗 1、用法 64。
 """
 import argparse
 import collections
@@ -606,8 +606,10 @@ def run(argv, env=None, source=None, api=None, load_projects=None):
     except Exception as e:
         sys.stdout.write("DASHBOARD\tFAIL\t%s\n" % scrub("未預期的錯誤（%s）" % type(e).__name__))
         return 1
-    if not any(oks.values()):
-        sys.stdout.write("DASHBOARD\tFAIL\t全部來源都抓不到（releases、issues、projects、watch）：不產生 site，避免用空頁蓋掉舊頁\n")
+    # 兩個 API 來源（releases、issues）都抓不到 → 不產生 site（避免用空頁蓋掉舊頁）。
+    # 專案清單讀 checkout 的 projects/（在 CI 一定成功）、watch 缺時頁面寫 GAP，都不算（預驗必修 1）。
+    if not oks["releases"] and not oks["issues"]:
+        sys.stdout.write("DASHBOARD\tFAIL\tReleases API 與 Issues API 都抓不到：不產生 site，避免用空頁蓋掉舊頁\n")
         return 1
     try:
         write_site(data, a.out, token)

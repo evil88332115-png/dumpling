@@ -28,6 +28,15 @@ LOCAL_HREFS = ("style.css", "data.json")
 ANCHOR_RE = re.compile(r"^#[a-z0-9-]{1,40}\Z")
 CTRL_RE = re.compile("[\x00-\x1f\x7f-\x9f​-‏ -‮⁠-⁩﻿]")
 DEFAULT_LEN = 200
+# 另外拿掉的不可見字元：U+061C（ALM）、U+00AD、U+034F、U+180E、tag 字元 U+E0000–E007F（預驗建議 5）
+INVISIBLE_RE = re.compile("[\u061c\u00ad\u034f\u180e\U000e0000-\U000e007f]")
+
+
+def _to_str(v):
+    try:
+        return str(v)
+    except ValueError:          # 超過 Python 的整數轉字串上限（4300 位）：不讓 build 當掉
+        return "（數值過大）"
 
 REPORTS = ("full", "bsp", "os")
 STATUS_HELP = (
@@ -43,8 +52,11 @@ STATUS_HELP = (
 # ---------------------------------------------------------------- 跳脫與連結
 
 def clean(s, n=DEFAULT_LEN):
-    """去控制字元（換行、tab 也換成空白）、截斷。不是字串的值先轉成字串。"""
-    s = CTRL_RE.sub(" ", str(s))
+    """去控制字元（換行、tab 也換成空白）、不可見與雙向控制字元、孤立的 surrogate，再截斷。不是字串的值先轉成字串。"""
+    s = s if isinstance(s, str) else _to_str(s)
+    s = s.encode("utf-8", "replace").decode("utf-8")          # 孤立 surrogate → ?（寫檔不會 UnicodeEncodeError 卡住部署；預驗建議 4）
+    s = CTRL_RE.sub(" ", s)
+    s = INVISIBLE_RE.sub("", s)
     return s if len(s) <= n else s[:n] + "…"
 
 
