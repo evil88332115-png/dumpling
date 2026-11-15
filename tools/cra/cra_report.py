@@ -43,6 +43,9 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
 作業系統核心（Jetson 的對應 Canonical 核心約 6000 列）：風險評估的主清單（8.4–8.6、附錄 A）不列核心的列，改在 8.7 節摘要
   （修補狀態、層級、修補全部所需的最低核心版本、只列 P1 與 accepted 的表格），完整清單寫 kernel-vulnerabilities.md。
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
+  C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另帶出狀態列的說明原文（只顯示，不拿來判斷）；scan/kernel-config.json 讀得到
+  核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」。
+  資料狀態與 VEX 不受影響（C-kernel-coverage 本來就在 COND_STAGES）。客戶版（supplier-package）沒有核心段落，不加任何核心狀態文字。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
 
 判定（專案驗收原則：缺資料不可顯示為安全）：
@@ -3777,6 +3780,52 @@ def kernel_fix_all(krows):
     return sorted(groups.values(), key=lambda g: (g["mapped_from"] is None, g["component"]))
 
 
+COVERAGE_STAGE = "C-kernel-coverage"
+
+
+def kernel_cve_list_info(kcfg):
+    """scan/kernel-config.json（schema 對、有 results 清單）→ ({CVE（大寫）}, 來源說明) 或 None（讀不到就不猜）。
+    清單來源取結構化欄位 inputs.cves_origin（sca-scan 寫的，中文）：KERNEL_CVES 開頭＝明確給的清單（與 Grype／DT 的核心 CVE 合併）、
+    kernel-cna-version 開頭＝依核心版本從 CNA 產生的清單；沒有這個欄位＝Grype、DT 對核心的比對；其他不認得的值只寫檔名。"""
+    if not (isinstance(kcfg, dict) and kcfg.get("schema") == "sca-center-kernel-config/1" and isinstance(kcfg.get("results"), list)):
+        return None
+    cves = {x["cve"].upper() for x in kcfg["results"] if isinstance(x, dict) and isinstance(x.get("cve"), str) and x["cve"]}
+    if not cves:
+        return None
+    origin = (kcfg.get("inputs") or {}).get("cves_origin") if isinstance(kcfg.get("inputs"), dict) else None
+    if origin is None:
+        src = "Grype and Dependency-Track kernel findings"
+    elif isinstance(origin, str) and origin.startswith("KERNEL_CVES"):
+        src = "KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings"
+    elif isinstance(origin, str) and origin.startswith("kernel-cna-version"):
+        src = "kernel CNA version comparison"
+    else:
+        src = "not recognised"
+    return cves, f"{src}; `scan/kernel-config.json`"
+
+
+def kernel_gap_text(status, krows, kcfg):
+    """C-kernel-coverage 不是 OK 時（有這一列）8.7 節與 kernel-vulnerabilities.md 多寫的說明（D-063）：狀態列的說明原文（只顯示，不拿來判斷），
+    以及核心 CVE 清單裡沒有成列的數量（N 取自 scan/kernel-config.json 的 results，讀不到或 N 不大於 M 時不寫）。OK 或沒有這一列時回傳空字串。"""
+    if not status or COVERAGE_STAGE not in status or status[COVERAGE_STAGE][0] == "OK":
+        return ""
+    st, detail = status[COVERAGE_STAGE][0], " ".join(str(status[COVERAGE_STAGE][1]).split())
+    out = [f"**Kernel coverage limitation:** `{COVERAGE_STAGE}` is {st}. Status text as recorded by sca-scan:\n\n> {detail}"]
+    info = kernel_cve_list_info(kcfg)
+    if info:
+        cves, src = info
+        listed = set()
+        for r in krows:
+            listed |= {c.upper() for c in r.get("cves") or []}
+            m = CVE_RE.match(str(r.get("id") or ""))
+            if m:
+                listed.add(m.group(1).upper())
+        n, m = len(cves), len(cves & listed)
+        if n > m:
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); listed as rows: {m} CVEs; the other {n - m} are not listed as rows.")
+    return "\n\n".join(out)
+
+
 def kernel_stage_text(status):
     st = [f"`{k}` {status[k][0]}" for k in ("C-kernel-l4t-map", "C-kernel-coverage") if status and k in status]
     return ("sca-scan kernel stages: " + ", ".join(st) + ". OK only means that the kernel was matched against vulnerability data; "
@@ -3787,7 +3836,7 @@ NOT_ASSESSED_TAIL = ("Kernel vulnerabilities were NOT assessed: the absence of k
                      "no known vulnerabilities.")
 
 
-def kernel_absent_text(status, mode, have_findings):
+def kernel_absent_text(status, mode, have_findings, kcfg=None):
     """沒有核心的列時，8.7 節的一段說明與狀態代號。核心在 SBOM 裡卻沒有比對（GAP 等）一律寫 NOT assessed，不寫「沒有弱點」。
     C-kernel-l4t-map 是 FAIL 時只說對應的步驟失敗（不斷定 SBOM 有 L4T 核心）。"""
     if not have_findings:
@@ -3802,6 +3851,9 @@ def kernel_absent_text(status, mode, have_findings):
     for k, what in (("C-kernel-l4t-map", "a Jetson Linux (L4T) kernel, but no Canonical kernel mapping was applied"),
                     ("C-kernel-coverage", "an operating system kernel, but the kernel was not matched against vulnerability data")):
         if k in status and status[k][0] != "OK":
+            if k == COVERAGE_STAGE:       # D-063：狀態列的說明原文與沒有成列的核心 CVE 數（OK 時不會到這裡）
+                return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}). " + NOT_ASSESSED_TAIL
+                                        + "\n\n" + kernel_gap_text(status, [], kcfg))
             return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}: {en(status[k][1])}). "
                                     + NOT_ASSESSED_TAIL)
     if any(k in status for k in ("C-kernel-l4t-map", "C-kernel-coverage")):
@@ -3814,11 +3866,11 @@ def kernel_absent_text(status, mode, have_findings):
                            "an operating system the product runs on is not covered by this scan.")
 
 
-def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None):
+def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None, kcfg=None):
     """euvd：None＝沒有 EUVD（沒有檔案、也沒有 C-euvd 這一行）；True＝EUVD 能用；字串＝不能用的原因（EUVD 的行寫 not available，不寫 0）。"""
     """回傳 (8.7 節的內容（Markdown）, 狀態代號, summary.json 用的數量, kernel-vulnerabilities.md 的摘要段)。"""
     if not krows:
-        state, text = kernel_absent_text(status, mode, have_findings)
+        state, text = kernel_absent_text(status, mode, have_findings, kcfg)
         return text, state, None, None
     t = tally(krows)
     fs = Counter(r["fix_state"] for r in krows)
@@ -3843,6 +3895,9 @@ def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, e
     stages = kernel_stage_text(status)
     if stages:
         parts.append(stages)
+    gap = kernel_gap_text(status, krows, kcfg)
+    if gap:
+        parts.append(gap)
     metrics = [["Kernel vulnerability rows (vulnerability × component version)", t["rows"]]]
     metrics += [[f"Grype fix state: {s}", fs[s]] for s in FIX_STATES if s != "unknown" or fs[s]]
     metrics += [[f"{x.upper()} – {pol['tiers'][x]['label']}", t[x]] for x in ("p1", "p2", "p3")]
@@ -5092,7 +5147,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     counts = [[m, raw if i == 0 else f(ta)] + ([f(tk), f(tm)] if krows else []) for i, (m, f) in enumerate(metrics)]
     ksection, kstate, kcounts, ksummary = kernel_section(krows, kinfo, status, pol, meta.get("mode") or NR,
                                                          isinstance(findings, list), have_grype,
-                                                         None if not euvd_used else True if euvd_map is not None else euvd_reason)
+                                                         None if not euvd_used else True if euvd_map is not None else euvd_reason, kcfg)
     # 版面的說明不是狀態的理由：寫在資料狀態說明的後面並標明 Note，不放進 reasons（summary.json 的 detail 也不放）
     notes = []
     if not split:

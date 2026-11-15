@@ -502,6 +502,8 @@ def build(out_dir):
     if "C-kernel-coverage" in sts:
         vers = [x.get("version") for x in (kc.get("versions") or []) if isinstance(x, dict) and x.get("version")] if isinstance(kc, dict) else []
         kernel = {"status": sts["C-kernel-coverage"], "versions": vers}
+        if isinstance(kc, dict) and kc.get("distro_data_unused"):       # M7d-5：核心有比對，但只有上游版本範圍（結構化欄位，不看說明文字）
+            kernel["upstream_ranges_only"] = True
     # NVIDIA 安全公告（C-nvidia-bulletins，lib/nvidia_bulletins.py）：狀態列在階段表；有發現（對照表已審核的列）時弱點節另外註明筆數
     nvb, _ = load_json(os.path.join(out_dir, "scan", "nvidia-bulletins.json"))
     nvidia = None
@@ -794,7 +796,10 @@ def render(rep):
     # --- 3. 弱點 ---
     p.append("<h2>弱點</h2>")
     kc = rep.get("kernel_coverage")
-    if kc and kc["status"] == "GAP":
+    if kc and kc["status"] == "GAP" and kc.get("upstream_ranges_only"):
+        p.append(f'<div class="card alert inc">作業系統核心（版本 {e("、".join(kc["versions"]) or "未知")}）的比對只有上游版本範圍（NVD），'
+                 "沒有用到發行版的修補（含回移）資訊：核心的弱點清單可能有誤報，也可能漏報（見 <code>C-kernel-coverage</code>）。</div>")
+    elif kc and kc["status"] == "GAP":
         p.append(f'<div class="card alert inc">作業系統核心（版本 {e("、".join(kc["versions"]) or "未知")}）沒有做漏洞比對，'
                  "核心的漏洞不在下面的數字裡（見 <code>C-kernel-coverage</code>）。</div>")
     nv = rep.get("nvidia_bulletins")

@@ -16,6 +16,12 @@
   - 有核心，Grype（或 DT）對核心至少 1 筆比對 → OK（只表示有做核心比對，不代表核心的弱點完整）；
     但核心不在發行版的核心序列上（OFF_SERIES_RULES，見下）時不是 OK，是 GAP。
   - 有核心，對核心 0 筆比對（或沒有 Grype 結果）→ GAP：核心的 CVE 未評估，0 筆不代表沒有。
+  - 只有上游版本範圍的比對（M7d-5，D-063；規則 DISTRO_DATA_RULE）：SBOM 有發行版的核心 deb（上面第 2 條的 deb 套件，不含 nvidia-l4t-kernel*），
+    而所有核心比對都落在 generic 的核心元件（pkg:generic/linux-kernel、CPE linux_kernel；NVD 的上游版本範圍），發行版核心 deb 一筆都沒有比對到，
+    也沒有 C-kernel-l4t-map 的對應 → GAP：沒有用到發行版安全資料的修補（含回移）資訊，可能有誤報，也可能漏報（例如 Debian 13 的核心 deb，
+    原始碼套件是 linux-signed-amd64，Debian 安全追蹤用 linux 記錄核心 CVE）。用結構化的條件判斷（Grype 的 artifact 與 DT 元件的型別、purl），不解析說明文字。
+    證據寫在 scan/kernel-coverage.json 的 distro_data_unused（只有這條規則成立時才有這個欄位，其他情況的輸出不變）。
+    和「不在發行版核心序列上」同時成立時，兩個原因都記（off_series 與 distro_data_unused），說明也兩個都寫。
 退出碼：0 已判定；3 輸入錯誤（同時印 FAIL 那一行，不印 traceback）。
 
 為什麼要有這個階段（證據）：Jetson Linux R39.2.1（Ubuntu 24.04 arm64）映像，Syft 1.55.0 的 SBOM 有 nvidia-l4t-kernel 等 deb 套件與
@@ -48,7 +54,7 @@ Grype 與 DT 對核心都是 0 筆，報告看起來像核心沒有弱點（Jets
   規則 a 也看 purl 的 epoch= 限定詞；規則 d 的 Debian 是 distro=debian 或 debian-*。
   已知沒有涵蓋的情況（要用 c 明確宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu、purl 也沒有 upstream／distro 限定詞（或限定詞也像發行版）；
   後綴不在清單或不是 + 的寫法（~rpt、.rpt）；distro= 不是 Debian（raspbian-*）或沒有 distro= 而來源套件是自訂名稱；名稱不在 KERNEL_PACKAGE_PATTERNS 的核心套件（連核心都偵測不到）。
-  這些規則抓得到的是已知的樣子，抓不到不代表核心是發行版的。核心 CVE 要以上游版本對核心 CNA（尚未實作，見 M7）。
+  這些規則抓得到的是已知的樣子，抓不到不代表核心是發行版的。核心 CVE 沒有以上游版本對核心 CNA 列出。
 核心版本的來源（依序）：linux-kernel 元件的版本 → 核心模組所在的 /usr/lib/modules/<版本>/（或 /lib/modules/）路徑，
   路徑沒有時用 Syft 的 syft:metadata:kernelVersion → 核心套件的版本。
 """
@@ -406,6 +412,80 @@ def dt_counts(findings):
     return {"matches": n}
 
 
+def _is_distro_package_artifact(a):
+    """Grype 的 artifact 或 DT 的元件（purl、名稱、type）是發行版的核心套件（deb／rpm／apk，名稱符合 KERNEL_PACKAGE_PATTERNS）。"""
+    typ, name = purl_type_name(a.get("purl"))
+    if typ is None:
+        typ, name = a.get("type"), a.get("name")
+    return typ in PACKAGE_TYPES and is_kernel_package_name(name)
+
+
+def grype_match_split(grype):
+    """Grype 對核心的比對分成 (發行版核心套件的筆數, generic 核心元件的筆數, {generic 元件名稱: 筆數})。
+    「核心的比對」的定義同 grype_counts（grype_artifact_is_kernel）；套件＝deb／rpm／apk 的核心套件，其餘（linux-kernel、linux-kernel-module、
+    CPE 是 Linux 核心的 artifact）＝generic／NVD 的核心元件。ignoredMatches 不算。"""
+    pkg, gen, by = 0, 0, collections.Counter()
+    for m in grype["matches"]:
+        a = m.get("artifact") if isinstance(m, dict) else None
+        if not grype_artifact_is_kernel(a, m.get("matchDetails")):
+            continue
+        if _is_distro_package_artifact(a):
+            pkg += 1
+        else:
+            gen += 1
+            by[a.get("name") or "?"] += 1
+    return pkg, gen, dict(by.most_common(50))
+
+
+def dt_match_split(findings):
+    """DT finding 對核心的比對分成 (發行版核心套件的筆數, generic 核心元件的筆數)；「核心的比對」的定義同 dt_counts。"""
+    pkg, gen = 0, 0
+    for f in findings:
+        c = (f.get("component") if isinstance(f, dict) else None) or {}
+        if not isinstance(c, dict):
+            continue
+        typ, name = purl_type_name(c.get("purl"))
+        if typ in PACKAGE_TYPES and is_kernel_package_name(name):
+            pkg += 1
+        elif is_kernel_cpe(c.get("cpe")) or (typ == "generic" and name == "linux-kernel"):
+            gen += 1
+    return pkg, gen
+
+
+def distro_kernel_debs(packages):
+    """SBOM 的核心套件裡「發行版的核心 deb」：deb、不含 OFF_SERIES_EXEMPT（nvidia-l4t-kernel*：NVIDIA 的核心套件，由 C-kernel-l4t-map 對應 Canonical 核心）。"""
+    out = []
+    for p in packages:
+        if p.get("purl_type") != "deb":
+            continue
+        names = {n.lower() for n in (p.get("name"), purl_type_name(p.get("purl"))[1]) if isinstance(n, str) and n}
+        if any(r.match(n) for n in names for r in _EXEMPT_RE):
+            continue
+        out.append(p)
+    return out
+
+
+DISTRO_DATA_RULE = ("SBOM 有發行版的核心 deb，而所有核心比對都落在 generic／NVD 的核心元件（pkg:generic/linux-kernel、CPE linux_kernel），"
+                    "發行版核心 deb 一筆都沒有比對到，也沒有 C-kernel-l4t-map 的對應")
+
+
+def distro_data_unused(comps, g, d, mk, gsplit, dsplit):
+    """結構化規則（不解析任何說明文字）：成立時回傳證據 dict，否則 None。
+    條件同時成立：(1) SBOM 有發行版的核心 deb；(2) 沒有 C-kernel-l4t-map 的對應元件（mk，Jetson）；
+    (3) 發行版核心套件的比對（Grype artifact、DT 元件是核心 deb／rpm／apk）一筆都沒有；(4) generic 核心元件的比對至少 1 筆。"""
+    debs = distro_kernel_debs(comps["kernel_packages"])
+    if not debs or mk:
+        return None
+    pkg_n = (gsplit[0] if gsplit else 0) + (dsplit[0] if dsplit else 0)
+    gen_n = (gsplit[1] if gsplit else 0) + (dsplit[1] if dsplit else 0)
+    if pkg_n or not gen_n:
+        return None
+    return {"rule": "generic-only-no-distro-package-match", "why": DISTRO_DATA_RULE,
+            "distro_kernel_packages": [{"name": p.get("name"), "version": p.get("version"), "purl": p.get("purl")} for p in debs],
+            "matches": {"distro_packages": pkg_n, "generic_components": gen_n,
+                        "grype_generic_by_component": gsplit[2] if gsplit else {}, "dt_generic": dsplit[1] if dsplit else 0}}
+
+
 SOURCE_LABEL = {"linux_kernel_component": "linux-kernel 元件", "modules_path": "模組路徑",
                 "module_metadata": "模組的 syft:metadata:kernelVersion", "kernel_package": "核心套件"}
 
@@ -476,14 +556,29 @@ def assess(sbom, grype=None, dt_findings=None, kmap=None, not_distro=None):
             r = f"規則 c：平台宣告核心不是發行版的核心（{not_distro}）"
             off.insert(0, {"name": None, "version": None, "reason": r, "reasons": [r]})
         ev["off_series"] = off
+        # 只有上游版本範圍的比對（DISTRO_DATA_RULE）：和 off-series 各自獨立，兩個都成立時兩個原因都記。沒成立時 ev 不多這個欄位（輸出不變）
+        du = distro_data_unused(comps, g, d, mk, grype_match_split(grype) if g else None, dt_match_split(dt_findings) if d else None)
+        if du:
+            ev["distro_data_unused"] = du
+            dpk = du["distro_kernel_packages"][0]["name"]
+            dmore = f" 等 {len(du['distro_kernel_packages'])} 個" if len(du["distro_kernel_packages"]) > 1 else ""
+            dtext = (f"核心的比對只有上游版本範圍（NVD；generic 核心元件 {du['matches']['generic_components']} 筆），發行版核心套件 {dpk}{dmore} "
+                     "沒有比對到發行版的安全資料，沒有用到發行版的修補（含回移）資訊：可能有誤報，也可能漏報")
         if off:
             f = off[0]
             who = f["reason"] if f["name"] is None else f"{f['name']} {f['version']}：{f['reason']}"
             more = f"，另有 {len(off) - 1} 項" if len(off) > 1 else ""
             st = "GAP"
             matched = f"Grype／DT 對核心有 {gn + dn} 筆比對，但" if gn + dn > 0 else "對核心的比對 0 筆，而且"
-            detail = (f"核心不在發行版的核心序列上（{who}{more}）：發行版資料（Grype／DT 的 Debian／Ubuntu 紀錄）的比對不可靠，可能漏報；"
-                      f"核心 CVE 要以上游版本對核心 CNA（尚未實作，見 M7）。{matched}不當作核心已涵蓋；核心{vt}；{what}；證據見 scan/kernel-coverage.json 的 off_series")
+            # 兩個原因都成立時，只有上游版本範圍的那句（短）放最前面：status 說明欄只留 500 字元，off-series 的原因文字本來就長，
+            # 放在後面會被截掉；完整的原因都在 scan/kernel-coverage.json
+            off_text = (f"核心不在發行版的核心序列上（{who}{more}）：發行版資料（Grype／DT 的 Debian／Ubuntu 紀錄）的比對不可靠，可能漏報；"
+                        f"核心 CVE 沒有以上游版本對核心 CNA 列出。{matched}不當作核心已涵蓋；")
+            detail = ((f"{dtext}；另外，" if du else "") + off_text + f"核心{vt}；{what}；"
+                      + ("證據見 scan/kernel-coverage.json 的 off_series、distro_data_unused" if du else "證據見 scan/kernel-coverage.json 的 off_series"))
+        elif du:
+            st = "GAP"
+            detail = (f"{dtext}；核心{vt}；{what}；證據見 scan/kernel-coverage.json 的 distro_data_unused")
         elif gn + dn > 0:
             st = "OK"
             tools = f"Grype {gn}" + (f"、DT {dn}" if d is not None else "")
