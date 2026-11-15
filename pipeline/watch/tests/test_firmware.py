@@ -1386,3 +1386,38 @@ class RematchLimits(RematchInput):
             self.assertIsNotNone(m, name)
             self.assertEqual(int(m.group(1)), getattr(match, name), name)
 
+
+
+class FirmwareDt(FW):
+    """C0（2026-11-15）：dt 的 status 不是 OK → 需注意（原因照 meta 的固定句），不影響公告比對、不開 Issue、不降級。"""
+
+    def result(self, day):
+        return json.load(open(os.path.join(self.w, "out-" + day[:10], "result.json")))
+
+    def test_gap_goes_to_attention_not_serious(self):
+        self.baseline()
+        self.fw["dt"] = {"status": "GAP", "result": "NOT_RUN", "reason": "DT 上傳沒有完成；Release 的內容與 DT 的結果無關"}
+        for s in ("bios-a", "bios-b"):
+            self.set_results(s, [], "OK")
+        _, _, plan = self.go(NOW2)
+        r = self.result(NOW2)
+        self.assertTrue([x for x in r["attention"] if "DT 上傳（NOT_RUN）：DT 上傳沒有完成" in x], r["attention"])
+        self.assertFalse([x for x in r["serious"] if "DT" in x])
+        self.assertEqual(self.fw_opens(plan), [])
+        self.assertFalse([x for x in plan["actions"] if "watch-health" in x.get("labels", [])])
+
+    def test_ok_absent_and_bad(self):
+        self.baseline()
+        for s in ("bios-a", "bios-b"):
+            self.set_results(s, [], "OK")
+        for dt, where, text in (({"status": "OK", "result": "OK", "reason": None}, "notes", "DT 上傳：OK"),
+                                (None, "notes", "沒有 DT 結果"),
+                                ({"status": "GAP", "result": "FAIL", "reason": "dt 欄位格式不對"}, "attention", "dt 欄位格式不對")):
+            with self.subTest(dt=dt):
+                if dt is None:
+                    self.fw.pop("dt", None)
+                else:
+                    self.fw["dt"] = dt
+                self.go(NOW2)
+                r = self.result(NOW2)
+                self.assertTrue([x for x in r[where] if text in x], r[where])

@@ -1857,6 +1857,17 @@ def fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious):
     for x in (fw.get("not_watched") or [])[:30]:
         if isinstance(x, dict):
             notes.append(f"韌體不監控：{x.get('slug')}：{x.get('why')}")
+    fw_meta = inv.get("firmware") if isinstance(inv.get("firmware"), dict) else None
+    if fw_meta is not None and not fw_meta.get("problems"):
+        dt = fw_meta.get("dt")
+        if dt is None:
+            notes.append("韌體 Release 沒有 DT 結果（firmware-meta 沒有 dt 欄位）")
+        elif isinstance(dt, dict) and dt.get("status") == "OK" and dt.get("result") == "OK":
+            notes.append("韌體 Release 的 DT 上傳：OK")
+        else:          # 只放進需注意：不影響公告比對、不開 Issue、不降級（C0，2026-11-15）
+            why = dt.get("reason") if isinstance(dt, dict) and isinstance(dt.get("reason"), str) else "dt 欄位格式不對"
+            res = dt.get("result") if isinstance(dt, dict) and dt.get("result") in ("FAIL", "NOT_RUN") else None
+            attn.append(f"韌體 Release 的 DT 上傳{('（' + res + '）') if res else ''}：{why}")
     if inv.get("firmware_older"):
         notes.append("舊的韌體 Release 不比對（只監控最新的一個，第一階段示範的限制）：" + "、".join(str(x)[:60] for x in inv["firmware_older"][:10]))
     if rm.get("rejected"):

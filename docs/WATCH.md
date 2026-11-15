@@ -100,7 +100,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 
 - **韌體 Release**（`docs/FIRMWARE-WATCH.md`）：tag `firmware-demo/<版本>`（不是 prerelease）分類成 `firmware`，**不進 `releases`**（不要求 release-meta），放在 inventory 的 `firmware`；只收最新的一個（`published_at`），其他列在 `firmware_older`（第一階段示範的限制）。
   讀 `firmware-meta.json`（schema `dumpling-firmware-meta/1`、tag 要一致；壞掉 → 整個韌體 Release 的 problem、inventory GAP），依它下載每個樣本的 `fw-<slug>.cdx.json` 與（bios）`fw-inventory-<slug>.json`，**每個附件都核對 meta 列的 sha256**；單一樣本的問題只讓那一份 GAP。
-  監控鍵的版本部分 `watch_version`：`<slug>@<firmware_version>`；版本讀不到或是佔位字串（空、`xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`…）→ `<slug>@sha256-<映像雜湊前 16 碼>` 並標 GAP；兩者都沒有 → 不監控、列進 `not_watched`。meta 的 `tables` 只留三張表的字串欄位。match.py 讀 `firmware`（見 3.2 的「韌體」），support.py 跳過韌體（不是產品，沒有支援期限）。
+  監控鍵的版本部分 `watch_version`：`<slug>@<firmware_version>`；版本讀不到或是佔位字串（空、`xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`…）→ `<slug>@sha256-<映像雜湊前 16 碼>` 並標 GAP；兩者都沒有 → 不監控、列進 `not_watched`。meta 的 `tables` 只留三張表的字串欄位。meta 的 `dt`（C2 #140：DT 上傳的結果，只用來顯示）存成 inventory 的 `firmware.dt`：合法組合只有 `OK/OK/null` 與 `GAP/(FAIL|NOT_RUN)/非空原因（≤ 200 字）`，其他一律 `dt 欄位格式不對`（不顯示原文），沒有這個欄位是 null；match 在 `dt` 不是 OK 時把原因放進「需注意」，不影響公告比對、不開 Issue、不降級（C0，2026-11-15）。match.py 讀 `firmware`（見 3.2 的「韌體」），support.py 跳過韌體（不是產品，沒有支援期限）。
 
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
 
