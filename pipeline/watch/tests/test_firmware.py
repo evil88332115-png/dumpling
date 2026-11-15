@@ -810,7 +810,9 @@ class HashChange(FW):
 
     def test_hash_change_comments_once_per_open_issue(self):
         plan = self.setup_open_issues()
-        mine = [x for x in nohealth(plan) if x["op"] == "open" and "layer-firmware" in x["labels"] and "bios-a" in x["title"]]      # bios-a 的 Issue
+        # bios-a 的 Issue。廠商層級是「一個廠商 × CVE 一個 Issue」（D-064 B，#121）：標題寫「<第一個版本> 等 n 個版本」，bios-a 在內文的表格裡
+        mine = [x for x in nohealth(plan) if x["op"] == "open" and "layer-firmware" in x["labels"]
+                and ("bios-a" in x["title"] or ("vendor-level" in x["labels"] and "bios-a" in x["body"]))]
         before = {x["key"] for x in mine}
         kinds = {x["labels"][0] for x in mine}
         self.assertEqual(kinds, {"kev", "firmware-advisory", "vendor-level"})                    # 三種開著的 Issue

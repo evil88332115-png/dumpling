@@ -984,6 +984,37 @@ def test_malformed_mirror_is_an_input_error(patch, word):
         nb.mirror_info(t)
 
 
+HOUR_24 = ("2026-11-13T24:00:00Z", "2026-11-13T24:00:00+00:00", "2026-11-13T24:00:01Z")
+
+
+@pytest.mark.parametrize("field", ["commit_date", "fetched_utc"])
+@pytest.mark.parametrize("value", HOUR_24)
+def test_hour_24_is_rejected(field, value):
+    # Python 3.14 的 fromisoformat 把 24:00:00 收成隔天 00:00（3.12 不收）：時只收 00～23，任何版本都擋（C2 #119 同樣的修正）
+    _bad(_vt(mirror={**MIRROR_OK, field: value}), field)
+
+
+def test_hour_24_is_rejected_even_if_fromisoformat_accepts_it(monkeypatch):
+    # 在 3.12 上模擬 3.14 的寬鬆 fromisoformat（24:00:00 → 隔天 00:00），確認擋下的是我們自己的檢查，不是剛好靠 Python 版本
+    real = datetime.datetime
+
+    class Lenient(real):
+        @classmethod
+        def fromisoformat(cls, v):
+            if v[11:19] == "24:00:00":
+                return real.fromisoformat(v[:11] + "00:00:00" + v[19:]) + datetime.timedelta(days=1)
+            return real.fromisoformat(v)
+
+    shim = type("M", (), {"datetime": Lenient, "date": datetime.date, "timedelta": datetime.timedelta,
+                          "timezone": datetime.timezone})
+    monkeypatch.setattr(nb, "datetime", shim)
+    assert Lenient.fromisoformat("2026-11-13T24:00:00+00:00") == real(2026, 11, 14, tzinfo=datetime.timezone.utc)
+    for v in HOUR_24:
+        assert nb._iso_with_tz(v) is None, v
+    assert nb._iso_with_tz("2026-11-13T23:59:59Z") == real(2026, 11, 13, 23, 59, 59, tzinfo=datetime.timezone.utc)
+    assert nb._iso_with_tz("2026-11-13T00:00:00+08:00") is not None
+
+
 def test_mirror_must_be_an_object():
     _bad({**_vt(mirror=None), "mirror": "98dc5d70"}, "mirror")
 
