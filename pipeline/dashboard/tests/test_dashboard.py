@@ -957,3 +957,26 @@ class MissingDataIsGap(unittest.TestCase):
         self.assertIn("不認得的分級", e.html[:e.html.index("</header>")])     # 頁首的「不認得的狀態值」警告
         self.assertEqual(check_site.check_html(e.html, REPO), [])
 
+    def test_new_tiers_format(self):
+        """C1 的新格式：6 個 key 都寫（0 也寫）、清單外放 tiers_unknown。新格式缺 key 是真的異常；tiers_unknown 有值 → 不明＋頁首警告。"""
+        full = {"p1": 0, "p2": 0, "p3": 2, "accepted": 0, "distro_fixed": 0, "nvidia_bulletin": 0}
+        e1 = run_entry(tiers=dict(full))
+        e1["vulnerabilities"]["tiers_unknown"] = {"None": 3}
+        e2 = run_entry(tiers={k: v for k, v in full.items() if k != "accepted"})
+        e2["vulnerabilities"]["tiers_unknown"] = {}
+        e3 = run_entry(tiers=dict(full))
+        e3["vulnerabilities"]["tiers_unknown"] = [1]
+        e = self.env_scan({"": e1, "-bsp": e2, "-os": e3})
+        sec = self.section(e.html, "漏洞統計（含該報告的狀態）", "</table>")
+        rows = sec.split("<tr>")
+        f = next(r for r in rows if '<span class="ext">full</span>' in r)
+        b = next(r for r in rows if '<span class="ext">bsp</span>' in r)
+        o = next(r for r in rows if '<span class="ext">os</span>' in r)
+        self.assertIn("p1 0", f)
+        self.assertNotIn("GAP", f.split("CVE 總數")[0].split("</div>", 1)[1])     # 新格式的 0 照寫，不是 GAP
+        self.assertIn('<span class="ext">None</span> 3', f)
+        self.assertIn('accepted <span class="st st-GAP">GAP</span>（缺（新格式不該缺））', b)
+        self.assertIn("tiers_unknown 不是物件", o)
+        self.assertIn("不認得的分級", e.html[:e.html.index("</header>")])
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+

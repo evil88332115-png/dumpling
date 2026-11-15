@@ -352,6 +352,8 @@ def render_vulns(ctx, rel):
                 parts.append('%s <span class="st st-GAP">GAP</span>（%s）' % (esc(k, 20), esc(tg.get(k) or "缺", 20)))
         for k, v in lst(r.get("unknown_tiers")):
             parts.append("%s %s %s" % (ext(k, 40), num(v), ctx.st("不認得的分級")))
+        if r.get("tiers_unknown_bad"):
+            parts.append(ctx.gap(r["tiers_unknown_bad"]))
         if r.get("tiers_gap"):
             parts.insert(0, ctx.gap(r["tiers_gap"]))
         total = num(r.get("cves_total"))

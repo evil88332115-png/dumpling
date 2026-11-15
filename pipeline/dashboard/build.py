@@ -180,7 +180,11 @@ def scan_row(scan):
         tiers_raw = vul.get("tiers")
         tiers = tiers_raw if isinstance(tiers_raw, dict) else {}
         # 每個分級逐項：缺少或格式不對都要寫出來，不能靜默丟掉（C0 驗證應修 2）
-        tier_gaps = {k: ("缺" if k not in tiers else "格式不對") for k in TIERS if ci(tiers.get(k)) is None}
+        # 新格式（C1 改 vuln_metrics 之後）：tiers 固定寫 6 個 key（0 也寫），清單外的值放在 tiers_unknown（{"值": 列數}）。
+        # 有 tiers_unknown 這個欄位就是新格式：缺 key 是真的異常；舊格式缺 key 可能代表 0（GAP 加說明）
+        new_fmt = isinstance(vul.get("tiers_unknown"), dict)
+        tier_gaps = {k: (("缺（新格式不該缺）" if new_fmt else "缺") if k not in tiers else "格式不對")
+                     for k in TIERS if ci(tiers.get(k)) is None}
         us = r.get("upstream_source")
         reports[name] = {"report_status": cs(r.get("report_status")), "release_gate": cs(r.get("release_gate")),
                          "build_record_status": cs(r.get("build_record_status")),
@@ -189,7 +193,11 @@ def scan_row(scan):
                          "tiers": {k: ci(tiers.get(k)) for k in TIERS if ci(tiers.get(k)) is not None},
                          "tier_gaps": tier_gaps, "tiers_gap": None if isinstance(tiers_raw, dict) else "沒有 tiers",
                          # 不認得的分級（例如某一列沒有 tier 時的 "None"）：標成異常，不默默丟掉（C1 建議）
-                         "unknown_tiers": [[c(k, 40), ci(v)] for k, v in sorted(tiers.items(), key=lambda kv: str(kv[0])) if k not in TIERS][:10],
+                         "unknown_tiers": ([[c(k, 40), ci(v)] for k, v in sorted(tiers.items(), key=lambda kv: str(kv[0])) if k not in TIERS]
+                                           + [[c(k, 40), ci(v)] for k, v in sorted((vul.get("tiers_unknown") if new_fmt else {}).items(),
+                                                                                key=lambda kv: str(kv[0]))])[:10],
+                         "tiers_format": "new" if new_fmt else "old",
+                         **({} if new_fmt or "tiers_unknown" not in vul else {"tiers_unknown_bad": "tiers_unknown 不是物件"}),
                          "cves_total": ci(vul.get("cves_total"))}
     if not reports:
         raise Gap("scan-summary 的 runs 裡沒有 full／-bsp／-os")
