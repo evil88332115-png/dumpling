@@ -50,14 +50,15 @@ def test_cve_list_source_same_for_all_kernels_is_written_once():
                 "b": doc(["CVE-2025-0002"], origin="KERNEL_CVES（另一個說明）")})
     cves, src = cr.kernel_cve_list_info(m)
     assert cves == {"CVE-2025-0001", "CVE-2025-0002"}
-    assert src == "KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings; `scan/kernels/<version>/kernel-config.json`, 2 kernels"
+    assert src == "KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings; 2 kernels"
+    assert "scan/" not in src and "`" not in src          # 交付文件不帶內部檔案路徑
 
 
 def test_cve_list_source_differs_per_kernel_is_listed_per_kernel():
     m = merged({"b": doc(["CVE-2025-0002"]), "a": doc(["CVE-2025-0001"], origin="kernel-cna-version（…）")})
     _, src = cr.kernel_cve_list_info(m)
-    assert src == ("per kernel: a: kernel CNA version comparison; b: Grype and Dependency-Track kernel findings; "
-                   "`scan/kernels/<version>/kernel-config.json`")
+    assert src == "per kernel: a: kernel CNA version comparison; b: Grype and Dependency-Track kernel findings; 2 kernels"
+    assert "scan/" not in src and "`" not in src
 
 
 def test_a_plain_dict_that_claims_to_be_merged_is_read_as_a_single_kernel_doc():
