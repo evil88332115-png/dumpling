@@ -154,7 +154,7 @@ jobs:
         id: fwrematch
         if: inputs.mode == 'real'
         continue-on-error: true
-        timeout-minutes: 10       # 離線腳本：卡住不能佔掉整個 job
+        timeout-minutes: 20       # 離線腳本：卡住不能佔掉整個 job。C2 的入口整次上限 900 秒（單份 300 秒），步驟上限要比它長
         run: |
           inv="$RUNNER_TEMP/w/inv"
           meta=$(python3 -I -c 'import json,sys; fw=json.load(open(sys.argv[1])).get("firmware"); print((fw or {}).get("meta") or "")' "$inv/inventory.json") || meta=""

@@ -1302,3 +1302,41 @@ class StateSizeGuard(FW):
         self.assertNotIn("rule:x", out)
         self.assertEqual(out["rule:y"]["bulletins"], ["S-1"])
 
+
+class RejectedEntries(RematchInput):
+    """C2 介面 4ec170b：rematch-summary.json 的 rejected（firmware-meta 條目被丟掉）→ GAP、整輪降級；代碼白名單。"""
+
+    def test_rejected_listed_and_degrades(self):
+        self.baseline()
+        self.set_results("bios-a", [], "OK")
+        self.set_results("bios-b", [], "OK")
+        self.write_rm({"rejected": [{"index": 3, "reason": "invalid-slug (length 4)"}, {"index": 4, "reason": "duplicate-slug"}]})
+        _, _, plan = self.go(NOW2, write=False)
+        res_ = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        g = [x for x in res_["gaps"] if "拒絕了 firmware-meta.json 的 2 筆" in x]
+        self.assertTrue(g, res_["gaps"])
+        self.assertIn("第 3 筆（從 0 起算）：invalid-slug (length 4)", g[0])
+        self.assertIn("duplicate-slug", g[0])
+        self.assertTrue([x for x in res_["serious"] if "拒絕" in x])
+        self.assertEqual(res_["status"], "ATTENTION")
+        report = open(os.path.join(self.w, "out-" + NOW2[:10], "report.md")).read()
+        self.assertEqual(match.unsafe_markdown(report), [])
+
+    def test_rejected_bad_shapes(self):
+        for bad in ("x", [{"index": "3", "reason": "duplicate-slug"}], [{"index": 1, "reason": "@everyone [x](https://e.example)"}],
+                    [{"index": True, "reason": "reserved-slug"}], [{"index": 1, "reason": "invalid-slug (type str\n)"}]):
+            with self.subTest(bad=bad):
+                self.set_results("bios-a", [], "OK")
+                self.set_results("bios-b", [], "OK")
+                self.write_rm({"rejected": bad})
+                rm = self.load()
+                self.assertTrue(rm["rejected"])
+                self.assertNotIn("everyone", "".join(rm["rejected"]))
+
+    def test_empty_or_missing_rejected_is_fine(self):
+        for over in ({"rejected": []}, {}):
+            self.set_results("bios-a", [], "OK")
+            self.set_results("bios-b", [], "OK")
+            self.write_rm(over)
+            self.assertEqual(self.load()["rejected"], [])
+
