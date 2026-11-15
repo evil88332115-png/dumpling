@@ -224,6 +224,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 - 修剪過的群組之後再出現：用 `open_if_closed`（舊 Issue 已關閉就開新的、開著就留言），不會被「已有 Issue」跳過；群組鍵記在 `dumpling.pruned_keys`。
 - 大小：編碼後超過約 45000 字元 → 整輪 ATTENTION，並在健康 Issue 留言「接近上限」（7 天一次，不每天留言）。超過 60000 字元 → `apply` 照樣執行 Issue 動作（新的 KEV、彙總 Issue 開得出來），
   **狀態不寫**，最後明確 FAIL（下一輪從舊狀態重算：open 因標記跳過，不重複開；留言可能重複）。分段存放是之後的待辦。
+  實際的影響是**留言可能重複，不是重複開 Issue**（`open` 有 Issue 標記，下一輪會跳過；`open_if_closed` 的留言與「新增元件」等事件留言會再送一次）。#28 刻意這樣做：漏掉 KEV 通知比重複留言嚴重（C0 確認，2026-11-15）。
+  **韌體另有一道**（C0 裁定，2026-11-15）：韌體的資料是外來的（rematch 結果），不能讓它撐爆狀態而擋到 KEV。match 在寫入韌體這一輪的結果後先估算整份狀態的大小；超過 60000 字元 → **只有韌體停下來**：這一輪的韌體結果不寫進狀態（沿用上一輪的韌體狀態）、不產生公告 Issue 的動作、每份韌體樣本的公告比對標 GAP、整輪降級；`state.firmware.size_stopped_at` 記停止的時間，狀態 Issue 的摘要寫「韌體因狀態大小上限停止（時間）」，健康 Issue 當輪就開或留言（7 天一次）。板子的 KEV 照常處理。大小恢復後停止標記清掉、韌體照常。另外每筆公告結果的公告 ID 最多 20 個、每個樣本的 affected 最多 100 筆，超過就那份樣本 GAP（不截斷）。
 - `runs` 只留最近 30 次。
 - GitLab 階段：狀態 Issue 一定設成 confidential（寫在 GITLAB-PORT）。
 
