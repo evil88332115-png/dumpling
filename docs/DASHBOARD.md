@@ -1,6 +1,6 @@
 # DASHBOARD：GitHub Pages 靜態儀表板（D-062，設計）
 
-> 狀態：**設計已經 C0 同意（2026-11-15），還沒寫程式**（D-062 第 6 點：先交設計給 C0）。負責：C3（WP2）。
+> 狀態：**已實作（第一版）**：設計經 C0 同意（2026-11-15，D-062 第 6 點），程式見第 11 節。負責：C3（WP2）。
 > 範圍：公開示範階段。DT 上線後的內部網頁另議（GitLab 搬移與公司 IT），本檔 §8 只寫「搬到 GitLab Pages 要改哪裡」。
 
 ## 1. 目的與不做的事
@@ -211,3 +211,38 @@
 3. **已關閉的監控 Issue**：全部列出，預設摺起來。摺起來用 HTML 的 `<details>`，不需要 JS。
 4. **固定 action SHA**：依據是 D-012。D-062 第 5 點寫成 D-027，C0 會在下一批 DECISIONS 更正。
 5. **`workflow_run` 依來源各自判斷**（§5），測試寫在 §9。
+
+## 11. 檔案與執行方式（第一版）
+
+| 檔案 | 用途 |
+|---|---|
+| `pipeline/dashboard/trigger.py` | 第 5 節的觸發判斷（`decide()` 純函式＋CLI）。release 的 tag 格式重用 `pipeline/watch/collect.py` 的 `classify(tag, False)`，另外要求版本部分以 `v` 開頭（對應 release.yml 的 `*/v*`；`classify` 只看字元，`feature/x` 也會判成 release） |
+| `pipeline/dashboard/build.py` | 收資料、組 data dict、寫出 `site/index.html`、`style.css`、`data.json` |
+| `pipeline/dashboard/render.py` | data dict → HTML 字串（純函式）；集中的 `esc()`、`ext()`、`safe_href()` |
+| `pipeline/dashboard/check_site.py` | 部署前檢查（第 4 節的 HTML 檢查三件事＋href 白名單；style.css 不能有 `@import`、`url(`） |
+| `pipeline/dashboard/style.css` | 同站樣式（淺色、深色、手機寬度；OK 用中性色） |
+| `pipeline/dashboard/watchlib.py` | 用檔案路徑載入 `pipeline/watch/` 的 collect、issues、support，不另寫 HTTP 或正規式 |
+| `.github/workflows/pages.yml` | build（唯讀）→ deploy（`pages: write`、`id-token: write`）；觸發與權限見第 4、5 節 |
+| `tests/run.d/c3-dashboard.sh`、`pipeline/dashboard/tests/` | 單元測試（不連網，假的 source 與 issues api 注入） |
+
+本機執行（需要 PyYAML 才讀得到專案清單；沒有時專案那一格是 GAP）：
+
+```
+# 1. 最近一輪監控：下載 watch-plan-real-N／watch-support-real-N 的 artifact 到某資料夾，另寫 run.json：
+#    {"id": <watch run 編號>, "created_at": "<UTC ISO>", "event": "...", "conclusion": "..."}
+GITHUB_TOKEN=<token> python3 -I pipeline/dashboard/build.py --repo <owner/repo> --watch-dir <資料夾> --out site
+python3 -I pipeline/dashboard/check_site.py --repo <owner/repo> --site site
+python3 -I -W ignore -m unittest discover -s pipeline/dashboard/tests -t .
+```
+
+build.py 的參數：`--repo`、`--api`（預設 `$GITHUB_API_URL`）、`--watch-dir`、`--projects-dir`（預設 `projects`）、`--out`（預設 `site`）、`--now`（測試用）、`--commit`、`--backend`（目前只有 `github`）。token 只從環境變數 `GITHUB_TOKEN` 讀，不進任何輸出（錯誤訊息裡的 token 也會被遮掉，寫檔前再檢查一次）。全部來源（Releases、Issues、專案、監控資料）都抓不到時結束碼 1、不產生 site；只有部分抓不到時，那一格寫 `GAP（原因）`，整頁照常產生。
+
+第一版的取捨與已知缺口：
+
+- 資料來源（CISA KEV、EUVD、核心 CVE、Grype DB）逐項的狀態與時間：watch 的 `result.json` 沒有這個欄位（在 `feeds.tsv`，沒有進 artifact），頁面寫成 GAP 一行，不猜。要補得先讓 match.py 把它寫進 result.json。
+- 「每日沒有涵蓋的項目」讀 `watch-plan-real-N/report.md` 的同名段落（`result.json` 沒有這個欄位）。
+- 「開著的監控 Issue 數」是標題含專案鍵或產品名的開著 Issue 數（Issue 沒有專案欄位）；有任一組 Issue 讀不到就顯示 `—`。
+- 支援期限的 Issue 只有在 repo 變數 `WATCH_REAL_ISSUES` 為 `on` 時才會真的開；沒開時頁面只有支援期限檢查的各列（`watch-support-real-N/result.json`）。
+- `href` 除了第 4 節的三種，另外允許本站的 `style.css`、`data.json` 與頁內 `#錨點`（頁面本身要載入樣式表）。
+- 下載附件的大小上限：release-meta 1 MiB、scan-summary 8 MiB、每份 VEX 32 MiB；超過就是該格 GAP。
+- 搬 GitLab（第 8 節）要換的是 build.py 的資料來源那一層（`source`、`api`、watch 資料夾的取得）與 render.py 的連結白名單前綴（`BASE`、`safe_href`）；`build_data()`、HTML 輸出與 check_site 的規則不變。`--backend gitlab` 還沒有實作。
