@@ -1,0 +1,120 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.6",
+ "version": 1,
+ "metadata": {
+  "tools": {
+   "components": [
+    {
+     "type": "application",
+     "name": "dumpling x86_firmware.py"
+    }
+   ]
+  }
+ },
+ "components": [
+  {
+   "type": "firmware",
+   "bom-ref": "sca-center:fw:bios:ad23261d43116abc",
+   "name": "OVMF_CODE_4M.fd",
+   "hashes": [
+    {
+     "alg": "SHA-256",
+     "content": "ad23261d43116abc3747d59a7837fbf578c9586a8993f4eeba064cd07eccb083"
+    },
+    {
+     "alg": "SHA-512",
+     "content": "144d221e850d1840bfaa4ab6b67ee978909572c2516a419127af317b0954e5260e6b5388dbd52606639fe5d1ab8795bb78dc9560bcdd982f4c806c0e62413941"
+    }
+   ],
+   "properties": [
+    {
+     "name": "bsi:component:filename",
+     "value": "OVMF_CODE_4M.fd"
+    },
+    {
+     "name": "bsi:component:executable",
+     "value": "executable"
+    },
+    {
+     "name": "bsi:component:archive",
+     "value": "no archive"
+    },
+    {
+     "name": "bsi:component:structured",
+     "value": "unstructured"
+    },
+    {
+     "name": "sca-center:found-in",
+     "value": "OVMF_CODE_4M.fd"
+    },
+    {
+     "name": "sca-center:note",
+     "value": "no Intel flash descriptor at 0x10 (capsule or BIOS-region-only image)"
+    },
+    {
+     "name": "sca-center:me-status",
+     "value": "no-me-region"
+    },
+    {
+     "name": "sca-center:me-note",
+     "value": "no flash descriptor, no $FPT and no $CPD named FTPR (BIOS-region-only or capsule file)"
+    },
+    {
+     "name": "sca-center:fit",
+     "value": "not-found"
+    },
+    {
+     "name": "sca-center:uefi-compressed-sections",
+     "value": "lzma=1"
+    },
+    {
+     "name": "sca-center:gap",
+     "value": "1 compressed UEFI sections not parsed (lzma 1); modules and versions inside are not listed"
+    },
+    {
+     "name": "sca-center:uefi-gfx-search",
+     "value": "complete (all firmware volumes found were decoded): 4 firmware volumes, 142 FFS files, 16122000 bytes decompressed, 0 parts not decoded, 0 bytes outside firmware volumes searched only as raw blocks; 0 GOP driver(s), 0 standalone VBT(s)"
+    },
+    {
+     "name": "sca-center:ami-core-search",
+     "value": "not-found: no Firmware ID record in the decoded UEFI content"
+    },
+    {
+     "name": "dumpling:advisory-rule-suggestion",
+     "value": "NOT_ASSESSED"
+    },
+    {
+     "name": "dumpling:advisory-rule-reason",
+     "value": "no-rule"
+    },
+    {
+     "name": "dumpling:advisory-rule-basis",
+     "value": "no rule applies to this component; no data in the database; the vendor advisory is authoritative"
+    },
+    {
+     "name": "dumpling:advisory-rule-source",
+     "value": "fw-advisory-rules.json (schema dumpling-fw-advisory-rules/1; 11 rules: 11 preliminary, 0 confirmed; last compiled 2026-11-14; table sha256 cd2433c53c49b2c4…)"
+    },
+    {
+     "name": "dumpling:vuln-assessment",
+     "value": "NOT_ASSESSED"
+    },
+    {
+     "name": "dumpling:vuln-assessment-note",
+     "value": "no vulnerability matching at this level; this tool only reports the parsed structure, versions and hashes"
+    },
+    {
+     "name": "dumpling:version-status",
+     "value": "GAP"
+    }
+   ]
+  }
+ ],
+ "dependencies": [
+  {
+   "ref": "sca-center:fw:bios:ad23261d43116abc",
+   "dependsOn": []
+  }
+ ]
+}

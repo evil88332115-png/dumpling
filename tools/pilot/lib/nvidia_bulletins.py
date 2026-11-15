@@ -215,6 +215,8 @@ def _iso_with_tz(v):
     """帶時區的 ISO 8601 時間 → datetime；格式不對或沒有時區 → None。"""
     if not (isinstance(v, str) and ISO_TZ_RE.fullmatch(v)):
         return None
+    if int(v[11:13]) > 23:       # Python 3.14 的 fromisoformat 把 24:00:00 收成隔天 00:00（3.12 不收）：時只收 00～23，不隨版本放寬
+        return None
     try:
         d = datetime.datetime.fromisoformat(v[:-1] + "+00:00" if v.endswith("Z") else v)
     except ValueError:

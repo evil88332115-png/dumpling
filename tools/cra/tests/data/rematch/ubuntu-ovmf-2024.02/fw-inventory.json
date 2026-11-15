@@ -1,0 +1,366 @@
+{
+ "schema": "sca-center-fw-inventory/1",
+ "vbios": [],
+ "intel_vbios": [],
+ "other_roms": [],
+ "bios": [
+  {
+   "file": "OVMF_CODE_4M.fd",
+   "locations": [
+    "OVMF_CODE_4M.fd"
+   ],
+   "size": 3653632,
+   "sha256": "ad23261d43116abc3747d59a7837fbf578c9586a8993f4eeba064cd07eccb083",
+   "sha512": "144d221e850d1840bfaa4ab6b67ee978909572c2516a419127af317b0954e5260e6b5388dbd52606639fe5d1ab8795bb78dc9560bcdd982f4c806c0e62413941",
+   "descriptor": false,
+   "descriptor_note": "no Intel flash descriptor at 0x10 (capsule or BIOS-region-only image)",
+   "regions": [],
+   "me": null,
+   "me_status": "no-me-region",
+   "me_note": "no flash descriptor, no $FPT and no $CPD named FTPR (BIOS-region-only or capsule file)",
+   "me_conflict": null,
+   "microcode": [],
+   "fit": {
+    "status": "not-found",
+    "offset": null,
+    "entries": 0,
+    "microcode": [],
+    "note": "no FIT pointer at 4 GB - 0x40 (file offset 0x37bfc0: 0x0e894fcb1a7e00f7)"
+   },
+   "platform": null,
+   "amd_markers": [],
+   "amd": null,
+   "uefi": {
+    "volumes": 2,
+    "volumes_other_fs": 0,
+    "files": 4,
+    "sections": 4,
+    "compressed": {
+     "lzma": 1
+    },
+    "guided_other": {},
+    "notes": []
+   },
+   "cbfs": null,
+   "ibv_hint": [],
+   "incomplete": [],
+   "gaps": [
+    "1 compressed UEFI sections not parsed (lzma 1); modules and versions inside are not listed"
+   ],
+   "evidence": [
+    "uefi"
+   ],
+   "uefi_gfx": {
+    "performed": true,
+    "reason": null,
+    "complete": true,
+    "gop": [],
+    "vbt": [],
+    "gaps": [],
+    "stats": {
+     "fvs": 4,
+     "ffs_files": 142,
+     "decompressed_total": 16122000,
+     "inspected_bytes": 4770408,
+     "inspected_blocks": 324,
+     "duplicate_blocks": 160,
+     "rom_probes": 2,
+     "reprobed_bytes": 0,
+     "undecoded": 0,
+     "notes": 0,
+     "outside_fv_nonblank_bytes": 0
+    },
+    "undecoded": [],
+    "notes": [],
+    "stopped": null
+   },
+   "ami_core": {
+    "performed": true,
+    "complete": true,
+    "incomplete": [],
+    "valid": 0,
+    "invalid": 0,
+    "count": 0,
+    "candidates": [],
+    "bad": [],
+    "found": [],
+    "gaps": [
+     "AMI core version (Firmware ID record): not found in the decoded UEFI content; a core version may still be recorded somewhere else"
+    ],
+    "status": "not-found"
+   },
+   "rule_advisory": {
+    "suggestion": "NOT_ASSESSED",
+    "reason": "no-rule",
+    "rule_ids": [],
+    "state": null,
+    "basis": "no rule applies to this component; no data in the database; the vendor advisory is authoritative",
+    "verification": {},
+    "results": [],
+    "evidence": [],
+    "related": [],
+    "source": "fw-advisory-rules.json (schema dumpling-fw-advisory-rules/1; 11 rules: 11 preliminary, 0 confirmed; last compiled 2026-11-14; table sha256 cd2433c53c49b2c4…)"
+   }
+  }
+ ],
+ "skipped": [],
+ "partial": [],
+ "limits": {
+  "time_limit_s": 900,
+  "max_file": 536870912,
+  "max_total": 4294967296,
+  "max_checksum": 268435456,
+  "max_fit_entries": 512,
+  "max_fpt_entries": 128,
+  "max_fv": 512,
+  "max_ffs_items": 131072
+ },
+ "advisory": {
+  "status": "OK",
+  "microcodes": 0,
+  "counts": {},
+  "source": {
+   "repo": "https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files",
+   "tag": "microcode-20261110",
+   "commit": "d71fe4e2f0f70a49ebbac7f2c7e915f181361974",
+   "path": "releasenote.md",
+   "sha256": "338b556b2e8788e68f542361d2835f1344b2ad42b40991756beb1fc8a5cf11f3",
+   "table_sha256": "253aab94c3c2a14eda457b1ee4a7a1490e00d4e854622cd9f05e77a07904e271",
+   "releases": 45,
+   "oldest": "microcode-20190312"
+  }
+ },
+ "vbios_advisory": {
+  "status": "OK",
+  "vbios": 0,
+  "counts": {},
+  "stale": false,
+  "source": {
+   "mirror_commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
+   "mirror_fetched_utc": "2026-11-13T16:52:04Z",
+   "reviewed_until": "2025-09-02",
+   "table_sha256": "c5324efc7d0b04b2740c08c6161807a37c167e1410a007d1f110a1421238b534",
+   "reviewed_rows": 0,
+   "unreviewed_rows": 0,
+   "not_applicable": [
+    "5674"
+   ],
+   "awaiting_confirmation": []
+  }
+ },
+ "rules_advisory": {
+  "status": "OK",
+  "components": 1,
+  "counts": {
+   "NOT_ASSESSED": 1
+  },
+  "items": [
+   {
+    "image": "OVMF_CODE_4M.fd",
+    "component": "BIOS image",
+    "kind": "bios_image",
+    "suggestion": "NOT_ASSESSED",
+    "reason": "no-rule",
+    "rule_ids": [],
+    "state": null,
+    "related": [],
+    "evidence": [],
+    "verification": {},
+    "datacenter": false
+   }
+  ],
+  "errors": 0,
+  "table": {
+   "schema": "dumpling-fw-advisory-rules/1",
+   "updated": "2026-11-14",
+   "rules": 11,
+   "preliminary": 11,
+   "confirmed": 0,
+   "sha256": "cd2433c53c49b2c40fbde48ecedf1fb1c9b4872e61ed7101076d77d2a80f1c31",
+   "ids": [
+    "AMD-SB-7005",
+    "AMD-SB-7014",
+    "AMD-SB-7033",
+    "INTEL-SA-00391",
+    "INTEL-SA-01152",
+    "INTEL-SA-01209",
+    "INTEL-SA-01280",
+    "INTEL-SA-01315",
+    "INTEL-SA-01372",
+    "AMI-SA-2026001",
+    "AMI-SA-2026002"
+   ],
+   "rules_info": [
+    {
+     "id": "AMD-SB-7005",
+     "vendor": "AMD",
+     "title": "Return Address Security Bulletin",
+     "published": "2023-08-08",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "direct",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7005.html"
+     ]
+    },
+    {
+     "id": "AMD-SB-7014",
+     "vendor": "AMD",
+     "title": "SMM Lock Bypass",
+     "published": "2024-08-09",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "direct",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html"
+     ]
+    },
+    {
+     "id": "AMD-SB-7033",
+     "vendor": "AMD",
+     "title": "AMD CPU Microcode Signature Verification Vulnerability",
+     "published": "2025-03-05",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "direct",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7033.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-00391",
+     "vendor": "Intel",
+     "title": "2020.2 IPU - Intel CSME, SPS, TXE, AMT and DAL Advisory",
+     "published": "2020-11-10",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "independent:nvd",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00391.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-01152",
+     "vendor": "Intel",
+     "title": "2025.1 IPU, Intel Chipset Firmware Advisory",
+     "published": "2025-02-11",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "summary-tool",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01152.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-01209",
+     "vendor": "Intel",
+     "title": "Intel PTT and SPS Advisory",
+     "published": "2025-06-10",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "summary-tool",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01209.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-01280",
+     "vendor": "Intel",
+     "title": "2025.3 IPU, Intel Chipset Firmware Advisory",
+     "published": "2025-08-12",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "summary-tool",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01280.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-01315",
+     "vendor": "Intel",
+     "title": "2026.1 IPU, Intel Chipset Firmware Advisory",
+     "published": "2026-02-10",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "summary-tool",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01315.html"
+     ]
+    },
+    {
+     "id": "INTEL-SA-01372",
+     "vendor": "Intel",
+     "title": "VRT0010, Intel Chipset Firmware Advisory",
+     "published": "2026-08-11",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "summary-tool",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-01372.html"
+     ]
+    },
+    {
+     "id": "AMI-SA-2026001",
+     "vendor": "AMI",
+     "title": "Security Audit Reported Vulnerabilities",
+     "published": "2026-09-08",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "direct",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026001.pdf",
+      "https://www.ami.com/security-advisories/"
+     ]
+    },
+    {
+     "id": "AMI-SA-2026002",
+     "vendor": "AMI",
+     "title": "Security Audit Reported Vulnerabilities",
+     "published": "2026-10-13",
+     "state": "preliminary",
+     "preliminary_by": "韌體分析（C2 角色）初審",
+     "preliminary_at": "2026-11-14",
+     "verification": "direct",
+     "confirmed_by": null,
+     "confirmed_at": null,
+     "sources": [
+      "https://go.ami.com/hubfs/Security%20Advisories/2026/AMI-SA-2026002.pdf",
+      "https://www.ami.com/security-advisories/"
+     ]
+    }
+   ]
+  }
+ },
+ "status": "ATTENTION",
+ "detail": "vBIOS 0 個、BIOS 映像 1 個；OVMF_CODE_4M.fd：沒有 flash descriptor；OVMF_CODE_4M.fd：1 個壓縮的 UEFI section 沒有解析（GAP，裡面的模組與版本沒有列出）；沒有版本清單（無法核對）"
+}

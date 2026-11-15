@@ -27,7 +27,7 @@
 | `tools/cra/dt_writeback.py` | `scripts/cra/dt_writeback.py` | 25fa89a | 原樣；**行為修改（M7c-1，A4／D-057）**：`match_statements` 略過帶 `dumpling:assessment`＝`NOT_ASSESSED` 的陳述（不算陳述、不算沒對上、不參與合併），DT 的狀態不會因為沒評估的列被改成 IN_TRIAGE；`dt-writeback.json` 的 vex 多 `not_assessed_skipped`；模組開頭安全規則多一條 |
 | `tools/cra/evidence_bundle.py` | `scripts/cra/evidence_bundle.py` | 25fa89a | 路徑調整 2 處、說明文字：內部主機名稱改成「本機」（1 行）；**行為修改（M2）**：證據包多收 `scan/kernel-versions.json` |
 | `tools/cra/exploited_grype.py` | `scripts/cra/exploited_grype.py` | 25fa89a | 路徑調整 10 處、清理 2 行（本機路徑換成中性路徑 1、其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述 |
-| `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
+| `tools/cra/exploited_vendor.py` | `scripts/cra/exploited_vendor.py` | 25fa89a | 清理 1 行（其他 1）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；說明修正（M7f 小修）：檔頭寫 linux、kernel 預設排除，但 DEFAULT_EXCLUDE 沒有它們（上游原版也是如此）：說明改成和程式一致，行為不變 |
 | `tools/cra/exploited_watch.py` | `scripts/cra/exploited_watch.py` | 25fa89a | 路徑調整 11 處、清理 2 行（其他 2）、提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔） |
 | `tools/cra/firmware_bom.py` | `scripts/cra/firmware_bom.py` | 25fa89a | 路徑調整 2 處、說明文字：提到 CLAUDE.md 的說明與輸出字串改成「專案規則」／project rule（dumpling 沒有那個檔）；註解：移除上游私有 repo 的編號與內部部署描述；**行為修改（M7a，adapter-gaps #25）**：新增 `platform_of()`（依 `list.json` 的 `l4t` 欄位判斷 jetson／other／不知道），`info["platform"]`；非 Jetson 時 sbom.md 第 6 節不列「Jetson Linux (L4T) release」那一列、不寫「L4T release not determined」備註（這個備註原本讓非 Jetson 的刷機包韌體狀態變 ATTENTION）、「NVIDIA's public BSP」改成中性的「the BSP or image published by the vendor of this platform」；`tr_text(..., platform=)` 只有 jetson 才舉 Jetson Linux 版本元件當邏輯元件的例子；Jetson 的輸出不變 |
 | `tools/cra/image_check.py` | `scripts/cra/image_check.py` | 25fa89a | 路徑調整 3 處、說明字串：systemd 樣板單元名稱的範例信箱樣式改成佔位文字（見「影響邏輯的替換」） |
@@ -149,7 +149,7 @@
 | `tools/mirror/nvidia-bulletins.sh` | `scripts/mirror/nvidia-bulletins.sh` | 25fa89a | 路徑調整 2 處 |
 | `tools/mirror/osv-distro.sh` | `scripts/mirror/osv-distro.sh` | 25fa89a | 路徑調整 1 處 |
 | `tools/mirror/ubuntu-cve-status.sh` | `scripts/mirror/ubuntu-cve-status.sh` | 25fa89a | 原樣 |
-| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行；內部掃描的執行編號改成「示範掃描」、「板子實測」依據說明改成設計預期（5 處）；註解：移除上游私有 repo 的編號與內部部署描述 |
+| `tools/pilot/README.md` | `scripts/pilot/README.md` | 25fa89a | 路徑調整 18 處、清理 2 行；內部掃描的執行編號改成「示範掃描」、「板子實測」依據說明改成設計預期（5 處）；註解：移除上游私有 repo 的編號與內部部署描述；--stable-git (b) 的說明改成 K1 標頭檔修正後的規則（只有完整原始碼樹證明沒有才不併入） |
 | `tools/pilot/lib/common.sh` | `scripts/pilot/lib/common.sh` | 25fa89a | 路徑調整 4 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/data/distro-kernel-sources.json` | （dumpling 自己寫） | — | 新增（M2）：kernelcheck 規則 d 的來源套件清單（Debian 建核心的來源套件 `linux`、`linux-latest`、`linux-signed-{amd64,arm64,i386}`；永遠算 off-series 的 `linux-upstream`；Ubuntu 不套用其他來源），附出處（Debian package tracker 的標準頁面） |
 | `tools/pilot/lib/data/kernel-included-c-6.1.json` | `scripts/pilot/lib/data/kernel-included-c-6.1.json` | 25fa89a | 路徑調整 1 處 |
@@ -161,7 +161,7 @@
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心）；`--source-tree-version`（只讀原始碼樹最上層 Makefile 的 X.Y.Z，沿用 `tree_version`） |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心）；`--source-tree-version`（只讀原始碼樹最上層 Makefile 的 X.Y.Z，沿用 `tree_version`）；**行為修改（K1 標頭檔修正）**：`--stable-git` 的 (b) 聯集只有完整核心原始碼樹（`--source-tree`）證明沒有的檔案才不併入；檔案名稱只來自映像 headers 套件（部分檔案）時，修補 commit 改到、但 headers 樹裡沒有的 .h／.c 不再當作不存在而丟掉，照樣併入（只會讓 not_affected 變 unknown）；`kernel.stable_git` 新增 `kept_not_proven_absent`（files、cves），`limitations` 的 --stable-git 那句補一段說明；沒給 `--stable-git` 時輸出不變；K1 修正後補（#136 驗證建議）：檔頭說明 kept_not_proven_absent 也包含修正前本來就會併入的情況 |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
 | `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：新增 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
@@ -174,9 +174,9 @@
 | `tools/pilot/lib/lockcheck.py` | `scripts/pilot/lib/lockcheck.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/lib/mirror_freshness.py` | `scripts/pilot/lib/mirror_freshness.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/lib/nvidia-bulletins.json` | `scripts/pilot/lib/nvidia-bulletins.json` | 25fa89a | 路徑調整 1 處 |
-| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的空對照表（vBIOS；沒有已審核的列，所有 gpu-firmware 公告都列為待審）；格式同 `nvidia-bulletins.json` |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | （dumpling 自己寫） | — | 新增：`nvidia_bulletins.py candidates --group gpu-firmware` 用的對照表（vBIOS）。沒有可比對的列；`not_applicable` 有一筆 5674（HGX／DGX 伺服器韌體，無法對應到 option ROM；C2 初審，使用者 2026-11-15 確認），`reviewed_until` 2025-09-02；格式同 `nvidia-bulletins.json`，內容的依據見 `docs/notes/c2-firmware-advisory.md` |
 | `tools/pilot/lib/nvidia-bulletins.md` | `scripts/pilot/lib/nvidia-bulletins.md` | 25fa89a | 路徑調整 9 處；1 行改成不指向沒帶進來的 `scripts/ci/fast-check.sh`；**新增（M7a2）**：對照表欄位一節補 `mirror`、公告編號格式、vBIOS 列（`line: vbios`）的欄位規則 |
-| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處；**行為修改（M7a2，與 C2 約定）**：`validate_table` 檢查 vBIOS 列（`line: vbios`：只用 `vbios_*` 版本、XX.XX.XX.XX.XX 格式、已審核列的 `pci_vendor`／`pci_devices`、上下界互斥與 fixed_in 自相矛盾）、非 vBIOS 列不得有 `vbios_*`／`pci_*`、頂層 `mirror` 的格式（commit、commit_date、fetched_utc）、公告編號只收數字；新增 `mirror_info()`（沒有 mirror → GAP）；PR #65 驗證應修：validate_table 的格式檢查改用 fullmatch（含原有的 reviewed_until、reviewed_at 日期；`$` 會放行結尾換行），帶時區的 ISO 8601 用明確的正規式限定 |
+| `tools/pilot/lib/nvidia_bulletins.py` | `scripts/pilot/lib/nvidia_bulletins.py` | 25fa89a | 路徑調整 1 處；**行為修改（M7a2，與 C2 約定）**：`validate_table` 檢查 vBIOS 列（`line: vbios`：只用 `vbios_*` 版本、XX.XX.XX.XX.XX 格式、已審核列的 `pci_vendor`／`pci_devices`、上下界互斥與 fixed_in 自相矛盾）、非 vBIOS 列不得有 `vbios_*`／`pci_*`、頂層 `mirror` 的格式（commit、commit_date、fetched_utc）、公告編號只收數字；新增 `mirror_info()`（沒有 mirror → GAP）；PR #65 驗證應修：validate_table 的格式檢查改用 fullmatch（含原有的 reviewed_until、reviewed_at 日期；`$` 會放行結尾換行），帶時區的 ISO 8601 用明確的正規式限定；**行為修改（M7f 小修，C2 #119 同樣的修正）**：帶時區的時間（mirror 的 commit_date、fetched_utc）時只收 00～23（Python 3.14 的 fromisoformat 會把 24:00:00 收成隔天） |
 | `tools/pilot/lib/strip_versions.py` | `scripts/pilot/lib/strip_versions.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_priority.py` | `scripts/pilot/lib/ubuntu_priority.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/ubuntu_status.py` | `scripts/pilot/lib/ubuntu_status.py` | 25fa89a | 路徑調整 1 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -191,7 +191,7 @@
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述；新增（M2）2 個 `tools/mirror/kernel-cve.sh` 的測試（clone 失敗重試、上游連不上時沿用上一份鏡像並標 ATTENTION；假的 git 與合成的鏡像）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
-| `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處；**行為修改（K1 標頭檔修正）**：新增 7 個測試（部分 headers 樹找不到的修補檔案不當作不存在）；**既有測試的期望值修改**：`test_backport_added_files_must_exist_in_the_kernel_and_be_code` 的 CVE-2024-2011（修補 commit 改了 headers 樹和 Makefile 都沒有的 `drivers/foo/renamed_away.c`）由 not_affected 改成 unknown，原因：舊期望建立在「headers 樹找不到＝這個核心沒有」，但 headers 套件只有部分檔案（驅動自帶的 .h、被 #include 的 .c 都不在），那正是 K1 標頭檔修正要修的缺陷；現在只有完整原始碼樹（`--source-tree`）證明沒有才丟，同一測試補了完整樹沒有 renamed_away.c 時仍 not_affected、不併入的斷言（C1 核准）；補測試：檔案名稱不知道（tree_names 是 None）一律 unproven，不是 absent |
 | `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |
@@ -200,7 +200,7 @@
 | `tools/pilot/tests/test_kernel_off_series.py` | （dumpling 自己寫） | — | 新增（M2）：kernelcheck 的 off-series 規則 a／b／c／d（合成資料，名稱與版本只取公開的樣子）：epoch、`+rpt`／`+rpi`、名稱、明確宣告、purl 的 `upstream=`（含 Radxa 型、URL 編碼的 Raspberry Pi purl、Debian／Ubuntu／Jetson 不被標）、規則是「或」、資料檔壞了 FAIL；M2 第二輪驗證：purl 的 `epoch=` 限定詞、沒有版本號的 `distro=debian`、`raspbian-*` 的已知盲點 |
 | `tools/pilot/tests/test_kernel_vendor_flow.py` | `scripts/pilot/tests/test_kernel_vendor_flow.py` | 25fa89a | 路徑調整 2 處；M2：`kernel_cve_list` 的測試外殼多抽出 `kernel_ship_from` |
 | `tools/pilot/tests/test_kernel_versions.py` | （dumpling 自己寫） | — | 新增（M2）：`--kernel-version`／`SCA_KERNEL_VERSIONS` 的參數檢查，以及 sca-scan 核心區段在 1 顆／多顆沒指定／多顆指定 1 顆／指定 2 顆的狀態列與 `kernel-versions.json`（合成的 rootfs tar，判定工具用假的）；另測 sca-scan 把 `--kernel-upstream-version` 轉給 kernel_versions.py（和 Makefile 一致／不一致）；**行為修改（M2）**：核心區段的測試外殼補 `KNONE=0; KOTHER=`（sca-scan 的核心區段新增分層判斷用的變數） |
-| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述；**新增（M7a2）**：vBIOS 列、mirror、公告編號的契約測試（合成表）與 gpu-firmware 對照表的格式測試 |
+| `tools/pilot/tests/test_nvidia_bulletins.py` | `scripts/pilot/tests/test_nvidia_bulletins.py` | 25fa89a | 路徑調整 4 處；刪段：`deploy/` 鏡像更新與同步、`deploy` 接線（8 個測試函式與輔助函式；見「刪掉的測試」）；註解：移除上游私有 repo 的編號與內部部署描述；**新增（M7a2）**：vBIOS 列、mirror、公告編號的契約測試（合成表）與 gpu-firmware 對照表的格式測試；**新增（M7f 小修）**：24 時一律擋下（含模擬 3.14 寬鬆 fromisoformat 的測試） |
 | `tools/pilot/tests/test_pilot_compare_and_scripts.py` | `scripts/pilot/tests/test_pilot_compare_and_scripts.py` | 25fa89a | 路徑調整 8 處、清理 5 行、刪段 129 行 |
 | `tools/pilot/tests/test_pilot_euvd.py` | `scripts/pilot/tests/test_pilot_euvd.py` | 25fa89a | 路徑調整 3 處；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_pilot_kernel_coverage.py` | `scripts/pilot/tests/test_pilot_kernel_coverage.py` | 25fa89a | 原樣；註解內部執行編號改成「Jetson R39.2.1 示範映像」（1 行）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
@@ -212,7 +212,7 @@
 | `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行；`shell_files()` 不再掃 `deploy/`，檔案數門檻 20 → 10（`tools/` 共 14 個 shell 檔） |
 | `tools/pilot/tests/test_pyver_wiring.py` | `scripts/pilot/tests/test_pyver_wiring.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/pilot/tests/test_sca_scan_local_image.py` | `scripts/pilot/tests/test_sca_scan_local_image.py` | 25fa89a | 路徑調整 1 處；**新增（M7b-2）**：`test_source_pin_and_identity_are_structured`（假的 docker：本機映像、tag、digest 相符與不符）、`test_dt_not_used_reason_is_recorded` |
-| `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL |
+| `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL；修正偶發失敗：金鑰改成長而少見的值（以前的 k1／k2 會出現在暫存路徑的亂數後綴裡，記了路徑的 meta.json 被秘密掃描刪掉），並檢查 F-secret-scan 是 OK |
 | `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處；`test_script_safety_and_docs` 去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，改名 `test_script_safety` |
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處；註解：移除上游私有 repo 的編號與內部部署描述 |
@@ -312,7 +312,7 @@
 | `tools/pilot/lib/data/kernel-included-c-{6.1,6.8}.json` | Linux 上游原始碼：6.8 是 kernel.org 的 `linux-6.8.tar.xz`（sha256 `c969dea4…` 與 kernel.org `sha256sums.asc` 相符），6.1 是 `v6.1.118`（commit `b67dc5c9…`）。**已實際重現**：用 `tools/pilot/lib/kernel_included_c.py` 對 kernel.org 的 `linux-6.8.tar.xz`、`linux-6.1.118.tar.xz` 重新產生，`files` 與 `unresolved` 與資料檔完全相同（2026-11-12） | 公開（上游原始碼推導）。重現：`python3 -I tools/pilot/lib/kernel_included_c.py --source linux-X.Y.tar.xz --kernel X.Y --out …` |
 | `tools/pilot/lib/data/distro-kernel-sources.json` | Debian 建核心用的來源套件名稱（`linux`、`linux-latest`、`linux-signed-{amd64,arm64,i386}`）、`linux-upstream`（核心原始碼 `make deb-pkg` 的預設來源名稱）。dumpling 自己整理，只有公開的套件名稱；出處是 Debian package tracker 的標準頁面（`https://tracker.debian.org/pkg/<來源套件名稱>`），整理時沒有連網逐頁開啟核對（檔案裡的 `checked` 欄照實寫） | 合成（公開的套件名稱，無內部資料） |
 | `tools/pilot/lib/nvidia-bulletins.json`（附 `.md`） | NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`；`prefilled_from.mirror_commit` `6e340ebe…` 是該公開倉庫的 commit（GitHub API 查得到，2026-10-27）；其餘欄位（`reviewed` 等）是人工整理 | 公開來源、人工整理。`.md` 裡提到的 `deploy/` 腳本沒有帶進來（說明文字） |
-| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 手寫的空對照表（沒有任何公告資料） | 合成 |
+| `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json` | 手寫的對照表：沒有可比對的列，只有 5674 一筆 `not_applicable`。標題、日期、CVE 編號與 CSAF 欄位名稱取自 NVIDIA 公開安全公告 `https://github.com/NVIDIA/product-security`（`mirror.commit` `98dc5d70…`）；理由用自己的話寫，不含公告原文 | 公開（NVIDIA 公開公告的事實欄位，無內部資料） |
 | `tools/pilot/lib/l4t-kernel-map.json` | Jetson Linux 版本 → Canonical 核心原始碼套件的對照；證據是 NVIDIA 公開的 GitLab（`gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble` 的 tag、changelog）與公開的 Ubuntu 套件版本 | 公開。已改寫兩個 `checked` 欄：改成只引用公開資料的說法，不含內部映像的套件版本字串與內部 CI 執行編號（無公開依據的部分改標為推論） |
 | `tools/pilot/lib/*.md`、`README.md` 等說明文件 | 手寫的說明 | 合成。內部 CI 的執行編號與代號已改成中性說法（「Jetson R39.2.1 示範映像」「示範掃描」） |
 | `tools/wizard/platforms/{jetson,rockchip,raspberrypi}.json`、`inputs.example.json`、`wizard.example.json` | 手寫的平台範本與範例（要檢查的輸入清單：刷機包、原始碼、建置紀錄、上游基準、板子檢查…） | 合成。`note` 欄原本寫「依某產品演練整理」，已改成「某平台的範本」 |
@@ -365,6 +365,10 @@
 以下是 dumpling 自己寫的（不是複製）：`tools/cra/amd_psp.py`、`tools/cra/tests/test_amd_psp.py`、`docs/notes/c2-amd-psp.md`、`firmware/bios/asus-prime-b550m-a-3404/firmware.yml`（AMD Embedded Firmware Structure、PSP／BIOS 目錄、AMD 微碼與 AGESA 字串的只讀解析；格式欄位與 type 編號核對自 coreboot `src/vendorcode/amd/psp/*.h`、`util/amdfwtool/amdfwtool.h`（GPL-2.0-only）、PSPTool 的 `entry.py`（GPL-3.0）與 Linux 核心 `arch/x86/kernel/cpu/microcode/amd.c`，只讀欄位位置、編號與行為說明，沒有複製程式碼；type 名稱沿用上游識別字；`PSP_TYPES`／`BIOS_TYPES` 是轉錄自公開 header 的事實性編號與名稱（出處見檔頭），沒有搬程式碼；出處寫在 `amd_psp.py` 檔頭與 `docs/notes/c2-amd-psp.md`）。
 
 以下也是 dumpling 自己寫的：`firmware/bios/novacustom-nuc-box-arl-v0.9.2/firmware.yml`（Dasharo 公開下載的 NovaCustom NUC BOX v0.9.2 完整 SPI 映像的登記；只有網址、sha256、大小、授權頁與預期值，映像本身不進 repo；用來核對 `intel_cse_layout.py` 的 layout 1.7 Size 0x60，出處見 `docs/notes/c2-csme-layout.md`）。
+
+以下也是 dumpling 自己寫的：`pipeline/firmware-rematch.sh`、`tools/cra/fw_rematch.py`、`tools/cra/tests/test_fw_rematch.py`、`tests/test_c2_rematch_render.py`、`docs/notes/c2-firmware-rematch.md`（每天用 repo 當下的三張公告表重跑 Release 上的 fw-inventory.json；只吃 inventory，不讀映像、不連網）、`tools/cra/tests/data/rematch/ubuntu-ovmf-2024.02/fw-inventory.json`、`tools/cra/tests/data/rematch/ubuntu-ovmf-2024.02/fw.cdx.json`（公開樣本 Ubuntu OVMF 2024.02 的 `x86_firmware.py` 輸出，CI 產物，約 14 KB，不含映像；測試用它核對「同樣的表重跑，SBOM 逐位元組相同」）。
+
+以下是參考但沒有複製的來源（只寫自己的話，不抄原文、不搬程式碼）：`docs/notes/c2-code-integrity-survey.md`。參考了 jetm/shipcheck 的 code-integrity 檢查項目（Apache-2.0，授權檔在該 repo 根目錄 `LICENSE`，讀的 commit `4621b3ab49f673221bdeb944f022829ccd8587af`，只讀 README 與檢查項目的定義，不含程式邏輯）；ETSI EN 304 623（Boot Managers）公開草稿 v0.0.12（內文與前置資料寫 2025-12；標籤 v0.0.12.1，提交 2b263e57bfeccb05a93a76db495dbca6018b468b；讀取日期 2026-11-15），來自 ETSI 自己的公開位置 https://labs.etsi.org/rep/stan4cra/en-304-623（匿名讀取，不需登入；`EN-304-623.md` 的 sha256 是 3c79effe01be926ca30895138b28417432ee72e67e785730e47c1dff850fc616；專案 `LICENSE` 是 Copyright 2025 ETSI 的三條款 BSD 型授權，是否涵蓋草稿本文不確定；`README.md` 的免責聲明寫明是過渡草稿，只供資訊與日後開發工作使用），只讀第 5 節的條款與相關附錄，用自己的話摘要並引用條款編號，不複製條文、草稿不進 repo；docbox 要登入、`etsi.org/deliver` 回 HTTP 403 阻擋頁，較新版（V0.1.1、V0.1.3）沒有取得，標 GAP，見該筆記第 1.1 節。
 
 ## C3 GitLab 範本（WP5，M5）
 

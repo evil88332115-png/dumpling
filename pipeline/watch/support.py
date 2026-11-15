@@ -120,6 +120,8 @@ def release_boms(inventory):
     _, projs, problems = match.load_inventory(inventory, os.path.dirname(os.path.abspath(inventory)))
     rel = {}
     for p in projs:
+        if p.get("layer") == "firmware" or p.get("kind") == "firmware":
+            continue            # 韌體示範樣本不是產品（沒有 project.yml、沒有支援期限）：不比支援期限，也不列「有 Release 但 projects/ 裡沒有這個專案」
         rel.setdefault((p["name"], p["version"], p["tag"]), []).append(p)
     out = {}
     for (name, ver, tag), layers in sorted(rel.items()):

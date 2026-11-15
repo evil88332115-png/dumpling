@@ -742,6 +742,10 @@ def test_unconfirmed_table_report_says_preliminary(tmp_path):
     assert "初審無法對應（待負責人確認）的公告：5674" in sec and "表尚未經負責人確認" in sec
     assert inv["vbios"][0]["advisory"]["reason"] == "table-not-reviewed"
     assert "不適用" not in sec and "not applicable" not in json.dumps(comps).lower()
+    # 沒確認的表不吃時鐘：鏡像超過 90 天也不報過期，結果和狀態說明都不變（確認過的表見 test_default_table_is_the_committed_one）
+    late, _, late_md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), nva.load(tmp_path / "prelim.json"), now=NOW + datetime.timedelta(days=5000))
+    assert late["vbios_advisory"]["stale"] is False and late["vbios"][0]["advisory"] == inv["vbios"][0]["advisory"]
+    assert "過期" not in late["detail"] and late["detail"] == inv["detail"] and "對照表過期" not in late_md
 
 
 def test_below_and_max_together_are_rejected(tmp_path):
@@ -909,7 +913,7 @@ def test_md_esc_uses_the_same_at_rules_as_firmware_mdsafe():
     ("2026-11-13T16:52:04.1Z", False), ("2026-11-13T16:52:04.12Z", False), ("2026-11-13T16:52:04.1234Z", False), ("2026-11-13T16:52:04.1234567Z", False),
     ("2026-11-13T16:52:04+00", False), ("2026-11-13T16:52:04z", False), ("2026-11-13t16:52:04Z", False),
     ("2026-11-13T16:52:04Z\n", False), (" 2026-11-13T16:52:04Z", False), ("２０２６-11-13T16:52:04Z", False),
-    ("2026-13-13T16:52:04Z", False), ("2026-02-30T16:52:04Z", False), ("2026-11-13T24:00:00Z", False), ("2026-11-13T16:60:04Z", False),
+    ("2026-13-13T16:52:04Z", False), ("2026-02-30T16:52:04Z", False), ("2026-11-13T24:00:00Z", False), ("2026-11-13T24:00:00+00:00", False), ("2026-11-13T24:00:01Z", False), ("2026-11-13T16:60:04Z", False),
     ("2026-11-13T16:52:04+99:00", False), ("", False), (None, False), (5, False)])
 def test_parse_utc_accepts_only_the_c1_time_format(text, ok):
     d = nva._parse_utc(text)
