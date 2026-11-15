@@ -53,16 +53,16 @@ def two_kernels():
 def test_plan_rules():
     p = kvmod.plan([A], [])                                  # 1 顆、沒指定：照舊判定它
     assert (names(p), p["requested"], jv(p), p["not_judged"]) == ([A], [], [A], [])
-    assert [x["basis"] for x in p["judged"]] == ["auto-detected"]
+    assert p["schema"] == "sca-center-kernel-versions/2" and p["judged"] == [A]         # 1 顆：照舊 /2（judged 是字串清單）
     p = kvmod.plan([B, A], [])                               # 多顆、沒指定：全部逐顆判定（M7d-1，D-061 (1)）
     assert names(p) == [A, B] and jv(p) == [A, B] and p["not_judged"] == []
     assert {x["basis"] for x in p["judged"]} == {"auto-detected"}
     p = kvmod.plan([A, B], [A])                              # 指定 1 顆：判定它，另一顆 not_judged
     assert jv(p) == [A] and p["not_judged"] == [{"version": B, "reason": kvmod.REASON_OTHER_GIVEN, "shipped": True}]
-    assert [x["basis"] for x in p["judged"]] == ["project-specified"]
+    assert p["schema"] == "sca-center-kernel-versions/2" and p["judged"] == [A]
     p = kvmod.plan([A, B], [A, B, A])                        # 指定 2 顆（重複的算一顆）：逐顆判定
     assert p["requested"] == [A, B] and jv(p) == [A, B] and p["not_judged"] == []
-    assert {x["basis"] for x in p["judged"]} == {"project-specified"}
+    assert {x["basis"] for x in p["judged"]} == {"project-specified"} and p["schema"] == kvmod.SCHEMA
     p = kvmod.plan([A, B, "6.1.130"], [A, B])                # 只指定一部分：沒指定的出貨核心照舊 not_judged
     assert jv(p) == [A, B] and p["not_judged"] == [{"version": "6.1.130", "reason": kvmod.REASON_OTHER_GIVEN, "shipped": True}]
     p = kvmod.plan([A], ["6.9.9", A])                        # 指定的核心映像沒有：一樣交給判定工具（由工具回 GAP），不另記 not_judged
@@ -94,7 +94,7 @@ def run_kv(tmp_path, *args):
 
 def test_cli_writes_file_and_lines(tmp_path):
     p, doc = run_kv(tmp_path, "--shipped", A, "--shipped", B, "--requested", A)
-    assert p.returncode == 0 and doc["schema"] == kvmod.SCHEMA
+    assert p.returncode == 0 and doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [A]      # 1 顆：照舊 /2
     assert f"KERNEL-NOT-JUDGED\t{B}\t{kvmod.REASON_OTHER_GIVEN}" in p.stdout and f"KERNEL-NOT-JUDGED\t{A}" not in p.stdout
     note = next(l for l in p.stdout.splitlines() if l.startswith("KERNEL-VERSIONS-NOTE\t"))
     assert B in note and "必須記錄證據" in note and "設計文件" in note
@@ -102,8 +102,12 @@ def test_cli_writes_file_and_lines(tmp_path):
     p, doc = run_kv(tmp_path, "--shipped", A, "--shipped", B)
     assert p.returncode == 0 and jv(doc) == [A, B] and doc["not_judged"] == [] and "KERNEL-NOT-JUDGED" not in p.stdout
     # --judged-result：每顆的結果檔與狀態
+    p, doc = run_kv(tmp_path, "--shipped", A, "--shipped", B, "--judged-result", f"{A}|scan/kernels/{A}/kernel-config.json|OK|-|-")
+    assert p.returncode == 0 and doc["judged"][0]["config_file"] == f"scan/kernels/{A}/kernel-config.json" and doc["judged"][0]["module_map_file"] is None
+    assert doc["judged"][1]["config_file"] is None
+    # 只判定 1 顆：結果檔與狀態不記（照舊 /2）
     p, doc = run_kv(tmp_path, "--shipped", A, "--judged-result", f"{A}|scan/kernel-config.json|OK|-|-")
-    assert p.returncode == 0 and doc["judged"][0]["config_file"] == "scan/kernel-config.json" and doc["judged"][0]["module_map_file"] is None
+    assert p.returncode == 0 and doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [A]
     for bad in (f"{A}|x|OK|y", f"a;b|x|OK|y|OK", f"{A}|../../etc|OK|-|-".replace("..", "a b")):
         p, _ = run_kv(tmp_path, "--shipped", A, "--judged-result", bad)
         assert p.returncode == 3 and p.stdout.startswith("KERNEL-VERSIONS-ERROR"), bad
@@ -313,14 +317,13 @@ def test_one_kernel_unchanged(tmp_path):
     assert "--kernel-version" not in log                                  # 沒指定：不加參數，和以前相同
     assert "LIST" not in log and log.count("--also-list-kernel-versions") == 2     # 出貨的核心由判定工具讀映像的同一趟印出，不另外讀映像
     assert names(doc) == [A] and doc["requested"] == [] and jv(doc) == [A] and doc["not_judged"] == []
-    # 只判定 1 顆：結果還是 scan/kernel-config.json 與 scan/kernel-module-map.json（不是 scan/kernels/），judged 記檔案與狀態（schema /3）
-    assert doc["judged"] == [{"version": A, "basis": "auto-detected", "config_file": "scan/kernel-config.json", "config_status": "OK",
-                              "module_map_file": "scan/kernel-module-map.json", "module_map_status": "OK"}]
+    # 只判定 1 顆：結果還是 scan/kernel-config.json 與 scan/kernel-module-map.json（不是 scan/kernels/）；檔案照舊是 schema /2、judged 是字串清單
+    assert doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [A]
     assert (tmp_path / "out" / "scan" / "kernel-config.json").exists() and not (tmp_path / "out" / "scan" / "kernels").exists()
     # 指定的就是那一顆：判定它，工具收到 --kernel-version
     rows, doc, log, p = kernel_run(sub(tmp_path, "g"), tkc.rootfs_members(kver=A), [A])
     assert rows["C-kernel-config"][0] == "OK" and jv(doc) == [A] and doc["not_judged"] == []
-    assert doc["judged"][0]["basis"] == "project-specified"
+    assert doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [A]
     assert log.count(f"--kernel-version {A}") == 2                        # kernel_config.py 與 kernel_module_map.py 都收到
 
 
@@ -705,7 +708,7 @@ def test_real_tools_two_kernels_each_judged_with_its_own_config(tmp_path, given)
 def test_real_tools_one_requested_of_two_keeps_the_other_not_judged(tmp_path):
     rows, doc, log, p = real_run(tmp_path, (RA,))
     assert jv(doc) == [RA] and [x["version"] for x in doc["not_judged"]] == [RB]
-    assert doc["judged"][0]["config_file"] == "scan/kernel-config.json"            # 只判定 1 顆：照舊寫 scan/kernel-config.json
+    assert doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [RA]      # 只判定 1 顆：照舊 /2、寫 scan/kernel-config.json
     assert (tmp_path / "out" / "scan" / "kernel-config.json").exists() and not (tmp_path / "out" / "scan" / "kernels").exists()
     assert rows[f"C-kernel-not-judged-{RB}"][0] == "GAP" and rows["C-kernel-config"][0] == "GAP"
 
@@ -715,11 +718,47 @@ def test_real_tools_single_kernel_files_are_unchanged(tmp_path):
     rows, doc, log, p = real_run(tmp_path, (), members=tkc.rootfs_members(kver=RA))
     out = tmp_path / "out" / "scan"
     assert (out / "kernel-config.json").exists() and (out / "kernel-module-map.json").exists() and not (out / "kernels").exists()
-    assert jv(doc) == [RA] and doc["judged"][0]["basis"] == "auto-detected" and doc["judged"][0]["config_file"] == "scan/kernel-config.json"
-    assert doc["judged"][0]["module_map_file"] == "scan/kernel-module-map.json" and (doc["judged"][0]["config_status"], doc["judged"][0]["module_map_status"]) == ("OK", "OK")
+    assert doc["schema"] == "sca-center-kernel-versions/2" and doc["judged"] == [RA]
     direct = tmp_path / "direct.json"
     q = subprocess.run([sys.executable, "-I", str(tkc.LIB), "--grype", str(out / "grype.json"), "--mirror", str(tmp_path / "mirror"), "--from",
                         str(tmp_path / "r.tar"), "--out", str(direct)], capture_output=True, text=True, timeout=120)
     assert q.returncode == 0
     a, b = json.loads(direct.read_text(encoding="utf-8")), json.loads((out / "kernel-config.json").read_text(encoding="utf-8"))
     assert a == b
+
+
+# ---------- 單顆核心時 kernel-versions.json 和改前（main 4f64db7）逐位元組相同 ----------
+
+BASELINE = Path(__file__).resolve().parent / "data" / "kernel_versions_single_baseline"
+# 名稱 → kernel_versions.py 的參數（judged 0 或 1 顆的各種情形；--out 另外給）
+SINGLE_CASES = {
+    "one-shipped": ["--shipped", A],
+    "one-shipped-upstream": ["--shipped", A, "--source-version", "6.1.118", "--upstream-version", f"{A}=6.1.118"],
+    "one-shipped-no-source": ["--shipped", A, "--source-gap", "原始碼樹最上層的 Makefile 讀不到"],
+    "one-requested-of-two": ["--shipped", A, "--shipped", B, "--requested", A],
+    "one-requested-not-shipped": ["--shipped", A, "--requested", "6.9.9"],
+    "requested-shipped-unknown": ["--shipped-unknown", "--requested", A],
+    "requested-only": ["--requested", A],
+}
+
+
+def test_single_kernel_file_is_byte_identical_to_main(tmp_path):
+    """judged 0 或 1 顆時 kernel-versions.json 照舊寫 schema /2，和 M7d-1 之前（main 4f64db7）的輸出逐位元組相同；
+    基準檔用改前的 kernel_versions.py 對同樣的參數產生（C4 的平台標準答案與 Release 附件都釘這個格式）。
+    KERNEL_VERSIONS_BASE_PY 給改前的 kernel_versions.py 時，另外直接比對（開發用）。"""
+    base = os.environ.get("KERNEL_VERSIONS_BASE_PY")
+    for name, args in SINGLE_CASES.items():
+        out = tmp_path / f"{name}.json"
+        p = subprocess.run([sys.executable, "-I", str(KV), "--out", str(out), *args], capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, (name, p.stdout)
+        got = out.read_bytes()
+        if base and os.environ.get("KERNEL_VERSIONS_WRITE") == "1":
+            ref = tmp_path / f"{name}.base.json"
+            q = subprocess.run([sys.executable, "-I", base, "--out", str(ref), *args], capture_output=True, text=True, timeout=60)
+            assert q.returncode == 0 and q.stdout == p.stdout, name
+            BASELINE.mkdir(parents=True, exist_ok=True)
+            (BASELINE / f"{name}.json").write_bytes(ref.read_bytes())
+            (BASELINE / f"{name}.stdout").write_text(q.stdout, encoding="utf-8")
+        assert got == (BASELINE / f"{name}.json").read_bytes(), name
+        assert p.stdout == (BASELINE / f"{name}.stdout").read_text(encoding="utf-8"), name           # stdout（KERNEL-NOT-JUDGED 等行）也相同
+        assert json.loads(got)["schema"] == "sca-center-kernel-versions/2"

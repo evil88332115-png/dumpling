@@ -148,7 +148,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 - 有 `gap` 的檔案不下載，fetch 回報 GAP；**不自動接受第一次看到的 sha256**。
 - 有 `commit` 的封存檔若 sha256 不符，不接受新雜湊，改用 `git clone`（只 https、不跑 hook、不抓 submodule）取該 commit、核對 `git rev-parse HEAD`，工作樹放 `<下載資料夾>/<name>.checkout`；clone 也失敗就是 FAIL。
 - 下載的檔案是不可信資料：只下載、不解開、不執行。
-- `platform_params.kernel_release` 可以是字串或清單（映像有不只一顆核心時，例如 Raspberry Pi 的 Pi 5 與 Pi 4），轉給 wizard 時每個值一個 `--kernel-version`（可重複；wizard 另接受環境變數 `SCA_KERNEL_VERSIONS`，命令列優先）。值原樣往下傳到 sca-scan 與核心工具；映像出貨但沒指定的核心記為「出貨但沒有判定」（`scan/kernel-versions.json`），指定 2 顆以上時逐顆判定、沒指定而映像有多顆時全部逐顆判定（M7d-1，D-036／D-061：每顆的結果在 `scan/kernels/<版本>/`，`scan/kernel-versions.json` 升 schema /3，judged 每顆記依據 basis 與結果檔）。
+- `platform_params.kernel_release` 可以是字串或清單（映像有不只一顆核心時，例如 Raspberry Pi 的 Pi 5 與 Pi 4），轉給 wizard 時每個值一個 `--kernel-version`（可重複；wizard 另接受環境變數 `SCA_KERNEL_VERSIONS`，命令列優先）。值原樣往下傳到 sca-scan 與核心工具；映像出貨但沒指定的核心記為「出貨但沒有判定」（`scan/kernel-versions.json`），指定 2 顆以上時逐顆判定、沒指定而映像有多顆時全部逐顆判定（M7d-1，D-036／D-061：每顆的結果在 `scan/kernels/<版本>/`，`scan/kernel-versions.json` 在逐顆判定〔judged 2 顆以上〕時是 schema /3、judged 每顆記依據 basis 與結果檔；單顆照舊 /2）。
 - `platform_params.kernel_upstream_version`（選用）：核心的上游版本 X.Y.Z（每日監控的核心 CNA 比對用）。字串＝只有一顆 `kernel_release` 時那一顆的；多顆寫成 `{<kernel_release>: X.Y.Z}`。
   轉給 wizard 時每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`，一路傳到 `kernel_versions.py --upstream-version`：和核心原始碼 Makefile 一致 → `upstream_basis` 是 `source-makefile+platform-param`；
   不一致 → 不採用任何一個（`upstream_version` 是 null，note 寫兩個值）。scan.sh 用 `python3 -I pipeline/project-info.py --kernel-args <專案資料夾> <版本>` 取得這兩種參數（一行一個；沒設定不印），

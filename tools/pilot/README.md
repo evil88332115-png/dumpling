@@ -129,7 +129,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   （只判定 1 顆時照舊寫 `scan/kernel-config.json`、`scan/kernel-module-map.json`）。判定哪幾顆：指定 1 顆＝那一顆；指定 2 顆以上＝指定的每一顆
   （`scan/kernel-versions.json` 的 basis 是 `project-specified`）；沒指定而映像有多顆＝映像列出的全部（`auto-detected`；第一次判定讀映像時順便列出出貨的核心，
   工具對多顆沒指定回 GAP 的那份結果丟掉）；只指定一部分＝沒指定的出貨核心照舊 `C-kernel-not-judged-<版本>`＋GAP。`C-kernel-config`、`C-kernel-module-map`
-  各一列，狀態取最差的一顆（FAIL > GAP > ATTENTION > OK），說明逐顆列出（說明欄限 500 位元組，完整的在各顆的檔案）。`scan/kernel-versions.json` 是 schema /3：
+  各一列，狀態取最差的一顆（FAIL > GAP > ATTENTION > OK），說明逐顆列出（說明欄限 500 位元組，完整的在各顆的檔案）。`scan/kernel-versions.json`：逐顆判定（judged 2 顆以上）時是 schema /3，單顆照舊 /2；
   `judged` 每顆記版本、basis、結果檔與狀態（讀取端 /1、/2、/3 都收）。合併規則在 `tools/cra/kernel_merge.py`：任一顆 affected → 產品 affected；每一顆出貨的核心
   都有可採用的結果而且都 not_affected 才排除（依據 build-record，位置逐顆列出核心版本與 config SHA-256）；有一顆 unknown、沒有結果、沒判定一律不排除。
   沒有核心 CVE（Grype、DT 都沒有）而要用 CNA 版本比對產生清單時，多顆核心照舊 GAP（清單依單一核心版本產生；M7d-2 處理）。

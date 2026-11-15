@@ -18,7 +18,7 @@
     kernel-module-map.json 的相對路徑｜C-kernel-module-map 的狀態（沒有狀態給 -）。只有 1 顆判定時檔案是 scan/kernel-config.json 與
     scan/kernel-module-map.json（和以前相同）；2 顆以上是 scan/kernels/<版本>/ 底下各一份（M7d-1，D-036／D-061）。
 
-規則（schema /3，M7d-1，D-036／D-061）：
+規則（M7d-1，D-036／D-061）。schema：judged 2 顆以上寫 /3，0 或 1 顆照舊寫 /2（和以前逐位元組相同）：
   - 指定剛好 1 顆：判定那一顆（和以前相同）；出貨但沒指定的核心記為 not_judged。
   - 指定 2 顆以上：逐顆判定（basis "project-specified"）；出貨但沒指定的核心記為 not_judged（GAP）。
   - 沒指定：映像只有 1 顆 → 判定它（和以前相同）；有多顆 → 全部逐顆判定（basis "auto-detected"）。
@@ -44,8 +44,9 @@ import os
 import re
 import sys
 
-SCHEMA = "sca-center-kernel-versions/3"
-SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2", SCHEMA)    # 讀取端收這三種
+SCHEMA = "sca-center-kernel-versions/3"       # 逐顆判定（judged 2 顆以上）才寫
+SCHEMA_2 = "sca-center-kernel-versions/2"     # judged 0 或 1 顆：和 M7d-1 之前逐位元組相同
+SCHEMAS = ("sca-center-kernel-versions/1", SCHEMA_2, SCHEMA)    # 讀取端收這三種
 BASIS_AUTO, BASIS_PROJECT = "auto-detected", "project-specified"
 VER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$")
 
@@ -121,6 +122,12 @@ def plan(shipped, requested, source=None, params=None, results=None):
     params = params or {}
     results = results or {}
     shipped_out = None if ship is None else [upstream_of(v, source, params.get(v)) for v in ship]
+    if len(judged) < 2:
+        # judged 0 或 1 顆：照舊寫 schema /2（judged 是版本字串清單，沒有 basis 與結果檔），內容和 M7d-1 之前逐位元組相同
+        # （C4 平台標準答案與 Release 附件都釘這個格式）。每顆的結果檔與狀態只在逐顆判定時記
+        return {"schema": SCHEMA_2, "shipped": shipped_out, "requested": requested, "judged": list(judged), "not_judged": nj,
+                "note": "judged 是交給判定工具的核心，不是判定的結果（結果看 scan/kernel-config.json 與 status.tsv 的 C-kernel-config）；"
+                        "not_judged 是出貨（或被指定）但沒有判定的核心，不可以當作它們不受影響。" + EXCLUDE_NOTE}
     judged_out = []
     for v in judged:
         cf, cs, mf, ms = (list(results.get(v) or (None,) * 4) + [None] * 4)[:4]
