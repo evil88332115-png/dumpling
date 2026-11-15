@@ -85,7 +85,7 @@ _mirror_pos_num() {  # <值>：大於 0 的數字 → 0
   [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]] && [ -n "$(printf '%s' "$1" | tr -d '0.')" ]
 }
 
-_mirror_internal_kinds="kernel-cve euvd osv-distro nvidia-bulletins grype-db cisa-kev"
+_mirror_internal_kinds=(kernel-cve euvd osv-distro nvidia-bulletins grype-db cisa-kev)
 
 _mirror_internal_pathvar() {  # <種類>：印子路徑變數的名稱（INTERNAL_MIRROR_PATH_KERNEL_CVE…）
   printf 'INTERNAL_MIRROR_PATH_%s' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"
@@ -148,7 +148,7 @@ mirror_internal_config() {
     else why="INTERNAL_MIRROR_KEV_FILE_FRESH_DAYS 必須是大於 0 的數字"; fi
   fi
   if [ -z "$why" ]; then
-    for k in $_mirror_internal_kinds; do
+    for k in "${_mirror_internal_kinds[@]}"; do
       name=$(_mirror_internal_pathvar "$k")
       sv=${!name-}; sv=${sv%/}
       [ -z "$sv" ] && continue
