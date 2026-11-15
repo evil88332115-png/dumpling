@@ -623,7 +623,7 @@ class TestPage(unittest.TestCase):
 
     def test_data_json_has_whitelist_fields_only(self):
         e = Env(self)
-        self.assertEqual(sorted(e.data), ["commit", "generated_at", "issues", "projects", "releases", "repo", "schema", "sources", "warnings", "watch"])
+        self.assertEqual(sorted(e.data), ["commit", "firmware", "generated_at", "issues", "projects", "releases", "repo", "schema", "sources", "warnings", "watch"])
         text = json.dumps(e.data)
         for k in ("GITHUB_TOKEN", "Authorization", "browser_download_url"):
             self.assertNotIn(k, text)

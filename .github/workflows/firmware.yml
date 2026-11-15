@@ -12,18 +12,25 @@ on:
       - 'pipeline/lib/firmware_*.py'
       - 'pipeline/dt-*'
       - 'pipeline/scan-status-check.py'
+      - 'pipeline/watch/collect.py'
       - 'tools/pilot/**'
       - 'tools/e2e/**'
       - 'tools/cra/**'
       - '.github/workflows/firmware.yml'
   workflow_dispatch:
+  # 示範用韌體 Release（docs/notes/c2-firmware-release.md）：tag firmware-demo/<YYYY.MM.DD>（同一天第二次起加 .2～.99）。
+  # `*` 不跨 /，所以只有 firmware-demo/<一段> 會觸發；格式與日期由第一個步驟用 fullmatch 驗證，不合就讓 job 失敗。
+  # release.yml 的 tag 是 `*/v*`（版本必須以 v 開頭）；firmware-demo/ 後面是數字，不會觸發它（tests/test_firmware_meta.py 有測）。
+  push:
+    tags:
+      - 'firmware-demo/*'
 
 permissions:
   contents: read
 
 concurrency:
   group: firmware-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}     # tag 的執行不被取消（Release 建到一半被取消會留下半套）
 
 # 明確指定 bash：Actions 會用 `bash --noprofile --norc -eo pipefail`，
 # 管線（例如 `… | tee`）前面的指令失敗時，步驟才會失敗（預設的 `bash -e` 沒有 pipefail，結束碼會被 tee 吃掉）。
@@ -40,6 +47,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: tag 格式（只有 tag 觸發）
+        if: github.ref_type == 'tag'
+        run: python3 -I pipeline/lib/firmware_meta.py check-tag "$GITHUB_REF_NAME"
       - name: 確認 PyYAML 可用
         run: python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
       - name: 下載全部樣本並核對 sha256／大小
@@ -262,3 +272,180 @@ jobs:
       - name: 臨時 DT：down
         if: always()
         run: bash pipeline/dt-ephemeral.sh down
+
+  # 示範用韌體 Release 的附件（docs/notes/c2-firmware-release.md）：產生 firmware-meta.json 與附件資料夾，並在上傳之前自我檢查。
+  # PR、workflow_dispatch、tag 三種觸發都跑；只有 tag 觸發用真的 tag，其餘用測試 tag（firmware-demo/0000.00.00，日期不是有效日期，真的 tag 不會撞到）。
+  # 這個 job 只有 contents: read，不建 Release；下一個 job（firmware-release）只上傳這裡產生並檢查過的檔案。
+  # needs firmware-dt 只為了把它的結果寫進 meta 的 dt 欄位（success＝OK；failure、cancelled＝FAIL；skipped＝NOT_RUN）：
+  # firmware-dt 失敗或被取消時這個 job 照跑（always()），Release 內容不受 DT 結果阻擋；只有 firmware-fetch 成功才會跑（fetch 失敗時什麼都不做）。
+  # 檢查（任何一項不過就讓 job 失敗）：
+  #   1. firmware_meta.py build：不合規的 slug、not_watched 沒有 why、三張表的識別不一致、狀態與 firmware-ci 的摘要不一致，都不產生。
+  #   2. collect-check：用路徑載入 pipeline/watch/collect.py（不改它），對 meta 跑 check_fw_meta 與 _fw_sample_fields，並逐一核對附件的檔名與 sha256。
+  #   3. firmware-rematch.sh 端到端：每個 bios 樣本 changed 必須是空的，狀態與表的識別必須和 meta 一致（這也證明 meta 能被每日重跑接受）。
+  #   4. public-check：對要上傳的整個資料夾（含 Release 說明文字）跑 ci/public-check.sh；不過就不建 Release。
+  # 狀態與比對結果不是漏洞判定：每個元件的漏洞比對是 NOT_ASSESSED，這個 job 綠燈只表示產出的檔案格式與內容和每日監控的讀法一致。
+  firmware-release-check:
+    name: firmware-release-check
+    needs: [firmware-fetch, firmware-dt]
+    # !cancelled()：整個 run 被取消時不跑；firmware-dt 失敗、被取消或略過時照跑（有狀態函式時不會加上隱含的 success()）。
+    if: ${{ !cancelled() && needs.firmware-fetch.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tag（tag 觸發用真的 tag 並驗證格式；其他觸發用測試 tag）
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            python3 -I pipeline/lib/firmware_meta.py check-tag "$GITHUB_REF_NAME"
+            echo "FW_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+            echo "FW_TAG_FLAG=" >> "$GITHUB_ENV"
+          else
+            python3 -I pipeline/lib/firmware_meta.py check-tag firmware-demo/0000.00.00 --allow-test-tag
+            echo "FW_TAG=firmware-demo/0000.00.00" >> "$GITHUB_ENV"
+            echo "FW_TAG_FLAG=--allow-test-tag" >> "$GITHUB_ENV"
+          fi
+          python3 -I -c 'import yaml; print("PyYAML", yaml.__version__)'
+      - name: 下載 BIOS 與供應商 SBOM 樣本並核對 sha256／大小
+        run: pipeline/firmware-fetch.sh firmware/bios/*/firmware.yml firmware/sbom/*/firmware.yml --out "$RUNNER_TEMP/rel-dl" | cut -f1-3
+      - name: 解析 BIOS 樣本
+        run: |
+          # 和 firmware-fetch job 同一支程式；解析結果的 expected 比對由那個 job 負責，這裡退出碼 1（FAIL、MISMATCH）仍讓這步失敗
+          pipeline/firmware-ci.sh "$RUNNER_TEMP/rel-dl" "$RUNNER_TEMP/rel-work" "$RUNNER_TEMP/rel-ci" "$RUNNER_TEMP/rel-ci-summary.md" | cut -f1-3
+      - name: 安裝固定版本的 sbomqs
+        run: |
+          exe=$(pipeline/install-tool.sh sbomqs "$RUNNER_TEMP/bin")
+          echo "SBOMQS=$exe" >> "$GITHUB_ENV"
+          pipeline/check-tool-version.sh sbomqs "$exe"
+      - name: 供應商 SBOM 品質檢查與正規化上傳副本
+        run: |
+          shopt -s nullglob
+          files=("$RUNNER_TEMP"/rel-dl/sbom/*/*.sbom.json)
+          [ ${#files[@]} -gt 0 ] || { echo "沒有 kind: sbom 的樣本"; exit 1; }
+          pipeline/firmware-sbom-check.sh "${files[@]}" --out "$RUNNER_TEMP/rel-sbom-check" | tee "$RUNNER_TEMP/rel-sbom-check.log"
+          # 正規化上傳副本（和 firmware-dt job 同一支 prep）：Release 附的是這份副本，meta 標 normalized: true
+          for m in firmware/sbom/*/firmware.yml; do
+            slug=$(basename "$(dirname "$m")")
+            for f in "$RUNNER_TEMP/rel-dl/sbom/$slug"/*.sbom.json; do
+              python3 -I pipeline/lib/firmware_dt.py prep --sbom "$f" --sample "$m" --out "$RUNNER_TEMP/rel-prep/$slug" | cut -f1-2
+            done
+          done
+      - name: 產生 firmware-meta.json 與附件資料夾
+        env:
+          FW_DT_RESULT: ${{ needs.firmware-dt.result }}     # success、failure、cancelled、skipped：產生器對應成 meta 的 dt 欄位
+        run: |
+          # 不監控的樣本由 firmware.yml 的 watch 欄位宣告（vbios 兩份）；status 不是 ok 的樣本也列進 not_watched
+          python3 -I pipeline/lib/firmware_meta.py build firmware/*/*/firmware.yml \
+            --ci-out "$RUNNER_TEMP/rel-ci" --ci-summary "$RUNNER_TEMP/rel-ci-summary.md" \
+            --supplier-prep "$RUNNER_TEMP/rel-prep" --sbom-check-log "$RUNNER_TEMP/rel-sbom-check.log" \
+            --dt-result "$FW_DT_RESULT" --out "$RUNNER_TEMP/rel-assets" \
+            --tag "$FW_TAG" $FW_TAG_FLAG --commit "$GITHUB_SHA" --built-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 -I pipeline/lib/firmware_meta.py release-notes --meta "$RUNNER_TEMP/rel-assets/firmware-meta.json" --out "$RUNNER_TEMP/rel-notes.md"
+          ls -l "$RUNNER_TEMP/rel-assets"
+          python3 -I -c 'import json,sys; print("dt =", json.dumps(json.load(open(sys.argv[1]))["dt"], ensure_ascii=False))' "$RUNNER_TEMP/rel-assets/firmware-meta.json"
+      - name: 自我檢查 1：meta 與附件符合 collect 的檢查（check_fw_meta、_fw_sample_fields、檔名與 sha256）
+        run: python3 -I pipeline/lib/firmware_meta.py collect-check --meta "$RUNNER_TEMP/rel-assets/firmware-meta.json" --dir "$RUNNER_TEMP/rel-assets" --tag "$FW_TAG"
+      - name: 自我檢查 2：端到端重跑公告比對（changed 必須是空的、狀態一致）
+        run: |
+          assets="$RUNNER_TEMP/rel-assets"
+          rc=0
+          pipeline/firmware-rematch.sh --meta "$assets/firmware-meta.json" --dir "$assets" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out "$RUNNER_TEMP/rel-rematch" | tee "$RUNNER_TEMP/rel-rematch.log" || rc=$?
+          # 退出碼 2＝有 ATTENTION 或 GAP（輸出照寫，狀態是否與 meta 一致由下面檢查）；其他非 0（FAIL、參數錯誤）讓這步失敗
+          case $rc in 0|2) ;; *) echo "firmware-rematch.sh 退出碼 $rc"; exit "$rc" ;; esac
+          python3 -I pipeline/lib/firmware_meta.py rematch-check --meta "$assets/firmware-meta.json" --rematch-out "$RUNNER_TEMP/rel-rematch"
+      # ci/public-check.sh 讀的是 git 的內容：把要上傳的檔案（含 Release 說明文字）放進暫存的 git 目錄（只 add、不 commit），對它的 tree 跑同一套規則（做法同 pages.yml）。
+      - name: 自我檢查 3：公開檢查（要上傳的整個資料夾；不過就不建 Release）
+        run: |
+          d="$RUNNER_TEMP/rel-public-check"
+          rm -rf "$d"; mkdir -p "$d"
+          cp -R "$RUNNER_TEMP/rel-assets/." "$d/"
+          cp "$RUNNER_TEMP/rel-notes.md" "$d/release-notes.md"
+          git init -q "$d"
+          git -C "$d" add -A
+          tree=$(git -C "$d" write-tree)
+          (cd "$d" && bash "$GITHUB_WORKSPACE/ci/public-check.sh" --rev "$tree")
+      - name: 摘要（Release 附件）
+        if: always()
+        run: |
+          {
+            echo '### firmware-release-check'
+            echo
+            echo "tag：\`$FW_TAG\`（$([ "$GITHUB_REF_TYPE" = tag ] && echo 真的 tag || echo 測試 tag，不建 Release)）"
+            echo
+            echo '```'
+            cut -f2- "$RUNNER_TEMP/rel-rematch.log" 2>/dev/null || true
+            echo '```'
+            echo '_檢查的是附件格式、和每日監控讀法的一致性；狀態與比對結果是候選與建議，漏洞判定仍是 NOT_ASSESSED。_'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 上傳要發布的附件（只有附件資料夾）
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-release
+          path: ${{ runner.temp }}/rel-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  # 建 Release：只有這個 job 有 contents: write，而且只在 tag push 時跑（PR 與 workflow_dispatch 不會到這裡）。
+  # 它不下載樣本、不解析任何下載檔，只上傳 firmware-release-check 產生並檢查過的 JSON 附件；上傳前再用同一支檢查核對一次。
+  # needs 不含 firmware-dt：Release 不被臨時 DT 的結果阻擋（DT 失敗時照建，結果由 firmware-release-check 寫進 meta 的 dt 欄位），
+  # 但會等 DT 跑完：firmware-release-check 要等 firmware-dt 結束才能寫 dt 欄位，所以最快也要等到 DT 結束（最長 90 分鐘）。
+  # 樣本解析與附件檢查都成功才建。
+  # 只有 main 的歷史裡的 commit 能建 Release（tag 指到的 commit 必須是 origin/main 的祖先）。
+  # 建立前先清掉同一個 tag 的殘留草稿（只刪草稿；同一個 tag 已有非草稿的 Release 就停下來），所有 API 呼叫都帶重試（ghx，API 偶爾回 403）。
+  # 先建成草稿、確認每個附件都上傳完成，才發布成正式版（不是 prerelease、不是 draft）；發布後下載再核對。
+  firmware-release:
+    name: firmware-release
+    needs: [firmware-fetch, firmware-release-check]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'firmware-demo/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: tag 格式
+        run: python3 -I pipeline/lib/firmware_meta.py check-tag "$GITHUB_REF_NAME"
+      - name: tag 指到的 commit 必須在 origin/main 的歷史裡
+        run: |
+          git rev-parse --verify -q origin/main > /dev/null || { echo "找不到 origin/main"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "tag 指到的 commit（$GITHUB_SHA）不在 origin/main 的歷史裡：只有 main 上的程式碼能建 Release"; exit 1; }
+      - name: 下載要發布的附件
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: firmware-release
+          path: ${{ runner.temp }}/rel-assets
+      - name: 上傳前再核對一次（meta、附件檔名與 sha256、只有 JSON）並產生 Release 說明文字
+        run: |
+          assets="$RUNNER_TEMP/rel-assets"
+          python3 -I pipeline/lib/firmware_meta.py collect-check --meta "$assets/firmware-meta.json" --dir "$assets" --tag "$GITHUB_REF_NAME"
+          bad=$(find "$assets" -type f ! -name '*.json' | head -5)
+          [ -z "$bad" ] || { echo "附件資料夾有非 JSON 的檔案：$bad"; exit 1; }
+          python3 -I pipeline/lib/firmware_meta.py release-notes --meta "$assets/firmware-meta.json" --out "$RUNNER_TEMP/rel-notes.md"
+      - name: 建立 Release（先清殘留草稿、建草稿、核對附件、發布）
+        run: bash pipeline/firmware-release-publish.sh "$GITHUB_REF_NAME" "$RUNNER_TEMP/rel-assets" "$RUNNER_TEMP/rel-notes.md"
+      - name: 發布後下載並核對（檔名、sha256、collect 的檢查）
+        run: |
+          . pipeline/firmware-ghx.sh
+          ghx gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease,tagName --jq '"draft=\(.isDraft) prerelease=\(.isPrerelease) tag=\(.tagName)"' | tee "$RUNNER_TEMP/release-state.txt"
+          grep -qxF "draft=false prerelease=false tag=$GITHUB_REF_NAME" "$RUNNER_TEMP/release-state.txt" || { echo "Release 不是正式版"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/rel-verify"
+          ghx gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/rel-verify" --clobber
+          python3 -I pipeline/lib/firmware_meta.py collect-check --meta "$RUNNER_TEMP/rel-verify/firmware-meta.json" --dir "$RUNNER_TEMP/rel-verify" --tag "$GITHUB_REF_NAME"
+          {
+            echo '### firmware-release'
+            echo
+            echo "已建立正式版 Release：\`$GITHUB_REF_NAME\`（不是 prerelease、不是 draft；只有 JSON 附件）。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 失敗時清掉這個 tag 殘留的草稿（只刪草稿）
+        if: failure()
+        run: bash pipeline/firmware-release-publish.sh --cleanup "$GITHUB_REF_NAME" || true

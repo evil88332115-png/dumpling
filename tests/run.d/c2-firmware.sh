@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# C2（韌體）單元測試：不連網。
+# C2（韌體）單元測試：不連網。tests/test_firmware*.py 全部會跑，包括 test_firmware_meta.py（Release 的 firmware-meta.json 產生器與檢查、firmware.yml 的 tag 觸發與權限、
+# 本機端到端：meta → collect 檢查 → firmware-rematch.sh）與 test_firmware_watch.py（firmware.yml 的 watch 欄位）。
 # 用標準庫 unittest，不用 pytest：ubuntu-24.04 runner 與本機都不一定有 pytest，
 # 用 unittest 就不必在 CI 安裝、也不必固定外部套件版本；測試只依賴 python3-yaml（runner 內建）。
 set -euo pipefail

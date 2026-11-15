@@ -755,6 +755,13 @@ def _ver_key(v):
     return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"[.\-]", v))
 
 
+def pick_latest_firmware(cands):
+    """韌體候選 [(rel, project, tag 版本), …] → (最新的一個, 其他的 list)。依 published_at，平手時比 tag 版本的數字（_ver_key）。
+    沒有候選回 (None, [])。collect.build 與儀表板（pipeline/dashboard/build.py）共用，兩邊一定選同一個。"""
+    ordered = sorted(cands, key=lambda c: (_date(c[0].get("published_at")) or "", _ver_key(c[2])), reverse=True)
+    return (ordered[0], ordered[1:]) if ordered else (None, [])
+
+
 def fw_watch_version(slug, version, image_sha256):
     """監控鍵的版本部分 → (watch_version 或 None, GAP 原因或 None)。
     一般：<slug>@<firmware_version>。版本讀不到或是佔位字串：<slug>@sha256-<前 16 碼>（GAP：版本讀不到）。兩者都沒有：不監控。"""
@@ -777,6 +784,28 @@ def _fw_tables(t):
             out[name] = {k: _clean(x, 100) for k, x in v.items()
                          if isinstance(k, str) and LABEL_RE.match(k) and isinstance(x, str)}
     return out
+
+
+FW_DT_BAD = {"status": "GAP", "result": None, "reason": "dt 欄位格式不對"}
+
+
+def fw_dt(meta):
+    """firmware-meta 的 dt（C2 #140：DT 上傳的結果，只用來顯示，不擋 Release、不影響比對）。
+    合法的組合只有兩種：result OK → status OK、reason null；result FAIL／NOT_RUN → status GAP、reason 是非空字串（≤ 200 字）。
+    沒有這個欄位（舊的 Release）→ None；其他（型別、組合不對）→ FW_DT_BAD（不顯示原文）。reason 只檢查型別與長度，不寫死固定句。"""
+    if "dt" not in meta:
+        return None
+    d = meta["dt"]
+    if not isinstance(d, dict):
+        return dict(FW_DT_BAD)
+    st, res, why = d.get("status"), d.get("result"), d.get("reason")
+    if st == "OK" and res == "OK" and why is None:
+        return {"status": "OK", "result": "OK", "reason": None}
+    if st == "GAP" and res in ("FAIL", "NOT_RUN") and isinstance(why, str):
+        w = _clean(why, 1000)
+        if w.strip() and len(why) <= 200:
+            return {"status": "GAP", "result": res, "reason": w[:200]}
+    return dict(FW_DT_BAD)
 
 
 def check_fw_meta(meta, tag):
@@ -851,7 +880,7 @@ def collect_firmware(source, rel, project, tagver, out):
     tag = rel["tag"]
     e = {"tag": tag, "kind": "firmware", "project": project, "version": tagver,
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
-         "commit": None, "built_at": None, "meta": None, "tables": {}, "samples": [], "not_watched": [], "problems": []}
+         "commit": None, "built_at": None, "meta": None, "tables": {}, "dt": None, "samples": [], "not_watched": [], "problems": []}
     probs = e["problems"]
     reldir = os.path.join(out, "firmware")
     relpath = "firmware"
@@ -893,6 +922,7 @@ def collect_firmware(source, rel, project, tagver, out):
     e["commit"] = meta.get("commit")
     e["built_at"] = _date(meta.get("built_at"))
     e["tables"] = _fw_tables(meta.get("tables"))
+    e["dt"] = fw_dt(meta)
     for x in meta.get("not_watched") or []:     # check_fw_meta 已確認是 list of {slug: str, why: str|None}
         # source=meta：firmware.yml 依設計宣告不監控（合成 vBIOS、沒有檔案的樣本），不算 collect 的 GAP
         e["not_watched"].append({"slug": _clean(x["slug"], 64), "why": _clean(x.get("why") or "", 200), "source": "meta"})
@@ -984,9 +1014,9 @@ def build(source, out, now):
         releases.append(collect_release(source, rel, kind, project, tagver, out, len(releases)))
     if fw_cands:
         # 只監控最新的一個韌體 Release（第一階段示範的限制，FIRMWARE-WATCH.md §2）；舊的留著當紀錄、只列出
-        fw_cands.sort(key=lambda c: (_date(c[0].get("published_at")) or "", _ver_key(c[2])), reverse=True)
-        inv["firmware"] = collect_firmware(source, *fw_cands[0], out)
-        inv["firmware_older"] = [_clean(c[0]["tag"]) for c in fw_cands[1:]][:50]
+        latest, others = pick_latest_firmware(fw_cands)
+        inv["firmware"] = collect_firmware(source, *latest, out)
+        inv["firmware_older"] = [_clean(c[0]["tag"]) for c in others][:50]
     nprob = sum(len(r["problems"]) for r in releases)
     nbad = sum(1 for r in releases if r["problems"])
     nrel = sum(1 for r in releases if r["kind"] == "release")

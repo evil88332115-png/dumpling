@@ -1,4 +1,4 @@
-"""載入 pipeline/watch 底下的模組（collect、issues、support），給儀表板重用。
+"""載入 pipeline/watch 底下的模組（collect、issues、support、match），給儀表板重用。
 
 不另寫一份正規式或 HTTP：Release 下載的大小上限、轉址檢查都在 collect.GitHubSource，Issue 的 API 在 issues.Api。
 用檔案路徑載入，不依賴 sys.path（python3 -I 時 sys.path 不含腳本資料夾）；同一個模組只載入一次。
@@ -14,8 +14,8 @@ _cache = {}
 
 
 def load(name):
-    """name：collect／issues／support。回模組物件。"""
-    if name not in ("collect", "issues", "support"):
+    """name：collect／issues／support／match。回模組物件。match 只讀它的常數與 uuid_of（韌體公告的用語、監控鍵）。"""
+    if name not in ("collect", "issues", "support", "match"):
         raise ValueError("不認得的模組：" + name)
     if name not in _cache:
         spec = importlib.util.spec_from_file_location("dumpling_dash_" + name, os.path.join(WATCH, name + ".py"))

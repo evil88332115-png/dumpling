@@ -493,24 +493,75 @@ class T(Base):
         self.assertIn("報告狀態（report_status）NOT_RUN", body)
         self.assertIn("發行閘門（release_gate）NOT_RUN", body)
 
-    def test_firmware_vendors_new_kev_opens_vendor_issue(self):
-        """D-043 第 3 點：Intel／AMD／AMI／NVIDIA（BIOS／vBIOS 韌體）新的 KEV 一律提醒（廠商層級，沒有元件比對也提醒）。
-        KEV 的 vendorProject 拼法：CISA 2026.11.10 實查 Intel、AMI；AMD、NVIDIA 目前沒有條目，以 exploited_vendor 的別名涵蓋常見拼法。"""
-        cfg = os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json")
-        self.run_once(NOW1, vendor_config=cfg)
-        self.kev_extra = [
-            {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90002", "vendorProject": "Advanced Micro Devices", "product": "AGESA", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90003", "vendorProject": "NVIDIA Corporation", "product": "GPU Firmware", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90005", "vendorProject": "Contoso", "product": "Widget", "dateAdded": NOW2[:10]},   # 不在清單：不提醒
-        ]
-        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+    VENDOR_CFG = os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json")
+
+    def as_project(self, name):
+        """把測試的 Release 改成指定的專案名（vendor-watch.json 的 projects 鍵比對專案名）。
+        SBOM 另加一個帶 linux CPE 的核心元件：exploited_vendor 會從 SBOM 取出 linux 這個廠商（exclude 要擋的就是這條路）。"""
+        doc = json.load(open(self.sb))
+        doc["components"].append({"type": "operating-system", "name": "linux-kernel", "version": "6.8.12", "bom-ref": "kernel",
+                                  "cpe": "cpe:2.3:o:linux:linux_kernel:6.8.12:*:*:*:*:*:*:*"})
+        raw = json.dumps(doc).encode()
+        open(self.sb, "wb").write(raw)
+        r = self.inventory["releases"][0]
+        r.update(tag=f"{name}/v1", project=name, html_url=f"https://github.com/o/r/releases/tag/{name}/v1")
+        r["sboms"]["bsp"].update(sha256=hashlib.sha256(raw).hexdigest(), size=len(raw))
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+
+    def vendor_cves(self, plan):
         vend = [x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]]
-        cves = sorted(__import__("re").search(r"CVE-\d{4}-\d+", t["title"]).group(0) for t in vend)
-        self.assertEqual(cves, ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
-        _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天不重複
-        self.assertEqual([x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]], [])
+        return sorted(__import__("re").search(r"CVE-\d{4}-\d+", t["title"]).group(0) for t in vend)
+
+    FW_KEV = [
+        {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V"},
+        {"cveID": "CVE-2026-90002", "vendorProject": "Advanced Micro Devices", "product": "AGESA"},
+        {"cveID": "CVE-2026-90003", "vendorProject": "NVIDIA Corporation", "product": "GPU Firmware"},
+        {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME"},
+        {"cveID": "CVE-2026-90005", "vendorProject": "Contoso", "product": "Widget"},     # 不在任何清單：不提醒
+        {"cveID": "CVE-2026-90006", "vendorProject": "Linux", "product": "Kernel"},
+    ]
+
+    def run_vendor_kev(self, project):
+        self.as_project(project)
+        self.run_once(NOW1, vendor_config=self.VENDOR_CFG)
+        self.kev_extra = [dict(e, dateAdded=NOW2[:10]) for e in self.FW_KEV]
+        _, _, plan = self.run_once(NOW2, vendor_config=self.VENDOR_CFG)
+        got = self.vendor_cves(plan)
+        _, _, plan = self.run_once(NOW3, vendor_config=self.VENDOR_CFG)                 # 隔天不重複
+        self.assertEqual(self.vendor_cves(plan), [])
+        return got
+
+    def test_vendor_watch_x86_project_gets_firmware_vendors(self):
+        """D-064（D-043 第 3 點的變更）：Intel／AMD／AMI 的新 KEV 只對列了它們的專案（x86 的 ai-nas-demo）提醒；
+        NVIDIA 不在 ai-nas-demo 的清單。linux 是安全網（核心比對不完整的專案）。
+        KEV 的 vendorProject 拼法：CISA 2026.11.10 實查 Intel、AMI；AMD、NVIDIA 目前沒有條目，以 exploited_vendor 的別名涵蓋常見拼法。"""
+        self.assertEqual(self.run_vendor_kev("ai-nas-demo"), ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90004", "CVE-2026-90006"])
+
+    def test_vendor_watch_orin_no_x86_firmware_no_linux(self):
+        """Orin 沒有 Intel／AMD／AMI 韌體：不提醒（之前全體清單會對每份 SBOM 各開一個）。
+        Orin 的核心元件比對完整（kernel_map、kernel_cna OK），linux 的廠商層級不開（exclude 拿掉 SBOM 取出的 linux）。"""
+        self.assertEqual(self.run_vendor_kev("orin-nano-demo"), ["CVE-2026-90003"])
+
+    def test_vendor_watch_rock5b_keeps_linux_safety_net(self):
+        """rock-5b 是廠商核心、核心比對不完整：linux 留著當安全網（手動清單不受 exclude 影響）。"""
+        self.assertEqual(self.run_vendor_kev("rock-5b-demo"), ["CVE-2026-90006"])
+
+    def test_vendor_watch_firmware_demo_gets_firmware_vendors(self):
+        """韌體示範專案（firmware-demo）：Intel／AMD／AMI／NVIDIA 的新 KEV 都提醒；Linux 不列（韌體 SBOM 沒有核心）。"""
+        self.assertEqual(self.run_vendor_kev("firmware-demo"), ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
+
+    def test_vendor_watch_unlisted_project_gets_no_manual_vendors(self):
+        """不在 projects 裡的專案沒有手動清單（測試 VendorWatchConfig 會擋下 projects/ 裡漏列的專案）；SBOM 取出的 linux 被 exclude 擋下。"""
+        self.assertEqual(self.run_vendor_kev("demo"), [])
+
+    def test_vendor_watch_sbom_linux_without_exclude_would_alert(self):
+        """對照組：同一份 SBOM，exclude 沒有 linux 時，SBOM 取出的 linux 會開廠商層級（證明上面幾個測試真的走到 exclude）。"""
+        cfg = json.load(open(self.VENDOR_CFG, encoding="utf-8"))
+        cfg["exclude"] = []
+        alt = os.path.join(self.w, "vendor-watch-noexclude.json")
+        json.dump(cfg, open(alt, "w"))
+        self.VENDOR_CFG = alt
+        self.assertEqual(self.run_vendor_kev("orin-nano-demo"), ["CVE-2026-90003", "CVE-2026-90006"])
 
     # ---- 廠商層級：同一個廠商 × CVE 只開一個 Issue（D-064 B，C0 決定 2026-11-15）----
     def add_sbom(self, version, layer, new_release=False):
@@ -607,6 +658,47 @@ class T(Base):
         txt = json.dumps(plan["state"])
         self.assertNotIn(self.w, txt)
         self.assertNotIn("releases/0", txt)
+
+
+class VendorWatchConfig(unittest.TestCase):
+    """vendor-watch.json 的規則（C0 決定 2026-11-15，D-064）：
+    每個 projects/*/ 都有一筆、鍵沒有打錯字、全體清單是空的；linux 只在核心元件比對完整的專案拿掉。"""
+    ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    # 核心元件比對完整（per_sbom 的 kernel_map、kernel_cna 都是 OK）的專案：可以不列 linux。
+    # 新增之前要先確認該專案每日監控的 kernel_map／kernel_cna 是 OK（M7d-2／M7d-3b 之後才可能加 rpi、rock-5b、ai-nas）。
+    KERNEL_COMPLETE = {"orin-nano-demo"}
+    # 不是產品、不在 projects/ 的監控專案（FIRMWARE-WATCH.md §5）：只有韌體示範專案
+    NON_PRODUCT = {"firmware-demo"}
+
+    def setUp(self):
+        self.cfg = json.load(open(os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json"), encoding="utf-8"))
+        pdir = os.path.join(self.ROOT, "projects")
+        self.projects = {d for d in os.listdir(pdir) if os.path.isfile(os.path.join(pdir, d, "project.yml"))}
+
+    def test_every_project_listed_and_no_typos(self):
+        self.assertTrue(self.projects)
+        keys = set(self.cfg["projects"])
+        self.assertEqual(sorted(self.projects - keys), [], "projects/ 裡有專案沒列在 vendor-watch.json 的 projects")
+        bad = sorted(k for k in keys if k.split("@")[0] not in self.projects | self.NON_PRODUCT)
+        self.assertEqual(bad, [], "vendor-watch.json 的 projects 鍵不是現有專案（打錯字？）")
+
+    def test_firmware_demo_entry(self):
+        """韌體 Release 也有廠商層級的提醒（FIRMWARE-WATCH.md §5，C0 2026-11-15）：鍵是正規化後的名稱。"""
+        self.assertEqual(sorted(self.cfg["projects"]["firmware-demo"]), ["amd", "ami", "insyde", "intel", "nvidia", "phoenix"])
+        self.assertNotIn("firmware-demo", self.projects)        # 不是 projects/ 的產品
+
+    def test_no_global_vendor_list(self):
+        self.assertEqual(self.cfg["vendors"], [], "全體清單會對每份 SBOM 各開一個廠商層級 Issue，改列在 projects")
+
+    def test_linux_only_dropped_where_kernel_matching_complete(self):
+        self.assertIn("linux", self.cfg["exclude"])
+        for p in sorted(self.projects):
+            vs = self.cfg["projects"].get(p, [])
+            if p in self.KERNEL_COMPLETE:
+                self.assertNotIn("linux", vs, p)
+            else:
+                self.assertIn("linux", vs, f"{p} 的核心元件比對不完整，要列 linux 當安全網")
+        self.assertIn("linux", self.cfg.get("notes", {}), "要註明 linux 的原因與何時可以拿掉")
 
 
 class FeedFallback(Base):

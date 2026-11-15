@@ -12,6 +12,8 @@
      專案（support.load_projects）、watch 資料夾。每一筆來源都有「抓不到」的處理：那一格寫 GAP（原因），整頁照常產生。
   2. 組 data dict（build_data）：只放白名單欄位；字串清掉控制字元、限制長度；不放環境變數、不放 API 回應原文。
   3. 輸出 HTML（render.py，純函式）。
+韌體示範區（docs/DASHBOARD.md 第 12 節）：只取最新的一個 firmware-demo Release，規則重用 collect 的函式；每日監控的結果取自
+最近一輪 watch 的 result.json（per_sbom 的韌體列）與狀態 Issue 的 firmware 欄位。
 Releases API 與 Issues API 都抓不到 → 結束碼 1、不產生 site（避免用空頁蓋掉舊頁；專案清單讀 checkout，一定成功，不算）。結束碼：OK 0、失敗 1、用法 64。
 """
 import argparse
@@ -55,6 +57,13 @@ VEX_JUSTIFICATIONS = ("code_not_present", "code_not_reachable", "requires_config
                       "protected_by_mitigating_control")
 UNKNOWN = "不明"
 UNSET = "（未填）"
+FW_UUID_RE = re.compile(r"^dumpling:firmware-demo/.{1,200}#firmware\Z", re.S)
+FW_TABLES = ("fw_advisory_rules", "intel_microcode", "nvidia_vbios")
+FW_KINDS = ("rule", "intel-microcode", "nvidia-vbios")
+FW_DT_RESULTS = ("OK", "FAIL", "NOT_RUN")
+FW_DT_REASON_MAX = 200
+FW_OLDER_MAX = 50
+FW_STATE_SAMPLES_MAX = 200
 
 
 _SCRUB = [""]      # run() 設成 token；c() 會把它從所有外來字串裡拿掉（錯誤訊息、Issue 標題…），token 不能進任何輸出
@@ -284,12 +293,13 @@ def read_release(collect, source, rel, kind, project, tagver, tmp):
 
 
 def gather_releases(collect, source, now):
-    """→ (section, ok)。draft 一律不列（連 tag 都不記）。"""
+    """→ (section, ok, 韌體候選)。draft 一律不列（連 tag 都不記）。firmware-demo/<版本> 不當成板子的 Release：
+    不進 rows、不進 skipped，另外交給 gather_firmware（只取最新的一個）。"""
     try:
         listing = source.list_releases()
     except Exception as e:
-        return {"gap": "Releases API 讀不到：%s" % (c(e, 150) if type(e).__name__ == "ApiError" else type(e).__name__), "rows": [], "skipped": []}, False
-    rows, skipped, seen = [], [], set()
+        return {"gap": "Releases API 讀不到：%s" % (c(e, 150) if type(e).__name__ == "ApiError" else type(e).__name__), "rows": [], "skipped": []}, False, []
+    rows, skipped, seen, fw_cands = [], [], set(), []
     tmp = tempfile.mkdtemp(prefix="dash-")
     try:
         for rel in listing:
@@ -308,6 +318,9 @@ def gather_releases(collect, source, now):
             if rel["tag"] in seen:
                 continue
             seen.add(rel["tag"])
+            if kind == "firmware":
+                fw_cands.append((rel, project, tagver))
+                continue
             if len(rows) >= MAX_RELEASES:
                 skipped.append({"tag": tag, "why": "超過 %d 個 Release 的上限，不列" % MAX_RELEASES})
                 continue
@@ -315,7 +328,166 @@ def gather_releases(collect, source, now):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     rows.sort(key=lambda r: (r["published_at"] or "", r["tag"]), reverse=True)
-    return {"gap": None, "rows": rows, "skipped": skipped[:50]}, True
+    return {"gap": None, "rows": rows, "skipped": skipped[:50]}, True, fw_cands
+
+
+# ---------------------------------------------------------------- 韌體示範（docs/DASHBOARD.md 第 12 節）
+
+def fw_word(match, kind, review):
+    """公告結果的用語（和 Issue 同一套，常數取自 match.py；C0 決定：不能只寫 affected，也不能寫成確定受影響）。"""
+    if kind == "rule":
+        return match.FW_WORD_CONFIRMED if review == "confirmed" else match.FW_WORD_PRELIM
+    if kind == "intel-microcode":
+        return match.FW_WORD_UCODE
+    if kind == "nvidia-vbios":
+        return match.FW_WORD_VBIOS
+    return None
+
+
+def dt_field(meta):
+    """firmware-meta 頂層的 dt 欄位（只用來顯示，不影響其他欄位）。
+    → {"state": "absent"｜"ok"｜"bad", "status", "result", "reason"}。
+    合法的組合只有兩種：result OK → status OK、reason null；result FAIL／NOT_RUN → status GAP、reason 非空字串（最多 200 字）。
+    其他組合、型別不對、缺 key 一律 bad（render 只寫「格式不對」，不顯示原文）；沒有 dt 這個 key（舊的 Release）是 absent。
+    reason 只檢查型別與長度，不比對固定字串。"""
+    if "dt" not in meta:
+        return {"state": "absent"}
+    d = meta["dt"]
+    bad = {"state": "bad"}
+    if not isinstance(d, dict) or not all(k in d for k in ("status", "result", "reason")):
+        return bad
+    status, result, reason = d["status"], d["result"], d["reason"]
+    if not (isinstance(status, str) and isinstance(result, str)):
+        return bad
+    if result == "OK":
+        if status != "OK" or reason is not None:
+            return bad
+    elif result in FW_DT_RESULTS:
+        if status != "GAP" or not isinstance(reason, str) or len(reason) > FW_DT_REASON_MAX or not render.clean(reason, 10 ** 6).strip():
+            return bad
+    else:
+        return bad
+    return {"state": "ok", "status": status, "result": result, "reason": c(reason, FW_DT_REASON_MAX) if reason is not None else None}
+
+
+def fw_asset(assets, name):
+    """meta 列的附件在 Release 上有沒有（下載連結由 render 的 asset_url 組，不用 API 回的網址）。"""
+    lst = assets.get(name) if isinstance(name, str) else None
+    return {"name": c(name, 220), "present": bool(lst) and len(lst) == 1, "size": lst[0].size if lst and len(lst) == 1 else None}
+
+
+def fw_samples(collect, match, meta, assets):
+    """meta 的 samples → (samples, not_watched)。規則和 collect.collect_firmware 一樣：欄位檢查用 _fw_sample_fields、監控鍵用 fw_watch_version；
+    監控不了的（版本與映像雜湊都讀不到）列進 not_watched（source=collect）；依設計不監控的（meta 的 not_watched）source=meta。"""
+    samples, not_watched, seen, keys = [], [], set(), set()
+    for x in meta.get("not_watched") or []:             # check_fw_meta 已確認格式
+        not_watched.append({"slug": c(x["slug"], 64), "why": c(x["why"], 200), "source": "meta"})
+    for i, x in enumerate(meta["samples"]):
+        err = collect._fw_sample_fields(x)
+        label = c(x["slug"], 64) if isinstance(x, dict) and isinstance(x.get("slug"), str) else "#%d" % i
+        if err:
+            samples.append({"slug": label, "gap": "firmware-meta 樣本：" + err})
+            continue
+        slug = x["slug"]
+        if slug in seen:
+            samples.append({"slug": slug, "gap": "firmware-meta 樣本：slug 重複（只收第一個）"})
+            continue
+        seen.add(slug)
+        wv, why = collect.fw_watch_version(slug, x.get("firmware_version"), x.get("image_sha256"))
+        if wv is None:
+            not_watched.append({"slug": slug, "why": "GAP：" + c(why, 200), "source": "collect"})
+            continue
+        row = {"slug": slug, "gap": None, "kind": x["kind"], "firmware_version": c(x["firmware_version"], 64) if x.get("firmware_version") is not None else None,
+               "watch_version": c(wv, 200), "key_gap": c(why, 200) if why else None,
+               "uuid": match.uuid_of(collect.FIRMWARE_PROJECT, wv, "firmware"), "image_sha256": x.get("image_sha256"),
+               "normalized": x.get("normalized") if x["kind"] == "sbom" else None,
+               "meta_status": cs(x.get("status"), 20), "expect": cs(x.get("expect"), 20),
+               "sbom": fw_asset(assets, x["sbom"]), "inventory": fw_asset(assets, x["inventory"]) if x["kind"] == "bios" else None}
+        if row["uuid"] in keys:
+            row.update(gap="監控鍵重複", uuid=None)
+        keys.add(row["uuid"])
+        samples.append(row)
+    return samples, not_watched
+
+
+def gather_firmware(collect, source, cands, ok_rel):
+    """→ 韌體區塊。只取最新的一個 firmware-demo Release（依 published_at；平手時比 tag 版本的數字），其他列成舊的（不監控）。
+    firmware-meta.json 讀不到、超過 1 MiB、check_fw_meta 不合格 → 整區 meta_gap（不列任何樣本）。"""
+    match = watchlib.load("match")
+    if not ok_rel:
+        return {"gap": "Releases API 讀不到（韌體區沒有資料）"}
+    if not cands:
+        return {"gap": None, "tag": None, "older": [], "older_total": 0}
+    latest, others = collect.pick_latest_firmware(cands)       # 和 collect.build 同一個函式：兩邊一定選同一個 Release
+    rel, project, tagver = latest
+    older = [c(k[0]["tag"], 120) for k in others]
+    fw = {"gap": None, "tag": c(rel["tag"], 120), "version": c(tagver, 64), "published_at": cs(rel.get("published_at"), 40),
+          "older": older[:FW_OLDER_MAX], "older_total": len(older), "meta_gap": None, "commit": None, "built_at": None,
+          "workflow_run": None, "samples": [], "not_watched": [], "meta_tables": {}, "dt": {"state": "absent"}}
+    tmp = tempfile.mkdtemp(prefix="dash-fw-")
+    try:
+        meta = fetch_json(source, rel["assets"], collect.FW_META, MAX_META, tmp, collect.FW_META)
+        err = collect.check_fw_meta(meta, rel["tag"])
+        if err:
+            raise Gap("%s：%s" % (collect.FW_META, err))
+    except Gap as e:
+        fw["meta_gap"] = str(e)
+        return fw
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    fw["commit"] = c(meta["commit"], 40) if isinstance(meta.get("commit"), str) else None
+    fw["built_at"] = cs(meta.get("built_at"), 40)
+    fw["workflow_run"] = cs(meta.get("workflow_run"), 200)
+    fw["samples"], fw["not_watched"] = fw_samples(collect, match, meta, rel["assets"])
+    fw["meta_tables"] = {n: {k: c(v, 100) for k, v in sorted(t.items())[:12]}
+                         for n, t in collect._fw_tables(meta.get("tables")).items()}
+    fw["dt"] = dt_field(meta)
+    return fw
+
+
+def fw_state(match, st):
+    """狀態 Issue 的 firmware 欄位（最近一輪的表識別、status、stale、affected 紀錄、size_stopped_at）。只留白名單欄位、限制大小。
+    上限和 match.py 一樣（FW_MAX_AFFECTED、REMATCH_MAX_BULLETINS、REMATCH_MAX_BULLETIN_CHARS，從 match 讀）；
+    超過上限、格式不對的紀錄不能默默丟掉或截斷後裝成完整：記下實際總數與丟掉的筆數，render 寫 GAP。
+    advisory：{uuid: {"recs": [...], "total": 紀錄實際筆數, "bad": 格式不對而丟掉的筆數}}。
+    沒有條目的樣本（uuid 不在 advisory 裡）和有條目但沒有 affected 的樣本不同：match 對每個監控中的樣本都會寫條目。"""
+    fw = st.get("firmware")
+    if not isinstance(fw, dict):
+        return {"present": False}
+    max_aff, max_bl, max_blc = match.FW_MAX_AFFECTED, match.REMATCH_MAX_BULLETINS, match.REMATCH_MAX_BULLETIN_CHARS
+    tables = {}
+    for n in FW_TABLES:
+        t = fw["tables"].get(n) if isinstance(fw.get("tables"), dict) else None
+        if isinstance(t, dict):
+            tables[n] = {k: (c(v, 100) if isinstance(v, str) else v) for k, v in sorted(t.items(), key=lambda kv: str(kv[0]))
+                         if isinstance(k, str) and len(k) <= 40 and isinstance(v, (str, bool))}
+            tables[n] = dict(list(tables[n].items())[:12])
+    adv, bad_unattributed = {}, 0
+    samples = fw.get("samples") if isinstance(fw.get("samples"), dict) else {}
+    for u, x in list(samples.items())[:FW_STATE_SAMPLES_MAX]:
+        if not (isinstance(u, str) and FW_UUID_RE.match(u) and isinstance(x, dict)):
+            bad_unattributed += 1
+            continue
+        raw = x.get("advisory") if isinstance(x.get("advisory"), dict) else None
+        if raw is None:
+            bad_unattributed += 1
+            continue
+        recs, bad = [], 0
+        for key, e in raw.items():
+            if not (isinstance(key, str) and isinstance(e, dict) and e.get("kind") in FW_KINDS and isinstance(e.get("result"), str)
+                    and isinstance(e.get("bulletins"), list) and all(isinstance(b, str) for b in e["bulletins"])):
+                bad += 1
+                continue
+            review = e.get("review") if e.get("review") in ("preliminary", "confirmed") else None
+            recs.append({"key": c(key, 300), "kind": e["kind"], "result": c(e["result"], 40), "review": review,
+                         "component": c(e["component"], 300) if isinstance(e.get("component"), str) else None,
+                         "bulletins": [c(b, max_blc) for b in e["bulletins"][:max_bl]], "bulletins_total": len(e["bulletins"]),
+                         "baseline": e["baseline"] if isinstance(e.get("baseline"), bool) else None,
+                         "word": fw_word(match, e["kind"], review)})
+        recs.sort(key=lambda r: r["key"])
+        adv[c(u, 200)] = {"recs": recs[:max_aff], "total": len(recs), "bad": bad}
+    return {"present": True, "tables": tables, "size_stopped_at": cs(fw.get("size_stopped_at"), 40), "advisory": adv,
+            "bad_unattributed": bad_unattributed, "samples_total": len(samples), "samples_read": min(len(samples), FW_STATE_SAMPLES_MAX)}
 
 
 def issue_rows(raw):
@@ -338,7 +510,7 @@ def issue_rows(raw):
     return out
 
 
-def state_issue(issues_mod, rows, repo):
+def state_issue(issues_mod, rows, repo, match=None):
     if not rows:
         return {"gap": "沒有 watch-state 標籤的 Issue"}
     if len(rows) > 1:
@@ -351,6 +523,7 @@ def state_issue(issues_mod, rows, repo):
     except Exception as e:
         out["gap"] = "狀態 Issue #%d 解不開：%s" % (r["number"], c(e, 120))
         return out
+    out["_fw"] = fw_state(match or watchlib.load("match"), st)
     d = st.get("dumpling")
     out["baseline_at"] = cs(d.get("baseline_at"), 40) if isinstance(d, dict) else None
     out["matches"] = len(st["matches"]) if isinstance(st.get("matches"), dict) else None
@@ -458,13 +631,22 @@ def plan_result(d):
             per.append({"tag": c(r.get("tag"), 100), "layer": c(r.get("layer"), 20), "grype": cs(r.get("grype")),
                         "report_status": cs(r.get("report_status")), "release_gate": cs(r.get("release_gate")),
                         "kernel_map": cs(r.get("kernel_map")), "kernel_cna": cs(r.get("kernel_cna")), "exploited": ci(r.get("exploited")),
-                        "why": c(r.get("why"), 200) if r.get("why") else None})
+                        "why": c(r.get("why"), 200) if r.get("why") else None,
+                        # 韌體的列（uuid 是 dumpling:firmware-demo/…#firmware）：公告比對的狀態與說明另外收（render 的韌體區用）
+                        "uuid": c(r.get("uuid"), 200) if isinstance(r.get("uuid"), str) else None,
+                        "fw": isinstance(r.get("uuid"), str) and bool(FW_UUID_RE.match(r["uuid"])),
+                        "advisory": cs(r.get("advisory"), 80), "advisory_why": c(r.get("advisory_why"), 400) if r.get("advisory_why") else None,
+                        "advisory_reasons": [c(x, 300) for x in r["advisory_reasons"][:10] if isinstance(x, str)]
+                        if isinstance(r.get("advisory_reasons"), list) else []})
 
     def strs(k):
         v = d.get(k)
         return [c(x, 600) for x in v if isinstance(x, str)][:50] if isinstance(v, list) else []
     stats = d.get("stats") if isinstance(d.get("stats"), dict) else {}
-    return {"gap": None, "status": cs(d.get("status")), "detail": c(d.get("detail"), 400), "per_sbom": per, "notes": strs("notes"),
+    # 超過 200 份不靜默截斷：記下實際份數，頁面寫 GAP（硬性限制 5）
+    cut = max(0, len(ps) - 200)
+    return {"gap": None, "status": cs(d.get("status")), "detail": c(d.get("detail"), 400), "per_sbom": per, "per_sbom_cut": cut,
+            "notes": strs("notes"),
             "attention": strs("attention"), "gaps": strs("gaps"),
             "stats": {k: ci(v) for k, v in stats.items() if isinstance(k, str) and ci(v) is not None and len(k) < 40}}
 
@@ -519,16 +701,51 @@ def gather_watch(watch_dir):
     return w, ok
 
 
+def fw_daily(watch, state, fw_st):
+    """韌體區要用的每日監控結果：最近一輪 result.json 的韌體列（uuid → 列）與狀態 Issue 的 firmware 欄位。各自缺就各自 GAP。"""
+    plan = watch.get("plan") if isinstance(watch.get("plan"), dict) else {}
+    if plan.get("gap") or not isinstance(watch.get("plan"), dict):
+        rows, rows_gap = [], "每日比對結果（watch-plan result.json）：%s" % (plan.get("gap") or "沒有資料")
+    else:
+        rows = [r for r in plan.get("per_sbom", []) if r.get("fw") and r.get("uuid")]          # 一列都不丟：render 逐列列出（對得到樣本的、對不到的）
+        rows_gap = None
+    if fw_st is None:
+        st = {"gap": "狀態 Issue：%s" % (state.get("gap") if isinstance(state, dict) and state.get("gap") else "沒有資料")}
+    elif not fw_st.get("present"):
+        st = {"gap": "狀態 Issue 的內容沒有 firmware 欄位（韌體還沒進過監控，或還沒寫進狀態）"}
+    else:
+        st = dict(fw_st, gap=None)
+    cut = plan.get("per_sbom_cut") if isinstance(plan.get("per_sbom_cut"), int) and not isinstance(plan.get("per_sbom_cut"), bool) else 0
+    return {"rows": rows, "rows_gap": rows_gap, "state": st, "per_sbom_cut": cut, "per_sbom_read": len(plan.get("per_sbom") or [])}
+
+
+def fw_warnings(fw, warnings):
+    """頁首警告：韌體區的 GAP、停止、表過期。"""
+    if not isinstance(fw, dict):
+        return
+    if fw.get("meta_gap"):
+        warnings.append("GAP：韌體區（%s）" % fw["meta_gap"])
+    st = (fw.get("daily") or {}).get("state") or {}
+    if st.get("size_stopped_at"):
+        warnings.append("GAP：韌體因狀態大小上限停止（%s）" % st["size_stopped_at"])
+    stale = [n for n, t in sorted((st.get("tables") or {}).items()) if isinstance(t, dict) and t.get("stale") is True]
+    if stale:
+        warnings.append("韌體的對照表過期：%s" % "、".join(stale))
+
+
 def build_data(source, api, repo, projects_dir="projects", watch_dir=None, now=None, commit=None, load_projects=None):
     """組成 data dict。source：collect 的來源（list_releases／fetch）；api：issues.Api（list_issues）。
     回 (data, sources_ok)；sources_ok 是 {"releases", "issues", "projects", "watch"} 各自有沒有讀到。"""
     collect, issues_mod = watchlib.load("collect"), watchlib.load("issues")
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    releases, ok_rel = gather_releases(collect, source, now)
+    releases, ok_rel, fw_cands = gather_releases(collect, source, now)
+    firmware = gather_firmware(collect, source, fw_cands, ok_rel)
     iss, state, ok_iss = gather_issues(issues_mod, api, repo)
     projects, ok_proj = gather_projects(projects_dir, load_projects, now)
     watch, ok_watch = gather_watch(watch_dir)
+    fw_state_part = state.pop("_fw", None) if isinstance(state, dict) else None
     watch["state_issue"] = state
+    firmware["daily"] = fw_daily(watch, state, fw_state_part)
     warnings = []
     run = watch.get("run")
     created = parse_time(run.get("created_at")) if run else None
@@ -553,6 +770,7 @@ def build_data(source, api, repo, projects_dir="projects", watch_dir=None, now=N
     bad_state = sum(1 for sec in iss.values() if isinstance(sec, dict) for i in sec.get("rows", []) if i.get("state") == "?")
     if bad_state:
         warnings.append("有 %d 個 Issue 的 state 不是 open／closed（顯示成 ?）" % bad_state)
+    fw_warnings(firmware, warnings)
     if releases.get("skipped"):
         warnings.append("有 %d 個已發布的 Release 不合規則，沒有列入（見版本區塊最下方）" % len(releases["skipped"]))
     # 專案列：補上最新正式版、開發版、支援期限檢查結果、開著的監控 Issue 數
@@ -572,7 +790,7 @@ def build_data(source, api, repo, projects_dir="projects", watch_dir=None, now=N
     commit = commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None
     data = {"schema": SCHEMA, "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "commit": commit, "repo": repo,
             "sources": {k: "OK" if v else "GAP" for k, v in oks.items()}, "warnings": warnings,
-            "projects": projects, "releases": releases, "watch": watch, "issues": iss}
+            "projects": projects, "releases": releases, "firmware": firmware, "watch": watch, "issues": iss}
     return data, oks
 
 
