@@ -62,7 +62,7 @@
     references 裡上游核心 commit（每一個都查得到才用）改的程式檔與標頭檔；(b) 有 CNA 紀錄的：紀錄裡修補 commit 在 clone 裡的，實際改的程式檔
     與標頭檔（除非完整的核心原始碼樹證明這個核心沒有它）和 programFiles 聯集（只會更保守）。只有 --source-tree（完整的樹，檔案名稱完整）找不到
     才算「沒有這個檔案」而不併入；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 .h 不在裡面）、--makefiles-dir 或讀不到名稱時，
-    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。計數在 kernel.stable_git.kept_not_proven_absent。找不到 commit 就照舊。
+    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。計數在 kernel.stable_git.kept_not_proven_absent（也包含修正前本來就會併入的情況，例如名稱超過上限、讀不到名稱；不等於這次修正多併入的數量）。找不到 commit 就照舊。
     結果在 kernel.stable_git。
   --mirror：kernel.org 的 CVE 紀錄（Linux 核心 CNA，vulns.git 的 cve/published/<年>/CVE-….json）；SOURCE 記 commit、
     下載時間與 zip 的 sha256。--max-age-days 預設 7（環境變數 KERNEL_CVE_MAX_AGE_DAYS；同 kernel-cve.sh --check）。
