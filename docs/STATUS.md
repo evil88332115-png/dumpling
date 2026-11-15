@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:27 +0800（C1）
+最後更新：2026-11-15 12:28 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -111,11 +111,18 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-> **目前（2026-11-15，C0 通知恢復）**
-> - **#110 已合併（main 4f64db7）**，main CI 綠。本機 worktree `dumpling-wt-c2-rules2` 與本機分支已移除，遠端分支已自動刪除。
-> - **合併順序（使用者已同意）**：#97（C4 的 M6）合併前，C0 不合併其他 PR；C2 的 PR 可以照常開，排在 #97 之後。
-> - D-046 的實作等 C1 的發現介面（main 與 wp1 分支目前都還沒有）；5674 對照表 PR 照原計畫，等使用者確認初審意見後再插隊做。沒有在跑的代理，也沒有下載或 firmware-ci。
-> - **M7f (c) 程式碼完整性／驗證開機的調查**（C0 同意提早開始，只做調查與設計筆記、不寫程式；照 D-060 排在 M7d／M7e 之後合併）：分支 `wp3/code-integrity-survey`（worktree `$AGENT_TMP/dumpling-wt-c2-cisurvey`，從 main 4f64db7 開；暫存 `$AGENT_TMP/dumpling-tmp-c2-cisurvey/`）。調查代理（sonnet、high，因為要解析下載的草稿檔）**進行中**。範圍：ETSI EN 304-623 的公開草稿（只從 ETSI docbox 取得；記版本、日期、網址、sha256；條文只摘要）＋ jetm/shipcheck（Apache-2.0）的 code-integrity 項目（只讀說明與定義，不搬程式碼）。產出 `docs/notes/c2-code-integrity-survey.md`：每項要求能不能從公開 BIOS／vBIOS／Jetson 映像自動判斷，判斷不了的照硬性限制 5 標 GAP／NOT_ASSESSED，哪些已被現有報告涵蓋，以及建議的 PR 切法與規模。寫好先傳給 C0。
+> **目前（2026-11-15）**
+> - **#110 已合併（main 4f64db7）**；rules2 的 worktree 與本機分支已移除。#97 已合併（main fff33a5）；照 D-060，C0 接著合 #111，之後其他 PR 照常排隊。
+> - **5674 對照表 → PR #113**（分支 `wp3/nvidia-5674-review`，worktree `$AGENT_TMP/dumpling-wt-c2-nv5674`，head cfd4f7c，已併入 main fff33a5）：使用者 2026-11-15 同意初審意見（經 C0 轉達）。5674 改 reviewed=true，reviewed_by「使用者（經 C0 轉達）」，reviewed_until 2025-09-02；vBIOS 結果從 table-not-reviewed 變成 no-row（仍是 NOT_ASSESSED）。6 個 C2 測試與 1 個 C1 測試（`test_shipped_gpu_firmware_table_is_valid_with_mirror_and_confirmed`）改成確認後的預期，已請 C0 轉告 C1。本機 c2-x86 1248 passed、pilot 1160 passed，public-check 與 provenance-check OK；PR 的 CI 已自動觸發，**結果待看**。已通知 C0，C0 派獨立驗證。確認過的表會吃時鐘：鏡像 fetched_utc 2026-11-13 過 90 天（2027-02-11）後報「對照表過期」，要重跑更新表的步驟。
+> - **M7f (c) 程式碼完整性／驗證開機的調查**：分支 `wp3/code-integrity-survey` f305cd0（worktree `$AGENT_TMP/dumpling-wt-c2-cisurvey`，暫存 `$AGENT_TMP/dumpling-tmp-c2-cisurvey/`）。調查代理（sonnet、high）**完成**，C2 看過，**已送 C0 審**，還沒開 PR；照 D-060，排在 M7d／M7e 之後合併。重點：
+>   - ETSI EN 304-623 是 GAP：docbox 回 403 或導向登入，所以沒有條款對照。怎麼取得要使用者決定。
+>   - shipcheck 讀 commit 4621b3a，只借概念。
+>   - 共 23 項：可以 5、部分 13、不行 5。只報結構證據，生效與否一律 NOT_ASSESSED。
+>   - 建議 PR-2～PR-8；PR-9（Jetson）由 C1 決定。
+>   - 待決定：ETSI 草稿怎麼取得；「生效與否 NOT_ASSESSED」要不要讓報告變 ATTENTION；測試金鑰表收哪些公開來源。
+> - D-046 的實作等 C1 的發現介面。
+> - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，由使用者決定。
+> - 代理：沒有在跑的。
 
 > **2026-11-14 下午的排序（#110 已合併，第 1 項完成）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
 > 1. **規則表第二批**（`wp3/fw-advisory-rules-2`，worktree `$AGENT_TMP/dumpling-wt-c2-rules2`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rules2/`）：寫程式代理（sonnet、high）**完成 38d0b74** → C2 補 **8cb6fc5**（linux-firmware 等價表釘 sha256、用詞修正、加入 D-046 設計文件）。11 筆規則，新增 INTEL-SA-01315、01209、01152，以及 01280、01372 的 15.x 條件；AMD-SB-7033 新增，7014 補 7 個資料中心微碼條件。PSP 與 FSP 都不收，因為公告沒有寫版本。樣本結果：V540TU 的 ME 18.0 變 affected（01315）；B550M、ASRock 的微碼 0x8012 變 affected，這是 Naples 的 CPUID，可能是 CPUID 層級的誤報，已寫明。2422 passed；CI 綠 → 預驗（獨立代理，sonnet、high）：**通過**（AMD 15 個條件逐值一致；linux-firmware 等價表一致；Intel 只能用同一類摘要工具讀，不算獨立核對；144 個變異沒有存活）→ C2 處理建議 **3eafeb0**（條件的 note 進 basis 與報告；真表的版本線整段比測試；bios-discovery 寫明實作前提；linux-firmware 出處寫完整）→ CI 綠 → **PR #110 已開**，已通知 C0。C0 的驗證排在 #109 之後，**這段期間 #110 不推 commit**。驗證後要改的（已記下）：0x8012 的 note 補「這個 patch 對應的 CPU（資料中心 Naples）不一定能裝在這塊主機板，不代表整塊板子受影響，請負責單位確認」；C0 決定 (2) 也要做，但不能靠比對 note 的文字（M7b-2 原則）：條件加結構化欄位 `segment`，值只收列舉 client／datacenter／embedded，和公告表格的分區對應（notes 寫明怎麼對）；validate 檢查列舉值；值是 datacenter 時，報告加固定的提示句；改表要更新 TABLE_SHA256。範圍：(a) CSME 18.0／15.x 的列；(b) AMD 微碼／PSP，只收能和 SBOM 欄位逐一對上的列，對不上就寫「公告格式無法機器比對」；(c) FSP，公告沒寫版本就不收並寫明原因，報告繼續顯示「資料庫沒有資料，以廠商公告為準」。預驗後開 PR。
