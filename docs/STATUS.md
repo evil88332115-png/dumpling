@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:17 +0800（C4）
+最後更新：2026-11-15 12:19 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -316,7 +316,9 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑；之後派代理一律指定 model sonnet＋effort（安全／判定／驗證 high，其他 medium）
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：C0 決定 dev 的 16 個 KEV Issue 要照開還是先把 dev 納入基準，之後才設 WATCH_REAL_ISSUES=on
+- 卡住／等決定：重建基準（#99 已關閉，C0／使用者決定）：baseline dry_run 跑在 4f64db7 與 fff33a5（#97 帶進三個示範專案）→ 給 C0 看 → 實跑 → 一般 dry_run → C0 設 WATCH_REAL_ISSUES=on
+- 之後：D-062 GitHub Pages 靜態儀表板（監控上線後；先交設計給 C0，不先寫程式）
+- 開著的 PR：#112（WATCH.md：新 Release 的既有 KEV 也開 Issue＋重建基準做法）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
