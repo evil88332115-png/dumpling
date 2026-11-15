@@ -154,6 +154,7 @@ jobs:
         id: fwrematch
         if: inputs.mode == 'real'
         continue-on-error: true
+        timeout-minutes: 10       # 離線腳本：卡住不能佔掉整個 job
         run: |
           inv="$RUNNER_TEMP/w/inv"
           meta=$(python3 -I -c 'import json,sys; fw=json.load(open(sys.argv[1])).get("firmware"); print((fw or {}).get("meta") or "")' "$inv/inventory.json") || meta=""
@@ -167,9 +168,15 @@ jobs:
           pipeline/firmware-rematch.sh --meta "$inv/$meta" --dir "$inv/$(dirname "$meta")" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --out "$out"
           rc=$?
           set -e
-          if [ -f "$out/rematch-summary.json" ]; then echo "ran=true" >> "$GITHUB_OUTPUT"; else echo "ran=false" >> "$GITHUB_OUTPUT"; fi
-          # rematch 自己只輸出 OK／ATTENTION／GAP（結束碼 0／2／3）；其他結束碼是這一步失敗
-          [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || { echo "::error::韌體公告重跑失敗（結束碼 $rc）：match 標 NOT_RUN"; exit "$rc"; }
+          # C2 的介面（d38962f）：0＝全部 OK、2＝有 ATTENTION 或 GAP（輸出照寫）；1＝FAIL、64＝參數錯誤。
+          # 只有 0／2 而且有 rematch-summary.json（最後才寫）才交給 match；失敗中途留下的檔案不用（match 標 NOT_RUN）
+          if { [ "$rc" = 0 ] || [ "$rc" = 2 ]; } && [ -f "$out/rematch-summary.json" ]; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+            echo "::error::韌體公告重跑失敗（結束碼 $rc）或沒有 rematch-summary.json：match 標 NOT_RUN"
+            exit 1
+          fi
       - name: 比對
         id: match
         env:

@@ -97,7 +97,9 @@ FW_WORD_PRELIM = "建議受影響（初步規則，待人審）"
 FW_WORD_CONFIRMED = "建議受影響（規則已確認，待負責單位確認）"
 FW_WORD_VBIOS = "建議受影響（依 NVIDIA 對照表，待人審）"
 FW_WORD_UCODE = "版本比較的候選，待人審"
-_SHA64 = re.compile(r"^[0-9a-f]{64}$")
+# rematch 的 key：不透明字串，只檢查字元集（C2 定的 A-Za-z0-9._=+-:/#）
+FW_KEY_RE = re.compile(r"[A-Za-z0-9._=+\-:/#]{1,300}")
+FW_MAX_AFFECTED = 100       # 每個樣本存進狀態的 affected 上限（狀態 Issue 有 60000 字元上限；超過整份樣本 GAP）
 
 
 class Fail(Exception):
@@ -373,8 +375,8 @@ def check_rematch_doc(doc, slug, tag, inv_sha):
         if r.get("result") not in FW_RESULTS[kind]:
             errs.append(w + f"result 不在 {kind} 認得的值裡")
             continue
-        if not _fw_str(r.get("key"), 1, 300) or r["key"] in seen:
-            errs.append(w + "key 不是字串或重複")
+        if not (isinstance(r.get("key"), str) and FW_KEY_RE.fullmatch(r["key"])) or r["key"] in seen:
+            errs.append(w + "key 不是合規則的字串（A-Za-z0-9._=+-:/#，1～300 字元）或重複")
             continue
         seen.add(r["key"])
         if not _fw_str(r.get("component"), 0, 300):
@@ -392,6 +394,9 @@ def check_rematch_doc(doc, slug, tag, inv_sha):
             continue
         results.append({"key": r["key"], "kind": kind, "component": r["component"], "result": r["result"], "bulletins": b,
                         "reason": r.get("reason"), "review": r.get("review")})
+    n_aff = sum(1 for r in results if r["result"] == FW_AFFECTED[r["kind"]])
+    if n_aff > FW_MAX_AFFECTED:
+        errs.append(f"affected 超過 {FW_MAX_AFFECTED} 筆（{n_aff}）：狀態 Issue 有大小上限，這份樣本 GAP")
     changed = []
     cs = doc.get("changed")
     if not isinstance(cs, list) or len(cs) > FW_MAX_RESULTS:
@@ -399,14 +404,18 @@ def check_rematch_doc(doc, slug, tag, inv_sha):
         cs = []
     for i, c in enumerate(cs):
         w = f"changed[{i}]."
-        ok = isinstance(c, dict) and _fw_str(c.get("key"), 1, 300) and c.get("kind") in FW_KINDS
+        ok = isinstance(c, dict) and isinstance(c.get("key"), str) and bool(FW_KEY_RE.fullmatch(c["key"])) and c.get("kind") in FW_KINDS
         sides = {}
         for side in ("before", "after"):
             x = c.get(side) if ok else None
-            if not (isinstance(x, dict) and _fw_str(x.get("result"), 1, 40)):
+            # before.result 可以是 null（Release 當時沒有這個元件的結果，C2 介面）；after 一定要有
+            res_ok = isinstance(x, dict) and (_fw_str(x.get("result"), 1, 40) or (side == "before" and x.get("result") is None))
+            if not res_ok or (x.get("reason") is not None and not _fw_str(x.get("reason"), 0, 300)) or \
+                    x.get("review") not in ("preliminary", "confirmed", None):
                 ok = False
                 break
-            sides[side] = {"result": x["result"], "bulletins": _fw_bulletins(x.get("bulletins"), errs, w + side + ".")}
+            sides[side] = {"result": x["result"], "bulletins": _fw_bulletins(x.get("bulletins") or [], errs, w + side + "."),
+                           "reason": x.get("reason"), "review": x.get("review")}
         if not ok:
             errs.append(w + "格式不對")
             continue
@@ -453,13 +462,20 @@ def load_rematch(dirpath, fw_projs):
         rows = doc.get("samples")
         if not isinstance(rows, list) or len(rows) > 1000:
             errs.append("samples 不是陣列")
+        ms = doc.get("meta_status", "OK")
+        if ms not in ("OK", "GAP"):
+            errs.append("meta_status 不是 OK／GAP")
+        elif ms == "GAP":       # rematch 入口讀不了 firmware-meta.json：samples 是空的，全部 bios 樣本 GAP（原因照錄）
+            rs = [_plain(x, 200) for x in (doc.get("reasons") if isinstance(doc.get("reasons"), list) else [])[:5] if isinstance(x, str)]
+            return all_bios("GAP", "公告重跑讀不了 firmware-meta.json（meta_status GAP）：" + ("；".join(rs) or "沒有寫原因"))
     if errs:
         return all_bios("GAP", "rematch-summary.json 不合格：" + "；".join(errs[:5]))
     out["ran"] = True
     out["tables"] = tables
     for name, t in tables.items():
         if t.get("status") != "OK":
-            out["table_flags"].setdefault(name, []).append(f"狀態 {t.get('status')}（表讀不到或驗證不過，那一類元件是 NOT_ASSESSED）")
+            why = f"：{t['gap']}" if isinstance(t.get("gap"), str) and t["gap"] else ""
+            out["table_flags"].setdefault(name, []).append(f"狀態 {t.get('status')}（表讀不到或驗證不過，那一類元件是 NOT_ASSESSED）{why}")
         if t.get("stale") is True:
             out["table_flags"].setdefault(name, []).append("過期（stale）：不開公告 Issue")
     by_slug = {}
@@ -768,12 +784,26 @@ def sanitize_firmware(fw):
     for u, x in (fw.get("samples") or {}).items() if isinstance(fw.get("samples"), dict) else []:
         if not isinstance(x, dict) or not isinstance(u, str):
             continue
+        hist = x.get("image_sha256_history") if isinstance(x.get("image_sha256_history"), list) else []
         sm = {"image_sha256": x.get("image_sha256") if isinstance(x.get("image_sha256"), str) else None,
-              "image_sha256_history": [{k: h.get(k) for k in ("at", "old", "new")} for h in x.get("image_sha256_history") or []
-                                       if isinstance(h, dict)][-FW_HISTORY_KEEP:], "advisory": {}}
-        for k, e in (x.get("advisory") or {}).items() if isinstance(x.get("advisory"), dict) else []:
-            if isinstance(e, dict):
-                sm["advisory"][k] = {f: e[f] for f in ("kind", "result", "bulletins", "component", "review", "baseline") if f in e}
+              "image_sha256_history": [{k: h.get(k) for k in ("at", "old", "new")} for h in hist
+                                       if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("at", "old", "new"))][-FW_HISTORY_KEEP:],
+              "advisory": {}}
+        adv = x.get("advisory") if isinstance(x.get("advisory"), dict) else {}
+        for k, e in list(adv.items())[:FW_MAX_AFFECTED]:
+            # 型別不對的紀錄丟掉（讀入的舊狀態可能被手改；fw_groups 不能因此當掉）
+            if not (isinstance(k, str) and FW_KEY_RE.fullmatch(k) and isinstance(e, dict) and e.get("kind") in FW_KINDS
+                    and isinstance(e.get("result"), str) and isinstance(e.get("bulletins"), list)
+                    and all(isinstance(b, str) for b in e["bulletins"])):
+                continue
+            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": [b[:80] for b in e["bulletins"][:50]]}
+            if isinstance(e.get("component"), str):
+                rec["component"] = e["component"][:300]
+            if e.get("review") in ("preliminary", "confirmed", None) and "review" in e:
+                rec["review"] = e["review"]
+            if isinstance(e.get("baseline"), bool):
+                rec["baseline"] = e["baseline"]
+            sm["advisory"][k] = rec
         out["samples"][u] = sm
     return out
 
@@ -893,7 +923,8 @@ def fw_update(state, inv_fw, fw_projs, rm, first, ts):
     - 公告沒有重跑（NOT_RUN）或檔案不合格（GAP）的樣本：沿用上一次的紀錄（不當成「不再受影響」）。
     - 這次的韌體 Release 沒收到或有 problem（meta 壞掉）：整份沿用上一次；其餘不在這次清單裡的鍵才移除（樣本離開最新的 Release）。
     - image_sha256 是 null：不比、保留舊值。"""
-    prev = state.get("firmware") if isinstance(state.get("firmware"), dict) else {}
+    # 讀入的舊狀態也當外來資料（狀態 Issue 可能被手改）：先 sanitize，型別不對的紀錄丟掉，不能讓 match 當掉
+    prev = sanitize_firmware(state["firmware"]) if isinstance(state.get("firmware"), dict) else {}
     ps_all = {u: x for u, x in (prev.get("samples") or {}).items() if isinstance(x, dict)} if isinstance(prev.get("samples"), dict) else {}
     carry_all = not isinstance(inv_fw, dict) or bool(inv_fw.get("problems"))
     listed = {uuid_of(FW_PROJECT, x["watch_version"], FW_LAYER) for x in ((inv_fw or {}).get("samples") or [])
@@ -1802,7 +1833,10 @@ def render_firmware(per, fwx, inv_fw, projs):
         L += ["", "結果和 Release 當時不同（changed）：", ""]
         for p, x in chg[:50]:
             def fmt(y):
-                return f"{md_code(y['result'])}" + (f"（{'、'.join(md_code(b) for b in y['bulletins'])}）" if y["bulletins"] else "")
+                if y.get("result") is None:          # C2 介面：Release 當時沒有這個元件的結果
+                    return "（Release 當時沒有這個元件的結果）"
+                return (f"{md_code(y['result'])}" + (f"（{'、'.join(md_code(b) for b in y['bulletins'])}）" if y["bulletins"] else "")
+                        + (f"［review {md_code(y['review'])}］" if y.get("review") else ""))
             L.append(f"- {md_code(p['slug'])}：{md_code(x['key'])}：{fmt(x['before'])} → {fmt(x['after'])}")
     if fwx["changes"]:
         L += ["", "映像 sha256 變了（同 slug、同版本）：", ""]

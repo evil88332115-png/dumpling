@@ -146,7 +146,8 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   - **Grype**：和板子同一套。SBOM 沒有任何帶 purl、CPE（含 `syft:cpe23` 屬性）的元件 → 不跑 Grype，per_sbom 的 grype 寫 `NOT_ASSESSED（可比對元件 0：沒有 purl／CPE）`：不是 OK，也不算「Grype 沒跑完」（不降級、不擋第一次基準）。
     核心對應、核心 CNA 寫「沒有這一項」，不算 GAP、不降級。
   - **公告重跑**（`match.py --firmware-rematch <資料夾>`，選填）：讀 `rematch-summary.json` 與 `rematch-<slug>.json`，**當不可信資料**：大小上限、不跟隨連結、schema 不符就是 GAP；
-    `slug`、`release_tag`、`inventory_sha256` 要和 inventory 一致，不一致就 GAP；`key` 當不透明字串；字串一律經過 md_text／md_code／md_title。
+    `slug`、`release_tag`、`inventory_sha256` 要和 inventory 一致，不一致就 GAP；`key` 當不透明字串，只檢查字元集 `A-Za-z0-9._=+-:/#`（1～300 字元）；字串一律經過 md_text／md_code／md_title。
+    介面照 C2 的 rematch 入口（`pipeline/firmware-rematch.sh`）：結束碼 0＝全部 OK、2＝有 ATTENTION 或 GAP（輸出照寫），只有這兩種而且有 `rematch-summary.json`（最後才寫）才交給 match；1、64 是失敗，watch-round 這一步失敗、不傳 `--firmware-rematch`（韌體標 NOT_RUN、整輪降級），步驟上限 10 分鐘。總表 `meta_status: GAP`（讀不了 firmware-meta）→ 全部 bios 樣本 GAP，原因照錄；表讀不到時識別是 null、另有 `gap`（原因）；`changed[].before.result` 是 null＝Release 當時沒有這個元件的結果，只有 `review` 變了也算 changed。每個樣本的 affected 最多 100 筆（狀態 Issue 有大小上限），超過整份 GAP；`reasons` 最多 20 筆。讀入的舊狀態先 sanitize（型別不對的紀錄丟掉，不讓 match 當掉）。
     每份 SBOM 多一欄 `advisory`：OK／ATTENTION／GAP／NOT_RUN（不在總表、沒有輸出的 bios 樣本是 NOT_RUN，不拿 Release 當時的結果頂替）；供應商 SBOM 是 `NOT_ASSESSED（沒有 inventory，不重跑公告比對）`（設計上不重跑，不是 NOT_RUN）。
     NOT_RUN／GAP、表過期或 GAP → 整輪降級；結果和 Release 當時不同（`changed`）→ 需注意。報告的「韌體」一節列 `changed`、三張表的識別、status、stale。
   - **公告 Issue**（標籤 `firmware-advisory`、`development`、`layer-firmware`；`mark_demo` 照舊；超過 `--max-new-issues` 併成彙總 Issue）：

@@ -28,6 +28,9 @@ TAG2 = "firmware-demo/2026.11.27"
 IMG_A, IMG_B, IMG_C, IMG_A2 = "a1" * 32, "b2" * 32, "c3" * 32, "d4" * 32
 EXAMPLE_DIR = os.environ.get("FW_EXAMPLE_DIR") or os.path.join(os.path.dirname(__file__), "data")
 EVIL = "@everyone [x](https://evil.example) ![i](https://evil.example/a.png) #12 &commat; GH-5"
+EVIL_KEY_R = "rule:#12:x=1+y/#3"
+EVIL_KEY_U = "ucode:#5/0x1:0x2"
+EVIL_KEY_V = "vbios:#7:GH-5:#9"
 EVIL_ID = "@everyone [x](https://e.example) ![i](u) #12 &commat; GH-5"          # 公告 ID 上限 80 字元
 TABLES = {"fw_advisory_rules": {"sha256": "cd" * 32, "table_updated": "2026-11-14", "status": "OK", "stale": False},
           "intel_microcode": {"source_commit": "d7" * 20, "source_tag": "microcode-20261110", "table_sha256": "25" * 32, "status": "OK", "stale": False},
@@ -471,6 +474,119 @@ class RematchInput(FW):
 
 
 HEALTH = test_match.HEALTH_KEY
+
+
+class InterfaceD38962f(RematchInput):
+    """C2 的 rematch 入口 d38962f 的介面與預驗建議：key 字元集、meta_status、tables 的 gap、changed 的 null／review、affected 上限、reasons 上限。"""
+
+    def test_key_charset(self):
+        for bad in ("rule:a b", "rule:<x>", "rule:a\n", "rule:a@b", "r" * 301, "rule:é"):
+            with self.subTest(key=bad):
+                self.set_results("bios-a", [rule(bad)], "ATTENTION")
+                self.set_results("bios-b", [], "OK")
+                self.write_rm()
+                self.assertEqual(self.adv(self.load(), "bios-a")["state"], "GAP")
+        self.set_results("bios-a", [rule("rule:me:e915ed1eae8b7b91:me=18.0.10.2285#2"), ucode("ucode:000A06A4/0xE6:0x25")], "ATTENTION")
+        self.write_rm()
+        self.assertEqual(self.adv(self.load(), "bios-a")["state"], "ATTENTION")
+
+    def test_meta_status_gap_all_bios_gap(self):
+        self.write_rm({"meta_status": "GAP", "samples": [], "reasons": ["firmware-meta.json sha256 不符"]})
+        rm = self.load()
+        for slug in ("bios-a", "bios-b"):
+            self.assertEqual(self.adv(rm, slug)["state"], "GAP")
+            self.assertIn("firmware-meta.json sha256 不符", self.adv(rm, slug)["why"])
+        self.assertEqual(self.adv(rm, "sbom-c")["state"], match.FW_SBOM_ADV)
+        self.write_rm({"meta_status": "WHAT"})
+        self.assertEqual(self.adv(self.load(), "bios-a")["state"], "GAP")
+
+    def test_table_gap_reason_and_null_ident(self):
+        t = copy.deepcopy(self.tables)
+        t["nvidia_vbios"] = {"sha256": None, "mirror_commit": None, "reviewed_until": None, "status": "GAP", "stale": False, "gap": "鏡像讀不到"}
+        self.set_results("bios-a", [], "OK", tables=t)
+        self.set_results("bios-b", [], "OK", tables=t)
+        self.write_rm({"tables": t})
+        rm = self.load()
+        self.assertTrue(any("鏡像讀不到" in x for x in rm["table_flags"]["nvidia_vbios"]), rm["table_flags"])
+
+    def test_changed_before_null_and_review(self):
+        ch = [{"key": "rule:a", "kind": "rule", "before": {"result": None, "bulletins": [], "reason": None, "review": None},
+               "after": {"result": "affected", "bulletins": ["AMI-SA-1"], "reason": None, "review": "preliminary"}},
+              {"key": "rule:b", "kind": "rule", "before": {"result": "affected", "bulletins": ["AMI-SA-2"], "reason": None, "review": "preliminary"},
+               "after": {"result": "affected", "bulletins": ["AMI-SA-2"], "reason": None, "review": "confirmed"}}]
+        self.baseline()
+        self.set_results("bios-a", [rule("rule:a"), rule("rule:b", ("AMI-SA-2",), review="confirmed")], "ATTENTION", changed=ch)
+        self.go(NOW2)
+        report = open(os.path.join(self.w, "out-" + NOW2[:10], "report.md")).read()
+        self.assertIn("（Release 當時沒有這個元件的結果）", report)
+        self.assertIn("review `confirmed`", report.replace("` confirmed `", "`confirmed`"))
+        self.assertNotIn("`None`", report)
+        self.assertEqual(match.unsafe_markdown(report), [])
+        ch[0]["after"]["result"] = None                                        # after 不能是 null
+        self.set_results("bios-a", [rule("rule:a")], "ATTENTION", changed=ch[:1])
+        self.write_rm()
+        self.assertEqual(self.adv(self.load(), "bios-a")["state"], "GAP")
+
+    def test_affected_cap(self):
+        many = [rule("rule:k%d" % i, ("AMI-SA-%d" % i,)) for i in range(match.FW_MAX_AFFECTED + 1)]
+        self.set_results("bios-a", many, "ATTENTION")
+        self.set_results("bios-b", [], "OK")
+        self.write_rm()
+        a = self.adv(self.load(), "bios-a")
+        self.assertEqual(a["state"], "GAP")
+        self.set_results("bios-a", many[:match.FW_MAX_AFFECTED], "ATTENTION")
+        self.write_rm()
+        self.assertEqual(self.adv(self.load(), "bios-a")["state"], "ATTENTION")
+
+    def test_reasons_cap(self):
+        self.set_results("bios-a", [], "OK", reasons=["r"] * 21)
+        self.set_results("bios-b", [], "OK", reasons=["r"] * 20)
+        self.write_rm()
+        rm = self.load()
+        self.assertEqual(self.adv(rm, "bios-a")["state"], "GAP")
+        self.assertEqual(self.adv(rm, "bios-b")["state"], "OK")
+
+
+class StateHardening(FW):
+    """預驗建議：讀入的舊狀態型別不對不能讓 match 當掉；image_sha256_history 只留 FW_HISTORY_KEEP 筆；狀態摘要不接受尾端換行。"""
+
+    def test_bad_old_state_does_not_crash(self):
+        self.baseline()
+        st = json.load(open(os.path.join(self.state, "state.json")))
+        u = self.uuid("bios-a")
+        st.setdefault("firmware", {"tables": {}, "samples": {}})["samples"][u] = {
+            "image_sha256": 5, "image_sha256_history": "x",
+            "advisory": {"rule:x": {"kind": "rule", "result": "affected", "bulletins": 7},
+                         "rule:y": {"kind": "rule", "result": "affected", "bulletins": [["n"]]},
+                         "bad key": {"kind": "rule", "result": "affected", "bulletins": ["A"]},
+                         "rule:z": {"kind": "rule", "result": "affected", "bulletins": ["AMI-SA-9"], "baseline": True}}}
+        json.dump(st, open(os.path.join(self.state, "state.json"), "w"))
+        self.set_results("bios-a", [], "OK")
+        self.set_results("bios-b", [], "OK")
+        _, _, plan = self.go(NOW2)                                         # 不能 TypeError
+        adv = plan["state"]["firmware"]["samples"][u]["advisory"]
+        self.assertNotIn("rule:x", adv)
+
+    def test_history_keep(self):
+        st = {"samples": {"u": {"image_sha256": "a", "advisory": {},
+                                "image_sha256_history": [{"at": "t%d" % i, "old": "o", "new": "n"} for i in range(30)]}}}
+        out = match.sanitize_firmware(st)
+        h = out["samples"]["u"]["image_sha256_history"]
+        self.assertEqual(len(h), match.FW_HISTORY_KEEP)
+        self.assertEqual(h[-1]["at"], "t29")
+
+    def test_summary_value_trailing_newline(self):
+        st = {"firmware": {"tables": {"fw_advisory_rules": {"sha256": "abc\n", "status": "OK\n", "stale": False}}}}
+        line = match.mods()["issues"].state_summary("g", 1, st) if "issues" in match.mods() else None
+        if line is None:
+            import importlib.util as iu
+            spec = iu.spec_from_file_location("_issues_t", os.path.join(os.path.dirname(__file__), "..", "issues.py"))
+            m = iu.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            line = m.state_summary("g", 1, st)
+        self.assertIn("fw_advisory_rules ?", line)
+        self.assertIn("status ?", line)
+        self.assertNotIn("\n", line)
 
 
 class RuleIssues(FW):
@@ -958,9 +1074,10 @@ class Escaping(FW):
         tables["fw_advisory_rules"]["table_updated"] = EVIL
         tables["nvidia_vbios"]["reviewed_until"] = EVIL
         self.tables = tables
-        self.set_results(evil_slug, [rule("rule:" + EVIL, (EVIL_ID, "AMI-SA-1"), component=EVIL),
-                                     ucode("ucode:" + EVIL, ("INTEL-SA-@evil [q](http:e.example)",)),
-                                     vbios("vbios:" + EVIL, (EVIL_ID,))], tables=tables)
+        # key 只允許 A-Za-z0-9._=+-:/#（C2 介面）；字元集內仍含 #數字、=、+、/ 這類要跳脫的字元
+        self.set_results(evil_slug, [rule(EVIL_KEY_R, (EVIL_ID, "AMI-SA-1"), component=EVIL),
+                                     ucode(EVIL_KEY_U, ("INTEL-SA-@evil [q](http:e.example)",)),
+                                     vbios(EVIL_KEY_V, (EVIL_ID,))], tables=tables)
         self.set_results("bios-ok", [rule("rule:ok", ("AMI-SA-1",), component=EVIL)], tables=tables)
         for r in self.docs[evil_slug]["results"]:
             r["component"] = EVIL
@@ -976,7 +1093,7 @@ class Escaping(FW):
         self.assertEqual(match.unsafe_markdown(report), [], "報告")
         self.assertTrue(any("AMI-SA-1" in x["title"] for x in self.fw_opens(plan)))
         # 第三輪：離開、新增的留言也要跳脫（惡意 slug 的 key 變 not-affected、hash 變化）
-        self.set_results(evil_slug, [rule("rule:" + EVIL, (EVIL_ID, "AMI-SA-1"), result="not-affected", component=EVIL)], "OK", tables=tables)
+        self.set_results(evil_slug, [rule(EVIL_KEY_R, (EVIL_ID, "AMI-SA-1"), result="not-affected", component=EVIL)], "OK", tables=tables)
         self.add_sample(evil_slug, "v@1 [z](http://e.example)", IMG_C, "bios", True)
         _, _, plan = self.go(NOW3, demo=True)
         self.assertTrue(self.comments(plan))
