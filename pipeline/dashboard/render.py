@@ -502,21 +502,65 @@ def fw_word_html(ctx, rec):
     return '<strong>%s</strong>' % ext(w, 80) if isinstance(w, str) and w.strip() else ctx.gap("用語缺少：不能當成確定受影響")
 
 
-def fw_records_html(ctx, recs, st):
-    """狀態 Issue 裡這個樣本的 affected 紀錄；每一筆旁邊都有用語。"""
+def fw_records_html(ctx, entry, st):
+    """狀態 Issue 裡這個樣本的 affected 紀錄；每一筆旁邊都有用語。entry 是 build.fw_state 的 advisory[uuid]（None＝狀態裡沒有這份樣本的條目）。
+    超過上限或格式不對時不能裝成完整：寫 GAP 與實際總數。"""
     if st.get("gap"):
         return ctx.gap(st["gap"])
-    recs = [dct(r) for r in lst(recs)]
+    if not isinstance(entry, dict):
+        return ctx.gap("狀態裡沒有這份樣本的條目（每個監控中的樣本都該有條目，不能當成沒有 affected 紀錄）")
+    recs = [dct(r) for r in lst(entry.get("recs"))]
+    out = []
+    bad = entry.get("bad")
+    if isinstance(bad, int) and not isinstance(bad, bool) and bad > 0:
+        out.append("<p>%s</p>" % ctx.gap("狀態裡有 %d 筆紀錄格式不對（不顯示）" % bad))
+    total = entry.get("total")
+    if isinstance(total, int) and not isinstance(total, bool) and total > len(recs):
+        out.append("<p>%s</p>" % ctx.gap("只列前 %d 筆，共 %d 筆" % (len(recs), total)))
     if not recs:
-        return "狀態裡沒有這份樣本的 affected 紀錄（只存 affected 與 affected-candidate）"
+        if not out:
+            out.append("<p>狀態裡沒有這份樣本的 affected 紀錄（只存 affected 與 affected-candidate）</p>")
+        return "".join(out)
     items = []
-    for r in recs[:50]:
+    for r in recs:
         comp = " %s" % ext(r.get("component"), 120) if r.get("component") else ""
-        bl = "（%s）" % "、".join(ext(b, 60) for b in lst(r.get("bulletins"))[:10] if isinstance(b, str)) if lst(r.get("bulletins")) else ""
+        bl_list = [b for b in lst(r.get("bulletins")) if isinstance(b, str)]
+        bl = "（%s）" % "、".join(ext(b, 80) for b in bl_list) if bl_list else ""
+        bt = r.get("bulletins_total")
+        more = " " + ctx.gap("公告只列前 %d 個，共 %d 個" % (len(bl_list), bt)) if isinstance(bt, int) and not isinstance(bt, bool) and bt > len(bl_list) else ""
         base = " baseline" if r.get("baseline") is True else ""
-        items.append("<li>%s：%s%s%s%s → %s</li>" % (ext(FW_KIND_LABELS.get(r.get("kind"), r.get("kind")), 30), ext(r.get("result"), 40), bl, comp,
-                                                     esc(base, 20), fw_word_html(ctx, r)))
-    return '<ul class="notes">%s</ul>' % "".join(items)
+        items.append("<li>%s：%s%s%s%s%s → %s</li>" % (ext(FW_KIND_LABELS.get(r.get("kind"), r.get("kind")), 30), ext(r.get("result"), 40), bl, more,
+                                                       comp, esc(base, 20), fw_word_html(ctx, r)))
+    return "".join(out) + '<ul class="notes">%s</ul>' % "".join(items)
+
+
+WORD_SCAN_RE = re.compile(r"affected|受影響|candidate", re.I)
+
+
+def fw_word_note(ctx, texts, entry):
+    """texts（狀態、why、說明…每個文字）提到 affected／受影響／candidate 時，同一格要有用語；沒有對應的用語就寫 GAP，不能只留 affected。"""
+    if not any(isinstance(t, str) and WORD_SCAN_RE.search(t) for t in texts):
+        return ""
+    words = sorted({w for w in (dct(q).get("word") for q in lst(dct(entry).get("recs"))) if isinstance(w, str) and w.strip()})
+    if words:
+        return "<p>用語：%s</p>" % "、".join("<strong>%s</strong>" % ext(w, 80) for w in words)
+    return "<p>%s</p>" % ctx.gap("說明提到 affected／受影響／candidate，但狀態裡沒有這份樣本的紀錄，無法附上用語；不能當成確定受影響")
+
+
+def fw_row_cells(ctx, r, entry):
+    """每日結果的一列 → (KEV 格, 公告比對格)。數字旁邊一律有 grype 狀態；提到 affected 的格子旁邊一定有用語（或 GAP）。"""
+    why = " " + ext(r.get("why"), 200) if r.get("why") else ""
+    kev = ('<div class="vcell"><div class="vnum">%s</div><div class="vstat">grype %s%s</div></div>') % (
+        num(r.get("exploited")), st_note(ctx, r.get("grype")), why)
+    kev += fw_word_note(ctx, [r.get("grype"), r.get("why")], entry)
+    reasons = [t for t in lst(r.get("advisory_reasons")) if isinstance(t, str)]
+    adv = ['<div class="vcell"><div class="vstat">公告比對 %s</div></div>' % st_note(ctx, r.get("advisory"))]
+    if r.get("advisory_why"):
+        adv.append("<p>%s</p>" % ext(r["advisory_why"], 400))
+    if reasons:
+        adv.append('<ul class="notes">%s</ul>' % "".join("<li>%s</li>" % ext(t, 300) for t in reasons[:10]))
+    adv.append(fw_word_note(ctx, [r.get("advisory"), r.get("advisory_why")] + reasons, entry))
+    return kev, "".join(adv)
 
 
 def render_fw_samples(ctx, fw):
@@ -551,40 +595,62 @@ def render_fw_samples(ctx, fw):
     return table(["樣本（slug）", "種類", "韌體版本", "監控鍵（watch_version）", "映像 sha256", "下載", "meta 狀態／firmware.yml 的 expect"], rows, "韌體樣本")
 
 
+ORPHAN_WHY = "不在最新的韌體 Release 樣本裡（可能是舊 Release 或新 tag 還沒跑過監控）"
+
+
 def render_fw_daily(ctx, fw):
     d = dct(fw.get("daily"))
     if d.get("rows_gap"):
         return "<p>%s</p>" % ctx.gap(d["rows_gap"])
     st = dct(d.get("state"))
-    byu = dct(d.get("rows"))
-    rows = []
+    adv = dct(st.get("advisory")) if not st.get("gap") else {}
+    plan_rows = [dct(r) for r in lst(d.get("rows"))]
+    used = set()                                    # 已經對到樣本的列（每個樣本只對第一個 uuid 相同的列）
+    rows, shown = [], set()
     for x in lst(fw.get("samples")):
         x = dct(x)
         if x.get("gap") or not x.get("uuid"):
             continue
-        r = byu.get(x["uuid"])
-        if not isinstance(r, dict):
-            rows.append([ext(x.get("slug"), 64), ctx.gap("最近一輪沒有這份樣本的監控紀錄（新樣本，或每日監控資料缺）"), "—", "—"])
+        shown.add(x["uuid"])
+        idx = next((i for i, r in enumerate(plan_rows) if r.get("uuid") == x["uuid"]), None)
+        if idx is None:
+            rows.append([ext(x.get("slug"), 64), ctx.gap("最近一輪沒有這份樣本的監控紀錄（新樣本，或每日監控資料缺）"), "—",
+                         fw_records_html(ctx, adv.get(x["uuid"]), st)])
             continue
-        r = dct(r)
-        recs = lst(dct(st.get("advisory")).get(x["uuid"]))
-        why = " " + ext(r.get("why"), 200) if r.get("why") else ""
-        kev = ('<div class="vcell"><div class="vnum">%s</div><div class="vstat">grype %s%s</div></div>') % (
-            num(r.get("exploited")), st_note(ctx, r.get("grype")), why)
-        texts = [t for t in [r.get("advisory_why")] + lst(r.get("advisory_reasons")) if isinstance(t, str)]
-        adv = ['<div class="vcell"><div class="vstat">公告比對 %s</div></div>' % st_note(ctx, r.get("advisory"))]
-        if r.get("advisory_why"):
-            adv.append("<p>%s</p>" % ext(r["advisory_why"], 400))
-        if texts and lst(r.get("advisory_reasons")):
-            adv.append('<ul class="notes">%s</ul>' % "".join("<li>%s</li>" % ext(t, 300) for t in lst(r["advisory_reasons"])[:10] if isinstance(t, str)))
-        if any(AFFECTED_RE.search(t) for t in texts):        # 說明裡提到 affected：旁邊要有用語（用狀態裡這份樣本的紀錄；沒有紀錄就寫 GAP）
-            words = sorted({w for w in (dct(q).get("word") for q in recs) if isinstance(w, str) and w.strip()})
-            adv.append("<p>用語：%s</p>" % ("、".join("<strong>%s</strong>" % ext(w, 80) for w in words) if words else ctx.gap(
-                "說明提到 affected，但狀態裡沒有這份樣本的紀錄，無法附上用語；不能當成確定受影響")))
-        rows.append([ext(x.get("slug"), 64), kev, "".join(adv), fw_records_html(ctx, recs, st)])
-    if not rows:
-        return "<p>%s</p>" % ctx.gap("沒有可對應的樣本")
-    return table(["樣本", "已遭利用（KEV）命中數（含狀態）", "公告比對（每日用 repo 當下的表重跑）", "公告結果（狀態 Issue；含用語）"], rows, "韌體每日監控")
+        used.add(idx)
+        kev, advc = fw_row_cells(ctx, plan_rows[idx], adv.get(x["uuid"]))
+        rows.append([ext(x.get("slug"), 64), kev, advc, fw_records_html(ctx, adv.get(x["uuid"]), st)])
+    out = []
+    if rows:
+        out.append(table(["樣本", "已遭利用（KEV）命中數（含狀態）", "公告比對（每日用 repo 當下的表重跑）", "公告結果（狀態 Issue；含用語）"], rows, "韌體每日監控"))
+    else:
+        out.append("<p>%s</p>" % ctx.gap("沒有可對應的樣本"))
+    # 每日結果裡有、但最新 Release 的樣本沒有的韌體列（舊 Release 或新 tag 還沒跑過監控）：不能整列消失
+    orphans = []
+    for i, r in enumerate(plan_rows):
+        if i in used:
+            continue
+        dup = r.get("uuid") in shown
+        kev, advc = fw_row_cells(ctx, r, adv.get(r.get("uuid")))
+        orphans.append([ext(r.get("uuid"), 200), kev, advc, fw_records_html(ctx, adv.get(r.get("uuid")), st),
+                        ctx.gap("uuid 和前一列重複（只有第一列對到樣本）") if dup else ctx.gap(ORPHAN_WHY)])
+        shown.add(r.get("uuid"))
+    for u, e in sorted(adv.items()):                # 狀態裡有 affected 紀錄、卻沒有樣本也沒有每日結果的列：一樣列出
+        if u in shown or not (lst(dct(e).get("recs")) or dct(e).get("bad")):
+            continue
+        orphans.append([ext(u, 200), "—", ctx.gap("最近一輪沒有這個監控鍵的每日結果"), fw_records_html(ctx, e, st), ctx.gap(ORPHAN_WHY)])
+    if orphans:
+        out.append("<h4>每日結果裡有、但最新韌體 Release 的樣本沒有的列</h4>")
+        out.append(table(["監控鍵（uuid）", "已遭利用（KEV）命中數（含狀態）", "公告比對", "公告結果（狀態 Issue；含用語）", "原因"], orphans, "韌體每日結果（對不到樣本）"))
+    if not st.get("gap"):
+        bu = st.get("bad_unattributed")
+        if isinstance(bu, int) and not isinstance(bu, bool) and bu > 0:
+            out.append("<p>%s</p>" % ctx.gap("狀態裡有 %d 筆樣本條目格式不對（不顯示）" % bu))
+        sr, stt = st.get("samples_read"), st.get("samples_total")
+        if isinstance(sr, int) and isinstance(stt, int) and not isinstance(stt, bool) and stt > sr:
+            out.append("<p>%s</p>" % ctx.gap("只讀狀態裡前 %d 個樣本條目，共 %d 個" % (sr, stt)))
+    out.append('<p class="muted">每日結果的韌體列共 %d 列，全部列在上面（對到樣本 %d 列、對不到 %d 列）。</p>' % (len(plan_rows), len(used), len(plan_rows) - len(used)))
+    return "\n".join(out)
 
 
 def render_fw_tables(ctx, fw):

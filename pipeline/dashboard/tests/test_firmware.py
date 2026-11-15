@@ -450,9 +450,9 @@ class TestDailyAndAdvisory(unittest.TestCase):
         h = fw_html(e)
         for w in WORDS:
             self.assertEqual(text(h).count(w), 2, w)       # 每個用語各出現在 reasons 旁與公告結果旁（同一列）
-        self.assertEqual(sorted(x["word"] for l in e.data["firmware"]["daily"]["state"]["advisory"].values() for x in l), sorted(WORDS))
+        self.assertEqual(sorted(x["word"] for l in e.data["firmware"]["daily"]["state"]["advisory"].values() for x in l["recs"]), sorted(WORDS))
         for cell in re.findall(r"<td>(.*?)</td>", h, re.S):
-            if re.search(r"affected", text(cell), re.I):
+            if re.search(r"affected|受影響|candidate", text(cell), re.I):
                 self.assertTrue(any(w in text(cell) for w in WORDS), text(cell)[:200])
         # 用語取自 match.py 的常數，不是寫死
         self.assertEqual(match.FW_WORD_PRELIM, "建議受影響（初步規則，待人審）")
@@ -461,7 +461,7 @@ class TestDailyAndAdvisory(unittest.TestCase):
 
     def test_missing_wording_is_gap_not_bare_affected(self):
         e = env(self, plan_rows=self.rows(), fw_state=self.state())
-        e.data["firmware"]["daily"]["state"]["advisory"][uuid_of(self.WV1)][0]["word"] = None
+        e.data["firmware"]["daily"]["state"]["advisory"][uuid_of(self.WV1)]["recs"][0]["word"] = None
         h = render.render(e.data)
         h = h[h.index('<section id="firmware">'):h.index('<section id="watch">')]
         self.assertIn("用語缺少", text(h))
@@ -488,7 +488,12 @@ class TestDailyAndAdvisory(unittest.TestCase):
         e = env(self, plan_rows=self.rows(), fw_state=fw)
         recs = e.data["firmware"]["daily"]["state"]["advisory"]
         self.assertEqual(list(recs), [uuid_of(self.WV1)])
-        self.assertEqual(len(recs[uuid_of(self.WV1)]), 1)
+        self.assertEqual(len(recs[uuid_of(self.WV1)]["recs"]), 1)
+        self.assertEqual(recs[uuid_of(self.WV1)]["bad"], 2)             # 丟掉的筆數要記下來，頁面寫 GAP
+        self.assertEqual(e.data["firmware"]["daily"]["state"]["bad_unattributed"], 1)
+        t = text(fw_html(e))
+        self.assertIn("狀態裡有 2 筆紀錄格式不對（不顯示）", t)
+        self.assertIn("狀態裡有 1 筆樣本條目格式不對（不顯示）", t)
 
 
 class TestTables(unittest.TestCase):
@@ -542,6 +547,232 @@ class TestTables(unittest.TestCase):
         self.assertTrue([w for w in e.data["warnings"] if "韌體因狀態大小上限停止" in w])
         e2 = env(self, plan_rows=[], fw_state=self.fw_state())
         self.assertNotIn("韌體因狀態大小上限停止", text(fw_html(e2)))
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+
+def cells(h):
+    return re.findall(r"<td>(.*?)</td>", h, re.S)
+
+
+def big_state(n_recs, n_bullets, wv=None):
+    wv = wv or wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1")
+    adv = {"k%03d" % i: rec("intel-microcode", "affected-candidate", None, "ucode %d" % i, ["INTEL-SA-%05d-%d" % (j, i) for j in range(n_bullets)])
+           for i in range(n_recs)}
+    return {"tables": tables_state(), "samples": {uuid_of(wv): {"image_sha256": None, "image_sha256_history": [], "advisory": adv}}}
+
+
+class TestLimitsNoSilentTruncation(unittest.TestCase):
+    def test_limits_come_from_match(self):
+        self.assertEqual((match.FW_MAX_AFFECTED, match.REMATCH_MAX_BULLETINS, match.REMATCH_MAX_BULLETIN_CHARS), (100, 64, 80))
+
+    def rows(self):
+        return [per_row(wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1"), advisory="ATTENTION")]
+
+    def test_at_limit_everything_shown(self):
+        e = env(self, plan_rows=self.rows(), fw_state=big_state(match.FW_MAX_AFFECTED, match.REMATCH_MAX_BULLETINS))
+        h = fw_html(e)
+        t = text(h)
+        self.assertEqual(len(re.findall(r"ucode \d+", t)), match.FW_MAX_AFFECTED)
+        self.assertEqual(len(re.findall(r"INTEL-SA-\d{5}-\d+", t)), 100 * 64)         # 100 筆、每筆 64 個公告：全部都在
+        self.assertIn("INTEL-SA-00063-99", t)
+        self.assertNotIn("只列前", t)
+        self.assertEqual(e.data["firmware"]["daily"]["state"]["advisory"][uuid_of(wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1"))]["total"], 100)
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_over_limit_records_gap_with_total(self):
+        e = env(self, plan_rows=self.rows(), fw_state=big_state(match.FW_MAX_AFFECTED + 1, 1))
+        t = text(fw_html(e))
+        self.assertIn("GAP（只列前 100 筆，共 101 筆）", t)
+        self.assertEqual(len(re.findall(r"ucode \d+", t)), 100)
+
+    def test_over_limit_bulletins_gap_with_total(self):
+        e = env(self, plan_rows=self.rows(), fw_state=big_state(1, match.REMATCH_MAX_BULLETINS + 1))
+        t = text(fw_html(e))
+        self.assertIn("GAP（公告只列前 64 個，共 65 個）", t)
+        self.assertEqual(len(re.findall(r"INTEL-SA-\d{5}-0", t)), 64)
+
+    def test_bulletin_id_chars_limit(self):
+        ok = "A" * match.REMATCH_MAX_BULLETIN_CHARS
+        fw = big_state(1, 0)
+        next(iter(fw["samples"].values()))["advisory"]["k000"]["bulletins"] = [ok]
+        e = env(self, plan_rows=self.rows(), fw_state=fw)
+        self.assertIn(ok, fw_html(e))                      # 80 字的 ID 完整顯示（以前截成 60）
+
+
+class TestStateEntries(unittest.TestCase):
+    WV1 = wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1")
+
+    def test_missing_entry_is_gap_but_empty_entry_is_not(self):
+        fw = {"tables": tables_state(), "samples": {uuid_of(self.WV1): {"advisory": {}}}}
+        rows = [per_row(self.WV1), per_row(wvk("dasharo-novacustom-ns5x-tgl-v1.6.0", "v1.6.0"), advisory="NOT_ASSESSED（沒有 inventory，不重跑公告比對）")]
+        e = env(self, plan_rows=rows, fw_state=fw)
+        c = cells(fw_html(e))
+        daily = [x for x in c if "grype" in text(x)]
+        recs_cells = [c[i + 2] for i, x in enumerate(c) if x in daily]
+        self.assertIn("沒有這份樣本的 affected 紀錄", text(recs_cells[0]))
+        self.assertNotIn("沒有這份樣本的條目", text(recs_cells[0]))
+        self.assertIn("狀態裡沒有這份樣本的條目", text(recs_cells[1]))
+
+    def test_bad_records_counted(self):
+        fw = {"tables": tables_state(), "samples": {uuid_of(self.WV1): {"advisory": {
+            "a": rec(), "b": {"kind": "zzz", "result": "affected", "bulletins": []}, "c": {"kind": "rule", "result": 5, "bulletins": []},
+            "d": {"kind": "rule", "result": "affected", "bulletins": "x"}, "e": 7}}}}
+        e = env(self, plan_rows=[per_row(self.WV1)], fw_state=fw)
+        self.assertEqual(e.data["firmware"]["daily"]["state"]["advisory"][uuid_of(self.WV1)]["bad"], 4)
+        self.assertIn("狀態裡有 4 筆紀錄格式不對（不顯示）", text(fw_html(e)))
+
+    def test_bad_uuid_entries_counted(self):
+        fw = {"tables": tables_state(), "samples": {"nope": {"advisory": {}}, uuid_of(self.WV1): "str"}}
+        e = env(self, plan_rows=[per_row(self.WV1)], fw_state=fw)
+        self.assertIn("狀態裡有 2 筆樣本條目格式不對（不顯示）", text(fw_html(e)))
+
+    def test_records_column_shows_state_gap(self):
+        e = env(self, plan_rows=[per_row(self.WV1)], fw_state=None)
+        h = fw_html(e)
+        sec = h[h.index("<h4>每日監控（最近一輪）</h4>"):h.index("<h4>不監控的項目</h4>")]
+        rows = re.findall(r"<tr>(.*?)</tr>", sec, re.S)[1:]
+        self.assertTrue(rows)
+        for r in rows:
+            last = cells(r)[-1]
+            self.assertIn("狀態 Issue 的內容沒有 firmware 欄位", text(last))
+
+
+class TestOrphanRows(unittest.TestCase):
+    WV1 = wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1")
+
+    def board_plan(self, rows):
+        plan = plan_with(rows)
+        plan["per_sbom"]["u1"] = {"uuid": "u1", "tag": "demo/v1.0", "layer": "bsp", "grype": "OK", "why": None, "report_status": "GAP",
+                                  "release_gate": "GAP", "kernel_map": "OK", "exploited": 5, "kernel_cna": "OK"}
+        return plan
+
+    def test_row_not_in_samples_is_listed(self):
+        orphan = per_row(wvk("old-sample", "v0.9"), grype="ATTENTION", exploited=7, advisory="OK")
+        rows = [per_row(self.WV1), orphan]
+        e = env(self, fw_state={"tables": tables_state(), "samples": {}}, watch_kw={"plan": self.board_plan(rows)})
+        h = fw_html(e)
+        t = text(h)
+        self.assertIn("每日結果裡有、但最新韌體 Release 的樣本沒有的列", t)
+        self.assertIn("dumpling:firmware-demo/" + wvk("old-sample", "v0.9") + "#firmware", t)
+        self.assertIn("不在最新的韌體 Release 樣本裡（可能是舊 Release 或新 tag 還沒跑過監控）", t)
+        i = h.index("每日結果裡有、但最新韌體 Release 的樣本沒有的列")
+        sec = h[i:]
+        self.assertIn('<div class="vnum">7</div>', sec)
+        self.assertRegex(sec, r'grype <span class="st st-ATTENTION">ATTENTION</span>')
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_count_in_board_note_matches_firmware_section(self):
+        wv2 = wvk("dasharo-novacustom-ns5x-tgl-v1.6.0", "v1.6.0")
+        rows = [per_row(self.WV1), per_row(wv2), per_row(wvk("old-a", "1")), per_row(wvk("old-b", "2"), exploited=9)]
+        plan = self.board_plan(rows)
+        e = env(self, fw_state={"tables": tables_state(), "samples": {}}, watch_kw={"plan": plan})
+        w = e.html[e.html.index('<section id="watch">'):]
+        n = int(re.search(r"韌體樣本（(\d+) 列）不在這張表", text(w)).group(1))
+        h = fw_html(e)
+        self.assertEqual(n, 4)
+        shown = len(re.findall(r'<div class="vnum">', h))
+        self.assertEqual(shown, n)                                          # 韌體區實際顯示的列數
+        self.assertIn("每日結果的韌體列共 4 列，全部列在上面（對到樣本 2 列、對不到 2 列）", text(h))
+
+    def test_duplicate_uuid_row_not_dropped(self):
+        rows = [per_row(self.WV1, exploited=1), per_row(self.WV1, exploited=2)]
+        plan = plan_with(rows[:1])
+        plan["per_sbom"]["dup"] = rows[1]
+        e = env(self, fw_state={"tables": tables_state(), "samples": {}}, watch_kw={"plan": plan})
+        h = fw_html(e)
+        self.assertIn('<div class="vnum">1</div>', h)
+        self.assertIn('<div class="vnum">2</div>', h)
+        self.assertIn("uuid 和前一列重複", text(h))
+
+    def test_state_only_records_listed(self):
+        fw = {"tables": tables_state(), "samples": {uuid_of(wvk("gone", "v1")): {"advisory": {"k": rec()}}}}
+        e = env(self, plan_rows=[per_row(self.WV1)], fw_state=fw)
+        t = text(fw_html(e))
+        self.assertIn(uuid_of(wvk("gone", "v1")), t)
+        self.assertIn(match.FW_WORD_PRELIM, t)
+        self.assertIn("最近一輪沒有這個監控鍵的每日結果", t)
+
+
+class TestWordingScanWholeCell(unittest.TestCase):
+    WV1 = wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1")
+
+    def cell_with(self, h, needle):
+        found = [x for x in cells(h) if needle in text(x)]
+        self.assertEqual(len(found), 1, needle)
+        return text(found[0])
+
+    def test_each_text_field_mention_needs_wording_or_gap(self):
+        for field, val, marker in (("grype", "NOT_ASSESSED（QA1 affected）", "QA1"), ("why", "QA2 candidate", "QA2"), ("advisory_why", "QA3 受影響", "QA3"),
+                                   ("advisory", "ATTENTION（QA4 affected）", "QA4"), ("reasons", ["QA5 affected"], "QA5")):
+            kw = {"reasons": val} if field == "reasons" else {field: val}
+            row = per_row(self.WV1, **kw)
+            # 沒有狀態紀錄：同一格要有 GAP
+            e = env(self, plan_rows=[row], fw_state={"tables": tables_state(), "samples": {}})
+            self.assertIn("無法附上用語", self.cell_with(fw_html(e), marker), field)
+            # 有狀態紀錄：同一格要有用語
+            fw = {"tables": tables_state(), "samples": {uuid_of(self.WV1): {"advisory": {"k": rec()}}}}
+            e = env(self, plan_rows=[row], fw_state=fw)
+            self.assertIn(match.FW_WORD_PRELIM, self.cell_with(fw_html(e), marker), field)
+
+    def test_no_mention_no_note(self):
+        e = env(self, plan_rows=[per_row(self.WV1)], fw_state={"tables": tables_state(), "samples": {uuid_of(self.WV1): {"advisory": {}}}})
+        self.assertNotIn("無法附上用語", e.html)
+
+
+class TestSharedPick(unittest.TestCase):
+    def test_pick_latest_firmware_function(self):
+        mk = lambda tag, pub: ({"tag": tag, "published_at": pub}, "firmware-demo", tag.split("/")[1])
+        a, b, c = mk("firmware-demo/2026.11.20.2", "2026-11-20T00:00:00Z"), mk("firmware-demo/2026.11.20.10", "2026-11-20T00:00:00Z"), mk("firmware-demo/2026.12.01", "2026-11-01T00:00:00Z")
+        latest, others = collect.pick_latest_firmware([a, c, b])
+        self.assertIs(latest, b)
+        self.assertEqual([x[0]["tag"] for x in others], ["firmware-demo/2026.11.20.2", "firmware-demo/2026.12.01"])
+        self.assertEqual(collect.pick_latest_firmware([]), (None, []))
+
+    def test_dashboard_uses_the_shared_function(self):
+        from unittest import mock
+        r1, f1 = fw_release("firmware-demo/2026.11.01", published="2026-11-01T00:00:00Z")
+        r2, f2 = fw_release("firmware-demo/2026.11.20", published="2026-11-20T00:00:00Z")
+        with mock.patch.object(collect, "pick_latest_firmware", side_effect=lambda cands: (cands[0], cands[1:])):
+            e = env(self, [r1, r2], {**f1, **f2})
+        self.assertEqual(e.data["firmware"]["tag"], "firmware-demo/2026.11.01")        # 選取真的由共用函式決定
+
+
+class TestWordConsistency(unittest.TestCase):
+    def test_fw_word_matches_match_fw_wording(self):
+        for kind, review in (("rule", "preliminary"), ("rule", None), ("rule", "confirmed"), ("nvidia-vbios", None)):
+            self.assertEqual(build.fw_word(match, kind, review), match.fw_wording([{"kind": kind, "review": review}]), (kind, review))
+        self.assertEqual(build.fw_word(match, "intel-microcode", None), match.FW_WORD_UCODE)
+
+
+class TestStatusTextEvil(unittest.TestCase):
+    def test_status_with_note_is_escaped(self):
+        wv = wvk("novacustom-v540tu-mtl-v1.0.1", "v1.0.1")
+        for ev in EVIL:
+            rows = [per_row(wv, grype="NOT_ASSESSED（%s）" % ev, advisory="ATTENTION（%s）" % ev, advisory_why=ev, why=ev)]
+            e = env(self, plan_rows=rows, fw_state=None)
+            h = e.html
+            self.assertEqual(check_site.check_html(h, REPO), [], ev[:30])
+            self.assertNotIn("<script", h.lower())
+            self.assertNotIn('"><img', h)
+            self.assertNotIn("A" * 1000, h)
+
+
+class TestSmallGaps(unittest.TestCase):
+    def test_duplicate_attachment_name_link_is_gap(self):
+        r, f = fw_release()
+        n = "fw-novacustom-v540tu-mtl-v1.0.1.cdx.json"
+        r["assets"][n].append(r["assets"][n][0])
+        e = env(self, [r], f)
+        h = fw_html(e)
+        self.assertIn("Release 沒有這個附件（或同名重複）", text(h))
+        self.assertNotIn('releases/download/firmware-demo/2026.11.20/%s"' % n, h)
+
+    def test_sample_without_status_shows_gap(self):
+        x = bios()
+        del x["status"]
+        r, f = fw_release(meta_obj=fw_meta(samples=[x]))
+        e = env(self, [r], f)
+        self.assertIn("meta 沒有 status", text(fw_html(e)))
         self.assertEqual(check_site.check_html(e.html, REPO), [])
 
 

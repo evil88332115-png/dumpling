@@ -63,6 +63,7 @@ FW_KINDS = ("rule", "intel-microcode", "nvidia-vbios")
 FW_DT_RESULTS = ("OK", "FAIL", "NOT_RUN")
 FW_DT_REASON_MAX = 200
 FW_OLDER_MAX = 50
+FW_STATE_SAMPLES_MAX = 200
 
 
 _SCRUB = [""]      # run() 設成 token；c() 會把它從所有外來字串裡拿掉（錯誤訊息、Issue 標題…），token 不能進任何輸出
@@ -417,9 +418,9 @@ def gather_firmware(collect, source, cands, ok_rel):
         return {"gap": "Releases API 讀不到（韌體區沒有資料）"}
     if not cands:
         return {"gap": None, "tag": None, "older": [], "older_total": 0}
-    cands = sorted(cands, key=lambda k: (collect._date(k[0].get("published_at")) or "", collect._ver_key(k[2])), reverse=True)
-    rel, project, tagver = cands[0]
-    older = [c(k[0]["tag"], 120) for k in cands[1:]]
+    latest, others = collect.pick_latest_firmware(cands)       # 和 collect.build 同一個函式：兩邊一定選同一個 Release
+    rel, project, tagver = latest
+    older = [c(k[0]["tag"], 120) for k in others]
     fw = {"gap": None, "tag": c(rel["tag"], 120), "version": c(tagver, 64), "published_at": cs(rel.get("published_at"), 40),
           "older": older[:FW_OLDER_MAX], "older_total": len(older), "meta_gap": None, "commit": None, "built_at": None,
           "workflow_run": None, "samples": [], "not_watched": [], "meta_tables": {}, "dt": {"state": "absent"}}
@@ -445,10 +446,15 @@ def gather_firmware(collect, source, cands, ok_rel):
 
 
 def fw_state(match, st):
-    """狀態 Issue 的 firmware 欄位（最近一輪的表識別、status、stale、affected 紀錄、size_stopped_at）。只留白名單欄位、限制大小。"""
+    """狀態 Issue 的 firmware 欄位（最近一輪的表識別、status、stale、affected 紀錄、size_stopped_at）。只留白名單欄位、限制大小。
+    上限和 match.py 一樣（FW_MAX_AFFECTED、REMATCH_MAX_BULLETINS、REMATCH_MAX_BULLETIN_CHARS，從 match 讀）；
+    超過上限、格式不對的紀錄不能默默丟掉或截斷後裝成完整：記下實際總數與丟掉的筆數，render 寫 GAP。
+    advisory：{uuid: {"recs": [...], "total": 紀錄實際筆數, "bad": 格式不對而丟掉的筆數}}。
+    沒有條目的樣本（uuid 不在 advisory 裡）和有條目但沒有 affected 的樣本不同：match 對每個監控中的樣本都會寫條目。"""
     fw = st.get("firmware")
     if not isinstance(fw, dict):
         return {"present": False}
+    max_aff, max_bl, max_blc = match.FW_MAX_AFFECTED, match.REMATCH_MAX_BULLETINS, match.REMATCH_MAX_BULLETIN_CHARS
     tables = {}
     for n in FW_TABLES:
         t = fw["tables"].get(n) if isinstance(fw.get("tables"), dict) else None
@@ -456,24 +462,32 @@ def fw_state(match, st):
             tables[n] = {k: (c(v, 100) if isinstance(v, str) else v) for k, v in sorted(t.items(), key=lambda kv: str(kv[0]))
                          if isinstance(k, str) and len(k) <= 40 and isinstance(v, (str, bool))}
             tables[n] = dict(list(tables[n].items())[:12])
-    adv = {}
+    adv, bad_unattributed = {}, 0
     samples = fw.get("samples") if isinstance(fw.get("samples"), dict) else {}
-    for u, x in list(samples.items())[:200]:
-        if not (isinstance(u, str) and FW_UUID_RE.match(u) and isinstance(x, dict) and isinstance(x.get("advisory"), dict)):
+    for u, x in list(samples.items())[:FW_STATE_SAMPLES_MAX]:
+        if not (isinstance(u, str) and FW_UUID_RE.match(u) and isinstance(x, dict)):
+            bad_unattributed += 1
             continue
-        recs = []
-        for key, e in list(x["advisory"].items())[:50]:
-            if not (isinstance(key, str) and isinstance(e, dict) and e.get("kind") in FW_KINDS and isinstance(e.get("result"), str)):
+        raw = x.get("advisory") if isinstance(x.get("advisory"), dict) else None
+        if raw is None:
+            bad_unattributed += 1
+            continue
+        recs, bad = [], 0
+        for key, e in raw.items():
+            if not (isinstance(key, str) and isinstance(e, dict) and e.get("kind") in FW_KINDS and isinstance(e.get("result"), str)
+                    and isinstance(e.get("bulletins"), list) and all(isinstance(b, str) for b in e["bulletins"])):
+                bad += 1
                 continue
             review = e.get("review") if e.get("review") in ("preliminary", "confirmed") else None
             recs.append({"key": c(key, 300), "kind": e["kind"], "result": c(e["result"], 40), "review": review,
                          "component": c(e["component"], 300) if isinstance(e.get("component"), str) else None,
-                         "bulletins": [c(b, 60) for b in e["bulletins"][:10] if isinstance(b, str)] if isinstance(e.get("bulletins"), list) else [],
+                         "bulletins": [c(b, max_blc) for b in e["bulletins"][:max_bl]], "bulletins_total": len(e["bulletins"]),
                          "baseline": e["baseline"] if isinstance(e.get("baseline"), bool) else None,
                          "word": fw_word(match, e["kind"], review)})
-        if recs:
-            adv[c(u, 200)] = sorted(recs, key=lambda r: r["key"])
-    return {"present": True, "tables": tables, "size_stopped_at": cs(fw.get("size_stopped_at"), 40), "advisory": adv}
+        recs.sort(key=lambda r: r["key"])
+        adv[c(u, 200)] = {"recs": recs[:max_aff], "total": len(recs), "bad": bad}
+    return {"present": True, "tables": tables, "size_stopped_at": cs(fw.get("size_stopped_at"), 40), "advisory": adv,
+            "bad_unattributed": bad_unattributed, "samples_total": len(samples), "samples_read": min(len(samples), FW_STATE_SAMPLES_MAX)}
 
 
 def issue_rows(raw):
@@ -688,9 +702,9 @@ def fw_daily(watch, state, fw_st):
     """韌體區要用的每日監控結果：最近一輪 result.json 的韌體列（uuid → 列）與狀態 Issue 的 firmware 欄位。各自缺就各自 GAP。"""
     plan = watch.get("plan") if isinstance(watch.get("plan"), dict) else {}
     if plan.get("gap") or not isinstance(watch.get("plan"), dict):
-        rows, rows_gap = {}, "每日比對結果（watch-plan result.json）：%s" % (plan.get("gap") or "沒有資料")
+        rows, rows_gap = [], "每日比對結果（watch-plan result.json）：%s" % (plan.get("gap") or "沒有資料")
     else:
-        rows = {r["uuid"]: r for r in plan.get("per_sbom", []) if r.get("fw") and r.get("uuid")}
+        rows = [r for r in plan.get("per_sbom", []) if r.get("fw") and r.get("uuid")]          # 一列都不丟：render 逐列列出（對得到樣本的、對不到的）
         rows_gap = None
     if fw_st is None:
         st = {"gap": "狀態 Issue：%s" % (state.get("gap") if isinstance(state, dict) and state.get("gap") else "沒有資料")}

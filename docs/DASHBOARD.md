@@ -139,7 +139,6 @@
 | watch、dev | `schedule`、`workflow_dispatch` 或 `push` | 必須是 `main` |
 | dev（另一種） | 必須是 `push` | 符合 `dev/**`（`dev/` 後接 `[A-Za-z0-9._/-]`，不能有 `..`）。dev.yml 在 dev/** 分支 push 時也會更新滾動的開發版（C0 決定 2026-11-15 收進來；workflow 定義讀預設分支，fork 碰不到） |
 | release | 必須是 `push` | 必須符合 `<專案>/<版本>` 的 tag 格式，而且不是 `dev/…`。驗證用 `pipeline/watch/collect.py` 的 `PROJECT_RE`、`VERSION_RE`（`classify` 回 `release` 的那種），與 release.yml 的 `*/v*` 觸發條件一致；不在 workflow 裡另寫一份 regex |
-
 | firmware | 必須是 `push` | 必須是 `firmware-demo/<版本>` 的 tag：`collect.classify(tag, False)` 回 `firmware`（同一套判斷，不在 workflow 或 trigger.py 另寫 regex）。PR、`workflow_dispatch`、`schedule` 一律不更新 |
 
 四種來源還有兩條共同規定：
@@ -265,7 +264,7 @@ build.py 的參數：`--repo`、`--api`（預設 `$GITHUB_API_URL`）、`--watch
 
 ### 12.1 取哪一個 Release
 - `collect.classify` 把 `firmware-demo/<版本>`（不是 prerelease）判成 `firmware`。這種 Release **不進版本區**（B），也不會被算成「不合規則」：版本區不會出現「未分類」的列，也沒有 release-meta 的 GAP。prerelease 的 `firmware-demo/…` 照 collect 是不合規則，仍列在警告。
-- 只取最新的一個：依 `published_at`，平手時比 tag 版本的數字（`2026.11.20.10` 比 `.9` 新）。排序用 collect 的 `_date` 與 `_ver_key`，和每日監控同一個選擇。其他韌體 Release 列成「舊的韌體 Release（不監控，只留紀錄）」。
+- 只取最新的一個：依 `published_at`，平手時比 tag 版本的數字（`2026.11.20.10` 比 `.9` 新）。選取是 `collect.pick_latest_firmware(cands)`（回傳（最新的, 其他的）），collect.build 與儀表板共用同一個函式，兩邊一定選同一個。其他韌體 Release 列成「舊的韌體 Release（不監控，只留紀錄）」。
 - 這是第一階段公開示範的限制；頁面固定寫「樣本是公開的測試資料，不是出貨產品；只監控最新的一個韌體 Release（第一階段示範的限制）」。內部版要監控每一個已出貨、還在支援期內的韌體版本（FIRMWARE-WATCH.md §2）。
 - 沒有韌體 Release：寫「沒有韌體 Release（韌體不在監控）」。Releases API 讀不到：整區 GAP。
 
@@ -282,13 +281,14 @@ build.py 的參數：`--repo`、`--api`（預設 `$GITHUB_API_URL`）、`--watch
 |---|---|
 | result `OK`、status `OK`、reason `null` | 顯示 status、result |
 | result `FAIL` 或 `NOT_RUN`、status `GAP`、reason 是非空字串（最多 200 字） | 顯示 status、result、reason（跳脫後原文） |
-| 其他組合、型別不對、缺 key、reason 太長或空白 | `GAP（dt 欄位格式不對）`，**不顯示原文** |
+| 其他組合、型別不對（包括 `dt` 是 `null`、不是物件）、缺 key、reason 太長或空白 | `GAP（dt 欄位格式不對）`，**不顯示原文** |
 | 沒有 `dt` 這個欄位（舊的 Release） | 「沒有 DT 結果」 |
 
-reason 只檢查型別與長度，不比對固定字串。dt 不影響樣本、對照表等其他欄位。
+reason 只檢查型別與長度，不比對固定字串。`dt` 是 `null`（key 存在、值是 null）算「格式不對」，不是「沒有 DT 結果」；只有整個 key 不存在才是後者。dt 不影響樣本、對照表等其他欄位。
 
 ### 12.4 每日監控的結果
 - 取自最近一輪 watch 的 `result.json`：`per_sbom` 裡 uuid 是 `dumpling:firmware-demo/…#firmware` 的列（`grype`、`why`、`exploited`、`advisory`、`advisory_why`、`advisory_reasons`），以及狀態 Issue 解開後的 `firmware`（`tables`、`size_stopped_at`、各樣本的 affected 紀錄）。各自缺就各自 GAP。
+- 每日結果裡的韌體列**一列都不丟**：對得到樣本的列在樣本表；每日結果有、但最新 Release 的樣本沒有的列（舊 Release 或新 tag 還沒跑過監控），另列一張表，標「不在最新的韌體 Release 樣本裡（可能是舊 Release 或新 tag 還沒跑過監控）」，欄位有 uuid、KEV 數加 grype 狀態、公告比對、狀態裡的紀錄；uuid 重複的列也列出。狀態裡有 affected 紀錄、卻沒有樣本也沒有每日結果的監控鍵，同一張表列出。板子的表上方「韌體樣本（N 列）」的 N 等於韌體區列出的列數（韌體區最後一行也寫總數）。
 - 韌體的列不再出現在「每份 SBOM 的監控狀態」那張板子用的表（那裡的核心對應、報告狀態對韌體是「沒有這一項」）。
 - **狀態一律附在數字旁邊**：KEV 命中數和 grype 狀態同一格；公告比對的狀態與說明同一格。GAP、NOT_RUN、NOT_ASSESSED 照原值顯示。match.py 寫的 `NOT_ASSESSED（原因）` 這種「狀態＋說明」拆成徽章與說明，不會被當成不認得的狀態值。
 - 對照表（`fw_advisory_rules`、`intel_microcode`、`nvidia_vbios`）：列出 Release 當時的識別（firmware-meta）、最近一輪重跑的識別、`status`、`stale`。`stale` 是 `true` 標「對照表過期」（頁首也有警告）；缺少寫 GAP。
@@ -304,7 +304,13 @@ reason 只檢查型別與長度，不比對固定字串。dt 不影響樣本、�
 | Intel 微碼 `affected-candidate` | 版本比較的候選，待人審 |
 | NVIDIA vBIOS | 建議受影響（依 NVIDIA 對照表，待人審） |
 
-資料沒有用語時寫 GAP（「用語缺少」），不會只留一個 affected，也不會寫成確定受影響。公告比對的說明（`advisory_reasons`）提到 affected 時，同一格另有「用語：…」一行；狀態裡沒有對應紀錄就寫 GAP。
+資料沒有用語時寫 GAP（「用語缺少」），不會只留一個 affected，也不會寫成確定受影響。每一格的文字（grype 狀態與 `why`、公告比對的狀態、`advisory_why`、`advisory_reasons`）都會掃 `affected｜受影響｜candidate`（不分大小寫）；只要提到，同一格另有「用語：…」一行（用語取自狀態裡這份樣本的紀錄），狀態裡沒有對應紀錄就寫 GAP「無法附上用語」。
+
+### 12.5.1 狀態裡的紀錄不截斷、不默默丟掉
+- 上限和 match.py 一樣，常數從 match.py 讀：每份樣本最多 `FW_MAX_AFFECTED`（100）筆 affected 紀錄、每筆最多 `REMATCH_MAX_BULLETINS`（64）個公告 ID、每個 ID 最多 `REMATCH_MAX_BULLETIN_CHARS`（80）字。
+- 達到上限以內全部顯示。超過上限（資料不合規）時記下實際總數，寫 `GAP（只列前 N 筆，共 M 筆）`、`GAP（公告只列前 N 個，共 M 個）`，不會截斷後裝成完整。
+- 格式不對而丟掉的紀錄（kind 不認得、result 不是字串、公告不是字串陣列）記下筆數，寫 `GAP（狀態裡有 n 筆紀錄格式不對（不顯示））`；uuid 格式不符或條目不是物件的，另寫「狀態裡有 n 筆樣本條目格式不對（不顯示）」。
+- 樣本在狀態裡**完全沒有條目**是 GAP（match 對每個監控中的樣本都會寫條目）；有條目但沒有 affected 紀錄才寫「沒有 affected 紀錄」。
 
 ### 12.6 測試與驗收
 `pipeline/dashboard/tests/test_firmware.py`：韌體 Release 的列出與不再列入警告、只取最新一個與平手比數字、meta 壞掉整區 GAP、dt 四種情況（含十幾種不合法組合）、not_watched 的 source、對照表與 stale、size_stopped_at、per_sbom 的 advisory 顯示、四種用語與「每個 affected 旁邊有用語」、惡意字串（slug、why、reason、表的識別、dt.reason…）加 check_site、trigger 的 firmware 規則、pages.yml 的 workflows 清單。另有一個範例檔存在時才跑的測試（`pipeline/watch/tests/data/firmware-meta.example.json`，C2 維護）。
