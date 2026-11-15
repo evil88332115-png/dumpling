@@ -104,6 +104,58 @@ def test_ignored_deb_matches_do_not_count_as_matched(tmp_path):
     assert st == "GAP" and "distro_data_unused" in ev
 
 
+# ---------- 壞的輸入：和 main 相同（不丟例外、不 FAIL）----------
+
+JUNK = [None, "x", 5, 1.5, [], True]
+
+
+def test_junk_matches_entries_do_not_fail_and_are_not_counted(tmp_path):
+    """matches 裡有 null、字串、數字：grype_counts 本來就略過它們；新規則的計數也要略過（改前的結果：GAP，不是 FAIL）。"""
+    r, st, detail, ev = run(tmp_path, [debian_kernel_deb(), generic_kernel()], JUNK)
+    assert (r.returncode, st) == (0, "GAP") and "核心沒有做漏洞比對" in detail and "distro_data_unused" not in ev
+    # 夾在有效比對之間：有效的 generic 比對照樣算
+    r, st, detail, ev = run(tmp_path, [debian_kernel_deb(), generic_kernel()], JUNK[:3] + [g_generic()] + JUNK[3:])
+    assert (r.returncode, st) == (0, "GAP") and ev["distro_data_unused"]["matches"]["generic_components"] == 1
+    # 沒有發行版核心 deb：照舊 OK
+    r, st, detail, ev = run(tmp_path, [generic_kernel()], JUNK + [g_generic()])
+    assert (r.returncode, st) == (0, "OK")
+
+
+def test_junk_dt_findings_entries_do_not_fail(tmp_path):
+    dt = JUNK + [{"component": None}, {"component": "x"}, {"component": {"purl": 5, "cpe": 7, "name": []}}]
+    r, st, detail, ev = run(tmp_path, [debian_kernel_deb(), generic_kernel()], [g_generic()], dt=dt)
+    assert (r.returncode, st) == (0, "GAP") and ev["distro_data_unused"]["matches"]["dt_generic"] == 0
+    assert kc.dt_match_split(dt) == (0, 0)
+
+
+def test_multiple_kernel_debs_one_matched_does_not_trigger(tmp_path):
+    """有多個核心 deb 時，只要任何一個（例如 linux-modules-*）有比對到，就不觸發。"""
+    mods = debian_kernel_deb("linux-modules-6.12.116+deb13-amd64", purl="pkg:deb/debian/linux-modules-6.12.116%2Bdeb13-amd64@6.12.116-1?distro=debian-13")
+    r, st, detail, ev = run(tmp_path, [debian_kernel_deb(), mods, generic_kernel()],
+                            [g_generic(), g_deb("CVE-2024-0005", purl=mods["purl"], name=mods["name"])])
+    assert st == "OK" and "distro_data_unused" not in ev
+
+
+def test_status_text_spacing_single_and_multiple_debs(tmp_path):
+    mods = debian_kernel_deb("linux-modules-6.12.116+deb13-amd64", purl="pkg:deb/debian/linux-modules-6.12.116%2Bdeb13-amd64@6.12.116-1?distro=debian-13")
+    r, st, d1, ev = run(tmp_path, [debian_kernel_deb(), generic_kernel()], [g_generic()])
+    assert f"發行版核心套件 {DEB_IMG} 沒有比對到" in d1
+    r, st, d2, ev = run(tmp_path, [debian_kernel_deb(), mods, generic_kernel()], [g_generic()])
+    assert f"發行版核心套件 {DEB_IMG} 等 2 個沒有比對到" in d2 and "個 沒有" not in d2 and "  " not in d2
+
+
+def test_off_series_entries_carry_structured_rule_ids(tmp_path):
+    rpi = debian_kernel_deb("linux-image-6.18.50+rpt-rpi-v8", "1:6.18.50-1+rpt1",
+                            "pkg:deb/debian/linux-image-6.18.50%2Brpt-rpi-v8@1%3A6.18.50-1%2Brpt1?arch=arm64&distro=debian-13")
+    r, st, detail, ev = run(tmp_path, [rpi], [g_deb(name=rpi["name"], purl=rpi["purl"])])
+    assert ev["off_series"][0]["rules"] == ["a", "b"]
+    r, st, detail, ev = run(tmp_path, [debian_kernel_deb(), generic_kernel()], [g_generic()], extra=["--not-distro-kernel", "x"])
+    assert ev["off_series"][0]["rules"] == ["c"]
+    up = debian_kernel_deb("linux-image-6.1.0-x", "6.1.0-1", "pkg:deb/debian/linux-image-6.1.0-x@6.1.0-1?distro=debian-12&upstream=linux-upstream")
+    r, st, detail, ev = run(tmp_path, [up, generic_kernel()], [g_deb(name=up["name"], purl=up["purl"])])
+    assert ev["off_series"][0]["rules"] == ["d"]
+
+
 # ---------- 規則不成立：照舊 ----------
 
 def test_deb_also_matched_is_ok_as_before(tmp_path):

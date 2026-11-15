@@ -39,11 +39,26 @@ def kcfg(n_extra, origin="KERNEL_CVES（明確給的清單）", schema="sca-cent
     return {"schema": schema, "inputs": inputs, "results": [{"cve": c, "files": []} for c in cves]}
 
 
+KCOV_DU = {"schema": "sca-pilot-kernel-coverage/1", "status": "GAP", "detail": ZH_DETAIL, "off_series": [],
+           "distro_data_unused": {"rule": "generic-only-no-distro-package-match",
+                                  "distro_kernel_packages": [{"name": "linux-image-6.12.116+deb13-amd64", "version": "6.12.116-1", "purl": "pkg:deb/debian/x"}]}}
+KCOV_OFF = {"schema": "sca-pilot-kernel-coverage/1", "status": "GAP", "detail": ZH_DETAIL,
+            "off_series": [{"name": "linux-image-x", "version": "1:6.18.50-1+rpt1", "reason": "規則 a：…；規則 b：…", "reasons": ["規則 a：…", "規則 b：…"], "rules": ["a", "b"]}]}
+EN_DU = ("Kernel matching used only upstream version ranges (NVD): the distribution kernel package `linux-image-6.12.116+deb13-amd64` was not matched "
+         "against the distribution's security data, so the distribution's fixes (including backports) are not taken into account; "
+         "the list may contain false positives and may miss vulnerabilities.")
+EN_OFF = ("The kernel is not on the distribution's kernel series (version epoch; vendor version or package-name suffix): matching against "
+          "distribution data is not reliable and may miss vulnerabilities.")
+CJK = re.compile(r"[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\u3000-\u303f]")
+
+
 def gap_scan(d, **kw):
     scan = kernel_scan(d, stages={"C-kernel-coverage": "GAP"})
     with_status_detail(scan, "C-kernel-coverage", ZH_DETAIL)
     if kw.get("kcfg") is not None:
         write_json(scan / "scan" / "kernel-config.json", kw["kcfg"])
+    if kw.get("kcov", KCOV_DU) is not None:
+        write_json(scan / "scan" / "kernel-coverage.json", kw.get("kcov", KCOV_DU))
     return scan
 
 
@@ -53,17 +68,19 @@ def docs(tmp_path, **kw):
     return s, (reports / "risk-assessment.md").read_text(encoding="utf-8"), (reports / "kernel-vulnerabilities.md").read_text(encoding="utf-8"), reports
 
 
-# ---------- GAP：說明原文與 N／M ----------
+# ---------- GAP：固定的英文句子（依 kernel-coverage.json 的結構化欄位）與 N／M ----------
 
-def test_gap_shows_status_text_and_cve_list_counts_in_both_documents(tmp_path):
+def test_gap_shows_fixed_english_sentences_and_cve_list_counts_in_both_documents(tmp_path):
     s, ra, kd, _ = docs(tmp_path, kcfg=kcfg(4))
     line = ("Kernel CVE list: 12 CVEs (source: KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings; "
             "`scan/kernel-config.json`); listed as rows: 8 CVEs; the other 4 are not listed as rows.")
     for text in (section_87(ra), kd):
-        assert "**Kernel coverage limitation:** `C-kernel-coverage` is GAP. Status text as recorded by sca-scan:" in text
-        assert f"> {ZH_DETAIL}" in text
+        assert f"**Kernel coverage limitation:** `C-kernel-coverage` is GAP. {EN_DU}" in text
         assert line in text
+        assert ZH_DETAIL not in text and "Status text as recorded" not in text and not CJK.search(text)      # 中文原文只留在 scan-status.tsv
+        assert "kernel-coverage.json" not in text and "off_series" not in text and "distro_data_unused" not in text   # 沒有內部檔案引用
     assert "listed as rows: 8 CVEs" in kd.split("## Full list")[0]            # 摘要段（不是完整清單）
+    assert "scan/kernel-coverage.json" in s["inputs"] and s["inputs"]["scan/kernel-coverage.json"]["sha256"]    # 讀了就登記為輸入
     # 判定不變：本來就是 GAP（COND_STAGES）；理由照舊
     assert s["documents"]["risk-assessment"]["status"] == "GAP"
     assert "C-kernel-coverage is GAP" in s["documents"]["risk-assessment"]["detail"]
@@ -91,7 +108,7 @@ def test_cve_list_line_not_written_when_n_unknown_or_not_larger(tmp_path, name, 
     s, ra, kd, _ = docs(tmp_path, kcfg=cfg)
     for text in (section_87(ra), kd):
         assert "Kernel CVE list:" not in text
-        assert f"> {ZH_DETAIL}" in text                                  # 說明原文照樣帶出
+        assert f"`C-kernel-coverage` is GAP. {EN_DU}" in text            # 英文句子照樣帶出
 
 
 def test_all_listed_but_kernel_rows_have_cves_outside_the_list(tmp_path):
@@ -115,7 +132,7 @@ def test_text_helpers_are_structure_only():
     st = {"C-kernel-coverage": ("GAP", "任何文字，包括 N = 99")}
     cfg = kcfg(0, cves=["CVE-2025-1", "CVE-2025-2", "CVE-2025-3"])
     t = cr.kernel_gap_text(st, rows, cfg)
-    assert "the other 1 are not listed as rows" in t and "任何文字，包括 N = 99" in t     # 說明文字裡的數字不影響 N
+    assert "the other 1 are not listed as rows" in t and "任何文字" not in t and "99" not in t     # 說明文字（含數字）不影響 N，也不貼進報告
     assert "A further" not in t                                                         # K 是 0：不寫
     t = cr.kernel_gap_text(st, rows + [{"id": "CVE-2025-9", "cves": ["CVE-2025-9"]}], cfg)
     assert t.endswith("the other 1 are not listed as rows. A further 1 CVEs of the kernel rows are not in the list.")
@@ -128,11 +145,42 @@ def test_text_helpers_are_structure_only():
     assert cr.kernel_cve_list_info(None) is None and cr.kernel_cve_list_info({"schema": "sca-center-kernel-config/1"}) is None
 
 
-def test_detail_with_markdown_and_newlines_stays_one_quoted_line(tmp_path):
-    """說明原文只顯示：換行與多餘空白壓成一行，放在引用區塊裡。"""
+def test_sentences_come_only_from_structured_fields():
     st = {"C-kernel-coverage": ("GAP", "第一行\n  第二行 | 表格字元")}
-    t = cr.kernel_gap_text(st, [], None)
-    assert "> 第一行 第二行 | 表格字元" in t and "\n> " in t and t.count("\n> ") == 1
+    head = "**Kernel coverage limitation:** `C-kernel-coverage` is GAP."
+    only = cr.kernel_gap_text(st, [], None, None)
+    assert only == head                                                         # 讀不到欄位：只寫 is GAP，不猜、不貼原文
+    for bad in (None, {}, {"schema": "other/1", "distro_data_unused": KCOV_DU["distro_data_unused"]}, {"schema": KCOV_DU["schema"]},
+                dict(KCOV_DU, distro_data_unused={"distro_kernel_packages": []}), dict(KCOV_DU, distro_data_unused="x"),
+                {"schema": KCOV_DU["schema"], "off_series": "x"}, {"schema": KCOV_DU["schema"], "off_series": []}):
+        assert cr.kernel_gap_text(st, [], None, bad) == head
+    assert cr.kernel_gap_text(st, [], None, KCOV_DU) == f"{head} {EN_DU}"
+    assert cr.kernel_gap_text(st, [], None, KCOV_OFF) == f"{head} {EN_OFF}"
+    both = cr.kernel_gap_text(st, [], None, dict(KCOV_DU, off_series=KCOV_OFF["off_series"]))
+    assert both == f"{head} {EN_DU} {EN_OFF}"                                  # 兩個原因都寫
+    names = {"a": "version epoch", "b": "vendor version or package-name suffix", "c": "declared not-distro by the platform owner", "d": "upstream source package"}
+    for r, txt in names.items():
+        t = cr.kernel_gap_text(st, [], None, {"schema": KCOV_DU["schema"], "off_series": [{"name": None, "rules": [r]}]})
+        assert f"kernel series ({txt}):" in t
+    # 規則代號讀不到（舊的 json）：照樣寫「不在序列上」，不寫括號、不猜原因
+    t = cr.kernel_gap_text(st, [], None, {"schema": KCOV_DU["schema"], "off_series": [{"name": "x"}]})
+    assert t == f"{head} The kernel is not on the distribution's kernel series: matching against distribution data is not reliable and may miss vulnerabilities."
+    assert not CJK.search(both) and "kernel-coverage.json" not in both and "off_series" not in both
+
+
+def test_off_series_sentence_in_both_documents(tmp_path):
+    s, ra, kd, _ = docs(tmp_path, kcfg=kcfg(4), kcov=KCOV_OFF)
+    for text in (section_87(ra), kd):
+        assert f"`C-kernel-coverage` is GAP. {EN_OFF}" in text and "Kernel matching used only upstream" not in text
+        assert ZH_DETAIL not in text
+
+
+def test_no_structured_evidence_file_only_says_gap(tmp_path):
+    """kernel-coverage.json 沒有（或讀不到）：只寫 `C-kernel-coverage` is GAP，不貼說明原文。"""
+    s, ra, kd, _ = docs(tmp_path, kcfg=None, kcov=None)
+    for text in (section_87(ra), kd):
+        assert "**Kernel coverage limitation:** `C-kernel-coverage` is GAP.\n" in text and ZH_DETAIL not in text
+    assert "scan/kernel-coverage.json" in s["inputs"] and s["inputs"]["scan/kernel-coverage.json"] is None
 
 
 # ---------- 沒有核心的列：不是「沒有弱點」，而且照樣帶出說明 ----------
@@ -141,10 +189,11 @@ def test_no_kernel_rows_case_also_shows_text_and_counts(tmp_path):
     scan = make_scan(tmp_path / "s", findings=KFINDINGS[8:], grype=None, stages={"C-kernel-coverage": "GAP"})
     with_status_detail(scan, "C-kernel-coverage", ZH_DETAIL)
     write_json(scan / "scan" / "kernel-config.json", kcfg(4))
+    write_json(scan / "scan" / "kernel-coverage.json", KCOV_DU)
     r, s, reports = run(make_project(tmp_path / "p"), scan)
     k = section_87((reports / "risk-assessment.md").read_text(encoding="utf-8"))
     assert "**Kernel not assessed.**" in k and "`C-kernel-coverage` GAP" in k and "NOT assessed" in k
-    assert f"> {ZH_DETAIL}" in k and "listed as rows: 0 CVEs; the other 12 are not listed as rows." in k
+    assert f"`C-kernel-coverage` is GAP. {EN_DU}" in k and ZH_DETAIL not in k and "listed as rows: 0 CVEs; the other 12 are not listed as rows." in k
     assert s["counts"]["kernel"]["section"] == "not_assessed" and not (reports / "kernel-vulnerabilities.md").exists()
 
 
@@ -220,6 +269,7 @@ def test_delivered_reports_have_no_internal_milestone_wording(tmp_path, shape):
     scan = kernel_scan(tmp_path / "s", stages={"C-kernel-coverage": "GAP"})
     with_status_detail(scan, "C-kernel-coverage", detail)
     write_json(scan / "scan" / "kernel-config.json", kcfg(4))
+    write_json(scan / "scan" / "kernel-coverage.json", json.loads((tmp_path / "kc.json").read_text(encoding="utf-8")))     # kernelcheck 真的輸出
     r, s, reports = run(make_project(tmp_path / "p"), scan)
     assert r.returncode in (0, 2)
     seen = 0
@@ -229,7 +279,14 @@ def test_delivered_reports_have_no_internal_milestone_wording(tmp_path, shape):
             assert "尚未實作" not in t and not re.search(r"\bM7[a-z0-9-]*\b", t), p.name
             seen += 1
     assert seen >= 5
-    assert detail in (reports / "risk-assessment.md").read_text(encoding="utf-8")        # 原文確實帶出（檢查不是空轉）
+    ra = (reports / "risk-assessment.md").read_text(encoding="utf-8")
+    kd = (reports / "kernel-vulnerabilities.md").read_text(encoding="utf-8")
+    assert detail not in ra and detail not in kd and not CJK.search(section_87(ra)) and not CJK.search(kd)       # 中文原文不進英文文件
+    want = {"off_series": ["not on the distribution's kernel series (version epoch; vendor version or package-name suffix)"],
+            "generic_only": ["Kernel matching used only upstream version ranges (NVD): the distribution kernel package `linux-image-6.12.116-amd64`"],
+            "both": ["Kernel matching used only upstream version ranges (NVD)", "not on the distribution's kernel series (version epoch; vendor version"]}[shape]
+    for w in want:
+        assert w in section_87(ra) and w in kd, w                                            # 結構化欄位真的產生了句子（檢查不是空轉）
 
 
 # ---------- 客戶版：沒有核心段落，不帶任何核心狀態文字 ----------
@@ -248,3 +305,73 @@ def test_customer_package_has_no_kernel_section_and_no_internal_text(tmp_path):
                 assert bad not in t, (p.name, bad)
     t = (pk / "vulnerability-status.md").read_text(encoding="utf-8")
     assert "**Incomplete:**" in t and "| Completeness of the vulnerability data | incomplete |" in t     # 資料狀態 GAP 的一般說明照舊
+
+
+# ---------- K1：kernel.stable_git.kept_not_proven_absent（固定英文句，files > 0 才寫）----------
+
+KEPT = ("Kernel configuration check: 7 file(s) changed by the fix commits of 3 CVE(s) are not in the image's partial kernel headers tree; "
+        "they were kept and judged as unknown, not as not built.")
+
+
+def kept_cfg(value):
+    c = kcfg(0)
+    c["kernel"] = {"stable_git": {"kept_not_proven_absent": value}} if value is not ABSENT else {"stable_git": {}}
+    return c
+
+
+ABSENT = object()
+
+
+@pytest.mark.parametrize("stage", ["OK", "GAP"])
+def test_kept_not_proven_absent_sentence_when_files_positive(tmp_path, stage):
+    scan = kernel_scan(tmp_path / "s", stages={"C-kernel-coverage": stage})
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg({"files": 7, "cves": 3}))
+    r, s, reports = run(make_project(tmp_path / "p"), scan)
+    for text in (section_87((reports / "risk-assessment.md").read_text(encoding="utf-8")), (reports / "kernel-vulnerabilities.md").read_text(encoding="utf-8")):
+        assert KEPT in text
+        assert len(text.split(KEPT)) == 2
+
+
+@pytest.mark.parametrize("name,value", [("absent field", ABSENT), ("files zero", {"files": 0, "cves": 0}), ("files zero with cves", {"files": 0, "cves": 4}),
+                                        ("bad type", {"files": "7", "cves": 3}), ("bool", {"files": True, "cves": 1}), ("not a dict", 7)])
+def test_kept_not_proven_absent_not_written_otherwise(tmp_path, name, value):
+    scan = kernel_scan(tmp_path / "s")
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg(value))
+    r, s, reports = run(make_project(tmp_path / "p"), scan)
+    for n in ("risk-assessment.md", "kernel-vulnerabilities.md"):
+        assert "partial kernel headers tree" not in (reports / n).read_text(encoding="utf-8")
+
+
+def test_kept_not_proven_absent_without_stable_git_is_byte_identical(tmp_path):
+    """kernel 區塊沒有 stable_git（沒給 --stable-git）：和沒有 kernel-config.json 的輸出相同（時間戳記正規化後）。"""
+    outs = []
+    for name, cfg in (("a", None), ("b", dict(kcfg(0), kernel={}))):
+        scan = kernel_scan(tmp_path / f"s{name}")
+        if cfg:
+            write_json(scan / "scan" / "kernel-config.json", cfg)
+        r, s, reports = run(make_project(tmp_path / f"p{name}"), scan)
+        outs.append({n: STAMP.sub("TS", (reports / n).read_text(encoding="utf-8")) for n in ("risk-assessment.md", "kernel-vulnerabilities.md")})
+    assert outs[0]["kernel-vulnerabilities.md"] == outs[1]["kernel-vulnerabilities.md"]
+
+
+def test_kept_sentence_not_in_customer_package(tmp_path):
+    scan = kernel_scan(tmp_path / "scan")
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg({"files": 7, "cves": 3}))
+    r, s, rep = run(make_project(tmp_path / "p", dict(MIN_CFG, role="supplier")), scan)
+    for p in (rep / "supplier-package").rglob("*"):
+        if p.is_file() and p.suffix in (".md", ".json", ".txt", ".csv"):
+            assert "partial kernel headers tree" not in p.read_text(encoding="utf-8"), p.name
+
+
+def test_ok_with_kernel_coverage_json_present_reads_nothing_and_registers_no_input(tmp_path):
+    """OK 時不讀 scan/kernel-coverage.json（summary.json 的 inputs 沒有這一項），輸出和沒有這個檔時逐位元組相同。"""
+    outs = []
+    for name, kcov in (("a", None), ("b", KCOV_DU)):
+        scan = kernel_scan(tmp_path / f"s{name}")
+        if kcov:
+            write_json(scan / "scan" / "kernel-coverage.json", kcov)
+        r, s, reports = run(make_project(tmp_path / f"p{name}"), scan)
+        assert "scan/kernel-coverage.json" not in s["inputs"]
+        outs.append({n: STAMP.sub("TS", (reports / n).read_text(encoding="utf-8")) for n in ("risk-assessment.md", "kernel-vulnerabilities.md")})
+        outs[-1]["summary"] = normalize_summary((reports / "summary.json").read_text(encoding="utf-8"))
+    assert outs[0] == outs[1]

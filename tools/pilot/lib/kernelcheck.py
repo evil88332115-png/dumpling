@@ -199,6 +199,11 @@ def _is_debian_distro(d):
     return d == "debian" or d.startswith("debian-")
 
 
+def off_series_rule_ids(reasons):
+    """off_series_reasons 回傳的原因文字（都是自己產生的「規則 x：…」）→ 規則代號清單（a、b、c、d；結構化欄位 off_series[].rules 用，報告不必讀中文）。"""
+    return sorted({r[3] for r in reasons if isinstance(r, str) and r.startswith("規則 ") and len(r) > 3 and r[3] in "abcd"})
+
+
 def off_series_reasons(name, version, purl, sources=None):
     """一個 deb 核心套件不在發行版核心序列上的所有原因（OFF_SERIES_RULES 的 a、b、d；c 在 assess）→ 原因文字清單，空清單＝沒有規則成立。
 
@@ -253,7 +258,7 @@ def off_series_packages(packages, sources=None):
             continue
         rs = off_series_reasons(p.get("name"), p.get("version"), p.get("purl"), sources)
         if rs:
-            out.append({"name": p.get("name"), "version": p.get("version"), "reason": "；".join(rs), "reasons": rs})
+            out.append({"name": p.get("name"), "version": p.get("version"), "reason": "；".join(rs), "reasons": rs, "rules": off_series_rule_ids(rs)})
     return out
 
 
@@ -426,7 +431,9 @@ def grype_match_split(grype):
     CPE 是 Linux 核心的 artifact）＝generic／NVD 的核心元件。ignoredMatches 不算。"""
     pkg, gen, by = 0, 0, collections.Counter()
     for m in grype["matches"]:
-        a = m.get("artifact") if isinstance(m, dict) else None
+        if not isinstance(m, dict):          # null、字串、數字：和 grype_counts 一樣略過（不是比對）
+            continue
+        a = m.get("artifact")
         if not grype_artifact_is_kernel(a, m.get("matchDetails")):
             continue
         if _is_distro_package_artifact(a):
@@ -554,15 +561,15 @@ def assess(sbom, grype=None, dt_findings=None, kmap=None, not_distro=None):
         off = off_series_packages(comps["kernel_packages"])
         if not_distro:
             r = f"規則 c：平台宣告核心不是發行版的核心（{not_distro}）"
-            off.insert(0, {"name": None, "version": None, "reason": r, "reasons": [r]})
+            off.insert(0, {"name": None, "version": None, "reason": r, "reasons": [r], "rules": ["c"]})
         ev["off_series"] = off
         # 只有上游版本範圍的比對（DISTRO_DATA_RULE）：和 off-series 各自獨立，兩個都成立時兩個原因都記。沒成立時 ev 不多這個欄位（輸出不變）
         du = distro_data_unused(comps, g, d, mk, grype_match_split(grype) if g else None, dt_match_split(dt_findings) if d else None)
         if du:
             ev["distro_data_unused"] = du
             dpk = du["distro_kernel_packages"][0]["name"]
-            dmore = f" 等 {len(du['distro_kernel_packages'])} 個" if len(du["distro_kernel_packages"]) > 1 else ""
-            dtext = (f"核心的比對只有上游版本範圍（NVD；generic 核心元件 {du['matches']['generic_components']} 筆），發行版核心套件 {dpk}{dmore} "
+            dmore = f" 等 {len(du['distro_kernel_packages'])} 個" if len(du["distro_kernel_packages"]) > 1 else " "
+            dtext = (f"核心的比對只有上游版本範圍（NVD；generic 核心元件 {du['matches']['generic_components']} 筆），發行版核心套件 {dpk}{dmore}"
                      "沒有比對到發行版的安全資料，沒有用到發行版的修補（含回移）資訊：可能有誤報，也可能漏報")
         if off:
             f = off[0]
