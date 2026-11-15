@@ -131,7 +131,7 @@
 >   - `_parse_utc` 不收 24 時（Python 3.14 的 fromisoformat 會收；這是 C2 的檔案）。C1 的 validate_table 同樣的問題已請 C0 轉告 C1。
 >   - 本機 1367 passed。C0 看過 diff，CI 綠就合併。
 > - **M7f**：
->   - 調查筆記 → **PR #115**（head 0d29fca），照常排隊合併。ETSI 從 labs.etsi.org 取得 v0.0.12；較新版是 GAP。共 26 項，含 92 條條款的對照。
+>   - 調查筆記 **#115 已合併**（ETSI v0.0.12 的條款對照，共 26 項）。V0.1.1／V0.1.3 由使用者手動下載的事，排到第二階段。
 >   - **PR-2（Intel FIT）**：寫程式代理（sonnet、high）**進行中**（`wp3/fw-integrity-fit`，worktree `$AGENT_TMP/dumpling-wt-c2-fit`）。做完開 PR，但驗證排在後面、先不合併（D-063）。
 >   - 其他程式碼完整性的實作凍結到第二階段。
 > - D-046 的實作等 C1 的發現介面。
