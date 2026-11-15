@@ -3921,7 +3921,7 @@ def kernel_cve_list_info(kcfg):
         return None
     docs = merged_kernel_docs(kcfg)
     if docs is not None:      # 逐顆判定的合併文件（M7d-1）：清單來源記在每顆核心自己的 kernel-config.json（scan/kernels/<版本>/）
-        # 這段文字會進交付文件（8.7 節）：只寫來源名稱與核心數，不寫內部檔案路徑（C0）
+        # 這段文字會進報告內文（8.7 節）：只寫來源名稱與核心數，不寫內部檔案路徑（C0）
         srcs = {v: cve_origin_text(d) for v, d in docs.items()}
         if len(set(srcs.values())) == 1:
             return cves, f"{next(iter(srcs.values()))}; {plural(len(srcs), 'kernel')}"
