@@ -92,7 +92,8 @@ class Base(unittest.TestCase):
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
                                grype=None, grype_total_timeout=100, vendor_config=kw.get("vendor_config"), now=now, demo=kw.get("demo", False),
-                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999")
+                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999",
+                               firmware_rematch=kw.get("fw_rematch"))
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
