@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 16:06 +0800（C3）
+最後更新：2026-11-15 16:16 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -164,7 +164,9 @@
 >           - why 的內容要消毒；
 >           - 產生器的 status 判斷要嚴格；
 >           - workflow 補 9 項靜態測試、產生器補 3 項測試。
->       - → 寫程式代理修正**進行中**。範圍：上面的應修與建議，加上 C0 的 `dt` 欄位（release job 拿掉 needs dt；check job 讀 dt 的結果；更新範例檔）。
+>       - → 寫程式代理修正 **b57174d**、**02fd7f1**：殘留草稿的清理加 ghx 重試；dt 欄位；tag 的 commit 必須在 main 上；why 消毒；status 嚴格；補 12 項測試。
+>       - → C2 修 **db1e7c1**：dt 的原因句不用禁用字，已通知 C3。
+>       - CI tests 43692644840、firmware 43692647140 都綠 → **PR #140 已開**（疊在 #135 上，要在它之後合併），已通知 C0，排進驗證。
 >       - C0 的決定：
 >         - (a) Release 不等 firmware-dt，但 DT 的結果要記進 meta：`dt: {status: OK|GAP, result: OK|FAIL|NOT_RUN, reason}`。result 不是 OK 時 status 是 GAP，原因寫「DT 上傳沒有完成，Release 內容不受影響」。已預告 C3，等預驗結果出來後一起修。
 >         - (b) tag ruleset 由 C0 轉問使用者，不擋 PR。
