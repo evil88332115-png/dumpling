@@ -161,7 +161,7 @@
 | `tools/pilot/lib/euvd.py` | `scripts/pilot/lib/euvd.py` | 25fa89a | 路徑調整 6 處 |
 | `tools/pilot/lib/kernel_boot.py` | `scripts/pilot/lib/kernel_boot.py` | 25fa89a | 清理 3 行 |
 | `tools/pilot/lib/kernel_cna_version.py` | `scripts/pilot/lib/kernel_cna_version.py` | 25fa89a | 路徑調整 1 處；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變 |
-| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心）；`--source-tree-version`（只讀原始碼樹最上層 Makefile 的 X.Y.Z，沿用 `tree_version`） |
+| `tools/pilot/lib/kernel_config.py` | `scripts/pilot/lib/kernel_config.py` | 25fa89a | 路徑調整 5 處、清理 1 行；另改 1 行說明（K1 預設 Image 的依據，見「影響邏輯的替換」）；上限註解裡的「實測」數字改成概略估計（不留可能量自內部建置的精確數量，D-023），常數值不變；**行為修改（M2）**：新增 `--list-kernel-versions`（只列出映像的核心模組目錄，不判定）與 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心）；`--source-tree-version`（只讀原始碼樹最上層 Makefile 的 X.Y.Z，沿用 `tree_version`）；**行為修改（K1 標頭檔修正）**：`--stable-git` 的 (b) 聯集只有完整核心原始碼樹（`--source-tree`）證明沒有的檔案才不併入；檔案名稱只來自映像 headers 套件（部分檔案）時，修補 commit 改到、但 headers 樹裡沒有的 .h／.c 不再當作不存在而丟掉，照樣併入（只會讓 not_affected 變 unknown）；`kernel.stable_git` 新增 `kept_not_proven_absent`（files、cves），`limitations` 的 --stable-git 那句補一段說明；沒給 `--stable-git` 時輸出不變 |
 | `tools/pilot/lib/kernel_git_files.py` | `scripts/pilot/lib/kernel_git_files.py` | 25fa89a | 原樣 |
 | `tools/pilot/lib/kernel_included_c.py` | `scripts/pilot/lib/kernel_included_c.py` | 25fa89a | 路徑調整 3 處（用法說明與輸出的 generator 欄位）；2026-11-12 補帶，讓 `lib/data/kernel-included-c-*.json` 可以重現 |
 | `tools/pilot/lib/kernel_module_map.py` | `scripts/pilot/lib/kernel_module_map.py` | 25fa89a | 路徑調整 1 處；**行為修改（M2）**：新增 `--also-list-kernel-versions`（讀映像的同一趟順便印出貨的核心） |
@@ -191,7 +191,7 @@
 | `tools/pilot/tests/test_kernel_cna_branch.py` | `scripts/pilot/tests/test_kernel_cna_branch.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_cna_version.py` | `scripts/pilot/tests/test_kernel_cna_version.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_config.py` | `scripts/pilot/tests/test_kernel_config.py` | 25fa89a | 路徑調整 6 處、清理 30 行；另刪段 2 個測試函式（`deploy/` 鏡像更新與同步、`deploy` 接線）；測試映像常數改寫成合成值（見資料來源）；註解的內部執行編號改成中性；註解：移除上游私有 repo 的編號與內部部署描述；新增（M2）2 個 `tools/mirror/kernel-cve.sh` 的測試（clone 失敗重試、上游連不上時沿用上一份鏡像並標 ATTENTION；假的 git 與合成的鏡像）；M2 後續（掃描層 NOT_RUN）：原始碼文字斷言跟著 KSEEN（SBOM 有核心才寫）改 |
-| `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處 |
+| `tools/pilot/tests/test_kernel_k1_improve.py` | `scripts/pilot/tests/test_kernel_k1_improve.py` | 25fa89a | 路徑調整 1 處；**行為修改（K1 標頭檔修正）**：新增 7 個測試（部分 headers 樹找不到的修補檔案不當作不存在）；**既有測試的期望值修改**：`test_backport_added_files_must_exist_in_the_kernel_and_be_code` 的 CVE-2024-2011（修補 commit 改了 headers 樹和 Makefile 都沒有的 `drivers/foo/renamed_away.c`）由 not_affected 改成 unknown，原因：舊期望建立在「headers 樹找不到＝這個核心沒有」，但 headers 套件只有部分檔案（驅動自帶的 .h、被 #include 的 .c 都不在），那正是 K1 標頭檔修正要修的缺陷；現在只有完整原始碼樹（`--source-tree`）證明沒有才丟，同一測試補了完整樹沒有 renamed_away.c 時仍 not_affected、不併入的斷言（C1 核准）|
 | `tools/pilot/tests/test_kernel_k1_review1.py` | `scripts/pilot/tests/test_kernel_k1_review1.py` | 25fa89a | 原樣；註解：移除上游私有 repo 的編號與內部部署描述 |
 | `tools/pilot/tests/test_kernel_k1_undetermined.py` | `scripts/pilot/tests/test_kernel_k1_undetermined.py` | 25fa89a | 原樣 |
 | `tools/pilot/tests/test_kernel_module_map.py` | `scripts/pilot/tests/test_kernel_module_map.py` | 25fa89a | 原樣 |

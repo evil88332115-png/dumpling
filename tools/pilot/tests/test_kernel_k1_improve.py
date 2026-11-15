@@ -308,9 +308,10 @@ def test_backport_files_are_unioned_with_program_files(tmp_path, repo):
 
 
 def test_backport_added_files_must_exist_in_the_kernel_and_be_code(tmp_path, repo):
-    """聯集只加「程式檔與標頭檔、而且這個核心有的檔案」：
-    沒有的檔案不加（本來就不可能編進這個核心）、MAINTAINERS／Documentation 不加；有的標頭檔加進去 → unknown（標頭檔不用來宣告沒編）；
-    有的、沒編的程式檔加進去 → 仍是 not_affected（記下加了哪個檔案）。"""
+    """聯集只加「程式檔與標頭檔、而且不是完整原始碼樹證明這個核心沒有的檔案」：
+    部分 headers 樹裡找不到不算不存在，只有完整原始碼樹（--source-tree）證明沒有才丟（K1 標頭檔修正；以前 headers 樹找不到就丟）。
+    所以 headers 樹找不到的 .c 也照樣併入，Makefile 沒有規則 → unknown（不是 not_affected）；MAINTAINERS／Documentation 不加；
+    headers 裡有的標頭檔加進去 → unknown（標頭檔不用來宣告沒編）；有的、沒編的程式檔加進去 → 仍是 not_affected（記下加了哪個檔案）。"""
     h_gone = commit(repo, ["drivers/foo/renamed_away.c", "MAINTAINERS", "Documentation/x.rst", "drivers/foo/Kconfig"], "files the kernel does not have")
     h_hdr = commit(repo, ["include/linux/absent.h"], "backport also touching a header the kernel has")
     h_unbuilt = commit(repo, ["drivers/bar/baz_main.c"], "backport touching an unbuilt file that the kernel has")
@@ -319,10 +320,19 @@ def test_backport_added_files_must_exist_in_the_kernel_and_be_code(tmp_path, rep
             "CVE-2024-2013": cna("CVE-2024-2013", ["drivers/foo/a.c"], [h_unbuilt])}
     p, st, out = git_run(tmp_path, recs, list(recs), repo)
     by = by_cve(out)
-    assert by["CVE-2024-2011"]["decision"] == "not_affected" and "stable_git_added_files" not in by["CVE-2024-2011"]
+    # headers 樹（部分檔案）找不到 renamed_away.c：不當作不存在 → 併入，沒有 Makefile 規則 → unknown
+    assert by["CVE-2024-2011"]["decision"] == "unknown" and by["CVE-2024-2011"]["stable_git_added_files"] == ["drivers/foo/renamed_away.c"]
     assert by["CVE-2024-2012"]["decision"] == "unknown" and by["CVE-2024-2012"]["stable_git_added_files"] == ["include/linux/absent.h"]
     assert by["CVE-2024-2013"]["decision"] == "not_affected" and by["CVE-2024-2013"]["stable_git_added_files"] == ["drivers/bar/baz_main.c"]
-    assert out["kernel"]["stable_git"]["decision_changes"] == {"not_affected->unknown": 1, "not_affected->not_affected": 1}
+    assert out["kernel"]["stable_git"]["decision_changes"] == {"not_affected->unknown": 2, "not_affected->not_affected": 1}
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    # 完整原始碼樹（--source-tree）裡沒有 renamed_away.c：這個核心沒有這個檔案 → 丟掉，維持 not_affected、不併入
+    sub = tmp_path / "full"
+    sub.mkdir()
+    p, st, out = hdr_run(sub, repo, None, {"CVE-2024-2011": recs["CVE-2024-2011"]}, tree=source_tree_with(sub), src=tvf.thin_rootfs(sub))
+    r = by_cve(out)["CVE-2024-2011"]
+    assert r["decision"] == "not_affected" and "stable_git_added_files" not in r and "files_origin" not in r
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
 
 
 def test_references_commits_for_cves_without_cna_record(tmp_path, repo):
@@ -408,3 +418,153 @@ def test_sca_scan_and_flash_package_wiring():
     # 完整掃描（Jetson）也把刷機包交給 C-kernel-config：才讀得到燒錄的 kernel/Image
     assert 'elif [ ${#SRC[@]} -gt 0 ]; then kb=(--kernel-build "${ARCHIVE:-$SRCDIR}" --kernel-build-prefix "$prefix"); fi' in fp
     assert "--kernel-source)" in fp and "KERNEL_SOURCE_DIR" in fp
+
+
+# =====================================================================================================
+# --stable-git (b)：headers 樹是部分檔案時，找不到不當作「不存在」（K1 標頭檔修正）
+# =====================================================================================================
+
+FOO_H = "drivers/foo/foo.h"           # 驅動自帶的 .h：映像的 headers 套件沒有，真正的原始碼樹才有
+CVE_H = "CVE-2024-4001"
+
+
+def header_fix(repo, files=("drivers/foo/a.c", FOO_H)):
+    """backport 改了 CNA 列的 drivers/foo/a.c（Makefile 判沒編）和驅動自帶的標頭檔。"""
+    return commit(repo, list(files), "backport touching the mainline file and a driver-local header")
+
+
+def hdr_run(tmp_path, repo_path, records, recs, extra=(), src=None, tree=None, with_git=True):
+    """映像的 headers 是部分檔案（br_rootfs：有全部的 Makefile，沒有 drivers/foo/foo.h）。tree：--source-tree 的資料夾。"""
+    mirror = full_mirror(tmp_path / "gm", recs)
+    f = tmp_path / "findings.json"
+    f.write_text("[]")
+    args = ["--stable-git", str(repo_path)] if with_git else []
+    if tree is not None:
+        args += ["--source-tree", str(tree)]
+    return tkc.run(tmp_path, *args, "--findings", str(f), *extra, grype_doc=grype_with_urls(list(recs)),
+                   src=src or tkc.br_rootfs(tmp_path), mirror=mirror)
+
+
+def test_header_missing_from_partial_headers_tree_is_not_treated_as_absent(tmp_path, repo):
+    """缺陷重現：programFiles 只有沒編的 a.c，修補 commit 還改了 drivers/foo/foo.h（headers 套件沒有）。
+    以前 foo.h 被當成「這個核心沒有」丟掉 → not_affected；現在照樣併入，標頭檔不能宣告沒編 → unknown。"""
+    h = header_fix(repo)
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    (tmp_path / "n").mkdir()
+    p0, st0, base = hdr_run(tmp_path / "n", None, None, recs, with_git=False)
+    assert by_cve(base)[CVE_H]["decision"] == "not_affected" and "stable_git" not in base["kernel"]
+    p, st, out = hdr_run(tmp_path, repo, None, recs)
+    assert st[1] == "OK", p.stdout + p.stderr
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "unknown" and "justification" not in r
+    assert r["files_origin"] == "cna+commits" and r["stable_git_added_files"] == [FOO_H]
+    sg = out["kernel"]["stable_git"]
+    assert sg["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert sg["decision_changes"] == {"not_affected->unknown": 1} and sg["cves_with_added_files"] == 1
+    assert out["counts"] == {"not_affected": 0, "affected": 0, "unknown": 1}
+    # 輸出的 limitations 說明這條規則；摘要那一行也帶計數
+    lim = [l for l in out["limitations"] if "--stable-git" in l]
+    assert len(lim) == 1 and "complete kernel source tree" in lim[0] and "partial headers" in lim[0] and "kept_not_proven_absent" in lim[0]
+    assert "沒有證明不存在而照樣併入的檔案 1 個／CVE 1 個" in st[2]
+
+
+def test_header_present_in_headers_tree_is_counted_as_present_not_kept(tmp_path, repo):
+    """headers 套件裡有的 .h（include/linux/foo.h）：有證據是 present，不算「沒證明不存在而保留」。"""
+    h = commit(repo, ["drivers/foo/a.c", "include/linux/foo.h"], "backport touching a header the headers package has")
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    p, st, out = hdr_run(tmp_path, repo, None, recs)
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "unknown" and r["stable_git_added_files"] == ["include/linux/foo.h"]
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+
+
+def source_tree_with(tmp_path, extra_files=(), link=None):
+    tree = tvf.write_tree(tmp_path / "tree")
+    for f in extra_files:
+        (tree / f).parent.mkdir(parents=True, exist_ok=True)
+        (tree / f).write_text("x\n")
+    if link:
+        os.symlink("foo", tree / link)
+    return tree
+
+
+def test_header_missing_from_complete_source_tree_is_still_dropped(tmp_path, repo):
+    """有完整的原始碼樹（--source-tree），foo.h 真的不在樹裡：維持現狀，不併入（沒有這個檔案，不可能編進這個核心）。"""
+    h = header_fix(repo)
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    p, st, out = hdr_run(tmp_path, repo, None, recs, tree=source_tree_with(tmp_path), src=tvf.thin_rootfs(tmp_path))
+    assert st[1] == "OK", p.stdout + p.stderr
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "not_affected" and "stable_git_added_files" not in r and "files_origin" not in r
+    sg = out["kernel"]["stable_git"]
+    assert sg["kept_not_proven_absent"] == {"files": 0, "cves": 0} and sg["decision_changes"] == {} and sg["cves_with_added_files"] == 0
+    # 同一棵樹有 foo.h → 併入（證據是 present，不算保留）→ unknown
+    sub = tmp_path / "w"
+    sub.mkdir()
+    p, st, out = hdr_run(sub, repo, None, recs, tree=source_tree_with(sub, [FOO_H]), src=tvf.thin_rootfs(sub))
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "unknown" and r["stable_git_added_files"] == [FOO_H]
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+
+
+def test_header_under_a_symlink_in_the_complete_tree_is_kept(tmp_path, repo):
+    """完整的樹，但路徑在樹裡的資料夾連結底下（沒有跟隨）：名稱清單不能證明它不存在 → 保留。"""
+    h = commit(repo, ["drivers/foo/a.c", "drivers/linkdir/x.h"], "backport touching a header under a link")
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    p, st, out = hdr_run(tmp_path, repo, None, recs, tree=source_tree_with(tmp_path, link="drivers/linkdir"), src=tvf.thin_rootfs(tmp_path))
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "unknown" and r["stable_git_added_files"] == ["drivers/linkdir/x.h"]
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+
+
+def rec_dir(tmp_path, extra_deps):
+    objs = dict(tkc.REC_OBJS)
+    s, d = objs["drivers/foo/always.o"]
+    objs["drivers/foo/always.o"] = (s, list(d) + list(extra_deps))
+    return tkc.write_record_dir(tmp_path / "rec", tkc.record_members(objs=objs))
+
+
+def test_header_in_deps_of_a_built_object_is_affected(tmp_path, repo):
+    """有建置紀錄，partial headers 沒有 foo.h，但有編的 always.o 的 deps 列了它 → affected（以前被丟掉，變成 not_affected）。"""
+    h = header_fix(repo)
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    rec = rec_dir(tmp_path, [FOO_H])
+    (tmp_path / "n").mkdir()
+    p0, st0, base = hdr_run(tmp_path / "n", None, None, recs, extra=["--build-record", str(rec)], with_git=False)
+    assert by_cve(base)[CVE_H]["decision"] == "not_affected"
+    p, st, out = hdr_run(tmp_path, repo, None, recs, extra=["--build-record", str(rec)])
+    assert out["kernel"]["build_record"]["status"] == "OK", out["kernel"]["build_record"]
+    r = by_cve(out)[CVE_H]
+    assert r["decision"] == "affected" and r["stable_git_added_files"] == [FOO_H]
+    assert any(f["path"] == FOO_H and f["built"] is True and "deps of drivers/foo/always.o" in f["evidence"] for f in r["files"])
+    assert out["kernel"]["stable_git"]["decision_changes"] == {"not_affected->affected": 1}
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+
+
+def test_header_not_in_deps_and_not_shown_to_exist_is_unknown(tmp_path, repo):
+    """有建置紀錄，foo.h 不在任何物件的 deps、headers 樹也證明不了它存在 → unknown（不是沒編）。
+    對照：headers 套件裡有的標頭檔（include/linux/absent.h），不在 deps → 沒編（照舊）。"""
+    h = header_fix(repo)
+    h2 = commit(repo, ["drivers/foo/a.c", "include/linux/absent.h"], "backport touching a header the headers package has")
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h]), "CVE-2024-4002": cna("CVE-2024-4002", ["drivers/foo/a.c"], [h2])}
+    rec = rec_dir(tmp_path, [])
+    p, st, out = hdr_run(tmp_path, repo, None, recs, extra=["--build-record", str(rec)])
+    assert out["kernel"]["build_record"]["status"] == "OK", out["kernel"]["build_record"]
+    by = by_cve(out)
+    assert by[CVE_H]["decision"] == "unknown"
+    ev = [f["evidence"] for f in by[CVE_H]["files"] if f["path"] == FOO_H][0]
+    assert "do not show that drivers/foo/foo.h exists" in ev
+    assert by["CVE-2024-4002"]["decision"] == "not_affected"
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+
+
+def test_stable_git_with_nothing_to_add_keeps_the_results_of_no_stable_git(tmp_path, repo):
+    """改到的檔案都已經在 programFiles：--stable-git 有沒有給，判定逐項相同；沒給 --stable-git 時沒有 stable_git 欄位，limitations 不變。"""
+    h = commit(repo, ["drivers/foo/a.c"], "backport touching only the mainline file")
+    recs = {CVE_H: cna(CVE_H, ["drivers/foo/a.c"], [h])}
+    (tmp_path / "n").mkdir()
+    p0, st0, base = hdr_run(tmp_path / "n", None, None, recs, with_git=False)
+    p, st, out = hdr_run(tmp_path, repo, None, recs)
+    assert out["results"] == base["results"] and out["counts"] == base["counts"]
+    assert "stable_git" not in base["kernel"] and base["limitations"] == kc.LIMITATIONS
+    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
