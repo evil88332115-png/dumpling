@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 18:14 +0800（C2）
+最後更新：2026-11-15 18:15 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -185,7 +185,9 @@
 >       - 已回報 C0 和 C3。C3 的 dry_run（run 43702639211）跑完，韌體部分 C2 已核對：
 >         - 規則表 6 個 Issue：7014、7033、AMI 兩則、01315、01372。01372 是 C2 給的預期清單漏了，規則結果正確（NUC BOX 的 ME 18.1.18.2724 低於 18.1.21）。
 >         - Intel 微碼 6 個 Issue；changed 0；dt OK。
->         - 已提醒人審：01372 那一列是 Core Ultra Series 1、樣本是 Arrow Lake，和 0x8012 同一類，規則只比版本線。規則要不要加平台條件，列為之後的待辦，由 C0 決定。
+>         - 01372 那一列是 Core Ultra Series 1、樣本是 Arrow Lake，規則只比版本線。C0 決定：
+>           - 寫進規則表筆記 → **PR #147**（只改文件；worktree `$AGENT_TMP/dumpling-wt-c2-rnote`）。
+>           - **第二階段待辦**：CSME 的條件要能標示平台或世代，不符或無法判斷時加固定提示句，比照 DATACENTER_CAVEAT。
 >         - 要不要打開 WATCH_REAL_ISSUES 由 C0 決定。
 >       - 「DT 失敗時 check job 照跑」這次 DT 是成功的，所以還沒有在真的 Actions 上走過。
 >       - C0 的決定：
