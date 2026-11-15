@@ -494,7 +494,7 @@
    "file": "support-lifecycle.json",
    "sha256": "<SHA>",
    "max_age_days": 180,
-   "entries": 6,
+   "entries": 17,
    "stale": [],
    "future": []
   }

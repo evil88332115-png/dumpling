@@ -1,6 +1,6 @@
 """單顆核心、一個核心元件（Jetson 形狀）的輸出基準（M7d-1）：逐顆判定與核心列去重不可以改變這種輸入的輸出，逐位元組相同。
 
-data/kernel_single_baseline/ 的檔案是用 M7d-1 之前的程式（main 4f64db7）對同一份合成輸入產生的：vulnerability-rows.json、vex.cdx.json、
+data/kernel_single_baseline/ 的檔案是用 M7d-1 之前的程式（合併 main 之後的 origin/main，98ff619）對同一份合成輸入產生的：vulnerability-rows.json、vex.cdx.json、
 vex.openvex.json、kernel-vulnerabilities.md、summary.json（時間與暫存路徑換成固定的佔位字）。這個測試用目前的程式再產生一次、逐位元組比對。
 輸入：Jetson 型的核心 CVE（一個核心元件 linux-nvidia-tegra、一顆核心）、kernel-config.json（K1 排除與 affected）、kernel-module-map.json、
 kernel-versions.json（舊的 schema /2，讀取端要照舊讀）。
