@@ -579,6 +579,7 @@ class Labels:
 ACTION_OPS = ("open", "comment", "open_if_closed")      # plan 的 action 認得的 op；stateless plan 只能用 open
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
+                            "layer-firmware", "firmware-advisory",      # 韌體（FIRMWARE-WATCH.md）：KEV／廠商層級掛在韌體層，公告 Issue 用 firmware-advisory
                             "demo", "summary", "attention", "drill", "watch-health", "support-period"})
 ALLOWED_LABELS = ALLOWED_LABELS | {DEADMAN_LABEL}     # 另起一行：不動上面的 frozenset 字面值
 
@@ -670,6 +671,29 @@ def public_check(texts):
         raise Fail(f"公開檢查命中 {len(hits)} 筆，什麼都沒寫：" + "；".join(hits[:3]))
 
 
+_SUMMARY_VAL = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def state_summary(gen, nm, st=None):
+    """狀態 Issue 的第一行摘要。有韌體狀態時另列三張比對表的識別、status、stale（FIRMWARE-WATCH.md §5：表的狀態要看得到，不能只在 artifact 裡）。
+    值來自外來資料（公告重跑的結果）：只收 [A-Za-z0-9._-]{1,64}，其他寫 ?（摘要是 Markdown，不放任何可被解讀的字元）。"""
+    out = f"最後執行：{gen}；比對數：{nm}"
+    tables = ((st or {}).get("firmware") or {}).get("tables") if isinstance((st or {}).get("firmware"), dict) else None
+    if isinstance(tables, dict) and tables:
+        def v(x):
+            x = str(x).lower() if isinstance(x, bool) else x
+            return x if isinstance(x, str) and _SUMMARY_VAL.fullmatch(x) else "?"
+        parts = []
+        for n in ("fw_advisory_rules", "intel_microcode", "nvidia_vbios"):
+            t = tables.get(n)
+            if isinstance(t, dict):
+                ident = next((t[k] for k in ("sha256", "table_sha256", "source_commit", "mirror_commit") if k in t), None)
+                parts.append(f"{n} {v(ident)[:16]}（status {v(t.get('status'))}、stale {v(t.get('stale'))}）")
+        if parts:
+            out += "；韌體的比對表：" + "；".join(parts)
+    return out
+
+
 # ---------- 指令 ----------
 def cmd_read_state(api, repo, mode, out):
     problems = []
@@ -717,7 +741,7 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     st = plan["state"]
     no_state = st is None       # match.py 在「沒有基準」時只開提醒 Issue、不寫狀態（#32 驗證 F4）
     nm = len(st["matches"]) if not no_state and isinstance(st.get("matches"), (dict, list)) else 0
-    summary = f"最後執行：{gen}；比對數：{nm}"
+    summary = state_summary(gen, nm, st if not no_state else None)
     too_big, state_body = None, None
     try:
         if not no_state:
