@@ -116,6 +116,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   已有 Issue 的群組出現新元件（同一個 CVE 的新 purl：SBOM 重發、開發版元件版本變了、Grype DB 多比對到一個元件）或再出現 → `open_if_closed`
   （原 Issue 開著就留言，關閉了就開新的）；基準裡的比對消失後又出現、群組從來沒有 Issue → 不再算基準，開 Issue；
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
+  - **給 RD：新 Release 帶進來的既有 KEV 也會開 Issue**。基準只涵蓋「建立基準那一刻」已有的 Release；之後才加入的 Release（新 tag、第一次發布的開發版）裡已經有的 KEV 命中都算新的，就算同一個 CVE 在舊 Release 因為在基準裡而沒有 Issue。所以新版本一發布，可能一次開好幾個 Issue，而且舊版本沒有對應的 Issue——這是規則本來的設計（舊 Release 的既有命中不通知，新 Release 是新的出貨，要有人看過）。2026-11-15 第一次真實基準之後新增 `dev/orin-nano-demo`，dry_run 會開 16 個 dev 的 KEV Issue、正式版 0 個；使用者決定重建基準，把 dev 一起納入（見 §5）。
 - 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`，對所有專案生效）：BIOS／vBIOS 韌體的 **Intel、AMD、AMI、NVIDIA**（D-043 第 3 點）
   只要 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。比對 KEV 的 `vendorProject`，
   經 `exploited_vendor` 的正規化與別名（`American Megatrends`→ami、`Advanced Micro Devices`→amd、`NVIDIA Corporation`→nvidia）。
@@ -217,6 +218,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
 - 狀態 Issue（`watch-state`）不是通知：標題與內文格式不變，但公開 repo（`--demo`）建立時也加 `demo` 標籤（C0 決定，2026-11-14；第一次真實基準的 #99 是手動補的）。read-state 靠 `watch-state` 標籤與第一行標記找，多了標籤不影響。
+- **重建基準**（例如基準建立後才加入、還沒開 Issue 前就要納入的 Release）：只有在「找不到狀態 Issue、也還沒有任何監控 Issue」時才能重建（§3.2）。做法：在舊的狀態 Issue 留言寫明原因與決定者，移除 `watch-state` 標籤並關閉（**不刪除**，保留紀錄；read-state 只靠標籤找）；再手動 `mode=real`＋`baseline=true`，先 dry_run 看報告、同意後實跑；最後看一輪一般的 dry_run，確認 KEV Issue 是 0 個。已經有監控 Issue 時不能這樣做（會吞掉新的命中，FAIL）。2026-11-15：#99 依此關閉（原因：基準建立後新增 dev Release，使用者決定），改由新的狀態 Issue 接手。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 

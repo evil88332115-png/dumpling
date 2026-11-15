@@ -997,11 +997,12 @@ def test_bulletin_ids_must_be_numeric(bid):
     _bad(t, "not_applicable")
 
 
-def test_shipped_gpu_firmware_table_is_valid_with_mirror_and_unreviewed():
+def test_shipped_gpu_firmware_table_is_valid_with_mirror_and_confirmed():
     t = nb.validate_table(json.loads(GPU_TABLE.read_text(encoding="utf-8")))
     assert nb.mirror_info(t)["status"] == "OK"
-    assert t["reviewed_until"] is None and not t["rows"]
-    assert all(x.get("reviewed") is False for x in t["not_applicable"])    # 額外欄位（title、cves、reason、preliminary_*…）照收
+    assert t["reviewed_until"] == "2025-09-02" and not t["rows"]           # 5674 經使用者確認（2026-11-15，經 C0 轉達）
+    assert t["not_applicable"] and all(x.get("reviewed") is True and x.get("reviewed_by") and x.get("reviewed_at")
+                                       for x in t["not_applicable"])      # 額外欄位（title、cves、reason、preliminary_*…）照收
 
 
 def test_trailing_newline_is_rejected_everywhere():
