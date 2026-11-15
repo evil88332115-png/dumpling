@@ -1,0 +1,18 @@
+# 開案資訊（《開案-CRA資訊表》的機器可讀版）。欄位說明見 docs/PLATFORM-INTERFACE.md。
+# 值是 "TO BE COMPLETED" 的欄位還沒填；status 改成 shipped 之前都要填完。
+schema: 1
+product_name: "Raspberry Pi OS Lite 示範"
+brand: "dumpling 公開示範"                       # 品牌或客戶
+company_role: "manufacturer"         # manufacturer｜supplier｜both
+markets: ["EU-ALL"]                   # 銷售市場：會員國代碼（ISO 3166-1 alpha-2，希臘 GR）清單，或單獨一個 EU-ALL（全歐盟）、UNKNOWN（明確不知道）
+platform: "raspberrypi"
+platform_version: "Raspberry Pi OS Lite（arm64，Debian 系）" # 平台與版本
+bsp_os_source: "Raspberry Pi OS 官方映像（downloads.raspberrypi.com）與 Raspberry Pi apt 套件庫"       # BSP／OS 來源
+kernel_source: "Raspberry Pi 的 linux-image deb（原始碼：Raspberry Pi apt 的原始碼包與 raspberrypi/linux）"       # 核心來源
+bootloader: "boot 分割區的 VideoCore 開機韌體（閉源，raspi-firmware）；Pi 4／5 另有板子上的 EEPROM 開機程式（不在映像裡）"             # 開機程式
+own_software: []         # 自有軟體（沒有就留空清單 []）
+interfaces: ["Ethernet", "Wi-Fi", "Bluetooth", "USB", "SSH"]             # 對外介面
+support_until: "2031-12-31"       # 支援期限 YYYY-MM-DD
+status: "development"                     # development｜shipped
+# OS 層歸誰：ours（OS 也是我們的待辦）｜customer（照掃、分開列、KEV 時通知客戶）｜upstream-vendor（上游 OS 廠商負責，我們只通知客戶）
+os_responsibility: "customer"

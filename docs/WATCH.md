@@ -21,6 +21,7 @@
 | DT（OSV）那條路 | 有 | **NOT_RUN**（每份報告與每個 KEV Issue 都列在「每日沒有涵蓋」，不分層） | — |
 | NVIDIA 公告 | 有 | **NOT_RUN**（報告列出；廠商層級的 nvidia 仍有） | — |
 | 廠商層級（exploited_vendor） | — | 有 | — |
+| 韌體（C2 的 BIOS／vBIOS SBOM，`firmware.yml`） | 有（firmware.yml 自己的比對與 DT） | **只有廠商層級，沒有元件比對**：collect 只收 GitHub Release，韌體 SBOM 只在 firmware.yml 的 Actions artifact（`firmware-sbom`，會過期），不在任何 Release 裡，所以每日的 Grype／KEV／EUVD 元件比對不含韌體元件；只有 `vendor-watch.json` 的廠商層級提醒（Intel、AMD、AMI、NVIDIA 等新的 KEV 條目），而且掛在現有的板子 SBOM 上，不是掛在韌體上 | 韌體進監控的設計另做（C3＋C2，D-063） |
 
 ## 3. 程式與資料流
 
@@ -116,6 +117,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   已有 Issue 的群組出現新元件（同一個 CVE 的新 purl：SBOM 重發、開發版元件版本變了、Grype DB 多比對到一個元件）或再出現 → `open_if_closed`
   （原 Issue 開著就留言，關閉了就開新的）；基準裡的比對消失後又出現、群組從來沒有 Issue → 不再算基準，開 Issue；
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
+  - **給 RD：新 Release 帶進來的既有 KEV 也會開 Issue**。基準只涵蓋「建立基準那一刻」已有的 Release；之後才加入的 Release（新 tag、第一次發布的開發版）裡已經有的 KEV 命中都算新的，就算同一個 CVE 在舊 Release 因為在基準裡而沒有 Issue。所以新版本一發布，可能一次開好幾個 Issue，而且舊版本沒有對應的 Issue——這是規則本來的設計（舊 Release 的既有命中不通知，新 Release 是新的出貨，要有人看過）。2026-11-15 第一次真實基準之後新增 `dev/orin-nano-demo`，dry_run 會開 16 個 dev 的 KEV Issue、正式版 0 個；使用者決定重建基準，把 dev 一起納入（見 §5）。
 - 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`，對所有專案生效）：BIOS／vBIOS 韌體的 **Intel、AMD、AMI、NVIDIA**（D-043 第 3 點）
   只要 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。比對 KEV 的 `vendorProject`，
   經 `exploited_vendor` 的正規化與別名（`American Megatrends`→ami、`Advanced Micro Devices`→amd、`NVIDIA Corporation`→nvidia）。
@@ -124,6 +126,8 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   不在別名裡就補進 `vendor-watch.json` 的 `aliases`（在那之前，`AMD`／`Advanced Micro Devices`／`NVIDIA`／`NVIDIA Corporation` 已涵蓋）。
   C2 的韌體 SBOM 公告比對會用到這裡的廠商層級結果。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
+  **一個廠商 × CVE 只開一個 Issue**（D-064 B，C0 決定 2026-11-15）：群組鍵是 `issue_key(mode, "vendor", CVE, 廠商)`，不含專案 UUID；內文的表格列出這次命中的每份 SBOM（專案、版本、分層、狀態、Release、監看來源），標籤取各版本狀態與分層的聯集。之後新的版本也命中（KEV 加入不到 `BASELINE_DAYS`＝7 天的條目，新版本第一次監看時不算基準）→ 在原 Issue 留言、只列新的版本（`open_if_closed`：原 Issue 已關閉就開新的）。狀態格式不變：`vendor_matches` 的鍵仍是 `[專案 UUID, CVE, 廠商]`，每份 SBOM 一筆。
+  升級前如果已經有「每份 SBOM 一個」的廠商層級 Issue（舊的群組鍵含專案 UUID），升級後新的命中用新的鍵，會另開一個 Issue，不會對到舊的；舊鍵的群組紀錄在 PRUNE_DAYS 後修剪。合併這個改動時（2026-11-15）還沒有任何廠商層級 Issue，所以不會發生。
 - 降級（只在 real；核心 CNA 缺附件、schema 不符、upstream_version 為 null 也算）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
   、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release、
   **上一次排程 run 被取消／失敗／逾時或超過 36 小時沒有排程**（compute 用 `actions: read` 查 watch.yml 的排程 run；keepalive 也印出最近 3 次）
@@ -217,6 +221,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
 - 狀態 Issue（`watch-state`）不是通知：標題與內文格式不變，但公開 repo（`--demo`）建立時也加 `demo` 標籤（C0 決定，2026-11-14；第一次真實基準的 #99 是手動補的）。read-state 靠 `watch-state` 標籤與第一行標記找，多了標籤不影響。
+- **重建基準**（例如基準建立後才加入、還沒開 Issue 前就要納入的 Release）：只有在「找不到狀態 Issue、也還沒有任何監控 Issue」時才能重建（§3.2）。做法：在舊的狀態 Issue 留言寫明原因與決定者，移除 `watch-state` 標籤並關閉（**不刪除**，保留紀錄；read-state 只靠標籤找）；再手動 `mode=real`＋`baseline=true`，先 dry_run 看報告、同意後實跑；最後看一輪一般的 dry_run，確認 KEV Issue 是 0 個。已經有監控 Issue 時不能這樣做（會吞掉新的命中，FAIL）。2026-11-15：#99 依此關閉（原因：基準建立後新增 dev Release，使用者決定），改由新的狀態 Issue 接手。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 

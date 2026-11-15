@@ -496,7 +496,9 @@ def kev_group_key(mode, e):
 
 
 def vendor_group_key(mode, e):
-    return issue_key(mode, "vendor", e["project_uuid"], e["cve"], e["vendor"])
+    """廠商層級的群組：同一個廠商 × CVE 只開一個 Issue，內文列出受影響的版本（D-064 B，C0 決定 2026-11-15）。
+    不含專案 UUID：原本一份 SBOM 一個，Intel 新 KEV 會對每個版本的 bsp／os 各開一個。狀態（vendor_matches 的鍵）不變。"""
+    return issue_key(mode, "vendor", e["cve"], e["vendor"])
 
 
 def pinfo_of(projs, uuid):
@@ -533,6 +535,35 @@ def labels_for(p, kind):
     return ls
 
 
+def labels_for_many(ps, kind):
+    """多個版本合成一個 Issue：狀態與分層標籤取聯集（順序固定）。"""
+    ls = ["kev"] if kind == "kev" else ["vendor-level"]
+    for p in ps:
+        for x in labels_for(p, kind)[1:]:
+            if x not in ls:
+                ls.append(x)
+    return ls
+
+
+def vendor_rows(es, ps):
+    """廠商層級受影響的版本：表格（每份 SBOM 一列）＋每個版本的 Release 結論。"""
+    lines = ["| 專案 | 版本 | 分層 | 狀態 | Release | 監看來源 | 元件數 | 第一次偵測 |", "|---|---|---|---|---|---|---|---|"]
+    for e, p in zip(es, ps):
+        lines.append(f"| {md_cell(e.get('project'))} | {md_cell(e.get('version'))} | {md_cell(p['layer'] if p else '?')} | "
+                     f"{md_cell(p['status'] if p else '?')} | {md_code(p.get('tag')) if p else '?'} | "
+                     f"{md_cell(', '.join(str(x) for x in e.get('watch_via') or []))} | {md_cell(e.get('component_count'))} | "
+                     f"{md_cell(e.get('first_detected'))} |")
+    lines.append("")             # 表格與後面的清單之間空一行（不然清單會被當成表格的一部分）
+    seen = set()
+    for e, p in zip(es, ps):
+        if not p or (p.get("tag"), p["layer"]) in seen:
+            continue
+        seen.add((p.get("tag"), p["layer"]))
+        lines.append(f"- {md_text(e.get('project'))} {md_text(e.get('version'))}（{p['layer']} 層）：狀態 {p['status']}，"
+                     f"{HANDLING.get(p['status'], '')}分層：{layer_note(p)} Release 的結論：{release_results(p)}")
+    return lines
+
+
 def kev_body(mode, entries, p, coverage, run_url, now):
     e0 = entries[0]
     lines = []
@@ -557,19 +588,18 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     return "\n".join(lines)
 
 
-def vendor_body(mode, e, p, run_url, now):
+def vendor_body(mode, es, ps, run_url, now):
+    """es：同一個廠商 × CVE 的新命中（每份 SBOM 一筆）；ps：對應的 Release 資訊（可能是 None）。"""
+    e = es[0]
     lines = []
     if mode == "drill":
         lines += ["> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。", ""]
     lines += [f"廠商層級、**可能相關**：{md_text(e['cve'])}（KEV 廠商 {md_text(e.get('kev_vendor') or '?')}、產品 {md_text(e.get('kev_product') or '?')}）"
-              f"與 **{md_text(e.get('project'))} {md_text(e.get('version'))}** 監看的廠商 {md_code(e.get('vendor'))} 相同，但沒有元件比對。", "",
-              f"- 監看來源：{md_text(', '.join(str(x) for x in e.get('watch_via') or []))}；元件數 {md_text(e.get('component_count'))}",
+              f"與下面 {len(es)} 份 SBOM 監看的廠商 {md_code(e.get('vendor'))} 相同，但沒有元件比對。", "",
               f"- KEV 加入日期：{md_text(e.get('date_added') or '?')}；來源：{md_text(e.get('source') or '?')}",
-              f"- 第一次偵測：{md_text(e.get('first_detected'))}（這次執行 {utc(now)}）"]
-    if p:
-        lines += [f"- Release：{md_code(p.get('tag'))}；狀態：{p['status']}；{HANDLING.get(p['status'], '')}", f"- 分層：{layer_note(p)}",
-                  f"- Release 的結論：{release_results(p)}"]
-    lines += ["", "要人工確認：KEV 的受影響產品是不是在這個專案裡（廠商可能有很多產品）。", "", ART14_NOTE]
+              f"- 這次執行：{utc(now)}", "", "受影響的版本（之後有新的版本也監看這個廠商時，會在這個 Issue 留言）：", ""]
+    lines += vendor_rows(es, ps)
+    lines += ["", "要人工確認：KEV 的受影響產品是不是在這些專案裡（廠商可能有很多產品）。", "", ART14_NOTE]
     if run_url:
         lines += ["", f"執行紀錄：{run_url}"]
     return "\n".join(lines)
@@ -621,13 +651,21 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         p = pinfo_of(projs, es[0]["project_uuid"])
         title = f"[KEV] {md_title(es[0]['cve'])} 在 {md_title(es[0]['project'])} {md_title(es[0]['version'])}（{p['layer'] if p else '?'} 層）"
         pending.append((gk, "kev", title, kev_body(mode, es, p, coverage, run_url, now), labels_for(p, "kev"), es[0]))
+    vgroups = {}
     for e in (vrep or {}).get("new") or []:
-        gk = vendor_group_key(mode, e)
+        vgroups.setdefault(vendor_group_key(mode, e), []).append(e)
+    vendor_events = {}          # 已有 Issue 的廠商群組又多了新的版本 → 留言（下面處理）
+    for gk, es in sorted(vgroups.items(), key=lambda x: (x[1][0]["cve"], x[1][0]["vendor"])):
+        es = sorted(es, key=lambda e: (str(e.get("project")), str(e.get("version")), e["project_uuid"]))
         if gk in iss:
+            vendor_events[gk] = es
             continue
-        p = pinfo_of(projs, e["project_uuid"])
-        title = f"[廠商層級] {md_title(e['cve'])}（{md_title(e.get('vendor'))}）可能影響 {md_title(e.get('project'))} {md_title(e.get('version'))}"
-        pending.append((gk, "vendor", title, vendor_body(mode, e, p, run_url, now), labels_for(p, "vendor"), e))
+        ps = [pinfo_of(projs, e["project_uuid"]) for e in es]
+        vers = sorted({f"{e.get('project')} {e.get('version')}" for e in es})
+        who = md_title(vers[0]) + (f" 等 {len(vers)} 個版本" if len(vers) > 1 else "")
+        title = f"[廠商層級] {md_title(es[0]['cve'])}（{md_title(es[0].get('vendor'))}）可能影響 {who}"
+        pending.append((gk, "vendor", title, vendor_body(mode, es, ps, run_url, now), labels_for_many([p for p in ps if p], "vendor"),
+                        min(es, key=lambda e: str(e.get("first_detected")))))
     actions, opened = [], 0
     pruned_keys = dd.setdefault("pruned_keys", [])
     if len(pending) <= max_new:
@@ -670,6 +708,17 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         e = state["matches"][k]
         if not e.get("baseline"):
             events.setdefault(kev_group_key(mode, e), []).append(("再出現", e))
+    for gk, es in sorted(vendor_events.items()):
+        t = target(gk)
+        if not t or gk in just_opened:
+            continue
+        ps = [pinfo_of(projs, e["project_uuid"]) for e in es]
+        lines = [f"{md_text(es[0]['cve'])}（廠商 {md_code(es[0].get('vendor'))}）又出現在 {len(es)} 份新的 SBOM（{ts}）：", ""] + \
+            vendor_rows(es, ps) + ["", "原 Issue 已關閉時會開新的 Issue。" + (f"執行紀錄：{run_url}" if run_url else "")]
+        actions.append({"op": "open_if_closed", "key": t,
+                        "title": f"[廠商層級] {md_title(es[0]['cve'])}（{md_title(es[0].get('vendor'))}）：新的版本",
+                        "body": "\n".join(lines), "labels": labels_for_many([p for p in ps if p], "vendor")})
+        comments += 1
     for gk, evs in sorted(events.items()):
         t = target(gk)
         if not t or gk in just_opened:

@@ -103,8 +103,8 @@ B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、F-secret-scan）不�
 無法正規化的另加「另有 M 處已知違規無法正規化」。正規化只影響上傳的副本：元件數與 `expected.json` 不變（正規化不增減元件）。
 
 NVIDIA vBIOS 公告：report 的 vBIOS 樣本行與摘要寫「NVIDIA 公告對照：NOT_ASSESSED（…）」，文字用路徑載入 `tools/pilot/lib/nvidia_bulletins.py` 的 `VBIOS_NOT_ASSESSED`（不複製）；
-載入失敗寫 GAP 加原因。workflow 另有一步：對照表用 gpu-firmware 專用的空表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（C1 M2 提供，不借 Jetson 的表）。
-檔案存在 → 抓公告鏡像（`tools/mirror/nvidia-bulletins.sh`）→ `nvidia_bulletins.py candidates --group gpu-firmware`，把那一行印進摘要；表是空的，鏡像裡的 gpu-firmware 公告全部列為待審（ATTENTION 是誠實的結果）。
+載入失敗寫 GAP 加原因。workflow 另有一步：對照表用 gpu-firmware 專用的表 `tools/pilot/lib/nvidia-bulletins-gpu-firmware.json`（不借 Jetson 的表）。
+檔案存在 → 抓公告鏡像（`tools/mirror/nvidia-bulletins.sh`）→ `nvidia_bulletins.py candidates --group gpu-firmware`，把那一行印進摘要。表裡已確認的 5674 不再列；NVIDIA 新增或修訂的 gpu-firmware 公告會列為待審（ATTENTION），要人工更新表（`docs/notes/c2-firmware-advisory.md`）。
 檔案不存在（M2 合併前）→ 不跑 candidates，印 `C-nvidia-bulletins-db GAP 沒有 gpu-firmware 對照表…`。鏡像或工具失敗一樣只記 GAP，不讓 job 失敗。
 本機實測（這一步的 run 區塊原樣執行）：沒有表 → GAP 那一行；從 `origin/wp1/m2` 暫時取出表 → `ATTENTION　有 1 個 GPU 韌體（vBIOS）公告待人工審核（5674）…`（暫時檔已刪、沒有 commit）；鏡像抓不到 → GAP 那一行。
 
