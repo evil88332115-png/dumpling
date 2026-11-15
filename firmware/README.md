@@ -82,6 +82,21 @@ NVIDIA vBIOS 元件另有 `dumpling:advisory-match`（`affected`／`fixed`／`NO
 Intel ME 的 NVD CPE（`dumpling:cpe-*`）見 `docs/notes/c2-firmware-advisory.md`：只放前三段版本，NVD 對 CSME 的資料不完整，Grype 比不到不代表沒有漏洞（臨時 DT 關閉 NVD 資料源，只有 CPE 的元件在 DT 比不到）；family 讀不出來時由版本推定（major 11～30），比對結果待人審。
 規則、資料來源、重新產生資料表的步驟與限制都在那份 notes。
 
+## 每天重跑公告比對（`pipeline/firmware-rematch.sh`）
+
+`firmware.yml` 打 tag 建 Release 時，每個 BIOS 樣本的 `fw-inventory-<slug>.json`（解析結果，不含映像）會上傳。每天用 repo 當下的三張表（Intel 微碼、NVIDIA vBIOS、廠商公告規則）重跑公告比對，不用重新下載映像：
+
+```
+pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --now <UTC，例如 2026-11-21T02:00:00Z> --out <空目錄>
+```
+
+- 完全離線：只吃 inventory，不讀映像、不連網、不重新解析。`--now` 必填，只用在 NVIDIA 對照表的過期判斷（鏡像超過 90 天）。
+- 每個 BIOS 樣本輸出 `rematch-<slug>.json`（今天的每個元件結果與 `key`、和 Release 當時不同的 `changed`、三張表的識別與 `stale`）、重新產生的 `fw-<slug>.cdx.json`（`dumpling:advisory-*` 是今天的結果，`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`）與 `fw-inventory-<slug>.md`；另有 `rematch-summary.json`。stdout 每個樣本一行 `FIRMWARE-REMATCH<TAB>OK|ATTENTION|GAP<TAB><slug><TAB>說明`。
+- 輸入當不可信資料：meta 的 schema、大小、slug、附件名、sha256 都核對，不跟隨符號連結，不收 meta 沒列的檔案；`kind: sbom` 跳過。meta 壞掉整份 GAP；單一樣本的 inventory 有問題（缺檔、sha256 不符、不是 JSON、缺鍵、型別不對）只有那一份 GAP。數字、雜湊、版本等欄位另外檢查格式；每份 inventory 最多處理 300 秒、整次最多 900 秒，超過 GAP。meta 裡沒有有效 slug 的條目列在總表的 `rejected`。報告裡來自 inventory 的字串都經過 `md_esc`（`fw-inventory.md` 的每個欄位，包括一般的 `firmware-bios.sh` 報告）。
+- 狀態：任何一張表不能用就整份 GAP；NVIDIA 對照表過期，`fixed` 降成 `NOT_ASSESSED` 並 ATTENTION；規則表的 `affected` 建議 ATTENTION；**結果和 Release 當時不同，整份至少 ATTENTION**。
+- 限制：只反映表的更新，不重新解析映像（解析器的改進要重新打 Release）；舊版程式產生的 inventory 缺新的鍵是 GAP，不猜預設值。rematch 不輸出 NOT_RUN（沒跑、沒有輸出由呼叫端標）。
+- 輸出格式、key、輸入驗證與狀態規則見 `docs/notes/c2-firmware-rematch.md`；範例檔在 `pipeline/watch/tests/data/`。
+
 ## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
 
 樣本 `sbom/dasharo-novacustom-ns5x-tgl-v1.6.0`：3mdeb 的 Dasharo 每個版本旁都放 CycloneDX 1.4 SBOM
