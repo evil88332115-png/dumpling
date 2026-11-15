@@ -366,6 +366,8 @@
 
 以下也是 dumpling 自己寫的：`firmware/bios/novacustom-nuc-box-arl-v0.9.2/firmware.yml`（Dasharo 公開下載的 NovaCustom NUC BOX v0.9.2 完整 SPI 映像的登記；只有網址、sha256、大小、授權頁與預期值，映像本身不進 repo；用來核對 `intel_cse_layout.py` 的 layout 1.7 Size 0x60，出處見 `docs/notes/c2-csme-layout.md`）。
 
+以下是參考但沒有複製的來源（只寫自己的話，不抄原文、不搬程式碼）：`docs/notes/c2-code-integrity-survey.md`。參考了 jetm/shipcheck 的 code-integrity 檢查項目（Apache-2.0，授權檔在該 repo 根目錄 `LICENSE`，讀的 commit `4621b3ab49f673221bdeb944f022829ccd8587af`，只讀 README 與檢查項目的定義，不含程式邏輯）；ETSI EN 304 623（Boot Managers）公開草稿在 docbox 要登入才能下載，沒有取得、沒有讀到內文，標 GAP，見該筆記第 1.1 節。
+
 ## C3 GitLab 範本（WP5，M5）
 
 | 檔案 | 來源 | 來源 commit | 授權 | 說明 |
