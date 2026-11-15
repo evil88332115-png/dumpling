@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 17:24 +0800（C3）
+最後更新：2026-11-15 17:41 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -173,7 +173,7 @@
 >       - CI tests 43692644840、firmware 43692647140 都綠 → **PR #140 已開**。
 >       - #135 合併後併 main，得到 **6f5b065**。#135 是 squash 合併，所以有 5 個 add/add 衝突；處理方式是以 main 為底，再套用 #140 自己的差異。合併後的 diff 和 f5effd1..db1e7c1 逐行相同。
 >       - C0 同意後已推送 → C0 的獨立驗證（high）**通過，應修 0** → **#140 已合併（main d095805）**。
->     - (3) **`wp3/fw-release-followup`**：處理 #140 驗證的 7 項建議，要在第一個 tag 之前完成。worktree 是 `$AGENT_TMP/dumpling-wt-c2-relfu`，暫存 `$AGENT_TMP/dumpling-tmp-c2-relfu/`（驗證報告 `verify-140.md`）。寫程式代理（sonnet、high）**進行中**。
+>     - (3) **`wp3/fw-release-followup`**：處理 #140 驗證的 7 項建議，要在第一個 tag 之前完成。worktree 是 `$AGENT_TMP/dumpling-wt-c2-relfu`，暫存 `$AGENT_TMP/dumpling-tmp-c2-relfu/`（驗證報告 `verify-140.md`）。寫程式代理**完成 25f6239**（29 個變異，28 個被抓到，1 個等價；本機 495 OK；CI tests 43699443967、firmware 43699446037 都綠）→ **PR #146 已開**，已通知 C0。
 >       - 測試：plan 的 tag 必須整串相等；ancestor 檢查要在暫存 repo 實際執行；not_watched_why 的 ValueError 要轉成 MetaError。
 >       - clean_why 也要拒絕雙向控制字元；build() 要拒絕附件撞名。
 >       - 註解與文件照實寫；always() 改成 !cancelled()；download-artifact 的版本和其他 workflow 統一。
