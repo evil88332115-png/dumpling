@@ -403,7 +403,7 @@ class CiFile(unittest.TestCase):
         self.assertIn("--confidential", command_flags(c, "pipeline/watch/issues.py"))
         self.assertIn("[ -f deadman-out/plan.json ]", c)
 
-    def run_deadman(self, dm_rc=0, plan=True, apply_rc=0, token="t", result=None):
+    def run_deadman(self, dm_rc=0, plan=True, apply_rc=0, token="t", result=None, stale=False):
         """實際執行 watch:deadman 的主要一項（假的 python3：記錄呼叫；deadman.py 依參數寫 plan.json 並回傳結束碼）。"""
         import os
         import subprocess
@@ -419,6 +419,10 @@ class CiFile(unittest.TestCase):
                                                '[ -n "$MK_RESULT" ] && echo "{\\"status\\": \\"$MK_RESULT\\"}" > deadman-out/result.json; exit "$DM_RC" ;;\n'
                                                '*pipeline/watch/issues.py*) exit "$APPLY_RC" ;; esac\nexit 99\n')
             (d / "bin" / "python3").chmod(0o755)
+            if stale:          # 上一次執行留下的輸出（runner 重用工作目錄）
+                (d / "deadman-out").mkdir()
+                (d / "deadman-out" / "result.json").write_text('{"status": "ALERT"}')
+                (d / "deadman-out" / "plan.json").write_text("{}")
             env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), DM_RC=str(dm_rc), APPLY_RC=str(apply_rc),
                        MK_PLAN="1" if plan else "0", MK_RESULT=result or "", REAL_PY=sys.executable, DEADMAN_GITLAB_TOKEN=token, CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
             r = subprocess.run(["bash", "-c", item], cwd=d, env=env, capture_output=True, text=True)
@@ -437,6 +441,11 @@ class CiFile(unittest.TestCase):
         rc, log, out = self.run_deadman(2, plan=False, result="ALERT")      # 真的 ALERT（沒有 plan 也一樣是 2）
         self.assertEqual(rc, 2, out)
         self.assertNotIn("deadman: FAIL", out)
+        # 上一次留下的 result.json 是 ALERT、這次找不到 deadman.py（結束碼 2、沒寫新的 result.json）→ 1；舊的 plan.json 也不套用
+        rc, log, out = self.run_deadman(2, plan=False, result=None, stale=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadman: FAIL", out)
+        self.assertFalse(any("issues.py apply" in x for x in log), log)
         # 其他結束碼不受影響
         self.assertEqual(self.run_deadman(0, plan=False, result="ALERT")[0], 0)
         self.assertEqual(self.run_deadman(1, plan=False, result="ALERT")[0], 1)
