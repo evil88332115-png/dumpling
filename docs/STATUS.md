@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 17:20 +0800（C2）
+最後更新：2026-11-15 17:24 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -404,8 +404,8 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：WATCH_REAL_ISSUES off；11-15 排程（07:50Z，晚 6.5 小時，43691755523）dry_run：KEV 0、廠商層級 0、支援期限 4；C4 的三個平台發布 dev Release 後再跑 dry_run 給 C0
-- 開著的 PR：#120（D-064 A，等 C4 確認板子廠商）
-- 韌體進監控：#122、#123、#128、#132、#134、#143 已合併；待辦：vendor-watch 的 firmware-demo（等 #120）、meta 的 dt 欄位（C2 PR 2 範例更新後）、儀表板的韌體示範區（設計 §5）→ C2 #135＋PR 2 合併 → C2 打第一個 tag → dry_run 給 C0
+- 開著的 PR：#120（D-064 A，等 C4 確認板子廠商）、#144（dt 欄位，C0 已看過，等 CI 綠）、#145（儀表板韌體示範區，等 C0 獨立驗證）
+- 韌體進監控：#122、#123、#128、#132、#134、#143 已合併，C2 的 #140（firmware.yml 建 Release）已合併；#144 dt、#145 儀表板韌體區；待辦：vendor-watch 的 firmware-demo（等 #120）→ C2 打第一個 tag → dry_run 給 C0
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 <!-- END C3 -->
 
