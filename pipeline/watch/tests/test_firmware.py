@@ -610,7 +610,7 @@ class RuleIssues(FW):
         self.assertEqual(self.fw_opens(plan), [])                                                # 表過期：不開公告 Issue
         res_ = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
         self.assertTrue([x for x in res_["attention"] if "fw_advisory_rules" in x and "stale" in x])   # 需注意
-        self.assertTrue(res_["serious"])
+        self.assertTrue([x for x in res_["serious"] if "fw_advisory_rules" in x])                  # 表過期：降級（連續兩次開健康 Issue）
         self.assertIs(plan["state"]["firmware"]["tables"]["fw_advisory_rules"]["stale"], True)   # state 看得到
         report = open(os.path.join(self.w, "out-" + NOW2[:10], "report.md")).read()
         self.assertIn("fw_advisory_rules", report)
@@ -670,6 +670,54 @@ class RuleIssues(FW):
         issues.load_plan(path)                                                                    # layer-firmware、firmware-advisory 在白名單
         for lab in ("firmware-advisory", "layer-firmware"):
             self.assertIn(lab, issues.ALLOWED_LABELS)
+
+
+class TableGap(FW):
+    def test_table_status_gap_is_gap_and_degrades(self):
+        self.baseline()
+        self.tables["intel_microcode"]["status"] = "GAP"
+        self.set_results("bios-a", [ucode(result="NOT_ASSESSED")], "GAP", tables=copy.deepcopy(self.tables))
+        self.go(NOW2)
+        res_ = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        self.assertTrue([x for x in res_["gaps"] if "intel_microcode" in x])
+        self.assertTrue([x for x in res_["serious"] if "intel_microcode" in x])
+        self.assertTrue([x for x in res_["serious"] if "bios-a" in x and "GAP" in x])
+
+    def test_table_gap_blocks_baseline(self):
+        self.tables["nvidia_vbios"]["stale"] = True
+        for s in ("bios-a", "bios-b"):
+            self.set_results(s, [], "OK", tables=copy.deepcopy(self.tables))
+        with self.assertRaises(match.Fail) as cm:
+            self.go(NOW1)
+        self.assertIn("nvidia_vbios", str(cm.exception))
+
+
+class SamplesLeave(FW):
+    def test_sample_leaving_release_is_dropped_and_commented(self):
+        """新的韌體 Release 沒有這個監控鍵（例如 BIOS 改版）：狀態移除它，它的公告 Issue 留言「樣本不在這次的韌體 Release」。"""
+        self.baseline()
+        self.set_results("bios-a", [rule("rule:r1:bios:aa", ("AMI-SA-1",))])
+        self.go(NOW2)
+        old = self.uuid("bios-a")
+        self.fw["samples"] = [x for x in self.fw["samples"] if x["slug"] != "bios-a"]
+        _, _, plan = self.go(NOW3)
+        self.assertNotIn(old, plan["state"]["firmware"]["samples"])
+        cs = self.comments(plan, match.issue_key("real", "fwadv", "AMI-SA-1"))
+        self.assertEqual(len(cs), 1)
+        self.assertIn("不在這次監控的韌體 Release", cs[0]["body"])
+
+    def test_release_problem_carries_state_over(self):
+        """韌體 Release 這次收不到（meta 壞掉）：整份沿用，不當成樣本離開、不留言。"""
+        self.baseline()
+        self.set_results("bios-a", [rule("rule:r1:bios:aa", ("AMI-SA-1",))])
+        self.go(NOW2)
+        key = self.uuid("bios-a")
+        self.fw["problems"] = ["firmware-meta.json：schema 不對"]
+        self.fw["samples"] = []
+        self.write_inv()
+        _, _, plan = self.run_once(NOW3, fw_rematch=None)
+        self.assertIn(key, plan["state"]["firmware"]["samples"])
+        self.assertEqual(self.comments(plan), [])
 
 
 class UcodeAndVbios(FW):
