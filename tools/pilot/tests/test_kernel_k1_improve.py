@@ -558,6 +558,24 @@ def test_header_not_in_deps_and_not_shown_to_exist_is_unknown(tmp_path, repo):
     assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
 
 
+def test_unknown_file_names_are_never_proof_of_absence():
+    """C0（#136 驗證建議 1）：檔案名稱不知道（tree_names 是 None：名稱超過上限，或沒有讀到）→ unproven，照樣併入；
+    即使 tree_complete 被設成 True 也一樣（名稱不知道就不能證明沒有）。只有完整樹的名稱清單裡找不到才是 absent。"""
+    from types import SimpleNamespace as NS
+    model = NS(obj_refs=set())
+    for complete in (False, True):
+        info = NS(tree_names=None, tree_complete=complete, tree_links=frozenset())
+        for path in (FOO_H, "drivers/foo/renamed_away.c", "drivers/foo/x.S"):
+            assert kc.kernel_file_proof(model, info, path) == "unproven", (complete, path)
+            assert kc.kernel_has_file(model, info, path) is True
+    full = NS(tree_names={"drivers/foo/a.c"}, tree_complete=True, tree_links=frozenset())
+    assert kc.kernel_file_proof(model, full, FOO_H) == "absent" and kc.kernel_has_file(model, full, FOO_H) is False
+    assert kc.kernel_file_proof(model, full, "drivers/foo/a.c") == "present"
+    partial = NS(tree_names={"drivers/foo/a.c"}, tree_complete=False, tree_links=frozenset())
+    assert kc.kernel_file_proof(model, partial, FOO_H) == "unproven"
+    assert kc.kernel_file_proof(NS(obj_refs={"drivers/foo/b.o"}), full, "drivers/foo/b.c") == "present"
+
+
 def test_stable_git_with_nothing_to_add_keeps_the_results_of_no_stable_git(tmp_path, repo):
     """改到的檔案都已經在 programFiles：--stable-git 有沒有給，判定逐項相同；沒給 --stable-git 時沒有 stable_git 欄位，limitations 不變。"""
     h = commit(repo, ["drivers/foo/a.c"], "backport touching only the mainline file")
