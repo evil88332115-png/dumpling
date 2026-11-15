@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:28 +0800（C2）
+最後更新：2026-11-15 12:30 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -114,14 +114,12 @@
 > **目前（2026-11-15）**
 > - **#110 已合併（main 4f64db7）**；rules2 的 worktree 與本機分支已移除。#97 已合併（main fff33a5）；照 D-060，C0 接著合 #111，之後其他 PR 照常排隊。
 > - **5674 對照表 → PR #113**（分支 `wp3/nvidia-5674-review`，worktree `$AGENT_TMP/dumpling-wt-c2-nv5674`，head cfd4f7c，已併入 main fff33a5）：使用者 2026-11-15 同意初審意見（經 C0 轉達）。5674 改 reviewed=true，reviewed_by「使用者（經 C0 轉達）」，reviewed_until 2025-09-02；vBIOS 結果從 table-not-reviewed 變成 no-row（仍是 NOT_ASSESSED）。6 個 C2 測試與 1 個 C1 測試（`test_shipped_gpu_firmware_table_is_valid_with_mirror_and_confirmed`）改成確認後的預期，已請 C0 轉告 C1。本機 c2-x86 1248 passed、pilot 1160 passed，public-check 與 provenance-check OK；PR 的 CI 已自動觸發，**結果待看**。已通知 C0，C0 派獨立驗證。確認過的表會吃時鐘：鏡像 fetched_utc 2026-11-13 過 90 天（2027-02-11）後報「對照表過期」，要重跑更新表的步驟。
-> - **M7f (c) 程式碼完整性／驗證開機的調查**：分支 `wp3/code-integrity-survey` f305cd0（worktree `$AGENT_TMP/dumpling-wt-c2-cisurvey`，暫存 `$AGENT_TMP/dumpling-tmp-c2-cisurvey/`）。調查代理（sonnet、high）**完成**，C2 看過，**已送 C0 審**，還沒開 PR；照 D-060，排在 M7d／M7e 之後合併。重點：
->   - ETSI EN 304-623 是 GAP：docbox 回 403 或導向登入，所以沒有條款對照。怎麼取得要使用者決定。
->   - shipcheck 讀 commit 4621b3a，只借概念。
->   - 共 23 項：可以 5、部分 13、不行 5。只報結構證據，生效與否一律 NOT_ASSESSED。
->   - 建議 PR-2～PR-8；PR-9（Jetson）由 C1 決定。
->   - 待決定：ETSI 草稿怎麼取得；「生效與否 NOT_ASSESSED」要不要讓報告變 ATTENTION；測試金鑰表收哪些公開來源。
+> - **M7f (c) 程式碼完整性／驗證開機**（C0 已審調查筆記並做了三個決定）：
+>   - **決定**：(1) ETSI 草稿可以改用 ETSI 自己不需要登入的公開位置（etsi.org/deliver、labs.etsi.org），仍然不登入、不繞過；草稿不進 repo，條文只摘要；都拿不到就維持 GAP，問使用者要不要手動下載後放在本機提供。(2)「生效與否」一律 NOT_ASSESSED，但不讓報告因此變 ATTENTION；摘要欄顯示計數，報告不出現「驗證開機已啟用」這類結論。(3) 測試金鑰表只收公開、有出處的憑證主體與指紋，不存金鑰本身，也不收外洩或非公開的資料；每筆記出處網址、讀取日期和授權。
+>   - **調查筆記**：分支 `wp3/code-integrity-survey`（f305cd0；worktree `$AGENT_TMP/dumpling-wt-c2-cisurvey`）。文件代理（sonnet、high，要解析下載的草稿）**進行中**：改用 ETSI 的公開位置重試，拿到就補條款對照；把三個決定寫進筆記；第 7 節標出各項在哪個 PR 核對。完成後開 PR 排隊，C0 直接審。
+>   - **實作一次一個 PR，先做 PR-2（Intel FIT，CI-01／CI-07 的 Intel 部分）**：分支 `wp3/fw-integrity-fit`（從 main fff33a5 開；worktree `$AGENT_TMP/dumpling-wt-c2-fit`，暫存 `$AGENT_TMP/dumpling-tmp-c2-fit/`）。寫程式代理（sonnet、high）**進行中**。做法：`fit_table()` 記錄全部 FIT 項目，microcode 的輸出不變；產生 `integrity` 資料與 `dumpling:integrity-*` property；not-found 只在解析完整時成立，其他一律 GAP；生效與否固定 NOT_ASSESSED；`status_of` 不改。報告接線留給 PR-8。expected 加 `integrity`，值用獨立腳本核對；第 7 節第 2 項（KM／BPM 字串、FIT type 編號的依據）在這個 PR 核對，核對不了就照實標成還沒核對。PR-2 不等 M7d，驗證後照完成的順序合併。
 > - D-046 的實作等 C1 的發現介面。
-> - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，由使用者決定。
+> - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，C0 會轉問使用者；在那之前，C2 的測試都用 3.12 venv 跑同一份清單（C0 同意，記在這裡）。
 > - 代理：沒有在跑的。
 
 > **2026-11-14 下午的排序（#110 已合併，第 1 項完成）**：AMI 這條線告一段落（#106、#108 已合併，main 242c5d2）。C0 同意的接下來排序：
