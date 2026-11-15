@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 17:55 +0800（C3）
+最後更新：2026-11-15 18:08 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -177,8 +177,13 @@
 >       - 測試：plan 的 tag 必須整串相等；ancestor 檢查要在暫存 repo 實際執行；not_watched_why 的 ValueError 要轉成 MetaError。
 >       - clean_why 也要拒絕雙向控制字元；build() 要拒絕附件撞名。
 >       - 註解與文件照實寫；always() 改成 !cancelled()；download-artifact 的版本和其他 workflow 統一。
->     - **打第一個 tag 時要注意**：「DT 失敗時 check job 照跑」還沒在真的 Actions 上看過；如果 DT 剛好失敗，要逐步看 log。
->     - **第一個 firmware-demo tag 由 C2 打**。#120 還卡在 C4，C0 在處理。時機：#120 與 (3) 都合併、C3 的 dry_run would_open 給 C0 看過並同意之後。tag ruleset 由 C0 轉問使用者；dt 接到每日監控由 C3 做。
+>     - **#146 已合併**（#145、#120 也已合併，main 60b07ed）。
+>     - **第一個韌體 Release 已發布**：tag `firmware-demo/2026.11.15` 指向 60b07ed，打 tag 前用 rev-parse 確認過就是 origin/main 的 HEAD。
+>       - run 43701569920：fetch、dt、check、release 四個 job 都是 success。
+>       - Release 網址 https://github.com/evil88332115-png/dumpling/releases/tag/firmware-demo/2026.11.15 。是正式版，不是 latest。附件 14 個，sha256 都和 meta 相符，C2 在本機另外跑 collect-check 也是 OK。
+>       - meta：7 個樣本（6 個 bios 都是 ATTENTION、expect OK；1 個 sbom），not_watched 2 個，dt OK，6 個 bios 樣本的 rematch changed 都是 0。
+>       - 已回報 C0 和 C3。**接下來由 C3 跑 dry_run**（WATCH_REAL_ISSUES 是 off），把 would_open 交給 C0 看；韌體這幾項由 C2 核對是否和預期一致。
+>       - 「DT 失敗時 check job 照跑」這次 DT 是成功的，所以還沒有在真的 Actions 上走過。
 >       - C0 的決定：
 >         - (a) Release 不等 firmware-dt，但 DT 的結果要記進 meta：`dt: {status: OK|GAP, result: OK|FAIL|NOT_RUN, reason}`。result 不是 OK 時 status 是 GAP，原因寫「DT 上傳沒有完成，Release 內容不受影響」。已預告 C3，等預驗結果出來後一起修。
 >         - (b) tag ruleset 由 C0 轉問使用者，不擋 PR。
