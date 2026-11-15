@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:59 +0800（C2）
+最後更新：2026-11-15 13:01 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -132,7 +132,8 @@
 >     - NOT_RUN 由 watch-round 標，不由 rematch 產生。
 >     - 也給了 firmware-meta.json 與 rematch.json（`dumpling-firmware-rematch/1`）的欄位。
 >     - C3 改完就開 PR 交 C0。
->   - **C2 接下來的兩個 PR（等 C0 審過設計稿）**：(1) rematch 入口加 schema 與範例檔；(2) firmware.yml 的 `firmware-demo/*` tag 觸發、上傳 Release、產生 firmware-meta.json。
+>   - **設計 #122（C3 的 PR）C0 已回覆**：監控鍵＝樣本身分＋韌體版本，不含 Release 日期；規則表的 affected 一律寫「建議受影響（初步規則，待人審）」；**第一個 `firmware-demo` tag 由 C2 打**，時機是設計和實作的 PR 都合併、C3 的 dry_run would_open 給 C0 看過、C0 同意之後。
+>   - **C2 的兩個 PR**：(1) `wp3/fw-rematch`：rematch 入口加 schema 與範例檔；範例檔放 `pipeline/watch/tests/data/firmware-{meta,rematch}.example.json`，只有 C2 改。(2) firmware.yml 建 Release、firmware-ci.sh 產生 firmware-meta.json。檔案分工與順序已傳給 C3，**等 C3 確認後開工**，不和 C3 同時改同一個檔案。
 >   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
 > - **T-04**（韌體上傳 DT 的 GitLab 版）排在 C4 的 T-14 之後。
 > - **#113 已合併（main 96ec1bc）**，驗證通過，應修 0。兩項建議 → **PR #119**（分支 `wp3/nvidia-5674-followup`，worktree `$AGENT_TMP/dumpling-wt-c2-nvfu`，head 599d760）：
