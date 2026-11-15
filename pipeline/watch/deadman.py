@@ -33,11 +33,11 @@ Issue 與恢復：
     被不可信作者的 Issue 佔用的 key 一律跳過，所以有人偽造同 key 的 Issue（或預先佔住下一個 key）也吞不掉真正的警告，偽造的 Issue 也不會收到恢復留言。
   - 恢復：狀態或排程恢復時，在「那一次停擺的 Issue」留言「已恢復，時間 …」，不自動關閉（由人關）。每個 key 只看可信 Issue 裡編號最大的那一個；
     Issue 內文第二行的範圍標記（<!-- dumpling-deadman-scope … -->）說明它屬於哪個檢查；該範圍這輪有檢查、而且沒有任何警告 → 恢復。
-    只對開著的 Issue 留言（issues.py apply 對已關閉的跳過、不重開）。同一次停擺只留一則：留言的第一行是機器標記
+    已關閉的可信 Issue 也會收到恢復留言，但不會被重開（plan 的 comment 帶 issue 編號，issues.py apply 只對 deadman 且有 issue 編號的 comment 允許已關閉的 Issue、不改狀態）：
+    恢復留言是「這一次停擺已經結束」的持久標記，人先關掉也一樣要留，否則之後同一種問題再發生會被當成同一次停擺而靜默。同一次停擺只留一則：留言的第一行是機器標記
     <!-- dumpling-deadman-recovered key=<64 hex> -->，下一輪看到可信作者寫的這則就跳過。
     標記放在留言（不用標籤）的理由：標籤 Reporter／Planner 就能改，留言有作者可以核對。可信的定義（Judge，沿用 art14.Trust）：GitLab 要是專案成員、等級 >= Developer（30），
     或是 token 自己的使用者（GET /user）；GitHub 要是 OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]；system 留言不算。Issue 的作者與留言的作者都照這個規則。
-    殘留限制：人在恢復「之前」就把 Issue 關掉、之後同一種問題又發生（而且 base 不含時間）時，因為沒有恢復留言，會被當成同一次停擺而不開新的（由人決定的那一邊）。
   - 外來字串（排程 description、owner username、ref、cron…）寫進 Issue 前一律用 match.md_text 淨化（標題用 match.md_title）。理由：md_text ＝ firmware_mdsafe.md_safe
     （跳脫 Markdown、@ 提及、自動連結、HTML 實體）再加上 Issue 參照（#123、GH-123）斷開，後者在 Issue 內文才需要，所以選 match.md_text 而不是裸的 md_safe。
     淨化結果是單行，所以不會產生以 / 開頭的行（GitLab quick action）；issues.py apply 另有 quick action 與公開檢查。公開檢查命中外來字串時（例如描述裡有信箱），
@@ -363,15 +363,13 @@ def assign_keys(api, target, mode, alerts, idx, judge):
 
 
 def find_recoveries(api, target, idx, judge, alerts, evaluated, recover_desc):
-    """每個 key 只看可信 Issue 裡編號最大的那一個：它開著、範圍這輪有檢查而且沒有警告、還沒有可信的「已恢復」留言 → [(key, issue 編號, 說明)]（每個 key 最多一筆）。"""
+    """每個 key 只看可信 Issue 裡編號最大的那一個（開著或已關閉都算）：範圍這輪有檢查而且沒有警告、還沒有可信的「已恢復」留言 → [(key, issue 編號, 說明)]（每個 key 最多一筆）。"""
     cur_scopes = {a["scope"] for a in alerts}
     out = []
     for key in sorted(idx, key=lambda k: idx[k]["trusted"][-1]["number"] if idx[k]["trusted"] else 0):
         if not idx[key]["trusted"]:
             continue
-        i = idx[key]["trusted"][-1]
-        if i.get("state") != "open":
-            continue
+        i = idx[key]["trusted"][-1]          # 已關閉的也算：恢復留言是「這一次停擺已經結束」的持久標記（下次再發生 n+1），人先關掉也要留
         lines = (i.get("body") or "").splitlines()
         sm = SCOPE_RE.fullmatch(lines[1]) if len(lines) > 1 else None
         if not sm:

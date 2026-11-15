@@ -728,15 +728,20 @@ class TestDedupAndRecovery(Base):
         keys = {re.match(r"<!-- dumpling-deadman key=([0-9a-f]{64})", i["description"]).group(1) for i in self.gl.deadman_issues().values()}
         self.assertEqual(len(keys), 2)
 
-    def test_closed_issue_gets_no_comment(self):
+    def test_closed_issue_gets_recovery_comment_once_without_reopening(self):
         self.stall(ago(40))
         (n, i), = self.gl.deadman_issues().items()
-        i["state"] = "closed"
+        i["state"] = "closed"                           # 人在恢復之前就關了
         self.recover_state()
         rc, out = self.dm()
         self.assertEqual(rc, 0, out)
+        self.assertEqual([(a["op"], a.get("issue")) for a in self.plan()["actions"]], [("comment", n)])
+        self.apply()
+        self.assertEqual(len(self.gl.notes[n]), 1)
+        self.assertEqual(i["state"], "closed")          # 沒有重開
+        self.assertEqual(self.dm()[0], 0)               # 冪等
         self.assertFalse(self.has_plan())
-        self.assertNotIn(n, self.gl.notes)
+        self.assertEqual(len(self.gl.notes[n]), 1)
 
     def test_closed_stall_issue_not_reopened_when_same_stall_continues(self):
         last = ago(40)
@@ -963,6 +968,55 @@ class TestIncidentCount(Base):
         break_it()
         self.go()
         self.assertEqual(self.plan()["actions"][0]["key"], self.k(base, 3))
+
+    def cycle_closed_before_recovery(self, break_it, fix_it, base):
+        """人在恢復之前就把 Issue 關了：恢復時已關閉的 Issue 也收到恢復留言（不重開），下次再發生開 n=2。"""
+        self.cur = NOW
+        self.tick(0)
+        self.gl.add_schedule(3)
+        self.tick(0)
+        break_it()
+        self.go()
+        self.apply()
+        first = min(self.real())
+        self.gl.issues[first]["state"] = "closed"
+        for _ in range(2):                               # 問題還在：不留言、不重開、不開新的
+            self.assertEqual(self.go()[0], 2)
+            self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("open", self.k(base, 1))])
+            self.apply()
+            self.assertEqual((len(self.real()), self.gl.issues[first]["state"], first in self.gl.notes), (1, "closed", False))
+        fix_it()
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([(a["op"], a["key"], a["issue"]) for a in self.plan()["actions"]], [("comment", self.k(base, 1), first)])
+        self.apply()
+        self.assertEqual((len(self.gl.notes[first]), self.gl.issues[first]["state"]), (1, "closed"))
+        self.assertEqual(self.go()[0], 0)                # 冪等：不再留言
+        self.assertFalse(self.has_plan())
+        self.assertEqual(len(self.gl.notes[first]), 1)
+        break_it()
+        rc, out = self.go()
+        self.assertEqual(rc, 2, out)
+        self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("open", self.k(base, 2))])
+        self.apply()
+        self.assertEqual(len(self.real()), 2)
+        self.assertEqual(self.gl.issues[first]["state"], "closed")
+
+    def test_schedule_inactive_closed_before_recovery_then_second_incident(self):
+        self.cycle_closed_before_recovery(lambda: self.gl.schedules[3]["row"].update(active=False),
+                                          lambda: self.gl.schedules[3]["row"].update(active=True), "schedule:3:inactive")
+
+    def test_state_missing_closed_before_recovery_then_second_incident(self):
+        def break_it():
+            self.gl.issues = {k: v for k, v in self.gl.issues.items() if "watch-state" not in v["labels"]}
+        self.cycle_closed_before_recovery(break_it, lambda: self.tick(self.cur_days()), "state:missing")
+
+    def test_forged_closed_issue_gets_no_comment(self):
+        self.set_state(ago(1))
+        f = self.forge("state:missing", 1, state="closed", scope="state")
+        self.assertEqual(self.dm()[0], 0)
+        self.assertFalse(self.has_plan())
+        self.assertNotIn(f, self.gl.notes)
 
     def test_schedule_inactive_second_incident_opens_new_issue(self):
         self.cycle(lambda: self.gl.schedules[3]["row"].update(active=False), lambda: self.gl.schedules[3]["row"].update(active=True),

@@ -801,13 +801,14 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                     created.add(key)
                     r.update(result="would_open" if dry else "opened", issue=num)
             elif stateless:
-                # deadman 的恢復通知：只對「開著的」deadman Issue 留言；已關閉或找不到就跳過（不重開、不算 problem）
+                # deadman 的恢復通知：只對 deadman Issue 留言，從不重開；找不到就跳過（不算 problem）
                 idx = watch_index(api, repo, problems, base_label, mark_re)
                 cands = [e for e in idx.get(key, []) if e["mode"] == mode]
                 if a.get("issue") is not None:      # plan 指定了 Issue（同 key 有多個時，不能讓偽造的那個收到留言）
                     cands = [e for e in cands if e["number"] == a["issue"]]
                 ent = pick(cands)
-                if not ent or ent["state"] != "open":
+                # 指定了 Issue 編號（deadman.py 一律指定）：已關閉的也留言、不改狀態（恢復留言是「這一次停擺結束了」的持久標記）；沒指定：只對開著的
+                if not ent or (ent["state"] != "open" and a.get("issue") is None):
                     r.update(result="skipped", reason="Issue 已關閉或不存在，不留言")
                     continue
                 if not dry:

@@ -522,9 +522,12 @@ class TestDeadmanPlan(Base):
             self.assertEqual(rc, 0, out)
             self.assertEqual(list(self.gl.notes), [want])
         self.gl.notes.clear()
-        rc, out = self.apply(self.dplan([dict(self.cact(), issue=c)], name="tc.json"), "--mode", "real")      # 指定的已關閉：跳過，不改送別的
+        rc, out = self.apply(self.dplan([dict(self.cact(), issue=c)], name="tc.json"), "--mode", "real")      # 指定的已關閉：照樣留言（持久標記），但不重開
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.gl.notes, {})
+        self.assertEqual(list(self.gl.notes), [c])
+        self.assertEqual(self.gl.issues[c]["state"], "closed")
+        self.assertNotIn("state_event", json.dumps(self.gl.writes))
+        self.gl.notes.clear()
         rc, out = self.apply(self.dplan([dict(self.cact(), issue=999)], name="t9.json"), "--mode", "real")    # 指定的不存在：跳過
         self.assertEqual((rc, self.gl.notes), (0, {}))
         # 沒指定：行為照舊（開著的優先、編號最大）

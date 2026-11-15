@@ -197,7 +197,7 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
   只有假 API 測試、未對真實 GitLab 驗證；清單見 GITLAB-PORT T-05。內文或留言有以 `/` 開頭的行（GitLab quick action 可能被執行）→ 不送、FAIL。
 - Token：`GH_TOKEN`／`GITHUB_TOKEN`，只放 HTTP 標頭；不跟隨轉址到別的主機；只連 `api.github.com`（`GITHUB_API_URL` 可改，給 GHES／測試用）。
 - 監控 Issue 的內文第一行是標記：`<!-- dumpling-watch key=<64 hex> mode=<real|drill> -->`。
-- stateless plan（不寫狀態、不做樂觀鎖）有兩種 `stateless_kind`：`support`（預設；支援期限，標記 `dumpling-support`、標籤 `support-period`，只能 `open`）與 `deadman`（死人開關，標記 `dumpling-deadman`、標籤 `watch-deadman`；除了 `open` 還可以對開著的 deadman Issue `comment`，不重開）。兩種都不算進 `read-state` 的 `watch_keys`。
+- stateless plan（不寫狀態、不做樂觀鎖）有兩種 `stateless_kind`：`support`（預設；支援期限，標記 `dumpling-support`、標籤 `support-period`，只能 `open`）與 `deadman`（死人開關，標記 `dumpling-deadman`、標籤 `watch-deadman`；除了 `open` 還可以對 deadman Issue `comment`，不重開）。兩種都不算進 `read-state` 的 `watch_keys`。
   去重：列出標籤 `dumpling-watch` 的所有 Issue（open＋closed，分頁），本地解析標記；**不用 search API**（索引有延遲）。
 - 狀態 Issue：標籤 `watch-state`（drill 是 `watch-state-drill`），內文第一行 `<!-- dumpling-watch-state mode=<mode> schema=1 -->`，
   接著一個程式碼區塊：狀態 JSON 經 gzip＋base64。超過 60000 字元 → FAIL（不截斷）。同時有兩個狀態 Issue → FAIL。
