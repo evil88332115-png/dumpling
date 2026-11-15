@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 15:20 +0800（C1）
+最後更新：2026-11-15 15:22 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -153,11 +153,12 @@
 >         - key 穩定；changed 正確；6 份真樣本逐位元組相同；status_parts 和 main 比 1809 例，結果相同。
 >         - 103 個變異裡，26 個真的存活。
 >       - → 寫程式代理修正 **4ec170b**：兩項應修都修好；md 全面改用 md_esc／md_hex，並修好 firmware-bios 既有的 50 條注入路徑；rematch 加 FIELD_RULES；建議 1～7 都處理了；總表加 `rejected[]`，已通知 C3，C3 在 #134 接上。CI tests 43686528606 的 log 有 `1395 passed`、shellcheck OK，C2 自己確認過。→ 併 main 得到 **f5effd1** → **PR #135 已開**。C0 的驗證排在 M7d-5、#133 之後；**驗證期間 wp3/fw-rematch 不推 commit**。
->     - (2) **`wp3/fw-release`**（worktree `$AGENT_TMP/dumpling-wt-c2-fwrel`，從 wp3/fw-rematch f5effd1 往上疊；暫存 `$AGENT_TMP/dumpling-tmp-c2-fwrel/`）：寫程式代理（sonnet、high）**進行中**。
->       - firmware.yml 加 `firmware-demo/*` tag 觸發；只有建 Release 的 job 有 contents: write。
->       - 附件上傳前跑 public-check。
->       - meta 產生器：not_watched 由 firmware.yml 的 `watch:` 明確宣告，why 必須非空；三張表的識別要一致。
->       - workflow 裡的自我檢查：產生 meta 後跑 rematch，確認 changed 是空的；用 C3 的 `collect.check_fw_meta`／`_fw_sample_fields` 驗 meta，並核對附件的檔名與 sha256。
+>     - (2) **`wp3/fw-release`**（worktree `$AGENT_TMP/dumpling-wt-c2-fwrel`，從 wp3/fw-rematch f5effd1 往上疊）：寫程式代理**完成 b38bff5**。
+>       - 檔案：firmware.yml 加 `firmware-demo/*` tag 觸發；新增 `firmware-release-check` job（contents: read，三種觸發都跑）與 `firmware-release` job（只有它有 contents: write，只在 tag push 時跑；流程是建草稿 → 核對附件 → 發布，`--latest=false` → 下載後再核對）；新增 `pipeline/lib/firmware_meta.py`、`firmware_watch.py`；firmware.yml 新增 `watch: {monitored: false, why}` 欄位，兩份 vbios 宣告不監控；PR 與 dispatch 用假 tag `firmware-demo/0000.00.00`，要加 `--allow-test-tag` 才接受。
+>       - 自我檢查在 CI 的 log 上：collect 的檢查 OK；6 個 bios 樣本的 changed 都是 0；public-check OK。
+>       - 10 個變異都被抓到。CI tests 43688765661、firmware 43688768372 都是綠的。
+>       - → **預驗**（獨立驗證代理，high）**進行中**。
+>       - 已請 C0 決定：(a) Release 要不要等 firmware-dt，C2 建議拿掉；(b) repo 的 tag ruleset 限制 `firmware-demo/*`，要使用者在設定裡做。
 >       - 不打 tag、不建 Release。
 >     - 用語：preliminary 寫「建議受影響（初步規則，待人審）」，confirmed 寫「建議受影響（規則已確認，待負責單位確認）」。
 >   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
