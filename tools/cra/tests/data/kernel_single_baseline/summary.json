@@ -1,0 +1,1127 @@
+{
+ "tool": "cra_report",
+ "generated": "<TIME>",
+ "status": "ATTENTION",
+ "scan_dir": "<TMP>/s",
+ "documents": {
+  "risk-assessment": {
+   "file": "risk-assessment.md",
+   "status": "ATTENTION",
+   "detail": [
+    "2 open findings in tier P1 (Immediate); 2 of them for the operating system kernel (section 8.7)",
+    "security testing: security testing NOT RUN: no image static check, on-device check or network scan results were found (this does not mean the product is secure)",
+    "1 exclusions (resolved or not_affected) without an evidence type (D-035): they count as not assessed in the release gate; see the VEX section and vex.evidence in summary.json"
+   ],
+   "template": "builtin",
+   "missing_fields": []
+  },
+  "sbom": {
+   "file": "sbom.md",
+   "status": "OK",
+   "detail": [],
+   "template": "builtin",
+   "missing_fields": []
+  },
+  "user-information": {
+   "file": "user-information.md",
+   "status": "OK",
+   "detail": [],
+   "template": "builtin",
+   "missing_fields": []
+  },
+  "technical-documentation": {
+   "file": "technical-documentation.md",
+   "status": "ATTENTION",
+   "detail": [
+    "security-findings is ATTENTION",
+    "risk-assessment is ATTENTION"
+   ],
+   "template": "builtin",
+   "missing_fields": []
+  },
+  "kernel-vulnerabilities": {
+   "file": "kernel-vulnerabilities.md",
+   "status": "ATTENTION",
+   "detail": [
+    "2 open findings in tier P1 (Immediate); 2 of them for the operating system kernel (section 8.7)"
+   ],
+   "template": "none (generated)",
+   "missing_fields": [],
+   "counts": {
+    "rows": 8,
+    "findings_raw": 8,
+    "p1": 2,
+    "p2": 1,
+    "p3": 3,
+    "accepted": 2,
+    "kev_open": 1,
+    "dt_unique_cves": 8,
+    "grype_only_rows": 0,
+    "fix_states": {
+     "fixed": 4,
+     "not-fixed": 2,
+     "wont-fix": 1,
+     "unknown": 0,
+     "no Grype data": 1
+    }
+   }
+  },
+  "security-findings": {
+   "file": "security-findings.md",
+   "status": "ATTENTION",
+   "detail": [
+    "security testing NOT RUN: no image static check, on-device check or network scan results were found (this does not mean the product is secure)"
+   ],
+   "template": "none (generated)",
+   "missing_fields": []
+  },
+  "vulnerability-rows": {
+   "file": "vulnerability-rows.json",
+   "status": "OK",
+   "detail": [],
+   "template": "none (generated; internal, machine-readable)",
+   "missing_fields": []
+  }
+ },
+ "missing_fields": [],
+ "config_warnings": [],
+ "company_config": null,
+ "policy": {
+  "status": "DRAFT - example only, to be decided by Example Co.",
+  "severity_sources": [
+   "vendor",
+   "distro",
+   "nvd"
+  ],
+  "tiers": {
+   "p1": {
+    "label": "Immediate",
+    "kev": true,
+    "epss_percentile_min": 0.9,
+    "action": "Mitigate or fix without undue delay; assess whether this is an actively exploited vulnerability that must be notified under CRA Article 14 (early warning within 24 hours)."
+   },
+   "p2": {
+    "label": "Next release",
+    "severities": [
+     "CRITICAL",
+     "HIGH"
+    ],
+    "action": "Fix in the next scheduled security update."
+   },
+   "p3": {
+    "label": "Track",
+    "action": "Monitor; fix when an update is available or at the next convenient release."
+   }
+  },
+  "accepted": {
+   "label": "Not affected / accepted",
+   "states": [
+    "NOT_AFFECTED",
+    "FALSE_POSITIVE"
+   ],
+   "include_suppressed": true,
+   "action": "Keep the justification, owner and date on record; re-assess when the component or the vulnerability data change."
+  },
+  "severity_sources_configured": false
+ },
+ "counts": {
+  "findings_raw": 10,
+  "rows": 10,
+  "p1": 2,
+  "p2": 1,
+  "p3": 5,
+  "accepted": 2,
+  "kev_open": 1,
+  "kev_grype_only_not_in_table": [],
+  "accepted_by_vex": {
+   "kconfig": 1
+  },
+  "dt_unique_cves": 10,
+  "grype_unique_cves": 9,
+  "grype_only_cves": 0,
+  "grype_advisories": 9,
+  "grype_only_advisories": 0,
+  "grype_advisories_without_dt": 0,
+  "grype_only_unlisted": 0,
+  "grype_version_unknown": 0,
+  "dt_only_rows": 1,
+  "sbom_components": 5,
+  "sbom_packages": 4,
+  "kernel": {
+   "rows": 8,
+   "findings_raw": 8,
+   "p1": 2,
+   "p2": 1,
+   "p3": 3,
+   "accepted": 2,
+   "kev_open": 1,
+   "dt_unique_cves": 8,
+   "grype_only_rows": 0,
+   "fix_states": {
+    "fixed": 4,
+    "not-fixed": 2,
+    "wont-fix": 1,
+    "unknown": 0,
+    "no Grype data": 1
+   },
+   "fix_all": [
+    {
+     "component": "linux-nvidia-tegra",
+     "mapped_from": "nvidia-l4t-kernel 6.8.12-tegra-39.2.1-20260806224157",
+     "rows": 4,
+     "without_version": 0,
+     "fix_all_version": "6.8.0-1100.100",
+     "comparable": true
+    }
+   ],
+   "section": "listed",
+   "risk_assessment_layout": "separate"
+  },
+  "nvidia_bulletins": {
+   "section": "not_applicable"
+  },
+  "distro_fixed": null,
+  "epss": {
+   "dt": 1,
+   "other_sources_shown": 0,
+   "only_other_sources": 0,
+   "by_source": {},
+   "grype_score_dates": [],
+   "rules": {
+    "p1": {
+     "epss_probability_min": null,
+     "epss_percentile_min": 0.9
+    },
+    "p2": {
+     "epss_probability_min": null,
+     "epss_percentile_min": null
+    }
+   },
+   "dt_invalid": 0
+  },
+  "severity_sources": {
+   "policy": [
+    "vendor",
+    "distro",
+    "nvd"
+   ],
+   "configured": false,
+   "by_source": {
+    "nvd-cvss": 2,
+    "other": 8
+   },
+   "ubuntu_priority": "not_available",
+   "ubuntu_priority_file_status": null
+  },
+  "usn_cves": {
+   "mapping": "not_available",
+   "file_status": null,
+   "without_cve": 0,
+   "merged": [],
+   "own_row": []
+  },
+  "deb_python": {
+   "rows": 0,
+   "with_owner": 0,
+   "without_owner": 0,
+   "sbom_components": 0,
+   "mixed_purls": 0,
+   "version_mismatch_purls": 0
+  },
+  "non_kernel": {
+   "rows": 2,
+   "findings_raw": 2,
+   "p1": 0,
+   "p2": 0,
+   "p3": 2,
+   "accepted": 0,
+   "kev_open": 0,
+   "dt_unique_cves": 2,
+   "grype_only_rows": 0
+  }
+ },
+ "product_sbom": {
+  "file": "sbom.cdx.json",
+  "sha256": "<SHA>",
+  "serial": "urn:uuid:<UUID>",
+  "flash_firmware": {
+   "absent": "Not a flash package scan (no flash package `list.json` next to the scan result): no flash firmware was added.",
+   "flash_package": false
+  },
+  "tr03183": {
+   "tr_version": "2.1.0",
+   "status": "ATTENTION",
+   "components": 5,
+   "file_components_not_counted": 1,
+   "sbom": [
+    {
+     "field": "Format: CycloneDX 1.6 or higher (JSON)",
+     "ok": true,
+     "value": "CycloneDX 1.6"
+    },
+    {
+     "field": "Creator of the SBOM (metadata.manufacturer with URL or email)",
+     "ok": true,
+     "value": "Example Co."
+    },
+    {
+     "field": "Timestamp",
+     "ok": true,
+     "value": "<TIME>"
+    },
+    {
+     "field": "SBOM-URI (serialNumber; additional field)",
+     "ok": true,
+     "value": "urn:uuid:<UUID>",
+     "additional": true
+    },
+    {
+     "field": "Completeness of dependencies stated (compositions)",
+     "ok": false,
+     "value": "0 composition(s)"
+    }
+   ],
+   "fields": [
+    {
+     "field": "Component creator",
+     "file_level": false,
+     "total": 5,
+     "have": 1,
+     "missing_count": 4,
+     "missing": [
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Component name",
+     "file_level": false,
+     "total": 5,
+     "have": 5,
+     "missing_count": 0,
+     "missing": []
+    },
+    {
+     "field": "Component version",
+     "file_level": false,
+     "total": 5,
+     "have": 5,
+     "missing_count": 0,
+     "missing": []
+    },
+    {
+     "field": "Filename of the component",
+     "file_level": true,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Dependencies on other components",
+     "file_level": false,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Distribution licences",
+     "file_level": false,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Hash value of the deployable component (SHA-512)",
+     "file_level": true,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Executable property",
+     "file_level": true,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Archive property",
+     "file_level": true,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    },
+    {
+     "field": "Structured property",
+     "file_level": true,
+     "total": 5,
+     "have": 0,
+     "missing_count": 5,
+     "missing": [
+      "Example EX-J100 Edge AI Controller HW rev. B, software image 2.3.0",
+      "brotli 1.1.0",
+      "nested 1",
+      "openssl 3.0.13-0ubuntu3.11",
+      "ubuntu 24.04"
+     ]
+    }
+   ],
+   "additional": [
+    {
+     "field": "Other unique identifiers (purl or CPE)",
+     "total": 5,
+     "have": 2
+    },
+    {
+     "field": "Original licences",
+     "total": 5,
+     "have": 0
+    },
+    {
+     "field": "Source code URI",
+     "total": 5,
+     "have": 0
+    },
+    {
+     "field": "URI of the deployable form",
+     "total": 5,
+     "have": 0
+    }
+   ],
+   "gaps": [
+    "Completeness of dependencies stated (compositions)",
+    "Component creator",
+    "Filename of the component",
+    "Dependencies on other components",
+    "Distribution licences",
+    "Hash value of the deployable component (SHA-512)",
+    "Executable property",
+    "Archive property",
+    "Structured property"
+   ]
+  }
+ },
+ "support_check": {
+  "status": "ATTENTION",
+  "reasons": [
+   "Ubuntu 24.04 LTS: ends before the product support period (2029-05)"
+  ],
+  "today": "2026-11-15",
+  "product_end": "2031-12",
+  "subscriptions": [],
+  "entries": [
+   {
+    "id": "ubuntu-24.04",
+    "name": "Ubuntu 24.04 LTS",
+    "informational": false,
+    "end": "2029-05",
+    "phase": "standard security maintenance",
+    "verdict": "ends before the product support period",
+    "phases": [
+     {
+      "name": "standard security maintenance",
+      "end": "2029-05"
+     },
+     {
+      "name": "Expanded Security Maintenance (Ubuntu Pro)",
+      "end": "2034-04",
+      "requires": "Ubuntu Pro"
+     },
+     {
+      "name": "Legacy add-on",
+      "end": "2039-04",
+      "requires": "Ubuntu Pro Legacy add-on"
+     }
+    ],
+    "note": "Ubuntu Pro phases build on each other: Legacy add-on requires Ubuntu Pro. Canonical's release-cycle page shows May 2034 (ESM) and May 2039 (Legacy); endoflife.date gives 2034-04-25 for ESM and has no Legacy date. April is used for both (one month earlier than Canonical's page for Legacy, a conservative choice without a separate source).",
+    "coverage": "Only packages from the Ubuntu main and restricted components, which Canonical maintains in the standard period. Packages from universe are maintained only with Ubuntu Pro (ESM-Apps); packages from other repositories (for example Docker, ROS or vendor apt repositories) are not maintained by Canonical and were not assessed here.",
+    "sources": [
+     "https://ubuntu.com/about/release-cycle",
+     "https://endoflife.date/ubuntu"
+    ],
+    "checked": "2026-11-03",
+    "matched": [
+     "ubuntu 24.04"
+    ]
+   }
+  ],
+  "not_in_table": [],
+  "table": {
+   "file": "support-lifecycle.json",
+   "sha256": "<SHA>",
+   "max_age_days": 180,
+   "entries": 17,
+   "stale": [],
+   "future": []
+  }
+ },
+ "vex": {
+  "gate": {
+   "verdict": "ATTENTION",
+   "reasons": [
+    "8 untriaged (P1 2, P2 1, P3 5, other 0)",
+    "1 exclusions without evidence type (Dependency-Track decision (an annotation cannot override it: clear it in Dependency-Track, then add evidence in an annotation) 1): CVE-2025-0107 on linux-nvidia-tegra 6.8.0-1021.21 (dt); every resolved or not_affected statement needs an evidence type"
+   ],
+   "assessment": {
+    "complete": false,
+    "untriaged": 8,
+    "extra_cves_untriaged": 0,
+    "untriaged_for_gate": 9,
+    "exclusions_without_evidence": 1,
+    "by_rule": 0,
+    "in_triage_by_rule": 0
+   },
+   "open_affected": {
+    "rows": 0,
+    "by_response": {},
+    "by_rule": 0,
+    "individual": 0
+   },
+   "counts": {
+    "total": {
+     "rows": 10,
+     "resolved": 0,
+     "not_affected": 2,
+     "exploitable": 0,
+     "in_triage": 0,
+     "untriaged": 8
+    },
+    "kernel": {
+     "rows": 8,
+     "resolved": 0,
+     "not_affected": 2,
+     "exploitable": 0,
+     "in_triage": 0,
+     "untriaged": 6
+    },
+    "non_kernel": {
+     "rows": 2,
+     "resolved": 0,
+     "not_affected": 0,
+     "exploitable": 0,
+     "in_triage": 0,
+     "untriaged": 2
+    }
+   },
+   "untriaged_by_tier": {
+    "p1": 2,
+    "p2": 1,
+    "p3": 5,
+    "other": 0
+   },
+   "untriaged_high": 3,
+   "untriaged_breakdown": {
+    "groups": [
+     {
+      "type": "kernel",
+      "fix_state": "fixed",
+      "rows": 3,
+      "tiers": {
+       "p1": 2,
+       "p3": 1
+      }
+     },
+     {
+      "type": "deb",
+      "fix_state": "fixed",
+      "rows": 1,
+      "tiers": {
+       "p3": 1
+      }
+     },
+     {
+      "type": "deb",
+      "fix_state": "not-fixed",
+      "rows": 1,
+      "tiers": {
+       "p3": 1
+      }
+     },
+     {
+      "type": "kernel",
+      "fix_state": "no Grype data",
+      "rows": 1,
+      "tiers": {
+       "p3": 1
+      }
+     },
+     {
+      "type": "kernel",
+      "fix_state": "not-fixed",
+      "rows": 1,
+      "tiers": {
+       "p3": 1
+      }
+     },
+     {
+      "type": "kernel",
+      "fix_state": "wont-fix",
+      "rows": 1,
+      "tiers": {
+       "p2": 1
+      }
+     }
+    ],
+    "components": [
+     {
+      "component": "linux-nvidia-tegra",
+      "type": "kernel",
+      "rows": 6,
+      "fix_states": {
+       "fixed": 3,
+       "wont-fix": 1,
+       "not-fixed": 1,
+       "no Grype data": 1
+      },
+      "tiers": {
+       "p1": 2,
+       "p2": 1,
+       "p3": 3
+      }
+     },
+     {
+      "component": "linux-libc-dev",
+      "type": "deb",
+      "rows": 1,
+      "fix_states": {
+       "not-fixed": 1
+      },
+      "tiers": {
+       "p3": 1
+      }
+     },
+     {
+      "component": "openssl",
+      "type": "deb",
+      "rows": 1,
+      "fix_states": {
+       "fixed": 1
+      },
+      "tiers": {
+       "p3": 1
+      }
+     }
+    ],
+    "components_total": 3
+   },
+   "open_components": [
+    {
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "type": "kernel",
+     "installed_as": [],
+     "rows": 6,
+     "states": {
+      "untriaged": 6
+     },
+     "tiers": {
+      "p1": 2,
+      "p2": 1,
+      "p3": 3
+     }
+    },
+    {
+     "component": "linux-libc-dev",
+     "version": "6.8.0-45.45",
+     "purl": "pkg:deb/ubuntu/linux-libc-dev@6.8.0-45.45?arch=arm64&distro=ubuntu-24.04",
+     "type": "deb",
+     "installed_as": [],
+     "rows": 1,
+     "states": {
+      "untriaged": 1
+     },
+     "tiers": {
+      "p3": 1
+     }
+    },
+    {
+     "component": "openssl",
+     "version": "3.0.13-0ubuntu3.11",
+     "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04",
+     "type": "deb",
+     "installed_as": [],
+     "rows": 1,
+     "states": {
+      "untriaged": 1
+     },
+     "tiers": {
+      "p3": 1
+     }
+    }
+   ],
+   "exploitable_without_response": 0,
+   "in_triage": 0,
+   "human_conflicts": 0,
+   "conflicts": 0,
+   "grype_only_advisories": 0,
+   "rules_without_author": [],
+   "annotations_without_author": [],
+   "annotations_unused": [],
+   "not_assessed": [],
+   "kev_without_human_decision": 0,
+   "untriaged_markers": {},
+   "grype_cross_check": true,
+   "extra_cves": 0,
+   "extra_cves_untriaged": 0,
+   "extra_cves_untriaged_list": [],
+   "dt_without_justification": [],
+   "top_untriaged": [
+    {
+     "id": "CVE-2024-1086",
+     "cves": [
+      "CVE-2024-1086"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p1",
+     "kev": true,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "HIGH",
+     "kernel": true
+    },
+    {
+     "id": "CVE-2025-0101",
+     "cves": [
+      "CVE-2025-0101"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p1",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": 0.95,
+     "severity": "MEDIUM",
+     "kernel": true
+    },
+    {
+     "id": "CVE-2025-0105",
+     "cves": [
+      "CVE-2025-0105"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p2",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "HIGH",
+     "kernel": true
+    },
+    {
+     "id": "CVE-2025-0104",
+     "cves": [
+      "CVE-2025-0104"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p3",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "MEDIUM",
+     "kernel": true
+    },
+    {
+     "id": "CVE-2025-0200",
+     "cves": [
+      "CVE-2025-0200"
+     ],
+     "component": "linux-libc-dev",
+     "version": "6.8.0-45.45",
+     "tier": "p3",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "MEDIUM",
+     "kernel": false
+    },
+    {
+     "id": "CVE-2025-0003",
+     "cves": [
+      "CVE-2025-0003"
+     ],
+     "component": "openssl",
+     "version": "3.0.13-0ubuntu3.11",
+     "tier": "p3",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "LOW",
+     "kernel": false
+    },
+    {
+     "id": "CVE-2025-0103",
+     "cves": [
+      "CVE-2025-0103"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p3",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "LOW",
+     "kernel": true
+    },
+    {
+     "id": "CVE-2025-0106",
+     "cves": [
+      "CVE-2025-0106"
+     ],
+     "component": "linux-nvidia-tegra",
+     "version": "6.8.0-1021.21",
+     "tier": "p3",
+     "kev": false,
+     "kev_by_cve": false,
+     "epss_percentile": null,
+     "severity": "LOW",
+     "kernel": true
+    }
+   ]
+  },
+  "files": {
+   "vex.cdx.json": {
+    "file": "vex.cdx.json",
+    "sha256": "<SHA>",
+    "statements": 10,
+    "not_assessed": 8
+   },
+   "vex.openvex.json": {
+    "file": "vex.openvex.json",
+    "sha256": "<SHA>",
+    "statements": 10,
+    "not_assessed": 8
+   }
+  },
+  "not_written_reason": null,
+  "sources": {
+   "dt": 1,
+   "annotation": 0,
+   "distro": 0,
+   "kconfig": 1,
+   "nvidia": 0,
+   "rule": 0
+  },
+  "conflicts": [],
+  "annotations": null,
+  "rules": null,
+  "kernel_config": {
+   "status": "OK",
+   "not_affected": 1,
+   "used": true
+  },
+  "nvidia_extra_rows": 0,
+  "suppressed_without_state": 0,
+  "dt_partial": 0,
+  "deb_python_inherited": 0,
+  "deb_python_inherit_conflict": 0,
+  "deb_python_kev_not_inherited": 0,
+  "markers": {},
+  "evidence_inputs": null,
+  "kernel_config_via_rule": false,
+  "rule_shadowed_rows": 0,
+  "kernel_modules": null,
+  "upstream_excludes": {
+   "basis": "scan/grype.json: distro matches without a version constraint, and cpe-match records for the same CVE and product",
+   "candidates": 0,
+   "flagged": 0,
+   "not_flagged": {},
+   "rows": []
+  },
+  "u1_excluded": [],
+  "evidence": {
+   "exclusions": 2,
+   "by_type": {
+    "build-record": 1,
+    "source": 0,
+    "on-device": 0,
+    "design-doc": 0,
+    "vendor-statement": 0
+   },
+   "with_type": 1,
+   "without_type": {
+    "total": 1,
+    "by_reason": {
+     "dt": 1
+    },
+    "sample": [
+     {
+      "id": "CVE-2025-0107",
+      "component": "linux-nvidia-tegra",
+      "version": "6.8.0-1021.21",
+      "source": "dt",
+      "reason": "dt"
+     }
+    ]
+   },
+   "on_device": [],
+   "design_doc": []
+  },
+  "nvidia_distro": {
+   "checked": false,
+   "reason": "no NVIDIA bulletin",
+   "remapped": {}
+  },
+  "section": "8.8",
+  "statements": 10,
+  "statements_assessed": 2,
+  "statements_not_assessed": 8,
+  "components_not_in_sbom": 3,
+  "timestamp_source": "generated (no scan or SBOM time)"
+ },
+ "inputs": {
+  "dt/findings.json": {
+   "file": "dt/findings.json",
+   "sha256": "<SHA>"
+  },
+  "sbom/sbom.cdx.json": {
+   "file": "sbom/sbom.cdx.json",
+   "sha256": "<SHA>"
+  },
+  "scan/grype.json": {
+   "file": "scan/grype.json",
+   "sha256": "<SHA>"
+  },
+  "meta.json": {
+   "file": "meta.json",
+   "sha256": "<SHA>"
+  },
+  "status.tsv": {
+   "file": "status.tsv",
+   "sha256": "<SHA>"
+  },
+  "dt/deb-sources.json": null,
+  "scan/sbomgate.json": null,
+  "scan/l4t-kernel-map.json": {
+   "file": "scan/l4t-kernel-map.json",
+   "sha256": "<SHA>"
+  },
+  "scan/nvidia-bulletins.json": null,
+  "scan/distro-recheck.json": null,
+  "scan/kernel-config.json": {
+   "file": "scan/kernel-config.json",
+   "sha256": "<SHA>"
+  },
+  "dt/analysis.json": null,
+  "scan/usn-cves.json": null,
+  "scan/ubuntu-priority.json": null,
+  "scan/ubuntu-status.json": null,
+  "scan/kernel-module-map.json": {
+   "file": "scan/kernel-module-map.json",
+   "sha256": "<SHA>"
+  },
+  "scan/kernel-boot.json": null,
+  "scan/kernel-versions.json": {
+   "file": "scan/kernel-versions.json",
+   "sha256": "<SHA>"
+  }
+ },
+ "security_testing": {
+  "status": "ATTENTION",
+  "reasons": [
+   "security testing NOT RUN: no image static check, on-device check or network scan results were found (this does not mean the product is secure)"
+  ],
+  "ran": {
+   "image": false,
+   "board": false,
+   "network": false
+  },
+  "inputs": {
+   "image_check": null,
+   "board_test": null
+  },
+  "counts": {
+   "high": {
+    "total": 0,
+    "open": 0,
+    "accepted": 0,
+    "false_positive": 0,
+    "fixed": 0
+   },
+   "medium": {
+    "total": 0,
+    "open": 0,
+    "accepted": 0,
+    "false_positive": 0,
+    "fixed": 0
+   },
+   "low": {
+    "total": 0,
+    "open": 0,
+    "accepted": 0,
+    "false_positive": 0,
+    "fixed": 0
+   },
+   "info": {
+    "total": 0,
+    "open": 0,
+    "accepted": 0,
+    "false_positive": 0,
+    "fixed": 0
+   }
+  },
+  "open": {
+   "high": 0,
+   "medium": 0,
+   "low": 0,
+   "info": 0
+  },
+  "superseded_runs": 0,
+  "decisions": {
+   "file": null,
+   "sha256": null,
+   "count": 0,
+   "used": [],
+   "unused": [],
+   "changed": [],
+   "fixed_not_confirmed": [],
+   "without_fingerprint": []
+  },
+  "findings": [],
+  "files": []
+ },
+ "role": "manufacturer",
+ "packages_without_vuln_data": {
+  "status": "GAP",
+  "count": 0,
+  "likely": 0,
+  "possible": 0,
+  "held": 0,
+  "examples": [],
+  "signals": {
+   "used": [
+    "vendor_maintainer",
+    "distro_name_other_domain",
+    "distro_maintainer_no_revision",
+    "no_maintainer",
+    "no_distro_revision",
+    "vendor_revision_suffix",
+    "vendor_version_tag",
+    "not_fully_installed",
+    "maintainer_too_long",
+    "same_vendor_domain",
+    "origin",
+    "held",
+    "nvidia_bulletins_not_ok",
+    "nvidia_not_jetson_linux"
+   ],
+   "not_used": {
+    "distro_name_index": "no package-name index of the distribution's advisory data (Grype DB package names, OSV distribution mirror, Ubuntu CVE Tracker) in the scan output: scan/ubuntu-status.json, scan/distro-recheck.json and scan/usn-cves.json only cover the CVEs of this scan's findings"
+   }
+  },
+  "groups": [],
+  "excluded": {
+   "has_vulnerability_data": 1
+  },
+  "vendor_with_data": {
+   "count": 0,
+   "examples": [],
+   "by_reason": {}
+  },
+  "maintainer_source": null,
+  "hold_known": false,
+  "deb_packages": 1,
+  "detail": [
+   "no maintainer data (no SBOM publisher/author/supplier and no pkgdb Maintainer): vendor packages cannot be identified; only the version signal was used",
+   "no pkgdb (dpkg-status): dpkg hold and Origin unknown"
+  ],
+  "file": "packages-without-vuln-data.csv"
+ },
+ "confirmation_items": {
+  "status": "OK",
+  "files": [
+   "confirmation-items.csv",
+   "confirmation-items.md"
+  ],
+  "total": 5,
+  "by_ask": {
+   "專案負責人（PM）": 1,
+   "產品工程師": 4
+  },
+  "by_category": {
+   "缺少輸入": 1,
+   "被利用或優先處理的漏洞": 2,
+   "作業系統核心": 1,
+   "出貨紀錄": 1
+  },
+  "items": [
+   {
+    "id": "Q1",
+    "key": "input:security-tests",
+    "category": "缺少輸入",
+    "ask": "產品工程師"
+   },
+   {
+    "id": "Q2",
+    "key": "vuln:CVE-2024-1086:linux-nvidia-tegra",
+    "category": "被利用或優先處理的漏洞",
+    "ask": "產品工程師"
+   },
+   {
+    "id": "Q3",
+    "key": "vuln:CVE-2025-0101:linux-nvidia-tegra",
+    "category": "被利用或優先處理的漏洞",
+    "ask": "產品工程師"
+   },
+   {
+    "id": "Q4",
+    "key": "kernel:build-record",
+    "category": "作業系統核心",
+    "ask": "產品工程師"
+   },
+   {
+    "id": "Q5",
+    "key": "shipping:record",
+    "category": "出貨紀錄",
+    "ask": "專案負責人（PM）"
+   }
+  ],
+  "pkgdb": "not_available"
+ }
+}

@@ -127,6 +127,15 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   打包的 Python 模組（dist-packages 的 pypi 元件）也收 SBOM 裡唯一擁有它的 deb 與 (CVE, 它的原始碼套件, 發行版)（`counts.deb_python_owners`）。沒有 Ubuntu 套件上的 CVE 時不寫這一列；
   沒有鏡像、過期、sha256 不符或發行版不在鏡像裡 → NOT_RUN（檔案記原因；U1 不套用，列照樣受影響）。
   `C-kernel-boot`（`lib/kernel_boot.py`，`scan/kernel-boot.json`，在 C-kernel-config 之前；需要 `--kernel-build-prefix`）：Jetson 刷機包的 `kernel/Image` 和 `rootfs/boot/Image` 不同時並列兩顆核心的 sha256、版本字串（含 `#1 SMP PREEMPT <建置時間>`）、IKCONFIG 差異數與前 10 項、`extlinux.conf` 的 DEFAULT 標籤指向哪裡、核心建置紀錄 BUILD-INFO.txt 的 image sha256 對的是哪一顆；兩顆不同 → ATTENTION（資訊性）。實際開機的核心只能在板子上確認（`uname -v`）；依據公開 L4T BSP（R39.2.1 的 `apply_binaries.sh` 呼叫 `nv_tools/scripts/nv_apply_kernel_files.sh`，把 `kernel/Image` 裝成 rootfs 的 `/boot/Image`；`bootloader/extlinux.conf` 的 `LINUX` 指向 `/boot/Image`），預期燒錄後開機的是 `kernel/Image`；UEFI 開機模式可改，有板子的 `uname -v` 時以它為準，所以預設不改 K1。環境變數 `KERNEL_BOARD_OS_TXT`（board-test 的 os.txt）有 uname 那一行時比對：對上 `kernel/Image` → OK；對上 `rootfs/boot/Image` → ATTENTION，C-kernel-config 才改用它的 IKCONFIG（`--prefer-rootfs-image`），核心建置紀錄除非 BUILD-INFO sha256 對得上否則 GAP；兩顆都對不上 → ATTENTION。只有一顆核心 → NOT_RUN（不寫這一列）。
+  **多顆核心逐顆判定**（M7d-1，D-036／D-061）：映像出貨 2 顆以上核心（例如 Raspberry Pi 的 Pi 5 與 Pi 4）時，sca-scan 每顆各跑一次 `kernel_config.py`
+  與 `kernel_module_map.py`（工具本身不改，用 `--kernel-version` 指定那一顆），結果寫 `scan/kernels/<版本>/kernel-config.json` 與 `kernel-module-map.json`
+  （只判定 1 顆時照舊寫 `scan/kernel-config.json`、`scan/kernel-module-map.json`）。判定哪幾顆：指定 1 顆＝那一顆；指定 2 顆以上＝指定的每一顆
+  （`scan/kernel-versions.json` 的 basis 是 `project-specified`）；沒指定而映像有多顆＝映像列出的全部（`auto-detected`；第一次判定讀映像時順便列出出貨的核心，
+  工具對多顆沒指定回 GAP 的那份結果丟掉）；只指定一部分＝沒指定的出貨核心照舊 `C-kernel-not-judged-<版本>`＋GAP。`C-kernel-config`、`C-kernel-module-map`
+  各一列，狀態取最差的一顆（FAIL > GAP > ATTENTION > OK），說明逐顆列出（說明欄限 500 位元組，完整的在各顆的檔案）。`scan/kernel-versions.json`：逐顆判定（judged 2 顆以上）時是 schema /3，單顆照舊 /2；
+  `judged` 每顆記版本、basis、結果檔與狀態（讀取端 /1、/2、/3 都收）。合併規則在 `tools/cra/kernel_merge.py`：任一顆 affected → 產品 affected；每一顆出貨的核心
+  都有可採用的結果而且都 not_affected 才排除（依據 build-record，位置逐顆列出核心版本與 config SHA-256）；有一顆 unknown、沒有結果、沒判定一律不排除。
+  沒有核心 CVE（Grype、DT 都沒有）而要用 CNA 版本比對產生清單時，多顆核心照舊 GAP（清單依單一核心版本產生；M7d-2 處理）。
   `C-kernel-config`（`lib/kernel_config.py`，`scan/kernel-config.json`，放在 D-distro-recheck 之後）：核心元件（C-kernel-l4t-map 加上的
   Canonical 核心等）上的每個 CVE，用 Linux 核心 CNA 紀錄的 programFiles（修補動到的檔案）對照產品核心的 `.config` 與 Makefile／Kbuild
   （映像的 `/usr/lib/modules/<版本>/build` 或 `/usr/src/linux-headers-<版本>*/`），判 not_affected（每個檔案都一定沒編）、affected

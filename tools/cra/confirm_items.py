@@ -537,13 +537,16 @@ def boot_items(kboot):
 def kernel_versions_items(kvers):
     """scan/kernel-versions.json（sca-scan 的 --kernel-version）：映像出貨（或被指定）但沒有判定的核心。有 not_judged 才問；問的人是 RD。
     C-kernel-config／C-kernel-module-map 的結論只對 judged 的核心成立，沒判定的核心不可以當作不受影響。"""
-    if not isinstance(kvers, dict) or kvers.get("schema") not in ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2"):
+    if not isinstance(kvers, dict) or kvers.get("schema") not in ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2",
+                                                                    "sca-center-kernel-versions/3"):
         return []
     nj = [x for x in kvers.get("not_judged") or [] if isinstance(x, dict) and isinstance(x.get("version"), str)]
     if not nj:
         return []
     RD = "RD"
-    judged = [v for v in kvers.get("judged") or [] if isinstance(v, str)]
+    # judged：/1、/2 是版本字串，/3（M7d-1）是物件（version、basis、結果檔與狀態）
+    judged = [(x.get("version") if isinstance(x, dict) else x) for x in kvers.get("judged") or []]
+    judged = [v for v in judged if isinstance(v, str)]
     reasons = sorted({str(x.get("reason") or "") for x in nj} - {""})
     return [item("作業系統核心", "kernel:not-judged",
                  f"映像出貨的核心有 {len(kvers.get('shipped') or [])} 顆，{len(nj)} 顆沒有判定：{names(x['version'] for x in nj)}"
@@ -551,7 +554,7 @@ def kernel_versions_items(kvers):
                  "核心設定比對（C-kernel-config）與模組對應（C-kernel-module-map）至少是 GAP；結論只對判定過的核心（"
                  + (names(judged) if judged else "沒有") + "）成立，沒判定的核心上的漏洞不能用「程式沒有編進核心」排除", (RD,),
                  "沒判定的核心是不是出貨給使用者、板子會不會載入它？要排除它的證據在哪裡？",
-                 "要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」）；或用 --kernel-version 指定要判定的核心（一次指定一顆；多顆逐一判定還沒實作）",
+                 "要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」）；或用 --kernel-version 指定要判定的核心（可以重複指定，指定幾顆就逐顆判定幾顆）",
                  "記錄證據或指定核心後重新掃描")]
 
 
