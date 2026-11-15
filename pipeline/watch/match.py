@@ -553,6 +553,7 @@ def vendor_rows(es, ps):
                      f"{md_cell(p['status'] if p else '?')} | {md_code(p.get('tag')) if p else '?'} | "
                      f"{md_cell(', '.join(str(x) for x in e.get('watch_via') or []))} | {md_cell(e.get('component_count'))} | "
                      f"{md_cell(e.get('first_detected'))} |")
+    lines.append("")             # 表格與後面的清單之間空一行（不然清單會被當成表格的一部分）
     seen = set()
     for e, p in zip(es, ps):
         if not p or (p.get("tag"), p["layer"]) in seen:
