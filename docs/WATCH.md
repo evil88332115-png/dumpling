@@ -21,6 +21,7 @@
 | DT（OSV）那條路 | 有 | **NOT_RUN**（每份報告與每個 KEV Issue 都列在「每日沒有涵蓋」，不分層） | — |
 | NVIDIA 公告 | 有 | **NOT_RUN**（報告列出；廠商層級的 nvidia 仍有） | — |
 | 廠商層級（exploited_vendor） | — | 有 | — |
+| 韌體（C2 的 BIOS／vBIOS SBOM，`firmware.yml`） | 有（firmware.yml 自己的比對與 DT） | **只有廠商層級，沒有元件比對**：collect 只收 GitHub Release，韌體 SBOM 只在 firmware.yml 的 Actions artifact（`firmware-sbom`，會過期），不在任何 Release 裡，所以每日的 Grype／KEV／EUVD 元件比對不含韌體元件；只有 `vendor-watch.json` 的廠商層級提醒（Intel、AMD、AMI、NVIDIA 等新的 KEV 條目），而且掛在現有的板子 SBOM 上，不是掛在韌體上 | 韌體進監控的設計另做（C3＋C2，D-063） |
 
 ## 3. 程式與資料流
 
