@@ -123,8 +123,13 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   （原 Issue 開著就留言，關閉了就開新的）；基準裡的比對消失後又出現、群組從來沒有 Issue → 不再算基準，開 Issue；
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
   - **給 RD：新 Release 帶進來的既有 KEV 也會開 Issue**。基準只涵蓋「建立基準那一刻」已有的 Release；之後才加入的 Release（新 tag、第一次發布的開發版）裡已經有的 KEV 命中都算新的，就算同一個 CVE 在舊 Release 因為在基準裡而沒有 Issue。所以新版本一發布，可能一次開好幾個 Issue，而且舊版本沒有對應的 Issue——這是規則本來的設計（舊 Release 的既有命中不通知，新 Release 是新的出貨，要有人看過）。2026-11-15 第一次真實基準之後新增 `dev/orin-nano-demo`，dry_run 會開 16 個 dev 的 KEV Issue、正式版 0 個；使用者決定重建基準，把 dev 一起納入（見 §5）。
-- 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`，對所有專案生效）：BIOS／vBIOS 韌體的 **Intel、AMD、AMI、NVIDIA**（D-043 第 3 點）
-  只要 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。比對 KEV 的 `vendorProject`，
+- 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`）：**每個專案各自列**（`projects`，鍵是專案名；全體清單 `vendors` 是空的，D-064，C0 決定 2026-11-15）。
+  原本 11 個廠商對每一份 SBOM 生效，一個新的 Intel KEV 就會對每個 Orin 版本的 bsp／os 各開一個 Issue（Orin 沒有 Intel 韌體）。現在：
+  orin-nano-demo：nvidia、arm、trustedfirmware、realtek；rpi-lite-demo：broadcom、arm；rock-5b-demo：rockchip、arm、trustedfirmware、realtek；
+  ai-nas-demo（x86）：intel、amd、ami、insyde、phoenix、realtek（板子的硬體廠商依公開規格，待 C4 確認）。SBOM 自動取出的廠商照舊監看。
+  **linux**：`exclude` 拿掉 SBOM 取出的 linux（核心的 KEV 由 Grype＋核心 CNA 做元件比對）；手動清單不受排除，所以核心元件比對還不完整的專案（rpi-lite-demo：CNA 候選沒列進報告；rock-5b-demo：廠商核心；ai-nas-demo：Debian 核心只有 NVD 上游範圍）把 linux 列在自己的清單當安全網，M7d-2／M7d-3b 完成、確認該專案每日的 kernel_map／kernel_cna 是 OK 才拿掉；目前只有 orin-nano-demo 不列。測試（`VendorWatchConfig`）檢查每個 `projects/*/` 都有一筆、鍵沒有打錯、這條 linux 規則。
+  D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：列在 x86 專案；韌體示範專案 `firmware-demo`（不在 `projects/`，FIRMWARE-WATCH.md §5）列 intel、amd、ami、insyde、phoenix、nvidia，韌體 Release 也有廠商層級的提醒（測試裡另列「非產品專案」只有 `firmware-demo`）。
+  清單裡的廠商在 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。新加進清單的廠商，第一次監看時既有的條目記成基準（`watched`），不會一次開一批。比對 KEV 的 `vendorProject`，
   經 `exploited_vendor` 的正規化與別名（`American Megatrends`→ami、`Advanced Micro Devices`→amd、`NVIDIA Corporation`→nvidia）。
   拼法查核（2026-11-13）：CISA KEV catalogVersion 2026.11.10（1779 筆）實際有 `Intel`（2 筆）、`AMI`（1 筆，CVE-2024-54085 MegaRAC SPx）；
   **AMD、NVIDIA 在 CISA KEV 與 EUVD 的 KEV dump（1796 筆）都還沒有條目，拼法無法從資料確認**——待辦：第一筆出現時核對 `vendorProject` 的實際拼法，
