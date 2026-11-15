@@ -97,6 +97,10 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
     不是規則檔名 → problem、不讀；列了但 Release 沒有這個附件 → problem。開發版 `dev/<專案>` 也有這個附件。
   - status：API 失敗 → FAIL；有 Release 有 problem → GAP；否則 OK。stdout 一行 `WATCH-COLLECT<TAB>狀態<TAB>說明`；結束碼 OK 0、FAIL 1、GAP 3、用法 64。
 
+- **韌體 Release**（`docs/FIRMWARE-WATCH.md`）：tag `firmware-demo/<版本>`（不是 prerelease）分類成 `firmware`，**不進 `releases`**（不要求 release-meta），放在 inventory 的 `firmware`；只收最新的一個（`published_at`），其他列在 `firmware_older`（第一階段示範的限制）。
+  讀 `firmware-meta.json`（schema `dumpling-firmware-meta/1`、tag 要一致；壞掉 → 整個韌體 Release 的 problem、inventory GAP），依它下載每個樣本的 `fw-<slug>.cdx.json` 與（bios）`fw-inventory-<slug>.json`，**每個附件都核對 meta 列的 sha256**；單一樣本的問題只讓那一份 GAP。
+  監控鍵的版本部分 `watch_version`：`<slug>@<firmware_version>`；版本讀不到或是佔位字串（空、`xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`…）→ `<slug>@sha256-<映像雜湊前 16 碼>` 並標 GAP；兩者都沒有 → 不監控、列進 `not_watched`。meta 的 `tables` 只留三張表的字串欄位。match.py／support.py 目前還不讀 `firmware`（下一個 PR 接上）。
+
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
 
 讀 inventory、feeds、state.json → 呼叫既有工具 → 產生 `plan.json`。規則：
