@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:15 +0800（C1）
+最後更新：2026-11-15 12:16 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -27,6 +27,7 @@
 - 方向檢查（2026-11-14，對照 PLAN 目標與 M1–M8）：M2 的驗收「打 tag 後全程跑通、產出正式 Release」還沒做到（沒有任何正式 tag），M6 也卡在重跑，兩者都在等使用者。調整：C2 在 advisory-polish 之後改做 D-043 (2) 規則表（AMD-SB／AMI-SA／INTEL-SA，現在 AMD 全 NOT_ASSESSED）；C3 的 GitLab 程式收在 #91、t10b，之後等內部環境，主線回到公開 repo 的第一次真實基準；C1 的 M7 照舊。C0 自省：PLAN 要求派代理時指定 effort（判定邏輯與其驗證用 high），之前的驗證代理都沒有指定，從現在起補上
 - 機器：2026-11-14 使用者反映 CPU 近 80°C；查到 C0 的 #95 驗證代理留下的 python3 空轉約 8 小時（cwd dumpling-tmp-c0-verify-95），已停掉；之後每個驗證代理結束都檢查殘留程序。
 - 使用者決定（2026-11-15）：同意 5674 初審（NVIDIA 5674 判 not_applicable，已通知 C2 插隊做對照表 PR）；**已刪** wp1/m2-spike 的 6 份 actions 快取（快取總量剩約 1.7 GB）與已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft（C0 執行）。
+- 2026-11-15 續：(1) C1 M7d 設計同意（4 個 PR；Q1–Q7 決定記 **D-061**，含釐清 D-038：候選列可依 K1 排除；coverage 改 ATTENTION 但不得放寬閘門），#111 現在 D-051 補＋D-054～D-061（head e853eba）；(2) C3 第 3 步：11-15 排程是 GitHub 延遲不是沒觸發；手動 dry_run 43675426062 會開 16 個 dev KEV＋3 個支援期限 → **使用者選重建基準納入 dev**：#99 移除 watch-state 並關閉（不刪）、baseline 先 dry_run 給 C0 看再實跑、再一輪 dry_run 預期 KEV 0 → C0 才設 WATCH_REAL_ISSUES=on；(3) 使用者同意本機裝 **sbom-tools v0.3.0**（只當驗證對照、不進 CI）：tar sha256 3817fbc0…7b24 與 GitHub asset digest 相符、SLSA provenance＝publish-crates.yml@v0.3.0；本機沒有做簽章密碼學驗證（gh 2.46 無 attestation、沒有 cosign）；(4) wp1/m7c2 遠端分支已不存在（合併時已刪）。C2：5674 對照表 PR，之後程式碼完整性調查筆記。
 - 卡住／等決定：D-059 金鑰指紋（3mdeb、Ubuntu archive）實作時要人工對照兩個獨立來源核對（使用者或負責人）；刪 wp1/m2-spike 的 6 份 actions 快取（約 7.5 GB，使用者決定）；已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft 要不要刪（C1、C2 刪分支都被權限擋，使用者決定）；5674 初審意見要負責人確認（使用者）；正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
