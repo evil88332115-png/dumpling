@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 18:15 +0800（C2）
+最後更新：2026-11-15 18:58 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -415,9 +415,9 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：WATCH_REAL_ISSUES off；等第一個 firmware-demo Release 與 dev.yml 排程（三個新平台的 dev pre-release）→ dry_run 給 C0
+- 卡住／等決定：WATCH_REAL_ISSUES off；firmware-demo/2026.11.15 之後的 dry_run（43702639211）：板子 KEV 0、廠商層級 0、韌體公告 6、Intel 微碼 6、支援期限 4（C2 已核對）；三個新平台的 dev Release 仍是 draft（dev.yml 不會把既有 draft 轉公開，已回報 C0）→ C0 決定照開或重建基準
 - 開著的 PR：沒有
-- 韌體進監控：C3 這邊全部合併（#122、#123、#128、#132、#134、#143、#144、#145、#120 的 firmware-demo）；等 C2 打第一個 firmware-demo tag → 一般 dry_run，分類回報 would_open（板子 KEV、廠商層級各專案、韌體公告、Intel 微碼、支援期限、韌體樣本 advisory／Grype／dt；三個新平台的 dev 分開列）→ C0 決定
+- 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 <!-- END C3 -->
 
