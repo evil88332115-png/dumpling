@@ -82,6 +82,8 @@ class FakeGitLab(issues.GitLabApi):
         if self.script:
             return self.script.pop(0)
         data = json.loads(body) if body else None
+        if u.path == "/api/v4/user" and method == "GET":         # token 自己的使用者（project access token 的 bot）
+            return 200, {}, json.dumps({"id": self.me, "username": "bot", "bot": True}).encode()
         pre = "/api/v4/projects/%s/" % PROJ
         if not u.path.startswith(pre):
             return 404, {}, b'{"message":"404 Project Not Found"}'
@@ -230,7 +232,9 @@ class TestKeyAndConstants(unittest.TestCase):
     def test_key_same_algorithm_as_match_issue_key(self):
         for mode in ("real", "drill"):
             for ident in ("state-stale:2026-11-14T00:00:00Z", "schedule:5:inactive", "schedule:none:missing"):
-                self.assertEqual(deadman.key_of(mode, ident), match.issue_key(mode, "deadman", ident))
+                for n in (1, 2, 10):
+                    self.assertEqual(deadman.key_of(mode, ident, n), match.issue_key(mode, "deadman", ident, str(n)))
+        self.assertNotEqual(deadman.key_of("real", "x", 1), deadman.key_of("real", "x", 2))
 
     def test_default_threshold_equals_dashboard_stale_hours(self):
         spec = importlib.util.spec_from_file_location("dashboard_build_for_test", os.path.join(ROOT, "pipeline", "dashboard", "build.py"))
@@ -265,7 +269,7 @@ class TestStateCheck(Base):
         self.assertEqual(len(p["actions"]), 1)
         a = p["actions"][0]
         self.assertEqual(a["op"], "open")
-        self.assertEqual(a["key"], match.issue_key("real", "deadman", "state-stale:" + last))
+        self.assertEqual(a["key"], match.issue_key("real", "deadman", "state-stale:" + last, "1"))
         self.assertEqual(a["labels"], ["watch-health", "watch-deadman"])
         self.assertIn("超過 36 小時沒有結果", a["title"])
         self.assertIn(last, a["title"])
@@ -293,25 +297,24 @@ class TestStateCheck(Base):
         self.assertEqual(self.dm()[0], 2)
         self.assertEqual(self.result()["last_update"], ago(50))
 
-    def test_no_runs_falls_back_to_issue_updated_at(self):
-        self.set_state(ago(1), runs=False, updated_at=ago(2).replace("Z", ".123Z"))
-        rc, out = self.dm()
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.result()["last_update"], ago(2))
-        self.set_state(ago(1), runs=False, updated_at=ago(40).replace("Z", ".000Z"))
-        self.assertEqual(self.dm()[0], 2)
-        self.assertIn("Issue 的 updated", self.plan()["actions"][0]["body"])
-
-    def test_updated_at_with_offset(self):
-        self.set_state(ago(1), runs=False, updated_at="2026-11-13T20:00:00.000+08:00")       # = 2026-11-13T12:00:00Z，48 小時前
-        self.assertEqual(self.dm()[0], 2)
-        self.assertEqual(self.result()["last_update"], "2026-11-13T12:00:00Z")
+    def test_bad_runs_is_alert_and_never_falls_back_to_updated_at(self):
+        # match.py 每輪都 append run：runs 不是非空 list 就是壞資料。Issue 的 updated_at 再新也不能拿來當「有在跑」
+        fresh = ago(1).replace("Z", ".000Z")
+        for label, st in (("garbage", {"schema": 1, "runs": "garbage"}), ("dict", {"schema": 1, "runs": {"at": ago(1)}}),
+                          ("none", {"schema": 1, "runs": None}), ("missing", {"schema": 1}), ("empty", {"schema": 1, "runs": []}),
+                          ("number", {"schema": 1, "runs": 5})):
+            self.gl.issues.clear()
+            self.gl.add_issue(issues.encode_state(st, "real", "s", urlsafe=True), ["watch-state"], updated_at=fresh)
+            rc, out = self.dm()
+            self.assertEqual(rc, 2, (label, out))
+            self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time", 1), label)
+            self.assertIsNone(self.result()["last_update"], label)
 
     def test_no_state_issue_alert_with_reason(self):
         rc, out = self.dm()
         self.assertEqual(rc, 2, out)
         a = self.plan()["actions"][0]
-        self.assertEqual(a["key"], deadman.key_of("real", "state:missing"))
+        self.assertEqual(a["key"], deadman.key_of("real", "state:missing", 1))
         self.assertIn("找不到每日監控的狀態 Issue", a["title"])
         self.assertIn("找不到狀態 Issue", self.result()["checks"][0]["detail"])
 
@@ -319,7 +322,7 @@ class TestStateCheck(Base):
         self.gl.add_issue("<!-- dumpling-watch-state mode=real schema=1 -->\n```\n!!!!\n```\n", ["watch-state"])
         rc, out = self.dm()
         self.assertEqual(rc, 2, out)
-        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:undecodable"))
+        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:undecodable", 1))
         self.assertIn("解不開", self.plan()["actions"][0]["title"])
 
     def test_unreadable_time_alerts(self):
@@ -329,17 +332,12 @@ class TestStateCheck(Base):
             self.gl.add_issue(st, ["watch-state"])
             rc, out = self.dm()
             self.assertEqual(rc, 2, (runs, out))
-            self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time"), runs)
-        # runs 空、updated_at 也壞
-        self.gl.issues.clear()
-        self.gl.add_issue(state_body(ago(1), runs=False), ["watch-state"], updated_at="garbage")
-        self.assertEqual(self.dm()[0], 2)
-        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time"))
+            self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time", 1), runs)
 
     def test_future_time_is_alert_not_silence(self):
         self.set_state((NOW + dt.timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.assertEqual(self.dm()[0], 2)
-        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time"))
+        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time", 1))
         self.set_state((NOW + dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))       # 1 小時內的時鐘誤差不算
         self.assertEqual(self.dm()[0], 0)
 
@@ -368,11 +366,11 @@ class TestStateCheck(Base):
         a = self.plan()["actions"][0]
         self.assertEqual(self.plan()["mode"], "drill")
         self.assertEqual(a["labels"], ["watch-health", "watch-deadman", "drill"])
-        self.assertEqual(a["key"], match.issue_key("drill", "deadman", "state-stale:" + ago(40)))
-        self.assertNotEqual(a["key"], match.issue_key("real", "deadman", "state-stale:" + ago(40)))
+        self.assertEqual(a["key"], match.issue_key("drill", "deadman", "state-stale:" + ago(40), "1"))
+        self.assertNotEqual(a["key"], match.issue_key("real", "deadman", "state-stale:" + ago(40), "1"))
         # real 模式看不到 drill 的狀態 Issue
         self.assertEqual(self.dm()[0], 2)
-        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:missing"))
+        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:missing", 1))
 
     def test_stale_state_old_plan_removed_when_ok(self):
         self.set_state(ago(40))
@@ -463,7 +461,7 @@ class TestSchedules(Base):
         rc, out = self.sd()
         self.assertEqual(rc, 2, out)
         self.assertEqual(self.idents(), {"schedule:none:missing"})
-        self.assertEqual(self.plan()["actions"][0]["key"], match.issue_key("real", "deadman", "schedule:none:missing"))
+        self.assertEqual(self.plan()["actions"][0]["key"], match.issue_key("real", "deadman", "schedule:none:missing", "1"))
 
     def test_no_watch_schedule_among_others(self):
         self.gl.add_schedule(4, watch=False)
@@ -792,7 +790,7 @@ class TestDedupAndRecovery(Base):
         rc, out = self.dm()
         self.assertEqual(rc, 2, out)
         self.assertEqual([a["op"] for a in self.plan()["actions"]], ["open"])
-        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:missing"))
+        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:missing", 1))
 
     def test_api_fail_never_recovers(self):
         self.stall(ago(40))
@@ -890,6 +888,208 @@ class TestDedupAndRecovery(Base):
         self.gl.add_schedule(3)
         self.assertEqual(self.dm("--schedules")[0], 0)
         self.assertEqual([a["op"] for a in self.plan()["actions"]], ["comment"])
+
+
+class TestIncidentCount(Base):
+    """停擺次數 n：恢復、人關閉之後同一種問題再發生要開新的 Issue；只認可信作者的 Issue（偽造的同 key Issue 吞不掉警告）。"""
+
+    def k(self, base, n=1):
+        return deadman.key_of("real", base, n)
+
+    def forge(self, base, n=1, state="opened", author=REPORTER, scope="state", mode="real"):
+        body = "<!-- dumpling-deadman key=%s mode=%s -->\n<!-- dumpling-deadman-scope %s -->\n偽造的" % (deadman.key_of(mode, base, n), mode, scope)
+        return self.gl.add_issue(body, ["watch-health", "watch-deadman"], state=state, author=author)
+
+    def real(self):
+        """可信作者（BOT）的 deadman Issue：{編號: Issue}。"""
+        return {n: i for n, i in self.gl.deadman_issues().items() if i["author"]["id"] == BOT}
+
+    def tick(self, days=0):
+        """時間往前走 days 天；狀態與排程都「剛跑過」（不是因為時間過去而變成停擺）。"""
+        self.cur = NOW + dt.timedelta(days=days)
+        self.set_state((self.cur - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        for sc in self.gl.schedules.values():
+            sc["row"]["next_run_at"] = (self.cur + dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    def go(self):
+        return self.dm("--schedules", now=self.cur.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def cycle(self, break_it, fix_it, base):
+        """開(n=1) → 恢復留言 → 人關閉 → 再發生 → 開新的(n=2)，持續好幾天不重複開；再恢復、再發生 → n=3。"""
+        self.cur = NOW
+        self.tick(0)
+        self.gl.add_schedule(3)
+        self.tick(0)
+        break_it()
+        self.assertEqual(self.go()[0], 2)
+        self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("open", self.k(base, 1))])
+        self.apply()
+        self.assertEqual(len(self.real()), 1)
+        fix_it()
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("comment", self.k(base, 1))])
+        self.apply()
+        first = min(self.real())
+        self.assertEqual(len(self.gl.notes[first]), 1)
+        self.gl.issues[first]["state"] = "closed"            # 人確認後關閉
+        self.assertEqual(self.go()[0], 0)                    # 恢復後的正常輪：什麼都不做
+        self.assertFalse(self.has_plan())
+        break_it()
+        rc, out = self.go()
+        self.assertEqual(rc, 2, out)
+        a = self.plan()["actions"][0]
+        self.assertEqual((a["op"], a["key"]), ("open", self.k(base, 2)))
+        self.assertIn("第 2 次", a["title"])
+        self.assertIn("第 2 次", a["body"])
+        self.apply()
+        self.assertEqual(len(self.real()), 2)
+        self.assertEqual(self.gl.issues[first]["state"], "closed")          # 舊的不重開
+        for days in (1, 2, 3):                               # 這次停擺持續好幾天：不再開新的
+            self.tick(days)
+            break_it()
+            self.assertEqual(self.go()[0], 2)
+            self.assertEqual(self.plan()["actions"][0]["key"], self.k(base, 2))
+            self.apply()
+            self.assertEqual(len(self.real()), 2)
+        second = max(self.real())
+        fix_it()
+        self.go()
+        self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("comment", self.k(base, 2))])
+        self.apply()
+        self.assertEqual(len(self.gl.notes[second]), 1)
+        self.assertEqual(len(self.gl.notes[first]), 1)          # 已關閉的舊 Issue 沒有再收到留言
+        self.gl.issues[second]["state"] = "closed"
+        break_it()
+        self.go()
+        self.assertEqual(self.plan()["actions"][0]["key"], self.k(base, 3))
+
+    def test_schedule_inactive_second_incident_opens_new_issue(self):
+        self.cycle(lambda: self.gl.schedules[3]["row"].update(active=False), lambda: self.gl.schedules[3]["row"].update(active=True),
+                   "schedule:3:inactive")
+
+    def test_state_missing_second_incident_opens_new_issue(self):
+        def break_it():
+            self.gl.issues = {k: v for k, v in self.gl.issues.items() if "watch-state" not in v["labels"]}
+        self.cycle(break_it, lambda: self.tick(self.cur_days()), "state:missing")
+
+    def cur_days(self):
+        return (self.cur - NOW).days
+
+    def test_closed_but_not_recovered_is_not_reopened_nor_duplicated(self):
+        self.gl.add_schedule(3, active=False)
+        self.set_state(ago(1))
+        self.dm("--schedules")
+        self.apply()
+        (n, i), = self.real().items()
+        i["state"] = "closed"                                   # 人關了，但問題還在
+        for _ in range(2):
+            self.assertEqual(self.dm("--schedules")[0], 2)
+            self.assertEqual(self.plan()["actions"][0]["key"], self.k("schedule:3:inactive", 1))
+            self.apply()
+            self.assertEqual(len(self.real()), 1)
+            self.assertEqual(i["state"], "closed")
+
+    def test_forged_open_or_closed_issue_cannot_swallow_the_alert(self):
+        self.set_state(ago(1))
+        self.gl.add_schedule(3, active=False)
+        for state in ("opened", "closed"):
+            self.gl.issues = {k: v for k, v in self.gl.issues.items() if "watch-deadman" not in v["labels"]}
+            self.forge("schedule:3:inactive", 1, state=state, scope="schedule:3")
+            self.assertEqual(self.dm("--schedules")[0], 2)
+            self.assertEqual(self.plan()["actions"][0]["key"], self.k("schedule:3:inactive", 2), state)
+            self.apply()
+            self.assertEqual(len(self.real()), 1, state)
+            self.assertEqual(min(self.real()) > 0, True)
+        # 預先佔住好幾個 key
+        self.gl.issues = {k: v for k, v in self.gl.issues.items() if "watch-deadman" not in v["labels"]}
+        self.forge("schedule:3:inactive", 1, scope="schedule:3")
+        self.forge("schedule:3:inactive", 2, state="closed", scope="schedule:3")
+        self.dm("--schedules")
+        self.assertEqual(self.plan()["actions"][0]["key"], self.k("schedule:3:inactive", 3))
+
+    def test_forged_issue_after_real_recovered_incident_is_skipped(self):
+        self.set_state(ago(1))
+        self.gl.add_schedule(3, active=False)
+        self.dm("--schedules")
+        self.apply()
+        self.gl.schedules[3]["row"]["active"] = True
+        self.dm("--schedules")
+        self.apply()                                   # 恢復留言
+        self.gl.schedules[3]["row"]["active"] = False
+        self.forge("schedule:3:inactive", 2, scope="schedule:3")      # 有人搶先佔住 n=2
+        self.dm("--schedules")
+        self.assertEqual(self.plan()["actions"][0]["key"], self.k("schedule:3:inactive", 3))
+
+    def test_forged_issue_never_gets_recovery_comment(self):
+        self.set_state(ago(1))
+        f = self.forge("state:missing", 1, scope="state")
+        self.assertEqual(self.dm()[0], 0)
+        self.assertFalse(self.has_plan())
+        self.assertNotIn(f, self.gl.notes)
+
+    def test_trusted_issue_wins_over_forged_copy_of_same_key(self):
+        self.set_state(ago(40))
+        self.dm()
+        self.apply()
+        (n, i), = self.real().items()
+        self.forge("state-stale:" + ago(40), 1)                # 同 key 的偽造 Issue（編號比較大）
+        self.set_state(ago(1))
+        self.dm()
+        self.assertEqual([(a["op"], a["key"]) for a in self.plan()["actions"]], [("comment", self.k("state-stale:" + ago(40), 1))])
+        self.apply()
+        self.assertEqual(len(self.gl.notes[n]), 1)
+
+    def test_duplicate_trusted_issues_same_key_one_recovery_comment_on_highest(self):
+        self.set_state(ago(1))
+        body = "<!-- dumpling-deadman key=%s mode=real -->\n<!-- dumpling-deadman-scope state -->\nx" % self.k("state:missing", 1)
+        a = self.gl.add_issue(body, ["watch-deadman"], author=DEV)
+        b = self.gl.add_issue(body, ["watch-deadman"], author=BOT)
+        self.dm()
+        self.assertEqual([(x["op"], x["key"]) for x in self.plan()["actions"]], [("comment", self.k("state:missing", 1))])
+        self.apply()
+        self.assertEqual(sorted(self.gl.notes), [b])
+
+    def test_token_bot_is_trusted_even_if_not_listed_as_member(self):
+        self.gl.members.pop(BOT)                           # 成員查詢查不到 bot；只靠 GET /user
+        self.set_state(ago(40))
+        self.dm()
+        self.apply()
+        self.set_state(ago(1))
+        self.dm()
+        self.assertEqual([a["op"] for a in self.plan()["actions"]], ["comment"])
+        self.apply()
+        self.set_state(ago(100))
+        self.dm()
+        self.assertEqual([a["op"] for a in self.plan()["actions"]], ["open"])       # 新的 base（最後更新時間不同）
+        self.gl.members[BOT] = (40, "active")
+
+    def test_too_many_incidents_is_fail(self):
+        old = deadman.MAX_N
+        deadman.MAX_N = 3
+        self.addCleanup(setattr, deadman, "MAX_N", old)
+        self.set_state(ago(1))
+        self.gl.add_schedule(3, active=False)
+        for n in (1, 2, 3):
+            self.forge("schedule:3:inactive", n, scope="schedule:3")
+        rc, out = self.dm("--schedules")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.result()["status"], "FAIL")
+        self.assertFalse(self.has_plan())
+        self.assertIn("超過上限", out)
+
+    def test_history_lookup_failure_still_reports_alert(self):
+        self.set_state(ago(40))
+        orig = self.gl.list_issues
+
+        def bad(repo, label, state="all"):
+            if label == "watch-deadman":
+                raise issues.Fail("boom")
+            return orig(repo, label, state)
+        self.gl.list_issues = bad
+        rc, out = self.dm()
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(self.plan()["actions"][0]["key"], self.k("state-stale:" + ago(40), 1))
 
 
 if __name__ == "__main__":

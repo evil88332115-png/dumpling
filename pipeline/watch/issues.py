@@ -624,6 +624,9 @@ def load_plan(path, want_mode=None):
             bad("stateless 的 plan 只能有 " + "、".join(ops))
         if deadman and any(isinstance(a, dict) and a.get("reopen_if_closed") for a in plan.get("actions") or []):
             bad("deadman 的 plan 不能重開 Issue（reopen_if_closed）")
+        if any(isinstance(a, dict) and "issue" in a and (not deadman or a.get("op") != "comment" or type(a["issue"]) is not int or a["issue"] <= 0)
+               for a in plan.get("actions") or []):
+            bad("issue（指定留言的 Issue 編號）只能用在 deadman 的 comment，而且要是正整數")
         if any(isinstance(a, dict) and isinstance(a.get("labels"), list) and "dumpling-watch" in a["labels"] for a in plan.get("actions") or []):
             bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限與死人開關的 Issue 不是監控 Issue）")
         if deadman and any(isinstance(a, dict) and isinstance(a.get("labels"), list) and SUPPORT_LABEL in a["labels"] for a in plan.get("actions") or []):
@@ -800,7 +803,10 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
             elif stateless:
                 # deadman 的恢復通知：只對「開著的」deadman Issue 留言；已關閉或找不到就跳過（不重開、不算 problem）
                 idx = watch_index(api, repo, problems, base_label, mark_re)
-                ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])
+                cands = [e for e in idx.get(key, []) if e["mode"] == mode]
+                if a.get("issue") is not None:      # plan 指定了 Issue（同 key 有多個時，不能讓偽造的那個收到留言）
+                    cands = [e for e in cands if e["number"] == a["issue"]]
+                ent = pick(cands)
                 if not ent or ent["state"] != "open":
                     r.update(result="skipped", reason="Issue 已關閉或不存在，不留言")
                     continue

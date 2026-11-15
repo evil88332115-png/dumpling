@@ -510,6 +510,34 @@ class TestDeadmanPlan(Base):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("problem\t", out)
 
+    def test_comment_with_issue_number_targets_that_issue_only(self):
+        mk = "<!-- dumpling-deadman key=%s mode=real -->\n" % K1
+        a = self.gl.add_issue(mk + "真的", ["watch-deadman"])
+        b = self.gl.add_issue(mk + "偽造的同 key（編號較大）", ["watch-deadman"])
+        c = self.gl.add_issue(mk + "已關閉", ["watch-deadman"], state="closed")
+        for target, want in ((a, a), (b, b)):
+            self.gl.notes.clear()
+            act = dict(self.cact(), issue=target)
+            rc, out = self.apply(self.dplan([act], name="t%d.json" % target), "--mode", "real")
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(list(self.gl.notes), [want])
+        self.gl.notes.clear()
+        rc, out = self.apply(self.dplan([dict(self.cact(), issue=c)], name="tc.json"), "--mode", "real")      # 指定的已關閉：跳過，不改送別的
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.gl.notes, {})
+        rc, out = self.apply(self.dplan([dict(self.cact(), issue=999)], name="t9.json"), "--mode", "real")    # 指定的不存在：跳過
+        self.assertEqual((rc, self.gl.notes), (0, {}))
+        # 沒指定：行為照舊（開著的優先、編號最大）
+        rc, out = self.apply(self.dplan([self.cact()], name="tn.json"), "--mode", "real")
+        self.assertEqual(list(self.gl.notes), [b])
+
+    def test_issue_field_validation(self):
+        for act in (dict(self.cact(), issue="1"), dict(self.cact(), issue=0), dict(self.cact(), issue=True), dict(self.dact(), issue=1)):
+            with self.assertRaises(issues.Fail):
+                issues.load_plan(self.dplan([act], name="v.json"))
+        with self.assertRaises(issues.Fail):          # support 的 plan 不能帶 issue
+            issues.load_plan(self.dplan([dict(self.dact(labels=("support-period",)), issue=1)], kind="support", name="v2.json"))
+
     def test_comment_never_lands_on_a_watch_issue_with_same_key(self):
         n = self.gl.add_issue(mark(K1), ["dumpling-watch"])
         rc, out = self.apply(self.dplan([self.cact()]), "--mode", "real")

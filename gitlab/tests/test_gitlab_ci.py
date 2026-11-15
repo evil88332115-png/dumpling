@@ -363,6 +363,10 @@ class CiFile(unittest.TestCase):
         self.assertNotEqual(gitlabci.pipeline_when(self.doc, sched), "never")
         self.assertEqual(gitlabci.job_when(j, sched), "manual")
         self.assertTrue(all(r.get("when") == "manual" and r.get("allow_failure") is True for r in j["rules"]))
+        # 規則層級的 allow_failure: true 會蓋掉 job 層級的 exit_codes：只有 when: manual 的規則可以有它（放開 manual 時要一起拿掉）
+        for r in j["rules"]:
+            if r.get("when") != "manual":
+                self.assertNotIn("allow_failure", r, r)
         self.assertEqual(gitlabci.pipeline_when(self.doc, self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="nope")), "never")
         for ctx in (self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch"), self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="art14"),
                     self.ctx(CI_PIPELINE_SOURCE="schedule"), self.ctx(CI_PIPELINE_SOURCE="web", DUMPLING_JOB="deadman"),
@@ -377,7 +381,8 @@ class CiFile(unittest.TestCase):
         self.assertEqual(j["allow_failure"], {"exit_codes": [2]})
         self.assertEqual(j["stage"], "watch")
         self.assertEqual(j["resource_group"], "watch-deadman")
-        self.assertIn("deadman-out/", j["artifacts"]["paths"])
+        self.assertEqual(j["artifacts"]["paths"], ["deadman-out/"])
+        self.assertEqual(j["artifacts"]["access"], "developer")       # 內有排程 description 與擁有者帳號名稱：不給 Reporter／Guest 下載
         self.assertEqual(j["artifacts"]["when"], "always")
         # 獨立的 token（只有這個 job 用）；GITLAB_TOKEN 只在指令前綴；不印 token、不 set -x、不用 CI_JOB_TOKEN
         c = self.lines_of("watch:deadman")

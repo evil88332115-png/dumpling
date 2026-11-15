@@ -9,7 +9,7 @@
 
 檢查 1（一律做）：狀態 Issue 的新舊。issues.find_state_issue 找狀態 Issue、decode_state 解開；
   最後更新時間＝state 的 runs 最後一筆的 at（match.py 每輪 append {at, status, run_url, mode, detail}，格式 YYYY-MM-DDTHH:MM:SSZ）；
-  state 沒有 runs（或是空的）才退回 Issue 的 updated_at；runs 最後一筆有、但 at 讀不出來 → 不退回（資料壞了，不掩蓋）、ALERT。
+  runs 不是 list、缺少、是空的、或最後一筆的 at 讀不出來 → ALERT（state:no-time），不退回 Issue 的 updated_at（match.py 每輪都會 append run；退回去會讓一次手動編輯就關掉死人開關）。
   現在減最後更新時間「超過」--max-age-hours（預設 36，和儀表板 pipeline/dashboard/build.py 的 STALE_HOURS 一致，測試鎖住）才 ALERT；剛好等於不算。
   找不到狀態 Issue、解不開、時間讀不出來（或在未來超過 1 小時）也是 ALERT，各自寫明原因。API 失敗是 FAIL。
 檢查 2（只有 GitLab 後端而且有 --schedules）：GET /projects/:id/pipeline_schedules 列出全部排程，再對每一個 GET …/pipeline_schedules/:id 取 variables
@@ -23,16 +23,21 @@
   有要開的 Issue 或要留的「已恢復」留言時另寫 <out>/plan.json（dumpling-watch-plan/1，stateless、stateless_kind=deadman；交給 issues.py apply）。
 
 Issue 與恢復：
-  - 每一個「停擺」一個 key＝sha256("dumpling-watch/1|<mode>|deadman|<停擺的識別>")（同 match.issue_key 的算法，這裡自己實作、不 import match 的函式；測試核對兩邊相同）。
-    停擺的識別：狀態停擺＝state-stale:<最後更新時間>；其他狀態問題＝state:missing／state:undecodable／state:no-time；
-    排程＝schedule:<id>:<inactive|owner-not-active|next-run-stale|next-run-unreadable>、schedule:none:missing、schedule:all:gap。
-    同一次停擺（最後更新時間沒變）每天都是同一個 key，issues.py apply 看到已有 Issue（含已關閉）就不重複開；恢復後又停（最後更新時間變了）→ 新的 key → 新的 Issue。
-  - 恢復：狀態或排程恢復時，在「那一次停擺的 Issue」留言「已恢復，時間 …」，不自動關閉（由人關）。deadman 先列出開著、帶 watch-deadman 標籤的 Issue，
-    從標記解出 key，Issue 內文第二行的範圍標記（<!-- dumpling-deadman-scope … -->）說明它屬於哪個檢查；該範圍這輪有檢查、而且沒有任何警告 → 恢復。
+  - 每一次「停擺」一個 key＝sha256("dumpling-watch/1|<mode>|deadman|<base>|<n>")（同 match.issue_key(mode, "deadman", base, str(n)) 的算法，這裡自己實作、不 import match 的函式；測試核對兩邊相同）。
+    base（停擺的種類）：state-stale:<最後更新時間>、state:missing／state:undecodable／state:no-time、
+    schedule:<id>:<inactive|owner-not-active|next-run-stale|next-run-unreadable>、schedule:none:missing、schedule:all:gap。
+    n＝這個 base 的第幾次停擺（從 1 開始），統一套用到所有 base：deadman 先列出所有（開著與已關閉）watch-deadman Issue、從標記解出 key，**只採用作者可信的 Issue**（Judge，見下）：
+    該 base 可信 Issue 裡最大的 n 是 n_max；沒有 → n 取最小、沒被「不可信」Issue 佔用的值；n_max 的 Issue 已經有可信的「已恢復」留言 → 新的一次停擺，n＝n_max 之後第一個沒被不可信 Issue 佔用的值；
+    否則同一次停擺還沒結束，n＝n_max（人已經關閉的話 apply 會跳過、不重開：由人決定）。n 超過 MAX_N（1000）→ FAIL。
+    同一次停擺持續好幾天都是同一個 key（apply 看到已有 Issue，含已關閉，就不重複開）；恢復（留言「已恢復」）之後又停 → n+1 → 新的 key → 新的 Issue。
+    被不可信作者的 Issue 佔用的 key 一律跳過，所以有人偽造同 key 的 Issue（或預先佔住下一個 key）也吞不掉真正的警告，偽造的 Issue 也不會收到恢復留言。
+  - 恢復：狀態或排程恢復時，在「那一次停擺的 Issue」留言「已恢復，時間 …」，不自動關閉（由人關）。每個 key 只看可信 Issue 裡編號最大的那一個；
+    Issue 內文第二行的範圍標記（<!-- dumpling-deadman-scope … -->）說明它屬於哪個檢查；該範圍這輪有檢查、而且沒有任何警告 → 恢復。
     只對開著的 Issue 留言（issues.py apply 對已關閉的跳過、不重開）。同一次停擺只留一則：留言的第一行是機器標記
     <!-- dumpling-deadman-recovered key=<64 hex> -->，下一輪看到可信作者寫的這則就跳過。
-    標記放在留言（不用標籤）的理由：標籤 Reporter／Planner 就能改，留言有作者可以核對；留言的作者要可信（art14.Trust：GitLab 要是專案成員、等級 >= Developer（30），
-    GitHub 要是 OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]；system 留言不算），不然別人貼一則偽造的標記就能讓真的恢復通知永遠不出現。
+    標記放在留言（不用標籤）的理由：標籤 Reporter／Planner 就能改，留言有作者可以核對。可信的定義（Judge，沿用 art14.Trust）：GitLab 要是專案成員、等級 >= Developer（30），
+    或是 token 自己的使用者（GET /user）；GitHub 要是 OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]；system 留言不算。Issue 的作者與留言的作者都照這個規則。
+    殘留限制：人在恢復「之前」就把 Issue 關掉、之後同一種問題又發生（而且 base 不含時間）時，因為沒有恢復留言，會被當成同一次停擺而不開新的（由人決定的那一邊）。
   - 外來字串（排程 description、owner username、ref、cron…）寫進 Issue 前一律用 match.md_text 淨化（標題用 match.md_title）。理由：md_text ＝ firmware_mdsafe.md_safe
     （跳脫 Markdown、@ 提及、自動連結、HTML 實體）再加上 Issue 參照（#123、GH-123）斷開，後者在 Issue 內文才需要，所以選 match.md_text 而不是裸的 md_safe。
     淨化結果是單行，所以不會產生以 / 開頭的行（GitLab quick action）；issues.py apply 另有 quick action 與公開檢查。公開檢查命中外來字串時（例如描述裡有信箱），
@@ -56,6 +61,7 @@ import match  # noqa: E402  只用 md_text／md_title／unsafe_actions（淨化�
 import publiccheck  # noqa: E402
 
 DEFAULT_MAX_AGE_HOURS = 36           # 和 pipeline/dashboard/build.py 的 STALE_HOURS 一致（test_deadman 鎖住）
+MAX_N = 1000                  # 同一種停擺最多追蹤幾次：超過就 FAIL（不無限迴圈，也不假裝沒事）
 FUTURE_SLACK = datetime.timedelta(hours=1)      # 最後更新時間比現在晚超過這麼多＝壞資料（否則一個未來的時間會讓死人開關永遠不響）
 KEY_PREFIX = "dumpling-watch/1"      # 同 match.KEY_PREFIX；key 的算法同 match.issue_key（不 import，測試核對）
 LABELS = ["watch-health", issues.DEADMAN_LABEL]
@@ -85,9 +91,10 @@ class Parser(argparse.ArgumentParser):
 
 
 # ---------- 小工具 ----------
-def key_of(mode, ident):
-    """同 match.issue_key(mode, "deadman", ident)：sha256("dumpling-watch/1|<mode>|deadman|<ident>")。"""
-    return hashlib.sha256("|".join((KEY_PREFIX, mode, "deadman", ident)).encode("utf-8")).hexdigest()
+def key_of(mode, base, n):
+    """同 match.issue_key(mode, "deadman", base, str(n))：sha256("dumpling-watch/1|<mode>|deadman|<base>|<n>")。
+    base＝停擺的種類（狀態、哪個排程的哪種問題），n＝這個 base 的第幾次停擺（從 1 開始）。"""
+    return hashlib.sha256("|".join((KEY_PREFIX, mode, "deadman", base, str(n))).encode("utf-8")).hexdigest()
 
 
 def parse_ts(s):
@@ -153,22 +160,19 @@ def check_state(api, target, mode, now, max_age_h):
     except issues.Fail as e:
         return alert("state:undecodable", "[監控健康] 每日監控的狀態 Issue 解不開",
                      f"狀態 Issue（編號 {si.get('number')}）解不開：{e}", f"狀態 Issue（編號 {si.get('number')}）解不開")
+    # match.py 每一輪都 append run，合法的狀態一定有非空的 runs（list）：不是 list、缺少、是空的、最後一筆壞掉 → 都是警告，不退回 Issue 的 updated_at
+    # （狀態 Issue 只要被人改過 updated_at 就會變新，退回去會讓死人開關被一次手動編輯關掉）
     runs = state.get("runs")
-    src = None
-    if isinstance(runs, list) and runs:
-        last = runs[-1]
-        at = last.get("at") if isinstance(last, dict) else None
-        t = parse_ts(at) if isinstance(at, str) and at.endswith("Z") else None
-        src = "runs 最後一筆的 at"
-        if t is None:
-            return alert("state:no-time", "[監控健康] 每日監控的狀態讀不出最後更新時間",
-                         "狀態的 runs 最後一筆沒有合法的 at（YYYY-MM-DDTHH:MM:SSZ）：資料可能壞了", "runs 最後一筆的時間讀不出來")
-    else:
-        t = parse_ts(si.get("updated_at"))
-        src = "Issue 的 updated_at（狀態沒有 runs）"
-        if t is None:
-            return alert("state:no-time", "[監控健康] 每日監控的狀態讀不出最後更新時間",
-                         "狀態沒有 runs，Issue 的 updated_at 也讀不出來", "沒有 runs，updated_at 也讀不出來")
+    if not isinstance(runs, list) or not runs:
+        return alert("state:no-time", "[監控健康] 每日監控的狀態讀不出最後更新時間",
+                     "狀態的 runs 不是列表、缺少或是空的：讀不出最後更新時間（每日監控每一輪都會寫一筆 run）", "狀態的 runs 不是非空列表")
+    last = runs[-1]
+    at = last.get("at") if isinstance(last, dict) else None
+    t = parse_ts(at) if isinstance(at, str) and at.endswith("Z") else None
+    src = "runs 最後一筆的 at"
+    if t is None:
+        return alert("state:no-time", "[監控健康] 每日監控的狀態讀不出最後更新時間",
+                     "狀態的 runs 最後一筆沒有合法的 at（YYYY-MM-DDTHH:MM:SSZ）：資料可能壞了", "runs 最後一筆的時間讀不出來")
     info["last_update"] = fmt(t)
     age = now - t
     info["age_hours"] = round(age.total_seconds() / 3600, 2)
@@ -261,7 +265,8 @@ def build_body(a, checks, info, now, max_age_h, summaries, foreign):
     """foreign＝False 時不放排程的 description／owner／ref／cron（公開檢查命中外來字串時的後備內文）。"""
     t = md
     lines = [f"<!-- dumpling-deadman-scope {a['scope']} -->", "",
-             "**每日監控的死人開關**（`deadman.py`）發出警告：", "", f"- 本次問題：{t(a['why'], 400)}", "- 檢查結果："]
+             "**每日監控的死人開關**（`deadman.py`）發出警告：", "", f"- 本次問題：{t(a['why'], 400)}",
+             f"- 停擺次數：第 {a['n']} 次（同一種問題恢復、人關閉 Issue 之後再發生，會開新的 Issue；同一次停擺持續期間不會重複開）", "- 檢查結果："]
     lines += [f"  - {t(c['name'])}：**{t(c['status'])}**（{t(c['detail'], 400)}）" for c in checks]
     lines += [f"- 狀態最後更新時間：{t(info['last_update'] or '讀不到')}；檢查時間：{t(fmt(now))}；門檻：{t(num(max_age_h))} 小時"]
     if summaries:
@@ -281,15 +286,91 @@ def recovered_body(key, scope_desc, now):
                       "這個 Issue 不會自動關閉，請人確認後關閉。"]) + "\n"
 
 
-# ---------- 恢復 ----------
-def find_recoveries(api, target, mode, now, alerts, evaluated, info, recover_desc):
-    """列出開著的 deadman Issue，找出已恢復、而且還沒有可信的「已恢復」留言的 → [(key, issue 編號, 說明)]。"""
-    cur_scopes = {a["scope"] for a in alerts}
-    trust = art14.Trust(api, target)
-    out = []
-    for i in issues.list_issues(api, target, issues.DEADMAN_LABEL, "open"):
+# ---------- 停擺次數與恢復：只認可信作者的 Issue ----------
+class Judge:
+    """誰寫的 Issue／留言可信（art14.Trust：GitLab 專案成員且等級 >= Developer；GitHub OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]）。
+    GitLab 另外認 token 自己的使用者（GET /user；project access token 能不能用文件沒寫，待內部驗證，查不到就只靠成員等級）。"""
+
+    def __init__(self, api, target):
+        self.api, self.trust, self._me = api, art14.Trust(api, target), "?"
+
+    def me(self):
+        if self._me == "?":
+            self._me = None
+            if art14.is_gitlab(self.api):
+                try:
+                    self._me = self.api.current_user()["id"]
+                except issues.Fail:
+                    pass
+        return self._me
+
+    def ok(self, obj):
+        if self.trust.ok(obj):
+            return True
+        if art14.is_gitlab(self.api):
+            uid = (obj.get("user") or {}).get("id")
+            return type(uid) is int and uid == self.me()
+        return False
+
+
+def load_index(api, target, mode, judge):
+    """所有（開著與已關閉的）watch-deadman Issue，依標記的 key 分組 → {key: {"trusted": [Issue…（編號小到大）], "untrusted": bool}}。
+    只看第一行標記合法而且 mode 相同的；作者不可信的 Issue 只記「這個 key 被佔用了」，不當作我們的 Issue。"""
+    idx = {}
+    for i in issues.list_issues(api, target, issues.DEADMAN_LABEL, "all"):
         mk = issues.parse_marker(i.get("body"), issues.DEADMAN_MARK_RE)
         if not mk or mk[1] != mode:
+            continue
+        e = idx.setdefault(mk[0], {"trusted": [], "untrusted": False})
+        if judge.ok(i):
+            e["trusted"].append(i)
+        else:
+            e["untrusted"] = True
+    for e in idx.values():
+        e["trusted"].sort(key=lambda i: i["number"])
+    return idx
+
+
+def has_recovered_note(api, target, judge, issue, key):
+    for n in api.list_notes(target, issue["number"]):
+        first = (n.get("body") or "").splitlines()[:1]
+        rm = RECOVERED_RE.fullmatch(first[0]) if first else None
+        if rm and rm.group(1) == key and not n.get("system") and judge.ok(n):
+            return True
+    return False
+
+
+def assign_keys(api, target, mode, alerts, idx, judge):
+    """每個警告（base）決定這一次是第幾次停擺 n，並算出 key：
+    - 可信的 Issue 裡最大的 n（n_max）：沒有 → n 取最小、沒被不可信 Issue 佔用的值；
+    - n_max 的 Issue 已經有可信的「已恢復」留言 → 新的一次停擺，n＝n_max 之後第一個沒被不可信 Issue 佔用的值；
+    - 否則同一次停擺還沒結束，n＝n_max（人已經關閉的話 apply 會跳過、不重開：由人決定）。
+    被不可信 Issue 佔用的 key 一律跳過，偽造的同 key Issue 吞不掉警告。n 超過 MAX_N → Fail。"""
+    def free(base, start):
+        for n in range(start, MAX_N + 1):
+            if not idx.get(key_of(mode, base, n), {}).get("untrusted"):
+                return n
+        raise Fail(f"{base} 的停擺次數超過上限 {MAX_N}：不再追蹤（請人處理掉舊的 Issue 與偽造的同 key Issue）")
+    for a in alerts:
+        base = a["ident"]
+        n_max = max((n for n in range(1, MAX_N + 1) if idx.get(key_of(mode, base, n), {}).get("trusted")), default=0)
+        if n_max == 0:
+            n = free(base, 1)
+        else:
+            k = key_of(mode, base, n_max)
+            n = free(base, n_max + 1) if has_recovered_note(api, target, judge, idx[k]["trusted"][-1], k) else n_max
+        a["n"], a["key"] = n, key_of(mode, base, n)
+
+
+def find_recoveries(api, target, idx, judge, alerts, evaluated, recover_desc):
+    """每個 key 只看可信 Issue 裡編號最大的那一個：它開著、範圍這輪有檢查而且沒有警告、還沒有可信的「已恢復」留言 → [(key, issue 編號, 說明)]（每個 key 最多一筆）。"""
+    cur_scopes = {a["scope"] for a in alerts}
+    out = []
+    for key in sorted(idx, key=lambda k: idx[k]["trusted"][-1]["number"] if idx[k]["trusted"] else 0):
+        if not idx[key]["trusted"]:
+            continue
+        i = idx[key]["trusted"][-1]
+        if i.get("state") != "open":
             continue
         lines = (i.get("body") or "").splitlines()
         sm = SCOPE_RE.fullmatch(lines[1]) if len(lines) > 1 else None
@@ -298,16 +379,8 @@ def find_recoveries(api, target, mode, now, alerts, evaluated, info, recover_des
         scope = sm.group(1)
         if scope not in evaluated or scope in cur_scopes:
             continue
-        notes = api.list_notes(target, i["number"])
-        done = False
-        for n in notes:
-            first = (n.get("body") or "").splitlines()[:1]
-            rm = RECOVERED_RE.fullmatch(first[0]) if first else None
-            if rm and rm.group(1) == mk[0] and not n.get("system") and trust.ok(n):
-                done = True
-                break
-        if not done:
-            out.append((mk[0], i["number"], recover_desc(scope)))
+        if not has_recovered_note(api, target, judge, i, key):
+            out.append((key, i["number"], recover_desc(scope)))
     return out
 
 
@@ -347,9 +420,15 @@ def run(args, api, target, now):
         return f"排程 {scope.split(':')[1]} 恢復正常（active、擁有者 active、next_run_at 沒有過期）。"
     recoveries = []
     try:
-        recoveries = find_recoveries(api, target, args.mode, now, alerts, evaluated, info, recover_desc)
+        judge = Judge(api, target)
+        idx = load_index(api, target, args.mode, judge)
+        assign_keys(api, target, args.mode, alerts, idx, judge)
+        recoveries = find_recoveries(api, target, idx, judge, alerts, evaluated, recover_desc)
     except issues.Fail as e:
-        checks.append({"name": "recovery", "status": "FAIL", "detail": f"列出舊的 deadman Issue 或留言失敗：{e}（這一輪不留恢復通知；警告照常）"})
+        for a in alerts:           # 查不到歷史：警告照報（key 取第 1 次；apply 會用既有 Issue 去重），不留恢復通知
+            if "key" not in a:
+                a["n"], a["key"] = 1, key_of(args.mode, a["ident"], 1)
+        checks.append({"name": "recovery", "status": "FAIL", "detail": f"列出舊的 deadman Issue 或留言失敗：{e}（這一輪不留恢復通知、不判斷第幾次停擺；警告照常）"})
         failed = True
 
     # 主要檢查失敗＝FAIL（沒辦法判斷）；只有「恢復查詢」失敗時，已經確定的警告照報（ALERT），沒有警告才 FAIL
@@ -363,13 +442,13 @@ def build_actions(args, alerts, checks, info, now, summaries, recoveries):
     drill = ["drill"] if args.mode == "drill" else []
     rules = publiccheck.load_rules()
     for a in alerts:
-        title = a["title"]
+        title = a["title"] + (f"（第 {a['n']} 次）" if a["n"] > 1 else "")
         body = build_body(a, checks, info, now, args.max_age_hours, summaries, True)
         if publiccheck.check_text(title + "\n" + body, rules):
             body = build_body(a, checks, info, now, args.max_age_hours, summaries, False)      # 外來字串命中公開檢查：換成不含外來字串的內文
-        actions.append({"op": "open", "key": key_of(args.mode, a["ident"]), "title": title, "body": body, "labels": LABELS + drill})
+        actions.append({"op": "open", "key": a["key"], "title": title, "body": body, "labels": LABELS + drill})
     for key, number, desc in recoveries:
-        actions.append({"op": "comment", "key": key, "body": recovered_body(key, desc, now)})
+        actions.append({"op": "comment", "key": key, "issue": number, "body": recovered_body(key, desc, now)})
     return actions
 
 
@@ -457,7 +536,7 @@ def main(argv=None, api=None):
     if alerts:
         detail += "；" + "；".join(a["why"] for a in alerts)[:600]
     result.update(status=status, checks=checks, last_update=info["last_update"], age_hours=info["age_hours"], schedules=summaries,
-                  alerts=[{"scope": a["scope"], "ident": a["ident"], "key": key_of(args.mode, a["ident"])} for a in alerts],
+                  alerts=[{"scope": a["scope"], "ident": a["ident"], "n": a["n"], "key": a["key"]} for a in alerts],
                   recovered=[{"key": k, "issue": n} for k, n, _ in recoveries])
     write_json(os.path.join(args.out, "result.json"), result, token)
     if actions:
