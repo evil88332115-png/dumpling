@@ -1,6 +1,6 @@
 # DASHBOARD：GitHub Pages 靜態儀表板（D-062，設計）
 
-> 狀態：**設計稿，還沒寫程式**（D-062 第 6 點：先交設計給 C0）。負責：C3（WP2）。
+> 狀態：**設計已經 C0 同意（2026-11-15），還沒寫程式**（D-062 第 6 點：先交設計給 C0）。負責：C3（WP2）。
 > 範圍：公開示範階段。DT 上線後的內部網頁另議（GitLab 搬移與公司 IT），本檔 §8 只寫「搬到 GitLab Pages 要改哪裡」。
 
 ## 1. 目的與不做的事
@@ -110,7 +110,7 @@
   - deploy：只有 `pages: write`、`id-token: write`，`environment: github-pages`。
 
   其他規則：
-  - 第三方 action 一律固定 commit SHA（D-012。D-062 第 5 點寫的是「照 D-027」，但 D-027 講的是分層與 GitHub 封存檔；action 固定 SHA 的規定在 D-012，請 C0 更正），用 `actions/upload-pages-artifact`、`actions/deploy-pages`。
+  - 第三方 action 一律固定 commit SHA（D-012；見 §10 第 4 點），用 `actions/upload-pages-artifact`、`actions/deploy-pages`。
   - **只從 main 部署**，不接 `pull_request` 觸發，fork PR 碰不到部署。
 - **不放金鑰**：只用 `GITHUB_TOKEN`，而且只在 build job 的環境變數裡，產生器不把環境變數寫進輸出。`data.json` 只放白名單欄位，不放整份 API 回應。
 
@@ -120,9 +120,23 @@
 
 | 觸發 | 時機 | 備註 |
 |---|---|---|
-| `workflow_run`：`watch` 完成 | 每日監控之後，排程每天 01:17Z，實際可能晚好幾小時 | 只在 `head_branch == main`、事件是 schedule 或 workflow_dispatch 時才跑；跳過演練（mode=drill） |
-| `workflow_run`：`release`、`dev` 完成 | 正式 Release 或開發版發布後 | draft 本來就不列，所以手動建 draft 的 run 雖然也會觸發，頁面內容不變 |
-| `workflow_dispatch` | 手動 | |
+| `workflow_run`：`watch` 完成 | 每日監控之後，排程每天 01:17Z，實際可能晚好幾小時 | 演練（mode=drill）也會觸發，頁面內容不變（演練 Issue 不列） |
+| `workflow_run`：`dev` 完成 | 開發版發布後 | |
+| `workflow_run`：`release` 完成 | 正式 Release 發布後（tag push） | 手動建 draft 的 run（workflow_dispatch）不更新；draft 本來就不列 |
+| `workflow_dispatch` | 手動 | 只能在 main 上跑（`github.ref == refs/heads/main`） |
+
+**`workflow_run` 要依來源各自判斷**（C0 指出，2026-11-15）。tag 觸發的 release run，`workflow_run.head_branch` 是 tag 名稱，不是 `main`；如果只收 `main`，正式 Release 就不會更新頁面。
+
+| 來源 | `workflow_run.event` | `workflow_run.head_branch` |
+|---|---|---|
+| watch、dev | `schedule`、`workflow_dispatch` 或 `push` | 必須是 `main` |
+| release | 必須是 `push` | 必須符合 `<專案>/<版本>` 的 tag 格式，而且不是 `dev/…`。驗證用 `pipeline/watch/collect.py` 的 `PROJECT_RE`、`VERSION_RE`（`classify` 回 `release` 的那種），與 release.yml 的 `*/v*` 觸發條件一致；不在 workflow 裡另寫一份 regex |
+
+三種來源還有兩條共同規定：
+- 一律要求 `workflow_run.head_repository.full_name == github.repository`，也就是 run 必須出自本 repo，不能來自 fork。
+- 一律要求 `workflow_run.conclusion` 不是 `cancelled`。`failure` 照樣更新，因為頁面要能顯示失敗。
+
+不符合任何一條就跳過，不更新頁面。來源 repo、event、conclusion、watch／dev 的 `main` 這幾條寫在 build job 的 `if:`，不符就 skipped。release 的 tag 格式由 build 的第一步呼叫 collect.py 判斷；不符就輸出 `go=false`，不產生 artifact。deploy 依賴 build，而且要求 `go == 'true'`。另外，觸發只是「該更新了」的訊號：頁面資料一律重新從 API 讀，不用 `workflow_run` 帶進來的任何欄位（分支名、標題）產生內容。
 
 - 實際約一天一次，加上每次發布。同一時間只跑一個（`concurrency: pages`，不取消進行中的）。
 - 不另外設排程，避免多一個要防 60 天停用的 workflow。watch 每天都跑，產生時間就會每天更新。watch 如果停了，頁面時間也停住，看頁首就知道。
@@ -177,13 +191,23 @@
   - 不認得的狀態值會顯示成「不明」。
   - 輸出裡沒有「安全」或 PASS 字樣。
   - CSP meta 存在。
+- 觸發條件：把 §5 的 `if:` 抽成一個可以測試的函式，或用 `gitlab/tests/gitlabci.py` 那種表達式求值器來測。每一種情況都要有測試：
+  - watch、dev 在 `main` 上，事件是 schedule、workflow_dispatch、push → 更新。
+  - watch、dev 在其他分支 → 跳過。
+  - release 由 `orin-nano-demo/v39.2.1-demo1` 的 tag push 觸發 → 更新。
+  - release 是 workflow_dispatch（draft） → 跳過。
+  - release 的 `head_branch` 不符合 tag 格式，例如 `main` 或 `feature/x` → 跳過。
+  - `head_repository.full_name` 是 fork → 三種來源一律跳過。
+  - `conclusion: cancelled` → 跳過。
 - 用現在的公開資料試產生一次：
   - 3 個 Release（v39.2.0、v39.2.1、dev）、6 份 SBOM、狀態 Issue #114、4 個支援期限 Issue 都要出現。
   - draft 與演練 Issue 不能出現。
 - 驗證代理照 D-048 另外派，effort 用 high（安全相關）。
 
-## 10. 待決定（給 C0）
+## 10. 已決定（C0，2026-11-15）
 
-1. 第一版不放 JS：沒有篩選和排序，只靠瀏覽器的頁內搜尋。之後如果要加，只放同站的 `script.js`，CSP 加 `script-src 'self'`。
-2. 每次 Release 把 `data.json` 一起上傳成附件（§6），要不要做、什麼時候做，要和 C1 協調。
-3. 已關閉的監控 Issue 要列多久：建議全部列、預設摺起來。數量變多時改成只列最近 90 天，其他給 Issue 搜尋連結。
+1. **第一版不放 JS**：沒有篩選和排序，只靠瀏覽器的頁內搜尋。之後如果要加，只放同站的 `script.js`，CSP 加 `script-src 'self'`。
+2. **`data.json` 當 Release 附件保存**（§6）：列入第二階段，現在不做。
+3. **已關閉的監控 Issue**：全部列出，預設摺起來。摺起來用 HTML 的 `<details>`，不需要 JS。
+4. **固定 action SHA**：依據是 D-012。D-062 第 5 點寫成 D-027，C0 會在下一批 DECISIONS 更正。
+5. **`workflow_run` 依來源各自判斷**（§5），測試寫在 §9。
