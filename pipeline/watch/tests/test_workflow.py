@@ -93,6 +93,12 @@ class WatchWorkflow(unittest.TestCase):
         self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', notify)
         self.assertRegex(notify, r'issues\.py apply [^\n]*"\$\{d\[@\]\}"')
 
+    def test_fw_rematch_step_timeout_longer_than_c2_limit(self):
+        """C2 的 rematch 入口整次上限 900 秒：步驟上限要比它長，否則還沒輸出總表就被砍掉（NOT_RUN）。"""
+        m = re.search(r"(?ms)^      - name: 韌體公告重跑[^\n]*\n(.*?)^      - (?:name|uses):", self.round)
+        t = int(re.search(r"timeout-minutes:\s*(\d+)", m.group(1)).group(1))
+        self.assertGreater(t * 60, 900)
+
     def test_feeds_step_has_own_timeout_and_report_still_runs(self):
         # 資料源卡住時：這一步自己逾時、job 繼續，後面照樣比對並留下報告；不完整的鏡像刪掉
         m = re.search(r"(?ms)^      - name: 資料源（[^\n]*\n(.*?)^      - name:", self.round)
@@ -135,6 +141,23 @@ class WatchWorkflow(unittest.TestCase):
             self.assertTrue(evaluate(e, c(True, v)))
             self.assertFalse(evaluate(e, c(False, v)))
         self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', sup)
+
+    def test_firmware_rematch_wiring(self):
+        """韌體公告重跑（FIRMWARE-WATCH.md §5）：只在 real、match 之前、continue-on-error；腳本不存在或失敗時 match 照跑（不傳 --firmware-rematch → 韌體 NOT_RUN）。"""
+        m = re.search(r"(?ms)^      - name: 韌體公告重跑（real[^\n]*\n(.*?)^      - name:", self.round)
+        step = m.group(1)
+        self.assertIn("id: fwrematch", step)
+        self.assertIn("if: inputs.mode == 'real'", step)
+        self.assertIn("continue-on-error: true", step)
+        self.assertLess(self.round.index("name: 韌體公告重跑（real"), self.round.index("      - name: 比對\n"))
+        self.assertIn("[ ! -x pipeline/firmware-rematch.sh ]", step)               # 腳本不存在或不能執行：不跑（不失敗）
+        self.assertRegex(step, r'pipeline/firmware-rematch\.sh --meta "\$inv/\$meta" --dir [^\n]*--now [^\n]*--out "\$out"')
+        self.assertIn('fw-rematch', step)
+        self.assertIn('"$out/rematch-summary.json"', step)                          # 有 summary 才算有輸出
+        match_step = re.search(r"(?ms)^      - name: 比對\n(.*?)^      - uses:", self.round).group(1)
+        self.assertIn("steps.fwrematch.outputs.ran", match_step)
+        self.assertRegex(match_step, r'--firmware-rematch "\$RUNNER_TEMP/w/fw-rematch"')
+        self.assertRegex(match_step, r'\[ "\$FW_REMATCH_RAN" = true \]')                 # 沒有輸出（腳本不存在、失敗）就不傳
 
     def test_translator_rejects_unknown_syntax(self):
         with self.assertRaises(AssertionError):

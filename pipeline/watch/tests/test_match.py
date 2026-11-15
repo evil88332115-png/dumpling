@@ -92,7 +92,8 @@ class Base(unittest.TestCase):
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
                                grype=None, grype_total_timeout=100, vendor_config=kw.get("vendor_config"), now=now, demo=kw.get("demo", False),
-                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999")
+                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999",
+                               firmware_rematch=kw.get("fw_rematch"))
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
@@ -714,6 +715,27 @@ class Injection(Base):
         body = match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                          "component": "c", "purl": "p", "basis": "b", "sources": []}], p, [], None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
+
+    def test_vendor_rows_hostile_project_and_version(self):
+        """專案、版本欄的 md_cell：敵意的專案名與版本（表格分隔符號、換行、反引號、@、連結、#數字）不能弄壞表格或逃出跳脫（C0 的 #121 驗證建議 2）。"""
+        e = {"cve": "CVE-2024-0001", "kev_vendor": "Intel", "kev_product": "CSME", "vendor": "intel", "watch_via": ["manual list"],
+             "component_count": 1, "date_added": "2024-01-01", "source": "CISA KEV", "first_detected": NOW1}
+        hostile = [("a|b|c", "v1|x"), ("p\n| x | y |", "v`1`|"), ("@everyone [x](https://evil.example)", "#12"),
+                   ("![i](https://evil.example/a.png)", "&commat;bob"), ("p\\|q", "v\\|")]
+        for proj, ver in hostile:
+            with self.subTest(proj=proj, ver=ver):
+                ee = dict(e, project=proj, version=ver)
+                p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1"}
+                body = match.vendor_body("real", [ee, dict(ee, version=ver + "b")], [p, p], None, match.parse_now(NOW1))
+                self.assertEqual(match.unsafe_markdown(body), [])
+                self.assertNotRegex(body, r"[#＃]\d")
+                rows = [l for l in body.splitlines() if l.startswith("| ") and "---" not in l]
+                self.assertEqual(len(rows), 3, rows)                          # 表頭＋兩列（換行沒有拆出新列）
+                for r in rows:
+                    cells = __import__("re").split(r"(?<!\\)\|", r)
+                    self.assertEqual(len(cells), 10, r)                      # 8 欄：前後各一個空的
+                i = body.index(rows[-1])
+                self.assertTrue(body[i + len(rows[-1]):].startswith("\n\n- "), "表格最後一列後面要空一行")
 
     def test_unsafe_markdown_catches_unescaped(self):
         for raw in ("@everyone", "[x](https://evil.example)", "![i](https://evil.example/a.png)"):
