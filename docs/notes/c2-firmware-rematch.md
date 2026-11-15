@@ -27,6 +27,8 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
   `--now` 只用在 NVIDIA 對照表的過期判斷（鏡像日期超過 90 天），不從牆上時鐘取。
 - `--out` 必須不存在或是空資料夾（不覆蓋、不刪除別人的檔案）；不能是符號連結。
 - 退出碼：0＝每個樣本都是 OK；2＝有 ATTENTION 或 GAP（輸出照寫）；1＝FAIL（寫不出輸出或內部錯誤；已寫的輸出全部刪掉，不留 `rematch-summary.json`）；64＝參數錯誤。
+  - 目前公開樣本的 bios 樣本都是 ATTENTION（規則表的 affected 建議、微碼候選、版本清單無法核對等），所以每天的正常結果就是退出碼 2；讀的一方（watch-round）把 0 與 2 都當成有輸出，有 `rematch-summary.json` 就交給 match。
+  - meta 裡沒有任何 bios 樣本（例如全是 `kind: sbom`）時整份 GAP、退出碼 2：沒有可以重跑的東西，`firmware-demo` 的 Release 一定含 bios 樣本，出現這種 meta 表示產生端有問題，保守地讓人看到。
 - stdout：每個樣本一行 `FIRMWARE-REMATCH<TAB>OK|ATTENTION|GAP<TAB><slug><TAB>說明`；meta 壞掉時一行 `FIRMWARE-REMATCH<TAB>GAP<TAB>-<TAB>…`；FAIL 時 `FIRMWARE-REMATCH<TAB>FAIL<TAB>-<TAB>原因`。
   說明只有結果數、changed 數、原因數與表不能用的原因（全文在 `rematch-<slug>.json`）；control 字元與換行換成空白，不會多出狀態行。
 - **rematch 不輸出 NOT_RUN**：沒跑、沒有輸出、執行前失敗，由呼叫端（watch-round）標 NOT_RUN。`rematch-summary.json` 最後才寫，沒有它就是沒有輸出。
@@ -112,6 +114,22 @@ repo 是公開的，Release 附件與 meta 都當不可信資料處理。
   反引號裡的雜湊與識別字串經過 `md_hex`（只留英數字）。這同時保護一般的 `firmware-bios.sh` 報告。重跑的橫幅（狀態原因、changed 的 key 與公告、Release tag）也經過 `md_esc`。
 - **處理時間**：每份 inventory 最多 `SAMPLE_LIMIT`＝300 秒（含讀檔、核對、重跑、產生報告）、整次執行最多 `TOTAL_LIMIT`＝900 秒（和 `x86_firmware.TIME_LIMIT`、`firmware-bios.sh` 的 Budget 預設同值）；
   超過的樣本 GAP（`rematch-input-invalid: time limit exceeded`），整次用完之後剩下的樣本也是。用 SIGALRM 中斷（逾時例外是 `BaseException`，不會被比對函式的 `except Exception` 吞掉）。實際重跑一份約 0.1 秒。
+
+## 輸出的格式上限
+
+和讀的一方 `pipeline/watch/match.py` 的同名常數一致（C0 裁定；`test_limits_match_the_reader_in_pipeline_watch_match` 用檔案路徑載入 match.py 比對）。
+定在 `tools/cra/fw_rematch.py` 的模組層級：
+
+| 常數 | 值 | 超過時 |
+|---|---|---|
+| `REMATCH_MAX_REASONS` | 50 | reasons 是說明文字：留前 49 筆，第 50 筆寫「…（另有 N 項，已截斷）」 |
+| `REMATCH_MAX_REASON_CHARS` | 1000 | 單筆截到 1000 字元以內，結尾是 `…（已截斷）`（標記算在 1000 之內） |
+| `REMATCH_MAX_BULLETINS` | 64 | 一筆結果的 bulletins 是資料，不截斷：整份樣本 GAP（`output limit: …`） |
+| `REMATCH_MAX_BULLETIN_CHARS` | 80 | 一個公告 ID 超過：整份樣本 GAP |
+| `REMATCH_MAX_RESULT_REASON_CHARS` | 300 | `results[].reason` 是代碼，不截斷：整份樣本 GAP |
+
+`changed[]` 的 before／after 也照同樣的上限檢查。截斷套用在 `rematch-<slug>.json`、`rematch-summary.json` 的 reasons 與 `fw-inventory-<slug>.md` 的橫幅。
+公開樣本實測（main 的表）：reasons 單筆最長 386 字元（ASUS B550M 3404）、376 字元（ASUS B650M 1807），bulletins 最多 24 個（Intel NUC11 0059 的微碼 000806C2 rev 0x16），`results[].reason` 最長 16 字元，都在上限內。
 
 ## 狀態規則
 

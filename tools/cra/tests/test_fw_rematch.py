@@ -168,6 +168,7 @@ def check_real_sample(inv_path, cdx_path):
     info = fm.table_info(xf, tables, NOW)
     assert fm.inventory_problems(inv) == []
     r = fm.rematch_inventory(xf, inv, NOW, tables, info)
+    assert fm.output_limit_problem(r["results"], r["changed"]) is None          # 真樣本在格式上限內（#135 驗證：B550M、NUC11）
     if tables_match_recorded(original):                      # 表沒變：全部相同
         assert r["changed"] == [] and inv == original
         assert r["cdx"] == cdx_path.read_text(encoding="utf-8")
@@ -1214,3 +1215,78 @@ def test_script_missing_tool_is_exit_1_and_each_missing_argument_is_64(tmp_path)
     for name in full[::2]:
         r = run_script(full[:full.index(name)] + [name], tmp_path)
         assert r.returncode == 64 and "少了參數" in r.stdout, name
+
+
+# ---------- 輸出的格式上限（#135 驗證應修；和 pipeline/watch/match.py 一致） ----------
+
+LIMIT_NAMES = ("REMATCH_MAX_REASONS", "REMATCH_MAX_REASON_CHARS", "REMATCH_MAX_BULLETINS", "REMATCH_MAX_BULLETIN_CHARS",
+               "REMATCH_MAX_RESULT_REASON_CHARS")
+
+
+def test_limits_match_the_reader_in_pipeline_watch_match():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("watch_match_for_limits", REPO / "pipeline" / "watch" / "match.py")
+    mm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mm)
+    for name in LIMIT_NAMES:
+        assert hasattr(mm, name), f"pipeline/watch/match.py 沒有 {name}"
+        assert getattr(mm, name) == getattr(fm, name), name
+    assert (fm.REMATCH_MAX_REASONS, fm.REMATCH_MAX_REASON_CHARS, fm.REMATCH_MAX_BULLETINS) == (50, 1000, 64)
+
+
+def test_cap_reasons_truncates_and_marks():
+    n, c = fm.REMATCH_MAX_REASONS, fm.REMATCH_MAX_REASON_CHARS
+    assert fm.cap_reasons(["a" * c]) == ["a" * c]                                  # 正好在上限：不動
+    [x] = fm.cap_reasons(["a" * (c + 1)])
+    assert len(x) == c and x.endswith(fm.TRUNC_MARK)
+    assert fm.cap_reasons([str(i) for i in range(n)]) == [str(i) for i in range(n)]
+    out = fm.cap_reasons([str(i) for i in range(n + 7)])
+    assert len(out) == n and out[:-1] == [str(i) for i in range(n - 1)] and out[-1] == "…（另有 8 項，已截斷）"
+    out = fm.cap_reasons(["b" * 5000] * 200)
+    assert len(out) <= n and all(len(x) <= c for x in out)
+
+
+def test_long_reasons_are_truncated_in_the_sample_and_the_summary(tmp_path, monkeypatch):
+    sample, inv, t = good_release(tmp_path)
+    real = fm.rematch_inventory
+
+    def long_reasons(*a, **k):
+        r = real(*a, **k)
+        return {**r, "status": "ATTENTION", "reasons": ["x" * 3000] + [f"r{i}" for i in range(80)]}
+    monkeypatch.setattr(fm, "rematch_inventory", long_reasons)
+    rc, lines, o, summary = go(tmp_path, [sample], t)
+    doc = load(o, "board-a")
+    assert doc["status"] == "ATTENTION" and len(doc["reasons"]) == fm.REMATCH_MAX_REASONS
+    assert all(len(x) <= fm.REMATCH_MAX_REASON_CHARS for x in doc["reasons"])
+    assert doc["reasons"][0].endswith(fm.TRUNC_MARK) and doc["reasons"][-1].startswith("…（另有 ")
+    assert "x" * 1000 not in (o / "fw-inventory-board-a.md").read_text(encoding="utf-8")       # 報告的橫幅用截斷後的原因
+
+
+@pytest.mark.parametrize("bulletins,reason,ok", [
+    ([f"INTEL-SA-{i:05d}" for i in range(64)], None, True),          # 正好 64 個：不 GAP（真樣本 NUC11 有 24 個）
+    ([f"INTEL-SA-{i:05d}" for i in range(65)], None, False),         # 超過：整份 GAP，不截斷
+    (["A" * 80], None, True), (["A" * 81], None, False),
+    ([], "c" * 300, True), ([], "c" * 301, False)])
+def test_bulletins_and_result_reasons_over_the_limit_make_the_sample_gap(tmp_path, monkeypatch, bulletins, reason, ok):
+    sample, inv, t = good_release(tmp_path)
+    real = fm.rematch_inventory
+
+    def patched(*a, **k):
+        r = real(*a, **k)
+        res = [dict(r["results"][0], bulletins=bulletins, reason=reason)] + r["results"][1:]
+        return {**r, "results": res}
+    monkeypatch.setattr(fm, "rematch_inventory", patched)
+    rc, lines, o, summary = go(tmp_path, [sample], t)
+    doc = load(o, "board-a")
+    if ok:
+        assert doc["status"] != "GAP" and doc["results"][0]["bulletins"] == bulletins
+    else:
+        assert doc["status"] == "GAP" and doc["results"] == [] and "output limit" in doc["reasons"][0]
+        assert summary["samples"][0]["status"] == "GAP"
+
+
+def test_changed_entries_are_also_checked_against_the_bulletin_limit():
+    over = {"result": "affected-candidate", "bulletins": [f"S-{i}" for i in range(65)], "reason": None, "review": None}
+    ok = {"result": "affected-candidate", "bulletins": ["S-1"], "reason": None, "review": None}
+    assert fm.output_limit_problem([], [{"key": "k", "kind": "intel-microcode", "before": over, "after": ok}])
+    assert fm.output_limit_problem([], [{"key": "k", "kind": "intel-microcode", "before": ok, "after": ok}]) is None

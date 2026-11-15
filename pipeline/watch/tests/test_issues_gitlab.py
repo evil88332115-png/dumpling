@@ -424,6 +424,200 @@ class TestApply(Base):
         self.assertEqual(self.gl.edits_confidential[-1], True)     # 改既有 Issue 也送 confidential（驗證 S4）
 
 
+class TestDeadmanPlan(Base):
+    """stateless_kind=deadman（deadman.py，GITLAB-PORT T-12）：自己的標記與標籤、可以對開著的 deadman Issue 留言、不算進 watch_keys。"""
+
+    def dplan(self, actions, mode="real", kind="deadman", name="d.json", **extra):
+        p = {"schema": issues.PLAN_SCHEMA, "mode": mode, "generated_at": "t", "state_base": None, "state": None,
+             "stateless": True, "actions": actions, "status": "ALERT", "detail": ""}
+        if kind is not None:
+            p["stateless_kind"] = kind
+        p.update(extra)
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as f:
+            json.dump(p, f)
+        return path
+
+    def dact(self, key=K1, labels=("watch-health", "watch-deadman"), body="內容"):
+        return {"op": "open", "key": key, "title": "[監控健康] 沒有結果", "body": body, "labels": list(labels)}
+
+    def cact(self, key=K1, body="<!-- dumpling-deadman-recovered key=%s -->\n已恢復" % K1):
+        return {"op": "comment", "key": key, "body": body}
+
+    def test_open_marker_labels_confidential_no_state_issue(self):
+        rc, out = self.apply(self.dplan([self.dact()]), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.gl.issues), 1)           # 只有那一個 Issue，沒有狀態 Issue
+        i = self.gl.issues[1]
+        self.assertTrue(i["description"].startswith("<!-- dumpling-deadman key=%s mode=real -->\n" % K1))
+        self.assertEqual(set(i["labels"]), {"watch-health", "watch-deadman"})
+        self.assertNotIn("support-period", i["labels"])
+        self.assertNotIn("dumpling-watch", i["labels"])
+        self.assertIs(self.gl.creates[0]["confidential"], True)
+
+    def test_open_is_not_duplicated_even_when_closed(self):
+        path = self.dplan([self.dact()])
+        self.assertEqual(self.apply(path, "--mode", "real")[0], 0)
+        rc, out = self.apply(path, "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.gl.creates), 1)
+        self.assertIn("skipped", out)
+        self.gl.issues[1]["state"] = "closed"
+        self.assertEqual(self.apply(path, "--mode", "real")[0], 0)
+        self.assertEqual(len(self.gl.creates), 1)           # 已關閉的也不重開、不重建
+        self.assertEqual(self.gl.issues[1]["state"], "closed")
+        # 不同的 key（新的一次停擺）→ 新的 Issue
+        self.assertEqual(self.apply(self.dplan([self.dact(key=K2)], name="e.json"), "--mode", "real")[0], 0)
+        self.assertEqual(len(self.gl.creates), 2)
+
+    def test_drill_gets_drill_label(self):
+        self.assertEqual(self.apply(self.dplan([self.dact()], mode="drill"), "--mode", "drill")[0], 0)
+        self.assertIn("drill", self.gl.issues[1]["labels"])
+        self.assertIn("mode=drill", self.gl.issues[1]["description"].splitlines()[0])
+
+    def test_support_plan_unchanged(self):
+        act = {"op": "open", "key": K1, "title": "支援期限", "body": "x", "labels": ["support-period"]}
+        for kind in (None, "support"):
+            self.gl.issues.clear()
+            self.gl.creates.clear()
+            rc, out = self.apply(self.dplan([act], kind=kind, name="s%s.json" % kind), "--mode", "real")
+            self.assertEqual(rc, 0, out)
+            (iss,) = self.gl.issues.values()
+            self.assertTrue(iss["description"].startswith("<!-- dumpling-support key=%s mode=real -->" % K1))
+            self.assertEqual(set(iss["labels"]), {"support-period"})
+        # support 的 plan 仍然只能 open
+        rc, out = self.apply(self.dplan([self.cact()], kind="support", name="sc.json"), "--mode", "real")
+        self.assertEqual(rc, 1)
+        self.assertIn("只能有 open", out)
+        rc, out = self.apply(self.dplan([self.cact()], kind=None, name="sn.json"), "--mode", "real")
+        self.assertEqual(rc, 1)
+
+    def test_comment_only_on_open_deadman_issue(self):
+        self.assertEqual(self.apply(self.dplan([self.dact()]), "--mode", "real")[0], 0)
+        rc, out = self.apply(self.dplan([self.cact()], name="c.json"), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.gl.notes[1]), 1)
+        self.assertEqual(self.gl.issues[1]["state"], "opened")
+        # 已關閉：不留言、不重開、不算 problem
+        self.gl.issues[1]["state"] = "closed"
+        rc, out = self.apply(self.dplan([self.cact()], name="c2.json"), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.gl.notes[1]), 1)
+        self.assertEqual(self.gl.issues[1]["state"], "closed")
+        self.assertIn("skipped", out)
+        # 找不到：跳過
+        rc, out = self.apply(self.dplan([self.cact(key=K2, body="x")], name="c3.json"), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("problem\t", out)
+
+    def test_comment_with_issue_number_targets_that_issue_only(self):
+        mk = "<!-- dumpling-deadman key=%s mode=real -->\n" % K1
+        a = self.gl.add_issue(mk + "真的", ["watch-deadman"])
+        b = self.gl.add_issue(mk + "偽造的同 key（編號較大）", ["watch-deadman"])
+        c = self.gl.add_issue(mk + "已關閉", ["watch-deadman"], state="closed")
+        for target, want in ((a, a), (b, b)):
+            self.gl.notes.clear()
+            act = dict(self.cact(), issue=target)
+            rc, out = self.apply(self.dplan([act], name="t%d.json" % target), "--mode", "real")
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(list(self.gl.notes), [want])
+        self.gl.notes.clear()
+        rc, out = self.apply(self.dplan([dict(self.cact(), issue=c)], name="tc.json"), "--mode", "real")      # 指定的已關閉：照樣留言（持久標記），但不重開
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(list(self.gl.notes), [c])
+        self.assertEqual(self.gl.issues[c]["state"], "closed")
+        self.assertNotIn("state_event", json.dumps(self.gl.writes))
+        self.gl.notes.clear()
+        rc, out = self.apply(self.dplan([dict(self.cact(), issue=999)], name="t9.json"), "--mode", "real")    # 指定的不存在：跳過
+        self.assertEqual((rc, self.gl.notes), (0, {}))
+        # 沒指定：行為照舊（開著的優先、編號最大）
+        rc, out = self.apply(self.dplan([self.cact()], name="tn.json"), "--mode", "real")
+        self.assertEqual(list(self.gl.notes), [b])
+
+    def test_deadman_label_only_in_deadman_plans(self):
+        act = dict(self.open_act(labels=("kev", "watch-deadman")))
+        with self.assertRaises(issues.Fail):                       # 一般監控的 plan
+            issues.load_plan(self.plan([act]))
+        sup = {"op": "open", "key": K1, "title": "支援期限", "body": "x", "labels": ["support-period", "watch-deadman"]}
+        for kind in (None, "support"):                             # 支援期限的 stateless plan
+            with self.assertRaises(issues.Fail):
+                issues.load_plan(self.dplan([sup], kind=kind, name="s.json"))
+        issues.load_plan(self.dplan([self.dact()], name="ok.json"))      # deadman 的 plan 可以
+        with self.assertRaises(issues.Fail):                       # demo 之類的一般 plan 帶 stateless=false 也不行
+            issues.load_plan(self.plan([act], stateless=False))
+
+    def test_gitlab_issue_has_created_at(self):
+        n = self.gl.add_issue("x", ["a"])
+        self.gl.issues[n]["created_at"] = "2026-11-15T12:00:00.000Z"
+        self.assertEqual(self.gl.list_issues(PROJ, "a")[0]["created_at"], "2026-11-15T12:00:00.000Z")
+
+    def test_issue_field_validation(self):
+        for act in (dict(self.cact(), issue="1"), dict(self.cact(), issue=0), dict(self.cact(), issue=True), dict(self.dact(), issue=1)):
+            with self.assertRaises(issues.Fail):
+                issues.load_plan(self.dplan([act], name="v.json"))
+        with self.assertRaises(issues.Fail):          # support 的 plan 不能帶 issue
+            issues.load_plan(self.dplan([dict(self.dact(labels=("support-period",)), issue=1)], kind="support", name="v2.json"))
+
+    def test_comment_never_lands_on_a_watch_issue_with_same_key(self):
+        n = self.gl.add_issue(mark(K1), ["dumpling-watch"])
+        rc, out = self.apply(self.dplan([self.cact()]), "--mode", "real")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn(n, self.gl.notes)
+
+    def test_comment_dry_run_and_quick_action(self):
+        self.assertEqual(self.apply(self.dplan([self.dact()]), "--mode", "real")[0], 0)
+        w = len(self.gl.writes)
+        rc, out = self.apply(self.dplan([self.cact()], name="c.json"), "--mode", "real", "--dry-run")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("would_comment", out)
+        self.assertEqual(len(self.gl.writes), w)
+        rc, out = self.apply(self.dplan([self.cact(body="已恢復\n/close\n")], name="q.json"), "--mode", "real")
+        self.assertEqual(rc, 1)
+        self.assertIn("quick action", out)
+        self.assertNotIn(1, self.gl.notes)
+
+    def test_deadman_issue_not_counted_in_watch_keys(self):
+        self.assertEqual(self.apply(self.dplan([self.dact()]), "--mode", "real")[0], 0)
+        self.gl.add_issue("<!-- dumpling-support key=%s mode=real -->\nx" % K2, ["support-period"])
+        out = os.path.join(self.dir, "st")
+        rc, so = run(self.argv("read-state", "--mode", "real", "--out", out), self.gl)
+        self.assertEqual(rc, 0, so)
+        with open(os.path.join(out, "state-base.json")) as f:
+            b = json.load(f)
+        self.assertEqual((b["watch_issues"], b["watch_keys"]), (0, []))      # 否則第一次基準會被擋
+
+    def test_load_plan_validation(self):
+        bad = {
+            "kind": dict(kind="oops"),
+            "kind-not-stateless": dict(stateless=False, kind="deadman"),
+        }
+        for why, extra in bad.items():
+            kind = extra.pop("kind")
+            path = self.dplan([self.dact()], kind=kind, name=why + ".json", **extra)
+            with self.assertRaises(issues.Fail, msg=why):
+                issues.load_plan(path)
+        for acts, msg in (([self.dact(labels=("watch-deadman", "dumpling-watch"))], "dumpling-watch"),
+                          ([self.dact(labels=("watch-deadman", "support-period"))], "support-period"),
+                          ([dict(self.cact(), reopen_if_closed=True)], "reopen"),
+                          ([self.dact(labels=("watch-deadman", "not-allowed"))], "白名單"),
+                          ([dict(self.cact(), op="open_if_closed")], "op")):
+            with self.assertRaises(issues.Fail, msg=msg):
+                issues.load_plan(self.dplan(acts, name="x%s.json" % msg))
+        plan = issues.load_plan(self.dplan([self.dact(), self.cact()], name="ok.json"))
+        self.assertEqual(plan["stateless_kind"], "deadman")
+        self.assertIn("watch-deadman", issues.ALLOWED_LABELS)
+        self.assertIn("support-period", issues.ALLOWED_LABELS)
+        # 沒有 stateless 的一般 plan 帶 stateless_kind 也不行
+        p = self.plan([self.open_act()])
+        with open(p) as f:
+            d = json.load(f)
+        d["stateless_kind"] = "deadman"
+        with open(p, "w") as f:
+            json.dump(d, f)
+        with self.assertRaises(issues.Fail):
+            issues.load_plan(p)
+
+
 class TestCloseDrill(Base):
     def test_only_drill_and_swaps_labels(self):
         a = self.gl.add_issue(mark(K1, "drill"), ["dumpling-watch", "drill"])

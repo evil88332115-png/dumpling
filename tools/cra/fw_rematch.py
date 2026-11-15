@@ -65,6 +65,14 @@ NOW_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([01][0-9]|2[0-3]):([0-5]
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 TAG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
 VERSION_RE = re.compile(r"[ -~]{0,128}")
+# 輸出的格式上限：和 pipeline/watch/match.py 的同名常數一致（C0 裁定，#135 驗證；兩邊用測試鎖住）。
+# reasons 是說明文字：超過就截斷並標示。bulletins 與 results[].reason 是資料與代碼：超過就整份樣本 GAP，不截斷。
+REMATCH_MAX_REASONS = 50
+REMATCH_MAX_REASON_CHARS = 1000
+REMATCH_MAX_BULLETINS = 64
+REMATCH_MAX_BULLETIN_CHARS = 80
+REMATCH_MAX_RESULT_REASON_CHARS = 300
+TRUNC_MARK = "…（已截斷）"
 KEY_BAD = re.compile(r"[^A-Za-z0-9._=+-]")
 KINDS = ("bios", "sbom")
 TABLES = ("fw_advisory_rules", "intel_microcode", "nvidia_vbios")
@@ -607,7 +615,37 @@ def md_banner(xf, slug, tag, now_text, status, reasons, info, changed):
     return "\n".join(L) + "\n---\n\n"
 
 
+def cap_reasons(reasons):
+    """reasons 照 REMATCH_MAX_REASONS／REMATCH_MAX_REASON_CHARS 截斷並標示：單筆超過就截到上限內、以 TRUNC_MARK 結尾；
+    筆數超過就留前 REMATCH_MAX_REASONS-1 筆，最後一筆寫「…（另有 N 項，已截斷）」。截斷後一定在上限內。"""
+    out = []
+    for x in reasons:
+        x = str(x)
+        if len(x) > REMATCH_MAX_REASON_CHARS:
+            x = x[:REMATCH_MAX_REASON_CHARS - len(TRUNC_MARK)] + TRUNC_MARK
+        out.append(x)
+    if len(out) > REMATCH_MAX_REASONS:
+        rest = len(out) - (REMATCH_MAX_REASONS - 1)
+        out = out[:REMATCH_MAX_REASONS - 1] + [f"…（另有 {rest} 項，已截斷）"]
+    return out
+
+
+def output_limit_problem(results, changed):
+    """bulletins 與 results[].reason 超過格式上限 → 原因字串（整份樣本 GAP，不截斷）；沒有問題 → None。"""
+    items = [(r.get("bulletins"), r.get("reason")) for r in results]
+    items += [(c[side].get("bulletins"), c[side].get("reason")) for c in changed for side in ("before", "after")]
+    for bulletins, reason in items:
+        if len(bulletins or []) > REMATCH_MAX_BULLETINS:
+            return f"output limit: a result has {len(bulletins)} bulletins (limit {REMATCH_MAX_BULLETINS})"
+        if any(len(b) > REMATCH_MAX_BULLETIN_CHARS for b in bulletins or []):
+            return f"output limit: a bulletin ID is longer than {REMATCH_MAX_BULLETIN_CHARS} characters"
+        if reason is not None and len(reason) > REMATCH_MAX_RESULT_REASON_CHARS:
+            return f"output limit: a result reason is longer than {REMATCH_MAX_RESULT_REASON_CHARS} characters"
+    return None
+
+
 def sample_doc(slug, version, tag, sha, now_text, status, reasons, info, results, changed):
+    reasons = cap_reasons(reasons)
     return {"schema": REMATCH_SCHEMA, "slug": slug, "firmware_version": version, "release_tag": tag, "inventory_sha256": sha, "now": now_text,
             "status": status, "reasons": reasons, "tables": info, "results": results, "changed": changed}
 
@@ -642,8 +680,11 @@ def _process_sample(xf, slug, plan, dfd, tag, now, now_text, tabs, info):
         return gap(str(e))
     try:
         r = rematch_inventory(xf, inv, now, tabs, info)
+        over = output_limit_problem(r["results"], r["changed"])
+        if over:
+            return gap(over)
         doc = sample_doc(slug, plan["firmware_version"], tag, sha_meta, now_text, r["status"], r["reasons"], info, r["results"], r["changed"])
-        md = md_banner(xf, slug, tag, now_text, r["status"], r["reasons"], info, r["changed"]) + r["md"]
+        md = md_banner(xf, slug, tag, now_text, r["status"], doc["reasons"], info, r["changed"]) + r["md"]
         for text in (dump(doc), r["cdx"], md):
             text.encode("utf-8")            # 單獨的代理字元等寫不出去的字元（inventory 是不可信資料）：這一份 GAP，不讓整次執行失敗
     except Exception as e:                  # 形狀檢查沒擋到的異常內容：這一份 GAP，其他樣本照常
@@ -752,7 +793,7 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
                         gap_slugs.add(slug)
                         doc = sample_doc(slug, None, tag, None, now_text, "GAP", [why], info, [], [])
                         w.write(f"rematch-{slug}.json", dump(doc))
-                        summary_samples.append({"slug": slug, "status": "GAP", "output": f"rematch-{slug}.json", "reasons": [why]})
+                        summary_samples.append({"slug": slug, "status": "GAP", "output": f"rematch-{slug}.json", "reasons": doc["reasons"]})
                     continue
                 doc, cdx, md = process_sample(xf, slug, data, dfd, tag, now, now_text, tabs, info, limit=min(SAMPLE_LIMIT, TOTAL_LIMIT - (time.monotonic() - t0)))
                 w.write(f"rematch-{slug}.json", dump(doc))
@@ -770,7 +811,7 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
             if dfd is not None:
                 os.close(dfd)
         summary = {"schema": SUMMARY_SCHEMA, "release_tag": tag, "now": now_text, "meta_status": "GAP" if meta_reasons else "OK",
-                   **({"reasons": meta_reasons} if meta_reasons else {}), "tables": info, "samples": summary_samples, "rejected": rejected}
+                   **({"reasons": cap_reasons(meta_reasons)} if meta_reasons else {}), "tables": info, "samples": summary_samples, "rejected": rejected}
         w.write("rematch-summary.json", dump(summary))
     except Exception as e:                  # 寫不出輸出或內部錯誤：已寫的輸出全部刪掉（沒有 rematch-summary.json，呼叫端標 NOT_RUN）
         w.rollback()
