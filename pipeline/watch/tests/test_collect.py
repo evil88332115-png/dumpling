@@ -171,7 +171,7 @@ class TestGitHub(Base):
         w.add("p/v1", files())
         code, so, inv = self.repo(w)
         self.assertEqual(code, 0, so)
-        self.assertEqual(so, "WATCH-COLLECT\tOK\t正式版 1、開發版 0、略過 0、draft 0\n")
+        self.assertEqual(so, "WATCH-COLLECT\tOK\t正式版 1、開發版 0、略過 0、draft 0；沒有韌體 Release（韌體不在監控）\n")
         r = inv["releases"][0]
         self.assertEqual((r["kind"], r["watch_version"], r["status"], r["commit"]), ("release", "v1", "shipped", HEX))
         self.assertEqual(set(r["sboms"]), {"bsp", "os"})
@@ -977,8 +977,10 @@ class TestFirmware(Base):
         def mut(m, f):
             f["fw-novacustom-v540tu-mtl-v1.0.1.cdx.json"] = sbom() + b" "          # 內容換了：sha256 不符
             del f["fw-inventory-ubuntu-ovmf-2024.02.json"]                        # 附件缺
-        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
-        self.assertEqual(code, 0, so)                                             # 單一樣本不讓整份 GAP
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut)), "a": (self.rj("p/v1"), files())})
+        self.assertEqual(code, 3, so)                       # C0 裁定：有樣本 GAP → 整體至少 GAP（結束碼 3）
+        self.assertEqual(inv["status"], "GAP")
+        self.assertEqual(inv["releases"][0]["problems"], [])       # 其他（板子、其他樣本）照常
         by = {x["slug"]: x for x in inv["firmware"]["samples"]}
         v = by["novacustom-v540tu-mtl-v1.0.1"]
         self.assertEqual((v["status"], v["sbom"]), ("GAP", None))
@@ -1044,8 +1046,11 @@ class TestFirmware(Base):
         self.assertEqual(v["watch_version"], "novacustom-v540tu-mtl-v1.0.1@sha256-" + "e" * 16)
         self.assertEqual(v["status"], "GAP")
         self.assertNotIn("ubuntu-ovmf-2024.02", by)
-        nw = {x["slug"]: x["why"] for x in fw["not_watched"]}
-        self.assertIn("不監控", nw["ubuntu-ovmf-2024.02"])
+        nw = {x["slug"]: x for x in fw["not_watched"]}
+        self.assertIn("不監控", nw["ubuntu-ovmf-2024.02"]["why"])
+        self.assertEqual(nw["ubuntu-ovmf-2024.02"]["source"], "collect")
+        self.assertEqual(nw["standalone-nvidia-option-rom"]["source"], "meta")
+        self.assertEqual((code, inv["status"]), (3, "GAP"))
         for x in fw["samples"]:
             self.assertTrue(x["watch_version"] is None or not x["watch_version"].endswith("@"), x)
 
@@ -1069,3 +1074,94 @@ class TestFirmware(Base):
         self.assertIsNone(collect.check_fw_meta(m, m["tag"]))
         for x in m["samples"]:
             self.assertIsNone(collect._fw_sample_fields(x), x.get("slug"))
+
+    def test_designed_not_watched_is_not_gap(self):
+        """firmware.yml 依設計宣告不監控的（source=meta，例如沒有檔案的 vBIOS）不讓整體 GAP；collect 監控不了的才算。"""
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files())})
+        self.assertEqual((code, inv["status"]), (0, "OK"), so)
+        self.assertEqual([x["source"] for x in inv["firmware"]["not_watched"]], ["meta"])
+
+    def test_meta_field_types_do_not_crash(self):
+        """#123 驗證應修 1：meta 欄位型別不對 → 只讓韌體 GAP，板子 Release 照常（不能 TypeError、結束碼 1）。"""
+        cases = {"nw_int": ("not_watched", 5), "nw_true": ("not_watched", True), "nw_big": ("not_watched", 10 ** 30),
+                 "nw_str": ("not_watched", "x"), "nw_item": ("not_watched", [5]), "nw_slug": ("not_watched", [{"slug": 5}]),
+                 "nw_why": ("not_watched", [{"slug": "a", "why": ["x"]}]), "nw_many": ("not_watched", [{"slug": "a"}] * 101),
+                 "tables": ("tables", [1]), "built_at": ("built_at", 5), "run": ("workflow_run", {"a": 1}),
+                 "samples_many": ("samples", [{}] * 101)}
+        for name, (k, v) in cases.items():
+            with self.subTest(name):
+                self.out = os.path.join(self._td.name, "w-" + name)
+                code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=lambda m, f, k=k, v=v: m.update({k: v}))),
+                                               "a": (self.rj("p/v1"), files())})
+                self.assertEqual(code, 3, so)
+                self.assertEqual(inv["releases"][0]["tag"], "p/v1")
+                self.assertEqual(inv["releases"][0]["problems"], [])
+                self.assertTrue(inv["firmware"]["problems"][0].startswith("firmware-meta.json："), inv["firmware"]["problems"])
+
+    def test_meta_size_limit(self):
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=lambda m, f: m.update(pad="x" * (1024 * 1024))))})
+        self.assertEqual(code, 3, so)
+        self.assertIn("上限", inv["firmware"]["problems"][0])
+
+    def test_trailing_newline_rejected(self):
+        """#123 驗證應修 2：正規式的 $ 會匹配尾端的 \n；改用 \Z。板子路徑一起修。"""
+        for tag in ("firmware-demo/2026.11.20\n", "p/v1\n", "dev/p\n", "p\n/v1"):
+            with self.subTest(tag=tag):
+                self.assertIsNone(collect.classify(tag, tag.startswith("dev/"))[0])
+        self.assertEqual(collect.fw_watch_version("s", "3404\n", "f" * 64)[0], "s@sha256-" + "f" * 16)
+        self.assertIsNone(collect.fw_watch_version("s", "3404\n", None)[0])
+        x = json.loads(fw_files()["firmware-meta.json"])["samples"][0]
+        for k, v in (("slug", x["slug"] + "\n"), ("sbom_sha256", x["sbom_sha256"] + "\n"), ("image_sha256", "e" * 64 + "\n")):
+            with self.subTest(k=k):
+                self.assertIsNotNone(collect._fw_sample_fields(dict(x, **{k: v})))
+        self.assertIsNotNone(collect.check_fw_meta(dict(json.loads(fw_files()["firmware-meta.json"]), commit=HEX + "\n"), FW_TAG))
+        for r in (collect.PROJECT_RE, collect.VERSION_RE, collect.COMMIT_RE, collect.LABEL_RE, collect.SHA256_RE, collect.FW_SLUG_RE):
+            self.assertIsNone(r.match("a" * 40 + "\n"), r.pattern)
+
+    def test_board_release_trailing_newline_in_meta_version(self):
+        """板子路徑：release-meta 的 version 尾端有 \n → 不收（VERSION_RE 用 \Z）。"""
+        code, so, inv = self.run_spec({"a": (self.rj("p/v1"), files(**{}))})
+        self.assertEqual(code, 0, so)
+        f = files()
+        m = json.loads(f["release-meta.json"])
+        m["version"] = "v1\n"
+        f["release-meta.json"] = j(m)
+        self.out = os.path.join(self._td.name, "w-nl")
+        code, so, inv = self.run_spec({"a": (self.rj("p/v1"), f)})
+        self.assertTrue(inv["releases"][0]["problems"], inv["releases"][0])
+
+    def test_tie_break_numeric_then_tag(self):
+        """published_at 相同：依 tag 版本的數字比（.10 在 .2 之後）。"""
+        same = "2026-11-20T03:10:00Z"
+        spec = {t.replace("/", "_"): (self.rj(t, same), fw_files(t)) for t in
+                ("firmware-demo/2026.11.20.2", "firmware-demo/2026.11.20.10", "firmware-demo/2026.11.20")}
+        code, so, inv = self.run_spec(spec)
+        self.assertEqual(inv["firmware"]["tag"], "firmware-demo/2026.11.20.10")
+        self.assertEqual(collect._ver_key("2026.11.20.10") > collect._ver_key("2026.11.20.2"), True)
+
+    def test_placeholder_tbd_and_slug_slash_and_sample_limit(self):
+        self.assertEqual(collect.fw_watch_version("s", "TBD", "f" * 64)[0], "s@sha256-" + "f" * 16)
+        x = json.loads(fw_files()["firmware-meta.json"])["samples"][0]
+        self.assertIsNotNone(collect._fw_sample_fields(dict(x, slug="a/b")))
+        m = json.loads(fw_files()["firmware-meta.json"])
+        self.assertIsNone(collect.check_fw_meta(dict(m, samples=m["samples"] * 33 + [m["samples"][0]]), FW_TAG))   # 100 筆可以
+        self.assertIsNotNone(collect.check_fw_meta(dict(m, samples=m["samples"] * 34), FW_TAG))                     # 102 筆不行
+
+    def test_no_firmware_detail(self):
+        code, so, inv = self.run_spec({"a": (self.rj("p/v1"), files())})
+        self.assertIn("沒有韌體 Release（韌體不在監控）", inv["detail"])
+        self.assertIsNone(inv["firmware"])
+
+    def test_firmware_dir_symlink_and_leftovers_cleared(self):
+        os.makedirs(os.path.join(self.out, "firmware"), exist_ok=True)
+        open(os.path.join(self.out, "firmware", "stale.json"), "w").write("{}")
+        self.run_spec({"a": (self.rj("p/v1"), files())})
+        self.assertFalse(os.path.exists(os.path.join(self.out, "firmware", "stale.json")))
+        target = os.path.join(self._td.name, "elsewhere")
+        os.makedirs(target)
+        __import__("shutil").rmtree(os.path.join(self.out, "firmware"), ignore_errors=True)
+        os.symlink(target, os.path.join(self.out, "firmware"))
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files())})
+        self.assertFalse(os.path.islink(os.path.join(self.out, "firmware")))
+        self.assertEqual(os.listdir(target), [])
+
