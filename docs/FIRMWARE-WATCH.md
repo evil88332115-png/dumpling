@@ -24,7 +24,7 @@
 | Release tag | `firmware-demo/<YYYY.MM.DD>`（同一天第二次加 `.2`、`.3`） | **避開 `*/v*`**，不會觸發 release.yml（板子的建置）。查過 main 上所有 workflow：只有 release.yml 用 tag 觸發。符合 collect 的 `PROJECT_RE`／`VERSION_RE` |
 | Release 種類 | 正式 Release（不是 prerelease、不是 draft），只由 tag push 產生 | 每一版都留著，是韌體 SBOM 的長期紀錄（PLAN：長期紀錄靠 Release） |
 | 監控的單位 | 每個樣本一份 SBOM | 版本只在同一個樣本底下有意義，樣本 slug 才是識別（C2） |
-| 監控鍵（UUID） | `dumpling:firmware-demo/<slug>@<firmware_version>+<image_sha256 前 16 碼>#firmware` | **不含 Release 的日期，但包含樣本身分＋韌體版本＋映像雜湊**（C0 決定）。BIOS 改版（版本或映像換了）就是新的鍵，當成新版本；同一份映像重新發布，鍵不變，不會把既有命中當成新的。新的鍵本來就有的 KEV，依 #112 的規則開 Issue。`image_sha256` 是 firmware.yml 該樣本主要檔案（`role: image`，沒有就用 `package`）的 sha256；供應商 SBOM 用 SBOM 原檔的 sha256 |
+| 監控鍵（UUID） | `dumpling:firmware-demo/<slug>@<firmware_version>#firmware` | **不含 Release 的日期，包含樣本身分（slug）＋韌體版本**（C0 決定：「BIOS 版本或映像的 sha256」，這裡用 BIOS 版本）。BIOS 改版就是新的鍵，當成新版本；同一版重新發布，鍵不變，不會把既有命中當成新的。新的鍵本來就有的 KEV，依 #112 的規則開 Issue。映像雜湊（`image_sha256`）**只記在 Issue 內文與報告**，不放進鍵：重新壓縮的同一版韌體會變成新的鍵（C2 建議） |
 | `firmware_version` | 照 firmware.yml 原樣，不改寫：`3404`、`v1.2.0`、`0059`、`v0.9.2`、`v1.0.1`、`2024.02-2ubuntu0.10`、`v1.6.0` | 全部符合 `VERSION_RE`（C2 核對） |
 
 - **只監控最新的一個 `firmware-demo` Release**（依 `published_at`）。舊的韌體 Release 留著當紀錄，collect 列在「說明」，不比對。
@@ -53,11 +53,11 @@
   {"schema": "dumpling-firmware-meta/1", "tag": "firmware-demo/2026.11.20", "commit": "<40 碼>", "built_at": "…Z", "workflow_run": "…",
    "samples": [{"slug": "intel-nuc11-patgl357-0059", "kind": "bios", "firmware_version": "0059",
                 "sbom": "fw-intel-nuc11-patgl357-0059.cdx.json", "sbom_sha256": "…",
-                "inventory": "fw-inventory-intel-nuc11-patgl357-0059.json", "inventory_sha256": "…", "image_sha256": "…",
+                "inventory": "fw-inventory-intel-nuc11-patgl357-0059.json", "inventory_sha256": "…", "image_sha256": "<映像的 sha256>",
                 "status": "OK|ATTENTION|GAP", "expect": "OK|MISMATCH|MISSING|ERROR|NOT_RUN|NONE"},
                {"slug": "dasharo-novacustom-ns5x-tgl-v1.6.0", "kind": "sbom", "firmware_version": "v1.6.0",
                 "sbom": "fw-dasharo-novacustom-ns5x-tgl-v1.6.0.cdx.json", "sbom_sha256": "…", "normalized": true,
-                "inventory": null, "inventory_sha256": null, "image_sha256": "<SBOM 原檔的 sha256>", "status": "…", "expect": "NONE"}],
+                "inventory": null, "inventory_sha256": null, "image_sha256": null, "status": "…", "expect": "NONE"}],
    "not_watched": [{"slug": "standalone-nvidia-option-rom", "why": "GAP：沒有合法可下載的檔案"}],
    "tables": {"fw_advisory_rules": {"sha256": "…", "table_updated": "…"}, "intel_microcode": {"source_commit": "…"},
               "nvidia_vbios": {"sha256": "…", "mirror_commit": "…", "reviewed_until": "…"}}}
@@ -191,11 +191,20 @@
 | C3 | watch-round 的重跑步驟、match 的韌體單位與公告 Issue、vendor-watch 的 `firmware-demo`、support 跳過 | `pipeline/watch/*`、`.github/workflows/watch-round.yml` |
 | C3 | WATCH.md §2 涵蓋表改成實際的涵蓋、儀表板的韌體區 | `docs/WATCH.md`、儀表板 |
 
-介面只有兩個：`firmware-meta.json`（§3）與 `rematch.json`（§4）。兩邊先合併這兩個 schema 的範例檔（`pipeline/watch/tests/data/`），各自照範例寫測試。
+介面只有兩個：`firmware-meta.json`（§3）與 `rematch.json`（§4），另加總表 `rematch-summary.json`。
+- rematch 每個樣本輸出一份 `rematch-<slug>.json`，另有一份 `rematch-summary.json`：每個樣本一列（slug、status、輸出檔名），加上三張表的識別。
+- **沒在總表裡的樣本，watch-round 標 NOT_RUN。**
+
+**檔案不重疊**（C2 提案，C3 同意）：
+- 範例檔 `pipeline/watch/tests/data/firmware-meta.example.json`、`firmware-rematch.example.json`：由 C2 新增，之後也只有 C2 改。C3 的測試只讀；要變形資料時，在測試裡複製一份再改。
+- C2 的 PR 不改 `docs/FIRMWARE-WATCH.md`、`pipeline/watch/*`（除了上面兩個範例檔）、`watch-round.yml`。
+- C3 不改 firmware.yml、firmware-ci.sh、firmware-rematch.sh、x86_firmware.py。
+
+**順序**：C2 PR 1（rematch 入口、schema、範例檔）→ C2 PR 2（firmware.yml 建 Release）。C3 的 collect／match／watch-round 和 PR 1 平行做，先用分支 `wp3/fw-rematch` 上的範例。
 
 ## 9. 已決定（C0，2026-11-15）
 
-1. **監控鍵**：不含 Release 日期，包含樣本身分＋韌體版本＋映像雜湊（§2）。
+1. **監控鍵**：不含 Release 日期，包含樣本身分＋韌體版本（§2）；映像雜湊只記在內文。
    - 只監控最新的韌體 Release，是第一階段示範的限制。
    - 內部版要監控每一個已出貨、還在支援期內的韌體版本，列為搬家與第二階段。
 2. **公告 Issue**：
