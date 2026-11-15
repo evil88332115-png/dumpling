@@ -940,3 +940,20 @@ class MissingDataIsGap(unittest.TestCase):
             with self.subTest(u=u):
                 self.assertIsNone(render.safe_href(u, REPO))
         self.assertIsNotNone(render.safe_href("https://github.com/%s/issues/1" % REPO, REPO))
+
+    def test_distro_fixed_unknown_tier_and_gap_note(self):
+        """C0／C1：distro_fixed 也是已知分級；不認得的分級（"None"）標成不明；GAP 的原因寫在漏洞統計下方與頁尾。"""
+        e = self.env_scan({"": run_entry(tiers={"p1": 1, "p2": 0, "p3": 2, "accepted": 3, "distro_fixed": 4, "nvidia_bulletin": 5, "None": 6}),
+                           "-bsp": run_entry(), "-os": run_entry()})
+        sec = self.section(e.html, "漏洞統計（含該報告的狀態）", "</table>")
+        full = sec[sec.index('<span class="ext">full</span>'):sec.index('<span class="ext">bsp</span>')]
+        self.assertIn("distro_fixed 4", full)
+        self.assertIn("p2 0", full)
+        self.assertIn('<span class="ext">None</span> 6', full)
+        self.assertIn("不明", full)
+        self.assertIn("產生端目前只寫有出現的分級，所以 GAP 可能代表 0", e.html)
+        foot = e.html[e.html.index("<footer"):]
+        self.assertIn("所以 GAP 可能代表 0", foot)
+        self.assertIn("不認得的分級", e.html[:e.html.index("</header>")])     # 頁首的「不認得的狀態值」警告
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+

@@ -46,7 +46,8 @@ DOWNLOAD_RE = re.compile(r"^(report-.+\.zip|vuln-list-.+\.xlsx|p1-table-.+\.xlsx
 SCAN_RE = re.compile(r"^scan-summary-.+\.json\Z", re.S)
 VEX_RE = re.compile(r"^vex-.+\.cdx\.json\Z", re.S)
 RUN_KEY = {"": "full", "-bsp": "bsp", "-os": "os"}
-TIERS = ("p1", "p2", "p3", "accepted", "nvidia_bulletin")
+# 產生端可能寫出的分級（C1：tools/cra/cra_report.py 的 TIERS 與 distro_fixed、tools/cra/vex_export.py 的 nvidia_bulletin）
+TIERS = ("p1", "p2", "p3", "accepted", "distro_fixed", "nvidia_bulletin")
 # CycloneDX 1.6 的 vulnerability analysis 列舉值（其他值一律歸成「不明」）
 VEX_STATES = ("resolved", "resolved_with_pedigree", "exploitable", "in_triage", "false_positive", "not_affected")
 VEX_JUSTIFICATIONS = ("code_not_present", "code_not_reachable", "requires_configuration", "requires_dependency",
@@ -187,6 +188,8 @@ def scan_row(scan):
                          "non_ok_stages": non_ok, "stages_gap": stages_gap,
                          "tiers": {k: ci(tiers.get(k)) for k in TIERS if ci(tiers.get(k)) is not None},
                          "tier_gaps": tier_gaps, "tiers_gap": None if isinstance(tiers_raw, dict) else "沒有 tiers",
+                         # 不認得的分級（例如某一列沒有 tier 時的 "None"）：標成異常，不默默丟掉（C1 建議）
+                         "unknown_tiers": [[c(k, 40), ci(v)] for k, v in sorted(tiers.items(), key=lambda kv: str(kv[0])) if k not in TIERS][:10],
                          "cves_total": ci(vul.get("cves_total"))}
     if not reports:
         raise Gap("scan-summary 的 runs 裡沒有 full／-bsp／-os")
