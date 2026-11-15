@@ -420,7 +420,10 @@ def find_reminders(idx, judge, alerts, now):
             if m and m.group(1) == a["key"] and not n.get("system") and judge.ok(n):
                 t = parse_ts(m.group(2))
                 if t is not None:
-                    last = max(last, t)
+                    # 標記裡的時間不能晚於留言本身的時間（伺服器記的 created_at，作者改不了），也不能晚於現在：
+                    # 否則一則寫了未來時間（時鐘錯、或 2099 年）的可信標記會讓提醒永遠不出現
+                    tn = parse_ts(n.get("created_at"))
+                    last = max(last, min(t, tn if tn is not None else now, now))
         if now - last >= datetime.timedelta(days=REMINDER_DAYS):
             out.append((a["key"], top["number"], start))
     return out

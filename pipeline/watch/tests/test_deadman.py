@@ -62,10 +62,12 @@ class FakeGitLab(issues.GitLabApi):
                                "author": {"id": author, "username": "u%d" % author, "state": "active"}}
         return self.n
 
-    def add_note(self, num, body, author=BOT, system=False):
+    def add_note(self, num, body, author=BOT, system=False, created_at=None):
         self.nid += 1
-        self.notes.setdefault(num, []).append({"id": self.nid, "body": body, "system": system,
-                                               "author": {"id": author, "username": "u%d" % author, "state": "active"}})
+        n = {"id": self.nid, "body": body, "system": system, "author": {"id": author, "username": "u%d" % author, "state": "active"}}
+        if created_at is not None:
+            n["created_at"] = created_at
+        self.notes.setdefault(num, []).append(n)
 
     def add_schedule(self, sid, watch=True, active=True, owner_state="active", next_run=None, single="ok", description="daily watch", extra_vars=None):
         row = {"id": sid, "description": description, "ref": "main", "cron": "0 3 * * *", "cron_timezone": "UTC",
@@ -1222,6 +1224,15 @@ class TestReminder(Base):
         # 別的 key 的標記不算
         self.gl.notes[self.n][-1]["body"] = forged.replace(self.key, "0" * 64)
         self.assertEqual(len(self.at(7)), 1)
+
+    def test_future_reminder_marker_does_not_silence_forever(self):
+        """可信作者的提醒標記寫了未來時間（時鐘錯、2099 年）：以留言本身的 created_at 為上限，7 天後照樣提醒。"""
+        self.start()
+        posted = (NOW + dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.gl.add_note(self.n, "<!-- dumpling-deadman-reminder key=%s at=2099-01-01T00:00:00Z -->\n仍在停擺" % self.key,
+                         author=DEV, created_at=posted)
+        self.assertEqual(self.at(13), [])                   # 留言後 6 天：不提醒
+        self.assertEqual(len(self.at(14)), 1)               # 留言後 7 天：照樣提醒（不是被 2099 年壓住）
 
     def test_no_reminder_for_closed_or_forged_or_recovered(self):
         self.start()

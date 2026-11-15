@@ -411,7 +411,8 @@ class GitLabApi(Api):
             if not isinstance(n, dict) or type(n.get("id")) is not int:
                 raise Fail("GitLab 留言回應格式不符（沒有整數 id）")
             out.append({"id": n["id"], "body": n.get("body"), "user": n.get("author") if isinstance(n.get("author"), dict) else {},
-                        "system": n.get("system") is True})
+                        "system": n.get("system") is True,
+                        "created_at": n.get("created_at") if isinstance(n.get("created_at"), str) else None})   # 伺服器記的時間（作者改不了）
         return out
 
     def edit_note(self, repo, number, note_id, body):
