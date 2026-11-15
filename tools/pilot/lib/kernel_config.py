@@ -44,7 +44,7 @@
     相同或只差工具鏈照舊；不同 → 記出來，狀態 ATTENTION。樹的主.次版本和判定的核心不同 → GAP。輸出的 kernel.source_tree 記 Makefile 的來源。
   沒有 linux-headers 時（映像沒有 /usr/lib/modules/<版本>/build 或 /usr/src/linux-headers-<版本>*/ 的 .config 與 Makefile，例如 Debian 的雲端映像）：
     改讀 rootfs 出貨的 /boot/config-<版本>（<版本> 就是判定的核心版本；有 headers 時完全不看它，輸出和以前逐位元組相同）。
-    不可信的輸入：只解析、不執行；檔案要是一般檔案（符號連結、硬連結不跟隨）、不超過 MAX_BOOT_CONFIG，而且 rootfs 的 dpkg 驗證通過
+    不可信的輸入：只解析、不執行；檔案要是一般檔案（符號連結、硬連結不跟隨；--from 資料夾時 st_nlink > 1 算硬連結；docker 上層換成資料夾等其他種類也不採用）、不超過 MAX_BOOT_CONFIG（/boot 底下最多讀 MAX_BOOT_CONFIGS 個 config-*），而且 rootfs 的 dpkg 驗證通過
     （boot_config_dpkg，和 dpkg_verify 同一種讀法：var/lib/dpkg/info/*.md5sums 與 status，一致性檢查，不防竄改）：
       1. md5sums 有恰好一個套件擁有 boot/config-<版本>；
       2. 擁有者是這顆核心的 image 套件：名稱整串等於 linux-image-<版本>、linux-image-<版本>-unsigned（Debian）或 linux-image-unsigned-<版本>
@@ -448,7 +448,7 @@ class Collected:
                 self.boot_cfg[parts] = (layer, "file", read_all(opener, size))
         elif kind == "symlink":
             self.boot_cfg[parts] = (layer, "symlink", link)
-        elif kind != "dir":
+        else:       # 資料夾、裝置檔等：記下來（docker 上層把它換成資料夾時，下層的舊檔不可以留著被採用）→ 不是一般檔案，GAP
             self.boot_cfg[parts] = (layer, kind, None)
 
     def feed(self, parts, kind, link=None, opener=None, size=0, layer=0):
@@ -834,6 +834,9 @@ def collect(src, prefix=None, col=None, images=False, modinfo=False):
                 continue
             col.feed(e.parts, e.kind, link=e.link if e.kind == "symlink" else None, opener=e.open if e.kind == "file" else None,
                      size=e.size)
+            if e.kind == "file" and e.key is not None and col.want_images and len(e.parts) == 2 and e.parts[0] == "boot" \
+                    and e.parts[1].startswith("config-"):
+                col.boot_cfg[e.parts] = (0, "hardlink", None)     # 資料夾來源的硬連結（st_nlink > 1）：同 tar 的硬連結，不採用
         if col.want_images and strip:
             for n in IMAGE_NAMES:
                 got = probe_dir_file(src, col.pkg_root + ("kernel", n))

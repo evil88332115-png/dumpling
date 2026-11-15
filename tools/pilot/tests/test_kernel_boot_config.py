@@ -253,6 +253,60 @@ def test_docker_layers_whiteout_removes_boot_config():
     assert col.boot_cfg == {}
 
 
+def test_docker_upper_layer_dir_replaces_boot_config():
+    # 驗證建議 3：上層把 /boot/config-<v> 換成資料夾，下層的舊檔不可以留著被採用
+    col = kc.ImageCollected()
+    col.want_images = True
+    col.feed(("boot", f"config-{KVER}"), "file", opener=lambda: io.BytesIO(CFG), size=len(CFG), layer=1)
+    col.feed(("boot", f"config-{KVER}"), "dir", layer=2)
+    assert col.boot_cfg[("boot", f"config-{KVER}")] == (2, "dir", None)
+
+
+def test_directory_source_hardlink_is_not_used(tmp_path):
+    # 驗證建議 4：--from 資料夾時，/boot/config-<v> 是硬連結（st_nlink > 1）→ 同 tar 的硬連結，不採用
+    src = write_dir(tmp_path / "root", rootfs_files())
+    os.link(src / "boot" / f"config-{KVER}", src / "boot" / "config-copy")
+    p, st, out = k1(tmp_path, src, "--source-tree", str(tree(tmp_path)))
+    assert st[1] == "GAP" and "硬連結" in st[2] and out["results"] == []
+    assert out["kernel"]["boot_config"]["kind"] == "hardlink"
+    os.unlink(src / "boot" / "config-copy")                     # 沒有硬連結時照舊判定
+    d = tmp_path / "again"
+    d.mkdir()
+    p, st, out = k1(d, src, "--source-tree", str(tree(d)))
+    assert st[1] == "OK" and out["kernel"]["boot_config"]["verified"] is True
+
+
+def test_status_with_two_versions_of_the_owner_is_gap(tmp_path):
+    # 驗證建議 9：status 裡擁有 /boot/config 的套件有兩個不同版本 → 不確定是哪一個，GAP
+    files = rootfs_files()
+    files["var/lib/dpkg/status"] = dpkg_status([(PKG, "install ok installed")]) + dpkg_status([(PKG, "install ok installed")]).replace(
+        b"Version: 6.8.12-1", b"Version: 6.8.12-2")
+    src = write_dir(tmp_path / "root", files)
+    for tool in (k1, k2):
+        d = tmp_path / tool.__name__
+        d.mkdir()
+        p, st, out = tool(d, src, "--source-tree", str(tree(d)))
+        assert st[1] == "GAP", (tool.__name__, st)
+        assert (out["results"] if tool is k1 else out["cves"]) in ([], {})
+        assert out["kernel"]["boot_config"]["verified"] is False
+
+
+def test_kcfg_basis_ignores_an_unverified_boot_config():
+    # 驗證建議 9：kernel.boot_config 沒有驗證通過時，依據的位置不寫 /boot 路徑與原始碼樹（和沒有 boot_config 時相同）
+    base = {"kernel": {"version": KVER, "config_sha256": "ab" * 32, "config_source": f"/boot/config-{KVER} (dpkg verified)",
+                       "source_tree": {"path_label": "linux-6.8.12", "version": "6.8.12"}}}
+    plain = vx.kcfg_basis({"kernel": {k: v for k, v in base["kernel"].items() if k != "source_tree"}})
+    for bc in ({"path": f"/boot/config-{KVER}", "verified": False}, {"path": f"/boot/config-{KVER}", "verified": "true"}, None, "x"):
+        doc = json.loads(json.dumps(base))
+        doc["kernel"]["boot_config"] = bc
+        b = vx.kcfg_basis(doc)
+        assert "/boot/" not in b["location"] and "source tree" not in b["location"], bc
+        assert b == plain, bc
+    doc = json.loads(json.dumps(base))
+    doc["kernel"]["boot_config"] = {"path": f"/boot/config-{KVER}", "verified": True}
+    assert f"/boot/config-{KVER}" in vx.kcfg_basis(doc)["location"]
+
+
 def test_boot_config_count_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(kc, "MAX_BOOT_CONFIGS", 2)
     col = kc.ImageCollected()

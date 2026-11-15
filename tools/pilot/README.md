@@ -221,9 +221,9 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   `differs` → ATTENTION；樹的主.次版本和 `.config` 標頭不同、或讀不出版本 → GAP。輸出的 `kernel.makefiles_from: source-tree` 與 `kernel.source_tree`（版本、Makefile 數、資料夾名稱，不寫路徑）記 Makefile 的來源。
   **沒有 linux-headers 的映像（出貨的 `/boot/config-<版本>`，M7d-3a）**：Debian 的雲端映像沒有 linux-headers，但有 `/boot/config-<版本>`。
   找不到 headers 的 `.config` 時（有 headers 時完全不看 /boot/config，輸出不變），`C-kernel-config` 與 `C-kernel-module-map`（同一個 `settle_config`，兩邊永遠同一份設定）改讀它，
-  條件（不可信的輸入：只解析、有上限、不跟隨連結；一致性檢查，不防竄改）：一般檔案（符號連結、硬連結不採用）、不超過 2 MB，而且 rootfs 的 dpkg 驗證通過——
+  條件（不可信的輸入：只解析、有上限、不跟隨連結；一致性檢查，不防竄改）：一般檔案（符號連結、硬連結不採用；`--from` 資料夾時以 st_nlink > 1 判斷硬連結；docker 上層換成資料夾或其他種類也不採用）、不超過 2 MB（`/boot` 底下最多讀 16 個 `config-*`，其餘只記名稱、不採用），而且 rootfs 的 dpkg 驗證通過——
   `var/lib/dpkg/info/*.md5sums` 恰好一個套件擁有 `boot/config-<版本>`、擁有者名稱整串等於 `linux-image-<版本>`、`linux-image-<版本>-unsigned`（Debian）或
-  `linux-image-unsigned-<版本>`（Ubuntu）、記的 md5 和檔案內容相同、`var/lib/dpkg/status` 有這個套件而且是已安裝。任何一項不成立 → GAP，原因寫明
+  `linux-image-unsigned-<版本>`（Ubuntu）、記的 md5 和檔案內容相同、`var/lib/dpkg/status` 有這個套件、是已安裝，而且只有一個版本。任何一項不成立 → GAP，原因寫明
   （沒有 dpkg 紀錄、擁有者不是 image 套件、md5 不同、是連結、超過上限、只有別的版本的 config），不判定。
   成立時 `kernel.config_source` 是 `/boot/config-<版本> (dpkg verified)`，`config_sha256` 是檔案內容的 SHA-256，`kernel.boot_config` 記驗證（套件、md5、檢查項目、限制）。
   有燒錄的 Image 時，照前面的規則再核對一次（IKCONFIG 相同照舊；不同改用 IKCONFIG，ATTENTION；沒有 IKCONFIG 要 dpkg 驗證，`/boot/Image` 與 `/boot/config` 的擁有者要是同一個 image 套件）。
