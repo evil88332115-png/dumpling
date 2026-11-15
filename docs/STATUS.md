@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 13:04 +0800（C2）
+最後更新：2026-11-15 13:06 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -29,6 +29,7 @@
 - 使用者決定（2026-11-15）：同意 5674 初審（NVIDIA 5674 判 not_applicable，已通知 C2 插隊做對照表 PR）；**已刪** wp1/m2-spike 的 6 份 actions 快取（快取總量剩約 1.7 GB）與已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft（C0 執行）。
 - 2026-11-15 續：(1) C1 M7d 設計同意（4 個 PR；Q1–Q7 決定記 **D-061**，含釐清 D-038：候選列可依 K1 排除；coverage 改 ATTENTION 但不得放寬閘門），#111 現在 D-051 補＋D-054～D-061（head e853eba）；(2) C3 第 3 步：11-15 排程是 GitHub 延遲不是沒觸發；手動 dry_run 43675426062 會開 16 個 dev KEV＋3 個支援期限 → **使用者選重建基準納入 dev**：#99 移除 watch-state 並關閉（不刪）、baseline 先 dry_run 給 C0 看再實跑、再一輪 dry_run 預期 KEV 0 → C0 才設 WATCH_REAL_ISSUES=on；(3) 使用者同意本機裝 **sbom-tools v0.3.0**（只當驗證對照、不進 CI）：tar sha256 3817fbc0…7b24 與 GitHub asset digest 相符、SLSA provenance＝publish-crates.yml@v0.3.0；本機沒有做簽章密碼學驗證（gh 2.46 無 attestation、沒有 cosign）；(4) wp1/m7c2 遠端分支已不存在（合併時已刪）。C2：5674 對照表 PR，之後程式碼完整性調查筆記。
 - 2026-11-15 合併：**#97 M6**（fff33a5；C0 核對 +/- 行與驗證過的 36fad69 逐位元組相同、50 檔）、**#111 DECISIONS 第 5 批**（8334eb9，D-051 補、D-054～D-062；D-062 GitHub Pages 靜態儀表板交 C3，監控上線後先交設計）、**#112** C3 WATCH.md 新 Release 既有 KEV 與重建基準（c716bd5，C0 直接審閱）。進行中：C3 重建基準實跑（C0 核可 dry_run 43676237339：84 筆基準、6 份 SBOM、支援期限 4）；C4 三個示範專案在 fff33a5 dev run 對照標準答案＋PROVENANCE 補 dsc；C1 M7d-1／M7d-3a 代理在跑、M7d-4 等實際數字（AI NAS 標準答案會改）、M7d-3b 同意（D-061 (8)）；C2 #113（5674 確認）C0 獨立驗證中、firmware-fetch 一次 curl exit 35 待重跑；C2 M7f 程式碼完整性調查筆記 wp3/code-integrity-survey，C0 決定 ETSI 只用免登入官方位置、NOT_ASSESSED 不升整份 ATTENTION、測試金鑰只收公開指紋；PR-2（Intel FIT）可先做、驗證後依完成順序合併（只動韌體檔）。待使用者：python3.14-venv（C2 測試腳本建不起 venv）；三封信建議是否轉 sca-center 對話；盤點表→project.yml 匯入、開案表對齊範本是否排入計畫。
+- 2026-11-15 續合併：#115（C2 程式碼完整性調查筆記，ETSI EN 304-623 v0.0.12 由 labs.etsi.org 匿名取得）、#116（儀表板設計，C3 開始實作）、#117（D-063、D-064、D-062 更正）、#118（WATCH.md 韌體只有廠商層級）、#119（#113 兩項建議＋_parse_utc 擋 24 時）、**#121**（D-064 B：廠商×CVE 一個 Issue；C0 獨立驗證通過應修 0，報告已貼）。main 33da59c。等：#120（D-064 A，等 C4 確認板子廠商）、#122（韌體進監控設計；C0 決定 §9：鍵＝slug@韌體版本、讀不到版本用 sha256＋GAP、同版不同 sha256 列需注意；公告 Issue 一則一個並寫「建議受影響（初步規則，待人審）」；ns5x 只跑 Grype；第一個 firmware-demo tag 由 C2 在 C0 看過 would_open 後打）。WATCH_REAL_ISSUES 仍 off。
 - 卡住／等決定：D-059 金鑰指紋（3mdeb、Ubuntu archive）實作時要人工對照兩個獨立來源核對（使用者或負責人）；刪 wp1/m2-spike 的 6 份 actions 快取（約 7.5 GB，使用者決定）；已合併分支 wp3/csme-new、wp1/m7a-fields、wp1/m7a-report、wp1/m2-pr-draft 要不要刪（C1、C2 刪分支都被權限擋，使用者決定）；5674 初審意見要負責人確認（使用者）；正式 tag（使用者自己推或放行 C1）；C4 重啟重跑腳本（使用者在 C4 對話同意）；wp3/csme-new 刪不刪；私有 BIOS 檔刪不刪。記憶體：兩次「記憶體不足」中止（C0 的 #50 驗證代理、C4 的派送腳本），但 /proc/pressure/memory 累計只有約 3.5 秒、可用記憶體約 21 GB、swap 用了 1.3 GB，系統層面看不到持續的記憶體壓力
 - 代理上限（D-048，C0 依第二台實測調整：16 執行緒、23 GB、負載 0.2）：每個對話 3 個（2 寫程式＋1 驗證），整台 10 個；負載 >12 或可用記憶體 <4 GB 不開新的。已用訊息通知 C1–C4
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
