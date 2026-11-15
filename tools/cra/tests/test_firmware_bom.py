@@ -451,3 +451,88 @@ def test_unreadable_and_unwalked_make_attention(tmp_path):
     _, s, rep = run(proj, scan)
     assert s["product_sbom"]["flash_firmware"]["status"] == "ATTENTION"
     assert "could not be read" in (rep / "sbom.md").read_text(encoding="utf-8")
+
+
+# ---------- adapter-gaps #25：flash_package_supplier 算進 missing_fields、sbom.md 的 BSP 說明依平台寫 ----------
+
+JETSON_WORDS = ("Jetson", "L4T", "NVIDIA")
+
+
+def flash_result_list(tmp_path, lst, cfg):
+    """同 flash_result，但 list.json 用傳進來的內容（測不同平台）。"""
+    proj, scan = flash_result(tmp_path, cfg=cfg)
+    write_json(tmp_path / "res" / "list.json", lst)
+    return proj, scan
+
+
+def test_missing_flash_package_supplier_counts_as_missing_field(tmp_path):
+    cfg_no = dict(MIN_CFG)
+    proj, scan = flash_result(tmp_path / "a", cfg=cfg_no)
+    r, s, rep = run(proj, scan)
+    md = (rep / "sbom.md").read_text(encoding="utf-8")
+    assert "Supplier of these components: **TO BE COMPLETED**" in md
+    assert "sbom.flash_package_supplier" in s["documents"]["sbom"]["missing_fields"] and "sbom.flash_package_supplier" in s["missing_fields"]
+    n_missing = len(s["missing_fields"])
+    # 設定有供應商 → 第 6 節沒有 TO BE COMPLETED、也不算缺，總數少 1
+    proj2, scan2 = flash_result(tmp_path / "b", cfg=dict(MIN_CFG, sbom={"flash_package_supplier": {"name": "Vendor Ltd"}}))
+    r2, s2, rep2 = run(proj2, scan2)
+    assert "sbom.flash_package_supplier" not in s2["missing_fields"] and "Vendor Ltd" in (rep2 / "sbom.md").read_text(encoding="utf-8")
+    assert len(s2["missing_fields"]) == n_missing - 1
+
+
+def test_flash_package_supplier_not_missing_when_section_has_no_such_line(tmp_path):
+    # 不是刷機包的掃描：第 6 節只說沒有加韌體，沒有供應商那一行 → 不算缺
+    proj, scan = make_project(tmp_path / "proj", MIN_CFG), make_scan(tmp_path / "scan")
+    r, s, rep = run(proj, scan)
+    assert "sbom.flash_package_supplier" not in s["missing_fields"]
+    # 刷機包但清點檔缺少：韌體沒有併進來，也沒有供應商那一行
+    proj2, scan2 = flash_result(tmp_path / "x", inventory=False, cfg=dict(MIN_CFG))
+    r2, s2, rep2 = run(proj2, scan2)
+    assert "Supplier of these components" not in (rep2 / "sbom.md").read_text(encoding="utf-8")
+    assert "sbom.flash_package_supplier" not in s2["missing_fields"]
+
+
+@pytest.mark.parametrize("l4t", [{"release": None, "status": "INFO", "detail": "原始磁碟映像：不是 NVIDIA Jetson，沒有 L4T 版本"}, None])
+def test_sbom_md_has_no_jetson_text_for_other_platforms(tmp_path, l4t):
+    rfs = {"variant": "rootfs_no_gui", "prefix": "product-a/Linux_for_Tegra/rootfs_no_gui"}
+    if l4t is not None:
+        rfs["l4t"] = l4t
+    proj, scan = flash_result_list(tmp_path, {"rootfs": [rfs]}, dict(MIN_CFG))
+    r, s, rep = run(proj, scan)
+    md = (rep / "sbom.md").read_text(encoding="utf-8")
+    # 第 6 節（韌體）與第 7 節（TR-03183-2）都不能有 Jetson 的字（INV 的檔名 nvgpu、mb1_t234 等是清點來的資料，不在說明文字裡）
+    sec = md.split("## 6.", 1)[1]
+    prose = "\n".join(l for l in sec.splitlines() if not l.startswith("|"))
+    for w in JETSON_WORDS:
+        assert w not in prose, (w, prose)
+    assert "published by the vendor of this platform" in md
+    assert "Jetson Linux (L4T) release" not in md and "L4T release not determined" not in md
+    # L4T 的備註不是「判斷不了」：不讓 sbom 的韌體狀態因為它變成 ATTENTION
+    if l4t is not None:
+        assert not any("L4T" in n for n in s["product_sbom"]["flash_firmware"]["notes"])
+
+
+def test_sbom_md_keeps_jetson_text_for_jetson(tmp_path):
+    proj, scan = flash_result(tmp_path)
+    r, s, rep = run(proj, scan)
+    md = (rep / "sbom.md").read_text(encoding="utf-8")
+    assert "| Jetson Linux (L4T) release |" in md and "comparing the files with NVIDIA's public BSP." in md
+    assert "such as the Jetson Linux release, TR-03183-2 3.2.2" in md
+    assert s["product_sbom"]["flash_firmware"]["platform"] == "jetson"
+
+
+def test_platform_of():
+    assert fb.platform_of({"l4t": {"release": "39.2.1", "status": "OK"}}) == "jetson"
+    assert fb.platform_of({"l4t": {"release": None, "status": "GAP"}}) == "jetson"       # tar 刷機包但讀不到版本：還是 Jetson 的讀法
+    assert fb.platform_of({"l4t": {"release": None, "status": "INFO"}}) == "other"
+    assert fb.platform_of({"variant": "x"}) is None and fb.platform_of(None) is None and fb.platform_of({"l4t": "x"}) is None
+
+
+def test_absent_text_by_platform(tmp_path):
+    proj, scan = flash_result(tmp_path / "j", inventory=False)
+    assert "Jetson Linux release, NVIDIA kernel modules" in (run(proj, scan)[2] / "sbom.md").read_text(encoding="utf-8")
+    proj2, scan2 = flash_result_list(tmp_path / "o", {"rootfs": [{"variant": "rootfs_no_gui", "prefix": "product-a/Linux_for_Tegra/rootfs_no_gui",
+                                                                 "l4t": {"release": None, "status": "INFO"}}]}, dict(MIN_CFG))
+    (tmp_path / "o" / "res" / "flash-inventory.json").unlink(missing_ok=True)
+    md = (run(proj2, scan2)[2] / "sbom.md").read_text(encoding="utf-8")
+    assert "platform release information" in md and "Jetson" not in md.split("## 6.", 1)[1].split("## 7.", 1)[0]

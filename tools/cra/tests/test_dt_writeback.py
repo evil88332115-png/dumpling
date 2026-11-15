@@ -581,3 +581,78 @@ def test_vex_for_python_module_matches_finding_on_patched_purl(tmp_path):
     # 沒有對照 → 對不上，而且列在 unmatched
     applies, rep = wb.match_statements(vex, product, targets, {})
     assert not applies and rep["unmatched"]
+
+
+# ---- M7c-1（A4／D-057）：沒有評估的陳述（in_triage 加 dumpling:assessment＝NOT_ASSESSED）不是判定，不寫回 DT
+
+NA_PROP = {"name": "dumpling:assessment", "value": "NOT_ASSESSED"}
+
+
+def na_stmt(vid, comp_ref, source_ids):
+    """vex_export.cdx_vex 為沒有判定的列輸出的樣子：in_triage、標記屬性、沒有 vex-source／規則。"""
+    return {"bom-ref": f"vex-{vid}", "id": vid, "source": {"name": "NVD"},
+            "analysis": {"state": "in_triage", "detail": "Not assessed: no VEX assessment has been recorded"},
+            "affects": [{"ref": f"urn:cdx:99999999-9999-4999-8999-999999999999/1#{comp_ref}"}],
+            "properties": [{"name": "sca-center:source-ids", "value": source_ids}, {"name": "sca-center:component", "value": "x"}, dict(NA_PROP)]}
+
+
+def test_marker_constants_match_vexconv():
+    import vex_export as vx
+    vc = vx._vexconv()
+    assert (wb.NOT_ASSESSED_PROP, wb.NOT_ASSESSED_VALUE) == (vc.PROP_ASSESSMENT, vc.NOT_ASSESSED)
+
+
+def test_not_assessed_statements_are_never_written_back(tmp_path):
+    """三個 finding：openssl 有判定（not_affected）、zlib 與 curl 的陳述是 NOT_ASSESSED（in_triage）。DT 只會收到 openssl 的那一條；
+    zlib、curl 的 finding 沒有 analysis，寫回之後仍然沒有（沒有被改成 IN_TRIAGE）。"""
+    stmts = [good_stmts()[0],
+             na_stmt("CVE-2", "pkg:deb/ubuntu/zlib@1.2.3?arch=arm64?package-id=x", "NVD:CVE-2"),
+             na_stmt("CVE-3", "pkg:deb/ubuntu/curl@7.0?arch=arm64?package-id=x", "NVD:CVE-9")]
+    code, st, fake, out = go(tmp_path, stmts)
+    assert code == 0 and st["D-dt-vex-applied"][0] == "OK", st
+    assert _sent_states(out) == ["not_affected"]
+    fs = fake.findings[ROOT_UUID]
+    by = {f["vulnerability"]["vulnId"]: f["analysis"] for f in fs}
+    assert by["UBUNTU-CVE-1"]["state"] == "NOT_AFFECTED"
+    assert not by["CVE-2"].get("state") and not by["GHSA-x"].get("state")          # DT 的狀態沒有因為 NOT_ASSESSED 改變
+    rep = json.loads((out / "dt-writeback.json").read_text())["vex"]
+    assert rep["not_assessed_skipped"] == 2 and rep["statements"] == 1 and rep["unmatched"] == 0
+    assert "1 of 1 statements matched" in st["D-dt-vex-build"][1]
+
+
+def test_only_not_assessed_statements_write_nothing(tmp_path):
+    stmts = [na_stmt("CVE-2", "pkg:deb/ubuntu/zlib@1.2.3?arch=arm64?package-id=x", "NVD:CVE-2")]
+    code, st, fake, out = go(tmp_path, stmts)
+    assert _sent_states(out) == [] and st["D-dt-vex-upload"][0] == "NOT_RUN"
+    assert all(not f["analysis"].get("state") for f in fake.findings[ROOT_UUID])
+    assert not any(c[0] == "POST" and c[1] == "/api/v1/vex" for c in fake.calls)
+
+
+def test_not_assessed_does_not_touch_someone_elses_analysis_or_our_earlier_writeback(tmp_path):
+    human = {"state": "FALSE_POSITIVE", "isSuppressed": True, "detail": "human"}
+    fs = [finding("u-zlib", ROOTFS[1], "NVD", "CVE-2", analysis=dict(human))]
+    code, st, fake, out = go(tmp_path, [na_stmt("CVE-2", "pkg:deb/ubuntu/zlib@1.2.3?arch=arm64?package-id=x", "NVD:CVE-2")], findings=fs)
+    assert fs[0]["analysis"]["state"] == "FALSE_POSITIVE" and fs[0]["analysis"]["detail"] == "human" and _sent_states(out) == []
+    # 沒有標記的 in_triage（人判的 in_triage 陳述）照舊會寫回：區別只在 dumpling:assessment
+    fs2 = [finding("u-curl", ROOTFS[2], "GITHUB", "GHSA-x", aliases=["CVE-3"])]
+    code, st, fake, out = go(tmp_path / "b", [good_stmts()[2]], findings=fs2)
+    assert fs2[0]["analysis"]["state"] == "IN_TRIAGE"
+
+
+def test_partial_shared_finding_is_unchanged_by_not_assessed_statements():
+    """H1：原始碼套件的 finding 對應多個二進位套件，只有一部分有陳述時寫 in_triage。沒有評估的二進位套件算「沒有陳述」，結果與沒有那條陳述時相同。"""
+    a = comp("libssl3", "3.0.1", "pkg:deb/ubuntu/libssl3@3.0.1?arch=arm64")
+    b = comp("openssl", "3.0.1", "pkg:deb/ubuntu/openssl@3.0.1?arch=arm64")
+    src = comp("openssl", "3.0.1", "pkg:deb/ubuntu/openssl@3.0.1?arch=source")
+    product = {"components": [a, b]}
+    f = finding("u-src", src, "NVD", "CVE-2")
+    targets = {"rootfs": {"findings": [f], "bomref_by_key": {wb.comp_key(src): src["bom-ref"]}, "serial": SERIAL, "version": 1}}
+    alt = {wb.comp_key(a): [wb.comp_key(src)], wb.comp_key(b): [wb.comp_key(src)]}
+    judged = vstmt("CVE-2", a["bom-ref"], "not_affected", "NVD:CVE-2", just="code_not_present")
+    na = na_stmt("CVE-2", b["bom-ref"], "NVD:CVE-2")
+    with_na, rep1 = wb.match_statements({"vulnerabilities": [judged, na]}, product, targets, alt)
+    without, rep2 = wb.match_statements({"vulnerabilities": [judged]}, product, targets, alt)
+    assert with_na == without and [x["state"] for x in with_na.values()] == ["in_triage"]
+    assert rep1["partial_shared"] == rep2["partial_shared"] == 1
+    assert rep1["not_assessed_skipped"] == 1 and rep2["not_assessed_skipped"] == 0
+    assert {k: v for k, v in rep1.items() if k != "not_assessed_skipped"} == {k: v for k, v in rep2.items() if k != "not_assessed_skipped"}

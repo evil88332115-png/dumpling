@@ -317,3 +317,21 @@ def test_dt_feeds_future_and_bad_limit(tmp_path):
                            capture_output=True, text=True, check=True)
         line = [x for x in r.stdout.splitlines() if x.startswith("C-dt-feeds")][0]
         assert line.split("\t")[1] == "FAIL" and "設定錯誤" in line, bad
+
+
+def test_dt_feeds_reason_code_is_structured(tmp_path):
+    """M7b：data-sources.json 的 feeds_freshness.reason（sca-scan 寫進 meta.json 的 dt_feeds_reason；cra_report 讀它，不看說明文字）。"""
+    import importlib.util
+    spec_ = importlib.util.spec_from_file_location("dtsources_m7b", LIB / "dtsources.py")
+    ds = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(ds)
+    for n in "abc":
+        (tmp_path / n).mkdir()
+    assert run_sources(tmp_path / "a", _fresh_all())[1]["feeds_freshness"]["reason"] == "fresh"
+    spec = _fresh_all()
+    spec[("vuln", "osv")] = ("200", _fresh(40))
+    assert run_sources(tmp_path / "b", spec)[1]["feeds_freshness"]["reason"] == "stale"
+    assert run_sources(tmp_path / "c", {k: ("403", None) for k in ALL_DONE})[1]["feeds_freshness"]["reason"] == "permission_denied"
+    assert ds.feeds_reason([], ds.feeds_freshness([])[0]) == "no_data"
+    assert ds.feeds_reason([], ds.feeds_freshness([], max_hours=-1)[0]) == "config_error"
+    assert set(ds.FEEDS_REASONS) == {"fresh", "stale", "permission_denied", "no_data", "config_error"}

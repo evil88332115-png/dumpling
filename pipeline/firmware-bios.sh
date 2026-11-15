@@ -7,6 +7,7 @@
 # 退出碼：0＝OK；2＝ATTENTION 或 GAP；1＝FAIL；64＝參數錯誤。
 # 狀態只代表解析的結果；每個元件的漏洞比對狀態是 NOT_ASSESSED（SBOM 的 dumpling:vuln-assessment property）。
 # Intel 微碼另外離線比對 tools/cra/data/intel-microcode-releases.json（dumpling:advisory-* property、fw-inventory.md 的「公告比對」）：候選公告不是確定受影響，資料表讀不到時狀態 ATTENTION。
+# NVIDIA vBIOS 另外離線比對 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json（repo 內的 NVIDIA 公告對照表，依版本與 PCI 裝置 ID；尚未經負責人確認時一律 NOT_ASSESSED）：affected／fixed／NOT_ASSESSED（多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準），表讀不到時狀態 ATTENTION。
 set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

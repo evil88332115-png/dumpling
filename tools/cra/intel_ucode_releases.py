@@ -71,7 +71,7 @@ def norm_sa(num):
 
 
 def tag_date(tag):
-    m = TAG_DATE.match(tag)
+    m = TAG_DATE.fullmatch(tag)
     if not m:
         return None
     y, mo, d = (int(x) for x in m.groups())
@@ -150,7 +150,7 @@ def parse(text, rules=()):
             section, last_bullet = None, None
             continue
         if s.startswith("## "):
-            m = TAG_URL.match(s[3:])
+            m = TAG_URL.fullmatch(s[3:])
             if m:
                 tag = m.group("tag")
                 cur = {"tag": tag, "date": tag_date(tag), "security": [], "security_na": False, "functional_updates": 0,
@@ -203,11 +203,11 @@ def parse(text, rules=()):
                 note(i, f"表格列有 {len(cells)} 欄（預期 6）")
                 continue
             proc, step, fms, old, new, _products = cells
-            m = FMS_PI.match(fms)
+            m = FMS_PI.fullmatch(fms)
             if not m:
                 note(i, "F-M-S/PI 不是 FF-MM-SS/PI 形式")
                 continue
-            bad = [v for v in (old, new) if v and v.upper() != "N/A" and not REV.match(v)]
+            bad = [v for v in (old, new) if v and v.upper() != "N/A" and not REV.fullmatch(v)]
             if bad:
                 note(i, "Old Ver／New Ver 不是 8 位十六進位")
                 continue

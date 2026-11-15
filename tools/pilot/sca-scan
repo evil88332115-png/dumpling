@@ -340,13 +340,15 @@ image)
     envphp=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$SRC" 2>/dev/null | sed -n 's/^PHP_VERSION=//p')
     IMG_TAR=$WORK/image.tar
     if docker save -o "$IMG_TAR" "$SRC" 2> "$WORK/save.txt"; then
-      if [ $LOCAL_ID = 1 ]; then
-        if [ "$iid" = "$SRC" ]; then status A-source OK "本機映像 $SRC（沒有 registry digest，以映像 ID 固定；來源見呼叫端的紀錄）"
-        else status A-source ATTENTION "指定 $SRC，inspect 得到的映像 ID 為 ${iid:-無}：不一致"; fi
-      elif [[ "$SRC" == *@sha256:* ]]; then
-        if [ "${SRC##*@}" = "${META[digest]}" ]; then status A-source OK "$dg（映像 ID ${iid:0:19}）"
-        else status A-source ATTENTION "指定 ${SRC##*@}，拉取後 RepoDigests 為 ${dg:-無}：不一致"; fi
-      else status A-source ATTENTION "未以 @sha256 固定；以拉取當下的 digest 記錄：${dg:-無}（tag 會被重建，結果會跟著變）"; fi
+      # 結構化（M7b，下游不看說明文字）：source_pin＝image-id｜digest｜none（怎麼固定的）、source_identity＝match｜mismatch｜not_checked
+      if [ $LOCAL_ID = 1 ]; then META[source_pin]=image-id
+        if [ "$iid" = "$SRC" ]; then META[source_identity]=match; status A-source OK "本機映像 $SRC（沒有 registry digest，以映像 ID 固定；來源見呼叫端的紀錄）"
+        else META[source_identity]=mismatch; status A-source ATTENTION "指定 $SRC，inspect 得到的映像 ID 為 ${iid:-無}：不一致"; fi
+      elif [[ "$SRC" == *@sha256:* ]]; then META[source_pin]=digest
+        if [ "${SRC##*@}" = "${META[digest]}" ]; then META[source_identity]=match; status A-source OK "$dg（映像 ID ${iid:0:19}）"
+        else META[source_identity]=mismatch; status A-source ATTENTION "指定 ${SRC##*@}，拉取後 RepoDigests 為 ${dg:-無}：不一致"; fi
+      else META[source_pin]=none; META[source_identity]=not_checked
+        status A-source ATTENTION "未以 @sha256 固定；以拉取當下的 digest 記錄：${dg:-無}（tag 會被重建，結果會跟著變）"; fi
       SRC_OK=1
     else status A-source FAIL "docker save 失敗：$(tail -1 "$WORK/save.txt")"; fi
   fi;;
@@ -617,7 +619,8 @@ DT_UUID=; DT_SKIP=
 [ -z "$DT_SKIP" ] && [ $HAVE_ENV != 1 ] && DT_SKIP="沒有 $PILOT_ENV"
 [ -z "$DT_SKIP" ] && { [ -n "$DT_URL" ] && [ -n "$DT_API_KEY" ] || DT_SKIP="pilot.env 缺 DT_URL 或 DT_API_KEY"; }
 [ -z "$DT_SKIP" ] && [ -z "$UPLOAD" ] && DT_SKIP="沒有可上傳的 SBOM"
-if [ -n "$DT_SKIP" ]; then for s in C-dt-feeds D-dt-data-sources D-dt-kev-sources D-dt-osv-coverage D-dt-project D-dt-upload D-dt-bom-processing D-dt-vuln-analysis D-dt-findings; do status "$s" NOT_RUN "$DT_SKIP"; done
+# meta.json 的 dt_feeds_reason（C-dt-feeds 的原因代碼，cra_report 讀它）：dt_not_used｜dtsources_failed｜dtsources.py 的 FEEDS_REASONS
+if [ -n "$DT_SKIP" ]; then META[dt_feeds_reason]=dt_not_used; for s in C-dt-feeds D-dt-data-sources D-dt-kev-sources D-dt-osv-coverage D-dt-project D-dt-upload D-dt-bom-processing D-dt-vuln-analysis D-dt-findings; do status "$s" NOT_RUN "$DT_SKIP"; done
 else
   O=$OUT/dt
   curl -sS -m 30 -o "$O/version.json" "$DT_URL/api/version" 2>>"$WORK/curl-dt.err"; META[dt_version]=$(jget "$O/version.json" version)
@@ -638,7 +641,8 @@ else
   if r=$(python3 -I "$ROOT/tools/pilot/lib/dtsources.py" "$O/data-sources.json" --osv-config "$c:$WORK/osv-config.json" --sbom "$UPLOAD" "${srcargs[@]}" 2>&1); then
     while IFS=$'\t' read -r s1 s2 s3; do [ -n "$s1" ] && status "$s1" "$s2" "$s3"; done <<< "$r"
     META[dt_data_sources]=$(jget "$O/data-sources.json" vuln_status)
-  else status D-dt-data-sources FAIL "dtsources.py 失敗：$(echo "$r" | tail -1)"; status D-dt-kev-sources NOT_RUN "dtsources.py 失敗"; status C-dt-feeds NOT_RUN "dtsources.py 失敗"; status D-dt-osv-coverage NOT_RUN "dtsources.py 失敗"; fi
+    META[dt_feeds_reason]=$(jget "$O/data-sources.json" feeds_freshness.reason)
+  else META[dt_feeds_reason]=dtsources_failed; status D-dt-data-sources FAIL "dtsources.py 失敗：$(echo "$r" | tail -1)"; status D-dt-kev-sources NOT_RUN "dtsources.py 失敗"; status C-dt-feeds NOT_RUN "dtsources.py 失敗"; status D-dt-osv-coverage NOT_RUN "dtsources.py 失敗"; fi
   q=$(python3 -I -c 'import sys,urllib.parse as u;print(u.urlencode({"name":sys.argv[1],"version":sys.argv[2]}))' "$NAME" "${META[version]}")
   c=$(dt_http GET "/api/v1/project/lookup?$q" "$O/project.json")
   if [ "$c" = 404 ]; then
@@ -956,7 +960,8 @@ if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] 
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"
     case $s2 in NOT_RUN) rm -f "$KBF";; *) status "$s1" "$s2" "$s3";; esac
   else rm -f "$KBF"; status C-kernel-boot FAIL "kernel_boot.py 失敗（或超過 3600 秒；來源：$KLABEL）：$(echo "$r" | tail -1)"; fi
-  [ -s "$KBF" ] && grep -q '"k1_kernel": "rootfs"' "$KBF" && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
+  # 讀 JSON 欄位（不是 grep 檔案文字：縮排或空白不同就會讀錯；M7b）
+  [ -s "$KBF" ] && [ "$(jget "$KBF" k1_kernel 2>/dev/null)" = rootfs ] && { KREC+=(--prefer-rootfs-image); KPREF=(--prefer-rootfs-image); }
 fi
 [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && [ "$KNONE" != 1 ] && kernel_versions_prepare
 # CNA 鏡像是沿用的舊資料（tools/mirror/kernel-cve.sh 的 KERNEL_CVE_FALLBACK_FROM：上游連不上）：結果照用，但報告要看得到

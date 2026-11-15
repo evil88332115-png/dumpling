@@ -14,7 +14,7 @@ if [ $# -gt 0 ]; then manifests=("$@"); else manifests=("$root"/firmware/bios/*/
 mkdir -p "$work" "$art"
 
 {
-  echo '| 樣本 | firmware-bios 狀態行 | 元件數 | expected 比對 | 微碼公告比對（候選不是確定受影響） |'
+  echo '| 樣本 | firmware-bios 狀態行 | 元件數 | expected 比對 | 公告比對（微碼、NVIDIA vBIOS；候選不是確定受影響） |'
   echo '|---|---|---|---|---|'
 } > "$summary"
 

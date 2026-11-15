@@ -602,7 +602,9 @@ def test_report_says_no_data_for_an_intel_image_without_microcode(tmp_path):
     md = xf.markdown(inv)
     sec = md[md.index("## 公告比對"):]
     assert "沒有找到 Intel microcode，沒有可比對的項目（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）" in sec
-    assert fc.cell(inv) == "沒有 Intel 微碼（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）"
+    assert fc.cell(inv).startswith("沒有 Intel 微碼（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）")          # 規則表建議另外接在後面（見 test_fw_advisory_rules）
+    inv_old = {k: v for k, v in inv.items() if k != "rules_advisory"}
+    assert fc.cell(inv_old) == "沒有 Intel 微碼（NOT_ASSESSED：資料庫沒有資料，以廠商公告為準）"
 
 
 # ---------- 揭露表、散文對照、被取代的 platform 遮罩 ----------

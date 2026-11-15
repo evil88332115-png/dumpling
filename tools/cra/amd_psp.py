@@ -1377,7 +1377,7 @@ def markdown_lines(amd, e):
             flag += ("（**歧義**：" + (f"同一個指標的另一種讀法在 {e(', '.join(r['readings']))}；" if r.get("readings") else f"同一個位置也用視窗開頭 {e(', '.join(r['other_bases']))} 讀過；"
                                      if r.get("other_bases") else "它在這樣的目錄底下；")
                      + "兩種以上的讀法都通過結構檢查而內容不同、或都沒通過，工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）")
-        L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}` @0x{r['offset']:x}（視窗開頭 0x{r['base']:x}）{flag}", "",
+        L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}`（位移 0x{r['offset']:x}，視窗開頭 0x{r['base']:x}）{flag}", "",      # 不寫 ` @0x…`：空白後接 @ 在 GitHub 可能被當成提及
               f"{r['num_entries']} 項；checksum {r['checksum']}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
         if r["kind"].startswith("combo"):
             if r["entries"]:

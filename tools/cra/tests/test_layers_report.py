@@ -513,6 +513,9 @@ def test_os_only_layer_report_skips_the_flash_firmware(tmp_path):
     assert fw["layer_not_applicable"] is True and "BSP layer's report" in fw["absent"]
     assert s["layers"]["bsp_inputs_not_applicable"]["skipped"] == ["flash-firmware"]
     assert "BSP layer's report" in (rep / "sbom.md").read_text(encoding="utf-8")
+    # 這份沒有「Supplier … TO BE COMPLETED」那一行，不算缺 sbom.flash_package_supplier（adapter-gaps #25）；Jetson 的刷機包標題照舊
+    assert "sbom.flash_package_supplier" not in s["missing_fields"]
+    assert "## 6. Flash firmware, Jetson Linux release and kernel modules" in (rep / "sbom.md").read_text(encoding="utf-8")
     # 同一個刷機包、分層 SBOM 有 bsp 元件 → 照舊加進去
     proj2, scan2 = flash_result(tmp_path / "b", sbom=_layered_sbom("bsp"))
     r2, s2, rep2 = run(proj2, scan2)

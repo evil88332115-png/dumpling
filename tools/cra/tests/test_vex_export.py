@@ -45,6 +45,16 @@ def ann(cve, state="not_affected", **kw):
     return a
 
 
+def typed(allr, typ="source", loc="synthetic evidence"):
+    """D-035：測試用。給每一筆沒有依據的排除補上依據類型（只動 evidence_basis），讓測試只看它原本要看的東西
+    （沒有類型的排除會算進 untriaged_for_gate 並擋閘門）。D-035 本身的測試在 test_vex_evidence_basis.py。"""
+    for r in allr:
+        for x in [r] + (r.get("vex_extra") or []):
+            if vx.is_exclusion(x.get("vex")) and not x["vex"].get("evidence_basis"):
+                x["vex"]["evidence_basis"] = [{"type": typ, "location": loc}]
+    return allr
+
+
 def kcfg(results, status="OK"):
     return {"schema": "sca-center-kernel-config/1", "status": status, "detail": "x",
             "kernel": {"version": "6.8.12-1021-tegra", "config_source": "/boot/config", "config_sha256": "ab" * 32},
@@ -240,6 +250,7 @@ def test_annotate_cli_appends_safely(tmp_path):
 def test_gate_verdicts():
     def g(rs, **kw):
         allr, conf, _ = vx.assess(rs)
+        typed(allr)           # 因 D-035 而變：DT 的排除沒有依據類型會擋閘門；這裡要看的是其他規則，所以補上類型
         return vx.gate(allr, conf, **{"grype_checked": True, "not_assessed": [], **kw})
     ok = g([row("CVE-1", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT")), row("CVE-2", "linux", "6.8", kernel=True, analysis=dt("RESOLVED")),
             row("CVE-3", analysis=dt("IN_TRIAGE")), row("CVE-4", analysis=dt("EXPLOITABLE", response="UPDATE"))])
@@ -285,6 +296,16 @@ PBOM = {"bomFormat": "CycloneDX", "specVersion": "1.6", "serialNumber": "urn:uui
                         "purl": DEB.format("nvidia-l4t-kernel", "5.15-39.2.1")}]}
 
 
+def is_na(v):
+    """CycloneDX 的 vulnerability 是不是「沒有評估」的陳述（M7c-1，A4／D-057：in_triage 加 dumpling:assessment＝NOT_ASSESSED）。"""
+    return {"name": "dumpling:assessment", "value": "NOT_ASSESSED"} in (v.get("properties") or [])
+
+
+def assessed(cdx):
+    """只留有判定的陳述。沒有判定的列從 A4（M7c-1）起也會寫進 VEX，這些測試要確認的是有判定的那幾條。"""
+    return [v for v in cdx["vulnerabilities"] if not is_na(v)]
+
+
 def sample_rows():
     return [row("CVE-2024-6119"), row("CVE-1", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT", details="not built")),
             row("CVE-2", "openssl", OSSL, purl=f"pkg:deb/ubuntu/openssl@{OSSL}?arch=source&distro=ubuntu-24.04", installed_as=["libssl3t64"],
@@ -306,7 +327,10 @@ def test_cyclonedx_shape():
     assert re.match(r"^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", cdx["serialNumber"])
     assert cdx["metadata"]["timestamp"] == "2026-11-02T02:43:55Z" and cdx["metadata"]["component"]["name"] == "EX-J100"
     v = {x["id"]: x for x in cdx["vulnerabilities"]}
-    assert sorted(v) == ["CVE-1", "CVE-2", "CVE-2024-6119", "CVE-3", "CVE-4"]          # untriaged 的 CVE-5 不寫
+    # M7c-1（A4／D-057）起沒有判定的 CVE-5 也寫（in_triage 加 dumpling:assessment＝NOT_ASSESSED）；以前這裡是五條、不含 CVE-5
+    assert sorted(v) == ["CVE-1", "CVE-2", "CVE-2024-6119", "CVE-3", "CVE-4", "CVE-5"]
+    assert v["CVE-5"]["analysis"]["state"] == "in_triage" and {"name": "dumpling:assessment", "value": "NOT_ASSESSED"} in v["CVE-5"]["properties"]
+    assert "dumpling:assessment" not in json.dumps(v["CVE-4"])         # CVE-4 是 DT 的 IN_TRIAGE（有判定）：沒有標記
     refs = {c["bom-ref"] for c in PBOM["components"]}
     for x in cdx["vulnerabilities"]:
         assert x["bom-ref"] and x["analysis"]["state"] in vx.CDX_STATES and x["analysis"]["detail"]
@@ -444,9 +468,13 @@ def test_non_debian_scan_and_no_findings(tmp_path):
     sbom = dict(SBOM, components=[{"type": "library", "name": "requests", "version": "2.0", "purl": "pkg:pypi/requests@2.0", "bom-ref": "r"}])
     r, s, rep = run(make_project(tmp_path / "p"), make_scan(tmp_path / "s", findings=pyf, grype={"matches": []}, sbom=sbom, meta=dict(META, mode="dir")))
     assert s["vex"]["gate"]["verdict"] == "ATTENTION" and s["vex"]["gate"]["counts"]["total"]["untriaged"] == 1
-    assert s["vex"]["files"]["vex.cdx.json"]["statements"] == 0 and s["vex"]["files"]["vex.openvex.json"] is None
-    assert (rep / "vex.cdx.json").exists() and not (rep / "vex.openvex.json").exists()
-    assert "`vex.openvex.json` not written (no statement (OpenVEX needs at least one))" in ra(rep)
+    # A4（M7c-1）：沒有判定的那一列也寫進 VEX（in_triage／under_investigation 加 NOT_ASSESSED）。以前這裡是 0 條陳述、OpenVEX 不寫
+    f = s["vex"]["files"]
+    assert f["vex.cdx.json"]["statements"] == 1 and f["vex.cdx.json"]["not_assessed"] == 1
+    assert f["vex.openvex.json"]["statements"] == 1 and f["vex.openvex.json"]["not_assessed"] == 1
+    assert s["vex"]["statements_assessed"] == 0 and s["vex"]["statements_not_assessed"] == 1
+    assert (rep / "vex.cdx.json").exists() and (rep / "vex.openvex.json").exists()
+    assert "`vex.openvex.json` (1 statements, 1 of them not assessed, SHA-256 " in ra(rep)
     # 沒有 DT findings：不寫 VEX、刪掉上一次的、閘門 NOT_ASSESSED
     proj = make_project(tmp_path / "p2")
     run(proj, make_scan(tmp_path / "s2"))
@@ -663,7 +691,7 @@ def test_report_grouped_alias_row_end_to_end(tmp_path):
     # Grype 的比對都不在這個 DT 清單裡（會成為只有 Grype 的列）：這裡只看別名併列，不給 Grype 的比對
     r, s, rep = run(proj, make_scan(tmp_path / "s", findings=[f], grype={"matches": []}))
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
-    assert [v["id"] for v in cdx["vulnerabilities"]] == ["CVE-2026-0002"] and s["vex"]["gate"]["counts"]["total"]["untriaged"] == 1
+    assert [v["id"] for v in assessed(cdx)] == ["CVE-2026-0002"] and s["vex"]["gate"]["counts"]["total"]["untriaged"] == 1
     assert s["vex"]["gate"]["verdict"] != "OK"
 
 
@@ -685,8 +713,8 @@ def test_report_alias_second_cve_without_statement_blocks_gate(tmp_path):
     g = s["vex"]["gate"]
     assert g["extra_cves_untriaged"] == 0 and not any("further CVEs" in x for x in g["reasons"])
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
-    assert sorted(v["id"] for v in cdx["vulnerabilities"]) == ["CVE-2026-0001", "CVE-2026-0002"]
-    assert len({v["bom-ref"] for v in cdx["vulnerabilities"]}) == 2
+    assert sorted(v["id"] for v in assessed(cdx)) == ["CVE-2026-0001", "CVE-2026-0002"]
+    assert len({v["bom-ref"] for v in cdx["vulnerabilities"]}) == len(cdx["vulnerabilities"])
 
 
 def test_extra_cve_dt_finding_for_that_cve_is_used():
@@ -700,6 +728,7 @@ def test_extra_cve_dt_finding_for_that_cve_is_used():
 
 def test_gate_without_grype_cross_check_is_not_ok():
     allr, conf, _ = vx.assess([row("CVE-2026-0001", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT"))])
+    typed(allr)                                                                  # 因 D-035 而變：補上依據類型
     assert vx.gate(allr, conf, grype_checked=True, not_assessed=[])["verdict"] == "OK"
     assert vx.gate(allr, conf)["verdict"] == "ATTENTION"                       # 預設偏保守：呼叫端要明確說 Grype 有跑
     g = vx.gate(allr, conf, grype_checked=False)
@@ -787,7 +816,7 @@ def test_report_alias_with_own_row_end_to_end(tmp_path):
     assert s is not None and g["extra_cves_untriaged"] == 0 and not any("further CVEs" in x for x in g["reasons"])
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
     vs = cdx["vulnerabilities"]
-    assert sorted((v["id"], v["analysis"]["state"]) for v in vs) == [("CVE-2026-0001", "not_affected"), ("CVE-2026-0002", "exploitable")]
+    assert sorted((v["id"], v["analysis"]["state"]) for v in assessed(cdx)) == [("CVE-2026-0001", "not_affected"), ("CVE-2026-0002", "exploitable")]
     assert len({v["bom-ref"] for v in vs}) == len(vs)
 
 
@@ -820,6 +849,7 @@ def test_report_self_no_version_match_blocks_gate(tmp_path):
 
 def test_gate_not_assessed_default_is_fail_safe():
     allr, conf, _ = vx.assess([row("CVE-2026-0001", analysis=dt("NOT_AFFECTED", "CODE_NOT_PRESENT"))])
+    typed(allr)                                                                  # 因 D-035 而變：補上依據類型
     assert vx.gate(allr, conf, grype_checked=True, not_assessed=[])["verdict"] == "OK"
     g = vx.gate(allr, conf, grype_checked=True)                                  # 呼叫端沒說 → 不知道
     assert g["verdict"] == "ATTENTION" and g["not_assessed"] is None
@@ -852,7 +882,7 @@ def test_report_two_rows_share_extra_cve_split_once(tmp_path):
     r, s, rep = run(proj, make_scan(tmp_path / "s2", findings=fs))
     assert not r.stdout.startswith("FAIL") and (rep / "vex.cdx.json").exists(), r.stdout + r.stderr
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))
-    assert sorted(v["id"] for v in cdx["vulnerabilities"]) == ["CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"]
+    assert sorted(v["id"] for v in assessed(cdx)) == ["CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"]
     assert s["vex"]["gate"]["extra_cves_untriaged"] == 0
 
 

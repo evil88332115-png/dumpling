@@ -319,6 +319,7 @@ def vulnerability_status(summary, vrows, ctx, table):
     c = bucket_counts(vrows)        # 含別名 CVE 各自的判定（gate 的 counts 只算列本身）
     asm = d(g.get("assessment"))
     under = c.get("in_triage", 0) + c.get("untriaged", 0)
+    noev = asm.get("exclusions_without_evidence") or 0       # 沒有依據類型的排除（D-035）：評估不算完整，寫 Evidence: not recorded 的那些
     out += ["## Summary", "",
             table(["Status", "Rows"], [["Affected", c.get("exploitable", 0)], ["Under assessment", under], ["Fixed", c.get("resolved", 0)],
                                        ["Not affected", c.get("not_affected", 0)]]),
@@ -327,7 +328,8 @@ def vulnerability_status(summary, vrows, ctx, table):
             "Rows are counted per vulnerability identifier, including aliases of the same vulnerability, so the totals can differ "
             "slightly from the number of statements in the VEX files.", "",
             f"Assessment complete: **{'yes' if asm.get('complete') else 'no'}**"
-            + (f" ({under} rows still under assessment)." if not asm.get("complete") else "."), ""]
+            + (f" ({under} rows still under assessment" + (f"; {noev} fixed or not affected rows without a recorded type of evidence" if noev else "") + ")."
+               if not asm.get("complete") else "."), ""]
     allx = statements(vrows)
     aff = [r for r in allx if (r.get("vex") or {}).get("state") == "exploitable"]
     # 已被利用且還沒解決：KEV、EUVD 與人工證據（exploited_sources）都算；NVIDIA 公告另加的列也在 vrows 裡，不排除。表與上面的句子用同一份清單
@@ -648,8 +650,25 @@ INTERNAL_WORDS = re.compile(r"Grype|Dependency[- ]Track|\bDT\b|sca-center|sca-sc
 # 說明文字（不是整個檔案）另不可有內部狀態代號；in_triage 是 CycloneDX 的狀態值，在檔案裡是合法的
 # 發版承諾式用語：客戶可見的檔案不可以出現（對外不訂「之後會修」）
 COMMIT_WORDS = re.compile(r"(?i:later release|will be included|re-checked|every release|planned|next image)")
+# 沒有評估的陳述（M7c-1，A4／D-057 Q1）：內部 VEX 以 in_triage／under_investigation 加標記輸出；客戶版也輸出這些列，但狀態說明改成中性英文，
+# 不帶內部名稱與標記。與 tools/vexconv/vexconv.py 的 PROP_ASSESSMENT、NOT_ASSESSED、NOTE_NOT_ASSESSED、NOTE_NOT_ASSESSED_CUSTOMER 同值（測試核對）
+NOT_ASSESSED_PROP, NOT_ASSESSED_VALUE = "dumpling:assessment", "NOT_ASSESSED"
+NOTE_NOT_ASSESSED = "dumpling: not assessed"
+CUSTOMER_NOT_ASSESSED = "Not yet assessed by the manufacturer"
+# 排除的依據（M7c-2，D-035／D-057）：客戶版只帶依據的類型、不帶位置（位置可能是內部路徑），每一種類型一句固定的中性英文，接在
+# CycloneDX 的 analysis.detail 與 OpenVEX 的 status_notes 後面（OpenVEX 選 status_notes：fixed 沒有 impact_statement，status_notes 每種狀態都有）。
+# 沒有類型（內部版寫 dumpling:evidence＝none，或根本沒有）的排除一律寫 "Evidence: not recorded"，不能省略（D-043）。沒有評估的陳述不是排除，不加。
+# 句子不可含 INTERNAL_WORDS 與 DUMPLING_MARK 的字樣（所以 build-record 寫 "build artifacts"，不寫 "build record"）。
+# 類型與屬性名稱和 tools/vexconv/vexconv.py 同值（測試核對）
+EVIDENCE_PROP = "dumpling:evidence"
+EVIDENCE_SENTENCES = {"build-record": "Evidence: build artifacts", "source": "Evidence: source code",
+                      "on-device": "Evidence: on-device check", "design-doc": "Evidence: design documentation",
+                      "vendor-statement": "Evidence: vendor statement"}
+EVIDENCE_NOT_RECORDED = "Evidence: not recorded"
+EXCLUSION_KINDS = ("fixed", "not_affected")
+DUMPLING_MARK = re.compile(r"(?i:dumpling:)")           # 內部的標記（屬性名稱、status_notes）：客戶的 VEX 檔案不可出現
 TOOL_WORDS = re.compile(r"Grype|Dependency[- ]Track|sca-center|sca-scan|bulk rule")
-TEXT_WORDS = re.compile(INTERNAL_WORDS.pattern + r"|NOT_ASSESSED|in_triage|untriaged|" + COMMIT_WORDS.pattern)
+TEXT_WORDS = re.compile(INTERNAL_WORDS.pattern + r"|NOT_ASSESSED|in_triage|untriaged|" + DUMPLING_MARK.pattern + "|" + COMMIT_WORDS.pattern)
 # SBOM 有檔案元件（*.py、scan/ 目錄都合法），所以只查工具名稱
 SBOM_WORDS = re.compile(r"Grype|Dependency[- ]Track|sca-center|sca-scan")
 BULK_SUFFIX = re.compile(r"\s*\(bulk rule .*\)\s*$", re.S)
@@ -664,6 +683,35 @@ DISTRO_NOT_AFFECTED = "The distribution's security records state that the instal
 DISTRO_FIXED = "The distribution's security records show that the installed package version already contains the fix."
 VERSION_UNKNOWN = ("Under assessment: the component version is not known, so the component is not matched against vulnerability data; "
                    "no version is assumed.")
+
+
+_VEXCONV = []
+
+
+def _vexconv():
+    """tools/vexconv/vexconv.py（依路徑載入，只載入一次）：解析內部版 OpenVEX 的依據行用同一份程式。"""
+    if not _VEXCONV:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sca_center_vexconv", Path(__file__).resolve().parents[1] / "vexconv" / "vexconv.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _VEXCONV.append(m)
+    return _VEXCONV[0]
+
+
+def evidence_text(types):
+    """依據類型（內部版的 dumpling:evidence／依據行的類型，可能含 none 或不合格的值）→ 客戶版的句子（每種類型一句，順序固定）。
+    沒有任何合格的類型 → "Evidence: not recorded"。回傳句子清單（不含句號）。"""
+    got = [EVIDENCE_SENTENCES[t] for t in EVIDENCE_SENTENCES if t in set(types)]
+    return got or [EVIDENCE_NOT_RECORDED]
+
+
+def with_evidence(text, types):
+    """說明文字接上依據句子：「<說明> Evidence: …」；說明不以句號結尾時先補句號。"""
+    t = (text or "").strip()
+    if t and t[-1] not in ".!?":
+        t += "."
+    return (t + " " if t else "") + " ".join(x + "." for x in evidence_text(types))
 
 
 FIXED_IN = re.compile(r"(?:^|(?<=[.:] ))Fixed in ")
@@ -732,6 +780,7 @@ CDX_VULN_KEYS = ("bom-ref", "id", "source", "references", "ratings", "cwes", "de
                  "published", "updated", "analysis", "affects")
 CDX_ANALYSIS_KEYS = ("state", "justification", "response", "detail", "firstIssued", "lastUpdated")
 CDX_TOP_KEYS = ("bomFormat", "specVersion", "serialNumber", "version", "metadata", "vulnerabilities")
+CDX_COMPONENT_KEYS = ("type", "bom-ref", "name", "version", "purl")     # 客戶版 VEX 文件內的元件只留這幾個（M7c-1b）
 OPENVEX_TOP_KEYS = ("@context", "@id", "author", "role", "timestamp", "last_updated", "version", "statements")
 OPENVEX_STMT_KEYS = ("@id", "vulnerability", "products", "status", "justification", "impact_statement", "status_notes", "action_statement",
                      "timestamp", "last_updated", "supplier")
@@ -748,11 +797,21 @@ def customer_cdx(bom, stats=None):
         if not isinstance(v, dict):
             continue
         kind = KIND.get(str((v.get("analysis") or {}).get("state")), "under_investigation")
+        # 沒有評估的陳述（內部版以屬性 dumpling:assessment＝NOT_ASSESSED 標記）：客戶版也輸出，狀態（in_triage）照抄、說明換成中性英文。
+        # 屬性本身照白名單規則不帶（下面只留 openvex:action_statement），不另開例外
+        not_assessed = any(isinstance(p, dict) and p.get("name") == NOT_ASSESSED_PROP and p.get("value") == NOT_ASSESSED_VALUE
+                           for p in v.get("properties") or [])
         o = {k: v[k] for k in CDX_VULN_KEYS if k in v}
         if isinstance(v.get("analysis"), dict):
             a = {k: v["analysis"][k] for k in CDX_ANALYSIS_KEYS if k in v["analysis"]}
-            if "detail" in a:
+            if not_assessed and kind == "under_investigation":
+                a["detail"] = CUSTOMER_NOT_ASSESSED
+            elif "detail" in a:
                 a["detail"] = customer_text(a["detail"], kind, stats=stats)
+            if kind in EXCLUSION_KINDS:
+                # 排除：只帶依據的類型（不帶位置），固定句子接在 detail 後面；沒有類型寫 Evidence: not recorded
+                a["detail"] = with_evidence(a.get("detail"), [p.get("value") for p in v.get("properties") or []
+                                                              if isinstance(p, dict) and p.get("name") == EVIDENCE_PROP])
             o["analysis"] = a
         props = []
         for p in v.get("properties") or []:
@@ -762,6 +821,14 @@ def customer_cdx(bom, stats=None):
             o["properties"] = props
         vulns.append(o)
     out["vulnerabilities"] = vulns
+    # 文件內的元件（內部版把不在產品 SBOM 的元件——例如只供比對的原始碼套件——列在 components，affects 指向它）：客戶版也要帶，
+    # 不然 affects.ref 指到不存在的元件，客戶的工具通常會忽略那筆陳述（M7c-1b，C0 決定）。只帶被參照到的元件、只留
+    # type／bom-ref／name／version／purl，不帶內部屬性。BOM-Link（urn:cdx:…）指向產品 SBOM，不在這份文件裡，不用帶。
+    used = {a.get("ref") for v in vulns for a in (v.get("affects") or []) if isinstance(a, dict) and isinstance(a.get("ref"), str)}
+    comps = [{k: c[k] for k in CDX_COMPONENT_KEYS if k in c} for c in bom.get("components") or []
+             if isinstance(c, dict) and c.get("bom-ref") in used]
+    if comps:
+        out["components"] = comps
     return out
 
 
@@ -774,9 +841,25 @@ def customer_openvex(doc, stats=None):
             continue
         kind = KIND.get(str(s_.get("status")), "under_investigation")
         o = {k: s_[k] for k in OPENVEX_STMT_KEYS if k in s_}
+        types = None
+        if kind in EXCLUSION_KINDS and isinstance(o.get("status_notes"), str):
+            # 排除：內部版 status_notes 的依據行（含位置）整行拿掉，只留類型；其餘的 notes 照一般規則清理
+            rest, ev = _vexconv().split_notes(o["status_notes"])
+            types = [t for t, _, _ in ev]
+            if rest:
+                o["status_notes"] = rest
+            else:
+                del o["status_notes"]
+        elif kind in EXCLUSION_KINDS:
+            types = []
         for k in ("status_notes", "impact_statement"):
             if k in o:
-                o[k] = customer_text(o[k], kind, stats=stats)
+                if k == "status_notes" and kind == "under_investigation" and o[k] == NOTE_NOT_ASSESSED:
+                    o[k] = CUSTOMER_NOT_ASSESSED          # 沒有評估：中性英文，不帶內部名稱（D-057 Q1）
+                else:
+                    o[k] = customer_text(o[k], kind, stats=stats)
+        if types is not None:
+            o["status_notes"] = with_evidence(o.get("status_notes"), types)
         if "action_statement" in o:
             o["action_statement"] = customer_text(o["action_statement"], kind, action=True, stats=stats)
         if s_.get("status") == "affected" and not o.get("action_statement"):
@@ -797,7 +880,7 @@ def check_customer_text(name, text):
         bad.append("CJK")
     if name != "sbom.cdx.json" and LOCAL_PATH.search(text):       # SBOM 裡的路徑是映像裡的路徑（/opt/…），不是本機路徑
         bad.append("local path")
-    if (name.startswith("vex.") and (INTERNAL_WORDS.search(text) or "sca-center:" in text)) or \
+    if (name.startswith("vex.") and (INTERNAL_WORDS.search(text) or "sca-center:" in text or DUMPLING_MARK.search(text))) or \
             (name == "sbom.cdx.json" and SBOM_WORDS.search(text)) or (name != "sbom.cdx.json" and TOOL_WORDS.search(text)):
         bad.append("internal term")
     if name != "sbom.cdx.json" and COMMIT_WORDS.search(text):

@@ -11,6 +11,7 @@ uefi_image.parse_fvs(data, sc, depth) 走訪 FV／FFS／section（GUID-defined L
   Stop（Exception 子類別）、MAX_DEPTH／MAX_LAYER／MAX_TOTAL／MAX_FILES（int），
   以及 Scan 的屬性 undecoded（list of {where, reason}）、notes（list）、modules（list of {guid, ui_name…}）、fvs、files、total、parse_errors；
   parse_fvs 對最上層 FV 以外位元組記的 undecoded 原因含 `outside any valid firmware volume`（where 是 "image"）。
+同一次走訪也收 AMI 的 Firmware ID 紀錄（`$FID`，解析在 ami_core.py）：每塊內容只多一個 `b"$FID" in body` 的檢查，沿用同一份去重與上限。
 scan_bytes 拿得到的位置資訊只有 module（FFS 檔的 GUID；FFS 內有 UI section 之後的內容是 UI 名稱）與內容本身：
 FV offset、section 位置拿不到（要改 C1 的檔才有），所以 found-in 只寫 module 與「在 section 內容裡的 offset」。
 
@@ -66,8 +67,9 @@ def digests(b):
 
 
 class Hits(list):
-    """一塊內容找到的 GOP／VBT（table, 雜湊, 內容, offset）；probed＝跑過 option ROM 搜尋。"""
+    """一塊內容找到的 GOP／VBT（table, 雜湊, 內容, offset）；probed＝跑過 option ROM 搜尋；fid＝這塊內容裡的 Firmware ID 候選。"""
     probed = False
+    fid = ()
 
 
 def make_scan_class(ui, state):
@@ -80,13 +82,14 @@ def make_scan_class(ui, state):
     return GfxScan
 
 
-def scan(data, find_roms=None, budget=None, soft=()):
+def scan(data, find_roms=None, budget=None, soft=(), cbfs=False):
     """BIOS 映像的位元組 → dict（可轉 JSON）：
     performed（有沒有走訪）、reason（沒走訪的原因）、complete、gop（Intel GOP 驅動清單）、vbt（獨立 VBT 清單）、gaps、stats、undecoded。
     find_roms(body, module)：呼叫端給的回呼，對含 `PCIR` 的內容找 legacy VBIOS option ROM（可丟 soft 裡的例外）。
     budget：有 check() 的物件（x86_firmware.Budget）；每塊內容檢查一次。
-    soft：視為「提早停止、結果不完整」而不是失敗的例外型別（x86_firmware.OverBudget）。永遠回傳，不丟例外。"""
-    r = {"performed": False, "reason": None, "complete": False, "gop": [], "vbt": [], "gaps": [],
+    soft：視為「提早停止、結果不完整」而不是失敗的例外型別（x86_firmware.OverBudget）。
+    cbfs：映像有 coreboot CBFS（CBFS 檔案沒有解開）→ AMI 核心版本搜尋記為不完整。結果的 "ami_core" 是 ami_core.summarize 的結果。永遠回傳，不丟例外。"""
+    r = {"performed": False, "reason": None, "complete": False, "gop": [], "vbt": [], "gaps": [], "ami_core": None,
          "stats": {"fvs": 0, "ffs_files": 0, "decompressed_total": 0, "inspected_bytes": 0, "inspected_blocks": 0, "duplicate_blocks": 0,
                    "rom_probes": 0, "reprobed_bytes": 0, "undecoded": 0, "notes": 0},
          "undecoded": [], "notes": [], "stopped": None}
@@ -96,8 +99,16 @@ def scan(data, find_roms=None, budget=None, soft=()):
     except ImportError as e:
         r["reason"] = f"{e}; the Intel GOP / VBT / legacy VBIOS search inside UEFI firmware volumes was not performed"
         r["gaps"].append(r["reason"])
+        r["ami_core"] = {"status": "not-searched", "performed": False, "complete": False, "incomplete": [r["reason"]], "reason": r["reason"], "count": 0,
+                         "found": [], "valid": 0, "invalid": 0, "candidates": [], "bad": [],
+                         "gaps": [f"AMI core version (Firmware ID record): not searched ({r['reason']})"]}
         return r
+    try:
+        ami = _sibling("ami_core")
+    except ImportError:
+        ami = None
     seen, gops, vbts = {}, {}, {}
+    fids = {}                              # ami_core.entry_key → 項目（"seen"＝遇到幾次、"found"＝位置）
 
     def record(table, key, entry, where):
         e = table.get(key)
@@ -108,6 +119,24 @@ def scan(data, find_roms=None, budget=None, soft=()):
             e = table[key] = {**entry, "found": []}
         if len(e["found"]) < MAX_LOCATIONS and where not in e["found"]:
             e["found"].append(where)
+
+    def record_fid(c, mod):
+        """Firmware ID 候選 c（ami_core.find_fid 的一筆）→ fids；同一份紀錄合成一項（遇到幾次、各個位置）。"""
+        if c.get("truncated"):
+            state["fid_capped"] = True
+            return
+        k = ami.entry_key(c)
+        e = fids.get(k)
+        if e is None:
+            if len(fids) >= MAX_FOUND:
+                state["fid_capped"] = True
+                return
+            e = fids[k] = {x: v for x, v in c.items() if x not in ("offset", "module")}
+            e.update(seen=0, found=[])
+        e["seen"] += 1
+        w = {"module": mod, "form": c["form"], "offset": c["offset"]}
+        if len(e["found"]) < MAX_LOCATIONS and w not in e["found"]:
+            e["found"].append(w)
 
     def inspect(body, module):
         if budget is not None:
@@ -121,6 +150,8 @@ def scan(data, find_roms=None, budget=None, soft=()):
             r["stats"]["duplicate_blocks"] += 1
             for table, hkey, entry, off in seen[key]:
                 record(table, hkey, entry, {"module": mod, "offset": off})
+            for c in seen[key].fid:
+                record_fid(c, mod)
             if find_roms is not None and seen[key].probed:        # option ROM 的位置：重跑一次，但重跑的總量有上限（big 重複內容不放大）
                 if r["stats"]["reprobed_bytes"] + n <= MAX_REPROBE:
                     r["stats"]["reprobed_bytes"] += n
@@ -137,6 +168,10 @@ def scan(data, find_roms=None, budget=None, soft=()):
             return
         r["stats"]["inspected_bytes"] += n
         r["stats"]["inspected_blocks"] += 1
+        if ami is not None and b"$FID" in body:
+            hits.fid = [{**c, "module": mod} for c in ami.find_fid(body, mod)]
+            for c in hits.fid:
+                record_fid(c, mod)
         # 內容可能前面有 16 bytes 的子類型 GUID（FREEFORM_SUBTYPE_GUID section）：兩種起點都試，辨識函式自己檢查開頭
         for off in (0, SUBTYPE_GUID_LEN):
             if body[off:off + 2] == b"MZ":
@@ -203,4 +238,25 @@ def scan(data, find_roms=None, budget=None, soft=()):
     if not sc.fvs and r["stopped"] is None:
         r["gaps"].append("no valid UEFI firmware volume found by the walker; the Intel GOP / VBT / legacy VBIOS search found nothing to look in")
     r["complete"] = not r["gaps"]       # 任何 gap（含沒解開、結構警告、上限）都不是完整
+    if ami is None:
+        r["ami_core"] = {"status": "not-searched", "performed": False, "complete": False, "incomplete": ["ami_core.py could not be loaded"],
+                         "reason": "ami_core.py could not be loaded", "count": 0, "found": [], "valid": 0, "invalid": 0, "candidates": [], "bad": [],
+                         "gaps": ["AMI core version (Firmware ID record): not searched (ami_core.py could not be loaded)"]}
+        return r
+    # AMI 核心版本的完整性：不含 GOP／VBT 專屬的 gap（option ROM 說明等），只看走訪本身有沒有走完
+    why = []
+    if r["stopped"]:
+        why.append(r["stopped"])
+    if undec:
+        why.append(f"{len(undec)} UEFI parts were not decoded ({'; '.join(sorted({clean(x['reason'], 120) for x in undec})[:MAX_UNDECODED_SHOWN])})")
+    if sc.notes or sc.parse_errors:
+        why.append(f"{len(sc.notes) + sc.parse_errors} UEFI structure warnings")
+    if state.get("capped"):
+        why.append(f"more than {MAX_INSPECT} bytes of distinct UEFI content; the rest was not searched")
+    if not sc.fvs and r["stopped"] is None:
+        why.append("no valid UEFI firmware volume found by the walker")
+    if cbfs:
+        why.append("coreboot CBFS found: files inside the CBFS were not unpacked for this search")
+    r["ami_core"] = ami.summarize(sorted(fids.values(), key=lambda e: (e["form"], e.get("sha256") or e.get("why", ""), e["found"][0]["module"], e["found"][0]["offset"])),
+                                  incomplete=why, truncated=bool(state.get("fid_capped")))
     return r

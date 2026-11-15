@@ -22,7 +22,7 @@ MEMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/-]*$")
 
 def extract_member(deb, member, dest_dir, run=subprocess.run):
     """從 deb 取出單一成員；回傳取出的路徑。失敗 raise ValueError。"""
-    if not MEMBER_RE.match(member) or ".." in member.split("/"):
+    if not MEMBER_RE.fullmatch(member) or ".." in member.split("/"):
         raise ValueError("member 不合法：%s" % member)
     os.makedirs(dest_dir, exist_ok=True)
     tar_in = subprocess.Popen(["dpkg-deb", "--fsys-tarfile", deb], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)

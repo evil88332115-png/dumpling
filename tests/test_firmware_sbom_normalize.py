@@ -432,8 +432,8 @@ class RecordShape(unittest.TestCase):
 
     @staticmethod
     def base(**kw):
-        r = {"schema": "firmware-sbom-normalize/1", "input_sha256": SHA, "spec_version": None, "supported": False, "applied": False,
-             "changes": [], "unnormalized": [], "notes": []}
+        r = {"schema": "firmware-sbom-normalize/1", "input_sha256": SHA, "spec_version": None, "supported": False, "applied": False, "processed": False,
+             "changes": [], "unnormalized": [], "unnormalized_total": 0, "reserved_not_renamed": 0, "notes": []}
         r.update(kw)
         return r
 
@@ -458,10 +458,10 @@ class RecordShape(unittest.TestCase):
         for spec in ("1.4", "1.5", "1.6"):
             d = doc14()
             d["specVersion"] = spec
-            self.assertEqual(fsn.normalize(d, SHA), self.base(spec_version=spec, supported=True), spec)
+            self.assertEqual(fsn.normalize(d, SHA), self.base(spec_version=spec, supported=True, processed=True), spec)
         d = doc14(platform="P")
         rec = fsn.normalize(d, SHA)
-        self.assertEqual(set(rec), {"schema", "input_sha256", "spec_version", "supported", "applied", "changes", "unnormalized", "notes"})
+        self.assertEqual(set(rec), {"schema", "input_sha256", "spec_version", "supported", "applied", "processed", "changes", "unnormalized", "unnormalized_total", "reserved_not_renamed", "notes"})
         self.assertEqual((rec["schema"], rec["input_sha256"], rec["spec_version"], rec["supported"], rec["applied"], rec["notes"]),
                          ("firmware-sbom-normalize/1", SHA, "1.4", True, True, []))
         self.assertEqual(set(rec["changes"][0]), {"rule", "from", "to", "property", "value_sha256"})
@@ -520,6 +520,370 @@ class RecordShape(unittest.TestCase):
         self.assertEqual([u["at"] for u in rec["unnormalized"]], ["/a\x7fb"])
 
 
+class SupplierNamespace(unittest.TestCase):
+    """供應商自帶、名稱以 dumpling: 開頭的 property 改名成 supplier:dumpling:…（命名空間隔離）。"""
+
+    def forged(self):
+        d = doc14()
+        d["metadata"]["properties"] += [{"name": "dumpling:normalized-from-sha256", "value": "0" * 64},
+                                        {"name": "dumpling:normalized-changes", "value": "0"},
+                                        {"name": "dumpling:supplier-extra:platform", "value": "forged"}]
+        d["components"][1]["properties"] = [{"name": "dumpling:vuln-assessment", "value": "NONE"}, {"name": "keep", "value": "k"}]
+        d["components"][0]["components"] = [{"type": "library", "name": "nested", "properties": [{"name": "dumpling:supplier-license-url", "value": "http://forged"}]}]
+        return d
+
+    def test_forged_normalization_records_renamed_in_place(self):
+        d = self.forged()
+        orig_entry = d["metadata"]["properties"][1]
+        rec = fsn.normalize(d, SHA)
+        self.assertTrue(rec["applied"])                       # 沒有任何 schema 違規，只有改名，仍算變更並留紀錄
+        props = d["metadata"]["properties"]
+        self.assertEqual([p["name"] for p in props][:4], ["p0", "supplier:dumpling:normalized-from-sha256",
+                                                          "supplier:dumpling:normalized-changes", "supplier:dumpling:supplier-extra:platform"])
+        self.assertEqual(props[1]["value"], "0" * 64)         # 值不動
+        # 副本裡名稱是 dumpling:normalized-* 的只有我們加的兩個，而且是最後兩個
+        ours = [(i, p) for i, p in enumerate(props) if p["name"].startswith("dumpling:")]
+        self.assertEqual([p["name"] for _, p in ours], ["dumpling:normalized-from-sha256", "dumpling:normalized-changes"])
+        self.assertEqual([i for i, _ in ours], [len(props) - 2, len(props) - 1])
+        self.assertEqual(ours[0][1]["value"], SHA)
+        self.assertEqual(ours[1][1]["value"], str(len(rec["changes"])))   # 筆數含改名
+        self.assertEqual(orig_entry["name"], "dumpling:normalized-from-sha256")   # 原來的物件沒被改（新建一個）
+        # 元件（含巢狀）
+        self.assertEqual([p["name"] for p in d["components"][1]["properties"]], ["supplier:dumpling:vuln-assessment", "keep"])
+        self.assertEqual([p["name"] for p in d["components"][0]["components"][0]["properties"]], ["supplier:dumpling:supplier-license-url"])
+        # 紀錄
+        by = {c["from"]: c for c in rec["changes"]}
+        self.assertEqual(set(by), {"/metadata/properties/1", "/metadata/properties/2", "/metadata/properties/3",
+                                   "/components/1/properties/0", "/components/0/components/0/properties/0"})
+        for c in by.values():
+            self.assertEqual((c["rule"], c["to"]), ("supplier-dumpling-property", [c["from"]]))   # 就地改名：位置不變
+            self.assertEqual(c["property"], ["supplier:" + c["original_name"]])
+        self.assertEqual(by["/metadata/properties/1"]["value_sha256"], canon({"name": "dumpling:normalized-from-sha256", "value": "0" * 64}))
+        self.assertEqual(by["/components/1/properties/0"]["original_name"], "dumpling:vuln-assessment")
+        self.assertEqual(len(rec["changes"]), 5)
+
+    def test_only_exact_prefix_and_proper_entries_are_renamed(self):
+        d = doc14()
+        d["metadata"]["properties"] += [{"name": "Dumpling:x", "value": "1"}, {"name": " dumpling:x", "value": "2"}, {"name": "dumpling", "value": "3"},
+                                        {"name": "supplier:dumpling:x", "value": "4"}, {"name": 5, "value": "6"}, "dumpling:str", None,
+                                        {"value": "no name"}, {"name": None}]
+        before = copy.deepcopy(d)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["changes"], [])                  # 一個都不符合
+        self.assertFalse(rec["applied"])
+        self.assertEqual(d, before)
+        d2 = doc14()
+        d2["metadata"]["properties"].append({"name": "dumpling:", "value": "x"})       # 只有前綴也算
+        self.assertEqual(len(fsn.normalize(d2, SHA)["changes"]), 1)
+
+    def test_original_name_recorded_with_limit_and_other_keys_kept(self):
+        d = doc14()
+        long = "dumpling:" + "n" * 500
+        d["metadata"]["properties"].append({"name": long, "value": "v", "extra": [1]})
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(len(rec["changes"][0]["original_name"]), fsn.MAX_NAME_RECORD)
+        self.assertEqual(rec["changes"][0]["value_sha256"], canon({"name": long, "value": "v", "extra": [1]}))   # 完整原值以 SHA-256 為準
+        self.assertEqual(d["metadata"]["properties"][1], {"name": "supplier:" + long, "value": "v", "extra": [1]})
+
+    def test_rename_and_license_and_top_level_together(self):
+        d = doc14(bad=True, platform="x")
+        d["components"][0]["properties"] = [{"name": "dumpling:version-status", "value": "OK"}]
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(sorted(c["rule"] for c in rec["changes"]), ["license-without-id-or-name", "supplier-dumpling-property", "top-level-extra-field"])
+        c0 = d["components"][0]["properties"]
+        self.assertEqual([p["name"] for p in c0], ["supplier:dumpling:version-status", "dumpling:supplier-license-url"])
+        lic = [c for c in rec["changes"] if c["rule"] == "license-without-id-or-name"][0]
+        self.assertEqual(lic["to"], ["/components/0/properties/1"])     # 改名是就地的，license 的新位置不受影響
+        ren = [c for c in rec["changes"] if c["rule"] == "supplier-dumpling-property"][0]
+        self.assertEqual(ren["from"], "/components/0/properties/0")
+        props = {p["name"]: p["value"] for p in d["metadata"]["properties"]}
+        self.assertEqual(props["dumpling:normalized-changes"], "3")
+
+    def test_every_dumpling_property_left_in_the_copy_is_ours(self):
+        d = self.forged()
+        d["platform"] = "x"
+        fsn.normalize(d, SHA)
+        allowed = {"dumpling:normalized-from-sha256", "dumpling:normalized-changes", "dumpling:supplier-extra:platform"}
+        found = []
+
+        def walk(comps):
+            for c in comps:
+                found.extend(p["name"] for p in c.get("properties") or [] if p["name"].startswith("dumpling:"))
+                walk(c.get("components") or [])
+        found.extend(p["name"] for p in d["metadata"]["properties"] if p["name"].startswith("dumpling:"))
+        walk(d["components"])
+        self.assertEqual(sorted(found), sorted(allowed))                  # 供應商那一筆 supplier-extra:platform 已改名，只剩我們搬的那一筆
+        names = [p["name"] for p in d["metadata"]["properties"]]
+        self.assertEqual(len(names), len(set(names)))                      # 副本裡沒有同名的 property（供應商的與我們的不再混在一起）
+
+    def test_unsupported_spec_or_bad_shapes_do_not_rename_or_crash(self):
+        d = self.forged()
+        d["specVersion"] = "1.3"
+        before = copy.deepcopy(d)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual((rec["supported"], rec["applied"]), (False, False))
+        self.assertEqual(d, before)                                       # 不支援的版本整份不處理（見檔頭）
+        d2 = doc14()
+        d2["components"][0]["properties"] = "dumpling:x"                  # 型別不對：沒有地方改名，也不出錯
+        d2["components"][1]["properties"] = {"name": "dumpling:x"}
+        rec = fsn.normalize(d2, SHA)
+        self.assertEqual(rec["changes"], [])
+
+    def test_change_limit_leaves_unrenamed_and_says_so(self):
+        d = doc14()
+        d["metadata"]["properties"] += [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(5)]
+        old = fsn.MAX_CHANGES
+        fsn.MAX_CHANGES = 3
+        self.addCleanup(setattr, fsn, "MAX_CHANGES", old)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(len(rec["changes"]), 3)
+        self.assertEqual([u["rule"] for u in rec["unnormalized"]], ["supplier-dumpling-property"] * 2)
+        self.assertEqual([u["at"] for u in rec["unnormalized"]], ["/metadata/properties/4", "/metadata/properties/5"])
+        names = [p["name"] for p in d["metadata"]["properties"]]
+        self.assertEqual(names[1:4], ["supplier:dumpling:p0", "supplier:dumpling:p1", "supplier:dumpling:p2"])
+        self.assertEqual(names[4:6], ["dumpling:p3", "dumpling:p4"])         # 超過上限的沒改，紀錄寫「無法正規化」
+
+    def test_counts_are_true_numbers_beyond_the_list_caps(self):
+        # 超過 MAX_CHANGES：剩下的沒改名；unnormalized 清單最多 MAX_UNNORMALIZED 筆（再加一筆「more」），但計數是真的
+        d = doc14()
+        n = 12
+        d["metadata"]["properties"] += [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(n)]
+        for attr, val in (("MAX_CHANGES", 4), ("MAX_UNNORMALIZED", 3)):
+            self.addCleanup(setattr, fsn, attr, getattr(fsn, attr))
+            setattr(fsn, attr, val)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(len(rec["changes"]), 4)
+        self.assertEqual(len(rec["unnormalized"]), 4)                          # 3 筆 + 一筆 more
+        self.assertEqual(rec["unnormalized"][-1]["rule"], "more")
+        self.assertEqual((rec["unnormalized_total"], rec["reserved_not_renamed"]), (n - 4, n - 4))
+        left = [p["name"] for p in d["metadata"]["properties"] if p["name"].startswith("dumpling:") and not p["name"].startswith("dumpling:normalized")]
+        self.assertEqual(len(left), n - 4)                                      # 副本裡真的還有這麼多沒改名
+        # 其他規則的略過也算進 unnormalized_total，但不算 reserved_not_renamed
+        d2 = doc14(bad=True, platform="x" * (fsn.MAX_VALUE_BYTES + 1))
+        rec2 = fsn.normalize(d2, SHA)
+        self.assertEqual((rec2["unnormalized_total"], rec2["reserved_not_renamed"]), (1, 0))
+
+    def test_deep_nesting_counts_in_unnormalized_total(self):
+        d = doc14()
+        c = d["components"][0]
+        for _ in range(fsn.MAX_NEST + 2):
+            c["components"] = [{"type": "library", "name": "n"}]
+            c = c["components"][0]
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual([u["rule"] for u in rec["unnormalized"]], ["nesting-too-deep"])
+        self.assertEqual(rec["unnormalized_total"], 1)
+
+    def test_record_property_name_is_truncated_like_original_name(self):
+        d = doc14()
+        d["metadata"]["properties"].append({"name": "dumpling:" + "n" * 100000, "value": "v"})
+        rec = fsn.normalize(d, SHA)
+        ch = rec["changes"][0]
+        self.assertLessEqual(len(ch["property"][0]), fsn.MAX_NAME_RECORD)
+        self.assertTrue(ch["property"][0].startswith("supplier:dumpling:nnn"))
+        self.assertEqual(len(ch["original_name"]), fsn.MAX_NAME_RECORD)
+        self.assertEqual(len(d["metadata"]["properties"][1]["name"]), len("supplier:dumpling:") + 100000)     # 副本裡的名稱不截短
+        # 紀錄的大小與名稱長度無關（完整原值有 value_sha256）
+        self.assertLess(len(json.dumps(rec)), 2000)
+
+    def test_unserializable_entry_is_skipped_and_counted(self):
+        d = doc14()
+        d["metadata"]["properties"].append({"name": "dumpling:x", "value": "v"})
+        old = fsn.canonical_sha256
+        self.addCleanup(setattr, fsn, "canonical_sha256", old)
+        fsn.canonical_sha256 = lambda v: None
+        before = copy.deepcopy(d)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(rec["changes"], [])
+        self.assertEqual([(u["rule"], u["at"], u["reason"]) for u in rec["unnormalized"]], [(fsn.RULE_RESERVED, "/metadata/properties/1", "無法序列化")])
+        self.assertEqual((rec["unnormalized_total"], rec["reserved_not_renamed"], rec["applied"]), (1, 1, False))
+        self.assertEqual(d, before)                                             # 沒改名，文件不動
+
+    def test_vulnerabilities_pass_through_untouched(self):
+        # DT 5.2.0 的 BOM 上傳不讀 vulnerabilities（見 docs/notes/c2-supplier-sbom.md），所以不移除；這裡釘住「不動、不算變更」
+        d = doc14(vulnerabilities=[{"id": "CVE-2000-0001", "analysis": {"state": "not_affected", "justification": "code_not_present"},
+                                    "affects": [{"ref": "a"}]}])
+        before = copy.deepcopy(d)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual((rec["applied"], rec["changes"], rec["unnormalized"]), (False, [], []))
+        self.assertEqual(d, before)
+        d2 = doc14(bad=True, vulnerabilities=[{"id": "CVE-2000-0001"}])
+        fsn.normalize(d2, SHA)
+        self.assertEqual(d2["vulnerabilities"], [{"id": "CVE-2000-0001"}])
+
+
+def all_dumpling_names(doc):
+    """文件裡所有 properties 陣列（任何位置）的 dumpling: 開頭的名稱（走完整份文件，不靠 normalize 的走訪）。"""
+    out, stack = [], [doc]
+    while stack:
+        x = stack.pop()
+        if isinstance(x, dict):
+            if isinstance(x.get("properties"), list):
+                out.extend(p["name"] for p in x["properties"] if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].startswith("dumpling:"))
+            stack.extend(x.values())
+        elif isinstance(x, list):
+            stack.extend(x)
+    return sorted(out)
+
+
+def P(*names):
+    return [{"name": n, "value": "v"} for n in names]
+
+
+class SupplierNamespaceEverywhere(unittest.TestCase):
+    """dumpling: property 改名涵蓋文件裡所有 properties 陣列（pedigree、services、metadata.tools、formulation、頂層 properties…）。
+    Dependency-Track 5.2.0 的 ModelConverter 只讀元件（含 metadata.tools 的元件）的 properties；pedigree 與 services 沒有工具讀，改名是為了讓
+    「副本裡所有 dumpling: 開頭的 property 都是我們寫的」這句話成立。"""
+
+    def rich(self, spec="1.6"):
+        return {"bomFormat": "CycloneDX", "specVersion": spec, "version": 1,
+                "metadata": {"properties": P("dumpling:m"),
+                             "component": {"type": "firmware", "name": "root", "properties": P("dumpling:sample-kind")},
+                             "tools": {"components": [{"type": "application", "name": "t", "properties": P("dumpling:tool")}],
+                                       "services": [{"name": "ts", "properties": P("dumpling:toolsvc")}]}},
+                "components": [{"type": "library", "name": "a", "bom-ref": "a", "properties": P("dumpling:c", "keep"),
+                                "pedigree": {"ancestors": [{"type": "library", "name": "anc", "properties": P("dumpling:anc"),
+                                                            "pedigree": {"variants": [{"type": "library", "name": "v", "properties": P("dumpling:variant")}]}}],
+                                             "descendants": [{"type": "library", "name": "d", "properties": P("dumpling:desc")}]},
+                                "components": [{"type": "library", "name": "n", "properties": P("dumpling:nested")}]}],
+                "services": [{"name": "svc", "bom-ref": "s", "properties": P("dumpling:svc"),
+                              "services": [{"name": "inner", "properties": P("dumpling:innersvc")}]}],
+                "formulation": [{"bom-ref": "f", "components": [{"type": "library", "name": "fc", "properties": P("dumpling:form")}]}],
+                "properties": P("dumpling:top")}
+
+    def test_every_location_is_renamed_and_recorded(self):
+        d = self.rich()
+        rec = fsn.normalize(d, SHA)
+        names = all_dumpling_names(d)
+        # 留下的只有：metadata.component 裡我們自己的（prep 換上的根元件）、normalize 自己寫的兩筆
+        self.assertEqual(names, sorted(["dumpling:sample-kind", "dumpling:normalized-from-sha256", "dumpling:normalized-changes"]))
+        renamed = [c for c in rec["changes"] if c["rule"] == fsn.RULE_RESERVED]
+        self.assertEqual(len(renamed), 12)
+        froms = sorted(c["from"] for c in renamed)
+        for want in ("/metadata/properties/0", "/components/0/properties/0", "/components/0/pedigree/ancestors/0/properties/0",
+                     "/components/0/pedigree/ancestors/0/pedigree/variants/0/properties/0", "/components/0/pedigree/descendants/0/properties/0",
+                     "/components/0/components/0/properties/0", "/services/0/properties/0", "/services/0/services/0/properties/0",
+                     "/formulation/0/components/0/properties/0", "/properties/0", "/metadata/tools/components/0/properties/0",
+                     "/metadata/tools/services/0/properties/0"):
+            self.assertIn(want, froms)
+        self.assertEqual(rec["reserved_not_renamed"], 0)
+        self.assertTrue(rec["processed"])
+        for c in renamed:                                                 # 名稱與值只改名，位置與值不變
+            self.assertTrue(c["property"][0].startswith("supplier:dumpling:"))
+            self.assertEqual(c["to"], [c["from"]])
+        self.assertEqual(d["components"][0]["pedigree"]["ancestors"][0]["properties"], [{"name": "supplier:dumpling:anc", "value": "v"}])
+        self.assertEqual(d["services"][0]["properties"], [{"name": "supplier:dumpling:svc", "value": "v"}])
+        self.assertEqual(d["components"][0]["properties"][1], {"name": "keep", "value": "v"})
+
+    def test_metadata_component_is_ours_and_not_renamed(self):
+        d = self.rich()
+        fsn.normalize(d, SHA)
+        self.assertEqual(d["metadata"]["component"]["properties"], P("dumpling:sample-kind"))
+
+    def test_top_level_extra_field_moved_as_a_string_is_not_a_property(self):
+        # 1.4 的 schema 沒有頂層 properties：整個欄位搬進 metadata.properties 的一個字串值，裡面的名稱不是 property
+        d = doc14(properties=P("dumpling:x"))
+        rec = fsn.normalize(d, SHA)
+        self.assertNotIn("properties", d)
+        moved = [p for p in d["metadata"]["properties"] if p["name"] == "dumpling:supplier-extra:properties"]
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(json.loads(moved[0]["value"]), P("dumpling:x"))
+        self.assertEqual([c["rule"] for c in rec["changes"]], ["top-level-extra-field"])
+        # 太大搬不走時留在原處：這時要改名
+        d = doc14(properties=P("dumpling:x") + [{"name": "pad", "value": "x" * (fsn.MAX_VALUE_BYTES + 1)}])
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(d["properties"][0]["name"], "supplier:dumpling:x")
+        self.assertEqual(rec["reserved_not_renamed"], 0)
+
+    def test_components_below_the_nesting_limit_still_get_renamed(self):
+        d = doc14()
+        c = d["components"][0]
+        for _ in range(fsn.MAX_NEST + 2):
+            c["components"] = [{"type": "library", "name": "n"}]
+            c = c["components"][0]
+        c["properties"] = P("dumpling:deep")
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual(c["properties"], [{"name": "supplier:dumpling:deep", "value": "v"}])
+        self.assertEqual(rec["reserved_not_renamed"], 0)
+        self.assertEqual([u["rule"] for u in rec["unnormalized"]], ["nesting-too-deep"])
+
+    def test_whole_document_not_processed_still_counts_the_properties_left_in_it(self):
+        for label, mutate, want_support in (("spec 1.3", lambda d: d.update(specVersion="1.3"), False),
+                                            ("spec 2.0", lambda d: d.update(specVersion="2.0"), False),
+                                            ("spec missing", lambda d: d.pop("specVersion"), False),
+                                            ("metadata.properties is an object", lambda d: d["metadata"].update(properties={"a": 1}), True),
+                                            ("metadata is a list", lambda d: d.update(metadata=[]), True)):
+            with self.subTest(label):
+                d = self.rich()
+                mutate(d)
+                before = copy.deepcopy(d)
+                expect = len(all_dumpling_names({k: v for k, v in d.items() if k != "metadata"})) + (
+                    len(all_dumpling_names(d["metadata"])) - 1 if isinstance(d.get("metadata"), dict) else 0)       # metadata.component 的那一個不算
+                rec = fsn.normalize(d, SHA)
+                self.assertEqual(d, before)                                       # 文件不動
+                self.assertEqual((rec["supported"], rec["processed"], rec["applied"], rec["changes"]), (want_support, False, False, []))
+                self.assertEqual(rec["reserved_not_renamed"], expect, label)
+                self.assertGreater(rec["reserved_not_renamed"], 0)
+                self.assertTrue(any("原樣帶著 %d 個" % expect in n for n in rec["notes"]), rec["notes"])
+        # 沒有任何 dumpling: property：不寫那則 note
+        d = doc14()
+        d["specVersion"] = "1.3"
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual((rec["reserved_not_renamed"], rec["processed"]), (0, False))
+        self.assertFalse(any("原樣帶著" in n for n in rec["notes"]))
+
+    def test_count_reserved(self):
+        d = self.rich()
+        self.assertEqual(fsn.count_reserved(d), 12)                 # metadata.component 的不算
+        self.assertEqual(fsn.count_reserved({}), 0)
+        self.assertEqual(fsn.count_reserved({"components": "x", "properties": None}), 0)
+        self.assertEqual(fsn.count_reserved({"properties": [{"name": "dumpling:a"}, {"name": "Dumpling:b"}, "x", {"name": 5}]}), 1)
+        deep = cur = {}
+        for _ in range(3000):                                       # 很深的文件：走訪不遞迴
+            cur["x"] = {}
+            cur = cur["x"]
+        cur["properties"] = P("dumpling:z")
+        self.assertEqual(fsn.count_reserved(deep), 1)
+
+    def test_planning_exception_counts_the_properties_left_in_the_document(self):
+        d = self.rich()
+        orig = fsn._plan
+        fsn._plan = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        self.addCleanup(setattr, fsn, "_plan", orig)
+        rec = fsn.normalize(d, SHA)
+        self.assertEqual((rec["processed"], rec["applied"], rec["reserved_not_renamed"]), (False, False, 12))
+
+
+class UnnormalizedCap(unittest.TestCase):
+    """nesting-too-deep 與其他略過的項目共用 MAX_UNNORMALIZED 上限與「more」，計數是真的筆數。"""
+
+    def deep_doc(self, extra_skips):
+        d = doc14(**{"k%03d" % i: "x" * (fsn.MAX_VALUE_BYTES + 1) for i in range(extra_skips)})
+        c = d["components"][0]
+        for _ in range(fsn.MAX_NEST + 2):
+            c["components"] = [{"type": "library", "name": "n"}]
+            c = c["components"][0]
+        return d
+
+    def test_deep_nesting_after_the_list_is_full_does_not_exceed_the_cap(self):
+        n = fsn.MAX_UNNORMALIZED
+        for skips, listed, deep_listed in ((n - 2, n - 1, True), (n - 1, n, True), (n, n + 1, False), (n + 1, n + 1, False), (n + 30, n + 1, False)):
+            with self.subTest(skips=skips):
+                rec = fsn.normalize(self.deep_doc(skips), SHA)
+                un = rec["unnormalized"]
+                self.assertEqual(rec["unnormalized_total"], skips + 1)                      # 真的筆數：略過的加上巢狀過深那一筆
+                self.assertEqual(len(un), listed)
+                self.assertLessEqual(len(un), n + 1)                                         # 不超過上限＋一筆 more
+                self.assertEqual(any(u["rule"] == "nesting-too-deep" for u in un), deep_listed)
+                self.assertEqual(sum(1 for u in un if u["rule"] == "more"), 0 if skips + 1 <= n else 1)
+                if skips + 1 > n:
+                    self.assertEqual(un[-1]["rule"], "more")
+
+    def test_deep_nesting_alone_is_listed_once(self):
+        rec = fsn.normalize(self.deep_doc(0), SHA)
+        self.assertEqual([u["rule"] for u in rec["unnormalized"]], ["nesting-too-deep"])
+        self.assertEqual(rec["unnormalized_total"], 1)
+
+
 class PrepIntegration(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
@@ -553,7 +917,7 @@ class PrepIntegration(unittest.TestCase):
         rec = rj(os.path.join(o, "normalize.json"))
         self.assertEqual(rec["input_sha256"], sha_in)
         self.assertEqual(len(rec["changes"]), 2)
-        self.assertEqual(info["normalize"], {"file": "normalize.json", "applied": True, "changes": 2, "unnormalized": 0})
+        self.assertEqual(info["normalize"], {"file": "normalize.json", "applied": True, "changes": 2, "unnormalized": 0, "renamed": 0, "not_renamed": 0, "processed": True})
         self.assertEqual(info["input_sbom_sha256"], sha_in)
         self.assertEqual(rj(src), d)               # 原檔沒動
         self.assertEqual(sha_of(src), sha_in)
@@ -589,6 +953,53 @@ class PrepIntegration(unittest.TestCase):
         lines, _ = fd.report([o2], None, os.path.join(self.tmp, "rep2"))
         self.assertIn("已正規化 1 處", lines[0])
         self.assertIn("另有 1 處已知違規無法正規化", lines[0])
+
+    def test_forged_normalization_records_do_not_reach_the_upload_copy_as_ours(self):
+        d = doc14(bad=True)
+        d["metadata"]["properties"] += [{"name": "dumpling:normalized-from-sha256", "value": "0" * 64}, {"name": "dumpling:normalized-changes", "value": "0"}]
+        info, o, src = self.prep(d)
+        sha_in = sha_of(src)
+        out = rj(os.path.join(o, "sbom.cdx.json"))
+        props = out["metadata"]["properties"]
+        mine = [p for p in props if p["name"] == "dumpling:normalized-from-sha256"]
+        self.assertEqual([p["value"] for p in mine], [sha_in])                                    # 只有我們的一個，值是真的原檔 SHA-256
+        self.assertEqual([p["value"] for p in props if p["name"] == "dumpling:normalized-changes"], ["3"])   # 1 筆 license ＋ 2 筆改名
+        self.assertEqual([p["value"] for p in props if p["name"] == "supplier:dumpling:normalized-from-sha256"], ["0" * 64])
+        rec = rj(os.path.join(o, "normalize.json"))
+        self.assertEqual(sum(1 for c in rec["changes"] if c["rule"] == "supplier-dumpling-property"), 2)
+        self.assertEqual(info["normalize"]["renamed"], 2)
+        self.assertEqual(info["summary"]["supplier_dumpling_props"], 2)
+        self.assertEqual(rj(src), d)                                                              # 原檔沒動
+
+    def test_supplier_markers_still_counted_after_rename(self):
+        # 元件自帶的 dumpling:vuln-assessment 等標記：摘要在改名之前算，「供應商自帶標記的元件」數不能因為改名而變成 0
+        d = doc14()
+        d["components"][1]["properties"] = [{"name": "dumpling:vuln-assessment", "value": "NONE"}]
+        info, o, _ = self.prep(d)
+        self.assertEqual(info["summary"]["supplier_markers"], 1)
+        self.assertEqual(info["summary"]["vuln_assessment"], {fd.UNSET: 2})              # 不採信：一律當作沒標
+        self.assertEqual(info["summary"]["supplier_dumpling_props"], 1)
+        out = rj(os.path.join(o, "sbom.cdx.json"))
+        self.assertEqual([p["name"] for p in out["components"][1]["properties"]], ["supplier:dumpling:vuln-assessment"])
+
+    def test_bios_kind_keeps_its_own_dumpling_properties(self):
+        d = doc14()
+        d["components"][1]["properties"] = [{"name": "dumpling:vuln-assessment", "value": "NOT_ASSESSED"}]
+        info, o, _ = self.prep(d, kind="bios")
+        out = rj(os.path.join(o, "sbom.cdx.json"))
+        self.assertEqual([p["name"] for p in out["components"][1]["properties"]], ["dumpling:vuln-assessment"])   # 本工具自己產的 SBOM 不改名
+        self.assertEqual(out["metadata"]["component"]["properties"][0]["name"], "dumpling:sample-kind")        # 我們寫的根元件標記也不動
+
+    def test_report_mentions_renamed_supplier_properties(self):
+        d = doc14()
+        d["metadata"]["properties"].append({"name": "dumpling:normalized-changes", "value": "0"})
+        info, o, _ = self.prep(d)
+        lines, failed = fd.report([o], None, os.path.join(self.tmp, "rep"))
+        self.assertIn("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 1 個", lines[0])     # 沒有 DT 結果（NOT_RUN）時也看得到
+        self.assertIn("已正規化 1 處", lines[0])
+        with open(os.path.join(self.tmp, "rep", "firmware-dt.md"), encoding="utf-8") as fh:
+            self.assertIn("supplier:dumpling:", fh.read())
+        self.assertEqual(lines[0].count("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property"), 1)
 
     def test_prep_cli_line(self):
         info, o, src = self.prep(doc14(bad=True))

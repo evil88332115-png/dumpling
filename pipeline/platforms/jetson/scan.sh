@@ -14,6 +14,8 @@
 #     （換成該層 SBOM 的複本）重跑比對 → 一個 DT 專案（<名稱>-bsp、<名稱>-os）＋一份報告包。
 #     完整掃描的那次也上傳了一個 DT 專案（<名稱>），報告當作「全部」的對照；分層的報告才是 bsp／os 各自的待辦。
 #  4. 收集：Release 附件（ASCII 檔名，中文標籤）、scan.json；與 tests/expected/<專案>/<版本>.json 比對，不符 = FAIL。
+#     版本：Release tag 是 <專案>/<版本>，$ver 就是那個版本；精靈用 --version "$ver" 覆寫設定包的 product.version，收集時 platform_scan 核對每份報告
+#     （含供應商資料包）的設定檔，不等於 $ver（括號後綴不算）→ FAIL（D-055 (3)）。
 # 最後一行：scan: OK｜ATTENTION｜GAP｜FAIL（說明）。ATTENTION＝弱點資料鏡像用了舊資料頂替（不擋）；GAP＝資料不齊（沒有標準答案、分層有 GAP）：結果照樣產生，但不當成通過。
 set -uo pipefail
 proj=${1:?專案資料夾}; ver=${2:?版本}
@@ -119,7 +121,7 @@ runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
   --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]+"${official[@]}"}" \
-  || fail "收集結果失敗"
+  || fail "收集結果失敗（見上一行 jetson_scan 的訊息；精靈覆寫後的 product.version 與 Release tag 的版本 $ver 不一致也在這裡 FAIL，D-055）"
 cp "$out/wizard.log" "$out/release/" 2> /dev/null; rm -f "$out/release/wizard.log"
 exp=$root/tests/expected/$DUMPLING_PROJECT/$ver.json
 state=OK; msg=""
@@ -137,6 +139,9 @@ case $sp in
   *) state=GAP; msg="$msg；流程步驟的整體狀態是 $sp（見 pipeline-steps.tsv）";;
 esac
 if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_responsibility）"; fi   # GAP 比 ATTENTION 重，蓋過它
+# 版本核對（product_version_check）不是 OK → scan 步驟記 GAP（M7b-4；共用函式，各平台的 scan 腳本照這樣呼叫）
+vs=$(python3 -I "$root/pipeline/lib/platform_scan.py" version-state "$out/scan.json" 2> /dev/null) || vs=$'GAP\tversion-state 執行失敗：版本沒有核對'
+case ${vs%%$'\t'*} in OK) ;; FAIL) state=FAIL; msg="$msg；${vs#*$'\t'}";; *) [ "$state" = FAIL ] || state=GAP; msg="$msg；${vs#*$'\t'}";; esac   # FAIL 不降成 GAP（其他平台照抄這段）
 {
   echo "## scan（$DUMPLING_PROJECT $ver）"
   echo "- 狀態：$state（$msg）"
@@ -144,4 +149,4 @@ if [ "$lrc" = 3 ]; then state=GAP; msg="$msg；分層有 GAP（沒有 os_respons
   [ ! -f "$out/steps-summary.md" ] || { echo; cat "$out/steps-summary.md"; }
 } > "$out/summary.md"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
-case $state in OK|ATTENTION) exit 0;; *) exit 3;; esac   # ATTENTION 不是 GAP：scan 步驟記 OK，整體狀態由 pipeline-steps.tsv 的 ATTENTION 列表示
+case $state in OK|ATTENTION) exit 0;; FAIL) exit 1;; *) exit 3;; esac   # ATTENTION 不是 GAP：scan 步驟記 OK，整體狀態由 pipeline-steps.tsv 的 ATTENTION 列表示

@@ -55,7 +55,7 @@ Product SBOM (`sbom.cdx.json` in this folder, the file that is delivered): {{ bo
 
 {{ sbom.availability }}
 
-## 6. Flash firmware, Jetson Linux release and kernel modules
+## 6. {{ text.sbom_firmware_title }}
 
 {{ text.sbom_firmware }}
 

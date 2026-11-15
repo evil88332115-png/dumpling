@@ -27,6 +27,10 @@ def _rel(path):
 
 def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
     project, sources = pc.load_project_all(project_dir, platforms_dir)
+    for w in project["_warnings"]:       # 警告走 stderr：stdout 是 KEY=VALUE，會被寫進 $GITHUB_OUTPUT
+        print("project-info: WARN（%s）" % w, file=sys.stderr)
+    if project["_markets_unknown"]:
+        print("project-info: GAP（markets 是 UNKNOWN：銷售市場不明）", file=sys.stderr)
     if version not in sources["releases"]:
         raise pc.ConfigError("sources.yml 沒有版本 " + version)
     if not re.match(r"^[A-Za-z0-9_./+-]+$", project_dir):
@@ -36,10 +40,17 @@ def info(project_dir, version, platforms_dir=pc.PLATFORMS_DIR):
     return [("PROJECT", name), ("VERSION", version), ("TAG", name + "/" + version),
             ("PLATFORM", project["platform"]), ("STATUS", project["status"]),
             ("OS_RESPONSIBILITY", project["os_responsibility"]), ("COMPANY_ROLE", project["company_role"]),
-            ("PROJECT_DIR", _rel(project_dir)),
+            ("PROJECT_DIR", _rel(project_dir)), ("MARKETS_UNKNOWN", "true" if project["_markets_unknown"] else "false"),
             ("BUILD_MODE", plan["build_mode"]), ("BUILD_RUNNER", plan["build_runner"]), ("BUILD_APT", " ".join(plan["build_apt"])),
             ("SCAN_RUNNER", plan["scan_runner"]), ("SCAN_APT", " ".join(plan["scan_apt"])), ("SCAN_TOOLS", plan["scan_tools"]), ("ARCH", plan["arch"]),
-            ("SCAN_PLATFORM_ARG", plan["scan_platform_arg"])]
+            ("SCAN_PLATFORM_ARG", plan["scan_platform_arg"]), ("SUPPORT_UNTIL", _support_until(project))]
+
+
+def _support_until(project):
+    """project.yml 的 support_until（YYYY-MM-DD）；還沒填（TO BE COMPLETED）→ 空字串。D-055：config.json 的 support.end_date 由它產生。"""
+    su = project.get("support_until")
+    su = su.isoformat() if hasattr(su, "isoformat") else su
+    return su if isinstance(su, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", su) else ""
 
 
 def matrix(root, only=None):

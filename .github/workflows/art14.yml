@@ -1,0 +1,119 @@
+name: art14
+# CRA 第 14 條通報工作流程的 GitHub 演練版（M8 B1、D-033 第 3 點、docs/ART14.md）。
+# 排程每小時觸發 countdown --drill：沒有開著的 art14-drill Issue 就立刻結束。倒數只是輔助，期限由負責人掌握。
+# 公開 repo 只做演練：沒有任何指令會開或改 art14（真實案件）Issue；真實案件只在 GitLab 的私密 Issue。
+# 權限照 D-012：頂層唯讀；job 只宣告需要的（issues: write）。
+# 手動 action=drill 的驗收：每一步輸出 JSON 結果檔，下一步用 art14.py check 比對，不符 job 就失敗。
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: countdown（更新倒數）或 drill（完整演練：開 → 倒數 → 填知悉時間 → 倒數 → 不重複 → 關閉）
+        type: choice
+        options: [countdown, drill]
+        default: countdown
+
+permissions:
+  contents: read
+
+concurrency:
+  group: art14-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  art14:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'countdown' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 倒數（沒有演練案件就立刻結束）
+        if: env.ACTION == 'countdown'
+        run: python3 -I pipeline/watch/art14.py countdown --repo "$GITHUB_REPOSITORY" --drill
+
+      # ---- action=drill：合成命中，固定時間讓驗收可重現 ----
+      # GitHub 依標籤列 Issue（issues?labels=…）在剛建立／剛關閉後有索引延遲（2026-11-13 實測：剛開的 #36 在同一個 job 幾秒後列不到）。
+      # 所以「要看得到剛開的 Issue」的步驟重試（每 10 秒、最多 2 分鐘）；每次重試都重新算，驗收照樣嚴格。
+      - name: 演練 1／6：開 Issue（知悉時間未填）
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"; mkdir -p "$r"
+          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --project projects/orin-nano-demo --result "$r/1.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/1.json" --expect result=opened --expect markets=eu-all
+
+      - name: 演練 2／6：倒數（驗收：時鐘未起算、first_detected 起 6 小時、只建立一則留言、標籤 art14-24h）
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"
+          # 先等到列得到剛開的 Issue（countdown 在列不到時不做任何事，所以重試不會多留言）
+          for i in $(seq 1 12); do
+            python3 -I pipeline/watch/art14.py countdown --repo "$GITHUB_REPOSITORY" --drill --now 2026-11-13T06:00:00Z --result "$r/2.json"
+            if python3 -I pipeline/watch/art14.py check --result "$r/2.json" --expect count=1 > /dev/null; then break; fi
+            echo "還列不到剛開的演練 Issue（標籤索引延遲），10 秒後重試（$i／12）"; sleep 10
+          done
+          python3 -I pipeline/watch/art14.py check --result "$r/2.json" --expect count=1 --expect issues.0.clock=not_started \
+            --expect issues.0.hours_since_detected=6 --expect issues.0.comment=created --expect issues.0.stage_label=art14-24h \
+            --expect issues.0.stages.24h.due=null
+
+      - name: 演練 3／6：填入合成的知悉時間（只允許改 art14-drill Issue）
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"
+          python3 -I pipeline/watch/art14.py fill-drill-aware --repo "$GITHUB_REPOSITORY" --at 2026-11-13T00:00:00Z --result "$r/3.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/3.json" --expect at=2026-11-13T00:00:00Z
+
+      - name: 演練 4／6：倒數（驗收：24h／72h 期限與預期一致、同一則留言被編輯）
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"
+          python3 -I pipeline/watch/art14.py countdown --repo "$GITHUB_REPOSITORY" --drill --now 2026-11-13T06:00:00Z --result "$r/4.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/4.json" --expect count=1 --expect issues.0.clock=started \
+            --expect issues.0.comment=updated --expect issues.0.stages.24h.due=2026-11-14T00:00:00Z \
+            --expect issues.0.stages.24h.state=pending --expect issues.0.stages.72h.due=2026-11-16T00:00:00Z \
+            --expect issues.0.stages.final.due=null
+
+      - name: 演練 5／6：同一個命中再開一次（驗收：不重複開）
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"
+          python3 -I pipeline/watch/art14.py open-drill --repo "$GITHUB_REPOSITORY" --match tests/fixtures/watch/art14-drill-match.json --project projects/orin-nano-demo --result "$r/5.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/5.json" --expect result=skipped
+
+      - name: 演練 6／6：關閉（art14-drill 換成 art14-drill-done）並確認不再有案件
+        if: env.ACTION == 'drill'
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/art14"
+          python3 -I pipeline/watch/art14.py close-drill --repo "$GITHUB_REPOSITORY" --result "$r/6.json"
+          python3 -I pipeline/watch/art14.py check --result "$r/6.json" --expect closed=1
+          for i in $(seq 1 12); do      # 剛關閉的也可能還列得到（同一個索引延遲）
+            python3 -I pipeline/watch/art14.py countdown --repo "$GITHUB_REPOSITORY" --drill --result "$r/7.json"
+            if python3 -I pipeline/watch/art14.py check --result "$r/7.json" --expect count=0 > /dev/null; then break; fi
+            echo "剛關閉的演練 Issue 還列得到，10 秒後重試（$i／12）"; sleep 10
+          done
+          python3 -I pipeline/watch/art14.py check --result "$r/7.json" --expect count=0
+
+      - name: 失敗時也收掉演練 Issue（下一次演練從頭開始）
+        if: failure() && env.ACTION == 'drill'
+        run: |
+          for i in $(seq 1 12); do
+            python3 -I pipeline/watch/art14.py close-drill --repo "$GITHUB_REPOSITORY" --result "$RUNNER_TEMP/close.json" || true
+            if python3 -I pipeline/watch/art14.py check --result "$RUNNER_TEMP/close.json" --expect closed=0 > /dev/null 2>&1; then
+              echo "還列不到演練 Issue 或已經沒有，10 秒後再試（$i／12）"; sleep 10
+            else break; fi
+          done

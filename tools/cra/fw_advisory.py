@@ -123,7 +123,7 @@ def validate(doc):
     seen = set()
     prev_date = None
     for r in rels:
-        if not isinstance(r, dict) or not isinstance(r.get("tag"), str) or not TAG_RE.match(r["tag"]) or r["tag"] in seen:
+        if not isinstance(r, dict) or not isinstance(r.get("tag"), str) or not TAG_RE.fullmatch(r["tag"]) or r["tag"] in seen:
             bad("release tag")
         seen.add(r["tag"])
         d = r.get("date")
@@ -134,7 +134,7 @@ def validate(doc):
                 bad("releases are not ordered newest first at " + r["tag"])        # 順序決定「較新」的判斷
             prev_date = d
         sec = r.get("security")
-        if not isinstance(sec, list) or not all(isinstance(s, dict) and isinstance(s.get("id"), str) and SA_RE.match(s["id"])
+        if not isinstance(sec, list) or not all(isinstance(s, dict) and isinstance(s.get("id"), str) and SA_RE.fullmatch(s["id"])
                                                  and s.get("how") in HOWS for s in sec):
             bad("security in " + r["tag"])
         for k in ROW_KEYS:
@@ -204,7 +204,7 @@ def load_default():
 def fms_of(cpuid):
     """CPUID（8 位十六進位）→ 'FF-MM-SS'（family-model-stepping，小寫十六進位）；格式不對 → None。
     family ＝ base family（family 為 0xF 時加 extended family）；model ＝ extended model:model（family 6 或 0xF 時）；stepping 在最低 4 位元。"""
-    if not isinstance(cpuid, str) or not CPUID_RE.match(cpuid):
+    if not isinstance(cpuid, str) or not CPUID_RE.fullmatch(cpuid):
         return None
     v = int(cpuid, 16)
     fam = (v >> 8) & 0xF
@@ -218,14 +218,14 @@ def fms_of(cpuid):
 
 def rev_value(rev):
     """'0xF8'／'0x000000F8' → 整數（無號 32 位）；格式不對 → None。"""
-    if not isinstance(rev, str) or not REV_RE.match(rev):
+    if not isinstance(rev, str) or not REV_RE.fullmatch(rev):
         return None
     return int(rev, 16)
 
 
 def pf_value(pf):
     """'0x94' → '94'（遮罩的兩位小寫十六進位）；格式不對 → None。"""
-    if not isinstance(pf, str) or not PF_RE.match(pf):
+    if not isinstance(pf, str) or not PF_RE.fullmatch(pf):
         return None
     return "%02x" % int(pf, 16)
 

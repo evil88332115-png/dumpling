@@ -53,6 +53,7 @@ stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK 
     核心判定階段（KERNEL_STAGES、C-kernel-not-judged-*）有這一列而且不是 OK → GAP（ATTENTION 維持；meta.json 有 kernel_in_other_report 時
     C-kernel-cve-list／config／module-map 的 NOT_RUN 是 D-044 的不適用，不降級）；刷機包的掃描另讀 <結果>/status.tsv 的 FLASH_ROOTFS_STAGES／
     FLASH_PRODUCT_STAGES（有這一列而且不是 OK／INFO → GAP，ATTENTION 維持；-os 的 bsp_na 時 BSP 專屬的不算）；
+    其中 B-bootloader-coverage（D-054）與 C-kernel-boot（kernel-boot.json）只進報告狀態（summary.json 的 status）與待確認事項表，不進漏洞資料狀態、不擋發行閘門；
     有未處理的 P1、Grype 有 DT 沒有的 CVE、C-grype 不是 OK 或沒有 Grype 結果 → ATTENTION。
   - Grype 有、DT 沒有的比對（交叉核對的同一個判斷）成為「只有 Grype」的列（grype_only_rows；Source IDs GRYPE:…，
     元件欄 found only by Grype），和其他列一樣分級、判斷、寫 VEX；DT 的列不變。
@@ -143,7 +144,10 @@ INFO_STAGES = ["C-grype-db", "C-grype"]
 COND_STAGES = ["C-kernel-l4t-map", "C-kernel-coverage", "C-nvidia-bulletins", "D-dt-deb-sources", "D-dt-bom-processing", "B-toolchain", "B-npm-no-lockfile",
                "C-pyver", "B-php-runtime"]
 # 資料新鮮度的階段（sca-scan 掃描前寫的；有這一列才處理）：C-grype-db、C-mirror-freshness 不是 OK、C-grype-db-update FAIL → GAP（ATTENTION 維持 ATTENTION）；
-# C-dt-feeds：GAP → GAP；NOT_RUN 只在原因是金鑰沒有權限（說明含 SYSTEM_CONFIGURATION_READ）時算 GAP——沒用 DT 的 NOT_RUN 已由 D-dt-data-sources 反映
+# C-dt-feeds：GAP → GAP；NOT_RUN 看 meta.json 的 dt_feeds_reason（結構化，不看說明文字；M7b）：金鑰沒有權限（permission_denied）、
+# 沒讀到任何資料源狀態（no_data）或沒有原因代碼（舊的 meta.json、寫錯）→ GAP；沒用 DT（dt_not_used）與 dtsources.py 失敗（dtsources_failed）
+# 不降級——那兩種已由 D-dt-data-sources 反映：它在 RISK_STAGES，不是 OK 就 GAP（sca-scan 在沒用 DT 時寫 NOT_RUN、dtsources.py 失敗時寫 FAIL）。
+# 不只信 meta.json 的代碼：D-dt-data-sources 是 OK（或沒有這一列以外的其他情況使它是 OK）時，C-dt-feeds 的 NOT_RUN 照樣 GAP
 FRESH_STAGES = ["C-grype-db-update", "C-grype-db", "C-mirror-freshness", "C-dt-feeds"]
 # 作業系統核心的判定階段（sca-scan；有這一列才處理）：不是 OK → GAP（ATTENTION 維持 ATTENTION）。沒有 CNA 鏡像時的 NOT_RUN、核心版本讀不出來的 GAP、
 # kernel_config.py 失敗的 FAIL、出貨但沒判定的核心（C-kernel-not-judged-<版本>）都表示核心的 CVE 沒有依產品核心判定完（D-043）。
@@ -160,8 +164,12 @@ REPORT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")      # sca-scan
 #   B-initrd-coverage-<rootfs>：initrd 裡有沒被套件涵蓋的 ELF／腳本（不在 SBOM，弱點沒比對）或讀不懂
 #   B-rootfs-tar-<rootfs>：rootfs 有讀不到、略過的項目（裡面的套件不會在 SBOM）
 #   B-uefi-binary（整個產品一列）：刷機包的 UEFI 映像和給的原始碼不一致或沒核對（UEFI 內建函式庫的列可能不是出貨的東西）
+#   B-bootloader-coverage-<rootfs>（D-054）：開機程式／閉源韌體沒有被掃到（GAP）、沒有定義開機鏈（NOT_ASSESSED：Rockchip、generic）、讀不懂（FAIL）。
+#     閉源韌體本來就無法用 SCA 掃描，所以這一列只進報告狀態（report_status＝summary.json 的 status）與待確認事項表，不進漏洞資料狀態（risk_st），
+#     所以也不擋 VEX 發行閘門（vex_export.gate 只收 risk_st）；報告寫明「閉源韌體以廠商公告為準」。見 FLASH_FIRMWARE_STAGES
 # 值＝這一列是不是 BSP 專屬（分層的 -os 報告不適用，同 bsp_na）。
-FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False}
+FLASH_ROOTFS_STAGES = {"B-initrd-coverage": True, "B-rootfs-tar": False, "B-bootloader-coverage": True}
+FLASH_FIRMWARE_STAGES = ("B-bootloader-coverage",)      # FLASH_ROOTFS_STAGES 裡只進報告狀態、不進漏洞資料狀態（不擋發行閘門）的列
 FLASH_PRODUCT_STAGES = {"B-uefi-binary": True}
 FLASH_STATUS_MISSING = "flash-package status.tsv"
 
@@ -193,6 +201,57 @@ def flash_stage_level(st):
     return None if st in ("OK", "INFO") else "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
+def flash_stage_is_firmware(k):
+    """flash_stage_status 的鍵（<階段>-<rootfs>）是不是 FLASH_FIRMWARE_STAGES 的列：只進報告狀態，不進漏洞資料狀態。"""
+    return any(k.startswith(f"{b}-") for b in FLASH_FIRMWARE_STAGES)
+
+
+FIRMWARE_ADVISORY = "the vendor's security advisories are authoritative for closed-source firmware"
+
+
+def firmware_reason(k, st):
+    """B-bootloader-coverage-<rootfs> 非 OK／INFO 的列 → 報告裡的理由（英文；閉源韌體沒有被掃描，以廠商公告為準，D-054）。"""
+    if st == "ATTENTION":
+        return f"{k} is ATTENTION (flash package scan): the boot firmware coverage needs review; {FIRMWARE_ADVISORY}"
+    if st == "NOT_ASSESSED":
+        return f"{k} is NOT_ASSESSED (flash package scan): the boot chain was not assessed; {FIRMWARE_ADVISORY}"
+    if st == "GAP":
+        return f"{k} is GAP (flash package scan): closed-source boot firmware was not scanned; {FIRMWARE_ADVISORY}"
+    return (f"{k} is {st} (flash package scan): the boot firmware coverage was not determined, so closed-source boot firmware "
+            f"was not scanned; {FIRMWARE_ADVISORY}")
+
+
+KERNEL_BOOT_SCHEMA = "sca-center-kernel-boot/1"
+KERNEL_BOOT_STATUSES = ("OK", "ATTENTION", "GAP")
+
+
+def kernel_boot_findings(kboot, status, meta, present=False):
+    """C-kernel-boot（刷機包有兩顆不同的核心；scan/kernel-boot.json 與 scan/status.tsv 的 C-kernel-boot 列）→ [(層級, 理由)]（只有 GAP／ATTENTION）。
+    只進報告狀態與待確認事項表（不進漏洞資料狀態、不擋發行閘門）。沒有檔案（不是刷機包、或只有一顆核心）→ []。
+    present：scan/kernel-boot.json 這個檔存在。存在卻讀不懂（不是 JSON、schema 或 status 不對）→ GAP（D-043；C1 審查時改：原本不處理）。
+    sca-scan 在 kernel_boot.py 失敗時只寫 status.tsv 的 FAIL 列、
+    不留 json，所以 status.tsv 的列也看：不是 OK／INFO 的 → GAP（ATTENTION 維持）。
+    分層報告的 SBOM 沒有核心、核心在另一份報告判定（meta.json 的 kernel_in_other_report，D-044）時不算在這份。"""
+    other = (meta or {}).get("kernel_in_other_report")
+    if isinstance(other, str) and REPORT_NAME_RE.fullmatch(other):
+        return []
+    out = []
+    usable = isinstance(kboot, dict) and kboot.get("schema") == KERNEL_BOOT_SCHEMA and kboot.get("status") in KERNEL_BOOT_STATUSES
+    if present and not usable:
+        out.append(("GAP", "C-kernel-boot: scan/kernel-boot.json exists but could not be read (not JSON, or wrong schema or status); "
+                           "whether the flash package's two kernels match is unknown"))
+    if usable and kboot["status"] in ("ATTENTION", "GAP"):
+        d = str(kboot.get("detail"))[:300]
+        out.append((kboot["status"], f"C-kernel-boot is {kboot['status']}: " + (
+            f"the two kernels in the flash package could not be compared ({d})" if kboot["status"] == "GAP" else
+            f"{d}; which kernel actually boots has to be confirmed on a board")))
+    row = (status or {}).get("C-kernel-boot")
+    lv = flash_stage_level(row[0]) if row else None
+    if lv and not out:
+        out.append((lv, f"C-kernel-boot is {row[0]}: the comparison of the flash package's kernels did not complete ({str(row[1])[:300]})"))
+    return out
+
+
 def kernel_stage_keys(status):
     """status.tsv 裡有的核心判定階段（KERNEL_STAGES 與 C-kernel-not-judged-*），照固定順序。"""
     return [k for k in KERNEL_STAGES if k in status] + sorted(k for k in status if k.startswith(KERNEL_STAGE_PREFIX))
@@ -208,8 +267,12 @@ def kernel_stage_level(k, st, meta):
     return "ATTENTION" if st == "ATTENTION" else "GAP"
 
 
-def fresh_stage_level(k, st, detail):
-    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。"""
+DT_FEEDS_NOT_DOWNGRADED = ("dt_not_used", "dtsources_failed")
+
+
+def fresh_stage_level(k, st, meta=None, status=None):
+    """新鮮度階段 → 風險狀態影響（GAP／ATTENTION／None）。meta：sca-scan 的 meta.json（C-dt-feeds 讀 dt_feeds_reason）；
+    status：read_status 的結果（C-dt-feeds 不降級時要確認 D-dt-data-sources 不是 OK）。"""
     if st == "OK":
         return None
     if st == "ATTENTION":
@@ -217,7 +280,11 @@ def fresh_stage_level(k, st, detail):
     if k == "C-grype-db-update":
         return "GAP" if st == "FAIL" else None          # NOT_RUN（GRYPE_DB_UPDATE=off）：資料庫年齡由 C-grype-db 判斷
     if k == "C-dt-feeds":
-        return "GAP" if st == "GAP" or (st == "NOT_RUN" and "SYSTEM_CONFIGURATION_READ" in (detail or "")) else None
+        if st == "NOT_RUN":
+            reason = (meta or {}).get("dt_feeds_reason") if isinstance(meta, dict) else None
+            dds = (status or {}).get("D-dt-data-sources", ("NOT_RUN",))[0]
+            return None if reason in DT_FEEDS_NOT_DOWNGRADED and dds != "OK" else "GAP"
+        return "GAP"        # GAP、FAIL（例如 config_error：DT_FEEDS_MAX_AGE_HOURS 設錯）、不認得的狀態：至少 GAP（D-043；#92 C0，原本 FAIL 回 None）
     return "GAP"
 
 
@@ -549,15 +616,27 @@ def stage_line(p, stage):
     return None
 
 
+# status.tsv 同一階段多列（M7b）：取最嚴重的一列（不認得的狀態比 OK 嚴重），取到 OK 而且有重複列 → ATTENTION。
+# 和 dumpling 的 pipeline/lib/status_tsv.py 同一套規則（tools/ 不 import pipeline/，所以另寫一份；tests/test_platform_status_tsv.py 比對兩邊）。
+STATUS_SEVERITY = {"OK": 0, "ATTENTION": 2, "NOT_ASSESSED": 3, "NOT_RUN": 4, "GAP": 5, "FAIL": 6}
+
+
 def read_status(p):
     if p is None:
         return None
-    rows = {}
+    rows, count = {}, {}
     with open_text(p) as f:
         for line in f:
             parts = line.rstrip("\r\n").split("\t", 2)
             if len(parts) >= 2 and parts[0] != "stage":
-                rows[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "")
+                new = (parts[1], parts[2] if len(parts) > 2 else "")
+                count[parts[0]] = count.get(parts[0], 0) + 1
+                old = rows.get(parts[0])
+                if old is None or STATUS_SEVERITY.get(new[0], 1) >= STATUS_SEVERITY.get(old[0], 1):
+                    rows[parts[0]] = new
+    for k, n in count.items():
+        if n > 1 and rows[k][0] == "OK":
+            rows[k] = ("ATTENTION", "status.tsv 有 %d 列 %s（取最嚴重的一列是 OK；重複列代表檔案被改過或寫檔有 bug，要有人看過）：%s" % (n, k, rows[k][1]))
     return rows
 
 
@@ -1333,11 +1412,13 @@ def flash_firmware(scan, cfg, spec, inventory=None):
     if isinstance(rt, dict) and isinstance(rt.get("prefix"), str):
         prefix = rt["prefix"]
     inv = load_json(inv_p)
+    plat = fwmod().platform_of(fwmod().pick_rootfs(lst, variant, prefix)[0])     # list.json 的 l4t 欄位：jetson｜other｜None（不知道）
     if not isinstance(inv, dict):
         why = "missing" if not inv_p.exists() else "not readable"
         return None, None, None, {"absent": f"**Flash firmware missing from the SBOM:** the flash package inventory (`{inv_p.name}`) is {why}. "
-                                  "Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware are not in "
-                                  "the product SBOM.", "flash_package": True, "status": "ATTENTION"}
+                                  + ("Boot and flash firmware, the Jetson Linux release, NVIDIA kernel modules and MCU firmware" if plat == "jetson" else
+                                     "Boot and flash firmware, the platform release information, kernel modules and MCU firmware")
+                                  + " are not in the product SBOM.", "flash_package": True, "status": "ATTENTION", "platform": plat}
     try:     # 清點檔是不可信資料：格式怪異時不讓整份 CRA 文件失敗
         comps, deps, top, info = fw.build(inv, lst if isinstance(lst, dict) else None, variant, prefix,
                                           (cfg.get("sbom") or {}).get("flash_package_supplier"), spec,
@@ -4711,7 +4792,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 rctx["nvidia_distro"] = rm
             nvd_info = {"checked": ri["checked"], "reason": ri["reason"], "db": ri["db"], "cves": len(nvd_cves), "remapped": rm,
                         "file_list": ri["file_list"]}
-    vrows, vconf, vinfo = vx.assess(rows, drc, kcfg, nvb, anns, vrules, rctx)
+    # project：annotation 的 on-device 依據要檢查檔案在專案資料夾內（D-035／D-057）
+    vrows, vconf, vinfo = vx.assess(rows, drc, kcfg, nvb, anns, vrules, rctx, project=project)
     # 可能誤報（只標記）：發行版紀錄沒有版本範圍、grype.json 裡同一個 CVE 的上游 CPE 範圍不含安裝的上游版本
     vinfo["upstream_excludes"] = vx.upstream_exclusion_flags(vrows, grype if have_grype else None, vx.ubuntu_status_of(ustatus_doc)[0])
     # 可能誤報的標記是 assess 之後才加的：標記的計數重算（含 NVIDIA 另加的列與拆出來的 CVE）
@@ -4793,6 +4875,18 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         warnings = list(warnings) + [f"專案的風險評估範本（CRA/templates/risk-assessment.md）沒有引用 text.kernel_section：作業系統核心的 "
                                      f"{len(krows)} 列照舊列在主清單（另有 {KERNEL_DOC[1]}）；要分開列請在範本加上 {{{{ text.kernel_section }}}}"]
     reasons, risk_st = [], "OK"
+    # 只進報告狀態、不進 risk_st（risk_st 會交給 vex_export.gate：進去就擋 VEX 發行閘門）的項目：
+    # B-bootloader-coverage（D-054；-os 的 bsp_na 不算）與 C-kernel-boot（C0 決定）。報告狀態用 fw_st／fw_reasons，待確認事項表用 fw_items
+    fw_st, fw_reasons, fw_items = "OK", [], []
+    for k, (fst, _fd, bsp_only) in flash.items():
+        lv = None if (bsp_only and bsp_na) or not flash_stage_is_firmware(k) else flash_stage_level(fst)
+        if lv:
+            fw_st = worst([fw_st, lv])
+            fw_items.append({"key": k, "status": fst, "level": lv, "reason": firmware_reason(k, fst)})
+            fw_reasons.append(firmware_reason(k, fst))
+    for lv, why in kernel_boot_findings(kboot, status, meta, present=paths["scan/kernel-boot.json"] is not None):
+        fw_st = worst([fw_st, lv])
+        fw_reasons.append(why)
     if not isinstance(findings, list):
         risk_st = "NOT_ASSESSED"
         reasons.append("no readable Dependency-Track findings (dt/findings.json): the vulnerability list could not be produced")
@@ -4820,12 +4914,12 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 reasons.append(f"{k} is {status[k][0]}: the operating system kernel's CVEs were not fully assessed against the product kernel"
                                if lv == "GAP" else f"{k} is {status[k][0]}")
         for k, (fst, _fd, bsp_only) in flash.items():
-            lv = None if (bsp_only and bsp_na) else flash_stage_level(fst)
+            lv = None if (bsp_only and bsp_na) or flash_stage_is_firmware(k) else flash_stage_level(fst)
             if lv:
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {fst} (flash package scan)" + (": the product SBOM may be incomplete" if lv == "GAP" else ""))
         for k in FRESH_STAGES:
-            lv = fresh_stage_level(k, status[k][0], status[k][1]) if k in status else None
+            lv = fresh_stage_level(k, status[k][0], meta, status) if k in status else None
             if lv:
                 risk_st = worst([risk_st, lv])
                 reasons.append(f"{k} is {status[k][0]}: vulnerability data may be out of date")
@@ -5114,7 +5208,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
              f"Vulnerability rows (vulnerability × component version): {ta['rows']} in total; {tk['rows']} for the operating system "
              f"kernel{f' (`{KERNEL_DOC[1]}`)' if krows else ''}, {tm['rows']} for other components.")
     ctx.update({
-        "risk.data_status": risk_st, "risk.data_status_detail": (reasons or ["no issue recorded"]) + notes,
+        "risk.data_status": risk_st,
+        "risk.data_status_detail": (reasons or ["no issue recorded"]) + notes
+        # D-054：只進文件狀態（summary.json 的 status、report_status），不改上面的漏洞資料狀態，也不擋發行閘門
+        + [f"Note (counted in this document's status, not in the vulnerability data status above, and not blocking the release gate): {x}"
+           for x in fw_reasons],
         "text.completeness": completeness, "text.cross_check": cross, "text.no_vuln_data_section": nvdmod().section(nvd, table),
         "tables.data_sources": table(["Stage", "Status", "Detail (as recorded by sca-scan)"],
                                      [[k, (status.get(k) or ("NOT_RUN",))[0], en((status.get(k) or ("", "not in status.tsv"))[1])] for k in RISK_STAGES + INFO_STAGES]
@@ -5159,6 +5257,14 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                     annotations_without_author=sorted({ann_label(a) for a in anns if vx.author_missing(a.get("author"))}),
                     # 沒有 DT findings 時每一筆都「沒對到」，不另外點名（閘門本來就是 NOT_ASSESSED）
                     annotations_unused=[ann_label(anns[i]) for i in vinfo["annotations_unused"]] if isinstance(findings, list) else [])
+    # D-035／D-057：沒有依據類型的排除（resolved、not_affected 沒有類型、或 on-device 的檔案不合格）→ 這份文件的狀態至少 ATTENTION。
+    # 和 D-054 的 fw_st 一樣只進文件狀態（summary.json 的 status），不進上面的漏洞資料狀態 risk_st；發行閘門由 vex_export.gate 自己擋
+    ev_n = vgate["assessment"]["exclusions_without_evidence"]
+    ev_st = "ATTENTION" if ev_n else "OK"
+    ev_reasons = [f"{ev_n} exclusions (resolved or not_affected) without an evidence type (D-035): they count as not assessed in the release gate; "
+                  "see the VEX section and vex.evidence in summary.json"] if ev_n else []
+    ctx["risk.data_status_detail"] = list(ctx["risk.data_status_detail"]) + [
+        f"Note (counted in this document's status, not in the vulnerability data status above): {x}" for x in ev_reasons]
     # 安全測試（風險評估第 9 節、技術文件第 6 項、security-findings.md）：掃描資料夾旁邊的 image-check／board-test，或 --image-check／--board-test
     img_p = Path(image_check) if image_check else (scan.parent / "image-check" / "image-check.json")
     brd_p = Path(board_test) if board_test else (scan.parent / "board-test" / "board-test.json")
@@ -5199,7 +5305,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     if bsp_na and (fwc or not fw_info.get("absent")):
         # 分層、這份沒有 BSP 元件（見 bsp_na）：刷機包韌體屬於 bsp 層，不加進這份的產品 SBOM
         bsp_na_skipped.append("flash-firmware")
-        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True}
+        fwc, fwd, fwt, fw_info = None, None, None, {"absent": BSP_NA_FIRMWARE, "layer_not_applicable": True, "platform": fw_info.get("platform")}
     # 產品自有軟體（設定 sbom.own_software；own_software.py）：沒有設定時 own_info 是 None，下面全部照舊
     owc, owt, own_info, fwc = own_software(scan, cfg, b.get("specVersion"), fwc, fw_info, own_software_file) if b else (None, None, None, fwc)
     if own_info is None and ownmod().configured(cfg):
@@ -5253,11 +5359,14 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         else bool(cfg["sbom"]["tools_scope_note"])
     scope_txt = spmod().TOOLS_SCOPE_NOTE if scope_note else ""
     ctx.update({"text.sbom_scope": ("\n\n" + scope_txt) if scope_txt else ""})
+    # 第 6 節標題：只有 Jetson 的刷機包才寫 Jetson Linux 版本；其他平台（或不知道平台）寫中性的標題（adapter-gaps #25）
+    ctx.update({"text.sbom_firmware_title": "Flash firmware, Jetson Linux release and kernel modules" if fw_info.get("platform") == "jetson"
+                else "Flash firmware and kernel modules"})
     ctx.update({"text.sbom_firmware": fwmod().firmware_text(fw_info, table) + ("\n\n### Scope of the SBOM\n\n" + scope_txt if scope_txt else "") + ("\n\n" + ownmod().text(own_info, table) if own_info else "")
                                                                                 + ("\n\n" + uefimod().text(uefi_info, table) if uefi_info else "")
                                                                                 + ("\n\n" + teemod().text(tee_info, table) if tee_info else "")
                                                                                 + ("\n\n### Boot firmware coverage\n\n" + bootmod().customer_text(boot_cov) if boot_cov else ""),
-                "text.sbom_tr03183": fwmod().tr_text(tr, table),
+                "text.sbom_tr03183": fwmod().tr_text(tr, table, platform=fw_info.get("platform")),
                 "bom.firmware_status": fw_info.get("status") or "not applicable", "bom.tr03183_status": tr["status"]})
     pbom_text = json.dumps(pbom, ensure_ascii=False, separators=(",", ":")) + "\n" if pbom else None
     # 板子執行中使用的證據（runtime_evidence.py）：只加欄位與 VEX 說明的一句話，不改 tier、不改 VEX 狀態。
@@ -5298,8 +5407,11 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     vex_out = {}
     for n in ("vex.cdx.json", "vex.openvex.json"):
         t = vex_texts.get(n)
+        # statements＝檔案裡的陳述總數；M7c-1（A4）起含沒有評估的列（in_triage／under_investigation 加 NOT_ASSESSED 標記），
+        # not_assessed＝其中沒有評估的（有判定的陳述數＝兩者相減）
         vex_out[n] = {"file": n, "sha256": hashlib.sha256(t.encode("utf-8")).hexdigest(),
-                      "statements": len(json.loads(t).get("vulnerabilities" if n == "vex.cdx.json" else "statements"))} if t else None
+                      "statements": len(json.loads(t).get("vulnerabilities" if n == "vex.cdx.json" else "statements")),
+                      "not_assessed": vx.not_assessed_count(json.loads(t), n)} if t else None
         vex_files.append((n, vex_out[n], why_not))
     vnum = f"8.{8 + bool(nsection) + bool(dsection)}"
     vsection = vx.section(vnum, vgate, vinfo, vconf, vex_files, f"{pname}, SBOM serial {pbom['serialNumber']}" if pbom else pname,
@@ -5394,11 +5506,17 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     docs, rendered = {}, {}
     # 風險評估的文件狀態＝漏洞資料狀態（第 8 節）與安全測試狀態（第 9 節）較差的那個；risk.data_status 仍只講第 8 節
     # 分級方式 exploitation：沒有對外服務清單（必須判斷的範圍不完整）→ GAP，依日期的出貨關卡擋住 → ATTENTION（current 時 est 是 OK）
-    data_st = {"risk-assessment": (worst([risk_st, sec_st, est]), reasons + sec_reasons + ereasons), "sbom": (bom_st, bom_reasons),
+    data_st = {"risk-assessment": (worst([risk_st, sec_st, est, fw_st, ev_st]), reasons + sec_reasons + ereasons + fw_reasons + ev_reasons),
+               "sbom": (bom_st, bom_reasons),
                "user-information": ("OK", [])}
     # 缺的欄位不只看實際用的範本：內建範本引用的欄位（專案範本少引用時也算缺）、Annex I 的逐項表、技術文件檢查清單的 config 欄位
     extra_missing = {"risk-assessment": set(annex_missing),
                      "technical-documentation": {src for _, _, src in TECHDOC_ITEMS if not src.startswith("doc:") and isinstance(ctx.get(src), Missing)}}
+    # sbom.md 第 6 節的「Supplier … TO BE COMPLETED」是 firmware_text 直接寫的字，不是 Missing 值：不另外算進去，summary.json 的 missing_fields
+    # 就少一個（adapter-gaps #25）。刷機包的韌體有併進來（fw_info 沒有 absent）、設定沒有可用的 sbom.flash_package_supplier、範本也用了 text.sbom_firmware
+    # 才算（-os 報告沒有 BSP 元件、不是刷機包的掃描、清點檔缺少時，第 6 節不會有這一行）
+    if "sbom" in active_docs and not fw_info.get("absent") and not fw_info.get("supplier") and "text.sbom_firmware" in sb_ph:
+        extra_missing["sbom"] = {"sbom.flash_package_supplier"}
     # security-findings.md 沒有範本；先放進 docs，技術文件的檢查清單（第 6 項）要用它的狀態
     docs[SEC_DOC[0]] = {"file": SEC_DOC[1], "status": sec_st, "detail": sec["reasons"], "template": "none (generated)", "missing_fields": []}
     for name, fn in active_docs.items():
@@ -5542,6 +5660,9 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                 "kernel_modules": kmods_info, "upstream_excludes": vinfo["upstream_excludes"],
                 # 被證據規則 U1 設成 not_affected 的每一列與理由、證據（vex_export.u1_exclusions；報告的「被排除清單」用）
                 "u1_excluded": vinfo.get("u1_excluded", []),
+                # 排除的依據（D-035／D-057；vex_export.exclusion_evidence）：exclusions、by_type（五種類型各幾筆排除）、with_type、
+                # without_type（total、by_reason、sample）、on_device／design_doc（每一筆依據：id、component、version、source、location、kernel）
+                "evidence": vinfo["evidence"],
                 # NVIDIA 公告列的 CVE 其實是發行版套件的（nvidia_distro.py）：checked＝有沒有查（沒給 Grype DB 就沒查）、remapped＝每個 CVE 的結果
                 "nvidia_distro": nvd_info,
                 # 被證據規則 U2 設成 resolved 的每一列（只有設定了 U2 時才有這個鍵；tier 是最後的層級，distro_fixed＝已移到發行版已修補小節）
@@ -5614,7 +5735,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # （缺的輸入也列一筆）。pkgdb 在風險評估之前已經讀好（pdb，和「沒有漏洞資料的套件」共用）
     try:
         cm = confmod()
-        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, status=status, expl=expl, svc_info=svc_info,
+        citems = cm.build(rows=vrows, sec=sec, pkgs=pkgs, krows=krows, kstate=kstate, kcfg=kcfg, kboot=kboot, kvers=kvers_doc, fw=fw_items, status=status, expl=expl, svc_info=svc_info,
                           missing_fields=summary["missing_fields"], cfg=cfg, role=role, have_findings=isinstance(findings, list),
                           risk_st=risk_st, risk_reasons=reasons, bom_st=bom_st, bom_reasons=bom_reasons, human=vx.HUMAN,
                           author_missing=vx.author_missing, schema=SCHEMA, db=pdb, no_vuln=nvd)

@@ -300,6 +300,22 @@ class ReportTests(ReportBase):
         self.assertIn("AMD 的微碼、PSP 韌體、AGESA 元件也是 `advisory-match=NOT_ASSESSED`：資料庫沒有資料，以 AMD 公告為準", md)
         self.assertNotIn("PASS", md)
 
+    def test_nvidia_vbios_advisory_match_is_counted_and_explained(self):
+        """NVIDIA vBIOS 元件的 advisory-match（affected／fixed／NOT_ASSESSED）：計數照 property 值，「怎麼讀」寫明多數是 NOT_ASSESSED、fixed 不代表沒有其他漏洞。"""
+        vs = []
+        for i, m in enumerate(("NOT_ASSESSED", "affected", "fixed")):
+            c = comp("NVIDIA VBIOS 24%02d" % i, "v%d" % i, version="94.04.5E.00.9%d" % i)
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": m}, {"name": "dumpling:advisory-basis", "value": "table row"}]
+            vs.append(c)
+        info, o = self.prep(bom(*vs), kind="vbios")
+        self.assertEqual(info["summary"]["advisory_match"], {"NOT_ASSESSED": 1, "affected": 1, "fixed": 1})
+        rc, _, md = self.run_report([o])
+        self.assertIn("affected=1", md)
+        self.assertIn("NVIDIA vBIOS 元件另有 `advisory-match`", md)
+        self.assertIn("所以多數是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準", md)
+        self.assertIn("fixed 不代表沒有其他漏洞，沒有任何一項代表沒有漏洞", md)
+        self.assertNotIn("PASS", md)
+
     EVIL = "x|y\n# 標題\n[點我](http://evil.example/a)\n<b>z</b>"
 
     def test_supplier_sbom_advisory_match_is_not_trusted_and_not_injected(self):
@@ -345,6 +361,28 @@ class ReportTests(ReportBase):
         self.assertNotIn("\n# 標題", md)                  # 換行被取代，不會多出標題行
         self.assertNotIn("<b>", md)
         self.assertEqual(len([l for l in md.splitlines() if l.startswith("- 公告比對")]), 1)
+
+    def test_supplier_sbom_own_affected_and_fixed_are_not_trusted(self):
+        """kind: sbom（供應商 SBOM）自帶的 dumpling:advisory-match=affected／fixed 不採信、不進報告；其他 kind 的照計。"""
+        for i, val in enumerate(("affected", "fixed", "Fixed", "affected-candidate")):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": val}, {"name": "dumpling:advisory-bulletins", "value": "9999"}]
+            info, o = self.prep(bom(c), kind="sbom", out="s%d" % i)
+            self.assertEqual(info["summary"]["advisory_match"], {}, val)
+            rc, out, md = self.run_report([o])
+            self.assertNotIn("affected=", md)
+            self.assertNotIn("fixed=", md)
+            self.assertNotIn("公告比對（dumpling:advisory-match）", md)
+        c = comp("a", "r1", version="1.0")
+        c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}, {"name": "dumpling:vuln-assessment", "value": "OK"}]
+        info, _ = self.prep(bom(c), kind="sbom", out="s-mixed")
+        self.assertEqual(info["summary"]["advisory_match"], {})
+        self.assertIsNone(info["summary"]["vuln_assessment"].get("OK"))
+        for kind in ("bios", "vbios"):
+            c = comp("a", "r1", version="1.0")
+            c["properties"] += [{"name": "dumpling:advisory-match", "value": "fixed"}]
+            info, _ = self.prep(bom(c), kind=kind, out="own-" + kind)
+            self.assertEqual(info["summary"]["advisory_match"], {"fixed": 1})
 
     def test_not_run_without_dt(self):
         _, o = self.prep(bom(comp("a", "r1")))
@@ -619,6 +657,38 @@ class HardeningTests(ReportBase):
         st, out, rc = self.case()
         self.assertEqual((st, rc), ("OK", 0), out)
 
+    def test_forged_normalization_record_in_supplier_sbom_cannot_change_the_report(self):
+        """供應商 SBOM 自帶 dumpling:normalized-*（假裝「已正規化 0 處」「原檔 SHA-256 是…」）與 dumpling:vuln-assessment=NONE：
+        report 讀的是 dt-project.json（prep 自己算的），不讀 SBOM 裡的 property；而且這種 SBOM 至少 ATTENTION。"""
+        HardeningTests.n += 1
+        slug = "forge%d" % HardeningTests.n
+        d = bom(clean())                      # clean()：元件自帶 vuln-assessment=NONE、version-status=OK（共 2 個 dumpling: property）
+        d["metadata"]["properties"] = [{"name": "dumpling:normalized-changes", "value": "0"},
+                                       {"name": "dumpling:normalized-from-sha256", "value": "f" * 64}]
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        self.assertEqual((info["normalize"]["changes"], info["normalize"]["renamed"]), (4, 4))      # 我們自己的紀錄：2 筆 metadata ＋ 2 筆元件
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertEqual(rc, 0)
+        self.assertIn("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 4 個", out)
+        self.assertIn("已正規化 4 處", out)                                                 # 不是供應商寫的 0
+        self.assertIn("供應商 SBOM 自帶 dumpling: 標記的元件 1 個", out)                   # vuln-assessment=NONE 不採信
+        self.assertIn("沒有 dumpling:vuln-assessment 標記的元件 1 個", out)
+        self.assertNotIn("f" * 64, out + md)                                              # 偽造的 SHA-256 不會進報告
+        with open(os.path.join(o, "sbom.cdx.json"), encoding="utf-8") as fh:
+            up = json.load(fh)
+        names = [p["name"] for p in up["metadata"]["properties"]]
+        self.assertEqual(names.count("dumpling:normalized-changes"), 1)
+        self.assertEqual(names.count("supplier:dumpling:normalized-changes"), 1)
+        # 對照：供應商沒有自帶 dumpling: 開頭的 property，就沒有這則說明（元件沒有標記、metadata 沒有 property）
+        plain = {"type": "firmware", "name": "p", "bom-ref": "r9", "version": "1", "purl": "pkg:github/a/b@1"}
+        info2, o2 = self.prep(bom(plain), slug=slug + "b", out="p-" + slug + "b", kind="sbom")
+        self.assertEqual(info2["normalize"]["renamed"], 0)
+        dt2 = self.dt_sample(info2, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug + "b")
+        _, out2, _ = self.run_report([o2], dt2)
+        self.assertNotIn("供應商 SBOM 自帶名稱以 dumpling:", out2)
+
     # ---- 1. DT／Grype 的比對數
     def test_findings_total_must_be_a_count(self):
         for v in (-3, None, "-", "0", "?", True, False, 1.5, [], {}, float("nan"), float("inf"), "[x](http://e)"):
@@ -789,7 +859,9 @@ class HardeningTests(ReportBase):
         self.assertIn(fd._cell(fd.EMPTY_STAGE), out)
         for bad in ("GAP", "NOT_RUN", "ATTENTION", "WEIRD", ""):
             self.assertEqual(self.status(rows=self.GOOD + [("", bad, "x")]), "ATTENTION", repr(bad))
-        self.assertEqual(self.status(rows=self.GOOD + [("", "OK", "x")]), "OK")
+        st, out, _ = self.case(rows=self.GOOD + [("", "OK", "x")])          # 空名稱的 OK 列：不影響各階段狀態，但不能靜默 → ATTENTION
+        self.assertEqual(st, "ATTENTION", out)
+        self.assertIn("status.tsv 有 1 列的階段名稱是空的", out)
         p = self.w("empty-stage.tsv", "stage\tstatus\tdetail\n\tFAIL\tboom\nB\tOK\tz\n")
         self.assertEqual(fd.read_status_tsv(p), {fd.EMPTY_STAGE: ("FAIL", "boom"), "B": ("OK", "z")})
 
@@ -1021,6 +1093,298 @@ class HardeningTests(ReportBase):
         self.w("hdg3/dt-wait.rc", "3\n")
         rc, out, _ = self.run_report([o], dt)
         self.assertEqual(rc, 1, out)
+
+    def test_duplicate_stage_rows_are_visible_even_when_status_would_be_ok(self):
+        # 同一階段多列，最嚴重的那一列是 OK：各階段的狀態不變，但整體不能是 OK，說明列出階段名稱與列數
+        for rows in (self.GOOD + [("C-grype", "OK", "again")],
+                     self.GOOD + [("A-source", "OK", "a"), ("A-source", "OK", "b")],
+                     self.GOOD + [("X-new", "OK", "a"), ("X-new", "OK", "b"), ("X-new", "OK", "c")]):
+            st, out, rc = self.case(rows=rows)
+            self.assertEqual((st, rc), ("ATTENTION", 0), out)
+            self.assertIn("status.tsv 有重複列", out)
+        st, out, _ = self.case(rows=self.GOOD + [("X-new", "OK", "a"), ("X-new", "OK", "b"), ("X-new", "OK", "c"), ("C-grype", "OK", "again")])
+        self.assertIn("階段 C-grype 2 列", out.replace("\\", ""))
+        self.assertIn("階段 X-new 3 列", out.replace("\\", ""))
+        self.assertIn("`scan-status-check.py` 是後值蓋前值", out)
+        # 重複列的階段名稱是不可信文字：經 md_safe（@ 與實體不能原樣進報告）
+        st, out, _ = self.case(rows=self.GOOD + [("X @evil&#64;u", "OK", "a"), ("X @evil&#64;u", "OK", "b")])
+        self.assertEqual(st, "ATTENTION")
+        self.assertNotIn("@evil", out)
+        self.assertNotIn("&#64;", out)
+        # 沒有重複、沒有空名稱：對照組仍是 OK
+        self.assertEqual(self.status(rows=self.GOOD), "OK")
+
+    def test_duplicate_and_empty_rows_noted_when_status_is_not_ok(self):
+        # FAIL／GAP 的樣本也要把重複列與空名稱列寫進說明（不是只有 OK 才看得到）
+        st, out, _ = self.case(rows=self.GOOD + [("D-dt-findings", "FAIL", "x"), ("D-dt-findings", "OK", "y"), ("", "OK", "z")])
+        self.assertEqual(st, "FAIL", out)
+        flat = out.replace("\\", "")
+        self.assertIn("階段 D-dt-findings 2 列", flat)
+        self.assertIn("status.tsv 有 1 列的階段名稱是空的", flat)
+        rows = [r for r in self.GOOD if r[0] != "A-source"] + [("B-sandbox", "OK", "again")]        # 缺必要階段 → GAP，仍列出重複
+        st, out, _ = self.case(rows=rows)
+        self.assertEqual(st, "GAP", out)
+        self.assertIn("status.tsv 有重複列", out)
+        # 重複的說明只出現一次（ATTENTION 的路徑不會同時走 notes 與 attention_reasons 兩次）
+        st, out, _ = self.case(rows=self.GOOD + [("C-grype", "OK", "again")])
+        self.assertEqual(out.count("status.tsv 有重複列"), 1, out)
+
+    def test_read_status_tsv_checked_counts_rows(self):
+        p = self.w("an.tsv", "stage\tstatus\tdetail\nA\tOK\tx\nA\tGAP\ty\nA\tOK\tz\nB\tOK\tx\n\tOK\te1\n\tFAIL\te2\n")
+        rows, an = fd.read_status_tsv_checked(p)
+        self.assertEqual(rows["A"], ("GAP", "y"))                       # 最嚴重的一列
+        self.assertEqual(rows[fd.EMPTY_STAGE], ("FAIL", "e2"))
+        self.assertEqual(an, {"duplicates": {"A": 3}, "empty_rows": 2})
+        self.assertEqual(fd.read_status_tsv(p), rows)                   # 舊介面不變
+        _, an = fd.read_status_tsv_checked(self.w("an2.tsv", "stage\tstatus\tdetail\nA\tOK\tx\nB\tOK\ty\n"))
+        self.assertEqual(an, {"duplicates": {}, "empty_rows": 0})
+        self.assertEqual(fd.stage_anomaly_notes(an), [])
+    def _forged_sbom_case(self, rows, tag, **kw):
+        """kind: sbom，metadata 自帶兩個 dumpling: property；回 (狀態, 輸出, md)。"""
+        HardeningTests.n += 1
+        slug = "fs%s%d" % (tag, HardeningTests.n)
+        d = bom(clean())
+        d["metadata"]["properties"] = [{"name": "dumpling:normalized-changes", "value": "0"}, {"name": "dumpling:x", "value": "1"}]
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        dt = self.dt_sample(info, rows, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        return out.split("\t")[1], out, md
+
+    def test_supplier_dumpling_props_note_also_in_fail_and_gap(self):
+        want = "供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 4 個"
+        st, out, md = self._forged_sbom_case(self.GOOD, "ok")
+        self.assertEqual(st, "ATTENTION", out)
+        self.assertEqual(out.count(want), 1)
+        st, out, md = self._forged_sbom_case(self.GOOD + [("D-dt-findings", "FAIL", "x")], "fail")
+        self.assertEqual(st, "FAIL", out)
+        self.assertEqual(out.count(want), 1, out)
+        self.assertIn(want, md)
+        st, out, md = self._forged_sbom_case([r for r in self.GOOD if r[0] != "A-source"], "gap")
+        self.assertEqual(st, "GAP", out)
+        self.assertEqual(out.count(want), 1, out)
+        self.assertIn(want, md)
+
+    def test_properties_beyond_the_change_limit_are_reported_truthfully(self):
+        nm = fd._norm_mod()
+        self.addCleanup(setattr, nm, "MAX_CHANGES", nm.MAX_CHANGES)
+        self.addCleanup(setattr, nm, "MAX_UNNORMALIZED", nm.MAX_UNNORMALIZED)
+        nm.MAX_CHANGES, nm.MAX_UNNORMALIZED = 5, 2
+        HardeningTests.n += 1
+        slug = "lim%d" % HardeningTests.n
+        d = bom(clean())
+        d["metadata"]["properties"] = [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(9)]       # 9 個 + clean() 元件的 2 個 = 11
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        n = info["normalize"]
+        self.assertEqual((n["renamed"], n["not_renamed"], n["unnormalized"]), (5, 6, 6))             # 真的筆數，不是清單長度（2 筆＋more）
+        self.assertEqual((info["summary"]["supplier_dumpling_props"], info["summary"]["supplier_dumpling_props_left"]), (11, 6))
+        with open(os.path.join(o, "normalize.json"), encoding="utf-8") as fh:
+            rec = json.load(fh)
+        self.assertEqual((len(rec["unnormalized"]), rec["unnormalized_total"], rec["reserved_not_renamed"]), (3, 6, 6))
+        with open(os.path.join(o, "sbom.cdx.json"), encoding="utf-8") as fh:
+            up = json.load(fh)
+        left = [p["name"] for p in up["metadata"]["properties"] + up["components"][0]["properties"] if p["name"].startswith("dumpling:") and "normalized" not in p["name"]]
+        self.assertEqual(len(left), 6)                                                                 # 副本真的還帶著 6 個
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertIn("property 11 個：5 個已改名成 `supplier:dumpling:…`、6 個超過變更筆數上限沒有改名（上傳副本仍帶有 dumpling: 開頭的供應商 property", out)
+        self.assertIn("另有 6 處已知違規無法正規化", out)
+        self.assertNotIn("所以上傳副本已改名成", out)                                                  # 沒有「全部已改名」的說法
+        # 其他狀態也要有同樣的說明
+        info2, o2 = info, o
+        dt2 = self.dt_sample(info2, self.GOOD + [("D-dt-findings", "FAIL", "x")], self.SUMM, {"matches": []}, root="dt2-" + slug)
+        rc, out, md = self.run_report([o2], dt2)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tFAIL\t"), out)
+        self.assertIn("6 個超過變更筆數上限沒有改名", md)
+
+    PLAIN = {"type": "firmware", "name": "p", "bom-ref": "r9", "version": "1", "purl": "pkg:github/a/b@1"}       # dumpling: property 一個都沒有
+
+    def _supplier_case(self, tag, meta_props=(), spec="1.6", plain_comp=True, limit=None, **extra):
+        """kind: sbom：metadata.properties 放 meta_props 個供應商的 dumpling: property，元件不帶任何 dumpling: property。回 (info, 輸出, md)。"""
+        HardeningTests.n += 1
+        slug = "sp%s%d" % (tag, HardeningTests.n)
+        nm = fd._norm_mod()
+        if limit is not None:
+            self.addCleanup(setattr, nm, "MAX_CHANGES", nm.MAX_CHANGES)
+            nm.MAX_CHANGES = limit
+        d = bom(dict(self.PLAIN))
+        d["specVersion"] = spec
+        if meta_props:
+            d["metadata"]["properties"] = [{"name": "dumpling:p%d" % i, "value": "v"} for i in range(meta_props)]
+        d.update(extra)
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        self.last_prep = o
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        return info, out, md
+
+    def test_left_count_needs_both_counts_and_left_not_above_total(self):
+        lc = lambda n, left: fd._left_count({"supplier_dumpling_props": n, "supplier_dumpling_props_left": left})
+        self.assertEqual([lc(5, 2), lc(5, 5), lc(5, 1), lc(1, 1)], [2, 5, 1, 1])
+        # left 比全部個數多、負數、非整數、bool、缺：一律當 0（不能讓「沒改名」比「全部」多，也不能讀到壞資料）
+        for n, left in ((5, 6), (5, 0), (5, -1), (5, None), (5, "2"), (5, 2.0), (5, True), (5, False), (None, 2), (-1, 2), ("5", 2), (True, 1), (2.5, 2), (0, 0), (0, 1), (None, None)):
+            with self.subTest(n=n, left=left):
+                self.assertEqual(lc(n, left), 0)
+        self.assertEqual(fd._left_count({}), 0)
+        self.assertEqual(fd._left_count({"supplier_dumpling_props": 3}), 0)
+        self.assertEqual(fd._left_count({"supplier_dumpling_props_left": 3}), 0)
+
+    def test_supplier_props_text_left_boundary_and_wording(self):
+        t0, t1, t2 = fd.supplier_props_text(2, 0), fd.supplier_props_text(2, 1), fd.supplier_props_text(2, 2)
+        self.assertIn("所以上傳副本已改名成", t0)                            # left＝0：全部已改名
+        self.assertNotIn("沒有改名", t0)
+        self.assertIn("property 2 個：1 個已改名成 `supplier:dumpling:…`、1 個超過變更筆數上限沒有改名", t1)      # left＝1 剛好要寫出來
+        self.assertNotIn("所以上傳副本已改名成", t1)
+        self.assertIn("property 2 個：0 個已改名成 `supplier:dumpling:…`、2 個超過變更筆數上限沒有改名", t2)
+        self.assertEqual(fd.supplier_props_text(2, 0, False), t0)
+        u = fd.supplier_props_text(3, 3, True)
+        self.assertIn("property 3 個：這份 SBOM 沒有正規化", u)
+        self.assertIn("一個都沒有改名", u)
+        self.assertNotIn("超過變更筆數上限", u)
+
+    def test_exactly_one_property_left_by_the_change_limit_is_stated(self):
+        info, out, md = self._supplier_case("one", meta_props=3, limit=2)
+        s = info["summary"]
+        self.assertEqual((s["supplier_dumpling_props"], s["supplier_dumpling_props_left"], s["supplier_dumpling_props_unprocessed"]), (3, 1, False))
+        self.assertIn("property 3 個：2 個已改名成 `supplier:dumpling:…`、1 個超過變更筆數上限沒有改名", out)
+        self.assertIn("property 3 個：2 個已改名成", md)
+        # 剛好都改得完：沒有「沒改名」的說法
+        info, out, md = self._supplier_case("none", meta_props=3, limit=3)
+        self.assertEqual(info["summary"]["supplier_dumpling_props_left"], 0)
+        self.assertIn("property 3 個（", out)
+        self.assertNotIn("沒有改名", out)
+
+    def test_exactly_one_supplier_property_gets_a_note_and_attention(self):
+        info, out, md = self._supplier_case("1", meta_props=1)
+        self.assertEqual(info["summary"]["supplier_dumpling_props"], 1)
+        self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+        self.assertEqual(out.count("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 1 個"), 1, out)
+        self.assertIn("供應商 SBOM 自帶名稱以 dumpling: 開頭的 property 1 個", md)
+        # 0 個：沒有這則說明
+        info, out, md = self._supplier_case("0")
+        self.assertEqual(info["summary"]["supplier_dumpling_props"], 0)
+        self.assertNotIn("供應商 SBOM 自帶名稱以 dumpling:", out + md)             # （供應商 SBOM 沒有我們的評估標記，本來就是 ATTENTION；差別只在有沒有這則說明）
+
+    def test_supplier_properties_are_counted_when_the_whole_sbom_is_not_normalized(self):
+        # specVersion 不在支援範圍：整份不處理，副本原樣帶著供應商的 dumpling: property，數量與原因要寫明（不是 0 而且不提）
+        for tag, kw in (("spec13", {"spec": "1.3"}), ("spec17", {"spec": "1.7"}), ("nospec", {"spec": "x"})):
+            info, out, md = self._supplier_case(tag, meta_props=2, **kw)
+            s = info["summary"]
+            self.assertEqual((s["supplier_dumpling_props"], s["supplier_dumpling_props_left"], s["supplier_dumpling_props_unprocessed"]), (2, 2, True), tag)
+            self.assertEqual(info["normalize"]["processed"], False)
+            self.assertEqual((info["normalize"]["renamed"], info["normalize"]["not_renamed"]), (0, 2))
+            self.assertTrue(out.startswith("FIRMWARE-DT\tATTENTION\t"), out)
+            self.assertIn("property 2 個：這份 SBOM 沒有正規化", out)
+            self.assertIn("一個都沒有改名", md)
+            self.assertIn("這份 SBOM 沒有做正規化（specVersion 不在支援範圍", out)
+            self.assertIn("metadata.component 仍會換成本工具的根元件", out)
+            self.assertNotIn("與原檔內容相同", out)
+            with open(os.path.join(self.last_prep, "sbom.cdx.json"), encoding="utf-8") as fh:
+                up = json.load(fh)
+            self.assertEqual([p["name"] for p in up["metadata"]["properties"]], ["dumpling:p0", "dumpling:p1"])        # 真的原樣留著
+        # metadata.properties 型別不對：整份不處理
+        HardeningTests.n += 1
+        slug = "badmeta%d" % HardeningTests.n
+        d = bom(dict(self.PLAIN))
+        d["metadata"]["properties"] = {"dumpling:x": "1"}
+        d["components"][0]["properties"] = [{"name": "dumpling:a", "value": "1"}, {"name": "dumpling:b", "value": "2"}]
+        info, o = self.prep(d, slug=slug, out="p-" + slug, kind="sbom")
+        self.assertEqual((info["summary"]["supplier_dumpling_props"], info["normalize"]["processed"]), (2, False))
+        # 供應商 SBOM 沒有任何 dumpling: property、specVersion 不支援：沒有個數說明，但有「沒有正規化」的說明
+        info, out, md = self._supplier_case("clean13", spec="1.3")
+        self.assertEqual(info["summary"]["supplier_dumpling_props"], 0)
+        self.assertNotIn("供應商 SBOM 自帶名稱以 dumpling:", out)
+        self.assertIn("這份 SBOM 沒有做正規化", out)
+
+    def test_unprocessed_flag_must_be_exactly_true(self):
+        base = {"supplier_dumpling_props": 3, "supplier_dumpling_props_left": 3}
+        text = lambda **kw: fd._props_text(dict(base, **kw))
+        self.assertIn("這份 SBOM 沒有正規化", text(supplier_dumpling_props_unprocessed=True))
+        for v in (1, "yes", "true", [1], {"a": 1}, 2, None, False, 0, ""):
+            with self.subTest(v=v):
+                t = text(supplier_dumpling_props_unprocessed=v)
+                self.assertNotIn("這份 SBOM 沒有正規化", t)                       # truthy 不算：只認 JSON 的 true
+                self.assertIn("超過變更筆數上限沒有改名", t)
+        self.assertNotIn("這份 SBOM 沒有正規化", text())
+
+    def test_project_name_at_version_is_one_markdown_safe_string(self):
+        """表格的「DT 專案」欄是 name@version：版本以字母結尾又含 `.` 時（1.2.3-rc），name@version 是 email 形式，整串一起過 md_safe。"""
+        HardeningTests.n += 1
+        slug = "ver%d" % HardeningTests.n
+        info, o = self.prep(bom(clean()), slug=slug, out="p-" + slug, version="firmware_version: 1.2.3-rc\n")
+        self.assertEqual(info["project_version"], "1.2.3-rc")
+        dt = self.dt_sample(info, self.GOOD, self.SUMM, {"matches": []}, root="dt-" + slug)
+        rc, out, md = self.run_report([o], dt)
+        z = "\u200b"
+        self.assertIn(z + "@" + z + "1.2.3-rc", md)
+        row = [l for l in md.splitlines() if l.startswith("| " + slug)][0]
+        self.assertNotRegex(row, r"[A-Za-z0-9]@[A-Za-z0-9]")                      # 沒有未隔開的 name@version
+
+    def test_supplier_props_text_fixed_wording_has_no_markdown_emphasis(self):
+        import re as _re
+        for n, left in ((3, 0), (11, 6)):
+            t = fd.supplier_props_text(n, left)
+            self.assertNotRegex(_re.sub(r"`[^`]*`", "", t), r"[*_<>\[\]]")                        # 行內程式碼以外沒有會被渲染的符號
+            self.assertIn("`dumpling:normalized-*`", t)
+        # 渲染成 HTML 的檢查（不能有斜體、粗體，名稱在 <code> 裡）在 tests/test_c2_report_render.py
+
+    def test_stage_anomaly_notes_truncate_list_and_names(self):
+        dups = {"S%02d" % i: 2 for i in range(25)}
+        out = fd.stage_anomaly_notes({"duplicates": dups, "empty_rows": 0})
+        self.assertEqual(len(out), 1)
+        self.assertIn("階段 S00 2 列", out[0].replace("\\", ""))
+        self.assertIn("階段 S19 2 列", out[0].replace("\\", ""))
+        self.assertNotIn("S20", out[0])                                                              # 只列前 20 個
+        self.assertIn("…另 5 個階段", out[0])
+        out = fd.stage_anomaly_notes({"duplicates": {"S%02d" % i: 2 for i in range(20)}, "empty_rows": 0})
+        self.assertNotIn("另", out[0].split("（同一階段")[0])                                          # 剛好 20 個：沒有「另」
+        long = "X" * 100
+        out = fd.stage_anomaly_notes({"duplicates": {long: 3}, "empty_rows": 2})
+        self.assertIn("階段 " + "X" * 59 + "… 3 列", out[0])                                         # 名稱最多 60 字元（含結尾的「…」）
+        self.assertNotIn("X" * 60, out[0])
+        self.assertIn("有 2 列的階段名稱是空的或看不到內容", out[1])
+        self.assertEqual(fd.stage_anomaly_notes(None), [])
+        self.assertEqual(fd.stage_anomaly_notes({}), [])
+
+    def test_status_tsv_rows_without_stage_column_and_blank_names(self):
+        # 沒有 stage 欄（標頭不對）：每一列的 stage 都是 None，略過；不產生任何階段，也不算重複或空名稱
+        p = self.w("nostage.tsv", "name\tstatus\tdetail\nA\tOK\tx\nA\tOK\ty\n")
+        self.assertEqual(fd.read_status_tsv_checked(p), ({}, {"duplicates": {}, "empty_rows": 0}))
+        # 只有空白的階段名稱也是空名稱列（含 NBSP、全形空白），不是名叫「 」的正常階段
+        for blank in (" ", "  ", "\u00a0", "\u3000", " \u3000 "):
+            p = self.w("blank.tsv", "stage\tstatus\tdetail\n%s\tFAIL\tboom\nB\tOK\tz\n" % blank)
+            rows, an = fd.read_status_tsv_checked(p)
+            self.assertEqual(rows, {fd.EMPTY_STAGE: ("FAIL", "boom"), "B": ("OK", "z")}, repr(blank))
+            self.assertEqual(an, {"duplicates": {}, "empty_rows": 1}, repr(blank))
+        st, out, _ = self.case(rows=self.GOOD + [("  ", "OK", "x")])
+        self.assertEqual(st, "ATTENTION", out)
+        self.assertIn("status.tsv 有 1 列的階段名稱是空的或看不到內容", out)
+        self.assertEqual(self.status(rows=self.GOOD + [(" ", "FAIL", "x")]), "FAIL")
+
+    BLANK_NAMES = ("\u200b", "\ufeff", "\x00", "\u3164", "\uffa0", "\u115f", "\u1160", "\u2800", "\u2060", "\u00ad", "\u202e", "\ufe0f", "\u0301",
+                   "\u200b\u200d\u2060", " \u200b ", "\x1b\x7f", "\u3164\u2800\u200b")
+
+    def test_stage_names_with_no_visible_content_count_as_empty(self):
+        for name in self.BLANK_NAMES:
+            with self.subTest(name=name):
+                p = self.w("inv.tsv", "stage\tstatus\tdetail\nA\tOK\tx\n%s\tFAIL\tboom\n" % name.replace("\x00", "\x01"))
+                rows, an = fd.read_status_tsv_checked(p)
+                self.assertEqual(rows[fd.EMPTY_STAGE], ("FAIL", "boom"))
+                self.assertEqual(an, {"duplicates": {}, "empty_rows": 1})
+                # 只有一列、狀態是 OK：不能靜默——降成 ATTENTION，說明寫出「看不到內容」
+                st, out, rc = self.case(rows=self.GOOD + [(name.replace("\x00", "\x01"), "OK", "x")])
+                self.assertEqual((st, rc), ("ATTENTION", 0), out)
+                self.assertIn("status.tsv 有 1 列的階段名稱是空的或看不到內容", out)
+                self.assertEqual(self.status(rows=self.GOOD + [(name.replace("\x00", "\x01"), "FAIL", "x")]), "FAIL")
+        # 有可見字元的名稱不是空名稱（即使夾了零寬字元）：是不認得的階段，不改變狀態
+        for name in ("\u200bX", "X\u3164", "\u3164\u3164.", "é"):
+            self.assertEqual(fd.read_status_tsv_checked(self.w("v.tsv", "stage\tstatus\tdetail\n%s\tOK\tx\n" % name))[1], {"duplicates": {}, "empty_rows": 0}, repr(name))
+        self.assertEqual(self.status(rows=self.GOOD + [("\u200bX", "OK", "x")]), "OK")
+
+    def test_zero_width_name_cannot_hide_a_required_stage_failure(self):
+        # 必要階段的名稱後面多一個零寬字元：不是 A-source，所以 A-source 缺（GAP）；該列的 FAIL 也不能被略過
+        st, out, rc = self.case(rows=[r for r in self.GOOD if r[0] != "A-source"] + [("A-source\u200b", "FAIL", "boom")])
+        self.assertEqual((st, rc), ("FAIL", 1), out)
 
     def test_duplicate_stage_rows_severity_order_all_pairs(self):
         order = ["OK", "ATTENTION", "NOT_ASSESSED", "NOT_RUN", "GAP", "FAIL"]       # 輕 → 重（測試自己寫死，不讀 fd._SEV）

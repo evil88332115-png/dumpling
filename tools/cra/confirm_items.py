@@ -29,6 +29,8 @@ cra_report.py 以檔案路徑載入這個模組（build、write、remove），�
   5 對外服務清單：分級方式 exploitation 卻沒有 CRA/Config/exposed-services.json。
   6 公司與產品資料：summary.json 的 missing_fields（TO BE COMPLETED）依負責人分組，每組一筆（OWNER_RULES）。
   7 出貨紀錄：報告只讀得到 product.first_placing_on_market；沒有填 → 問專案負責人出貨紀錄。
+  8 開機韌體（D-054）：刷機包的 B-bootloader-coverage-<rootfs> 不是 OK／INFO（cra_report 傳進來的 fw）：閉源韌體沒有被掃描（或沒有評估開機鏈），
+    問產品工程師對照廠商的安全公告；VEX 發行閘門不因此擋住（最終做法待專案負責人與法務確認）。
 排序與編號固定（類別順序、類別內依穩定的鍵排序；Q1、Q2…），同樣的輸入重跑結果相同（不寫產生時間）。
 只用標準函式庫。
 """
@@ -44,7 +46,7 @@ CSV_NAME, MD_NAME = "confirmation-items.csv", "confirmation-items.md"
 COLUMNS = ("編號", "類別", "掃描發現（為什麼要問）", "影響", "要問誰（建議）", "要確認的問題", "建議做法",
            "回答", "決定", "填寫人", "日期", "軟體部門後續")
 DECISIONS = "照建議做／不同意（理由寫在回答）／需要再討論"
-CATEGORIES = ("缺少輸入", "被利用或優先處理的漏洞", "沒有漏洞資料的套件", "安全測試", "開發工具", "作業系統核心", "對外服務清單", "公司與產品資料", "出貨紀錄")
+CATEGORIES = ("缺少輸入", "被利用或優先處理的漏洞", "沒有漏洞資料的套件", "安全測試", "開發工具", "作業系統核心", "開機韌體", "對外服務清單", "公司與產品資料", "出貨紀錄")
 ENG, PM, LEGAL, BOSS, QA, SW = "產品工程師", "專案負責人（PM）", "法務", "核准人／產品主管", "QA／認證", "軟體部門（掃描負責人）"
 HUMAN_DEFAULT = ("dt", "annotation")         # vex_export.HUMAN（cra_report 傳進來；單獨測試時用這個）
 FEW_ROOTS = 3                                # 帶進來的頂層套件在這個數量以內 → 問專案負責人要不要那個功能
@@ -553,8 +555,23 @@ def kernel_versions_items(kvers):
                  "記錄證據或指定核心後重新掃描")]
 
 
+def boot_check_failed_items(kboot, status):
+    """C-kernel-boot 的狀態列不是 OK／INFO／NOT_RUN，而且沒有可用的 kernel-boot.json（sca-scan 的 kernel_boot.py 失敗時只寫狀態列、不留 json；
+    有可用的 json 時 boot_items 已經問了）：兩顆核心有沒有比對不知道。"""
+    row = (status or {}).get("C-kernel-boot")
+    if not row or row[0] in ("OK", "INFO", "NOT_RUN"):
+        return []
+    if isinstance(kboot, dict) and kboot.get("schema") == "sca-center-kernel-boot/1" and kboot.get("status") in ("ATTENTION", "GAP"):
+        return []
+    return [item("作業系統核心", "kernel:two-kernels", f"C-kernel-boot 是 {row[0]}：刷機包的兩顆核心有沒有比對不知道（{str(row[1])[:300]}）",
+                 "不知道刷機包裡 kernel/Image 與 rootfs/boot/Image 是不是同一顆；核心的判定仍以 kernel/Image 為準但沒有核對", ("RD",),
+                 "這個階段為什麼沒有完成？實際開機的是哪一顆核心？",
+                 "查 scan/status.tsv 的 C-kernel-boot 說明，修好後重新掃描；在板子上跑 uname -v 或 cat /proc/version 放進 board-test 的 os.txt",
+                 "修好後重新掃描")]
+
+
 def kernel_items(krows, kstate, kcfg, status, kboot=None, kvers=None):
-    items = boot_items(kboot) + kernel_versions_items(kvers)
+    items = boot_items(kboot) + boot_check_failed_items(kboot, status) + kernel_versions_items(kvers)
     st = status or {}
     if kstate == "not_assessed":
         why = "；".join(f"{k} {st[k][0]}" for k in ("C-kernel-l4t-map", "C-kernel-coverage") if k in st and st[k][0] != "OK")
@@ -607,6 +624,28 @@ def kernel_items(krows, kstate, kcfg, status, kboot=None, kvers=None):
                           "每一版出貨都保留核心建置紀錄：.config、全部的 .*.cmd、modules.order、modules.builtin、System.map（和刷進去的 Image 同一次建置）",
                           "拿到建置紀錄後交給掃描重新判定；之後每版出貨都收"))
     return items
+
+
+# ---------- 規則 8：開機韌體 ----------
+
+def firmware_items(fw):
+    """cra_report 的 fw_items（[{key: B-bootloader-coverage-<rootfs>, status, level, reason}]）→ 每個 rootfs 一筆。
+    閉源韌體（例如 NVIDIA Jetson 的 MB1／MB2／BPMP）不能用 SCA 掃描：報告顯示 GAP，不擋 VEX 發行閘門（D-054）；問產品工程師對照廠商公告。"""
+    out = []
+    for x in fw or ():
+        if not isinstance(x, dict) or not isinstance(x.get("key"), str):
+            continue
+        na = x.get("status") == "NOT_ASSESSED"
+        out.append(item("開機韌體", f"firmware:{x['key']}",
+                        f"{x['key']} 是 {x.get('status')}：" + ("這個平台的開機鏈沒有評估" if na else "開機程式與閉源韌體沒有被掃描（或涵蓋說明沒有完成）")
+                        + "；閉源韌體以廠商公告為準（涵蓋說明見 <rootfs>/bootloader-coverage.md）",
+                        "開機韌體上的漏洞沒有列在漏洞清單裡（不是沒有漏洞）；報告狀態顯示 " + str(x.get("level") or "GAP")
+                        + "，VEX 發行閘門不因此擋住（最終做法待專案負責人與法務確認）",
+                        (ENG, PM),
+                        "廠商（例如 NVIDIA、Raspberry Pi）對這個版本的開機韌體有沒有安全公告？對照出貨的 BSP／韌體版本，有沒有影響產品的項目？",
+                        "對照廠商的安全公告與出貨版本，把結論、依據與日期記錄下來（目前沒有工具判定這類韌體）；要不要讓這一項擋住發行，由專案負責人問法務",
+                        "記錄結論後告知掃描負責人；平台定義了開機鏈（或有新的涵蓋資料）時重新掃描"))
+    return out
 
 
 # ---------- 規則 5–7 ----------
@@ -721,7 +760,7 @@ def missing_items(have_findings, risk_st, risk_reasons, bom_st, sec, need_db, db
 
 def build(rows=(), sec=None, pkgs=(), krows=(), kstate=None, kcfg=None, kboot=None, status=None, expl=False, svc_info=None, missing_fields=(),
           cfg=None, role="manufacturer", have_findings=True, risk_st="OK", risk_reasons=(), bom_st="OK", pkgdb=None, human=HUMAN_DEFAULT,
-          schema=None, db=None, bom_reasons=(), author_missing=author_missing_default, no_vuln=None, kvers=None):
+          schema=None, db=None, bom_reasons=(), author_missing=author_missing_default, no_vuln=None, kvers=None, fw=()):
     """已有的資料 → 事項清單（排好序、編好號）。pkgdb：pkg_why.py extract 的資料夾（或 None）；db：已經讀好的 load_pkgdb(pkgdb) 結果
     （(PkgDB 或 None, 原因)；給了就不再讀 pkgdb）。no_vuln：no_vuln_data.classify 的結果（或 None：不列這一類）。"""
     db, db_why = db if db is not None else load_pkgdb(pkgdb)
@@ -733,6 +772,7 @@ def build(rows=(), sec=None, pkgs=(), krows=(), kstate=None, kcfg=None, kboot=No
         "安全測試": security_items(sec),
         "開發工具": dev_items(list(pkgs), list(rows)) if bom_st != "NOT_ASSESSED" else [],
         "作業系統核心": kernel_items(list(krows), kstate, kcfg, status, kboot, kvers),
+        "開機韌體": firmware_items(fw),
         "對外服務清單": services_items(expl, svc_info),
         "公司與產品資料": company_items(missing_fields, schema or {}, role),
         "出貨紀錄": shipping_items(cfg, role),

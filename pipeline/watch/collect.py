@@ -2,7 +2,9 @@
 """collect.py（每日監控 4a）：收集 GitHub Release 附件，輸出 inventory.json。契約見 docs/WATCH.md 3.1。
 
 用法：
-  python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料夾>) --out <工作資料夾> [--max-asset-mb 200]
+  python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料夾> | --backend gitlab --gitlab-url <…/api/v4> --project <數字 ID>)
+      --out <工作資料夾> [--max-asset-mb 200]
+  GitLab 後端（GITLAB-PORT T-05）：token 從環境變數 GITLAB_TOKEN 讀（PRIVATE-TOKEN 標頭），不收 argv。
 
 stdout 一行：WATCH-COLLECT<TAB>狀態<TAB>說明。結束碼：OK 0、FAIL 1、GAP 3、用法 64。
 
@@ -13,6 +15,8 @@ stdout 一行：WATCH-COLLECT<TAB>狀態<TAB>說明。結束碼：OK 0、FAIL 1�
     只允許 https 的 githubusercontent.com 子網域，其他轉址一律算該附件的 problem。
   - 檔名由規則組出（專案、版本都過正規式），不用 API 回的檔名當路徑；先寫暫存檔再 rename；大小有上限。
   - inventory.json 只放相對路徑。
+  - GitLab：只下載「這個專案的 Generic Package 檔案」（…/api/v4/projects/<ID>/packages/generic/<套件>/<版本>/<檔名>，同一個 API 主機），
+    不跟隨任何轉址；其他連結（別的主機、別的專案、不是 Generic Package）不下載，記成該 Release 的 problem。
 """
 import argparse
 import hashlib
@@ -99,17 +103,17 @@ def allowed_download_url(url):
     return host == "githubusercontent.com" or host.endswith(".githubusercontent.com")
 
 
-def check_api_base(url):
+def check_api_base(url, name="GITHUB_API_URL"):
     try:
         p = urllib.parse.urlsplit(url)
         host = p.hostname
         p.port
     except ValueError:
-        raise ApiError("GITHUB_API_URL 不合法")
+        raise ApiError("%s 不合法" % name)
     loopback = host in ("127.0.0.1", "localhost", "::1")
     if not host or p.username is not None or p.query or p.fragment or \
             not (p.scheme == "https" or (p.scheme == "http" and loopback)):
-        raise ApiError("GITHUB_API_URL 不合法（要 https；測試才允許本機 http）")
+        raise ApiError("%s 不合法（要 https；測試才允許本機 http）" % name)
     return url.rstrip("/")
 
 
@@ -174,10 +178,13 @@ class GitHubSource:
             h["Authorization"] = "Bearer " + self.token
         return h
 
+    def _page_headers(self, url):
+        return self._headers("application/vnd.github+json", True)
+
     def _get_page(self, url):
         if _origin(url) != _origin(self.api_base):
             raise ApiError("分頁網址不在 API 主機")
-        req = urllib.request.Request(url, headers=self._headers("application/vnd.github+json", True))
+        req = urllib.request.Request(url, headers=self._page_headers(url))
         try:
             resp = self.opener.open(req, timeout=TIMEOUT)
         except urllib.error.HTTPError as e:
@@ -279,6 +286,9 @@ class GitHubSource:
                 raise AssetError("下載回 HTTP %d" % code)
             except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
                 raise AssetError("下載連線失敗（%s）" % type(e).__name__)
+        return self._read_response(resp, asset, dest_dir, final_name)
+
+    def _read_response(self, resp, asset, dest_dir, final_name):
         try:
             with resp:
                 st = getattr(resp, "status", 200)
@@ -294,6 +304,131 @@ class GitHubSource:
             _rm(os.path.join(dest_dir, final_name))
             raise AssetError("下載大小與 API 標示不符")
         return sha, n
+
+
+# ---------------------------------------------------------------- GitLab 來源
+# 官方文件對照（docs/GITLAB-PORT.md T-05）：
+#   Releases：docs.gitlab.com/api/releases/（GET /projects/:id/releases；tag_name、released_at、assets.links[]；
+#     「upcoming_release」＝released_at 在未來的 Release，文件只說「回傳會多一個 upcoming_release: true」）
+#   Generic Package：docs.gitlab.com/user/packages/generic_packages/（GET /projects/:id/packages/generic/:package_name/:package_version/:file_name；
+#     PRIVATE-TOKEN 標頭；檔名可用字元 A-Za-z0-9 . _ - + ~ @ /，不能以 ~ 或 @ 開頭／結尾）
+#   分頁：docs.gitlab.com/api/rest/（per_page 最大 100；Link rel=next）
+# GitLab 沒有 draft Release、也沒有 prerelease：upcoming_release 當 draft（列在 drafts、不監控）；prerelease 一律 False
+# （所以 dev/<專案> 的滾動 Release 會被 classify 略過並列在 skipped——開發版 SBOM 怎麼收是 T-03 的決定，這裡不先發明）。
+PKG_SEG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+PKG_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
+PROJECT_ID_RE = re.compile(r"^[0-9]{1,18}$")
+MAX_LINK_PROBLEMS = 10
+
+
+class GitLabSource(GitHubSource):
+    name_prefix = "gitlab:"
+
+    def __init__(self, project, api_base, token, opener, max_bytes):
+        self.project = project
+        self.api_base = check_api_base(api_base, "--gitlab-url")
+        self.token = token
+        self.opener = opener
+        self.max_bytes = max_bytes
+        if not urllib.parse.urlsplit(self.api_base).path.endswith("/api/v4"):
+            raise ApiError("--gitlab-url 要是 API 網址（…/api/v4，即 CI_API_V4_URL）")
+        self._pkg_prefix = urllib.parse.urlsplit(self.api_base).path + "/projects/%s/packages/generic/" % project
+
+    @property
+    def label(self):
+        return "gitlab:" + self.project
+
+    def _headers(self, accept, auth):
+        raise AssertionError("GitLabSource 只用 _auth_headers(url, …)：token 要先核對網址才送")
+
+    def _auth_headers(self, url, accept):
+        """GitLab 的請求標頭：token（PRIVATE-TOKEN）只送給 API 主機——每次都依網址核對，不靠呼叫端記得（#74 驗證建議 5）。"""
+        if _origin(url) != _origin(self.api_base):
+            raise ApiError("不送 token 到 API 主機以外的網址")
+        h = {"Accept": accept, "User-Agent": UA}
+        if self.token:
+            h["PRIVATE-TOKEN"] = self.token
+        return h
+
+    def _page_headers(self, url):
+        # GitLab 的 API 回 JSON；GitHub 的 vnd.github+json 對 GitLab 可能是 406（#74 驗證應修 2，官方 /api/rest/ 的範例不帶 Accept）
+        return self._auth_headers(url, "application/json")
+
+    def list_releases(self):
+        url = "%s/projects/%s/releases?per_page=100" % (self.api_base, self.project)
+        out, seen = [], set()
+        for _ in range(MAX_PAGES):
+            seen.add(url)
+            data, link = self._get_page(url)
+            out.extend(self._convert(x) for x in data)
+            nxt = self._next_link(link, url)
+            if not nxt:
+                return out
+            if _origin(nxt) != _origin(self.api_base):
+                raise ApiError("下一頁網址不在同一個主機")
+            if nxt in seen:
+                raise ApiError("分頁網址重複（迴圈）")
+            url = nxt
+        raise ApiError("分頁超過 %d 頁上限" % MAX_PAGES)
+
+    def _package_file(self, url):
+        """連結網址若是「這個專案的 Generic Package 檔案（同一個 API 主機）」回檔名，否則回 None。不解碼、不接受 query／fragment。"""
+        if not isinstance(url, str) or re.search(r"[\x00-\x20\x7f\\%]", url):
+            return None
+        try:
+            if _origin(url) != _origin(self.api_base):
+                return None
+            p = urllib.parse.urlsplit(url)
+        except ValueError:
+            return None
+        if p.query or p.fragment or p.username is not None or not p.path.startswith(self._pkg_prefix):
+            return None
+        parts = p.path[len(self._pkg_prefix):].split("/")
+        if len(parts) != 3 or not PKG_SEG_RE.match(parts[0]) or not PKG_SEG_RE.match(parts[1]) or not PKG_FILE_RE.match(parts[2]):
+            return None
+        return parts[2]
+
+    def _convert(self, x):
+        bad = {"malformed": "Release 資料格式不符", "tag": "?"}
+        if not isinstance(x, dict) or not isinstance(x.get("tag_name"), str):
+            return bad
+        tag = x["tag_name"]
+        up = x.get("upcoming_release", False)
+        if not isinstance(up, bool):
+            return {"malformed": "upcoming_release 欄位不是布林", "tag": tag}
+        assets, probs = {}, []
+        links = (x.get("assets") or {}).get("links") if isinstance(x.get("assets"), dict) else None
+        for a in links if isinstance(links, list) else []:
+            fname = self._package_file(a.get("url")) if isinstance(a, dict) else None
+            if fname is None:
+                if len(probs) < MAX_LINK_PROBLEMS:
+                    nm = _clean(a.get("name"), 60) if isinstance(a, dict) else "?"
+                    probs.append("附件連結 %s：不是本專案 Generic Package 的檔案（同一個 API 主機），不下載" % nm)
+                continue
+            assets.setdefault(fname, []).append(Asset(fname, None, a["url"]))
+        return {"tag": tag, "draft": up, "prerelease": False, "published_at": x.get("released_at"),
+                "html_url": None, "assets": assets, "asset_problems": probs, "malformed": None}
+
+    def fetch(self, asset, dest_dir, final_name):
+        url = asset.handle
+        if self._package_file(url) is None:
+            raise AssetError("附件網址不是本專案的 Generic Package 檔案")
+        try:
+            hdr = self._auth_headers(url, "application/octet-stream")
+        except ApiError as e:
+            raise AssetError(str(e))
+        req = urllib.request.Request(url, headers=hdr)
+        try:
+            resp = self.opener.open(req, timeout=TIMEOUT)
+        except urllib.error.HTTPError as e:
+            code = e.code
+            e.close()
+            if 300 <= code < 400:
+                raise AssetError("下載收到 HTTP %d 轉址（不跟隨）" % code)
+            raise AssetError("下載回 HTTP %d" % code)
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+            raise AssetError("下載連線失敗（%s）" % type(e).__name__)
+        return self._read_response(resp, asset, dest_dir, final_name)
 
 
 # ---------------------------------------------------------------- 資料夾來源（演練、測試）
@@ -511,6 +646,7 @@ def collect_release(source, rel, kind, project, tagver, out, n):
     reldir = os.path.join(out, "releases", str(n))
     relpath = "releases/%d" % n
     assets = rel["assets"]
+    probs.extend(rel.get("asset_problems") or [])
 
     def grab(name, check):
         """依規則檔名取附件。不存在回 None（不算問題，由呼叫端決定）；有問題記 problem 回 None。"""
@@ -671,13 +807,34 @@ class _Parser(argparse.ArgumentParser):
 
 
 def parse_args(argv):
-    ap = _Parser(prog="collect.py", description="收集 GitHub Release 附件（每日監控 4a）")
-    g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--repo", help="owner/repo")
-    g.add_argument("--from-dir", dest="from_dir", help="合成 Release 資料夾（演練、測試）")
+    ap = _Parser(prog="collect.py", description="收集 Release 附件（每日監控 4a；GitHub 或 GitLab）")
+    ap.add_argument("--backend", choices=["github", "gitlab"], default="github")
+    ap.add_argument("--repo", help="owner/repo（github）")
+    ap.add_argument("--from-dir", dest="from_dir", help="合成 Release 資料夾（演練、測試）")
+    ap.add_argument("--gitlab-url", dest="gitlab_url", help="GitLab API 網址（…/api/v4，即 CI_API_V4_URL）")
+    ap.add_argument("--project", help="GitLab 專案的數字 ID（CI_PROJECT_ID）")
     ap.add_argument("--out", required=True, help="工作資料夾")
     ap.add_argument("--max-asset-mb", type=float, default=200, help="單一附件大小上限（MiB，預設 200）")
     a = ap.parse_args(argv)
+    if a.backend == "gitlab":
+        if a.repo is not None or a.from_dir is not None:
+            ap.error("--backend gitlab 不能搭配 --repo／--from-dir")
+        if not a.gitlab_url or not a.project or not PROJECT_ID_RE.match(a.project):
+            ap.error("--backend gitlab 需要 --gitlab-url 與數字的 --project")
+        try:
+            p = urllib.parse.urlsplit(a.gitlab_url)
+            p.port
+        except ValueError:
+            ap.error("--gitlab-url 不合法")
+        if not (p.scheme == "https" or (p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost", "::1"))) \
+                or not p.hostname or p.username is not None or p.query or p.fragment \
+                or not p.path.rstrip("/").endswith("/api/v4"):
+            ap.error("--gitlab-url 要是 https 的 …/api/v4（測試才允許本機 http）")
+    else:
+        if (a.repo is None) == (a.from_dir is None):
+            ap.error("要給 --repo 或 --from-dir 其中一個")
+        if a.gitlab_url is not None or a.project is not None:
+            ap.error("--gitlab-url／--project 只能搭配 --backend gitlab")
     if a.repo is not None and (not REPO_RE.match(a.repo) or a.repo.split("/")[0] in (".", "..")
                                or a.repo.split("/")[1] in (".", "..")):
         ap.error("--repo 格式要是 owner/repo")
@@ -700,7 +857,10 @@ def run(argv, env=None, opener=None, now=None):
     except SystemExit as e:
         return int(e.code) if isinstance(e.code, int) else 64
     max_bytes = int(a.max_asset_mb * 1024 * 1024)
-    token = (env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or "").strip()
+    if a.backend == "gitlab":
+        token = (env.get("GITLAB_TOKEN") or "").strip()
+    else:
+        token = (env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or "").strip()
     now = now or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     out = os.path.abspath(a.out)
 
@@ -711,7 +871,11 @@ def run(argv, env=None, opener=None, now=None):
         os.makedirs(out, exist_ok=True)
         source = None
         try:
-            if a.repo:
+            if a.backend == "gitlab":
+                if token and not TOKEN_RE.match(token):
+                    raise ApiError("token 格式不合法")
+                source = GitLabSource(a.project, a.gitlab_url, token, opener or make_opener(), max_bytes)
+            elif a.repo:
                 if token and not TOKEN_RE.match(token):
                     raise ApiError("token 格式不合法")
                 source = GitHubSource(a.repo, env.get("GITHUB_API_URL") or DEFAULT_API, token,
@@ -721,7 +885,7 @@ def run(argv, env=None, opener=None, now=None):
             inv = build(source, out, now)
         except ApiError as ex:
             inv = {"schema": SCHEMA, "generated_at": now,
-                   "source": ("github:" + a.repo) if a.repo else "dir",
+                   "source": ("gitlab:" + a.project) if a.backend == "gitlab" else ("github:" + a.repo) if a.repo else "dir",
                    "status": "FAIL", "detail": _clean(scrub(str(ex))), "releases": [], "skipped": []}
         write_json(os.path.join(out, "inventory.json"), inv)
     except Exception as ex:  # 不讓例外訊息（可能含路徑、token）直接出去

@@ -420,3 +420,27 @@ def test_rpi_coverage_classes():
     txt = bc.customer_text(c)
     assert "EEPROM" in txt and "release notes" in txt
     assert "EEPROM" in bc.markdown_zh(c)
+
+
+@need_mke2fs
+def test_disk_image_stage_name_and_eeprom_line_follow_platform(tmp_path, capsys):
+    """adapter-gaps #20（M7b-4）：原始磁碟映像的分割區步驟叫 B-disk-partitions（不是 B-rockchip；x86 的 AI NAS 映像也走這裡）；
+    「Raspberry Pi 4/5 的 EEPROM 開機程式不在映像裡」只在 raspberrypi 平台出現。Rockchip 的 list.json 仍是 B-rockchip。"""
+    p = disk(tmp_path)
+    out = tmp_path / "list.json"
+    assert fp.main(["list", "--archive", str(p), "--out", str(out), "--inventory", str(tmp_path / "inv.json")]) == 0
+    capsys.readouterr()
+    assert "EEPROM" not in json.loads(out.read_text())["disk_image"]["detail"]
+    assert fp.main(["rk-status", "--list", str(out), "--stage"]) == 0
+    assert capsys.readouterr().out.strip() == "B-disk-partitions"
+    for plat, has in (("raspberrypi", True), ("generic", False), ("", False), ("rockchip", False)):
+        assert fp.main(["rk-status", "--list", str(out), "--platform", plat]) == 0
+        line = capsys.readouterr().out
+        assert ("Raspberry Pi 4/5 的 EEPROM 開機程式不在映像裡" in line) == has, (plat, line)
+    rk = tmp_path / "rk.json"
+    rk.write_text(json.dumps({"rockchip": {"status": "OK", "detail": "x"}}))
+    assert fp.main(["rk-status", "--list", str(rk), "--stage"]) == 0
+    assert capsys.readouterr().out.strip() == "B-rockchip"
+    rk.write_text(json.dumps({"rootfs": []}))
+    assert fp.main(["rk-status", "--list", str(rk), "--stage"]) == 0
+    assert capsys.readouterr().out == ""

@@ -1,8 +1,35 @@
 {
   "schema": "sca-nvidia-bulletins-table/1",
-  "about": "NVIDIA 安全公告「gpu-firmware」群組（顯示卡與獨顯的 vBIOS）的人工對照表。目前是空表：沒有任何已審核的列，所以 match 不會產生發現；candidates --group gpu-firmware 會把鏡像選入的每一則 gpu-firmware 公告都列為待審（ATTENTION），直到有人審核並填入 bulletins／rows（line 用 vBIOS 版本線，例如 XX.XX.XX.XX.XX 的前幾段）或 not_applicable。沒有比對到不代表沒有漏洞：消費型 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知（PLAN「C. vBIOS」）。流程與欄位說明見 nvidia-bulletins.md；Jetson 用 nvidia-bulletins.json。",
+  "about": "NVIDIA 安全公告「gpu-firmware」群組（顯示卡與獨顯的 vBIOS）的人工對照表。目前**尚未經負責人確認**（reviewed_until 為 null）：鏡像選入這個群組的公告只有 5674（HGX／DGX 的 VBIOS 與 LS10），C2 的初審意見是無法對應到顯卡 option ROM（沒有 PCI 裝置 ID 與 option ROM 版本的對應），寫在 not_applicable 的 5674 項（reviewed=false，等負責人確認；candidates 因此仍列為待審）。所以沒有任何可比對的列，所有 NVIDIA vBIOS 的比對結果都是 NOT_ASSESSED（表尚未經負責人確認；資料庫沒有資料，以廠商公告為準）。沒有比對到不代表沒有漏洞：消費型 vBIOS 幾乎沒有公開公告，主要管道是 NVIDIA 的合作夥伴通知（PLAN「C. vBIOS」）。vBIOS 的列格式（C1 欄位之外的 pci_vendor、pci_devices、vbios_affected_below、vbios_affected_max、vbios_fixed_in；line 寫 vbios）見 tools/cra/nvidia_vbios_advisory.py 檔頭；比對在 tools/cra（離線，只讀這張表）。mirror 記初審用的鏡像。負責人確認後：把 5674 項改成 reviewed=true 並填 reviewed_by（角色）、reviewed_at，reviewed_until 填 gpu-firmware 群組看過的最新公告日期（目前是 5674 的 2025-09-02；不是鏡像 commit 的日期）。流程與欄位說明見 nvidia-bulletins.md；Jetson 用 nvidia-bulletins.json。",
   "reviewed_until": null,
   "bulletins": [],
-  "not_applicable": [],
-  "rows": []
+  "not_applicable": [
+    {
+      "bulletin": "5674",
+      "title": "Security Bulletin: NVIDIA HGX and DGX VBIOS and LS10 - September 2025",
+      "current_release_date": "2025-09-02T00:00:00Z",
+      "cves": [
+        "CVE-2025-23301",
+        "CVE-2025-23302"
+      ],
+      "reason": "初審意見（未經負責人確認）：無法對應到顯卡 option ROM 的 vBIOS。HGX／DGX 伺服器基板的韌體公告：(1) CSAF product_tree 的產品只有「HGX, DGX Hopper」「HGX, DGX Blackwell」（CPE cpe:2.3:a:nvidia:hgx_dgx_hopper／hgx_dgx_blackwell），分支 architecture 是 VBIOS 與 LS10（NVSwitch 的韌體）；(2) 版本是平台韌體的三段十進位版本（Hopper：1.7.1 以下含 → 1.8.0；Blackwell：1.2.0 以下含 → 1.2.1），不是 option ROM 的 XX.XX.XX.XX.XX 版本，公告沒有說明兩者的對應；(3) 公告與 CSAF 都沒有 PCI vendor／device ID 或型號清單，沒有 option ROM 版本與公告版本的對應；(4) vulnerabilities[].remediations 沒有內容。這不是「不影響」的結論，只是無法機器對應：範圍看不出來就不猜，不放進 rows。如果 HGX／DGX 的 vBIOS 也進了 SBOM，要由負責單位提供 option ROM 版本與裝置 ID 和公告版本的對應，再補列。另：公告 5561（Hopper HGX 8-GPU HMC，CVE-2024-0141 的描述提到 GPU vBIOS）不在 gpu-firmware 群組（群組選取是 C1 的規則，只看標題、產品名稱與 CVE_index），搜尋時另外看到；版本是 HMC 版本、沒有 PCI 裝置 ID，同樣無法對應到 option ROM，沒有放進表。",
+      "csaf_fields": [
+        "product_tree.branches[].branches[] (category product_family／architecture VBIOS、LS10／product_version)",
+        "vulnerabilities[].product_status.known_affected／fixed",
+        "vulnerabilities[].remediations（空）"
+      ],
+      "reviewed": false,
+      "reviewed_by": null,
+      "reviewed_at": null,
+      "preliminary_by": "韌體分析（C2 角色）初審，待負責人確認",
+      "preliminary_at": "2026-11-14"
+    }
+  ],
+  "rows": [],
+  "mirror": {
+    "commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
+    "commit_date": "2026-11-10T13:01:57Z",
+    "fetched_utc": "2026-11-13T16:52:04Z",
+    "note": "tools/mirror/nvidia-bulletins.sh 的輸出（204 則公告、選入 36 則；gpu-firmware 群組 1 則：5674）。初審看的是這份鏡像；鏡像的時間點是 commit_date，不是 reviewed_until。"
+  }
 }

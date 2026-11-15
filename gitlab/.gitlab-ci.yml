@@ -39,8 +39,8 @@ workflow:
   rules:
     # 1) tag <專案>/<版本> → release
     - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
-    # 2) 排程：每日監控或開發版，由排程變數 DUMPLING_JOB 區分
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev")'
+    # 2) 排程：每日監控、開發版或第 14 條倒數，由排程變數 DUMPLING_JOB 區分
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($DUMPLING_JOB == "watch" || $DUMPLING_JOB == "dev" || $DUMPLING_JOB == "art14")'
     # 3) dev/** 分支與預設分支的 push → dev、tests、firmware
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && ($CI_COMMIT_BRANCH =~ /^dev\// || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
     # 4) merge request → tests、firmware
@@ -54,7 +54,16 @@ workflow:
 
 .rules-tag-release:
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+    # 真的 tag push 才發 Release：在 tag ref 上從網頁或 API 手動建的 pipeline 也有 CI_COMMIT_TAG，不能因此發正式 Release（#72 驗證應修 2）
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+    # T-17：手動試跑 release（代替 GitHub 的「只建 draft Release」；GitLab 沒有 draft Release）。網頁或 API 建立 pipeline 時帶
+    # DUMPLING_RELEASE_DRY_RUN=1 與 DUMPLING_RELEASE_TAG=<專案>/<版本>：跑 build、scan，publish 只驗證，不上傳 Package、不建 Release、不開 Issue。
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_RELEASE_DRY_RUN == "1" && $DUMPLING_RELEASE_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/'
+
+# 只有真的 tag push、而且不是試跑才跑（簽章會寫進透明紀錄；規則就排除試跑，不只靠腳本裡的檢查）
+.rules-tag-only:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^[a-z0-9][a-z0-9-]*\/v[0-9][A-Za-z0-9._+-]*$/ && $DUMPLING_RELEASE_DRY_RUN != "1"'
 
 .rules-dev:
   rules:
@@ -79,7 +88,15 @@ workflow:
 # 不用管線（|）接 project-info.py：不同 shell 的 pipefail 行為不同，失敗會被吃掉。
 .resolve-from-tag:
   script:
-    - python3 -I pipeline/project-info.py "$CI_COMMIT_TAG" > info.txt
+    # tag pipeline 用 CI_COMMIT_TAG；手動試跑（T-17）用 DUMPLING_RELEASE_TAG，而且一定要帶 DUMPLING_RELEASE_DRY_RUN=1
+    - |
+      RELEASE_TAG="${CI_COMMIT_TAG:-}"
+      if [ -z "$RELEASE_TAG" ]; then
+        [ "${DUMPLING_RELEASE_DRY_RUN:-0}" = 1 ] || { echo "release: FAIL（沒有 tag；手動試跑要帶 DUMPLING_RELEASE_DRY_RUN=1 與 DUMPLING_RELEASE_TAG）"; exit 1; }
+        RELEASE_TAG="${DUMPLING_RELEASE_TAG:-}"
+      fi
+      export RELEASE_TAG
+    - python3 -I pipeline/project-info.py "$RELEASE_TAG" > info.txt
     - cat info.txt
     - |
       PROJECT=$(sed -n 's/^PROJECT=//p' info.txt); VERSION=$(sed -n 's/^VERSION=//p' info.txt)
@@ -218,6 +235,10 @@ workflow:
 validate:unit-tests:
   stage: validate
   rules:
+    # T-19：分支有開著的 merge request 時，branch pipeline 不跑（MR pipeline 會跑），不重複。官方 workflow 的「避免重複 pipeline」寫法，
+    # 放在 job 層級：dev/** 的 build／scan 只在 branch pipeline 跑，整條 branch pipeline 不能關
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
     # tag 的 push 也是 push（官方 job_rules：push 事件含分支與 tag）：加 $CI_COMMIT_BRANCH，tag pipeline 不跑（同 tests.yml 不在 tag 跑，不擋 release）
     - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
   tags: [dumpling]
@@ -259,28 +280,13 @@ release:publish:
     - !reference [.setup, script]
     - !reference [.resolve-from-tag, script]
     - |
-      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$CI_COMMIT_TAG" \
+      python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$RELEASE_TAG" --notes result/notes.md \
         --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
         --scan-summary "result/scan-summary-$PROJECT-$VERSION.json" --out result/release-meta.json
       printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv
-    - |
-      test -s result/manifest.tsv || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
-    # 附件 → Generic Package（套件名稱＝專案，套件版本＝版本；tag 含斜線，不能直接當套件版本。套件名稱與版本的字元規則官方沒寫，待內部驗證）
-    - |
-      cd result
-      while IFS=$'\t' read -r f label; do
-        [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
-        curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" \
-          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PROJECT/$VERSION/$f"
-      done < manifest.tsv
-      cd ..
-    - |
-      python3 -I gitlab/release-payload.py --manifest result/manifest.tsv --tag "$CI_COMMIT_TAG" --project "$PROJECT" --version "$VERSION" \
-        --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes result/notes.md --out release.json
-    - |
-      curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --header "Content-Type: application/json" \
-        --data @release.json "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
-      echo "release: OK（$CI_COMMIT_TAG）"
+    # 先驗再傳（T-21）：release-publish.sh 先用 release-payload.py 驗完全部附件，驗不過一個檔都不上傳；
+    # DUMPLING_RELEASE_DRY_RUN=1（T-17）只驗證，不上傳 Package、不建 Release
+    - bash gitlab/release-publish.sh result "$RELEASE_TAG" "$PROJECT" "$VERSION"
   artifacts:
     # 長期保存靠 Generic Package 與 Release；這裡只留給除錯與簽章 job 用
     paths: [result/, release.json]
@@ -290,10 +296,12 @@ release:publish:
 # 官方限制：id_tokens 要寫在被簽署的專案本身（不能 include、不能放 child pipeline）。cosign 需 2.0.1 以上。
 release:sign:
   stage: release
-  extends: [.rules-tag-release]
+  extends: [.rules-tag-only]
   needs: ["release:publish"]
   tags: [dumpling]
-  allow_failure: true
+  # NOT_RUN（沒開簽章、試跑）是結束碼 3、允許失敗；真的簽章失敗是失敗（#72 驗證建議；官方 allow_failure:exit_codes）
+  allow_failure:
+    exit_codes: [3]
   interruptible: false
   id_tokens:
     SIGSTORE_ID_TOKEN:
@@ -301,7 +309,9 @@ release:sign:
   script:
     - !reference [.setup, script]
     - |
-      test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 0; }
+      test "$DUMPLING_SIGN_MODE" = cosign-keyless || { echo "sign: NOT_RUN（DUMPLING_SIGN_MODE 不是 cosign-keyless）"; exit 3; }
+    - |
+      [ "${DUMPLING_RELEASE_DRY_RUN:-0}" != 1 ] || { echo "sign: NOT_RUN（試跑不簽章：簽章會寫進透明紀錄）"; exit 3; }
     # cosign 執行檔要固定版本與 sha256：進 pipeline/lib/tools.lock（待辦 T-09，M7 的 A2 一併處理）
     - bash pipeline/install-tool.sh cosign "$DUMPLING_OUT_BASE/bin"
     - |
@@ -355,10 +365,12 @@ dev:publish:
         matrix:
           - PROJECT: ["orin-nano-demo"]
   tags: [dumpling]
-  allow_failure: true
+  # T-20：NOT_RUN 用結束碼 3，只有 3 算允許失敗（官方 allow_failure:exit_codes）；其他結束碼照常是失敗。同 GitHub 版「NOT_RUN 不是失敗、但照實列出」
+  allow_failure:
+    exit_codes: [3]
   script:
     - echo "dev:publish NOT_RUN（待辦 T-03：滾動開發版的 GitLab 版發布方式尚未定案，見 docs/GITLAB-PORT.md）"
-    - exit 1
+    - exit 3
 
 # ---------------------------------------------------------------------------
 # firmware：firmware/ 與韌體相關腳本有變動時（對應 firmware.yml 的 firmware-fetch）
@@ -371,6 +383,8 @@ firmware:fetch:
   tags: [dumpling]
   timeout: 30 minutes
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'     # T-19：同 validate:unit-tests
+      when: never
     - if: '($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH) || $CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - firmware/**/*
@@ -437,20 +451,25 @@ firmware:dt:
       test -n "${PILOT_ENV:-}" || { echo "firmware-dt: FAIL（沒有 PILOT_ENV）"; exit 1; }
     - |
       echo "firmware-dt: NOT_RUN（待辦 T-04：常駐 DT 版的 firmware-dt.sh 呼叫方式待內部驗證）"
-    - exit 1
+    - exit 3
 
 # ---------------------------------------------------------------------------
 # watch：每日監控（排程變數 DUMPLING_JOB=watch）。compute 與 notify 分開，對應 watch-round.yml
 # ---------------------------------------------------------------------------
-# 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）目前只支援 GitHub API。
-# GitLab 版需要新增後端（--backend gitlab）；在那之前這兩個 job 都是 when: manual，不會自動跑，也不假裝能跑。
-# 下面的 --backend 旗標是「預期的介面」，現行程式沒有這個旗標。
+# 待辦 T-05：pipeline/watch/collect.py（讀 Release）與 issues.py（讀寫 Issue）已有 GitLab 後端（--backend gitlab），
+# 但只用假 API 測過、沒有對真實 GitLab 驗證；所以這兩個 job 仍是 when: manual，不會自動跑（驗證完再改，見 GITLAB-PORT T-05）。
 
+# T-16：手動入口（同 watch.yml 的 workflow_dispatch）。網頁 Run pipeline 或 API 帶 pipeline 變數：
+#   DUMPLING_WATCH_MODE=real：照輸入跑一輪（DUMPLING_WATCH_DRY_RUN=1 只算不寫；DUMPLING_WATCH_BASELINE=1 還沒有狀態時建立第一次的基準，
+#     要明確指定，狀態 Issue 不見時不會自動重建）
+#   DUMPLING_WATCH_MODE=drill：watch:drill（合成資料的三輪演練＋關閉）
+# 排程的 real 預設只算不寫（同 D-040：第一次真實基準看過「會開哪些 Issue」之前），CI/CD 變數 WATCH_REAL_ISSUES=on 才真的開 Issue。
 .rules-watch:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "watch"'
       when: manual
       allow_failure: true
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_WATCH_MODE == "real"'
 
 watch:compute:
   stage: watch
@@ -464,7 +483,7 @@ watch:compute:
   script:
     - !reference [.setup, script]
     - |
-      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
     # grype 要在 PATH（feeds.sh 的 grype db update、match.py；同 watch-round.yml）
     - $SUDO install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"
@@ -483,17 +502,31 @@ watch:compute:
     - |
       rc=0; GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/collect.py --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --out "$DUMPLING_OUT_BASE/w/inv" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
+    # T-23：支援期限與 EOL（pipeline/watch/support.py，WATCH.md 第 7 節）。放在比對前面，失敗不擋每日監控：結果寫進 watch-out-support/status，
+    # watch:notify 套用完兩份 plan 之後，status 是 FAIL 才讓 job 變紅（同 watch-round.yml 的 support-fail job）。內部版不加 --demo
+    - |
+      mkdir -p watch-out-support
+      src=0
+      python3 -I pipeline/watch/support.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --out watch-out-support --run-url "$CI_PIPELINE_URL" || src=$?
+      case $src in 0) st=OK ;; 2) st=ATTENTION ;; *) st=FAIL ;; esac
+      echo "$st" > watch-out-support/status
+      [ -f watch-out-support/report.md ] && cat watch-out-support/report.md || true
+      [ "$st" != FAIL ] || echo "support: FAIL（結束碼 $src）：每日監控照常進行，watch:notify 最後會讓 job 變紅"
     - GITLAB_TOKEN="$WATCH_GITLAB_READ_TOKEN" python3 -I pipeline/watch/issues.py read-state --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mode real --out "$DUMPLING_OUT_BASE/w/state"
     - |
       rc=0
+      # 第一次的基準只在手動指定時建立（DUMPLING_WATCH_BASELINE=1，同 watch.yml 的 baseline；排程不能自己建）
+      ab=()
+      if { [ "$CI_PIPELINE_SOURCE" = web ] || [ "$CI_PIPELINE_SOURCE" = api ]; } && [ "${DUMPLING_WATCH_BASELINE:-0}" = 1 ]; then ab=(--allow-baseline); fi
       python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \
-        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" || rc=$?
+        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" "${ab[@]}" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"
   after_script:
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
     when: always
-    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json]
+    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json,
+            watch-out-support/plan.json, watch-out-support/report.md, watch-out-support/result.json, watch-out-support/status]
     expire_in: 14 days
 
 # notify：只有這個 job 拿得到 WATCH_GITLAB_TOKEN（protected＋masked 的 CI/CD 變數，project access token，scope api；
@@ -513,13 +546,105 @@ watch:notify:
     - |
       test -n "${WATCH_GITLAB_TOKEN:-}" || { echo "watch: FAIL（沒有 WATCH_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
     - |
-      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 1; }
+      python3 -I pipeline/watch/issues.py --help 2>&1 | grep -q -- '--backend' || { echo "watch: NOT_RUN（issues.py 還沒有 GitLab 後端：GITLAB-PORT 待辦 T-05）"; exit 3; }
     - |
-      # 沒有 plan.json（GAP：不建基準、不開 Issue）→ 什麼都不做（同 watch-round.yml 的 has_plan）
-      test -f watch-out/plan.json || { echo "watch: 沒有 plan.json（match 是 GAP），不動任何 Issue"; exit 0; }
-      GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
-        --project "$CI_PROJECT_ID" --confidential --plan watch-out/plan.json
+      # 只算不寫（T-16）：手動帶 DUMPLING_WATCH_DRY_RUN=1，或排程而 WATCH_REAL_ISSUES 不是 on（同 watch.yml 的 dry_run 運算式）
+      case "${DUMPLING_WATCH_DRY_RUN:-0}" in 0|1) ;; *) echo "watch: FAIL（DUMPLING_WATCH_DRY_RUN 只能是 0 或 1，收到的值不認得：不猜，什麼都不寫）"; exit 1 ;; esac
+      d=()
+      if [ "${DUMPLING_WATCH_DRY_RUN:-0}" = 1 ] || { [ "$CI_PIPELINE_SOURCE" = schedule ] && [ "${WATCH_REAL_ISSUES:-}" != on ]; }; then
+        d=(--dry-run); echo "watch: 只算不寫（dry-run）"
+      fi
+      # 每日監控：沒有 plan.json（GAP：不建基準、不開 Issue）→ 不動監控 Issue（同 watch-round.yml 的 has_plan）
+      rc=0
+      if [ -f watch-out/plan.json ]; then
+        GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out/plan.json "${d[@]}" || rc=$?
+      else
+        echo "watch: 沒有 plan.json（match 是 GAP），不動監控 Issue"
+      fi
+      # T-23：支援期限的 Issue（stateless plan，不碰狀態 Issue；每日監控的 apply 失敗也照樣套用，同 watch-round.yml 的 !cancelled()）
+      src=0
+      if [ -f watch-out-support/plan.json ]; then
+        GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+          --project "$CI_PROJECT_ID" --confidential --mode real --plan watch-out-support/plan.json "${d[@]}" || src=$?
+      fi
+      st=$(cat watch-out-support/status 2>/dev/null || echo FAIL)
+      [ "$rc" = 0 ] || exit "$rc"
+      [ "$src" = 0 ] || exit "$src"
+      [ "$st" != FAIL ] || { echo "support: FAIL（支援期限檢查沒有完成：看 watch:compute 的輸出與 watch-out-support/）"; exit 1; }
   artifacts:
     when: always
-    paths: [watch-out/apply-result.json]
+    paths: [watch-out/apply-result.json, watch-out-support/apply-result.json]
+    expire_in: 14 days
+
+# T-16：每日監控的演練（同 watch.yml 的 drill-1-baseline／drill-2-new-kev／drill-3-repeat／drill-close）。
+# 網頁或 API 帶 DUMPLING_WATCH_MODE=drill（DUMPLING_WATCH_DRY_RUN=1 只算不寫）：合成 Release＋合成 KEV，三輪（預期開 0／2／0 個）後關閉。
+# 演練 Issue 一律 confidential（後端寫死）、標籤 drill。讀狀態用 WATCH_GITLAB_READ_TOKEN，開／關 Issue 與寫狀態用 WATCH_GITLAB_TOKEN。
+# 收掉演練 Issue：watch-drill.sh 收（失敗就整體非 0）；逾時或被取消時腳本的 trap 不一定跑得到，after_script 再收一次。
+watch:drill:
+  stage: watch
+  rules:
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $DUMPLING_WATCH_MODE == "drill"'
+  tags: [dumpling-scan]
+  timeout: 90 minutes
+  interruptible: false
+  resource_group: watch-notify
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${WATCH_GITLAB_TOKEN:-}" || { echo "watch-drill: FAIL（沒有 WATCH_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
+      test -n "${WATCH_GITLAB_READ_TOKEN:-}" || { echo "watch-drill: FAIL（沒有 WATCH_GITLAB_READ_TOKEN）"; exit 1; }
+    - bash tools/e2e/install-tools.sh "$DUMPLING_OUT_BASE/tools/bin" "$DUMPLING_OUT_BASE/tools/versions.txt" --sbom-only
+    - $SUDO install -m 0755 -t /usr/local/bin "$DUMPLING_OUT_BASE/tools/bin/grype"
+    - WATCH_READ_TOKEN="$WATCH_GITLAB_READ_TOKEN" WATCH_WRITE_TOKEN="$WATCH_GITLAB_TOKEN" bash gitlab/watch-drill.sh "$DUMPLING_OUT_BASE/drill" watch-drill-out
+  after_script:
+    # 逾時或被取消時，腳本的 trap 不一定跑得到：再收一次演練 Issue（沒有開著的演練 Issue 時什麼都不做）；dry-run 不收
+    - |
+      if [ "${DUMPLING_WATCH_DRY_RUN:-0}" != 1 ] && [ -n "${WATCH_GITLAB_TOKEN:-}" ]; then
+        GITLAB_TOKEN="$WATCH_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py close-drill --backend gitlab --gitlab-url "$CI_API_V4_URL" --project "$CI_PROJECT_ID" \
+          || echo "watch-drill: after_script 收掉演練 Issue 失敗（請人工關閉 drill 標籤的 Issue）"
+      fi
+    - rm -rf "$DUMPLING_OUT_BASE"
+  artifacts:
+    when: always
+    paths: [watch-drill-out/]
+    expire_in: 14 days
+
+# ---------------------------------------------------------------------------
+# art14：CRA 第 14 條通報倒數（排程變數 DUMPLING_JOB=art14，每小時；對應 art14.yml）。GITLAB-PORT T-10、docs/ART14.md 第 10 節
+# ---------------------------------------------------------------------------
+# pipeline/watch/art14.py 有 GitLab 後端，但只用假 API 測過、沒有對真實 GitLab 驗證；所以這個 job 仍是 when: manual（同 watch:*），
+# 驗證完再改成自動（見 GITLAB-PORT T-10 的內部驗證清單）。
+# 真實案件預設（DUMPLING_ART14_MODE 沒設或不是 drill）：處理標籤 art14 的 confidential Issue；不是 confidential 的 art14 Issue → job FAIL、不寫入。
+# 演練：pipeline 變數 DUMPLING_ART14_MODE=drill（處理標籤 art14-drill 的 Issue）。結束碼 0 OK、1 FAIL。
+# ART14_GITLAB_TOKEN：project access token，scope api（官方：Issues／Notes 寫入需要 api scope），角色 Developer 以上（要讀得到 confidential Issue、
+# 查成員等級；程式開始前會檢查，不夠就 FAIL）；protected＋masked，可以的話再限定到只給 art14 排程用的 environment；和 watch 的 token 分開（只有這個 job 用）。
+# 倒數的依據只取自 Developer 以上成員的「art14 紀錄」留言（ART14.md 第 4.1 節），內文的時間不算數。Email 提醒（ART14.md 第 10 節）還沒做。
+
+.rules-art14:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $DUMPLING_JOB == "art14"'
+      when: manual
+      allow_failure: true
+
+art14:countdown:
+  stage: watch
+  extends: [.rules-art14]
+  tags: [dumpling]
+  timeout: 10 minutes
+  interruptible: false
+  resource_group: art14
+  script:
+    - !reference [.setup, script]
+    - |
+      test -n "${ART14_GITLAB_TOKEN:-}" || { echo "art14: FAIL（沒有 ART14_GITLAB_TOKEN：protected＋masked 變數，只在保護分支可用）"; exit 1; }
+    - |
+      mkdir -p art14-out
+      DRILL=""
+      if [ "${DUMPLING_ART14_MODE:-real}" = drill ]; then DRILL="--drill"; fi
+      GITLAB_TOKEN="$ART14_GITLAB_TOKEN" python3 -I pipeline/watch/art14.py countdown --backend gitlab --gitlab-url "$CI_API_V4_URL" \
+        --gitlab-project "$CI_PROJECT_ID" --result art14-out/result.json $DRILL
+  artifacts:
+    when: always
+    paths: [art14-out/result.json]
     expire_in: 14 days

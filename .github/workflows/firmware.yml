@@ -68,7 +68,7 @@ jobs:
             echo
             cat "$RUNNER_TEMP/firmware-summary.md"
             echo
-            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。微碼公告比對（離線，用 repo 內的 Intel 發佈資料表）列的是候選公告，不是確定受影響；up-to-date 與 NOT_ASSESSED 都不代表沒有漏洞。這不是整體通過或安全的結論。_'
+            echo '_狀態行是解析結果，expected 比對只涵蓋 firmware.yml 寫了的項目；每個元件的漏洞比對狀態是 NOT_ASSESSED。公告比對（離線）：微碼用 repo 內的 Intel 發佈資料表，列的是候選公告，不是確定受影響；NVIDIA vBIOS 用 repo 內的 NVIDIA 公告對照表（版本與 PCI 裝置 ID；表尚未經負責人確認，目前沒有可比對的列），所以都是 NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）；up-to-date、fixed 與 NOT_ASSESSED 都不代表沒有漏洞。這不是整體通過或安全的結論。_'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
       # 供應商 SBOM（kind: sbom）的品質檢查：sbomqs 版本與 sha256 固定在 pipeline/lib/tools.lock，核對後才安裝。
@@ -207,8 +207,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
       # NVIDIA vBIOS 公告對照（C1 的 nvidia_bulletins.py candidates --group gpu-firmware）：鏡像抓不到或工具失敗只記 GAP，不讓 job 失敗。
-      # 對照表用 gpu-firmware 專用的空表 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json（C1 M2 提供）；沒有這個檔就不跑 candidates，
-      # 直接印 GAP（不借 Jetson 的表：那會把 Jetson 的公告混進來）。表是空的，所以鏡像裡的 gpu-firmware 公告全部列為待審（ATTENTION 是誠實的結果）。
+      # 對照表用 gpu-firmware 專用的表 tools/pilot/lib/nvidia-bulletins-gpu-firmware.json；沒有這個檔就不跑 candidates，
+      # 直接印 GAP（不借 Jetson 的表：那會把 Jetson 的公告混進來）。表尚未經負責人確認：5674 只有初審意見（沒有 PCI 裝置 ID 與 option ROM 版本的對應，無法對應），所以 candidates 是 ATTENTION、所有 vBIOS 都是 NOT_ASSESSED；負責人確認後，NVIDIA 新增或修訂的 gpu-firmware 公告仍會列為待審，要人工更新表（docs/notes/c2-firmware-advisory.md）。
       - name: NVIDIA 公告（vBIOS）待審對照
         if: always()
         run: |
