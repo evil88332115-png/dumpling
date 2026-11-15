@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:55 +0800（C2）
+最後更新：2026-11-15 12:58 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -337,8 +337,10 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前沒有代理在跑；之後派代理一律指定 model sonnet＋effort（安全／判定／驗證 high，其他 medium）
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：監控已正式上線（WATCH_REAL_ISSUES=on，11-15 04:36Z）；等下一輪排程，回報實際開出的 Issue（預期支援期限 4、KEV 0）與 #114 更新
-- D-062 儀表板：設計稿 PR #116（docs/DASHBOARD.md，沒有程式）等 C0 審
+- 卡住／等決定：WATCH_REAL_ISSUES 暫時 off（C0，04:44Z：三個新平台的 dev 會帶進一批 Issue）；C4 發布後跑 dry_run 回報（KEV／支援期限分開）
+- 開著的 PR：#118（WATCH.md 韌體只有廠商層級）、#120（D-064 A：廠商層級每個專案各列、linux 規則）、#121（D-064 B：廠商 × CVE 一個 Issue，驗證通過）、#116（儀表板設計，CI 綠）
+- 韌體進監控設計：docs/FIRMWARE-WATCH.md（分支 wp2/firmware-watch-design）C2 審中 → PR 給 C0
+- 之後：儀表板實作（#116 合併後）→ T-12（只做偵測＋開 Issue）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
