@@ -217,7 +217,7 @@
 | `tools/pilot/tests/test_pilot_utf8_truncation.py` | `scripts/pilot/tests/test_pilot_utf8_truncation.py` | 25fa89a | 路徑調整 1 處、清理 1 行；`shell_files()` 不再掃 `deploy/`，檔案數門檻 20 → 10（`tools/` 共 14 個 shell 檔） |
 | `tools/pilot/tests/test_pyver_wiring.py` | `scripts/pilot/tests/test_pyver_wiring.py` | 25fa89a | 路徑調整 3 處 |
 | `tools/pilot/tests/test_sca_scan_local_image.py` | `scripts/pilot/tests/test_sca_scan_local_image.py` | 25fa89a | 路徑調整 1 處；**新增（M7b-2）**：`test_source_pin_and_identity_are_structured`（假的 docker：本機映像、tag、digest 相符與不符）、`test_dt_not_used_reason_is_recorded` |
-| `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL |
+| `tools/pilot/tests/test_sca_scan_no_license_libs.py` | （dumpling 自己寫） | — | 新增：pilot.env 設了 DejaCode／ScanCode.io 網址、輔助程式沒帶進來時，E、E2 段記 NOT_RUN 而不是 FAIL；修正偶發失敗：金鑰改成長而少見的值（以前的 k1／k2 會出現在暫存路徑的亂數後綴裡，記了路徑的 meta.json 被秘密掃描刪掉），並檢查 F-secret-scan 是 OK |
 | `tools/pilot/tests/test_ubuntu_cve_status.py` | `scripts/pilot/tests/test_ubuntu_cve_status.py` | 25fa89a | 路徑調整 3 處；`test_script_safety_and_docs` 去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，改名 `test_script_safety` |
 | `tools/pilot/tests/test_ubuntu_priority.py` | `scripts/pilot/tests/test_ubuntu_priority.py` | 25fa89a | 路徑調整 1 處 |
 | `tools/pilot/tests/test_ubuntu_status.py` | `scripts/pilot/tests/test_ubuntu_status.py` | 25fa89a | 路徑調整 5 處；註解：移除上游私有 repo 的編號與內部部署描述 |
