@@ -44,6 +44,12 @@ VBT 版本（`1.00`、BDB 2.28）試掃報告沒有記錄，沒有加。NUC 維�
   規則表新增、修改規則或改版本順序後，建議可能改變，要重新核對並更新樣本的 expected；這不是漏洞判定，建議不是結論。
 - 樣本 `asus-prime-b550m-a-3404`（AGESA affected，AMD-SB-7014）、`dasharo-protectli-vp46xx-v1.2.0`（CSME not-affected，INTEL-SA-00391）、`novacustom-nuc-box-arl-v0.9.2`（CSME affected，INTEL-SA-01372）各寫一項，兩條路徑（affected、not-affected）都有真樣本鎖住。
 
+## AMI 核心版本鍵（ami_core）
+
+- `ami_core` 是映射：`status` 比 `fw-inventory.json` 每個 BIOS 映像的 `ami_core.status`；`version`、`product`、`bios_tag`（清單，每個都要出現）、`project_version` 比 SBOM 的 `AMI Aptio V core`／`AMI firmware core` 元件。
+  值是映像自述的 Firmware ID 紀錄（沒有簽章），這裡鎖的是工具讀到的值；`asus-prime-b550m-a-3404` 與 `intel-nuc11-patgl357-0059` 寫 `read`，coreboot 與 OVMF 樣本寫 `not-found`。
+  規則表對核心版本的建議（`AMI Aptio V core` 的 affected）另用 `advisory_rule` 寫。說明在 `docs/notes/c2-ami-core.md`。
+
 ## CI 結果（2026-11-12）
 
 - 綠燈：https://github.com/evil88332115-png/dumpling/actions/runs/43231626732

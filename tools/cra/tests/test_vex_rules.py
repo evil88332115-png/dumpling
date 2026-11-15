@@ -46,7 +46,14 @@ def assess(rs, rules, **kw):
     return vx.assess(rs, rules=rules, rule_ctx=ctx, **kw)
 
 
-def gate(allr, conf, **kw):
+def gate(allr, conf, typed=True, **kw):
+    # 因 D-035 而變：DT 的排除沒有依據類型，會算進 untriaged_for_gate 並擋閘門；這個檔案的測試看的是規則與閘門的其他部分，
+    # 所以預設先給每一筆排除補上依據類型（typed=False 看 D-035 的行為；D-035 自己的測試在 test_vex_evidence_basis.py）
+    if typed:
+        for r in allr:
+            for x in [r] + (r.get("vex_extra") or []):
+                if vx.is_exclusion(x.get("vex")) and not x["vex"].get("evidence_basis"):
+                    x["vex"]["evidence_basis"] = [{"type": "source", "location": "synthetic evidence"}]
     return vx.gate(allr, conf, **{"grype_checked": True, "not_assessed": [], **kw})
 
 
@@ -296,7 +303,8 @@ def test_gate_assessment_and_open_affected():
                             row("CVE-3", analysis=dt("EXPLOITABLE", response="WORKAROUND_AVAILABLE"))], rules)
     g = gate(allr, conf)
     assert g["verdict"] == "ATTENTION" and g["assessment"] == {"complete": True, "untriaged": 0, "extra_cves_untriaged": 0,
-                                                               "untriaged_for_gate": 0, "by_rule": 1, "in_triage_by_rule": 0}
+                                                               "untriaged_for_gate": 0, "exclusions_without_evidence": 0,    # 因 D-035 而變：多一個欄位
+                                                               "by_rule": 1, "in_triage_by_rule": 0}
     assert g["open_affected"] == {"rows": 2, "by_response": {"update": 1, "workaround_available": 1}, "by_rule": 1, "individual": 1}
     assert g["reasons"] == ["assessment complete; 2 affected rows (exploitable; 1 by bulk rules) need a release decision by a person "
                             "(fixed before placing on the market, or a documented risk-based justification): by response update 1, "

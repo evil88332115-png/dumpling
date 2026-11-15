@@ -30,6 +30,14 @@ expected 欄位（都選填，只寫有佐證的）：
   advisory_rule       清單，每項 {component, version, suggestion, rule_ids}：SBOM 要有名稱是 component、version 相符的元件，它的 `dumpling:advisory-rule-suggestion`
                       等於 suggestion（affected／not-affected／NOT_ASSESSED），`dumpling:advisory-rule-ids` 的規則編號與 rule_ids 相同（沒有規則寫 []）；
                       這是對 tools/cra/data/fw-advisory-rules.json 目前內容的預期（規則表新增或修改規則後要重新核對），不是漏洞判定
+  ami_core            mapping（至少一項），AMI 核心版本（Firmware ID 紀錄，見 docs/notes/c2-ami-core.md；值是映像自述、沒有簽章）：
+                      status          fw-inventory.json 每個 BIOS 映像的 ami_core.status 都等於它（read／not-found／conflict／layout-unknown／not-searched；
+                                      非 AMI 映像寫 not-found）
+                      version         SBOM 裡 `AMI Aptio V core`／`AMI firmware core` 元件的 version（例如 "5.17"）；沒有元件＝MISSING
+                      product         同一個元件的 `sca-center:ami-core-product`（例如 "Aptio V"）
+                      bios_tag        字串清單；每個 tag 都要是元件的 `sca-center:ami-fid-bios-tag`（多出來的不比）
+                      project_version 字串，元件的 `sca-center:ami-fid-project-version`（例如 "34.04"）
+                      這是對核心版本的預期，不是漏洞判定；規則表對它的建議用 advisory_rule 寫
   （沒有 intel_vbt：VBT 元件的 version 是 $VBT 表頭的格式版本（x100），不是顯示韌體的發行版本，不拿來比對）
 """
 import argparse
@@ -43,7 +51,10 @@ except ImportError:
     yaml = None
 
 KEYS = ("intel_me", "microcode", "fsp", "coreboot_version", "coreboot_revision",
-        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode", "advisory_rule")
+        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode", "advisory_rule", "ami_core")
+AMI_KEYS = ("status", "version", "product", "bios_tag", "project_version")
+AMI_STATUSES = ("read", "not-found", "conflict", "layout-unknown", "not-searched")
+AMI_NAMES = ("AMI Aptio V core", "AMI firmware core")
 GFX_NAMES = {"intel_gop": "Intel GOP driver", "intel_legacy_vbios": "Intel legacy VBIOS (option ROM)"}
 STATUSES = ("OK", "MISMATCH", "MISSING", "NOT_RUN")
 
@@ -177,6 +188,23 @@ def compare(exp, inv, sbom):
             ids = tuple(sorted(scalar(x, "rule_ids") for x in m["rule_ids"])) if m["rule_ids"] else ()
             plan.append(("advisory_rule", "規則表建議 %s %s" % (scalar(m["component"], "component"), scalar(m["version"], "version")),
                          (m["component"], m["version"], m["suggestion"], ids)))
+    if "ami_core" in exp:
+        am = exp["ami_core"]
+        if not isinstance(am, dict) or not am or not set(am) <= set(AMI_KEYS):
+            raise FormatError("ami_core 必須是 mapping，只能有 %s（至少一項）" % "、".join(AMI_KEYS))
+        if "status" in am:
+            if am["status"] not in AMI_STATUSES:
+                raise FormatError("ami_core.status 必須是 %s 之一" % "、".join(AMI_STATUSES))
+            plan.append(("ami_status", "AMI 核心版本搜尋結果", am["status"]))
+        for k, key, label in (("version", "ami_version", "AMI 核心版本"), ("product", "ami_product", "AMI 核心版本的產品"),
+                              ("project_version", "ami_project", "AMI FID 專案版本")):
+            if k in am:
+                plan.append((key, label, scalar(am[k], "ami_core." + k)))
+        if "bios_tag" in am:
+            if not isinstance(am["bios_tag"], list) or not am["bios_tag"]:
+                raise FormatError("ami_core.bios_tag 必須是非空的字串清單")
+            for i, t in enumerate(am["bios_tag"]):
+                plan.append(("ami_tag", "AMI FID BIOS tag", scalar(t, "ami_core.bios_tag[%d]" % i)))
     if inv is None:
         return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）"
                  % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2][2] if p[0] == "advisory_rule" else p[2])) for p in plan]
@@ -258,6 +286,26 @@ def compare(exp, inv, sbom):
             ok = any(g[0] == sug and g[1] == ids for g in got)
             items.append(result("OK" if ok else ("MISMATCH" if any(g[0] != "（沒有標）" for g in got) else "MISSING"), label, expect,
                                 "；".join("%s（規則 %s）" % (g[0], "、".join(g[1]) if g[1] else "無") for g in got)))
+        elif key == "ami_status":
+            got = uniq((b.get("ami_core") or {}).get("status") for b in bios)
+            if not got:
+                items.append(result("MISSING", label, want, "（inventory 沒有 ami_core 欄位）"))
+            else:
+                items.append(result("OK" if got == [want] else "MISMATCH", label, want, show(got)))
+        elif key in ("ami_version", "ami_product", "ami_tag", "ami_project"):
+            comps = [c for c in sbom_components(sbom) if c.get("name") in AMI_NAMES]
+            if not comps:
+                items.append(result("MISSING", label, want, "（SBOM 裡沒有 AMI 核心版本元件）"))
+                continue
+            if key == "ami_version":
+                got = uniq(str(c.get("version")) for c in comps if c.get("version"))
+            else:
+                name = {"ami_product": "sca-center:ami-core-product", "ami_tag": "sca-center:ami-fid-bios-tag", "ami_project": "sca-center:ami-fid-project-version"}[key]
+                got = uniq(str(v) for c in comps for v in prop(c, name))
+            if not got:
+                items.append(result("MISSING", label, want, "（AMI 核心版本元件沒有這項）"))
+            else:
+                items.append(result("OK" if want in got else "MISMATCH", label, want, show(got)))
         elif key in GFX_NAMES:
             # 只看 SBOM（GOP／legacy VBIOS 沒有進 inventory 的固定欄位）。映像裡可能有好幾個同名元件（例如多份 GOP），
             # 跟 fsp 一樣：任一個的 version 相符就 OK，其餘不比。元件在但沒讀到 version（GAP）→ MISSING，不猜。

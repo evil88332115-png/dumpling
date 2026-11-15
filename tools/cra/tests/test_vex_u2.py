@@ -191,8 +191,10 @@ def test_full_output_is_the_same_with_and_without_u2_except_for_the_u2_rows():
         else:
             assert x == y, x["id"]
     assert "u2_resolved" not in i0 and [r["id"] for r in i1["u2_resolved"]] == ["CVE-P1"]
-    strip = lambda i: {k: v for k, v in i.items() if k not in ("rules", "u2_resolved", "sources", "evidence_inputs")}      # noqa: E731
+    # 因 D-035 而變：info 多了 evidence（排除的依據統計）；有 U2 時多一筆 resolved 的排除，所以 evidence 兩邊不同（下面另外核對）
+    strip = lambda i: {k: v for k, v in i.items() if k not in ("rules", "u2_resolved", "sources", "evidence_inputs", "evidence")}      # noqa: E731
     assert strip(i0) == strip(i1)
+    assert i0["evidence"]["exclusions"] == 0 and i1["evidence"]["exclusions"] == 1 and i1["evidence"]["by_type"]["vendor-statement"] == 1
     assert {r["id"] for r in i0["rules"]} == {"R8"} and {r["id"] for r in i1["rules"]} == {"U2", "R8"}
     assert next(r for r in i0["rules"] if r["id"] == "R8") == next(r for r in i1["rules"] if r["id"] == "R8")
     u = i1["u2_resolved"][0]

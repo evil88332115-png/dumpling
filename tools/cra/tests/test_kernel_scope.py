@@ -102,10 +102,16 @@ def test_report_withholds_k1_and_shows_note(tmp_path):
     md = ra(rep1)
     assert "K1/K2" in md and B in md and "只判定了部分核心" in md and "1 kernel rows would have been excluded" in md
     assert any(B in w and "沒有判定" in w for w in s1.get("config_warnings", []))
-    # VEX 檔案：對照組有這個 CVE 的 not_affected 陳述，這裡完全沒有這個 CVE 的陳述
-    for name in ("vex.cdx.json", "vex.openvex.json"):
-        assert "CVE-2025-0102" in (rep0 / name).read_text(encoding="utf-8")
-        assert "CVE-2025-0102" not in (rep1 / name).read_text(encoding="utf-8")
+    # VEX 檔案：對照組有這個 CVE 的 not_affected 陳述；這裡沒有任何判定的陳述。A4（M7c-1）起沒有判定的列也輸出，
+    # 所以是一條沒評估的陳述（CycloneDX in_triage＋NOT_ASSESSED、OpenVEX under_investigation＋not assessed），不是 not_affected
+    c0 = json.loads((rep0 / "vex.cdx.json").read_text(encoding="utf-8"))["vulnerabilities"]
+    c1 = json.loads((rep1 / "vex.cdx.json").read_text(encoding="utf-8"))["vulnerabilities"]
+    assert [v["analysis"]["state"] for v in c0 if v["id"] == "CVE-2025-0102"] == ["not_affected"]
+    assert [(v["analysis"]["state"], {"name": "dumpling:assessment", "value": "NOT_ASSESSED"} in v["properties"]) for v in c1 if v["id"] == "CVE-2025-0102"] == [("in_triage", True)]
+    o0 = json.loads((rep0 / "vex.openvex.json").read_text(encoding="utf-8"))["statements"]
+    o1 = json.loads((rep1 / "vex.openvex.json").read_text(encoding="utf-8"))["statements"]
+    assert [s["status"] for s in o0 if s["vulnerability"]["name"] == "CVE-2025-0102"] == ["not_affected"]
+    assert [(s["status"], s["status_notes"]) for s in o1 if s["vulnerability"]["name"] == "CVE-2025-0102"] == [("under_investigation", "dumpling: not assessed")]
     # not_judged 為空：和沒有檔案完全相同
     r2, s2, rep2 = make_report(tmp_path / "c", kv([A], []))
     stamp = lambda p: re.sub(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", "T", p.read_text(encoding="utf-8"))      # 產生時間不比

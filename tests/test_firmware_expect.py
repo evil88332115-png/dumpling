@@ -115,6 +115,31 @@ class CompareTest(unittest.TestCase):
             with self.assertRaises(fe.FormatError):
                 fe.compare(bad, INV, SBOM)
 
+    def test_ami_core(self):
+        """AMI 核心版本：inventory 的 status 與 SBOM 的 `AMI Aptio V core` 元件（version、product、tag、專案版本）。"""
+        def ami(version="5.17", name="AMI Aptio V core"):
+            c = {"name": name, "version": version, "properties": [
+                {"name": "sca-center:ami-core-product", "value": "Aptio V"}, {"name": "sca-center:ami-fid-bios-tag", "value": "1AWQH340"},
+                {"name": "sca-center:ami-fid-bios-tag", "value": "1AWQG340"}, {"name": "sca-center:ami-fid-project-version", "value": "3.40"}]}
+            return {"components": [c]}
+        inv = lambda st: {"bios": [{"ami_core": {"status": st}}]}      # noqa: E731
+        want = {"ami_core": {"status": "read", "version": "5.17", "product": "Aptio V", "bios_tag": ["1AWQH340", "1AWQG340"], "project_version": "3.40"}}
+        self.assertEqual(statuses(want, inv("read"), ami()), ["OK"] * 6)
+        self.assertEqual(statuses({"ami_core": {"version": "5.18"}}, inv("read"), ami()), ["MISMATCH"])
+        self.assertEqual(statuses({"ami_core": {"version": "5.17"}}, inv("read"), {"components": []}), ["MISSING"])           # 沒有元件
+        self.assertEqual(statuses({"ami_core": {"bios_tag": ["OTHER"]}}, inv("read"), ami()), ["MISMATCH"])
+        self.assertEqual(statuses({"ami_core": {"project_version": "3.41"}}, inv("read"), ami()), ["MISMATCH"])
+        self.assertEqual(statuses({"ami_core": {"product": "Aptio IV"}}, inv("read"), ami()), ["MISMATCH"])
+        self.assertEqual(statuses({"ami_core": {"version": "4.6"}}, inv("read"), ami("4.6", "AMI firmware core")), ["OK"])
+        self.assertEqual(statuses({"ami_core": {"status": "not-found"}}, inv("not-found"), {"components": []}), ["OK"])
+        self.assertEqual(statuses({"ami_core": {"status": "not-found"}}, inv("read"), ami()), ["MISMATCH"])
+        self.assertEqual(statuses({"ami_core": {"status": "not-found"}}, {"bios": [{}]}, SBOM), ["MISSING"])
+        self.assertEqual(statuses({"ami_core": {"status": "read", "version": "5.17"}}, None, None), ["NOT_RUN", "NOT_RUN"])
+        for bad in ({"ami_core": {}}, {"ami_core": "5.17"}, {"ami_core": {"core": "5.17"}}, {"ami_core": {"status": "safe"}},
+                    {"ami_core": {"bios_tag": []}}, {"ami_core": {"bios_tag": "A"}}, {"ami_core": {"version": ""}}):
+            with self.assertRaises(fe.FormatError, msg=repr(bad)):
+                fe.compare(bad, INV, SBOM)
+
     def test_mismatch(self):
         r = dict(fe.compare({"intel_me": "14.0.47.1559"}, INV, SBOM))
         self.assertEqual(list(r), ["MISMATCH"])

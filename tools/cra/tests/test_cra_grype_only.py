@@ -342,9 +342,16 @@ def _dhcp(tmp_path, srv_version=DHCP_V, services=None, anns=None, name="dhcp", f
     return s, rep
 
 
-def _stmts(rep, cve="CVE-2026-5555"):
+def _is_na(v):
+    return {"name": "dumpling:assessment", "value": "NOT_ASSESSED"} in (v.get("properties") or [])
+
+
+def _stmts(rep, cve="CVE-2026-5555", not_assessed=False):
+    """VEX 的陳述（狀態、指向的元件）。M7c-1（A4／D-057）起沒有判定的列也寫成 in_triage 加 NOT_ASSESSED：預設只看有判定的陳述
+    （這些測試要確認的是「不會有矛盾或繼承來的判定」）；not_assessed=True 只看沒有評估的那幾條。"""
     cdx = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8")) if (rep / "vex.cdx.json").exists() else {"vulnerabilities": []}
-    return [(v["analysis"]["state"], sorted(a["ref"].split("#")[1] for a in v["affects"])) for v in cdx["vulnerabilities"] if v["id"] == cve]
+    return [(v["analysis"]["state"], sorted(a["ref"].split("#")[1] for a in v["affects"])) for v in cdx["vulnerabilities"]
+            if v["id"] == cve and _is_na(v) == not_assessed]
 
 
 def test_exposed_server_binary_of_same_source_is_its_own_row(tmp_path):
@@ -372,6 +379,8 @@ def test_client_not_affected_is_not_inherited_by_exposed_server(tmp_path):
     assert set(by) == {"isc-dhcp-server"} and (by["isc-dhcp-server"]["vex"], by["isc-dhcp-server"]["assessed"]) == ("untriaged", False)
     st = _stmts(rep)
     assert st == [("not_affected", ["isc-dhcp-client-ref"])] and not any("isc-dhcp-server-ref" in refs for _, refs in st)
+    # A4：server 的列沒有判定 → VEX 有一條 in_triage 加 NOT_ASSESSED（沒有評估），不是 client 的 not_affected
+    assert _stmts(rep, not_assessed=True) == [("in_triage", ["isc-dhcp-server-ref"])]
     assert s["vex"]["gate"]["verdict"] != "OK" and s["vex"]["gate"]["assessment"]["untriaged"] == 1
 
 
@@ -551,8 +560,10 @@ def test_vendor_kernel_rows_from_cna_list(tmp_path):
     assert "CVE-2026-8001" in t and "exploited: EUVD (CISA KEV)" in t and s["counts"]["p1"] == 1
     assert "version could not be determined (unknown), not shown as affected" in t and "KERNEL-CNA:CVE-2026-8001" in t
     v = json.loads((rep / "vex.cdx.json").read_text(encoding="utf-8"))["vulnerabilities"]
-    by = {x["id"]: x["analysis"]["state"] for x in v}
-    assert by.get("CVE-2026-8002") == "not_affected" and "CVE-2026-8003" not in by       # unknown 不當成沒問題，也沒有 VEX 陳述
+    by = {x["id"]: x["analysis"]["state"] for x in v if not _is_na(x)}
+    # unknown 不當成沒問題，沒有判定的 VEX 陳述；A4（M7c-1）起它寫成 in_triage 加 NOT_ASSESSED（沒有評估），不是 not_affected
+    assert by.get("CVE-2026-8002") == "not_affected" and "CVE-2026-8003" not in by
+    assert {x["id"] for x in v if _is_na(x)} >= {"CVE-2026-8003"}
     assert s["counts"]["kernel"]["rows"] == 3 and s["counts"]["kernel"]["accepted"] >= 1
 
 
