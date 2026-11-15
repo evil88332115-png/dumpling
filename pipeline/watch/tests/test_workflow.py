@@ -93,6 +93,12 @@ class WatchWorkflow(unittest.TestCase):
         self.assertIn('if [ "$DRY" = true ]; then d=(--dry-run); fi', notify)
         self.assertRegex(notify, r'issues\.py apply [^\n]*"\$\{d\[@\]\}"')
 
+    def test_fw_rematch_step_timeout_longer_than_c2_limit(self):
+        """C2 的 rematch 入口整次上限 900 秒：步驟上限要比它長，否則還沒輸出總表就被砍掉（NOT_RUN）。"""
+        m = re.search(r"(?ms)^      - name: 韌體公告重跑[^\n]*\n(.*?)^      - (?:name|uses):", self.round)
+        t = int(re.search(r"timeout-minutes:\s*(\d+)", m.group(1)).group(1))
+        self.assertGreater(t * 60, 900)
+
     def test_feeds_step_has_own_timeout_and_report_still_runs(self):
         # 資料源卡住時：這一步自己逾時、job 繼續，後面照樣比對並留下報告；不完整的鏡像刪掉
         m = re.search(r"(?ms)^      - name: 資料源（[^\n]*\n(.*?)^      - name:", self.round)
