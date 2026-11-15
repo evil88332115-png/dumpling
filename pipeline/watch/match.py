@@ -5,6 +5,7 @@
   python3 -I pipeline/watch/match.py --inventory <W/inventory.json> --state-dir <W/state> --feeds <W/feeds> --out <W/out>
         [--mode real|drill] [--kev-overlay <合成 KEV.json>（只限 drill）] [--max-new-issues 20] [--run-url <網址>]
         [--grype <執行檔>] [--grype-total-timeout 1500] [--vendor-config <vendor-watch.json>] [--now <UTC ISO>] [--demo] [--allow-baseline]
+        [--firmware-rematch <firmware-rematch.sh 的輸出資料夾>]
   --state-dir：issues.py read-state 的輸出（state-base.json 必要；state.json 有狀態 Issue 時才有）。
   --feeds：feeds.sh 的輸出：cisa-kev.json（CISA KEV）、euvd/（EUVD 鏡像，index.tsv）、kernel-cve/（kernel-cve.sh 的輸出）。
     Grype DB 用環境變數 GRYPE_DB_CACHE_DIR（同 exploited_grype.grype_env）。
@@ -23,12 +24,17 @@
     群組全部消失 → comment（不自動關閉）。廠商層級：（專案、監控版本、層、CVE、廠商）一個 Issue；baseline 不開。
   - 一次新增超過 --max-new-issues（預設 20）個群組 → 全部併成一個彙總 Issue（ATTENTION；那些群組之後的事件都留言在彙總 Issue，D-040）。
   - 只開「已遭利用（KEV／EUVD）」與「廠商層級」兩種 Issue；一般 CVE 候選（核心 CNA 上千筆、U-Boot 候選）不開（D-040）。
+  - 韌體（docs/FIRMWARE-WATCH.md，F2）：inventory 的 firmware.samples 每份樣本是一個監控單位（dumpling:firmware-demo/<slug>@<版本>#firmware，status development）。
+    Grype＋KEV／EUVD＋廠商層級照板子；核心對應、核心 CNA 沒有這一項；沒有 purl／CPE 的 SBOM 不能寫 OK（NOT_ASSESSED）。
+    公告重跑（--firmware-rematch，rematch-summary.json＋rematch-<slug>.json，不可信資料）的 affected／affected-candidate 開 firmware-advisory Issue
+    （規則表、vBIOS：一則公告一個；Intel 微碼：一個 key 一個），基準與 #112 的規則同 KEV；同 slug 同版本 image_sha256 變了：不開新鍵，需注意＋既有 Issue 留言。
   - --demo（公開 repo）：標題與內文寫明「示範專案（公開 BSP）」、加 demo 標籤；不開 art14 Issue（第 14 條只做演練）。
 輸出：stdout 一行 WATCH-MATCH<TAB>OK|ATTENTION|FAIL<TAB>說明；<out>/plan.json、report.md、result.json。
 退出碼：OK 0、FAIL 1、ATTENTION 2、GAP 3、用法 64。FAIL 與 GAP 時不寫 plan.json（notify 跳過，不會動任何東西）。
   GAP：還沒有狀態、也沒有任何可監控的 SBOM（例如 M2 之前）→ 不建立空的基準。
 """
 import argparse
+import copy
 import datetime
 import hashlib
 import importlib.util
@@ -65,6 +71,37 @@ ART14_NOTE = ("偵測時間是這個工具第一次看到這筆比對的時間�
               "是否依 CRA 第 14 條通報，由負責人判斷。")
 HANDLING = {"shipped": "已出貨：照內部 SOP 當天排查，交 PM。",
             "development": "開發中：直接交 RD 處理。"}
+
+# ---- 韌體（docs/FIRMWARE-WATCH.md）----
+FW_PROJECT = "firmware-demo"
+FW_LAYER = "firmware"
+FW_NO_ITEM = "沒有這一項"                                        # 韌體層沒有 L4T 核心對應、核心 CNA：不算 GAP、不降級
+FW_GRYPE_NA = "NOT_ASSESSED（可比對元件 0：沒有 purl／CPE）"       # 不能寫 OK；Grype 空的不代表沒有漏洞
+FW_SBOM_ADV = "NOT_ASSESSED（沒有 inventory，不重跑公告比對）"      # 供應商 SBOM（kind sbom）：設計上就不重跑，不是 NOT_RUN
+FW_GRYPE_NOTE = "Grype 空的不代表沒有漏洞，以廠商公告為準"
+FW_NVD_NOTE = "NVD 的 CSME 資料不完整"
+FW_REMATCH_SCHEMA = "dumpling-firmware-rematch/1"
+FW_SUMMARY_SCHEMA = "dumpling-firmware-rematch-summary/1"
+FW_SUMMARY_MAX = 1 << 20                                         # 外來檔案的大小上限
+FW_SAMPLE_MAX = 4 << 20
+FW_MAX_RESULTS = 500
+FW_KINDS = ("rule", "intel-microcode", "nvidia-vbios")
+FW_RESULTS = {"rule": ("affected", "not-affected", "NOT_ASSESSED"),
+              "intel-microcode": ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED"),
+              "nvidia-vbios": ("affected", "fixed", "NOT_ASSESSED")}
+FW_AFFECTED = {"rule": "affected", "intel-microcode": "affected-candidate", "nvidia-vbios": "affected"}
+FW_TABLES = ("fw_advisory_rules", "intel_microcode", "nvidia_vbios")
+FW_TABLE_OF = {"rule": "fw_advisory_rules", "intel-microcode": "intel_microcode", "nvidia-vbios": "nvidia_vbios"}
+FW_ISSUE_LABELS = ["firmware-advisory", "development", "layer-firmware"]
+FW_HISTORY_KEEP = 20
+FW_WORD_PRELIM = "建議受影響（初步規則，待人審）"
+FW_WORD_CONFIRMED = "建議受影響（規則已確認，待負責單位確認）"
+FW_WORD_VBIOS = "建議受影響（依 NVIDIA 對照表，待人審）"
+FW_WORD_UCODE = "版本比較的候選，待人審"
+# rematch 的 key：不透明字串，只檢查字元集（C2 定的 A-Za-z0-9._=+-:/#）
+FW_KEY_RE = re.compile(r"[A-Za-z0-9._=+\-:/#]{1,300}")
+FW_MAX_BULLETINS = 20      # 每筆結果的公告 ID 上限（C0 決定 2026-11-15）：超過就那份樣本 GAP，不截斷
+FW_MAX_AFFECTED = 100       # 每個樣本存進狀態的 affected 上限（狀態 Issue 有 60000 字元上限；超過整份樣本 GAP）
 
 
 class Fail(Exception):
@@ -162,7 +199,335 @@ def load_inventory(path, base):
                           "reports": r.get("reports") or [], "meta_attention": r.get("attention") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
                           and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None})
+    if isinstance(inv.get("firmware"), dict):
+        projs += firmware_projs(inv["firmware"], base, problems, {p["uuid"] for p in projs})
     return inv, projs, problems
+
+
+def firmware_projs(fw, base, problems, taken):
+    """inventory 的 firmware.samples → 監控單位（FIRMWARE-WATCH.md §2、§5）。watch_version 與 sbom 都有的樣本才進；
+    Release 與樣本的 problems 都列進 problems（報告看得到、降級、擋第一次基準）。
+    status 固定 development：樣本是公開的示範測試資料，不是出貨品，不能走「已出貨」的 SOP。"""
+    out = []
+    tag = fw.get("tag") if isinstance(fw.get("tag"), str) else None
+    for x in fw.get("problems") or []:
+        problems.append(f"韌體 Release {str(tag)[:120]}: {str(x)[:300]}")
+    for x in fw.get("not_watched") or []:
+        # collect 自己判定不能監控的樣本（版本讀不到又沒有映像雜湊）才是 GAP；meta 列的（合成 vBIOS 等）只是說明，不降級
+        if isinstance(x, dict) and x.get("source") == "collect":
+            problems.append(f"韌體樣本 {str(x.get('slug'))[:64]}: 不監控：{str(x.get('why'))[:200]}")
+    for s in fw.get("samples") or []:
+        if not isinstance(s, dict) or not isinstance(s.get("slug"), str):
+            continue
+        slug = s["slug"]
+        for x in s.get("problems") or []:
+            problems.append(f"韌體樣本 {slug[:64]}: {str(x)[:300]}")
+        wv, sb = s.get("watch_version"), s.get("sbom")
+        if not isinstance(wv, str) or not isinstance(sb, dict):
+            continue
+        rel = sb.get("file")
+        if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split("/"):
+            problems.append(f"韌體樣本 {slug[:64]}: SBOM 路徑不合法")
+            continue
+        uuid = uuid_of(FW_PROJECT, wv, FW_LAYER)
+        if uuid in taken:
+            problems.append(f"韌體樣本 {slug[:64]}: 監控鍵重複（只收第一個）")
+            continue
+        taken.add(uuid)
+        inv = s.get("inventory") if isinstance(s.get("inventory"), dict) else None
+        out.append({"uuid": uuid, "name": FW_PROJECT, "version": wv, "layer": FW_LAYER, "status": "development", "tag": tag, "kind": "firmware",
+                    "slug": slug, "sample_kind": s.get("kind"), "firmware_version": s.get("firmware_version"),
+                    "image_sha256": s.get("image_sha256") if isinstance(s.get("image_sha256"), str) else None,
+                    "inventory": inv, "meta_status": s.get("meta_status"), "expect": s.get("expect"),
+                    "release_version": fw.get("version"), "os_responsibility": None, "html_url": fw.get("html_url"),
+                    "sbom": os.path.join(base, rel), "sha256": sb.get("sha256"), "report_status": None, "release_gate": None,
+                    "pipeline_result": None, "reports": [], "meta_attention": [], "kernel_versions": None})
+    return out
+
+
+def is_fw(p):
+    return bool(p) and p.get("kind") == "firmware"
+
+
+def sbom_matchable(path, limit=256 << 20):
+    """SBOM 裡可以讓 Grype 比對的元件數（有 purl、CPE，或 syft:cpe23 屬性）；讀不到或不是 CycloneDX → None（交給 Grype 那一步報 NOT_RUN）。"""
+    try:
+        if os.path.getsize(path) > limit:
+            return None
+        with open(path, encoding="utf-8") as f:
+            bom = json.load(f)
+    except (OSError, ValueError, RecursionError, MemoryError):
+        return None
+    if not isinstance(bom, dict) or not isinstance(bom.get("components"), list):
+        return None
+    n, seen = 0, 0
+    stack = list(bom["components"])
+    while stack and seen < 2_000_000:
+        c = stack.pop()
+        seen += 1
+        if not isinstance(c, dict):
+            continue
+        if isinstance(c.get("components"), list):
+            stack.extend(c["components"])
+        if c.get("type") == "file":
+            continue
+        if (isinstance(c.get("purl"), str) and c["purl"].strip()) or (isinstance(c.get("cpe"), str) and c["cpe"].strip()) or \
+                any(isinstance(x, dict) and isinstance(x.get("name"), str) and x["name"].startswith("syft:cpe23") and isinstance(x.get("value"), str)
+                    and x["value"].strip() for x in (c["properties"] if isinstance(c.get("properties"), list) else [])):
+            n += 1
+    return n
+
+
+# ---------- 韌體公告重跑的輸出（不可信資料，docs/FIRMWARE-WATCH.md §4）----------
+
+def _fw_str(x, lo=1, hi=300):
+    return isinstance(x, str) and lo <= len(x) <= hi and not _MD_CTRL.search(x)
+
+
+def _fw_read(path, limit):
+    """外來的 JSON 檔：一般檔案（不跟隨連結）、有大小上限。→ (物件, None) 或 (None, 原因)。"""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError as e:
+        return None, f"讀不到（{type(e).__name__}）"
+    import stat as _stat
+    if not _stat.S_ISREG(st.st_mode):
+        return None, "不是一般檔案（不跟隨連結）"
+    if st.st_size > limit:
+        return None, f"超過大小上限 {limit} 位元組"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.loads(f.read(limit + 1)), None
+    except (OSError, ValueError, RecursionError) as e:
+        return None, f"不是 JSON（{type(e).__name__}）"
+
+
+def _fw_tables(t, where, errs):
+    """表的識別（三張都要有）：字串與布林欄位；status 要是 OK／GAP、stale 要是布林。→ {表名: {欄位: 值}}。"""
+    out = {}
+    if not isinstance(t, dict):
+        errs.append(f"{where}tables 不是物件")
+        return out
+    for name in FW_TABLES:
+        v = t.get(name)
+        if not isinstance(v, dict):
+            errs.append(f"{where}tables 缺 {name}")
+            continue
+        row = {}
+        for k, x in v.items():
+            if not (isinstance(k, str) and re.fullmatch(r"[a-z0-9_]{1,40}", k)):
+                continue
+            if isinstance(x, bool):
+                row[k] = x
+            elif isinstance(x, str):
+                row[k] = _plain(x, 100)
+        if row.get("status") not in ("OK", "GAP"):
+            errs.append(f"{where}tables.{name}.status 不是 OK／GAP")
+        if not isinstance(row.get("stale"), bool):
+            errs.append(f"{where}tables.{name}.stale 不是布林")
+        out[name] = row
+    return out
+
+
+def _fw_bulletins(b, errs, where):
+    if not isinstance(b, list) or len(b) > FW_MAX_BULLETINS or not all(_fw_str(x, 1, 80) for x in b):
+        errs.append(f"{where}bulletins 不是字串陣列（最多 {FW_MAX_BULLETINS} 筆、每筆 1～80 字元）")
+        return []
+    return list(b)
+
+
+def check_rematch_doc(doc, slug, tag, inv_sha):
+    """rematch-<slug>.json → (整理過的內容, 問題清單)。slug、release_tag、inventory_sha256 要和 inventory 一致；
+    schema 不符、欄位型別不對都是問題（呼叫端記 GAP，不用這份的任何內容）。"""
+    if not isinstance(doc, dict) or doc.get("schema") != FW_REMATCH_SCHEMA:
+        return None, [f"schema 不是 {FW_REMATCH_SCHEMA}"]
+    errs = []
+    if doc.get("slug") != slug:
+        errs.append("slug 和 inventory 不一致")
+    if doc.get("release_tag") != tag:
+        errs.append("release_tag 和 inventory 不一致")
+    if not (isinstance(inv_sha, str) and doc.get("inventory_sha256") == inv_sha):
+        errs.append("inventory_sha256 和 inventory 不一致")
+    if errs:
+        return None, errs
+    status = doc.get("status")
+    if status not in ("OK", "ATTENTION", "GAP"):
+        errs.append("status 不是 OK／ATTENTION／GAP")
+    reasons = doc.get("reasons")
+    if not isinstance(reasons, list) or len(reasons) > 20 or not all(_fw_str(x, 0, 300) for x in reasons):
+        errs.append("reasons 不是字串陣列")
+        reasons = []
+    tables = _fw_tables(doc.get("tables"), "", errs)
+    results, seen = [], set()
+    rs = doc.get("results")
+    if not isinstance(rs, list) or len(rs) > FW_MAX_RESULTS:
+        errs.append(f"results 不是陣列或超過 {FW_MAX_RESULTS} 筆")
+        rs = []
+    for i, r in enumerate(rs):
+        w = f"results[{i}]."
+        if not isinstance(r, dict):
+            errs.append(w + "不是物件")
+            continue
+        kind = r.get("kind")
+        if kind not in FW_KINDS:
+            errs.append(w + "kind 不是 rule／intel-microcode／nvidia-vbios")
+            continue
+        if r.get("result") not in FW_RESULTS[kind]:
+            errs.append(w + f"result 不在 {kind} 認得的值裡")
+            continue
+        if not (isinstance(r.get("key"), str) and FW_KEY_RE.fullmatch(r["key"])) or r["key"] in seen:
+            errs.append(w + "key 不是合規則的字串（A-Za-z0-9._=+-:/#，1～300 字元）或重複")
+            continue
+        seen.add(r["key"])
+        if not _fw_str(r.get("component"), 0, 300):
+            errs.append(w + "component 不是字串")
+            continue
+        if r.get("reason") is not None and not _fw_str(r.get("reason"), 0, 300):
+            errs.append(w + "reason 不是字串或 null")
+            continue
+        if r.get("review") not in ("preliminary", "confirmed", None):
+            errs.append(w + "review 不是 preliminary／confirmed／null")
+            continue
+        b = _fw_bulletins(r.get("bulletins"), errs, w)
+        if r["result"] == FW_AFFECTED[kind] and not b:
+            errs.append(w + f"{r['result']} 卻沒有公告 ID")
+            continue
+        results.append({"key": r["key"], "kind": kind, "component": r["component"], "result": r["result"], "bulletins": b,
+                        "reason": r.get("reason"), "review": r.get("review")})
+    n_aff = sum(1 for r in results if r["result"] == FW_AFFECTED[r["kind"]])
+    if n_aff > FW_MAX_AFFECTED:
+        errs.append(f"affected 超過 {FW_MAX_AFFECTED} 筆（{n_aff}）：狀態 Issue 有大小上限，這份樣本 GAP")
+    changed = []
+    cs = doc.get("changed")
+    if not isinstance(cs, list) or len(cs) > FW_MAX_RESULTS:
+        errs.append("changed 不是陣列")
+        cs = []
+    for i, c in enumerate(cs):
+        w = f"changed[{i}]."
+        ok = isinstance(c, dict) and isinstance(c.get("key"), str) and bool(FW_KEY_RE.fullmatch(c["key"])) and c.get("kind") in FW_KINDS
+        sides = {}
+        for side in ("before", "after"):
+            x = c.get(side) if ok else None
+            # before.result 可以是 null（Release 當時沒有這個元件的結果，C2 介面）；after 一定要有
+            res_ok = isinstance(x, dict) and (_fw_str(x.get("result"), 1, 40) or (side == "before" and x.get("result") is None))
+            if not res_ok or (x.get("reason") is not None and not _fw_str(x.get("reason"), 0, 300)) or \
+                    x.get("review") not in ("preliminary", "confirmed", None):
+                ok = False
+                break
+            sides[side] = {"result": x["result"], "bulletins": _fw_bulletins(x.get("bulletins") or [], errs, w + side + "."),
+                           "reason": x.get("reason"), "review": x.get("review")}
+        if not ok:
+            errs.append(w + "格式不對")
+            continue
+        changed.append({"key": c["key"], "kind": c["kind"], **sides})
+    if errs:
+        return None, errs[:10]
+    return {"status": status, "reasons": reasons, "tables": tables, "results": results, "changed": changed}, []
+
+
+def load_rematch(dirpath, fw_projs):
+    """--firmware-rematch 的資料夾 → {"adv": {uuid: {state, why, results, changed, reasons}}, "tables": {表: 識別}｜None,
+    "table_flags": {表: [原因]}, "problems": [說明], "ran": bool}。
+    state：OK／ATTENTION／GAP／NOT_RUN（bios 樣本）、FW_SBOM_ADV（供應商 SBOM，不重跑）。
+    沒給資料夾、沒有 rematch-summary.json、不在總表裡的 bios 樣本 → NOT_RUN（不拿 Release 當時的結果頂替）；
+    檔案不合格 → GAP（不用裡面的任何內容）。"""
+    out = {"adv": {}, "tables": None, "table_flags": {}, "problems": [], "ran": False, "listed_unknown": []}
+    adv = out["adv"]
+    bios = []
+    for p in fw_projs:
+        if p.get("sample_kind") == "sbom":
+            adv[p["uuid"]] = {"state": FW_SBOM_ADV, "why": None, "results": None, "changed": [], "reasons": []}
+        else:
+            bios.append(p)
+
+    def all_bios(state, why):
+        for p in bios:
+            adv[p["uuid"]] = {"state": state, "why": why, "results": None, "changed": [], "reasons": []}
+        return out
+    if not dirpath:
+        return all_bios("NOT_RUN", "沒有給 --firmware-rematch：公告重跑沒有執行（Release 當時的結果不能頂替今天的）")
+    doc, err = _fw_read(os.path.join(dirpath, "rematch-summary.json"), FW_SUMMARY_MAX)
+    if doc is None:
+        if err == "missing":
+            return all_bios("NOT_RUN", "沒有 rematch-summary.json：公告重跑沒有輸出（Release 當時的結果不能頂替今天的）")
+        return all_bios("GAP", f"rematch-summary.json {err}")
+    tag = next((p["tag"] for p in fw_projs), None)
+    errs = []
+    if not isinstance(doc, dict) or doc.get("schema") != FW_SUMMARY_SCHEMA:
+        errs.append(f"schema 不是 {FW_SUMMARY_SCHEMA}")
+    else:
+        if doc.get("release_tag") != tag:
+            errs.append("release_tag 和 inventory 的韌體 Release 不一致")
+        tables = _fw_tables(doc.get("tables"), "", errs)
+        rows = doc.get("samples")
+        if not isinstance(rows, list) or len(rows) > 1000:
+            errs.append("samples 不是陣列")
+        ms = doc.get("meta_status", "OK")
+        if ms not in ("OK", "GAP"):
+            errs.append("meta_status 不是 OK／GAP")
+        elif ms == "GAP":       # rematch 入口讀不了 firmware-meta.json：samples 是空的，全部 bios 樣本 GAP（原因照錄）
+            rs = [_plain(x, 200) for x in (doc.get("reasons") if isinstance(doc.get("reasons"), list) else [])[:5] if isinstance(x, str)]
+            return all_bios("GAP", "公告重跑讀不了 firmware-meta.json（meta_status GAP）：" + ("；".join(rs) or "沒有寫原因"))
+    if errs:
+        return all_bios("GAP", "rematch-summary.json 不合格：" + "；".join(errs[:5]))
+    out["ran"] = True
+    out["tables"] = tables
+    for name, t in tables.items():
+        if t.get("status") != "OK":
+            why = f"：{t['gap']}" if isinstance(t.get("gap"), str) and t["gap"] else ""
+            out["table_flags"].setdefault(name, []).append(f"狀態 {t.get('status')}（表讀不到或驗證不過，那一類元件是 NOT_ASSESSED）{why}")
+        if t.get("stale") is True:
+            out["table_flags"].setdefault(name, []).append("過期（stale）：不開公告 Issue")
+    by_slug = {}
+    for r in rows:
+        if isinstance(r, dict) and isinstance(r.get("slug"), str):
+            by_slug.setdefault(r["slug"], []).append(r)
+    known = {p["slug"] for p in fw_projs}
+    out["listed_unknown"] = sorted(x[:64] for x in by_slug if x not in known)[:20]
+    for p in bios:
+        u, slug = p["uuid"], p["slug"]
+        if not p.get("inventory"):
+            adv[u] = {"state": "NOT_RUN", "why": "Release 沒有這份樣本的 inventory（collect 沒有收到）", "results": None, "changed": [], "reasons": []}
+            continue
+        lst = by_slug.get(slug)
+        if not lst:
+            adv[u] = {"state": "NOT_RUN", "why": "不在 rematch-summary.json 裡（沒有重跑；Release 當時的結果不能頂替今天的）",
+                      "results": None, "changed": [], "reasons": []}
+            continue
+
+        def gap(why, reasons=()):
+            adv[u] = {"state": "GAP", "why": why, "results": None, "changed": [], "reasons": list(reasons)}
+        row = lst[0]
+        rreasons = [_plain(x, 200) for x in (row.get("reasons") if isinstance(row.get("reasons"), list) else [])[:10] if isinstance(x, str)]
+        if len(lst) > 1:
+            gap("rematch-summary.json 同一個 slug 列了不只一筆", rreasons)
+            continue
+        if row.get("status") not in ("OK", "ATTENTION", "GAP"):
+            gap("rematch-summary.json 的 status 不是 OK／ATTENTION／GAP", rreasons)
+            continue
+        if row.get("output") != f"rematch-{slug}.json" or "/" in slug or "\\" in slug or "\0" in slug:
+            gap("rematch-summary.json 的 output 檔名不是 rematch-<slug>.json（不讀）", rreasons)
+            continue
+        sd, err = _fw_read(os.path.join(dirpath, row["output"]), FW_SAMPLE_MAX)
+        if sd is None:
+            gap(f"{row['output']} " + ("不存在" if err == "missing" else err), rreasons)
+            continue
+        clean, errs = check_rematch_doc(sd, slug, tag, p["inventory"].get("sha256"))
+        if clean is None:
+            gap(f"{row['output']} 不合格：" + "；".join(errs[:5]), rreasons)
+            continue
+        if clean["status"] != row["status"]:
+            gap("rematch-summary.json 與樣本檔的 status 不一致", rreasons + clean["reasons"])
+            continue
+        for name, t in clean["tables"].items():
+            if t.get("status") != "OK" or t.get("stale") is True:
+                out["table_flags"].setdefault(name, []).append(
+                    ("狀態 " + str(t.get("status")) if t.get("status") != "OK" else "過期（stale）") + f"（{slug} 的重跑結果）")
+        adv[u] = {"state": clean["status"], "why": None, "results": clean["results"], "changed": clean["changed"],
+                  "reasons": clean["reasons"] or rreasons}
+    return out
 
 
 def load_state(state_dir):
@@ -381,7 +746,8 @@ def prune_state(st, now):
     iss = (st.get("dumpling") or {}).get("issues") or {}
     mode = (st.get("dumpling") or {}).get("mode") or "real"
     live = {kev_group_key(mode, e) for e in (st.get("matches") or {}).values() if isinstance(e, dict) and "project_uuid" in e} | \
-        {vendor_group_key(mode, e) for e in (st.get("vendor_matches") or {}).values() if isinstance(e, dict) and "vendor" in e}
+        {vendor_group_key(mode, e) for e in (st.get("vendor_matches") or {}).values() if isinstance(e, dict) and "vendor" in e} | \
+        fw_live_keys(mode, st)
     pk = (st.get("dumpling") or {}).setdefault("pruned_keys", []) if st.get("dumpling") is not None else []
     for k in [k for k, r in iss.items() if k not in live and old((r or {}).get("opened_at"))]:
         del iss[k]
@@ -405,6 +771,44 @@ def sanitize_state(st):
     out["vendor_watch"] = {"enabled_at": vw.get("enabled_at"), "watched": vw.get("watched") or {}}
     if "supplementary" in st:
         out["supplementary"] = st["supplementary"]
+    if isinstance(st.get("firmware"), dict):
+        out["firmware"] = sanitize_firmware(st["firmware"])
+    return out
+
+
+def sanitize_firmware(fw):
+    """firmware 狀態：只留公開欄位、限制大小（WATCH.md 3.5）。tables：表的識別（字串、布林）；
+    samples：{監控鍵: {image_sha256, image_sha256_history, advisory: {key: {kind, result, bulletins, component, review, baseline}}}}。"""
+    out = {"tables": {}, "samples": {}}
+    if isinstance(fw.get("size_stopped_at"), str):          # 韌體因狀態大小上限停止的時間（狀態 Issue 的摘要看得到）
+        out["size_stopped_at"] = fw["size_stopped_at"][:40]
+    for n, t in (fw.get("tables") or {}).items() if isinstance(fw.get("tables"), dict) else []:
+        if n in FW_TABLES and isinstance(t, dict):
+            out["tables"][n] = {k: v for k, v in t.items() if isinstance(k, str) and isinstance(v, (str, bool))}
+    for u, x in (fw.get("samples") or {}).items() if isinstance(fw.get("samples"), dict) else []:
+        if not isinstance(x, dict) or not isinstance(u, str):
+            continue
+        hist = x.get("image_sha256_history") if isinstance(x.get("image_sha256_history"), list) else []
+        sm = {"image_sha256": x.get("image_sha256") if isinstance(x.get("image_sha256"), str) else None,
+              "image_sha256_history": [{k: h.get(k) for k in ("at", "old", "new")} for h in hist
+                                       if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("at", "old", "new"))][-FW_HISTORY_KEEP:],
+              "advisory": {}}
+        adv = x.get("advisory") if isinstance(x.get("advisory"), dict) else {}
+        for k, e in list(adv.items())[:FW_MAX_AFFECTED]:
+            # 型別不對的紀錄丟掉（讀入的舊狀態可能被手改；fw_groups 不能因此當掉）
+            if not (isinstance(k, str) and FW_KEY_RE.fullmatch(k) and isinstance(e, dict) and e.get("kind") in FW_KINDS
+                    and isinstance(e.get("result"), str) and isinstance(e.get("bulletins"), list)
+                    and len(e["bulletins"]) <= FW_MAX_BULLETINS and all(isinstance(b, str) and len(b) <= 80 for b in e["bulletins"])):
+                continue        # 超過上限不截斷（截斷後看起來像完整的）：整筆丟掉
+            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": list(e["bulletins"])}
+            if isinstance(e.get("component"), str):
+                rec["component"] = e["component"][:300]
+            if e.get("review") in ("preliminary", "confirmed", None) and "review" in e:
+                rec["review"] = e["review"]
+            if isinstance(e.get("baseline"), bool):
+                rec["baseline"] = e["baseline"]
+            sm["advisory"][k] = rec
+        out["samples"][u] = sm
     return out
 
 
@@ -505,8 +909,263 @@ def pinfo_of(projs, uuid):
     return next((p for p in projs if p["uuid"] == uuid), None)
 
 
+# ---------- 韌體公告 Issue 與狀態（docs/FIRMWARE-WATCH.md §5） ----------
+
+def fw_entry_of(r, baseline):
+    """一筆 affected／affected-candidate 的結果 → 狀態裡的紀錄（只存這兩種，控制大小）。"""
+    # 公告 ID 超過 FW_MAX_BULLETINS 的結果在 check_rematch_doc 就讓整份樣本 GAP（results 是 None，走不到這裡）；這裡不再切片
+    if len(r["bulletins"]) > FW_MAX_BULLETINS:
+        raise Fail(f"內部錯誤：公告 ID 超過 {FW_MAX_BULLETINS} 筆的結果不該寫進狀態（{r.get('key')!r:.80}）")
+    e = {"kind": r["kind"], "result": r["result"], "bulletins": list(r["bulletins"]), "component": _plain(r["component"], 120)}
+    if r.get("review"):
+        e["review"] = r["review"]
+    if baseline:
+        e["baseline"] = True
+    return e
+
+
+def fw_update(state, inv_fw, fw_projs, rm, first, ts):
+    """這一輪的韌體狀態：每個監控鍵最近一次的 image_sha256（與變化的歷史）、affected 的公告比對結果、三張表的識別。
+    → {"samples", "prev_samples", "tables", "changes", "evaluated", "rm", "projs"}（呼叫端把 samples、tables 寫進 state["firmware"]）。
+    - 公告沒有重跑（NOT_RUN）或檔案不合格（GAP）的樣本：沿用上一次的紀錄（不當成「不再受影響」）。
+    - 這次的韌體 Release 沒收到或有 problem（meta 壞掉）：整份沿用上一次；其餘不在這次清單裡的鍵才移除（樣本離開最新的 Release）。
+    - image_sha256 是 null：不比、保留舊值。"""
+    # 讀入的舊狀態也當外來資料（狀態 Issue 可能被手改）：先 sanitize，型別不對的紀錄丟掉，不能讓 match 當掉
+    prev = sanitize_firmware(state["firmware"]) if isinstance(state.get("firmware"), dict) else {}
+    ps_all = {u: x for u, x in (prev.get("samples") or {}).items() if isinstance(x, dict)} if isinstance(prev.get("samples"), dict) else {}
+    carry_all = not isinstance(inv_fw, dict) or bool(inv_fw.get("problems"))
+    listed = {uuid_of(FW_PROJECT, x["watch_version"], FW_LAYER) for x in ((inv_fw or {}).get("samples") or [])
+              if isinstance(x, dict) and isinstance(x.get("watch_version"), str)}
+    cur = {p["uuid"] for p in fw_projs}
+    samples, changes, evaluated = {}, [], {}
+    for u, x in ps_all.items():
+        if u not in cur and (carry_all or u in listed):
+            samples[u] = x
+    for p in fw_projs:
+        u = p["uuid"]
+        old_s = ps_all.get(u) or {}
+        hist = [h for h in old_s.get("image_sha256_history") or [] if isinstance(h, dict)][-FW_HISTORY_KEEP:]
+        old, img = old_s.get("image_sha256"), p.get("image_sha256")
+        if img is None:
+            img = old if isinstance(old, str) else None
+        elif isinstance(old, str) and old != img:
+            hist = (hist + [{"at": ts, "old": old, "new": img}])[-FW_HISTORY_KEEP:]
+            changes.append({"uuid": u, "slug": p["slug"], "old": old, "new": img})
+        a = rm["adv"].get(u) or {}
+        pa = old_s.get("advisory") if isinstance(old_s.get("advisory"), dict) else {}
+        if a.get("results") is not None:
+            now_adv, ev = {}, {}
+            for r in a["results"]:
+                ev[r["key"]] = r
+                if r["result"] == FW_AFFECTED[r["kind"]]:
+                    now_adv[r["key"]] = fw_entry_of(r, first or bool((pa.get(r["key"]) or {}).get("baseline")))
+            evaluated[u] = ev
+        else:
+            now_adv = pa
+        samples[u] = {"image_sha256": img, "image_sha256_history": hist, "advisory": now_adv}
+    tables = rm["tables"] if rm["tables"] is not None else (prev.get("tables") if isinstance(prev.get("tables"), dict) else {})
+    return {"samples": samples, "prev_samples": ps_all, "tables": tables, "changes": changes, "evaluated": evaluated, "rm": rm,
+            "projs": fw_projs}
+
+
+def fw_groups(mode, samples):
+    """firmware.samples → {群組鍵: {"kind", "id", "members": {uuid: {key: 紀錄}}}}。
+    規則表、vBIOS（result affected）：每個公告 ID 一個群組（issue_key(mode, "fwadv", 公告 ID)）；
+    Intel 微碼（affected-candidate）：每個 rematch key 一個群組（issue_key(mode, "fwadv-ucode", key)，key 當不透明字串）。"""
+    out = {}
+    for u, sm in (samples or {}).items():
+        for key, e in ((sm or {}).get("advisory") or {}).items():
+            if not isinstance(e, dict):
+                continue
+            if e.get("kind") in ("rule", "nvidia-vbios") and e.get("result") == "affected":
+                gks = [(issue_key(mode, "fwadv", b), "fwadv", b) for b in e.get("bulletins") or []]
+            elif e.get("kind") == "intel-microcode" and e.get("result") == "affected-candidate":
+                gks = [(issue_key(mode, "fwadv-ucode", key), "fwadv-ucode", key)]
+            else:
+                continue
+            for gk, kind, gid in gks:
+                out.setdefault(gk, {"kind": kind, "id": gid, "members": {}})["members"].setdefault(u, {})[key] = e
+    return out
+
+
+def fw_live_keys(mode, st):
+    """狀態裡還有 affected 的公告群組鍵（prune_state 不能把它們的群組紀錄修剪掉）。"""
+    fw = st.get("firmware") if isinstance(st.get("firmware"), dict) else {}
+    return set(fw_groups(mode, fw.get("samples") if isinstance(fw.get("samples"), dict) else {}))
+
+
+def fw_wording(entries):
+    """用語（C0 決定）：規則表 preliminary → 初步規則，待人審；confirmed → 規則已確認，待負責單位確認；不能寫成確定受影響。"""
+    if any(e.get("kind") == "rule" and e.get("review") != "confirmed" for e in entries):
+        return FW_WORD_PRELIM
+    if any(e.get("kind") == "nvidia-vbios" for e in entries):
+        return FW_WORD_VBIOS
+    return FW_WORD_CONFIRMED
+
+
+def fw_tables_text(tables, names):
+    out = []
+    for n in names:
+        t = (tables or {}).get(n)
+        if isinstance(t, dict):
+            out.append(f"  - {md_code(n)}：" + "、".join(f"{md_code(k)} = {md_code(str(v).lower() if isinstance(v, bool) else v)}" for k, v in sorted(t.items())))
+        else:
+            out.append(f"  - {md_code(n)}：沒有這次的識別")
+    return out
+
+
+def _fw_label(by_uuid, u):
+    p = by_uuid.get(u)
+    return (md_code(p["slug"]), md_text(p.get("firmware_version") if p.get("firmware_version") is not None else p.get("version"), 80),
+            md_code(p.get("image_sha256") or "—")) if p else (md_code(u), "—", "—")
+
+
+def fw_group_title(g, entries, by_uuid):
+    n = len(g["members"])
+    if g["kind"] == "fwadv-ucode":
+        comp = next((e.get("component") for e in entries if e.get("component")), None) or g["id"]
+        cands = {b for e in entries for b in e.get("bulletins") or []}
+        return f"[韌體公告] Intel {md_title(comp)}：{len(cands)} 個候選公告（{FW_WORD_UCODE}）"
+    slugs = sorted(by_uuid[u]["slug"] if u in by_uuid else u for u in g["members"])
+    tail = md_title(slugs[0]) + (f" 等 {n} 份樣本" if n > 1 else "")
+    return f"[韌體公告] {md_title(g['id'])} {fw_wording(entries)}：{tail}"
+
+
+def fw_group_body(mode, g, entries, fw, by_uuid, p0, run_url, now, tables):
+    ev = fw["evaluated"]
+    lines = ["> **演練（合成資料）**：這是每日監控的演練 Issue，不是真的漏洞通知。", ""] if mode == "drill" else []
+    ucode = g["kind"] == "fwadv-ucode"
+    if ucode:
+        cands = sorted({b for e in entries for b in e.get("bulletins") or []})
+        lines += [f"Intel 微碼 **{md_text(next((e.get('component') for e in entries if e.get('component')), None) or g['id'])}**："
+                  f"SBOM 的微碼 revision 比某個微碼 release 舊，就把那個 release 列的 INTEL-SA 都列成候選（{FW_WORD_UCODE}）。"
+                  "這是 release 層級的版本比較，**不是確認受影響**；是否受影響由負責單位確認。", "",
+                  f"- 候選公告（{len(cands)} 個）：{'、'.join(md_code(b) for b in cands)}"]
+    else:
+        lines += [f"**{md_text(g['id'])}**：韌體公告比對的結果是 **{fw_wording(entries)}**。"
+                  "這是 repo 當下的比對表對韌體 inventory 的比對結果，**不是確定受影響**；是否受影響由負責單位確認。", ""]
+    if p0:
+        lines += [f"- 韌體 Release：{md_code(p0.get('tag'))}（{md_code(p0.get('html_url'))}）",
+                  f"- 狀態：development（公開的示範樣本，不是出貨品）；{HANDLING['development']}"]
+    kinds = sorted({e.get("kind") for e in entries})
+    basis = {"rule": "規則表（fw-advisory-rules.json）；review 是 preliminary 的規則是初步的，要人審",
+             "intel-microcode": "Intel 微碼發佈資料表（revision 的版本比較）",
+             "nvidia-vbios": "NVIDIA vBIOS 對照表（對照表的列、裝置 ID、vBIOS 版本寫在下面的「依據」欄，表的 reviewed_until 在表的識別）"}
+    lines += [f"- 比對依據：{'；'.join(basis[k] for k in kinds if k in basis)}",
+              "- 表的識別（公告重跑的結果）："] + fw_tables_text(tables, sorted({FW_TABLE_OF[k] for k in kinds if k in FW_TABLE_OF}))
+    lines += ["", f"受影響的樣本（{len(g['members'])} 份）：", "", "| 樣本 | 版本 | 元件 | key | 映像 sha256 | 依據 |", "|---|---|---|---|---|---|"]
+    for u in sorted(g["members"], key=lambda x: (by_uuid[x]["slug"] if x in by_uuid else x)):
+        slug, ver, img = _fw_label(by_uuid, u)
+        for key, e in sorted(g["members"][u].items()):
+            reason = (((ev.get(u) or {}).get(key) or {}).get("reason"))
+            lines.append(f"| {slug} | {ver} | {md_code(e.get('component'))} | {md_code(key)} | {img} | "
+                         f"{md_text(reason) if reason else md_text(e.get('review') or '—')} |")
+    lines += ["", "限制：公告重跑只反映表的更新，不重新解析映像；比不到的元件是 NOT_ASSESSED（以廠商公告為準）。"
+              "Issue 不會自動關閉，請負責單位確認後關閉。"]
+    if run_url:
+        lines += ["", f"執行紀錄：{run_url}"]
+    return "\n".join(lines)
+
+
+def fw_plan(mode, state, fw, projs, iss, target, ts, run_url, now):
+    """→ (要新開的群組 pending 項目, 留言動作)。
+    新開：群組有至少一筆不是基準的紀錄、還沒有 Issue、而且它那一類的表沒有過期或 GAP。
+    已有 Issue 的群組：新的樣本 → open_if_closed（只列新的；原 Issue 關閉了就開新的）；樣本離開（不再 affected、變 NOT_ASSESSED、不在結果裡）、
+    微碼的候選清單變了 → comment（不自動關閉）。image_sha256 變了：這個鍵每個開著的 KEV、廠商層級、公告群組 Issue 各留言一次。"""
+    by_uuid = {p["uuid"]: p for p in projs}
+    prev_g, cur_g = fw_groups(mode, fw["prev_samples"]), fw_groups(mode, fw["samples"])
+    bad_tables = {n for n, v in fw["rm"]["table_flags"].items() if v}
+    pending, acts = [], []
+    p0 = next((p for p in fw["projs"]), None)
+    for gk in sorted(set(cur_g) | set(prev_g), key=lambda k: ((cur_g.get(k) or prev_g[k])["kind"], (cur_g.get(k) or prev_g[k])["id"])):
+        g, pg = cur_g.get(gk), prev_g.get(gk)
+        if g is not None and gk not in iss:
+            entries = [e for m in g["members"].values() for e in m.values()]
+            if all(e.get("baseline") for e in entries):
+                continue                                    # 基準：不開 Issue（比照 KEV）
+            if any(FW_TABLE_OF.get(e.get("kind")) in bad_tables for e in entries):
+                continue                                    # 表過期或 GAP：不開公告 Issue（需注意與狀態看得到）
+            labels = list(FW_ISSUE_LABELS)
+            pending.append((gk, "fwadv", fw_group_title(g, entries, by_uuid), fw_group_body(mode, g, entries, fw, by_uuid, p0, run_url, now, fw["tables"]),
+                            labels, {"first_detected": ts}))
+            continue
+        t = target(gk)
+        if not t:
+            continue
+        gm, pm = (g or {"members": {}})["members"], (pg or {"members": {}})["members"]
+        new = [u for u in gm if u not in pm]
+        left = [u for u in pm if u not in gm]
+        lines = []
+        entries = [e for m in gm.values() for e in m.values()] or [e for m in pm.values() for e in m.values()]
+        kind_g = (g or pg)
+        if new:
+            lines += [f"新增受影響的樣本（{len(new)} 份）：", ""]
+            for u in sorted(new, key=lambda x: (by_uuid[x]["slug"] if x in by_uuid else x)):
+                slug, ver, img = _fw_label(by_uuid, u)
+                for key, e in sorted(gm[u].items()):
+                    lines.append(f"- {slug}（{ver}）：元件 {md_code(e.get('component'))}、key {md_code(key)}、映像 sha256 {img}")
+        if kind_g["kind"] == "fwadv-ucode" and g is not None and pg is not None and gm and pm:
+            pc = sorted({b for m in pm.values() for e in m.values() for b in e.get("bulletins") or []})
+            cc = sorted({b for m in gm.values() for e in m.values() for b in e.get("bulletins") or []})
+            if pc != cc:
+                lines += ["", "候選公告清單變了：", f"- 之前（{len(pc)} 個）：{'、'.join(md_code(b) for b in pc) or '—'}",
+                          f"- 現在（{len(cc)} 個）：{'、'.join(md_code(b) for b in cc) or '—'}"]
+        if left:
+            lines += ["", f"離開的樣本（{len(left)} 份；Issue 不會自動關閉）：", ""]
+            for u in sorted(left, key=lambda x: (by_uuid[x]["slug"] if x in by_uuid else x)):
+                slug, ver, img = _fw_label(by_uuid, u)
+                for key in sorted(pm[u]):
+                    r = (fw["evaluated"].get(u) or {}).get(key)
+                    if u not in by_uuid:
+                        why = "樣本不在這次監控的韌體 Release 裡"
+                    elif r is not None:
+                        why = f"這次的結果是 {md_code(r['result'])}" + (f"（公告 {'、'.join(md_code(b) for b in r['bulletins'])}）" if r["bulletins"] else "")
+                    else:
+                        why = "這個 key 不在這次的結果裡"
+                    lines.append(f"- {slug}（{ver}）：key {md_code(key)}：{why}")
+        if not lines:
+            continue
+        head = f"{md_text(kind_g['id'])} 的韌體公告比對有變化（{ts}）：" if kind_g["kind"] == "fwadv" else \
+            f"Intel 微碼 {md_text(next((e.get('component') for e in entries if e.get('component')), None) or kind_g['id'])} 的候選有變化（{ts}）："
+        body = "\n".join([head, ""] + lines + ["", "這是公告比對的建議，不是確定受影響；原 Issue 已關閉時會開新的 Issue。" + (f"執行紀錄：{run_url}" if run_url else "")])
+        if new:
+            gg = g
+            acts.append({"op": "open_if_closed", "key": t, "title": fw_group_title(gg, entries, by_uuid) if gg else "[韌體公告] 新的樣本", "body": body,
+                         "labels": list(FW_ISSUE_LABELS)})
+        else:
+            acts.append({"op": "comment", "key": t, "body": body, "reopen_if_closed": False})
+    # image_sha256 變了：同 slug、同版本，內容卻不同。不開新鍵；這個鍵每個開著的 Issue 各留言一次
+    for ch in fw["changes"]:
+        u = ch["uuid"]
+        targets = {}
+        for e in state["matches"].values():
+            if isinstance(e, dict) and e.get("project_uuid") == u and e.get("status") == "open" and "cve" in e:
+                gk = kev_group_key(mode, e)
+                if gk in iss:
+                    targets.setdefault(target(gk), f"KEV {e['cve']}")
+        for e in (state.get("vendor_matches") or {}).values():
+            if isinstance(e, dict) and e.get("project_uuid") == u and e.get("status") == "open" and "vendor" in e:
+                gk = vendor_group_key(mode, e)
+                if gk in iss:
+                    targets.setdefault(target(gk), f"廠商層級 {e['cve']}")
+        for gk, g in cur_g.items():
+            if u in g["members"] and gk in iss:
+                targets.setdefault(target(gk), f"公告 {g['id']}")
+        slug, ver, _ = _fw_label(by_uuid, u)
+        for t in sorted(k for k in targets if k):
+            acts.append({"op": "comment", "key": t, "reopen_if_closed": False,
+                         "body": "\n".join([f"樣本 {slug}（{ver}）的映像 sha256 變了（{ts}）：", "",
+                                           f"- 之前：{md_code(ch['old'])}", f"- 現在：{md_code(ch['new'])}", "",
+                                           "同一個樣本、同一個版本，內容卻不同（廠商重新發布了檔案？）：監控鍵不變，沒有開新的 Issue，這個 Issue 的判斷要重新確認。"
+                                           + (f"執行紀錄：{run_url}" if run_url else "")])})
+    return pending, acts
+
+
 def release_results(p):
     """Release 的結論（release-meta；缺少時 NOT_RUN）。status 是生命週期，這幾個才是掃描與發行的結論。"""
+    if is_fw(p):
+        return (f"韌體示範樣本（沒有 release-meta）；firmware-meta 的樣本狀態 {md_text(p.get('meta_status') or '—')}、"
+                f"firmware.yml 的 expected 結果 {md_text(p.get('expect') or '—')}")
     if not p:
         return "報告狀態 NOT_RUN（找不到 Release 資訊）"
     reps = "、".join(f"{x['report']} 報告 {x['report_status']}／閘門 {x['release_gate']}" for x in p.get("reports") or [])
@@ -525,7 +1184,8 @@ def layer_note(p):
     if p["layer"] == "os" and p.get("os_responsibility") in ("customer", "upstream-vendor"):
         return "OS 層（範例 rootfs）：列入「通知客戶」，不是我們的修補待辦。"
     return {"bsp": "BSP 層：我們的待辦。", "os": "OS 層：我們的待辦（os_responsibility: ours）。",
-            "product": "沒有分層 SBOM（整份產品）：當成我們的待辦。"}.get(p["layer"], "")
+            "product": "沒有分層 SBOM（整份產品）：當成我們的待辦。",
+            "firmware": "韌體層（公開的示範樣本）：交 RD 與韌體負責人確認。"}.get(p["layer"], "")
 
 
 def labels_for(p, kind):
@@ -553,6 +1213,7 @@ def vendor_rows(es, ps):
                      f"{md_cell(p['status'] if p else '?')} | {md_code(p.get('tag')) if p else '?'} | "
                      f"{md_cell(', '.join(str(x) for x in e.get('watch_via') or []))} | {md_cell(e.get('component_count'))} | "
                      f"{md_cell(e.get('first_detected'))} |")
+    lines.append("")             # 表格與後面的清單之間空一行（不然清單會被當成表格的一部分）
     seen = set()
     for e, p in zip(es, ps):
         if not p or (p.get("tag"), p["layer"]) in seen:
@@ -619,7 +1280,7 @@ def mark_demo(actions):
     return actions
 
 
-def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, run_url, now, max_new):
+def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, run_url, now, max_new, fw=None):
     """→ (actions, 統計)。在 state["dumpling"]["issues"] 記下每個群組對應的 Issue（或彙總 Issue）。"""
     dd = state.setdefault("dumpling", {})
     dd["mode"] = mode
@@ -665,6 +1326,10 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         title = f"[廠商層級] {md_title(es[0]['cve'])}（{md_title(es[0].get('vendor'))}）可能影響 {who}"
         pending.append((gk, "vendor", title, vendor_body(mode, es, ps, run_url, now), labels_for_many([p for p in ps if p], "vendor"),
                         min(es, key=lambda e: str(e.get("first_detected")))))
+    fw_acts = []
+    if fw is not None:      # 韌體公告群組與 image_sha256 變化的留言（用還沒加進這次新群組的 iss 判斷）
+        fp, fw_acts = fw_plan(mode, state, fw, projs, iss, lambda k: ((iss[k].get("via_summary") or k) if k in iss else None), ts, run_url, now)
+        pending += fp
     actions, opened = [], 0
     pruned_keys = dd.setdefault("pruned_keys", [])
     if len(pending) <= max_new:
@@ -684,8 +1349,9 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             body.insert(0, "> **演練（合成資料）**\n")
         if run_url:
             body += ["", f"執行紀錄：{run_url}"]
-        actions.append({"op": "open", "key": sk, "title": f"[KEV][ATTENTION] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）", "body": "\n".join(body),
-                        "labels": ["kev", "summary", "attention"]})
+        only_fw = all(k == "fwadv" for _, k, _, _, _, _ in rest)
+        actions.append({"op": "open", "key": sk, "title": f"[{'韌體公告' if only_fw else 'KEV'}][ATTENTION] 彙總：{len(rest)} 個新的命中群組（{ts[:10]}）",
+                        "body": "\n".join(body), "labels": ["firmware-advisory", "summary", "attention"] if only_fw else ["kev", "summary", "attention"]})
         for gk, kind, _, _, _, e in rest:
             iss[gk] = {"kind": kind, "first_detected": e.get("first_detected"), "opened_at": ts, "via_summary": sk}
             if gk in pruned_keys:
@@ -749,6 +1415,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             actions.append({"op": "comment", "key": t, "body": f"{md_text(e['cve'])} 在 {md_text(e['project'])} {md_text(e['version'])} 這次沒有再比對到（{ts}）："
                             "可能已修補、元件移除，或 KEV 清單改變。Issue 不會自動關閉，請負責人確認後關閉。", "reopen_if_closed": False})
             comments += 1
+    actions += fw_acts          # 韌體的留言不併進上面的事件彙總（每個都要列出樣本與 sha256）
+    comments += len(fw_acts)
     return actions, {"opened": opened, "summary": len(rest), "comments": comments}
 
 
@@ -921,7 +1589,14 @@ def run(a, kernel_runner=None):
         sbx = eg.sandbox_check()
         budget = float(a.grype_total_timeout)
         matches, grype_ok, kernel_ok, per = {}, set(), set(), {}
+        grype_na = set()        # 韌體：SBOM 沒有任何帶 purl／CPE 的元件：Grype 沒有東西可比，NOT_ASSESSED（不是 OK，也不算 Grype 沒跑完）
         for p in projs:
+            if is_fw(p) and sbom_matchable(p["sbom"]) == 0:
+                grype_na.add(p["uuid"])
+                per[p["uuid"]] = {"uuid": p["uuid"], "tag": p["tag"], "layer": p["layer"], "grype": FW_GRYPE_NA, "why": None,
+                                  "report_status": FW_NO_ITEM, "release_gate": FW_NO_ITEM, "kernel_map": FW_NO_ITEM, "exploited": 0,
+                                  "version_unknown": 0, "kernel_cna": FW_NO_ITEM, "kind": "firmware"}
+                continue
             spec = {"sbom": p["sbom"], "sha256": p["sha256"]}
             t0 = datetime.datetime.now()
             try:
@@ -932,6 +1607,8 @@ def run(a, kernel_runner=None):
             row = {"uuid": p["uuid"], "tag": p["tag"], "layer": p["layer"], "grype": info.get("status"), "why": info.get("why"),
                    "report_status": p.get("report_status"), "release_gate": p.get("release_gate"),
                    "kernel_map": (info.get("kernel_map") or {}).get("status"), "exploited": 0, "version_unknown": 0, "kernel_cna": None}
+            if is_fw(p):        # 韌體 SBOM 沒有 Linux 核心：核心對應與核心 CNA「沒有這一項」，不算 GAP、不降級、不擋基準
+                row.update(kind="firmware", report_status=FW_NO_ITEM, release_gate=FW_NO_ITEM, kernel_map=FW_NO_ITEM, kernel_cna=FW_NO_ITEM)
             if row["kernel_map"] in ("GAP", "FAIL"):
                 # L4T 核心對應失敗：Grype 用原始 SBOM 比對，核心的 KEV 可能漏掉（Release 掃描這種情況也標 GAP；預驗第 3 項）
                 g = f"{p['name']}@{p['version']}#{p['layer']}：L4T 核心對應 {row['kernel_map']}（{(info.get('kernel_map') or {}).get('detail') or ''}）：核心元件可能沒有比對"
@@ -998,10 +1675,37 @@ def run(a, kernel_runner=None):
             notes += vnotes
         except Exception as e:
             attn.append(f"廠商層級 NOT_RUN（{type(e).__name__}）")
+        # 韌體：公告重跑的結果、image_sha256 的變化、狀態（FIRMWARE-WATCH.md §4、§5）
+        fw_projs = [p for p in projs if is_fw(p)]
+        fwx = None
+        fw_size_why = None
+        if fw_projs or isinstance(inv.get("firmware"), dict) or isinstance(state.get("firmware"), dict):
+            rm = load_rematch(getattr(a, "firmware_rematch", None), fw_projs)
+            old_fw = copy.deepcopy(state["firmware"]) if isinstance(state.get("firmware"), dict) else None
+            fwx = fw_update(state, inv.get("firmware"), fw_projs, rm, first, utc(now))
+            state["firmware"] = {"tables": fwx["tables"], "samples": fwx["samples"]}
+            fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious)
+            # 狀態大小（C0 裁定 (A)，2026-11-15）：加上韌體會超過狀態 Issue 的上限 → 只有韌體停下來（fail-closed），
+            # KEV 照常（#28 的決定：漏掉 KEV 通知比重複留言嚴重）。韌體這一輪不寫進狀態（沿用上一輪）、不產生 fwadv 的動作、整份標 GAP
+            size_fw = state_size(sanitize_state(state))
+            if size_fw > STATE_MAX_CHARS:
+                state["firmware"] = sanitize_firmware(old_fw) if old_fw is not None else {"tables": {}, "samples": {}}
+                state["firmware"]["size_stopped_at"] = utc(now)
+                why = (f"韌體因狀態大小上限停止：加上這一輪的韌體結果，狀態編碼後約 {size_fw} 字元，超過上限 {STATE_MAX_CHARS}；"
+                       "這一輪的韌體結果不寫進狀態、不開公告 Issue（KEV 照常）")
+                for p in fw_projs:
+                    if p["uuid"] in per:
+                        per[p["uuid"]].update(advisory="GAP", advisory_why=why)
+                gaps.append(why)
+                serious.append("韌體因狀態大小上限停止")
+                fw_size_why = why
+                fwx = None
+            elif isinstance(state.get("firmware"), dict):
+                state["firmware"].pop("size_stopped_at", None)
         if first:
             # 基準不完整會讓下一次把既有的命中全部當成新的：任何一項沒有完整跑完就 FAIL、不寫狀態（PR #28 驗證應修 1）
             why = []
-            missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok]
+            missing = [p["uuid"] for p in projs if p["uuid"] not in grype_ok and p["uuid"] not in grype_na]
             if missing:
                 why.append(f"{len(missing)} 份 SBOM 的 Grype 沒跑完（例如 {missing[0]}）")
             if cisa["status"] != "OK":
@@ -1020,6 +1724,12 @@ def run(a, kernel_runner=None):
                 why.append(f"{len(knr)} 份 SBOM 的核心 CNA NOT_RUN")
             if vrep is None:
                 why.append("廠商層級 NOT_RUN")
+            if fwx is not None:
+                fbad = [p["slug"] for p in fw_projs if fwx["rm"]["adv"][p["uuid"]]["state"] in ("NOT_RUN", "GAP")]
+                if fbad:
+                    why.append(f"{len(fbad)} 份韌體樣本的公告重跑是 NOT_RUN／GAP（例如 {str(fbad[0])[:60]}）：公告結果沒有納入基準")
+                if fwx["rm"]["table_flags"]:
+                    why.append("韌體的比對表過期或 GAP（" + "、".join(sorted(fwx["rm"]["table_flags"])) + "）：過期時的結果不能當基準")
             if why:
                 raise Fail("第一次執行要建立基準，但沒有完整跑完：" + "；".join(why) + "。基準不完整會讓下一次把既有的命中全部當成新的，這次不寫狀態")
         coverage = list(NOT_RUN_DAILY)
@@ -1027,10 +1737,18 @@ def run(a, kernel_runner=None):
         nb_actions = [{"op": "comment", "key": nb_key, "reopen_if_closed": False,
                        "body": f"已建立基準（{utc(now)}，{len(projs)} 份 SBOM）。每日監控開始比對，這個 Issue 可以關閉。"}] \
             if first and nb_key in (sbase.get("watch_keys") or []) else []
-        actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues)
+        actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues, fwx)
         actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
+            if fw_size_why:          # 韌體因狀態大小上限停止：健康 Issue 當輪就看得到（7 天一次，同「狀態接近上限」）
+                dd = state.setdefault("dumpling", {})
+                last = dd.get("fw_size_warned_at")
+                if not last or (now - parse_now(last)).days >= HEALTH_REPEAT_DAYS:
+                    dd["fw_size_warned_at"] = utc(now)
+                    actions.append({"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 韌體因狀態大小上限停止",
+                                    "body": fw_size_why + "。請處理：修剪狀態、減少韌體樣本或改成分段存放（WATCH.md 3.5）。",
+                                    "labels": ["watch-health"]})
         add_feed_note(actions, feed_attn)
         if a.demo:
             mark_demo(actions)
@@ -1063,7 +1781,7 @@ def run(a, kernel_runner=None):
             "state": clean, "actions": actions, "status": status, "detail": detail}
     if a.demo:
         plan["demo"] = True        # 公開 repo（D-040）：狀態 Issue 建立時也加 demo 標籤（標題與內文格式不變；C0 決定，2026-11-14）
-    report = render_report(a.mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep)
+    report = render_report(a.mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep, fwx, inv.get("firmware"), projs)
     rules = publiccheck.load_rules()
     probs = publiccheck.check_text(json.dumps(clean, ensure_ascii=False, indent=0), rules) + \
         [x for act in actions for x in publiccheck.check_text(act.get("title", "") + "\n" + act.get("body", ""), rules)]
@@ -1075,6 +1793,10 @@ def run(a, kernel_runner=None):
         raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
     result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
               "new": new, "back": back, "gone": gone, "stats": stats, "baseline": first}
+    if fwx is not None:
+        result["firmware"] = {"tables": fwx["tables"], "table_flags": fwx["rm"]["table_flags"], "image_sha256_changes": fwx["changes"],
+                              "advisory": {u: {"state": x["state"], "why": x["why"], "reasons": x["reasons"], "changed": x["changed"]}
+                                           for u, x in fwx["rm"]["adv"].items()}}
     for name, obj in (("plan.json", plan), ("result.json", result)):
         tmp = os.path.join(a.out, name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -1085,7 +1807,83 @@ def run(a, kernel_runner=None):
     return status, detail
 
 
-def render_report(mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep):
+def fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious):
+    """韌體的報告列與降級：公告重跑 NOT_RUN／GAP、表過期或 GAP、結果和 Release 當時不同、image_sha256 變了。
+    NOT_RUN／GAP 讓整輪降級（連續兩次開健康 Issue）；供應商 SBOM 的 NOT_ASSESSED 是設計上不重跑，不降級。"""
+    for p in fw_projs:
+        u, a = p["uuid"], rm["adv"][p["uuid"]]
+        row = per.get(u)
+        if row is not None:
+            row.update(advisory=a["state"], image_sha256=p.get("image_sha256"), advisory_why=a["why"], advisory_reasons=a["reasons"][:10])
+        if a["state"] == "NOT_RUN":
+            attn.append(f"{p['slug']}：韌體公告重跑 NOT_RUN（{a['why']}）")
+            serious.append(f"{u} 韌體公告重跑 NOT_RUN")
+        elif a["state"] == "GAP":
+            gaps.append(f"{p['slug']}：韌體公告重跑 GAP（{a['why'] or '；'.join(a['reasons']) or '見重跑結果'}）")
+            serious.append(f"{u} 韌體公告重跑 GAP")
+        if a["changed"]:
+            attn.append(f"{p['slug']}：{len(a['changed'])} 項公告比對結果和 Release 當時不同（列在報告的韌體一節）")
+    for name, why in sorted(rm["table_flags"].items()):
+        txt = "；".join(sorted(set(why))[:3])
+        attn.append(f"韌體的比對表 {name}：{txt}")        # 過期（stale）只進需注意；狀態 GAP（表讀不到或驗證不過）另外是 GAP
+        if any(x.startswith("狀態") for x in why):
+            gaps.append(f"韌體的比對表 {name}：{txt}")
+        serious.append(f"韌體的比對表 {name} 過期或 GAP")
+    for ch in fwx["changes"]:
+        attn.append(f"{ch['slug']}：同一個 slug、同一個版本，映像 sha256 變了：{ch['old']} → {ch['new']}（監控鍵不變，不開新的 Issue）")
+    fw = inv.get("firmware") if isinstance(inv.get("firmware"), dict) else {}
+    for x in (fw.get("not_watched") or [])[:30]:
+        if isinstance(x, dict):
+            notes.append(f"韌體不監控：{x.get('slug')}：{x.get('why')}")
+    if inv.get("firmware_older"):
+        notes.append("舊的韌體 Release 不比對（只監控最新的一個，第一階段示範的限制）：" + "、".join(str(x)[:60] for x in inv["firmware_older"][:10]))
+    if rm["listed_unknown"]:
+        notes.append("rematch-summary.json 列了 inventory 沒有的樣本（略過）：" + "、".join(rm["listed_unknown"][:10]))
+
+
+def render_firmware(per, fwx, inv_fw, projs):
+    """報告的韌體一節：表的識別（status、stale）、每份樣本的 Grype 與公告比對、changed、映像 sha256 的變化。"""
+    rm = fwx["rm"]
+    L = ["", "## 韌體", "", f"韌體 Release：{md_code((inv_fw or {}).get('tag'))}（FIRMWARE-WATCH.md；樣本是公開的測試資料，不是出貨品）", "", "表的識別："]
+    if rm["tables"] is not None:
+        L += fw_tables_text(rm["tables"], FW_TABLES)
+    else:
+        L += ["  - 這次沒有公告重跑的結果（NOT_RUN／GAP）：沒有表的識別；狀態裡保留上一次的值"]
+        old = fwx["tables"] if fwx["tables"] else {}
+        if old:
+            L += ["  - 上一次的識別："] + [f"  {x}" for x in fw_tables_text(old, FW_TABLES)]
+    for name, why in sorted(rm["table_flags"].items()):
+        L.append(f"  - 注意：{md_code(name)}：{md_text('；'.join(sorted(set(why))[:3]))}")
+    L += ["", "| 樣本 | 監控鍵 | 種類 | Grype | 公告比對 | 映像 sha256 | 說明 |", "|---|---|---|---|---|---|---|"]
+    for p in projs:
+        if not is_fw(p):
+            continue
+        r = per.get(p["uuid"]) or {}
+        why = "；".join(x for x in [r.get("why"), r.get("advisory_why")] + list(r.get("advisory_reasons") or []) if x)
+        L.append(f"| {md_code(p['slug'])} | {md_cell(p['uuid'])} | {md_text(p.get('sample_kind') or '—')} | {md_cell(r.get('grype'))} | "
+                 f"{md_cell(r.get('advisory'))} | {md_code(p.get('image_sha256') or '—')} | {md_text(why, 400)} |")
+    chg = [(p, x) for p in projs if is_fw(p) for x in rm["adv"].get(p["uuid"], {}).get("changed") or []]
+    if chg:
+        L += ["", "結果和 Release 當時不同（changed）：", ""]
+        for p, x in chg[:50]:
+            def fmt(y):
+                if y.get("result") is None:          # C2 介面：Release 當時沒有這個元件的結果
+                    return "（Release 當時沒有這個元件的結果）"
+                return (f"{md_code(y['result'])}" + (f"（{'、'.join(md_code(b) for b in y['bulletins'])}）" if y["bulletins"] else "")
+                        + (f"［review {md_code(y['review'])}］" if y.get("review") else ""))
+            L.append(f"- {md_code(p['slug'])}：{md_code(x['key'])}：{fmt(x['before'])} → {fmt(x['after'])}")
+    if fwx["changes"]:
+        L += ["", "映像 sha256 變了（同 slug、同版本）：", ""]
+        L += [f"- {md_code(c['slug'])}：之前 {md_code(c['old'])}、現在 {md_code(c['new'])}" for c in fwx["changes"]]
+    fws = [r for r in per.values() if r.get("kind") == "firmware"]
+    if any(r.get("grype") == FW_GRYPE_NA for r in fws):
+        L += ["", f"- {FW_GRYPE_NOTE}（沒有 purl／CPE 的樣本，Grype 是 NOT_ASSESSED，不是 OK）。"]
+    if any(r.get("grype") not in (None, FW_GRYPE_NA) for r in fws):
+        L += ["", f"- 有可比對元件的樣本照常比對；{FW_NVD_NOTE}。"]
+    return L
+
+
+def render_report(mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep, fw=None, inv_fw=None, projs=None):
     L = [f"# 每日監控（{mode}）：{status}", "", detail, ""]
     if first:
         L += ["**第一次執行：只建立基準，不開 Issue。**", ""]
@@ -1095,6 +1893,8 @@ def render_report(mode, detail, status, per, gaps, attn, notes, coverage, action
         L.append(f"| {md_cell(r['uuid'])} | {md_code(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
                  f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or '不適用'} | {md_cell(r['why'])} |")
     L += ["", "## 每日沒有涵蓋的項目", ""] + [f"- {x}：{y}" for x, y in coverage]
+    if fw is not None:
+        L += render_firmware(per, fw, inv_fw, projs or [])
     for title, xs in (("GAP", gaps), ("需注意", attn), ("說明", notes)):
         if xs:
             L += ["", f"## {title}", ""] + [f"- {md_cell(x)}" for x in xs]
@@ -1121,6 +1921,7 @@ def main(argv=None):
     ap.add_argument("--demo", action="store_true", help="公開 repo：Issue 標明「示範專案（公開 BSP）」並加 demo 標籤（D-040）")
     ap.add_argument("--prev-schedule", help="watch.yml 最近幾次排程 run 的 JSON（workflow 用 actions: read 查）：上一次被取消或沒跑 → 降級")
     ap.add_argument("--run-id", help="這一次的 run id（從 --prev-schedule 排除）")
+    ap.add_argument("--firmware-rematch", help="firmware-rematch.sh 的輸出資料夾（rematch-summary.json、rematch-<slug>.json；不可信資料）。沒給 → 韌體公告 NOT_RUN")
     ap.add_argument("--allow-baseline", action="store_true",
                     help="還沒有狀態時，允許建立第一次的基準（要人明確指定；沒給時回 GAP、不產生 plan）")
     try:
