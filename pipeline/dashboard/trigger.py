@@ -13,6 +13,9 @@
       * watch、dev：head_branch 必須是 main，event 必須是 schedule／workflow_dispatch／push。
       * release：event 必須是 push，head_branch（tag 名稱）經 collect.classify(tag, False) 判定為 "release"，
         而且版本部分以 v 開頭（release.yml 的觸發條件是 tags: ["*/v*"]）。
+      * firmware：event 必須是 push，head_branch（tag 名稱）經 collect.classify(tag, False) 判定為 "firmware"
+        （firmware-demo/<版本>；和 release 一樣用 collect 的同一套判斷，不另寫 regex）。firmware.yml 的 PR、手動觸發不更新頁面。
+        同一個 repo、不是 cancelled 這兩條是上面共同的規定。
   - 其他一律不更新。
 觸發只是「該更新了」的訊號：頁面資料之後一律重新從 API 讀，不用事件帶進來的任何欄位產生內容。
 """
@@ -76,7 +79,15 @@ def decide(event_name, event, repository, ref):
         if kind != "release" or not branch.split("/")[1].startswith("v"):
             return False, "release 的 head_branch 不是 <專案>/<版本> 的 tag 格式，跳過"
         return True, "release 的 tag push 完成"
-    return False, "來源 workflow 不是 watch／dev／release，跳過"
+    if name == "firmware":
+        if run_event != "push":
+            return False, "firmware 不是 tag push 觸發（PR 或手動），跳過"
+        if branch is None:
+            return False, "firmware 沒有 head_branch，跳過"
+        if watchlib.load("collect").classify(branch, False)[0] != "firmware":
+            return False, "firmware 的 head_branch 不是 firmware-demo/<版本> 的 tag 格式，跳過"
+        return True, "firmware 的 tag push 完成"
+    return False, "來源 workflow 不是 watch／dev／release／firmware，跳過"
 
 
 def main(env=None):

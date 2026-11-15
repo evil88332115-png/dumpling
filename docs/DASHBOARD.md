@@ -1,6 +1,6 @@
 # DASHBOARD：GitHub Pages 靜態儀表板（D-062，設計）
 
-> 狀態：**已實作（第一版）**：設計經 C0 同意（2026-11-15，D-062 第 6 點），程式見第 11 節。負責：C3（WP2）。
+> 狀態：**已實作（第一版）**：設計經 C0 同意（2026-11-15，D-062 第 6 點），程式見第 11 節；韌體示範區見第 12 節。負責：C3（WP2）。
 > 範圍：公開示範階段。DT 上線後的內部網頁另議（GitLab 搬移與公司 IT），本檔 §8 只寫「搬到 GitLab Pages 要改哪裡」。
 
 ## 1. 目的與不做的事
@@ -24,6 +24,7 @@
 | 報告包下載連結 | Release 附件 | 只用 API 回的 `browser_download_url` | `report-*.zip`、`vuln-list-*.xlsx`、`p1-table-*.xlsx`、`sbom-*.cdx.json`、`vex-*.cdx.json`、`release-meta.json`、`scan-summary-*.json`、`build-record-*.json` |
 | 監控狀態 | 狀態 Issue（標籤 `watch-state`，目前 #114） | Issues API（issues: read）＋ `issues.py` 的 `decode_state` | 基準時間、比對數、最後更新時間 |
 | 最近一輪監控 | 最近一次 `watch.yml` 成功 run 的 artifact `watch-plan-real-1/result.json`、`watch-support-real-1/result.json` | Actions API（actions: read） | 每份 SBOM 的狀態、資料來源狀態、「每日沒有涵蓋的項目」（NOT_RUN）、支援期限各列 |
+| 韌體示範 | 最新一個 `firmware-demo/<版本>` Release 的 `firmware-meta.json`（上限 1 MiB）、最近一輪 watch 的 `result.json`（`per_sbom` 的韌體列）、狀態 Issue 的 `firmware` 欄位 | Releases API、Actions artifact、Issues API | 樣本、監控鍵、公告比對狀態、對照表識別（第 12 節） |
 | 監控 Issue | 標籤 `dumpling-watch`（KEV、廠商層級）、`support-period`、`watch-health` | Issues API | 標題、編號、開／關、建立時間、標籤 |
 
 不讀、不顯示：
@@ -67,6 +68,11 @@
 - 每份 SBOM 的監控狀態，以及「每日沒有涵蓋的項目」（NOT_RUN 原文）。
 - 監控 Issue 分三組列：KEV／廠商層級、支援期限、監控健康。每列有編號（連到 Issue）、標題、開／關、建立時間。預設只列開著的，已關閉的另外摺起來。
 - 監控資料超過 36 小時沒更新（C0 決定，2026-11-15；原本 48 小時）：頁首加 `GAP：監控資料過期（超過 36 小時沒更新）`，比對數與開著的監控 Issue 數旁邊也標「監控資料過期」。這段由產生器判斷；頁面沒有 JS，所以也寫明產生時間，讓人自己看。
+
+**D. 韌體示範**（`firmware-demo/<版本>` 的 Release 不在 B 區，另外列在這裡；細節見第 12 節）
+- 只列最新的一個韌體 Release；每個樣本一列：slug、種類、韌體版本、監控鍵、映像 sha256、SBOM 與 inventory 的下載連結、meta 的 status 與 expect。
+- 每日監控（最近一輪）：每個樣本的 KEV 命中數（和 grype 狀態同一格）、公告比對狀態與說明、公告結果（含和 Issue 相同的用語）。
+- 不監控的項目（含來源）、三張對照表的識別、status、stale、DT 結果。
 
 **頁尾**
 - 權威來源是 Release 附件與 Issue。
@@ -123,6 +129,7 @@
 | `workflow_run`：`watch` 完成 | 每日監控之後，排程每天 01:17Z，實際可能晚好幾小時 | 演練（mode=drill）也會觸發，頁面內容不變（演練 Issue 不列） |
 | `workflow_run`：`dev` 完成 | 開發版發布後 | |
 | `workflow_run`：`release` 完成 | 正式 Release 發布後（tag push） | 手動建 draft 的 run（workflow_dispatch）不更新；draft 本來就不列 |
+| `workflow_run`：`firmware` 完成 | 打 `firmware-demo/<版本>` 的 tag 建立韌體 Release 之後（tag push） | firmware.yml 的 PR、手動觸發不更新 |
 | `workflow_dispatch` | 手動 | 只能在 main 上跑（`github.ref == refs/heads/main`） |
 
 **`workflow_run` 要依來源各自判斷**（C0 指出，2026-11-15）。tag 觸發的 release run，`workflow_run.head_branch` 是 tag 名稱，不是 `main`；如果只收 `main`，正式 Release 就不會更新頁面。
@@ -133,11 +140,13 @@
 | dev（另一種） | 必須是 `push` | 符合 `dev/**`（`dev/` 後接 `[A-Za-z0-9._/-]`，不能有 `..`）。dev.yml 在 dev/** 分支 push 時也會更新滾動的開發版（C0 決定 2026-11-15 收進來；workflow 定義讀預設分支，fork 碰不到） |
 | release | 必須是 `push` | 必須符合 `<專案>/<版本>` 的 tag 格式，而且不是 `dev/…`。驗證用 `pipeline/watch/collect.py` 的 `PROJECT_RE`、`VERSION_RE`（`classify` 回 `release` 的那種），與 release.yml 的 `*/v*` 觸發條件一致；不在 workflow 裡另寫一份 regex |
 
-三種來源還有兩條共同規定：
+| firmware | 必須是 `push` | 必須是 `firmware-demo/<版本>` 的 tag：`collect.classify(tag, False)` 回 `firmware`（同一套判斷，不在 workflow 或 trigger.py 另寫 regex）。PR、`workflow_dispatch`、`schedule` 一律不更新 |
+
+四種來源還有兩條共同規定：
 - 一律要求 `workflow_run.head_repository.full_name == github.repository`，也就是 run 必須出自本 repo，不能來自 fork。
 - 一律要求 `workflow_run.conclusion` 不是 `cancelled`。`failure` 照樣更新，因為頁面要能顯示失敗。
 
-不符合任何一條就跳過，不更新頁面。來源 repo、event、conclusion、watch／dev 的 `main` 這幾條寫在 build job 的 `if:`，不符就 skipped。release 的 tag 格式由 build 的第一步呼叫 collect.py 判斷；不符就輸出 `go=false`，不產生 artifact。deploy 依賴 build，而且要求 `go == 'true'`。另外，觸發只是「該更新了」的訊號：頁面資料一律重新從 API 讀，不用 `workflow_run` 帶進來的任何欄位（分支名、標題）產生內容。
+不符合任何一條就跳過，不更新頁面。來源 repo、event、conclusion、watch／dev 的 `main` 這幾條寫在 build job 的 `if:`，不符就 skipped。release 與 firmware 的 tag 格式由 build 的第一步呼叫 collect.py 判斷（firmware 還要求 event 是 push）；不符就輸出 `go=false`，不產生 artifact。deploy 依賴 build，而且要求 `go == 'true'`。另外，觸發只是「該更新了」的訊號：頁面資料一律重新從 API 讀，不用 `workflow_run` 帶進來的任何欄位（分支名、標題）產生內容。
 
 - 實際約一天一次，加上每次發布。同一時間只跑一個（`concurrency: pages`，不取消進行中的）。
 - 不另外設排程，避免多一個要防 60 天停用的 workflow。watch 每天都跑，產生時間就會每天更新。watch 如果停了，頁面時間也停住，看頁首就知道。
@@ -200,6 +209,8 @@
   - release 的 `head_branch` 不符合 tag 格式，例如 `main` 或 `feature/x` → 跳過。
   - `head_repository.full_name` 是 fork → 三種來源一律跳過。
   - `conclusion: cancelled` → 跳過。
+  - firmware 由 `firmware-demo/2026.11.20` 的 tag push 觸發 → 更新；`pull_request`、`workflow_dispatch`、`schedule` → 跳過；fork、`cancelled` → 跳過；head_branch 不是 firmware-demo 的 tag → 跳過。
+- 韌體區的測試在 `pipeline/dashboard/tests/test_firmware.py`（第 12.6 節）。
 - 用現在的公開資料試產生一次：
   - 3 個 Release（v39.2.0、v39.2.1、dev）、6 份 SBOM、狀態 Issue #114、4 個支援期限 Issue 都要出現。
   - draft 與演練 Issue 不能出現。
@@ -222,7 +233,7 @@
 | `pipeline/dashboard/render.py` | data dict → HTML 字串（純函式）；集中的 `esc()`、`ext()`、`safe_href()` |
 | `pipeline/dashboard/check_site.py` | 部署前檢查（第 4 節的 HTML 檢查三件事＋href 白名單；style.css 不能有 `@import`、`url(`） |
 | `pipeline/dashboard/style.css` | 同站樣式（淺色、深色、手機寬度；OK 用中性色） |
-| `pipeline/dashboard/watchlib.py` | 用檔案路徑載入 `pipeline/watch/` 的 collect、issues、support，不另寫 HTTP 或正規式 |
+| `pipeline/dashboard/watchlib.py` | 用檔案路徑載入 `pipeline/watch/` 的 collect、issues、support、match（韌體只讀 match 的用語常數與 `uuid_of`），不另寫 HTTP 或正規式 |
 | `.github/workflows/pages.yml` | build（唯讀）→ deploy（`pages: write`、`id-token: write`）；觸發與權限見第 4、5 節 |
 | `tests/run.d/c3-dashboard.sh`、`pipeline/dashboard/tests/` | 單元測試（不連網，假的 source 與 issues api 注入） |
 
@@ -247,3 +258,53 @@ build.py 的參數：`--repo`、`--api`（預設 `$GITHUB_API_URL`）、`--watch
 - `href` 除了第 4 節的三種，另外允許本站的 `style.css`、`data.json` 與頁內 `#錨點`（頁面本身要載入樣式表）。
 - 下載附件的大小上限：release-meta 1 MiB、scan-summary 8 MiB、每份 VEX 32 MiB；超過就是該格 GAP。
 - 搬 GitLab（第 8 節）要換的是 build.py 的資料來源那一層（`source`、`api`、watch 資料夾的取得）與 render.py 的連結白名單前綴（`BASE`、`safe_href`）；`build_data()`、HTML 輸出與 check_site 的規則不變。`--backend gitlab` 還沒有實作。
+
+## 12. 韌體示範區（D-063 第 5 點、docs/FIRMWARE-WATCH.md §5）
+
+頁面多一區「韌體示範」（`#firmware`，在版本區與每日監控之間）。規則如下。
+
+### 12.1 取哪一個 Release
+- `collect.classify` 把 `firmware-demo/<版本>`（不是 prerelease）判成 `firmware`。這種 Release **不進版本區**（B），也不會被算成「不合規則」：版本區不會出現「未分類」的列，也沒有 release-meta 的 GAP。prerelease 的 `firmware-demo/…` 照 collect 是不合規則，仍列在警告。
+- 只取最新的一個：依 `published_at`，平手時比 tag 版本的數字（`2026.11.20.10` 比 `.9` 新）。排序用 collect 的 `_date` 與 `_ver_key`，和每日監控同一個選擇。其他韌體 Release 列成「舊的韌體 Release（不監控，只留紀錄）」。
+- 這是第一階段公開示範的限制；頁面固定寫「樣本是公開的測試資料，不是出貨產品；只監控最新的一個韌體 Release（第一階段示範的限制）」。內部版要監控每一個已出貨、還在支援期內的韌體版本（FIRMWARE-WATCH.md §2）。
+- 沒有韌體 Release：寫「沒有韌體 Release（韌體不在監控）」。Releases API 讀不到：整區 GAP。
+
+### 12.2 firmware-meta.json
+- 下載附件 `firmware-meta.json`，上限 1 MiB（附件大小與讀入大小都檢查）。用 collect 的 `check_fw_meta` 驗整份、`_fw_sample_fields` 驗每個樣本、`fw_watch_version` 算監控鍵（`<slug>@<版本>`；版本讀不到時用映像雜湊並標 GAP）。
+- meta 缺少、太大、不是 JSON、`check_fw_meta` 不合格：**整區 GAP**，不列任何樣本，頁首也有警告。單一樣本欄位不合格：只有那一列 GAP。
+- 每個樣本列出：slug、kind、firmware_version、監控鍵、`image_sha256`、SBOM 與 inventory 的下載連結（Release 上沒有那個附件就寫 GAP）、meta 的 `status` 與 firmware.yml 的 `expect`（`expect` 是 firmware-expect 的原始輸出，不是狀態徽章，原文照錄）。
+- 不監控的項目（`not_watched`）：meta 列的（`source: meta`，依設計不監控）與 collect 判定監控不了的（`source: collect`，版本與映像雜湊都讀不到，GAP）分開標示。
+
+### 12.3 dt 欄位（firmware-meta 頂層，只用來顯示）
+`{"status": "OK"|"GAP", "result": "OK"|"FAIL"|"NOT_RUN", "reason": 字串或 null}`
+
+| 情況 | 頁面 |
+|---|---|
+| result `OK`、status `OK`、reason `null` | 顯示 status、result |
+| result `FAIL` 或 `NOT_RUN`、status `GAP`、reason 是非空字串（最多 200 字） | 顯示 status、result、reason（跳脫後原文） |
+| 其他組合、型別不對、缺 key、reason 太長或空白 | `GAP（dt 欄位格式不對）`，**不顯示原文** |
+| 沒有 `dt` 這個欄位（舊的 Release） | 「沒有 DT 結果」 |
+
+reason 只檢查型別與長度，不比對固定字串。dt 不影響樣本、對照表等其他欄位。
+
+### 12.4 每日監控的結果
+- 取自最近一輪 watch 的 `result.json`：`per_sbom` 裡 uuid 是 `dumpling:firmware-demo/…#firmware` 的列（`grype`、`why`、`exploited`、`advisory`、`advisory_why`、`advisory_reasons`），以及狀態 Issue 解開後的 `firmware`（`tables`、`size_stopped_at`、各樣本的 affected 紀錄）。各自缺就各自 GAP。
+- 韌體的列不再出現在「每份 SBOM 的監控狀態」那張板子用的表（那裡的核心對應、報告狀態對韌體是「沒有這一項」）。
+- **狀態一律附在數字旁邊**：KEV 命中數和 grype 狀態同一格；公告比對的狀態與說明同一格。GAP、NOT_RUN、NOT_ASSESSED 照原值顯示。match.py 寫的 `NOT_ASSESSED（原因）` 這種「狀態＋說明」拆成徽章與說明，不會被當成不認得的狀態值。
+- 對照表（`fw_advisory_rules`、`intel_microcode`、`nvidia_vbios`）：列出 Release 當時的識別（firmware-meta）、最近一輪重跑的識別、`status`、`stale`。`stale` 是 `true` 標「對照表過期」（頁首也有警告）；缺少寫 GAP。
+- 狀態有 `size_stopped_at` 時標「韌體因狀態大小上限停止（時間）」（GAP，頁首也有警告）：這一輪的韌體結果沒有寫進狀態，KEV 照常。
+
+### 12.5 公告結果的用語
+頁面只要列出受影響的結果（狀態 Issue 的 `affected`、`affected-candidate`），旁邊一定有和 Issue 相同的用語。用語的常數直接取自 `pipeline/watch/match.py`（`FW_WORD_PRELIM`、`FW_WORD_CONFIRMED`、`FW_WORD_UCODE`、`FW_WORD_VBIOS`），不另外寫死：
+
+| 來源 | 用語 |
+|---|---|
+| 規則表，`review: preliminary`（或沒寫） | 建議受影響（初步規則，待人審） |
+| 規則表，`review: confirmed` | 建議受影響（規則已確認，待負責單位確認） |
+| Intel 微碼 `affected-candidate` | 版本比較的候選，待人審 |
+| NVIDIA vBIOS | 建議受影響（依 NVIDIA 對照表，待人審） |
+
+資料沒有用語時寫 GAP（「用語缺少」），不會只留一個 affected，也不會寫成確定受影響。公告比對的說明（`advisory_reasons`）提到 affected 時，同一格另有「用語：…」一行；狀態裡沒有對應紀錄就寫 GAP。
+
+### 12.6 測試與驗收
+`pipeline/dashboard/tests/test_firmware.py`：韌體 Release 的列出與不再列入警告、只取最新一個與平手比數字、meta 壞掉整區 GAP、dt 四種情況（含十幾種不合法組合）、not_watched 的 source、對照表與 stale、size_stopped_at、per_sbom 的 advisory 顯示、四種用語與「每個 affected 旁邊有用語」、惡意字串（slug、why、reason、表的識別、dt.reason…）加 check_site、trigger 的 firmware 規則、pages.yml 的 workflows 清單。另有一個範例檔存在時才跑的測試（`pipeline/watch/tests/data/firmware-meta.example.json`，C2 維護）。

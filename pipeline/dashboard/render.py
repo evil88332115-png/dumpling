@@ -454,6 +454,206 @@ def render_releases(ctx, data):
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------- 韌體示範（D）
+
+FW_NOTE = "樣本是公開的測試資料，不是出貨產品；只監控最新的一個韌體 Release（第一階段示範的限制）。"
+FW_TABLE_LABELS = (("fw_advisory_rules", "公告規則表（fw_advisory_rules）"), ("intel_microcode", "Intel 微碼發佈資料表（intel_microcode）"),
+                   ("nvidia_vbios", "NVIDIA vBIOS 對照表（nvidia_vbios）"))
+FW_KIND_LABELS = {"rule": "規則表", "intel-microcode": "Intel 微碼", "nvidia-vbios": "NVIDIA vBIOS"}
+AFFECTED_RE = re.compile(r"affected", re.I)
+
+
+def st_note(ctx, v):
+    """狀態值後面可以接說明，例如 match.py 寫的「NOT_ASSESSED（沒有 inventory，不重跑公告比對）」：開頭是固定狀態才出徽章，說明原文照錄。"""
+    if isinstance(v, str):
+        head = v.split("（", 1)[0]
+        if head in STATUSES and head != v:
+            return ctx.st(head) + " " + ext(v[len(head):], 120)
+    return ctx.st(v)
+
+
+def ident_text(t):
+    """表的識別（字串、布林欄位）→ 逐項原文。"""
+    parts = ["%s：%s" % (clean(k, 40), clean(v, 100)) for k, v in sorted(dct(t).items()) if k not in ("status", "stale")]
+    return "<br>".join(ext(x, 160) for x in parts) if parts else "—"
+
+
+def fw_run_link(ctx, wr):
+    if not isinstance(wr, str) or not wr:
+        return "—"
+    link = safe_href(wr, ctx.repo) or run_url(ctx.repo, wr)
+    return ctx.a(link, "run") + " " + ext(wr, 80) if link else ext(wr, 80)
+
+
+def fw_dt_html(ctx, dt):
+    """dt 欄位（只用來顯示）：沒有 → 沒有 DT 結果；格式不對 → GAP，不顯示原文；合法 → status／result／reason。"""
+    dt = dct(dt)
+    if dt.get("state") == "absent":
+        return "<p>DT：沒有 DT 結果</p>"
+    if dt.get("state") != "ok":
+        return "<p>DT：%s</p>" % ctx.gap("dt 欄位格式不對")
+    reason = " reason：" + ext(dt.get("reason"), 200) if dt.get("reason") else ""
+    return "<p>DT 結果（只顯示，不影響其他欄位）：status %s／result %s%s</p>" % (ctx.st(dt.get("status")), ctx.st(dt.get("result")), reason)
+
+
+def fw_word_html(ctx, rec):
+    """公告結果旁邊的用語（和 Issue 同一套）。資料沒有用語時寫 GAP，不能只留 affected。"""
+    w = dct(rec).get("word")
+    return '<strong>%s</strong>' % ext(w, 80) if isinstance(w, str) and w.strip() else ctx.gap("用語缺少：不能當成確定受影響")
+
+
+def fw_records_html(ctx, recs, st):
+    """狀態 Issue 裡這個樣本的 affected 紀錄；每一筆旁邊都有用語。"""
+    if st.get("gap"):
+        return ctx.gap(st["gap"])
+    recs = [dct(r) for r in lst(recs)]
+    if not recs:
+        return "狀態裡沒有這份樣本的 affected 紀錄（只存 affected 與 affected-candidate）"
+    items = []
+    for r in recs[:50]:
+        comp = " %s" % ext(r.get("component"), 120) if r.get("component") else ""
+        bl = "（%s）" % "、".join(ext(b, 60) for b in lst(r.get("bulletins"))[:10] if isinstance(b, str)) if lst(r.get("bulletins")) else ""
+        base = " baseline" if r.get("baseline") is True else ""
+        items.append("<li>%s：%s%s%s%s → %s</li>" % (ext(FW_KIND_LABELS.get(r.get("kind"), r.get("kind")), 30), ext(r.get("result"), 40), bl, comp,
+                                                     esc(base, 20), fw_word_html(ctx, r)))
+    return '<ul class="notes">%s</ul>' % "".join(items)
+
+
+def render_fw_samples(ctx, fw):
+    rows = []
+    for x in lst(fw.get("samples")):
+        x = dct(x)
+        if x.get("gap"):
+            rows.append([ext(x.get("slug"), 64), ctx.gap(x["gap"]), "—", "—", "—", "—", "—"])
+            continue
+        links = []
+        for lab, a in (("SBOM", x.get("sbom")), ("inventory", x.get("inventory"))):
+            if a is None:
+                links.append("%s：—（沒有 inventory）" % lab)
+                continue
+            a = dct(a)
+            url = asset_url(ctx.repo, fw.get("tag"), a.get("name")) if a.get("present") is True else None
+            label = ext(a.get("name"), 220)
+            if a.get("present") is not True:
+                links.append("%s：%s %s" % (lab, label, ctx.gap("Release 沒有這個附件（或同名重複）")))
+            else:
+                links.append("%s：%s <span class=\"muted\">%s</span>" % (lab, ctx.a(url, label) if url else label, esc(size_text(a.get("size")))))
+        key = ext(x.get("watch_version"), 200) + (" " + ctx.gap(x["key_gap"]) if x.get("key_gap") else "")
+        kind = esc("BIOS" if x.get("kind") == "bios" else "供應商 SBOM" if x.get("kind") == "sbom" else "不明", 20)
+        if x.get("normalized") is True:
+            kind += "（正規化後的上傳副本）"
+        rows.append([ext(x.get("slug"), 64), kind, ext(x.get("firmware_version"), 64) if x.get("firmware_version") else "—", key,
+                     ext(x.get("image_sha256"), 64) if x.get("image_sha256") else "—", "<br>".join(links),
+                     "%s／expect %s" % (ctx.st(x.get("meta_status")) if x.get("meta_status") is not None else ctx.gap("meta 沒有 status"),
+                                        ext(x.get("expect"), 20) if x.get("expect") else "—")])
+    if not rows:
+        return "<p>%s</p>" % ctx.gap("firmware-meta 沒有任何樣本")
+    return table(["樣本（slug）", "種類", "韌體版本", "監控鍵（watch_version）", "映像 sha256", "下載", "meta 狀態／firmware.yml 的 expect"], rows, "韌體樣本")
+
+
+def render_fw_daily(ctx, fw):
+    d = dct(fw.get("daily"))
+    if d.get("rows_gap"):
+        return "<p>%s</p>" % ctx.gap(d["rows_gap"])
+    st = dct(d.get("state"))
+    byu = dct(d.get("rows"))
+    rows = []
+    for x in lst(fw.get("samples")):
+        x = dct(x)
+        if x.get("gap") or not x.get("uuid"):
+            continue
+        r = byu.get(x["uuid"])
+        if not isinstance(r, dict):
+            rows.append([ext(x.get("slug"), 64), ctx.gap("最近一輪沒有這份樣本的監控紀錄（新樣本，或每日監控資料缺）"), "—", "—"])
+            continue
+        r = dct(r)
+        recs = lst(dct(st.get("advisory")).get(x["uuid"]))
+        why = " " + ext(r.get("why"), 200) if r.get("why") else ""
+        kev = ('<div class="vcell"><div class="vnum">%s</div><div class="vstat">grype %s%s</div></div>') % (
+            num(r.get("exploited")), st_note(ctx, r.get("grype")), why)
+        texts = [t for t in [r.get("advisory_why")] + lst(r.get("advisory_reasons")) if isinstance(t, str)]
+        adv = ['<div class="vcell"><div class="vstat">公告比對 %s</div></div>' % st_note(ctx, r.get("advisory"))]
+        if r.get("advisory_why"):
+            adv.append("<p>%s</p>" % ext(r["advisory_why"], 400))
+        if texts and lst(r.get("advisory_reasons")):
+            adv.append('<ul class="notes">%s</ul>' % "".join("<li>%s</li>" % ext(t, 300) for t in lst(r["advisory_reasons"])[:10] if isinstance(t, str)))
+        if any(AFFECTED_RE.search(t) for t in texts):        # 說明裡提到 affected：旁邊要有用語（用狀態裡這份樣本的紀錄；沒有紀錄就寫 GAP）
+            words = sorted({w for w in (dct(q).get("word") for q in recs) if isinstance(w, str) and w.strip()})
+            adv.append("<p>用語：%s</p>" % ("、".join("<strong>%s</strong>" % ext(w, 80) for w in words) if words else ctx.gap(
+                "說明提到 affected，但狀態裡沒有這份樣本的紀錄，無法附上用語；不能當成確定受影響")))
+        rows.append([ext(x.get("slug"), 64), kev, "".join(adv), fw_records_html(ctx, recs, st)])
+    if not rows:
+        return "<p>%s</p>" % ctx.gap("沒有可對應的樣本")
+    return table(["樣本", "已遭利用（KEV）命中數（含狀態）", "公告比對（每日用 repo 當下的表重跑）", "公告結果（狀態 Issue；含用語）"], rows, "韌體每日監控")
+
+
+def render_fw_tables(ctx, fw):
+    d = dct(fw.get("daily"))
+    st = dct(d.get("state"))
+    mt = dct(fw.get("meta_tables"))
+    out = []
+    rows = []
+    for name, label in FW_TABLE_LABELS:
+        cur = dct(st.get("tables")).get(name) if not st.get("gap") else None
+        if st.get("gap"):
+            status = stale = ctx.gap(st["gap"])
+        elif not isinstance(cur, dict):
+            status = stale = ctx.gap("狀態裡沒有這張表")
+        else:
+            status = ctx.st(cur.get("status")) if "status" in cur else ctx.gap("狀態裡沒有 status")
+            sv = cur.get("stale")
+            stale = ('<span class="st st-GAP">對照表過期</span>' if sv is True else "否（stale false）" if sv is False else ctx.gap("狀態裡沒有 stale"))
+        rows.append([esc(label, 80), ident_text(mt.get(name)) if isinstance(mt.get(name), dict) else ctx.gap("firmware-meta 沒有這張表"),
+                     ident_text(cur) if isinstance(cur, dict) else "—", status, stale])
+    out.append(table(["表", "Release 當時的識別（firmware-meta）", "最近一輪重跑的識別（狀態 Issue）", "status", "stale"], rows, "韌體對照表"))
+    if not st.get("gap") and st.get("size_stopped_at"):
+        out.append("<p>%s</p>" % ctx.gap("韌體因狀態大小上限停止（%s）：這一輪的韌體結果沒有寫進狀態，公告 Issue 也沒有開（KEV 照常）" % clean(st["size_stopped_at"], 40)))
+    return "\n".join(out)
+
+
+def render_firmware(ctx, data):
+    fw = data.get("firmware")
+    out = ['<p class="muted">%s</p>' % esc(FW_NOTE, 200)]
+    if not isinstance(fw, dict):
+        return out[0] + "<p>%s</p>" % ctx.gap("韌體區：沒有資料")
+    if fw.get("gap"):
+        return out[0] + "<p>%s</p>" % ctx.gap(fw["gap"])
+    if not fw.get("tag"):
+        return out[0] + "<p>沒有韌體 Release（韌體不在監控）</p>"
+    dl = ["<dt>監控的韌體 Release（最新的一個）</dt><dd>%s</dd>" % ext(fw.get("tag"), 120),
+          "<dt>發布時間</dt><dd>%s</dd>" % ext(fw.get("published_at"), 40)]
+    if not fw.get("meta_gap"):
+        dl += ["<dt>commit</dt><dd>%s</dd>" % ext(str(fw.get("commit") or "")[:12], 12), "<dt>建置時間</dt><dd>%s</dd>" % ext(fw.get("built_at"), 40),
+               "<dt>建置 run</dt><dd>%s</dd>" % fw_run_link(ctx, fw.get("workflow_run"))]
+    out.append('<dl class="kv">%s</dl>' % "".join(dl))
+    older = [x for x in lst(fw.get("older")) if isinstance(x, str)]
+    if older:
+        total = fw.get("older_total") if isinstance(fw.get("older_total"), int) and not isinstance(fw.get("older_total"), bool) else len(older)
+        out.append("<details><summary>舊的韌體 Release（不監控，只留紀錄；%d）</summary><ul>%s</ul></details>" % (
+            total, "".join("<li>%s</li>" % ext(x, 120) for x in older[:50])))
+    if fw.get("meta_gap"):
+        out.append("<p>%s</p>" % ctx.gap("整個韌體區無法列出：" + str(fw["meta_gap"])))
+        return "\n".join(out)
+    out.append(fw_dt_html(ctx, fw.get("dt")))
+    out.append("<h4>樣本</h4>")
+    out.append(render_fw_samples(ctx, fw))
+    out.append("<h4>每日監控（最近一輪）</h4>")
+    out.append(render_fw_daily(ctx, fw))
+    nw = [dct(x) for x in lst(fw.get("not_watched"))]
+    out.append("<h4>不監控的項目</h4>")
+    if nw:
+        items = []
+        for x in nw[:100]:
+            src = "firmware.yml 依設計不監控" if x.get("source") == "meta" else ctx.gap("collect 判定監控不了") if x.get("source") == "collect" else ctx.gap("來源不明")
+            items.append("<li>%s：%s（%s）</li>" % (ext(x.get("slug"), 64), ext(x.get("why"), 200), src))
+        out.append('<ul class="notes">%s</ul>' % "".join(items))
+    else:
+        out.append("<p>沒有</p>")
+    out.append("<h4>對照表</h4>")
+    out.append(render_fw_tables(ctx, fw))
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------- 每日監控（C）
 
 def render_issue_rows(ctx, rows, with_cve):
@@ -520,16 +720,23 @@ def render_state_issue(ctx, w, data=None):
 
 def render_per_sbom(ctx, plan):
     rows = []
+    fw_rows = 0
     for r in lst(plan.get("per_sbom")):
         r = dct(r)
+        if r.get("fw") is True:          # 韌體的列另外在「韌體示範」區顯示（那裡才有公告比對與用語）
+            fw_rows += 1
+            continue
         # 已遭利用的命中數：和該 SBOM 的 grype、report_status、release_gate 同一格，不單獨顯示
         cell = ('<div class="vcell"><div class="vnum">%s</div><div class="vstat">grype %s／report_status %s／release_gate %s</div></div>') % (
             num(r.get("exploited")), ctx.st(r.get("grype")), ctx.st(r.get("report_status")), ctx.st(r.get("release_gate")))
         rows.append([ext(r.get("tag"), 100), ext(r.get("layer"), 20), ctx.st(r.get("kernel_map")) if r.get("kernel_map") else "—",
                      ctx.st(r.get("kernel_cna")) if r.get("kernel_cna") else "—", cell, ext(r.get("why"), 200) if r.get("why") else ""])
     if not rows:
+        if fw_rows:
+            return '<p class="muted">這一輪只有韌體的列，見「韌體示範」。</p>'
         return "<p>%s</p>" % ctx.gap("沒有各 SBOM 的監控狀態")
-    return table(["Release", "層", "核心對應 kernel_map", "核心 CNA", "已遭利用（KEV）命中數（含狀態）", "說明"], rows, "每份 SBOM 的監控狀態")
+    note = '<p class="muted">韌體樣本（%d 列）不在這張表，見「韌體示範」。</p>' % fw_rows if fw_rows else ""
+    return table(["Release", "層", "核心對應 kernel_map", "核心 CNA", "已遭利用（KEV）命中數（含狀態）", "說明"], rows, "每份 SBOM 的監控狀態") + note
 
 
 def render_watch(ctx, data):
@@ -606,7 +813,7 @@ def render_header(ctx, data):
     if warns:
         parts.append('<div class="warn" role="note"><strong>警告</strong><ul>%s</ul></div>' % "".join(warns))
     parts.append('<details><summary>狀態圖例</summary><dl class="kv legend">%s</dl></details>' % legend)
-    parts.append('<nav aria-label="頁內導覽"><a href="#projects">專案</a> <a href="#releases">版本</a> <a href="#watch">每日監控</a> <a href="#about">說明</a></nav>')
+    parts.append('<nav aria-label="頁內導覽"><a href="#projects">專案</a> <a href="#releases">版本</a> <a href="#firmware">韌體示範</a> <a href="#watch">每日監控</a> <a href="#about">說明</a></nav>')
     parts.append("</header>")
     return "\n".join(parts)
 
@@ -634,6 +841,7 @@ def render(data):
         '<main>',
         '<section id="projects"><h2>專案</h2>%s</section>' % render_projects(ctx, data),
         '<section id="releases"><h2>版本</h2>%s</section>' % render_releases(ctx, data),
+        '<section id="firmware"><h2>韌體示範</h2>%s</section>' % render_firmware(ctx, data),
         '<section id="watch"><h2>每日監控</h2>%s</section>' % render_watch(ctx, data),
         "</main>"]
     head = render_header(ctx, data)         # 要等本文渲染完才知道有哪些不認得的狀態值
