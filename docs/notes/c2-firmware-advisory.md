@@ -241,7 +241,7 @@ CI 與一般使用都只讀 repo 裡的表，不連網；鏡像只在人工審�
 7. 逐列比版本：版本 ≥ `vbios_fixed_in` → fixed；低於 `vbios_affected_below`（或不高於 `vbios_affected_max`）→ affected；落在受影響範圍與修正版本之間的空隙、或列沒有可比較的版本 → gap。
    整份：任何 affected → **affected**（有 gap 的列、已修補的列另加註）；沒有 affected、有 gap → NOT_ASSESSED（`range-gap`）；全部 fixed → **fixed**。
 8. 已審核的表，`mirror` 整個沒寫或是 null（日期不明）、`mirror.fetched_utc` 超過 90 天（正好 90 天不算）或在未來（比現在晚超過一天）：fixed 降成 NOT_ASSESSED（`table-stale`，表可能漏了較新的公告）；affected 與其他結果照舊但加註「重新審核表」；有 vBIOS 元件時 `fw-inventory` 狀態 ATTENTION（`vbios_advisory.stale`）。
-   `mirror` 有寫就三個鍵 `commit`（40 碼小寫十六進位）、`commit_date`、`fetched_utc` 都要有；缺一個、不是物件、或時間格式不對（沒有時區也算）：載入時就是 `table-invalid`，不是 `table-stale`。時間只收 `YYYY-MM-DDTHH:MM:SS`，秒後面可以有 3 或 6 位小數，時區寫 `Z` 或 `±HH:MM`（不靠 `fromisoformat`：Python 3.10 與 3.12 能讀的格式不同；`+0000`、空白分隔、沒有秒、其他位數的小數都不收）。
+   `mirror` 有寫就三個鍵 `commit`（40 碼小寫十六進位）、`commit_date`、`fetched_utc` 都要有；缺一個、不是物件、或時間格式不對（沒有時區也算）：載入時就是 `table-invalid`，不是 `table-stale`。時間只收 `YYYY-MM-DDTHH:MM:SS`，秒後面可以有 3 或 6 位小數，時區寫 `Z` 或 `±HH:MM`（時只收 00～23：Python 3.14 的 `fromisoformat` 會把 `24:00:00` 收成隔天 00:00。不靠 `fromisoformat`：Python 3.10 與 3.12 能讀的格式不同；`+0000`、空白分隔、沒有秒、其他位數的小數都不收）。
    現在時間由呼叫端傳入（`inventory(vbios_now=…)`、`match_vbios(now=…)`；沒給才用牆上時鐘，沒有時區的時間當成 UTC），測試一律傳固定時間，不吃時鐘。
 
 公告編號（`bulletins[].id`、`rows[].bulletin`、`not_applicable[].bulletin`，含未審核的）只收 1～8 位 ASCII 數字（`^[0-9]{1,8}$`，與 C1 `nvidia_bulletins.py` 的 `BULLETIN_ID_RE` 相同，用 `fullmatch`，`$` 不放行結尾換行）：這些編號會寫進 fw-inventory.md 與 SBOM 的 property，不合整張表 `table-invalid`。
