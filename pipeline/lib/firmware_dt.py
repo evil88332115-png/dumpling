@@ -206,6 +206,10 @@ def load_sample(path):
         raise DtError("firmware.yml 不是合法 YAML（%s）" % type(e).__name__)
     if not isinstance(doc, dict):
         raise DtError("firmware.yml 不是 mapping")
+    try:
+        _watch_mod().parse_watch(doc)
+    except ValueError as e:
+        raise DtError("firmware.yml：%s" % e)
     return doc
 
 
@@ -442,6 +446,21 @@ def _norm_mod():
         spec.loader.exec_module(mod)
         _NORM.append(mod)
     return _NORM[0]
+
+
+_WATCH = []
+
+
+def _watch_mod():
+    # 同 _norm_mod：用路徑載入同資料夾的 firmware_watch（選用欄位 watch 的格式檢查）
+    if not _WATCH:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "firmware_watch", os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware_watch.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _WATCH.append(mod)
+    return _WATCH[0]
 
 
 def dumps_json(obj, what):
