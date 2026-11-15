@@ -69,5 +69,10 @@
       "mirror_commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
       "reviewed_until": "2025-09-02"
     }
+  },
+  "dt": {
+    "status": "OK",
+    "result": "OK",
+    "reason": null
   }
 }

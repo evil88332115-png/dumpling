@@ -35,6 +35,11 @@ TAG = "firmware-demo/2026.11.20"
 NOW = "2026-11-21T02:00:00Z"
 
 
+def slurp(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def sha(b):
     return hashlib.sha256(b).hexdigest()
 
@@ -97,7 +102,7 @@ class Env:
 
     def build(self, tag=TAG, **kw):
         args = dict(manifests=self.manifests, ci_out=self.ci, supplier_prep=self.prep, out=self.out, tag=tag, commit=COMMIT,
-                    built_at=BUILT, workflow_run=RUN, sbom_check_log=self.sbom_log)
+                    built_at=BUILT, workflow_run=RUN, sbom_check_log=self.sbom_log, dt_result="success")
         args.update(kw)
         return fm.build(**args)
 
@@ -713,33 +718,122 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("write-all", self.text)
         self.assertNotIn("permissions: write", self.text)
 
-    def test_release_job_runs_only_for_tag_push_after_every_check(self):
+    def job_text(self, name):
+        return yaml.safe_dump(self.wf["jobs"][name])
+
+    def test_release_job_runs_only_for_tag_push_and_does_not_wait_for_dt(self):
         j = self.wf["jobs"]["firmware-release"]
         cond = j["if"]
         self.assertIn("github.event_name == 'push'", cond)
         self.assertIn("github.ref_type == 'tag'", cond)
         self.assertIn("startsWith(github.ref_name, 'firmware-demo/')", cond)
-        self.assertEqual(set(j["needs"]), {"firmware-fetch", "firmware-dt", "firmware-release-check"})
+        self.assertEqual(set(j["needs"]), {"firmware-fetch", "firmware-release-check"})     # 不等 firmware-dt（C0 的決定）
+        self.assertNotIn("firmware-dt", j["needs"])
         for name, other in self.wf["jobs"].items():                                  # 沒有其他 job 依賴 Release job 或建 Release
             self.assertNotIn("firmware-release", [x for x in (other.get("needs") or []) if name != "firmware-release"])
             if name != "firmware-release":
                 self.assertNotIn("gh release", yaml.safe_dump(other))
+                self.assertNotIn("firmware-release-publish", yaml.safe_dump(other))
+
+    def test_check_job_waits_for_dt_but_is_not_blocked_by_it(self):
+        j = self.wf["jobs"]["firmware-release-check"]
+        self.assertEqual(set(j["needs"]), {"firmware-fetch", "firmware-dt"})
+        cond = j["if"]
+        self.assertTrue(cond.startswith("always()"), cond)                          # dt 失敗、取消、略過都不能讓這個 job 被跳過
+        self.assertIn("needs.firmware-fetch.result == 'success'", cond)             # fetch 沒成功就什麼都不做
+        self.assertNotIn("firmware-dt", cond)
+        self.assertNotIn("continue-on-error", self.job_text("firmware-release-check"))
+        build = next(s for s in j["steps"] if "firmware_meta.py build" in s.get("run", ""))
+        self.assertEqual(build["env"]["FW_DT_RESULT"], "${{ needs.firmware-dt.result }}")      # dt 的結果經 env 傳進產生器
+        self.assertIn('--dt-result "$FW_DT_RESULT"', build["run"])
+        self.assertNotIn("needs.firmware-dt.result", build["run"])                  # 不直接把 expression 寫進 shell
 
     def test_release_is_published_not_prerelease_not_draft(self):
+        with open(os.path.join(ROOT, "pipeline", "firmware-release-publish.sh"), encoding="utf-8") as fh:
+            script = fh.read()
+        self.assertIn("--draft", script)                                             # 先建草稿、確認附件，之後才發布
+        self.assertIn("--latest=false", script)
+        self.assertIn("--verify-tag", script)
+        self.assertIn("draft=false", script)
+        self.assertIn("prerelease=false", script)
+        self.assertNotIn("--prerelease", script)
         steps = "\n".join(s.get("run", "") for s in self.wf["jobs"]["firmware-release"]["steps"])
-        self.assertIn("--draft", steps)                                              # 先建草稿、確認附件，之後才發布
+        self.assertIn("firmware-release-publish.sh", steps)
+        self.assertIn("prerelease=false", steps)                                     # 發布後核對
         self.assertIn("draft=false", steps)
-        self.assertIn("prerelease=false", steps)
         self.assertNotIn("--prerelease", steps)
-        self.assertIn("--verify-tag", steps)
+
+    def test_non_json_check_and_collect_check_before_publishing(self):
+        steps = self.wf["jobs"]["firmware-release"]["steps"]
+        runs = [s.get("run", "") for s in steps]
+        i_check = next(i for i, r in enumerate(runs) if "find \"$assets\" -type f ! -name '*.json'" in r)
+        i_pub = next(i for i, r in enumerate(runs) if "firmware-release-publish.sh \"$GITHUB_REF_NAME\"" in r)
+        self.assertLess(i_check, i_pub)
+        self.assertIn("collect-check", runs[i_check])
+
+    def test_release_job_only_from_main_history(self):
+        steps = self.wf["jobs"]["firmware-release"]["steps"]
+        self.assertEqual(steps[0]["with"]["fetch-depth"], 0)                         # origin/main 的歷史要拿得到
+        runs = [s.get("run", "") for s in steps]
+        i_main = next(i for i, r in enumerate(runs) if "merge-base --is-ancestor" in r)
+        self.assertIn('"$GITHUB_SHA" origin/main', runs[i_main])
+        i_pub = next(i for i, r in enumerate(runs) if "firmware-release-publish.sh \"$GITHUB_REF_NAME\"" in r)
+        self.assertLess(i_main, i_pub)
+        self.assertIn("exit 1", runs[i_main])
+
+    def test_leftover_drafts_are_cleaned_and_api_calls_retry(self):
+        steps = self.wf["jobs"]["firmware-release"]["steps"]
+        cleanup = [s for s in steps if "--cleanup" in s.get("run", "")]
+        self.assertEqual(len(cleanup), 1)
+        self.assertEqual(cleanup[0].get("if"), "failure()")
+        with open(os.path.join(ROOT, "pipeline", "firmware-release-publish.sh"), encoding="utf-8") as fh:
+            script = fh.read()
+        self.assertIn("ghx", script)
+        self.assertIn("-X DELETE", script)
+        self.assertEqual(script.count("-X DELETE"), 1)                              # 只有一處刪除，用在草稿 id 上
+        with open(os.path.join(ROOT, "pipeline", "firmware-ghx.sh"), encoding="utf-8") as fh:
+            self.assertIn("GHX_TRIES:-8", fh.read())
+        self.assertIn("firmware-ghx.sh", "\n".join(s.get("run", "") for s in steps))
+
+    def test_no_pull_request_target_and_no_continue_on_error(self):
+        self.assertNotIn("pull_request_target", self.on)
+        self.assertNotIn("pull_request_target", self.text)
+        for name in ("firmware-release-check", "firmware-release"):
+            self.assertNotIn("continue-on-error", self.job_text(name), name)
+            for st in self.wf["jobs"][name]["steps"]:
+                self.assertNotIn("continue-on-error", st)
+
+    def test_test_tag_flag_never_reaches_the_tag_branch_or_release_job(self):
+        self.assertNotIn("--allow-test-tag", self.job_text("firmware-release"))
+        self.assertNotIn("allow-test-tag", self.job_text("firmware-release").replace("allow_test", ""))
+        step = next(s for s in self.wf["jobs"]["firmware-release-check"]["steps"] if "check-tag" in s.get("run", ""))
+        run = step["run"]
+        tag_branch = run[run.index('if [ "$GITHUB_REF_TYPE" = tag ]; then'):run.index("else")]
+        self.assertNotIn("allow-test-tag", tag_branch)
+        self.assertNotIn("0000.00.00", tag_branch)
+        self.assertIn('check-tag "$GITHUB_REF_NAME"', tag_branch)
+        self.assertIn('FW_TAG_FLAG=" >> "$GITHUB_ENV"', tag_branch)                  # 真的 tag：旗標是空的
+
+    def test_cancel_in_progress_only_for_non_tag(self):
+        self.assertEqual(self.wf["concurrency"]["cancel-in-progress"], "${{ github.ref_type != 'tag' }}")
+
+    def test_uploaded_artifact_is_only_the_assets_folder(self):
+        ups = [s for st in self.wf["jobs"].values() for s in st["steps"]
+               if s.get("with", {}).get("name") == "firmware-release" and "upload-artifact" in s.get("uses", "")]
+        self.assertEqual(len(ups), 1)
+        self.assertEqual(ups[0]["with"]["path"], "${{ runner.temp }}/rel-assets")
+        gens = [s for s in self.wf["jobs"]["firmware-release-check"]["steps"] if "firmware_meta.py build" in s.get("run", "")]
+        self.assertIn('--out "$RUNNER_TEMP/rel-assets"', gens[0]["run"])
+        self.assertNotIn("rel-notes", ups[0]["with"]["path"])                       # 說明文字不在 artifact 裡（Release job 從 meta 重新產生）
+        down = [s for s in self.wf["jobs"]["firmware-release"]["steps"] if s.get("with", {}).get("name") == "firmware-release"]
+        self.assertEqual(down[0]["with"]["path"], "${{ runner.temp }}/rel-assets")
 
     def test_self_check_steps_run_for_every_trigger(self):
         j = self.wf["jobs"]["firmware-release-check"]
-        self.assertNotIn("if", j)
         self.assertEqual(j.get("permissions"), None)
         for s in j["steps"]:
             c = s.get("if")
-            self.assertTrue(c is None or c == "always()", s.get("name", s.get("uses")))                # 沒有步驟只在某種觸發才跑（摘要用 always）
+            self.assertTrue(c is None or c == "always()", s.get("name", s.get("uses")))     # 沒有步驟只在某種觸發才跑（摘要用 always）
         runs = "\n".join(s.get("run", "") for s in j["steps"])
         for needle in ("firmware_meta.py build", "firmware_meta.py collect-check", "firmware-rematch.sh", "firmware_meta.py rematch-check",
                        "ci/public-check.sh", "--allow-test-tag", "firmware-demo/0000.00.00"):
@@ -764,6 +858,447 @@ class Workflow(unittest.TestCase):
         added = self.text[start:]
         for bad in ("安全", "不適用", "不受影響", "整體 PASS", "以前", "這一輪", "驗證後", "原本"):
             self.assertNotIn(bad, added)
+
+
+# ------------------------------------------------------------------ dt 欄位、嚴格的 status、why 的共同檢查、讀檔的限制
+
+class DtField(unittest.TestCase):
+    def test_three_results(self):
+        for job, want in (("success", ("OK", "OK", None)), ("failure", ("GAP", "FAIL", fm.DT_REASON)), ("cancelled", ("GAP", "FAIL", fm.DT_REASON)),
+                          ("skipped", ("GAP", "NOT_RUN", fm.DT_REASON)), ("", ("GAP", "NOT_RUN", fm.DT_REASON)),
+                          ("surprise", ("GAP", "NOT_RUN", fm.DT_REASON)), (None, ("GAP", "NOT_RUN", fm.DT_REASON))):
+            e = full_env(self)
+            meta = e.build(dt_result=job, out=e.out + "-" + str(job))
+            self.assertEqual(meta["dt"], dict(zip(("status", "result", "reason"), want)), job)
+            with open(os.path.join(e.out + "-" + str(job), "firmware-meta.json"), encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["dt"], meta["dt"])
+            self.assertEqual(fm.dt_problem(meta["dt"]), None)
+
+    def test_only_two_status_result_combinations_are_valid(self):
+        good = [{"status": "OK", "result": "OK", "reason": None}, {"status": "GAP", "result": "FAIL", "reason": fm.DT_REASON},
+                {"status": "GAP", "result": "NOT_RUN", "reason": fm.DT_REASON}]
+        for g in good:
+            self.assertIsNone(fm.dt_problem(g))
+        bad = [{"status": "OK", "result": "FAIL", "reason": None}, {"status": "OK", "result": "OK", "reason": fm.DT_REASON},
+               {"status": "GAP", "result": "OK", "reason": None}, {"status": "GAP", "result": "OK", "reason": fm.DT_REASON},
+               {"status": "GAP", "result": "FAIL", "reason": None}, {"status": "GAP", "result": "FAIL", "reason": "別的原因"},
+               {"status": "GAP", "result": "FAIL", "reason": ""}, {"status": "OK", "result": "NOT_RUN", "reason": None},
+               {"status": "ATTENTION", "result": "FAIL", "reason": fm.DT_REASON}, {"status": "GAP", "result": "ERROR", "reason": fm.DT_REASON},
+               {"status": "OK", "result": "OK"}, {"status": "OK", "result": "OK", "reason": None, "x": 1}, None, [], "OK"]
+        for b in bad:
+            self.assertTrue(fm.dt_problem(b), b)
+            meta = {"schema": fm.META_SCHEMA, "samples": [], "not_watched": [], "dt": b}
+            self.assertTrue(fm.validate_meta(meta), b)
+        self.assertTrue(fm.validate_meta({"schema": fm.META_SCHEMA, "samples": [], "not_watched": []}))      # 沒有 dt 也不行
+
+    def test_example_file_has_a_valid_dt(self):
+        with open(EXAMPLE, encoding="utf-8") as fh:
+            ex = json.load(fh)
+        self.assertIsNone(fm.dt_problem(ex["dt"]))
+
+    def test_meta_with_dt_is_accepted_by_collect_and_notes_mention_it(self):
+        for job in ("success", "failure", "skipped"):
+            e = full_env(self)
+            meta = e.build(dt_result=job, out=e.out + job)
+            self.assertEqual(fm.collect_check(os.path.join(e.out + job, "firmware-meta.json"), e.out + job, TAG, COLLECT), [])
+            text = fm.release_notes(meta)
+            self.assertIn("臨時 Dependency-Track（DT）上傳：", text)
+            if job == "success":
+                self.assertIn("DT）上傳：OK", text)
+            else:
+                self.assertIn("GAP（結果 %s" % meta["dt"]["result"], text)
+            for bad in ("安全", "不適用", "不受影響", "整體 PASS"):
+                self.assertNotIn(bad, text)
+
+    def test_dt_result_is_required_on_the_command_line(self):
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "pipeline", "lib", "firmware_meta.py"), "build", "x.yml", "--ci-out", "a",
+                            "--supplier-prep", "b", "--out", "c", "--tag", TAG, "--commit", COMMIT, "--built-at", BUILT, "--workflow-run", RUN],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--dt-result", r.stderr)
+
+
+class StrictStatusAndWhy(unittest.TestCase):
+    def test_status_other_than_ok_or_gap_fails_instead_of_becoming_not_watched(self):
+        for st in ("OK", "Ok", "ok ", "GAP ", "gap", "", None, ["ok"], {"a": 1}, True, 1, "FAIL"):
+            e = Env(self)
+            e.bios("b")
+            e.manifest("bios", "odd", status=st, firmware_version=None, notes="GAP：x")
+            with self.assertRaises(fm.MetaError, msg=repr(st)):
+                e.build()
+            self.assertFalse(os.path.exists(e.out))
+        e = Env(self)
+        e.bios("b")
+        p = e.manifest("bios", "odd")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("kind: bios\nstatus: [ok]\nnotes: n\n")                          # 清單
+        with self.assertRaises(fm.MetaError):
+            e.build()
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("kind: bios\nnotes: n\n")                                         # 沒有 status
+        with self.assertRaises(fm.MetaError):
+            e.build()
+
+    def test_kind_must_be_a_known_string(self):
+        for k in (["bios"], "BIOS", None, 5):
+            e = Env(self)
+            e.bios("b")
+            p = e.manifest("bios", "odd")
+            with open(p, "w", encoding="utf-8") as fh:
+                yaml.safe_dump({"kind": k, "status": "ok", "notes": "n"}, fh)
+            with self.assertRaises(fm.MetaError, msg=repr(k)):
+                e.build()
+
+    def test_monitored_true_with_non_ok_status_is_a_contradiction(self):
+        e = Env(self)
+        e.bios("b")
+        e.manifest("bios", "odd", status="GAP", firmware_version=None, notes="GAP：x", watch={"monitored": True})
+        with self.assertRaises(fm.MetaError) as cm:
+            e.build()
+        self.assertIn("矛盾", str(cm.exception))
+
+    def test_status_gap_with_declared_false_is_fine(self):
+        e = Env(self)
+        e.bios("b")
+        e.manifest("bios", "odd", status="GAP", firmware_version=None, notes="x", watch={"monitored": False, "why": "沒有檔案"})
+        self.assertEqual(e.build()["not_watched"], [{"slug": "odd", "why": "GAP：沒有檔案"}])
+
+    def test_why_derived_from_notes_uses_the_same_checks(self):
+        for notes in ("\u200b\u200b", "\u2028", "a\x00b", "x" * 400, "\ufeff \u200d"):
+            e = Env(self)
+            e.bios("b")
+            e.manifest("vbios", "v", status="GAP", firmware_version=None, notes=notes)
+            if notes in ("a\x00b",):
+                continue                                                              # YAML 不能放 NUL；控制字元由 clean_why 的單元測試涵蓋
+            with self.assertRaises(fm.MetaError, msg=repr(notes)):
+                e.build()
+
+    def test_clean_why_rules(self):
+        from firmware_watch import clean_why
+        self.assertEqual(clean_why("  原因  "), "原因")
+        self.assertEqual(clean_why("a\u200bb"), "a\u200bb")                           # 中間有零寬字元但還有可見字元：接受
+        for bad in ("", "   ", "\u200b", "\u200b\u200c\u200d\u2060\ufeff", " \u200b ", "a\nb", "a\rb", "a\tb", "a\u2028b", "a\u2029b",
+                    "a\u0085b", "a\x00b", "a\x7fb", "x" * 301, None, 5, ["x"], b"x"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                clean_why(bad)
+        self.assertEqual(len(clean_why("x" * 300)), 300)
+
+    def test_watch_why_uses_clean_why(self):
+        from firmware_watch import parse_watch
+        for bad in ("\u200b", "a\u2028b", "a\u0085b"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                parse_watch({"watch": {"monitored": False, "why": bad}})
+
+
+class ReadRegular(unittest.TestCase):
+    def test_symlink_is_refused(self):
+        d = tempfile.mkdtemp(prefix="dumpling-fwmeta-")
+        self.addCleanup(shutil.rmtree, d, True)
+        real = os.path.join(d, "real.json")
+        with open(real, "w") as fh:
+            fh.write("{}")
+        link = os.path.join(d, "link.json")
+        os.symlink(real, link)
+        self.assertEqual(fm.read_regular(real, "x"), b"{}")
+        with self.assertRaises(fm.MetaError):
+            fm.read_regular(link, "x")
+        with self.assertRaises(fm.MetaError):
+            fm.read_regular(d, "x")                                                   # 資料夾
+        with self.assertRaises(fm.MetaError):
+            fm.read_regular(os.path.join(d, "missing"), "x")
+
+    def test_size_cap(self):
+        d = tempfile.mkdtemp(prefix="dumpling-fwmeta-")
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "big.json")
+        with open(p, "wb") as fh:
+            fh.write(b"x" * 11)
+        old = fm.MAX_FILE
+        fm.MAX_FILE = 10
+        self.addCleanup(setattr, fm, "MAX_FILE", old)
+        with self.assertRaises(fm.MetaError):
+            fm.read_regular(p, "x")
+        fm.MAX_FILE = 11
+        self.assertEqual(len(fm.read_regular(p, "x")), 11)
+
+    def test_symlinked_ci_output_is_refused_by_build(self):
+        e = Env(self)
+        e.bios("a")
+        target = os.path.join(e.dir, "elsewhere.json")
+        shutil.move(os.path.join(e.ci, "a", "fw-inventory.json"), target)
+        os.symlink(target, os.path.join(e.ci, "a", "fw-inventory.json"))
+        with self.assertRaises(fm.MetaError):
+            e.build()
+
+
+class CollectCheckMore(unittest.TestCase):
+    def test_duplicate_sample_and_watch_key(self):
+        e = full_env(self)
+        meta = e.build()
+        path = os.path.join(e.out, "firmware-meta.json")
+        dup = copy.deepcopy(meta)
+        dup["samples"].append(copy.deepcopy(dup["samples"][0]))                     # 同一個樣本兩次：附件名與監控鍵都重複
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(dup, fh)
+        probs = fm.collect_check(path, e.out, TAG, COLLECT)
+        self.assertTrue(any("重複" in p for p in probs), probs)
+
+    def test_two_slugs_cannot_share_a_watch_key(self):
+        # 監控鍵是 <slug>@<版本>：不同 slug 不會撞；這裡直接核對 collect 的函式，確認 collect_check 用的是它
+        col = fm.load_collect(COLLECT)
+        self.assertEqual(col.fw_watch_version("a", "1.0", None), ("a@1.0", None))
+        self.assertNotEqual(col.fw_watch_version("a", "1.0", None), col.fw_watch_version("b", "1.0", None))
+
+
+class RematchCheckMore(RematchCheckSynthetic):
+    def test_release_tag_must_match(self):
+        self.summary["release_tag"] = "firmware-demo/2026.11.21"
+        self.write()
+        self.assertTrue(any("release_tag" in p for p in fm.rematch_check(self.mp, self.rm)))
+
+    def test_meta_status_must_be_ok(self):
+        for st in ("GAP", None, "ok"):
+            self.summary["meta_status"] = st
+            self.write()
+            self.assertTrue(fm.rematch_check(self.mp, self.rm), st)
+
+
+# ------------------------------------------------------------------ 建 Release 的腳本（假的 gh）與 API 回應處理
+
+API = os.path.join(ROOT, "pipeline", "lib", "firmware_release_api.py")
+PUBLISH = os.path.join(ROOT, "pipeline", "firmware-release-publish.sh")
+GHX = os.path.join(ROOT, "pipeline", "firmware-ghx.sh")
+
+FAKE_GH = r"""#!/usr/bin/env python3
+import json, os, sys
+state_dir = os.environ["FAKE_GH_STATE"]
+sp = os.path.join(state_dir, "state.json")
+state = json.load(open(sp))
+log = open(os.path.join(state_dir, "calls.log"), "a")
+a = sys.argv[1:]
+log.write(" ".join(a) + "\n"); log.close()
+def save(): json.dump(state, open(sp, "w"))
+def fail_once(key):
+    n = state.get("fail", {}).get(key, 0)
+    if n > 0:
+        state["fail"][key] = n - 1; save(); return True
+    return False
+if a[:1] == ["api"]:
+    method = "GET"; args = a[1:]
+    if args[:1] == ["-X"]: method = args[1]; args = args[2:]
+    path = args[0]
+    parts = path.split("/")
+    if method == "GET" and parts[-1] == "releases":
+        if fail_once("list"): sys.stderr.write("HTTP 403\n"); sys.exit(1)
+        sys.stdout.write(json.dumps(state["releases"][:1]) + json.dumps(state["releases"][1:])); sys.exit(0)
+    if method == "GET" and parts[-2] == "releases":
+        r = [x for x in state["releases"] if str(x["id"]) == parts[-1]]
+        print(json.dumps(r[0])); sys.exit(0)
+    if method == "DELETE":
+        rid = parts[-1]
+        state.setdefault("deleted", []).append(rid)
+        state["releases"] = [x for x in state["releases"] if str(x["id"]) != rid]; save(); sys.exit(0)
+    if method == "PATCH":
+        rid = parts[-1]
+        for x in state["releases"]:
+            if str(x["id"]) == rid:
+                x["draft"] = False; x["prerelease"] = False
+        state.setdefault("patched", []).append(args); save(); sys.exit(0)
+if a[:2] == ["release", "create"]:
+    if fail_once("create"):
+        state["releases"].append({"id": state["next"], "tag_name": a[2], "draft": True, "assets": []}); state["next"] += 1; save()
+        sys.stderr.write("upload failed\n"); sys.exit(1)
+    files = []
+    for x in a[3:]:
+        if x.startswith("--"): break
+        files.append(x)
+    assets = [{"name": os.path.basename(f), "size": os.path.getsize(f) + state.get("size_skew", 0), "state": "uploaded"} for f in files]
+    state["releases"].append({"id": state["next"], "tag_name": a[2], "draft": True, "assets": assets}); state["next"] += 1
+    state["created_args"] = a; save(); sys.exit(0)
+sys.stderr.write("fake gh: unsupported " + " ".join(a) + "\n"); sys.exit(9)
+"""
+
+
+class PublishScript(unittest.TestCase):
+    TAGN = "firmware-demo/2026.11.20"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="dumpling-fwpub-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.bin = os.path.join(self.dir, "bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "gh"), "w") as fh:
+            fh.write(FAKE_GH)
+        os.chmod(os.path.join(self.bin, "gh"), 0o755)
+        self.assets = os.path.join(self.dir, "assets")
+        os.makedirs(self.assets)
+        for n, c in (("firmware-meta.json", "{}"), ("fw-a.cdx.json", "{\"bomFormat\": \"CycloneDX\"}")):
+            with open(os.path.join(self.assets, n), "w") as fh:
+                fh.write(c)
+        self.notes = os.path.join(self.dir, "notes.md")
+        with open(self.notes, "w") as fh:
+            fh.write("notes")
+        self.state_dir = os.path.join(self.dir, "state")
+        os.makedirs(self.state_dir)
+
+    def state(self, releases=(), **extra):
+        with open(os.path.join(self.state_dir, "state.json"), "w") as fh:
+            json.dump({"releases": list(releases), "next": 100, **extra}, fh)
+
+    def load(self):
+        with open(os.path.join(self.state_dir, "state.json")) as fh:
+            return json.load(fh)
+
+    def run_script(self, *args):
+        env = {"PATH": self.bin + ":" + os.environ["PATH"], "FAKE_GH_STATE": self.state_dir, "GH_REPO": "o/r", "GHX_SLEEP": "0", "GHX_TRIES": "3",
+               "TMPDIR": self.dir, "HOME": self.dir}
+        return subprocess.run(["bash", PUBLISH, *args], capture_output=True, text=True, env=env)
+
+    def rel(self, rid, draft, tag=None, assets=()):
+        return {"id": rid, "tag_name": tag or self.TAGN, "draft": draft, "assets": list(assets)}
+
+    def test_publishes_when_nothing_exists(self):
+        self.state()
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        st = self.load()
+        self.assertEqual(st.get("deleted", []), [])
+        self.assertEqual([(x["draft"]) for x in st["releases"]], [False])
+        args = st["created_args"]
+        for flag in ("--draft", "--verify-tag", "--latest=false"):
+            self.assertIn(flag, args)
+        self.assertEqual(sorted(os.path.basename(x) for x in args[3:] if not x.startswith("--") and x.endswith(".json")),
+                         ["firmware-meta.json", "fw-a.cdx.json"])
+        self.assertTrue(any("draft=false" in " ".join(p) and "prerelease=false" in " ".join(p) for p in st["patched"]))
+
+    def test_leftover_drafts_of_the_same_tag_are_deleted_and_nothing_else(self):
+        other_published = self.rel(7, False, tag="firmware-demo/2026.11.01")
+        other_draft = self.rel(8, True, tag="firmware-demo/2026.11.19")
+        self.state([other_published, self.rel(5, True), self.rel(6, True), other_draft])
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        st = self.load()
+        self.assertEqual(sorted(st["deleted"]), ["5", "6"])                        # 只刪同 tag 的草稿；別的 tag 的草稿與正式版不動
+        self.assertEqual({x["id"] for x in st["releases"]}, {7, 8, 100})
+
+    def test_published_release_of_the_same_tag_stops_and_deletes_nothing(self):
+        for published in (self.rel(9, False), {**self.rel(9, False), "prerelease": True}):
+            self.state([self.rel(5, True), published])
+            r = self.run_script(self.TAGN, self.assets, self.notes)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            st = self.load()
+            self.assertEqual(st.get("deleted", []), [])                              # 正式版與草稿都不刪
+            self.assertEqual({x["id"] for x in st["releases"]}, {5, 9})
+            self.assertNotIn("create", slurp(os.path.join(self.state_dir, "calls.log")))
+
+    def test_retry_after_a_failed_upload_cleans_the_partial_draft(self):
+        self.state(fail={"create": 1})
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        st = self.load()
+        self.assertEqual(len(st["deleted"]), 1)                                      # 第一次失敗留下的草稿，第二次嘗試先清掉
+        self.assertEqual([x["draft"] for x in st["releases"]], [False])
+
+    def test_transient_api_failure_is_retried(self):
+        self.state(fail={"list": 2})
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_persistent_failure_exits_nonzero_and_leaves_no_published_release(self):
+        self.state(fail={"create": 99})
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertTrue(all(x["draft"] for x in self.load()["releases"]))
+
+    def test_asset_mismatch_is_not_published(self):
+        self.state(size_skew=1)
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        st = self.load()
+        self.assertEqual(st.get("patched", []), [])
+        self.assertTrue(all(x["draft"] for x in st["releases"]))
+
+    def test_cleanup_mode_only_deletes_drafts_of_the_tag(self):
+        self.state([self.rel(5, True), self.rel(7, False, tag="x/1"), self.rel(8, True, tag="x/1")])
+        r = self.run_script("--cleanup", self.TAGN)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.load()["deleted"], ["5"])
+        self.state([self.rel(5, True), self.rel(9, False)])                         # 同 tag 已有正式版：什麼都不刪
+        r = self.run_script("--cleanup", self.TAGN)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.load().get("deleted", []), [])
+
+    def test_argument_and_attachment_checks(self):
+        self.state()
+        self.assertEqual(self.run_script(self.TAGN, self.assets).returncode, 64)
+        with open(os.path.join(self.assets, "evil.bin"), "wb") as fh:
+            fh.write(b"\x00")
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 64, r.stdout + r.stderr)                      # 非 JSON 的附件不上傳
+        self.assertNotIn("create", slurp(os.path.join(self.state_dir, "calls.log")) if os.path.exists(os.path.join(self.state_dir, "calls.log")) else "")
+
+
+class ReleaseApi(unittest.TestCase):
+    def test_parse_paginate_output(self):
+        import firmware_release_api as api
+        text = json.dumps([{"id": 1, "tag_name": "t", "draft": True}]) + "\n" + json.dumps([{"id": 2, "tag_name": "t", "draft": True}, {"id": 3, "tag_name": "u", "draft": False}])
+        self.assertEqual(api.plan(text, "t"), (False, ["1", "2"]))
+        self.assertEqual(api.plan(text, "u"), (True, []))
+        self.assertEqual(api.plan("[]", "t"), (False, []))
+        with self.assertRaises(ValueError):
+            api.plan("not json", "t")
+
+    def test_non_draft_ids_are_never_listed(self):
+        import firmware_release_api as api
+        text = json.dumps([{"id": 1, "tag_name": "t", "draft": False}, {"id": 2, "tag_name": "t", "draft": True},
+                           {"id": "3", "tag_name": "t", "draft": True}, {"id": True, "tag_name": "t", "draft": True},
+                           {"id": 4, "tag_name": "t", "draft": "true"}, "junk", None])
+        published, drafts = api.plan(text, "t")
+        self.assertTrue(published)
+        self.assertEqual(drafts, ["2"])                                              # 1 是正式版：不會出現在待刪清單
+
+    def test_verify_assets(self):
+        import firmware_release_api as api
+        d = tempfile.mkdtemp(prefix="dumpling-fwapi-")
+        self.addCleanup(shutil.rmtree, d, True)
+        for n, c in (("a.json", "12345"), ("b.json", "1")):
+            with open(os.path.join(d, n), "w") as fh:
+                fh.write(c)
+        ok = {"assets": [{"name": "a.json", "size": 5, "state": "uploaded"}, {"name": "b.json", "size": 1, "state": "uploaded"}]}
+        self.assertEqual(api.verify_assets(json.dumps(ok), d), [])
+        for mut in (lambda r: r["assets"].pop(), lambda r: r["assets"][0].update(size=6), lambda r: r["assets"][0].update(state="starter"),
+                    lambda r: r["assets"].append({"name": "c.json", "size": 1, "state": "uploaded"}), lambda r: r["assets"].append(dict(r["assets"][0]))):
+            r = copy.deepcopy(ok)
+            mut(r)
+            self.assertTrue(api.verify_assets(json.dumps(r), d))
+        self.assertTrue(api.verify_assets("[]", d))
+        self.assertTrue(api.verify_assets("x", d))
+
+
+class Ghx(unittest.TestCase):
+    def run_ghx(self, body, tries="4"):
+        d = tempfile.mkdtemp(prefix="dumpling-ghx-")
+        self.addCleanup(shutil.rmtree, d, True)
+        script = ". '%s'\n%s\n" % (GHX, body.replace("@D@", d))
+        env = {"PATH": os.environ["PATH"], "GHX_SLEEP": "0", "GHX_TRIES": tries, "GH_REPO": "o/r"}
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, cwd=d)
+        return r, d
+
+    def test_retries_until_success(self):
+        r, d = self.run_ghx('n=0; flaky() { n=$((n+1)); echo "$n" > @D@/n; [ "$n" -ge 3 ]; }\nghx flaky; echo rc=$?')
+        self.assertIn("rc=0", r.stdout)
+        self.assertEqual(slurp(os.path.join(d, "n")).strip(), "3")
+
+    def test_gives_up_after_the_limit(self):
+        r, d = self.run_ghx('always() { echo x >> @D@/n; false; }\ngh() { echo "gh-called" >&2; }\nghx always; echo rc=$?', tries="3")
+        self.assertIn("rc=1", r.stdout)
+        self.assertEqual(len(slurp(os.path.join(d, "n")).split()), 3)
+        self.assertIn("診斷", r.stdout)
+
+    def test_exit_code_3_is_not_retried(self):
+        r, d = self.run_ghx('three() { echo x >> @D@/n; return 3; }\nghx three; echo rc=$?')
+        self.assertIn("rc=3", r.stdout)
+        self.assertEqual(len(slurp(os.path.join(d, "n")).split()), 1)
 
 
 if __name__ == "__main__":

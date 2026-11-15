@@ -5,7 +5,7 @@
       tag 要 fullmatch firmware-demo/YYYY.MM.DD（同一天第二次起加 .2～.99），日期要是有效日期。
       --allow-test-tag：另外接受測試用的 firmware-demo/0000.00.00（PR 與手動觸發的端到端自我檢查用；真的 tag 不能用）。
   build <firmware.yml>... --ci-out <firmware-ci 的產出資料夾> --supplier-prep <供應商 SBOM 的 prep 資料夾> --out <空資料夾>
-        --tag <tag> --commit <40 碼> --built-at <UTC> --workflow-run <網址> [--allow-test-tag] [--ci-summary <firmware-ci 的摘要.md>] [--sbom-check-log <firmware-sbom-check.sh 的 stdout>]
+        --tag <tag> --commit <40 碼> --built-at <UTC> --workflow-run <網址> [--allow-test-tag] [--ci-summary <firmware-ci 的摘要.md>] [--sbom-check-log <firmware-sbom-check.sh 的 stdout>] --dt-result <success|failure|cancelled|skipped|空>
       產生要上傳的資料夾：fw-<slug>.cdx.json、fw-inventory-<slug>.json、firmware-meta.json（不放任何二進位檔）。
       任何一項不合規就失敗（退出碼 1，原因印在 stderr），不寫半套輸出。
   collect-check --meta <firmware-meta.json> --dir <資料夾> --tag <tag> [--collect <collect.py>]
@@ -29,7 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)  # Python 3.11 起 -I 含 -P，不會自動把腳本所在目錄放進 sys.path
-from firmware_watch import parse_watch  # noqa: E402
+from firmware_watch import clean_why, parse_watch  # noqa: E402
 
 try:
     import yaml
@@ -49,6 +49,9 @@ BUILT_AT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}
 RUN_RE = re.compile(r"https://[!-~]{1,300}")
 KINDS = ("bios", "vbios", "sbom")
 STATUSES = ("OK", "ATTENTION", "GAP")
+DT_RESULTS = ("OK", "FAIL", "NOT_RUN")
+DT_REASON = "DT 上傳沒有完成，Release 內容不受影響"       # 固定字串（C3 已確認格式）
+MANIFEST_STATUSES = ("ok", "GAP")                       # firmware.yml 的 status：只有 ok 才算監控；GAP 列進 not_watched；其他值一律失敗
 EXPECT_VALUES = ("OK", "MISMATCH", "MISSING", "ERROR", "NOT_RUN", "NONE")
 EXPECT_ORDER = ("ERROR", "MISMATCH", "MISSING", "NOT_RUN")   # 多項時取最差的；全部 OK 才是 OK
 MAX_FILE = 64 * 1024 * 1024
@@ -81,6 +84,28 @@ def check_tag(tag, allow_test=False):
     except ValueError:
         raise MetaError("tag 的日期不是有效日期")
     return tag
+
+
+# ---------------------------------------------------------------- 臨時 DT 的結果
+
+def dt_block(job_result):
+    """firmware-dt job 的結果（workflow 的 needs.<job>.result：success、failure、cancelled、skipped）→ meta 的 dt 欄位。
+    success＝OK；failure、cancelled＝FAIL；skipped 或拿不到結果（空字串、不認得的值）＝NOT_RUN。
+    只有兩種組合：OK 時 status OK、reason null；其他 status GAP、reason 固定字串。"""
+    r = {"success": "OK", "failure": "FAIL", "cancelled": "FAIL"}.get(job_result if isinstance(job_result, str) else "", "NOT_RUN")
+    if r == "OK":
+        return {"status": "OK", "result": "OK", "reason": None}
+    return {"status": "GAP", "result": r, "reason": DT_REASON}
+
+
+def dt_problem(dt):
+    """meta 的 dt 欄位是否合規 → 問題字串或 None。只接受 dt_block 產生的三種組合，其他一律不合規。"""
+    if not isinstance(dt, dict) or set(dt) != {"status", "result", "reason"}:
+        return "dt 必須是 {status, result, reason}"
+    good = ({"status": "OK", "result": "OK", "reason": None},
+            {"status": "GAP", "result": "FAIL", "reason": DT_REASON},
+            {"status": "GAP", "result": "NOT_RUN", "reason": DT_REASON})
+    return None if dt in good else "dt 的組合不合規（只能是 OK／OK／null，或 GAP＋FAIL／NOT_RUN＋固定的 reason）"
 
 
 # ---------------------------------------------------------------- 讀檔
@@ -186,19 +211,22 @@ def ci_summary_status(summary_text, slug):
 
 
 def not_watched_why(slug, doc, mon, why):
+    """不監控的原因（為什麼列進 not_watched）。宣告的 why 與 notes 推導出來的原因用同一個檢查（firmware_watch.clean_why）。"""
     status = doc.get("status")
     if mon is False:
         if status != "ok" and not why.startswith(str(status)):
-            return "%s：%s" % (status, why)
+            return clean_why("%s：%s" % (status, why))
         return why
-    notes = str(doc.get("notes") or "").strip().splitlines()
-    first = notes[0].strip() if notes else ""
-    if not first:
-        raise MetaError("%s：status 是 %s 但 notes 沒有可當原因的文字" % (slug, status))
-    return first if first.startswith(str(status)) else "%s：%s" % (status, first)
+    lines = [x.strip() for x in str(doc.get("notes") or "").splitlines() if x.strip()]
+    first = lines[0] if lines else ""
+    try:
+        clean_why(first)                      # notes 的第一行本身要符合規則（加上「狀態：」前綴之前先檢查，免得前綴蓋掉空的內容）
+        return clean_why(first if first.startswith(str(status)) else "%s：%s" % (status, first))
+    except ValueError as e:
+        raise MetaError("%s：status 是 %s，notes 的第一行不能當原因（%s）" % (slug, status, e))
 
 
-def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow_run, allow_test_tag=False, ci_summary=None, sbom_check_log=None, write=True):
+def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow_run, allow_test_tag=False, ci_summary=None, sbom_check_log=None, dt_result="", write=True):
     """→ meta（dict）。write=True 時另把附件與 firmware-meta.json 寫進 out（必須不存在或是空資料夾）。"""
     check_tag(tag, allow_test_tag)
     if not (isinstance(commit, str) and COMMIT_RE.fullmatch(commit)):
@@ -222,12 +250,18 @@ def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow
             raise MetaError("slug 重複：%s" % slug)
         seen.add(slug)
         kind, status = doc.get("kind"), doc.get("status")
-        if kind not in KINDS:
+        if not isinstance(kind, str) or kind not in KINDS:
             raise MetaError("%s：kind 必須是 %s" % (slug, "／".join(KINDS)))
+        # 第二道防線（第一道是 firmware_fetch.validate）：status 只有 ok（監控）與 GAP（沒有檔案）兩種；
+        # 其他值（大寫的 OK、清單、空值…）一律失敗，不放進 not_watched，免得打錯字的樣本悄悄變成「不監控」。
+        if not isinstance(status, str) or status not in MANIFEST_STATUSES:
+            raise MetaError("%s：firmware.yml 的 status 必須是 %s（原樣小寫），拿到的值不合規" % (slug, "／".join(MANIFEST_STATUSES)))
         try:
             mon, why = parse_watch(doc)
         except ValueError as e:
             raise MetaError("%s：%s" % (slug, e))
+        if mon is True and status != "ok":
+            raise MetaError("%s：watch.monitored 是 true，但 status 是 %s（沒有檔案可監控）：矛盾的宣告" % (slug, status))
         # 不監控一律由 firmware.yml 明確宣告（watch.monitored: false）；不從輸出推測。status 不是 ok（沒有檔案）也列進 not_watched。
         if mon is False or status != "ok":
             not_watched.append({"slug": slug, "why": not_watched_why(slug, doc, mon, why)})
@@ -277,7 +311,7 @@ def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow
     samples.sort(key=lambda x: x["slug"])
     not_watched.sort(key=lambda x: x["slug"])
     meta = {"schema": META_SCHEMA, "tag": tag, "commit": commit, "built_at": built_at, "workflow_run": workflow_run,
-            "samples": samples, "not_watched": not_watched, "tables": tables}
+            "samples": samples, "not_watched": not_watched, "tables": tables, "dt": dt_block(dt_result)}
     problems = validate_meta(meta)
     if problems:
         raise MetaError("產生的 meta 自己檢查不過：" + "；".join(problems[:5]))
@@ -342,8 +376,13 @@ def validate_meta(meta):
         s, w = x.get("slug"), x.get("why")
         if not (isinstance(s, str) and SLUG_RE.fullmatch(s)):
             p.append("not_watched 的 slug 不合規則")
-        if not (isinstance(w, str) and w.strip()):
-            p.append("not_watched 的 %s 沒有 why" % s)
+        try:
+            clean_why(w)
+        except ValueError as e:
+            p.append("not_watched 的 %s：%s" % (s, e))
+    dp = dt_problem(meta.get("dt"))
+    if dp:
+        p.append(dp)
     return p
 
 
@@ -467,6 +506,14 @@ def rematch_check(meta_path, rematch_out):
 
 # ---------------------------------------------------------------- Release 說明
 
+def dt_text(dt):
+    if not isinstance(dt, dict) or dt_problem(dt):
+        return "沒有記錄"
+    if dt["result"] == "OK":
+        return "OK（上傳與驗證完成）"
+    return "GAP（結果 %s，上傳沒有完成；附件由解析與離線公告比對產生，與 DT 的結果無關）" % dt["result"]
+
+
 def release_notes(meta):
     watched = [x for x in meta["samples"]]
     lines = [
@@ -478,6 +525,7 @@ def release_notes(meta):
         "- 狀態是解析結果與離線公告比對的狀態。比對結果是候選或建議，漏洞判定仍是 NOT_ASSESSED；NOT_ASSESSED 是資料庫沒有資料，以廠商公告為準。",
         "- 供應商 SBOM（kind sbom）附的是正規化後的上傳副本（`normalized: true`），沒有 inventory。",
         "- 建置的 commit 與工作流程記錄在 `firmware-meta.json`。",
+        "- 臨時 Dependency-Track（DT）上傳：%s。" % dt_text(meta.get("dt")),
         "",
         "## 進每日監控的樣本（%d 份）" % len(watched),
         "",
@@ -511,6 +559,7 @@ def main(argv=None):
     b.add_argument("--allow-test-tag", action="store_true")
     b.add_argument("--ci-summary")
     b.add_argument("--sbom-check-log")
+    b.add_argument("--dt-result", required=True, help="firmware-dt job 的 needs 結果：success、failure、cancelled、skipped（空字串＝拿不到結果）")
     k = sub.add_parser("collect-check", allow_abbrev=False)
     k.add_argument("--meta", required=True)
     k.add_argument("--dir", required=True)
@@ -529,7 +578,7 @@ def main(argv=None):
             print("FIRMWARE-META\tOK\t-\ttag 合規：%s" % a.tag)
         elif a.cmd == "build":
             meta = build(a.manifests, a.ci_out, a.supplier_prep, a.out, a.tag, a.commit, a.built_at, a.workflow_run,
-                         a.allow_test_tag, a.ci_summary, a.sbom_check_log)
+                         a.allow_test_tag, a.ci_summary, a.sbom_check_log, a.dt_result)
             print("FIRMWARE-META\tOK\t-\t%d 個樣本、%d 個不監控、tag %s" % (len(meta["samples"]), len(meta["not_watched"]), meta["tag"]))
         elif a.cmd in ("collect-check", "rematch-check"):
             if a.cmd == "collect-check":

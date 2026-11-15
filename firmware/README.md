@@ -109,7 +109,7 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
   產生器是 `pipeline/lib/firmware_meta.py`；不進監控的樣本由 `firmware.yml` 的 `watch` 欄位宣告。
 
 每次 PR、手動觸發與 tag 觸發都會先產生這些附件並自我檢查（meta 符合每日監控 collect 的檢查、附件的檔名與 sha256 一致、`firmware-rematch.sh` 重跑的 `changed` 是空的、整個資料夾通過 `ci/public-check.sh`）；
-只有 tag push 才會建 Release，而且只有最後的 `firmware-release` job 有 `contents: write`。
+只有 tag push 才會建 Release，而且只有最後的 `firmware-release` job 有 `contents: write`；tag 指到的 commit 必須在 main 的歷史裡，Release 不等臨時 DT（DT 的結果記在 meta 的 `dt` 欄位）。
 tag、附件、meta 欄位、自我檢查與限制見 `docs/notes/c2-firmware-release.md`。第一個 tag 由 C2 在 C0 同意後打。
 
 ## 第二條路：供應商 BIOS SBOM 匯入（品質檢查）
