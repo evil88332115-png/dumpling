@@ -82,7 +82,6 @@ def test_cve_list_source_comes_from_structured_origin(tmp_path, origin, source):
 @pytest.mark.parametrize("name,cfg", [
     ("no file", None),
     ("N equals M", kcfg(0)),
-    ("N smaller than M", kcfg(0, cves=KERNEL_CVES[:5])),
     ("wrong schema", kcfg(4, schema="something/1")),
     ("no results", {"schema": "sca-center-kernel-config/1", "inputs": {}}),
     ("results not a list", {"schema": "sca-center-kernel-config/1", "inputs": {}, "results": "x"}),
@@ -93,6 +92,14 @@ def test_cve_list_line_not_written_when_n_unknown_or_not_larger(tmp_path, name, 
     for text in (section_87(ra), kd):
         assert "Kernel CVE list:" not in text
         assert f"> {ZH_DETAIL}" in text                                  # 說明原文照樣帶出
+
+
+def test_all_listed_but_kernel_rows_have_cves_outside_the_list(tmp_path):
+    """清單的 CVE 都成列（N 不大於 M），核心列另有清單以外的 CVE（K > 0）：也寫一行（C0）。"""
+    s, ra, kd, _ = docs(tmp_path, kcfg=kcfg(0, cves=KERNEL_CVES[:5]))
+    for text in (section_87(ra), kd):
+        assert ("Kernel CVE list: 5 CVEs (source: KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings; "
+                "`scan/kernel-config.json`); all of them are listed as rows. A further 3 CVEs of the kernel rows are not in the list.") in text
 
 
 def test_listed_count_is_distinct_cves_of_kernel_rows_in_n(tmp_path):
@@ -112,6 +119,10 @@ def test_text_helpers_are_structure_only():
     assert "A further" not in t                                                         # K 是 0：不寫
     t = cr.kernel_gap_text(st, rows + [{"id": "CVE-2025-9", "cves": ["CVE-2025-9"]}], cfg)
     assert t.endswith("the other 1 are not listed as rows. A further 1 CVEs of the kernel rows are not in the list.")
+    full = kcfg(0, cves=["CVE-2025-1", "CVE-2025-2"])                  # N 等於 M、K > 0：也要寫出 K（C0）
+    t = cr.kernel_gap_text(st, rows + [{"id": "CVE-2025-9", "cves": ["CVE-2025-9"]}], full)
+    assert t.endswith("all of them are listed as rows. A further 1 CVEs of the kernel rows are not in the list.")
+    assert "Kernel CVE list" not in cr.kernel_gap_text(st, rows, full)  # N 等於 M、K 是 0：不寫
     assert cr.kernel_gap_text({"C-kernel-coverage": ("OK", "x")}, rows, cfg) == ""
     assert cr.kernel_gap_text({}, rows, cfg) == "" and cr.kernel_gap_text(None, rows, cfg) == ""
     assert cr.kernel_cve_list_info(None) is None and cr.kernel_cve_list_info({"schema": "sca-center-kernel-config/1"}) is None
