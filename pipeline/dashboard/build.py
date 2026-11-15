@@ -46,7 +46,8 @@ DOWNLOAD_RE = re.compile(r"^(report-.+\.zip|vuln-list-.+\.xlsx|p1-table-.+\.xlsx
 SCAN_RE = re.compile(r"^scan-summary-.+\.json\Z", re.S)
 VEX_RE = re.compile(r"^vex-.+\.cdx\.json\Z", re.S)
 RUN_KEY = {"": "full", "-bsp": "bsp", "-os": "os"}
-TIERS = ("p1", "p2", "p3", "accepted", "nvidia_bulletin")
+# 產生端可能寫出的分級（C1：tools/cra/cra_report.py 的 TIERS 與 distro_fixed、tools/cra/vex_export.py 的 nvidia_bulletin）
+TIERS = ("p1", "p2", "p3", "accepted", "distro_fixed", "nvidia_bulletin")
 # CycloneDX 1.6 的 vulnerability analysis 列舉值（其他值一律歸成「不明」）
 VEX_STATES = ("resolved", "resolved_with_pedigree", "exploitable", "in_triage", "false_positive", "not_affected")
 VEX_JUSTIFICATIONS = ("code_not_present", "code_not_reachable", "requires_configuration", "requires_dependency",
@@ -179,7 +180,11 @@ def scan_row(scan):
         tiers_raw = vul.get("tiers")
         tiers = tiers_raw if isinstance(tiers_raw, dict) else {}
         # 每個分級逐項：缺少或格式不對都要寫出來，不能靜默丟掉（C0 驗證應修 2）
-        tier_gaps = {k: ("缺" if k not in tiers else "格式不對") for k in TIERS if ci(tiers.get(k)) is None}
+        # 新格式（C1 改 vuln_metrics 之後）：tiers 固定寫 6 個 key（0 也寫），清單外的值放在 tiers_unknown（{"值": 列數}）。
+        # 有 tiers_unknown 這個欄位就是新格式：缺 key 是真的異常；舊格式缺 key 可能代表 0（GAP 加說明）
+        new_fmt = isinstance(vul.get("tiers_unknown"), dict)
+        tier_gaps = {k: (("缺（新格式不該缺）" if new_fmt else "缺") if k not in tiers else "格式不對")
+                     for k in TIERS if ci(tiers.get(k)) is None}
         us = r.get("upstream_source")
         reports[name] = {"report_status": cs(r.get("report_status")), "release_gate": cs(r.get("release_gate")),
                          "build_record_status": cs(r.get("build_record_status")),
@@ -187,6 +192,18 @@ def scan_row(scan):
                          "non_ok_stages": non_ok, "stages_gap": stages_gap,
                          "tiers": {k: ci(tiers.get(k)) for k in TIERS if ci(tiers.get(k)) is not None},
                          "tier_gaps": tier_gaps, "tiers_gap": None if isinstance(tiers_raw, dict) else "沒有 tiers",
+                         # 不認得的分級（例如某一列沒有 tier 時的 "None"）：標成異常，不默默丟掉（C1 建議）
+                         "unknown_tiers": ([[c(k, 40), ci(v)] for k, v in sorted(tiers.items(), key=lambda kv: str(kv[0])) if k not in TIERS]
+                                           + [[c(k, 40), ci(v)] for k, v in sorted((vul.get("tiers_unknown") if new_fmt else {}).items(),
+                                                                                key=lambda kv: str(kv[0]))])[:10],
+                         "tiers_format": "new" if new_fmt else "old",
+                         # 新格式：tiers 與 tiers_unknown 的列數加起來等於 rows_total（C1）；不一致就是資料有問題
+                         **({"tiers_sum_bad": "分級合計 %s 與 rows_total %s 不一致" % (
+                             sum(v for v in list(tiers.values()) + list(vul["tiers_unknown"].values()) if ci(v) is not None), ci(vul.get("rows_total")))}
+                            if new_fmt and not tier_gaps and ci(vul.get("rows_total")) is not None
+                            and sum(v for v in list(tiers.values()) + list(vul["tiers_unknown"].values()) if ci(v) is not None) != vul["rows_total"]
+                            else {}),
+                         **({} if new_fmt or "tiers_unknown" not in vul else {"tiers_unknown_bad": "tiers_unknown 不是物件"}),
                          "cves_total": ci(vul.get("cves_total"))}
     if not reports:
         raise Gap("scan-summary 的 runs 裡沒有 full／-bsp／-os")

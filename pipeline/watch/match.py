@@ -34,6 +34,7 @@
   GAP：還沒有狀態、也沒有任何可監控的 SBOM（例如 M2 之前）→ 不建立空的基準。
 """
 import argparse
+import copy
 import datetime
 import hashlib
 import importlib.util
@@ -99,6 +100,7 @@ FW_WORD_VBIOS = "建議受影響（依 NVIDIA 對照表，待人審）"
 FW_WORD_UCODE = "版本比較的候選，待人審"
 # rematch 的 key：不透明字串，只檢查字元集（C2 定的 A-Za-z0-9._=+-:/#）
 FW_KEY_RE = re.compile(r"[A-Za-z0-9._=+\-:/#]{1,300}")
+FW_MAX_BULLETINS = 20      # 每筆結果的公告 ID 上限（C0 決定 2026-11-15）：超過就那份樣本 GAP，不截斷
 FW_MAX_AFFECTED = 100       # 每個樣本存進狀態的 affected 上限（狀態 Issue 有 60000 字元上限；超過整份樣本 GAP）
 
 
@@ -330,8 +332,8 @@ def _fw_tables(t, where, errs):
 
 
 def _fw_bulletins(b, errs, where):
-    if not isinstance(b, list) or len(b) > 50 or not all(_fw_str(x, 1, 80) for x in b):
-        errs.append(f"{where}bulletins 不是字串陣列（最多 50 筆、每筆 1～80 字元）")
+    if not isinstance(b, list) or len(b) > FW_MAX_BULLETINS or not all(_fw_str(x, 1, 80) for x in b):
+        errs.append(f"{where}bulletins 不是字串陣列（最多 {FW_MAX_BULLETINS} 筆、每筆 1～80 字元）")
         return []
     return list(b)
 
@@ -778,6 +780,8 @@ def sanitize_firmware(fw):
     """firmware 狀態：只留公開欄位、限制大小（WATCH.md 3.5）。tables：表的識別（字串、布林）；
     samples：{監控鍵: {image_sha256, image_sha256_history, advisory: {key: {kind, result, bulletins, component, review, baseline}}}}。"""
     out = {"tables": {}, "samples": {}}
+    if isinstance(fw.get("size_stopped_at"), str):          # 韌體因狀態大小上限停止的時間（狀態 Issue 的摘要看得到）
+        out["size_stopped_at"] = fw["size_stopped_at"][:40]
     for n, t in (fw.get("tables") or {}).items() if isinstance(fw.get("tables"), dict) else []:
         if n in FW_TABLES and isinstance(t, dict):
             out["tables"][n] = {k: v for k, v in t.items() if isinstance(k, str) and isinstance(v, (str, bool))}
@@ -794,9 +798,9 @@ def sanitize_firmware(fw):
             # 型別不對的紀錄丟掉（讀入的舊狀態可能被手改；fw_groups 不能因此當掉）
             if not (isinstance(k, str) and FW_KEY_RE.fullmatch(k) and isinstance(e, dict) and e.get("kind") in FW_KINDS
                     and isinstance(e.get("result"), str) and isinstance(e.get("bulletins"), list)
-                    and all(isinstance(b, str) for b in e["bulletins"])):
-                continue
-            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": [b[:80] for b in e["bulletins"][:50]]}
+                    and len(e["bulletins"]) <= FW_MAX_BULLETINS and all(isinstance(b, str) and len(b) <= 80 for b in e["bulletins"])):
+                continue        # 超過上限不截斷（截斷後看起來像完整的）：整筆丟掉
+            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": list(e["bulletins"])}
             if isinstance(e.get("component"), str):
                 rec["component"] = e["component"][:300]
             if e.get("review") in ("preliminary", "confirmed", None) and "review" in e:
@@ -909,7 +913,10 @@ def pinfo_of(projs, uuid):
 
 def fw_entry_of(r, baseline):
     """一筆 affected／affected-candidate 的結果 → 狀態裡的紀錄（只存這兩種，控制大小）。"""
-    e = {"kind": r["kind"], "result": r["result"], "bulletins": list(r["bulletins"])[:50], "component": _plain(r["component"], 120)}
+    # 公告 ID 超過 FW_MAX_BULLETINS 的結果在 check_rematch_doc 就讓整份樣本 GAP（results 是 None，走不到這裡）；這裡不再切片
+    if len(r["bulletins"]) > FW_MAX_BULLETINS:
+        raise Fail(f"內部錯誤：公告 ID 超過 {FW_MAX_BULLETINS} 筆的結果不該寫進狀態（{r.get('key')!r:.80}）")
+    e = {"kind": r["kind"], "result": r["result"], "bulletins": list(r["bulletins"]), "component": _plain(r["component"], 120)}
     if r.get("review"):
         e["review"] = r["review"]
     if baseline:
@@ -1671,11 +1678,30 @@ def run(a, kernel_runner=None):
         # 韌體：公告重跑的結果、image_sha256 的變化、狀態（FIRMWARE-WATCH.md §4、§5）
         fw_projs = [p for p in projs if is_fw(p)]
         fwx = None
+        fw_size_why = None
         if fw_projs or isinstance(inv.get("firmware"), dict) or isinstance(state.get("firmware"), dict):
             rm = load_rematch(getattr(a, "firmware_rematch", None), fw_projs)
+            old_fw = copy.deepcopy(state["firmware"]) if isinstance(state.get("firmware"), dict) else None
             fwx = fw_update(state, inv.get("firmware"), fw_projs, rm, first, utc(now))
             state["firmware"] = {"tables": fwx["tables"], "samples": fwx["samples"]}
             fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious)
+            # 狀態大小（C0 裁定 (A)，2026-11-15）：加上韌體會超過狀態 Issue 的上限 → 只有韌體停下來（fail-closed），
+            # KEV 照常（#28 的決定：漏掉 KEV 通知比重複留言嚴重）。韌體這一輪不寫進狀態（沿用上一輪）、不產生 fwadv 的動作、整份標 GAP
+            size_fw = state_size(sanitize_state(state))
+            if size_fw > STATE_MAX_CHARS:
+                state["firmware"] = sanitize_firmware(old_fw) if old_fw is not None else {"tables": {}, "samples": {}}
+                state["firmware"]["size_stopped_at"] = utc(now)
+                why = (f"韌體因狀態大小上限停止：加上這一輪的韌體結果，狀態編碼後約 {size_fw} 字元，超過上限 {STATE_MAX_CHARS}；"
+                       "這一輪的韌體結果不寫進狀態、不開公告 Issue（KEV 照常）")
+                for p in fw_projs:
+                    if p["uuid"] in per:
+                        per[p["uuid"]].update(advisory="GAP", advisory_why=why)
+                gaps.append(why)
+                serious.append("韌體因狀態大小上限停止")
+                fw_size_why = why
+                fwx = None
+            elif isinstance(state.get("firmware"), dict):
+                state["firmware"].pop("size_stopped_at", None)
         if first:
             # 基準不完整會讓下一次把既有的命中全部當成新的：任何一項沒有完整跑完就 FAIL、不寫狀態（PR #28 驗證應修 1）
             why = []
@@ -1715,6 +1741,14 @@ def run(a, kernel_runner=None):
         actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
+            if fw_size_why:          # 韌體因狀態大小上限停止：健康 Issue 當輪就看得到（7 天一次，同「狀態接近上限」）
+                dd = state.setdefault("dumpling", {})
+                last = dd.get("fw_size_warned_at")
+                if not last or (now - parse_now(last)).days >= HEALTH_REPEAT_DAYS:
+                    dd["fw_size_warned_at"] = utc(now)
+                    actions.append({"op": "open_if_closed", "key": issue_key(a.mode, "health"), "title": "[監控降級] 韌體因狀態大小上限停止",
+                                    "body": fw_size_why + "。請處理：修剪狀態、減少韌體樣本或改成分段存放（WATCH.md 3.5）。",
+                                    "labels": ["watch-health"]})
         add_feed_note(actions, feed_attn)
         if a.demo:
             mark_demo(actions)

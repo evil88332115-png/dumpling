@@ -39,7 +39,8 @@ def _to_str(v):
         return "（數值過大）"
 
 REPORTS = ("full", "bsp", "os")
-TIERS = ("p1", "p2", "p3", "accepted", "nvidia_bulletin")
+TIERS = ("p1", "p2", "p3", "accepted", "distro_fixed", "nvidia_bulletin")
+TIER_GAP_NOTE = "分級缺少時寫 GAP。產生端目前只寫有出現的分級，所以 GAP 可能代表 0；之後會改成明確寫出 0"
 STATUS_HELP = (
     ("OK", "這一項有跑、資料齊"),
     ("GAP", "資料缺或沒跑完整；缺什麼寫在旁邊"),
@@ -349,6 +350,12 @@ def render_vulns(ctx, rel):
                 parts.append("%s %s" % (esc(k, 20), num(t.get(k))))
             else:          # 缺少或格式不對：逐項寫 GAP，不靜默丟掉（硬性限制 5）
                 parts.append('%s <span class="st st-GAP">GAP</span>（%s）' % (esc(k, 20), esc(tg.get(k) or "缺", 20)))
+        for k, v in lst(r.get("unknown_tiers")):
+            parts.append("%s %s %s" % (ext(k, 40), num(v), ctx.st("不認得的分級")))
+        if r.get("tiers_sum_bad"):
+            parts.append(ctx.gap(r["tiers_sum_bad"]))
+        if r.get("tiers_unknown_bad"):
+            parts.append(ctx.gap(r["tiers_unknown_bad"]))
         if r.get("tiers_gap"):
             parts.insert(0, ctx.gap(r["tiers_gap"]))
         total = num(r.get("cves_total"))
@@ -364,7 +371,8 @@ def render_vulns(ctx, rel):
     if comp:
         extra = "<p class=\"muted\">元件數：%s</p>" % esc("、".join("%s %s" % (k, num(comp.get(k)))
                                                               for k in ("total", "bsp", "os", "unknown") if k in comp))
-    return table(["報告", "漏洞統計（含該報告的狀態）"], rows, "漏洞統計") + extra
+    note = '<p class="muted">%s。</p>' % esc(TIER_GAP_NOTE, 200)          # C0：GAP 的原因要讓讀者知道（vuln_metrics 改好之前）
+    return table(["報告", "漏洞統計（含該報告的狀態）"], rows, "漏洞統計") + note + extra
 
 
 def render_vex(ctx, rel):
@@ -611,6 +619,7 @@ def render_footer(ctx):
         "<li>本頁只列已發布的 Release（草稿不列）；演練用的 Issue 不列。</li>",
         "<li>本頁不保存歷史：每次都從來源重算，只留最新一次部署。</li>",
         "<li>OK 只表示該項有跑、資料齊；沒有命中時寫「這次比對沒有新的已遭利用命中」，不代表沒有風險。</li>",
+        "<li>漏洞統計：%s。</li>" % esc(TIER_GAP_NOTE, 200),
         "<li>機器可讀版：%s（同一份資料，不含任何金鑰）。</li>" % ctx.a("data.json", "data.json"),
         "</ul>",
         "</footer>"])

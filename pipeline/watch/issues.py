@@ -675,6 +675,7 @@ def public_check(texts):
 
 
 _SUMMARY_VAL = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_SUMMARY_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
 def state_summary(gen, nm, st=None):
@@ -694,6 +695,10 @@ def state_summary(gen, nm, st=None):
                 parts.append(f"{n} {v(ident)[:16]}（status {v(t.get('status'))}、stale {v(t.get('stale'))}）")
         if parts:
             out += "；韌體的比對表：" + "；".join(parts)
+    fwst = (st or {}).get("firmware") if isinstance((st or {}).get("firmware"), dict) else {}
+    if fwst.get("size_stopped_at") is not None:            # C0（2026-11-15）：韌體因狀態大小上限停止，摘要要看得到
+        t = fwst["size_stopped_at"]
+        out += "；韌體因狀態大小上限停止（%s）" % (t if isinstance(t, str) and _SUMMARY_TIME.fullmatch(t) else "?")
     return out
 
 
