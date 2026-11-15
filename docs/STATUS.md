@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 13:57 +0800（C3）
+最後更新：2026-11-15 14:05 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -142,7 +142,16 @@
 >       - 退出碼：0＝OK，2＝ATTENTION 或 GAP，1＝FAIL，64＝參數錯誤。
 >       - 真樣本：6 份重跑後 changed 都是空的，fw.cdx.json 逐位元組相同。
 >       - 本機 1331 passed；c3-watch 416 passed。CI tests 43681896973、firmware 43681898763。
->       - → **預驗**（獨立驗證代理，sonnet、high）**進行中**。
+>       - → **預驗**（獨立驗證代理，sonnet、high）：**不通過，應修 2 項**。
+>         - (1) CI tests 43681896973 的 shellcheck SC2015 失敗，單元測試在 CI 上被跳過。
+>         - (2) `markdown()` 本文有 48 條欄位路徑把 inventory 字串原樣輸出，連結、提及、HTML、標題都能注入。
+>       - 預驗確認沒問題的部分：
+>         - §4 全部符合，離線用 unshare 與 audit hook 確認過。
+>         - 惡意輸入：fz1 共 116 例、fz2 約 3.3 萬次，都沒有例外，也沒有寫到 `--out` 以外。
+>         - 舊結果不會混進今天的結果。
+>         - key 穩定；changed 正確；6 份真樣本逐位元組相同；status_parts 和 main 比 1809 例，結果相同。
+>         - 103 個變異裡，26 個真的存活。
+>       - → 寫程式代理修正**進行中**。範圍：兩項應修（md 用 md_esc 加上 inventory 格式檢查）；建議 1～7（補測試殺存活變異、NVIDIA 表的說明照實寫、總表加 `rejected[]`、GAP 的 stdout 寫原因、key 納入 truncated、時間上限）。總表加 `rejected[]` 是介面變更，修好後要通知 C3。
 >     - (2) firmware.yml 的 `firmware-demo/*` tag 觸發、建 Release、產生 firmware-meta.json：排在 (1) 之後。
 >     - 用語：preliminary 寫「建議受影響（初步規則，待人審）」，confirmed 寫「建議受影響（規則已確認，待負責單位確認）」。
 >   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
@@ -159,7 +168,7 @@
 >     - 真樣本：V540TU 的 KM、BPM、ACM 是 observed；Protectli、NUC BOX 是 not-found；NUC11 與 OVMF 是 GAP；status_of 和 md 不變。
 >     - 依據：FIT 規格用 Intel 公開的 599500 rev 1.6 核對；`__KEYM__`／`__ACBP__` 的依據是 Slim Bootloader（BSD-2-Clause-Patent）。
 >     - 測試：25 個變異都被抓到。CI tests 43680118563（c1-tools 的偶發失敗，重跑後綠）、firmware 43680120967 綠。
->     - 併 main 後是 **427d9b6**（PROVENANCE 衝突兩邊都保留），本機測試進行中。
+>     - 併 main 後是 **427d9b6**（PROVENANCE 衝突兩邊都保留），本機測試在 HEAVY_LOCK 排隊中，跑完就開 PR。
 >     - 照 D-063：開 PR，但驗證排後面、先不合併。
 >   - 其他程式碼完整性的實作凍結到第二階段。
 > - D-046 的實作等 C1 的發現介面。
