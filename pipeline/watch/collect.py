@@ -755,6 +755,13 @@ def _ver_key(v):
     return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"[.\-]", v))
 
 
+def pick_latest_firmware(cands):
+    """韌體候選 [(rel, project, tag 版本), …] → (最新的一個, 其他的 list)。依 published_at，平手時比 tag 版本的數字（_ver_key）。
+    沒有候選回 (None, [])。collect.build 與儀表板（pipeline/dashboard/build.py）共用，兩邊一定選同一個。"""
+    ordered = sorted(cands, key=lambda c: (_date(c[0].get("published_at")) or "", _ver_key(c[2])), reverse=True)
+    return (ordered[0], ordered[1:]) if ordered else (None, [])
+
+
 def fw_watch_version(slug, version, image_sha256):
     """監控鍵的版本部分 → (watch_version 或 None, GAP 原因或 None)。
     一般：<slug>@<firmware_version>。版本讀不到或是佔位字串：<slug>@sha256-<前 16 碼>（GAP：版本讀不到）。兩者都沒有：不監控。"""
@@ -1007,9 +1014,9 @@ def build(source, out, now):
         releases.append(collect_release(source, rel, kind, project, tagver, out, len(releases)))
     if fw_cands:
         # 只監控最新的一個韌體 Release（第一階段示範的限制，FIRMWARE-WATCH.md §2）；舊的留著當紀錄、只列出
-        fw_cands.sort(key=lambda c: (_date(c[0].get("published_at")) or "", _ver_key(c[2])), reverse=True)
-        inv["firmware"] = collect_firmware(source, *fw_cands[0], out)
-        inv["firmware_older"] = [_clean(c[0]["tag"]) for c in fw_cands[1:]][:50]
+        latest, others = pick_latest_firmware(fw_cands)
+        inv["firmware"] = collect_firmware(source, *latest, out)
+        inv["firmware_older"] = [_clean(c[0]["tag"]) for c in others][:50]
     nprob = sum(len(r["problems"]) for r in releases)
     nbad = sum(1 for r in releases if r["problems"])
     nrel = sum(1 for r in releases if r["kind"] == "release")

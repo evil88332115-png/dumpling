@@ -1,11 +1,11 @@
 name: pages
 # GitHub Pages 靜態儀表板（D-062，docs/DASHBOARD.md）。唯讀、沒有 JS；頁面資料一律重新從 API 讀，不用事件帶進來的任何欄位產生內容。
-# 觸發：watch／dev／release 完成（workflow_run，依來源各自判斷，見 pipeline/dashboard/trigger.py）與手動（只能在 main 上跑）。不接 pull_request。
+# 觸發：watch／dev／release／firmware 完成（workflow_run，依來源各自判斷，見 pipeline/dashboard/trigger.py）與手動（只能在 main 上跑）。不接 pull_request。
 # 權限照 D-012：頂層沒有權限；build 只讀（contents、issues、actions）；deploy 只有 pages: write、id-token: write，
 # 環境 github-pages（repo 設定：Pages 來源選 GitHub Actions；環境的 Deployment branches 只允許 main，見 docs/DASHBOARD.md 第 7 節）。
 on:
   workflow_run:
-    workflows: [watch, dev, release]
+    workflows: [watch, dev, release, firmware]
     types: [completed]
   workflow_dispatch:
 
@@ -22,7 +22,7 @@ defaults:
 jobs:
   build:
     # 先擋最明顯的：手動只能在 main；workflow_run 必須出自本 repo、不是被取消。
-    # watch／dev 的 main、release 的 tag 格式由第一步 trigger.py 判斷（和這裡的條件一樣，只是更嚴；不符就是 go=false）。
+    # watch／dev 的 main、release 與 firmware 的 tag push（firmware：event 必須是 push、tag 是 firmware-demo/<版本>）由第一步 trigger.py 判斷（和這裡的條件一樣，只是更嚴；不符就是 go=false）。
     if: >-
       ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (github.event_name == 'workflow_run'
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 要不要更新頁面（watch／dev 在 main、release 是 <專案>/v<版本> 的 tag push）
+      - name: 要不要更新頁面（watch／dev 在 main、release 是 <專案>/v<版本> 的 tag push、firmware 是 firmware-demo/<版本> 的 tag push）
         id: trigger
         run: python3 -I pipeline/dashboard/trigger.py | tee -a "$GITHUB_OUTPUT"
       # 最近一次在 main 上成功、而且 artifact 還在的 watch run：下載 watch-plan-real-N、watch-support-real-N，另寫 run.json（id、時間、event、結果）。
