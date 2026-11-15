@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:16 +0800（C0）
+最後更新：2026-11-15 12:17 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -322,11 +322,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：**已暫停**（2026-11-14，使用者要用電腦；C0 通知恢復再繼續）。M6 PR #97（wp7/adapters，36fad69＝併 main a1fe821〔#98〕）CI 五項都綠；之後 main 又進 #106–#108（242c5d2），#97 再度和 main 衝突（只有 docs/PROVENANCE.md），暫停期間不併，恢復後處理
-- 分支／PR／commit：`wp7/adapters`（36fad69）→ PR #97；`wp7/platform-samples`（868f064）
+- 目前在做：已恢復（2026-11-15）。M6 PR #97（wp7/adapters，2f9d177＝併 main 4f64db7）CI 五項都綠、mergeable clean，等 C0 比對 36fad69 後合併
+- 分支／PR／commit：`wp7/adapters`（2f9d177）→ PR #97；`wp7/platform-samples`（868f064）
 - 代理：0 個（D-048 上限 3）
 - CI：PR #97 在 36fad69 五項都綠（b79087f 修 ai-nas/assemble.sh:18 的 SC2015，改成明確的 if，行為不變）。M6 最終重跑（d12d1eb）rock 43532296542、rpi 43535044427、ai-nas 43536522257 都通過標準答案（101／92／77 項）；之後併 #92、#94、#95、#98 沒有重跑（#98 照 C0 指示不在 #97 加 version-state）。單元測試 c4-wp7 89、c1-m2-platform 106、c1-m2-layers 35、c1-pipeline 都通過
 - 今天處理：PR #97 驗證後修改、SC2015 修正、併 main（#98）、核對 #98 對三個平台的影響（B-rockchip→B-disk-partitions、B-bootloader-coverage 進 report_status、scan 版本核對）
-- 下一步：恢復後併 main（242c5d2 之後）、CI 綠了通知 C0；M6 合併後另開 PR：三個平台 scan.sh 照抄 jetson 的 version-state 段，開工前先告訴 C0 會動哪些標準答案，再重跑一次；評估覆寫 independent_version
+- 下一步：M6 合併後另開 PR：三個平台 scan.sh 照抄 jetson 的 version-state 段，開工前先告訴 C0 會動哪些標準答案，再重跑一次；評估覆寫 independent_version
 - 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
