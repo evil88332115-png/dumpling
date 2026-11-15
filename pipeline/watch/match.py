@@ -100,6 +100,8 @@ FW_WORD_VBIOS = "建議受影響（依 NVIDIA 對照表，待人審）"
 FW_WORD_UCODE = "版本比較的候選，待人審"
 # rematch 的 key：不透明字串，只檢查字元集（C2 定的 A-Za-z0-9._=+-:/#）
 FW_KEY_RE = re.compile(r"[A-Za-z0-9._=+\-:/#]{1,300}")
+# rematch 拒絕 meta 條目的原因代碼（C2：只有這幾種，不帶輸入字串）
+FW_REJECT_RE = re.compile(r"entry-not-object|invalid-slug \(type [a-z]{1,10}\)|invalid-slug \(length [0-9]{1,6}\)|reserved-slug|duplicate-slug")
 FW_MAX_BULLETINS = 20      # 每筆結果的公告 ID 上限（C0 決定 2026-11-15）：超過就那份樣本 GAP，不截斷
 FW_MAX_AFFECTED = 100       # 每個樣本存進狀態的 affected 上限（狀態 Issue 有 60000 字元上限；超過整份樣本 GAP）
 
@@ -433,7 +435,7 @@ def load_rematch(dirpath, fw_projs):
     state：OK／ATTENTION／GAP／NOT_RUN（bios 樣本）、FW_SBOM_ADV（供應商 SBOM，不重跑）。
     沒給資料夾、沒有 rematch-summary.json、不在總表裡的 bios 樣本 → NOT_RUN（不拿 Release 當時的結果頂替）；
     檔案不合格 → GAP（不用裡面的任何內容）。"""
-    out = {"adv": {}, "tables": None, "table_flags": {}, "problems": [], "ran": False, "listed_unknown": []}
+    out = {"adv": {}, "tables": None, "table_flags": {}, "problems": [], "ran": False, "listed_unknown": [], "rejected": []}
     adv = out["adv"]
     bios = []
     for p in fw_projs:
@@ -486,6 +488,19 @@ def load_rematch(dirpath, fw_projs):
             by_slug.setdefault(r["slug"], []).append(r)
     known = {p["slug"] for p in fw_projs}
     out["listed_unknown"] = sorted(x[:64] for x in by_slug if x not in known)[:20]
+    # rematch 丟掉的 firmware-meta 條目（C2 介面 4ec170b：一定有 rejected，沒有時是 []；代碼不帶輸入字串）。
+    # meta 是 firmware.yml 產生的，有 rejected 就是產生端有問題 → GAP（整輪降級）。格式不對也是 GAP，不默默略過
+    rj = doc.get("rejected", [])
+    if not isinstance(rj, list) or len(rj) > 1000:
+        out["rejected"].append("rematch-summary.json 的 rejected 不是陣列")
+    else:
+        for x in rj[:20]:
+            ok = isinstance(x, dict) and isinstance(x.get("index"), int) and not isinstance(x.get("index"), bool) \
+                and 0 <= x["index"] < 100000 and isinstance(x.get("reason"), str) and FW_REJECT_RE.fullmatch(x["reason"])
+            out["rejected"].append(f"firmware-meta.json 第 {x['index']} 筆（從 0 起算）：{x['reason']}" if ok
+                                   else "rejected 裡有格式不對的條目（不顯示內容）")
+        if len(rj) > 20:
+            out["rejected"].append(f"另有 {len(rj) - 20} 筆被拒絕（只列前 20 筆）")
     for p in bios:
         u, slug = p["uuid"], p["slug"]
         if not p.get("inventory"):
@@ -1837,6 +1852,9 @@ def fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious):
             notes.append(f"韌體不監控：{x.get('slug')}：{x.get('why')}")
     if inv.get("firmware_older"):
         notes.append("舊的韌體 Release 不比對（只監控最新的一個，第一階段示範的限制）：" + "、".join(str(x)[:60] for x in inv["firmware_older"][:10]))
+    if rm.get("rejected"):
+        gaps.append(f"公告重跑拒絕了 firmware-meta.json 的 {len(rm['rejected'])} 筆條目（firmware.yml 產生端有問題）：" + "；".join(rm["rejected"][:10]))
+        serious.append("韌體公告重跑拒絕了 firmware-meta 的條目")
     if rm["listed_unknown"]:
         notes.append("rematch-summary.json 列了 inventory 沒有的樣本（略過）：" + "、".join(rm["listed_unknown"][:10]))
 
