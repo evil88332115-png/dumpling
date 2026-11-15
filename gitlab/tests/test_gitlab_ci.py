@@ -356,6 +356,124 @@ class CiFile(unittest.TestCase):
         self.assertEqual(j["resource_group"], "art14")
         self.assertIn("art14-out/result.json", j["artifacts"]["paths"])
 
+    def test_t12_deadman_rules_token_and_artifacts(self):
+        j = self.jobs["watch:deadman"]
+        sched = self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="deadman")
+        # workflow 規則有加：DUMPLING_JOB=deadman 的排程會建立 pipeline；驗證完成前是 manual＋allow_failure（同 watch:*）
+        self.assertNotEqual(gitlabci.pipeline_when(self.doc, sched), "never")
+        self.assertEqual(gitlabci.job_when(j, sched), "manual")
+        self.assertTrue(all(r.get("when") == "manual" and r.get("allow_failure") is True for r in j["rules"]))
+        # 規則層級的 allow_failure: true 會蓋掉 job 層級的 exit_codes：只有 when: manual 的規則可以有它（放開 manual 時要一起拿掉）
+        for r in j["rules"]:
+            if r.get("when") != "manual":
+                self.assertNotIn("allow_failure", r, r)
+        self.assertEqual(gitlabci.pipeline_when(self.doc, self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="nope")), "never")
+        for ctx in (self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="watch"), self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB="art14"),
+                    self.ctx(CI_PIPELINE_SOURCE="schedule"), self.ctx(CI_PIPELINE_SOURCE="web", DUMPLING_JOB="deadman"),
+                    self.ctx(CI_PIPELINE_SOURCE="api", DUMPLING_JOB="deadman"), self.ctx(CI_PIPELINE_SOURCE="push", CI_COMMIT_BRANCH="main")):
+            self.assertEqual(gitlabci.job_when(j, ctx), "never", ctx)
+        # deadman 排程的 pipeline 裡只有 watch:deadman；watch、art14 的排程不會帶起 deadman
+        self.assertEqual({n for n, jj in self.jobs.items() if gitlabci.job_when(jj, sched) != "never"}, {"watch:deadman"})
+        for job in ("watch", "art14", "dev"):
+            self.assertNotIn("watch:deadman", {n for n, jj in self.jobs.items()
+                                               if gitlabci.job_when(jj, self.ctx(CI_PIPELINE_SOURCE="schedule", DUMPLING_JOB=job)) != "never"})
+        # 結束碼 2（ALERT）允許失敗，1（FAIL）不允許
+        self.assertEqual(j["allow_failure"], {"exit_codes": [2]})
+        self.assertEqual(j["stage"], "watch")
+        self.assertEqual(j["resource_group"], "watch-deadman")
+        self.assertEqual(j["artifacts"]["paths"], ["deadman-out/"])
+        self.assertEqual(j["artifacts"]["access"], "developer")       # 內有排程 description 與擁有者帳號名稱：不給 Reporter／Guest 下載
+        self.assertEqual(j["artifacts"]["when"], "always")
+        # 獨立的 token（只有這個 job 用）；GITLAB_TOKEN 只在指令前綴；不印 token、不 set -x、不用 CI_JOB_TOKEN
+        c = self.lines_of("watch:deadman")
+        self.assertIn('GITLAB_TOKEN="$DEADMAN_GITLAB_TOKEN" python3 -I pipeline/watch/deadman.py', c)
+        self.assertIn('GITLAB_TOKEN="$DEADMAN_GITLAB_TOKEN" python3 -I pipeline/watch/issues.py apply', c)
+        for n in self.jobs:
+            if n != "watch:deadman":
+                self.assertNotIn("DEADMAN_GITLAB_TOKEN", self.lines_of(n) + json.dumps(self.jobs[n].get("variables", {})), n)
+                self.assertNotIn("deadman.py", self.lines_of(n), n)
+        self.assertNotRegex(c, r"echo[^\n]*\$\{?DEADMAN_GITLAB_TOKEN")
+        self.assertNotRegex(c, r"(?m)^\s*set\s+-[a-z]*x")
+        self.assertNotIn("CI_JOB_TOKEN", c)
+        a = command_args(c, "pipeline/watch/deadman.py")
+        self.assertEqual((a["--backend"], a["--gitlab-url"], a["--project"], a["--out"], a["--mode"]), ("gitlab", "$CI_API_V4_URL", "$CI_PROJECT_ID", "deadman-out", "real"))
+        self.assertIn("--schedules", command_flags(c, "pipeline/watch/deadman.py"))
+        b = command_args(c, "pipeline/watch/issues.py")
+        self.assertEqual((b["--backend"], b["--gitlab-url"], b["--project"], b["--plan"], b["--mode"]), ("gitlab", "$CI_API_V4_URL", "$CI_PROJECT_ID", "deadman-out/plan.json", "real"))
+        self.assertIn("--confidential", command_flags(c, "pipeline/watch/issues.py"))
+        self.assertIn("[ -f deadman-out/plan.json ]", c)
+
+    def run_deadman(self, dm_rc=0, plan=True, apply_rc=0, token="t", result=None, stale=False):
+        """實際執行 watch:deadman 的主要一項（假的 python3：記錄呼叫；deadman.py 依參數寫 plan.json 並回傳結束碼）。"""
+        import os
+        import subprocess
+        import tempfile
+        item = [it for it in self.items_of("watch:deadman") if "deadman-out/plan.json" in it][0]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "bin").mkdir()
+            (d / "bin" / "python3").write_text('#!/bin/sh\n'
+                                               'case "$*" in " -I -c"*|"-I -c "*) exec "$REAL_PY" "$@" ;; esac\n'          # 讀 result.json 的那一行用真的 python3
+                                               'echo "$*" >> "$LOG"\n'
+                                               'case "$*" in *pipeline/watch/deadman.py*) [ "$MK_PLAN" = 1 ] && echo {} > deadman-out/plan.json; '
+                                               '[ -n "$MK_RESULT" ] && echo "{\\"status\\": \\"$MK_RESULT\\"}" > deadman-out/result.json; exit "$DM_RC" ;;\n'
+                                               '*pipeline/watch/issues.py*) exit "$APPLY_RC" ;; esac\nexit 99\n')
+            (d / "bin" / "python3").chmod(0o755)
+            if stale:          # 上一次執行留下的輸出（runner 重用工作目錄）
+                (d / "deadman-out").mkdir()
+                (d / "deadman-out" / "result.json").write_text('{"status": "ALERT"}')
+                (d / "deadman-out" / "plan.json").write_text("{}")
+            env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), DM_RC=str(dm_rc), APPLY_RC=str(apply_rc),
+                       MK_PLAN="1" if plan else "0", MK_RESULT=result or "", REAL_PY=sys.executable, DEADMAN_GITLAB_TOKEN=token, CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
+            r = subprocess.run(["bash", "-c", item], cwd=d, env=env, capture_output=True, text=True)
+            log = (d / "log").read_text().splitlines() if (d / "log").exists() else []
+        return r.returncode, log, r.stdout
+
+    def test_t12_deadman_exit_2_must_be_a_real_alert(self):
+        # Python「找不到檔案」的結束碼也是 2：allow_failure:exit_codes [2] 不能把它當成 ALERT 而靜默
+        rc, log, out = self.run_deadman(2, plan=False, result=None)         # 沒有 result.json（例如 deadman.py 不見了）
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadman: FAIL", out)
+        rc, log, out = self.run_deadman(2, plan=False, result="OK")         # 有 result.json 但 status 不是 ALERT
+        self.assertEqual(rc, 1, out)
+        rc, log, out = self.run_deadman(2, plan=False, result="FAIL")
+        self.assertEqual(rc, 1, out)
+        rc, log, out = self.run_deadman(2, plan=False, result="ALERT")      # 真的 ALERT（沒有 plan 也一樣是 2）
+        self.assertEqual(rc, 2, out)
+        self.assertNotIn("deadman: FAIL", out)
+        # 上一次留下的 result.json 是 ALERT、這次找不到 deadman.py（結束碼 2、沒寫新的 result.json）→ 1；舊的 plan.json 也不套用
+        rc, log, out = self.run_deadman(2, plan=False, result=None, stale=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadman: FAIL", out)
+        self.assertFalse(any("issues.py apply" in x for x in log), log)
+        # 其他結束碼不受影響
+        self.assertEqual(self.run_deadman(0, plan=False, result="ALERT")[0], 0)
+        self.assertEqual(self.run_deadman(1, plan=False, result="ALERT")[0], 1)
+
+    def test_t12_deadman_script_exit_codes(self):
+        rc, log, out = self.run_deadman(0, plan=False)          # OK、沒有 plan：不呼叫 apply
+        self.assertEqual((rc, len(log)), (0, 1), out)
+        rc, log, out = self.run_deadman(0, plan=True)           # OK 但有恢復留言的 plan：apply
+        self.assertEqual((rc, len(log)), (0, 2), out)
+        self.assertIn("issues.py apply", log[1])
+        rc, log, out = self.run_deadman(2, plan=True, result="ALERT")           # ALERT：apply 之後結束碼 2（allow_failure 的那個）
+        self.assertEqual((rc, len(log)), (2, 2), out)
+        rc, log, out = self.run_deadman(1, plan=False)          # FAIL：結束碼 1
+        self.assertEqual((rc, len(log)), (1, 1), out)
+        rc, log, out = self.run_deadman(1, plan=True)           # FAIL 但已經確定的警告照樣套用，結束碼仍是 1
+        self.assertEqual((rc, len(log)), (1, 2), out)
+        rc, log, out = self.run_deadman(2, plan=True, apply_rc=1, result="ALERT")    # 警告的 Issue 開不出來：FAIL（不是 2，不能被當成「只是警告」）
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadman: FAIL", out)
+        rc, log, out = self.run_deadman(64, plan=False)
+        self.assertEqual(rc, 64)
+        self.assertNotIn(64, self.jobs["watch:deadman"]["allow_failure"]["exit_codes"])
+        import subprocess
+        item = [it for it in self.items_of("watch:deadman") if "沒有 DEADMAN_GITLAB_TOKEN" in it][0]       # 沒有 token：FAIL（1）
+        r = subprocess.run(["bash", "-c", item], env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("deadman: FAIL", r.stdout)
+
     def test_signing_job(self):
         j = self.jobs["release:sign"]
         self.assertEqual(j["id_tokens"]["SIGSTORE_ID_TOKEN"]["aud"], "sigstore")

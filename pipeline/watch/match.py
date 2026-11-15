@@ -102,7 +102,13 @@ FW_WORD_UCODE = "版本比較的候選，待人審"
 FW_KEY_RE = re.compile(r"[A-Za-z0-9._=+\-:/#]{1,300}")
 # rematch 拒絕 meta 條目的原因代碼（C2：只有這幾種，不帶輸入字串）
 FW_REJECT_RE = re.compile(r"entry-not-object|invalid-slug \(type [a-z]{1,10}\)|invalid-slug \(length [0-9]{1,6}\)|reserved-slug|duplicate-slug")
-FW_MAX_BULLETINS = 20      # 每筆結果的公告 ID 上限（C0 決定 2026-11-15）：超過就那份樣本 GAP，不截斷
+# rematch 輸出的上限：和 C2 的 tools/cra/fw_rematch.py 同名同值（兩邊的測試互相鎖住；C0 決定 2026-11-15，#135 驗證用真實樣本修正）
+REMATCH_MAX_BULLETINS = 64          # 每筆結果的公告 ID 上限：超過就那份樣本 GAP，不截斷（公告是資料，不能截）；Intel 微碼實際有 24 個
+REMATCH_MAX_BULLETIN_CHARS = 80     # 每個公告 ID 的字元上限
+REMATCH_MAX_REASONS = 50            # reasons 筆數上限（rematch 端超過會截成 49 筆＋「…（另有 N 項，已截斷）」）
+REMATCH_MAX_REASON_CHARS = 1000     # reasons 每筆字元上限（rematch 端超過會截斷並以「…（已截斷）」結尾，標記算在內）
+REMATCH_MAX_RESULT_REASON_CHARS = 300   # results[].reason（代碼，例如 no-rule）：超過就整份 GAP，不截斷
+FW_MAX_BULLETINS = REMATCH_MAX_BULLETINS
 FW_MAX_AFFECTED = 100       # 每個樣本存進狀態的 affected 上限（狀態 Issue 有 60000 字元上限；超過整份樣本 GAP）
 
 
@@ -334,8 +340,8 @@ def _fw_tables(t, where, errs):
 
 
 def _fw_bulletins(b, errs, where):
-    if not isinstance(b, list) or len(b) > FW_MAX_BULLETINS or not all(_fw_str(x, 1, 80) for x in b):
-        errs.append(f"{where}bulletins 不是字串陣列（最多 {FW_MAX_BULLETINS} 筆、每筆 1～80 字元）")
+    if not isinstance(b, list) or len(b) > REMATCH_MAX_BULLETINS or not all(_fw_str(x, 1, REMATCH_MAX_BULLETIN_CHARS) for x in b):
+        errs.append(f"{where}bulletins 不是字串陣列（最多 {REMATCH_MAX_BULLETINS} 筆、每筆 1～{REMATCH_MAX_BULLETIN_CHARS} 字元）")
         return []
     return list(b)
 
@@ -358,8 +364,8 @@ def check_rematch_doc(doc, slug, tag, inv_sha):
     if status not in ("OK", "ATTENTION", "GAP"):
         errs.append("status 不是 OK／ATTENTION／GAP")
     reasons = doc.get("reasons")
-    if not isinstance(reasons, list) or len(reasons) > 20 or not all(_fw_str(x, 0, 300) for x in reasons):
-        errs.append("reasons 不是字串陣列")
+    if not isinstance(reasons, list) or len(reasons) > REMATCH_MAX_REASONS or not all(_fw_str(x, 0, REMATCH_MAX_REASON_CHARS) for x in reasons):
+        errs.append(f"reasons 不是字串陣列（最多 {REMATCH_MAX_REASONS} 筆、每筆最多 {REMATCH_MAX_REASON_CHARS} 字元）")
         reasons = []
     tables = _fw_tables(doc.get("tables"), "", errs)
     results, seen = [], set()
@@ -386,7 +392,7 @@ def check_rematch_doc(doc, slug, tag, inv_sha):
         if not _fw_str(r.get("component"), 0, 300):
             errs.append(w + "component 不是字串")
             continue
-        if r.get("reason") is not None and not _fw_str(r.get("reason"), 0, 300):
+        if r.get("reason") is not None and not _fw_str(r.get("reason"), 0, REMATCH_MAX_RESULT_REASON_CHARS):
             errs.append(w + "reason 不是字串或 null")
             continue
         if r.get("review") not in ("preliminary", "confirmed", None):
@@ -813,7 +819,8 @@ def sanitize_firmware(fw):
             # 型別不對的紀錄丟掉（讀入的舊狀態可能被手改；fw_groups 不能因此當掉）
             if not (isinstance(k, str) and FW_KEY_RE.fullmatch(k) and isinstance(e, dict) and e.get("kind") in FW_KINDS
                     and isinstance(e.get("result"), str) and isinstance(e.get("bulletins"), list)
-                    and len(e["bulletins"]) <= FW_MAX_BULLETINS and all(isinstance(b, str) and len(b) <= 80 for b in e["bulletins"])):
+                    and len(e["bulletins"]) <= REMATCH_MAX_BULLETINS
+                    and all(isinstance(b, str) and len(b) <= REMATCH_MAX_BULLETIN_CHARS for b in e["bulletins"])):
                 continue        # 超過上限不截斷（截斷後看起來像完整的）：整筆丟掉
             rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": list(e["bulletins"])}
             if isinstance(e.get("component"), str):
@@ -1850,6 +1857,17 @@ def fw_messages(inv, fw_projs, rm, fwx, per, attn, gaps, notes, serious):
     for x in (fw.get("not_watched") or [])[:30]:
         if isinstance(x, dict):
             notes.append(f"韌體不監控：{x.get('slug')}：{x.get('why')}")
+    fw_meta = inv.get("firmware") if isinstance(inv.get("firmware"), dict) else None
+    if fw_meta is not None and not fw_meta.get("problems"):
+        dt = fw_meta.get("dt")
+        if dt is None:
+            notes.append("韌體 Release 沒有 DT 結果（firmware-meta 沒有 dt 欄位）")
+        elif isinstance(dt, dict) and dt.get("status") == "OK" and dt.get("result") == "OK":
+            notes.append("韌體 Release 的 DT 上傳：OK")
+        else:          # 只放進需注意：不影響公告比對、不開 Issue、不降級（C0，2026-11-15）
+            why = dt.get("reason") if isinstance(dt, dict) and isinstance(dt.get("reason"), str) else "dt 欄位格式不對"
+            res = dt.get("result") if isinstance(dt, dict) and dt.get("result") in ("FAIL", "NOT_RUN") else None
+            attn.append(f"韌體 Release 的 DT 上傳{('（' + res + '）') if res else ''}：{why}")
     if inv.get("firmware_older"):
         notes.append("舊的韌體 Release 不比對（只監控最新的一個，第一階段示範的限制）：" + "、".join(str(x)[:60] for x in inv["firmware_older"][:10]))
     if rm.get("rejected"):

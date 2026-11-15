@@ -4,6 +4,9 @@ model: NVIDIA Graphics Firmware Update Tool for DisplayPort 1.3/1.4 Displays
 firmware_version: "1.1"
 ibv: unknown
 status: ok
+watch:
+  monitored: false
+  why: "沒有 vBIOS 元件（內嵌的是 GOP 驅動範本，版本是佔位字串）"
 files:
   - name: NVIDIA_DisplayPort_Firmware_Updater_1.1-x64.exe
     url: https://us.download.nvidia.com/Windows/uefi/firmware/1.1/NVIDIA_DisplayPort_Firmware_Updater_1.1-x64.exe

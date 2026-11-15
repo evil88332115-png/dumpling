@@ -61,6 +61,7 @@
 # - 退出碼：有 FAIL → 1；沒有 FAIL 但有任何非 OK（GAP／NOT_ASSESSED／NOT_RUN／ATTENTION）→ 2；全部 OK → 0。參數錯誤 → 64。
 # - 原始碼只用 cdxgen（在 bwrap 沙箱、預設無網路）；映像只用 Syft（同一產物只用一個產生器）。Grype 比對 SBOM（sbom:）；Go 專案加 govulncheck。
 #   映像與 --sbom 另檢查作業系統核心有沒有做比對（C-kernel-coverage，SBOM 有核心時才寫）：有核心但 0 筆比對 → GAP，不可當作核心沒有弱點。
+#   發行版的核心 deb 一筆都沒有比對、所有核心比對都落在 generic／NVD 的核心元件（只有上游版本範圍）時也是 GAP：沒有用到發行版的修補（含回移）資訊，可能有誤報也可能漏報（lib/kernelcheck.py，證據 scan/kernel-coverage.json 的 distro_data_unused）。
 #   Jetson Linux（SBOM 有 nvidia-l4t-* 套件）另用人工對照表比對 NVIDIA 安全公告（C-nvidia-bulletins，scan/nvidia-bulletins.json）。
 #   Debian／Ubuntu 套件上只經 NVD 等非發行版資料比對到的 DT 發現，以發行版的 OSV 紀錄再判（D-distro-recheck，scan/distro-recheck.json；
 #   原始 findings 不改，cra_report.py 把「發行版已修補」的列移出 P1–P3）。沒有 CVE 別名的 USN 從同一個鏡像查它列的 CVE

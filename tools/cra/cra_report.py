@@ -43,6 +43,9 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
 作業系統核心（Jetson 的對應 Canonical 核心約 6000 列）：風險評估的主清單（8.4–8.6、附錄 A）不列核心的列，改在 8.7 節摘要
   （修補狀態、層級、修補全部所需的最低核心版本、只列 P1 與 accepted 的表格），完整清單寫 kernel-vulnerabilities.md。
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
+  C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另依 scan/kernel-coverage.json 的結構化欄位寫固定的英文句子（中文的狀態說明原文只留在 scan-status.tsv）；kernel-config.json 的 kernel.stable_git.kept_not_proven_absent（files > 0）另寫固定英文句；scan/kernel-config.json 讀得到
+  核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」（M 是清單裡有、而且成列的 CVE 數；核心列另有 K 個 CVE 不在清單時，再接「A further K CVEs of the kernel rows are not in the list.」，K 是 0 不寫；N 不大於 M 但 K > 0 時寫「Kernel CVE list: N CVEs (source: …); all of them are listed as rows. A further K …」）。
+  資料狀態與 VEX 不受影響（C-kernel-coverage 本來就在 COND_STAGES）。客戶版（supplier-package）沒有核心段落，不加任何核心狀態文字。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
 
 判定（專案驗收原則：缺資料不可顯示為安全）：
@@ -3904,6 +3907,123 @@ def kernel_fix_all(krows):
     return sorted(groups.values(), key=lambda g: (g["mapped_from"] is None, g["component"]))
 
 
+COVERAGE_STAGE = "C-kernel-coverage"
+
+
+def kernel_cve_list_info(kcfg):
+    """scan/kernel-config.json（schema 對、有 results 清單）→ ({CVE（大寫）}, 來源說明) 或 None（讀不到就不猜）。
+    清單來源取結構化欄位 inputs.cves_origin（sca-scan 寫的，中文）：KERNEL_CVES 開頭＝明確給的清單（與 Grype／DT 的核心 CVE 合併）、
+    kernel-cna-version 開頭＝依核心版本從 CNA 產生的清單；沒有這個欄位＝Grype、DT 對核心的比對；其他不認得的值只寫檔名。"""
+    if not (isinstance(kcfg, dict) and kcfg.get("schema") == "sca-center-kernel-config/1" and isinstance(kcfg.get("results"), list)):
+        return None
+    cves = {x["cve"].upper() for x in kcfg["results"] if isinstance(x, dict) and isinstance(x.get("cve"), str) and x["cve"]}
+    if not cves:
+        return None
+    docs = merged_kernel_docs(kcfg)
+    if docs is not None:      # 逐顆判定的合併文件（M7d-1）：清單來源記在每顆核心自己的 kernel-config.json（scan/kernels/<版本>/）
+        srcs = {v: cve_origin_text(d) for v, d in docs.items()}
+        if len(set(srcs.values())) == 1:
+            return cves, f"{next(iter(srcs.values()))}; `scan/kernels/<version>/kernel-config.json`, {len(srcs)} kernels"
+        return cves, "per kernel: " + "; ".join(f"{v}: {t}" for v, t in sorted(srcs.items())) + "; `scan/kernels/<version>/kernel-config.json`"
+    return cves, f"{cve_origin_text(kcfg)}; `scan/kernel-config.json`"
+
+
+def cve_origin_text(kcfg):
+    """一份（單顆核心的）kernel-config.json 的 inputs.cves_origin → 清單來源的固定英文說明（不貼原文）。"""
+    origin = (kcfg.get("inputs") or {}).get("cves_origin") if isinstance(kcfg, dict) and isinstance(kcfg.get("inputs"), dict) else None
+    if origin is None:
+        return "Grype and Dependency-Track kernel findings"
+    if isinstance(origin, str) and origin.startswith("KERNEL_CVES"):
+        return "KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings"
+    if isinstance(origin, str) and origin.startswith("kernel-cna-version"):
+        return "kernel CNA version comparison"
+    return "not recognised"
+
+
+def merged_kernel_docs(kcfg):
+    """逐顆判定的合併文件（vex_export.kernel_multi_doc 在記憶體裡建的 MergedDoc；以型別判斷，檔案裡的欄位不算）→ {版本: 該顆的文件}；
+    其他 → None。讀不到的那顆（None）不列。"""
+    if not vexmod().is_merged(kcfg) or not isinstance(kcfg.get("docs"), dict):
+        return None
+    return {v: d for v, d in kcfg["docs"].items() if isinstance(v, str) and isinstance(d, dict)}
+
+
+OFF_SERIES_RULE_TEXT = {"a": "version epoch", "b": "vendor version or package-name suffix", "c": "declared not-distro by the platform owner",
+                        "d": "upstream source package"}
+KERNEL_COVERAGE_SCHEMA = "sca-pilot-kernel-coverage/1"
+
+
+def kernel_coverage_sentences(kcov):
+    """scan/kernel-coverage.json 的結構化欄位 → 固定的英文句子清單（不讀、不貼中文說明；讀不到的欄位不猜）：
+    distro_data_unused（只有上游版本範圍的比對）、off_series（不在發行版核心序列上；規則代號取 off_series[].rules）。"""
+    if not (isinstance(kcov, dict) and kcov.get("schema") == KERNEL_COVERAGE_SCHEMA):
+        return []
+    out = []
+    du = kcov.get("distro_data_unused")
+    pk = du.get("distro_kernel_packages") if isinstance(du, dict) else None
+    names = [x["name"] for x in pk if isinstance(x, dict) and isinstance(x.get("name"), str) and x["name"]] if isinstance(pk, list) else []
+    if names:
+        extra = f" (and {len(names) - 1} more)" if len(names) > 1 else ""
+        out.append(f"Kernel matching used only upstream version ranges (NVD): the distribution kernel package `{names[0]}`{extra} was not matched "
+                   "against the distribution's security data, so the distribution's fixes (including backports) are not taken into account; "
+                   "the list may contain false positives and may miss vulnerabilities.")
+    off = kcov.get("off_series")
+    if isinstance(off, list) and off:
+        rules = sorted({r for x in off if isinstance(x, dict) and isinstance(x.get("rules"), list) for r in x["rules"] if r in OFF_SERIES_RULE_TEXT})
+        why = f" ({'; '.join(OFF_SERIES_RULE_TEXT[r] for r in rules)})" if rules else ""
+        out.append(f"The kernel is not on the distribution's kernel series{why}: matching against distribution data is not reliable and may "
+                   "miss vulnerabilities.")
+    return out
+
+
+KEPT_NOT_PROVEN_ABSENT = ("Kernel configuration check: {n} file(s) changed by the fix commits of {m} CVE(s) are not in the image's partial kernel "
+                          "headers tree; they were kept and judged as unknown, not as not built.")
+
+
+def kernel_kept_text(kcfg):
+    """scan/kernel-config.json 的 kernel.stable_git.kept_not_proven_absent = {"files": n, "cves": m}（只在有 --stable-git 時有）：
+    files > 0 才回傳固定英文句；欄位不存在、型別不對或 files 是 0 回傳空字串（輸出不變）。
+    逐顆判定的合併文件（M7d-1）：合併文件沒有 stable_git，改讀每顆核心自己的文件，每顆一句、前面標 [版本]。"""
+    docs = merged_kernel_docs(kcfg)
+    if docs is not None:
+        return " ".join(f"[{v}] {t}" for v, t in ((v, kernel_kept_text(d)) for v, d in sorted(docs.items())) if t)
+    k = kcfg.get("kernel") if isinstance(kcfg, dict) else None
+    sg = k.get("stable_git") if isinstance(k, dict) else None
+    v = sg.get("kept_not_proven_absent") if isinstance(sg, dict) else None
+    if not isinstance(v, dict):
+        return ""
+    n, m = v.get("files"), v.get("cves")
+    if not (isinstance(n, int) and not isinstance(n, bool) and n > 0 and isinstance(m, int) and not isinstance(m, bool) and m >= 0):
+        return ""
+    return KEPT_NOT_PROVEN_ABSENT.format(n=n, m=m)
+
+
+def kernel_gap_text(status, krows, kcfg, kcov=None):
+    """C-kernel-coverage 不是 OK 時（有這一列）8.7 節與 kernel-vulnerabilities.md 多寫的說明（D-063）：依 scan/kernel-coverage.json 的結構化欄位
+    產生的固定英文句子（kernel_coverage_sentences；欄位讀不到就只寫 `C-kernel-coverage` is GAP，不猜；中文的狀態說明原文只留在 scan-status.tsv），
+    以及核心 CVE 清單裡沒有成列的數量（N 取自 scan/kernel-config.json 的 results，讀不到或 N 不大於 M 時不寫）。OK 或沒有這一列時回傳空字串。"""
+    if not status or COVERAGE_STAGE not in status or status[COVERAGE_STAGE][0] == "OK":
+        return ""
+    st = status[COVERAGE_STAGE][0]
+    out = [" ".join([f"**Kernel coverage limitation:** `{COVERAGE_STAGE}` is {st}."] + kernel_coverage_sentences(kcov))]
+    info = kernel_cve_list_info(kcfg)
+    if info:
+        cves, src = info
+        listed = set()
+        for r in krows:
+            listed |= {c.upper() for c in r.get("cves") or []}
+            m = CVE_RE.match(str(r.get("id") or ""))
+            if m:
+                listed.add(m.group(1).upper())
+        n, m, k = len(cves), len(cves & listed), len(listed - cves)
+        further = f" A further {k} CVEs of the kernel rows are not in the list." if k else ""
+        if n > m:
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); listed as rows: {m} CVEs; the other {n - m} are not listed as rows." + further)
+        elif k:          # 清單的 CVE 都成列了，但核心列另有清單以外的 CVE：也寫出來（C0）
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); all of them are listed as rows." + further)
+    return "\n\n".join(out)
+
+
 def kernel_stage_text(status):
     st = [f"`{k}` {status[k][0]}" for k in ("C-kernel-l4t-map", "C-kernel-coverage") if status and k in status]
     return ("sca-scan kernel stages: " + ", ".join(st) + ". OK only means that the kernel was matched against vulnerability data; "
@@ -3914,7 +4034,7 @@ NOT_ASSESSED_TAIL = ("Kernel vulnerabilities were NOT assessed: the absence of k
                      "no known vulnerabilities.")
 
 
-def kernel_absent_text(status, mode, have_findings):
+def kernel_absent_text(status, mode, have_findings, kcfg=None, kcov=None):
     """沒有核心的列時，8.7 節的一段說明與狀態代號。核心在 SBOM 裡卻沒有比對（GAP 等）一律寫 NOT assessed，不寫「沒有弱點」。
     C-kernel-l4t-map 是 FAIL 時只說對應的步驟失敗（不斷定 SBOM 有 L4T 核心）。"""
     if not have_findings:
@@ -3929,6 +4049,9 @@ def kernel_absent_text(status, mode, have_findings):
     for k, what in (("C-kernel-l4t-map", "a Jetson Linux (L4T) kernel, but no Canonical kernel mapping was applied"),
                     ("C-kernel-coverage", "an operating system kernel, but the kernel was not matched against vulnerability data")):
         if k in status and status[k][0] != "OK":
+            if k == COVERAGE_STAGE:       # D-063：固定英文句與沒有成列的核心 CVE 數（OK 時不會到這裡）
+                return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}). " + NOT_ASSESSED_TAIL
+                                        + "\n\n" + kernel_gap_text(status, [], kcfg, kcov))
             return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}: {en(status[k][1])}). "
                                     + NOT_ASSESSED_TAIL)
     if any(k in status for k in ("C-kernel-l4t-map", "C-kernel-coverage")):
@@ -3970,11 +4093,11 @@ def kernel_judged_text(kvers_doc, kcfg):
             + (f"\n\nShipped but not judged (GAP, nothing is excluded for the product): {', '.join(nj)}." if nj else ""))
 
 
-def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None, kjudged=""):
+def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None, kjudged="", kcfg=None, kcov=None):
     """euvd：None＝沒有 EUVD（沒有檔案、也沒有 C-euvd 這一行）；True＝EUVD 能用；字串＝不能用的原因（EUVD 的行寫 not available，不寫 0）。"""
     """回傳 (8.7 節的內容（Markdown）, 狀態代號, summary.json 用的數量, kernel-vulnerabilities.md 的摘要段)。"""
     if not krows:
-        state, text = kernel_absent_text(status, mode, have_findings)
+        state, text = kernel_absent_text(status, mode, have_findings, kcfg, kcov)
         return text, state, None, None
     t = tally(krows)
     fs = Counter(r["fix_state"] for r in krows)
@@ -3999,6 +4122,12 @@ def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, e
     stages = kernel_stage_text(status)
     if stages:
         parts.append(stages)
+    gap = kernel_gap_text(status, krows, kcfg, kcov)
+    if gap:
+        parts.append(gap)
+    kept = kernel_kept_text(kcfg)
+    if kept:
+        parts.append(kept)
     if kjudged:
         parts.append(kjudged)
     if any(r.get("kernel_packages") for r in krows):
@@ -4660,6 +4789,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     kjudged, kdocs, kmms, kfiles = load_kernel_docs(scan, kvers_doc, vx)
     kmulti = bool(kjudged)
     paths.update(kfiles)
+    if status and COVERAGE_STAGE in status and status[COVERAGE_STAGE][0] != "OK":     # D-063：核心比對的限制要讀結構化證據（OK 時不讀，輸出不變）
+        paths["scan/kernel-coverage.json"] = find(scan, "scan/kernel-coverage.json")
     hashes = {k: sha256(p) for k, p in paths.items() if p}
     meta = meta if isinstance(meta, dict) else {}
     ctx = dict(report_fields(cfg))
@@ -4897,6 +5028,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     kcfg = vx.kernel_multi_doc(kdocs, kvers_doc) if kmulti else None       # 逐顆判定：合併每顆的 kernel-config.json（vex_export.kernel_multi_doc）
     if kcfg is None:
         kcfg = load_json(paths["scan/kernel-config.json"])
+    kcov = load_json(paths.get("scan/kernel-coverage.json"))      # 只有 C-kernel-coverage 不是 OK 時才有路徑（見上）；其他情況是 None
     # 映像另有出貨但沒判定的核心（scan/kernel-versions.json 的 not_judged）：K1／K2 的排除只對判定過的核心成立，不套用到整個產品
     # （vex_export.with_scope 標 scope_incomplete；kconfig_usable、module_map_of、runtime_evidence 看到就不採用）。沒有檔案或 not_judged 為空 → 原樣
     kcfg = vx.kernel_with_scope(kcfg, kvers_doc)
@@ -5271,7 +5403,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     ksection, kstate, kcounts, ksummary = kernel_section(krows, kinfo, status, pol, meta.get("mode") or NR,
                                                          isinstance(findings, list), have_grype,
                                                          None if not euvd_used else True if euvd_map is not None else euvd_reason,
-                                                         kernel_judged_text(kvers_doc, kcfg) if kmulti else "")
+                                                         kernel_judged_text(kvers_doc, kcfg) if kmulti else "", kcfg, kcov)
     # 版面的說明不是狀態的理由：寫在資料狀態說明的後面並標明 Note，不放進 reasons（summary.json 的 detail 也不放）
     notes = []
     if not split:

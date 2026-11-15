@@ -495,7 +495,7 @@ INTEL-SA-00391（2020）沒有 15.x 與 18.x 的列；INTEL-SA-01371（VRT0011�
 | ASUS PRIME B550M-A 3404、ASRock B550 PG4 3.40 | AGESA `ComboAM4v2PI 1.2.0.B` | affected | AMD-SB-7014（AMD-SB-7005 的 1.2.0.B 不低於，記在依據） |
 | ASUS PRIME B650M-A 1807 | AGESA `ComboAM5PI 1.0.8.0` | affected | AMD-SB-7014（AMD-SB-7005 的 1.0.8.0 不低於） |
 | Protectli VP46xx（Dasharo v1.2.0） | ME 14.0.47.1558 | **not-affected**（依據 vendor-statement：INTEL-SA-00391 的 14.0.45） | INTEL-SA-00391；FSP 9.x 沒有規則 |
-| NovaCustom NUC box ARL v0.9.2 | ME 18.1.18.2724 | affected | INTEL-SA-01372（INTEL-SA-01280 的 18.1.18 不低於，記在依據） |
+| NovaCustom NUC box ARL v0.9.2 | ME 18.1.18.2724 | affected | INTEL-SA-01372（INTEL-SA-01280 的 18.1.18 不低於，記在依據）；01372 的條件是 Core Ultra (Series 1) 那一列、樣本是 Arrow Lake，規則只比版本線（見「限制與沒做的事」） |
 | NovaCustom V540TU MTL v1.0.1 | ME 18.0.10.2285 | **第二批前** NOT_ASSESSED（`no-rule-for-line`：規則只有 14.x、18.1 版本線）；**第二批後 affected** | INTEL-SA-01315 的 18.0.18（INTEL-SA-01209 的 18.0.10 不低於，記在依據；版本值只經網頁摘要工具讀到、沒有獨立核對）；FSP 沒有規則 |
 | Intel NUC11 PATGL357.0059 | AMI 核心 5.19（`AMI Aptio V core`） | affected（核心低於 `AptioV_5.044`；preliminary；基底版本、回補看不出來、A1 未確認，是線索不是判定） | AMI-SA-2026001、AMI-SA-2026002；有核心元件時 BIOS 映像不比 AMI 規則 |
 
@@ -519,6 +519,12 @@ ASUS B550M（核心 5.17）、ASRock B550（5.17）、ASUS B650M（5.26）的映
 
 - 規則表只有 11 筆（第一批 7、第二批新增 INTEL-SA-01152、01209、01315、AMD-SB-7033），**不是完整的公告資料庫**；沒有規則的元件、版本線、family 一律 NOT_ASSESSED（`no-rule`、`no-rule-for-line`）。
 - AGESA 取同表最高的修正版本、CSME 只看版本線、不知道映像是給哪顆 CPU 或哪個產品，所以 `affected` 偏保守；`not-affected` 只是「版本不低於公告列的修正版本」。
+- **CSME 的條件只比 ME 的版本線，不看平台或處理器世代**。公告表格的一列通常對應某個平台，但規則不知道映像是給哪個平台，所以版本線相同就會套用。審核這類建議時，要由負責單位確認公告那一列是否適用這塊板子。目前已知的例子：
+  - **INTEL-SA-01372 對 NovaCustom NUC BOX（`novacustom-nuc-box-arl-v0.9.2`）**：條件取自公告「Core Ultra Processors (Series 1)」那一列（18.1 版本線，修正版本 18.1.21），但這個樣本是 Arrow Lake（`firmware.yml` 的型號寫 Arrow Lake-U/H FSP）。ME 18.1.18.2724 低於 18.1.21，所以規則給 `affected`。
+    - 公告是否涵蓋 Arrow Lake 上的 18.1 版本線，規則表看不出來；而且 01372 的版本值只經過網頁摘要工具讀取（`summary-tool`），還沒有直接核對。
+    - 這個建議是「建議受影響（初步規則，待人審）」，不是判定。
+  - 同一類的例子還有 AMD 微碼的 `0x8012`：條件來自公告的資料中心表，用 `segment: datacenter` 標示，basis 固定附上 `DATACENTER_CAVEAT`。
+  - CSME 目前沒有對應的平台欄位。讓 CSME 的條件能標示適用的平台或世代、不符或無法判斷時附上固定提示句，列在規則表的第二階段待辦。
 - AMI 核心版本讀的是映像自述的 Firmware ID 紀錄（沒有簽章、結構從公開映像反推）；核心是基底版本，板廠回補的修正看不出來；核心版本寫法與公告寫法的對應（A1）沒有明文，所以 `affected` 只是線索、不輸出 not-affected。
 - 沒有規則的元件種類：Intel 微碼（另有發佈資料表的比對）、coreboot、edk2、GOP／VBT、NVIDIA vBIOS。
 - 規則表不隨 CI 更新；Intel 頁面的內容要人工對照。

@@ -74,7 +74,10 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
 - 規則 14：沒有鎖定檔的 npm 專案，cdxgen 的 `npm install` 在沙箱內執行；沒有網路時記 GAP。
 - 作業系統核心（`C-kernel-coverage`，只有 `--image`、`--sbom`；`lib/kernelcheck.py`，結果 `scan/kernel-coverage.json`）：SBOM 有核心
   （Syft 的 linux-kernel／linux-kernel-module 元件、`cpe:2.3:o:linux:linux_kernel` 或明確列出的核心套件名稱）但 Grype 對核心 0 筆 → GAP，
-  報告弱點節另註「核心的漏洞不在下面的數字裡」；有比對 → OK；沒有核心時不寫這一列（一般容器映像不受影響）。版本依序取 linux-kernel 元件、`/usr/lib/modules/<版本>/`、核心套件。
+  報告弱點節另註「核心的漏洞不在下面的數字裡」；有比對 → OK；沒有核心時不寫這一列（一般容器映像不受影響）。
+  另有一條 GAP 規則（結構化判斷，不解析說明文字）：SBOM 有發行版的核心 deb（不含 `nvidia-l4t-kernel*`），所有核心比對都落在 generic／NVD 的核心元件
+  （`pkg:generic/linux-kernel`、CPE `linux_kernel`），deb 一筆都沒有比對到，也沒有 `C-kernel-l4t-map` 的對應 → GAP：核心的比對只有上游版本範圍，沒有用到發行版安全資料的修補（含回移）資訊，可能有誤報，也可能漏報
+  （例如 Debian 13 的核心 deb，原始碼套件是 `linux-signed-amd64`，Debian 安全追蹤用 `linux` 記錄核心 CVE）。證據是 `scan/kernel-coverage.json` 的 `distro_data_unused`（只有這條規則成立時才有）；和「不在發行版核心序列上」同時成立時兩個原因都記。版本依序取 linux-kernel 元件、`/usr/lib/modules/<版本>/`、核心套件。
   證據：Jetson Linux R39.2.1 映像有 nvidia-l4t-kernel 與 1468 個核心模組、沒有 linux-kernel 元件，Grype 與 DT 對核心都是 0 筆（Jetson R39.2.1 示範映像）。
 - Jetson Linux 的核心（`C-kernel-l4t-map`，只有 `--image`、`--sbom`；`lib/l4t_kernel.py`，對應檔 `lib/l4t-kernel-map.json`，結果 `scan/l4t-kernel-map.json`）：
   L4T 的核心是 NVIDIA 的 deb（nvidia-l4t-kernel），Ubuntu 的弱點資料沒有它；它是從 Canonical 的 noble linux-nvidia-tegra 建的。
@@ -298,8 +301,8 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   - **本機 linux-stable（離線 git）**：環境變數 `KERNEL_STABLE_GIT`（`--stable-git`，clone 的資料夾，唯讀、不 fetch；`lib/kernel_git_files.py`，只執行
     `git cat-file --batch-check` 與 `git log --no-walk --name-only`，clone 的設定不信任）。(a) 沒有 CNA 紀錄的 CVE：Grype／DT 的 references 裡
     git.kernel.org／github torvalds 的 commit，**每一個都查得到**才用，取程式檔與標頭檔照一般規則判斷，一個查不到就照舊 unknown；
-    (b) 有 CNA 紀錄的 CVE：紀錄裡修補 commit（git 範圍的 `lessThan`）在 clone 裡的（產品分支的 backport），實際改的程式檔／標頭檔（這個核心有的檔案）和
-    `programFiles` **聯集**，只會更保守（例如主線改 `btmtk.c`、6.1 的 backport 改 `btusb.c`）。結果在 `kernel.stable_git`，
+    (b) 有 CNA 紀錄的 CVE：紀錄裡修補 commit（git 範圍的 `lessThan`）在 clone 裡的（產品分支的 backport），實際改的程式檔／標頭檔和
+    `programFiles` **聯集**，只會更保守（例如主線改 `btmtk.c`、6.1 的 backport 改 `btusb.c`）。只有**完整的核心原始碼樹**（`KERNEL_SOURCE_DIR`／`--source-tree`）找不到某個檔案時，才算這個核心沒有它而不併入；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 `.h` 不在裡面）、`--makefiles-dir`，或名稱超過上限讀不到時，找不到不當作不存在，照樣併入（只會讓 not_affected 變成 unknown；K1 標頭檔修正 #136）。`kernel.stable_git.kept_not_proven_absent`（`files`、`cves`）記「沒有證明不存在而照樣併入」的檔案與 CVE 數，**也包含修正前本來就會併入的情況**（例如名稱超過上限、讀不到名稱時，修正前也是照樣併入），所以它不等於「這次修正多併入的數量」。結果在 `kernel.stable_git`，
     每筆多 `files_origin`、`stable_git_commits`、`stable_git_added_files`。
   - **CNA 版本比對的分支修補**（`kernel_cna_version.py`）：同一筆紀錄有只含 git 範圍的項目（defaultStatus unaffected），另一個項目的 semver 明寫
     「X.Y.Z <= v <= X.Y.\*：unaffected」而且涵蓋產品版本 → 以分支紀錄為準判 not_affected（理由 `branch X.Y fixed in X.Y.Z`）；有 semver 項目判受影響、
