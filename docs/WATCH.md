@@ -21,6 +21,7 @@
 | DT（OSV）那條路 | 有 | **NOT_RUN**（每份報告與每個 KEV Issue 都列在「每日沒有涵蓋」，不分層） | — |
 | NVIDIA 公告 | 有 | **NOT_RUN**（報告列出；廠商層級的 nvidia 仍有） | — |
 | 廠商層級（exploited_vendor） | — | 有 | — |
+| 韌體（C2 的 BIOS／vBIOS SBOM，`firmware.yml`） | 有（firmware.yml 自己的比對與 DT） | **只有廠商層級，沒有元件比對**：collect 只收 GitHub Release，韌體 SBOM 只在 firmware.yml 的 Actions artifact（`firmware-sbom`，會過期），不在任何 Release 裡，所以每日的 Grype／KEV／EUVD 元件比對不含韌體元件；只有 `vendor-watch.json` 的廠商層級提醒（Intel、AMD、AMI、NVIDIA 等新的 KEV 條目），而且掛在現有的板子 SBOM 上，不是掛在韌體上 | 韌體進監控的設計另做（C3＋C2，D-063） |
 
 ## 3. 程式與資料流
 
@@ -125,6 +126,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   不在別名裡就補進 `vendor-watch.json` 的 `aliases`（在那之前，`AMD`／`Advanced Micro Devices`／`NVIDIA`／`NVIDIA Corporation` 已涵蓋）。
   C2 的韌體 SBOM 公告比對會用到這裡的廠商層級結果。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
+  **一個廠商 × CVE 只開一個 Issue**（D-064 B，C0 決定 2026-11-15）：群組鍵是 `issue_key(mode, "vendor", CVE, 廠商)`，不含專案 UUID；內文的表格列出這次命中的每份 SBOM（專案、版本、分層、狀態、Release、監看來源），標籤取各版本狀態與分層的聯集。之後新的版本也命中（KEV 加入不到 `BASELINE_DAYS`＝7 天的條目，新版本第一次監看時不算基準）→ 在原 Issue 留言、只列新的版本（`open_if_closed`：原 Issue 已關閉就開新的）。狀態格式不變：`vendor_matches` 的鍵仍是 `[專案 UUID, CVE, 廠商]`，每份 SBOM 一筆。
 - 降級（只在 real；核心 CNA 缺附件、schema 不符、upstream_version 為 null 也算）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
   、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release、
   **上一次排程 run 被取消／失敗／逾時或超過 36 小時沒有排程**（compute 用 `actions: read` 查 watch.yml 的排程 run；keepalive 也印出最近 3 次）
