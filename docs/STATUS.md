@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 14:05 +0800（C3）
+最後更新：2026-11-15 14:15 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -168,8 +168,8 @@
 >     - 真樣本：V540TU 的 KM、BPM、ACM 是 observed；Protectli、NUC BOX 是 not-found；NUC11 與 OVMF 是 GAP；status_of 和 md 不變。
 >     - 依據：FIT 規格用 Intel 公開的 599500 rev 1.6 核對；`__KEYM__`／`__ACBP__` 的依據是 Slim Bootloader（BSD-2-Clause-Patent）。
 >     - 測試：25 個變異都被抓到。CI tests 43680118563（c1-tools 的偶發失敗，重跑後綠）、firmware 43680120967 綠。
->     - 併 main 後是 **427d9b6**（PROVENANCE 衝突兩邊都保留），本機測試在 HEAVY_LOCK 排隊中，跑完就開 PR。
->     - 照 D-063：開 PR，但驗證排後面、先不合併。
+>     - 併 main 後是 **427d9b6**（PROVENANCE 衝突兩邊都保留），本機 1299 passed → **PR #130 已開**，已通知 C0。
+>     - 照 D-063：驗證排後面，先不合併。worktree `$AGENT_TMP/dumpling-wt-c2-fit`。
 >   - 其他程式碼完整性的實作凍結到第二階段。
 > - D-046 的實作等 C1 的發現介面。
 > - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，C0 會轉問使用者；在那之前，C2 的測試都用 3.12 venv 跑同一份清單（C0 同意，記在這裡）。
