@@ -863,3 +863,209 @@ class TestMetaResults(unittest.TestCase):
         self.assertEqual(r["reports"], [{"report": "bsp", "report_status": "GAP", "release_gate": "FAIL"},
                                         {"report": "os", "report_status": "NOT_RUN", "release_gate": "OK"}])
         self.assertEqual(r["attention"], ["kernel-cve 沿用舊鏡像  x"])
+
+
+# ---------------------------------------------------------------- 韌體（docs/FIRMWARE-WATCH.md）
+import hashlib  # noqa: E402
+
+FW_TAG = "firmware-demo/2026.11.20"
+EXAMPLE_META = os.path.join(HERE, "data", "firmware-meta.example.json")
+
+
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def fw_files(tag=FW_TAG, samples=None, mutate=None):
+    """合成的韌體 Release：bios 兩份（V540TU、OVMF）＋供應商 SBOM 一份；欄位照 C2 的 firmware-meta.example.json。"""
+    samples = samples if samples is not None else [
+        ("novacustom-v540tu-mtl-v1.0.1", "bios", "v1.0.1", "e" * 64),
+        ("ubuntu-ovmf-2024.02", "bios", "2024.02-2ubuntu0.10", None),
+        ("dasharo-novacustom-ns5x-tgl-v1.6.0", "sbom", "v1.6.0", None),
+    ]
+    f, meta = {}, {"schema": "dumpling-firmware-meta/1", "tag": tag, "commit": HEX, "built_at": "2026-11-20T03:00:00Z",
+                   "workflow_run": "0", "samples": [], "not_watched": [{"slug": "standalone-nvidia-option-rom", "why": "GAP：沒有檔案"}],
+                   "tables": {"fw_advisory_rules": {"sha256": "c" * 64, "table_updated": "2026-11-14"},
+                              "intel_microcode": {"source_commit": "d" * 40, "source_tag": "microcode-20261110"},
+                              "nvidia_vbios": {"sha256": "a" * 64, "mirror_commit": "9" * 40, "reviewed_until": "2025-09-02"}}}
+    for slug, kind, ver, img in samples:
+        sb = sbom()
+        f["fw-%s.cdx.json" % slug] = sb
+        x = {"slug": slug, "kind": kind, "firmware_version": ver, "image_sha256": img,
+             "sbom": "fw-%s.cdx.json" % slug, "sbom_sha256": sha(sb), "status": "ATTENTION", "expect": "OK"}
+        if kind == "bios":
+            iv = j({"schema": "sca-center-fw-inventory/1", "slug": slug})
+            f["fw-inventory-%s.json" % slug] = iv
+            x.update(inventory="fw-inventory-%s.json" % slug, inventory_sha256=sha(iv))
+        else:
+            x.update(inventory=None, inventory_sha256=None, normalized=True, expect="NONE")
+        meta["samples"].append(x)
+    if mutate:
+        mutate(meta, f)
+    f["firmware-meta.json"] = j(meta)
+    return f
+
+
+class TestFirmware(Base):
+    def rj(self, tag=FW_TAG, published="2026-11-20T03:10:00Z", prerelease=False):
+        return {"tag_name": tag, "prerelease": prerelease, "draft": False, "published_at": published,
+                "html_url": "https://github.com/o/r/releases/tag/x"}
+
+    def run_spec(self, spec):
+        __import__("shutil").rmtree(os.path.join(self._td.name, "src"), ignore_errors=True)   # dirs() 的根是固定的（subTest 會重用）
+        code, so = go(["--from-dir", self.dirs(spec), "--out", self.out])
+        return code, so, self.inv()
+
+    def test_classify(self):
+        self.assertEqual(collect.classify("firmware-demo/2026.11.20", False), ("firmware", "firmware-demo", "2026.11.20"))
+        self.assertEqual(collect.classify("firmware-demo/2026.11.20", True)[0], None)
+        self.assertEqual(collect.classify("firmware-demo/../x", False)[0], None)
+        self.assertEqual(collect.classify("orin-nano-demo/v39.2.1-demo1", False)[0], "release")   # 板子照舊
+
+    def test_firmware_release_collected_not_as_board_release(self):
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files()), "a": (self.rj("p/v1"), files())})
+        self.assertEqual(code, 0, so)
+        self.assertEqual([r["tag"] for r in inv["releases"]], ["p/v1"])        # 韌體不進 releases（不要求 release-meta）
+        fw = inv["firmware"]
+        self.assertEqual(fw["tag"], FW_TAG)
+        self.assertEqual(fw["problems"], [])
+        self.assertEqual(fw["tables"]["fw_advisory_rules"]["table_updated"], "2026-11-14")
+        by = {x["slug"]: x for x in fw["samples"]}
+        v = by["novacustom-v540tu-mtl-v1.0.1"]
+        self.assertEqual(v["watch_version"], "novacustom-v540tu-mtl-v1.0.1@v1.0.1")
+        self.assertEqual(v["status"], "OK")
+        self.assertEqual(v["sbom"]["file"], "firmware/fw-novacustom-v540tu-mtl-v1.0.1.cdx.json")
+        self.assertEqual(v["inventory"]["file"], "firmware/fw-inventory-novacustom-v540tu-mtl-v1.0.1.json")
+        n = by["dasharo-novacustom-ns5x-tgl-v1.6.0"]
+        self.assertEqual((n["kind"], n["inventory"], n["normalized"], n["status"]), ("sbom", None, True, "OK"))
+        self.assertEqual(fw["not_watched"][0]["slug"], "standalone-nvidia-option-rom")
+        self.assertIn("韌體 firmware-demo/2026.11.20", inv["detail"])
+        self.assertNotIn(self._td.name, json.dumps(inv))
+
+    def test_only_latest_firmware_release(self):
+        old = fw_files("firmware-demo/2026.11.01")
+        code, so, inv = self.run_spec({"new": (self.rj(), fw_files()),
+                                       "old": (self.rj("firmware-demo/2026.11.01", "2026-11-01T00:00:00Z"), old)})
+        self.assertEqual(inv["firmware"]["tag"], FW_TAG)
+        self.assertEqual(inv["firmware_older"], ["firmware-demo/2026.11.01"])
+
+    def test_firmware_only_is_not_gap(self):
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files())})
+        self.assertEqual(code, 0, so)
+        self.assertEqual(inv["status"], "OK")
+
+    def test_meta_broken_whole_release_gap(self):
+        for name, mut in (("schema", lambda m, f: m.update(schema="x")),
+                          ("tag", lambda m, f: m.update(tag="firmware-demo/2026.01.01")),
+                          ("samples", lambda m, f: m.update(samples={})),
+                          ("commit", lambda m, f: m.update(commit="nothex"))):
+            with self.subTest(name):
+                self.out = os.path.join(self._td.name, "w-" + name)
+                code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+                self.assertEqual(code, 3, so)
+                self.assertEqual(inv["status"], "GAP")
+                self.assertEqual(inv["firmware"]["samples"], [])
+                self.assertTrue(inv["firmware"]["problems"][0].startswith("firmware-meta.json："), inv["firmware"]["problems"])
+        self.out = os.path.join(self._td.name, "w-nometa")
+        f = fw_files()
+        del f["firmware-meta.json"]
+        code, so, inv = self.run_spec({"fw": (self.rj(), f)})
+        self.assertEqual(inv["status"], "GAP")
+        self.assertIn("缺少附件", inv["firmware"]["problems"][0])
+
+    def test_sample_problems_only_that_sample_gap(self):
+        def mut(m, f):
+            f["fw-novacustom-v540tu-mtl-v1.0.1.cdx.json"] = sbom() + b" "          # 內容換了：sha256 不符
+            del f["fw-inventory-ubuntu-ovmf-2024.02.json"]                        # 附件缺
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+        self.assertEqual(code, 0, so)                                             # 單一樣本不讓整份 GAP
+        by = {x["slug"]: x for x in inv["firmware"]["samples"]}
+        v = by["novacustom-v540tu-mtl-v1.0.1"]
+        self.assertEqual((v["status"], v["sbom"]), ("GAP", None))
+        self.assertIn("sha256 與 firmware-meta.json 不符", v["problems"][0])
+        self.assertFalse(os.path.exists(os.path.join(self.out, "firmware", "fw-novacustom-v540tu-mtl-v1.0.1.cdx.json")))
+        o = by["ubuntu-ovmf-2024.02"]
+        self.assertEqual((o["status"], o["inventory"]), ("GAP", None))
+        self.assertIn("NOT_RUN", o["problems"][0])
+        self.assertEqual(by["dasharo-novacustom-ns5x-tgl-v1.6.0"]["status"], "OK")
+        self.assertIn("2 份樣本 GAP", inv["detail"])
+
+    def test_sample_field_rules(self):
+        bad = {
+            "slug": {"slug": "../x"}, "kind": {"kind": "vbios"}, "sbomname": {"sbom": "other.cdx.json"},
+            "sbomsha": {"sbom_sha256": "X" * 64}, "img": {"image_sha256": "1234"}, "ver": {"firmware_version": 7},
+            "invname": {"inventory": "../fw-inventory.json"}, "sbom_with_inv": None, "sbom_norm": None,
+        }
+        for name, over in bad.items():
+            with self.subTest(name):
+                def mut(m, f, over=over, name=name):
+                    if name == "sbom_with_inv":
+                        m["samples"][2]["inventory"] = "fw-inventory-x.json"
+                    elif name == "sbom_norm":
+                        m["samples"][2]["normalized"] = "yes"
+                    else:
+                        m["samples"][0].update(over)
+                self.out = os.path.join(self._td.name, "w-" + name)
+                code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+                gaps = [x for x in inv["firmware"]["samples"] if x["status"] == "GAP"]
+                self.assertEqual(len(gaps), 1, inv["firmware"]["samples"])
+                self.assertTrue(gaps[0]["problems"][0].startswith("firmware-meta 樣本："), gaps[0])
+                self.assertIsNone(gaps[0]["watch_version"])
+
+    def test_duplicate_slug(self):
+        def mut(m, f):
+            m["samples"].append(dict(m["samples"][0]))
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+        dup = [x for x in inv["firmware"]["samples"] if "slug 重複" in " ".join(x["problems"])]
+        self.assertEqual(len(dup), 1)
+
+    def test_watch_key_version_unreadable_uses_image_sha(self):
+        """C0 決定：版本讀不到或只是佔位字串 → 鍵改用映像雜湊，標 GAP；不能用空字串或預設值當鍵。"""
+        img = "f" * 64
+        for ver in ("", None, "xx.xx.xx", "XX.XX.XX.XX.XX", "0.0", "0", "unknown", "N/A", "TO BE COMPLETED", " ", "bad/ver"):
+            with self.subTest(ver=ver):
+                wv, why = collect.fw_watch_version("s", ver, img)
+                self.assertEqual(wv, "s@sha256-ffffffffffffffff")
+                self.assertIn("版本讀不到", why)
+        self.assertEqual(collect.fw_watch_version("s", "0059", img), ("s@0059", None))       # 0059 不是佔位
+        self.assertEqual(collect.fw_watch_version("s", "3404", None), ("s@3404", None))
+        wv, why = collect.fw_watch_version("s", "unknown", None)
+        self.assertIsNone(wv)
+        self.assertIn("不監控", why)
+
+    def test_unreadable_version_sample_watched_by_sha_and_gap(self):
+        def mut(m, f):
+            m["samples"][0]["firmware_version"] = "xx.xx"
+            m["samples"][1]["firmware_version"] = None                   # OVMF：image_sha256 也是 null → 不監控
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+        fw = inv["firmware"]
+        by = {x["slug"]: x for x in fw["samples"]}
+        v = by["novacustom-v540tu-mtl-v1.0.1"]
+        self.assertEqual(v["watch_version"], "novacustom-v540tu-mtl-v1.0.1@sha256-" + "e" * 16)
+        self.assertEqual(v["status"], "GAP")
+        self.assertNotIn("ubuntu-ovmf-2024.02", by)
+        nw = {x["slug"]: x["why"] for x in fw["not_watched"]}
+        self.assertIn("不監控", nw["ubuntu-ovmf-2024.02"])
+        for x in fw["samples"]:
+            self.assertTrue(x["watch_version"] is None or not x["watch_version"].endswith("@"), x)
+
+    def test_untrusted_strings_cleaned(self):
+        def mut(m, f):
+            m["not_watched"].append({"slug": "x\n<script>", "why": "a\x00b" + "y" * 500})
+            m["tables"]["nvidia_vbios"]["reviewed_until"] = "\x1b[31m2025"
+            m["tables"]["bogus"] = {"k": "v"}
+        code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+        fw = inv["firmware"]
+        txt = json.dumps(fw, ensure_ascii=False)
+        self.assertNotIn("\x00", txt)
+        self.assertNotIn("\x1b", txt)
+        self.assertNotIn("bogus", fw["tables"])
+        self.assertLessEqual(max(len(x["why"]) for x in fw["not_watched"]), 200)
+
+    @unittest.skipUnless(os.path.exists(EXAMPLE_META), "C2 的 firmware-meta.example.json 還沒合併")
+    def test_c2_example_meta_accepted(self):
+        """介面範例（C2 維護）：每個樣本的欄位都通過檢查（雜湊是佔位值，只檢查格式）。"""
+        m = json.load(open(EXAMPLE_META, encoding="utf-8"))
+        self.assertIsNone(collect.check_fw_meta(m, m["tag"]))
+        for x in m["samples"]:
+            self.assertIsNone(collect._fw_sample_fields(x), x.get("slug"))
