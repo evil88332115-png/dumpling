@@ -875,6 +875,8 @@ class DtField(unittest.TestCase):
             self.assertEqual(fm.dt_problem(meta["dt"]), None)
 
     def test_only_two_status_result_combinations_are_valid(self):
+        for bad_word in ("安全", "不適用", "不受影響", "整體 PASS"):          # 固定原因句會進 meta 與 Release 說明（公開文字）
+            self.assertNotIn(bad_word, fm.DT_REASON)
         good = [{"status": "OK", "result": "OK", "reason": None}, {"status": "GAP", "result": "FAIL", "reason": fm.DT_REASON},
                 {"status": "GAP", "result": "NOT_RUN", "reason": fm.DT_REASON}]
         for g in good:
