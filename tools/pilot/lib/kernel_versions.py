@@ -7,23 +7,30 @@
 
 用法：python3 -I kernel_versions.py --out <kernel-versions.json> (--shipped <版本>… | --shipped-unknown) [--requested <版本>]…
                               [--source-version X.Y.Z | --source-gap <原因>] [--upstream-version <出貨版本>=<X.Y.Z>]…
+                              [--judged-result '<版本>|<config 檔>|<config 狀態>|<模組對應檔>|<模組對應狀態>']…
   --shipped：映像出貨的核心（kernel_config.py --list-kernel-versions 的結果；可重複，也可以一個都沒有）
   --shipped-unknown：映像出貨的核心讀不出來（檔案的 shipped 是 null）
   --requested：呼叫端指定的核心（--kernel-version／SCA_KERNEL_VERSIONS；可重複）
   --source-version：核心原始碼樹最上層 Makefile 的 X.Y.Z（kernel_config.py --source-tree-version 的結果）。--source-gap：有給原始碼
     但讀不出版本（原因寫進 upstream_note）。兩個都沒給＝沒有核心原始碼（--kernel-source）。
   --upstream-version：平台設定（platform_params）給的上游版本，格式 <出貨版本>=<X.Y.Z>，可重複；和 Makefile 核對（見下）。
+  --judged-result：sca-scan 對 judged 的每一顆核心記下的結果：版本｜kernel-config.json 的相對路徑（沒有檔案給 -）｜C-kernel-config 的狀態｜
+    kernel-module-map.json 的相對路徑｜C-kernel-module-map 的狀態（沒有狀態給 -）。只有 1 顆判定時檔案是 scan/kernel-config.json 與
+    scan/kernel-module-map.json（和以前相同）；2 顆以上是 scan/kernels/<版本>/ 底下各一份（M7d-1，D-036／D-061）。
 
-規則：
+規則（schema /3，M7d-1，D-036／D-061）：
   - 指定剛好 1 顆：判定那一顆（和以前相同）；出貨但沒指定的核心記為 not_judged。
-  - 沒指定：映像只有 1 顆 → 判定它（和以前相同）；有多顆 → 都不判定（不猜），全部 not_judged。
-  - 指定 2 顆以上：多顆核心逐一判定還沒實作（M2 之後）→ 一顆都不判定，出貨的與指定的全部 not_judged。
-  - shipped 的每一筆是 {"version", "upstream_version", "upstream_basis", "upstream_note"}（schema /2；shipped 是 null 時維持 null）。
+  - 指定 2 顆以上：逐顆判定（basis "project-specified"）；出貨但沒指定的核心記為 not_judged（GAP）。
+  - 沒指定：映像只有 1 顆 → 判定它（和以前相同）；有多顆 → 全部逐顆判定（basis "auto-detected"）。
+  - judged 的每一筆是 {"version", "basis", "config_file", "config_status", "module_map_file", "module_map_status"}（/1、/2 是版本字串清單；
+    讀取端三種都要收：見 judged_versions）。basis：指定的（--kernel-version）是 "project-specified"，映像自己列出的是 "auto-detected"。
+  - shipped 的每一筆是 {"version", "upstream_version", "upstream_basis", "upstream_note"}（schema /2 起；shipped 是 null 時維持 null）。
     上游版本只認原始碼 Makefile 的 X.Y.Z（不從版本字串的數字推測）：出貨版本字串以 X.Y.Z 開頭、後面接 -、+ 或結尾才算是它編的 →
     upstream_basis "source-makefile"。不相符 → null，note 寫兩個值。一份原始碼與多顆出貨核心：逐顆比，只有相符的填。沒有原始碼 → null。
     --upstream-version 給的值：和（相符的）Makefile 一致 → basis "source-makefile+platform-param"；不一致 → null，note 寫兩個值；
     沒有可核對的 Makefile（沒給原始碼，或 Makefile 不是這顆核心的）→ 填給的值，basis "platform-param"，note 寫沒有原始碼可核對。
-  judged 是「交給判定工具的核心」，不是判定的結果（結果看 scan/kernel-config.json 與 status.tsv 的 C-kernel-config）。
+  judged 是「交給判定工具的核心」，不是判定的結果（結果看 config_file／module_map_file 與 status.tsv 的 C-kernel-config；
+  /3 另外記下各自的狀態）。
 
 stdout：
   KERNEL-NOT-JUDGED<TAB>版本<TAB>原因   每一顆沒判定的核心一行
@@ -37,16 +44,26 @@ import os
 import re
 import sys
 
-SCHEMA = "sca-center-kernel-versions/2"
+SCHEMA = "sca-center-kernel-versions/3"
+SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2", SCHEMA)    # 讀取端收這三種
+BASIS_AUTO, BASIS_PROJECT = "auto-detected", "project-specified"
 VER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$")
 
 REASON_NOT_GIVEN = "沒有指定 --kernel-version"
 REASON_OTHER_GIVEN = "出貨但沒有列在 --kernel-version，這次只判定指定的核心"
-REASON_MULTI = "多顆核心逐一判定還沒實作（M2 之後）"
-REASON_MULTI_NOT_SHIPPED = REASON_MULTI + "；映像也沒有這顆核心的模組目錄"
 NO_SOURCE_NOTE = "沒有核心原始碼（--kernel-source），不推測上游版本"
 UP_RE = re.compile(r"^\d+\.\d+\.\d+$")
 EXCLUDE_NOTE = ("要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」），沒有證據不能當作它不受影響")
+
+
+def judged_versions(doc):
+    """kernel-versions.json（/1、/2、/3）→ judged 的版本清單（/1、/2 是字串清單，/3 是物件清單）；格式不對的項目略過。"""
+    out = []
+    for x in (doc.get("judged") if isinstance(doc, dict) else None) or []:
+        v = x.get("version") if isinstance(x, dict) else x
+        if isinstance(v, str) and v not in out:
+            out.append(v)
+    return out
 
 
 def dedupe(items):
@@ -88,30 +105,28 @@ def upstream_of(version, source, param):
     return out(None, None, why)
 
 
-def plan(shipped, requested, source=None, params=None):
-    """出貨的核心（list，或 None＝讀不出來）與指定的核心（list）→ 檔案內容 dict。source、params：見 upstream_of。"""
+def plan(shipped, requested, source=None, params=None, results=None):
+    """出貨的核心（list，或 None＝讀不出來）與指定的核心（list）→ 檔案內容 dict。source、params：見 upstream_of。
+    results：{版本: (config 檔, config 狀態, 模組對應檔, 模組對應狀態)}（沒有的項目全是 None）。"""
     requested = dedupe(requested)
     ship = None if shipped is None else sorted(set(shipped))
-    judged, nj = [], []
-    if len(requested) >= 2:
-        names = sorted(set(requested) | set(ship or []))
-        for v in names:
-            insh = None if ship is None else v in ship
-            nj.append({"version": v, "reason": REASON_MULTI_NOT_SHIPPED if insh is False else REASON_MULTI, "shipped": insh})
-    elif len(requested) == 1:
-        judged = list(requested)
+    judged, nj, basis = [], [], None
+    if requested:
+        judged, basis = list(requested), BASIS_PROJECT       # 指定的都交給判定工具（映像沒有的那顆由工具回 GAP，同指定 1 顆）
         for v in ship or []:
-            if v != requested[0]:
+            if v not in requested:
                 nj.append({"version": v, "reason": REASON_OTHER_GIVEN, "shipped": True})
-    elif ship is not None:
-        if len(ship) == 1:
-            judged = list(ship)
-        else:
-            nj = [{"version": v, "reason": REASON_NOT_GIVEN, "shipped": True} for v in ship]
+    elif ship:
+        judged, basis = list(ship), BASIS_AUTO                 # 沒指定：映像出貨的核心全部判定（1 顆照舊）
     params = params or {}
+    results = results or {}
     shipped_out = None if ship is None else [upstream_of(v, source, params.get(v)) for v in ship]
-    return {"schema": SCHEMA, "shipped": shipped_out, "requested": requested, "judged": judged, "not_judged": nj,
-            "note": "judged 是交給判定工具的核心，不是判定的結果（結果看 scan/kernel-config.json 與 status.tsv 的 C-kernel-config）；"
+    judged_out = []
+    for v in judged:
+        cf, cs, mf, ms = (list(results.get(v) or (None,) * 4) + [None] * 4)[:4]
+        judged_out.append({"version": v, "basis": basis, "config_file": cf, "config_status": cs, "module_map_file": mf, "module_map_status": ms})
+    return {"schema": SCHEMA, "shipped": shipped_out, "requested": requested, "judged": judged_out, "not_judged": nj,
+            "note": "judged 是交給判定工具的核心，不是判定的結果（結果看每顆的 config_file／module_map_file 與 status.tsv 的 C-kernel-config）；"
                     "not_judged 是出貨（或被指定）但沒有判定的核心，不可以當作它們不受影響。" + EXCLUDE_NOTE}
 
 
@@ -143,6 +158,7 @@ def main(argv=None):
     ap.add_argument("--source-version")
     ap.add_argument("--source-gap")
     ap.add_argument("--upstream-version", action="append", default=[])
+    ap.add_argument("--judged-result", action="append", default=[])
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -165,9 +181,16 @@ def main(argv=None):
             print("KERNEL-VERSIONS-ERROR\t--upstream-version 要是 <出貨版本>=<X.Y.Z>（同一顆核心不能給兩個值）：" + re.sub(r"[^\x20-\x7e]", "?", x)[:80])
             return 3
         params[v] = up
+    results = {}
+    for x in a.judged_result:
+        f = x.split("|")
+        if len(f) != 5 or not VER_RE.match(f[0]) or f[0] in results or any(not re.fullmatch(r"[A-Za-z0-9_./+~-]{1,200}|-", y) for y in f[1:]):
+            print("KERNEL-VERSIONS-ERROR\t--judged-result 要是 <版本>|<config 檔>|<狀態>|<模組對應檔>|<狀態>（沒有的給 -；同一顆核心只給一次）：" + re.sub(r"[^\x20-\x7e]", "?", x)[:80])
+            return 3
+        results[f[0]] = tuple(None if y == "-" else y for y in f[1:])
     source = ("OK", a.source_version) if a.source_version is not None else \
         ("GAP", re.sub(r"\s+", " ", a.source_gap)[:200]) if a.source_gap is not None else None
-    doc = plan(None if a.shipped_unknown else a.shipped, a.requested, source, params)
+    doc = plan(None if a.shipped_unknown else a.shipped, a.requested, source, params, results)
     if doc["shipped"] is None and not doc["requested"]:
         return 0                                  # 讀不出映像有什麼核心，也沒指定：沒有東西可記（和以前相同）
     if doc["shipped"] == [] and not doc["requested"]:

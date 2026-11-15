@@ -189,7 +189,7 @@ IMAGE_RE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
 IMAGE_PLACEHOLDER = "sha256:<image digest>"
 # 判定函式看得到的欄位（只有產物的身分與這一列的 CVE）。不含 severity、epss、epss_pct、cvss、tier、kev 等：它們只能用來「排除」
 # （KEV／被利用的列不套用），不能讓一列變成 not_affected
-EVIDENCE_VIEW_KEYS = ("id", "cves", "key", "component", "name", "version", "purl", "kernel", "installed_as", "deb_python")
+EVIDENCE_VIEW_KEYS = ("id", "cves", "key", "component", "name", "version", "purl", "kernel", "installed_as", "deb_python", "kernel_packages")
 # deb_python 只交出擁有者的身分（U2 用）；Ubuntu 的修補狀態、PyPI 的修補版本等推出來的欄位不交
 DEB_PYTHON_VIEW_KEYS = ("owner", "source_owner", "candidates")
 KMOD_REL = Path("CRA") / "Config" / "kernel-modules.json"
@@ -229,6 +229,17 @@ class VexInputError(ValueError):
 
 
 _VEXCONV = []
+_KMERGE = []
+
+
+def _kmerge():
+    """tools/cra/kernel_merge.py（多顆核心的合併規則；依路徑載入，只載入一次）。"""
+    if not _KMERGE:
+        spec = importlib.util.spec_from_file_location("sca_center_kernel_merge", HERE / "kernel_merge.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _KMERGE.append(m)
+    return _KMERGE[0]
 
 
 def _vexconv():
@@ -436,13 +447,41 @@ def kcfg_basis(kcfg):
     return basis_entry("build-record", "scan/kernel-config.json" + (f" ({inner})" if inner else ""), ver)
 
 
+def kernel_basis_entry(v):
+    """逐顆判定的依據（M7d-1）：一顆核心一筆 build-record，位置寫它的 kernel-config.json、核心版本與 config 的 SHA-256。
+    v：合併文件 kernel.kernels 的一筆。每筆都短（版本最多 100 字、SHA-256 64 字，總長遠小於 512），不需要縮寫；
+    一顆核心一筆（而不是全部塞進一個位置），位置就不會因為核心多而超過 vexconv 的上限。"""
+    ver, sha = str(v.get("version") or ""), v.get("config_sha256")
+    inner = ", ".join(x for x in (f"kernel {ver}", f"config SHA-256 {sha}" if sha else "") if x)
+    return basis_entry("build-record", f"scan/kernels/{ver}/kernel-config.json ({inner})", ver)
+
+
+def kcfg_basis_list(kcfg):
+    """K1 的依據清單：單顆 → [kcfg_basis]；合併的文件（kernel_multi_doc）→ 每顆判定過的核心一筆（版本排序）。"""
+    if isinstance(kcfg, dict) and kcfg.get("merged"):
+        return [kernel_basis_entry(v) for v in sorted(((kcfg.get("kernel") or {}).get("kernels") or []), key=lambda x: str(x.get("version")))]
+    return [kcfg_basis(kcfg)]
+
+
 def k2_basis(mm, ec, km):
-    """K2 的依據：build-record，位置寫核心設定檢查（有 config 的 SHA-256 時）、模組對應與映像模組清單（各附 SHA-256）。"""
+    """K2 的依據：build-record，位置寫核心設定檢查（有 config 的 SHA-256 時）、模組對應與映像模組清單（各附 SHA-256）。
+    逐顆判定時（ec["multi"]）：K2 那顆核心的檔案在 scan/kernels/<版本>/（ec["kcfg_path"]、ec["mm_path"]），其他核心各一筆 K1 的依據（k2_basis_list）。"""
     parts = []
     if ec.get("kcfg_sha"):
-        parts.append(sha_part("scan/kernel-config.json", ec["kcfg_sha"], "config SHA-256"))
-    parts += [sha_part("scan/kernel-module-map.json", ec.get("mm_sha")), sha_part(KMOD_REL.as_posix(), km.get("sha256"))]
+        parts.append(sha_part(ec.get("kcfg_path") or "scan/kernel-config.json", ec["kcfg_sha"], "config SHA-256"))
+    parts += [sha_part(ec.get("mm_path") or "scan/kernel-module-map.json", ec.get("mm_sha")), sha_part(KMOD_REL.as_posix(), km.get("sha256"))]
     return basis_entry("build-record", ", ".join(parts), ((mm or {}).get("kernel") or {}).get("version"))
+
+
+def k2_basis_list(mm, ec, km):
+    """K2 成立的依據清單：單顆 → [k2_basis]；逐顆判定 → K2 那顆一筆（k2_basis）加其他每顆核心 K1 的一筆。"""
+    own = k2_basis(mm, ec, km)
+    if not ec.get("multi"):
+        return [own]
+    k2v = ((mm or {}).get("kernel") or {}).get("version")
+    others = [kernel_basis_entry(v) for v in sorted(((ec["kcfg"].get("kernel") or {}).get("kernels") or []), key=lambda x: str(x.get("version")))
+              if v.get("version") != k2v]
+    return sorted([own] + others, key=lambda e: (str(e.get("kernel") or ""), e["location"]))
 
 
 def ubuntu_basis(ev, cve_info=None):
@@ -514,7 +553,18 @@ def load_annotations(project):
 
 
 def annotation_matches(a, row):
-    """這筆判定是否適用於這一列。VEX 的陳述寫在這一列的編號（row["id"]）下，所以：
+    """這筆判定是否適用於這一列（核心列去重後一列帶好幾個套件，M7d-1：逐個套件比；會關閉弱點的判定〔resolved、not_affected、false_positive〕
+    要每個套件都對上，不然一個套件上的排除會變成整列所有套件的排除；其他判定只要有一個套件對上）。"""
+    kp = row.get("kernel_packages")
+    if not kp or len(kp) < 2:
+        return annotation_matches_row(a, row)
+    each = [annotation_matches_row(a, dict(row, purl=p.get("purl"), name=p.get("name"), component=p.get("name"), version=p.get("version"),
+                                           installed_as=p.get("installed_as") or [])) for p in kp]
+    return all(each) if BUCKET.get(a.get("state")) in ("resolved", "not_affected") else any(each)
+
+
+def annotation_matches_row(a, row):
+    """這筆判定是否適用於這一列（單一套件）。VEX 的陳述寫在這一列的編號（row["id"]）下，所以：
       - 判定的編號要就是這一列的編號；別名（例如 GHSA-…）只在判定寫的不是 CVE、而且這一列最多只有一個 CVE 時才算
         （同一列可能併了別名不同的 CVE：GHSA 同時是 CVE-A 與 CVE-B 時列在 CVE-A，CVE-B 的判定不能變成 CVE-A 的陳述）；
       - purl 比 base（類型＋namespace＋名稱；DT 的原始碼套件也比安裝的二進位套件）；purl 有 qualifiers 時要直接對上，
@@ -780,7 +830,27 @@ def kconfig_toolchain_only(kcfg):
     return None
 
 
-KVERS_SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2")      # /2：shipped 是物件清單；not_judged 兩版相同，舊檔照樣讀
+KVERS_SCHEMAS = ("sca-center-kernel-versions/1", "sca-center-kernel-versions/2", "sca-center-kernel-versions/3")
+# /2：shipped 是物件清單；not_judged 兩版相同，舊檔照樣讀。/3（M7d-1）：judged 是物件清單（版本、basis、結果檔與狀態）；/1、/2 是版本字串清單
+
+
+def kvers_judged(kvers):
+    """kernel-versions.json（/1、/2、/3）→ judged 的版本清單（字串）；沒有檔案、格式不對 → []。"""
+    if not isinstance(kvers, dict) or kvers.get("schema") not in KVERS_SCHEMAS:
+        return []
+    out = []
+    for x in kvers.get("judged") or []:
+        v = x.get("version") if isinstance(x, dict) else x
+        if isinstance(v, str) and v not in out:
+            out.append(v)
+    return out
+
+
+def kvers_shipped(kvers):
+    """kernel-versions.json 的 shipped → 出貨的核心版本清單；讀不出來（null、沒有檔案、格式不對）→ None。"""
+    if not isinstance(kvers, dict) or kvers.get("schema") not in KVERS_SCHEMAS or not isinstance(kvers.get("shipped"), list):
+        return None
+    return [(x.get("version") if isinstance(x, dict) else x) for x in kvers["shipped"] if isinstance(x.get("version") if isinstance(x, dict) else x, str)]
 
 
 def kernel_scope_of(kvers):
@@ -792,7 +862,7 @@ def kernel_scope_of(kvers):
           if isinstance(x, dict) and isinstance(x.get("version"), str) and x.get("shipped") is not False]
     if not nj:
         return None
-    return {"judged": [v for v in kvers.get("judged") or [] if isinstance(v, str)], "not_judged": nj}
+    return {"judged": kvers_judged(kvers), "not_judged": nj}
 
 
 def kernel_with_scope(doc, kvers):
@@ -816,11 +886,70 @@ def kernel_scope_note(doc):
             f"({'只判定了核心 ' + j if j else '沒有判定任何核心'}；{n} 已出貨、未判定，排除不適用整個產品)")
 
 
+def kernel_multi_doc(docs, kvers):
+    """逐顆判定的合併（M7d-1，D-036／D-061）：每顆判定過的核心各一份 kernel-config.json（docs：{版本: 文件或 None}；不帶 scope 標記）
+    → 一份讀取端看得懂的 kernel-config 文件（schema 同單顆；merged True）。判定一律交給 kernel_merge.merge_cve（這裡只準備輸入）：
+    每顆的結果可採用（kconfig_usable：status OK，或依完整 IKCONFIG 的 ATTENTION）才算數；任一顆 affected → affected；每顆都 not_affected → not_affected；
+    其他（unknown、沒有結果、沒有檔案、出貨的核心讀不出來）一律 unknown／affected，不排除。results 每一筆帶 per_kernel（各顆的狀態），K2 與報告用。
+    沒判定的出貨核心由 kernel_with_scope 另外標 scope_incomplete（讀取端整個不採用）。judged 少於 2 顆 → None（呼叫端走單顆）。"""
+    km = _kmerge()
+    judged = [v for v in kvers_judged(kvers) if km.valid_version(v)]
+    if len(judged) < 2 or not isinstance(docs, dict):
+        return None
+    shipped = kvers_shipped(kvers)
+    inputs, cves, info = {}, set(), []
+    for v in judged:
+        d = docs.get(v)
+        ok = kconfig_usable(d)
+        k = (d.get("kernel") if isinstance(d, dict) and isinstance(d.get("kernel"), dict) else {}) or {}
+        dec = {}
+        if isinstance(d, dict):
+            for x in d.get("results") or []:
+                if isinstance(x, dict) and isinstance(x.get("cve"), str):
+                    cves.add(x["cve"].upper())
+                    if ok:
+                        dec[x["cve"].upper()] = x.get("decision")
+        inputs[v] = {"usable": ok, "decisions": dec} if isinstance(d, dict) else None
+        info.append({"version": v, "status": d.get("status") if isinstance(d, dict) else None, "usable": ok, "config_sha256": k.get("config_sha256"),
+                     "config_source": k.get("config_source"), "present": isinstance(d, dict)})
+    by = {v: {str(x["cve"]).upper(): x for x in (docs.get(v) or {}).get("results") or [] if isinstance(x, dict) and isinstance(x.get("cve"), str)}
+          for v in judged if isinstance(docs.get(v), dict)}
+    results, counts = [], {"affected": 0, "not_affected": 0, "unknown": 0}
+    # 要求 not_affected 的是「出貨又判定過」的核心；出貨清單不明（None）時 merge_cve 不排除。judged 了但映像沒有的核心只有 affected 的證據算數；
+    # 出貨但沒判定的核心不在這裡（kernel_with_scope 標 scope_incomplete，讀取端整個不採用）
+    need = None if shipped is None else [v for v in judged if v in shipped]
+    # 沒有任何一顆的結果可採用：和單顆（status 不是 OK）一樣，沒有逐 CVE 的判定（讀取端不會拿 unknown 去套 kernel_config 條件的規則）
+    for c in sorted(cves) if any(i["usable"] for i in info) else []:
+        m = km.merge_cve(c, need, judged, inputs)
+        det = {v: (by.get(v, {}).get(c) or {}) for v in judged}
+        if m["decision"] == km.NOT_AFFECTED:
+            detail = "not built in any of the judged kernels: " + " / ".join(
+                f"[{v}] {str(det[v].get('detail') or 'all files of the fix are only built with kernel options that are not set')}" for v in judged)
+        else:
+            detail = "; ".join(f"kernel {v}: {m['states'][v]}" for v in judged) + f" ({m['reason']})"
+        files, seen = [], set()
+        for v in judged:
+            for f in det[v].get("files") or []:
+                key = json.dumps(f, sort_keys=True) if isinstance(f, dict) else str(f)
+                if key not in seen:
+                    seen.add(key)
+                    files.append(f)
+        results.append({"cve": c, "decision": m["decision"], "detail": detail, "per_kernel": m["states"], "files": files})
+        counts[m["decision"]] += 1
+    nus = sum(1 for i in info if not i["usable"])
+    status = "OK" if not nus else "GAP" if nus == len(info) else "ATTENTION"
+    return {"schema": KCFG_SCHEMA, "merged": True, "status": status,
+            "detail": f"{len(judged)} kernels judged one by one: " + ", ".join(f"{i['version']} {i['status'] or 'no result'}" for i in info),
+            "kernel": {"version": ", ".join(judged), "config_sha256": None, "config_source": "merged", "kernels": info},
+            "component": {}, "results": results, "counts": counts, "inputs": {"kernels": judged},
+            "shipped": shipped, "docs": {v: docs.get(v) for v in judged}}
+
+
 def kconfig_usable(kcfg):
     """讀取端採用 kernel-config.json 的結果：status OK，或依完整的 IKCONFIG 判定的 ATTENTION（kconfig_ikconfig）。
     scope_incomplete（映像另有出貨但沒判定的核心，kernel_with_scope）→ 不採用。"""
     return (isinstance(kcfg, dict) and kcfg.get("schema") == KCFG_SCHEMA and not kcfg.get("scope_incomplete")
-            and (kcfg.get("status") == "OK" or kconfig_ikconfig(kcfg) is not None))
+            and (kcfg.get("status") == "OK" or kconfig_ikconfig(kcfg) is not None or kcfg.get("merged") is True))
 
 
 def kconfig_all(kcfg):
@@ -867,11 +996,12 @@ def rule_criteria(rule, row, kdec):
     m = rule["match"]
     if m["scope"] == "kernel" and not row.get("kernel") or m["scope"] == "non_kernel" and row.get("kernel"):
         return False
+    # 核心列去重後（kernel_packages）一列帶好幾個套件：purl 的條件每個套件都要成立（一個套件符合不能代表整列）
+    purls = [p.get("purl") for p in row.get("kernel_packages") or []] or [row.get("purl")]
     if "purl_prefix" in m:
-        base = purl_split(row.get("purl"))[0] or ""
-        if not any(base.startswith(p.lower()) for p in m["purl_prefix"]):
+        if not all(any((purl_split(u)[0] or "").startswith(p.lower()) for p in m["purl_prefix"]) for u in purls):
             return False
-    if "purl_type" in m and purl_type(row.get("purl")) not in m["purl_type"]:
+    if "purl_type" in m and not all(purl_type(u) in m["purl_type"] for u in purls):
         return False
     if "fix_state" in m and row.get("fix_state") not in m["fix_state"]:
         return False
@@ -1257,7 +1387,15 @@ def evidence_context(kcfg, ctx):
         kms = None
     k = (kcfg or {}).get("kernel") or {} if isinstance(kcfg, dict) else {}
     srcs = (mm or {}).get("sources") if isinstance((mm or {}).get("sources"), dict) else {}
-    return {"kidx": kconfig_index(kcfg), "kcfg": kcfg if isinstance(kcfg, dict) else {}, "kcfg_sha": k.get("config_sha256"),
+    multi = isinstance(kcfg, dict) and kcfg.get("merged") is True
+    k2v = ((mm or {}).get("kernel") or {}).get("version") if multi else None
+    k2info = next((x for x in k.get("kernels") or [] if x.get("version") == k2v), {}) if multi else {}
+    return {"kidx": kconfig_index(kcfg), "kcfg": kcfg if isinstance(kcfg, dict) else {},
+            # 逐顆判定（merged）：K2 只用在 kernel-modules.json 的那一顆（它的 config 與模組對應檔在 scan/kernels/<版本>/），其他核心只看 K1
+            "kcfg_sha": k2info.get("config_sha256") if multi else k.get("config_sha256"), "multi": multi,
+            "kcfg_k2": ((kcfg.get("docs") or {}).get(k2v) or {}) if multi else None,
+            "kcfg_path": f"scan/kernels/{k2v}/kernel-config.json" if multi and k2v else None,
+            "mm_path": f"scan/kernels/{k2v}/kernel-module-map.json" if multi and k2v else None,
             "mm": mm, "mm_problem": mm_problem, "km": kms, "km_problem": km_problem,
             # 這個核心建置的 modules.order／modules.builtin（對應表最上層，B 線③）：已移除的模組必須是這個建置真的有的模組
             "mm_order": module_names((mm or {}).get("modules_order")), "mm_builtin": module_names((mm or {}).get("modules_builtin")),
@@ -1280,9 +1418,12 @@ def ev_k1(v, ec):
     s = from_kconfig(v, ec["kidx"], ec["kcfg"])
     if not s:
         return None
-    return {"decision": "not_affected", "justification": "code_not_present", "detail": s["detail"],
-            "inputs": f"kernel {'IKCONFIG' if kconfig_ikconfig(ec['kcfg']) or kconfig_toolchain_only(ec['kcfg']) else '.config'} SHA-256 {str(ec['kcfg_sha'] or '?')[:12]}",
-            "basis": [kcfg_basis(ec["kcfg"])]}
+    if ec["kcfg"].get("merged"):
+        inputs = "kernels " + ", ".join(f"{x['version']} SHA-256 {str(x.get('config_sha256') or '?')[:12]}" for x in (ec["kcfg"]["kernel"].get("kernels") or []))
+    else:
+        inputs = f"kernel {'IKCONFIG' if kconfig_ikconfig(ec['kcfg']) or kconfig_toolchain_only(ec['kcfg']) else '.config'} SHA-256 {str(ec['kcfg_sha'] or '?')[:12]}"
+    return {"decision": "not_affected", "justification": "code_not_present", "detail": s["detail"], "inputs": inputs,
+            "basis": kcfg_basis_list(ec["kcfg"])}
 
 
 def present_problem(mm):
@@ -1317,7 +1458,7 @@ def ev_k2(v, ec):
     mm = ec["mm"]
     if mm is None:
         return {"marker": "K4", "detail": f"not mapped to a kernel module: {ec['mm_problem']}; treated as built into the kernel (affected)"}
-    if not kconfig_component_matches(v, mm):
+    if not (_kmerge().row_matched(v.get("kernel_packages") or []) if ec.get("multi") else kconfig_component_matches(v, mm)):
         return {"marker": "K4", "detail": "the module map is for another kernel component; treated as built into the kernel (affected)"}
     ents = {c: module_entry(mm, c.upper()) for c in v["cves"] or []}
     if not ents:
@@ -1394,10 +1535,15 @@ def ev_k2(v, ec):
                 + " – still affected"}
     parts = ([f"removed from the image: {', '.join(removed)}"] if removed else []) + ([f"blocked from loading: {'; '.join(blocked)}"] if blocked else [])
     # kernel-config.json 對同一個 CVE 說 affected（例如 CONFIG_X=m）：結論不同，照樣列為衝突（並列，不互相覆蓋）
-    kc = ec["kcfg"]
+    # 逐顆判定時：K2 只對 kernel-modules.json 的那一顆成立，其他核心要 K1 都是 not_affected（multi_k2_problem），否則不排除
+    problem = multi_k2_problem(v, mm, ec) if ec.get("multi") else None
+    if problem:
+        return {"not_applied": "other_kernels", "detail": problem}
     # 只因 =m 而 affected、而且就是 K2 判的模組（kernel-config 的 files[] 每個有編的檔都是 built_as module、module 在 K2 的模組裡）：
     # 兩個結論其實一致（核心設定只說「編成模組」，K2 另看映像裡有沒有那個模組），不列衝突
-    kaff = [] if not (kconfig_usable(kc) and kconfig_component_matches(v, kc)) else [
+    # （逐顆判定時看 K2 那一顆自己的 kernel-config）
+    kc = ec["kcfg_k2"] if ec.get("multi") else ec["kcfg"]
+    kaff = [] if not (kconfig_usable(kc) and (ec.get("multi") or kconfig_component_matches(v, kc))) else [
         {"cve": str(x["cve"]).upper(), "detail": str(x.get("detail") or "")[:300]} for x in kc.get("results") or []
         if isinstance(x, dict) and str(x.get("cve") or "").upper() == str(v["id"] or "").upper() and x.get("decision") == "affected"
         and not kconfig_only_these_modules(x, set((ents.get(v["id"]) or ents.get(str(v["id"] or "").upper()) or {}).get("modules") or ()))]
@@ -1406,11 +1552,36 @@ def ev_k2(v, ec):
     return {"decision": "not_affected", "justification": "code_not_reachable" if blocked else "code_not_present",
             "detail": f"The fix only changes code in kernel module(s) {', '.join(mods)} ({'; '.join(parts)}); kernel "
                       f"{mm['kernel']['version']}, module map {mm.get('method') or 'scan/kernel-module-map.json'}."
-                      + (f" {nb} more file(s) changed by the fix are not built into this kernel (kernel-config)." if nb else ""),
+                      + (f" {nb} more file(s) changed by the fix are not built into this kernel (kernel-config)." if nb else "")
+                      + (" The other judged kernels are covered by the kernel configuration check (K1): " + ", ".join(
+                          f"{x['version']}" for x in (ec["kcfg"].get("kernel") or {}).get("kernels") or [] if x.get("version") != mm["kernel"]["version"])
+                          + " (not built)." if ec.get("multi") else ""),
             "inputs": f"{KMOD_REL.name} SHA-256 {str(km['sha256'] or '?')[:12]}; module map SHA-256 {str(ec['mm_sha'] or '?')[:12]}; "
                       f"modules.order SHA-256 {str(ec['mm_order_sha'] or '?')[:12]}"
                       + (f"; blocking line(s): {' | '.join(sorted(set(block_lines)))[:300]}" if block_lines else ""),
-            "kcfg_affected": kaff, "basis": [k2_basis(mm, ec, km)]}
+            "kcfg_affected": kaff, "basis": k2_basis_list(mm, ec, km)}
+
+
+def multi_k2_problem(v, mm, ec):
+    """逐顆判定時，K2 能不能成為整個產品的排除（D-036 的合併規則）：K2 只用在 kernel-modules.json 的那一顆（mm 是那一顆的模組對應）；
+    其他每顆判定過的核心，這一列的每個 CVE 都要有 K1 的 not_affected（kernel_config 合併文件的 per_kernel）。回傳原因（文字）或 None（可以排除）。
+    K2 在那一顆不成立時根本不會走到這裡（ev_k2 前面已經回 K3／K4）。"""
+    kmod = _kmerge()
+    kc = ec["kcfg"]
+    k2v = ((mm or {}).get("kernel") or {}).get("version")
+    judged = [x.get("version") for x in (kc.get("kernel") or {}).get("kernels") or []]
+    if k2v not in judged:
+        return f"K2 not applied: kernel-modules.json and the module map are for kernel {k2v}, which is not among the judged kernels ({', '.join(judged)})"
+    by = {str(x["cve"]).upper(): x for x in kc.get("results") or [] if isinstance(x, dict) and isinstance(x.get("cve"), str)}
+    for c in v.get("cves") or []:
+        states = dict((by.get(str(c).upper()) or {}).get("per_kernel") or {})
+        if not states:
+            return f"K2 not applied: no kernel configuration result of the other kernels for {c}"
+        dec, why = kmod.merge_states(kmod.override_states(states, {k2v: kmod.NOT_AFFECTED}), shipped_known=bool(judged), row_matched=True)
+        if dec != kmod.NOT_AFFECTED:
+            return (f"K2 not applied: it covers kernel {k2v} only (the only kernel with a load restriction list); {c} is not shown "
+                    f"to be unaffected on every judged kernel by the kernel configuration check ({why}; {', '.join(f'{a} {b}' for a, b in sorted(states.items()))})")
+    return None
 
 
 def ev_u1(v, ec):
@@ -2035,6 +2206,17 @@ def kconfig_component_matches(row, kcfg):
     """kernel-config.json 只對它檢查的那個核心有效（kconfig-vex-interface.md 的 component 與 kernel.version）：
     這一列的 purl（base＋版本）或名稱＋版本要和 component 相同，或是名稱以 -<kernel.version> 結尾的核心套件
     （linux-image-6.8.12-1021-tegra 之類）。沒有 component 時一律不套用。"""
+    kp = row.get("kernel_packages")
+    if kp:
+        # 核心列已經去重（cra_report：一個 CVE 一列，帶 kernel_packages；M7d-1）：每個套件都要對得到判定過的核心，一個對不到整列就不採用。
+        # 逐顆判定的合併文件：套件對到出貨的核心或是「整個產品」（沒有核心檔案的 meta 套件）都算；單顆的文件：只認那一顆（版本相同）或整個產品
+        km = _kmerge()
+        if not km.row_matched(kp):
+            return False
+        if kcfg.get("merged"):
+            return True
+        kv = str((kcfg.get("kernel") or {}).get("version") or "")
+        return bool(kv) and bool(kcfg.get("component")) and all(p["scope"] == km.SCOPE_PRODUCT or p["kernels"] == [kv] for p in kp)
     comp, k = kcfg.get("component") or {}, kcfg.get("kernel") or {}
     rb, rv = purl_split(row.get("purl"))
     cb, cv = purl_split(comp.get("purl"))
@@ -2070,13 +2252,17 @@ def from_kconfig(row, kidx, kcfg):
     if not hits or len(hits) != len(row.get("cves") or []):
         return None
     k = kcfg.get("kernel") or {}
-    where = ", ".join(x for x in (f"kernel {k['version']}" if k.get("version") else "",
-                                  f"configuration {k['config_source']}" if k.get("config_source") else "",
-                                  f"SHA-256 {str(k['config_sha256'])[:12]}" if k.get("config_sha256") else "") if x)
+    if kcfg.get("merged"):
+        where = "kernels " + ", ".join(f"{x['version']} (SHA-256 {str(x['config_sha256'])[:12]})" if x.get("config_sha256") else str(x["version"])
+                                       for x in k.get("kernels") or [])
+    else:
+        where = ", ".join(x for x in (f"kernel {k['version']}" if k.get("version") else "",
+                                      f"configuration {k['config_source']}" if k.get("config_source") else "",
+                                      f"SHA-256 {str(k['config_sha256'])[:12]}" if k.get("config_sha256") else "") if x)
     det = " / ".join(str(h.get("detail") or "all files of the fix are only built with kernel options that are not set") for h in hits)
     det = kconfig_source_note(kcfg) + det
     return stmt("kconfig", "not_affected", f"Kernel configuration check ({where or 'see scan/kernel-config.json'}): {det}",
-                "code_not_present", evidence_basis=[kcfg_basis(kcfg)])
+                "code_not_present", evidence_basis=kcfg_basis_list(kcfg))
 
 
 UB_ABSENT, UB_PRESENT = "UB1", "UB2"       # 建議的代號（不是會套用的規則）
@@ -2575,7 +2761,10 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
             "kernel_config": None if not isinstance(kcfg, dict) else {"status": kcfg.get("status"), "not_affected": len(kidx),
                                                                        "used": kidx != {} and kcfg.get("schema") == KCFG_SCHEMA,
                                                                        **({"scope_incomplete": True, "scope": kcfg.get("scope"), "rows_withheld": notes["kernel_scope_withheld"]}
-                                                                          if kcfg.get("scope_incomplete") else {})},
+                                                                          if kcfg.get("scope_incomplete") else {}),
+                                                                       **({"merged_kernels": [{k: x.get(k) for k in ("version", "status", "usable", "config_sha256")}
+                                                                                              for x in (kcfg.get("kernel") or {}).get("kernels") or []]}
+                                                                          if kcfg.get("merged") else {})},
             "distro_fixed_available": len(didx), "rules": evidence_summary(erules, estats) + rule_summary(rules, rstats),
             "kernel_config_via_rule": kidx_src is not kidx,
             "u1_excluded": u1_exclusions(allrows + ext, erules),
@@ -2584,7 +2773,9 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
             "rule_shadowed_rows": sum(1 for x in allrows + ext if x.get("rule_shadowed")),
             "evidence": exclusion_evidence(allrows + ext),
             "evidence_inputs": None if ec is None else {
-                "kernel_config_sha256": ec["kcfg_sha"], "module_map": ec["mm_problem"] or "OK", "kernel_modules": ec["km_problem"] or "OK",
+                "kernel_config_sha256": ec["kcfg_sha"], "module_map": ec["mm_problem"] or "OK",
+                **({"kernel_config_sha256_by_kernel": {x["version"]: x.get("config_sha256") for x in (ec["kcfg"].get("kernel") or {}).get("kernels") or []}}
+                   if ec.get("multi") else {}), "kernel_modules": ec["km_problem"] or "OK",
                 "kernel_modules_sha256": (ec["km"] or {}).get("sha256"), "ubuntu_status": ec["us_problem"] or "OK",
                 "ubuntu_tracker_commit": ((ec["us"] or {}).get("mirror") or {}).get("commit"),
                 "ubuntu_tracker_fetched": ((ec["us"] or {}).get("mirror") or {}).get("fetched_utc"),
@@ -2904,6 +3095,15 @@ def refs_for(r, idx):
     """一列對應的產品 SBOM 元件 bom-ref（可能多個）。依序：完整 purl → purl base＋版本 → DT 原始碼套件安裝的二進位套件 →
     核心對應的 nvidia-l4t-kernel → 名稱＋版本。都沒有 → 空清單（呼叫端改指向產品主元件並記下）。"""
     full, base, nv = idx
+    kp = r.get("kernel_packages")
+    if kp:
+        # 核心列去重（M7d-1）：一個 CVE 一列，affects 帶全部核心套件的 ref（每個套件各自對到產品 SBOM 的元件）
+        out = []
+        for p in kp:
+            for ref in refs_for({"purl": p.get("purl"), "name": p.get("name"), "version": p.get("version"), "installed_as": p.get("installed_as")}, idx):
+                if ref not in out:
+                    out.append(ref)
+        return sorted(out)
     b, v = purl_split(r.get("purl"))
     # DT 的原始碼套件元件（sca-scan 的 D-dt-deb-sources 加的，arch=source）不在 SBOM：先對到從它安裝的二進位套件
     # （原始碼套件 openssl 也有同名的二進位套件 openssl，只對名稱會漏掉 libssl3t64 等）
