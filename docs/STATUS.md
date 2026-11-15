@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 16:22 +0800（C1）
+最後更新：2026-11-15 16:48 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -152,7 +152,11 @@
 >         - 舊結果不會混進今天的結果。
 >         - key 穩定；changed 正確；6 份真樣本逐位元組相同；status_parts 和 main 比 1809 例，結果相同。
 >         - 103 個變異裡，26 個真的存活。
->       - → 寫程式代理修正 **4ec170b**：兩項應修都修好；md 全面改用 md_esc／md_hex，並修好 firmware-bios 既有的 50 條注入路徑；rematch 加 FIELD_RULES；建議 1～7 都處理了；總表加 `rejected[]`，已通知 C3，C3 在 #134 接上。CI tests 43686528606 的 log 有 `1395 passed`、shellcheck OK，C2 自己確認過。→ 併 main 得到 **f5effd1** → **PR #135 已開**。C0 的驗證排在 M7d-5、#133 之後；**驗證期間 wp3/fw-rematch 不推 commit**。
+>       - → 寫程式代理修正 **4ec170b**：兩項應修都修好；md 全面改用 md_esc／md_hex，並修好 firmware-bios 既有的 50 條注入路徑；rematch 加 FIELD_RULES；建議 1～7 都處理了；總表加 `rejected[]`，已通知 C3，C3 在 #134 接上。CI tests 43686528606 的 log 有 `1395 passed`、shellcheck OK，C2 自己確認過。→ 併 main 得到 **f5effd1** → **PR #135 已開**。
+>       - → C0 的獨立驗證：**不通過，應修 1 項**。rematch 的輸出超過 match.py 的格式上限，7 份真樣本裡有 3 份會被判 GAP（B550M、B650M 的 reasons 超過 300 字元；NUC11 有 24 個 SA）。
+>       - C0 裁定：reasons 截斷並標示（50 筆、1000 字元）；bulletins 超過 64 個就整份 GAP；兩邊的常數要一致。
+>       - → C2 修好 **c48e4fa**：5 個常數 `REMATCH_MAX_*` 和 C3 的 **#143** 相同，兩邊的測試互相交叉跑過，都通過；B550M、NUC11、B650M 三份真樣本都在上限內。
+>       - 在 #143 合併前，#135 的一致性測試會是紅的，這是預期的。**#143 合併後，C2 併 main 再推，並通知 C0**；接著把 fw-rematch 併進 #140，推之前先告訴 C0。
 >     - (2) **`wp3/fw-release`**（worktree `$AGENT_TMP/dumpling-wt-c2-fwrel`，從 wp3/fw-rematch f5effd1 往上疊）：寫程式代理**完成 b38bff5**。
 >       - 檔案：firmware.yml 加 `firmware-demo/*` tag 觸發；新增 `firmware-release-check` job（contents: read，三種觸發都跑）與 `firmware-release` job（只有它有 contents: write，只在 tag push 時跑；流程是建草稿 → 核對附件 → 發布，`--latest=false` → 下載後再核對）；新增 `pipeline/lib/firmware_meta.py`、`firmware_watch.py`；firmware.yml 新增 `watch: {monitored: false, why}` 欄位，兩份 vbios 宣告不監控；PR 與 dispatch 用假 tag `firmware-demo/0000.00.00`，要加 `--allow-test-tag` 才接受。
 >       - 自我檢查在 CI 的 log 上：collect 的檢查 OK；6 個 bios 樣本的 changed 都是 0；public-check OK。
