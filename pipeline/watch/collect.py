@@ -36,22 +36,23 @@ import urllib.request
 
 SCHEMA = "dumpling-watch-inventory/1"
 # pipeline/lib/project_config.py 在 main 上還不存在，先用保守的正規式（之後有了再改成 import）。
-PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
-REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$")
-COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-TOKEN_RE = re.compile(r"^[\x21-\x7e]+$")
-LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\Z")
+VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\Z")
+REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}\Z")
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}\Z")
+TOKEN_RE = re.compile(r"^[\x21-\x7e]+\Z")
+LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}\Z")
 STATUSES = ("shipped", "development")
 # 韌體示範專案（docs/FIRMWARE-WATCH.md，D-063 第 5 點）：tag firmware-demo/<YYYY.MM.DD>[.n]，避開 release.yml 的 */v*
 FIRMWARE_PROJECT = "firmware-demo"
 FW_META = "firmware-meta.json"
 FW_META_SCHEMA = "dumpling-firmware-meta/1"
-FW_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}$")
-SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+FW_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}\Z")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}\Z")
 FW_MAX_SAMPLES = 100
+FW_META_MAX = 1024 * 1024       # firmware-meta.json 另設小上限（附件上限是給 SBOM 的）
 # 版本讀不到或只是佔位字串（FIRMWARE-WATCH.md §2）：監控鍵改用映像雜湊並標 GAP，不用空字串或預設值當鍵
-FW_PLACEHOLDER_RE = re.compile(r"^(x+([._-]x+)*|0+([._-]0+)*|unknown|n/?a|tbd|to be completed)$", re.I)
+FW_PLACEHOLDER_RE = re.compile(r"^(x+([._-]x+)*|0+([._-]0+)*|unknown|n/?a|tbd|to be completed)\Z", re.I)
 DEFAULT_API = "https://api.github.com"
 TIMEOUT = 30
 MAX_PAGES = 100
@@ -324,9 +325,9 @@ class GitHubSource:
 #   分頁：docs.gitlab.com/api/rest/（per_page 最大 100；Link rel=next）
 # GitLab 沒有 draft Release、也沒有 prerelease：upcoming_release 當 draft（列在 drafts、不監控）；prerelease 一律 False
 # （所以 dev/<專案> 的滾動 Release 會被 classify 略過並列在 skipped——開發版 SBOM 怎麼收是 T-03 的決定，這裡不先發明）。
-PKG_SEG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
-PKG_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
-PROJECT_ID_RE = re.compile(r"^[0-9]{1,18}$")
+PKG_SEG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\Z")
+PKG_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}\Z")
+PROJECT_ID_RE = re.compile(r"^[0-9]{1,18}\Z")
 MAX_LINK_PROBLEMS = 10
 
 
@@ -621,7 +622,7 @@ def _date(s):
 # ---------------------------------------------------------------- release-meta 的結論欄位
 
 RESULT_VALUES = ("OK", "ATTENTION", "NOT_RUN", "GAP", "NOT_ASSESSED", "FAIL")     # C1 的 release-meta（wp1/m2 9f1d2f0）
-REPORT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+REPORT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}\Z")
 CTRL_RE = re.compile(r"[\x00-\x1f\x7f<>]")
 
 
@@ -749,10 +750,15 @@ def collect_release(source, rel, kind, project, tagver, out, n):
 
 # ---------------------------------------------------------------- 韌體（docs/FIRMWARE-WATCH.md §3、§5）
 
+def _ver_key(v):
+    """韌體 tag 版本（YYYY.MM.DD[.n]）的排序鍵：數字段依數字比（2026.11.20.10 在 .2 之後），其他段照字串。"""
+    return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"[.\-]", v))
+
+
 def fw_watch_version(slug, version, image_sha256):
     """監控鍵的版本部分 → (watch_version 或 None, GAP 原因或 None)。
     一般：<slug>@<firmware_version>。版本讀不到或是佔位字串：<slug>@sha256-<前 16 碼>（GAP：版本讀不到）。兩者都沒有：不監控。"""
-    ok = isinstance(version, str) and VERSION_RE.match(version) and not FW_PLACEHOLDER_RE.match(version.strip())
+    ok = isinstance(version, str) and VERSION_RE.match(version) and not FW_PLACEHOLDER_RE.match(version)
     if ok:
         return "%s@%s" % (slug, version), None
     if isinstance(image_sha256, str) and SHA256_RE.match(image_sha256):
@@ -787,6 +793,22 @@ def check_fw_meta(meta, tag):
         return "samples 超過 %d 筆" % FW_MAX_SAMPLES
     if meta.get("commit") is not None and not (isinstance(meta["commit"], str) and COMMIT_RE.match(meta["commit"])):
         return "commit 格式不符"
+    # 其他欄位的型別（型別不對不能讓整輪 collect 當掉：只當成 meta 的問題，韌體 GAP，板子照常；#123 驗證應修 1）
+    for k in ("built_at", "workflow_run"):
+        if meta.get(k) is not None and not isinstance(meta[k], str):
+            return "%s 不是字串" % k
+    if meta.get("not_watched") is not None:
+        nw = meta["not_watched"]
+        if not isinstance(nw, list) or len(nw) > FW_MAX_SAMPLES:
+            return "not_watched 不是陣列或超過 %d 筆" % FW_MAX_SAMPLES
+        for x in nw:
+            if not isinstance(x, dict) or not isinstance(x.get("slug"), str) or not FW_SLUG_RE.match(x["slug"]):
+                return "not_watched 的項目格式不符（slug）"
+            # 依設計不監控一定要寫原因（C0：不能變成躲掉 GAP 的後門）
+            if not isinstance(x.get("why"), str) or not CTRL_RE.sub("", x["why"]).strip():
+                return "not_watched 的 %s 沒有寫原因（why 必須是非空字串）" % x["slug"]
+    if meta.get("tables") is not None and not isinstance(meta["tables"], dict):
+        return "tables 不是物件"
     return None
 
 
@@ -855,6 +877,9 @@ def collect_firmware(source, rel, project, tagver, out):
         return {"file": "%s/%s" % (relpath, name), "sha256": sha, "size": size}, None
 
     got, err = grab(FW_META, _json_ok)
+    if got is not None and (got["size"] or 0) > FW_META_MAX:
+        _rm(os.path.join(reldir, FW_META))
+        got, err = None, "超過 %d bytes 上限" % FW_META_MAX
     if got is None:
         probs.append("%s：%s" % (FW_META, err))
         return e
@@ -868,9 +893,9 @@ def collect_firmware(source, rel, project, tagver, out):
     e["commit"] = meta.get("commit")
     e["built_at"] = _date(meta.get("built_at"))
     e["tables"] = _fw_tables(meta.get("tables"))
-    for x in meta.get("not_watched") or []:
-        if isinstance(x, dict) and isinstance(x.get("slug"), str) and len(e["not_watched"]) < FW_MAX_SAMPLES:
-            e["not_watched"].append({"slug": _clean(x["slug"], 64), "why": _clean(x.get("why") or "", 200)})
+    for x in meta.get("not_watched") or []:     # check_fw_meta 已確認是 list of {slug: str, why: str|None}
+        # source=meta：firmware.yml 依設計宣告不監控（合成 vBIOS、沒有檔案的樣本），不算 collect 的 GAP
+        e["not_watched"].append({"slug": _clean(x["slug"], 64), "why": _clean(x.get("why") or "", 200), "source": "meta"})
     seen, keys = set(), set()
     for i, x in enumerate(meta["samples"]):
         err = _fw_sample_fields(x)
@@ -890,7 +915,8 @@ def collect_firmware(source, rel, project, tagver, out):
                "meta_status": _clean(x.get("status") or "", 20), "expect": _clean(x.get("expect") or "", 20),
                "sbom": None, "inventory": None, "status": "OK", "problems": []}
         if wv is None:
-            e["not_watched"].append({"slug": slug, "why": "GAP：" + why})
+            # source=collect：collect 監控不了（版本與映像雜湊都讀不到）→ 算 GAP（C0 裁定：有樣本 GAP 整體至少 GAP）
+            e["not_watched"].append({"slug": slug, "why": "GAP：" + why, "source": "collect"})
             continue
         if why:
             smp["status"] = "GAP"
@@ -923,11 +949,12 @@ def build(source, out, now):
     inv = {"schema": SCHEMA, "generated_at": now, "source": source.label, "status": "OK", "detail": "",
            "releases": [], "skipped": [], "drafts": [], "firmware": None, "firmware_older": []}
     releases, skipped = inv["releases"], inv["skipped"]
-    rdir = os.path.join(out, "releases")
-    if os.path.islink(rdir):
-        os.unlink(rdir)
-    else:
-        shutil.rmtree(rdir, ignore_errors=True)
+    for sub in ("releases", "firmware"):        # 舊的輸出（含符號連結）先清掉，不沿用殘留檔
+        rdir = os.path.join(out, sub)
+        if os.path.islink(rdir):
+            os.unlink(rdir)
+        else:
+            shutil.rmtree(rdir, ignore_errors=True)
     gap_extra = False
     drafts = 0
     seen = set()
@@ -957,7 +984,7 @@ def build(source, out, now):
         releases.append(collect_release(source, rel, kind, project, tagver, out, len(releases)))
     if fw_cands:
         # 只監控最新的一個韌體 Release（第一階段示範的限制，FIRMWARE-WATCH.md §2）；舊的留著當紀錄、只列出
-        fw_cands.sort(key=lambda c: (_date(c[0].get("published_at")) or "", c[0]["tag"]), reverse=True)
+        fw_cands.sort(key=lambda c: (_date(c[0].get("published_at")) or "", _ver_key(c[2])), reverse=True)
         inv["firmware"] = collect_firmware(source, *fw_cands[0], out)
         inv["firmware_older"] = [_clean(c[0]["tag"]) for c in fw_cands[1:]][:50]
     nprob = sum(len(r["problems"]) for r in releases)
@@ -970,12 +997,16 @@ def build(source, out, now):
         inv["status"] = "GAP"
         notes.append("沒有可監控的 Release")
     if fw:
-        nfw_bad = sum(1 for x in fw["samples"] if x["status"] != "OK")
+        # C0 裁定（#123 驗證應修 3）：任何樣本 GAP（含 collect 監控不了的樣本）→ 整體至少 GAP（結束碼 3）；其他樣本照常監控
+        nfw_bad = sum(1 for x in fw["samples"] if x["status"] != "OK") + \
+            sum(1 for x in fw["not_watched"] if x.get("source") == "collect")
         if fw["problems"]:
             inv["status"] = "GAP"
             notes.append("韌體 Release %s 有 problem（%d 項）" % (_clean(fw["tag"]), len(fw["problems"])))
         elif nfw_bad:
+            inv["status"] = "GAP"
             notes.append("韌體 Release %s：%d 份樣本 GAP" % (_clean(fw["tag"]), nfw_bad))
+
     if nbad:
         inv["status"] = "GAP"
         notes.append("%d 個 Release 有 problem（共 %d 項）" % (nbad, nprob))
@@ -988,6 +1019,12 @@ def build(source, out, now):
     if fw:
         summary += "、韌體 %s（樣本 %d、不監控 %d、舊的韌體 Release %d）" % (
             _clean(fw["tag"]), len(fw["samples"]), len(fw["not_watched"]), len(inv["firmware_older"]))
+        designed = [x for x in fw["not_watched"] if x.get("source") == "meta"]
+        if designed:     # 依設計不監控的不能藏起來（C0）：逐一列出 slug 與原因
+            summary += "；%d 份依設計不監控：%s" % (len(designed), "、".join(
+                "%s（%s）" % (x["slug"], _clean(x["why"], 80)) for x in designed[:10]) + ("…" if len(designed) > 10 else ""))
+    else:
+        summary += "；沒有韌體 Release（韌體不在監控）"
     inv["detail"] = "；".join(notes + [summary]) if notes else summary
     return inv
 
