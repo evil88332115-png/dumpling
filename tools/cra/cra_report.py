@@ -44,7 +44,7 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
   （修補狀態、層級、修補全部所需的最低核心版本、只列 P1 與 accepted 的表格），完整清單寫 kernel-vulnerabilities.md。
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
   C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另帶出狀態列的說明原文（只顯示，不拿來判斷）；scan/kernel-config.json 讀得到
-  核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」。
+  核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」（M 是清單裡有、而且成列的 CVE 數；核心列另有 K 個 CVE 不在清單時，再接「A further K CVEs of the kernel rows are not in the list.」，K 是 0 不寫）。
   資料狀態與 VEX 不受影響（C-kernel-coverage 本來就在 COND_STAGES）。客戶版（supplier-package）沒有核心段落，不加任何核心狀態文字。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
 
@@ -3820,9 +3820,10 @@ def kernel_gap_text(status, krows, kcfg):
             m = CVE_RE.match(str(r.get("id") or ""))
             if m:
                 listed.add(m.group(1).upper())
-        n, m = len(cves), len(cves & listed)
+        n, m, k = len(cves), len(cves & listed), len(listed - cves)
         if n > m:
-            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); listed as rows: {m} CVEs; the other {n - m} are not listed as rows.")
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); listed as rows: {m} CVEs; the other {n - m} are not listed as rows."
+                       + (f" A further {k} CVEs of the kernel rows are not in the list." if k else ""))
     return "\n\n".join(out)
 
 

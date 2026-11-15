@@ -100,6 +100,7 @@ def test_listed_count_is_distinct_cves_of_kernel_rows_in_n(tmp_path):
     cfg = kcfg(0, cves=KERNEL_CVES[:4] + ["CVE-2023-9001", "CVE-2023-9002"])         # 4 個有列＋2 個沒有；核心列另有 4 個不在清單
     s, ra, kd, _ = docs(tmp_path, kcfg=cfg)
     assert "Kernel CVE list: 6 CVEs" in kd and "listed as rows: 4 CVEs; the other 2 are not listed as rows." in kd
+    assert "A further 4 CVEs of the kernel rows are not in the list." in kd          # K：核心列有、清單沒有（C0：讓 N−M 不被誤讀）
 
 
 def test_text_helpers_are_structure_only():
@@ -108,6 +109,9 @@ def test_text_helpers_are_structure_only():
     cfg = kcfg(0, cves=["CVE-2025-1", "CVE-2025-2", "CVE-2025-3"])
     t = cr.kernel_gap_text(st, rows, cfg)
     assert "the other 1 are not listed as rows" in t and "任何文字，包括 N = 99" in t     # 說明文字裡的數字不影響 N
+    assert "A further" not in t                                                         # K 是 0：不寫
+    t = cr.kernel_gap_text(st, rows + [{"id": "CVE-2025-9", "cves": ["CVE-2025-9"]}], cfg)
+    assert t.endswith("the other 1 are not listed as rows. A further 1 CVEs of the kernel rows are not in the list.")
     assert cr.kernel_gap_text({"C-kernel-coverage": ("OK", "x")}, rows, cfg) == ""
     assert cr.kernel_gap_text({}, rows, cfg) == "" and cr.kernel_gap_text(None, rows, cfg) == ""
     assert cr.kernel_cve_list_info(None) is None and cr.kernel_cve_list_info({"schema": "sca-center-kernel-config/1"}) is None
