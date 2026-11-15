@@ -857,3 +857,16 @@ class CountsWithStatus(unittest.TestCase):
         self.assertIn("最近一輪監控", e.html[j:j + 3000])
         self.assertEqual(check_site.check_html(e.html, REPO), [])
 
+
+    def test_no_watch_run_counts_show_gap_not_blank(self):
+        """C0：完全沒有監控 run（freshness 讀不到）→ 比對數與開著的 Issue 數旁邊寫「沒有最近一輪監控資料」（GAP），頁首也有 GAP 警告；不能空白或像 OK。"""
+        api = FakeApi({"watch-state": [issue(114, "s", labels=("watch-state",), body=state_body())]})
+        e = Env(self, api=api, watch=False)
+        self.assertIn("GAP：沒有找到最近一輪監控資料", e.html[:e.html.index("</header>")])
+        gap = '<span class="st st-GAP">GAP</span>（<span class="ext">沒有最近一輪監控資料</span>）'
+        i = e.html.index("<dt>比對數</dt>")
+        self.assertIn(gap, e.html[i:i + 600])
+        j = e.html.index("開著的監控 Issue")
+        self.assertIn(gap, e.html[j:j + 3000])
+        self.assertNotIn("最近一輪監控 <span", e.html)                      # 沒有假的時間
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
