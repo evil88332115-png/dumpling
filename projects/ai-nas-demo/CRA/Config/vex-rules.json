@@ -1,0 +1,5 @@
+{
+ "$comment": "WP7 示範專案：規則是空的，與 new-project.sh 的輸出一致（D-055：不帶範本值）。原本從範本帶進來的 R1～R5（Jetson 的批次分流範例）與 K1、K2、U1（作者只寫角色，本來就不生效）都已拿掉；示範專案沒有人審過的分流規則。要加規則時，照 tools/cra/README.md 寫具名作者、日期、理由與適用的映像雜湊。",
+ "schema": "sca-center-vex-rules/1",
+ "rules": []
+}
