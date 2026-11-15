@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 13:37 +0800（C3）
+最後更新：2026-11-15 13:43 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -135,7 +135,14 @@
 >     - C3 改完就開 PR 交 C0。
 >   - **設計 #122（C3 的 PR）C0 已回覆**：監控鍵＝樣本身分＋韌體版本，不含 Release 日期；規則表的 affected 一律寫「建議受影響（初步規則，待人審）」；**第一個 `firmware-demo` tag 由 C2 打**，時機是設計和實作的 PR 都合併、C3 的 dry_run would_open 給 C0 看過、C0 同意之後。
 >   - **C2 的兩個 PR**（C3 已同意分工；#122 head c594ad9）：
->     - (1) **`wp3/fw-rematch`**（worktree `$AGENT_TMP/dumpling-wt-c2-rematch`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rematch/`）。介面範例檔 **e0898ec** 已推，C3 已收到通知：`pipeline/watch/tests/data/firmware-meta.example.json`、`firmware-rematch.example.json`、`firmware-rematch-summary.example.json`，只有 C2 改，C3 只讀。寫程式代理（sonnet、high）**進行中**：`pipeline/firmware-rematch.sh --meta --dir --now --out`，加測試，加真樣本對照。
+>     - (1) **`wp3/fw-rematch`**（worktree `$AGENT_TMP/dumpling-wt-c2-rematch`，暫存 `$AGENT_TMP/dumpling-tmp-c2-rematch/`）：寫程式代理**完成 d38962f**，已併入 main（含 #119）。
+>       - 新增 `pipeline/firmware-rematch.sh` 與 `tools/cra/fw_rematch.py`；`status_of` 拆成 `status_parts`，行為不變；81 個測試。
+>       - 範例檔改成實際輸出，已通知 C3。
+>       - key 的格式：`rule:<種類>:<sha16>:<元件識別>`、`ucode:<cpuid>/<platform>:<rev>`、`vbios:<vendor>:<device>:<sha16>`。
+>       - 退出碼：0＝OK，2＝ATTENTION 或 GAP，1＝FAIL，64＝參數錯誤。
+>       - 真樣本：6 份重跑後 changed 都是空的，fw.cdx.json 逐位元組相同。
+>       - 本機 1331 passed；c3-watch 416 passed。CI tests 43681896973、firmware 43681898763。
+>       - → **預驗**（獨立驗證代理，sonnet、high）**進行中**。
 >     - (2) firmware.yml 的 `firmware-demo/*` tag 觸發、建 Release、產生 firmware-meta.json：排在 (1) 之後。
 >     - 用語：preliminary 寫「建議受影響（初步規則，待人審）」，confirmed 寫「建議受影響（規則已確認，待負責單位確認）」。
 >   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
@@ -147,7 +154,13 @@
 >   - 本機 1367 passed。C0 看過 diff，CI 綠就合併。
 > - **M7f**：
 >   - 調查筆記 **#115 已合併**（ETSI v0.0.12 的條款對照，共 26 項）。V0.1.1／V0.1.3 由使用者手動下載的事，排到第二階段。
->   - **PR-2（Intel FIT）**：寫程式代理（sonnet、high）**進行中**（`wp3/fw-integrity-fit`，worktree `$AGENT_TMP/dumpling-wt-c2-fit`）。做完開 PR，但驗證排在後面、先不合併（D-063）。
+>   - **PR-2（Intel FIT，CI-01／CI-07）**：寫程式代理**完成 44c6479**（`wp3/fw-integrity-fit`）。
+>     - 實作：fit_table 記錄全部 FIT 項目；`integrity.items` 加上 `dumpling:integrity-*` property；`expected.integrity` 四個樣本。
+>     - 真樣本：V540TU 的 KM、BPM、ACM 是 observed；Protectli、NUC BOX 是 not-found；NUC11 與 OVMF 是 GAP；status_of 和 md 不變。
+>     - 依據：FIT 規格用 Intel 公開的 599500 rev 1.6 核對；`__KEYM__`／`__ACBP__` 的依據是 Slim Bootloader（BSD-2-Clause-Patent）。
+>     - 測試：25 個變異都被抓到。CI tests 43680118563（c1-tools 的偶發失敗，重跑後綠）、firmware 43680120967 綠。
+>     - 併 main 後是 **427d9b6**（PROVENANCE 衝突兩邊都保留），本機測試進行中。
+>     - 照 D-063：開 PR，但驗證排後面、先不合併。
 >   - 其他程式碼完整性的實作凍結到第二階段。
 > - D-046 的實作等 C1 的發現介面。
 > - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，C0 會轉問使用者；在那之前，C2 的測試都用 3.12 venv 跑同一份清單（C0 同意，記在這裡）。
