@@ -962,6 +962,7 @@ class MissingDataIsGap(unittest.TestCase):
         full = {"p1": 0, "p2": 0, "p3": 2, "accepted": 0, "distro_fixed": 0, "nvidia_bulletin": 0}
         e1 = run_entry(tiers=dict(full))
         e1["vulnerabilities"]["tiers_unknown"] = {"None": 3}
+        e1["vulnerabilities"]["rows_total"] = 5                                  # 2 ＋ 3（合計要一致）
         e2 = run_entry(tiers={k: v for k, v in full.items() if k != "accepted"})
         e2["vulnerabilities"]["tiers_unknown"] = {}
         e3 = run_entry(tiers=dict(full))
@@ -979,4 +980,16 @@ class MissingDataIsGap(unittest.TestCase):
         self.assertIn("tiers_unknown 不是物件", o)
         self.assertIn("不認得的分級", e.html[:e.html.index("</header>")])
         self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_new_format_sum_matches_rows_total(self):
+        full = {"p1": 1, "p2": 2, "p3": 3, "accepted": 0, "distro_fixed": 0, "nvidia_bulletin": 0}
+        ok = run_entry(tiers=dict(full))
+        ok["vulnerabilities"].update(tiers_unknown={"None": 4}, rows_total=10)
+        bad = run_entry(tiers=dict(full))
+        bad["vulnerabilities"].update(tiers_unknown={}, rows_total=10)
+        e = self.env_scan({"": ok, "-bsp": bad, "-os": run_entry()})
+        sec = self.section(e.html, "漏洞統計（含該報告的狀態）", "</table>")
+        rows = sec.split("<tr>")
+        self.assertNotIn("不一致", next(r for r in rows if '<span class="ext">full</span>' in r))
+        self.assertIn("分級合計 6 與 rows_total 10 不一致", next(r for r in rows if '<span class="ext">bsp</span>' in r))
 

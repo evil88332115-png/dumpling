@@ -197,6 +197,12 @@ def scan_row(scan):
                                            + [[c(k, 40), ci(v)] for k, v in sorted((vul.get("tiers_unknown") if new_fmt else {}).items(),
                                                                                 key=lambda kv: str(kv[0]))])[:10],
                          "tiers_format": "new" if new_fmt else "old",
+                         # 新格式：tiers 與 tiers_unknown 的列數加起來等於 rows_total（C1）；不一致就是資料有問題
+                         **({"tiers_sum_bad": "分級合計 %s 與 rows_total %s 不一致" % (
+                             sum(v for v in list(tiers.values()) + list(vul["tiers_unknown"].values()) if ci(v) is not None), ci(vul.get("rows_total")))}
+                            if new_fmt and not tier_gaps and ci(vul.get("rows_total")) is not None
+                            and sum(v for v in list(tiers.values()) + list(vul["tiers_unknown"].values()) if ci(v) is not None) != vul["rows_total"]
+                            else {}),
                          **({} if new_fmt or "tiers_unknown" not in vul else {"tiers_unknown_bad": "tiers_unknown 不是物件"}),
                          "cves_total": ci(vul.get("cves_total"))}
     if not reports:
