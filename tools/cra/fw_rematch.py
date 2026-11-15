@@ -7,16 +7,20 @@
 只吃 inventory：呼叫 x86_firmware 的 advisory_section（Intel 微碼）、vbios_advisory_section（NVIDIA 對照表）、rules_section（規則表）、
 status_parts／status_of、components、bom、markdown；不讀映像、不連網、不重新解析。表只讀 repo 當下的三個檔案
 （tools/cra/data/intel-microcode-releases.json、tools/pilot/lib/nvidia-bulletins-gpu-firmware.json、tools/cra/data/fw-advisory-rules.json），
-各自核對固定的 sha256 與結構（載入邏輯在 fw_advisory、nvidia_vbios_advisory、fw_advisory_rules）。
+載入與核對在 fw_advisory、nvidia_vbios_advisory、fw_advisory_rules：Intel 微碼表與規則表核對固定的 sha256 加結構；
+NVIDIA 對照表只驗結構（沒有固定的 sha256，檔案的 sha256 記在 tables 的識別裡）。
 
 輸入是不可信資料：
 - firmware-meta.json：大小上限 MAX_META；schema 必須是 dumpling-firmware-meta/1；不跟隨符號連結。
 - 附件：只收 meta 的 samples[] 列的 `fw-inventory-<slug>.json`（slug 要 fullmatch SLUG_RE，附件名要等於 `fw-inventory-<slug>.json`），
   用 O_NOFOLLOW 在 --dir 底下開檔（不跟隨符號連結、不接受路徑分隔符號與 ..、一定要是一般檔案），大小上限 MAX_INVENTORY，
   核對 meta 列的 inventory_sha256；沒列在 meta 的檔案不讀。kind 是 sbom 的樣本跳過（沒有 inventory，也不輸出）。
-- meta 壞掉：整份 GAP，只輸出總表（rematch-summary.json）。單一樣本的 inventory 有問題（缺檔、sha256 不符、不是 JSON、schema 不對、
+- meta 壞掉：整份 GAP，只輸出總表（rematch-summary.json）。meta 裡被丟掉的條目（沒有有效 slug 的、重複的 slug）列在總表的 rejected
+  （index 加原因代碼，不帶輸入裡的字串）。單一樣本的 inventory 有問題（缺檔、sha256 不符、不是 JSON、schema 不對、
   必要的鍵缺了或型別不對）：那一份 GAP（`rematch-input-invalid`），其他樣本照常；不丟例外。
-- inventory 是舊版程式產生、缺新的鍵時是 GAP，不猜預設值。
+- inventory 是舊版程式產生、缺新的鍵時是 GAP，不猜預設值。數字、雜湊、版本、日期這類欄位另外檢查格式（FIELD_RULES）：不合那一份 GAP，
+  作為報告跳脫（x86_firmware.markdown 每個插進報告的字串都經過 md_esc）之外的第二道防線。
+- 處理時間：每份 inventory 最多 SAMPLE_LIMIT 秒、整次最多 TOTAL_LIMIT 秒（和 x86_firmware.TIME_LIMIT 同一個值，firmware-bios 的 Budget 預設）；超過的樣本 GAP。
 
 重跑前清掉 inventory 裡舊的比對結果（advisory、vbios_advisory、rules_advisory、rule_advisory、status、detail），以免舊結果混進今天的結果；
 舊結果先記下來，和今天的比（changed）。
@@ -27,16 +31,21 @@ status_parts／status_of、components、bom、markdown；不讀映像、不連�
 stdout：每個樣本一行 `FIRMWARE-REMATCH<TAB>OK|ATTENTION|GAP<TAB><slug>|-<TAB>說明`；寫不出輸出時一行 `FIRMWARE-REMATCH<TAB>FAIL<TAB>-<TAB>原因`。
 退出碼：0＝每個樣本都是 OK；2＝有 ATTENTION 或 GAP（輸出照寫）；1＝FAIL（寫不出輸出或內部錯誤，已寫的輸出會刪掉）；64＝參數錯誤。
 重跑不輸出 NOT_RUN（沒跑、沒有輸出由呼叫端標）。
+rematch-<slug>.json 的 reasons 與 results 裡來自 inventory 的字串（檔名等）是 JSON 原值，下游渲染成 markdown 或 HTML 時要自己跳脫；fw-inventory-<slug>.md 已經跳脫。
 """
 import argparse
+import contextlib
 import datetime
 import errno
 import hashlib
 import json
 import os
 import re
+import signal
 import stat
 import sys
+import threading
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -48,6 +57,8 @@ MAX_META = 1 << 20                     # firmware-meta.json 的大小上限
 MAX_INVENTORY = 32 << 20               # 單一 fw-inventory-<slug>.json 的大小上限（目前最大約 0.4 MB）
 MAX_SAMPLES = 64                       # meta 的 samples[] 筆數上限
 MAX_PROBLEMS = 5                       # inventory 結構問題最多列幾項
+SAMPLE_LIMIT = 300                     # 秒：每份 inventory 從讀檔到寫出結果的時間上限（超過 GAP）
+TOTAL_LIMIT = 900                      # 秒：整次執行的上限（x86_firmware.TIME_LIMIT 同值）；用完之後剩下的樣本 GAP
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9.-]{0,62}")
 RESERVED_SLUGS = frozenset({"summary"})    # rematch-summary.json 的檔名
 NOW_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])Z")
@@ -66,6 +77,30 @@ class InputError(Exception):
 
 class ArgError(Exception):
     pass
+
+
+class TimeLimit(BaseException):
+    """處理時間超過上限。繼承 BaseException：x86_firmware 的比對函式有 `except Exception`（那一個元件記成 match-error），不能把逾時吞掉。"""
+
+
+@contextlib.contextmanager
+def deadline(seconds):
+    """seconds 秒後在主執行緒丟 TimeLimit（SIGALRM）。不在主執行緒或沒有 setitimer 時只在進入前檢查剩餘時間（沒有中斷的能力）。"""
+    if seconds <= 0:
+        raise TimeLimit()
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def fire(_sig, _frame):
+        raise TimeLimit()
+    old = signal.signal(signal.SIGALRM, fire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
 
 
 # ---------- 讀不可信輸入 ----------
@@ -143,12 +178,17 @@ def parse_meta(data):
 
 
 def plan_sample(entry, dup_slugs):
-    """meta 的一個樣本 → ("skip", None, None) ｜ ("gap", slug 或 None, 原因) ｜ ("run", slug, 資料 dict)。"""
+    """meta 的一個樣本 → ("skip", slug, None) ｜ ("reject", None, 原因代碼) ｜ ("gap", slug, 原因) ｜ ("run", slug, 資料 dict)。
+    reject＝沒有可用的 slug（沒有檔名可寫），只出現在總表的 rejected；原因代碼不帶輸入裡的字串。"""
     if not isinstance(entry, dict):
-        return "gap", None, "a sample entry in firmware-meta.json is not an object"
+        return "reject", None, "entry-not-object"
     slug, kind = entry.get("slug"), entry.get("kind")
-    if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug) or slug in RESERVED_SLUGS:
-        return "gap", None, "a sample in firmware-meta.json has no valid slug"
+    if not isinstance(slug, str):
+        return "reject", None, f"invalid-slug (type {type(slug).__name__})"
+    if slug in RESERVED_SLUGS:
+        return "reject", None, "reserved-slug"
+    if not SLUG_RE.fullmatch(slug):
+        return "reject", None, f"invalid-slug (length {len(slug)})"
     if kind == "sbom":
         return "skip", slug, None
     if kind != "bios":
@@ -194,6 +234,58 @@ AGESA_SPEC = {"values": "list"}
 FSP_SPEC = {"revision": "str|null"}
 ROM_SPEC = {"device": "str"}
 FILE_SPEC = {"file": "str"}
+
+
+# 欄位格式（第二道防線；第一道是 markdown 的 md_esc）：路徑（清單索引寫成 *）→ 格式。None 一律可以（程式用 `or ''` 處理）。
+# INT＝整數（不含 bool）；其他是 fullmatch 的字串格式。這些欄位會原樣進報告或 key，不合那一份 GAP。
+_HEX = r"[0-9A-Fa-f]{1,128}"
+_H0X = r"0x[0-9A-Fa-f]{1,16}"
+_VER = r"[0-9A-Za-z]{1,8}(?:\.[0-9A-Za-z]{1,8}){0,6}"
+_DATE = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+_TOK = r"[A-Za-z0-9._-]{1,40}"
+FIELD_RULES = {
+    "bios/*/amd/agesa/values/*/count": "INT", "bios/*/amd/directories/*/checksum": _H0X, "bios/*/amd/directories/*/entries/*/index": "INT",
+    "bios/*/amd/directories/*/entries/*/instance": "INT", "bios/*/amd/directories/*/entries/*/subprogram": "INT", "bios/*/amd/directories/*/num_entries": "INT",
+    "bios/*/amd/microcode/*/date": _DATE, "bios/*/amd/microcode/*/equiv_id": _H0X, "bios/*/amd/microcode/*/form": _TOK, "bios/*/amd/microcode/*/patch_id": _H0X,
+    "bios/*/amd/microcode/*/sha256": _HEX, "bios/*/amd/microcode/*/sha512": _HEX, "bios/*/amd/psp_firmware/*/sha256": _HEX, "bios/*/amd/psp_firmware/*/sha512": _HEX,
+    "bios/*/ami_core/count": "INT",
+    "bios/*/cbfs/coreboot/*/config/sha256": _HEX, "bios/*/cbfs/coreboot/*/config/size": "INT", "bios/*/cbfs/fmap/areas": "INT", "bios/*/cbfs/fmap/version": _VER,
+    "bios/*/cbfs/fsp/*/hash/sha256": _HEX, "bios/*/cbfs/fsp/*/stored_sha256": _HEX, "bios/*/cbfs/fsp/*/image_base": _H0X, "bios/*/cbfs/fsp/*/revision": _VER,
+    "bios/*/cbfs/fsp/*/spec_version": _VER, "bios/*/cbfs/fsp/*/type": _TOK, "bios/*/cbfs/method": _TOK,
+    "bios/*/cbfs/payloads/*/hash/sha256": _HEX, "bios/*/cbfs/payloads/*/length": "INT",
+    "bios/*/cbfs/vbt/*/bdb_version": _VER, "bios/*/cbfs/vbt/*/vbt_size": "INT", "bios/*/cbfs/vbt/*/version": _VER,
+    "bios/*/fit/entries": "INT", "bios/*/fit/status": _TOK, "bios/*/ibv_hint/*": r"[A-Za-z0-9 ._-]{1,40}",
+    "bios/*/me/date": _DATE, "bios/*/me/other_versions/*": _VER, "bios/*/me/version": _VER,
+    "bios/*/microcode/*/cpuid": r"[0-9A-Fa-f]{8}", "bios/*/microcode/*/date": _DATE, "bios/*/microcode/*/platform_id": _H0X, "bios/*/microcode/*/revision": _H0X,
+    "bios/*/microcode/*/sha512": _HEX, "bios/*/sha512": _HEX,
+    "bios/*/pfat/container_sha256": _HEX, "bios/*/pfat/container_size": "INT", "bios/*/pfat/image_sha256": _HEX, "bios/*/pfat/image_size": "INT",
+    "bios/*/regions/*/name": _TOK, "bios/*/regions/*/sha256": _HEX, "bios/*/regions/*/sha512": _HEX,
+    "bios/*/uefi/files": "INT", "bios/*/uefi/sections": "INT", "bios/*/uefi/volumes": "INT", "bios/*/uefi/volumes_other_fs": "INT",
+    "bios/*/uefi_gfx/gop/*/sha256": _HEX, "bios/*/uefi_gfx/vbt/*/sha256": _HEX, "bios/*/uefi_gfx/vbt/*/version": _VER,
+    "vbios/*/vendor": r"[0-9a-f]{4}", "vbios/*/device": r"[0-9a-f]{4}", "vbios/*/terminated": _TOK, "vbios/*/sha512": _HEX,
+    "vbios/*/version": r"[0-9A-F]{2}(?:\.[0-9A-F]{2}){4}",
+}
+_FIELD_RE = {k: (v if v == "INT" else re.compile(v)) for k, v in FIELD_RULES.items()}
+MAX_FIELD_DEPTH = 24
+
+
+def field_problems(x, probs, path=(), depth=0):
+    """FIELD_RULES 的格式檢查：walk 整份 inventory（深度上限 MAX_FIELD_DEPTH，更深的結構一律不合）。"""
+    if len(probs) >= MAX_PROBLEMS:
+        return
+    if depth > MAX_FIELD_DEPTH:
+        probs.append("inventory is nested too deeply")
+        return
+    if isinstance(x, dict):
+        for k, v in x.items():
+            field_problems(v, probs, path + (k,), depth + 1)
+    elif isinstance(x, list):
+        for v in x:
+            field_problems(v, probs, path + ("*",), depth + 1)
+    elif x is not None:
+        rule = _FIELD_RE.get("/".join(path))
+        if rule is not None and not (is_int(x) if rule == "INT" else isinstance(x, str) and rule.fullmatch(x)):
+            probs.append("/".join(path) + " has an invalid format")
 
 
 def _type_ok(v, t):
@@ -282,6 +374,8 @@ def inventory_problems(inv):
             _check_list(b["amd"]["microcode"], f"{w}.amd.microcode", AMD_UCODE_SPEC, probs)
             if _check(b["amd"]["agesa"], f"{w}.amd.agesa", AGESA_SPEC, probs):
                 _check_list(b["amd"]["agesa"]["values"], f"{w}.amd.agesa.values", {"value": "str"}, probs)
+    if not probs:
+        field_problems({"bios": inv["bios"], "vbios": inv["vbios"]}, probs)
     return probs[:MAX_PROBLEMS]
 
 
@@ -305,7 +399,7 @@ def rule_ident(kind, h):
     if kind == "amd_microcode":
         return f"amdmc={_s(h.get('equiv_id'))}:{_s(h.get('patch_id'))}:{_s(str(h.get('sha256') or '')[:12])}"
     if kind == "amd_agesa":
-        return f"agesa={_s(h.get('value'))}"
+        return f"agesa={_s(h.get('tag'))}:{_s(h.get('value'))}" + (":truncated" if h.get("truncated") else "")
     if kind == "intel_fsp":
         return f"fsp={_s(h.get('revision'))}:{_s(str(h.get('stored_sha256') or '')[:12])}"
     return _s(kind)
@@ -518,8 +612,17 @@ def sample_doc(slug, version, tag, sha, now_text, status, reasons, info, results
             "status": status, "reasons": reasons, "tables": info, "results": results, "changed": changed}
 
 
-def process_sample(xf, slug, plan, dfd, tag, now, now_text, tabs, info):
-    """一個 bios 樣本 → (rematch dict, cdx 文字或 None, md 文字或 None)。輸入有問題 → GAP（rematch-input-invalid），不丟例外。"""
+def process_sample(xf, slug, plan, dfd, tag, now, now_text, tabs, info, limit=None):
+    """一個 bios 樣本 → (rematch dict, cdx 文字或 None, md 文字或 None)。輸入有問題、處理超過 limit 秒（沒給就用 SAMPLE_LIMIT）→ GAP（rematch-input-invalid），不丟例外。"""
+    try:
+        with deadline(SAMPLE_LIMIT if limit is None else limit):
+            return _process_sample(xf, slug, plan, dfd, tag, now, now_text, tabs, info)
+    except TimeLimit:
+        r = sample_doc(slug, plan["firmware_version"], tag, plan["inventory_sha256"], now_text, "GAP", ["rematch-input-invalid: time limit exceeded"], info, [], [])
+        return r, None, None
+
+
+def _process_sample(xf, slug, plan, dfd, tag, now, now_text, tabs, info):
     sha_meta = plan["inventory_sha256"]
 
     def gap(why):
@@ -557,8 +660,8 @@ def one_line(xf, x, cap=400):
 def summary_text(xf, doc):
     """stdout 的說明：結果數、changed 數、原因數（原因全文在 rematch-<slug>.json）；表不能用的原因直接寫出。"""
     head = f"結果 {len(doc['results'])} 項，changed {len(doc['changed'])}，原因 {len(doc['reasons'])} 項（見 rematch-{doc['slug']}.json）"
-    gaps = [x for x in doc["reasons"] if "table cannot be used" in x]
-    return one_line(xf, head + "".join("；" + x for x in gaps))
+    shown = doc["reasons"][:1] if doc["status"] == "GAP" else [x for x in doc["reasons"] if "table cannot be used" in x]
+    return one_line(xf, head + "".join("；" + x for x in shown))
 
 
 def dump(doc):
@@ -604,7 +707,8 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
         raise ArgError("--out must not exist yet or be an empty directory")
     tabs = load_tables(xf, **(tables or {}))
     info = table_info(xf, tabs, now)
-    lines, summary_samples, rc, gap_slugs = [], [], 0, set()
+    lines, summary_samples, rc, gap_slugs, rejected = [], [], 0, set(), []
+    t0 = time.monotonic()
     tag, meta_reasons, plans = None, [], []
     try:
         tag, samples = parse_meta(read_file(meta_path, MAX_META))
@@ -629,11 +733,17 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
             except OSError:
                 dfd = None
         try:
-            for kind, slug, data in plans:
+            for index, (kind, slug, data) in enumerate(plans):
                 if kind == "skip":
                     continue
+                if kind == "reject":                            # 沒有可用的 slug：沒有檔名可寫，只記在總表的 rejected
+                    rejected.append({"index": index, "reason": data})
+                    lines.append(f"FIRMWARE-REMATCH\tGAP\t-\tsample #{index} in firmware-meta.json rejected: {data}")
+                    rc = 2
+                    continue
                 if kind == "gap":
-                    if slug in gap_slugs:                       # 同一個 slug 重複：整組一份輸出
+                    if slug in gap_slugs:                       # 同一個 slug 重複：整組一份輸出，其餘記在 rejected
+                        rejected.append({"index": index, "reason": "duplicate-slug"})
                         continue
                     why = f"rematch-input-invalid: {data}"
                     lines.append(f"FIRMWARE-REMATCH\tGAP\t{slug or '-'}\t{why}")
@@ -644,7 +754,7 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
                         w.write(f"rematch-{slug}.json", dump(doc))
                         summary_samples.append({"slug": slug, "status": "GAP", "output": f"rematch-{slug}.json", "reasons": [why]})
                     continue
-                doc, cdx, md = process_sample(xf, slug, data, dfd, tag, now, now_text, tabs, info)
+                doc, cdx, md = process_sample(xf, slug, data, dfd, tag, now, now_text, tabs, info, limit=min(SAMPLE_LIMIT, TOTAL_LIMIT - (time.monotonic() - t0)))
                 w.write(f"rematch-{slug}.json", dump(doc))
                 if cdx is not None:
                     w.write(f"fw-{slug}.cdx.json", cdx)
@@ -660,7 +770,7 @@ def run(xf, meta_path, dir_path, now_text, out, tables=None):
             if dfd is not None:
                 os.close(dfd)
         summary = {"schema": SUMMARY_SCHEMA, "release_tag": tag, "now": now_text, "meta_status": "GAP" if meta_reasons else "OK",
-                   **({"reasons": meta_reasons} if meta_reasons else {}), "tables": info, "samples": summary_samples}
+                   **({"reasons": meta_reasons} if meta_reasons else {}), "tables": info, "samples": summary_samples, "rejected": rejected}
         w.write("rematch-summary.json", dump(summary))
     except Exception as e:                  # 寫不出輸出或內部錯誤：已寫的輸出全部刪掉（沒有 rematch-summary.json，呼叫端標 NOT_RUN）
         w.rollback()

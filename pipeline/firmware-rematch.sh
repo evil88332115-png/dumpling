@@ -28,7 +28,9 @@ while [ $# -gt 0 ]; do
     *) fail 64 "未知參數 $1" ;;
   esac
 done
-[ -n "$meta" ] && [ -n "$dir" ] && [ -n "$now" ] && [ -n "$out" ] || fail 64 "用法：firmware-rematch.sh --meta <firmware-meta.json> --dir <附件資料夾> --now <UTC> --out <資料夾>（四個都要給）"
+if [ -z "$meta" ] || [ -z "$dir" ] || [ -z "$now" ] || [ -z "$out" ]; then
+  fail 64 "用法：firmware-rematch.sh --meta <firmware-meta.json> --dir <附件資料夾> --now <UTC> --out <資料夾>（四個都要給）"
+fi
 [ -f "$tool" ] || fail 1 "找不到 x86_firmware.py"
 
 exec python3 -I "$tool" --rematch --meta "$meta" --dir "$dir" --now "$now" --out "$out"

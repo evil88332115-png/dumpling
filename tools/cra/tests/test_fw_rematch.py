@@ -563,18 +563,21 @@ def test_path_traversal_and_bad_slugs(tmp_path):
            {**base, "slug": ".a", "inventory": "fw-inventory-.a.json"},
            {**base, "slug": "summary", "inventory": "fw-inventory-summary.json"},
            {**base, "slug": 7, "inventory": "fw-inventory-7.json"}, {**base, "inventory": "x"}, "x",
-           {**base, "slug": "e", "inventory": "fw-inventory-e.json", "inventory_sha256": "ABC"},
-           {**base, "slug": "f", "inventory": "fw-inventory-f.json", "kind": "other"},
-           {**base, "slug": "g", "inventory": "fw-inventory-g.json", "firmware_version": 3},
-           {**base, "slug": "h", "inventory": "fw-inventory-h.json", "firmware_version": "a\nb"}]
+           {**base, "slug": "e", "inventory": "fw-inventory-e.json", "inventory_sha256": "ABC"}]
     rc, lines, o, summary = go(tmp_path, [good, *bad], t)
     assert rc == 2 and sorted(p.name for p in o.iterdir() if p.name.startswith("rematch-") and p.name != "rematch-summary.json") == sorted(
-        f"rematch-{s}.json" for s in ("good", "a", "b", "c", "d", "e", "f", "g", "h"))
+        f"rematch-{s}.json" for s in ("good", "a", "b", "c", "d", "e"))
     assert sorted(p.name for p in o.glob("fw-*")) == ["fw-good.cdx.json", "fw-inventory-good.md"]
     st = {s["slug"]: s for s in summary["samples"]}
-    assert set(st) == {"good", "a", "b", "c", "d", "e", "f", "g", "h"} and all(st[k]["status"] == "GAP" for k in st if k != "good")
+    assert set(st) == {"good", "a", "b", "c", "d", "e"} and all(st[k]["status"] == "GAP" for k in st if k != "good")
     assert "not fw-inventory-<slug>.json" in st["a"]["reasons"][0] and "no inventory" in st["d"]["reasons"][0]
-    assert sum("no valid slug" in x for x in lines) == 7 and all("\t-\t" in x for x in lines if "no valid slug" in x)
+    # 沒有可用 slug 的條目：沒有檔名可寫，只在總表的 rejected（index 與原因代碼，不帶輸入的字串）和 stdout 各一行
+    assert summary["rejected"] == [{"index": 5, "reason": "invalid-slug (length 10)"}, {"index": 6, "reason": "invalid-slug (length 5)"},
+                                   {"index": 7, "reason": "invalid-slug (length 64)"}, {"index": 8, "reason": "invalid-slug (length 2)"},
+                                   {"index": 9, "reason": "reserved-slug"}, {"index": 10, "reason": "invalid-slug (type int)"},
+                                   {"index": 11, "reason": "invalid-slug (type NoneType)"}, {"index": 12, "reason": "entry-not-object"}]
+    assert sum(" rejected: " in x for x in lines) == 8 and all(x.startswith("FIRMWARE-REMATCH\tGAP\t-\t") for x in lines if " rejected: " in x)
+    assert "../" not in json.dumps(summary["rejected"]) and "UPPER" not in json.dumps(summary["rejected"])
     # 不在 meta 裡的檔案不會被讀、也沒有輸出
     assert not (o / "rematch-outside.json").exists()
 
@@ -583,6 +586,7 @@ def test_duplicate_slug_is_gap_for_every_entry_with_it(tmp_path):
     good, inv, t = good_release(tmp_path, slug="good")
     rc, lines, o, summary = go(tmp_path, [good, good], t)
     assert rc == 2 and [s["status"] for s in summary["samples"]] == ["GAP"] and "more than once" in summary["samples"][0]["reasons"][0]
+    assert summary["rejected"] == [{"index": 1, "reason": "duplicate-slug"}]
 
 
 def test_file_not_listed_in_meta_is_not_read(tmp_path):
@@ -802,3 +806,411 @@ def test_x86_firmware_rematch_flag_arg_errors(tmp_path, capsys):
     assert capsys.readouterr().out.startswith("FIRMWARE-REMATCH\tFAIL\t-\t")
     assert xf.main(["--rematch", "--meta", "m", "--dir", "d", "--now", "bad", "--out", str(tmp_path / "o")]) == 64
     assert not (tmp_path / "o").exists()
+
+
+# ---------- meta 的檢查（有 bios 樣本的 meta：不能讓「沒有 bios 樣本」蓋過這些檢查） ----------
+
+@pytest.mark.parametrize("over", [
+    {"schema": "other/1"}, {"schema": None}, {"schema": "dumpling-firmware-meta/2"}, {"schema": "dumpling-firmware-meta/1 "},
+    {"tag": ""}, {"tag": "a b"}, {"tag": "../x"}, {"tag": "x" * 129}, {"tag": 7}, {"tag": None}, {"tag": "firmware-demo/2026\n11"},
+    {"samples": "x"}, {"samples": {}},
+])
+def test_meta_checks_with_a_bios_sample(tmp_path, over):
+    good, inv, t = good_release(tmp_path, slug="good")
+    meta = {"schema": fm.META_SCHEMA, "tag": TAG, "samples": [good], **over}
+    if over.get("samples") is not None:
+        meta["samples"] = over["samples"]
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps(meta), encoding="utf-8")
+    rc, lines, o, summary = go(tmp_path, None, t, meta=p)
+    assert rc == 2 and only_summary(o) and summary["meta_status"] == "GAP" and summary["samples"] == [] and summary["rejected"] == []
+
+
+def test_valid_tags_and_missing_schema_key(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    for tag in ("firmware-demo/2026.11.20", "firmware-demo/2026.11.20.2", "a", "x" * 128):
+        p = _meta_text(tmp_path, json.dumps({"schema": fm.META_SCHEMA, "tag": tag, "samples": [good]}))
+        rc, lines, o, summary = go(tmp_path, None, t, meta=p, out=f"o{len(tag)}")
+        assert summary["meta_status"] == "OK" and summary["release_tag"] == tag
+    p = _meta_text(tmp_path, json.dumps({"tag": TAG, "samples": [good]}))
+    rc, lines, o, summary = go(tmp_path, None, t, meta=p, out="o-noschema")
+    assert summary["meta_status"] == "GAP"
+
+
+@pytest.mark.parametrize("over,text", [
+    ({"kind": "other"}, "not bios or sbom"), ({"kind": "BIOS"}, "not bios or sbom"), ({"kind": None}, "not bios or sbom"), ({"kind": ["bios"]}, "not bios or sbom"),
+    ({"firmware_version": 3}, "firmware_version"), ({"firmware_version": "a\nb"}, "firmware_version"), ({"firmware_version": "x" * 129}, "firmware_version"),
+    ({"firmware_version": "é"}, "firmware_version"), ({"firmware_version": ["1"]}, "firmware_version"),
+    ({"inventory_sha256": "A" * 64}, "lowercase sha256"), ({"inventory_sha256": "a" * 63}, "lowercase sha256"), ({"inventory_sha256": None}, "lowercase sha256"),
+    ({"inventory_sha256": "a" * 64 + "x"}, "lowercase sha256"), ({"inventory_sha256": "x" + "a" * 64}, "lowercase sha256"),
+    ({"inventory": "fw-inventory-bad.json "}, "not fw-inventory-<slug>.json"), ({"inventory": ""}, "not fw-inventory-<slug>.json"),
+])
+def test_meta_sample_fields_with_an_attached_inventory(tmp_path, over, text):
+    good, inv, t = good_release(tmp_path, slug="good")
+    bad = attach(tmp_path / "att", "bad", inv, **over)
+    rc, lines, o, summary = go(tmp_path, [good, bad], t)
+    st = {s["slug"]: s for s in summary["samples"]}
+    assert st["good"]["status"] == "ATTENTION" and st["bad"]["status"] == "GAP" and text in st["bad"]["reasons"][0]
+    assert not (o / "fw-bad.cdx.json").exists()
+
+
+@pytest.mark.parametrize("version", [None, "", "x" * 128, "2024.02-2ubuntu0.10", "v 1.0"])
+def test_valid_firmware_versions(tmp_path, version):
+    good, inv, t = good_release(tmp_path, slug="good")
+    ok = attach(tmp_path / "att", "ok", inv, firmware_version=version)
+    rc, lines, o, summary = go(tmp_path, [ok], t)
+    assert load(o, "ok")["firmware_version"] == version and load(o, "ok")["status"] == "ATTENTION"
+
+
+def test_plan_sample_unit():
+    ok = {"slug": "a", "kind": "bios", "inventory": "fw-inventory-a.json", "inventory_sha256": "a" * 64}
+    assert fm.plan_sample(ok, set())[0] == "run"
+    assert fm.plan_sample({**ok, "kind": "sbom"}, set())[:2] == ("skip", "a")
+    assert fm.plan_sample({**ok, "kind": "sbom", "slug": "../x"}, set()) == ("reject", None, "invalid-slug (length 4)")
+    assert fm.plan_sample(ok, {"a"})[0] == "gap"
+    assert fm.plan_sample({"slug": "ab", "kind": "bios", "inventory": "fw-inventory-ab.json", "inventory_sha256": "A" * 64}, set())[0] == "gap"
+
+
+# ---------- 空 inventory 不能是 OK ----------
+
+def test_inventory_without_bios_or_vbios_is_gap_not_ok(tmp_path):
+    inv = xf.inventory([_empty(tmp_path)])
+    inv["status"], inv["detail"] = xf.status_of(inv)
+    assert inv["status"] == "GAP"
+    sample = attach(tmp_path / "att", "empty", inv)
+    t = tabs(rules_table(tmp_path, "16.1.30.2000"), vbios_table(tmp_path, vbios_fixed_in="94.04.00.00.01"))
+    rc, lines, o, summary = go(tmp_path, [sample], t)
+    doc = load(o, "empty")
+    assert doc["status"] == "GAP" and rc == 2 and any(x.startswith("inventory: 沒有找到 NVIDIA vBIOS 或 BIOS 結構") for x in doc["reasons"])
+    assert doc["results"] == [] and lines[0].startswith("FIRMWARE-REMATCH\tGAP\tempty\t")
+
+
+def test_status_parts_early_gap_has_no_attention_items_and_status_of_joins_the_rest(tmp_path):
+    inv = xf.inventory([_empty(tmp_path)])
+    st, base, att = xf.status_parts(inv)
+    assert st == "GAP" and att == [] and xf.status_of(inv) == (st, base)
+    sample, inv2, t = good_release(tmp_path, slug="g")
+    st, base, att = xf.status_parts(inv2)
+    assert st == "ATTENTION" and att and xf.status_of(inv2) == (st, base + "".join("；" + x for x in att))
+
+
+# ---------- changed 的比較 ----------
+
+def test_reason_change_alone_is_a_change(tmp_path):
+    """結果與公告 ID 都沒變（NOT_ASSESSED、沒有公告），只有原因代碼不同（no-rule → no-rule-for-line）：也是 changed。"""
+    vbios = vbios_table(tmp_path, vbios_fixed_in="94.04.00.00.01")
+    then = rules_build(tmp_path, rules_doc(rules_rule()), name="rules-then.json")                   # AGESA 的規則而已：ME には適用する規則がない
+    now = rules_table(tmp_path, "16.1.30.2000")
+    inv = synthetic_inventory(tmp_path, then, vbios)
+    me = inv["bios"][0]["me"]["rule_advisory"]
+    assert (me["suggestion"], me["reason"]) == ("NOT_ASSESSED", "no-rule")
+    other = rules_build(tmp_path, rules_doc(rules_rule("INTEL-SA-00009", vendor="Intel", url=INTEL % "00009",
+                                                        match=[{"component": "intel_csme", "line": "17.0", "fixed_in": "17.0.1"}])), name="rules-now.json")
+    sample = attach(tmp_path / "att", "board-a", inv)
+    rc, lines, o, summary = go(tmp_path, [sample], tabs(other, vbios))
+    [c] = [c for c in load(o, "board-a")["changed"] if ":intel_csme:" in c["key"]]
+    assert (c["before"]["result"], c["after"]["result"]) == ("NOT_ASSESSED", "NOT_ASSESSED") and c["before"]["bulletins"] == c["after"]["bulletins"] == []
+    assert (c["before"]["reason"], c["after"]["reason"]) == ("no-rule", "no-rule-for-line")
+    assert load(o, "board-a")["status"] == "ATTENTION"
+
+
+def test_review_mapping_and_confirmed_result(tmp_path):
+    assert [fm.review_of(x) for x in (None, "", "preliminary", "confirmed", "preliminary+confirmed", "x", 5)] == [None, None, "preliminary", "confirmed", "preliminary", None, None]
+    vbios = vbios_table(tmp_path, vbios_fixed_in="94.04.00.00.01")
+    r = rules_rule("INTEL-SA-00001", vendor="Intel", url=INTEL % "00001", state="confirmed", match=[{"component": "intel_csme", "line": "16.1", "fixed_in": "16.1.30.3000"}])
+    conf = rules_build(tmp_path, rules_doc(r), name="rules-confirmed.json")
+    pre = rules_table(tmp_path, "16.1.30.3000")
+    inv = synthetic_inventory(tmp_path, conf, vbios)
+    sample = attach(tmp_path / "att", "board-a", inv)
+    rc, lines, o, summary = go(tmp_path, [sample], tabs(conf, vbios))
+    me = next(r for r in load(o, "board-a")["results"] if ":intel_csme:" in r["key"])
+    assert me["review"] == "confirmed" and me["result"] == "affected"
+    rc, lines, o, summary = go(tmp_path, [sample], tabs(pre, vbios), out="o2")
+    me = next(r for r in load(o, "board-a")["results"] if ":intel_csme:" in r["key"])
+    assert me["review"] == "preliminary" and me["result"] == "affected"
+
+
+def test_norm_functions_check_the_shape():
+    ok_rule = {"suggestion": "affected", "reason": None, "rule_ids": ["B", "A", "A"], "state": "preliminary"}
+    assert fm.norm_rule(ok_rule) == {"result": "affected", "bulletins": ["A", "B"], "reason": None, "review": "preliminary"}
+    for bad in (None, "x", [], {}, {**ok_rule, "suggestion": "bogus"}, {**ok_rule, "suggestion": None}, {**ok_rule, "rule_ids": "A"}, {**ok_rule, "rule_ids": [1]},
+                {**ok_rule, "rule_ids": None}, {**ok_rule, "reason": 5}):
+        assert fm.norm_rule(bad) is None, bad
+    ok_u = {"match": "affected-candidate", "reason": None, "candidates": [{"id": "B"}, {"id": "A"}]}
+    assert fm.norm_ucode(ok_u) == {"result": "affected-candidate", "bulletins": ["A", "B"], "reason": None, "review": None}
+    for bad in (None, {}, {**ok_u, "match": "bogus"}, {**ok_u, "candidates": "A"}, {**ok_u, "candidates": [{"id": 1}]}, {**ok_u, "candidates": ["A"]}, {**ok_u, "reason": 1}):
+        assert fm.norm_ucode(bad) is None, bad
+    ok_v = {"match": "fixed", "reason": None, "bulletins": ["9002", "9001"]}
+    assert fm.norm_vbios(ok_v) == {"result": "fixed", "bulletins": ["9001", "9002"], "reason": None, "review": None}
+    for bad in (None, {}, {**ok_v, "match": "affected-candidate"}, {**ok_v, "bulletins": "9001"}, {**ok_v, "bulletins": [9001]}, {**ok_v, "reason": 1}):
+        assert fm.norm_vbios(bad) is None, bad
+    assert fm._ids(["b", "a", "b"]) == ["a", "b"] and fm._ids("a") is None and fm._ids([1]) is None
+
+
+def test_garbage_release_time_results_count_as_changed_not_as_exceptions(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    inv = json.loads(json.dumps(inv))
+    inv["bios"][0]["me"]["rule_advisory"] = "garbage"
+    inv["bios"][0]["microcode"][0]["advisory"] = {"match": "bogus"}
+    sample = attach(tmp_path / "att", "board-a", inv)
+    rc, lines, o, summary = go(tmp_path, [sample], t)
+    ch = load(o, "board-a")["changed"]
+    assert len(ch) == 2 and all(c["before"]["result"] is None for c in ch)
+
+
+def test_candidate_order_in_the_release_time_result_does_not_cause_changed(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    inv = json.loads(json.dumps(inv))
+    for u in inv["bios"][0]["microcode"]:
+        u["advisory"]["candidates"].reverse()
+    assert any(len(u["advisory"]["candidates"]) > 1 for u in inv["bios"][0]["microcode"])
+    sample = attach(tmp_path / "att", "board-a", inv)
+    rc, lines, o, summary = go(tmp_path, [sample], t)
+    assert load(o, "board-a")["changed"] == []
+    b = json.loads(json.dumps(inv))
+    b["vbios"][0]["advisory"]["bulletins"] = ["9002", "9001"]                           # 順序不同、內容不同的 bulletins 也是排序後才比
+    assert fm.norm_vbios(b["vbios"][0]["advisory"])["bulletins"] == ["9001", "9002"]
+
+
+# ---------- key ----------
+
+def amd_inventory(tmp_path):
+    img = good_image()
+    put(img, 0x80000, b"AGESA!V9\x00ComboAM4v2PI 1.2.0.B\x00")
+    p = tmp_path / "amd.bin"
+    p.write_bytes(bytes(img))
+    inv = xf.inventory([p])
+    inv["status"], inv["detail"] = xf.status_of(inv)
+    return json.loads(json.dumps(inv))
+
+
+def test_amd_keys_include_the_content_hash_and_flags(tmp_path):
+    inv = amd_inventory(tmp_path)
+    a = inv["bios"][0]["amd"]
+    psp = a["psp_firmware"]
+    assert len(psp) >= 1
+    img = inv["bios"][0]["sha256"][:16]
+    keys = [e["key"] for e in fm.collect(xf, json.loads(json.dumps(inv)))]
+    assert f"rule:amd_psp:{img}:psp=0x{psp[0]['type']:02x}:{psp[0]['version']}:{psp[0]['sha256'][:12]}" in keys
+    # 同 type、同版本、內容不同的兩個 PSP 項目：用內容區分，不靠序號
+    inv["bios"][0]["amd"]["psp_firmware"] = [psp[0], {**psp[0], "sha256": "d" * 64}]
+    keys = [e["key"] for e in fm.collect(xf, json.loads(json.dumps(inv)))]
+    psp_keys = [k for k in keys if ":amd_psp:" in k]
+    assert len(psp_keys) == 2 and not any("#" in k for k in psp_keys) and psp_keys[1].endswith(":" + "d" * 12)
+    # AGESA：同一個字串、其中一個被截斷 → 兩個 key（截斷的有 :truncated）；tag 不同也是兩個
+    ag = inv["bios"][0]["amd"]["agesa"]["values"]
+    assert len(ag) == 1
+    inv["bios"][0]["amd"]["agesa"]["values"] = [ag[0], {**ag[0], "truncated": True}, {**ag[0], "tag": "AGESA!V8"}]
+    ak = [e["key"] for e in fm.collect(xf, json.loads(json.dumps(inv))) if ":amd_agesa:" in e["key"]]
+    assert len(ak) == 3 and len(set(ak)) == 3 and sum(k.endswith(":truncated") for k in ak) == 1 and not any("#" in k for k in ak)
+    assert ak[0].endswith(":agesa=AGESA_V9:ComboAM4v2PI_1.2.0.B")
+
+
+def test_key_parts_are_capped_at_64_characters(tmp_path):
+    assert len(fm._s("x" * 100)) == 64 and fm._s("a b") == "a_b" and fm._s("é@") == "__"
+    sample, inv, t = good_release(tmp_path)
+    inv = json.loads(json.dumps(inv))
+    inv["bios"][0]["me"]["version"] = "1" * 200
+    [k] = [e["key"] for e in fm.collect(xf, inv) if ":intel_csme:" in e["key"]]
+    assert k.endswith(":me=" + "1" * 64)
+
+
+# ---------- --out、Writer、讀檔 ----------
+
+def test_out_symlink_to_an_empty_directory_is_rejected(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    with pytest.raises(fm.ArgError):
+        fm.run(xf, str(write_meta(tmp_path, [good])), str(tmp_path / "att"), NOW_TEXT, str(tmp_path / "link"), t)
+    assert list((tmp_path / "real").iterdir()) == []
+
+
+def test_writer_writes_through_a_temporary_file_and_replace(tmp_path, monkeypatch):
+    calls = []
+    real = os.replace
+    monkeypatch.setattr(fm.os, "replace", lambda a, b: (calls.append((Path(a).name, Path(b).name)), real(a, b))[1])
+    w = fm.Writer(tmp_path)
+    w.write("x.json", "{}")
+    assert calls == [(".x.json.tmp", "x.json")] and sorted(p.name for p in tmp_path.iterdir()) == ["x.json"]
+    monkeypatch.setattr(fm.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError(28, "full")))
+    with pytest.raises(OSError):
+        w.write("y.json", "{}")
+    w.rollback()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_replace_leaves_nothing(tmp_path, monkeypatch):
+    good, inv, t = good_release(tmp_path, slug="good")
+    real = os.replace
+    n = []
+
+    def flaky(a, b):
+        n.append(b)
+        if len(n) == 3:
+            raise OSError(28, "full")
+        return real(a, b)
+    monkeypatch.setattr(fm.os, "replace", flaky)
+    rc, lines, o, summary = go(tmp_path, [good], t)
+    assert rc == 1 and lines == ["FIRMWARE-REMATCH\tFAIL\t-\tcannot write to --out (OSError)"] and list(o.iterdir()) == []
+
+
+def test_read_file_limits(tmp_path, monkeypatch):
+    p = tmp_path / "f"
+    p.write_bytes(b"x" * 10)
+    assert fm.read_file(str(p), 10) == b"x" * 10
+    with pytest.raises(fm.InputError, match="larger than the limit"):
+        fm.read_file(str(p), 9)
+    real = os.fstat
+    monkeypatch.setattr(fm.os, "fstat", lambda fd: type("S", (), {"st_mode": real(fd).st_mode, "st_size": 0})())      # 宣告的大小是 0、實際比上限大（讀的時候才長大）
+    with pytest.raises(fm.InputError, match="larger than the limit"):
+        fm.read_file(str(p), 9)
+    assert fm.read_file(str(p), 10) == b"x" * 10
+    with pytest.raises(fm.InputError, match="not a regular file"):
+        fm.read_file(str(tmp_path), 10)
+
+
+def test_too_many_problems_are_capped(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    inv = json.loads(json.dumps(inv))
+    for k in list(fm.BIOS_SPEC)[:12]:
+        inv["bios"][0].pop(k, None)
+    assert len(fm.inventory_problems(inv)) == fm.MAX_PROBLEMS
+    inv["bios"] = [{"file": 1}] * 20
+    assert len(fm.inventory_problems(inv)) == fm.MAX_PROBLEMS
+
+
+def test_item_checks_stop_at_the_cap(tmp_path):
+    inv = xf.inventory([_empty(tmp_path)])
+    inv["skipped"] = [{"file": 1}] * 30
+    assert len(fm.inventory_problems(inv)) == fm.MAX_PROBLEMS
+
+
+def test_now_rejects_hours_above_23_and_odd_forms(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    for bad in ("2026-11-21T24:59:59Z", "2026-11-21T25:00:00Z", "2026-11-21T30:00:00Z", "2026-11-21T2a:00:00Z", "2026-11-21T02:00:60Z", "2026-11-21T02:60:00Z",
+                "2026-11-21T2:00:00Z", " 2026-11-21T02:00:00Z", "2026-11-21T02:00:00Z\n", "2026-11-21T02:00:00z"):
+        with pytest.raises(fm.ArgError):
+            fm.run(xf, str(write_meta(tmp_path, [good])), str(tmp_path / "att"), bad, str(tmp_path / "o"), t)
+    assert fm.run(xf, str(write_meta(tmp_path, [good])), str(tmp_path / "att"), "2026-11-21T20:00:00Z", str(tmp_path / "o20"), t)[0] == 2
+
+
+# ---------- 處理流程的防線 ----------
+
+def test_component_key_change_or_missing_result_makes_the_sample_gap(tmp_path, monkeypatch):
+    good, inv, t = good_release(tmp_path, slug="good")
+    orig = fm.collect
+    calls = []
+
+    def drifting(xf_, inv_):
+        out = orig(xf_, inv_)
+        calls.append(1)
+        if len(calls) % 2 == 0:
+            out[0] = {**out[0], "key": out[0]["key"] + "x"}
+        return out
+    monkeypatch.setattr(fm, "collect", drifting)
+    rc, lines, o, summary = go(tmp_path, [good], t)
+    assert load(o, "good")["status"] == "GAP" and "RuntimeError" in load(o, "good")["reasons"][0]
+    monkeypatch.undo()
+    calls.clear()
+
+    def lost(xf_, inv_):
+        out = orig(xf_, inv_)
+        calls.append(1)
+        if len(calls) % 2 == 0:
+            out[0] = {**out[0], "res": None}
+        return out
+    monkeypatch.setattr(fm, "collect", lost)
+    rc, lines, o, summary = go(tmp_path, [good], t, out="o2")
+    assert load(o, "good")["status"] == "GAP" and "RuntimeError" in load(o, "good")["reasons"][0]
+
+
+def test_time_limit_makes_the_sample_gap_even_inside_a_broad_except(tmp_path, monkeypatch):
+    import time as _t
+    good, inv, t = good_release(tmp_path, slug="good")
+    other = attach(tmp_path / "att", "other", inv)
+    real = xf.components
+
+    def slow(i):
+        if i["bios"][0].get("marker"):
+            return real(i)
+        try:
+            _t.sleep(5)                                    # 比 SAMPLE_LIMIT 長；SIGALRM 要能中斷它
+        except Exception:                                  # TimeLimit 是 BaseException：這個 except 吞不掉
+            pass
+        return real(i)
+    monkeypatch.setattr(xf, "components", slow)
+    monkeypatch.setattr(fm, "SAMPLE_LIMIT", 0.3)
+    t0 = _t.monotonic()
+    rc, lines, o, summary = go(tmp_path, [good, other], t)
+    assert _t.monotonic() - t0 < 4
+    assert [s["status"] for s in summary["samples"]] == ["GAP", "GAP"] and load(o, "good")["reasons"] == ["rematch-input-invalid: time limit exceeded"]
+    assert not (o / "fw-good.cdx.json").exists() and rc == 2
+
+
+def test_total_time_limit_applies_to_the_remaining_samples(tmp_path, monkeypatch):
+    good, inv, t = good_release(tmp_path, slug="good")
+    monkeypatch.setattr(fm, "TOTAL_LIMIT", 0)
+    rc, lines, o, summary = go(tmp_path, [good], t)
+    assert load(o, "good")["status"] == "GAP" and "time limit exceeded" in load(o, "good")["reasons"][0]
+    assert fm.SAMPLE_LIMIT == 300 and fm.TOTAL_LIMIT == 0 and xf.TIME_LIMIT == 900
+    monkeypatch.undo()
+    assert fm.TOTAL_LIMIT == xf.TIME_LIMIT == 900
+
+
+def test_gap_sample_line_shows_the_first_reason(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    bad = attach(tmp_path / "att", "bad", inv)
+    bad["inventory_sha256"] = "e" * 64
+    rc, lines, o, summary = go(tmp_path, [good, bad], t)
+    [line] = [x for x in lines if "\tbad\t" in x]
+    assert line.startswith("FIRMWARE-REMATCH\tGAP\tbad\t") and "rematch-input-invalid: inventory sha256 does not match firmware-meta.json" in line and line.count("\t") == 3
+
+
+def test_field_formats_make_the_sample_gap(tmp_path):
+    good, inv, t = good_release(tmp_path, slug="good")
+    for path, value in ((["bios", 0, "microcode", 0, "cpuid"], "[x](http://e.example)"), (["bios", 0, "microcode", 0, "revision"], "0x1\\n# H"), (["bios", 0, "me", "version"], "<b>1</b>"),
+                        (["bios", 0, "fit", "status"], "found\\n# H"), (["bios", 0, "regions", 0, "name"], "a|b"), (["bios", 0, "uefi", "files"], "5"),
+                        (["bios", 0, "uefi", "files"], True), (["vbios", 0, "device"], "2489 @x"), (["vbios", 0, "version"], "94.04.5E.00.92 x")):
+        bad = attach(tmp_path / "att", "bad", mutate(inv, path, value))
+        rc, lines, o, summary = go(tmp_path, [good, bad], t, out=f"o{abs(hash((tuple(map(str, path)), str(value))))}")
+        s = reasons_of(summary, "bad")
+        assert s["status"] == "GAP" and s["reasons"][0].startswith("rematch-input-invalid: inventory structure: "), (path, value, s)
+        assert "e.example" not in s["reasons"][0] and "<b>" not in s["reasons"][0]
+    deep = json.loads(json.dumps(inv))
+    x = deep["bios"][0]["me"]
+    for _ in range(40):
+        x["n"] = {}
+        x = x["n"]
+    bad = attach(tmp_path / "att", "bad", deep)
+    rc, lines, o, summary = go(tmp_path, [good, bad], t, out="odeep")
+    assert "nested too deeply" in reasons_of(summary, "bad")["reasons"][0]
+
+
+# ---------- shell ----------
+
+def test_script_runs_python_isolated(tmp_path):
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "python3").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_OUT"\necho "FIRMWARE-REMATCH\\tOK\\tstub\\tx"\nexit 0\n')
+    (stub / "python3").chmod(0o755)
+    env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", "STUB_OUT": str(tmp_path / "args.txt")}
+    r = subprocess.run(["bash", str(SCRIPT), "--meta", "m", "--dir", "d", "--now", NOW_TEXT, "--out", "o"], capture_output=True, text=True, timeout=60, env=env)
+    args = (tmp_path / "args.txt").read_text().split("\n")
+    assert r.returncode == 0 and args[0] == "-I" and args[1].endswith("tools/cra/x86_firmware.py") and args[2] == "--rematch"
+    assert args[3:11] == ["--meta", "m", "--dir", "d", "--now", NOW_TEXT, "--out", "o"]
+
+
+def test_script_missing_tool_is_exit_1_and_each_missing_argument_is_64(tmp_path):
+    (tmp_path / "pipeline").mkdir()
+    copy = tmp_path / "pipeline" / "firmware-rematch.sh"
+    copy.write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+    r = subprocess.run(["bash", str(copy), "--meta", "m", "--dir", "d", "--now", NOW_TEXT, "--out", "o"], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and r.stdout == "FIRMWARE-REMATCH\tFAIL\t-\t找不到 x86_firmware.py\n"
+    full = ["--meta", "m", "--dir", "d", "--now", NOW_TEXT, "--out", "o"]
+    for i in (0, 2, 4, 6):
+        r = run_script(full[:i] + full[i + 2:], tmp_path)
+        assert r.returncode == 64 and r.stdout.startswith("FIRMWARE-REMATCH\tFAIL\t-\t用法："), (i, r.stdout)
+    for name in full[::2]:
+        r = run_script(full[:full.index(name)] + [name], tmp_path)
+        assert r.returncode == 64 and "少了參數" in r.stdout, name

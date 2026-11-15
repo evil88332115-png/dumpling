@@ -36,7 +36,7 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
 | 檔案 | 內容 |
 |---|---|
 | `rematch-<slug>.json` | schema `dumpling-firmware-rematch/1`：今天的 `results[]`、和 Release 當時的差異 `changed[]`、三張表的識別、status 與 reasons、now、release_tag、inventory_sha256。每個 `kind: bios` 的樣本都有（GAP 的也有，`results` 是空的） |
-| `rematch-summary.json` | schema `dumpling-firmware-rematch-summary/1`：release_tag、now、`meta_status`、三張表、每個樣本一列（slug、status、輸出檔名；GAP 另有 reasons）。**沒在這裡的樣本，watch-round 標 NOT_RUN** |
+| `rematch-summary.json` | schema `dumpling-firmware-rematch-summary/1`：release_tag、now、`meta_status`、三張表、每個樣本一列（slug、status、輸出檔名；GAP 另有 reasons）、`rejected`（meta 裡被丟掉的條目）。**沒在這裡的樣本，watch-round 標 NOT_RUN** |
 | `fw-<slug>.cdx.json` | 重新產生的 CycloneDX 1.6：`dumpling:advisory-*` 是今天的結果，`dumpling:vuln-assessment` 仍是 `NOT_ASSESSED`（GAP 的樣本沒有） |
 | `fw-inventory-<slug>.md` | 重跑的狀態與差異（開頭），接著是和 `fw-inventory.md` 同一份的內容（GAP 的樣本沒有） |
 
@@ -59,6 +59,13 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
 
 `rematch-summary.json` 的 `meta_status`：`OK`｜`GAP`。`GAP` 時 `samples` 是空的，`reasons` 寫原因，只有這一個檔案（整份 GAP）。
 
+`rejected`：`[{"index": <meta samples 的索引，從 0 起算>, "reason": "<原因代碼>"}]`，沒有時是空清單。meta 裡沒有可用 slug 的條目（沒有檔名可寫，所以沒有 `rematch-<slug>.json`）與重複的 slug（第二個以後）列在這裡；
+原因代碼只有 `entry-not-object`、`invalid-slug (type <型別>)`、`invalid-slug (length <長度>)`、`reserved-slug`、`duplicate-slug`，不帶輸入裡的字串。有 `rejected` 項目時 `meta_status` 仍是 `OK`（其他樣本照常重跑），
+stdout 每個被丟掉的條目也有一行 `FIRMWARE-REMATCH<TAB>GAP<TAB>-<TAB>sample #<index> in firmware-meta.json rejected: <原因代碼>`，退出碼 2。
+
+`rematch-<slug>.json` 的 `reasons`、`results[].component`、`changed[].key` 裡來自 inventory 的字串（檔名、版本等）是 **JSON 原值，沒有跳脫**：下游渲染成 markdown 或 HTML（Issue、報告、儀表板）時要自己跳脫。
+`fw-inventory-<slug>.md` 已經跳脫。
+
 ## key
 
 `key` 在一個樣本內唯一，而且穩定：只由 inventory 的內容組成（不含比對結果、不含時間）。同一份 inventory 重跑多次，key 與順序都相同。
@@ -79,10 +86,10 @@ pipeline/firmware-rematch.sh --meta firmware-meta.json --dir <附件目錄> --no
 | `intel_fsp` | `fsp=<revision>:<FSP 內容的 sha256 前 12 碼>`（同一個映像常有好幾個同名的 FSP，例如 V540TU 三個） |
 | `amd_psp` | `psp=0x<type>:<版本>:<內容 sha256 前 12 碼>` |
 | `amd_microcode` | `amdmc=<equiv_id>:<patch_id>:<內容 sha256 前 12 碼>` |
-| `amd_agesa` | `agesa=<字串>` |
+| `amd_agesa` | `agesa=<tag>:<字串>`，被截斷的（`truncated`）加 `:truncated`（同一個字串被截斷與沒被截斷是兩個結果） |
 
 - 同名的先用內容區分（上表的 sha256）；內容也相同的（例如同一份 FSP 在兩個區域各一份）整組加 `#<序號>`（1 起算、依 inventory 的順序）。微碼的 `ucode:…` 重複時，先加 `:<微碼 sha256 前 12 碼>`，仍然重複才加序號。
-- 來自 inventory 的字串只留 `A-Za-z0-9._=+-`，其餘換成底線（最長 64 字元）：key 不會帶空白、`#`、`@`、反引號或換行。`#` 只會是序號的開頭。
+- 來自 inventory 的字串只留 `A-Za-z0-9._=+-`，其餘換成底線（每一段最長 64 字元）：key 不會帶空白、`#`、`@`、反引號或換行。`#` 只會是序號的開頭。
 - 微碼的 key 不含映像：同一份微碼在同一個樣本的兩個映像出現、內容相同時，加 `#<序號>`。呼叫端要依「微碼＋revision」合併時，取 `ucode:<cpuid>/<platform_id>:<revision>` 的前綴。
 
 ## 輸入驗證（不可信資料）
@@ -96,10 +103,15 @@ repo 是公開的，Release 附件與 meta 都當不可信資料處理。
   - 大小上限 32 MiB；核對 meta 的 `inventory_sha256`（collect 之後的第二道防線）；`firmware_version` 要是可印出的 ASCII 字串或 null。
   - `kind: sbom` 的樣本跳過：不讀、不輸出、不列在總表。`kind` 不是 `bios`、`sbom` 的樣本 GAP。
   - 同一個 slug 出現不只一次：那個 slug GAP（一份輸出）。
-- inventory：不是 JSON、schema 不是 `sca-center-fw-inventory/1`、必要的鍵缺了或型別不對（檢查的鍵見 `fw_rematch.py` 的 `*_SPEC`）、內容怪到重跑丟例外、寫不出 UTF-8：**那一份 GAP**（`rematch-input-invalid: …`），其他樣本照常，不丟例外。原因文字只寫鍵的路徑，不帶 inventory 裡的字串。
+- inventory：不是 JSON、schema 不是 `sca-center-fw-inventory/1`、必要的鍵缺了或型別不對（檢查的鍵見 `fw_rematch.py` 的 `*_SPEC`）、欄位格式不對（見下面）、內容怪到重跑丟例外、寫不出 UTF-8、處理超過時間上限：**那一份 GAP**（`rematch-input-invalid: …`），其他樣本照常，不丟例外。原因文字只寫鍵的路徑，不帶 inventory 裡的字串。
 - **舊版程式產生的 inventory 缺新的鍵時是 GAP**，不猜預設值（要重新打 Release）。
 - 重跑前清掉 inventory 裡舊的比對結果：頂層的 `advisory`、`vbios_advisory`、`rules_advisory`、`status`、`detail`，微碼與 vBIOS 的 `advisory`，任何位置的 `rule_advisory`。舊結果先記下來，只出現在 `changed[].before`。
-- 報告裡來自 inventory 的字串都經過 `md_esc`（和 `fw-inventory.md` 同一個函式）。
+- **欄位格式**（第二道防線，`FIELD_RULES`）：進報告與 key 的數字、雜湊、版本、日期、列舉欄位（例如微碼的 cpuid 是 8 位十六進位、`platform_id`／`revision` 是 `0x…`、ME 版本只收英數與點、`fit.status` 與區域名稱只收 `[A-Za-z0-9._-]`、各種計數是整數）
+  不合格式，那一份 GAP（原因只寫欄位路徑）。
+- **報告跳脫**（第一道防線）：`x86_firmware.markdown()` 與它呼叫的各段（`cbfs_markdown`、`advisory_markdown`、`rules_markdown`、`amd_psp.markdown_lines` 等）每一個插進報告的字串都經過 `md_esc`，整數也一樣；
+  反引號裡的雜湊與識別字串經過 `md_hex`（只留英數字）。這同時保護一般的 `firmware-bios.sh` 報告。重跑的橫幅（狀態原因、changed 的 key 與公告、Release tag）也經過 `md_esc`。
+- **處理時間**：每份 inventory 最多 `SAMPLE_LIMIT`＝300 秒（含讀檔、核對、重跑、產生報告）、整次執行最多 `TOTAL_LIMIT`＝900 秒（和 `x86_firmware.TIME_LIMIT`、`firmware-bios.sh` 的 Budget 預設同值）；
+  超過的樣本 GAP（`rematch-input-invalid: time limit exceeded`），整次用完之後剩下的樣本也是。用 SIGALRM 中斷（逾時例外是 `BaseException`，不會被比對函式的 `except Exception` 吞掉）。實際重跑一份約 0.1 秒。
 
 ## 狀態規則
 
@@ -124,6 +136,7 @@ repo 是公開的，Release 附件與 meta 都當不可信資料處理。
 
 ## 測試
 
-`tools/cra/tests/test_fw_rematch.py`（在 `tests/run.d/c2-x86-firmware.sh` 的清單裡）：合成 meta 與 inventory，涵蓋 meta 壞掉、sha256 不符、路徑穿越、符號連結、大小上限、不在 meta 裡的檔案、`kind: sbom`、inventory 壞掉與缺鍵、表壞掉、表過期、結果有變化（改過的合成規則表與 vBIOS 表）、舊結果清掉；一致性：同一份 inventory 用同樣的表重跑，results、inventory 的比對結果與 SBOM（逐位元組）都相同
+`tools/cra/tests/test_fw_rematch.py` 與 `tests/test_c2_rematch_render.py`（都在 `tests/run.d/c2-x86-firmware.sh` 的清單裡；後者用 cmark-gfm 與 markdown-it 渲染重跑報告，
+合成的豐富 inventory 的每一個純量欄位換成連結、圖片、@ 提及、HTML、標題、表格列、換行，報告的結構不能和對照組不同；欄位格式檢查同樣的欄位都要 GAP）：合成 meta 與 inventory，涵蓋 meta 壞掉、sha256 不符、路徑穿越、符號連結、大小上限、不在 meta 裡的檔案、`kind: sbom`、inventory 壞掉與缺鍵、表壞掉、表過期、結果有變化（改過的合成規則表與 vBIOS 表）、舊結果清掉；一致性：同一份 inventory 用同樣的表重跑，results、inventory 的比對結果與 SBOM（逐位元組）都相同
 （合成映像；repo 內一份很小的真樣本 `tools/cra/tests/data/rematch/ubuntu-ovmf-2024.02/`，來自 CI 產物；環境變數 `DUMPLING_REMATCH_ART` 指到 CI 產物資料夾時，全部樣本都對照）。
 真樣本的 inventory 記的三張表識別和 repo 當下的表不同時（Release 之後表更新過），只檢查結構與 changed，不比 SBOM 位元組。
