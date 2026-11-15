@@ -2198,7 +2198,11 @@ def load_kernel_docs(scan, kvers_doc, vx):
             rel = f"scan/kernels/{v}/{name}"
             f = find(scan, rel)
             files[rel] = f
-            dst[v] = load_json(f)
+            d = load_json(f)
+            # 檔案記的核心版本要是它所在資料夾的那一顆（複製來的別顆檔案不採用）
+            if not (isinstance(d, dict) and isinstance(d.get("kernel"), dict) and d["kernel"].get("version") == v):
+                d = None if name == "kernel-module-map.json" else d       # config 的核對在 vex_export.kernel_multi_doc（usable＝False，結果照樣列出）
+            dst[v] = d
     return judged, cfg, mm, files
 
 
@@ -4896,7 +4900,7 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     # 映像另有出貨但沒判定的核心（scan/kernel-versions.json 的 not_judged）：K1／K2 的排除只對判定過的核心成立，不套用到整個產品
     # （vex_export.with_scope 標 scope_incomplete；kconfig_usable、module_map_of、runtime_evidence 看到就不採用）。沒有檔案或 not_judged 為空 → 原樣
     kcfg = vx.kernel_with_scope(kcfg, kvers_doc)
-    if kmulti and isinstance(kcfg, dict) and kcfg.get("merged"):
+    if kmulti and vx.is_merged(kcfg):
         kernel_results_of(rows, kcfg, kvers_doc, vx)
     if vx.kernel_scope_of(kvers_doc) is not None:
         warnings = list(warnings) + ["核心：映像出貨的核心 " + "、".join(vx.kernel_scope_of(kvers_doc)["not_judged"]) + " 沒有判定；"

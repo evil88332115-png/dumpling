@@ -382,7 +382,7 @@ def assess_rows(rows, kc, rules=(), **ctx_kw):
 
 def test_multi_doc_shape_and_usability():
     d = multi_doc({"CVE-1": "not_affected", "CVE-2": "affected"}, {"CVE-1": "not_affected", "CVE-2": "unknown", "CVE-3": "not_affected"})
-    assert d["merged"] is True and d["schema"] == KCFG_SCHEMA and vx.kconfig_usable(d)
+    assert vx.is_merged(d) and "merged" not in d and d["schema"] == KCFG_SCHEMA and vx.kconfig_usable(d)
     res = {x["cve"]: x for x in d["results"]}
     assert {c: x["decision"] for c, x in res.items()} == {"CVE-1": "not_affected", "CVE-2": "affected", "CVE-3": "unknown"}      # CVE-3：A 沒有結果 → 不排除
     assert res["CVE-3"]["per_kernel"] == {A: "no_result", B: "not_affected"}
@@ -860,9 +860,10 @@ def test_judged_but_not_shipped_kernel_does_not_block_and_unknown_shipped_does()
     """指定了但映像沒有的核心（沒有結果）不擋排除；出貨清單不明（null）時一律不排除（不知道有沒有別顆）。"""
     ghost = "6.99.0-ghost"
     docs = {A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"}), ghost: None}
+    ghost_doc = lambda res: dict(kdoc(A, res), kernel=dict(kdoc(A, res)["kernel"], version=ghost))      # noqa: E731
     d = vx.kernel_multi_doc(docs, kvdoc(judged=(A, B, ghost), shipped=(A, B)))
     assert d["results"][0]["decision"] == "not_affected" and d["results"][0]["per_kernel"][ghost] == "no_result"
-    d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"}), ghost: kdoc(B, {"CVE-1": "affected"})},
+    d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"}), ghost: ghost_doc({"CVE-1": "affected"})},
                             kvdoc(judged=(A, B, ghost), shipped=(A, B)))
     assert d["results"][0]["decision"] == "affected"
     kv = dict(kvdoc(), shipped=None)
@@ -870,3 +871,118 @@ def test_judged_but_not_shipped_kernel_does_not_block_and_unknown_shipped_does()
     assert d["results"][0]["decision"] == "unknown"
     d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "affected"}), B: kdoc(B, {"CVE-1": "not_affected"})}, kv)
     assert d["results"][0]["decision"] == "affected"
+
+
+# ===================== 檔案不可信：驗證報告的三項竄改情境（改前排除、改後不排除） =====================
+
+def vex_state(reports, cve):
+    return stmt_of(reports, cve)["analysis"]["state"]
+
+
+def test_tamper_shipped_minus_judged_is_recomputed_not_trusted(tmp_path):
+    """kernel-versions.json 的 not_judged 寫空，但 shipped 比 judged 多一顆（或多一個不合法的版本字串）：讀取端自己算差集，視為 scope_incomplete，不排除。"""
+    a = {"CVE-2026-1001": "not_affected"}
+    for extra in ("6.12.99+rpt-rpi-x", "../x"):
+        sub = tmp_path / ("c" + str(abs(hash(extra)) % 1000))
+        kvs = kvdoc(judged=(A, B), shipped=(A, B, extra), not_judged=())            # not_judged 空
+        assert kvs["not_judged"] == []
+        scan = multi_scan(sub, a, dict(a), kvers=kvs)
+        r, s, reports = run(make_project(sub / "p"), scan)
+        x = rows_of(reports)["rows"][0]
+        assert x["vex"] is None and vex_state(reports, "CVE-2026-1001") == "in_triage", extra
+        assert s["vex"]["kernel_config"]["scope_incomplete"] is True
+    # 對照：shipped 和 judged 一致時排除
+    scan = multi_scan(tmp_path / "ok", a, dict(a))
+    r, s, reports = run(make_project(tmp_path / "ok" / "p"), scan)
+    assert vex_state(reports, "CVE-2026-1001") == "not_affected"
+    # 函式層：差集非空 → 合併文件自己標 scope_incomplete，不看 not_judged
+    d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"})}, kvdoc(shipped=(A, B, "6.99.0")))
+    assert d["scope_incomplete"] is True and d["scope"]["not_judged"] == ["6.99.0"] and not vx.kconfig_usable(d) and vx.kconfig_index(d) == {}
+    d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"})}, kvdoc(shipped=(A, B)))
+    assert "scope_incomplete" not in d and vx.kconfig_usable(d)
+
+
+def test_tamper_merged_flag_in_a_file_is_ignored(tmp_path):
+    """status 改成 GAP／FAIL 再加 "merged": true：不能因此被當成可採用（merged 只認讀取端在記憶體裡建的 MergedDoc）。"""
+    from test_vex_export import kcfg as legacy_kcfg
+    forged = dict(legacy_kcfg([{"cve": "CVE-2025-0102", "decision": "not_affected", "detail": "x"}], status="GAP"), merged=True)
+    assert vx.kconfig_usable(forged) is False and vx.kconfig_index(forged) == {} and vx.is_merged(forged) is False
+    assert vx.kconfig_usable(dict(forged, status="FAIL")) is False
+    # 單顆：整個流程
+    a = {"CVE-2026-1001": "not_affected"}
+    scan = multi_scan(tmp_path, a, None, kvers=kvdoc(judged=(A,), shipped=(A,)), with_docs=False, names=[PKGS["imgA"]])
+    d = legacy_kcfg([{"cve": "CVE-2026-1001", "decision": "not_affected", "detail": "x"}], status="GAP")
+    d["kernel"]["version"] = A
+    d["component"] = {"name": PKGS["imgA"], "version": VER, "purl": PURL.format(PKGS["imgA"])}
+    write_json(scan / "scan" / "kernel-config.json", dict(d, merged=True))
+    r, s, reports = run(make_project(tmp_path / "p"), scan)
+    assert vex_state(reports, "CVE-2026-1001") == "in_triage"
+    # 多顆：B 的檔案改成 GAP＋merged true → B 不可採用，不排除
+    a2 = {"CVE-2026-1001": "not_affected"}
+    scan = multi_scan(tmp_path / "m", a2, dict(a2))
+    p = scan / "scan" / "kernels" / B / "kernel-config.json"
+    doc = json.loads(p.read_text())
+    doc.update(status="GAP", merged=True)
+    p.write_text(json.dumps(doc))
+    r, s, reports = run(make_project(tmp_path / "m" / "p"), scan)
+    assert rows_of(reports)["rows"][0]["kernel_results"] == {A: "not_affected", B: "no_result"} and vex_state(reports, "CVE-2026-1001") == "in_triage"
+    # 單元：per-kernel 文件自稱 merged 也不採用／不是 MergedDoc
+    docs = {A: kdoc(A, {"CVE-1": "not_affected"}), B: dict(kdoc(B, {"CVE-1": "not_affected"}), merged=True, status="GAP")}
+    assert vx.kernel_multi_doc(docs, kvdoc())["results"][0]["per_kernel"] == {A: "not_affected", B: "no_result"}
+
+
+def test_tamper_per_kernel_file_must_name_its_own_kernel(tmp_path):
+    """A 的 kernel-config.json 複製到 scan/kernels/B/（B 原本 affected）；kernel 欄位是 list、None、別的版本、缺少：都不能算 B 的結果。"""
+    a, b = {"CVE-2026-1001": "not_affected"}, {"CVE-2026-1001": "affected"}
+    scan = multi_scan(tmp_path, a, b)
+    write_json(scan / "scan" / "kernels" / B / "kernel-config.json", kdoc(A, a))                 # 複製來的
+    r, s, reports = run(make_project(tmp_path / "p"), scan)
+    assert rows_of(reports)["rows"][0]["kernel_results"] == {A: "not_affected", B: "no_result"} and vex_state(reports, "CVE-2026-1001") == "in_triage"
+    for bad in ([A], None, 5, {"version": A}, "", A + "x"):
+        d = kdoc(B, a)
+        d["kernel"] = bad if not isinstance(bad, str) else dict(d["kernel"], version=bad)
+        if bad is None:
+            d.pop("kernel")
+        m = vx.kernel_multi_doc({A: kdoc(A, a), B: d}, kvdoc())
+        assert m["results"][0]["decision"] == "unknown" and m["kernel"]["kernels"][1]["usable"] is False, bad
+    d = kdoc(B, a)
+    d["kernel"] = dict(d["kernel"], version=[B])                                                  # 版本不是字串
+    assert vx.kernel_multi_doc({A: kdoc(A, a), B: d}, kvdoc())["results"][0]["decision"] == "unknown"
+    # 對照：版本相符才排除
+    assert vx.kernel_multi_doc({A: kdoc(A, a), B: kdoc(B, a)}, kvdoc())["results"][0]["decision"] == "not_affected"
+
+
+def test_tamper_module_map_must_name_its_own_kernel(tmp_path):
+    import cra_report as cr
+    a = {"CVE-2026-1001": "not_affected"}
+    scan = multi_scan(tmp_path, a, dict(a), mm={A: mapdoc(A), B: mapdoc(B)})
+    write_json(scan / "scan" / "kernels" / B / "kernel-module-map.json", mapdoc(A))              # A 的模組對應複製到 B
+    judged, cfg, mms, files = cr.load_kernel_docs(scan, kvdoc(), vx)
+    assert mms[A]["kernel"]["version"] == A and mms[B] is None and cfg[B]["kernel"]["version"] == B
+    write_json(scan / "scan" / "kernels" / B / "kernel-module-map.json", dict(mapdoc(B), kernel=[B]))
+    assert cr.load_kernel_docs(scan, kvdoc(), vx)[2][B] is None
+
+
+def test_merge_states_never_excludes_on_unrecognized_values():
+    """merge_states 直接用不合法的狀態值呼叫（multi_k2_problem 就是直接呼叫它）：不能排除；全部是 not_affected 才排除。"""
+    for bad in ("not-affected", "NOT_AFFECTED", "", None, 0, "affected ", "fixed", ["not_affected"]):
+        assert km.merge_states({A: NA, B: bad}) == (UNK, "unrecognized_state"), bad
+        assert km.merge_states({A: bad}) == (UNK, "unrecognized_state"), bad
+    assert km.merge_states({A: NA, B: NA}) == (NA, "all_not_affected") and km.merge_states({A: NA}) == (NA, "all_not_affected")
+    assert km.merge_states({}) == (UNK, "no_kernels")
+
+
+def test_customer_xlsx_component_cell_says_all_kernel_packages_are_covered(tmp_path):
+    import supplier_package as sp
+    m, _ = merge4()
+    row = {"id": "CVE-M", "component": m["component"], "version": m["version"], "vex": None, "kernel_packages": m["kernel_packages"], "cvss_score": None}
+    got = sp.xlsx_rows([row])
+    assert got[0][1] == f"{PKGS['imgA']} and 3 other kernel packages"
+    single = dict(row, kernel_packages=m["kernel_packages"][:1])
+    assert sp.xlsx_rows([single])[0][1] == PKGS["imgA"] and sp.xlsx_rows([dict(row, kernel_packages=None)])[0][1] == PKGS["imgA"]
+    two = dict(row, kernel_packages=m["kernel_packages"][:2])
+    assert sp.xlsx_rows([two])[0][1].endswith("and 1 other kernel package")
+    assert "one row per vulnerability and component" in sp.PURPOSE["vulnerabilities.xlsx"] and "kernel packages that share a vulnerability" in sp.PURPOSE["vulnerabilities.xlsx"]
+    text = json.dumps(got)
+    for internal in ("scan/", "/usr", "SHA-256", "dumpling", "kernel-config"):
+        assert internal not in text

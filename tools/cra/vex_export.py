@@ -458,7 +458,7 @@ def kernel_basis_entry(v):
 
 def kcfg_basis_list(kcfg):
     """K1 的依據清單：單顆 → [kcfg_basis]；合併的文件（kernel_multi_doc）→ 每顆判定過的核心一筆（版本排序）。"""
-    if isinstance(kcfg, dict) and kcfg.get("merged"):
+    if is_merged(kcfg):
         return [kernel_basis_entry(v) for v in sorted(((kcfg.get("kernel") or {}).get("kernels") or []), key=lambda x: str(x.get("version")))]
     return [kcfg_basis(kcfg)]
 
@@ -872,7 +872,7 @@ def kernel_with_scope(doc, kvers):
     sc = kernel_scope_of(kvers)
     if sc is None or not isinstance(doc, dict):
         return doc
-    return dict(doc, scope_incomplete=True, scope=sc)
+    return type(doc)(doc, scope_incomplete=True, scope=sc)       # type：合併文件（MergedDoc）維持原來的型別
 
 
 def kernel_scope_note(doc):
@@ -884,6 +884,15 @@ def kernel_scope_note(doc):
     return (f"Kernel exclusions (K1/K2) are not adopted: {'only kernel ' + j + ' was judged' if j else 'no kernel was judged'}; {n} shipped but "
             f"{'was' if len(sc.get('not_judged') or []) == 1 else 'were'} not judged, so an exclusion does not apply to the whole product "
             f"({'只判定了核心 ' + j if j else '沒有判定任何核心'}；{n} 已出貨、未判定，排除不適用整個產品)")
+
+
+class MergedDoc(dict):
+    """kernel_multi_doc 在記憶體裡建的合併文件。「這是合併文件」的標記是這個型別（isinstance），不是文件裡的欄位：
+    kernel-config.json 是掃描產生的檔案（不可信），檔案裡寫 "merged": true 不算數。"""
+
+
+def is_merged(doc):
+    return isinstance(doc, MergedDoc)
 
 
 def kernel_multi_doc(docs, kvers):
@@ -900,8 +909,10 @@ def kernel_multi_doc(docs, kvers):
     inputs, cves, info = {}, set(), []
     for v in judged:
         d = docs.get(v)
-        ok = kconfig_usable(d)
         k = (d.get("kernel") if isinstance(d, dict) and isinstance(d.get("kernel"), dict) else {}) or {}
+        # 檔案要是這顆核心的：文件記的 kernel.version 要是字串而且等於資料夾名稱（把 A 的檔案複製到 B 的資料夾不能算 B 的結果）；
+        # 文件不能自稱是合併文件（merged 只認 MergedDoc 型別）
+        ok = kconfig_usable(d) and not is_merged(d) and isinstance(k.get("version"), str) and k["version"] == v
         dec = {}
         if isinstance(d, dict):
             for x in d.get("results") or []:
@@ -938,18 +949,23 @@ def kernel_multi_doc(docs, kvers):
         counts[m["decision"]] += 1
     nus = sum(1 for i in info if not i["usable"])
     status = "OK" if not nus else "GAP" if nus == len(info) else "ATTENTION"
-    return {"schema": KCFG_SCHEMA, "merged": True, "status": status,
+    # 出貨但沒判定的核心：不信任 not_judged 清單，讀取端自己算 shipped − judged（含不合法的版本字串：它不會被判定，也不能是排除的依據）。
+    # 非空 → scope_incomplete（讀取端整個不採用）；kernel_with_scope 之後若 kernel-versions.json 有自己的 not_judged 會以它的清單蓋過（一樣是 scope_incomplete）
+    unjudged = sorted(set(shipped or ()) - set(judged))
+    scope = ({"scope_incomplete": True, "scope": {"judged": judged, "not_judged": [re.sub(r"[^\x20-\x7e]", "?", v)[:100] for v in unjudged]}}
+             if unjudged else {})
+    return MergedDoc({"schema": KCFG_SCHEMA, "status": status,
             "detail": f"{len(judged)} kernels judged one by one: " + ", ".join(f"{i['version']} {i['status'] or 'no result'}" for i in info),
             "kernel": {"version": ", ".join(judged), "config_sha256": None, "config_source": "merged", "kernels": info},
             "component": {}, "results": results, "counts": counts, "inputs": {"kernels": judged},
-            "shipped": shipped, "docs": {v: docs.get(v) for v in judged}}
+            "shipped": shipped, "docs": {v: docs.get(v) for v in judged}, **scope})
 
 
 def kconfig_usable(kcfg):
     """讀取端採用 kernel-config.json 的結果：status OK，或依完整的 IKCONFIG 判定的 ATTENTION（kconfig_ikconfig）。
     scope_incomplete（映像另有出貨但沒判定的核心，kernel_with_scope）→ 不採用。"""
     return (isinstance(kcfg, dict) and kcfg.get("schema") == KCFG_SCHEMA and not kcfg.get("scope_incomplete")
-            and (kcfg.get("status") == "OK" or kconfig_ikconfig(kcfg) is not None or kcfg.get("merged") is True))
+            and (kcfg.get("status") == "OK" or kconfig_ikconfig(kcfg) is not None or is_merged(kcfg)))
 
 
 def kconfig_all(kcfg):
@@ -1387,7 +1403,7 @@ def evidence_context(kcfg, ctx):
         kms = None
     k = (kcfg or {}).get("kernel") or {} if isinstance(kcfg, dict) else {}
     srcs = (mm or {}).get("sources") if isinstance((mm or {}).get("sources"), dict) else {}
-    multi = isinstance(kcfg, dict) and kcfg.get("merged") is True
+    multi = is_merged(kcfg)
     k2v = ((mm or {}).get("kernel") or {}).get("version") if multi else None
     k2info = next((x for x in k.get("kernels") or [] if x.get("version") == k2v), {}) if multi else {}
     return {"kidx": kconfig_index(kcfg), "kcfg": kcfg if isinstance(kcfg, dict) else {},
@@ -1418,7 +1434,7 @@ def ev_k1(v, ec):
     s = from_kconfig(v, ec["kidx"], ec["kcfg"])
     if not s:
         return None
-    if ec["kcfg"].get("merged"):
+    if is_merged(ec["kcfg"]):
         inputs = "kernels " + ", ".join(f"{x['version']} SHA-256 {str(x.get('config_sha256') or '?')[:12]}" for x in (ec["kcfg"]["kernel"].get("kernels") or []))
     else:
         inputs = f"kernel {'IKCONFIG' if kconfig_ikconfig(ec['kcfg']) or kconfig_toolchain_only(ec['kcfg']) else '.config'} SHA-256 {str(ec['kcfg_sha'] or '?')[:12]}"
@@ -2213,7 +2229,7 @@ def kconfig_component_matches(row, kcfg):
         km = _kmerge()
         if not km.row_matched(kp):
             return False
-        if kcfg.get("merged"):
+        if is_merged(kcfg):
             return True
         kv = str((kcfg.get("kernel") or {}).get("version") or "")
         return bool(kv) and bool(kcfg.get("component")) and all(p["scope"] == km.SCOPE_PRODUCT or p["kernels"] == [kv] for p in kp)
@@ -2252,7 +2268,7 @@ def from_kconfig(row, kidx, kcfg):
     if not hits or len(hits) != len(row.get("cves") or []):
         return None
     k = kcfg.get("kernel") or {}
-    if kcfg.get("merged"):
+    if is_merged(kcfg):
         where = "kernels " + ", ".join(f"{x['version']} (SHA-256 {str(x['config_sha256'])[:12]})" if x.get("config_sha256") else str(x["version"])
                                        for x in k.get("kernels") or [])
     else:
@@ -2764,7 +2780,7 @@ def assess(rows, drc=None, kcfg=None, nvb=None, annotations=(), rules=(), rule_c
                                                                           if kcfg.get("scope_incomplete") else {}),
                                                                        **({"merged_kernels": [{k: x.get(k) for k in ("version", "status", "usable", "config_sha256")}
                                                                                               for x in (kcfg.get("kernel") or {}).get("kernels") or []]}
-                                                                          if kcfg.get("merged") else {})},
+                                                                          if is_merged(kcfg) else {})},
             "distro_fixed_available": len(didx), "rules": evidence_summary(erules, estats) + rule_summary(rules, rstats),
             "kernel_config_via_rule": kidx_src is not kidx,
             "u1_excluded": u1_exclusions(allrows + ext, erules),
