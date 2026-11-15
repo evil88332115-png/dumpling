@@ -1282,3 +1282,23 @@ class StateSizeGuard(FW):
         rm = match.load_rematch(self.rmdir, [p for p in projs if match.is_fw(p)])
         self.assertEqual(rm["adv"][self.uuid("bios-a")]["state"], "GAP")
         self.assertEqual(rm["adv"][self.uuid("bios-b")]["state"], "ATTENTION")
+
+    def test_21_bulletins_never_truncated_into_state(self):
+        """C0：21 個公告 ID 的結果不會被截斷成 20 個寫進狀態（看起來像完整的）。rematch 那條路整份樣本 GAP、沿用上一輪；
+        讀入的舊狀態有 21 個的紀錄整筆丟掉。"""
+        self.baseline()
+        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(21)))], "ATTENTION")
+        self.set_results("bios-b", [], "OK")
+        _, _, plan = self.go(NOW2)
+        adv = plan["state"]["firmware"]["samples"][self.uuid("bios-a")]["advisory"]
+        self.assertNotIn("rule:a", adv)
+        self.assertEqual(self.fw_opens(plan), [])
+        for x in plan["state"]["firmware"]["samples"].values():
+            for e in x["advisory"].values():
+                self.assertLessEqual(len(e["bulletins"]), match.FW_MAX_BULLETINS)
+        old = {"samples": {"u": {"advisory": {"rule:x": {"kind": "rule", "result": "affected", "bulletins": ["S-%d" % i for i in range(21)]},
+                                              "rule:y": {"kind": "rule", "result": "affected", "bulletins": ["S-1"]}}}}}
+        out = match.sanitize_firmware(old)["samples"]["u"]["advisory"]
+        self.assertNotIn("rule:x", out)
+        self.assertEqual(out["rule:y"]["bulletins"], ["S-1"])
+

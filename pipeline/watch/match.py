@@ -798,9 +798,9 @@ def sanitize_firmware(fw):
             # 型別不對的紀錄丟掉（讀入的舊狀態可能被手改；fw_groups 不能因此當掉）
             if not (isinstance(k, str) and FW_KEY_RE.fullmatch(k) and isinstance(e, dict) and e.get("kind") in FW_KINDS
                     and isinstance(e.get("result"), str) and isinstance(e.get("bulletins"), list)
-                    and all(isinstance(b, str) for b in e["bulletins"])):
-                continue
-            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": [b[:80] for b in e["bulletins"][:FW_MAX_BULLETINS]]}
+                    and len(e["bulletins"]) <= FW_MAX_BULLETINS and all(isinstance(b, str) and len(b) <= 80 for b in e["bulletins"])):
+                continue        # 超過上限不截斷（截斷後看起來像完整的）：整筆丟掉
+            rec = {"kind": e["kind"], "result": e["result"][:40], "bulletins": list(e["bulletins"])}
             if isinstance(e.get("component"), str):
                 rec["component"] = e["component"][:300]
             if e.get("review") in ("preliminary", "confirmed", None) and "review" in e:
@@ -913,7 +913,10 @@ def pinfo_of(projs, uuid):
 
 def fw_entry_of(r, baseline):
     """一筆 affected／affected-candidate 的結果 → 狀態裡的紀錄（只存這兩種，控制大小）。"""
-    e = {"kind": r["kind"], "result": r["result"], "bulletins": list(r["bulletins"])[:FW_MAX_BULLETINS], "component": _plain(r["component"], 120)}
+    # 公告 ID 超過 FW_MAX_BULLETINS 的結果在 check_rematch_doc 就讓整份樣本 GAP（results 是 None，走不到這裡）；這裡不再切片
+    if len(r["bulletins"]) > FW_MAX_BULLETINS:
+        raise Fail(f"內部錯誤：公告 ID 超過 {FW_MAX_BULLETINS} 筆的結果不該寫進狀態（{r.get('key')!r:.80}）")
+    e = {"kind": r["kind"], "result": r["result"], "bulletins": list(r["bulletins"]), "component": _plain(r["component"], 120)}
     if r.get("review"):
         e["review"] = r["review"]
     if baseline:
