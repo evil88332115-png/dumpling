@@ -211,11 +211,15 @@ def ci_summary_status(summary_text, slug):
 
 
 def not_watched_why(slug, doc, mon, why):
-    """不監控的原因（為什麼列進 not_watched）。宣告的 why 與 notes 推導出來的原因用同一個檢查（firmware_watch.clean_why）。"""
+    """不監控的原因（為什麼列進 not_watched）。宣告的 why 與 notes 推導出來的原因用同一個檢查（firmware_watch.clean_why）。
+    加上「狀態：」前綴後可能超過長度上限等，clean_why 的 ValueError 一律轉成 MetaError（輸出 FIRMWARE-META FAIL 那一行，不是 traceback）。"""
     status = doc.get("status")
     if mon is False:
         if status != "ok" and not why.startswith(str(status)):
-            return clean_why("%s：%s" % (status, why))
+            try:
+                return clean_why("%s：%s" % (status, why))
+            except ValueError as e:
+                raise MetaError("%s：status 是 %s，加上狀態前綴的原因不合規（%s）" % (slug, status, e))
         return why
     lines = [x.strip() for x in str(doc.get("notes") or "").splitlines() if x.strip()]
     first = lines[0] if lines else ""
@@ -224,6 +228,14 @@ def not_watched_why(slug, doc, mon, why):
         return clean_why(first if first.startswith(str(status)) else "%s：%s" % (status, first))
     except ValueError as e:
         raise MetaError("%s：status 是 %s，notes 的第一行不能當原因（%s）" % (slug, status, e))
+
+
+def add_file(files, name, data):
+    """附件名在同一個 Release 裡必須唯一（含 firmware-meta.json）：撞名就失敗，不讓後寫的檔案悄悄蓋掉先寫的。
+    例：bios 樣本 slug `a.cdx` 的 inventory 與 slug `inventory-a` 的 SBOM 都是 fw-inventory-a.cdx.json。"""
+    if name == META_NAME or name in files:
+        raise MetaError("附件檔名重複：%s（不同樣本的 slug 組出同一個檔名）" % name[:80])
+    files[name] = data
 
 
 def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow_run, allow_test_tag=False, ci_summary=None, sbom_check_log=None, dt_result="", write=True):
@@ -292,7 +304,7 @@ def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow
             elif ident != tables:     # 同一次建置用的是同一份表；識別不同＝資料有問題，不挑一份
                 raise MetaError("%s：三張表的識別與 %s 不一致（同一次建置的樣本必須用同一份表）" % (slug, tables_from))
             inv_name = "fw-inventory-%s.json" % slug
-            files[inv_name] = inv_bytes
+            add_file(files, inv_name, inv_bytes)
             entry = {"slug": slug, "kind": "bios", "firmware_version": fv, "image_sha256": image_sha256_of(inv), "sbom": sbom_name,
                      "sbom_sha256": sha256_of(sbom_bytes), "inventory": inv_name, "inventory_sha256": sha256_of(inv_bytes),
                      "status": st, "expect": expect_of(doc, os.path.join(d, "expect.log"))}
@@ -304,7 +316,7 @@ def build(manifests, ci_out, supplier_prep, out, tag, commit, built_at, workflow
         obj = load_json_bytes(sbom_bytes, "%s 的 SBOM" % slug)
         if not isinstance(obj, dict) or obj.get("bomFormat") != "CycloneDX":
             raise MetaError("%s：SBOM 不是 CycloneDX（bomFormat 不符）" % slug)
-        files[sbom_name] = sbom_bytes
+        add_file(files, sbom_name, sbom_bytes)
         samples.append(entry)
     if tables is None:
         raise MetaError("沒有任何 bios 樣本：沒有表的識別可寫（每日重跑也沒有東西可跑）")
