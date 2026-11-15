@@ -1056,7 +1056,7 @@ class TestFirmware(Base):
 
     def test_untrusted_strings_cleaned(self):
         def mut(m, f):
-            m["not_watched"].append({"slug": "x\n<script>", "why": "a\x00b" + "y" * 500})
+            m["not_watched"].append({"slug": "x-script", "why": "a\x00b" + "y" * 500})
             m["tables"]["nvidia_vbios"]["reviewed_until"] = "\x1b[31m2025"
             m["tables"]["bogus"] = {"k": "v"}
         code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
@@ -1080,12 +1080,28 @@ class TestFirmware(Base):
         code, so, inv = self.run_spec({"fw": (self.rj(), fw_files())})
         self.assertEqual((code, inv["status"]), (0, "OK"), so)
         self.assertEqual([x["source"] for x in inv["firmware"]["not_watched"]], ["meta"])
+        self.assertIn("1 份依設計不監控：standalone-nvidia-option-rom（GAP：沒有檔案）", inv["detail"])
+
+    def test_designed_not_watched_needs_reason(self):
+        """C0：source=meta 的 why 必須是非空字串；空的、只有空白或控制字元、缺少、不是字串 → meta 問題，整份韌體 GAP。"""
+        for name, why in (("empty", ""), ("space", "   "), ("ctrl", "\x00\n"), ("none", None), ("int", 5)):
+            with self.subTest(name):
+                self.out = os.path.join(self._td.name, "w-" + name)
+
+                def mut(m, f, why=why):
+                    m["not_watched"] = [{"slug": "standalone-nvidia-option-rom"} if why is None else
+                                        {"slug": "standalone-nvidia-option-rom", "why": why}]
+                code, so, inv = self.run_spec({"fw": (self.rj(), fw_files(mutate=mut))})
+                self.assertEqual(code, 3, so)
+                self.assertIn("沒有寫原因", inv["firmware"]["problems"][0])
+                self.assertEqual(inv["firmware"]["samples"], [])
 
     def test_meta_field_types_do_not_crash(self):
         """#123 驗證應修 1：meta 欄位型別不對 → 只讓韌體 GAP，板子 Release 照常（不能 TypeError、結束碼 1）。"""
         cases = {"nw_int": ("not_watched", 5), "nw_true": ("not_watched", True), "nw_big": ("not_watched", 10 ** 30),
                  "nw_str": ("not_watched", "x"), "nw_item": ("not_watched", [5]), "nw_slug": ("not_watched", [{"slug": 5}]),
-                 "nw_why": ("not_watched", [{"slug": "a", "why": ["x"]}]), "nw_many": ("not_watched", [{"slug": "a"}] * 101),
+                 "nw_why": ("not_watched", [{"slug": "a", "why": ["x"]}]), "nw_many": ("not_watched", [{"slug": "a", "why": "x"}] * 101),
+                 "nw_badslug": ("not_watched", [{"slug": "../a", "why": "x"}]),
                  "tables": ("tables", [1]), "built_at": ("built_at", 5), "run": ("workflow_run", {"a": 1}),
                  "samples_many": ("samples", [{}] * 101)}
         for name, (k, v) in cases.items():

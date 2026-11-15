@@ -802,9 +802,11 @@ def check_fw_meta(meta, tag):
         if not isinstance(nw, list) or len(nw) > FW_MAX_SAMPLES:
             return "not_watched 不是陣列或超過 %d 筆" % FW_MAX_SAMPLES
         for x in nw:
-            if not isinstance(x, dict) or not isinstance(x.get("slug"), str) or \
-                    (x.get("why") is not None and not isinstance(x["why"], str)):
-                return "not_watched 的項目格式不符"
+            if not isinstance(x, dict) or not isinstance(x.get("slug"), str) or not FW_SLUG_RE.match(x["slug"]):
+                return "not_watched 的項目格式不符（slug）"
+            # 依設計不監控一定要寫原因（C0：不能變成躲掉 GAP 的後門）
+            if not isinstance(x.get("why"), str) or not CTRL_RE.sub("", x["why"]).strip():
+                return "not_watched 的 %s 沒有寫原因（why 必須是非空字串）" % x["slug"]
     if meta.get("tables") is not None and not isinstance(meta["tables"], dict):
         return "tables 不是物件"
     return None
@@ -1017,6 +1019,10 @@ def build(source, out, now):
     if fw:
         summary += "、韌體 %s（樣本 %d、不監控 %d、舊的韌體 Release %d）" % (
             _clean(fw["tag"]), len(fw["samples"]), len(fw["not_watched"]), len(inv["firmware_older"]))
+        designed = [x for x in fw["not_watched"] if x.get("source") == "meta"]
+        if designed:     # 依設計不監控的不能藏起來（C0）：逐一列出 slug 與原因
+            summary += "；%d 份依設計不監控：%s" % (len(designed), "、".join(
+                "%s（%s）" % (x["slug"], _clean(x["why"], 80)) for x in designed[:10]) + ("…" if len(designed) > 10 else ""))
     else:
         summary += "；沒有韌體 Release（韌體不在監控）"
     inv["detail"] = "；".join(notes + [summary]) if notes else summary
