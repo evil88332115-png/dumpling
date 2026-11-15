@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 15:24 +0800（C1）
+最後更新：2026-11-15 15:35 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -157,7 +157,14 @@
 >       - 檔案：firmware.yml 加 `firmware-demo/*` tag 觸發；新增 `firmware-release-check` job（contents: read，三種觸發都跑）與 `firmware-release` job（只有它有 contents: write，只在 tag push 時跑；流程是建草稿 → 核對附件 → 發布，`--latest=false` → 下載後再核對）；新增 `pipeline/lib/firmware_meta.py`、`firmware_watch.py`；firmware.yml 新增 `watch: {monitored: false, why}` 欄位，兩份 vbios 宣告不監控；PR 與 dispatch 用假 tag `firmware-demo/0000.00.00`，要加 `--allow-test-tag` 才接受。
 >       - 自我檢查在 CI 的 log 上：collect 的檢查 OK；6 個 bios 樣本的 changed 都是 0；public-check OK。
 >       - 10 個變異都被抓到。CI tests 43688765661、firmware 43688768372 都是綠的。
->       - → **預驗**（獨立驗證代理，high）**進行中**。
+>       - → **預驗**（獨立驗證代理，high）：**有條件通過**。沒有權限漏洞、沒有指令注入，失敗時不會留下半成品的正式版。
+>         - 應修 1 項：建 Release 失敗時留下的草稿，會讓重跑卡住。
+>         - 建議：
+>           - 確認 tag 指向的 commit 在 main 上；
+>           - why 的內容要消毒；
+>           - 產生器的 status 判斷要嚴格；
+>           - workflow 補 9 項靜態測試、產生器補 3 項測試。
+>       - → 寫程式代理修正**進行中**。範圍：上面的應修與建議，加上 C0 的 `dt` 欄位（release job 拿掉 needs dt；check job 讀 dt 的結果；更新範例檔）。
 >       - C0 的決定：
 >         - (a) Release 不等 firmware-dt，但 DT 的結果要記進 meta：`dt: {status: OK|GAP, result: OK|FAIL|NOT_RUN, reason}`。result 不是 OK 時 status 是 GAP，原因寫「DT 上傳沒有完成，Release 內容不受影響」。已預告 C3，等預驗結果出來後一起修。
 >         - (b) tag ruleset 由 C0 轉問使用者，不擋 PR。
