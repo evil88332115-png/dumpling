@@ -39,6 +39,7 @@ def _to_str(v):
         return "（數值過大）"
 
 REPORTS = ("full", "bsp", "os")
+TIERS = ("p1", "p2", "p3", "accepted", "nvidia_bulletin")
 STATUS_HELP = (
     ("OK", "這一項有跑、資料齊"),
     ("GAP", "資料缺或沒跑完整；缺什麼寫在旁邊"),
@@ -298,17 +299,34 @@ def render_stages(ctx, rel):
     if scan.get("gap"):
         return "<p>%s</p>" % ctx.gap("scan-summary：" + str(scan["gap"]))
     reports = dct(scan.get("reports"))
-    names = [n for n in REPORTS if n in reports] + [n for n in reports if n not in REPORTS]
-    stages = {}
+    names = report_names(rel, reports)
+    stages, gaps = {}, []
     for n in names:
-        for s, v in lst(dct(reports.get(n)).get("non_ok_stages")):
+        r = reports.get(n)
+        if not isinstance(r, dict):
+            gaps.append("<li>%s：%s</li>" % (ext(n, 20), ctx.gap("scan-summary 的 runs 沒有這份報告")))
+            continue
+        if r.get("stages_gap"):
+            gaps.append("<li>%s：%s</li>" % (ext(n, 20), ctx.gap(r["stages_gap"])))
+        for s, v in lst(r.get("non_ok_stages")):
             stages.setdefault(s, {})[n] = v
+    out = ['<ul class="notes">%s</ul>' % "".join(gaps)] if gaps else []
     if not stages:
-        return "<p>每份報告的階段都是 OK（只表示有跑完，不是對產品的保證）。</p>"
+        if not gaps:
+            out.append("<p>每份報告的階段都是 OK（只表示有跑完，不是對產品的保證）。</p>")
+        return "\n".join(out)
     rows = []
     for s in sorted(stages):
         rows.append([ext(s, 60)] + [ctx.st(stages[s][n]) if n in stages[s] else "—" for n in names])
-    return table(["階段（只列不是 OK 的）"] + [clean(n, 20) for n in names], rows, "不是 OK 的階段")
+    out.append(table(["階段（只列不是 OK 的）"] + [clean(n, 20) for n in names], rows, "不是 OK 的階段"))
+    return "\n".join(out)
+
+
+def report_names(rel, reports):
+    """要列的報告：scan-summary 有的，加上 release-meta 列了、scan 卻沒有的（那幾份寫 GAP；C0 驗證應修 2）。"""
+    meta_names = [r.get("report") for r in lst(dct(rel.get("meta")).get("reports")) if isinstance(r, dict) and isinstance(r.get("report"), str)]
+    allnames = list(reports) + [n for n in meta_names if n not in reports]
+    return [n for n in REPORTS if n in allnames] + [n for n in allnames if n not in REPORTS]
 
 
 def render_vulns(ctx, rel):
@@ -318,13 +336,26 @@ def render_vulns(ctx, rel):
         return "<p>%s</p>" % ctx.gap("scan-summary：" + str(scan["gap"]))
     reports = dct(scan.get("reports"))
     rows = []
-    for n in [x for x in REPORTS if x in reports] + [x for x in reports if x not in REPORTS]:
+    for n in report_names(rel, reports):
+        if not isinstance(reports.get(n), dict):
+            rows.append([ext(n, 20), ctx.gap("scan-summary 的 runs 沒有這份報告（release-meta 有列）")])
+            continue
         r = dct(reports[n])
         t = dct(r.get("tiers"))
-        counts = "、".join("%s %s" % (k, num(t.get(k))) for k in ("p1", "p2", "p3", "accepted", "nvidia_bulletin") if k in t)
+        tg = dct(r.get("tier_gaps"))
+        parts = []
+        for k in TIERS:
+            if k in t and k not in tg:
+                parts.append("%s %s" % (esc(k, 20), num(t.get(k))))
+            else:          # 缺少或格式不對：逐項寫 GAP，不靜默丟掉（硬性限制 5）
+                parts.append('%s <span class="st st-GAP">GAP</span>（%s）' % (esc(k, 20), esc(tg.get(k) or "缺", 20)))
+        if r.get("tiers_gap"):
+            parts.insert(0, ctx.gap(r["tiers_gap"]))
+        total = num(r.get("cves_total"))
+        total = total if total != "—" else '<span class="st st-GAP">GAP</span>（缺）'
         cell = ('<div class="vcell"><div class="vstat">report_status %s／release_gate %s</div>'
                 '<div class="vnum">%s；CVE 總數 %s</div></div>') % (
-            ctx.st(r.get("report_status")), ctx.st(r.get("release_gate")), esc(counts or "沒有分級計數", 200), num(r.get("cves_total")))
+            ctx.st(r.get("report_status")), ctx.st(r.get("release_gate")), "、".join(parts), total)
         rows.append([ext(n, 20), cell])
     if not rows:
         return "<p>%s</p>" % ctx.gap("scan-summary 沒有漏洞統計")
@@ -428,8 +459,10 @@ def render_issue_rows(ctx, rows, with_cve):
         if with_cve:
             m = re.search(r"CVE-[0-9]{4}-[0-9]{4,}", str(i.get("title") or ""))
             cells.append(cve_text(m.group(0)) if m else "—")
-        cells += [ext(i.get("title"), 300), esc(i.get("state") if i.get("state") in ("open", "closed") else "?", 10),
-                  ext(i.get("created_at"), 40), " ".join(ext(x, 40) for x in lst(i.get("labels"))[:8])]
+        title = ext(i.get("title"), 300) if isinstance(i.get("title"), str) and i["title"] else ctx.gap("沒有標題")
+        created = ext(i.get("created_at"), 40) if isinstance(i.get("created_at"), str) and i["created_at"] else '<span class="muted">（沒有）</span>'
+        cells += [title, esc(i.get("state") if i.get("state") in ("open", "closed") else "?", 10),
+                  created, " ".join(ext(x, 40) for x in lst(i.get("labels"))[:8])]
         out.append(cells)
     return out
 

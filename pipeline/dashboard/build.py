@@ -46,6 +46,7 @@ DOWNLOAD_RE = re.compile(r"^(report-.+\.zip|vuln-list-.+\.xlsx|p1-table-.+\.xlsx
 SCAN_RE = re.compile(r"^scan-summary-.+\.json\Z", re.S)
 VEX_RE = re.compile(r"^vex-.+\.cdx\.json\Z", re.S)
 RUN_KEY = {"": "full", "-bsp": "bsp", "-os": "os"}
+TIERS = ("p1", "p2", "p3", "accepted", "nvidia_bulletin")
 # CycloneDX 1.6 的 vulnerability analysis 列舉值（其他值一律歸成「不明」）
 VEX_STATES = ("resolved", "resolved_with_pedigree", "exploitable", "in_triage", "false_positive", "not_affected")
 VEX_JUSTIFICATIONS = ("code_not_present", "code_not_reachable", "requires_configuration", "requires_dependency",
@@ -169,17 +170,23 @@ def scan_row(scan):
         r = runs.get(key)
         if not isinstance(r, dict):
             continue
-        stages = r.get("stages") if isinstance(r.get("stages"), dict) else {}
-        non_ok = [[c(k, 60), cs(v, 40)] for k, v in sorted(stages.items(), key=lambda kv: str(kv[0])) if v != "OK"][:100]
+        # 硬性限制 5：stages 缺少或不是 dict → 該份報告記 GAP（不能寫成「每個階段都是 OK」；C0 驗證應修 1）
+        stages = r.get("stages") if isinstance(r.get("stages"), dict) else None
+        stages_gap = None if stages else "沒有 stages"
+        non_ok = [[c(k, 60), cs(v, 40)] for k, v in sorted((stages or {}).items(), key=lambda kv: str(kv[0])) if v != "OK"][:100]
         vul = r.get("vulnerabilities") if isinstance(r.get("vulnerabilities"), dict) else top_vul.get(name)
         vul = vul if isinstance(vul, dict) else {}
-        tiers = vul.get("tiers") if isinstance(vul.get("tiers"), dict) else {}
+        tiers_raw = vul.get("tiers")
+        tiers = tiers_raw if isinstance(tiers_raw, dict) else {}
+        # 每個分級逐項：缺少或格式不對都要寫出來，不能靜默丟掉（C0 驗證應修 2）
+        tier_gaps = {k: ("缺" if k not in tiers else "格式不對") for k in TIERS if ci(tiers.get(k)) is None}
         us = r.get("upstream_source")
         reports[name] = {"report_status": cs(r.get("report_status")), "release_gate": cs(r.get("release_gate")),
                          "build_record_status": cs(r.get("build_record_status")),
                          "upstream_source_status": cs(us.get("status")) if isinstance(us, dict) else None,
-                         "non_ok_stages": non_ok,
-                         "tiers": {k: ci(tiers.get(k)) for k in ("p1", "p2", "p3", "accepted", "nvidia_bulletin") if ci(tiers.get(k)) is not None},
+                         "non_ok_stages": non_ok, "stages_gap": stages_gap,
+                         "tiers": {k: ci(tiers.get(k)) for k in TIERS if ci(tiers.get(k)) is not None},
+                         "tier_gaps": tier_gaps, "tiers_gap": None if isinstance(tiers_raw, dict) else "沒有 tiers",
                          "cves_total": ci(vul.get("cves_total"))}
     if not reports:
         raise Gap("scan-summary 的 runs 裡沒有 full／-bsp／-os")
@@ -306,7 +313,8 @@ def issue_rows(raw):
                 labels.append(c(n, 40))
         if any(DRILL_RE.search(n) for n in labels):          # 演練（drill、*-drill、*-drill-done）不列
             continue
-        out.append({"number": i["number"], "title": c(i.get("title"), 300),
+        t = i.get("title")
+        out.append({"number": i["number"], "title": c(t, 300) if isinstance(t, str) and t.strip() else None,   # null 不寫成字面的 None
                     "state": i.get("state") if i.get("state") in ("open", "closed") else "?",
                     "created_at": cs(i.get("created_at"), 40), "labels": labels[:10], "_body": i.get("body")})
     out.sort(key=lambda r: -r["number"])
@@ -517,11 +525,22 @@ def build_data(source, api, repo, projects_dir="projects", watch_dir=None, now=N
     plan = watch.get("plan") if isinstance(watch.get("plan"), dict) and not watch["plan"].get("gap") else None
     watch["freshness"] = {"at": run.get("created_at") if run else None, "status": plan.get("status") if plan else None,
                           "stale": None if created is None else (now - created > datetime.timedelta(hours=STALE_HOURS))}
+    # Releases 或 Issues 其中一個 API 讀不到：頁首也要有 GAP 警告（C0 驗證建議）
+    if not ok_rel:
+        warnings.append("GAP：Releases API 讀不到（版本區塊沒有資料）")
+    for k, sec in sorted(iss.items()):
+        if isinstance(sec, dict) and sec.get("gap"):
+            warnings.append("GAP：" + sec["gap"])
+    if isinstance(state, dict) and state.get("gap") and "API" in str(state.get("gap")):
+        warnings.append("GAP：" + state["gap"])
+    bad_state = sum(1 for sec in iss.values() if isinstance(sec, dict) for i in sec.get("rows", []) if i.get("state") == "?")
+    if bad_state:
+        warnings.append("有 %d 個 Issue 的 state 不是 open／closed（顯示成 ?）" % bad_state)
     if releases.get("skipped"):
         warnings.append("有 %d 個已發布的 Release 不合規則，沒有列入（見版本區塊最下方）" % len(releases["skipped"]))
     # 專案列：補上最新正式版、開發版、支援期限檢查結果、開著的監控 Issue 數
     sup_rows = {r[0]: r for r in (watch.get("support") or {}).get("rows", [])} if isinstance(watch.get("support"), dict) else {}
-    open_titles = [i["title"] for k in ("kev", "support", "health") for i in iss.get(k, {}).get("rows", []) if i.get("state") == "open"]
+    open_titles = [i["title"] for k in ("kev", "support", "health") for i in iss.get(k, {}).get("rows", []) if i.get("state") == "open" and isinstance(i.get("title"), str)]
     for p in projects.get("rows", []):
         mine = [r for r in releases.get("rows", []) if r["project"] == p["key"]]
         rel = [r for r in mine if r["kind"] == "release"]

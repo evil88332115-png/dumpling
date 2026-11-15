@@ -870,3 +870,73 @@ class CountsWithStatus(unittest.TestCase):
         self.assertIn(gap, e.html[j:j + 3000])
         self.assertNotIn("最近一輪監控 <span", e.html)                      # 沒有假的時間
         self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+
+class MissingDataIsGap(unittest.TestCase):
+    """C0 獨立驗證（982c111）的應修與建議：缺資料不能看起來像沒事（硬性限制 5）。"""
+
+    def env_scan(self, runs, meta_over=None):
+        r, f = release_set(scan_obj={"runs": runs, "components": {"total": 1}}, meta_over=meta_over)
+        return Env(self, releases=[r], files=f)
+
+    def section(self, html, start, end="</article>"):
+        i = html.index(start)
+        return html[i:html.index(end, i)]
+
+    def test_missing_stages_is_gap_not_all_ok(self):
+        for bad in (None, [], "x", {}):
+            with self.subTest(bad=bad):
+                e1 = run_entry()
+                e1["stages"] = bad
+                if bad is None:
+                    del e1["stages"]
+                e = self.env_scan({"": e1, "-bsp": run_entry(), "-os": run_entry()})
+                sec = self.section(e.html, "不是 OK 的階段", "漏洞統計")
+                self.assertIn("沒有 stages", sec)
+                self.assertNotIn("都是 OK", sec)
+        e = self.env_scan({"": run_entry(stages={"A": "OK"}), "-bsp": run_entry(stages={"A": "OK"}), "-os": run_entry(stages={"A": "OK"})})
+        self.assertIn("每份報告的階段都是 OK", e.html)           # 真的都有、都是 OK 才寫
+
+    def test_tiers_missing_or_invalid_listed_as_gap(self):
+        e = self.env_scan({"": run_entry(tiers={"p1": "5", "p2": 2, "p3": -1, "accepted": True}), "-bsp": run_entry(), "-os": run_entry()})
+        sec = self.section(e.html, "漏洞統計（含該報告的狀態）", "</table>")
+        full = sec[sec.index('<span class="ext">full</span>'):sec.index('<span class="ext">bsp</span>')]
+        for k in ("p1", "p3", "accepted"):
+            self.assertIn('%s <span class="st st-GAP">GAP</span>（格式不對）' % k, full)
+        self.assertIn("p2 2", full)
+        self.assertIn('nvidia_bulletin <span class="st st-GAP">GAP</span>（缺）', full)
+        e1 = run_entry()
+        e1["vulnerabilities"] = {"cves_total": 1}
+        e = self.env_scan({"": e1, "-bsp": run_entry(), "-os": run_entry()})
+        self.assertIn("沒有 tiers", e.html)
+        self.assertNotIn("沒有分級計數", e.html)
+
+    def test_meta_report_missing_in_scan_runs(self):
+        e = self.env_scan({"": run_entry(), "-bsp": run_entry()})            # meta 有 full／bsp／os，scan 沒有 -os
+        self.assertIn("scan-summary 的 runs 沒有這份報告（release-meta 有列）", e.html)
+        self.assertIn("scan-summary 的 runs 沒有這份報告", self.section(e.html, "不是 OK 的階段", "漏洞統計"))
+
+    def test_api_failure_in_header(self):
+        e = Env(self, source=FakeSource([], {}, boom=collect.ApiError("API 回 HTTP 500")))
+        self.assertIn("GAP：Releases API 讀不到", e.html[:e.html.index("</header>")])
+        e = Env(self, api=FakeApi(fail={"support-period": issues.Fail("HTTP 500")}))
+        self.assertIn("GAP：Issues API 讀不到（support-period）", e.html[:e.html.index("</header>")])
+
+    def test_issue_null_title_created_and_bad_state(self):
+        bad = issue(7, "x", state="weird")
+        bad["title"], bad["created_at"] = None, None
+        e = Env(self, api=FakeApi({"dumpling-watch": [bad]}))
+        self.assertNotIn(">None<", e.html)
+        self.assertNotIn('"ext">None', e.html)
+        self.assertIn("沒有標題", e.html)
+        self.assertIn("（沒有）", e.html)
+        self.assertIn("state 不是 open／closed", e.html[:e.html.index("</header>")])
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_safe_href_other_host_same_length(self):
+        self.assertEqual(len("https://gitlab.com/"), len(render.BASE))
+        for u in ("https://gitlab.com/%s/issues/1" % REPO, "https://githuc.com/%s/issues/1" % REPO,
+                  "https://github.com.evil.example/%s/issues/1" % REPO, "http://github.com/%s/issues/1" % REPO):
+            with self.subTest(u=u):
+                self.assertIsNone(render.safe_href(u, REPO))
+        self.assertIsNotNone(render.safe_href("https://github.com/%s/issues/1" % REPO, REPO))
