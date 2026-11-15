@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)  # Python 3.11 起 -I 含 -P，不會自動把腳本所在目錄放進 sys.path
 import fetch_verify  # noqa: E402  共用實作（C1）
+from firmware_watch import parse_watch  # noqa: E402  選用欄位 watch 的格式
 from fetch_verify import check_file, curl_download, fetch_one, sha256_of  # noqa: E402,F401
 
 try:
@@ -45,6 +46,10 @@ def validate(doc):
     status = doc.get("status")
     if status and status not in STATUSES:
         errs.append("status 必須是 " + "/".join(STATUSES))
+    try:
+        parse_watch(doc)
+    except ValueError as e:
+        errs.append(str(e))
     if status != "ok":
         return errs
     for k in OK_REQUIRED:
