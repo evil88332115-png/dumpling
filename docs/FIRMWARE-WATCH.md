@@ -27,6 +27,15 @@
 | 監控鍵（UUID） | `dumpling:firmware-demo/<slug>@<firmware_version>#firmware` | **不含 Release 的日期，包含樣本身分（slug）＋韌體版本**（C0 決定：「BIOS 版本或映像的 sha256」，這裡用 BIOS 版本）。BIOS 改版就是新的鍵，當成新版本；同一版重新發布，鍵不變，不會把既有命中當成新的。新的鍵本來就有的 KEV，依 #112 的規則開 Issue。映像雜湊（`image_sha256`）**只記在 Issue 內文與報告**，不放進鍵：重新壓縮的同一版韌體會變成新的鍵（C2 建議） |
 | `firmware_version` | 照 firmware.yml 原樣，不改寫：`3404`、`v1.2.0`、`0059`、`v0.9.2`、`v1.0.1`、`2024.02-2ubuntu0.10`、`v1.6.0` | 全部符合 `VERSION_RE`（C2 核對） |
 
+- **監控鍵的兩條例外規則**（C0 決定，2026-11-15）：
+  1. **讀不到 BIOS 版本，或版本只是佔位字串**：鍵改用映像雜湊，寫成 `dumpling:firmware-demo/<slug>@sha256-<image_sha256 前 16 碼>#firmware`，同時標 GAP（版本讀不到）。
+     - 不能用空字串或預設值當鍵。
+     - 佔位字串的判定：`firmware_version` 是空的、null，或符合 `^(x+([._-]x+)*|0+([._-]0+)*|unknown|n/?a|tbd|to be completed)$`（不分大小寫）。
+     - 兩者都沒有（版本讀不到、`image_sha256` 也是 null）：這份樣本不進監控，標 GAP，列在報告與 not_watched。
+  2. **同一個 slug、同一個版本，`image_sha256` 卻不同**（廠商重新發布了內容不同的檔案）：
+     - 不開新鍵。
+     - 放進「需注意」（ATTENTION），在報告與這個鍵所有開著的 Issue 留言，列出前後兩個 sha256。不能悄悄覆蓋。
+     - 狀態記每個鍵最近一次的 `image_sha256`（`firmware.samples[<鍵>].image_sha256`），另外記 `image_sha256_history`，每次變化追加一筆：時間、舊值、新值。
 - **只監控最新的一個 `firmware-demo` Release**（依 `published_at`）。舊的韌體 Release 留著當紀錄，collect 列在「說明」，不比對。
   理由：每個 Release 都包含全部樣本，監控鍵又不含日期，同時收多個 Release 會出現重複的鍵。
   - **這是第一階段公開示範的限制。** 公司內部版要監控**每一個已出貨、還在支援期內的韌體版本**，因為舊版 BIOS 還在市場上。這和盤點已出貨產品的工作直接相關，列為搬家與第二階段（C0 決定，2026-11-15）。
@@ -205,6 +214,7 @@
 ## 9. 已決定（C0，2026-11-15）
 
 1. **監控鍵**：不含 Release 日期，包含樣本身分＋韌體版本（§2）；映像雜湊只記在內文。
+   另有兩條例外規則：版本讀不到或只是佔位字串時，改用映像雜湊當鍵並標 GAP；同版本不同雜湊時，不開新鍵，但進「需注意」並列出兩個雜湊（§2）。
    - 只監控最新的韌體 Release，是第一階段示範的限制。
    - 內部版要監控每一個已出貨、還在支援期內的韌體版本，列為搬家與第二階段。
 2. **公告 Issue**：
@@ -218,3 +228,30 @@
    - dry_run 的 would_open 給 C0 看過，而且 C0 同意。
 
    第一輪既有的 affected（AMI、AMD-SB-7014／7033、INTEL-SA-01315）要照開，還是先納入基準，到時候看了數字再決定。
+
+## 10. C3 實作的測試清單
+
+監控鍵：
+- 一般情況：`<slug>@<firmware_version>`。同一份樣本放進新的韌體 Release（日期不同）重發 → 鍵不變，0 個新的 KEV Issue。
+- 版本改了（BIOS 改版）→ 新的鍵；它本來就有的 KEV 依 #112 開 Issue。
+- **版本讀不到或只是佔位字串**（空字串、null、`xx.xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`）→ 鍵用 `sha256-<前 16 碼>`，該樣本標 GAP（版本讀不到）；**沒有任何鍵是空字串或預設值**。
+- **版本讀不到、`image_sha256` 也是 null** → 不進監控，標 GAP，列在 not_watched。
+- **同 slug、同版本、`image_sha256` 不同** → 鍵不變、不開新的 KEV Issue；結果 ATTENTION。報告與既有的 Issue 留言列出兩個 sha256；狀態的 `image_sha256` 更新，`image_sha256_history` 多一筆。
+- 隔天同一個新 sha256 → 不再留言。
+
+collect：
+- 只收最新的 `firmware-demo` Release，舊的列在「說明」。
+- `firmware-meta.json` 壞掉、schema 不對 → 整個韌體 Release GAP。
+- 單一樣本附件缺、sha256 不符、超過大小、附件名不在清單 → 只有那一份 GAP。
+- `firmware-demo/…` 不會被當成板子的 `release`，也不會要求 release-meta。
+
+公告重跑與 Issue：
+- 範例檔照 C2 的 `firmware-rematch.example.json`，變形資料在測試裡另外複製一份。
+- rematch-summary 沒列的樣本 → NOT_RUN，不拿 Release 當時的結果頂替。
+- 規則表 affected：一則公告一個 Issue，內文列出多個樣本；標題與內文寫「建議受影響（初步規則，待人審）」（`review: preliminary`）或「規則已確認，待負責單位確認」（`confirmed`）。
+- 多一個樣本變成 affected → 在原 Issue 留言；變回 not-affected → 留言，不關閉。
+- Intel 微碼：同一份微碼（cpuid/platform＋rev）在兩個樣本 → 一個 Issue，列出全部候選 SA；候選清單變了 → 留言。
+- 表過期（`stale: true`）→ 不開公告 Issue，進「需注意」；狀態 Issue 的摘要與 state 的 `firmware.tables` 看得到。
+- 供應商 SBOM → 公告比對欄是 `NOT_ASSESSED（沒有 inventory，不重跑公告比對）`，不是 NOT_RUN。
+- 沒有 purl／CPE 的樣本 → Grype 欄是 NOT_ASSESSED（可比對元件 0），不是 OK。
+- 所有外來字串（slug、元件名、公告 ID、表的識別）經過 md_text／md_code／md_title，`unsafe_markdown` 為空。
