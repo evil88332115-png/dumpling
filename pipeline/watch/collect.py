@@ -779,6 +779,28 @@ def _fw_tables(t):
     return out
 
 
+FW_DT_BAD = {"status": "GAP", "result": None, "reason": "dt 欄位格式不對"}
+
+
+def fw_dt(meta):
+    """firmware-meta 的 dt（C2 #140：DT 上傳的結果，只用來顯示，不擋 Release、不影響比對）。
+    合法的組合只有兩種：result OK → status OK、reason null；result FAIL／NOT_RUN → status GAP、reason 是非空字串（≤ 200 字）。
+    沒有這個欄位（舊的 Release）→ None；其他（型別、組合不對）→ FW_DT_BAD（不顯示原文）。reason 只檢查型別與長度，不寫死固定句。"""
+    if "dt" not in meta:
+        return None
+    d = meta["dt"]
+    if not isinstance(d, dict):
+        return dict(FW_DT_BAD)
+    st, res, why = d.get("status"), d.get("result"), d.get("reason")
+    if st == "OK" and res == "OK" and why is None:
+        return {"status": "OK", "result": "OK", "reason": None}
+    if st == "GAP" and res in ("FAIL", "NOT_RUN") and isinstance(why, str):
+        w = _clean(why, 1000)
+        if w.strip() and len(why) <= 200:
+            return {"status": "GAP", "result": res, "reason": w[:200]}
+    return dict(FW_DT_BAD)
+
+
 def check_fw_meta(meta, tag):
     """firmware-meta.json 整份的檢查：回錯誤字串或 None（樣本各自的問題在 collect_firmware 處理）。"""
     if not isinstance(meta, dict):
@@ -851,7 +873,7 @@ def collect_firmware(source, rel, project, tagver, out):
     tag = rel["tag"]
     e = {"tag": tag, "kind": "firmware", "project": project, "version": tagver,
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
-         "commit": None, "built_at": None, "meta": None, "tables": {}, "samples": [], "not_watched": [], "problems": []}
+         "commit": None, "built_at": None, "meta": None, "tables": {}, "dt": None, "samples": [], "not_watched": [], "problems": []}
     probs = e["problems"]
     reldir = os.path.join(out, "firmware")
     relpath = "firmware"
@@ -893,6 +915,7 @@ def collect_firmware(source, rel, project, tagver, out):
     e["commit"] = meta.get("commit")
     e["built_at"] = _date(meta.get("built_at"))
     e["tables"] = _fw_tables(meta.get("tables"))
+    e["dt"] = fw_dt(meta)
     for x in meta.get("not_watched") or []:     # check_fw_meta 已確認是 list of {slug: str, why: str|None}
         # source=meta：firmware.yml 依設計宣告不監控（合成 vBIOS、沒有檔案的樣本），不算 collect 的 GAP
         e["not_watched"].append({"slug": _clean(x["slug"], 64), "why": _clean(x.get("why") or "", 200), "source": "meta"})
