@@ -49,15 +49,16 @@ class FakeGitLab(issues.GitLabApi):
         self.members = {BOT: (40, "active"), DEV: (30, "active"), REPORTER: (20, "active"), GUEST: (10, "active"), BLOCKED: (30, "blocked")}
         self.schedules = {}          # id -> {"row": 列表的欄位, "vars": [...]|None, "single": "ok"|"403"|"omit"}
         self.requests, self.creates, self.script = [], [], []
+        self.now_s = NOW_S              # 新建 Issue 的 created_at（測試要讓時間往前走時改這個）
 
     def _ts(self):
         self.tick += 1
         return "2026-11-15T11:00:%02d.000Z" % (self.tick % 60)
 
-    def add_issue(self, description, labels, state="opened", title="t", author=BOT, updated_at=None):
+    def add_issue(self, description, labels, state="opened", title="t", author=BOT, updated_at=None, created_at=None):
         self.n += 1
         self.issues[self.n] = {"id": 1000 + self.n, "iid": self.n, "title": title, "description": description, "state": state,
-                               "labels": list(labels), "updated_at": updated_at or self._ts(), "confidential": True,
+                               "labels": list(labels), "updated_at": updated_at or self._ts(), "created_at": created_at or self.now_s, "confidential": True,
                                "author": {"id": author, "username": "u%d" % author, "state": "active"}}
         return self.n
 
@@ -235,6 +236,14 @@ class TestKeyAndConstants(unittest.TestCase):
                 for n in (1, 2, 10):
                     self.assertEqual(deadman.key_of(mode, ident, n), match.issue_key(mode, "deadman", ident, str(n)))
         self.assertNotEqual(deadman.key_of("real", "x", 1), deadman.key_of("real", "x", 2))
+
+    def test_docs_do_not_describe_removed_behaviour(self):
+        # 預驗發現文件和程式相反過：退回 updated_at、只列開著的 Issue 都不是現在的行為。文件不能再這樣寫
+        for rel in ("docs/GITLAB-PORT.md", "docs/WATCH.md", "pipeline/watch/deadman.py"):
+            with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+                text = f.read()
+            for stale in ("沒有 runs 才用", "沒有 runs 才退回", "才退回 Issue 的 `updated_at`", "先列出開著、帶", "列出開著、帶 watch-deadman", "只對開著的 Issue 留言"):
+                self.assertNotIn(stale, text, (rel, stale))
 
     def test_default_threshold_equals_dashboard_stale_hours(self):
         spec = importlib.util.spec_from_file_location("dashboard_build_for_test", os.path.join(ROOT, "pipeline", "dashboard", "build.py"))
@@ -490,15 +499,23 @@ class TestSchedules(Base):
         self.assertEqual(self.idents(), {"schedule:3:owner-not-active"})
 
     def test_next_run_stale_and_boundary(self):
-        self.gl.add_schedule(3, next_run=ago(37).replace("Z", ".000Z"))
+        # 排程的容忍值是獨立的 2 小時（NEXT_RUN_SLACK_HOURS），不跟狀態的 36 小時走
+        self.assertEqual(deadman.NEXT_RUN_SLACK_HOURS, 2)
+        self.gl.add_schedule(3, next_run=ago(3).replace("Z", ".000Z"))
         self.assertEqual(self.sd()[0], 2)
         self.assertEqual(self.idents(), {"schedule:3:next-run-stale"})
-        self.gl.schedules[3]["row"]["next_run_at"] = ago(36).replace("Z", ".000Z")       # 剛好 36 小時：不算
+        self.assertIn("2 小時", self.plan()["actions"][0]["title"] + self.plan()["actions"][0]["body"])
+        self.gl.schedules[3]["row"]["next_run_at"] = ago(2).replace("Z", ".000Z")        # 剛好 2 小時：不算
         self.assertEqual(self.sd()[0], 0)
-        self.gl.schedules[3]["row"]["next_run_at"] = ago(35).replace("Z", ".000Z")
+        self.gl.schedules[3]["row"]["next_run_at"] = (NOW - dt.timedelta(hours=2, seconds=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        self.assertEqual(self.sd()[0], 2)
+        self.gl.schedules[3]["row"]["next_run_at"] = ago(1).replace("Z", ".000Z")
         self.assertEqual(self.sd()[0], 0)
         self.gl.schedules[3]["row"]["next_run_at"] = (NOW + dt.timedelta(hours=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         self.assertEqual(self.sd()[0], 0)
+        # --max-age-hours 只管狀態，不影響排程的 2 小時
+        self.gl.schedules[3]["row"]["next_run_at"] = ago(3).replace("Z", ".000Z")
+        self.assertEqual(self.sd("--max-age-hours", "100")[0], 2)
 
     def test_next_run_unreadable_for_active_schedule(self):
         self.gl.add_schedule(3)
@@ -827,12 +844,16 @@ class TestDedupAndRecovery(Base):
             return orig(repo, label, state)
         self.gl.list_issues = bad
         rc, out = self.dm()
-        self.assertEqual(rc, 2, out)                # 警告照報
+        # 查不到歷史：已確定的警告仍然送出（plan 有 open），但結果是 FAIL（結束碼 1），不是 ALERT（2）
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(last_line(out)[1], "FAIL")
+        self.assertEqual(self.result()["status"], "FAIL")
         self.assertEqual([a["op"] for a in self.plan()["actions"]], ["open"])
         self.assertEqual([(c["name"], c["status"]) for c in self.result()["checks"]], [("state", "ALERT"), ("recovery", "FAIL")])
-        # 沒有警告、只有恢復查詢失敗 → FAIL
+        # 沒有警告、只有恢復查詢失敗 → 一樣 FAIL，沒有 plan
         self.set_state(ago(1))
         self.assertEqual(self.dm()[0], 1)
+        self.assertFalse(self.has_plan())
 
     def test_schedule_issue_recovery_scoped(self):
         self.set_state(ago(1))
@@ -1142,8 +1163,99 @@ class TestIncidentCount(Base):
             return orig(repo, label, state)
         self.gl.list_issues = bad
         rc, out = self.dm()
-        self.assertEqual(rc, 2, out)
+        self.assertEqual(rc, 1, out)                 # 不是 2：不知道第幾次停擺時要看得出來
         self.assertEqual(self.plan()["actions"][0]["key"], self.k("state-stale:" + ago(40), 1))
+        self.assertEqual(self.result()["status"], "FAIL")
+
+
+class TestReminder(Base):
+    """同一次停擺持續：每 7 天在原 Issue 留一則「仍在停擺」（T-08 寄信做好之前）。"""
+
+    def start(self):
+        self.last = ago(40)
+        self.set_state(self.last)
+        self.assertEqual(self.dm()[0], 2)
+        self.apply()
+        (self.n, self.issue), = self.gl.deadman_issues().items()
+        self.key = re.match(r"<!-- dumpling-deadman key=([0-9a-f]{64})", self.issue["description"]).group(1)
+
+    def at(self, days, **kw):
+        now = (NOW + dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rc, out = self.dm(now=now, **kw)
+        self.assertEqual(rc, 2, out)
+        return [a for a in self.plan()["actions"] if a["op"] == "comment"]
+
+    def test_day_6_no_reminder_day_7_reminder_then_quiet(self):
+        self.start()
+        self.assertEqual(self.at(6), [])
+        self.assertEqual(self.at(6.99), [])
+        c = self.at(7)
+        self.assertEqual(len(c), 1)
+        self.assertEqual((c[0]["key"], c[0]["issue"]), (self.key, self.n))
+        self.assertTrue(c[0]["body"].startswith("<!-- dumpling-deadman-reminder key=%s at=" % self.key))
+        self.assertIn("仍在停擺（自 " + NOW_S, c[0]["body"])
+        self.assertIn("T-08", c[0]["body"])
+        self.assertEqual(self.dm(now=(NOW + dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))[0], 2)
+        self.apply()
+        self.assertEqual(len(self.gl.notes[self.n]), 1)
+        self.assertEqual(self.result()["reminded"], [{"key": self.key, "issue": self.n}])
+        # 冪等：同一天再跑、之後 6 天都不再留；14 天再留一則
+        self.assertEqual(self.at(7), [])
+        self.assertEqual(self.at(13), [])
+        c = self.at(14)
+        self.assertEqual(len(c), 1)
+        self.apply()
+        self.assertEqual(len(self.gl.notes[self.n]), 2)
+        self.assertEqual(len(self.gl.deadman_issues()), 1)            # 沒有開新的 Issue
+        self.assertEqual(self.gl.issues[self.n]["state"], "opened")
+
+    def test_forged_reminder_marker_does_not_count(self):
+        self.start()
+        forged = "<!-- dumpling-deadman-reminder key=%s at=%s -->\n偽造" % (self.key, (NOW + dt.timedelta(days=6)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        for who in (REPORTER, GUEST, BLOCKED, 777):
+            self.gl.add_note(self.n, forged, author=who)
+        self.gl.add_note(self.n, forged, author=DEV, system=True)
+        self.assertEqual(len(self.at(7)), 1)            # 真的提醒還是會出現
+        # 可信作者（Developer）貼的有效標記才算
+        self.gl.add_note(self.n, forged, author=DEV)
+        self.assertEqual(self.at(7), [])
+        # 別的 key 的標記不算
+        self.gl.notes[self.n][-1]["body"] = forged.replace(self.key, "0" * 64)
+        self.assertEqual(len(self.at(7)), 1)
+
+    def test_no_reminder_for_closed_or_forged_or_recovered(self):
+        self.start()
+        self.issue["state"] = "closed"                  # 人關了：由人決定，不提醒
+        self.assertEqual(self.at(30), [])
+        self.issue["state"] = "opened"
+        self.issue["author"] = {"id": REPORTER, "username": "u", "state": "active"}    # 作者不可信的 Issue 不提醒（也不算我們的 Issue）
+        rc, out = self.dm(now=(NOW + dt.timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        self.assertEqual([a["op"] for a in self.plan()["actions"]], ["open"])
+        self.assertNotEqual(self.plan()["actions"][0]["key"], self.key)       # 被不可信 Issue 佔用的 key 跳過，開新的
+
+    def test_no_created_at_no_reminder(self):
+        self.start()
+        self.issue["created_at"] = None
+        self.assertEqual(self.at(30), [])
+        self.issue["created_at"] = "garbage"
+        self.assertEqual(self.at(30), [])
+
+
+class TestAsciiOnly(Base):
+    def test_parse_ts_rejects_fullwidth_digits(self):
+        self.assertIsNotNone(deadman.parse_ts("2026-11-15T12:00:00Z"))
+        for bad in ("２０２６-11-15T12:00:00Z", "2026-１１-15T12:00:00Z", "2026-11-15T12:00:00.１Z", "2026-11-15T12:00:00+０８:00"):
+            self.assertIsNone(deadman.parse_ts(bad), bad)
+
+    def test_fullwidth_digits_in_state_time_is_alert(self):
+        st = issues.encode_state({"schema": 1, "runs": [{"at": "２０２６-11-15T11:00:00Z"}]}, "real", "s", urlsafe=True)
+        self.gl.add_issue(st, ["watch-state"])
+        self.assertEqual(self.dm()[0], 2)
+        self.assertEqual(self.plan()["actions"][0]["key"], deadman.key_of("real", "state:no-time", 1))
+
+    def test_now_rejects_fullwidth_digits(self):
+        rc, out = run_main(deadman, [*GL, "--out", self.out(), "--now", "２０２６-11-15T12:00:00Z"], self.gl)
+        self.assertEqual(rc, 64, out)
 
 
 if __name__ == "__main__":

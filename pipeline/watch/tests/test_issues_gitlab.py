@@ -534,6 +534,23 @@ class TestDeadmanPlan(Base):
         rc, out = self.apply(self.dplan([self.cact()], name="tn.json"), "--mode", "real")
         self.assertEqual(list(self.gl.notes), [b])
 
+    def test_deadman_label_only_in_deadman_plans(self):
+        act = dict(self.open_act(labels=("kev", "watch-deadman")))
+        with self.assertRaises(issues.Fail):                       # 一般監控的 plan
+            issues.load_plan(self.plan([act]))
+        sup = {"op": "open", "key": K1, "title": "支援期限", "body": "x", "labels": ["support-period", "watch-deadman"]}
+        for kind in (None, "support"):                             # 支援期限的 stateless plan
+            with self.assertRaises(issues.Fail):
+                issues.load_plan(self.dplan([sup], kind=kind, name="s.json"))
+        issues.load_plan(self.dplan([self.dact()], name="ok.json"))      # deadman 的 plan 可以
+        with self.assertRaises(issues.Fail):                       # demo 之類的一般 plan 帶 stateless=false 也不行
+            issues.load_plan(self.plan([act], stateless=False))
+
+    def test_gitlab_issue_has_created_at(self):
+        n = self.gl.add_issue("x", ["a"])
+        self.gl.issues[n]["created_at"] = "2026-11-15T12:00:00.000Z"
+        self.assertEqual(self.gl.list_issues(PROJ, "a")[0]["created_at"], "2026-11-15T12:00:00.000Z")
+
     def test_issue_field_validation(self):
         for act in (dict(self.cact(), issue="1"), dict(self.cact(), issue=0), dict(self.cact(), issue=True), dict(self.dact(), issue=1)):
             with self.assertRaises(issues.Fail):

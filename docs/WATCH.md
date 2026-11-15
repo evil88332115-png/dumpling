@@ -242,11 +242,12 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 
 「每日監控沒有結果」本身要有人發現：`deadman.py` 讀狀態 Issue，最後更新時間（state 的 `runs` 最後一筆的 `at`）超過 36 小時（`--max-age-hours`，和儀表板的 `STALE_HOURS` 一致）
 就開一個 Issue（標籤 `watch-health`、`watch-deadman`；同一次停擺只開一個，恢復後在原 Issue 留言「已恢復」，不自動關閉）。GitLab 上加 `--schedules` 還會巡檢 pipeline schedules
-（`DUMPLING_JOB=watch` 的排程不見、被停用、擁有者不是 active、`next_run_at` 過期；看不到 variables 算 GAP 也是警告）。
-輸出 `result.json`，有警告時另寫 stateless 的 `plan.json`（`stateless_kind: deadman`）交給 `issues.py apply`；結束碼 OK 0、ALERT 2、FAIL 1。
+（`DUMPLING_JOB=watch` 的排程不見、被停用、擁有者不是 active、`next_run_at` 過期超過 2 小時〔獨立的常數，不跟狀態的 36 小時走〕；看不到 variables 算 GAP 也是警告）。
+輸出 `result.json`，有警告（或要留恢復／提醒留言）時另寫 stateless 的 `plan.json`（`stateless_kind: deadman`）交給 `issues.py apply`；結束碼 OK 0、ALERT 2、FAIL 1。查舊 Issue／留言失敗時，已確定的警告仍然送出，但結果是 FAIL（1），不是 ALERT。範本在 rc＝2 時還會確認 `result.json` 的 `status` 是 `ALERT`（Python 找不到檔案的結束碼也是 2）。
 狀態的 `runs` 不是非空列表（缺少、空的、壞掉）也是警告，不退回 Issue 的 `updated_at`。
 **停擺次數 n**：同一種停擺的 key 含「第幾次」（`<base>|<n>`）：同一次停擺持續好幾天只開一個 Issue；恢復（deadman 在原 Issue 留言「已恢復」）、人關閉之後再發生，開新的 Issue（標題加「（第 n 次）」）。
 deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 ≥ Developer，或 token 自己；GitHub：OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]）；偽造的同 key Issue 不能吞掉警告，也收不到恢復留言（細節與威脅模型見 GITLAB-PORT T-12）。
+同一次停擺持續時，每 7 天在原 Issue 留一則「仍在停擺（自 …）」（可信作者的機器標記加時間判斷，7 天內不重複；已關閉的不提醒），直到 T-08 的寄信做好。已關閉的可信 Issue 在恢復時也會收到「已恢復」留言（不重開）。
 **只偵測與開 Issue，email 還沒做（T-08）。**範本現在是 `when: manual`：沒人點就不會跑，死人開關要等驗證完放開 manual 才真的有作用。範本 `gitlab/.gitlab-ci.yml` 的 `watch:deadman` 用獨立的排程（`DUMPLING_JOB=deadman`）、獨立的擁有者與 token（`DEADMAN_GITLAB_TOKEN`）。
 **GitHub 端目前沒有 deadman**：公開 repo 靠上面的 keepalive 加每月人工檢查（`docs/STATUS.md` 的「下次人工檢查日期」）；第一階段只做 GitLab 範本，GitHub 後端只用在測試與演練。
 

@@ -656,6 +656,7 @@ art14:countdown:
 # next_run_at 過期；看不到排程的 variables 時算 GAP（也是警告）。有警告就開 Issue（key 含這一次停擺的識別：同一次停擺只開一個）；恢復時在原 Issue 留言「已恢復」，不自動關閉。
 # 只做偵測與開 Issue；email 提醒（T-08）還沒做。只用假 API 測過、沒有對真實 GitLab 驗證，所以這個 job 仍是 when: manual（同 watch:*），驗證完再放開。
 # 結束碼：0 OK、2 ALERT（有警告：Issue 已開，job 顯示「允許失敗」的黃色，不算失敗）、其他（1 FAIL、64 用法）是失敗。
+# 注意 2 和 Python「找不到檔案」的結束碼撞號：script 在 rc=2 時另外檢查 result.json 的 status 是 ALERT，不是就改成 1（見 script）。
 # **請用另一個排程、另一個擁有者（服務帳號）跑這個 job**：watch 的排程擁有者被封鎖時，watch 排程會 Inactive；deadman 的排程若同一個擁有者就會一起停，
 # 死人開關就失效了（GITLAB-PORT 第 8 節）。
 # **allow_failure 的兩層**：規則層級的 `allow_failure: true` 會蓋掉 job 層級的 `allow_failure:exit_codes`（官方 ci/yaml 的 rules:allow_failure）。
@@ -693,6 +694,12 @@ watch:deadman:
       rc=0
       GITLAB_TOKEN="$DEADMAN_GITLAB_TOKEN" python3 -I pipeline/watch/deadman.py --backend gitlab --gitlab-url "$CI_API_V4_URL" \
         --project "$CI_PROJECT_ID" --out deadman-out --mode real --schedules || rc=$?
+      # 結束碼 2 要確認真的是 deadman 的 ALERT：Python 找不到檔案（例如 deadman.py 不見了）的結束碼也是 2，而 allow_failure:exit_codes 會把它當成「允許失敗」而靜默。
+      # 所以 rc=2 時 deadman-out/result.json 要存在、status 要是 ALERT，否則算 FAIL（1）
+      if [ "$rc" = 2 ] && ! python3 -I -c 'import json,sys; sys.exit(0 if json.load(open("deadman-out/result.json", encoding="utf-8")).get("status") == "ALERT" else 1)' 2>/dev/null; then
+        echo "deadman: FAIL（結束碼 2，但 deadman-out/result.json 不存在或 status 不是 ALERT：不是 deadman 的警告，可能是找不到 deadman.py）"
+        rc=1
+      fi
       # 有 plan.json（警告要開的 Issue、或恢復的留言）才套用；plan 是 stateless，不碰狀態 Issue。deadman 自己失敗（1）時，已經確定的警告也照樣套用
       arc=0
       if [ -f deadman-out/plan.json ]; then

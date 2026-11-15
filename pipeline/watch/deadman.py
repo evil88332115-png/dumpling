@@ -14,11 +14,12 @@
   找不到狀態 Issue、解不開、時間讀不出來（或在未來超過 1 小時）也是 ALERT，各自寫明原因。API 失敗是 FAIL。
 檢查 2（只有 GitLab 後端而且有 --schedules）：GET /projects/:id/pipeline_schedules 列出全部排程，再對每一個 GET …/pipeline_schedules/:id 取 variables
   （variables 只在單筆回應，而且只給 Maintainer、Owner 或排程擁有者看），挑出 variables 有 DUMPLING_JOB=watch 的排程。ALERT 的情況：
-  一個都沒有；active 是 false；owner.state 不是 active；next_run_at 已經過了超過 --max-age-hours（排程卡住）。
+  一個都沒有；active 是 false；owner.state 不是 active；next_run_at 已經過了超過 NEXT_RUN_SLACK_HOURS（2 小時；獨立的常數，不跟狀態的 36 小時走；排程卡住）。
   單筆回應拿不到 variables（HTTP 403／404，或回應沒有 variables 欄位）→ GAP「token 角色不夠，看不到排程的 variables」，算 ALERT 並寫明，不當成「沒有排程」。
   官方依據（2026-11-15 C3 讀過）：docs.gitlab.com/api/pipeline_schedules/；官方頁沒寫最低角色，待內部驗證（GITLAB-PORT T-12）。
 
 輸出：stdout 一行 WATCH-DEADMAN<TAB>OK|ALERT|FAIL<TAB>說明；結束碼 OK 0、ALERT 2、FAIL 1、用法 64。
+  查舊 Issue／留言失敗（不知道第幾次停擺、也不能留恢復與提醒留言）→ 已確定的警告仍然寫進 plan（key 取第 1 次，apply 用既有 Issue 去重），但整體 FAIL（結束碼 1，不是 2）。
   <out>/result.json 一定寫：{status, checks:[{name,status,detail}], last_update, age_hours, max_age_hours, schedules:[摘要，不含 variables 的值], …}。
   有要開的 Issue 或要留的「已恢復」留言時另寫 <out>/plan.json（dumpling-watch-plan/1，stateless、stateless_kind=deadman；交給 issues.py apply）。
 
@@ -38,6 +39,8 @@ Issue 與恢復：
     <!-- dumpling-deadman-recovered key=<64 hex> -->，下一輪看到可信作者寫的這則就跳過。
     標記放在留言（不用標籤）的理由：標籤 Reporter／Planner 就能改，留言有作者可以核對。可信的定義（Judge，沿用 art14.Trust）：GitLab 要是專案成員、等級 >= Developer（30），
     或是 token 自己的使用者（GET /user）；GitHub 要是 OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]；system 留言不算。Issue 的作者與留言的作者都照這個規則。
+  - 提醒：同一次停擺持續時（這個警告的 key 有可信的、開著的 Issue），Issue 開了或上一則提醒之後每 REMINDER_DAYS（7）天，在原 Issue 留一則「仍在停擺（自 …）」，直到 T-08 的寄信做好。
+    留言第一行是 <!-- dumpling-deadman-reminder key=<64 hex> at=<UTC> -->；上一則提醒只認可信作者寫的（at 取自標記），7 天內不重複；Issue 開啟時間取 API 的 created_at（讀不到就不提醒）；已關閉的 Issue 不提醒。
   - 外來字串（排程 description、owner username、ref、cron…）寫進 Issue 前一律用 match.md_text 淨化（標題用 match.md_title）。理由：md_text ＝ firmware_mdsafe.md_safe
     （跳脫 Markdown、@ 提及、自動連結、HTML 實體）再加上 Issue 參照（#123、GH-123）斷開，後者在 Issue 內文才需要，所以選 match.md_text 而不是裸的 md_safe。
     淨化結果是單行，所以不會產生以 / 開頭的行（GitLab quick action）；issues.py apply 另有 quick action 與公開檢查。公開檢查命中外來字串時（例如描述裡有信箱），
@@ -61,16 +64,19 @@ import match  # noqa: E402  只用 md_text／md_title／unsafe_actions（淨化�
 import publiccheck  # noqa: E402
 
 DEFAULT_MAX_AGE_HOURS = 36           # 和 pipeline/dashboard/build.py 的 STALE_HOURS 一致（test_deadman 鎖住）
+NEXT_RUN_SLACK_HOURS = 2         # 排程的 next_run_at 過期超過這麼久＝排程卡住（和狀態的 36 小時門檻分開：排程該跑的時候沒跑，不必等一天半才發現）
+REMINDER_DAYS = 7              # 同一次停擺持續時，每隔這麼多天在原 Issue 提醒一次（T-08 寄信做好之前，Issue 開了之後不會有任何動靜）
 MAX_N = 1000                  # 同一種停擺最多追蹤幾次：超過就 FAIL（不無限迴圈，也不假裝沒事）
 FUTURE_SLACK = datetime.timedelta(hours=1)      # 最後更新時間比現在晚超過這麼多＝壞資料（否則一個未來的時間會讓死人開關永遠不響）
 KEY_PREFIX = "dumpling-watch/1"      # 同 match.KEY_PREFIX；key 的算法同 match.issue_key（不 import，測試核對）
 LABELS = ["watch-health", issues.DEADMAN_LABEL]
 SCOPE_RE = re.compile(r"<!-- dumpling-deadman-scope (state|schedule:[0-9]+|schedule:none|schedule:all) -->")
 RECOVERED_RE = re.compile(r"<!-- dumpling-deadman-recovered key=([0-9a-f]{64}) -->")
-TS_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})$")
+TS_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})$", re.ASCII)      # ASCII：全形數字之類的 \d 不算
+REMINDER_RE = re.compile(r"<!-- dumpling-deadman-reminder key=([0-9a-f]{64}) at=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) -->", re.ASCII)
 GAP_WHY = "token 角色不夠，看不到排程的 variables"
 SCHEDULE_PROBLEM_ZH = {"inactive": "已停用（Inactive）", "owner-not-active": "擁有者不是 active（被封鎖或移出專案）",
-                       "next-run-stale": "next_run_at 已經過期（排程卡住）", "next-run-unreadable": "next_run_at 讀不出來"}
+                       "next-run-stale": f"next_run_at 已經過期超過 {NEXT_RUN_SLACK_HOURS} 小時（排程卡住）", "next-run-unreadable": "next_run_at 讀不出來"}
 TODO = ["到 Build > Pipeline schedules 看每日監控的排程（變數 DUMPLING_JOB=watch）是不是 **Inactive**；是的話，Maintainer 或 Owner 按 **Take ownership** 接手，"
         "並確認原擁有者沒被封鎖或移出專案（排程用擁有者的權限執行）。",
         "看最近一次 `watch:compute` 的 artifact（`watch-out/result.json`、`report.md`）與 job log，找出為什麼狀態 Issue 沒有更新。",
@@ -124,7 +130,7 @@ def fmt(t):
 def parse_now(s):
     if not s:
         return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", s):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", s, re.ASCII):
         raise Usage("--now 必須是 UTC ISO 8601（YYYY-MM-DDTHH:MM:SSZ）")
     t = parse_ts(s)
     if t is None:
@@ -188,9 +194,9 @@ def check_state(api, target, mode, now, max_age_h):
 
 
 # ---------- 檢查 2：GitLab pipeline schedules ----------
-def check_schedules(api, project, now, max_age_h):
+def check_schedules(api, project, now):
     """→ (check dict, alerts, summaries, watch_ids, had_gap)。"""
-    max_age = datetime.timedelta(hours=max_age_h)
+    max_age = datetime.timedelta(hours=NEXT_RUN_SLACK_HOURS)
     rows = api.get_all(f"/projects/{project}/pipeline_schedules?per_page=100")
     summaries, alerts, watch_ids, gaps = [], [], [], []
     for row in rows:
@@ -280,6 +286,12 @@ def build_body(a, checks, info, now, max_age_h, summaries, foreign):
     return "\n".join(lines) + "\n"
 
 
+def reminder_body(key, start, days, now):
+    return "\n".join([f"<!-- dumpling-deadman-reminder key={key} at={fmt(now)} -->",
+                      f"仍在停擺（自 {md(fmt(start))}），已持續約 {days} 天；檢查時間 {md(fmt(now))}。", "",
+                      f"問題還沒恢復（恢復時這個 Issue 會收到「已恢復」留言）。寄信提醒還沒做（T-08），所以每 {REMINDER_DAYS} 天在這裡提醒一次。"]) + "\n"
+
+
 def recovered_body(key, scope_desc, now):
     return "\n".join([f"<!-- dumpling-deadman-recovered key={key} -->",
                       f"已恢復，時間 {md(fmt(now))}。{md(scope_desc, 300)}", "",
@@ -292,7 +304,13 @@ class Judge:
     GitLab 另外認 token 自己的使用者（GET /user；project access token 能不能用文件沒寫，待內部驗證，查不到就只靠成員等級）。"""
 
     def __init__(self, api, target):
-        self.api, self.trust, self._me = api, art14.Trust(api, target), "?"
+        self.api, self.target, self.trust, self._me, self._notes = api, target, art14.Trust(api, target), "?", {}
+
+    def notes(self, number):
+        """Issue 的留言（同一輪每個 Issue 只查一次）。"""
+        if number not in self._notes:
+            self._notes[number] = self.api.list_notes(self.target, number)
+        return self._notes[number]
 
     def me(self):
         if self._me == "?":
@@ -332,7 +350,7 @@ def load_index(api, target, mode, judge):
 
 
 def has_recovered_note(api, target, judge, issue, key):
-    for n in api.list_notes(target, issue["number"]):
+    for n in judge.notes(issue["number"]):
         first = (n.get("body") or "").splitlines()[:1]
         rm = RECOVERED_RE.fullmatch(first[0]) if first else None
         if rm and rm.group(1) == key and not n.get("system") and judge.ok(n):
@@ -382,6 +400,32 @@ def find_recoveries(api, target, idx, judge, alerts, evaluated, recover_desc):
     return out
 
 
+def find_reminders(idx, judge, alerts, now):
+    """同一次停擺還沒結束（這個警告的 key 有可信的、開著的 Issue）：Issue 開了或上一則提醒之後超過 REMINDER_DAYS 天，就留一則「仍在停擺」。
+    上一則提醒＝可信作者寫的、第一行是 <!-- dumpling-deadman-reminder key=… at=<UTC> --> 的留言（at 取自標記，偽造的不可信作者不算）。
+    Issue 開啟時間取 API 的 created_at（標題與內文別人也改得了，created_at 不行）；讀不到就不提醒。已關閉的 Issue 不提醒（人決定了）。"""
+    out = []
+    for a in alerts:
+        e = idx.get(a["key"])
+        if not e or not e["trusted"]:
+            continue
+        top = e["trusted"][-1]
+        start = parse_ts(top.get("created_at"))
+        if top.get("state") != "open" or start is None:
+            continue
+        last = start
+        for n in judge.notes(top["number"]):
+            first = (n.get("body") or "").splitlines()[:1]
+            m = REMINDER_RE.fullmatch(first[0]) if first else None
+            if m and m.group(1) == a["key"] and not n.get("system") and judge.ok(n):
+                t = parse_ts(m.group(2))
+                if t is not None:
+                    last = max(last, t)
+        if now - last >= datetime.timedelta(days=REMINDER_DAYS):
+            out.append((a["key"], top["number"], start))
+    return out
+
+
 # ---------- 組裝 ----------
 def run(args, api, target, now):
     checks, alerts, summaries, info = [], [], [], {"last_update": None, "age_hours": None}
@@ -397,7 +441,7 @@ def run(args, api, target, now):
         failed = True
     if args.schedules:
         try:
-            c, al, summaries, watch_ids, had_gap = check_schedules(api, target, now, args.max_age_hours)
+            c, al, summaries, watch_ids, had_gap = check_schedules(api, target, now)
             checks.append(c)
             alerts += al
             evaluated.add("schedule:all")
@@ -416,26 +460,28 @@ def run(args, api, target, now):
         if scope == "schedule:all":
             return "現在看得到排程的 variables 了。"
         return f"排程 {scope.split(':')[1]} 恢復正常（active、擁有者 active、next_run_at 沒有過期）。"
-    recoveries = []
+    recoveries, reminders = [], []
     try:
         judge = Judge(api, target)
         idx = load_index(api, target, args.mode, judge)
         assign_keys(api, target, args.mode, alerts, idx, judge)
         recoveries = find_recoveries(api, target, idx, judge, alerts, evaluated, recover_desc)
+        reminders = find_reminders(idx, judge, alerts, now)
     except issues.Fail as e:
-        for a in alerts:           # 查不到歷史：警告照報（key 取第 1 次；apply 會用既有 Issue 去重），不留恢復通知
+        # 查不到歷史（舊 Issue 或留言）：不知道這是第幾次停擺。選擇：已確定的警告仍然送出（key 取第 1 次；apply 用既有 Issue 去重，可能被已關閉的第 1 次吞掉），
+        # 但整體結束碼是 FAIL（1），不留恢復與提醒留言——不能回 2（ALERT）假裝一切正常，看得出來才有人去查
+        for a in alerts:
             if "key" not in a:
                 a["n"], a["key"] = 1, key_of(args.mode, a["ident"], 1)
-        checks.append({"name": "recovery", "status": "FAIL", "detail": f"列出舊的 deadman Issue 或留言失敗：{e}（這一輪不留恢復通知、不判斷第幾次停擺；警告照常）"})
+        checks.append({"name": "recovery", "status": "FAIL", "detail": f"列出舊的 deadman Issue 或留言失敗：{e}（這一輪不留恢復與提醒留言、不判斷第幾次停擺；已確定的警告仍然送出，但結果是 FAIL）"})
         failed = True
 
-    # 主要檢查失敗＝FAIL（沒辦法判斷）；只有「恢復查詢」失敗時，已經確定的警告照報（ALERT），沒有警告才 FAIL
-    main_fail = any(c["status"] == "FAIL" for c in checks if c["name"] != "recovery")
-    status = "FAIL" if main_fail else ("ALERT" if alerts else ("FAIL" if failed else "OK"))
-    return status, checks, alerts, summaries, info, recoveries
+    # 任何一項檢查（含查舊 Issue／留言）失敗＝FAIL（結束碼 1）；已確定的警告仍然寫進 plan，由範本照樣套用
+    status = "FAIL" if failed else ("ALERT" if alerts else "OK")
+    return status, checks, alerts, summaries, info, recoveries, reminders
 
 
-def build_actions(args, alerts, checks, info, now, summaries, recoveries):
+def build_actions(args, alerts, checks, info, now, summaries, recoveries, reminders=()):
     actions = []
     drill = ["drill"] if args.mode == "drill" else []
     rules = publiccheck.load_rules()
@@ -445,6 +491,9 @@ def build_actions(args, alerts, checks, info, now, summaries, recoveries):
         if publiccheck.check_text(title + "\n" + body, rules):
             body = build_body(a, checks, info, now, args.max_age_hours, summaries, False)      # 外來字串命中公開檢查：換成不含外來字串的內文
         actions.append({"op": "open", "key": a["key"], "title": title, "body": body, "labels": LABELS + drill})
+    for key, number, start in reminders:
+        days = (now - start).days
+        actions.append({"op": "comment", "key": key, "issue": number, "body": reminder_body(key, start, days, now)})
     for key, number, desc in recoveries:
         actions.append({"op": "comment", "key": key, "issue": number, "body": recovered_body(key, desc, now)})
     return actions
@@ -514,8 +563,8 @@ def main(argv=None, api=None):
             if args.backend == "gitlab" and not api.token:
                 raise Fail("沒有 GITLAB_TOKEN（環境變數；範本用 DEADMAN_GITLAB_TOKEN 對應，protected＋masked）")
         token = getattr(api, "token", "") or ""
-        status, checks, alerts, summaries, info, recoveries = run(args, api, target, now)
-        actions = build_actions(args, alerts, checks, info, now, summaries, recoveries)
+        status, checks, alerts, summaries, info, recoveries, reminders = run(args, api, target, now)
+        actions = build_actions(args, alerts, checks, info, now, summaries, recoveries, reminders)
         probs = [x for a in actions for x in publiccheck.check_text(a.get("title", "") + "\n" + a["body"])]
         if probs:
             raise Fail(f"要寫進 Issue 的內容沒過公開檢查（{probs[0]}）")
@@ -535,7 +584,8 @@ def main(argv=None, api=None):
         detail += "；" + "；".join(a["why"] for a in alerts)[:600]
     result.update(status=status, checks=checks, last_update=info["last_update"], age_hours=info["age_hours"], schedules=summaries,
                   alerts=[{"scope": a["scope"], "ident": a["ident"], "n": a["n"], "key": a["key"]} for a in alerts],
-                  recovered=[{"key": k, "issue": n} for k, n, _ in recoveries])
+                  recovered=[{"key": k, "issue": n} for k, n, _ in recoveries],
+                  reminded=[{"key": k, "issue": n} for k, n, _ in reminders])
     write_json(os.path.join(args.out, "result.json"), result, token)
     if actions:
         plan = {"schema": issues.PLAN_SCHEMA, "mode": args.mode, "stateless": True, "stateless_kind": "deadman", "generated_at": fmt(now),

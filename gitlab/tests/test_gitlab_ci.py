@@ -403,7 +403,7 @@ class CiFile(unittest.TestCase):
         self.assertIn("--confidential", command_flags(c, "pipeline/watch/issues.py"))
         self.assertIn("[ -f deadman-out/plan.json ]", c)
 
-    def run_deadman(self, dm_rc=0, plan=True, apply_rc=0, token="t"):
+    def run_deadman(self, dm_rc=0, plan=True, apply_rc=0, token="t", result=None):
         """實際執行 watch:deadman 的主要一項（假的 python3：記錄呼叫；deadman.py 依參數寫 plan.json 並回傳結束碼）。"""
         import os
         import subprocess
@@ -412,15 +412,34 @@ class CiFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             (d / "bin").mkdir()
-            (d / "bin" / "python3").write_text('#!/bin/sh\necho "$*" >> "$LOG"\n'
-                                               'case "$*" in *pipeline/watch/deadman.py*) [ "$MK_PLAN" = 1 ] && echo {} > deadman-out/plan.json; exit "$DM_RC" ;;\n'
+            (d / "bin" / "python3").write_text('#!/bin/sh\n'
+                                               'case "$*" in " -I -c"*|"-I -c "*) exec "$REAL_PY" "$@" ;; esac\n'          # 讀 result.json 的那一行用真的 python3
+                                               'echo "$*" >> "$LOG"\n'
+                                               'case "$*" in *pipeline/watch/deadman.py*) [ "$MK_PLAN" = 1 ] && echo {} > deadman-out/plan.json; '
+                                               '[ -n "$MK_RESULT" ] && echo "{\\"status\\": \\"$MK_RESULT\\"}" > deadman-out/result.json; exit "$DM_RC" ;;\n'
                                                '*pipeline/watch/issues.py*) exit "$APPLY_RC" ;; esac\nexit 99\n')
             (d / "bin" / "python3").chmod(0o755)
             env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", LOG=str(d / "log"), DM_RC=str(dm_rc), APPLY_RC=str(apply_rc),
-                       MK_PLAN="1" if plan else "0", DEADMAN_GITLAB_TOKEN=token, CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
+                       MK_PLAN="1" if plan else "0", MK_RESULT=result or "", REAL_PY=sys.executable, DEADMAN_GITLAB_TOKEN=token, CI_API_V4_URL="https://gitlab.example.com/api/v4", CI_PROJECT_ID="7")
             r = subprocess.run(["bash", "-c", item], cwd=d, env=env, capture_output=True, text=True)
             log = (d / "log").read_text().splitlines() if (d / "log").exists() else []
         return r.returncode, log, r.stdout
+
+    def test_t12_deadman_exit_2_must_be_a_real_alert(self):
+        # Python「找不到檔案」的結束碼也是 2：allow_failure:exit_codes [2] 不能把它當成 ALERT 而靜默
+        rc, log, out = self.run_deadman(2, plan=False, result=None)         # 沒有 result.json（例如 deadman.py 不見了）
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadman: FAIL", out)
+        rc, log, out = self.run_deadman(2, plan=False, result="OK")         # 有 result.json 但 status 不是 ALERT
+        self.assertEqual(rc, 1, out)
+        rc, log, out = self.run_deadman(2, plan=False, result="FAIL")
+        self.assertEqual(rc, 1, out)
+        rc, log, out = self.run_deadman(2, plan=False, result="ALERT")      # 真的 ALERT（沒有 plan 也一樣是 2）
+        self.assertEqual(rc, 2, out)
+        self.assertNotIn("deadman: FAIL", out)
+        # 其他結束碼不受影響
+        self.assertEqual(self.run_deadman(0, plan=False, result="ALERT")[0], 0)
+        self.assertEqual(self.run_deadman(1, plan=False, result="ALERT")[0], 1)
 
     def test_t12_deadman_script_exit_codes(self):
         rc, log, out = self.run_deadman(0, plan=False)          # OK、沒有 plan：不呼叫 apply
@@ -428,13 +447,13 @@ class CiFile(unittest.TestCase):
         rc, log, out = self.run_deadman(0, plan=True)           # OK 但有恢復留言的 plan：apply
         self.assertEqual((rc, len(log)), (0, 2), out)
         self.assertIn("issues.py apply", log[1])
-        rc, log, out = self.run_deadman(2, plan=True)           # ALERT：apply 之後結束碼 2（allow_failure 的那個）
+        rc, log, out = self.run_deadman(2, plan=True, result="ALERT")           # ALERT：apply 之後結束碼 2（allow_failure 的那個）
         self.assertEqual((rc, len(log)), (2, 2), out)
         rc, log, out = self.run_deadman(1, plan=False)          # FAIL：結束碼 1
         self.assertEqual((rc, len(log)), (1, 1), out)
         rc, log, out = self.run_deadman(1, plan=True)           # FAIL 但已經確定的警告照樣套用，結束碼仍是 1
         self.assertEqual((rc, len(log)), (1, 2), out)
-        rc, log, out = self.run_deadman(2, plan=True, apply_rc=1)    # 警告的 Issue 開不出來：FAIL（不是 2，不能被當成「只是警告」）
+        rc, log, out = self.run_deadman(2, plan=True, apply_rc=1, result="ALERT")    # 警告的 Issue 開不出來：FAIL（不是 2，不能被當成「只是警告」）
         self.assertEqual(rc, 1, out)
         self.assertIn("deadman: FAIL", out)
         rc, log, out = self.run_deadman(64, plan=False)

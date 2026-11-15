@@ -349,7 +349,7 @@ class GitLabApi(Api):
         if not isinstance(d, dict) or type(d.get("iid")) is not int:
             raise Fail("GitLab Issue 回應格式不符（沒有整數 iid）")
         return {"number": d["iid"], "title": d.get("title"), "body": d.get("description"),
-                "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"),
+                "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"), "created_at": d.get("created_at"),
                 "labels": d.get("labels") or [], "confidential": d.get("confidential"),
                 "user": d.get("author") if isinstance(d.get("author"), dict) else {}}
 
@@ -631,6 +631,10 @@ def load_plan(path, want_mode=None):
             bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限與死人開關的 Issue 不是監控 Issue）")
         if deadman and any(isinstance(a, dict) and isinstance(a.get("labels"), list) and SUPPORT_LABEL in a["labels"] for a in plan.get("actions") or []):
             bad("deadman 的 plan 不能用 support-period 標籤")
+    # watch-deadman 標籤只給 deadman 的 stateless plan 用（一般監控與支援期限的 plan 帶它，會讓 Issue 混進 deadman 的 key 與恢復判斷）
+    if not (plan.get("stateless") and plan.get("stateless_kind") == "deadman") and any(
+            isinstance(a, dict) and isinstance(a.get("labels"), list) and DEADMAN_LABEL in a["labels"] for a in plan.get("actions") or []):
+        bad("watch-deadman 標籤只能用在 stateless_kind=deadman 的 plan")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
