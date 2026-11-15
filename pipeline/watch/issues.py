@@ -42,6 +42,10 @@ MARK_RE = re.compile(r"<!-- dumpling-watch key=([0-9a-f]{64}) mode=(real|drill) 
 # 不能讓 read-state 算進 watch_keys（沒有狀態 Issue 時會擋住第一次基準，M8 預驗應修 1）
 SUPPORT_MARK_RE = re.compile(r"<!-- dumpling-support key=([0-9a-f]{64}) mode=(real|drill) -->")
 SUPPORT_LABEL = "support-period"
+# 每日監控的死人開關（deadman.py，GITLAB-PORT T-12，stateless plan 的第二種 kind）：同樣自己的標記與標籤，不是監控 Issue
+DEADMAN_MARK_RE = re.compile(r"<!-- dumpling-deadman key=([0-9a-f]{64}) mode=(real|drill) -->")
+DEADMAN_LABEL = "watch-deadman"
+STATELESS_KINDS = ("support", "deadman")      # plan 的 stateless_kind；沒寫＝support（原本的行為）
 STATE_MARK_RE = re.compile(r"<!-- dumpling-watch-state mode=(real|drill) schema=1 -->")
 KEY_RE = re.compile(r"[0-9a-f]{64}")
 REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
@@ -576,6 +580,7 @@ ACTION_OPS = ("open", "comment", "open_if_closed")      # plan 的 action 認得
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
                             "demo", "summary", "attention", "drill", "watch-health", "support-period"})
+ALLOWED_LABELS = ALLOWED_LABELS | {DEADMAN_LABEL}     # 另起一行：不動上面的 frozenset 字面值
 
 
 def load_plan(path, want_mode=None):
@@ -606,13 +611,22 @@ def load_plan(path, want_mode=None):
         bad("demo")
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
+    if "stateless_kind" in plan and (plan["stateless_kind"] not in STATELESS_KINDS or not plan.get("stateless")):
+        bad("stateless_kind 只能是 support／deadman，而且只能用在 stateless 的 plan")
     if plan.get("stateless"):
+        deadman = plan.get("stateless_kind") == "deadman"
         if plan.get("state") is not None:
             bad("stateless 的 plan 不能帶 state")
-        if any(not isinstance(a, dict) or a.get("op") != "open" for a in plan.get("actions") or []):
-            bad("stateless 的 plan 只能有 open")
+        # support 只能 open；deadman 另外可以對「開著的」deadman Issue 留言（恢復通知）：不重開、不碰別種 Issue
+        ops = ("open", "comment") if deadman else ("open",)
+        if any(not isinstance(a, dict) or a.get("op") not in ops for a in plan.get("actions") or []):
+            bad("stateless 的 plan 只能有 " + "、".join(ops))
+        if deadman and any(isinstance(a, dict) and a.get("reopen_if_closed") for a in plan.get("actions") or []):
+            bad("deadman 的 plan 不能重開 Issue（reopen_if_closed）")
         if any(isinstance(a, dict) and isinstance(a.get("labels"), list) and "dumpling-watch" in a["labels"] for a in plan.get("actions") or []):
-            bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限的 Issue 不是監控 Issue）")
+            bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限與死人開關的 Issue 不是監控 Issue）")
+        if deadman and any(isinstance(a, dict) and isinstance(a.get("labels"), list) and SUPPORT_LABEL in a["labels"] for a in plan.get("actions") or []):
+            bad("deadman 的 plan 不能用 support-period 標籤")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -715,6 +729,8 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     texts = [] if no_state else [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
     prepared = []
     mark_name, base_label, mark_re = ("dumpling-support", SUPPORT_LABEL, SUPPORT_MARK_RE) if stateless else ("dumpling-watch", "dumpling-watch", MARK_RE)
+    if stateless and plan.get("stateless_kind") == "deadman":
+        mark_name, base_label, mark_re = "dumpling-deadman", DEADMAN_LABEL, DEADMAN_MARK_RE
     for n, a in enumerate(plan["actions"]):
         a = dict(a)
         if a["op"] != "comment":
@@ -757,6 +773,16 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                         num = d["number"]
                     created.add(key)
                     r.update(result="would_open" if dry else "opened", issue=num)
+            elif stateless:
+                # deadman 的恢復通知：只對「開著的」deadman Issue 留言；已關閉或找不到就跳過（不重開、不算 problem）
+                idx = watch_index(api, repo, problems, base_label, mark_re)
+                ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])
+                if not ent or ent["state"] != "open":
+                    r.update(result="skipped", reason="Issue 已關閉或不存在，不留言")
+                    continue
+                if not dry:
+                    api.add_comment(repo, ent["number"], a["body"])
+                r.update(result="would_comment" if dry else "commented", issue=ent["number"])
             else:
                 idx = watch_index(api, repo, problems)
                 ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])

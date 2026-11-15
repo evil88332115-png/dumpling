@@ -173,6 +173,7 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
   只有假 API 測試、未對真實 GitLab 驗證；清單見 GITLAB-PORT T-05。內文或留言有以 `/` 開頭的行（GitLab quick action 可能被執行）→ 不送、FAIL。
 - Token：`GH_TOKEN`／`GITHUB_TOKEN`，只放 HTTP 標頭；不跟隨轉址到別的主機；只連 `api.github.com`（`GITHUB_API_URL` 可改，給 GHES／測試用）。
 - 監控 Issue 的內文第一行是標記：`<!-- dumpling-watch key=<64 hex> mode=<real|drill> -->`。
+- stateless plan（不寫狀態、不做樂觀鎖）有兩種 `stateless_kind`：`support`（預設；支援期限，標記 `dumpling-support`、標籤 `support-period`，只能 `open`）與 `deadman`（死人開關，標記 `dumpling-deadman`、標籤 `watch-deadman`；除了 `open` 還可以對開著的 deadman Issue `comment`，不重開）。兩種都不算進 `read-state` 的 `watch_keys`。
   去重：列出標籤 `dumpling-watch` 的所有 Issue（open＋closed，分頁），本地解析標記；**不用 search API**（索引有延遲）。
 - 狀態 Issue：標籤 `watch-state`（drill 是 `watch-state-drill`），內文第一行 `<!-- dumpling-watch-state mode=<mode> schema=1 -->`，
   接著一個程式碼區塊：狀態 JSON 經 gzip＋base64。超過 60000 字元 → FAIL（不截斷）。同時有兩個狀態 Issue → FAIL。
@@ -210,6 +211,15 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 通知寄給「最後修改 cron 語法的使用者」。做法：keepalive job（只有 `actions: write`）每天先讀 workflow 的 state 並寫進 job 摘要，再呼叫 enable；
 `status` 分支上 `docs/STATUS.md` 的 C3 節（D-008，不在 main）記「下次人工檢查日期」，每月人工看一次 `gh workflow view watch.yml`。
 workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋得住。
+
+### 4.1 死人開關（`pipeline/watch/deadman.py`，GitLab 用；GITLAB-PORT T-12）
+
+「每日監控沒有結果」本身要有人發現：`deadman.py` 讀狀態 Issue，最後更新時間（state 的 `runs` 最後一筆的 `at`）超過 36 小時（`--max-age-hours`，和儀表板的 `STALE_HOURS` 一致）
+就開一個 Issue（標籤 `watch-health`、`watch-deadman`；同一次停擺只開一個，恢復後在原 Issue 留言「已恢復」，不自動關閉）。GitLab 上加 `--schedules` 還會巡檢 pipeline schedules
+（`DUMPLING_JOB=watch` 的排程不見、被停用、擁有者不是 active、`next_run_at` 過期；看不到 variables 算 GAP 也是警告）。
+輸出 `result.json`，有警告時另寫 stateless 的 `plan.json`（`stateless_kind: deadman`）交給 `issues.py apply`；結束碼 OK 0、ALERT 2、FAIL 1。
+**只偵測與開 Issue，email 還沒做（T-08）。**範本 `gitlab/.gitlab-ci.yml` 的 `watch:deadman` 用獨立的排程（`DUMPLING_JOB=deadman`）、獨立的擁有者與 token（`DEADMAN_GITLAB_TOKEN`）。
+**GitHub 端目前沒有 deadman**：公開 repo 靠上面的 keepalive 加每月人工檢查（`docs/STATUS.md` 的「下次人工檢查日期」）；第一階段只做 GitLab 範本，GitHub 後端只用在測試與演練。
 
 ## 5. 公開 repo 的 real 模式（D-040）
 
