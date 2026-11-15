@@ -546,6 +546,10 @@ class T(Base):
         """rock-5b 是廠商核心、核心比對不完整：linux 留著當安全網（手動清單不受 exclude 影響）。"""
         self.assertEqual(self.run_vendor_kev("rock-5b-demo"), ["CVE-2026-90006"])
 
+    def test_vendor_watch_firmware_demo_gets_firmware_vendors(self):
+        """韌體示範專案（firmware-demo）：Intel／AMD／AMI／NVIDIA 的新 KEV 都提醒；Linux 不列（韌體 SBOM 沒有核心）。"""
+        self.assertEqual(self.run_vendor_kev("firmware-demo"), ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
+
     def test_vendor_watch_unlisted_project_gets_no_manual_vendors(self):
         """不在 projects 裡的專案沒有手動清單（測試 VendorWatchConfig 會擋下 projects/ 裡漏列的專案）；SBOM 取出的 linux 被 exclude 擋下。"""
         self.assertEqual(self.run_vendor_kev("demo"), [])
@@ -663,6 +667,8 @@ class VendorWatchConfig(unittest.TestCase):
     # 核心元件比對完整（per_sbom 的 kernel_map、kernel_cna 都是 OK）的專案：可以不列 linux。
     # 新增之前要先確認該專案每日監控的 kernel_map／kernel_cna 是 OK（M7d-2／M7d-3b 之後才可能加 rpi、rock-5b、ai-nas）。
     KERNEL_COMPLETE = {"orin-nano-demo"}
+    # 不是產品、不在 projects/ 的監控專案（FIRMWARE-WATCH.md §5）：只有韌體示範專案
+    NON_PRODUCT = {"firmware-demo"}
 
     def setUp(self):
         self.cfg = json.load(open(os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json"), encoding="utf-8"))
@@ -673,8 +679,13 @@ class VendorWatchConfig(unittest.TestCase):
         self.assertTrue(self.projects)
         keys = set(self.cfg["projects"])
         self.assertEqual(sorted(self.projects - keys), [], "projects/ 裡有專案沒列在 vendor-watch.json 的 projects")
-        bad = sorted(k for k in keys if k.split("@")[0] not in self.projects)
+        bad = sorted(k for k in keys if k.split("@")[0] not in self.projects | self.NON_PRODUCT)
         self.assertEqual(bad, [], "vendor-watch.json 的 projects 鍵不是現有專案（打錯字？）")
+
+    def test_firmware_demo_entry(self):
+        """韌體 Release 也有廠商層級的提醒（FIRMWARE-WATCH.md §5，C0 2026-11-15）：鍵是正規化後的名稱。"""
+        self.assertEqual(sorted(self.cfg["projects"]["firmware-demo"]), ["amd", "ami", "insyde", "intel", "nvidia", "phoenix"])
+        self.assertNotIn("firmware-demo", self.projects)        # 不是 projects/ 的產品
 
     def test_no_global_vendor_list(self):
         self.assertEqual(self.cfg["vendors"], [], "全體清單會對每份 SBOM 各開一個廠商層級 Issue，改列在 projects")

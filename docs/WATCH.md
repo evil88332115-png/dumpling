@@ -128,7 +128,7 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   orin-nano-demo：nvidia、arm、trustedfirmware、realtek；rpi-lite-demo：broadcom、arm；rock-5b-demo：rockchip、arm、trustedfirmware、realtek；
   ai-nas-demo（x86）：intel、amd、ami、insyde、phoenix、realtek（板子的硬體廠商依公開規格，待 C4 確認）。SBOM 自動取出的廠商照舊監看。
   **linux**：`exclude` 拿掉 SBOM 取出的 linux（核心的 KEV 由 Grype＋核心 CNA 做元件比對）；手動清單不受排除，所以核心元件比對還不完整的專案（rpi-lite-demo：CNA 候選沒列進報告；rock-5b-demo：廠商核心；ai-nas-demo：Debian 核心只有 NVD 上游範圍）把 linux 列在自己的清單當安全網，M7d-2／M7d-3b 完成、確認該專案每日的 kernel_map／kernel_cna 是 OK 才拿掉；目前只有 orin-nano-demo 不列。測試（`VendorWatchConfig`）檢查每個 `projects/*/` 都有一筆、鍵沒有打錯、這條 linux 規則。
-  D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：列在 x86 專案；韌體進每日監控後，韌體專案另外列。
+  D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：列在 x86 專案；韌體示範專案 `firmware-demo`（不在 `projects/`，FIRMWARE-WATCH.md §5）列 intel、amd、ami、insyde、phoenix、nvidia，韌體 Release 也有廠商層級的提醒（測試裡另列「非產品專案」只有 `firmware-demo`）。
   清單裡的廠商在 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。新加進清單的廠商，第一次監看時既有的條目記成基準（`watched`），不會一次開一批。比對 KEV 的 `vendorProject`，
   經 `exploited_vendor` 的正規化與別名（`American Megatrends`→ami、`Advanced Micro Devices`→amd、`NVIDIA Corporation`→nvidia）。
   拼法查核（2026-11-13）：CISA KEV catalogVersion 2026.11.10（1779 筆）實際有 `Intel`（2 筆）、`AMI`（1 筆，CVE-2024-54085 MegaRAC SPx）；

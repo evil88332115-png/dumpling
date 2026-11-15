@@ -6,11 +6,12 @@
     "orin-nano-demo": ["nvidia", "arm", "trustedfirmware", "realtek"],
     "rpi-lite-demo": ["broadcom", "arm", "linux"],
     "rock-5b-demo": ["rockchip", "arm", "trustedfirmware", "realtek", "linux"],
-    "ai-nas-demo": ["intel", "amd", "ami", "insyde", "phoenix", "realtek", "linux"]
+    "ai-nas-demo": ["intel", "amd", "ami", "insyde", "phoenix", "realtek", "linux"],
+    "firmware-demo": ["intel", "amd", "ami", "insyde", "phoenix", "nvidia"]
   },
   "notes": {
     "scope": "廠商層級只對列在 projects 裡的專案生效（vendors 全體清單是空的；C0 決定 2026-11-15，D-064）。每個 projects/*/ 都要有一筆（測試檢查）。SBOM 自動取出的廠商照舊監看。板子的硬體廠商依公開規格，待 C4 確認。",
-    "firmware": "D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：x86 專案（ai-nas-demo）列 Intel、AMD、AMI；韌體進每日監控後，韌體專案另外列（C2＋C3 設計中）。",
+    "firmware": "D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：x86 專案（ai-nas-demo）列 Intel、AMD、AMI；韌體示範專案 firmware-demo（不在 projects/，FIRMWARE-WATCH.md §5）列 intel、amd、ami、insyde、phoenix、nvidia（BIOS／vBIOS 的 IBV 與晶片廠）。",
     "linux": "exclude 的 linux 只拿掉『SBOM 取出的 linux』；手動列在專案裡的不受排除。核心的元件比對完整（per_sbom 的 kernel_map、kernel_cna 都是 OK）的專案才不列 linux：目前只有 orin-nano-demo。rpi-lite-demo（CNA 候選沒列進報告）、rock-5b-demo（廠商核心）、ai-nas-demo（Debian 核心只有 NVD 上游範圍）保留 linux 當安全網，M7d-2／M7d-3b 完成、該專案的核心比對確認完整後才拿掉。"
   }
 }
