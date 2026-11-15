@@ -1,0 +1,18 @@
+{
+  "$comment": "WP7 示範專案（C0 決定，adapter-gaps.md 第 21 項）：new-project.sh 從 tools/cra/config.example.json 帶進來的虛構值都已移除，沒有寫的報告欄位由 cra_report 顯示 TO BE COMPLETED 並算 GAP（字面寫 TO BE COMPLETED 不會被當成缺少，所以用不寫的方式）。留下的只有：公司與產品名稱（project.yml 的 brand、product_name）、支援期限（project.yml 的 support_until，到月）、SBOM 主元件類型 firmware（掃的是整個映像）。sbom.own_software 是空清單加 own_software_none_reason（C1 在 M2 定的宣告方式：B-own-software 記 OK，說明寫「製造商宣告，掃描沒有驗證」）。範本的虛構路徑（example-agent 等）已移除。",
+  "schema_version": 1,
+  "manufacturer": {
+    "name": "dumpling 公開示範"
+  },
+  "product": {
+    "name": "ROCK 5B 示範"
+  },
+  "support": {
+    "end_date": "2031-12"
+  },
+  "sbom": {
+    "component_type": "firmware",
+    "own_software": [],
+    "own_software_none_reason": "示範專案只用官方映像，沒有自有軟體"
+  }
+}
