@@ -850,7 +850,9 @@ def kvers_shipped(kvers):
     """kernel-versions.json 的 shipped → 出貨的核心版本清單；讀不出來（null、沒有檔案、格式不對）→ None。"""
     if not isinstance(kvers, dict) or kvers.get("schema") not in KVERS_SCHEMAS or not isinstance(kvers.get("shipped"), list):
         return None
-    return [(x.get("version") if isinstance(x, dict) else x) for x in kvers["shipped"] if isinstance(x.get("version") if isinstance(x, dict) else x, str)]
+    out = [(x.get("version") if isinstance(x, dict) else x) for x in kvers["shipped"]]
+    # 有任何一項讀不出版本字串（數字、物件沒有 version…）→ 出貨清單不明（None，不排除），不是略過那一項（M7d-1 複驗建議）
+    return out if all(isinstance(v, str) for v in out) else None
 
 
 def kernel_scope_of(kvers):

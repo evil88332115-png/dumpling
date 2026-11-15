@@ -323,7 +323,7 @@ def vulnerability_status(summary, vrows, ctx, table):
     out += ["## Summary", "",
             table(["Status", "Rows"], [["Affected", c.get("exploitable", 0)], ["Under assessment", under], ["Fixed", c.get("resolved", 0)],
                                        ["Not affected", c.get("not_affected", 0)]]),
-            "", "A row is one vulnerability on one component version. Rows under assessment have not been assessed yet; "
+            "", "A row is one vulnerability on one component version; kernel packages that share a vulnerability are listed in one row. Rows under assessment have not been assessed yet; "
                 "they are candidates from automated matching, not confirmed vulnerabilities.", "",
             "Rows are counted per vulnerability identifier, including aliases of the same vulnerability, so the totals can differ "
             "slightly from the number of statements in the VEX files.", "",
@@ -340,12 +340,12 @@ def vulnerability_status(summary, vrows, ctx, table):
                 if kev else "")
     out += ["## Affected vulnerabilities", "",
             table(["Vulnerability", "Component", "Version", "Response", "Fix"],
-                  [[r["id"], r.get("component"), r.get("version") or "unknown", customer_response(r), affected_fix(customer_fix(r))] for r in sorted(aff, key=lambda r: (r["id"], str(r.get("component"))))])
+                  [[r["id"], component_cell(r), r.get("version") or "unknown", customer_response(r), affected_fix(customer_fix(r))] for r in sorted(aff, key=lambda r: (r["id"], str(r.get("component"))))])
             if aff else "None recorded as affected.", "",
             "## Reported as actively exploited and not resolved", "",
             *([kev_line, ""] if kev else []),
             table(["Vulnerability", "Component", "Version", "Status"],
-                  [[r["id"], r.get("component"), r.get("version") or "unknown", CUSTOMER_STATUS.get((r.get("vex") or {}).get("state"), "Under assessment")]
+                  [[r["id"], component_cell(r), r.get("version") or "unknown", CUSTOMER_STATUS.get((r.get("vex") or {}).get("state"), "Under assessment")]
                    for r in kev]) if kev else "None.", "",
             "## Not assessed", "",
             "Only the components listed in the SBOM were matched against vulnerability databases. Parts that are not software packages in the "

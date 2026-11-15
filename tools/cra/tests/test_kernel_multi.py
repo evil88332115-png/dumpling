@@ -902,6 +902,25 @@ def test_tamper_shipped_minus_judged_is_recomputed_not_trusted(tmp_path):
     assert "scope_incomplete" not in d and vx.kconfig_usable(d)
 
 
+def test_shipped_with_a_non_string_entry_is_unknown_not_skipped():
+    """M7d-1 複驗建議 4：shipped 有讀不出版本字串的項目（數字、物件沒有 version）→ 出貨清單不明（None），不是略過那一項；不排除。"""
+    for bad in ([A, B, 7], [A, B, {"foo": 1}], [A, B, None], [{"version": A}, {"version": B}, {"version": 3}]):
+        kv = dict(kvdoc(judged=(A, B), shipped=(A, B), not_judged=()), shipped=bad)
+        assert vx.kvers_shipped(kv) is None, bad
+        d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"})}, kv)
+        assert vx.kconfig_index(d).get("CVE-1", {}).get("decision") != "not_affected", bad
+    assert vx.kvers_shipped(kvdoc(judged=(A, B), shipped=(A, B), not_judged=())) == [A, B]
+
+
+def test_scope_not_judged_text_is_sanitized():
+    """M7d-1 複驗建議 2：讀取端自己算的 not_judged 版本字串會進說明文字：控制字元換掉、截在 100 字。"""
+    evil = "6.99\n\x1b[31m|`" + "x" * 300
+    d = vx.kernel_multi_doc({A: kdoc(A, {"CVE-1": "not_affected"}), B: kdoc(B, {"CVE-1": "not_affected"})}, kvdoc(shipped=(A, B, evil)))
+    assert d["scope_incomplete"] is True
+    nj = d["scope"]["not_judged"]
+    assert len(nj) == 1 and len(nj[0]) <= 100 and "\n" not in nj[0] and "\x1b" not in nj[0]
+
+
 def test_tamper_merged_flag_in_a_file_is_ignored(tmp_path):
     """status 改成 GAP／FAIL 再加 "merged": true：不能因此被當成可採用（merged 只認讀取端在記憶體裡建的 MergedDoc）。"""
     from test_vex_export import kcfg as legacy_kcfg
@@ -970,6 +989,20 @@ def test_merge_states_never_excludes_on_unrecognized_values():
         assert km.merge_states({A: bad}) == (UNK, "unrecognized_state"), bad
     assert km.merge_states({A: NA, B: NA}) == (NA, "all_not_affected") and km.merge_states({A: NA}) == (NA, "all_not_affected")
     assert km.merge_states({}) == (UNK, "no_kernels")
+
+
+def test_customer_status_md_tables_list_the_other_kernel_packages():
+    """M7d-1 複驗建議 1：客戶版 vulnerability-status.md 的 Affected 與 KEV 表用同一個元件欄（主套件加 and N other kernel packages），說明句跟著改。"""
+    import supplier_package as sp
+    from test_supplier_package import CTX, SUMM, sp_table
+    m, _ = merge4()
+    row = {"id": "CVE-2026-0999", "component": m["component"], "version": m["version"], "kernel_packages": m["kernel_packages"],
+           "vex": {"state": "exploitable"}, "kev": True, "cvss_score": None}
+    md = sp.vulnerability_status(SUMM, [row], CTX, sp_table)
+    assert md.count(f"{PKGS['imgA']} and 3 other kernel packages") == 2           # Affected 表＋KEV 表
+    assert "kernel packages that share a vulnerability are listed in one row" in md
+    for internal in ("scan/", "/usr", "SHA-256", "dumpling", "kernel-config"):
+        assert internal not in md
 
 
 def test_customer_xlsx_component_cell_says_all_kernel_packages_are_covered(tmp_path):
