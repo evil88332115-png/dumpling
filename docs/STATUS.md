@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 12:53 +0800（C2）
+最後更新：2026-11-15 12:55 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -113,17 +113,23 @@
 ## C2 韌體（WP3＋WP4）
 
 > **目前（2026-11-15 下午）**：D-063（PR #117）已定，先完成第一階段的端到端流程。
-> - **韌體進每日監控（D-063 第 5 點，和 C3 一起設計，設計稿由 C3 寫，先給 C2 看再交 C0）**：已回 C3 的 5 題。C2 的立場：
->   - 第一階段走 (c) 獨立的韌體示範專案，不綁 ai-nas-demo（它沒有指定主機板）。tag 要避開 release.yml 的 `*/v*`。
->   - SBOM 是每個樣本一份 CycloneDX 1.6。Grype 比得到的只有 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；其他元件（微碼、FSP、AGESA、PSP、AMI 核心、vBIOS）靠規則表加 NOT_ASSESSED。
->   - firmware.yml 沒有排程，D-043 的比對每天不會重跑，標 NOT_RUN。可以加一個從 Release 上的 fw-inventory.json 重跑比對的入口（C2 小 PR，約 150 行，不碰映像），第一階段要不要做由 C0 決定。
->   - 版本用 firmware_version 原值，全部符合 VERSION_RE。合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
+> - **韌體進每日監控（D-063 第 5 點，和 C3 一起設計，設計稿由 C3 寫，先給 C2 看，再一起送 C0 審）**：
+>   - C0 已決定：(c) 獨立的韌體示範專案，不綁 ai-nas-demo；「從 Release 上的 fw-inventory.json 每天重跑比對」的入口**第一階段要做**。
+>   - C2 的設計已交給 C3：
+>     - 入口 `pipeline/firmware-rematch.sh`（`x86_firmware.py --rematch`）。離線，只讀 repo 當下的三張表，不碰映像，也不打廠商伺服器。
+>     - 輸入先核對 sha256，有任何不對就 GAP。
+>     - 每個樣本輸出 rematch.json（今天的結果、和 Release 當時的差異、三張表的識別）與新的 fw.cdx.json。
+>     - 狀態照現有規則；結果和 Release 不同時列出差異，至少 ATTENTION。
+>     - 沒重跑就標 NOT_RUN，不拿 Release 的結果當成今天的。
+>     - Release 每個樣本附 fw.cdx.json、fw-inventory.json 與 sha256。
+>     - 工作量大約 150 行程式加 150 行測試。
+>   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
 > - **T-04**（韌體上傳 DT 的 GitLab 版）排在 C4 的 T-14 之後。
 > - **#113 已合併（main 96ec1bc）**，驗證通過，應修 0。兩項建議 → **PR #119**（分支 `wp3/nvidia-5674-followup`，worktree `$AGENT_TMP/dumpling-wt-c2-nvfu`，head 599d760）：
 >   - PROVENANCE 兩處與 firmware-dt.md 改成現況；
 >   - 補「沒確認的表不報過期」的反向測試（變異會抓到）；
 >   - `_parse_utc` 不收 24 時（Python 3.14 的 fromisoformat 會收；這是 C2 的檔案）。C1 的 validate_table 同樣的問題已請 C0 轉告 C1。
->   - 本機 1367 passed。
+>   - 本機 1367 passed。C0 看過 diff，CI 綠就合併。
 > - **M7f**：
 >   - 調查筆記 → **PR #115**（head 0d29fca），照常排隊合併。ETSI 從 labs.etsi.org 取得 v0.0.12；較新版是 GAP。共 26 項，含 92 條條款的對照。
 >   - **PR-2（Intel FIT）**：寫程式代理（sonnet、high）**進行中**（`wp3/fw-integrity-fit`，worktree `$AGENT_TMP/dumpling-wt-c2-fit`）。做完開 PR，但驗證排在後面、先不合併（D-063）。
