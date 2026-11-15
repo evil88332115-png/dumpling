@@ -158,7 +158,9 @@
 >       - 自我檢查在 CI 的 log 上：collect 的檢查 OK；6 個 bios 樣本的 changed 都是 0；public-check OK。
 >       - 10 個變異都被抓到。CI tests 43688765661、firmware 43688768372 都是綠的。
 >       - → **預驗**（獨立驗證代理，high）**進行中**。
->       - 已請 C0 決定：(a) Release 要不要等 firmware-dt，C2 建議拿掉；(b) repo 的 tag ruleset 限制 `firmware-demo/*`，要使用者在設定裡做。
+>       - C0 的決定：
+>         - (a) Release 不等 firmware-dt，但 DT 的結果要記進 meta：`dt: {status: OK|GAP, result: OK|FAIL|NOT_RUN, reason}`。result 不是 OK 時 status 是 GAP，原因寫「DT 上傳沒有完成，Release 內容不受影響」。已預告 C3，等預驗結果出來後一起修。
+>         - (b) tag ruleset 由 C0 轉問使用者，不擋 PR。
 >       - 不打 tag、不建 Release。
 >     - 用語：preliminary 寫「建議受影響（初步規則，待人審）」，confirmed 寫「建議受影響（規則已確認，待負責單位確認）」。
 >   - 其他事實：SBOM 是每個樣本一份 CycloneDX 1.6；Grype 只比得到 3 份 Dasharo 樣本的 edk2 purl 與 CSME CPE；版本用 firmware_version 原值；合成 vBIOS 與 GAP 樣本不進監控，供應商 SBOM（ns5x）建議進。
