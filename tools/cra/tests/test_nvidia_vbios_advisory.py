@@ -303,51 +303,56 @@ def test_unreviewed_draft_rows_do_not_need_vbios_fields(tmp_path):
 
 # ---------- 進 repo 的表 ----------
 
-def test_committed_table_passes_c1_validation_and_is_not_yet_confirmed():
+def test_committed_table_passes_c1_validation_and_is_confirmed():
+    """5674 的初審意見由使用者 2026-11-15 確認（經 C0 轉達）：reviewed=true，reviewed_until 是看過的最新公告日期。"""
     t = nva.load(COMMITTED)
     c1 = nva._c1()
     text = COMMITTED.read_text(encoding="utf-8")
     d = json.loads(text)
     c1.validate_table(d)
-    assert d["reviewed_until"] is None and t.mirror_commit == "98dc5d70d87f6f068c38161930fcda2ae3193bb3"      # 負責人確認前維持待審
+    assert d["reviewed_until"] == "2025-09-02" and t.mirror_commit == "98dc5d70d87f6f068c38161930fcda2ae3193bb3"   # 5674 的日期，不是鏡像的日期
     assert d["rows"] == [] and d["bulletins"] == []
     [na] = d["not_applicable"]
-    assert na["bulletin"] == "5674" and na["reviewed"] is False and na["reviewed_by"] is None and na["reviewed_at"] is None
-    assert na["preliminary_by"] == "韌體分析（C2 角色）初審，待負責人確認"                                                  # 只寫角色
+    assert na["bulletin"] == "5674" and na["reviewed"] is True
+    assert na["reviewed_by"] == "使用者（經 C0 轉達）" and na["reviewed_at"] == "2026-11-15"                     # 照實寫確認者，不寫成負責單位
+    assert na["preliminary_by"] == "韌體分析（C2 角色）初審" and na["preliminary_at"] <= na["reviewed_at"]      # 只寫角色
     assert na["current_release_date"] == "2025-09-02T00:00:00Z" and na["csaf_fields"]
     assert "無法對應" in na["reason"] and "不適用" not in na["reason"] and "5561" in na["reason"]
-    assert t.awaiting == ["5674"] and t.not_applicable == []
+    assert "未經負責人確認" not in na["reason"] and "使用者 2026-11-15 確認" in na["reason"]
+    assert t.confirmed is True and t.awaiting == [] and t.not_applicable == ["5674"]
     assert d["mirror"]["commit_date"] == "2026-11-10T13:01:57Z" and "2025-09-02" in d["about"] and "不是鏡像 commit 的日期" in d["about"]
+    assert "尚未經負責人確認" not in d["about"] and "使用者 2026-11-15 確認" in d["about"]
     assert "@" not in text and "/home/" not in text
 
 
-def test_committed_table_stays_pending_for_c1_candidates():
-    """負責人確認前，C1 的 candidates 要列為待審（ATTENTION），不會因為 C2 的初審就回 OK。"""
+def test_committed_table_closes_5674_for_c1_candidates():
+    """確認後，C1 的 candidates 不再把 5674 列為待審；新的公告、比 reviewed_until 晚的公告仍會列出。"""
     c1 = nva._c1()
     d = json.loads(COMMITTED.read_text(encoding="utf-8"))
     mirror_entry = {"id": "5674", "year": "2025", "current_release_date": "2025-09-02T00:00:00Z", "initial_release_date": "2025-09-02T00:00:00Z"}
-    [p] = c1.pending_bulletins([mirror_entry], d)
-    assert "unreviewed_not_applicable" in p["reasons"] and "after_reviewed_until" in p["reasons"] and "not_in_table" not in p["reasons"]
-    # 負責人確認後（reviewed=true、reviewed_until 有值）才會關掉
-    done = json.loads(json.dumps(d))
-    done["not_applicable"][0].update(reviewed=True, reviewed_by="負責人", reviewed_at="2026-12-01")
-    done["reviewed_until"] = "2025-09-02"                                        # 看過的最新公告日期（不是鏡像的日期）
-    c1.validate_table(done)
-    assert c1.pending_bulletins([mirror_entry], done) == []
-    assert c1.pending_bulletins([{**mirror_entry, "id": "9999"}], done)[0]["reasons"][0] == "not_in_table"        # 新公告仍會列為待審
+    assert c1.pending_bulletins([mirror_entry], d) == []
+    assert c1.pending_bulletins([{**mirror_entry, "id": "9999"}], d)[0]["reasons"][0] == "not_in_table"            # 新公告仍會列為待審
+    later = {**mirror_entry, "id": "9999", "current_release_date": "2025-09-03T00:00:00Z", "initial_release_date": "2025-09-03T00:00:00Z"}
+    assert "after_reviewed_until" in c1.pending_bulletins([later], d)[0]["reasons"]
+    # 改回初審（reviewed=false）就會重新列為待審：確認的狀態只靠表裡的欄位
+    back = json.loads(json.dumps(d))
+    back["not_applicable"][0].update(reviewed=False, reviewed_by=None, reviewed_at=None)
+    c1.validate_table(back)
+    assert "unreviewed_not_applicable" in c1.pending_bulletins([mirror_entry], back)[0]["reasons"]
 
 
-def test_committed_table_gives_not_assessed_not_reviewed_for_every_vbios():
+def test_committed_table_gives_not_assessed_no_row_for_every_vbios():
     t = nva.load(COMMITTED)
     for v in (vb(), vb("00.00.00.00.01", "fffe"), vb(None, "2489"), vb("94.04.5E.00.92", "2504")):
         r = m(t, v)
-        if v["version"]:
-            assert_na(r, "table-not-reviewed")
-            assert "表尚未經負責人確認" in r["basis"] and "5674" in r["basis"]
-        assert r["match"] == "NOT_ASSESSED" and NO_DATA in r["basis"], r
-    assert "mirror commit 98dc5d70d87f" in t.label() and "awaiting confirmation (5674)" in t.label()
-    late = NOW + datetime.timedelta(days=5000)                                       # 沒審核過的表不吃時鐘
-    assert m(t, vb(), now=late) == m(t, vb(), now=NOW)
+        assert_na(r, "no-row" if v["version"] else "version-unreadable")
+        assert r["match"] == "NOT_ASSESSED" and NO_DATA in r["basis"] and "表尚未經負責人確認" not in r["basis"], r
+    assert "mirror commit 98dc5d70d87f" in t.label() and "confirmed as not mappable to option ROM versions (5674)" in t.label()
+    assert "awaiting confirmation" not in t.label() and "not applicable" not in t.label().lower()
+    # 確認過的表會吃時鐘：鏡像超過 90 天，結果仍是 no-row（沒有 fixed 可降），但加註要重新審核
+    late = m(t, vb(), now=NOW + datetime.timedelta(days=5000))
+    assert_na(late, "no-row")
+    assert any("older than 90 days" in n for n in late["notes"]) and not m(t, vb(), now=NOW)["notes"]
 
 
 def test_never_says_safe_or_not_affected(tmp_path):
@@ -456,12 +461,16 @@ def test_match_errors_become_not_assessed_not_exceptions(tmp_path, monkeypatch):
 def test_default_table_is_the_committed_one(tmp_path):
     inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), None)
     [c] = [c for c in comps if c["name"].startswith("NVIDIA VBIOS")]
-    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "表尚未經負責人確認" in props(c, "dumpling:advisory-basis")[0]
-    assert "reviewed_until null" in props(c, "dumpling:advisory-source")[0] and inv["vbios_advisory"]["source"]["awaiting_confirmation"] == ["5674"]
+    assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and "has no reviewed row" in props(c, "dumpling:advisory-basis")[0]
+    assert "表尚未經負責人確認" not in props(c, "dumpling:advisory-basis")[0]
+    assert "reviewed_until 2025-09-02" in props(c, "dumpling:advisory-source")[0]
+    src = inv["vbios_advisory"]["source"]
+    assert src["not_applicable"] == ["5674"] and src["awaiting_confirmation"] == [] and inv["vbios"][0]["advisory"]["reason"] == "no-row"
     assert inv["status"] == "ATTENTION" and "公告比對的對照表不能用" not in inv["detail"] and "過期" not in inv["detail"]
-    assert "表尚未經負責人確認" in md and "無法對應" in md and "不適用" not in md[md.index("### NVIDIA vBIOS"):]
-    late = xf.inventory([tmp_path / "in.bin"], vbios_now=NOW + datetime.timedelta(days=5000))["vbios_advisory"]   # 沒審核過的表：不吃時鐘，也不報過期
-    assert late["stale"] is False and late["counts"] == {"NOT_ASSESSED": 1}
+    assert "已確認無法對應" in md and "表尚未經負責人確認" not in md and "不適用" not in md[md.index("### NVIDIA vBIOS"):]
+    late, _, _ = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), None, now=NOW + datetime.timedelta(days=5000))   # 確認過的表：鏡像超過 90 天要報過期
+    assert late["vbios_advisory"]["stale"] is True and late["vbios_advisory"]["counts"] == {"NOT_ASSESSED": 1}
+    assert late["status"] == "ATTENTION" and "過期" in late["detail"]
 
 
 def test_synthetic_rom_end_to_end(tmp_path):
@@ -477,12 +486,13 @@ def test_synthetic_rom_end_to_end(tmp_path):
     assert not list(cdx_validator().iter_errors(d))
     [c] = d["components"]
     assert props(c, "dumpling:advisory-match") == ["NOT_ASSESSED"] and props(c, "dumpling:vuln-assessment") == ["NOT_ASSESSED"]
-    assert "表尚未經負責人確認" in props(c, "dumpling:advisory-basis")[0] and NO_DATA in props(c, "dumpling:advisory-basis")[0]
+    assert "has no reviewed row" in props(c, "dumpling:advisory-basis")[0] and NO_DATA in props(c, "dumpling:advisory-basis")[0]
+    assert "表尚未經負責人確認" not in props(c, "dumpling:advisory-basis")[0]
     assert "mirror commit 98dc5d70d87f" in props(c, "dumpling:advisory-source")[0]
     md = (out / "fw-inventory.md").read_text(encoding="utf-8")
     assert "### NVIDIA vBIOS（1 個）" in md and "NOT_ASSESSED（資料庫沒有資料，以廠商公告為準）" in md
     inv = json.loads((out / "fw-inventory.json").read_text(encoding="utf-8"))
-    assert inv["vbios_advisory"]["counts"] == {"NOT_ASSESSED": 1} and inv["vbios"][0]["advisory"]["reason"] == "table-not-reviewed"
+    assert inv["vbios_advisory"]["counts"] == {"NOT_ASSESSED": 1} and inv["vbios"][0]["advisory"]["reason"] == "no-row"
     assert "PASS" not in r.stdout and "安全" not in r.stdout and "不受影響" not in md
 
 
@@ -714,10 +724,23 @@ def test_confirmed_table_report_says_confirmed_not_mappable(tmp_path):
         assert "not applicable" not in x.lower() and "不適用" not in x[x.find("NVIDIA vBIOS"):]
 
 
-def test_unconfirmed_table_report_says_preliminary(tmp_path):
+def test_committed_table_report_says_confirmed_not_mappable(tmp_path):
     inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), nva.load(COMMITTED))
     sec = md[md.index("### NVIDIA vBIOS"):]
+    assert "已確認無法對應到 option ROM 版本與裝置的公告：5674（技術理由見對照表）" in sec and "審核到 2025-09-02" in sec
+    assert "初審無法對應" not in sec and "表尚未經負責人確認" not in sec
+    assert "不適用" not in sec and "not applicable" not in json.dumps(comps).lower()
+
+
+def test_unconfirmed_table_report_says_preliminary(tmp_path):
+    """同一張表改回初審（reviewed=false、reviewed_until=null）時，報告寫「待負責人確認」。"""
+    d = json.loads(COMMITTED.read_text(encoding="utf-8"))
+    d["reviewed_until"] = None
+    d["not_applicable"][0].update(reviewed=False, reviewed_by=None, reviewed_at=None)
+    inv, comps, md = sbom(tmp_path, vbios_rom(0x2489, "94.04.5E.00.92"), nva.load(write(tmp_path, d, "prelim.json")))
+    sec = md[md.index("### NVIDIA vBIOS"):]
     assert "初審無法對應（待負責人確認）的公告：5674" in sec and "表尚未經負責人確認" in sec
+    assert inv["vbios"][0]["advisory"]["reason"] == "table-not-reviewed"
     assert "不適用" not in sec and "not applicable" not in json.dumps(comps).lower()
 
 
