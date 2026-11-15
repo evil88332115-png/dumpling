@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-15 14:05 +0800（C2）
+最後更新：2026-11-15 14:05 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -369,15 +369,15 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 
 - 目前在做：**第一次真實基準已建立**（11-15 重建：狀態 Issue #114，main fff33a5；3 Release／6 SBOM、KEV 84、廠商層級 225；#99 已關閉）。第 3 步：11-14 排程其實有跑，只是晚了 6 小時 19 分（07:36Z，43571895080，dry_run：would_open 3，都是支援期限 Issue；KEV 新 0）。11-15 的排程到 04:07Z 還沒來（GitHub 排程延遲），已手動代跑 dry_run（43675426062）：多了 dev/orin-nano-demo（11-14 10:27Z 發布，基準之後）→ would_open 16 個 KEV（全在 dev）＋3 個支援期限，已回報 C0 等決定。#101（md_text 改用 C2 的 firmware_mdsafe＋斷開 #數字／GH-數字 Issue 參照，POST /markdown 實測）已合併，實測結果已轉告 C2。GitLab 線已停（#93 合併；T-12 等內部 GitLab 環境）
 - 之後（D-040）：有正式 Release（C0 通知；使用者還沒推 tag）→ 手動 `mode=real`＋`baseline=true`（先看 dry_run 報告有沒有 ATTENTION）→ 排程 dry_run 一天 → 回報「打開會開哪些 Issue」→ C0 設 WATCH_REAL_ISSUES=on
-- 已合併：#32、#47、#49、#61、#69、#71、#72、#74、#84、#85、#91、#93、#94、#100、#101、#112、#116、#118、#121、#122、#124、#123
+- 已合併：#32、#47、#49、#61、#69、#71、#72、#74、#84、#85、#91、#93、#94、#100、#101、#112、#116、#118、#121、#122、#124、#123、#126
 - M8：B1＋B2 已合併（#69）。GitLab 版（T-10、T-23）之後做
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：WATCH_REAL_ISSUES 暫時 off（C0，04:44Z：三個新平台的 dev 會帶進一批 Issue）；C4 發布後跑 dry_run 回報（KEV／支援期限分開）
-- 開著的 PR：#120（D-064 A，等 C4 確認板子廠商）、#126（儀表板，C0 已看過修正，等 CI 綠合併，head 91ddb06）、#128（韌體 F2，等 C0 獨立驗證，head 28e7c68）
+- 開著的 PR：#120（D-064 A，等 C4 確認板子廠商）、#128（韌體 F2，等 C0 獨立驗證）、#129（儀表板 tiers 小修，C0 直接審）
 - 韌體進監控：設計 #122、F1 #123 已合併；F2 #128；之後 vendor-watch 的 firmware-demo（等 #120）→ C2 的 rematch 入口與 firmware.yml 建 Release 合併 → C2 打第一個 tag → dry_run 給 C0
-- 儀表板：#126；tiers 缺 key 的顯示（C1：缺＝0 列）等 C0 決定；Pages 設定由 C0 轉使用者；之後 T-12（只做偵測＋開 Issue）
+- 儀表板：#126 已合併（Pages 設定由 C0 轉使用者）；#129 tiers；C1 的 vuln_metrics（wp1/tiers-fixed）合併後新格式自動生效；之後 T-12（只做偵測＋開 Issue）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
