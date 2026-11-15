@@ -151,21 +151,34 @@ def run_paths(w, rootfs="rootfs"):
             "package": os.path.join(w, "報告")}
 
 
+# cra_report／vex_export 會給一列的 tier：cra_report 的 TIERS（p1、p2、p3、accepted）、發行版已修補（distro_fixed，cra_report）、
+# NVIDIA 公告另加的列（nvidia_bulletin，vex_export）。tests/test_jetson_pipeline.py 核對這份清單和那兩個檔案一致。
+KNOWN_TIERS = ("p1", "p2", "p3", "accepted", "distro_fixed", "nvidia_bulletin")
+
+
 def vuln_metrics(rows_doc):
     """vulnerability-rows.json → 列數、CVE 數、各 tier、各層、P1 判斷表列數（＝我們的待辦：每列的 layer_todo，cra_report 依
-    os_responsibility 給——bsp、unknown 一定算，os 只有 ours 或沒給時算；舊資料沒有 layer_todo 時 bsp＋unknown；沒有層標記時全部）。"""
+    os_responsibility 給——bsp、unknown 一定算，os 只有 ours 或沒給時算；舊資料沒有 layer_todo 時 bsp＋unknown；沒有層標記時全部）。
+    tiers 固定有 KNOWN_TIERS 的每一個 key（0 列也寫 0），讓「真的 0」和「資料漏了」分得出來；不在清單裡的 tier 值（包括沒有 tier 的列，
+    記成 "None"）不混進 tiers，另外記在 tiers_unknown（{值: 列數}，沒有時是 {}），讀的人看到不是空的就是異常。
+    以前（2026-11-15 之前）的 scan-summary 沒有 tiers_unknown，tiers 只有出現過的 tier（0 列的 key 不寫）。"""
     if not isinstance(rows_doc, dict) or not isinstance(rows_doc.get("rows"), list):
         return None
     rows = rows_doc["rows"]
-    tiers, layers = {}, {}
+    tiers, unknown, layers = {t: 0 for t in KNOWN_TIERS}, {}, {}
     for r in rows:
-        tiers[str(r.get("tier"))] = tiers.get(str(r.get("tier")), 0) + 1
+        t = r.get("tier")
+        if isinstance(t, str) and t in tiers:
+            tiers[t] += 1
+        else:
+            unknown[str(t)] = unknown.get(str(t), 0) + 1
         layers[str(r.get("layer"))] = layers.get(str(r.get("layer")), 0) + 1
     def todo(r):
         v = r.get("layer_todo")
         return v if isinstance(v, bool) else r.get("layer") in (None, "bsp", "unknown")
     p1 = {r.get("id") for r in rows if r.get("tier") == "p1" and todo(r)}
-    return {"rows_total": len(rows), "cves_total": len({r.get("id") for r in rows}), "tiers": tiers, "layers": layers, "p1_rows": len(p1)}
+    return {"rows_total": len(rows), "cves_total": len({r.get("id") for r in rows}), "tiers": tiers, "tiers_unknown": unknown,
+            "layers": layers, "p1_rows": len(p1)}
 
 
 def sbom_layer_counts(path, package_purl_prefix="pkg:deb/"):
