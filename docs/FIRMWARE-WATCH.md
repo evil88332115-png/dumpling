@@ -24,16 +24,17 @@
 | Release tag | `firmware-demo/<YYYY.MM.DD>`（同一天第二次加 `.2`、`.3`） | **避開 `*/v*`**，不會觸發 release.yml（板子的建置）。查過 main 上所有 workflow：只有 release.yml 用 tag 觸發。符合 collect 的 `PROJECT_RE`／`VERSION_RE` |
 | Release 種類 | 正式 Release（不是 prerelease、不是 draft），只由 tag push 產生 | 每一版都留著，是韌體 SBOM 的長期紀錄（PLAN：長期紀錄靠 Release） |
 | 監控的單位 | 每個樣本一份 SBOM | 版本只在同一個樣本底下有意義，樣本 slug 才是識別（C2） |
-| 監控鍵（UUID） | `dumpling:firmware-demo/<slug>@<firmware_version>#firmware` | **不含 Release 的日期**。同一個樣本同一版，在新的韌體 Release 重發時鍵不變，不會每次都把既有命中當成新的。樣本換版本，或新加樣本，才是新的鍵；它本來就有的 KEV 依 #112 的規則開 Issue |
+| 監控鍵（UUID） | `dumpling:firmware-demo/<slug>@<firmware_version>+<image_sha256 前 16 碼>#firmware` | **不含 Release 的日期，但包含樣本身分＋韌體版本＋映像雜湊**（C0 決定）。BIOS 改版（版本或映像換了）就是新的鍵，當成新版本；同一份映像重新發布，鍵不變，不會把既有命中當成新的。新的鍵本來就有的 KEV，依 #112 的規則開 Issue。`image_sha256` 是 firmware.yml 該樣本主要檔案（`role: image`，沒有就用 `package`）的 sha256；供應商 SBOM 用 SBOM 原檔的 sha256 |
 | `firmware_version` | 照 firmware.yml 原樣，不改寫：`3404`、`v1.2.0`、`0059`、`v0.9.2`、`v1.0.1`、`2024.02-2ubuntu0.10`、`v1.6.0` | 全部符合 `VERSION_RE`（C2 核對） |
 
 - **只監控最新的一個 `firmware-demo` Release**（依 `published_at`）。舊的韌體 Release 留著當紀錄，collect 列在「說明」，不比對。
   理由：每個 Release 都包含全部樣本，監控鍵又不含日期，同時收多個 Release 會出現重複的鍵。
+  - **這是第一階段公開示範的限制。** 公司內部版要監控**每一個已出貨、還在支援期內的韌體版本**，因為舊版 BIOS 還在市場上。這和盤點已出貨產品的工作直接相關，列為搬家與第二階段（C0 決定，2026-11-15）。
 - 進監控的：
   - `firmware/bios/*` 裡 `status: ok` 的樣本（目前 6 份）。
   - 供應商 SBOM（`firmware/sbom/dasharo-novacustom-ns5x-tgl-v1.6.0`）：正規化後給 Grype 比對；採信規則照 #54／#60，`advisory-match` 不採信。
     它走 firmware-sbom-check，不經過 x86_firmware 解析，**沒有 fw-inventory.json，不重跑公告比對**。
-    公告比對那欄寫 `NOT_ASSESSED（供應商 SBOM：不重跑；advisory-match 不採信）`。這是設計上就不做，不是 NOT_RUN。
+    公告比對那欄寫 `NOT_ASSESSED（沒有 inventory，不重跑公告比對；advisory-match 不採信）`。這是設計上就不做，不是 NOT_RUN。
 - 不進監控，只在報告列出：
   - 合成 vBIOS。
   - `vbios/nvidia-displayport-fw-updater-1.1`：沒有 vBIOS 元件。
@@ -52,11 +53,11 @@
   {"schema": "dumpling-firmware-meta/1", "tag": "firmware-demo/2026.11.20", "commit": "<40 碼>", "built_at": "…Z", "workflow_run": "…",
    "samples": [{"slug": "intel-nuc11-patgl357-0059", "kind": "bios", "firmware_version": "0059",
                 "sbom": "fw-intel-nuc11-patgl357-0059.cdx.json", "sbom_sha256": "…",
-                "inventory": "fw-inventory-intel-nuc11-patgl357-0059.json", "inventory_sha256": "…",
+                "inventory": "fw-inventory-intel-nuc11-patgl357-0059.json", "inventory_sha256": "…", "image_sha256": "…",
                 "status": "OK|ATTENTION|GAP", "expect": "OK|MISMATCH|MISSING|ERROR|NOT_RUN|NONE"},
                {"slug": "dasharo-novacustom-ns5x-tgl-v1.6.0", "kind": "sbom", "firmware_version": "v1.6.0",
                 "sbom": "fw-dasharo-novacustom-ns5x-tgl-v1.6.0.cdx.json", "sbom_sha256": "…", "normalized": true,
-                "inventory": null, "inventory_sha256": null, "status": "…", "expect": "NONE"}],
+                "inventory": null, "inventory_sha256": null, "image_sha256": "<SBOM 原檔的 sha256>", "status": "…", "expect": "NONE"}],
    "not_watched": [{"slug": "standalone-nvidia-option-rom", "why": "GAP：沒有合法可下載的檔案"}],
    "tables": {"fw_advisory_rules": {"sha256": "…", "table_updated": "…"}, "intel_microcode": {"source_commit": "…"},
               "nvidia_vbios": {"sha256": "…", "mirror_commit": "…", "reviewed_until": "…"}}}
@@ -131,16 +132,20 @@
   - 有可比對元件時照常 OK／GAP，並附「NVD 的 CSME 資料不完整」。
 - 核心對應、核心 CNA：**沒有這一項**（韌體 SBOM 沒有 Linux 核心元件），報告的這兩欄寫「沒有這一項」。
 - **公告重跑的結果**（`rematch.json`）：
-  - 每份 SBOM 多一欄「公告比對」，值是 OK／ATTENTION／GAP／NOT_RUN，原文照錄。供應商 SBOM 寫 `NOT_ASSESSED（供應商 SBOM：不重跑；advisory-match 不採信）`。報告列出 `changed` 與三張表的識別。
-  - **開 Issue 的條件**（內文一律寫明：是建議、待負責單位確認、比對依據與表的識別）：
-    - **規則表**：結果是 `affected`，而且這則公告在這個樣本還沒開過 Issue → 開「[韌體公告] <公告> 可能影響 <樣本> <版本>（<元件>）」。一則公告一個 Issue。
-      - 群組鍵：`issue_key(mode, "fwadv", <slug>@<firmware_version>, <rematch 的 key>)`。
-      - 結果從 affected 變回 not-affected，或變成 NOT_ASSESSED：在原 Issue 留言，不自動關閉。
+  - 每份 SBOM 多一欄「公告比對」，值是 OK／ATTENTION／GAP／NOT_RUN，原文照錄。供應商 SBOM 寫 `NOT_ASSESSED（沒有 inventory，不重跑公告比對；advisory-match 不採信）`。報告列出 `changed` 與三張表的識別。
+  - **開 Issue 的條件**（C0 決定，2026-11-15）。內文一律寫明：是建議、待負責單位確認、比對依據與表的識別。
+    **比照 D-064，不要每個樣本各開一個**：
+    - **規則表**：**一則公告一個 Issue，內文列出受影響的樣本**（樣本、版本、元件、rematch 的 key）。
+      - 群組鍵：`issue_key(mode, "fwadv", <公告 ID>)`。
+      - 之後又有樣本的結果變成 affected：在原 Issue 留言，只列新的樣本。
+      - 某個樣本從 affected 變回 not-affected，或變成 NOT_ASSESSED：在原 Issue 留言，不自動關閉。
+      - **用語**：規則表目前都是 `review: preliminary`。標題和內文寫「**建議受影響（初步規則，待人審）**」，不能寫成確定受影響。
+        標題例：「[韌體公告] AMI-SA-… 建議受影響（初步規則，待人審）：B550M 3404 等 2 份樣本」。`review: confirmed` 的規則才寫「建議受影響（規則已確認，待負責單位確認）」。
     - **Intel 微碼**：`affected-candidate` 是 release 層級的候選。SBOM 的 revision 比某個微碼 release 舊，就把那個 release 列的 INTEL-SA 都列成候選，所以一份微碼常常帶好幾個 SA（C2）。
-      - 因此是**一份微碼一個 Issue**：「[韌體公告] Intel 微碼 <cpuid>/<platform> rev <rev> 有 n 個候選公告（<樣本> <版本>）」，內文列出全部候選 SA。
-      - 群組鍵：`issue_key(mode, "fwadv-ucode", <slug>@<firmware_version>, <cpuid>/<platform>)`。
-      - 候選清單變了，或結果變成 up-to-date／older-no-sa／NOT_ASSESSED：在原 Issue 留言。
-    - **NVIDIA vBIOS 表**：結果是 `affected` 時，比照規則表，一則公告一個 Issue。目前沒有進監控的 vBIOS 樣本。
+      - 因此是**一份微碼一個 Issue**：「[韌體公告] Intel 微碼 <cpuid>/<platform> rev <rev>：n 個候選公告（版本比較的候選，待人審）」。內文列出全部候選 SA 與受影響的樣本。
+      - 群組鍵：`issue_key(mode, "fwadv-ucode", <cpuid>/<platform>, <rev>)`。不含樣本，同一份微碼出現在多個樣本只開一個。
+      - 候選清單變了、多了樣本，或結果變成 up-to-date／older-no-sa／NOT_ASSESSED：在原 Issue 留言。
+    - **NVIDIA vBIOS 表**：結果是 `affected` 時，比照規則表，一則公告一個 Issue，內文**照實寫依據**（對照表的哪一列、裝置 ID、vBIOS 版本、表的 `reviewed_until`）。目前沒有進監控的 vBIOS 樣本。
   - 第一輪就會有既有的 affected（C2 列出的）：
     - AMI 兩則公告會出現在 4 份 AMI 樣本，其中有 firmware.yml 的是 B550M、NUC11。
     - B550M 的 0x8012 對到 AMD-SB-7014／7033。
@@ -148,7 +153,11 @@
 
     所以 §6 第 3、4 步「先看 would_open，再決定照開或重建基準」不能省。
   - 對照表過期（vBIOS 超過 90 天）不開公告 Issue。它是資料健康問題，跟其他資料源一樣進「需注意」，連續兩次就開健康 Issue。
-  - 狀態只存有開 Issue 的組合，以及最近一次的表識別，控制狀態 Issue 的大小。
+  - **表的狀態要看得到，不能只在 artifact 裡**（C0 決定）：
+    - 狀態 Issue 的摘要文字寫三張表的識別、`status`、`stale`。
+    - state 的 `firmware.tables` 存最近一次的值。
+    - 儀表板的韌體區顯示同樣三項。
+  - 狀態只存：有開 Issue 的組合、各樣本最近一次的公告比對結果（只存 affected／affected-candidate 的 key），以及表識別。這樣控制狀態 Issue 的大小。
 - **廠商層級**：`vendor-watch.json` 的 `projects` 加 `firmware-demo`：intel、amd、ami、nvidia、insyde、phoenix。這就是 D-043 第 3 點 Intel、AMD、AMI、NVIDIA 的落點（D-064）。
   - #121 合併後，同一個廠商 × CVE 只開一個 Issue，內文列出受影響的樣本。
   - `VendorWatchConfig` 測試允許 `firmware-demo` 這個不在 `projects/` 的鍵：測試裡另列「非產品專案」清單，只有 `firmware-demo`。
@@ -161,7 +170,7 @@
 ## 6. 第一次進監控的順序
 
 1. C2 的 rematch 入口＋測試、firmware.yml 打 tag／上傳 Release 合併。C3 的 collect／match／watch-round 合併。兩邊各自可測：C3 用合成的 firmware-meta 與 inventory。
-2. 打第一個 `firmware-demo/<日期>` tag（使用者或 C0）→ 確認 Release 附件與 firmware-meta。
+2. C0 同意後由 C2 打第一個 `firmware-demo/<日期>` tag（見 §9 第 4 點）→ 確認 Release 附件與 firmware-meta。
 3. 每日監控一般 dry_run，回報 would_open：KEV、廠商層級、韌體公告分開列。新加入的韌體 SBOM 本來就有的 KEV 會算新的（#112 規則）。
 4. C0 決定照開，還是先重建基準把韌體納入（WATCH.md §5 的做法），之後才打開 `WATCH_REAL_ISSUES`。
 
@@ -184,12 +193,19 @@
 
 介面只有兩個：`firmware-meta.json`（§3）與 `rematch.json`（§4）。兩邊先合併這兩個 schema 的範例檔（`pipeline/watch/tests/data/`），各自照範例寫測試。
 
-## 9. 待決定（給 C0）
+## 9. 已決定（C0，2026-11-15）
 
-1. 監控鍵不含 Release 日期，而且只監控最新的韌體 Release（§2）。同意嗎？
-2. 公告 Issue 的開法（§5）：同意嗎？
-   - 規則表、vBIOS：affected 時，一則公告一個 Issue。
+1. **監控鍵**：不含 Release 日期，包含樣本身分＋韌體版本＋映像雜湊（§2）。
+   - 只監控最新的韌體 Release，是第一階段示範的限制。
+   - 內部版要監控每一個已出貨、還在支援期內的韌體版本，列為搬家與第二階段。
+2. **公告 Issue**：
+   - 規則表、vBIOS：一則公告一個 Issue，內文列出受影響的樣本。
    - Intel 微碼：一份微碼一個 Issue，內文列出全部候選 SA。
-   - 表過期：只進需注意，不開 Issue。
-3. 供應商 SBOM（ns5x）進監控（§2）：只跑 Grype，公告比對寫 NOT_ASSESSED。同意嗎？
-4. 第一個 `firmware-demo` tag 由誰打：使用者還是 C0。
+   - 用語：「建議受影響（初步規則，待人審）」。
+   - 表過期：只進「需注意」，但狀態 Issue 與儀表板上看得到（§5）。
+3. **供應商 SBOM（ns5x）**：只跑 Grype，公告比對寫 `NOT_ASSESSED（沒有 inventory，不重跑公告比對）`。
+4. **第一個 `firmware-demo` tag 由 C2 打**。時機：
+   - 設計與實作的 PR 都合併了。
+   - dry_run 的 would_open 給 C0 看過，而且 C0 同意。
+
+   第一輪既有的 affected（AMI、AMD-SB-7014／7033、INTEL-SA-01315）要照開，還是先納入基準，到時候看了數字再決定。
