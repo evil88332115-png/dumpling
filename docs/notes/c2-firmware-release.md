@@ -26,8 +26,8 @@
 |---|---|---|---|
 | `firmware-fetch` | `contents: read` | PR、dispatch、tag | 原有的下載、解析、expected 比對、供應商 SBOM 品質檢查；tag 觸發時第一步先驗 tag 格式 |
 | `firmware-dt` | `contents: read` | PR、dispatch、tag | 原有的臨時 Dependency-Track |
-| `firmware-release-check` | `contents: read` | PR、dispatch、tag；`needs: [firmware-fetch, firmware-dt]`，條件 `always() && needs.firmware-fetch.result == 'success'` | 等臨時 DT 跑完，把它的結果寫進 meta 的 `dt` 欄位；產生 `firmware-meta.json` 與附件資料夾，做三項自我檢查，上傳 artifact `firmware-release`（只有附件資料夾）。DT 失敗、被取消或略過都不會讓這個 job 被跳過；`firmware-fetch` 沒成功時什麼都不做 |
-| `firmware-release` | **`contents: write`** | **只有 tag push**，而且 `firmware-fetch`、`firmware-release-check` 都成功 | 確認 commit 在 main 的歷史裡、下載 artifact、再核對一次、建 Release。**不等 `firmware-dt`**（DT 的結果只記在 meta 的 `dt` 欄位） |
+| `firmware-release-check` | `contents: read` | PR、dispatch、tag；`needs: [firmware-fetch, firmware-dt]`，條件 `!cancelled() && needs.firmware-fetch.result == 'success'` | 等臨時 DT 跑完，把它的結果寫進 meta 的 `dt` 欄位；產生 `firmware-meta.json` 與附件資料夾，做三項自我檢查，上傳 artifact `firmware-release`（只有附件資料夾）。DT 失敗、被取消或略過都不會讓這個 job 被跳過（條件裡有狀態函式，GitHub 不會再加隱含的 `success()`）；整個 run 被取消時不跑；`firmware-fetch` 沒成功時什麼都不做 |
+| `firmware-release` | **`contents: write`** | **只有 tag push**，而且 `firmware-fetch`、`firmware-release-check` 都成功 | 確認 commit 在 main 的歷史裡、下載 artifact、再核對一次、建 Release。`needs` 不含 `firmware-dt`：DT 的結果不阻擋 Release（只記在 meta 的 `dt` 欄位），但 `firmware-release-check` 要等 `firmware-dt` 跑完，所以 Release 會等 DT 結束 |
 
 只有最後一個 job 有 `contents: write`（D-012），而且它不下載樣本、不解析任何下載檔，只上傳前一個 job 產生並檢查過的 JSON。PR 與 `workflow_dispatch` 不會到這個 job（`if` 條件要求 push、tag、`firmware-demo/` 開頭）。
 
@@ -39,7 +39,7 @@
 4. 先用 API 依 id 刪掉同一個 tag 的**草稿**（草稿用 tag 名稱查不到）。刪除只對 API 回應裡 `draft` 為 true 且 `tag_name` 相同的項目；非草稿的 id 不會進待刪清單（`firmware_release_api.py releases-plan`，有測試）。
 5. `gh release create … --draft --verify-tag --latest=false`：先建草稿，附件全部上傳；用 API 核對每個附件的名稱、大小、狀態（`uploaded`）和本機一致。建草稿與核對是一組，失敗就整組重來（先清掉上一次留下的草稿）。
 6. 發布成正式版（`draft=false`、`prerelease=false`）。不是 prerelease、不是 draft；`--latest=false` 只是不讓它成為 repo 的「最新 Release」（板子的 Release 才是）。
-7. 發布後用 `gh release download` 下載，再跑一次 `collect-check`，並確認 Release 狀態。這一步失敗時 Release 已經存在：刪掉它，用下一個序號（`.2`）重發。
+7. 發布後用 `gh release download` 下載，再跑一次 `collect-check`，並確認 Release 狀態。這一步失敗時 Release 已經是正式版：處理步驟見下面的「發布之後的核對失敗」。
 8. 任何一步失敗，job 最後會執行 `firmware-release-publish.sh --cleanup <tag>`：只清這個 tag 的草稿。
 
 Release 說明文字（`firmware_meta.py release-notes` 產生）：示範用的公開韌體樣本、不是產品、附件只有 JSON、進每日監控的樣本清單與不進的樣本和原因。
@@ -52,6 +52,8 @@ Release 說明文字（`firmware_meta.py release-notes` 產生）：示範用的
 | `fw-inventory-<slug>.json`（BIOS 樣本） | `fw-inventory.json`（schema `sca-center-fw-inventory/1`）。檔名都是「壓縮檔!內部檔名」的形式，沒有絕對路徑。供應商 SBOM 沒有 inventory |
 | `firmware-meta.json` | 見下節，名稱固定 |
 
+附件名在同一個 Release 裡必須唯一（含 `firmware-meta.json`）。slug 可以含 `.` 與 `-`，不同樣本的 slug 可能組出同一個檔名：例如 slug `a.cdx` 的 inventory 與 slug `inventory-a` 的 SBOM 都是 `fw-inventory-a.cdx.json`。產生器（`build`）遇到撞名就失敗（`FIRMWARE-META<TAB>FAIL`），不產生任何輸出；`collect-check` 另外核對 meta 裡的附件名不重複。
+
 不放映像或任何二進位檔。要上傳的整個資料夾（加上 Release 說明文字）上傳前跑 `ci/public-check.sh`：資料夾不是 git repo，所以做法同 `pages.yml`：複製到暫存資料夾，`git init`、`git add -A`、`git write-tree`，對 tree 跑 `--rev`。不過就不建 Release。
 
 ## `firmware-meta.json`（schema `dumpling-firmware-meta/1`）
@@ -61,7 +63,7 @@ Release 說明文字（`firmware_meta.py release-notes` 產生）：示範用的
 | 欄位 | 說明 |
 |---|---|
 | `tag`、`commit`、`built_at`、`workflow_run` | tag（見上）、40 位小寫十六進位 commit、UTC 建置時間、工作流程執行的網址 |
-| `dt` | 臨時 DT（`firmware-dt` job）的結果：`{status, result, reason}`。`success`→`OK／OK／null`；`failure`、`cancelled`→`GAP／FAIL`；`skipped` 或拿不到結果→`GAP／NOT_RUN`；非 OK 時 `reason` 是固定字串（`firmware_meta.DT_REASON`，說明 DT 上傳沒有完成、Release 內容與它無關；C3 已確認格式）。只有這三種組合，其他組合產生器一律失敗。Release 不等 DT，所以 DT 失敗時 Release 照建，只是 `dt.status` 是 `GAP` |
+| `dt` | 臨時 DT（`firmware-dt` job）的結果：`{status, result, reason}`。`success`→`OK／OK／null`；`failure`、`cancelled`→`GAP／FAIL`；`skipped` 或拿不到結果→`GAP／NOT_RUN`；非 OK 時 `reason` 是固定字串（`firmware_meta.DT_REASON`，說明 DT 上傳沒有完成、Release 內容與它無關；C3 已確認格式）。只有這三種組合，其他組合產生器一律失敗。DT 的結果不阻擋 Release：DT 失敗時 Release 照建，只是 `dt.status` 是 `GAP`；Release 會等 DT 跑完才開始建 |
 | `samples[]` | 每個進監控的樣本一筆，依 slug 排序 |
 | `samples[].slug` | 樣本資料夾名稱；fullmatch `^[a-z0-9][a-z0-9.-]{0,62}$`（也不能是 `summary`，那是 rematch 總表的檔名），不合就失敗，不產生 meta |
 | `samples[].kind` | `bios` 或 `sbom` |
@@ -89,7 +91,9 @@ watch:
 - 目前宣告不監控的：`vbios/nvidia-displayport-fw-updater-1.1`（沒有 vBIOS 元件）與 `vbios/standalone-nvidia-option-rom`（GAP：沒有合法可下載的檔案；CI 只用合成 option ROM 測流程）。合成 vBIOS 沒有自己的 `firmware.yml`，用的是後者。
 - `kind: vbios` 的樣本沒有每日監控的流程：`status: ok` 卻沒有宣告 `watch.monitored: false`，產生器失敗。
 - `status` 只有兩種值：`ok`（監控）與 `GAP`（沒有檔案可下載）。`GAP` 的樣本一律列進 `not_watched`，`why` 是「狀態：原因」（`notes` 的第一行；有宣告 `why` 時用宣告的，並補上狀態）。其他值（大寫的 `OK`、清單、空值…）產生器直接失敗，不放進 `not_watched`（第二道防線；第一道是 `firmware_fetch.validate`）。`watch.monitored: true` 與 `status` 不是 `ok` 同時出現是矛盾的宣告，也失敗。
-- `why` 不論是宣告的還是從 `notes` 推導的，都用 `firmware_watch.clean_why`：單行（沒有控制字元、換行、U+2028、U+2029、U+0085）、去掉空白與零寬字元後不是空的、最多 300 字。
+- `why` 不論是宣告的還是從 `notes` 推導的，都用 `firmware_watch.clean_why`：單行（沒有控制字元、換行、U+2028、U+2029、U+0085）、沒有雙向控制字元、去掉空白與零寬字元後不是空的、最多 300 字。
+  雙向控制字元全部拒絕：U+202A～U+202E（內嵌與覆寫）、U+2066～U+2069（隔離），以及方向標記 U+200E、U+200F、U+061C。它們會改變文字的顯示順序，Release 說明裡看到的原因會和實際內容不同；原因是一行說明文字，用不到。零寬字元（U+200B～U+200D、U+2060、U+FEFF）可以出現在文字中間，但不能是原因裡唯一的內容。
+  加上「狀態：」前綴之後才超過 300 字，或前綴後的文字不合規，也一樣失敗：產生器輸出 `FIRMWARE-META<TAB>FAIL<TAB>-<TAB>原因` 那一行、結束碼 1，不會出現 traceback。
 - `status: ok` 的 BIOS 或供應商 SBOM 樣本在輸出裡找不到結果（沒有 inventory、沒有 prep 副本）也失敗，不會悄悄略過。
 
 ## 端到端自我檢查（`firmware-release-check`，PR、dispatch、tag 都跑）
@@ -104,8 +108,30 @@ watch:
 ## 限制
 
 - tag 觸發的 `firmware-release` 只有在 tag push 時才會跑，PR 上無法實測；降低風險的做法：附件的產生與檢查（`firmware-release-check`）三種觸發都跑，建 Release 的 job 只做上傳；上傳用草稿、核對附件、再發布；發布後下載核對。`gh` 與 GitHub API 的呼叫（建草稿、查附件、發布）只有真的 tag 才會執行，第一個 tag 的 `firmware-release` log 要逐步確認。
-- `firmware-release-check` 要等 `firmware-dt` 跑完（臨時 DT 最長 90 分鐘）才能把結果寫進 meta，所以 tag 觸發的 Release 最快也要等 DT 結束；但 DT 失敗、被取消或略過都不會阻擋 Release，只會讓 meta 的 `dt.status` 是 `GAP`。
-- **草稿殘留**：建草稿之後任何一步失敗（上傳、核對、API 暫時失敗）會留下草稿。重跑 workflow 時 `firmware-release-publish.sh` 會先依 id 刪掉同一個 tag 的草稿再重建，不需要手動刪；job 失敗時也會嘗試清掉。只有草稿會被刪：同一個 tag 已經有正式版或 prerelease 時，腳本停下來（結束碼 2），要人決定（通常是用 `.2` 重發）。
+- `firmware-release-check` 要等 `firmware-dt` 跑完（臨時 DT 最長 90 分鐘）才能把結果寫進 meta，所以 tag 觸發的 Release 最快也要等 DT 結束；但 DT 失敗、被取消或略過都不會阻擋 Release，只會讓 meta 的 `dt.status` 是 `GAP`。整個 run 被取消時（`!cancelled()`）`firmware-release-check` 與 Release 都不跑。
+- **草稿殘留**：建草稿之後任何一步失敗（上傳、核對、API 暫時失敗）會留下草稿。重跑 workflow 時 `firmware-release-publish.sh` 會先依 id 刪掉同一個 tag 的草稿再重建，不需要手動刪；job 失敗時也會嘗試清掉。只有草稿會被刪：同一個 tag 已經有正式版或 prerelease 時，腳本停下來（結束碼 2），要人決定；處理步驟見下面的「重跑停在同一個 tag 已有正式版」。
+## 出問題時的處理
+
+已發布的 Release 是長期紀錄：腳本與 workflow 都不覆寫、不刪除它（清理只刪草稿）；刪不刪由人決定，重發一律換新的序號。
+
+### 發布之後的核對失敗（`firmware-release` 的「發布後下載並核對」步驟紅燈）
+
+此時 Release 已經是正式版，只是下載回來的內容沒通過核對。
+
+1. 確認失敗原因：開 job 的 log，看是 Release 狀態不對（不是正式版）、下載不到附件，還是 `collect-check` 的哪一項不符（檔名、sha256、meta 內容）。API 暫時失敗（403、逾時）與內容不符要分開看：前者重跑核對那一步即可確認，後者代表附件本身有問題。
+2. 不覆寫已發布的 Release：不要用 `gh release upload --clobber`、不要編輯它的附件或說明。
+3. 要不要刪掉已發布的 Release（以及它的 tag）由人決定（C0 指定的人），程式不會替人刪。判斷依據：手動下載附件跑 `collect-check` 通過，代表只是核對時 API 暫時失敗，Release 可以留；附件內容不符，就刪，並注意 tag 也要一併處理，免得留下指向壞內容的 tag。
+4. 要重發：在 main 的 commit 上打同一天的下一個序號 tag（`firmware-demo/<YYYY.MM.DD>.2`，再來 `.3`）。不要重用已經發布過的 tag 名稱。
+
+### 重跑停在「同一個 tag 已有正式版」（`firmware-release-publish.sh` 結束碼 2）
+
+log 的訊息是 `firmware-release: FAIL（<tag> 已經有非草稿的 Release，不覆蓋…）`。腳本在這個情況下不刪、不建、不發布任何東西。
+
+1. 先看那個 Release 是什麼：它是不是同一個 tag 先前發布成功的版本（附件齊全、說明文字正常）。可以用 `gh release view <tag>`，並把附件下載回來跑 `firmware_meta.py collect-check`。
+2. 內容正常：那個 Release 就是最終結果，不需要重跑；失敗的只是後面的步驟（例如核對那一步 API 暫時失敗）。
+3. 內容不正常，或要換內容：不覆寫。要不要刪掉已發布的 Release 由人決定；要重發就用同一天的 `.2`（再來 `.3`）。
+4. 殘留的草稿不用處理：重跑時腳本會依 id 先刪掉同一個 tag 的草稿。
+
 - `tables` 記的是建置當下 repo 的三張表；每日監控讀 repo 當下的表，表更新後 `changed` 才會有內容，這是預期的行為。
 - 狀態是解析與離線比對的結果；每個元件的漏洞比對是 `NOT_ASSESSED`；供應商 SBOM 不跑公告重跑（沒有 inventory）。
 - 重跑只反映表的更新，不重新解析映像：解析器改進要重新打 tag。

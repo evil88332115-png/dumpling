@@ -721,7 +721,7 @@ class Workflow(unittest.TestCase):
     def job_text(self, name):
         return yaml.safe_dump(self.wf["jobs"][name])
 
-    def test_release_job_runs_only_for_tag_push_and_does_not_wait_for_dt(self):
+    def test_release_job_runs_only_for_tag_push_and_does_not_need_dt(self):
         j = self.wf["jobs"]["firmware-release"]
         cond = j["if"]
         self.assertIn("github.event_name == 'push'", cond)
@@ -739,7 +739,8 @@ class Workflow(unittest.TestCase):
         j = self.wf["jobs"]["firmware-release-check"]
         self.assertEqual(set(j["needs"]), {"firmware-fetch", "firmware-dt"})
         cond = j["if"]
-        self.assertTrue(cond.startswith("always()"), cond)                          # dt 失敗、取消、略過都不能讓這個 job 被跳過
+        self.assertIn("!cancelled()", cond)                                         # 整個 run 被取消時不跑；有狀態函式，所以 dt 失敗、取消、略過都不會讓這個 job 被跳過
+        self.assertNotIn("always()", cond)
         self.assertIn("needs.firmware-fetch.result == 'success'", cond)             # fetch 沒成功就什麼都不做
         self.assertNotIn("firmware-dt", cond)
         self.assertNotIn("continue-on-error", self.job_text("firmware-release-check"))
@@ -1301,6 +1302,409 @@ class Ghx(unittest.TestCase):
         r, d = self.run_ghx('three() { echo x >> @D@/n; return 3; }\nghx three; echo rc=$?')
         self.assertIn("rc=3", r.stdout)
         self.assertEqual(len(slurp(os.path.join(d, "n")).split()), 1)
+
+
+# ------------------------------------------------------------------ 整串相等的比對（tag、檔名、slug）
+
+class ExactMatching(unittest.TestCase):
+    """firmware-demo/2026.11.20 是 firmware-demo/2026.11.20.2 的前綴（.2 也是 .20 的前綴）：比對 tag、檔名一律要整串相等。"""
+
+    def test_plan_tag_must_equal_not_prefix_suffix_or_substring(self):
+        import firmware_release_api as api
+        def rel(tag, draft, rid):
+            return {"id": rid, "tag_name": tag, "draft": draft}
+        pairs = (("firmware-demo/2026.11.20", "firmware-demo/2026.11.20.2"),       # 要查的 tag 是別人的前綴
+                 ("firmware-demo/2026.11.20.2", "firmware-demo/2026.11.20.20"),
+                 ("firmware-demo/2026.11.20.2", "firmware-demo/2026.11.20"),       # 別人是要查的 tag 的前綴
+                 ("firmware-demo/2026.11.20", "xfirmware-demo/2026.11.20"),        # 後綴、子字串
+                 ("firmware-demo/2026.11.20", "firmware-demo/2026.11.20 "),
+                 ("firmware-demo/2026.11.20", "FIRMWARE-DEMO/2026.11.20"),
+                 ("firmware-demo/2026.11.20", "firmware-demo/2026.11.2"))          # 查的 tag 比別人長
+        for want, other in pairs:
+            text = json.dumps([rel(other, False, 1), rel(other, True, 2)])
+            self.assertEqual(api.plan(text, want), (False, []), (want, other))
+            self.assertEqual(api.plan(text, other), (True, ["2"]), (want, other))    # 反過來查它自己：照常找得到
+        # 同時有兩個 tag：只算整串相等的那一個
+        text = json.dumps([rel("firmware-demo/2026.11.20.2", False, 1), rel("firmware-demo/2026.11.20", True, 2), rel("firmware-demo/2026.11.20.20", True, 3)])
+        self.assertEqual(api.plan(text, "firmware-demo/2026.11.20"), (False, ["2"]))
+        self.assertEqual(api.plan(text, "firmware-demo/2026.11.20.2"), (True, []))
+        self.assertEqual(api.plan(text, "firmware-demo/2026.11.20.20"), (False, ["3"]))
+
+    def run_plan(self, text, tag):
+        r = subprocess.run([sys.executable, "-I", API, "releases-plan", "--tag", tag], input=text, capture_output=True, text=True)
+        return r.returncode, r.stdout
+
+    def test_releases_plan_cli_does_not_stop_or_delete_for_a_neighbouring_tag(self):
+        text = json.dumps([{"id": 1, "tag_name": "firmware-demo/2026.11.20.2", "draft": False},
+                           {"id": 2, "tag_name": "firmware-demo/2026.11.20.2", "draft": True}])
+        self.assertEqual(self.run_plan(text, "firmware-demo/2026.11.20"), (0, ""))   # 不停下來（結束碼 3）、不列出別人的草稿
+        self.assertEqual(self.run_plan(text, "firmware-demo/2026.11.20.2"), (3, "PUBLISHED\n"))
+        self.assertEqual(self.run_plan(text, "firmware-demo/2026.11.20.20"), (0, ""))
+
+    def test_verify_assets_names_must_equal(self):
+        import firmware_release_api as api
+        d = tempfile.mkdtemp(prefix="dumpling-fwapi-")
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "fw-a.cdx.json"), "w") as fh:
+            fh.write("12345")
+        def rel(name):
+            return json.dumps({"assets": [{"name": name, "size": 5, "state": "uploaded"}]})
+        self.assertEqual(api.verify_assets(rel("fw-a.cdx.json"), d), [])
+        for other in ("fw-a.cdx.json.bak", "xfw-a.cdx.json", "fw-a.cdx.jso", "FW-A.cdx.json", "fw-a.cdx.json "):
+            probs = api.verify_assets(rel(other), d)
+            self.assertTrue(any("沒有上傳" in x for x in probs), other)             # 本機的檔案沒有同名的附件
+            self.assertTrue(any("多出來的附件" in x for x in probs), other)
+
+    def test_ci_summary_status_slug_must_equal(self):
+        summary = "| board-a-2 | ATTENTION x |\n| xboard-a | GAP y |\n| board-a- | FAIL z |\n"
+        for line in summary.splitlines():
+            self.assertIsNone(fm.ci_summary_status(line, "board-a"), line)
+        self.assertEqual(fm.ci_summary_status("| board-a | OK ok |", "board-a"), "OK")
+        self.assertEqual(fm.ci_summary_status(summary + "| board-a | GAP g |", "board-a"), "GAP")
+
+    def test_sbom_check_status_file_name_must_equal(self):
+        doc = {"files": [{"name": "a.sbom.json", "role": "sbom"}]}
+        for other in ("a.sbom.json.old", "xa.sbom.json", "a.sbom.jso", "A.sbom.json"):
+            with self.assertRaises(fm.MetaError, msg=other):
+                fm.sbom_check_status("FIRMWARE-SBOM\tOK\t%s\tx\n" % other, doc, "s")
+        self.assertEqual(fm.sbom_check_status("FIRMWARE-SBOM\tGAP\ta.sbom.json\tx\nFIRMWARE-SBOM\tFAIL\ta.sbom.json.old\tx\n", doc, "s"), "GAP")
+
+    def test_post_publish_state_check_compares_the_whole_line_as_a_fixed_string(self):
+        steps = yaml.safe_load(slurp(os.path.join(ROOT, ".github", "workflows", "firmware.yml")))["jobs"]["firmware-release"]["steps"]
+        run = next(s["run"] for s in steps if "release-state.txt" in s.get("run", ""))
+        line = next(x for x in run.splitlines() if x.lstrip().startswith("grep "))
+        self.assertRegex(line, r"grep -q[xF]{2} ")                                   # -x 整行相等；-F 不把 tag 裡的 . 當萬用字元
+
+
+# ------------------------------------------------------------------ tag 的 commit 必須在 origin/main 的歷史裡（實際執行 workflow 的那一步）
+
+class AncestorStep(unittest.TestCase):
+    NEEDLE = "merge-base --is-ancestor"
+
+    @classmethod
+    def setUpClass(cls):
+        wf = yaml.safe_load(slurp(os.path.join(ROOT, ".github", "workflows", "firmware.yml")))
+        steps = [s for s in wf["jobs"]["firmware-release"]["steps"] if cls.NEEDLE in s.get("run", "")]
+        assert len(steps) == 1, "找不到唯一的 ancestor 檢查步驟"
+        cls.script = steps[0]["run"]
+        cls.job_steps = wf["jobs"]["firmware-release"]["steps"]
+
+    def git(self, *args):
+        env = dict(self.env, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.org", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.org")
+        r = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=self.repo, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="dumpling-fwanc-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.repo = os.path.join(self.dir, "repo")
+        os.makedirs(self.repo)
+        self.env = {"PATH": os.environ["PATH"], "HOME": self.dir, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C.UTF-8"}
+        self.git("init", "-q", "-b", "main")
+        self.git("commit", "-q", "--allow-empty", "-m", "c1")
+        self.c1 = self.git("rev-parse", "HEAD")
+        self.git("commit", "-q", "--allow-empty", "-m", "c2")
+        self.c2 = self.git("rev-parse", "HEAD")                                      # main 的最新
+        self.git("update-ref", "refs/remotes/origin/main", self.c2)
+        self.git("checkout", "-q", "-b", "side", self.c1)                            # 沒有合併進 main 的分支
+        self.git("commit", "-q", "--allow-empty", "-m", "side")
+        self.side = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "--no-edit", self.c1)                     # main 還是 c2（已包含 c1）
+
+    def run_script(self, sha, script=None):
+        sf = os.path.join(self.dir, "step.sh")
+        with open(sf, "w", encoding="utf-8") as fh:
+            fh.write(self.script if script is None else script)
+        # Actions 的 shell：bash --noprofile --norc -eo pipefail {0}
+        r = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", sf], cwd=self.repo, capture_output=True, text=True,
+                           env=dict(self.env, GITHUB_SHA=sha))
+        return r.returncode, r.stdout + r.stderr
+
+    def test_commit_on_main_passes(self):
+        for sha in (self.c2, self.c1):                                               # main 的最新與較早的 commit
+            rc, out = self.run_script(sha)
+            self.assertEqual(rc, 0, out)
+
+    def test_commit_not_on_main_fails(self):
+        rc, out = self.run_script(self.side)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("不在 origin/main 的歷史裡", out)
+        self.assertIn(self.side, out)
+
+    def test_main_that_moved_past_the_commit_still_fails_for_the_other_branch(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.c1)                  # origin/main 落後：c2 不在它的歷史裡
+        rc, out = self.run_script(self.c2)
+        self.assertNotEqual(rc, 0, out)
+        rc, out = self.run_script(self.c1)
+        self.assertEqual(rc, 0, out)
+
+    def test_missing_origin_main_fails(self):
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        rc, out = self.run_script(self.c1)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("找不到 origin/main", out)
+
+    def test_unknown_or_garbage_sha_fails(self):
+        for sha in ("0" * 40, "", "not-a-sha"):
+            rc, out = self.run_script(sha)
+            self.assertNotEqual(rc, 0, repr(sha))
+
+    def test_step_sits_before_anything_is_downloaded_or_published(self):
+        runs = [(s.get("uses", ""), s.get("run", "")) for s in self.job_steps]
+        i = next(i for i, (_, r) in enumerate(runs) if self.NEEDLE in r)
+        j = next(i2 for i2, (u, r) in enumerate(runs) if "download-artifact" in u)
+        k = next(i3 for i3, (_, r) in enumerate(runs) if "firmware-release-publish.sh" in r)
+        self.assertLess(i, j)
+        self.assertLess(j, k)
+        self.assertNotIn("continue-on-error", self.job_steps[i])
+
+
+# ------------------------------------------------------------------ check job 的條件（不被 DT 阻擋、整個 run 被取消時不跑）
+
+def eval_job_if(cond, needs, run_cancelled=False):
+    """GitHub 的 job 條件（只支援 firmware.yml 用到的寫法）→ 這個 job 會不會跑。
+    條件裡沒有狀態函式（success()、always()、cancelled()、failure()）時，GitHub 會自動加上 success()：
+    run 沒被取消，而且 needs 的 job 全部 success。"""
+    expr = cond.strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", expr, re.S)
+    if m:
+        expr = m.group(1).strip()
+    status_fn, ok = False, True
+    for clause in (c.strip() for c in expr.split("&&")):
+        if clause == "always()":
+            status_fn = True
+        elif clause == "!cancelled()":
+            status_fn, ok = True, ok and not run_cancelled
+        elif clause == "success()":
+            status_fn, ok = True, ok and not run_cancelled and all(v == "success" for v in needs.values())
+        else:
+            m = re.fullmatch(r"needs\.([\w-]+)\.result == '(\w+)'", clause)
+            if not m:
+                raise AssertionError("測試不認得的條件：%s" % clause)
+            ok = ok and needs[m.group(1)] == m.group(2)
+    if not status_fn:
+        ok = ok and not run_cancelled and all(v == "success" for v in needs.values())
+    return ok
+
+
+class CheckJobCondition(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = slurp(os.path.join(ROOT, ".github", "workflows", "firmware.yml"))
+        cls.job = yaml.safe_load(cls.text)["jobs"]["firmware-release-check"]
+        cls.cond = cls.job["if"]
+
+    def test_runs_when_dt_failed_was_cancelled_or_skipped(self):
+        for dt in ("success", "failure", "cancelled", "skipped"):
+            self.assertTrue(eval_job_if(self.cond, {"firmware-fetch": "success", "firmware-dt": dt}), dt)
+
+    def test_does_not_run_when_fetch_did_not_succeed(self):
+        for fetch in ("failure", "cancelled", "skipped"):
+            for dt in ("success", "failure"):
+                self.assertFalse(eval_job_if(self.cond, {"firmware-fetch": fetch, "firmware-dt": dt}), (fetch, dt))
+
+    def test_does_not_run_when_the_whole_run_is_cancelled(self):
+        for dt in ("success", "failure", "cancelled"):
+            self.assertFalse(eval_job_if(self.cond, {"firmware-fetch": "success", "firmware-dt": dt}, run_cancelled=True), dt)
+
+    def test_uses_cancelled_not_always(self):
+        self.assertIn("!cancelled()", self.cond)
+        self.assertNotIn("always()", self.cond)
+
+    def test_the_evaluator_tells_the_old_and_a_bare_condition_apart(self):
+        # 測試用的求值器本身：always() 在取消時照跑；沒有狀態函式時 DT 失敗就被跳過
+        self.assertTrue(eval_job_if("always() && needs.firmware-fetch.result == 'success'", {"firmware-fetch": "success", "firmware-dt": "failure"}, run_cancelled=True))
+        self.assertFalse(eval_job_if("needs.firmware-fetch.result == 'success'", {"firmware-fetch": "success", "firmware-dt": "failure"}))
+
+    def test_comment_says_release_waits_for_dt_but_is_not_blocked(self):
+        start = self.text.index("  firmware-release:\n")
+        comment = self.text[self.text.rindex("# 建 Release", 0, start):start]
+        self.assertIn("不被臨時 DT 的結果阻擋", comment)
+        self.assertIn("會等 DT 跑完", comment)
+        self.assertNotIn("Release 不等臨時 DT", self.text)
+
+    def test_download_artifact_pin_is_the_same_as_the_other_workflows(self):
+        pins = {}
+        for path in sorted(glob.glob(os.path.join(ROOT, ".github", "workflows", "*.yml"))):
+            for m in re.finditer(r"uses:\s*actions/download-artifact@([0-9a-f]{40}) # (v[0-9.]+)", slurp(path)):
+                pins.setdefault(m.groups(), []).append(os.path.basename(path))
+        self.assertEqual(len(pins), 1, pins)                                         # 所有 workflow 用同一個 SHA 與同一個版本註解
+        self.assertIn("firmware.yml", next(iter(pins.values())))
+
+
+# ------------------------------------------------------------------ not_watched 的原因：長度、雙向控制字元；附件檔名不能撞
+
+FWMETA = os.path.join(ROOT, "pipeline", "lib", "firmware_meta.py")
+
+
+class WhyErrorsAndBidi(unittest.TestCase):
+    def cli_build(self, env):
+        r = subprocess.run([sys.executable, "-I", FWMETA, "build", *env.manifests, "--ci-out", env.ci, "--supplier-prep", env.prep, "--out", env.out,
+                            "--tag", TAG, "--commit", COMMIT, "--built-at", BUILT, "--workflow-run", RUN, "--sbom-check-log", env.sbom_log,
+                            "--dt-result", "success"], capture_output=True, text=True)
+        return r
+
+    def test_status_prefix_pushing_why_over_the_limit_is_a_meta_error(self):
+        e = Env(self)
+        e.bios("b")
+        e.manifest("vbios", "v", status="GAP", firmware_version=None, notes="x", watch={"monitored": False, "why": "y" * 297})   # 「GAP：」4 字加 297 字＝301
+        with self.assertRaises(fm.MetaError) as cm:
+            e.build()
+        self.assertIn("v", str(cm.exception))
+        self.assertIn("300", str(cm.exception))
+        self.assertFalse(os.path.exists(e.out))
+        # 剛好 300 字可以
+        e = Env(self)
+        e.bios("b")
+        e.manifest("vbios", "v", status="GAP", firmware_version=None, notes="x", watch={"monitored": False, "why": "y" * 296})
+        self.assertEqual(len(e.build()["not_watched"][0]["why"]), 300)
+
+    def test_cli_prints_the_fail_line_not_a_traceback(self):
+        e = Env(self)
+        e.bios("b")
+        e.manifest("vbios", "v", status="GAP", firmware_version=None, notes="x", watch={"monitored": False, "why": "y" * 297})
+        r = self.cli_build(e)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(r.stderr, "")
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, r.stdout)
+        self.assertRegex(lines[0], r"FIRMWARE-META\tFAIL\t-\t[^\t\n]+")
+        self.assertFalse(os.path.exists(e.out))
+
+    def test_not_watched_why_converts_every_clean_why_error(self):
+        def doc(**kw):
+            return dict({"status": "GAP", "notes": "n"}, **kw)
+        for d, mon, why in ((doc(), False, "y" * 297), (doc(notes="y" * 301), None, None), (doc(notes="a\u202eb"), None, None),
+                            (doc(), False, "a\u202eb")):
+            with self.assertRaises(fm.MetaError, msg=repr((d, mon, why[:5] if why else why))):
+                fm.not_watched_why("v", d, mon, why)
+        self.assertEqual(fm.not_watched_why("v", doc(), False, "原因"), "GAP：原因")
+
+    def test_clean_why_rejects_bidi_controls(self):
+        from firmware_watch import clean_why
+        bidi = [chr(c) for c in range(0x202A, 0x202F)] + [chr(c) for c in range(0x2066, 0x206A)] + ["\u200e", "\u200f", "\u061c"]
+        self.assertEqual(len(bidi), 5 + 4 + 3)
+        for ch in bidi:
+            for raw in (ch, "a" + ch + "b", ch + "原因", "原因" + ch):
+                with self.assertRaises(ValueError, msg="U+%04X %r" % (ord(ch), raw)):
+                    clean_why(raw)
+        self.assertEqual(clean_why("a​b"), "a​b")                           # 零寬字元（不是方向控制）還是可以在文字中間
+        self.assertEqual(clean_why("العربية و English"), "العربية و English")         # 阿拉伯文、英文本身不是控制字元
+
+    def test_bidi_in_why_fails_the_build_and_the_cli(self):
+        for ch in ("\u202e", "\u2066", "\u200f", "\u061c"):
+            for kw in ({"watch": {"monitored": False, "why": "沒有%s元件" % ch}}, {"status": "GAP", "firmware_version": None, "notes": "沒有%s檔案" % ch}):
+                e = Env(self)
+                e.bios("b")
+                e.manifest("vbios", "v", **kw)
+                with self.assertRaises(fm.MetaError, msg=repr((ch, kw))):
+                    e.build()
+                r = self.cli_build(e)
+                self.assertEqual(r.returncode, 1)
+                self.assertRegex(r.stdout, r"FIRMWARE-META\tFAIL\t-\t")
+                self.assertNotIn(ch, r.stdout)                                       # 輸出裡不回顯控制字元
+                self.assertNotIn("Traceback", r.stderr)
+
+    def test_validate_meta_also_rejects_bidi(self):
+        meta = {"schema": fm.META_SCHEMA, "samples": [], "not_watched": [{"slug": "v", "why": "a\u202eb"}]}
+        self.assertTrue(fm.validate_meta(meta))
+
+    def test_watch_why_rejects_bidi(self):
+        from firmware_watch import parse_watch
+        for ch in ("\u202a", "\u202e", "\u2069", "\u200e", "\u061c"):
+            with self.assertRaises(ValueError, msg=hex(ord(ch))):
+                parse_watch({"watch": {"monitored": False, "why": "a%sb" % ch}})
+
+    def test_docs_state_the_bidi_rule(self):
+        doc = slurp(os.path.join(ROOT, "docs", "notes", "c2-firmware-release.md"))
+        for needle in ("雙向控制字元", "U+202A", "U+2066", "U+200E", "U+200F", "U+061C"):
+            self.assertIn(needle, doc)
+
+
+class AttachmentNameCollisions(unittest.TestCase):
+    """附件名（fw-<slug>.cdx.json、fw-inventory-<slug>.json、firmware-meta.json）在同一個 Release 裡必須唯一；build 自己擋，不靠後面的 collect-check。"""
+
+    def test_slugs_that_produce_the_same_file_name_fail(self):
+        # bios `a.cdx` 的 inventory ＝ fw-inventory-a.cdx.json ＝ 樣本 `inventory-a` 的 SBOM
+        self.assertEqual("fw-inventory-%s.json" % "a.cdx", "fw-%s.cdx.json" % "inventory-a")
+        for order in (("a.cdx", "inventory-a"), ("inventory-a", "a.cdx")):
+            for second_kind in ("bios", "sbom"):
+                e = Env(self)
+                kinds = {"a.cdx": "bios", "inventory-a": second_kind}
+                for slug in order:
+                    (e.bios if kinds[slug] == "bios" else e.sbom)(slug)
+                with self.assertRaises(fm.MetaError, msg=repr((order, second_kind))) as cm:
+                    e.build()
+                self.assertIn("fw-inventory-a.cdx.json", str(cm.exception))
+                self.assertIn("重複", str(cm.exception))
+                self.assertFalse(os.path.exists(e.out))                              # 不留半套輸出
+
+    def test_cli_prints_the_fail_line(self):
+        e = Env(self)
+        e.bios("a.cdx")
+        e.bios("inventory-a")
+        r = subprocess.run([sys.executable, "-I", FWMETA, "build", *e.manifests, "--ci-out", e.ci, "--supplier-prep", e.prep, "--out", e.out,
+                            "--tag", TAG, "--commit", COMMIT, "--built-at", BUILT, "--workflow-run", RUN, "--dt-result", "success"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stdout, r"FIRMWARE-META\tFAIL\t-\t附件檔名重複：fw-inventory-a\.cdx\.json")
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_similar_but_different_names_are_fine(self):
+        e = Env(self)
+        e.bios("a")
+        e.bios("a.cdx")
+        e.bios("inventory-a-x")
+        e.sbom("inventory")
+        meta = e.build()
+        names = [x["sbom"] for x in meta["samples"]] + [x["inventory"] for x in meta["samples"] if x["inventory"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(sorted(os.listdir(e.out)), sorted(names + ["firmware-meta.json"]))
+
+    def test_add_file_rejects_duplicates_and_the_meta_name(self):
+        files = {}
+        fm.add_file(files, "fw-a.cdx.json", b"1")
+        with self.assertRaises(fm.MetaError):
+            fm.add_file(files, "fw-a.cdx.json", b"2")
+        self.assertEqual(files, {"fw-a.cdx.json": b"1"})                             # 先寫的內容沒被蓋掉
+        with self.assertRaises(fm.MetaError):
+            fm.add_file(files, fm.META_NAME, b"3")
+
+    def test_docs_state_the_collision_rule(self):
+        doc = slurp(os.path.join(ROOT, "docs", "notes", "c2-firmware-release.md"))
+        self.assertIn("附件名在同一個 Release 裡必須唯一", doc)
+        self.assertIn("fw-inventory-a.cdx.json", doc)
+
+
+class OperationsDocs(unittest.TestCase):
+    def setUp(self):
+        self.doc = slurp(os.path.join(ROOT, "docs", "notes", "c2-firmware-release.md"))
+
+    def section(self, title):
+        i = self.doc.index(title)
+        level = len(title) - len(title.lstrip("#"))
+        m = re.compile(r"\n#{1,%d} " % level).search(self.doc, i + 1)             # 同層或更上層的下一個標題
+        return self.doc[i:m.start() if m else len(self.doc)]
+
+    def test_post_publish_check_failure_steps(self):
+        s = self.section("### 發布之後的核對失敗")
+        for needle in ("確認失敗原因", "不覆寫已發布的 Release", "由人決定", ".2"):
+            self.assertIn(needle, s)
+
+    def test_rerun_stopping_at_an_existing_release_steps(self):
+        s = self.section("### 重跑停在「同一個 tag 已有正式版」")
+        for needle in ("結束碼 2", "不覆寫", "由人決定", ".2"):
+            self.assertIn(needle, s)
+
+    def test_docs_describe_waiting_for_dt_and_the_published_text_has_no_forbidden_words(self):
+        self.assertIn("會等 DT 結束", self.doc)
+        self.assertIn("!cancelled()", self.doc)
+        added = self.section("## 出問題時的處理")
+        for bad in ("安全", "不適用", "不受影響", "整體 PASS", "以前", "這一輪", "驗證後", "原本", "我們", "我"):
+            self.assertNotIn(bad, added)
 
 
 if __name__ == "__main__":

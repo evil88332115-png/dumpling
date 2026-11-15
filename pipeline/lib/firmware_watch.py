@@ -7,7 +7,7 @@
 規則：
 - 沒有 `watch` ＝沒有宣告（監控與否由樣本的 kind 與 status 決定，見 firmware_meta.py）。
 - 有 `watch` 就必須是 mapping，鍵只能是 `monitored`（布林，必填）與 `why`（字串）。
-- `monitored: false` 一定要有 `why`：規則在 `clean_why`（單行：沒有控制字元、換行與 U+2028、U+0085 等分隔字元；去掉空白與零寬字元後不是空的；最多 300 字）。
+- `monitored: false` 一定要有 `why`：規則在 `clean_why`（單行：沒有控制字元、換行與 U+2028、U+0085 等分隔字元；沒有雙向控制字元；去掉空白與零寬字元後不是空的；最多 300 字）。
   從 `notes` 推導出來的原因（`status` 不是 `ok` 的樣本）用同一個檢查。
   不能用空字串或只有空白當原因（不監控的樣本不能變成躲掉 GAP 的後門）。
 - `monitored: true` 的 `why` 可以省略；寫了就要符合同一個格式。
@@ -20,11 +20,16 @@ import unicodedata
 
 WATCH_KEYS = ("monitored", "why")
 WHY_MAX = 300
+# 雙向控制字元：會改變文字的顯示順序（Release 說明與報告裡的原因看起來和實際內容不同）。
+# U+202A～U+202E（內嵌與覆寫：LRE、RLE、PDF、LRO、RLO）、U+2066～U+2069（隔離：LRI、RLI、FSI、PDI）、
+# 方向標記 U+200E（LRM）、U+200F（RLM）、U+061C（ALM）。全部拒絕；why 是一行說明文字，用不到它們。
+BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200e\u200f\u061c")
 
 
 def clean_why(raw):
     """不監控的原因（watch.why，或從 notes 推導出來的文字）的共同檢查 → 去掉頭尾空白的字串；不合規丟 ValueError。
     - 必須是字串、單行：不能有控制字元（Cc，含換行、tab）與行／段落分隔字元（U+2028、U+2029、U+0085 等，Zl、Zp）；
+    - 不能有雙向控制字元（BIDI_CONTROLS：U+202A～U+202E、U+2066～U+2069、U+200E、U+200F、U+061C）；
     - 去掉空白（Zs）與不可見的格式字元（Cf，含零寬字元 U+200B～U+200D、U+2060、U+FEFF）之後不能是空的；
     - 最多 300 字。"""
     if not isinstance(raw, str):
@@ -32,6 +37,8 @@ def clean_why(raw):
     for ch in raw:
         if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):
             raise ValueError("why 不能有換行、控制字元或行分隔字元（寫成單行）")
+        if ch in BIDI_CONTROLS:
+            raise ValueError("why 不能有雙向控制字元（U+%04X）" % ord(ch))
     visible = "".join(ch for ch in raw if unicodedata.category(ch) not in ("Cf", "Zs"))
     if not visible:
         raise ValueError("why 不能是空字串、只有空白或只有不可見字元")

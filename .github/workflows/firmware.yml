@@ -287,7 +287,8 @@ jobs:
   firmware-release-check:
     name: firmware-release-check
     needs: [firmware-fetch, firmware-dt]
-    if: always() && needs.firmware-fetch.result == 'success'
+    # !cancelled()：整個 run 被取消時不跑；firmware-dt 失敗、被取消或略過時照跑（有狀態函式時不會加上隱含的 success()）。
+    if: ${{ !cancelled() && needs.firmware-fetch.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -389,7 +390,9 @@ jobs:
 
   # 建 Release：只有這個 job 有 contents: write，而且只在 tag push 時跑（PR 與 workflow_dispatch 不會到這裡）。
   # 它不下載樣本、不解析任何下載檔，只上傳 firmware-release-check 產生並檢查過的 JSON 附件；上傳前再用同一支檢查核對一次。
-  # needs 不含 firmware-dt：Release 不等臨時 DT（結果已由 firmware-release-check 寫進 meta 的 dt 欄位）；樣本解析與附件檢查都成功才建。
+  # needs 不含 firmware-dt：Release 不被臨時 DT 的結果阻擋（DT 失敗時照建，結果由 firmware-release-check 寫進 meta 的 dt 欄位），
+  # 但會等 DT 跑完：firmware-release-check 要等 firmware-dt 結束才能寫 dt 欄位，所以最快也要等到 DT 結束（最長 90 分鐘）。
+  # 樣本解析與附件檢查都成功才建。
   # 只有 main 的歷史裡的 commit 能建 Release（tag 指到的 commit 必須是 origin/main 的祖先）。
   # 建立前先清掉同一個 tag 的殘留草稿（只刪草稿；同一個 tag 已有非草稿的 Release 就停下來），所有 API 呼叫都帶重試（ghx，API 偶爾回 403）。
   # 先建成草稿、確認每個附件都上傳完成，才發布成正式版（不是 prerelease、不是 draft）；發布後下載再核對。
@@ -417,7 +420,7 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "tag 指到的 commit（$GITHUB_SHA）不在 origin/main 的歷史裡：只有 main 上的程式碼能建 Release"; exit 1; }
       - name: 下載要發布的附件
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: firmware-release
           path: ${{ runner.temp }}/rel-assets
@@ -434,7 +437,7 @@ jobs:
         run: |
           . pipeline/firmware-ghx.sh
           ghx gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease,tagName --jq '"draft=\(.isDraft) prerelease=\(.isPrerelease) tag=\(.tagName)"' | tee "$RUNNER_TEMP/release-state.txt"
-          grep -qx "draft=false prerelease=false tag=$GITHUB_REF_NAME" "$RUNNER_TEMP/release-state.txt" || { echo "Release 不是正式版"; exit 1; }
+          grep -qxF "draft=false prerelease=false tag=$GITHUB_REF_NAME" "$RUNNER_TEMP/release-state.txt" || { echo "Release 不是正式版"; exit 1; }
           mkdir -p "$RUNNER_TEMP/rel-verify"
           ghx gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/rel-verify" --clobber
           python3 -I pipeline/lib/firmware_meta.py collect-check --meta "$RUNNER_TEMP/rel-verify/firmware-meta.json" --dir "$RUNNER_TEMP/rel-verify" --tag "$GITHUB_REF_NAME"
