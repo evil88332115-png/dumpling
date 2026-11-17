@@ -450,7 +450,7 @@
   "reasons": [
    "Ubuntu 24.04 LTS: ends before the product support period (2029-05)"
   ],
-  "today": "2026-11-15",
+  "today": "<TODAY>",
   "product_end": "2031-12",
   "subscriptions": [],
   "entries": [
