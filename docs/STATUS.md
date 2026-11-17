@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 17:10 +0800（C1）
+最後更新：2026-11-17 17:10 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -436,9 +436,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：WATCH_REAL_ISSUES on；11-18 01:17 UTC 的排程等 C0 通知後核對（不開背景等待）→ 上線第一天報告：開出的 Issue（預期 KEV 彙總 1、支援期限 8）、沒有重複、#149～#164 沒重開也沒被重複留言、csaf_drafts 全部 NOT_RUN（沒有 artifact）、狀態大小、執行時間、排程延遲。#182（儀表板 CSAF 草稿紀錄、D-069 說明）、#183（GitLab T-24）已合併
-- 開著的 PR：沒有
+- 開著的 PR：沒有。本機 commit 8284cd1（wp2/csaf-doc-previous：docs/CSAF.md 第 39 行改寫成 #186 合併後的行為），跟下一個 PR 一起送
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
+
+- 換乾淨版本時要改（sca-center 改報告 zip 檔名與 VEX 已緩解 → affected-mitigated；tools/cra 四支報告／VEX 程式凍結中）：做法是先讀 zip 裡的機器可讀目錄，找不到才退回舊路徑，兩邊都要有測試。① `pipeline/watch/collect.py` REPORT_MEMBERS／REPORT_REQUIRED 寫死 4 個路徑（改名後正式版 zip 會被判缺必要成員 → CSAF 草稿 GAP，監控本身照跑）② `pipeline/watch/csaf_draft.py` 用 collect 的成員表，跟著 ① 改 ③ `pipeline/dashboard/build.py` VEX_STATES 固定清單（新狀態值會算成 UNKNOWN；等 sca-center 回覆 affected-mitigated 用哪些欄位和值）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
