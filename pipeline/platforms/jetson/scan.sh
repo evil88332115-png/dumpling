@@ -40,11 +40,10 @@ crole=$(sed -n 's/^COMPANY_ROLE=//p' <<< "$role_info")
 kargs_out=$(python3 -I "$root/pipeline/project-info.py" --kernel-args "$proj" "$ver") || fail "platform_params 的核心參數不合法：$(tail -1 <<< "$kargs_out")"
 mapfile -t kargs <<< "$kargs_out"; [ -n "$kargs_out" ] || kargs=()
 
-# ---------- 1. 臨時 DT 與鏡像 ----------
-trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
-export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Ubuntu,PyPI,Go,Maven}
-export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
-bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
+# ---------- 1. DT（臨時或常駐，pipeline/lib/dt-session.sh，T-14）與鏡像 ----------
+# shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
+. "$root/pipeline/lib/dt-session.sh"
+dt_begin Ubuntu,PyPI,Go,Maven
 export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
 mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
 # shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
@@ -53,9 +52,7 @@ mirror nvidia-bulletins.sh nvbul || fail "鏡像 nvidia-bulletins.sh 失敗（�
 mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 mirror euvd.sh euvd || fail "鏡像 euvd.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 OSV_DISTRO_ECOSYSTEMS=Ubuntu mirror osv-distro.sh osv || fail "鏡像 osv-distro.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
-bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
-mkdir -p "$(dirname "$PILOT_ENV")"
-bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env 失敗"
+dt_ready "$PILOT_ENV"
 {
   echo "NVIDIA_BULLETINS_MIRROR=$mir/nvbul"
   echo "KERNEL_CVE_MIRROR=$mir/kcve"
@@ -71,6 +68,7 @@ pyl jetson_scan.py site-config --out "$out/wizard.json" --repo "$root" --root "$
   --grype-cache "$out/grype-db" --upstream-set "jetson-r$rel" --public-sources "$out/downloads/public_sources.tbz2" --bsp "$out/downloads/$bsp" \
   --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
 export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
+dt_mirror_status   # 常駐 DT 模式：不設 MIRROR_REFRESH_STATUS（讀常駐環境的狀態檔；讀不到 → C-mirror-freshness GAP）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
   local tee=(); [ -d "$out/tee-source" ] && tee=(--tee-source "$out/tee-source")
@@ -118,7 +116,8 @@ done <<< "$plan"
 # ---------- 4. 收集與標準答案 ----------
 echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
-official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
+# 正式 Release＝這個 tag 的 push（和 pipeline/lib 的 official_tag_push 同一個判斷）：分支 push、手動觸發都不是
+official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ] && [ "${GITHUB_REF:-}" = "refs/tags/$DUMPLING_PROJECT/$ver" ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
   --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]+"${official[@]}"}" \
   || fail "收集結果失敗（見上一行 jetson_scan 的訊息；精靈覆寫後的 product.version 與 Release tag 的版本 $ver 不一致也在這裡 FAIL，D-055）"
