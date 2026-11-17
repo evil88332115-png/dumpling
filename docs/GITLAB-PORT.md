@@ -264,6 +264,7 @@
 - **時間沒有時區一律失敗**：`fetched_utc`、`built`、`dateReleased`（包括只有日期）都一樣，不假設是 UTC；未來時間只容忍 1 小時（主機時鐘誤差），超過就失敗。CISA 官方的 dateReleased 都帶 `Z`，不會誤擋。
 - **部署限制**：根目錄路徑不能含空白（用法錯誤）。**內部鏡像根目錄只能由同步帳號寫入**（job 的帳號、其他使用者都不能寫）：程式在 `realpath` 確認子路徑在根目錄內之後才複製，兩者之間如果有人把子路徑換成指向根目錄外的符號連結，可能讀到根目錄外的檔案（複製後的型別檢查與 `--check` 仍會擋下大部分情況，但不能取代寫入權限的限制）。
 - **範圍（PR-2 合併之前）**：`DUMPLING_REQUIRE_INTERNAL_MIRROR=1` 只保證 `feeds.sh` 與 `pipeline/lib/mirrors.sh` 這兩段不連外。release scan 的 Grype DB 更新（`GRYPE_DB_UPDATE` 預設 `online`）與其他步驟仍會從公開網址下載，**不代表整條流程都不下載**；要等 PR-2 接上 `grype_db_mode` 才算。
+- **PR-2 之後仍會連外的地方**（不在 T-06 範圍）：臨時 DT 自己下載 NVD／OSV／KEV／EPSS 與 docker pull（T-14 改連常駐 DT）；掃描工具的安裝（第 5 節，改用 `DUMPLING_IMAGE`）；`sources.yml` 的 BSP 與 `app_repo` 下載（本節第 1 列，換內部網址、sha256 照樣核對）；**Go 專案的 govulncheck 會連 `vuln.go.dev`**（`scan.tools: full` 才跑；`tools/pilot/sca-scan` 是上游的檔，要等上游支援指定內部漏洞資料庫，例如 govulncheck 的 `-db` 或 `GOVULNDB`；已轉給 sca-center，D-071）。
 
 **官方依據**：內部系統，沒有對應的 GitLab 官方文件。
 
