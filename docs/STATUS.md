@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 17:11 +0800（C1）
+最後更新：2026-11-17 17:11 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -440,7 +440,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 
-- 換乾淨版本時要改（sca-center 改報告 zip 檔名與 VEX 已緩解 → affected-mitigated；tools/cra 四支報告／VEX 程式凍結中）：做法是先讀 zip 裡的機器可讀目錄，找不到才退回舊路徑，兩邊都要有測試。① `pipeline/watch/collect.py` REPORT_MEMBERS／REPORT_REQUIRED 寫死 4 個路徑（改名後正式版 zip 會被判缺必要成員 → CSAF 草稿 GAP，監控本身照跑）② `pipeline/watch/csaf_draft.py` 用 collect 的成員表，跟著 ① 改 ③ `pipeline/dashboard/build.py` VEX_STATES 固定清單（新狀態值會算成 UNKNOWN；等 sca-center 回覆 affected-mitigated 用哪些欄位和值）
+- 換乾淨版本時要改（sca-center 11-17 回覆：機器讀取的 4 個路徑不變，只改給人看的 Excel 檔名與客戶資料包資料夾名；zip 根目錄新增 manifest.json（格式版本＋每個用途對應的路徑）；已緩解不新增 analysis.state，CycloneDX 改為 exploitable＋response 含 workaround_available、detail 寫緩解措施，不再輸出 not_affected＋protected_by_mitigating_control；tools/cra 四支報告／VEX 程式凍結中）：① `pipeline/watch/collect.py` REPORT_MEMBERS／REPORT_REQUIRED：改成先讀 manifest.json、找不到才退回舊路徑，兩邊都要有測試 ② `pipeline/watch/csaf_draft.py` 用 collect 的成員表，跟著 ① 改 ③ `pipeline/dashboard/build.py` VEX 判定統計（state×justification）：不會出現 UNKNOWN，但已緩解的項目會從 not_affected／protected_by_mitigating_control 移到 exploitable，數字會變；另外顯示「已緩解」（exploitable 且 response 含 workaround_available）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
