@@ -1,4 +1,4 @@
-# shellcheck shell=bash
+# shellcheck shell=bash disable=SC2154  # root、out 由呼叫端定義（見下面的說明；函式開頭也用 ${root:?}／${out:?} 擋住沒設的情況）
 # 供 source：scan 步驟的 DT 連線（T-14）。pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 用（之後 C2 的 firmware 也用）。
 # 呼叫端要先定義 fail（印「…: FAIL（說明）」並結束）以及 $root（repo 根目錄）、$out（DUMPLING_OUT）。
 #
@@ -27,12 +27,13 @@ _DT_TMP=
 
 dt_mode() { printf '%s' "${DUMPLING_DT_MODE:-ephemeral}"; }
 
+_dt_take3() { _DT_PREV_EXIT=$3; }
+
 _dt_on_exit() {  # dt_end 接在原有的 EXIT trap 後面（只接一次）
   local cur
   cur=$(trap -p EXIT)
   if [ -n "$cur" ]; then
-    eval "set -- $cur"          # trap -p 的輸出已經是 shell 引號格式：trap -- '<指令>' EXIT
-    _DT_PREV_EXIT=$3
+    eval "_dt_take3 $cur"       # trap -p 的輸出已經是 shell 引號格式：trap -- '<指令>' EXIT → 第三個參數是原本的指令
   fi
   # shellcheck disable=SC2016 # 結束時才展開
   trap 'eval "$_DT_PREV_EXIT"; dt_end' EXIT
@@ -47,6 +48,7 @@ _dt_outside_out() {  # <路徑>：不在 $out 底下 → 0
 }
 
 dt_begin() {
+  : "${root:?}" "${out:?}"
   case $(dt_mode) in
     ephemeral)
       _dt_on_exit
@@ -64,8 +66,9 @@ dt_begin() {
       _dt_on_exit
       _dt_outside_out "$_DT_TMP" || fail "常駐 DT 的暫存資料夾不能在 DUMPLING_OUT 底下（裡面會有 API key）"
       if [ -n "${DUMPLING_DT_CA_FILE:-}" ]; then
-        [ -f "$DUMPLING_DT_CA_FILE" ] && grep -q -- "-----BEGIN CERTIFICATE-----" "$DUMPLING_DT_CA_FILE" \
-          || fail "DUMPLING_DT_CA_FILE 不是 PEM 格式的憑證檔"
+        if ! { [ -f "$DUMPLING_DT_CA_FILE" ] && grep -q -- "-----BEGIN CERTIFICATE-----" "$DUMPLING_DT_CA_FILE"; }; then
+          fail "DUMPLING_DT_CA_FILE 不是 PEM 格式的憑證檔"
+        fi
         for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem; do
           [ -f "$f" ] && { sys=$f; break; }
         done
@@ -81,6 +84,7 @@ dt_begin() {
 
 dt_ready() {  # <PILOT_ENV>
   local pe=$1 rc
+  : "${root:?}" "${out:?}"
   _dt_outside_out "$pe" || fail "PILOT_ENV 不能放在 DUMPLING_OUT 底下（裡面有 DT 的 API key，DUMPLING_OUT 會上傳成 artifact）"
   case $(dt_mode) in
     ephemeral)
@@ -96,7 +100,7 @@ dt_ready() {  # <PILOT_ENV>
       c=$(curl -sS -m 30 -o "$_DT_TMP/version.json" -w '%{http_code}' "$url/api/version") || c=000
       [ "$c" = 200 ] || fail "常駐 DT 連不上：GET /api/version http=$c"
       ver=$(python3 -I -c 'import json,sys;v=json.load(open(sys.argv[1])).get("version");print(v if isinstance(v,str) and v.isprintable() else "?")' \
-        "$_DT_TMP/version.json" 2> /dev/null) || ver=?
+        "$_DT_TMP/version.json" 2> /dev/null) || ver='?'
       r=$(python3 -I "$_dt_lib/dt_resident.py" curlcfg "$DUMPLING_DT_CONN" "$_DT_TMP/key.cfg") || fail "常駐 DT 的連線檔不合：$r"
       # API key 屬於使用者／服務帳號 → /api/v1/user/self/permissions；屬於團隊（那個端點回 401）→ /api/v1/team/self（apiserver 5.2.0）
       c=$(curl -sS -m 30 -K "$_DT_TMP/key.cfg" -o "$_DT_TMP/perm.json" -w '%{http_code}' "$url/api/v1/user/self/permissions") || c=000
