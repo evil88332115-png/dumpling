@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 17:09 +0800（C1）
+最後更新：2026-11-17 17:09 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -444,12 +444,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：三平台 release 草稿試跑：rpi、rock 已建 draft；ai-nas 有網址時兩次 403，拿掉 https:// 後建出 draft（見下方紀錄），正式修法等 C0 決定；同時準備 T-14（只讀、寫設計）
-- 分支／PR／commit：無進行中的 PR；#174、#178 已合併
+- 目前在做：PR #189（WP7 notes 不帶 http(s):// 網址，403 修正 (a)）等驗證；同時準備 T-14（只讀、寫設計）
+- 分支／PR／commit：`wp7/notes-no-url`（74dfe16）→ PR #189；#174、#178 已合併
 - 代理：0 個（D-048 上限 3）
-- CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）、ai-nas 44040129677 failure（403）
-- 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（Syft 依上游 sca-scan 給的 docker-archive 路徑命名），已回報 C0（D-071）
-- 下一步：等 ai-nas 補跑的決定 → T-14（含 --official 只認 tag push，先給 C1 審；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6
-- 偶發 403 紀錄（C0 決定先不改 release.yml，第二次樣本出現再決定是否改用 gh api 建立以取得回應標頭）：run 44040129677（ai-nas 草稿），07:50:40–07:54:12Z，POST /releases（gh release create）連續 8 次 403「Resource not accessible by integration」；同一步驟的 GET /releases 是 200；同一天先跑的 rpi（44034643050）、rock（44037426757）都成功；查過 release.yml／dev.yml 最近 76 個 Release／發布 job，只有這一次；沒有次級速率限制的跡象（X-Ratelimit-Remaining 4990）；repo 沒有 ruleset。樣本 2：同一個 run 的補跑（attempt 2，使用者同意）08:06:20–08:09:52Z 同樣 8 次 403、GET 200；ai-nas 兩次都失敗、rpi／rock 同 SHA 都成功；三者 body 唯一明顯差異是 ai-nas 的 notes 含外部網址（未驗證是否相關）；沒有建出任何 Release／tag；不再重跑。網址診斷（使用者同意）：測試分支 wp7/test-nas-url 只在 release-meta.py 把 notes 的 https:// 拿掉，run 44051748503 第一次就成功、0 次 403，建出 draft 448371388（target 6de7d01，分支已刪；先留著等 C0）；正式修法等 C0 決定
-- 卡住／等決定：ai-nas notes 網址的正式修法（C0）。缺口 19、7、20、22、23 排 M7
+- CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）；ai-nas 44040129677 兩次 403，診斷 run 44051748503 建出 draft 448371388（target 6de7d01，#189 合併後重跑換掉，重跑前 C0 問使用者）
+- 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（上游轉 sca-center、dumpling 後處理由 C1 做）；ai-nas 草稿 403 診斷與修正 (a)
+- 下一步：#189 合併 → ai-nas 草稿重跑（等使用者）→ T-14（含 --official 只認 tag push：jetson/scan.sh 先給 C1 審、scan-disk.sh 一起改；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6（屬性名稱照 D-072：inventory:）
+- 403 紀錄（已知原因之一：Release body 含 https 網址會 403；2026-11-17 診斷，原因沒有查出來）：run 44040129677（ai-nas 草稿），07:50:40–07:54:12Z 與補跑 08:06:20–08:09:52Z，POST /releases 各連續 8 次 403「Resource not accessible by integration」，同一步驟的 GET /releases 是 200；同 SHA 的 rpi、rock 都成功；body 唯一明顯差異是 ai-nas 的 notes 含 `https://github.com/…`；同一份 scan 只拿掉 https:// 後 run 44051748503 第一次成功、0 次 403。查過最近 76 個 Release／發布 job 與現有 12 個 Release body：之前沒有 403、body 都沒有網址；沒有次級速率限制的跡象；repo 沒有 ruleset。修正：(a) WP7 notes 產生端 #189（C4）；(b) 所有平台的 Release 說明寫入端 release-meta.py（C1，排在 SBOM 路徑 PR 之後）；release.yml:118 註解由 C1 更新
+- 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
