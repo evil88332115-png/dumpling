@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 10:18 +0800（C1）
+最後更新：2026-11-17 10:22 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -421,7 +421,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：韌體 Issue 已照開（使用者決定，WATCH_REAL_ISSUES on）：real run 43713609654 開 #149–#160（韌體公告 6、Intel 微碼 6）與 #161–#164（支援期限 4），板子 KEV 0、廠商層級 0，#114 已更新；之後的 dry_run 43714167032 開 Issue 0。三個新平台等 C1 #148 合併（C0 會先關開關）→ 我跑 dry_run、分開列板子 KEV／廠商層級給 C0
+- 卡住／等決定：WATCH_REAL_ISSUES off（C0 11-15 關）；新平台 dry_run 43999671458：KEV 新 50 筆／38 組→1 個彙總 Issue、廠商層級 0、支援期限新 9；PR #169（支援期限 OS＋元件同項目只開一個、報告禁用詞）分支 dry_run 44001564813 支援期限新 8 → 等日期修正合併、C0 驗證合併後由 C0 開開關。#149–#164 保留待人審。S4（edac554 CSAF）設計 C0 已同意，做 PR-1（工具）中；A 的 Release 接線歸 C1
 - 開著的 PR：沒有
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
