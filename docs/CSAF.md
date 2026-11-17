@@ -36,7 +36,10 @@
 - 草稿放 `交給PM/CSAF/csaf-fix-advisory-<名稱>-<版本>.json`，旁邊的 `README.md` 寫明這是草稿、各分類的意思、發布前要補的欄位。完整輸出放 `內部存檔/csaf-fix-advisory/`。兩者都進 `SHA256SUMS.txt`。
 - **不放進客戶資料包**（有測試檢查客戶資料包裡沒有 CSAF 檔案或內容）。
 - 沒給 `--csaf-previous`：訊息寫 NOT_RUN（沒有前一版可比較），不算 GAP。給了但產生不了（找不到前一版、前後版是同一份、版本順序反了、驗證失敗等）：原因寫進 `交給PM/未產生的項目.md`（GAP）。
-- 發 Release 時自動找同一專案的前一個正式 Release 來比較：還沒接（D-066 後續，C1）。
+- 發 Release 時自動找同一專案的前一個正式 Release 來比較：已接上，詳見下面「pipeline 接線」一節。只有正式 Release 的 tag push 才會找。前一版依版本排序來選（semver，加上 dumpling 的自然排序延伸：demo2 小於 demo10），不看建立時間。
+  - 產生草稿：找到前一版，至少一層的報告 zip 下載、檢查、組好，而且沒有任何一層是 GAP。草稿放 `交給PM/CSAF/`。
+  - 記 NOT_RUN（說明以「僅供參考」開頭，不算 GAP，不降低整體狀態）：不是正式 Release 的 tag push；第一個正式 Release；前一版沒有報告 zip；前一版的 zip 裡沒有 VEX；前一版沒有這一層。後兩種舊格式的情況可能只出現在部分層：那幾層記 NOT_RUN，其他層照常產生。
+  - 記 GAP（照實記，不擋 Release）：zip 壞掉或不合規則、大小和 Release 記的不同、下載不完整或逾時、VEX 格式不對、版本排不出先後、API 錯誤。
 
 ## B：被利用漏洞的使用者通知
 

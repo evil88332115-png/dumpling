@@ -750,6 +750,51 @@ class ReleasePayload(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.build(lines=[])
 
+    def run_main(self, notes, **files):
+        # main() 直接呼叫（不經 release-publish.sh 的 test -s）：讀不到說明檔不能當成空的說明
+        import contextlib
+        import io
+        import tempfile
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        d = Path(td.name)
+        (d / "manifest.tsv").write_text("sbom-p-v1.cdx.json\tSBOM\n")
+        for name, data in files.items():
+            (d / name).write_bytes(data)
+        argv = ["--manifest", str(d / "manifest.tsv"), "--tag", "p/v1", "--project", "p", "--version", "v1",
+                "--api-url", "https://gitlab.example.com/api/v4", "--project-id", "12", "--out", str(d / "release.json")]
+        if notes is not None:
+            argv += ["--notes", str(d / notes)]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = self.m.main(argv)
+        return rc, buf.getvalue(), d
+
+    def test_notes_is_the_description(self):
+        rc, out, d = self.run_main("release-body.md", **{"release-body.md": "# p v1\n說明\n".encode()})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(json.loads((d / "release.json").read_text(encoding="utf-8"))["description"], "# p v1\n說明\n")
+
+    def test_unreadable_or_empty_notes_fail(self):
+        cases = {"missing": ("release-body.md", {}),
+                 "empty": ("release-body.md", {"release-body.md": b""}),
+                 "blank": ("release-body.md", {"release-body.md": b" \n\t\n"}),
+                 "not-utf8": ("release-body.md", {"release-body.md": b"\xff\xfe\x00bad"}),
+                 "directory": (".", {})}
+        for why, (notes, files) in cases.items():
+            rc, out, d = self.run_main(notes, **files)
+            self.assertEqual(rc, 1, why)
+            self.assertTrue(out.startswith("release-payload: FAIL"), (why, out))
+            self.assertFalse((d / "release.json").exists(), why)          # 失敗時不寫 release.json，後面不會建 Release
+            self.assertNotIn(str(d), out, why)                            # 訊息只有檔名，沒有 runner 的路徑
+
+    def test_notes_is_required(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            self.run_main(None)
+        self.assertEqual(cm.exception.code, 2)
+
 
 class ReleasePublish(unittest.TestCase):
     """gitlab/release-publish.sh 的行為（T-21 先驗再傳、T-17 試跑不寫）：用假的 curl 記錄每一次呼叫。"""
