@@ -1,0 +1,816 @@
+"""pipeline/lib/previous_release.py（S4 接線）：前一個正式 Release 的選法、附件下載與 zip 檢查、依層組資料夾、狀態（OK／NOT_RUN／GAP）、
+和精靈（previous_from_env）與 report_package（--csaf-previous）的銜接。GitHub 用替身（函式）或本機 HTTP 伺服器，附件是合成的；不連網。"""
+import hashlib
+import http.server
+import importlib.util
+import io
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+import zipfile
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+LIB = os.path.join(ROOT, "pipeline", "lib")
+sys.path.insert(0, LIB)
+import previous_release as pr  # noqa: E402
+import step_rows as sr  # noqa: E402
+
+SCRIPT = os.path.join(LIB, "previous_release.py")
+WIZ = os.path.join(ROOT, "tools", "wizard", "cra-scan.py")
+PROJ = "acme-board"
+TAG_ENV = {"GITHUB_EVENT_NAME": "push", "GITHUB_REF_TYPE": "tag", "GITHUB_REPOSITORY": "example-org/example-repo"}
+
+
+def tag_env(version):
+    return dict(TAG_ENV, GITHUB_REF="refs/tags/%s/%s" % (PROJ, version))
+
+
+def vex_doc(version, n=2):
+    return {"bomFormat": "CycloneDX", "specVersion": "1.5", "metadata": {"component": {"type": "firmware", "name": "ACME Board", "version": version}},
+            "vulnerabilities": [{"id": "CVE-2026-%04d" % i, "analysis": {"state": "exploitable"}} for i in range(n)]}
+
+
+def make_zip(members, extra=None):
+    """members：{名稱: bytes}；extra：[ZipInfo, bytes]（符號連結、路徑穿越等）。→ bytes"""
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, d in members.items():
+            z.writestr(n, d)
+        for zi, d in extra or []:
+            z.writestr(zi, d)
+    return b.getvalue()
+
+
+def report_zip(version, vex=None, summary=True, **kw):
+    v = json.dumps(vex if vex is not None else vex_doc(version)).encode()
+    m = {pr.VEX_MEMBER: v, "報告/交給PM/SBOM/sbom.cdx.json": b"{}"}
+    if summary:
+        m[pr.SUMMARY_MEMBER] = json.dumps({"vex": {"files": {"vex.cdx.json": {"sha256": hashlib.sha256(v).hexdigest()}}}}).encode()
+    return make_zip(m, **kw)
+
+
+def release(tag, assets=None, draft=False, prerelease=False, rid=1):
+    return {"id": rid, "tag_name": tag, "draft": draft, "prerelease": prerelease, "created_at": "2026-11-01T00:00:00Z", "assets": assets or []}
+
+
+class Fake:
+    """GitHub 替身：list_releases／download。blobs：{asset id: bytes}；size 可以和內容不同（測 API 說謊）。"""
+    def __init__(self, releases, blobs=None):
+        self.releases, self.blobs, self.calls, self.downloads = releases, blobs or {}, [], []
+
+    def list_releases(self):
+        self.calls.append("list")
+        return self.releases
+
+    def download(self, asset_id, dest, max_size):
+        self.downloads.append(asset_id)
+        data = self.blobs[asset_id]
+        if len(data) > max_size:
+            raise pr.PrevError("附件太大（超過上限 %d 位元組）" % max_size)
+        with open(dest, "xb") as f:
+            f.write(data)
+        return len(data), hashlib.sha256(data).hexdigest()
+
+
+def prev_release(version, layers=("", "-bsp", "-os"), rid=10, blob_start=100, **zkw):
+    """前一版的 Release（附件是各層報告 zip）＋ blobs。"""
+    assets, blobs = [], {}
+    for i, sfx in enumerate(layers):
+        data = report_zip(version, **zkw)
+        aid = blob_start + i
+        assets.append({"id": aid, "name": "report-%s-%s%s.zip" % (PROJ, version, sfx), "size": len(data), "state": "uploaded"})
+        blobs[aid] = data
+    return release("%s/%s" % (PROJ, version), assets, rid=rid), blobs
+
+
+class Tmp(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="dumpling-prev-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def p(self, *a):
+        return os.path.join(self.tmp, *a)
+
+    def run_prepare(self, fake, version="v1.1.0", env=None, limits=None, out="out"):
+        return pr.prepare(PROJ, version, self.p(out), env=tag_env(version) if env is None else env, client=fake, limits=limits)
+
+
+# ---------------------------------------------------------------- 版本排序與選法
+
+class Versions(unittest.TestCase):
+    def test_compare_table(self):
+        T = [("v39.2.1-demo1", "v39.2.0-demo1", 1), ("v39.2.0-demo1", "v39.2.1-demo1", -1), ("v1.10.0", "v1.9.0", 1),       # 數字比大小，不是字串
+             ("v1.0.1", "v1.0", 1), ("v1.0", "v1.0.1", -1), ("v1.0.0-demo2", "v1.0.0-demo1", 1), ("v1.0", "V1.0", 0), ("v1.0", "v1.00", 0),
+             ("v1.0.0", "v1.0.0-demo1", None), ("v1.0.0-demo1", "v1.0.0-rc1", None), ("v1.rc", "v1.2", None)]
+        for a, b, want in T:
+            self.assertEqual(pr.compare(a, b), want, (a, b))
+
+    def sel(self, rels, ver="v1.1.0"):
+        return pr.select_previous(rels, PROJ, ver)
+
+    def tag(self, v, **kw):
+        return release("%s/%s" % (PROJ, v), **kw)
+
+    def test_picks_highest_version_below_current(self):
+        r, note, st = self.sel([self.tag("v1.0.0"), self.tag("v0.9.0"), self.tag("v1.2.0"), self.tag("v1.0.5")])
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.5")
+        self.assertEqual(st["newer"], 1)
+
+    def test_numeric_not_string_order(self):
+        r, _, _ = self.sel([self.tag("v1.9.0"), self.tag("v1.10.0")], "v1.11.0")
+        self.assertEqual(r["tag_name"], "acme-board/v1.10.0")
+
+    def test_patch_on_old_line_compares_to_its_predecessor_not_latest_published(self):
+        # v1.0.1 在 v1.1.0 之後才發：前一版是 v1.0.0，不是時間上最近的 v1.1.0
+        r, _, _ = self.sel([self.tag("v1.1.0"), self.tag("v1.0.0"), self.tag("v0.9.0")], "v1.0.1")
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0")
+
+    def test_skips_drafts_prereleases_other_projects_and_dev_tags(self):
+        rels = [self.tag("v1.0.5", draft=True), self.tag("v1.0.4", prerelease=True), release("other-board/v1.0.3"), release("dev/%s" % PROJ, prerelease=True),
+                release("firmware-demo/2026.11.15"), self.tag("v1.0.0")]
+        r, _, st = self.sel(rels)
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0")
+        self.assertEqual((st["drafts"], st["prereleases"]), (1, 1))
+
+    def test_same_tag_is_never_the_previous(self):
+        # 同名 tag 被重打（這次的版本已經有正式 Release）：不拿自己比
+        r, note, st = self.sel([self.tag("v1.1.0"), self.tag("v1.0.0")])
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0")
+        self.assertEqual(st["same_tag"], 1)
+        r, note, _ = self.sel([self.tag("v1.1.0")])
+        self.assertIsNone(r)
+
+    def test_no_previous_cases(self):
+        self.assertIsNone(self.sel([])[0])
+        self.assertIsNone(self.sel([self.tag("v1.0.0", draft=True), self.tag("v1.0.1", prerelease=True)])[0])
+        self.assertIsNone(self.sel([self.tag("v2.0.0")])[0])                      # 只有比較新的
+        self.assertIn("沒有前一個正式 Release", self.sel([])[1])
+
+    def test_non_bool_flags_are_not_trusted(self):
+        r = self.tag("v1.0.0")
+        r["draft"] = "false"                                                         # 字串不是 bool：不當成正式 Release
+        res, _, st = self.sel([r])
+        self.assertIsNone(res)
+        self.assertEqual(st["malformed"], 1)
+
+    def test_duplicate_published_tag_is_gap(self):
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v1.0.0", rid=1), self.tag("v1.0.0", rid=2)])
+        # 草稿重複不算（GitHub 允許同 tag 多個草稿）
+        r, _, _ = self.sel([self.tag("v1.0.0", rid=1), self.tag("v1.0.0", rid=2, draft=True)])
+        self.assertEqual(r["id"], 1)
+
+    def test_unorderable_versions_are_gap_not_guess(self):
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v1.0.0")], "v1.0.0-demo1")                          # 後綴是字母：排不出
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v1.0.0-rc1"), self.tag("v0.9.0")], "v1.0.0-demo1")    # 排不出的版本可能比 v0.9.0 更前，不能略過
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v1.00"), self.tag("v0.9.0")], "v1.0")                # 寫法不同的同一版
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v1.0.0-rc1"), self.tag("v1.0.0-demo0")], "v1.0.0-demo1")
+
+    def test_odd_suffix_on_an_older_version_does_not_block(self):
+        # v0.5.0-x 和 v0.9.0 的第一個不同處是數字（5 < 9），排得出先後：不影響
+        r, _, _ = self.sel([self.tag("v0.9.0"), self.tag("v0.5.0-x")], "v1.0.0")
+        self.assertEqual(r["tag_name"], "acme-board/v0.9.0")
+        # v0.9.0-x 和 v0.9.0 之間排不出先後，而兩個都比這次小：不猜
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v0.9.0"), self.tag("v0.9.0-x")], "v1.0.0")
+
+
+# ---------------------------------------------------------------- 是不是正式 Release
+
+class Official(Tmp):
+    def test_guard(self):
+        T = [({"GITHUB_EVENT_NAME": "push", "GITHUB_REF_TYPE": "tag", "GITHUB_REF": "refs/tags/acme-board/v1.1.0"}, True),
+             ({"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "tag", "GITHUB_REF": "refs/tags/acme-board/v1.1.0"}, False),
+             ({"GITHUB_EVENT_NAME": "push", "GITHUB_REF_TYPE": "branch", "GITHUB_REF": "refs/heads/dev/x"}, False),     # dev/** 分支的 push
+             ({"GITHUB_EVENT_NAME": "schedule", "GITHUB_REF_TYPE": "branch", "GITHUB_REF": "refs/heads/main"}, False),
+             ({"GITHUB_EVENT_NAME": "push", "GITHUB_REF_TYPE": "tag", "GITHUB_REF": "refs/tags/acme-board/v9.9.9"}, False),     # tag 不是這次要掃的
+             ({}, False)]
+        for env, want in T:
+            self.assertEqual(pr.official_tag_push(env, PROJ, "v1.1.0")[0], want, env)
+
+    def test_not_official_is_not_run_and_never_calls_api(self):
+        fake = Fake([])
+        for env in ({}, {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "branch"},
+                    {"GITHUB_EVENT_NAME": "push", "GITHUB_REF_TYPE": "branch", "GITHUB_REF": "refs/heads/dev/x"}):
+            st, note, doc = self.run_prepare(fake, env=env)
+            self.assertEqual(st, "NOT_RUN", env)
+            self.assertTrue(note.startswith("僅供參考"))
+            self.assertEqual(fake.calls, [])
+        self.assertTrue(os.path.isfile(self.p("out", pr.MANIFEST)))
+        self.assertEqual(json.load(open(self.p("out", pr.MANIFEST), encoding="utf-8"))["status"], "NOT_RUN")
+
+    def test_non_official_never_connects_even_with_a_real_client(self):
+        """真的 GitHub 用戶端、指到不通的位址：不是正式 Release 時一次連線都不會試（沒有例外、沒有等待）。"""
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.listen(1)
+        s.settimeout(0.3)
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REPOSITORY": "example-org/example-repo", "GITHUB_API_URL": "http://127.0.0.1:%d" % port}
+        old = (pr.TIMEOUT, pr.RETRY_DELAY)
+        pr.TIMEOUT, pr.RETRY_DELAY = 0.3, 0                                           # 萬一真的連線，快速失敗（不是等 120 秒）
+        self.addCleanup(lambda: setattr(pr, "TIMEOUT", old[0]) or setattr(pr, "RETRY_DELAY", old[1]))
+        try:
+            st, _, _ = pr.prepare(PROJ, "v1.1.0", self.p("out"), env=env)
+            self.assertEqual(st, "NOT_RUN")
+            with self.assertRaises(socket.timeout):
+                s.accept()
+        finally:
+            s.close()
+
+    def test_out_dir_is_not_overwritten_unless_ours(self):
+        os.makedirs(self.p("out"))
+        open(self.p("out", "x"), "w").close()
+        with self.assertRaises(ValueError):
+            self.run_prepare(Fake([]))
+        shutil.rmtree(self.p("out"))
+        self.run_prepare(Fake([]))
+        self.run_prepare(Fake([]))                                                   # 自己上一次的輸出可以蓋掉
+
+
+# ---------------------------------------------------------------- 組資料夾
+
+class Prepare(Tmp):
+    def test_ok_three_layers(self):
+        rel, blobs = prev_release("v1.0.0")
+        fake = Fake([rel, release("acme-board/v0.9.0")], blobs)
+        st, note, doc = self.run_prepare(fake)
+        self.assertEqual(st, "OK", note)
+        self.assertEqual(sorted(doc["layers"]), [PROJ, PROJ + "-bsp", PROJ + "-os"])
+        for name in doc["layers"]:
+            d = self.p("out", name)
+            self.assertEqual(sorted(os.listdir(d)), ["summary.json", "vex.cdx.json"])
+            v = open(os.path.join(d, "vex.cdx.json"), "rb").read()
+            self.assertEqual(doc["layers"][name]["vex_sha256"], hashlib.sha256(v).hexdigest())
+            self.assertEqual(oct(os.stat(os.path.join(d, "vex.cdx.json")).st_mode & 0o777), "0o600")
+        self.assertEqual(doc["previous_tag"], "acme-board/v1.0.0")
+        self.assertEqual(os.listdir(self.p("out")).count(".work"), 0)                # zip 暫存已清掉
+        self.assertEqual(json.load(open(self.p("out", pr.MANIFEST), encoding="utf-8"))["status"], "OK")
+        self.assertNotIn(("sbom.cdx.json"), os.listdir(self.p("out", PROJ)))         # 舊版的 SBOM 不用
+
+    def test_first_release_is_not_run_informational(self):
+        st, note, doc = self.run_prepare(Fake([release("dev/%s" % PROJ, prerelease=True)]))
+        self.assertEqual(st, "NOT_RUN")
+        self.assertTrue(note.startswith("僅供參考") and "沒有前一個正式 Release" in note)
+        self.assertEqual(doc["layers"], {})
+
+    def test_only_drafts_and_prereleases_is_not_run(self):
+        fake = Fake([release("%s/v1.0.0" % PROJ, draft=True), release("%s/v1.0.1" % PROJ, prerelease=True)])
+        st, note, _ = self.run_prepare(fake)
+        self.assertEqual(st, "NOT_RUN")
+        self.assertEqual(fake.downloads, [])
+
+    def test_previous_without_report_assets_is_gap(self):
+        st, note, doc = self.run_prepare(Fake([release("%s/v1.0.0" % PROJ, [{"id": 1, "name": "sbom-%s-v1.0.0.cdx.json" % PROJ, "size": 5, "state": "uploaded"}])]))
+        self.assertEqual(st, "GAP")
+        self.assertIn("沒有 report-", note)
+
+    def test_one_layer_broken_is_gap_other_layers_still_built(self):
+        rel, blobs = prev_release("v1.0.0")
+        blobs[101] = make_zip({"報告/其他.txt": b"x"})                               # -bsp 的 zip 沒有 vex
+        rel["assets"][1]["size"] = len(blobs[101])
+        st, note, doc = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "GAP")
+        self.assertEqual(doc["layers"][PROJ + "-bsp"]["status"], "GAP")
+        self.assertEqual(doc["layers"][PROJ]["status"], "OK")
+        self.assertTrue(os.path.isfile(self.p("out", PROJ, "vex.cdx.json")))
+        self.assertFalse(os.path.exists(self.p("out", PROJ + "-bsp")))              # 壞的那層不留半成品
+
+    def test_asset_not_uploaded_or_zero_size_or_duplicate_is_gap(self):
+        for mut in (lambda r: r["assets"][0].update(state="starter"), lambda r: r["assets"][0].update(size=0),
+                    lambda r: r["assets"][0].update(size="12"), lambda r: r["assets"].append(dict(r["assets"][0], id=999))):
+            rel, blobs = prev_release("v1.0.0", layers=("",))
+            mut(rel)
+            blobs[999] = blobs[100]
+            st, note, doc = self.run_prepare(Fake([rel], blobs))
+            self.assertEqual(st, "GAP", note)
+
+    def test_too_large_asset_is_gap_without_downloading(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        fake = Fake([rel], blobs)
+        st, note, _ = self.run_prepare(fake, limits={"zip": 50})
+        self.assertEqual(st, "GAP")
+        self.assertIn("太大", note)
+        self.assertEqual(fake.downloads, [])
+
+    def test_lying_size_is_caught_by_actual_download(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        n = len(blobs[100])
+        rel["assets"][0]["size"] = 10                                                 # API 說 10 位元組，實際比較大
+        st, note, _ = self.run_prepare(Fake([rel], blobs), limits={"zip": n - 1, "total": n - 1})
+        self.assertEqual(st, "GAP")
+        st, note, _ = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "GAP")
+        self.assertIn("大小", note)                                                   # 下載的大小和 Release 記的不同
+
+    def test_total_limit_across_layers(self):
+        rel, blobs = prev_release("v1.0.0")
+        one = len(blobs[100])
+        st, note, doc = self.run_prepare(Fake([rel], blobs), limits={"total": one * 2})
+        self.assertEqual(st, "GAP")
+        self.assertEqual(sorted(k for k, v in doc["layers"].items() if v["status"] == "OK"), [PROJ, PROJ + "-bsp"])
+        self.assertIn("加起來超過上限", doc["layers"][PROJ + "-os"]["note"])
+
+    def test_unsafe_zips_are_gap_and_write_nothing_outside(self):
+        sym = zipfile.ZipInfo("報告/交給PM/VEX/link")
+        sym.create_system = 3
+        sym.external_attr = (0o120777 << 16)
+        trav = zipfile.ZipInfo("../../evil.txt")
+        absn = zipfile.ZipInfo("/etc/evil.txt")
+        back = zipfile.ZipInfo("a\\..\\evil")
+        dup_members = {pr.VEX_MEMBER: json.dumps(vex_doc("v1.0.0")).encode()}
+        cases = {"symlink": [(sym, b"/etc/passwd")], "traversal": [(trav, b"x")], "absolute": [(absn, b"x")], "backslash": [(back, b"x")]}
+        for label, extra in cases.items():
+            rel, blobs = prev_release("v1.0.0", layers=("",))
+            blobs[100] = report_zip("v1.0.0", extra=extra)
+            rel["assets"][0]["size"] = len(blobs[100])
+            st, note, doc = self.run_prepare(Fake([rel], blobs), out="o-" + label)
+            self.assertEqual(st, "GAP", label)
+            self.assertFalse(os.path.exists(self.p("o-" + label, PROJ)), label)
+            self.assertFalse(os.path.exists(self.p("evil.txt")) or os.path.exists("/etc/evil.txt"), label)
+        # 重複名稱
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            z.writestr(pr.VEX_MEMBER, json.dumps(vex_doc("v1.0.0")))
+            with self.assertWarns(UserWarning):
+                z.writestr(pr.VEX_MEMBER, json.dumps(vex_doc("v1.0.0", 5)))
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        blobs[100] = b.getvalue()
+        rel["assets"][0]["size"] = len(blobs[100])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o-dup")[0], "GAP")
+
+    def test_not_a_zip_or_member_too_big_or_bomb(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        blobs[100] = b"not a zip" * 10
+        rel["assets"][0]["size"] = len(blobs[100])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o1")[0], "GAP")
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o2", limits={"member": 20})[0], "GAP")
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o3", limits={"unpacked": 20})[0], "GAP")
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o4", limits={"entries": 1})[0], "GAP")
+
+    def test_vex_must_be_cyclonedx_vex_and_summary_json_object(self):
+        for label, kw in {"not-json": {"vex": None}, "wrong-format": {"vex": {"bomFormat": "SPDX"}}, "no-vulns": {"vex": {"bomFormat": "CycloneDX"}}}.items():
+            rel, blobs = prev_release("v1.0.0", layers=("",))
+            if label == "not-json":
+                blobs[100] = make_zip({pr.VEX_MEMBER: b"{ not json"})
+            else:
+                blobs[100] = report_zip("v1.0.0", vex=kw["vex"])
+            rel["assets"][0]["size"] = len(blobs[100])
+            self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o-" + label)[0], "GAP", label)
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        blobs[100] = make_zip({pr.VEX_MEMBER: json.dumps(vex_doc("v1.0.0")).encode(), pr.SUMMARY_MEMBER: b"[1]"})
+        rel["assets"][0]["size"] = len(blobs[100])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o-sum")[0], "GAP")
+        # 沒有 summary.json：可以用（csaf_advisory 會在公告的 notes 寫舊版沒有 summary），不是 GAP
+        rel, blobs = prev_release("v1.0.0", layers=("",), summary=False)
+        st, _, doc = self.run_prepare(Fake([rel], blobs), out="o-nosum")
+        self.assertEqual(st, "OK")
+        self.assertEqual(os.listdir(self.p("o-nosum", PROJ)), ["vex.cdx.json"])
+
+    def test_nested_json_does_not_crash(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        blobs[100] = make_zip({pr.VEX_MEMBER: b"[" * 200000})
+        rel["assets"][0]["size"] = len(blobs[100])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o")[0], "GAP")
+
+    def test_api_failure_and_unexpected_exception_are_gap_with_manifest(self):
+        class Boom(Fake):
+            def list_releases(self):
+                raise pr.PrevError("GitHub API 失敗（HTTP 403）")
+        st, note, _ = self.run_prepare(Boom([]), out="o1")
+        self.assertEqual((st, "403" in note), ("GAP", True))
+        self.assertEqual(json.load(open(self.p("o1", pr.MANIFEST), encoding="utf-8"))["status"], "GAP")
+
+        class Bug(Fake):
+            def list_releases(self):
+                raise KeyError("x")
+        st, note, _ = self.run_prepare(Bug([]), out="o2")
+        self.assertEqual(st, "GAP")
+        self.assertIn("KeyError", note)
+
+    def test_layer_names_only_match_project_and_version(self):
+        rel, blobs = prev_release("v1.0.0", layers=("", "-bsp"))
+        rel["assets"] += [{"id": 7, "name": "report-other-board-v1.0.0.zip", "size": 1, "state": "uploaded"},
+                          {"id": 8, "name": "report-%s-v0.9.0.zip" % PROJ, "size": 1, "state": "uploaded"},
+                          {"id": 9, "name": "report-%s-v1.0.0-../x.zip" % PROJ, "size": 1, "state": "uploaded"},
+                          {"id": 10, "name": "report-%s-v1.0.0-bsp-extra-long-suffix-name.zip" % PROJ, "size": 1, "state": "uploaded"},
+                          {"id": 11, "name": "vex-%s-v1.0.0.cdx.json" % PROJ, "size": 1, "state": "uploaded"}]
+        fake = Fake([rel], blobs)
+        st, _, doc = self.run_prepare(fake)
+        self.assertEqual((st, sorted(doc["layers"])), ("OK", [PROJ, PROJ + "-bsp"]))
+        self.assertEqual(sorted(fake.downloads), [100, 101])
+
+
+# ---------------------------------------------------------------- pipeline-steps.tsv
+
+class Steps(Tmp):
+    def run_cli(self, env_extra, version="v1.1.0", steps=True):
+        env = {"PATH": os.environ.get("PATH", ""), **env_extra}
+        args = [sys.executable, "-I", SCRIPT, "prepare", "--project", PROJ, "--version", version, "--out", self.p("out")]
+        if steps:
+            args += ["--steps", self.p("steps.tsv")]
+        return subprocess.run(args, capture_output=True, text=True, env=env)
+
+    def test_not_run_row_does_not_lower_overall(self):
+        r = self.run_cli({})
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertTrue(r.stdout.strip().startswith("previous-release: NOT_RUN（僅供參考"))
+        rows = sr.read_rows(self.p("steps.tsv"))
+        self.assertEqual([(x["step"], x["status"], x["exit"], x.get("recorded")) for x in rows], [("pipeline-previous-release", "NOT_RUN", 4, True)])
+        self.assertEqual(sr.overall(rows), "OK")                                     # 資訊，不是 GAP
+        self.assertEqual(subprocess.run([sys.executable, "-I", os.path.join(LIB, "step_rows.py"), "status", self.p("steps.tsv")], capture_output=True, text=True).stdout.strip(), "OK")
+
+    def test_not_run_text_without_recorded_marker_still_lowers_overall(self):
+        """只看文字會被步驟輸出繞過：一般步驟（沒有 recorded）說明寫「僅供參考」也照樣是 GAP。"""
+        sr.append_row(self.p("s.tsv"), "scan", "NOT_RUN", 4, "僅供參考：假的")
+        self.assertEqual(sr.overall(sr.read_rows(self.p("s.tsv"))), "GAP")
+
+    def test_gap_row_lowers_overall_to_gap(self):
+        for st, d in (("GAP", "找到了但失敗"),):
+            sr.append_row(self.p("g.tsv"), "previous-release", st, 3, d)
+        self.assertEqual(sr.overall(sr.read_rows(self.p("g.tsv"))), "GAP")
+
+    def test_bad_args_exit_64_and_unwritable_steps_is_gap_not_crash(self):
+        r = subprocess.run([sys.executable, "-I", SCRIPT, "prepare", "--project", PROJ], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 64)
+        os.makedirs(self.p("out"))
+        open(self.p("out", "x"), "w").close()
+        r = self.run_cli({})
+        self.assertEqual(r.returncode, 64)                                           # 不是自己的輸出：不覆蓋
+
+
+# ---------------------------------------------------------------- 真的 HTTP 用戶端（本機伺服器）
+
+class Server:
+    def __init__(self, releases, blobs, pages=None):
+        self.releases, self.blobs, self.log, self.fail, self.nolen = releases, blobs, [], {}, False
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                outer.log.append((self.path, self.headers.get("Authorization")))
+                code = outer.fail.get(self.path.split("?")[0])
+                if code:
+                    self.send_response(code)
+                    self.end_headers()
+                    return
+                m = re.fullmatch(r"/repos/example-org/example-repo/releases\?per_page=100&page=(\d+)", self.path)
+                if m:
+                    page = int(m.group(1))
+                    body = json.dumps(outer.releases[(page - 1) * 100:page * 100]).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                m = re.fullmatch(r"/repos/example-org/example-repo/releases/assets/(\d+)", self.path)
+                if m:                                                                # 附件：轉址到別的路徑（模擬簽名網址）
+                    self.send_response(302)
+                    self.send_header("Location", "/blob/%s" % m.group(1))
+                    self.end_headers()
+                    return
+                m = re.fullmatch(r"/blob/(\d+)", self.path)
+                if m and int(m.group(1)) in outer.blobs:
+                    body = outer.blobs[int(m.group(1))]
+                    self.send_response(200)
+                    if not outer.nolen:                                              # 沒有 Content-Length：只能靠實際讀到的位元組數擋
+                        self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(404)
+                self.end_headers()
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+class Http(Tmp):
+    def server(self, releases, blobs):
+        s = Server(releases, blobs)
+        self.addCleanup(s.close)
+        return s
+
+    def env(self, s, version="v1.1.0", token="tok-123"):
+        e = dict(tag_env(version), GITHUB_API_URL=s.url)
+        if token:
+            e["GITHUB_TOKEN"] = token
+        return e
+
+    def test_end_to_end_over_http_with_pagination_and_redirect(self):
+        rel, blobs = prev_release("v1.0.0")
+        rels = [release("%s/v0.%d.0" % (PROJ, i), draft=True, rid=1000 + i) for i in range(150)] + [rel]      # 第二頁才有
+        s = self.server(rels, blobs)
+        st, note, doc = pr.prepare(PROJ, "v1.1.0", self.p("out"), env=self.env(s))
+        self.assertEqual(st, "OK", note)
+        paths = [p for p, _ in s.log]
+        self.assertIn("/repos/example-org/example-repo/releases?per_page=100&page=2", paths)
+        auth = dict(s.log)
+        self.assertEqual(auth["/repos/example-org/example-repo/releases/assets/100"], "Bearer tok-123")
+        self.assertIsNone(auth["/blob/100"])                                          # 轉址後不帶 Authorization
+
+    def test_no_token_is_fine(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        st, _, _ = pr.prepare(PROJ, "v1.1.0", self.p("out"), env=self.env(s, token=None))
+        self.assertEqual(st, "OK")
+        self.assertTrue(all(a is None for _, a in s.log))
+
+    def test_download_url_in_response_is_never_used(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        rel["assets"][0]["browser_download_url"] = "http://127.0.0.1:1/evil"
+        rel["assets"][0]["url"] = "http://127.0.0.1:1/evil"
+        s = self.server([rel], blobs)
+        self.assertEqual(pr.prepare(PROJ, "v1.1.0", self.p("out"), env=self.env(s))[0], "OK")
+        self.assertFalse([p for p, _ in s.log if "evil" in p])
+
+    def test_http_errors_are_gap(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        s.fail["/repos/example-org/example-repo/releases"] = 403
+        st, note, _ = pr.prepare(PROJ, "v1.1.0", self.p("o1"), env=self.env(s))
+        self.assertEqual(st, "GAP")
+        self.assertIn("403", note)
+        self.assertEqual(len([p for p, _ in s.log if p.startswith("/repos/example-org/example-repo/releases?")]), 1)      # 4xx 不重試
+        s.fail.clear()
+        s.fail["/repos/example-org/example-repo/releases/assets/100"] = 404
+        self.assertEqual(pr.prepare(PROJ, "v1.1.0", self.p("o2"), env=self.env(s))[0], "GAP")
+
+    def test_server_error_is_retried(self):
+        s = self.server([], {})
+        s.fail["/repos/example-org/example-repo/releases"] = 502
+        c = pr.GitHub("example-org/example-repo", None, s.url, retries=3, delay=0)
+        with self.assertRaises(pr.PrevError):
+            c.list_releases()
+        self.assertEqual(len(s.log), 3)
+
+    def test_api_url_must_be_https_or_loopback(self):
+        for bad in ("http://example.invalid", "ftp://127.0.0.1", "https://user:pw@example.invalid", "http://127.0.0.1@example.invalid"):
+            with self.assertRaises(pr.PrevError, msg=bad):
+                pr.GitHub("example-org/example-repo", None, bad)
+        pr.GitHub("example-org/example-repo", None, "https://api.github.com")
+        with self.assertRaises(pr.PrevError):
+            pr.GitHub("bad repo", None, "https://api.github.com")
+
+    def test_oversize_response_and_download_stop(self):
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        c = pr.GitHub("example-org/example-repo", None, s.url, limits={"api": 10})
+        with self.assertRaises(pr.PrevError):
+            c.list_releases()
+        c = pr.GitHub("example-org/example-repo", None, s.url)
+        dest = self.p("big.zip")
+        with self.assertRaises(pr.PrevError):
+            c.download(100, dest, 20)
+        self.assertFalse(os.path.exists(dest))                                        # 超過上限的半成品要刪掉
+        n, sha = c.download(100, dest, 1 << 20)
+        self.assertEqual(sha, hashlib.sha256(blobs[100]).hexdigest())
+
+    def test_download_cap_without_content_length(self):
+        """伺服器不給 Content-Length（或說謊）：照實際讀到的位元組數擋，超過就停止並刪掉檔案。"""
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        s.nolen = True
+        c = pr.GitHub("example-org/example-repo", None, s.url)
+        dest = self.p("big.zip")
+        with self.assertRaises(pr.PrevError):
+            c.download(100, dest, 20)
+        self.assertFalse(os.path.exists(dest))
+        self.assertEqual(c.download(100, dest, 1 << 20)[0], len(blobs[100]))
+
+    def test_cli_official_over_http(self):
+        rel, blobs = prev_release("v1.0.0")
+        s = self.server([rel], blobs)
+        env = {"PATH": os.environ.get("PATH", ""), **self.env(s)}
+        r = subprocess.run([sys.executable, "-I", SCRIPT, "prepare", "--project", PROJ, "--version", "v1.1.0", "--out", self.p("out"), "--steps", self.p("s.tsv")],
+                           capture_output=True, text=True, env=env)
+        self.assertEqual((r.returncode, r.stdout.startswith("previous-release: OK（前一個正式 Release acme-board/v1.0.0，3 層")), (0, True), r.stdout + r.stderr)
+        rows = sr.read_rows(self.p("s.tsv"))
+        self.assertEqual([(x["status"], x.get("recorded")) for x in rows], [("OK", None)])
+        self.assertNotIn("tok-123", r.stdout + r.stderr + open(self.p("out", pr.MANIFEST), encoding="utf-8").read())
+
+
+# ---------------------------------------------------------------- 精靈讀資料夾、report_package 真的產生草稿
+
+def wiz_module():
+    spec = importlib.util.spec_from_file_location("cra_scan_wizard_prev_env", WIZ)
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+    return w
+
+
+class Wizard(Tmp):
+    def prepared(self, fake=None, **kw):
+        rel, blobs = prev_release("v1.0.0", **kw)
+        st, note, doc = self.run_prepare(fake or Fake([rel], blobs))
+        return st, doc
+
+    def test_each_layer_gets_its_own_folder(self):
+        w = wiz_module()
+        st, doc = self.prepared()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        for name in (PROJ, PROJ + "-bsp", PROJ + "-os"):
+            r, note, status = w.previous_from_env(name, env)
+            self.assertEqual((status, r), ("ok", __import__("pathlib").Path(self.p("out", name))), name)
+        self.assertEqual(w.resolve_previous(None, self.tmp, PROJ + "-bsp", True, env)[2], "ok")
+
+    def test_env_not_set_is_none_and_cli_wins(self):
+        w = wiz_module()
+        self.assertIsNone(w.previous_from_env(PROJ, {}))
+        self.assertIsNone(w.previous_from_env(PROJ, {w.PREVIOUS_ENV: ""}))
+        self.prepared()
+        r, note, status = w.resolve_previous(None, self.tmp, PROJ, True, {})              # 沒有環境變數、--yes：不猜，NOT_RUN
+        self.assertEqual((r, status), (None, "not_run"))
+        other = self.p("cli", "cra-project", "CRA", "Reports")
+        os.makedirs(other)
+        open(os.path.join(other, "vex.cdx.json"), "w").write("{}")
+        r, _, status = w.resolve_previous(self.p("cli"), self.tmp, PROJ, True, {w.PREVIOUS_ENV: self.p("out")})
+        self.assertEqual((str(r), status), (other, "ok"))                                   # 命令列優先
+
+    def test_not_run_states_are_not_gap(self):
+        w = wiz_module()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        self.run_prepare(Fake([]))                                                            # 第一個正式 Release
+        r, note, status = w.previous_from_env(PROJ, env)
+        self.assertEqual((r, status), (None, "not_run"))
+        self.assertIn("沒有前一個正式 Release", note)
+        shutil.rmtree(self.p("out"))
+        self.run_prepare(Fake([]), env={})                                                    # 不是正式 Release
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "not_run")
+        shutil.rmtree(self.p("out"))
+        self.prepared(layers=("", "-bsp"))                                                    # 前一版沒有 -os 這一層：不能比，不是 GAP
+        r, note, status = w.previous_from_env(PROJ + "-os", env)
+        self.assertEqual((r, status), (None, "not_run"))
+        self.assertIn("-os", note)
+
+    def test_gap_states_are_not_silent(self):
+        w = wiz_module()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        # 前一版有，但這層的 zip 壞了
+        rel, blobs = prev_release("v1.0.0")
+        blobs[101] = b"broken"
+        rel["assets"][1]["size"] = 6
+        self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "ok")
+        r, note, status = w.previous_from_env(PROJ + "-bsp", env)
+        self.assertEqual((r, status), (None, "gap"))
+        self.assertIn("讀不了", note)
+        # 整個 API 失敗
+        shutil.rmtree(self.p("out"))
+
+        class Boom(Fake):
+            def list_releases(self):
+                raise pr.PrevError("GitHub API 失敗（HTTP 403）")
+        self.run_prepare(Boom([]))
+        r, note, status = w.previous_from_env(PROJ, env)
+        self.assertEqual((r, status), (None, "gap"))
+        self.assertIn("403", note)
+        # 資料夾不存在、沒有 manifest、manifest 壞掉、層的資料夾被清掉、符號連結
+        self.assertEqual(w.previous_from_env(PROJ, {w.PREVIOUS_ENV: self.p("nowhere")})[2], "gap")
+        os.makedirs(self.p("empty"))
+        self.assertEqual(w.previous_from_env(PROJ, {w.PREVIOUS_ENV: self.p("empty")})[2], "gap")
+        open(self.p("empty", pr.MANIFEST), "w").write("[not json")
+        self.assertEqual(w.previous_from_env(PROJ, {w.PREVIOUS_ENV: self.p("empty")})[2], "gap")
+        shutil.rmtree(self.p("out"))
+        self.prepared()
+        shutil.rmtree(self.p("out", PROJ))
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "gap")                           # manifest 說 OK、資料夾卻不見
+        os.symlink(self.p("out"), self.p("link"))
+        self.assertEqual(w.previous_from_env(PROJ + "-os", {w.PREVIOUS_ENV: self.p("link")})[2], "gap")
+
+    def test_layer_folder_must_be_exactly_that_layer(self):
+        """manifest 的 layers 鍵與資料夾名稱不可帶路徑；名稱 .、.. 不接受。"""
+        w = wiz_module()
+        self.prepared()
+        for bad in ("..", ".", ""):
+            r, note, status = w.previous_from_env(bad, {w.PREVIOUS_ENV: self.p("out")})
+            self.assertIsNone(r)
+            self.assertNotEqual(status, "ok", bad)
+
+    def test_report_package_produces_pm_csaf_from_prepared_folder(self):
+        """前一版的 zip → previous_release → 精靈的 previous_from_env → report_package --csaf-previous：交給PM/CSAF/ 真的產生。"""
+        cra = os.path.join(ROOT, "tools", "cra")
+        sys.path[:0] = [cra, os.path.join(cra, "tests")]
+        try:
+            import csaf_advisory as ca
+            import report_package as rp
+            from test_csaf_advisory import CFG, NEW, OLD, SBOM_NEW, csaf_validator, reports as csaf_reports
+            from test_report_package import MIX, project
+        finally:
+            del sys.path[:2]
+        old = csaf_reports(__import__("pathlib").Path(self.p("oldsrc")), "1.0.0", OLD)
+        vex, summ = (old / "vex.cdx.json").read_bytes(), (old / "summary.json").read_bytes()
+        zdata = make_zip({pr.VEX_MEMBER: vex, pr.SUMMARY_MEMBER: summ})
+        rel = release("%s/v1.0.0" % PROJ, [{"id": 5, "name": "report-%s-v1.0.0.zip" % PROJ, "size": len(zdata), "state": "uploaded"}])
+        st, note, doc = self.run_prepare(Fake([rel], {5: zdata}))
+        self.assertEqual(st, "OK", note)
+        w = wiz_module()
+        prev, _, status = w.previous_from_env(PROJ, {w.PREVIOUS_ENV: self.p("out")})
+        self.assertEqual(status, "ok")
+        P = __import__("pathlib").Path
+        p = project(P(self.p("proj")), MIX)
+        src = csaf_reports(P(self.p("newsrc")), "1.1.0", NEW, 3, SBOM_NEW)
+        for n in ("vex.cdx.json", "sbom.cdx.json", "summary.json"):
+            shutil.copyfile(src / n, p / "CRA" / "Reports" / n)
+        (p / "CRA" / "Config" / "config.json").write_text(json.dumps(dict(CFG, product={"name": "ACME-X100", "version": "1.1.0"})), encoding="utf-8")
+        out = P(self.p("report"))
+        code, msgs = rp.build(p, out, allow_tmp=True, csaf_previous=prev)
+        f = out / "交給PM" / "CSAF" / "csaf-fix-advisory-ACME-X100-1.1.0.json"
+        self.assertTrue(f.is_file(), msgs)
+        d = json.loads(f.read_text(encoding="utf-8"))
+        self.assertEqual(d["document"]["tracking"]["status"], "draft")
+        self.assertFalse(list(csaf_validator().iter_errors(d)))
+        self.assertTrue(any(m.startswith("CSAF 修補公告草稿：") for m in msgs), msgs)
+        # 沒有資料時（NOT_RUN）report_package 不給 --csaf-previous：訊息寫 NOT_RUN，也沒有「未產生的項目」
+        out2 = P(self.p("report2"))
+        code2, msgs2 = rp.build(p, out2, allow_tmp=True)
+        self.assertTrue(any("CSAF 修補公告：未產生（NOT_RUN" in m for m in msgs2))
+        self.assertFalse((out2 / "交給PM" / "未產生的項目.md").exists())
+
+
+    def test_gap_step_is_listed_and_not_run_step_is_not(self):
+        """精靈記的步驟：gap（有前一版但資料不能用）→ report_package 列在「未產生的項目」（GAP）；not_run（僅供參考）→ 不列。"""
+        cra = os.path.join(ROOT, "tools", "cra")
+        sys.path[:0] = [cra, os.path.join(cra, "tests")]
+        try:
+            import report_package as rp
+            from test_csaf_advisory import CFG, NEW, SBOM_NEW, reports as csaf_reports
+            from test_report_package import MIX, project
+        finally:
+            del sys.path[:2]
+        P = __import__("pathlib").Path
+        w = wiz_module()
+        p = project(P(self.p("proj")), MIX)
+        src = csaf_reports(P(self.p("newsrc")), "1.1.0", NEW, 3, SBOM_NEW)
+        for n in ("vex.cdx.json", "sbom.cdx.json", "summary.json"):
+            shutil.copyfile(src / n, p / "CRA" / "Reports" / n)
+        (p / "CRA" / "Config" / "config.json").write_text(json.dumps(dict(CFG, product={"name": "ACME-X100", "version": "1.1.0"})), encoding="utf-8")
+        d = P(self.p("ic"))
+        d.mkdir()
+        w.add_info_step(d, w.csaf_previous_plan(None, "GitHub API 失敗（HTTP 403）", "gap", "both", True)[1])
+        code, msgs = rp.build(p, P(self.p("o-gap")), allow_tmp=True, inputs_check=d / "inputs-check.json")
+        text = (P(self.p("o-gap")) / "交給PM" / "未產生的項目.md").read_text(encoding="utf-8")
+        self.assertEqual(code, 2)
+        self.assertIn("CSAF 修補公告草稿", text)
+        self.assertIn("HTTP 403", text)
+        self.assertIn("GAP", text)
+        w.add_info_step(d, w.csaf_previous_plan(None, "沒有前一個正式 Release", "not_run", "both", True)[1])
+        code, msgs = rp.build(p, P(self.p("o-nr")), allow_tmp=True, inputs_check=d / "inputs-check.json")
+        self.assertEqual(code, 0, msgs)
+        self.assertFalse((P(self.p("o-nr")) / "交給PM" / "未產生的項目.md").exists())
+        self.assertTrue(any("NOT_RUN" in m and "CSAF" in m for m in msgs))
+
+
+# ---------------------------------------------------------------- workflow（靜態檢查）
+
+class Workflow(unittest.TestCase):
+    def setUp(self):
+        self.text = open(os.path.join(ROOT, ".github", "workflows", "pipeline.yml"), encoding="utf-8").read()
+
+    def step(self, name_part):
+        parts = re.split(r"\n      - ", self.text)
+        got = [p for p in parts if p.startswith("name: ") and name_part in p.splitlines()[0]]
+        self.assertEqual(len(got), 1, name_part)
+        return got[0]
+
+    def test_token_only_on_tag_push_and_only_in_that_step(self):
+        s = self.step("前一個正式 Release 的報告")
+        self.assertIn("GITHUB_TOKEN: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && github.token || '' }}", s)
+        self.assertIn("previous_release.py prepare", s)
+        self.assertIn("DUMPLING_PREVIOUS_REPORTS=", s)
+        scan = self.step("scan（臨時 DT")
+        self.assertNotIn("GITHUB_TOKEN", scan)
+        self.assertNotIn("github.token", scan)
+
+    def test_runs_before_scan_and_after_assemble(self):
+        i = self.text.index("previous_release.py prepare")
+        self.assertLess(self.text.index("name: assemble"), i)
+        self.assertLess(i, self.text.index("pipeline/run-step.sh scan"))
+
+    def test_no_platform_scan_script_mentions_it(self):
+        for rel in ("pipeline/platforms/jetson/scan.sh", "pipeline/platforms/_shared/scan-disk.sh"):
+            self.assertNotIn("previous", open(os.path.join(ROOT, rel), encoding="utf-8").read().lower().replace("previous release", ""), rel)
+
+
+if __name__ == "__main__":
+    unittest.main()

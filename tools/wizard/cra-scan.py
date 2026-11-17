@@ -15,6 +15,10 @@
   --kernel-not-distro <理由>（環境變數 SCA_KERNEL_NOT_DISTRO 也可以）：平台負責人宣告核心不是發行版（Debian／Ubuntu）的核心，版本字串看不出來時用；
   SBOM 有核心時 C-kernel-coverage 是 GAP。不是空的、沒有控制字元、最多 300 位元組，否則 exit 64。
 
+  CSAF 修補公告草稿（Annex I Part II(4)）：--previous-report <較早一版的精靈輸出資料夾或它的 cra-project/CRA/Reports>；沒給時看環境變數
+  DUMPLING_PREVIOUS_REPORTS（pipeline 在正式 Release 時組好的前一版資料，依 --name 分層；見 pipeline/lib/previous_release.py、docs/CSAF.md）。
+  都沒有 → 報告記 NOT_RUN（僅供參考，不算 GAP）；有前一版但資料缺或讀不到 → GAP。--yes 不會自己從輸出根目錄挑。
+
 流程：核對 MD5 → 安全解開原始碼（不執行裡面任何東西）→ 自動找核心原始碼、UEFI、NVIDIA 樹外模組、核心建置紀錄
      → 列出計畫請你確認 → 取工具（預設目前 checkout 的 HEAD，用 git archive 取乾淨副本；--tools-rev 或 DUMPLING_TOOLS_REV 可指定其他版本）→ 掃描 → 套用規則產生 CRA 文件（製造商／供應商）→ 整理成報告（工具有 report_package.py 時）
 輸出：<站台設定的 outroot>/<產品>-<版本>-<日期時間>/（每次新資料夾，舊的不動）
@@ -285,6 +289,165 @@ def merge_step_status(out, steps, inputs_check_name="inputs-check.json"):
         d["inputs"].append({"id": "step:" + st["id"], "label": st["label"], "provider": "", "required": False, "kind": "step", "status": status,
                             "path": None, "affects": st.get("affects", ""), "note": st.get("note", ""), "step_status": s0})
     f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def reports_dir_of(path):
+    """前一版的 CRA/Reports：給 CRA/Reports、專案資料夾，或精靈的輸出資料夾都可以；找不到 vex.cdx.json → None。不跟隨連結。"""
+    p = Path(path)
+    for c in (p, p / "CRA" / "Reports", p / "cra-project" / "CRA" / "Reports"):
+        if c.is_dir() and not c.is_symlink() and (c / "vex.cdx.json").is_file() and not (c / "vex.cdx.json").is_symlink():
+            return c
+    return None
+
+
+def find_previous_outputs(outroot, name):
+    """輸出根目錄裡同一個產品名稱的較早輸出（精靈的輸出資料夾，裡面有 cra-project/CRA/Reports/vex.cdx.json），新的在前。
+    名稱以 plan.json 的 name 為準；沒有 plan.json 才看資料夾名稱的前綴（<名稱>-）。→ [(Path, 版本字串或 None)]。"""
+    want = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    found = []
+    try:
+        kids = [k for k in Path(outroot).iterdir() if k.is_dir() and not k.is_symlink()]
+    except OSError:
+        return []
+    for k in kids:
+        if not (k / "cra-project" / "CRA" / "Reports" / "vex.cdx.json").is_file():
+            continue
+        pn = pv = None
+        try:
+            pl = json.loads((k / "plan.json").read_text(encoding="utf-8"))
+            pn, pv = pl.get("name"), pl.get("version")
+        except (OSError, ValueError, AttributeError):
+            pass
+        if isinstance(pn, str):
+            if re.sub(r"[^A-Za-z0-9._-]", "_", pn) != want:
+                continue
+        elif not k.name.startswith(want + "-"):
+            continue
+        m = re.search(r"-(\d{8}-\d{4})$", k.name)
+        found.append(((m.group(1) if m else "", k.stat().st_mtime), k, pv if isinstance(pv, str) else None))
+    found.sort(key=lambda x: x[0], reverse=True)
+    return [(k, v) for _, k, v in found]
+
+
+def add_info_step(out, step, inputs_check_name="inputs-check.json"):
+    """inputs-check.json 加一個步驟：預設是「僅供參考」（informational）：報告列出，但不算 GAP（例如第一版沒有前一版可比較）。
+    step 帶 "informational": False 時是一般步驟（status 是 gap 就會進報告的「未產生的項目」，例如有前一版、但資料讀不到）。
+    同 id 的舊項目先清掉；檔案不存在時建一個只有這個步驟的。"""
+    f = Path(out) / inputs_check_name
+    try:
+        d = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    except (OSError, ValueError):
+        d = {}
+    if not isinstance(d, dict) or not isinstance(d.get("inputs"), list):
+        d = {"manifest": None, "inputs": [], "missing_required": [], "missing_optional": [], "unconfirmed_required": []}
+    sid = "step:" + step["id"]
+    d["inputs"] = [r for r in d["inputs"] if not (isinstance(r, dict) and r.get("id") == sid)]
+    d["inputs"].append({"id": sid, "label": step["label"], "provider": "", "required": False, "kind": "step", "status": step["status"],
+                        "path": None, "affects": step.get("affects", ""), "note": step.get("note", ""), "step_status": step["status"].upper(),
+                        "informational": step.get("informational", True) is True})
+    f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def pick_previous_report(args_value, outroot, name, noninteractive):
+    """--previous-report、或互動模式列出同名稱的較早輸出讓人選（預設最新的一個）。--yes 沒給參數＝不比較（不猜）。
+    → (CRA/Reports 路徑或 None, 說明)。"""
+    if args_value:
+        r = reports_dir_of(args_value)
+        if not r:
+            sys.exit(f"錯誤：--previous-report {args_value} 裡找不到 vex.cdx.json（要給較早的精靈輸出資料夾，或它的 cra-project/CRA/Reports）")
+        return r, f"--previous-report {args_value}"
+    if noninteractive:
+        return None, "沒有給 --previous-report（--yes 不自動挑前一版）"
+    cands = find_previous_outputs(outroot, name)
+    if not cands:
+        return None, "輸出根目錄裡沒有同一個產品的較早輸出"
+    say("\n10. 要拿哪一個較早的版本比較，產生 CSAF 修補公告草稿？（只是草稿，要給 PM 看）")
+    for i, (k, v) in enumerate(cands[:5], 1):
+        say(f"   {i}. {k.name}" + (f"（{v}）" if v else ""))
+    ans = input("   輸入編號；不比較就輸入 n［預設：1］：").strip().lower() or "1"
+    if ans in ("n", "no", "0"):
+        return None, "互動模式選擇不比較"
+    if ans.isdigit() and 1 <= int(ans) <= min(5, len(cands)):
+        return reports_dir_of(cands[int(ans) - 1][0]), f"互動選擇 {cands[int(ans) - 1][0].name}"
+    return None, f"輸入「{ans}」不是有效的編號，不比較"
+
+
+# dumpling（S4 接線）：pipeline 不改各平台的 scan.sh，前一版的資料用環境變數一路傳進來。
+# 資料夾由 pipeline/lib/previous_release.py 組出：<資料夾>/previous-release.json（狀態與每一層的說明）、<資料夾>/<精靈的 --name>/（vex.cdx.json、summary.json）。
+# 完整、-bsp、-os 三次呼叫的 --name 不同（<專案>、<專案>-bsp、<專案>-os），各自拿到對應層的前一版。
+PREVIOUS_ENV = "DUMPLING_PREVIOUS_REPORTS"
+PREV_MANIFEST = "previous-release.json"
+PREV_MANIFEST_MAX = 1 << 20
+
+
+def previous_from_env(name, environ=None):
+    """環境變數 DUMPLING_PREVIOUS_REPORTS 的前一版資料 → None（沒設環境變數）或 (CRA/Reports 路徑或 None, 說明, 狀態)。
+    狀態：ok（找到可比較的資料）、not_run（沒有前一版可比較：第一版、不是正式 Release、前一版沒有這一層；僅供參考，不算 GAP）、
+    gap（有前一版，但資料缺或讀不到：照實記 GAP，不當成沒有前一版）。"""
+    env = os.environ if environ is None else environ
+    v = env.get(PREVIOUS_ENV, "")
+    if not v:
+        return None
+    base = Path(v)
+    key = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    if base.is_symlink() or not base.is_dir():
+        return None, f"{PREVIOUS_ENV} 指的資料夾不存在（或是符號連結），無法確認有沒有前一版", "gap"
+    mf = base / PREV_MANIFEST
+    try:
+        if mf.is_symlink() or not mf.is_file() or mf.stat().st_size > PREV_MANIFEST_MAX:
+            raise ValueError("不是一般檔案或太大")
+        m = json.loads(mf.read_text(encoding="utf-8"))
+        if not isinstance(m, dict) or not isinstance(m.get("status"), str):
+            raise ValueError("格式不對")
+    except (OSError, ValueError, RecursionError) as e:
+        return None, f"{PREVIOUS_ENV} 資料夾裡的 {PREV_MANIFEST} 讀不到（{type(e).__name__}），無法確認有沒有前一版", "gap"
+    note = str(m.get("note") or "")[:300]
+    layers = m.get("layers") if isinstance(m.get("layers"), dict) else {}
+    ent = layers.get(key) if key not in ("", ".", "..") else None
+    if not isinstance(ent, dict):
+        if m["status"] == "OK":
+            return None, f"前一個正式 Release（{str(m.get('previous_tag') or '')[:100]}）沒有 {key} 這一層的報告", "not_run"
+        ent = m
+    st, enote = ent.get("status"), (str(ent.get("note") or "")[:300] or note)
+    if st == "NOT_RUN":
+        return None, enote or "沒有前一個正式 Release", "not_run"
+    if st == "OK" and key not in ("", ".", ".."):
+        r = reports_dir_of(base / key)
+        if r is not None and r == base / key:
+            return r, f"{PREVIOUS_ENV}（前一個正式 Release {str(m.get('previous_tag') or '')[:100]}）", "ok"
+        return None, f"前一個正式 Release 的資料夾 {key}/ 裡找不到 vex.cdx.json", "gap"
+    return None, enote or f"前一個正式 Release 的資料沒有組好（狀態 {str(st)[:20]}）", "gap"
+
+
+def resolve_previous(args_value, outroot, name, noninteractive, environ=None):
+    """前一版的來源，優先順序：--previous-report > 環境變數 DUMPLING_PREVIOUS_REPORTS（pipeline）> 互動選擇／沒有。
+    → (CRA/Reports 路徑或 None, 說明, 狀態 ok｜not_run｜gap)。"""
+    if args_value:
+        r, note = pick_previous_report(args_value, outroot, name, noninteractive)
+        return r, note, "ok"
+    e = previous_from_env(name, environ)
+    if e is not None:
+        return e
+    r, note = pick_previous_report(None, outroot, name, noninteractive)
+    if r is None:
+        return None, note, "not_run"
+    return r, note, "ok"
+
+
+def csaf_previous_plan(prev_report, prev_note, prev_status, role, pkg_has_option):
+    """整理報告時怎麼處理前一版 → (給 report_package.py 的參數, inputs-check 要記的步驟或 None)。
+    有前一版、製造商專案、這版 report_package 有 --csaf-previous → 給參數，不記步驟（結果由 report_package 自己寫）；
+    資料缺或讀不到（gap）→ 記一般步驟 gap（報告的「未產生的項目」列為 GAP，不當成沒有前一版）；其他（沒有前一版、供應商角色、工具太舊）→ 記「僅供參考」的 not_run（不算 GAP）。"""
+    label = "CSAF 修補公告草稿（和前一版比較）"
+    if prev_report and pkg_has_option and role in ("both", "manufacturer"):
+        return ["--csaf-previous", str(prev_report)], None
+    if prev_status == "gap" and role in ("both", "manufacturer"):
+        return [], {"id": "csaf-fix-advisory", "label": label, "status": "gap", "informational": False,
+                    "note": f"前一版的資料有問題，沒有產生草稿：{prev_note}",
+                    "affects": "沒有 CSAF 修補公告草稿（Annex I Part II(4) 修補後公開資訊的輸入）；這不代表和前一版之間沒有差異"}
+    why = prev_note if not prev_report else "這個角色沒有製造商專案" if role == "supplier" else "這版工具的 report_package.py 還沒有 --csaf-previous"
+    return [], {"id": "csaf-fix-advisory", "label": label, "status": "not_run", "note": f"沒有前一版可比較：{why}",
+                "affects": "沒有 CSAF 修補公告草稿（Annex I Part II(4) 修補後公開資訊的輸入）；第一版或沒有前一版時屬正常"}
 
 
 # ---- 設定包的版本與刷機包識別：精靈覆寫，設定包不要寫死 ----
@@ -881,6 +1044,8 @@ def main():
     ap.add_argument("--site-config", help="站台設定檔（JSON）；不給時用環境變數 SCA_WIZARD_CONFIG，再不然 ~/.config/sca-center/wizard.json")
     ap.add_argument("--rescan-from", help="上一次完整掃描的 scan 資料夾（scan-flash-package.sh 的結果，要有 list.json）：只重跑比對，沿用它的 SBOM（可以事先換成某一層的 SBOM，"
                                           "分層用）與 A0 上游比對結果；不再做 A0。見 docs/LAYERS.md、docs/JETSON.md")
+    ap.add_argument("--previous-report", help="同一產品較早一版的精靈輸出資料夾（或它的 cra-project/CRA/Reports）：產生 CSAF 修補公告草稿（交給PM/CSAF/）；"
+                    "不給時先看環境變數 DUMPLING_PREVIOUS_REPORTS（pipeline 在正式 Release 時組好的前一版資料），再來互動模式列出同名稱的較早輸出讓你選，--yes 不會自己挑（記 NOT_RUN）")
     ap.add_argument("--yes", action="store_true"); ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--kernel-version", action="append", metavar="版本",
                     help="要判定的核心版本（映像的 /usr/lib/modules/<版本>/），可重複；不給時用環境變數 SCA_KERNEL_VERSIONS（空白或逗號分隔）。"
@@ -957,6 +1122,7 @@ def main():
     if _board_check(bt_in or ""):
         sys.exit(f"錯誤：{_board_check(bt_in)}")
     board_tests = [Path(s.strip()).absolute() for s in (bt_in or "").split(",") if s.strip()]
+    prev_report, prev_note, prev_status = resolve_previous(a.previous_report, OUTROOT, re.sub(r"[^A-Za-z0-9._-]", "_", name), ni)
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     OUT = OUTROOT / f"{re.sub(r'[^A-Za-z0-9._-]', '_', name)}-{re.sub(r'[^A-Za-z0-9._-]', '_', version)}-{stamp}"
@@ -1013,6 +1179,7 @@ def main():
     say(f"  名稱／版本／rootfs／角色：{name}／{version}／{rootfs}／{role}")
     say(f"  另外交付的韌體（{len(extras)} 個）：{', '.join(p.name for p in extras) or '無'}")
     say(f"  板子檢查結果檔（{len(board_tests)} 個）：{', '.join(p.name for p in board_tests) or '無 → 對外服務欄顯示「不明」'}")
+    say(f"  CSAF 修補公告草稿的前一版：{prev_report if prev_report else ('無 → 不產生（GAP：' if prev_status == 'gap' else '無 → 不產生（NOT_RUN：') + prev_note + '）'}")
     plan = {"archive": str(fp), "source_archive": str(sa) if sa else None, "source_note": no_source, "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
             "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
             "stable_git": str(stable) if stable else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
@@ -1053,6 +1220,9 @@ def main():
     plan["a0_artifacts"] = bool(plan["upstream_bsp"])
     plan["a0_source"] = bool(plan["upstream_source"]) and bool(oot or built_oot or kt)
     plan["board_test"] = [str(p) for p in board_tests]
+    plan["csaf_previous"] = str(prev_report) if prev_report else None
+    plan["csaf_previous_note"] = prev_note
+    plan["csaf_previous_status"] = prev_status
     plan["kernel_versions"] = kvers      # --kernel-version／SCA_KERNEL_VERSIONS（原樣交給 scan-flash-package.sh）
     plan["kernel_upstream_versions"] = kups   # --kernel-upstream-version（原樣交給 scan-flash-package.sh）
     plan["kernel_in_other_report"] = kother   # --kernel-in-other-report（分層：核心在哪份報告判定；原樣交給 scan-flash-package.sh）
@@ -1339,7 +1509,12 @@ def main():
             args += ["--project", str(OUT / "cra-project")]
         if role in ("both", "supplier"):
             args += ["--supplier-project", str(OUT / "supplier/cra-project")]
-        if (OUT / "inputs-check.json").exists() and "--inputs-check" in pkg.read_text(encoding="utf-8"):
+        pkg_src = pkg.read_text(encoding="utf-8")
+        csaf_args, csaf_step = csaf_previous_plan(prev_report, prev_note, prev_status, role, "--csaf-previous" in pkg_src)
+        args += csaf_args
+        if csaf_step:
+            add_info_step(OUT, csaf_step)
+        if (OUT / "inputs-check.json").exists() and "--inputs-check" in pkg_src:
             args += ["--inputs-check", str(OUT / "inputs-check.json")]
         rc = run(args, OUT / "report_package.log", env=env)
         say(f"  整理 exit={rc}")

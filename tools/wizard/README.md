@@ -41,6 +41,19 @@ python3 -I tools/wizard/cra-scan.py --site-config /path/to/wizard.json
 # 非互動：--archive A --source S [--name N --version V --config C --role both|manufacturer|supplier --yes --plan-only]
 ```
 
+`--previous-report <較早一版的精靈輸出資料夾或它的 cra-project/CRA/Reports>`（選用）：和較早一版比較，產生 **CSAF 修補公告草稿**（Annex I Part II(4)；`報告/交給PM/CSAF/`，只是草稿、不進客戶資料包，說明見 `docs/CSAF.md`）。
+沒給時：**互動模式**列出輸出根目錄裡同一個產品名稱的較早輸出（最新的五個）讓你選，預設最新的一個，輸入 `n` 不比較；**`--yes` 不會自己挑**（不默默猜）。
+沒有前一版（第一版、`--yes` 沒給、選不比較）→ 在 `inputs-check.json` 記 `csaf-fix-advisory` 步驟 `not_run`（僅供參考，不算 GAP），報告訊息寫 `NOT_RUN`；選定的前一版記在 `plan.json` 的 `csaf_previous`。
+只對製造商專案做；給了不存在或沒有 `vex.cdx.json` 的路徑 → 直接報錯。
+
+**環境變數 `DUMPLING_PREVIOUS_REPORTS`（pipeline 用，dumpling 新增）**：指到一個資料夾，裡面有 `previous-release.json`（狀態與每一層的說明）和 `<--name>/vex.cdx.json`（`summary.json` 有的話一起）；由 `pipeline/lib/previous_release.py` 在正式 Release 時組好（見 `docs/CSAF.md`「pipeline 接線」）。各平台的 `scan.sh` 不用改：環境變數會一路繼承，完整、`-bsp`、`-os` 三次呼叫的 `--name` 不同，各自拿到對應層的資料夾。優先順序：`--previous-report` ＞ 這個環境變數 ＞ 互動選擇。狀態：
+
+| 狀態 | 條件 | 記在哪 |
+|---|---|---|
+| `ok` | manifest 說這一層是 OK，資料夾裡有 `vex.cdx.json` | 給 `report_package.py --csaf-previous`；`plan.json` 的 `csaf_previous`、`csaf_previous_status` |
+| `not_run` | 第一個正式 Release、不是正式 Release、前一版沒有這一層 | `inputs-check.json` 的 informational 步驟（不算 GAP） |
+| `gap` | 有前一版但資料缺或讀不到：manifest 讀不到或格式不對、資料夾不見或是符號連結、這一層組裝失敗、找前一版時 API 失敗 | `inputs-check.json` 的一般步驟 `gap`，報告 `交給PM/未產生的項目.md` 列出原因 |
+
 `--plan-only` 只解開、找輸入、寫 `plan.json`，不掃描。測試：`python3 -m pytest -q tools/demo/tests/test_wizard_plan.py`。
 
 核心建置紀錄請用 `tools/demo/pack-build-record.sh` 打包（見 `tools/demo/flash-package.md`）。

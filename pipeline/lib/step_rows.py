@@ -1,10 +1,11 @@
 """workflow 步驟的結果紀錄：$DUMPLING_OUT/pipeline-steps.tsv（沒有標題列）。每一步一列，TAB 分隔：
     pipeline-<步驟>   OK｜ATTENTION｜GAP｜NOT_RUN｜FAIL   <結束碼>   <最後一行輸出或說明>   [recorded]
-第 5 欄 recorded 只有 run-step.sh --record（workflow 自己記、不執行步驟的那一列）會寫；一般執行的列沒有第 5 欄（說明裡的 TAB 會被清掉，寫不出來）。
+第 5 欄 recorded 只有 run-step.sh --record（workflow 自己記、不執行步驟的那一列）與 previous_release.py 的 NOT_RUN 列會寫；一般執行的列沒有第 5 欄（說明裡的 TAB 會被清掉，寫不出來）。
 由 pipeline/run-step.sh 寫；platform_scan.collect（summary、notes、scan.json）、release-meta.py（steps／result）、scan-status-check.py 讀。
 ATTENTION：這一步完成了，但用了舊資料頂替（例如弱點資料鏡像上游連不上、沿用 48 小時內的上一份；pipeline/lib/mirrors.sh 寫）。
 整體狀態（overall）：有 FAIL → FAIL；沒有 FAIL 但有 GAP 或「沒能執行」的 NOT_RUN → GAP；沒有 GAP 但有 ATTENTION → ATTENTION（不是 OK，但比 GAP 輕；不擋 Release）；其他 → OK。
 NOT_RUN 分兩類：有 recorded 標記（run-step.sh --record 寫的）且說明以「不適用」開頭＝這一步本來就不該做（例如 build.mode: none 的 build），不降低整體狀態；
+說明以「僅供參考」開頭的 recorded NOT_RUN 也不降低整體狀態（只是資訊：例如第一個正式 Release 沒有前一版可比較，不是缺資料；只有 recorded 的列算，一般步驟輸出的文字不算）。
 其他 NOT_RUN＝該做卻沒做（平台沒有實作這一步、build 在非 aarch64 主機上等，run-step.sh 收到結束碼 4 時的最後一行；腳本自己印「不適用…」也算這一類），
 整體降成 GAP（D-043：沒做的不能當成沒問題）。只看文字會被步驟輸出繞過，所以要 recorded 這個結構標記。兩類都照實列出。
 用法（python3 -I）：step_rows.py append <tsv> <步驟> <狀態> <結束碼> <說明>｜step_rows.py record <tsv> <步驟> <狀態> <結束碼> <說明>（同 append，加 recorded；只給 run-step.sh --record 用）｜step_rows.py status <tsv>（印 OK｜GAP｜FAIL；檔案不存在印 GAP）
@@ -14,6 +15,7 @@ import sys
 
 STATUSES = ("OK", "ATTENTION", "GAP", "NOT_RUN", "FAIL")
 NOT_APPLICABLE = "不適用"        # recorded 的 NOT_RUN 說明以這個開頭＝這一步本來就不該做（不降低整體狀態）
+INFORMATIONAL = "僅供參考"       # recorded 的 NOT_RUN 說明以這個開頭＝只是資訊，不是該做卻沒做（例如第一個正式 Release 沒有前一版可比較；pipeline/lib/previous_release.py 寫）
 RECORDED = "recorded"            # 第 5 欄：run-step.sh --record 寫的列
 MAX_DETAIL = 800
 
@@ -54,7 +56,7 @@ def read_rows(path):
 
 def not_applicable(row):
     """run-step.sh --record 寫的（recorded）NOT_RUN，且說明以「不適用」開頭：這一步本來就不該做。一般執行的列不看文字，一律不算。"""
-    return row["status"] == "NOT_RUN" and row.get("recorded") is True and row["detail"].startswith(NOT_APPLICABLE)
+    return row["status"] == "NOT_RUN" and row.get("recorded") is True and row["detail"].startswith((NOT_APPLICABLE, INFORMATIONAL))
 
 
 def overall(rows):

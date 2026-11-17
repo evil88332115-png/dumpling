@@ -211,6 +211,28 @@ jobs:
           key: kernel-cve-mirror-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: kernel-cve-mirror-
 
+      - name: 前一個正式 Release 的報告（只有正式 Release 的 tag push 才會找；給 CSAF 修補公告草稿比較用）
+        env:
+          # 只有正式 Release 的 tag push 才給 token（唯讀）；dev、排程、手動觸發沒有 token，腳本也不會呼叫 API。token 只在這一步，不放進 scan 步驟的環境
+          GITHUB_TOKEN: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && github.token || '' }}
+        run: |
+          # 腳本把前一個正式 Release 的報告（依層）放在 $DUMPLING_OUT/previous-release/，狀態寫成 pipeline-previous-release 一列：
+          # OK（找到並組好）、NOT_RUN（沒有前一個正式 Release、或這次不是正式 Release；僅供參考，不降低整體狀態）、GAP（找到了但下載或組裝失敗）。
+          # 資料夾用環境變數 DUMPLING_PREVIOUS_REPORTS 交給精靈（platform.sh → scan.sh → 精靈會繼承；不用改各平台的 scan.sh）
+          o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
+          mkdir -p "$o"
+          rc=0
+          python3 -I pipeline/lib/previous_release.py prepare --project "$DUMPLING_IN_PROJECT" --version "$DUMPLING_IN_VERSION" \
+            --out "$o/previous-release" --steps "$o/pipeline-steps.tsv" || rc=$?
+          case $rc in
+            0|4) ;;
+            3) echo "::warning::前一個正式 Release 的報告沒有組好（GAP）：不產生 CSAF 修補公告草稿，報告會照實記 GAP";;
+            *) echo "::error::previous_release.py 結束碼 $rc（用法或資料夾錯誤）"; exit 1;;
+          esac
+          if [ -f "$o/previous-release/previous-release.json" ]; then
+            echo "DUMPLING_PREVIOUS_REPORTS=$o/previous-release" >> "$GITHUB_ENV"
+          fi
+
       - name: scan（臨時 DT → 精靈 → 分層 → 報告 → 標準答案比對）
         env:
           MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
@@ -244,7 +266,7 @@ jobs:
           o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
           mkdir -p "$RUNNER_TEMP/result"
           [ -d "$o/release" ] && cp -r "$o/release/." "$RUNNER_TEMP/result/" || true
-          for f in handoff/build.json assemble.json scan.json expected-check.txt pipeline-steps.tsv; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
+          for f in handoff/build.json assemble.json scan.json expected-check.txt pipeline-steps.tsv previous-release/previous-release.json; do [ -f "$o/$f" ] && cp "$o/$f" "$RUNNER_TEMP/result/" || true; done
           [ -f "$o/summary.md" ] && cat "$o/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
           # 診斷用（只在 artifact，不進 Release）：精靈輸出裡的小檔（狀態、紀錄、比對結果、報告），不含解開的原始碼與建置紀錄
           if [ -d "$o/wizard-out" ]; then
