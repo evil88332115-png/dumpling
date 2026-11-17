@@ -39,7 +39,7 @@
 #         [--kernel-version <核心版本>]（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準。映像有不只一顆核心
 #           （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 sca-scan --kernel-version（只接受英數字開頭、
 #           英數字與「. _ + ~ -」，否則 exit 64）。出貨但沒指定的核心記為「出貨但沒有判定」，C-kernel-config 與 C-kernel-module-map 至少 GAP；
-#           指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan）
+#           指定 2 顆以上時逐顆判定（M7d-1），沒指定而映像有多顆時全部逐顆判定；每顆的結果在 scan/kernels/<版本>/。見 tools/pilot/sca-scan）
 #         [--kernel-upstream-version <核心版本>=<X.Y.Z>]（可重複；平台設定給的上游版本，原樣交給 sca-scan --kernel-upstream-version，
 #           和核心原始碼 Makefile 核對，不一致不採用；格式不對 exit 64）
 #         [--kernel-in-other-report <報告名稱>]（環境變數 SCA_KERNEL_IN_OTHER_REPORT；分層的重跑（--rescan-from，SBOM 換成某一層的）用：

@@ -1,0 +1,457 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.6",
+ "serialNumber": "urn:uuid:<UUID>",
+ "version": 1,
+ "metadata": {
+  "timestamp": "<TIME>",
+  "component": {
+   "type": "firmware",
+   "bom-ref": "product",
+   "name": "Example EX-J100 Edge AI Controller",
+   "version": "HW rev. B, software image 2.3.0"
+  },
+  "tools": {
+   "components": [
+    {
+     "type": "application",
+     "group": "sca-center",
+     "name": "vex_export.py"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "sca-center:product-sbom-serial",
+    "value": "urn:uuid:<UUID>"
+   },
+   {
+    "name": "sca-center:product-sbom-version",
+    "value": "1"
+   },
+   {
+    "name": "sca-center:scanned-artifact",
+    "value": "jetson-r39.2.1-base sha256:abc"
+   },
+   {
+    "name": "sca-center:release-gate",
+    "value": "ATTENTION"
+   },
+   {
+    "name": "sca-center:timestamp-source",
+    "value": "generated (no scan or SBOM time)"
+   }
+  ]
+ },
+ "components": [
+  {
+   "type": "library",
+   "bom-ref": "vex-component-590fb4726f6b5e67",
+   "name": "linux-libc-dev",
+   "version": "6.8.0-45.45",
+   "purl": "pkg:deb/ubuntu/linux-libc-dev@6.8.0-45.45?arch=arm64&distro=ubuntu-24.04",
+   "properties": [
+    {
+     "name": "sca-center:note",
+     "value": "not in the product SBOM (for example a source package used only for matching); listed here so that the statement is scoped to it"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "bom-ref": "vex-component-5ad84ccd3e540635",
+   "name": "linux-nvidia-tegra",
+   "version": "6.8.0-1021.21",
+   "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+   "properties": [
+    {
+     "name": "sca-center:note",
+     "value": "not in the product SBOM (for example a source package used only for matching); listed here so that the statement is scoped to it"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "bom-ref": "vex-component-9eaf08d9b7d1a838",
+   "name": "openssl",
+   "version": "3.0.13-0ubuntu3.11",
+   "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04",
+   "properties": [
+    {
+     "name": "sca-center:note",
+     "value": "not in the product SBOM (for example a source package used only for matching); listed here so that the statement is scoped to it"
+    }
+   ]
+  }
+ ],
+ "vulnerabilities": [
+  {
+   "bom-ref": "vex-CVE-2024-1086-9c5b62ab7e87",
+   "id": "CVE-2024-1086",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-1086"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2024-1086"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0003-25ef18ae666c",
+   "id": "CVE-2025-0003",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0003"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-9eaf08d9b7d1a838"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "openssl 3.0.13-0ubuntu3.11"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "NVD:CVE-2025-0003"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0101-567a47436df4",
+   "id": "CVE-2025-0101",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0101"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0101"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0102-e0e03ea0f49a",
+   "id": "CVE-2025-0102",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0102"
+   },
+   "analysis": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "Kernel configuration check (kernel 6.8.12-1021-tegra, configuration /boot/config, SHA-256 abababababab): CONFIG_X is not set"
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:vex-source",
+     "value": "kconfig"
+    },
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0102"
+    },
+    {
+     "name": "dumpling:evidence",
+     "value": "build-record"
+    },
+    {
+     "name": "dumpling:evidence-location",
+     "value": "scan/kernel-config.json (kernel 6.8.12-1021-tegra, config SHA-256 abababababababababababababababababababababababababababababababab)"
+    },
+    {
+     "name": "dumpling:evidence-kernel",
+     "value": "6.8.12-1021-tegra"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0103-29259bc29323",
+   "id": "CVE-2025-0103",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0103"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0103"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0104-d4686d4090b0",
+   "id": "CVE-2025-0104",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0104"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0104"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0105-53296682dd26",
+   "id": "CVE-2025-0105",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0105"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0105"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0106-0f403b80d4e1",
+   "id": "CVE-2025-0106",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0106"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0106"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0107-bf818bf868d7",
+   "id": "CVE-2025-0107",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0107"
+   },
+   "analysis": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "driver not built"
+   },
+   "affects": [
+    {
+     "ref": "vex-component-5ad84ccd3e540635"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:vex-source",
+     "value": "dt"
+    },
+    {
+     "name": "sca-center:component",
+     "value": "linux-nvidia-tegra 6.8.0-1021.21"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "OSV:UBUNTU-CVE-2025-0107"
+    },
+    {
+     "name": "dumpling:evidence",
+     "value": "none"
+    }
+   ]
+  },
+  {
+   "bom-ref": "vex-CVE-2025-0200-dfdaa0819f8c",
+   "id": "CVE-2025-0200",
+   "source": {
+    "name": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0200"
+   },
+   "analysis": {
+    "state": "in_triage",
+    "detail": "Not assessed: no VEX assessment has been recorded for this vulnerability on this component. The state in_triage is used only because CycloneDX has no 'not assessed' state; it does not mean that anyone is investigating it."
+   },
+   "affects": [
+    {
+     "ref": "vex-component-590fb4726f6b5e67"
+    }
+   ],
+   "properties": [
+    {
+     "name": "sca-center:component",
+     "value": "linux-libc-dev 6.8.0-45.45"
+    },
+    {
+     "name": "sca-center:component-purl",
+     "value": "pkg:deb/ubuntu/linux-libc-dev@6.8.0-45.45?arch=arm64&distro=ubuntu-24.04"
+    },
+    {
+     "name": "sca-center:source-ids",
+     "value": "NVD:CVE-2025-0200"
+    },
+    {
+     "name": "dumpling:assessment",
+     "value": "NOT_ASSESSED"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+{
+ "schema": "sca-center-kernel-versions/2",
+ "shipped": [],
+ "requested": [
+  "6.1.118"
+ ],
+ "judged": [
+  "6.1.118"
+ ],
+ "not_judged": [],
+ "note": "judged 是交給判定工具的核心，不是判定的結果（結果看 scan/kernel-config.json 與 status.tsv 的 C-kernel-config）；not_judged 是出貨（或被指定）但沒有判定的核心，不可以當作它們不受影響。要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」），沒有證據不能當作它不受影響"
+}

@@ -43,6 +43,9 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
 作業系統核心（Jetson 的對應 Canonical 核心約 6000 列）：風險評估的主清單（8.4–8.6、附錄 A）不列核心的列，改在 8.7 節摘要
   （修補狀態、層級、修補全部所需的最低核心版本、只列 P1 與 accepted 的表格），完整清單寫 kernel-vulnerabilities.md。
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
+  C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另依 scan/kernel-coverage.json 的結構化欄位寫固定的英文句子（中文的狀態說明原文只留在 scan-status.tsv）；kernel-config.json 的 kernel.stable_git.kept_not_proven_absent（files > 0）另寫固定英文句；scan/kernel-config.json 讀得到
+  核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」（M 是清單裡有、而且成列的 CVE 數；核心列另有 K 個 CVE 不在清單時，再接「A further K CVEs of the kernel rows are not in the list.」，K 是 0 不寫；N 不大於 M 但 K > 0 時寫「Kernel CVE list: N CVEs (source: …); all of them are listed as rows. A further K …」）。
+  資料狀態與 VEX 不受影響（C-kernel-coverage 本來就在 COND_STAGES）。客戶版（supplier-package）沒有核心段落，不加任何核心狀態文字。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
 
 判定（專案驗收原則：缺資料不可顯示為安全）：
@@ -1668,6 +1671,24 @@ def confmod():
     return _CONF
 
 
+_KMERGE = None
+
+
+def kmergemod():
+    """tools/cra/kernel_merge.py（多顆核心逐顆判定的合併規則與核心列去重；同 vexmod 依路徑載入）。"""
+    global _KMERGE
+    if _KMERGE is None:
+        p = HERE / "kernel_merge.py"
+        try:
+            spec = importlib.util.spec_from_file_location("sca_center_kernel_merge", p)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+        except Exception as e:
+            raise Fail(f"無法載入 {p}（多顆核心的合併規則；{type(e).__name__}）")
+        _KMERGE = m
+    return _KMERGE
+
+
 _NVD = None
 
 
@@ -2119,6 +2140,89 @@ def grype_only_rows(grype, rows, pol, gidx, have_grype, srcmap=None, kmap=None, 
         r.update(found_by=GRYPE_ONLY, sources=["grype"], grype_namespaces=sorted(ns), grype_matches=r["n_findings"], n_findings=0)
         out.append(r)
     return out, unlisted, unknown
+
+
+def dedupe_kernel_rows(rows, kinfo, pol, pkgdb, kshipped, kjudged, multi):
+    """核心列去重（M7d-1，D-061 (2)）：同一個 CVE 在好幾個核心套件上各一列 → 每個 CVE 一列，帶 kernel_packages（名稱、版本、purl、對到哪顆核心）。
+    合併欄位的規則在 kernel_merge.merge_rows（嚴重度取最高、fix_state 有一個不是 fixed 就不是 fixed…），合併後依政策重算 tier。
+    對到哪顆核心：映像的 dpkg 檔案清單（pkgdb/dpkg-file-owners：套件擁有 /usr/lib/modules/<版本>/…）；沒有檔案清單或套件沒有核心檔案（meta 套件、
+    linux-base 等）→ 算整個產品。multi（判定了 2 顆以上）時只有一個套件的核心列也帶 kernel_packages（K1／K2 的讀取端靠它判斷這一列對不對得到核心）。
+    沒有重複、也不是 multi → 原樣回傳（Jetson：1 個核心元件，輸出逐位元組不變）。回傳 (列, 摘要或 None)。"""
+    km = kmergemod()
+    groups = {}
+    for r in rows:
+        if is_kernel_row(r, kinfo):
+            groups.setdefault(r["id"], []).append(r)
+    dups = {k for k, g in groups.items() if len(g) >= 2}
+    if not dups and not (multi and groups):
+        return rows, None
+    ship = list(kshipped) if kshipped is not None else (list(kjudged) if kjudged else None)       # 出貨的核心不明又沒有判定：不核對套件對到的核心
+    owners, why = km.read_kernel_owners(pkgdb)
+    cache = {}
+
+    def scope(r):
+        n = r.get("name") or r.get("component")
+        if n not in cache:
+            cache[n] = km.package_scope(n, owners, ship)
+        return cache[n]
+    out, merged_rows, members = [], 0, 0
+    first = {k: g[0] for k, g in groups.items()}
+    krow = {id(x) for g in groups.values() for x in g}
+    for r in rows:
+        g = groups.get(r["id"]) if id(r) in krow else None
+        if g is None:
+            out.append(r)
+        elif len(g) == 1:
+            out.append(km.annotate_single(r, scope(r)) if multi else r)
+        elif r is first[r["id"]]:
+            m = km.merge_rows(g, {id(x): scope(x) for x in g}, SEV_RANK)
+            m["tier"] = tier_of(m, pol)
+            out.append(m)
+            merged_rows += 1
+            members += len(g)
+    if merged_rows:
+        out.sort(key=row_order)
+    return out, {"merged_rows": merged_rows, "packages_merged": members, "rows_before": len(rows), "rows_after": len(out),
+                 "kernel_rows": sum(1 for r in out if r.get("kernel_packages")), "owners": None if owners is None else len(owners), "owners_problem": why,
+                 "shipped": ship, "packages_unmatched": sorted({p["name"] for r in out for p in r.get("kernel_packages") or [] if p["scope"] == km.SCOPE_UNMATCHED})}
+
+
+def load_kernel_docs(scan, kvers_doc, vx):
+    """逐顆判定（kernel-versions.json 的 judged 有 2 顆以上，M7d-1）：每顆的 scan/kernels/<版本>/kernel-config.json 與 kernel-module-map.json。
+    版本字串先過檢查（只收合法的，不信任檔案裡記的路徑）。回傳 (judged 的版本清單, {版本: config 文件或 None}, {版本: 模組對應或 None}, {相對路徑: 檔案})；
+    不是逐顆判定（少於 2 顆）→ ([], {}, {}, {})。"""
+    km = kmergemod()
+    judged = [v for v in vx.kvers_judged(kvers_doc) if km.valid_version(v)]
+    if len(judged) < 2:
+        return [], {}, {}, {}
+    cfg, mm, files = {}, {}, {}
+    for v in judged:
+        for name, dst in (("kernel-config.json", cfg), ("kernel-module-map.json", mm)):
+            rel = f"scan/kernels/{v}/{name}"
+            f = find(scan, rel)
+            files[rel] = f
+            d = load_json(f)
+            # 檔案記的核心版本要是它所在資料夾的那一顆（複製來的別顆檔案不採用）
+            if not (isinstance(d, dict) and isinstance(d.get("kernel"), dict) and d["kernel"].get("version") == v):
+                d = None if name == "kernel-module-map.json" else d       # config 的核對在 vex_export.kernel_multi_doc（usable＝False，結果照樣列出）
+            dst[v] = d
+    return judged, cfg, mm, files
+
+
+def kernel_results_of(rows, kcfg, kvers_doc, vx):
+    """逐顆判定：每個核心列加 kernel_results（{核心版本: affected|not_affected|unknown|no_result|not_judged}，K1 的各顆結果；這一列有好幾個 CVE 時
+    任一個 affected → affected、全部 not_affected → not_affected）。出貨但沒判定的核心記 not_judged。"""
+    km = kmergemod()
+    by = {str(x["cve"]).upper(): x.get("per_kernel") or {} for x in kcfg.get("results") or [] if isinstance(x, dict) and isinstance(x.get("cve"), str)}
+    judged = [x["version"] for x in (kcfg.get("kernel") or {}).get("kernels") or []]
+    nj = sorted({v for v in ((vx.kernel_scope_of(kvers_doc) or {}).get("not_judged") or [])})
+    for r in rows:
+        if not r.get("kernel"):
+            continue
+        cves = [c.upper() for c in r.get("cves") or []] or [str(r["id"]).upper()]
+        states = km.row_states([by.get(c) or {v: km.NO_RESULT for v in judged} for c in cves])
+        states.update({v: km.NOT_JUDGED for v in nj})
+        r["kernel_results"] = dict(sorted(states.items()))
 
 
 KERNEL_CNA = "kernel cna"
@@ -3471,6 +3575,9 @@ def vulnerability_rows(vrows, cidx, upri_of, services, svc_info, kernel_net, gse
             "aliases": sorted(set(r.get("all_ids") or []) - {r["id"]}),
             "component": r.get("component"), "version": r.get("version"), "purl": r.get("purl") or None,
             "is_kernel": bool(r.get("kernel")),
+            # 核心列去重（M7d-1）：一個 CVE 一列，列出所有核心套件與每顆核心的結果；只有一個核心套件、一顆核心時沒有這兩個欄位（輸出不變）
+            **({"kernel_packages": r["kernel_packages"]} if r.get("kernel_packages") else {}),
+            **({"kernel_results": r["kernel_results"]} if r.get("kernel_results") else {}),
             **({"layer": r["layer"], "layer_todo": r.get("layer_todo", True), "layer_basis": r.get("layer_basis")} if r.get("layer") else {}),
             **({"uefi_build_check": r["uefi_build_check"]} if r.get("uefi_build_check") else {}),
             **({"uefi_image_check": r["uefi_image_check"]} if r.get("uefi_image_check") else {}),
@@ -3533,6 +3640,9 @@ def vuln_table(rows, kernel=False):
     layered = bool(rows) and all("layer" in r for r in rows)       # 分層（SBOM 有 dumpling:layer）時多一欄 Layer，放在 Type 後面
     if layered:
         head.insert(head.index("Type") + 1, "Layer")
+    perk = bool(rows) and any(r.get("kernel_results") for r in rows)       # 逐顆判定：多一欄各顆核心的結果（K1，核心設定檢查）
+    if perk:
+        head = head + ["Per-kernel result (K1)"]
     head = head + ["VEX status"]
     out = []
     for i, r in enumerate(rows, 1):
@@ -3544,6 +3654,8 @@ def vuln_table(rows, kernel=False):
                                                        + (" (suppressed)" if all(a["suppressed"] for a in r["analysis"]) else "")]
         if layered:
             x.insert(head.index("Layer"), LAYER_ZH.get(r["layer"], r["layer"]))
+        if perk:
+            x = x + [kernel_results_text(r) or "—"]
         out.append(x + [vexmod().label(r)])
     return table(head, out)
 
@@ -3575,7 +3687,25 @@ def type_text(r):
     return f"{r['ptype']} (deb-packaged)" if r.get("deb_python") else r["ptype"]
 
 
+def kernel_package_text(r):
+    """去重後的核心列（kernel_packages 有 2 個以上套件）的元件欄：主列的元件，加上其他套件的名稱與版本。"""
+    kp = r.get("kernel_packages") or []
+    others = [f"{p['name']} {p['version']}".strip() for p in kp[1:]]
+    return f" (+{len(others)} more kernel package{'s' if len(others) != 1 else ''}: " + "; ".join(others[:4]) + ("; …" if len(others) > 4 else "") + ")"
+
+
+KERNEL_RESULT_TEXT = {"not_affected": "not built in the kernel", "affected": "affected", "unknown": "undetermined",
+                      "no_result": "no result", "not_judged": "not judged"}
+
+
+def kernel_results_text(r):
+    """逐顆判定的結果（kernel_results）→ 一句話：「<核心版本>: not built in the kernel; <核心版本>: affected」。"""
+    return "; ".join(f"{v}: {KERNEL_RESULT_TEXT.get(s, s)}" for v, s in sorted((r.get("kernel_results") or {}).items()))
+
+
 def component_text(r):
+    if len(r.get("kernel_packages") or []) > 1:
+        return component_text(dict(r, kernel_packages=None)) + kernel_package_text(r)
     if r.get("found_by") == KERNEL_CNA:      # 廠商核心：CVE 清單是 Linux 核心 CNA 的版本比對（不是 Grype／DT）
         kc = r.get("kernel_cna") or {}
         if kc.get("version_verdict") == "explicit":
@@ -3777,6 +3907,124 @@ def kernel_fix_all(krows):
     return sorted(groups.values(), key=lambda g: (g["mapped_from"] is None, g["component"]))
 
 
+COVERAGE_STAGE = "C-kernel-coverage"
+
+
+def kernel_cve_list_info(kcfg):
+    """scan/kernel-config.json（schema 對、有 results 清單）→ ({CVE（大寫）}, 來源說明) 或 None（讀不到就不猜）。
+    清單來源取結構化欄位 inputs.cves_origin（sca-scan 寫的，中文）：KERNEL_CVES 開頭＝明確給的清單（與 Grype／DT 的核心 CVE 合併）、
+    kernel-cna-version 開頭＝依核心版本從 CNA 產生的清單；沒有這個欄位＝Grype、DT 對核心的比對；其他不認得的值只寫檔名。"""
+    if not (isinstance(kcfg, dict) and kcfg.get("schema") == "sca-center-kernel-config/1" and isinstance(kcfg.get("results"), list)):
+        return None
+    cves = {x["cve"].upper() for x in kcfg["results"] if isinstance(x, dict) and isinstance(x.get("cve"), str) and x["cve"]}
+    if not cves:
+        return None
+    docs = merged_kernel_docs(kcfg)
+    if docs is not None:      # 逐顆判定的合併文件（M7d-1）：清單來源記在每顆核心自己的 kernel-config.json（scan/kernels/<版本>/）
+        # 這段文字會進報告內文（8.7 節）：只寫來源名稱與核心數，不寫內部檔案路徑（C0）
+        srcs = {v: cve_origin_text(d) for v, d in docs.items()}
+        if len(set(srcs.values())) == 1:
+            return cves, f"{next(iter(srcs.values()))}; {plural(len(srcs), 'kernel')}"
+        return cves, "per kernel: " + "; ".join(f"{v}: {t}" for v, t in sorted(srcs.items())) + f"; {plural(len(srcs), 'kernel')}"
+    return cves, f"{cve_origin_text(kcfg)}; `scan/kernel-config.json`"
+
+
+def cve_origin_text(kcfg):
+    """一份（單顆核心的）kernel-config.json 的 inputs.cves_origin → 清單來源的固定英文說明（不貼原文）。"""
+    origin = (kcfg.get("inputs") or {}).get("cves_origin") if isinstance(kcfg, dict) and isinstance(kcfg.get("inputs"), dict) else None
+    if origin is None:
+        return "Grype and Dependency-Track kernel findings"
+    if isinstance(origin, str) and origin.startswith("KERNEL_CVES"):
+        return "KERNEL_CVES explicit list, merged with the Grype and Dependency-Track kernel findings"
+    if isinstance(origin, str) and origin.startswith("kernel-cna-version"):
+        return "kernel CNA version comparison"
+    return "not recognised"
+
+
+def merged_kernel_docs(kcfg):
+    """逐顆判定的合併文件（vex_export.kernel_multi_doc 在記憶體裡建的 MergedDoc；以型別判斷，檔案裡的欄位不算）→ {版本: 該顆的文件}；
+    其他 → None。讀不到的那顆（None）不列。"""
+    if not vexmod().is_merged(kcfg) or not isinstance(kcfg.get("docs"), dict):
+        return None
+    return {v: d for v, d in kcfg["docs"].items() if isinstance(v, str) and isinstance(d, dict)}
+
+
+OFF_SERIES_RULE_TEXT = {"a": "version epoch", "b": "vendor version or package-name suffix", "c": "declared not-distro by the platform owner",
+                        "d": "upstream source package"}
+KERNEL_COVERAGE_SCHEMA = "sca-pilot-kernel-coverage/1"
+
+
+def kernel_coverage_sentences(kcov):
+    """scan/kernel-coverage.json 的結構化欄位 → 固定的英文句子清單（不讀、不貼中文說明；讀不到的欄位不猜）：
+    distro_data_unused（只有上游版本範圍的比對）、off_series（不在發行版核心序列上；規則代號取 off_series[].rules）。"""
+    if not (isinstance(kcov, dict) and kcov.get("schema") == KERNEL_COVERAGE_SCHEMA):
+        return []
+    out = []
+    du = kcov.get("distro_data_unused")
+    pk = du.get("distro_kernel_packages") if isinstance(du, dict) else None
+    names = [x["name"] for x in pk if isinstance(x, dict) and isinstance(x.get("name"), str) and x["name"]] if isinstance(pk, list) else []
+    if names:
+        extra = f" (and {len(names) - 1} more)" if len(names) > 1 else ""
+        out.append(f"Kernel matching used only upstream version ranges (NVD): the distribution kernel package `{names[0]}`{extra} was not matched "
+                   "against the distribution's security data, so the distribution's fixes (including backports) are not taken into account; "
+                   "the list may contain false positives and may miss vulnerabilities.")
+    off = kcov.get("off_series")
+    if isinstance(off, list) and off:
+        rules = sorted({r for x in off if isinstance(x, dict) and isinstance(x.get("rules"), list) for r in x["rules"] if r in OFF_SERIES_RULE_TEXT})
+        why = f" ({'; '.join(OFF_SERIES_RULE_TEXT[r] for r in rules)})" if rules else ""
+        out.append(f"The kernel is not on the distribution's kernel series{why}: matching against distribution data is not reliable and may "
+                   "miss vulnerabilities.")
+    return out
+
+
+KEPT_NOT_PROVEN_ABSENT = ("Kernel configuration check: {n} file(s) changed by the fix commits of {m} CVE(s) are not in the image's partial kernel "
+                          "headers tree; they were kept and judged as unknown, not as not built.")
+
+
+def kernel_kept_text(kcfg):
+    """scan/kernel-config.json 的 kernel.stable_git.kept_not_proven_absent = {"files": n, "cves": m}（只在有 --stable-git 時有）：
+    files > 0 才回傳固定英文句；欄位不存在、型別不對或 files 是 0 回傳空字串（輸出不變）。
+    逐顆判定的合併文件（M7d-1）：合併文件沒有 stable_git，改讀每顆核心自己的文件，每顆一句、前面標 [版本]。"""
+    docs = merged_kernel_docs(kcfg)
+    if docs is not None:
+        return " ".join(f"[{v}] {t}" for v, t in ((v, kernel_kept_text(d)) for v, d in sorted(docs.items())) if t)
+    k = kcfg.get("kernel") if isinstance(kcfg, dict) else None
+    sg = k.get("stable_git") if isinstance(k, dict) else None
+    v = sg.get("kept_not_proven_absent") if isinstance(sg, dict) else None
+    if not isinstance(v, dict):
+        return ""
+    n, m = v.get("files"), v.get("cves")
+    if not (isinstance(n, int) and not isinstance(n, bool) and n > 0 and isinstance(m, int) and not isinstance(m, bool) and m >= 0):
+        return ""
+    return KEPT_NOT_PROVEN_ABSENT.format(n=n, m=m)
+
+
+def kernel_gap_text(status, krows, kcfg, kcov=None):
+    """C-kernel-coverage 不是 OK 時（有這一列）8.7 節與 kernel-vulnerabilities.md 多寫的說明（D-063）：依 scan/kernel-coverage.json 的結構化欄位
+    產生的固定英文句子（kernel_coverage_sentences；欄位讀不到就只寫 `C-kernel-coverage` is GAP，不猜；中文的狀態說明原文只留在 scan-status.tsv），
+    以及核心 CVE 清單裡沒有成列的數量（N 取自 scan/kernel-config.json 的 results，讀不到或 N 不大於 M 時不寫）。OK 或沒有這一列時回傳空字串。"""
+    if not status or COVERAGE_STAGE not in status or status[COVERAGE_STAGE][0] == "OK":
+        return ""
+    st = status[COVERAGE_STAGE][0]
+    out = [" ".join([f"**Kernel coverage limitation:** `{COVERAGE_STAGE}` is {st}."] + kernel_coverage_sentences(kcov))]
+    info = kernel_cve_list_info(kcfg)
+    if info:
+        cves, src = info
+        listed = set()
+        for r in krows:
+            listed |= {c.upper() for c in r.get("cves") or []}
+            m = CVE_RE.match(str(r.get("id") or ""))
+            if m:
+                listed.add(m.group(1).upper())
+        n, m, k = len(cves), len(cves & listed), len(listed - cves)
+        further = f" A further {k} CVEs of the kernel rows are not in the list." if k else ""
+        if n > m:
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); listed as rows: {m} CVEs; the other {n - m} are not listed as rows." + further)
+        elif k:          # 清單的 CVE 都成列了，但核心列另有清單以外的 CVE：也寫出來（C0）
+            out.append(f"Kernel CVE list: {n} CVEs (source: {src}); all of them are listed as rows." + further)
+    return "\n\n".join(out)
+
+
 def kernel_stage_text(status):
     st = [f"`{k}` {status[k][0]}" for k in ("C-kernel-l4t-map", "C-kernel-coverage") if status and k in status]
     return ("sca-scan kernel stages: " + ", ".join(st) + ". OK only means that the kernel was matched against vulnerability data; "
@@ -3787,7 +4035,7 @@ NOT_ASSESSED_TAIL = ("Kernel vulnerabilities were NOT assessed: the absence of k
                      "no known vulnerabilities.")
 
 
-def kernel_absent_text(status, mode, have_findings):
+def kernel_absent_text(status, mode, have_findings, kcfg=None, kcov=None):
     """沒有核心的列時，8.7 節的一段說明與狀態代號。核心在 SBOM 裡卻沒有比對（GAP 等）一律寫 NOT assessed，不寫「沒有弱點」。
     C-kernel-l4t-map 是 FAIL 時只說對應的步驟失敗（不斷定 SBOM 有 L4T 核心）。"""
     if not have_findings:
@@ -3802,6 +4050,9 @@ def kernel_absent_text(status, mode, have_findings):
     for k, what in (("C-kernel-l4t-map", "a Jetson Linux (L4T) kernel, but no Canonical kernel mapping was applied"),
                     ("C-kernel-coverage", "an operating system kernel, but the kernel was not matched against vulnerability data")):
         if k in status and status[k][0] != "OK":
+            if k == COVERAGE_STAGE:       # D-063：固定英文句與沒有成列的核心 CVE 數（OK 時不會到這裡）
+                return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}). " + NOT_ASSESSED_TAIL
+                                        + "\n\n" + kernel_gap_text(status, [], kcfg, kcov))
             return "not_assessed", (f"**Kernel not assessed.** The SBOM contains {what} (`{k}` {status[k][0]}: {en(status[k][1])}). "
                                     + NOT_ASSESSED_TAIL)
     if any(k in status for k in ("C-kernel-l4t-map", "C-kernel-coverage")):
@@ -3814,11 +4065,40 @@ def kernel_absent_text(status, mode, have_findings):
                            "an operating system the product runs on is not covered by this scan.")
 
 
-def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None):
+BASIS_TEXT = {"auto-detected": "auto-detected (listed by the image)", "project-specified": "project-specified (--kernel-version)"}
+
+
+def kernel_judged_text(kvers_doc, kcfg):
+    """逐顆判定（kernel-versions.json 的 judged 有 2 顆以上，M7d-1）：判定了哪幾顆、各自根據什麼（自動偵測或專案指定）、各顆的結果檔與狀態、
+    各顆的 K1 結果筆數，以及合併規則。少於 2 顆 → ""（單顆時輸出不變）。"""
+    judged = [x for x in (kvers_doc or {}).get("judged") or [] if isinstance(x, dict) and isinstance(x.get("version"), str)] \
+        if isinstance(kvers_doc, dict) else []
+    if len(judged) < 2:
+        return ""
+    per = {}
+    for x in (kcfg or {}).get("results") or [] if isinstance(kcfg, dict) else []:
+        for v, st in (x.get("per_kernel") or {}).items():
+            per.setdefault(v, Counter())[st] += 1
+    rows = []
+    for x in judged:
+        c = per.get(x["version"]) or Counter()
+        rows.append([x["version"], BASIS_TEXT.get(x.get("basis"), str(x.get("basis") or "—")), x.get("config_status") or "no result",
+                     x.get("module_map_status") or "no result", f"`{x['config_file']}`" if x.get("config_file") else "—",
+                     c["not_affected"], c["affected"], c["unknown"] + c["no_result"]])
+    nj = [x["version"] for x in (kvers_doc.get("not_judged") or []) if isinstance(x, dict) and isinstance(x.get("version"), str)]
+    return ("**Kernels judged one by one.** The image ships more than one kernel; each judged kernel was checked against its own configuration "
+            "(`C-kernel-config`) and module map (`C-kernel-module-map`). A kernel CVE is excluded (not built into the kernel) only if every shipped kernel shows it "
+            "not built and every result is usable; if any kernel is affected, the product is affected; anything undetermined, missing or not judged is "
+            "not excluded.\n\n"
+            + table(["Kernel", "Basis", "Config check", "Module map", "Result file", "CVEs not built", "CVEs affected", "CVEs undetermined"], rows)
+            + (f"\n\nShipped but not judged (GAP, nothing is excluded for the product): {', '.join(nj)}." if nj else ""))
+
+
+def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, euvd=None, kjudged="", kcfg=None, kcov=None):
     """euvd：None＝沒有 EUVD（沒有檔案、也沒有 C-euvd 這一行）；True＝EUVD 能用；字串＝不能用的原因（EUVD 的行寫 not available，不寫 0）。"""
     """回傳 (8.7 節的內容（Markdown）, 狀態代號, summary.json 用的數量, kernel-vulnerabilities.md 的摘要段)。"""
     if not krows:
-        state, text = kernel_absent_text(status, mode, have_findings)
+        state, text = kernel_absent_text(status, mode, have_findings, kcfg, kcov)
         return text, state, None, None
     t = tally(krows)
     fs = Counter(r["fix_state"] for r in krows)
@@ -3843,6 +4123,20 @@ def kernel_section(krows, kinfo, status, pol, mode, have_findings, have_grype, e
     stages = kernel_stage_text(status)
     if stages:
         parts.append(stages)
+    gap = kernel_gap_text(status, krows, kcfg, kcov)
+    if gap:
+        parts.append(gap)
+    kept = kernel_kept_text(kcfg)
+    if kept:
+        parts.append(kept)
+    if kjudged:
+        parts.append(kjudged)
+    if any(r.get("kernel_packages") for r in krows):
+        n = sum(1 for r in krows if len(r.get("kernel_packages") or []) > 1)
+        pk = {(p["name"], p["version"]) for r in krows for p in r.get("kernel_packages") or []}
+        parts.append(f"Each kernel CVE is listed once (one row per CVE), with all kernel packages that carry it: {plural(len(pk), 'kernel package')} in total; "
+                     f"{plural(n, 'row')} {verb(n, 'combines', 'combine')} more than one package. Severity is the highest of the packages; the Grype fix state is "
+                     "`fixed` only if every package is fixed.")
     metrics = [["Kernel vulnerability rows (vulnerability × component version)", t["rows"]]]
     metrics += [[f"Grype fix state: {s}", fs[s]] for s in FIX_STATES if s != "unknown" or fs[s]]
     metrics += [[f"{x.upper()} – {pol['tiers'][x]['label']}", t[x]] for x in ("p1", "p2", "p3")]
@@ -4491,6 +4785,13 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         raise Fail(f"安全測試的人工決定檔有錯：{e}")
     status = read_status(paths["status.tsv"])
     flash = flash_stage_status(scan)              # 刷機包層會影響清單完整性的列（不是刷機包的掃描時是空的）
+    # 逐顆判定（M7d-1，D-036／D-061）：kernel-versions.json 的 judged 有 2 顆以上時，每顆的結果在 scan/kernels/<版本>/；檔案一併算雜湊、列進 inputs
+    kvers_doc = load_json(paths["scan/kernel-versions.json"])
+    kjudged, kdocs, kmms, kfiles = load_kernel_docs(scan, kvers_doc, vx)
+    kmulti = bool(kjudged)
+    paths.update(kfiles)
+    if status and COVERAGE_STAGE in status and status[COVERAGE_STAGE][0] != "OK":     # D-063：核心比對的限制要讀結構化證據（OK 時不讀，輸出不變）
+        paths["scan/kernel-coverage.json"] = find(scan, "scan/kernel-coverage.json")
     hashes = {k: sha256(p) for k, p in paths.items() if p}
     meta = meta if isinstance(meta, dict) else {}
     ctx = dict(report_fields(cfg))
@@ -4658,6 +4959,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
         else:
             tee_info["gaps"].append("no Dependency-Track findings (dt/findings.json): the Grype matches on the OP-TEE/TF-A/Mbed TLS components were not listed as rows")
             tee_info["status"] = "GAP"
+    # 核心列去重（M7d-1，D-061 (2)）：一個 CVE 一列（同一個 CVE 在好幾個核心套件上各一列時合併，帶 kernel_packages）；只有一個核心套件、一顆核心時原樣
+    rows, kdedupe = dedupe_kernel_rows(rows, kinfo, pol, pkgdb, vx.kvers_shipped(kvers_doc), kjudged, kmulti)
     # Debian／Ubuntu 打包的 Python 模組（/usr/lib/python3/dist-packages）：指向擁有它的 deb 套件，不給 pip 的修補建議
     dprows = apply_deb_python(rows, dpy, gidx, have_grype)
     for r in dprows:
@@ -4723,11 +5026,15 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
             warnings = list(warnings) + ["專案的風險評估範本（CRA/templates/risk-assessment.md）沒有引用 text.distro_section：發行版已修補"
                                          "（backport）的列照舊留在 P1–P3；要分開列請在 {{ text.nvidia_section }} 後面加上 {{ text.distro_section }}"]
     # VEX：每一列的判定（DT 的人工分析 ＞ vex-annotations.json ＞ 發行版已修補 ＞ 核心設定 ＞ NVIDIA 推定），表格的 VEX status 欄用
-    kcfg = load_json(paths["scan/kernel-config.json"])
+    kcfg = vx.kernel_multi_doc(kdocs, kvers_doc) if kmulti else None       # 逐顆判定：合併每顆的 kernel-config.json（vex_export.kernel_multi_doc）
+    if kcfg is None:
+        kcfg = load_json(paths["scan/kernel-config.json"])
+    kcov = load_json(paths.get("scan/kernel-coverage.json"))      # 只有 C-kernel-coverage 不是 OK 時才有路徑（見上）；其他情況是 None
     # 映像另有出貨但沒判定的核心（scan/kernel-versions.json 的 not_judged）：K1／K2 的排除只對判定過的核心成立，不套用到整個產品
     # （vex_export.with_scope 標 scope_incomplete；kconfig_usable、module_map_of、runtime_evidence 看到就不採用）。沒有檔案或 not_judged 為空 → 原樣
-    kvers_doc = load_json(paths["scan/kernel-versions.json"])
     kcfg = vx.kernel_with_scope(kcfg, kvers_doc)
+    if kmulti and vx.is_merged(kcfg):
+        kernel_results_of(rows, kcfg, kvers_doc, vx)
     if vx.kernel_scope_of(kvers_doc) is not None:
         warnings = list(warnings) + ["核心：映像出貨的核心 " + "、".join(vx.kernel_scope_of(kvers_doc)["not_judged"]) + " 沒有判定；"
                                      "核心設定比對（K1）與模組對應（K2）的排除不套用到整個產品（沒有排除任何核心的列）"]
@@ -4754,9 +5061,13 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
             rctx["exploited_sources"].setdefault(e["cve"], []).append(f"manual: {e['source']}, {e['date']}")
     # 證據規則（K1、K2、U1）的輸入：只有產物。映像雜湊取自 meta.json（registry digest、映像 ID、資料夾或 SBOM 的內容雜湊），
     # 生效日和報告日（UTC）比；Debian 版本比較用 deb_vercmp
+    kmm_ver = (kmods or {}).get("kernel_version") if isinstance(kmods, dict) and kmulti else None
+    kmm_rel = f"scan/kernels/{kmm_ver}/kernel-module-map.json" if kmm_ver in kmms else "scan/kernel-module-map.json"
+    kmm_doc = kmms.get(kmm_ver) if kmulti else load_json(paths["scan/kernel-module-map.json"])
     rctx.update(image_ids=sorted({x for x in (vx.norm_image(meta.get(k)) for k in ("digest", "image_id", "content_sha256", "version")) if x}),
                 today=now[:10], kernel_modules=kmods, kernel_modules_info=kmods_info,
-                module_map=vx.kernel_with_scope(load_json(paths["scan/kernel-module-map.json"]), kvers_doc), module_map_sha256=hashes.get("scan/kernel-module-map.json"),
+                # 逐顆判定時 K2 只用在 kernel-modules.json 寫的那一顆（D-061 (3)）：給那一顆的模組對應，其他核心只看 K1
+                module_map=vx.kernel_with_scope(kmm_doc, kvers_doc), module_map_sha256=hashes.get(kmm_rel),
                 ubuntu_status=ustatus_doc, vercmp=deb_vercmp)
     # NVIDIA 公告的 CVE 其實是發行版套件的（nvidia_distro.py）：依 Grype DB（唯讀）判斷；沒有資料庫 → 不查，維持原狀並記在 summary
     nvd_info = {"checked": False, "reason": "no NVIDIA bulletin", "remapped": {}}
@@ -5092,7 +5403,8 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
     counts = [[m, raw if i == 0 else f(ta)] + ([f(tk), f(tm)] if krows else []) for i, (m, f) in enumerate(metrics)]
     ksection, kstate, kcounts, ksummary = kernel_section(krows, kinfo, status, pol, meta.get("mode") or NR,
                                                          isinstance(findings, list), have_grype,
-                                                         None if not euvd_used else True if euvd_map is not None else euvd_reason)
+                                                         None if not euvd_used else True if euvd_map is not None else euvd_reason,
+                                                         kernel_judged_text(kvers_doc, kcfg) if kmulti else "", kcfg, kcov)
     # 版面的說明不是狀態的理由：寫在資料狀態說明的後面並標明 Note，不放進 reasons（summary.json 的 detail 也不放）
     notes = []
     if not split:
@@ -5598,6 +5910,10 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                    "sbom_components": len(comps), "sbom_packages": len(pkgs),
                    # 廠商核心（Grype、DT 都沒有核心的列）：CVE 清單來自 Linux 核心 CNA 的版本比對（kernel_cna_rows）；沒有時不出現這一欄
                    **({"kernel_cna": kcna_info} if kcna_info else {}),
+                   # 核心列去重（M7d-1，一個 CVE 一列）與逐顆判定：沒有重複、也不是逐顆判定時不出現（單顆核心的輸出不變）
+                   **({"kernel_dedupe": kdedupe} if kdedupe else {}),
+                   **({"kernel_judged": [{k: x.get(k) for k in ("version", "basis", "config_status", "module_map_status", "config_file", "module_map_file")}
+                                         for x in kvers_doc["judged"] if isinstance(x, dict)]} if kmulti else {}),
                    # 核心與其他元件分開的數量（上面的鍵是全部的列，不變）；kernel.section：8.7 節的狀態代號
                    "kernel": dict(kcounts or {"rows": 0, "findings_raw": 0, **dict.fromkeys(TIERS, 0), "kev_open": 0, "dt_unique_cves": 0, "grype_only_rows": 0,
                                               "fix_states": dict.fromkeys(FIX_STATES, 0), "fix_all": []}, section=kstate,

@@ -6,6 +6,10 @@
   輸出 <資料夾>/fw-inventory.json（解析結果與比對）、<資料夾>/fw.cdx.json（CycloneDX 1.6 的韌體元件）、
   <資料夾>/fw-inventory.md（給人看的 BIOS 元件版本與 vBIOS 摘要，內容同 JSON），stdout 一行 `FW-INVENTORY<TAB>OK|ATTENTION|GAP|FAIL<TAB>說明`。
 
+  python3 -I x86_firmware.py --rematch --meta <firmware-meta.json> --dir <附件資料夾> --now <UTC，YYYY-MM-DDTHH:MM:SSZ> --out <資料夾>
+  每天重跑公告比對（入口是 pipeline/firmware-rematch.sh；邏輯在 fw_rematch.py）：讀 Release 的 fw-inventory-<slug>.json，用 repo 當下的三張表
+  （Intel 微碼、NVIDIA vBIOS、廠商公告規則）重新比對，重新產生狀態、SBOM 與報告；不讀映像、不連網。輸出與狀態見 docs/notes/c2-firmware-rematch.md。
+
 輸入是不可信資料（官網下載的更新包、廠商或團隊提供的映像）：
 - 只讀；**不執行**任何東西（更新包裡的 .exe、.efi、.nsh 都只當資料讀），不解開到磁碟。
 - 資料夾不跟隨符號連結；ZIP 只讀一般檔案成員到記憶體，宣告大小與實際讀到的都有上限（MAX_FILE），不展開巢狀壓縮檔（記在 skipped）。
@@ -2298,7 +2302,7 @@ def intel_gfx_markdown(inv):
     e = md_esc
     L = ["", "## Intel legacy VBIOS", "", "| 橫幅 | 版本 | 建置時間 | 內嵌 VBT | 來源 |", "|---|---|---|---|---|"]
     for v in inv["intel_vbios"]:
-        vbt = f"{v['vbt']['signature']} v{v['vbt']['version']}（BDB {v['vbt']['bdb_version']}）" if v["vbt"] else ""
+        vbt = f"{e(v['vbt']['signature'])} v{e(v['vbt']['version'])}（BDB {e(v['vbt']['bdb_version'])}）" if v["vbt"] else ""
         L.append(f"| {e(v['banner'] or '')} | {e(v['version'] or '找不到')} | {e(v['build_time'] or '')} | {e(vbt)} | "
                  + "、".join(e(x) for x in v["locations"]) + " |")
     L.append("\n版本只有 Intel 公告無法機器比對的身分資訊（NOT_ASSESSED）；格式只對一份公開樣本核對過。")
@@ -2489,7 +2493,7 @@ def ami_core_markdown(b):
     if a["status"] == "read":
         L += ["", "| 核心版本 | 產品 | 公告寫法（推導） | BIOS tag | 專案版本 | 建置時間 | 紀錄數 | 位置 |", "|---|---|---|---|---|---|---|---|",
               f"| {e(a['core'])}（FID `{e(a['core_fid'])}`） | {e(a['product'] or '不確定（Core Major 不是 5）')} | {e(a['advisory_form'] or '無')} | {e('、'.join(a['tags']))} | "
-              f"{e('、'.join(a['projects']))} | {e('、'.join(a['build_dates']) or '無')} | {a['count']} | {e('、'.join(a['found']))} |", "",
+              f"{e('、'.join(a['projects']))} | {e('、'.join(a['build_dates']) or '無')} | {e(a['count'])} | {e('、'.join(a['found']))} |", "",
               "- 公告寫法是推導的（A1：FID 兩位數的次版號補成公告的三位數），AMI 與板廠都沒有明文；同一個 major 內次版號隨發行遞增（A2）也是假設。"
               "核心是 AMI 的基底版本，板廠回補的修正在映像裡看不出來；這一節不是漏洞判定。"]
         if a.get("note"):
@@ -2499,7 +2503,7 @@ def ami_core_markdown(b):
         L += [f"| {e(c['core'])} | {e(c['tag'])} | {e(c['project'])} | {e('、'.join(c['found']))} |" for c in a["candidates"]]
     elif a["status"] == "layout-unknown":
         L += ["", "| 原因 | 形式 | 開頭位元組（十六進位） | 位置 |", "|---|---|---|---|"]
-        L += [f"| {e(x['why'])} | {e(x['form'])} | `{x['head']}` | {e('、'.join(x['found']))} |" for x in a["bad"]]
+        L += [f"| {e(x['why'])} | {e(x['form'])} | `{md_hex(x['head'])}` | {e('、'.join(x['found']))} |" for x in a["bad"]]
     if a["status"] == "read":
         return L + ([f"- 不完整：{e(x)}" for x in a["incomplete"]] if not a["complete"] else [])
     if not ami_gap_applies(b):        # 沒有 AMI 的線索（例如 coreboot、OVMF）：沒有核心版本是正常的，只寫結果與說明，不當成 GAP
@@ -2516,9 +2520,9 @@ def uefi_gfx_markdown(b):
          e(uefi_gfx_summary(g)) + "。legacy VBIOS 另列在「Intel legacy VBIOS」一節。", ""]
     if g["gop"] or g["vbt"]:
         L += ["| 元件 | 版本 | SHA-256 | 位置 |", "|---|---|---|---|"]
-        L += [f"| Intel GOP driver | {e(it['version'] or '找不到')} | `{it['sha256']}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
+        L += [f"| Intel GOP driver | {e(it['version'] or '找不到')} | `{md_hex(it['sha256'])}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
               for it in g["gop"]]
-        L += [f"| {e(it['signature'])} | {it['version']} | `{it['sha256']}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
+        L += [f"| {e(it['signature'])} | {e(it['version'])} | `{md_hex(it['sha256'])}` | " + "、".join(e(uefi_gfx_where(w)) for w in it["found"]) + " |"
               for it in g["vbt"]]
     else:
         L.append("沒有找到 Intel GOP 驅動或獨立 VBT" + ("（找到的 firmware volume 都解開了，裡面沒有；FV 以外的位元組只當原始內容掃）。" if g["complete"] else "（走訪不完整，不代表不存在）。"))
@@ -2788,6 +2792,12 @@ def rules_section(inv, rules=None):
 
 
 def status_of(inv):
+    st, detail, att = status_parts(inv)
+    return st, detail + "".join("；" + x for x in att)
+
+
+def status_parts(inv):
+    """status_of 的內容：(狀態, 說明的主體, 讓狀態變成 ATTENTION 的各項)。status_of 把它們接成一個字串；重跑公告比對（fw_rematch）逐項列出原因。"""
     att = []
     n_skipped = len({x["file"] for x in inv["skipped"]})          # 兩邊都以檔案數計（同一個檔案可能有多筆原因）
     n_partial = len({x["file"] for x in inv.get("partial", [])})
@@ -2796,7 +2806,7 @@ def status_of(inv):
         return "GAP", ("沒有找到 NVIDIA vBIOS 或 BIOS 結構"
                        + (f"（只有其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個，沒有 x86／EFI 影像）" if inv["other_roms"] else "")
                        + (f"；略過 {n_skipped} 個檔案" if n_skipped else "")
-                       + (f"；{partial_txt}" if partial_txt else ""))
+                       + (f"；{partial_txt}" if partial_txt else "")), []
     for b in inv["bios"]:
         if not b["descriptor"]:
             att.append(f"{b['file']}：沒有 flash descriptor")
@@ -2873,7 +2883,7 @@ def status_of(inv):
     if inv["other_roms"]:                 # 燒錄工具自帶的其他 NVIDIA 映像：不算產品元件，只列出來
         detail += (f"、其他內嵌 NVIDIA 映像 {len(inv['other_roms'])} 個（裝置 ID "
                    f"{', '.join(sorted({x['device'] for x in inv['other_roms']}))}，沒有 x86／EFI 影像，不列入 SBOM）")
-    return ("ATTENTION" if att else "OK"), detail + "".join("；" + x for x in att)
+    return ("ATTENTION" if att else "OK"), detail, att
 
 
 _MDSAFE_PATH = Path(__file__).resolve().parent.parent.parent / "pipeline" / "lib" / "firmware_mdsafe.py"
@@ -2920,6 +2930,11 @@ def md_esc(x):
     return links(s)
 
 
+def md_hex(x, cap=130):
+    """反引號（code span）裡的雜湊、十六進位與識別字串：只留英數字，其餘換成 ?（code span 裡的跳脫不生效，反引號會提早結束；inventory 是不可信資料）。"""
+    return re.sub(r"[^0-9A-Za-z]", "?", str(x))[:cap]
+
+
 ME_STATUS_TEXT = {"found": "found（找到）", "no-me-region": "no-me-region（沒有 ME 區域）", "unknown": "unknown（有 ME 區域，版本拿不到）"}
 
 
@@ -2928,9 +2943,9 @@ def cbfs_markdown(cb):
     e = md_esc
     f = cb["fmap"]
     L = ["", "### CBFS（coreboot）", "",
-         f"找到方式：{cb['method']}" + (f"（FMAP `{e(f['name'])}` 版本 {f['version']}，{f['areas']} 個區域，file offset 0x{f['offset']:x}）" if f else "（沒有可用的 FMAP，掃 `LARCHIVE`）"), "",
+         f"找到方式：{e(cb['method'])}" + (f"（FMAP `{e(f['name'])}` 版本 {e(f['version'])}，{e(f['areas'])} 個區域，file offset 0x{f['offset']:x}）" if f else "（沒有可用的 FMAP，掃 `LARCHIVE`）"), "",
          "| 區域 | 角色 | offset | 大小 | 檔案數（空的） |", "|---|---|---|---|---|"]
-    L += [f"| {e(r['name'])} | {e(r['role'])} | 0x{r['offset']:x} | 0x{r['size']:x} | {r['entries'] - r['empty']}（{r['empty']}） |" for r in cb["regions"]]
+    L += [f"| {e(r['name'])} | {e(r['role'])} | 0x{r['offset']:x} | 0x{r['size']:x} | {e(r['entries'] - r['empty'])}（{e(r['empty'])}） |" for r in cb["regions"]]
     where = lambda it: "、".join(e(cbfs_where(l)) for l in it["locations"])
     if cb["coreboot"]:
         L += ["", "| coreboot 版本 | git 修訂 | Dasharo | 建置時間 | 主機板 | 位置 |", "|---|---|---|---|---|---|"]
@@ -2939,19 +2954,19 @@ def cbfs_markdown(cb):
     for it in cb["coreboot"]:
         if it["config"]:
             k = it["config"]["keys"]
-            L.append(f"\nconfig（SHA-256 `{it['config']['sha256']}`，{it['config']['size']} bytes）："
+            L.append(f"\nconfig（SHA-256 `{md_hex(it['config']['sha256'])}`，{e(it['config']['size'])} bytes）："
                      + e("、".join(f"{a}={b}" for a, b in sorted(k.items()))) + f"；payload {e(', '.join(it['config']['payload']))}")
     if cb["payloads"]:
         L += ["", "| payload | 大小 | segment | SHA-256 | 位置 |", "|---|---|---|---|---|"]
-        L += [f"| {e(it['file'])} | {it['length']} | " + e(", ".join(f"{x['type']}/{x['compression']}" for x in it["segments"]))
-              + f" | `{it['hash']['sha256']}` | {where(it)} |" for it in cb["payloads"]]
+        L += [f"| {e(it['file'])} | {e(it['length'])} | " + e(", ".join(f"{x['type']}/{x['compression']}" for x in it["segments"]))
+              + f" | `{md_hex(it['hash']['sha256'])}` | {where(it)} |" for it in cb["payloads"]]
     if cb["fsp"]:
         L += ["", "| FSP | ImageId | 版本 | spec | ImageBase | SHA-256 | 位置 |", "|---|---|---|---|---|---|---|"]
-        L += [f"| {it['type']} | {e(it['image_id'])} | {it['revision']} | {it['spec_version']} | {it['image_base']} | `{it['hash']['sha256'][:16]}…` | {where(it)} |"
+        L += [f"| {e(it['type'])} | {e(it['image_id'])} | {e(it['revision'])} | {e(it['spec_version'])} | {e(it['image_base'])} | `{md_hex(it['hash']['sha256'][:16])}…` | {where(it)} |"
               for it in cb["fsp"]]
     if cb["vbt"]:
         L += ["", "| VBT | 版本 | BDB 版本 | 大小 | 位置 |", "|---|---|---|---|---|"]
-        L += [f"| {e(it['signature'])} | {it['version']} | {it['bdb_version'] or ''} | {it['vbt_size']} | {where(it)} |" for it in cb["vbt"]]
+        L += [f"| {e(it['signature'])} | {e(it['version'])} | {e(it['bdb_version'] or '')} | {e(it['vbt_size'])} | {where(it)} |" for it in cb["vbt"]]
     return L
 
 
@@ -2980,21 +2995,21 @@ def nvidia_vbios_advisory_markdown(inv):
         s = va["source"]
         # 判斷與 nvidia_vbios_advisory.Table.confirmed 相同：reviewed_until 有值、沒有只有初審意見的公告、沒有未審核的列（三個條件缺一個都是尚未確認）
         why = ([] if s["reviewed_until"] else ["reviewed_until 為 null"]) + (["還有公告只有初審意見"] if s.get("awaiting_confirmation") else []) \
-            + ([f"還有 {s['unreviewed_rows']} 筆未審核的列"] if s["unreviewed_rows"] else [])
+            + ([f"還有 {e(s['unreviewed_rows'])} 筆未審核的列"] if s["unreviewed_rows"] else [])
         who = (f"審核到 {e(s['reviewed_until'])}" if not why
                else "**表尚未經負責人確認**（" + "、".join(why) + "，所有 vBIOS 都是 NOT_ASSESSED）")
-        L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{e(s['mirror_commit'] or '未記錄')}`"
-                 f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {s['reviewed_rows']} 筆、未審核 {s['unreviewed_rows']} 筆；"
+        L.append(f"- 對照表：{who}、NVIDIA product-security 鏡像 commit `{md_hex(s['mirror_commit'] or '未記錄')}`"
+                 f"（下載 {e(s['mirror_fetched_utc'] or '未記錄')}）；已審核的 vBIOS 列 {e(s['reviewed_rows'])} 筆、未審核 {e(s['unreviewed_rows'])} 筆；"
                  + (f"已確認無法對應到 option ROM 版本與裝置的公告：{e('、'.join(s['not_applicable']))}（技術理由見對照表）；" if s["not_applicable"] else "")
                  + (f"初審無法對應（待負責人確認）的公告：{e('、'.join(s['awaiting_confirmation']))}（初審意見：沒有 PCI 裝置 ID 與 option ROM 版本的對應，原因見對照表）；"
                     if s.get("awaiting_confirmation") else "")
-                 + f"對照表檔案 SHA-256 `{s['table_sha256']}`。")
+                 + f"對照表檔案 SHA-256 `{md_hex(s['table_sha256'])}`。")
         if va.get("stale"):
             L.append("- **對照表過期**（鏡像日期超過上限、讀不到或在未來）：fixed 會降成 NOT_ASSESSED（`table-stale`），要重新審核表。")
     else:
         L.append(f"- 對照表：**GAP（不能用）**：{e(va['gap'])}。所有 NVIDIA vBIOS 都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
     c = va["counts"]
-    L.append(f"- NVIDIA vBIOS {va['vbios']} 個：" + ("、".join(f"{k} {c[k]}" for k in ("affected", "fixed", "NOT_ASSESSED") if k in c) or "無"))
+    L.append(f"- NVIDIA vBIOS {e(va['vbios'])} 個：" + ("、".join(f"{k} {e(c[k])}" for k in ("affected", "fixed", "NOT_ASSESSED") if k in c) or "無"))
     L += ["", "| PCI device | 版本 | 比對結果 | 公告 | CVE |", "|---|---|---|---|---|"]
     for v in inv["vbios"]:
         r = v.get("advisory")
@@ -3023,13 +3038,13 @@ def advisory_markdown(inv):
          "- `up-to-date` 只表示資料表裡沒有更新的 revision；`NOT_ASSESSED` ＝ 資料庫沒有資料，以廠商公告（Intel INTEL-SA）為準。"]
     if adv["status"] == "OK":
         s = adv["source"]
-        L.append(f"- 資料表：Intel `{e(s['repo'].split('github.com/')[-1])}` 的 `{e(s['path'])}`，tag `{e(s['tag'])}`、commit `{s['commit']}`、"
-                 f"來源 SHA-256 `{s['sha256']}`；資料表檔案 SHA-256 `{s['table_sha256']}`；涵蓋 {s['releases']} 個 release（最舊 `{e(s['oldest'])}`）。"
+        L.append(f"- 資料表：Intel `{e(s['repo'].split('github.com/')[-1])}` 的 `{e(s['path'])}`，tag `{e(s['tag'])}`、commit `{md_hex(s['commit'])}`、"
+                 f"來源 SHA-256 `{md_hex(s['sha256'])}`；資料表檔案 SHA-256 `{md_hex(s['table_sha256'])}`；涵蓋 {e(s['releases'])} 個 release（最舊 `{e(s['oldest'])}`）。"
                  "比對在本機離線完成，沒有連網。")
     else:
         L.append(f"- 資料表：**GAP（不能用）**：{e(adv['gap'])}。所有微碼都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。")
     c = adv["counts"]
-    L.append(f"- Intel 微碼 {adv['microcodes']} 份：" + ("、".join(f"{k} {c[k]}" for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c) or "無"))
+    L.append(f"- Intel 微碼 {e(adv['microcodes'])} 份：" + ("、".join(f"{k} {e(c[k])}" for k in ("affected-candidate", "older-no-sa", "up-to-date", "NOT_ASSESSED") if k in c) or "無"))
     for b in inv["bios"]:
         L += ["", f"### {e(fname(b['file']))}", ""]
         if b["microcode"]:
@@ -3037,16 +3052,16 @@ def advisory_markdown(inv):
             for u in b["microcode"]:
                 r = u.get("advisory")
                 if not r:
-                    L.append(f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | NOT_ASSESSED（沒有比對結果） | | |")
+                    L.append(f"| {e(u['cpuid'])} | {e(u['platform_id'])} | {e(u['revision'])} | NOT_ASSESSED（沒有比對結果） | | |")
                     continue
-                late = f"{r['latest_revision']}（{e(r['latest_release'])}）" if r.get("latest_revision") else ""
-                sa = "、".join(x["id"] for x in r["candidates"])
-                L.append(f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | {ADV_TEXT[r['match']]} | {late} | {sa} |")
+                late = f"{e(r['latest_revision'])}（{e(r['latest_release'])}）" if r.get("latest_revision") else ""
+                sa = e("、".join(x["id"] for x in r["candidates"]))
+                L.append(f"| {e(u['cpuid'])} | {e(u['platform_id'])} | {e(u['revision'])} | {ADV_TEXT[r['match']]} | {late} | {sa} |")
             L.append("")
             for u in b["microcode"]:
                 r = u.get("advisory")
                 if r:
-                    L.append(f"- `{u['cpuid']}/{u['platform_id']}/{u['revision']}`：{e(r['basis'])}")
+                    L.append(f"- `{md_hex(u['cpuid'])}/{md_hex(u['platform_id'])}/{md_hex(u['revision'])}`：{e(r['basis'])}")
                     L += [f"  - {e(n)}" for n in r.get("notes", [])]
         elif b["platform"] == "amd":
             a = b.get("amd")
@@ -3114,12 +3129,12 @@ def rules_markdown(inv):
          "`not-affected` 只表示版本不低於公告列的修正版本，不代表沒有其他漏洞；依據是廠商公告（`dumpling:evidence=vendor-statement`）。"]
     if ra["status"] == "OK":
         t = ra["table"]
-        L.append(f"- 規則表：{t['rules']} 筆（初審 {t['preliminary']}、已確認 {t['confirmed']}），最後整理日期 **{e(t['updated'])}**；"
-                 f"之後的新公告沒有收錄，以廠商公告為準。檔案 SHA-256 `{t['sha256']}`；比對在本機離線完成，沒有連網。")
+        L.append(f"- 規則表：{e(t['rules'])} 筆（初審 {e(t['preliminary'])}、已確認 {e(t['confirmed'])}），最後整理日期 **{e(t['updated'])}**；"
+                 f"之後的新公告沒有收錄，以廠商公告為準。檔案 SHA-256 `{md_hex(t['sha256'])}`；比對在本機離線完成，沒有連網。")
     else:
         L.append(f"- 規則表：**GAP（不能用）**：{e(ra['gap'])}。所有元件的規則建議都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準（報告狀態 ATTENTION）。")
     c = ra["counts"]
-    L.append(f"- 元件 {ra['components']} 個：" + ("、".join(f"{k} {c[k]}" for k in ("affected", "not-affected", "NOT_ASSESSED") if k in c) or "無"))
+    L.append(f"- 元件 {e(ra['components'])} 個：" + ("、".join(f"{k} {e(c[k])}" for k in ("affected", "not-affected", "NOT_ASSESSED") if k in c) or "無"))
     if ra["status"] == "OK" and ra["table"].get("rules_info"):
         L += ["", "### 規則表內容", "", "| 規則 | 廠商 | 標題 | 公告日 | 審核 | 版本值核對 | 出處 |", "|---|---|---|---|---|---|---|"]
         for ri in ra["table"]["rules_info"]:
@@ -3167,13 +3182,13 @@ def rules_markdown(inv):
         r = holder.get("rule_advisory")
         if r is None or (kind not in RULE_DETAIL_KINDS and r["suggestion"] == "NOT_ASSESSED"):
             continue
-        ids = e("、".join(r["rule_ids"])) + (f"（{r['state']}）" if r["rule_ids"] else "")
+        ids = e("、".join(r["rule_ids"])) + (f"（{e(r['state'])}）" if r["rule_ids"] else "")
         L.append(f"| {e(img)} | {e(label)} | {RULE_TEXT[r['suggestion']]} | {ids} | {e(r['basis'])} |")
     if rest:
         g = {}
         for x in rest:
             g[(x["kind"], x.get("reason") or "-")] = g.get((x["kind"], x.get("reason") or "-"), 0) + 1
-        L += ["", "- 其餘 " + str(len(rest)) + " 個元件沒有適用的規則：" + "、".join(f"{e(k)} {n} 個（{e(rs)}）" for (k, rs), n in sorted(g.items()))
+        L += ["", "- 其餘 " + str(len(rest)) + " 個元件沒有適用的規則：" + "、".join(f"{e(k)} {e(n)} 個（{e(rs)}）" for (k, rs), n in sorted(g.items()))
               + "；都是 NOT_ASSESSED：資料庫沒有資料，以廠商公告為準。"]
     L.append("")
     L.append("- 沒有規則元件種類的元件（Intel 微碼另見「公告比對」、coreboot、edk2、GOP／VBT／legacy VBIOS、NVIDIA vBIOS）：這一節沒有比對，不代表沒有漏洞。")
@@ -3194,37 +3209,37 @@ def markdown(inv):
     L.append("")
     for b in inv["bios"]:
         L += [f"## BIOS 映像 {e(fname(b['file']))}", "",
-              f"- SHA-256 `{b['sha256']}`，{b['size']} bytes；來源：" + "、".join(e(x) for x in b["locations"]),
-              "- flash descriptor：" + ("有（區域：" + "、".join(f"{r['name']} 0x{r['base']:x}-0x{r['limit']:x}" for r in b["regions"]) + "）"
+              f"- SHA-256 `{md_hex(b['sha256'])}`，{e(b['size'])} bytes；來源：" + "、".join(e(x) for x in b["locations"]),
+              "- flash descriptor：" + ("有（區域：" + "、".join(f"{e(r['name'])} 0x{r['base']:x}-0x{r['limit']:x}" for r in b["regions"]) + "）"
                                         if b["descriptor"] else f"沒有（{e(b['descriptor_note'])}）")]
         if b.get("declared_version"):
             L.append(f"- BIOS 版本（版本清單）：{e(b['declared_version'])}")
         if b.get("pfat"):
             p = b["pfat"]
-            L.append(f"- 來自 {e(p['format'])} 封裝：原檔 SHA-256 `{p['container_sha256']}`（{p['container_size']} bytes），"
-                     f"組回映像 SHA-256 `{p['image_sha256']}`（{p['image_size']} bytes，{len(p['files'])} 個區段依封裝順序串接）；" + e("；".join(p["notes"])))
+            L.append(f"- 來自 {e(p['format'])} 封裝：原檔 SHA-256 `{md_hex(p['container_sha256'])}`（{e(p['container_size'])} bytes），"
+                     f"組回映像 SHA-256 `{md_hex(p['image_sha256'])}`（{e(p['image_size'])} bytes，{len(p['files'])} 個區段依封裝順序串接）；" + e("；".join(p["notes"])))
         if b["platform"]:
             L.append(f"- 平台：{e(b['platform'])}（" + "；".join(e(x) for x in b["amd_markers"]) + "）")
         L += ["", "### ME", "", "| 狀態 | 版本 | 日期 | family | 位置 | 依據 |", "|---|---|---|---|---|---|"]
         m = b["me"]
         if m:
             fam = m["family"] + "（版本清單）" if m.get("family") else "family unknown"
-            L.append(f"| {ME_STATUS_TEXT[b['me_status']]} | {m['version']} | {m['date'] or ''} | {e(fam)} | 0x{m['offset']:x} | {e(m['basis'])} |")
+            L.append(f"| {ME_STATUS_TEXT[b['me_status']]} | {e(m['version'])} | {e(m['date'] or '')} | {e(fam)} | 0x{m['offset']:x} | {e(m['basis'])} |")
         else:
             L.append(f"| {ME_STATUS_TEXT[b['me_status']]} | | | | | {e(b['me_note'] or '')} |")
         if m and m["other_versions"]:
-            L.append(f"\n其他 `$MN2` 版本（其他分割區）：{', '.join(m['other_versions'])}")
+            L.append(f"\n其他 `$MN2` 版本（其他分割區）：{e(', '.join(m['other_versions']))}")
         if m and b["me_note"]:
             L.append(f"\n說明：{e(b['me_note'])}")
         f = b["fit"]
         L += ["", "### CPU microcode", "",
-              f"FIT：{f['status']}" + (f"（file offset 0x{f['offset']:x}，{f['entries']} 項）" if f["offset"] is not None else "")
+              f"FIT：{e(f['status'])}" + (f"（file offset 0x{f['offset']:x}，{e(f['entries'])} 項）" if f["offset"] is not None else "")
               + (f"；{e(f['note'])}" if f["note"] else ""), ""]
         if b["platform"] == "amd":
             L += ["AMD 平台：下面是 Intel 格式的 microcode 掃描；AMD 微碼（BIOS 目錄 type 0x66）見後面的 AMD 區段。", ""]
         if b["microcode"]:
             L += ["| CPUID | platform id | revision | 日期 | in FIT | 位置 |", "|---|---|---|---|---|---|"]
-            L += [f"| {u['cpuid']} | {u['platform_id']} | {u['revision']} | {u['date']} | {in_fit_text(u)} | 0x{u['offset']:x} |"
+            L += [f"| {e(u['cpuid'])} | {e(u['platform_id'])} | {e(u['revision'])} | {e(u['date'])} | {in_fit_text(u)} | 0x{u['offset']:x} |"
                   for u in b["microcode"]]
         else:
             L.append("映像裡沒有找到 Intel microcode" + ("（AMD 平台，見後面的 AMD 區段）" if b["platform"] == "amd" else "") + "。")
@@ -3232,14 +3247,14 @@ def markdown(inv):
             L += load_sibling("amd_psp").markdown_lines(b["amd"], e)
         elif b["platform"] == "amd":
             L += ["", "### AMD", "", "**GAP**：PSP／BIOS 目錄解析沒有執行，AMD 微碼、PSP 韌體與 AGESA 沒有列出，不代表沒有。"]
-        L += ["", "### IBV 線索", "", ("、".join(b["ibv_hint"]) + "（未壓縮的字串，只是線索）") if b["ibv_hint"] else "沒有找到（不代表不是這些 IBV）"]
+        L += ["", "### IBV 線索", "", (e("、".join(b["ibv_hint"])) + "（未壓縮的字串，只是線索）") if b["ibv_hint"] else "沒有找到（不代表不是這些 IBV）"]
         u = b["uefi"]
         L += ["", "### UEFI 壓縮 section（沒有解壓）", "",
-              f"firmware volume {u['volumes']} 個（其他檔案系統 {u['volumes_other_fs']} 個）、FFS 檔案 {u['files']} 個、section {u['sections']} 個。", ""]
+              f"firmware volume {e(u['volumes'])} 個（其他檔案系統 {e(u['volumes_other_fs'])} 個）、FFS 檔案 {e(u['files'])} 個、section {e(u['sections'])} 個。", ""]
         if u["compressed"] or u["guided_other"]:
             L += ["| 壓縮方式 | 數量 |", "|---|---|"]
-            L += [f"| {e(k)} | {v} |" for k, v in sorted(u["compressed"].items())]
-            L += [f"| GUID-defined（需要處理，不認得）{e(k)} | {v} |" for k, v in sorted(u["guided_other"].items())]
+            L += [f"| {e(k)} | {e(v)} |" for k, v in sorted(u["compressed"].items())]
+            L += [f"| GUID-defined（需要處理，不認得）{e(k)} | {e(v)} |" for k, v in sorted(u["guided_other"].items())]
             L.append("\nefi-standard 是 EFI／Tiano 標準壓縮、tiano-custom 是 edk2 TianoCompress，Python 標準庫都沒有解碼器；"
                      "lzma、lzma-f86 標準庫有；brotli 沒有。數量決定第 2b 步要不要自己寫 Tiano 解碼器。")
         else:
@@ -3257,7 +3272,7 @@ def markdown(inv):
     L += ["## vBIOS", ""]
     if inv["vbios"]:
         L += ["| device | 版本 | 結束 | 來源 | 說明 |", "|---|---|---|---|---|"]
-        L += [f"| {v['device']} | {e(v['version'] or '找不到')} | {v['terminated']} | " + "、".join(e(x) for x in v["locations"])
+        L += [f"| {e(v['device'])} | {e(v['version'] or '找不到')} | {e(v['terminated'])} | " + "、".join(e(x) for x in v["locations"])
               + " | " + e("；".join(x for x in (v.get("terminated_note"), v.get("start_note")) if x)) + " |" for v in inv["vbios"]]
     else:
         L.append("沒有找到 NVIDIA vBIOS。")
@@ -3266,7 +3281,7 @@ def markdown(inv):
     L += intel_gfx_markdown(inv)
     if inv.get("comparison") is not None:
         L += ["", "## 版本清單比對", "", "| 元件 | identifier | 清單 | 映像 | 結果 |", "|---|---|---|---|---|"]
-        L += [f"| {c['component']} | {e(c['identifier'] or '')} | {e(c['declared'] or '')} | {e(c['extracted'] or '')} | {c['result']}"
+        L += [f"| {e(c['component'])} | {e(c['identifier'] or '')} | {e(c['declared'] or '')} | {e(c['extracted'] or '')} | {e(c['result'])}"
               + ("" if c["verifiable"] else "（映像拆不出來）") + " |" for c in inv["comparison"]]
     L += advisory_markdown(inv)
     L += rules_markdown(inv)
@@ -3318,7 +3333,20 @@ def seconds(v):
     return x
 
 
+def rematch_main(argv):
+    """`--rematch ...`：每天用 repo 當下的三張公告表重跑 Release 上的 fw-inventory.json（fw_rematch.py；只吃 inventory，不讀映像、不連網）。"""
+    try:
+        mod = load_sibling("fw_rematch")
+    except Fail as e:
+        print(f"FIRMWARE-REMATCH\tFAIL\t-\t{e}")
+        return 1
+    return mod.main(argv, xf=sys.modules[__name__])
+
+
 def main(argv=None):
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args and args[0] == "--rematch":
+        return rematch_main(args[1:])
     # allow_abbrev=False：不接受縮寫（例如 --ou）。否則縮寫的 --out 能用，但參數錯誤時 out_arg 找不到它，上一次的輸出不會被清掉
     ap = Parser(description=__doc__.splitlines()[0], allow_abbrev=False)
     sub = ap.add_subparsers(dest="cmd", required=True)

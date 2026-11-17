@@ -49,7 +49,7 @@ def test_epoch_at_least_one_is_gap_even_with_matches(tmp_path, ver):
     r, st, detail, ev = run(tmp_path, [pkg("linux-image-6.18.50-x", ver)])
     assert (r.returncode, st) == (0, "GAP")
     assert "核心不在發行版的核心序列上" in detail and f"linux-image-6.18.50-x {ver}" in detail and "規則" in detail
-    assert "可能漏報" in detail and "上游版本對核心 CNA" in detail and "M7" in detail
+    assert "可能漏報" in detail and "上游版本對核心 CNA" in detail and "M7" not in detail and "尚未實作" not in detail
     assert flagged(ev) == [("linux-image-6.18.50-x", ver)] and ev["matches"]["grype"]["matches"] == 1
 
 

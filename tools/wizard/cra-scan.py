@@ -8,7 +8,7 @@
   核心版本：--kernel-version <版本>（可重複；環境變數 SCA_KERNEL_VERSIONS 以空白或逗號分隔，兩者都給時以命令列為準）。映像有不只一顆核心
   （/usr/lib/modules/<版本>/，例如 Raspberry Pi 有 Pi 5 與 Pi 4 兩顆）時要判定哪一顆；原樣交給 scan-flash-package.sh --kernel-version → sca-scan。
   只接受英數字開頭、英數字與「. _ + ~ -」，否則 exit 64。出貨但沒指定的核心記為「出貨但沒有判定」（C-kernel-config 與 C-kernel-module-map 至少 GAP）；
-  指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。見 tools/pilot/sca-scan。
+  指定 2 顆以上時逐顆判定（M7d-1），沒指定而映像有多顆時全部逐顆判定；每顆的結果在 scan/kernels/<版本>/。見 tools/pilot/sca-scan。
   分層：--kernel-in-other-report <報告名稱>（環境變數 SCA_KERNEL_IN_OTHER_REPORT 也可以）。分層重跑（--rescan-from，SBOM 換成某一層的）時，這份報告的 SBOM 沒有
   作業系統核心、核心在 <報告名稱> 那份報告判定：原樣交給 scan-flash-package.sh → sca-scan，SBOM 真的沒有核心時 C-kernel-cve-list、C-kernel-config、
   C-kernel-module-map 記 NOT_RUN「不適用」，不跑核心階段；SBOM 有核心時照舊。名稱只接受 ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$，否則 exit 64。見 docs/LAYERS.md。

@@ -1,0 +1,78 @@
+{
+  "schema": "dumpling-firmware-meta/1",
+  "_note": "介面範例（C2 維護，C3 只讀）。雜湊是佔位值；tables 是 2026-11-15 main 上的真實識別。",
+  "tag": "firmware-demo/2026.11.20",
+  "commit": "0000000000000000000000000000000000000000",
+  "built_at": "2026-11-20T03:00:00Z",
+  "workflow_run": "https://github.com/<owner>/<repo>/actions/runs/0",
+  "samples": [
+    {
+      "slug": "novacustom-v540tu-mtl-v1.0.1",
+      "kind": "bios",
+      "firmware_version": "v1.0.1",
+      "image_sha256": "e915ed1eae8b7b91a7a94ad7a75d57a4a077c0e7c6379234755788ca72fb1cd9",
+      "sbom": "fw-novacustom-v540tu-mtl-v1.0.1.cdx.json",
+      "sbom_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inventory": "fw-inventory-novacustom-v540tu-mtl-v1.0.1.json",
+      "inventory_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": "ATTENTION",
+      "expect": "OK"
+    },
+    {
+      "slug": "ubuntu-ovmf-2024.02",
+      "kind": "bios",
+      "firmware_version": "2024.02-2ubuntu0.10",
+      "image_sha256": null,
+      "sbom": "fw-ubuntu-ovmf-2024.02.cdx.json",
+      "sbom_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "inventory": "fw-inventory-ubuntu-ovmf-2024.02.json",
+      "inventory_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "status": "ATTENTION",
+      "expect": "OK"
+    },
+    {
+      "slug": "dasharo-novacustom-ns5x-tgl-v1.6.0",
+      "kind": "sbom",
+      "firmware_version": "v1.6.0",
+      "image_sha256": null,
+      "sbom": "fw-dasharo-novacustom-ns5x-tgl-v1.6.0.cdx.json",
+      "sbom_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "normalized": true,
+      "inventory": null,
+      "inventory_sha256": null,
+      "status": "ATTENTION",
+      "expect": "NONE"
+    }
+  ],
+  "not_watched": [
+    {
+      "slug": "standalone-nvidia-option-rom",
+      "why": "GAP：沒有官方可合法下載、可直接讀出 vBIOS 版本的公開檔案"
+    },
+    {
+      "slug": "nvidia-displayport-fw-updater-1.1",
+      "why": "沒有 vBIOS 元件（內嵌的是 GOP 驅動範本）"
+    }
+  ],
+  "tables": {
+    "fw_advisory_rules": {
+      "sha256": "cd2433c53c49b2c40fbde48ecedf1fb1c9b4872e61ed7101076d77d2a80f1c31",
+      "table_updated": "2026-11-14"
+    },
+    "intel_microcode": {
+      "source_commit": "d71fe4e2f0f70a49ebbac7f2c7e915f181361974",
+      "source_tag": "microcode-20261110",
+      "table_sha256": "253aab94c3c2a14eda457b1ee4a7a1490e00d4e854622cd9f05e77a07904e271"
+    },
+    "nvidia_vbios": {
+      "sha256": "c5324efc7d0b04b2740c08c6161807a37c167e1410a007d1f110a1421238b534",
+      "mirror_commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
+      "reviewed_until": "2025-09-02"
+    }
+  },
+  "dt": {
+    "status": "OK",
+    "result": "OK",
+    "reason": null
+  }
+}
