@@ -206,15 +206,12 @@ try:
     if not isinstance(val, str) or not val:
         fail(f"沒有 {key}（無法判斷新舊）")
     t = datetime.datetime.fromisoformat(val.replace("Z", "+00:00"))
-    if t.tzinfo is None:
-        if kind == "cisa-kev-file":
-            t = t.replace(tzinfo=datetime.timezone.utc)
-        else:
-            fail(f"{key} 沒有時區：{val[:40]!r}")
+    if t.tzinfo is None:                      # 沒有時區（包括只有日期）不能猜：猜錯會讓舊資料看起來是新的
+        fail(f"{key} 沒有時區：{val[:40]!r}")
 except (OSError, ValueError, AttributeError, RecursionError) as e:
     fail(f"讀不到可解析的資料時間（{type(e).__name__}）")
 h = (datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() / 3600
-if h < -24 if kind == "cisa-kev-file" else h < -1:
+if h < -1:                                    # 未來時間只容忍 1 小時（主機時鐘誤差）
     fail(f"{key} 在未來（{val[:40]}；主機時鐘或資料異常）")
 print("\t".join([key, t.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "%.1f" % max(h, 0.0),
                  "1" if h > fresh else "0", str(fb), "1" if h > mx else "0"]))

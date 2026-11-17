@@ -1,6 +1,7 @@
 """pipeline/lib/mirrors.sh 的內部鏡像模式（T-06）與 tools/mirror/cisa-kev.sh。不連網：假的 curl／git／grype 放在 PATH 最前面，
 被呼叫就留標記；每個情境都要確認標記資料夾是空的（沒有任何公開下載），不只是成功的情境。"""
 import json
+import datetime
 import os
 import subprocess
 import sys
@@ -590,6 +591,43 @@ class KevSingleFile(Base):
         os.symlink(outside, os.path.join(self.e.root, "kevstore", "kev.json"))
         r = self.mirror()
         self.assertIn("rc=64", r.stdout, r.stdout + r.stderr)
+        self.no_public()
+
+    @staticmethod
+    def naive_dates():
+        """沒有時區的 dateReleased：去掉 Z 的時間（1 天前）、只有日期（今天）。都不能當成 UTC 算新。"""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return [(now - datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S"), now.strftime("%Y-%m-%d")]
+
+    def test_release_date_without_timezone_fails_single_file(self):
+        for rel in self.naive_dates():
+            with self.subTest(rel=rel):
+                self.put(released=rel)
+                r = self.mirror()
+                self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+                self.assertIn("沒有時區", r.stdout)
+                self.no_public()
+
+    def test_release_date_without_timezone_fails_folder_mode(self):
+        for rel in self.naive_dates():
+            with self.subTest(rel=rel):
+                self.e.write_real_kev(hours_ago=1, released=rel)
+                r = self.run_fn("mirror cisa-kev.sh kev; echo rc=$?", stubs=False)
+                self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+                self.assertIn("沒有時區", r.stdout)
+                self.no_public()
+
+    def test_release_date_in_the_future_fails_after_one_hour(self):
+        """dateReleased 在未來：1 小時內容忍（時鐘誤差），超過就失敗（兩種模式都一樣）。"""
+        self.put(released_hours_ago=-0.5)
+        self.assertIn("rc=0", self.mirror().stdout)
+        self.put(released_hours_ago=-3)
+        r = self.mirror()
+        self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+        self.e.write_real_kev(hours_ago=1, released_hours_ago=-3)
+        r = self.run_fn("mirror cisa-kev.sh kev; echo rc=$?", stubs=False)
+        self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+        self.assertIn("在未來", r.stdout)
         self.no_public()
 
     def test_only_cisa_kev_may_be_a_single_file(self):

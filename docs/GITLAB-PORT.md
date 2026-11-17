@@ -234,6 +234,9 @@
 - CISA KEV：新增 `tools/mirror/cisa-kev.sh`（SOURCE 記 sha256、筆數、dateReleased、fetched_utc；`--check` 驗 sha256、筆數下限 `CISA_KEV_MIN_ENTRIES`＝1000、同步時間上限 3 天、dateReleased 上限 14 天）。`cisa-kev` 的子路徑也可以直接指到**單一 JSON 檔**（沒有 SOURCE）：只驗 JSON 格式、筆數下限與 dateReleased；沒有同步時間，`.result` 與 feeds.tsv 固定寫「同步時間不明（單一檔案，只依 dateReleased）」，即使結果是 OK；dateReleased 超過 7 天 ATTENTION、超過 14 天失敗（`INTERNAL_MIRROR_KEV_FILE_FRESH_DAYS`、`CISA_KEV_MAX_RELEASE_AGE_DAYS`）。不使用檔案的 mtime。
 - Grype DB：`feeds.sh` 改成 `grype-db` 鏡像通過 `--check` 之後 `grype db import <壓縮檔>`（取代 `grype db update`），每次呼叫 grype 都帶 `GRYPE_DB_AUTO_UPDATE=false`、`GRYPE_CHECK_FOR_APP_UPDATE=false`。`mirrors.sh` 的 `grype_db_mode` 在內部模式回傳 `import:<壓縮檔>`、鏡像不可用就回傳失敗（絕不回 `online`），給 PR-2 的 scan.sh 一行接上。`match.py` 比對時本來就不更新 Grype（`GRYPE_DB_AUTO_UPDATE=false`），有測試鎖住。
 - **目前 runner 主機上的內部鏡像沒有 `euvd`、`grype-db`（`cisa-kev` 是否有資料夾版本也要看內部決定）**：內部模式下這幾個子路徑不存在時，`feeds.sh` 記 GAP（EUVD 缺 → match.py 的 EUVD GAP；Grype DB 缺 → GAP）；release scan 要 euvd 時會 FAIL，Grype DB 的 `grype_db_mode` 回報失敗、PR-2 的 scan 端要 FAIL。要不要同步這幾種是內部決定，在那之前 GitLab 上這幾項會是 GAP／FAIL。
+- **時間沒有時區一律失敗**：`fetched_utc`、`built`、`dateReleased`（包括只有日期）都一樣，不假設是 UTC；未來時間只容忍 1 小時（主機時鐘誤差），超過就失敗。CISA 官方的 dateReleased 都帶 `Z`，不會誤擋。
+- **部署限制**：根目錄路徑不能含空白（用法錯誤）。**內部鏡像根目錄只能由同步帳號寫入**（job 的帳號、其他使用者都不能寫）：程式在 `realpath` 確認子路徑在根目錄內之後才複製，兩者之間如果有人把子路徑換成指向根目錄外的符號連結，可能讀到根目錄外的檔案（複製後的型別檢查與 `--check` 仍會擋下大部分情況，但不能取代寫入權限的限制）。
+- **範圍（PR-2 合併之前）**：`DUMPLING_REQUIRE_INTERNAL_MIRROR=1` 只保證 `feeds.sh` 與 `pipeline/lib/mirrors.sh` 這兩段不連外。release scan 的 Grype DB 更新（`GRYPE_DB_UPDATE` 預設 `online`）與其他步驟仍會從公開網址下載，**不代表整條流程都不下載**；要等 PR-2 接上 `grype_db_mode` 才算。
 
 **官方依據**：內部系統，不適用 GitLab 官方文件。
 

@@ -49,16 +49,17 @@ def parse(path, max_bytes):
     rel = doc.get("dateReleased")
     return hashlib.sha256(raw).hexdigest(), len(raw), len(v), good, rel if isinstance(rel, str) else ""
 def release_age(rel, max_days):
-    """dateReleased 的天數；無法解析、在未來或超過上限都 FAIL。"""
+    """dateReleased 的天數；無法解析、沒有時區（例如只有日期）、在未來超過 1 小時或超過上限都 FAIL。
+    沒有時區不能假設是 UTC：猜錯會讓舊資料看起來是新的（CISA 官方的 dateReleased 都帶 Z）。"""
     try:
         t = datetime.datetime.fromisoformat(rel.replace("Z", "+00:00"))
-        if t.tzinfo is None:
-            t = t.replace(tzinfo=datetime.timezone.utc)
     except ValueError:
         fail(f"dateReleased 無法解析：{rel[:40]!r}")
+    if t.tzinfo is None:
+        fail(f"dateReleased 沒有時區：{rel[:40]!r}（無法判斷新舊）")
     age = (NOW - t).total_seconds() / 86400
-    if age < -1:
-        fail(f"dateReleased 在未來（{rel[:40]}）")
+    if age < -1 / 24:
+        fail(f"dateReleased 在未來（{rel[:40]}；主機時鐘或資料異常）")
     if age > max_days:
         fail(f"內容太舊：dateReleased {rel[:40]} 是 {age:.1f} 天前 > {max_days:g}（CISA_KEV_MAX_RELEASE_AGE_DAYS）")
     return max(age, 0.0)
