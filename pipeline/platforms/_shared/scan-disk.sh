@@ -187,7 +187,7 @@ case $augment in
     [ -s "$asbom" ] || fail "NAS 應用原始碼沒有產生 SBOM（見 augment/app-scan.log）"
     mrc=0
     line=$(python3 -I "$here/sbom_augment.py" merge-source "$sbom0" "$asbom" "$out/augment/sbom.cdx.json" \
-      --label app-source --repo "$arepo" --commit "$acommit" --app-name "$aname" --app-version "$aversion") || mrc=$?
+      --label app-source --repo "$arepo" --commit "$acommit" --app-name "$aname" --app-version "$aversion" --work-parent "$out/augment") || mrc=$?
     echo "$line"
     case $mrc in 0) ;; 3) arc=3;; *) fail "併入原始碼 SBOM 失敗";; esac
     # 摘要：應用本身的名稱與版本由 sources.yml 指定（cdxgen 原值從合併後的 SBOM 讀）；版本與 commit 是否完全相同 NOT_ASSESSED（D-025）

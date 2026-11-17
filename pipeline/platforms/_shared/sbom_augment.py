@@ -205,11 +205,189 @@ def from_raw_sectors(doc, raw):
 
 # ---------------------------------------------------------------- merge-source
 
-def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None):
+# 原始碼 SBOM（cdxgen）的檔案路徑是掃描當下的絕對路徑：sca-scan 把原始碼複製到 <WORK>/cdxgen-src 再交給 cdxgen，
+# WORK＝mktemp -d "<--out 的上一層>/.sca-scan-work.XXXXXX"（在 /tmp、/run 底下時改用 $HOME/.cache/sca-scan/work.XXXXXX），
+# 掃完 sca-scan 就把 WORK 刪掉，所以 WORK 只能由「實際的上一層資料夾（--work-parent）＋mktemp 的樣式」比對出來，不只比對字串片段。
+# 同一個 WORK 可能以 abspath 與 realpath 兩種寫法出現（上一層是符號連結）：後綴相同就是同一個；後綴不同的兩個 WORK → FAIL（不猜）。
+# 併入時，原始碼元件的每一個字串（包括 bom-ref、purl；依賴的 ref 用同一份對照表改，不會對不起來）：
+#   1. <WORK>/cdxgen-src 底下 → 相對路徑（根目錄本身是 .）；file://<根目錄>/… 連 file:// 一起拿掉；<WORK> 底下的其他位置 → 相對於 <WORK>。
+#      百分比編碼（purl 的 qualifier）與 \/ 跳脫的寫法也一樣處理。
+#   2. 整個值就是一個絕對路徑（沒有空白）→ 只留檔名並計數；自由文字裡其他的斜線一律不碰（例如「/login」「10 /s」）。
+#   3. 最後保險：改寫完，整份 SBOM 任何字串（含 purl、bom-ref；\/ 跳脫與百分比編碼都算）還出現 WORK 的任何寫法 → FAIL。
+# Windows 路徑（C:\…）不處理：sca-scan 只在 Linux 上跑。
+WHOLE_ABS_RE = re.compile(r"/[^\s]*[^\s/]")
+
+
+def _strings(o):
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from _strings(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _strings(v)
+    elif isinstance(o, str):
+        yield o
+
+
+def _variants(sv):
+    r"""一個字串的幾種寫法：原樣、\/ 還原、百分比解碼（沒有 \/ 或 % 時只有原樣，省時間）。"""
+    out = {sv}
+    if "\\/" in sv:
+        out.add(sv.replace("\\/", "/"))
+    if "%" in sv:
+        out |= {urllib.parse.unquote(x) for x in list(out)}
+    return out
+
+
+def _work_bases(work_parent):
+    """→ {(上一層的寫法, WORK 名稱的正規式)}：--work-parent 的 abspath／realpath，以及 $HOME/.cache/sca-scan。"""
+    bases = set()
+    for x in (os.path.abspath(work_parent), os.path.realpath(work_parent)):
+        bases.add((x.rstrip("/"), r"\.sca-scan-work\.[A-Za-z0-9]{6}"))
+    home = os.environ.get("HOME")
+    if home:
+        for h in (os.path.abspath(home), os.path.realpath(home)):
+            bases.add((os.path.join(h, ".cache", "sca-scan"), r"work\.[A-Za-z0-9]{6}"))
+    return bases
+
+
+def find_work(src, work_parent):
+    """原始碼 SBOM 裡實際出現的 WORK → 它所有的寫法（長的在前）；沒有 → []。後綴不同的 WORK 兩個以上 → AugError。"""
+    bases = _work_bases(work_parent)
+    pats = [(base, name, re.compile(re.escape(base) + "/(" + name + ")(?=/|$)")) for base, name in bases]
+    found = {}
+    for sv in _strings(src):
+        if "work" not in sv:
+            continue
+        for v in _variants(sv):
+            for base, _, pat in pats:
+                for m in pat.finditer(v):
+                    found.setdefault(m.group(1), set()).add(base + "/" + m.group(1))
+    if len(found) > 1:
+        raise AugError("原始碼 SBOM 裡出現 %d 個不同的掃描暫存資料夾，不能判斷相對路徑" % len(found))
+    if not found:
+        return []
+    suf, forms = next(iter(found.items()))
+    forms |= {base + "/" + suf for base, name, _ in pats if re.fullmatch(name, suf)}    # 同一個後綴：每一種上一層的寫法都算
+    return sorted(forms, key=len, reverse=True)
+
+
+def _replacements(works):
+    """→ (正規式, {要找的字串: 換成})，長的在前；含百分比編碼的寫法。沒有 WORK → None。"""
+    pairs = []
+    for w in works:
+        root = w + "/cdxgen-src"
+        for x, y in (("file://" + root + "/", ""), (root + "/", ""), ("file://" + root, "."), (root, "."),
+                     ("file://" + w + "/", ""), (w + "/", ""), ("file://" + w, "."), (w, ".")):
+            pairs.append((x, y))
+            for q in (urllib.parse.quote(x, safe=""), urllib.parse.quote(x, safe="/")):
+                if q != x:
+                    pairs.append((q, y))
+    if not pairs:
+        return None
+    table = {}
+    for x, y in sorted(pairs, key=lambda t: len(t[0]), reverse=True):
+        table.setdefault(x, y)
+    return re.compile("|".join(re.escape(x) for x in table)), table
+
+
+def fix_path_string(sv, reps, counts):
+    """一個字串：WORK 的前綴拿掉（counts["relative"]）；整個值是絕對路徑時只留檔名（counts["basename"]）；其他文字不動。"""
+    if reps:
+        pat, table = reps
+        if "\\/" in sv and pat.search(sv.replace("\\/", "/")):
+            sv = sv.replace("\\/", "/")
+        def sub(m):
+            counts["relative"] += 1
+            return table[m.group(0)]
+        sv = pat.sub(sub, sv)
+    if WHOLE_ABS_RE.fullmatch(sv):
+        counts["basename"] += 1
+        sv = os.path.basename(sv) or "."
+    return sv
+
+
+def relativize(o, reps, counts, skip=()):
+    """o 裡每個字串交給 fix_path_string。原地改；skip 是 o（dict）最上層不處理的鍵。"""
+    if isinstance(o, dict):
+        for k, v in list(o.items()):
+            if k in skip:
+                continue
+            if isinstance(v, str):
+                o[k] = fix_path_string(v, reps, counts)
+            else:
+                relativize(v, reps, counts)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            if isinstance(v, str):
+                o[i] = fix_path_string(v, reps, counts)
+            else:
+                relativize(v, reps, counts)
+
+
+MAX_UNQUOTE = 8          # 最後保險反覆百分比解碼的上限（多層編碼）
+
+
+def _work_patterns(work_parent):
+    """→ (整份 SBOM 都要檢查的正規式, 只檢查 metadata.component 以外的正規式)。不靠 find_work 有沒有找到 WORK。
+    --work-parent（abspath／realpath）底下的 .sca-scan-work.XXXXXX：整份 SBOM。
+    $HOME/.cache/sca-scan/work.XXXXXX：精靈那次掃描（映像）的 WORK 也可能在這裡，而它寫進 metadata.component.name 的路徑
+    要到之後 sbom-layers.py tag 才換掉（#200），所以這個樣式略過 metadata.component，其他地方照樣檢查。"""
+    whole, rest = [], []
+    for base, name in _work_bases(work_parent) if work_parent else set():
+        (whole if name.startswith(r"\.sca") else rest).append(re.escape(base) + "/" + name)
+    home = os.environ.get("HOME")
+    if home and not work_parent:
+        for h in (os.path.abspath(home), os.path.realpath(home)):
+            rest.append(re.escape(os.path.join(h, ".cache", "sca-scan")) + r"/work\.[A-Za-z0-9]{6}")
+    comp = lambda xs: re.compile("|".join(sorted(set(xs)))) if xs else None
+    return comp(whole), comp(rest)
+
+
+def _decoded_forms(text):
+    """序列化後的文字 → 它的幾種寫法：\\/ 與 \\\\/ 還原，再反覆百分比解碼到不變為止（最多 MAX_UNQUOTE 次）。"""
+    t = text.replace("\\\\/", "/").replace("\\/", "/")
+    out = [text, t]
+    for _ in range(MAX_UNQUOTE):
+        u = urllib.parse.unquote(t)
+        if u == t:
+            break
+        out.append(u)
+        t = u
+    return out
+
+
+def assert_no_work(doc, work_parent):
+    r"""最後保險：改寫完，序列化後的整份 SBOM（鍵與值、purl、bom-ref；\/ 跳脫、多層百分比編碼都算）還出現掃描暫存資料夾 → AugError。
+    直接用已知的上一層資料夾加 mktemp 的樣式比對，不靠 find_work 有沒有找到（根目錄只出現在鍵名、或藏在兩層編碼裡時，find_work 找不到）。"""
+    whole, rest = _work_patterns(work_parent)
+    if whole is None and rest is None:
+        return
+    text = json.dumps(doc, ensure_ascii=False)
+    if whole is not None and any(whole.search(t) for t in _decoded_forms(text)):
+        raise AugError("改寫後 SBOM 仍有掃描暫存資料夾的路徑（沒想到的寫法；不輸出）")
+    if rest is not None:
+        md = doc.get("metadata")
+        mc = md.get("component") if isinstance(md, dict) else None
+        if mc is not None:
+            md = dict(md)
+            md.pop("component")
+        other = dict(doc)
+        if mc is not None:
+            other["metadata"] = md
+        if any(rest.search(t) for t in _decoded_forms(json.dumps(other, ensure_ascii=False))):
+            raise AugError("改寫後 SBOM 仍有掃描暫存資料夾的路徑（沒想到的寫法；不輸出）")
+
+
+def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None, work_parent=None):
+    counts = {"relative": 0, "basename": 0}
+    works = find_work(src, work_parent) if work_parent else []
+    reps = _replacements(works)
     for c in walk(doc.get("components")):
         prop(c, "dumpling:origin", "image")
     pre = "dumpling:src:%s:" % label
     mapping = {}
+    assigned = set()
 
     def remap(c):
         c = copy.deepcopy(c)
@@ -217,12 +395,17 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None)
         if old is not None:
             if not isinstance(old, str):
                 raise AugError("原始碼 SBOM 的 bom-ref 不是字串")
-            mapping[old] = pre + old
-            c["bom-ref"] = pre + old
+            ref = pre + fix_path_string(old, reps, counts)        # 路徑改寫後的 bom-ref；依賴的 ref 用同一份對照表
+            if ref in assigned and mapping.get(old) != ref:
+                raise AugError("路徑改寫後 bom-ref 重複（%s）" % ref[:120])
+            assigned.add(ref)
+            mapping[old] = ref
+            c["bom-ref"] = ref
         else:
             c["bom-ref"] = pre + "anon-%d" % len(mapping)
             mapping[c["bom-ref"]] = c["bom-ref"]
         c["properties"] = [p for p in c.get("properties") or [] if isinstance(p, dict) and not str(p.get("name", "")).startswith("dumpling:origin")]
+        relativize(c, reps, counts, skip=("components", "bom-ref"))   # purl 也改；bom-ref 在上面改；子元件在下面 remap 時各自處理
         prop(c, "dumpling:origin", "source")
         prop(c, "dumpling:origin-label", label)
         prop(c, "dumpling:origin-repo", repo)
@@ -285,10 +468,14 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None)
         kept += len(outs)
     if app_ref:
         add_root_deps(doc, [app_ref])
+    assert_no_work(doc, work_parent)
     meta_prop(doc, "dumpling:augment:source:%s" % label, "%s@%s：%d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）"
               % (repo, commit, len(list(walk(merged))), kept, dropped))
-    gaps = [] if app_ref else ["原始碼 SBOM 沒有 metadata.component（應用本身），無法標 source-vs-package"]
-    return len(list(walk(merged))), kept, dropped, gaps
+    meta_prop(doc, "dumpling:augment:source:%s:paths" % label, "改成相對路徑 %d 個；不在原始碼根目錄底下的絕對路徑只留檔名 %d 個"
+              % (counts["relative"], counts["basename"]))
+
+    gaps = ([] if app_ref else ["原始碼 SBOM 沒有 metadata.component（應用本身），無法標 source-vs-package"])
+    return len(list(walk(merged))), kept, dropped, gaps, counts
 
 
 def main(argv=None):
@@ -300,6 +487,7 @@ def main(argv=None):
     m.add_argument("sbom"); m.add_argument("src"); m.add_argument("out")
     m.add_argument("--label", required=True); m.add_argument("--repo", required=True); m.add_argument("--commit", required=True)
     m.add_argument("--app-name"); m.add_argument("--app-version")
+    m.add_argument("--work-parent", help="sca-scan --out 的上一層資料夾（掃描時的實際路徑）：用來比對原始碼根目錄，路徑改成相對")
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -323,8 +511,9 @@ def main(argv=None):
         else:
             src = read_json(a.src)
             check_bom(src, "原始碼 SBOM")
-            n, kept, dropped, gaps = merge_source(doc, src, a.label, a.repo, a.commit, a.app_name, a.app_version)
-            msg = "併入 %s 的 %d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）" % (a.label, n, kept, dropped)
+            n, kept, dropped, gaps, counts = merge_source(doc, src, a.label, a.repo, a.commit, a.app_name, a.app_version, a.work_parent)
+            msg = "併入 %s 的 %d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）；路徑：相對 %d、只留檔名 %d" % (
+                a.label, n, kept, dropped, counts["relative"], counts["basename"])
         write_json(doc, a.out)
     except AugError as e:
         print("sbom-augment: FAIL（%s）" % e)
