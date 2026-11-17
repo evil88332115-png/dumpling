@@ -3,6 +3,8 @@ name: pages
 # 觸發：watch／dev／release／firmware 完成（workflow_run，依來源各自判斷，見 pipeline/dashboard/trigger.py）與手動（只能在 main 上跑）。不接 pull_request。
 # 權限照 D-012：頂層沒有權限；build 只讀（contents、issues、actions）；deploy 只有 pages: write、id-token: write，
 # 環境 github-pages（repo 設定：Pages 來源選 GitHub Actions；環境的 Deployment branches 只允許 main，見 docs/DASHBOARD.md 第 7 節）。
+# deploy 只在 repo 變數 DASHBOARD_PAGES=on 時跑：Pages 目前不開（使用者決定，2026-11-17），沒設時 deploy 是 skipped、不是紅色的失敗；
+# build 與 artifact 照舊（頁面可以從 artifact 下載預覽）。
 on:
   workflow_run:
     workflows: [watch, dev, release, firmware]
@@ -107,7 +109,7 @@ jobs:
 
   deploy:
     needs: build
-    if: needs.build.outputs.go == 'true'
+    if: needs.build.outputs.go == 'true' && vars.DASHBOARD_PAGES == 'on'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

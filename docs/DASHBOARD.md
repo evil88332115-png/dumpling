@@ -172,7 +172,11 @@
 3. 不設自訂網域。網址是 `https://<帳號>.github.io/dumpling/`，HTTPS 預設強制。
 4. repo 是公開的，Pages 也是公開的。內容只有已公開的資料，不另外加存取控制，公開 repo 也沒有這個選項。
 
-設定完成前 pages.yml 的 deploy job 會失敗，但不影響其他 workflow。build job 照樣可以產生 artifact，供人預覽。
+5. Settings → Secrets and variables → Actions → Variables：新增 repo 變數 `DASHBOARD_PAGES`，值是 `on`。
+
+**目前 Pages 不開**（使用者決定，2026-11-17）：公開的 Pages 等於第二個首頁，儀表板上有法規名稱與條號，和 D-067「首頁只描述功能」的方向不合。要開之前，先把儀表板的用語改成中性，再另外決定。
+
+pages.yml 的 deploy job 只在 `DASHBOARD_PAGES` 是 `on` 時跑。沒設（現在）時 deploy 是 skipped，不會在 Actions 留下紅色的失敗；build job 照樣產生 artifact，可以下載預覽。只設變數、沒開 Pages 時，deploy 會失敗（`Failed to create deployment (status: 404)`），所以第 1 步和第 5 步要一起做。
 
 ## 8. 搬到 GitLab Pages 要改哪裡
 
