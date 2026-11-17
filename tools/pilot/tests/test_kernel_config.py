@@ -1039,15 +1039,27 @@ def test_included_c_generator(tmp_path):
 
 
 def test_no_included_c_list_for_kernel_version_means_no_not_affected():
-    """#include 的 .c 清單只有 6.8：其他主.次版本（例如 5.15）不判 not_affected，說明寫出缺清單；6.8 照常。"""
+    """#include 的 .c 清單只有 5.15、6.1、6.8：其他主.次版本（例如 5.14）不判 not_affected，說明寫出缺清單；6.8 照常。"""
     assert kc.judge_cve(model(), ["drivers/foo/a.c"], set())[0] == "not_affected"
-    old = model(config=CONFIG.replace("Linux/arm64 6.8.12 Kernel", "Linux/arm64 5.15.0 Kernel"))
+    old = model(config=CONFIG.replace("Linux/arm64 6.8.12 Kernel", "Linux/arm64 5.14.0 Kernel"))
     d = old.obj_built("drivers/foo/a.o")
     assert d.value is False                                   # Makefile 的判斷不變
     dec, detail, _, _ = kc.judge_cve(old, ["drivers/foo/a.c"], set())
-    assert dec == "unknown" and "no list of #included .c files for kernel 5.15" in detail
+    assert dec == "unknown" and "no list of #included .c files for kernel 5.14" in detail
     assert kc.judge_cve(old, ["drivers/foo/always.c"], set())[0] == "affected"   # 有編照樣是 affected
     assert kc.major_minor("6.8.12-1021-tegra") == "6.8" and "6.8" in kc.included_c_versions()
+
+
+def test_included_c_list_5_15_loads_and_k1_judges():
+    """5.15 的清單（上游 v5.15.185 產生）存在、有出處；5.15 核心的 CVE 不再全部 unknown。"""
+    doc = json.loads((kc.INCLUDED_C_DATA / "kernel-included-c-5.15.json").read_text(encoding="utf-8"))
+    assert doc["schema"] == kc.INCLUDED_C_SCHEMA and doc["kernel"] == "5.15" and len(doc["files"]) > 100
+    assert doc["source"]["git_tag"] == "v5.15.185" and len(doc["source"]["git_commit"]) == 40 and doc["generator"].endswith("kernel_included_c.py")
+    assert {"5.15", "6.1", "6.8"} <= kc.included_c_versions()
+    m = model(config=CONFIG.replace("Linux/arm64 6.8.12 Kernel", "Linux/arm64 5.15.185 Kernel"))
+    assert kc.major_minor(m.kver_hdr) == "5.15"
+    assert kc.judge_cve(m, ["drivers/foo/a.c"], set())[0] == "not_affected"
+    assert kc.judge_cve(m, ["drivers/foo/always.c"], set())[0] == "affected"
 
 
 def test_rescan_provenance(tmp_path):

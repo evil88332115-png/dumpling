@@ -804,6 +804,8 @@ KVMULTI=0; KVARGS=(); KVACT=0; KVJ=(); KVAUTO=0; KVN=0; KJ_SKIP=0
 declare -A KJR_CF=() KJR_CS=() KJR_MF=() KJR_MS=()   # 每顆判定的核心的結果檔與狀態（kernel_versions.py --judged-result，schema /3 的 judged）
 # 核心建置紀錄（環境變數 KERNEL_BUILD_RECORD，選用）：只給 kernel_config.py（kernel_module_map.py 不讀）；不存在等問題由 kernel_config.py 記 GAP
 [ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+# 建置紀錄是自己用出貨原始碼重編的（環境變數 KERNEL_BUILD_RECORD_SELF_BUILT=1，選用）：給 kernel_config.py 的 --build-record-self-built
+[ "${KERNEL_BUILD_RECORD_SELF_BUILT:-}" = 1 ] && [ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC+=(--build-record-self-built)
 # 樹外模組的建置紀錄（環境變數 KERNEL_OOT_BUILD_RECORDS，選用；用冒號分隔多個資料夾）：給 kernel_config.py 的 --oot-build-record（可重複）。
 # 標頭檔只有在「核心與所有樹外 .ko 的紀錄都沒有列它」而且映像每個樹外 .ko 都有紀錄時，才不因為樹外模組而 unknown。需要 KERNEL_BUILD_RECORD。
 if [ -n "${KERNEL_OOT_BUILD_RECORDS:-}" ]; then
@@ -1036,6 +1038,7 @@ rm -f "$KBF"
 if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && [ -n "$KBUILD_PREFIX" ]; then
   kba=(--out "$KBF"); [ -n "${KERNEL_BOARD_OS_TXT:-}" ] && kba+=(--board-os-txt "$(readlink -m -- "$KERNEL_BOARD_OS_TXT")")
   [ -n "${KERNEL_BUILD_RECORD:-}" ] && kba+=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+  [ "${KERNEL_BUILD_RECORD_SELF_BUILT:-}" = 1 ] && [ -n "${KERNEL_BUILD_RECORD:-}" ] && kba+=(--build-record-self-built)
   r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_boot.py" --from "$KBUILD" --prefix "$KBUILD_PREFIX" "${kba[@]}" 2>&1)
   l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-boot\t')
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"

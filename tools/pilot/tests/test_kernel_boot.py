@@ -153,6 +153,18 @@ def test_build_info_sha_must_match_partition_image():
     assert bad["status"] == "ATTENTION" and "does not match kernel/Image" in bad["detail"] and bad["build_record"]["matches_rootfs_image"]
 
 
+def test_self_built_record_hash_mismatch_is_not_attention(tmp_path):
+    img = image(UTS_A)
+    imgs = kc.image_inputs(kc.collect(str(tkc.write_tar(tmp_path / "p.tbz2", members(img, img), mode="w:bz2")), f"{L4T}/rootfs", images=True)[0])
+    other = {"ab" * 32}
+    shipped = kb.evaluate(imgs, kc.config_diff, None, other)
+    assert shipped["status"] == "ATTENTION" and "may not describe the flashed kernel" in shipped["detail"]
+    none = kb.evaluate(imgs, kc.config_diff, None, other, False)          # K1 沒有確認 self_built：維持 ATTENTION
+    assert none["status"] == "ATTENTION"
+    own = kb.evaluate(imgs, kc.config_diff, None, other, True)
+    assert own["status"] == "OK" and "自編紀錄，映像雜湊本來就不同" in own["detail"] and "may not describe" not in own["detail"]
+
+
 def test_build_info_read_from_record_top_level(tmp_path):
     sha = "ab" * 32
     p = tkc.write_tar(tmp_path / "rec.tar", [("BUILD-INFO.txt", f"packed_utc=x\nimage=arch/arm64/boot/Image sha256={sha}\n".encode(), None),
@@ -243,6 +255,24 @@ def test_wizard_extracts_only_os_txt_from_board_tarball(tmp_path):
     assert out and UTS_A in out.read_text() and [p.name for p in (tmp_path / "o").iterdir()] == ["os.txt"]
     evil = tkc.write_tar(tmp_path / "board-test-y.tar.gz", [("../os.txt", b"x", None), ("os.txt", None, "/etc/passwd")], mode="w:gz")
     assert w.extract_board_os_txt([evil], tmp_path / "o2" / "os.txt") is None
+
+
+def test_k1_config_self_built_gate(tmp_path, capsys):
+    """--build-record-self-built 只有在 --k1-config 的 identity.result 是 self_built 時才降為註記；沒給 K1 結果 → 仍是 ATTENTION。"""
+    img = image(UTS_A)
+    mem = members(img, img)
+    rec = tkc.write_tar(tmp_path / "rec.tar", [("BUILD-INFO.txt", f"image=arch/arm64/boot/Image sha256={'ab' * 32}\n".encode(), None),
+                                                ("kernel/.config", b"CONFIG_A=y\n", None)])
+    k1 = tmp_path / "k1.json"
+    k1.write_text(json.dumps({"kernel": {"build_record": {"status": "OK", "identity": {"result": "self_built"}}}}))
+    base = ["--build-record", str(rec), "--build-record-self-built"]
+    rc, ln, doc = run(tmp_path / "a", mem, *base, capsys=capsys)
+    assert ln[1] == "ATTENTION"
+    rc, ln, doc = run(tmp_path / "b", mem, *base, "--k1-config", str(k1), capsys=capsys)
+    assert ln[1] == "OK" and "自編紀錄，映像雜湊本來就不同" in doc["detail"]
+    k1.write_text(json.dumps({"kernel": {"build_record": {"status": "OK", "identity": {"result": "matched"}}}}))
+    rc, ln, doc = run(tmp_path / "c", mem, *base, "--k1-config", str(k1), capsys=capsys)
+    assert ln[1] == "ATTENTION"
 
 
 def test_sca_scan_reads_k1_kernel_as_json_not_text(tmp_path):

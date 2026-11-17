@@ -5040,6 +5040,21 @@ def generate(project, scan, out, cfg, warnings, company=None, image_check=None, 
                                      "核心設定比對（K1）與模組對應（K2）的排除不套用到整個產品（沒有排除任何核心的列）"]
     # 刷機包有兩顆不同的核心（scan/kernel-boot.json，C-kernel-boot）：資訊性 ATTENTION／GAP 進設定警告（報告包的警告區也會顯示）
     kboot = load_json(paths["scan/kernel-boot.json"])
+    # 核心建置紀錄是自編（用出貨原始碼重編，不是出貨那次建置）：讀者要知道，進設定警告（報告包的警告區也會顯示）
+    _kbr = ((kcfg.get("kernel") or {}).get("build_record") if isinstance(kcfg, dict) and isinstance(kcfg.get("kernel"), dict) else None)
+    if isinstance(_kbr, dict) and _kbr.get("self_built") and _kbr.get("status") == "OK":
+        _id, _sc = (_kbr.get("identity") or {}), (_kbr.get("self_built_source_check") or {})
+        _sh = _sc.get("source_hashes") or {}
+        warnings.append("建置紀錄：自編建置紀錄（.config 已核對與出貨核心相同；用出貨原始碼重編，不是出貨那次建置；"
+                        f"版本字串已核對項目：{'、'.join(_id.get('compared') or []) or '無'}，其中只有編譯者／主機與建置序號、時間不同；"
+                        f".cmd 引用的原始檔路徑 {_sc.get('checked', 0)} 個都在出貨原始碼樹裡"
+                        + (f"，內容雜湊比對 {_sh.get('compared')}／{_sh.get('listed')} 個相同、略過 {_sh.get('skipped')} 個"
+                           if _sc.get("contents_compared") else "，未比對檔案內容")
+                        + "）；核心 CVE 的「沒編進核心」判定依這份自編紀錄")
+    elif isinstance(_kbr, dict) and _kbr.get("identity_incomplete") and _kbr.get("status") == "OK":
+        warnings.append("建置紀錄沒有完整識別檔，無法確認是出貨那次建置還是自編（只靠 kernel.release、.config 與模組清單採用）")
+    elif isinstance(_kbr, dict) and (_kbr.get("self_built") or _kbr.get("self_built_requested")) and _kbr.get("status") != "OK":
+        warnings.append(f"建置紀錄：自編，但未採用（{_kbr.get('status')}：{str(_kbr.get('reason') or '')[:200]}）；核心 CVE 照舊依 Makefile 判定")
     if isinstance(kboot, dict) and kboot.get("schema") == "sca-center-kernel-boot/1" and kboot.get("status") in ("ATTENTION", "GAP"):
         warnings = list(warnings) + [f"C-kernel-boot {kboot['status']}：{str(kboot.get('detail'))[:500]}"]
     # 批次規則（CRA/Config/vex-rules.json）最後才套用；範本的 {kernel_fix_all} 是每個核心元件全部修好所需的最低版本（8.7 節同一個值）。

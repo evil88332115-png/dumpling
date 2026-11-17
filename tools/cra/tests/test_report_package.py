@@ -732,6 +732,15 @@ def test_inputs_check_unconfirmed_required_is_warning_not_gap(tmp_path):
     assert "人工確認項" not in txt
 
 
+def test_inputs_check_self_built_flag_alone_adds_no_duplicate_warning(tmp_path):
+    chk = tmp_path / "ic.json"
+    write_json(chk, {"build_record_self_built": True, "inputs": []})
+    out = tmp_path / "out"
+    rp.build(project(tmp_path, MIX), out, tmp_path / "nosuch", allow_tmp=True, inputs_check=chk)
+    cells = [c for sh in sheets(out / "交給PM" / "漏洞清單.xlsx").values() for r in sh for c in r]
+    assert not any("建置紀錄：自編" in str(c) for c in cells)       # 警告只由 cra_report（讀 kernel-config.json）寫一次
+
+
 def test_inputs_check_step_gap_shows_in_report(tmp_path):
     """精靈附加步驟（tee-source 等）沒做成：進設定警告與「未產生的項目」（GAP），found 的不出現。"""
     p = project(tmp_path, MIX, with_all=True)

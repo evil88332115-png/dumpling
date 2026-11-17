@@ -117,6 +117,12 @@ Ubuntu 還沒修的約 3,400 個。很多是產品核心根本沒編進去的驅
   建置的身分（record_identity）：紀錄的 include/config/kernel.release、include/generated/utsversion.h、compile.h 和燒錄的 Image
   （刷機包的 kernel/Image，沒有時 rootfs 的 /boot/Image）的 linux_banner 逐項核對，對不上 → GAP；沒有識別檔或讀不到 banner →
   identity.result not_tied（照舊採用，limitations 與說明列註明「沒有和映像綁定」）。
+  自編模式（--build-record-self-built；精靈 --build-record-self-built、環境變數 KERNEL_BUILD_RECORD_SELF_BUILT=1）：紀錄是我們用出貨原始碼重編的，
+  UTS_VERSION／編譯者與主機／編譯器／時間和燒錄的 Image 不同是預期的，不拒收；仍要求 kernel.release 等於燒錄的核心、.config 相同（或只差工具鏈）、
+  紀錄完整，其餘驗證照舊。identity.result self_built（image_banner、record_identity、differences、config_compare 一併記錄），
+  limitations 加「建置紀錄為自編（用出貨原始碼重編），與出貨核心設定相同；不是出貨那次建置」。.config 有非工具鏈差異 → GAP。沒給旗標 → 行為不變。
+  樹外模組紀錄的核對（srcversion、ELF 區段）在自編模式下規則不變：srcversion 由原始碼算出，同一份原始碼重編會相同；沒有 srcversion 時的 ELF 區段
+  比對若因工具鏈不同而對不上，該模組不採用（偏向 unknown，不會偏向 not_affected）。
   絕對路徑：source_ 推出的原始碼樹前綴（O= 建置；可以有好幾個；只認絕對路徑或只有 ../ 的前綴）去掉後對到樹；其他對不上樹的絕對路徑（in-tree 建置裡
   $(abspath …) 的路徑，例如 arm64 vDSO 的 lib/vdso/gettimeofday.c；O= 的符號連結路徑與實際路徑不同；系統標頭）不丟掉：
   任何一個這種路徑以 /<檔案> 結尾，那個檔案就算有編（只會偏向 affected；unmapped_absolute_paths 記數量，路徑本身不寫出）。
@@ -255,7 +261,7 @@ STABLE_GIT_LIMITATION = (
     "unknown (kernel.stable_git.kept_not_proven_absent counts those files and CVEs).")
 LIMITATIONS = [
     "C files #included by other kernel sources are never judged not_affected; the list is generated from upstream sources per "
-    "kernel version (data/kernel-included-c-<major.minor>.json; currently 6.1 and 6.8) and does not include vendor-added #include "
+    "kernel version (data/kernel-included-c-<major.minor>.json; currently 5.15, 6.1 and 6.8) and does not include vendor-added #include "
     "of .c files. Without a list for the kernel's major.minor version no CVE is judged not_affected.",
     "Assembly files (.S) #included by another .S file are not covered by the list.",
     "Conditional Makefile sections (ifeq/ifdef) are treated as unknown; they can only turn 'affected' into 'unknown', never into 'not_affected'.",
@@ -2652,6 +2658,21 @@ RECORD_NOT_TIED_LIMITATION = (
     "banner could not be read; it was accepted because its .config and module lists match. A record of another build of the same "
     "version and configuration (for example with other patches) would also pass: keep include/generated/ and "
     "include/config/kernel.release in the record.")
+SELF_BUILT_NOTE = ("自編建置紀錄（.config 已核對與出貨核心相同）。建置紀錄為自編（用出貨原始碼重編），與出貨核心設定相同；不是出貨那次建置 "
+                   "(self-built build record: .config verified identical to the shipped kernel's, kernel release and compiler equal; "
+                   "UTS_VERSION build number/time and compile host differ because it is not the build that was shipped).")
+SELF_BUILT_LIMITATION = (
+    SELF_BUILT_NOTE + " Every non-generated source file that the record's .cmd files name (source_) was found in the shipped source tree "
+    "by path; the file contents are NOT compared (the record has no SOURCE-HASHES), so a record built from a modified tree with the same "
+    "file names would pass.")
+SELF_BUILT_HASHED_LIMITATION = (
+    SELF_BUILT_NOTE + " Every non-generated source file that the record's .cmd files name was found in the shipped source tree by path, and "
+    "the content hashes (SOURCE-HASHES) are identical: compared {compared} of {listed} listed, skipped {skipped} (not in the tree, a link, "
+    "too large or unreadable).")
+SELF_BUILT_INCOMPLETE_IDENTITY_LIMITATION = (
+    "建置紀錄沒有完整識別檔，無法確認是出貨那次建置還是自編 (the build record has no complete build-identity files (version string and "
+    "compiler could not both be compared with the Image's banner), so it cannot be told whether it is the build that was shipped or a "
+    "self-built rebuild; it was accepted on kernel.release, .config and module lists only).")
 RECORD_NO_VERSION_LIMITATION = (
     "The kernel version being judged is not known (no module directory or --kernel-version): include/config/kernel.release "
     "was not compared (kernel_release_checked is false).")
@@ -3284,11 +3305,26 @@ def header_defines(data):
     return out
 
 
-def record_identity(got, info):
+UTS_DATE_RE = re.compile(r"\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\d{4}\s*$")
+
+
+def uts_norm(v):
+    """UTS_VERSION（"#4 SMP PREEMPT Thu Aug  6 11:33:36 CST 2026"）去掉建置序號與日期時間 → "SMP PREEMPT"；格式看不懂 → None。"""
+    m = re.match(r"^#\d+\s+(.*)$", (v or "").strip())
+    if not m:
+        return None
+    rest = UTS_DATE_RE.sub("", m.group(1)).strip()
+    return rest if rest and rest != m.group(1).strip() else None
+
+
+def record_identity(got, info, self_built=False):
     """紀錄的建置識別檔（kernel.release、utsversion.h、compile.h）和映像的 Image banner（linux_banner：
     "Linux version <release> (<by>@<host>) (<compiler>) <version>"）核對 → (紀錄, GAP 的原因或 None)。
     result：matched（有識別檔、banner 讀得到、每一項都對上）／not_tied（沒有識別檔，或讀不到 banner：照舊採用，limitations 註明）。
-    對不上 → GAP（不是出貨的那一次建置）。"""
+    對不上 → GAP（不是出貨的那一次建置）。
+    self_built（--build-record-self-built）：先做上面出貨建置的嚴格核對；matched／not_tied 照舊（不標自編）；只有對不上時才看自編條件：
+    release、編譯器相同、UTS_VERSION 去掉序號與日期時間後相同（兩邊都要看得懂），只有編譯者／主機與序號、時間不同 → result self_built，
+    兩邊的 banner 與不同的項目記在紀錄裡；其他 → mismatch（GAP）。.config 與原始碼的核對由 check_build_record 做。"""
     imgs = getattr(info, "images", None) or {}
     prim = primary_image(imgs)
     banner = getattr(prim, "banner", None) if prim is not None else None
@@ -3304,8 +3340,11 @@ def record_identity(got, info):
     files = [n for n in ("kernel.release", "utsversion.h", "compile.h") if got.get(n) is not None]
     rec = {"files": files, "image": (prim.path if prim is not None else None), "banner_read": banner is not None,
            "compared": sorted(want) if banner is not None else [], "result": "not_tied"}
+    if self_built:
+        rec["record_identity"] = {k: want[k] for k in sorted(want)}
+        rec["image_banner"] = banner
     if not want or banner is None:
-        return rec, None
+        return rec, None                    # not_tied：沒有識別檔或讀不到 banner → 照舊（出貨紀錄的舊行為），不走自編條件
     bad = []
     if "release" in want and not banner.startswith(f"Linux version {want['release']} ("):
         bad.append("release")
@@ -3315,11 +3354,28 @@ def record_identity(got, info):
         bad.append("compiler")
     if "version" in want and not banner.rstrip().endswith(" " + want["version"]):
         bad.append("version (UTS_VERSION)")
-    if bad:
+    if not bad:
+        rec["result"] = "matched"            # 出貨那次建置的嚴格核對全部對上：就是出貨的建置，不標自編（旗標有沒有給都一樣）
+        return rec, None
+    why_ship = (f"the record's build-identity files do not match the version banner of the image's kernel ({prim.path}): "
+                f"{', '.join(bad)} differ: not the build that was shipped")
+    if not self_built:
         rec["result"] = "mismatch"
-        return rec, (f"the record's build-identity files do not match the version banner of the image's kernel ({prim.path}): "
-                     f"{', '.join(bad)} differ: not the build that was shipped")
-    rec["result"] = "matched"
+        return rec, why_ship
+    # 只有嚴格核對對不上時才走自編條件（--build-record-self-built）：kernel.release、編譯器、UTS_VERSION 去掉建置序號與日期時間後
+    # 的其餘部分（SMP／PREEMPT… 旗標）都要和映像相同，三項都要有可比的值；只有編譯者／主機與建置序號、時間可以不同。看不懂就不採用。
+    m = re.search(r" (#\d+ .*)$", banner)
+    img_uts = m.group(1) if m else None
+    nv, ni = uts_norm(want.get("version")), uts_norm(img_uts)
+    missing = [k for k in ("release", "compiler", "version") if k not in want]
+    if missing or "release" in bad or "compiler" in bad or nv is None or ni is None or nv != ni:
+        rec["result"] = "mismatch"
+        reason = (f"missing {', '.join(missing)} in the record" if missing else "kernel.release differs" if "release" in bad
+                  else "the compiler differs" if "compiler" in bad else "the UTS_VERSION flags cannot be compared or differ "
+                  f"({nv or '?'} vs {ni or '?'})")
+        return rec, f"self-built conditions not met ({reason}); strict check: {why_ship}"
+    rec["result"] = "self_built"
+    rec["differences"] = bad
     return rec, None
 
 
@@ -3414,14 +3470,115 @@ def build_info_sha256s(rec):
     return out
 
 
-def check_build_record(rec, info, model, mods):
+SOURCE_HASHES_NAME = "SOURCE-HASHES"
+MAX_HASH_FILE = 8 << 20
+
+
+def record_toplevel_text(rec, name, limit=8 << 20):
+    """BuildRecord 根目錄的小檔（SOURCE-HASHES）：tar 內最上層（至多一層資料夾），或資料夾紀錄自己的根目錄一般檔案（不跟隨連結、不往上一層找）。"""
+    texts = [v for k, v in rec.files.items() if len(k) <= 2 and k[-1] == name]
+    path = getattr(rec, "path", None)
+    if not texts and path and os.path.isdir(path):
+        f = os.path.join(path, name)
+        try:
+            if stat.S_ISREG(os.lstat(f).st_mode) and os.lstat(f).st_size <= limit:
+                with flash_package().open_nofollow(f) as fh:
+                    return fh.read(limit)
+        except OSError:
+            pass
+    return texts[0] if texts else None
+
+
+def compare_source_hashes(text, info, prefixes):
+    """SOURCE-HASHES（sha256sum 格式：<64 hex>  <路徑>；pack-build-record.sh 寫，只含 .cmd 引用的樹內檔案）抽樣對出貨原始碼樹的檔案內容。
+    → {present, listed, compared, mismatched, examples, error}。路徑對不到樹或是 kbuild 產生的檔案 → 略過（路徑那一關已核對）。"""
+    res = {"present": text is not None, "listed": 0, "compared": 0, "skipped": 0, "mismatched": 0, "examples": [], "error": None}
+    if text is None:
+        return res
+    root = getattr(info, "source_tree_root", None)
+    names = getattr(info, "tree_names", None)
+    ents = {}
+    for l in text.decode("utf-8", "replace").splitlines():
+        m = re.match(r"^([0-9a-f]{64})[ \t]+\*?(.+)$", l)
+        if not m:
+            continue
+        pth = record_norm(m.group(2).strip(), prefixes)
+        if pth is None or GENERATED_SOURCE_RE.search(pth):
+            continue
+        ents[pth] = m.group(1)
+    res["listed"] = len(ents)
+    if not root or names is None:
+        res["error"] = "no shipped source tree to compare the record's SOURCE-HASHES with"
+        return res
+    keys = sorted(k for k in ents if k in names)
+    fp = flash_package()
+    for k in keys:
+        f = os.path.join(root, *k.split("/"))
+        try:
+            st = os.lstat(f)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_HASH_FILE:
+                continue                    # 連結、特殊檔案、太大：不跟隨、不比（略過的數量記在 skipped）
+            h = hashlib.sha256()
+            with fp.open_nofollow(f) as fh:
+                for b in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(b)
+        except OSError:
+            continue
+        res["compared"] += 1
+        if h.hexdigest() != ents[k]:
+            res["mismatched"] += 1
+            if len(res["examples"]) < 10:
+                res["examples"].append(k)
+    res["skipped"] = res["listed"] - res["compared"]        # 不在樹裡、連結、太大、讀不到
+    return res
+
+
+# kbuild 在建置時產生、所以不在出貨原始碼樹裡的「原始檔」（.cmd 的 source_ 會寫到它們）。依 kbuild 的規則：
+#   *.mod.c（modpost 的模組 stub）、*.asn1.c（asn1_compiler）、*.dtb.S／*.dtbo.S（dtb 轉組合語言）、*.gen.S（firmware 轉檔）、
+#   隱藏檔名（.vmlinux.export.c 等 kbuild 內部產物）、lib/raid6/ 的 int*／neon*／altivec*／vpermxor*／tables（unroll.awk／mktables 產生）、
+#   drivers/video/logo/logo_*_clut224.c 等（pnmtologo）、consolemap_deftbl.c（conmakehash）、net/wireless/shipped-certs.c（genc）、defkeymap.c（loadkeys）、arch/*/crypto/*-core.S（perlasm）、arm64 nvhe hyp-reloc.S（gen-hyprel）。
+#   （清單來自實測：.cmd 的 source_ 有近千個產生檔不在出貨樹；缺的非產生檔 → GAP。）
+GENERATED_SOURCE_RE = re.compile(
+    r"(?:^|/)[^/]*\.mod\.c$|\.asn1\.c$|\.dtbo?\.S$|\.gen\.S$|(?:^|/)\.[^/]+$|"
+    r"^lib/raid6/(?:int|neon|altivec|vpermxor)\d+\.c$|^lib/raid6/tables\.c$|"
+    r"^drivers/video/logo/logo_[^/]+_(?:clut224|vga16|mono|gray256)\.c$|^drivers/tty/vt/consolemap_deftbl\.c$|"
+    r"^net/wireless/shipped-certs\.c$|^drivers/tty/vt/defkeymap\.c$|^arch/[^/]+/crypto/[^/]+-core\.S$|^arch/arm64/kvm/hyp/nvhe/hyp-reloc\.S$|^certs/(?:x509_certificate_list|system_certificates\.S)$")
+
+
+def self_built_source_check(paths, info):
+    """自編模式：紀錄 .cmd 的 source_ 路徑（已對到樹內相對路徑）除了 kbuild 產生的檔案之外，都要在出貨的原始碼樹（--source-tree）裡。
+    只比路徑，不比內容（紀錄沒有內容或雜湊）。→ {checked, generated_exempt, missing, examples, error, contents_compared: False}。"""
+    sc = {"checked": 0, "generated_exempt": 0, "missing": 0, "examples": [], "error": None, "contents_compared": False}
+    names = getattr(info, "tree_names", None)
+    if not getattr(info, "source_tree", None) or names is None:
+        sc["error"] = ("there is no shipped source tree to compare the record's source files with (--source-tree / --kernel-source), so the "
+                       "record cannot be tied to the shipped source")
+        return sc
+    miss = []
+    for p, (_t, how) in paths.items():
+        if how != "source":
+            continue
+        if GENERATED_SOURCE_RE.search(p):
+            sc["generated_exempt"] += 1
+        elif p in names:
+            sc["checked"] += 1
+        else:
+            miss.append(p)
+    sc["missing"] = len(miss)
+    sc["examples"] = sorted(miss)[:10]
+    return sc
+
+
+def check_build_record(rec, info, model, mods, self_built=False):
     """讀進來的 BuildRecord → (kernel.build_record 的紀錄, RecordJudge 或 None)。任何一項不成立 → status GAP（reason），
     不用這份紀錄（照舊用 Makefile 的判定）。"""
-    out = {"source": rec.label, "status": "GAP", "reason": None, "root": None, "config_sha256": None, "config_compare": None,
+    out = {"source": rec.label, "status": "GAP", "reason": None, "self_built_requested": bool(self_built), "root": None, "config_sha256": None, "config_compare": None,
            "kernel_release": None, "kernel_release_checked": False, "cmd_files": 0, "object_cmd_files": 0, "host_cmd_files": 0,
            "closure": None, "paths": 0, "unmapped_absolute_paths": 0, "source_tree_prefixes": 0,
            "rejected_members": rec.rejected, "ignored_links": rec.ignored_links, "out_of_tree_modules": None,
            "limitations": list(BUILD_RECORD_LIMITATIONS)}
+
+    hash_gap = None
 
     def gap(why):
         out["reason"] = why
@@ -3434,9 +3591,12 @@ def check_build_record(rec, info, model, mods):
         # 板子跑的是 rootfs/boot/Image（C-kernel-boot）：紀錄要和它同一次建置才能用；BUILD-INFO.txt 的 sha256 對不上（或沒有）→ 不採用
         shas = build_info_sha256s(rec)
         if imgs["rootfs"].sha256 not in shas:
-            return gap("the board runs rootfs/boot/Image (sha256 " + str(imgs["rootfs"].sha256)[:12] + "...), which is not the kernel this build "
-                       "record describes (BUILD-INFO.txt image sha256 " + (", ".join(x[:12] + "..." for x in sorted(shas)) or "not found") + "): "
-                       "the record's exclusions do not apply to the running kernel")
+            msg = ("the board runs rootfs/boot/Image (sha256 " + str(imgs["rootfs"].sha256)[:12] + "...), which is not the kernel this build "
+                   "record describes (BUILD-INFO.txt image sha256 " + (", ".join(x[:12] + "..." for x in sorted(shas)) or "not found") + "): "
+                   "the record's exclusions do not apply to the running kernel")
+            if not self_built:
+                return gap(msg)
+            hash_gap = msg          # 自編紀錄的映像雜湊本來就不同：等身分核對的結果（只有走自編條件才放行）
     if rec.needed_links.n:
         return gap(f"{rec.needed_links.n} .cmd or list file(s) in the record are links or special files (not followed): "
                    + rec.needed_links.text())
@@ -3518,12 +3678,25 @@ def check_build_record(rec, info, model, mods):
             out["limitations"].append(RECORD_RELEASE_LIMITATION)
         elif not info.kernel_version:
             out["limitations"].append(RECORD_NO_VERSION_LIMITATION)
-    ident, why = record_identity(got, info)
+    ident, why = record_identity(got, info, self_built)
     out["identity"] = ident
+    out["self_built"] = False
     if why:
         return gap(why)
-    if ident["result"] != "matched":
-        out["limitations"].append(RECORD_NOT_TIED_LIMITATION)
+    if ident["result"] == "self_built":
+        self_built = True
+        ident["config_compare"] = out["config_compare"]["result"]
+        out["self_built"] = True
+        out["limitations"].append(SELF_BUILT_LIMITATION)          # 內容有沒有比對過，等 source check 之後再換成 HASHED 版
+    else:
+        self_built = False                  # 出貨建置的核對過了（matched／not_tied）：舊行為
+        if hash_gap:
+            return gap(hash_gap)
+        if ident["result"] != "matched":
+            out["limitations"].append(RECORD_NOT_TIED_LIMITATION)
+        if out["self_built_requested"] and not {"version", "compiler"} <= set(ident.get("compared") or []):
+            out["identity_incomplete"] = True        # 自編旗標開著，但識別檔不全：不能無聲當成「出貨那次」
+            out["limitations"].append(SELF_BUILT_INCOMPLETE_IDENTITY_LIMITATION)
     prefixes = sorted((p for p in r["prefix"] if p), key=lambda p: (-len(p), p))
     paths, suffixes, unmapped = {}, {}, 0
     for raw, v in r["paths"].items():
@@ -3542,6 +3715,29 @@ def check_build_record(rec, info, model, mods):
         elif p not in paths or (v[1] == "source" and paths[p][1] != "source"):
             paths[p] = v
     out.update(paths=len(paths), unmapped_absolute_paths=unmapped, source_tree_prefixes=len(prefixes))
+    if self_built:
+        sc = self_built_source_check(paths, info)
+        out["self_built_source_check"] = sc
+        if sc["error"]:
+            out["self_built"] = False
+            return gap("self-built record: " + sc["error"])
+        sh = compare_source_hashes(record_toplevel_text(rec, SOURCE_HASHES_NAME), info, prefixes)
+        sc["source_hashes"] = sh
+        if sh["present"] and sh["mismatched"]:
+            out["self_built"] = False
+            return gap(f"self-built record: {sh['mismatched']} of {sh['compared']} sampled source file(s) differ in content from the shipped "
+                       f"source tree (SOURCE-HASHES), for example {', '.join(sh['examples'][:5])}: not built from the same source")
+        if sh["present"] and sh["error"]:
+            out["self_built"] = False
+            return gap("self-built record: " + sh["error"])
+        sc["contents_compared"] = bool(sh["present"] and sh["compared"])
+        if sc["contents_compared"] and SELF_BUILT_LIMITATION in out["limitations"]:
+            out["limitations"][out["limitations"].index(SELF_BUILT_LIMITATION)] = SELF_BUILT_HASHED_LIMITATION.format(
+                compared=sh["compared"], listed=sh["listed"], skipped=sh["skipped"])
+        if sc["missing"]:
+            out["self_built"] = False
+            return gap(f"self-built record: {sc['missing']} source file(s) named by the record's .cmd files are not in the shipped source tree "
+                       f"(not a generated file; the record may come from another tree), for example {', '.join(sc['examples'][:5])}")
     order = set(rkeys.get("modules.order") or ())
     # 映像 kernel/ 底下有 .ko 不在紀錄的 modules.order：不拒收（modules.order／modules.builtin 與映像相同、身分相符時，多出的模組是出貨時
     # 另外放進映像的）。這些模組的檔案不判沒編（RecordJudge.extra_objs），找不到來源的標 GAP，列在 image_modules_not_in_record
@@ -3584,7 +3780,7 @@ def attach_oot_records(brec, brecord, paths, info, mods):
     或建置紀錄（--build-record）本身不能用 → 不採用，標頭檔照舊因為樹外模組而 unknown。brec 是 None（建置紀錄 GAP）時只記原因。"""
     mod = kernel_oot_record()
     me = sys.modules[__name__]
-    sm = {"records": [], "image_modules": None, "covered": 0, "uncovered": 0, "uncovered_examples": [], "identity": {},
+    sm = {"self_built": bool(brecord.get("self_built")), "records": [], "image_modules": None, "covered": 0, "uncovered": 0, "uncovered_examples": [], "identity": {},
           "used": False, "reason": None}
     brecord["out_of_tree_records"] = sm
     recs = []
@@ -3665,6 +3861,8 @@ def attach_oot_records(brec, brecord, paths, info, mods):
         # 就是那一個建置，其他候選不相干；沒有任何內容驗證過的候選，而有候選對不上 → 整個模組不採用。只比名稱的候選不抵銷對不上的候選。
         if mismatch and best not in ("srcversion", "sections", "sections_masked"):
             best, why = None, mismatch
+        if best == "name_only" and brecord.get("self_built"):
+            best, why = None, "self-built record: the module is matched by name only (no .ko of it in the record to verify by srcversion or ELF sections)"
         if best is None:
             unc.append((k, why))
         else:
@@ -3994,6 +4192,7 @@ def apply_source_tree(info, tree):
     n_mk = sum(1 for k in files if k and k[-1] in ("Makefile", "Kbuild"))
     info.files = files
     info.tree_names = tree_names(col, {base: ()})
+    info.source_tree_root = root                  # 自編紀錄的 SOURCE-HASHES 抽樣比對要讀樹裡的檔案內容（不寫進輸出）
     info.tree_complete = info.tree_names is not None                   # 名稱超過上限（None）就不算完整
     info.tree_links = frozenset("/".join(k[len(base):]) for k in col.links if k[:len(base)] == base)     # 樹裡的符號連結（沒有跟隨）
     info.source_tree = {"type": "source-tree", "path_label": os.path.basename(root.rstrip("/")) or "(root)",
@@ -4385,7 +4584,8 @@ def assess(a, max_age):
     brec = None
     if getattr(a, "build_record", None):
         # 建置紀錄：驗證過才用（check_build_record）；GAP 時照舊只用 Makefile 的判定，kernel.build_record 記原因
-        brecord, brec = check_build_record(read_build_record(a.build_record), info, model, mods)
+        brecord, brec = check_build_record(read_build_record(a.build_record), info, model, mods,
+                                           bool(getattr(a, "build_record_self_built", False)))
         out["kernel"]["build_record"] = brecord
         if getattr(a, "oot_build_record", None):
             attach_oot_records(brec, brecord, a.oot_build_record, info, mods)
@@ -4503,11 +4703,11 @@ def assess(a, max_age):
     if brec is not None:
         br = out["kernel"]["build_record"]
         br.update(counts_without_record=base_counts, decision_changes=dict(sorted(changes.items())), file_judgements=dict(brec.stats))
-        rsuffix = (f"；建置紀錄 {br['source']} 採用（.cmd {br['cmd_files']} 個、物件 {br['object_cmd_files']} 個；和只用 Makefile 相比："
+        rsuffix = (f"；建置紀錄 {br['source']} 採用" + ("（自編：用出貨原始碼重編，不是出貨那次建置）" if br.get("self_built") else "") + f"（.cmd {br['cmd_files']} 個、物件 {br['object_cmd_files']} 個；和只用 Makefile 相比："
                    + ("、".join(f"{k} {v}" for k, v in sorted(changes.items())) or "判定沒有改變")
                    + (f"；建置紀錄與 Makefile 矛盾的檔案 {brec.stats['conflict_makefile_built']} 個，判 unknown" if brec.stats["conflict_makefile_built"] else "")
                    + "）")
-        if (br.get("identity") or {}).get("result") != "matched":
+        if (br.get("identity") or {}).get("result") not in ("matched", "self_built"):
             rsuffix += ("；建置紀錄沒有和映像綁定（.config 與模組清單相符；沒有建置識別檔"
                         + ("" if not (br.get("identity") or {}).get("files") else "或讀不到 Image 的版本字串") + "）")
     elif (out["kernel"].get("build_record") or {}).get("status") == "GAP":
@@ -4625,6 +4825,8 @@ def main(argv=None):
     ap.add_argument("--mirror")
     ap.add_argument("--max-age-days", type=float, default=None)
     ap.add_argument("--build-record")
+    ap.add_argument("--build-record-self-built", action="store_true",
+                    help="the build record was rebuilt by us from the shipped source (not the shipped build): accept it when kernel.release and .config match")
     ap.add_argument("--oot-build-record", action="append", default=[])
     ap.add_argument("--stable-git")
     ap.add_argument("--cves-origin")
@@ -4706,7 +4908,8 @@ def main(argv=None):
     if out is not None and a.build_record and "build_record" not in out["kernel"]:
         # 給了建置紀錄、但這個階段沒有判定（GAP）：沒有讀紀錄
         out["kernel"]["build_record"] = {"source": os.path.basename(os.path.normpath(a.build_record)) or a.build_record,
-                                         "status": "NOT_RUN", "reason": "no CVE was judged (the stage is GAP), so the record was not read"}
+                                         "status": "NOT_RUN", "reason": "no CVE was judged (the stage is GAP), so the record was not read",
+                                         "self_built_requested": bool(getattr(a, "build_record_self_built", False))}
     if out is not None:
         out["status"], out["detail"] = st, detail
         try:
