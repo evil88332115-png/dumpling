@@ -78,12 +78,16 @@ jobs:
             [ "${PIPESTATUS[0]}" = 0 ] || { echo "offline-scan: FAIL（tools/mirror/$k.sh 失敗）"; exit 1; }
           done
           du -sh "$root"/*
+          # artifact 不收含冒號的檔名（Grype DB 的壓縮檔名帶時間 …T00:22:24Z…），整個根目錄打包成一個 tar 再上傳
+          mkdir -p "$RUNNER_TEMP/mirror-tar"
+          tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/mirror-tar/internal-mirror.tar" mirror
+          ls -l "$RUNNER_TEMP/mirror-tar"
 
       - name: artifact（內部鏡像快照；只保留 1 天）
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: internal-mirror
-          path: ${{ runner.temp }}/mirror
+          path: ${{ runner.temp }}/mirror-tar/internal-mirror.tar
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -159,7 +163,7 @@ jobs:
             sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true && echo "bubblewrap: OK"
-          strace -V | head -n 1
+          strace -V | sed -n 1p
 
       - name: 驗證、fetch、assemble（可以連網）
         run: |
@@ -171,7 +175,21 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: internal-mirror
-          path: ${{ runner.temp }}/mirror
+          path: ${{ runner.temp }}/mirror-tar
+
+      - name: 解開內部鏡像快照（到 $RUNNER_TEMP/mirror）
+        run: |
+          # 只收 mirror/ 底下的一般檔案與資料夾（連結、裝置一律不收）。不用 grep -q：它提早結束時前面的指令收到 SIGPIPE，
+          # 在 pipefail 下整條變成失敗、if 反而判成「沒問題」
+          t=$RUNNER_TEMP/mirror-tar/internal-mirror.tar
+          badtype=$(tar -tvf "$t" | awk 'substr($1,1,1) != "-" && substr($1,1,1) != "d"' | wc -l)
+          badpath=$(tar -tf "$t" | awk '!/^mirror\//' | wc -l)
+          if [ "$badtype" != 0 ] || [ "$badpath" != 0 ]; then
+            echo "offline-scan: FAIL（內部鏡像快照裡有一般檔案與資料夾以外的東西 $badtype 個，或路徑不在 mirror/ 底下 $badpath 個）"; exit 1
+          fi
+          tar -C "$RUNNER_TEMP" --no-same-owner --no-same-permissions -xf "$t"
+          rm -rf "$RUNNER_TEMP/mirror-tar"
+          du -sh "$DUMPLING_MIRROR_ROOT"/*
 
       - name: 先 pull DT 的映像（scan 期間不該再有映像下載）
         run: |
