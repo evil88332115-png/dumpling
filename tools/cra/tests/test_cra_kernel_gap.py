@@ -315,9 +315,11 @@ KEPT = ("Kernel configuration check: 7 file(s) changed by the fix commits of 3 C
         "they were kept and judged as unknown, not as not built.")
 
 
-def kept_cfg(value):
+def kept_cfg(value, cves=3):
+    """kept_not_proven_absent 是保留的檔案數（整數），kept_not_proven_absent_cves 是 CVE 數（WP1 S1；以前是 {"files": n, "cves": m}）。"""
     c = kcfg(0)
-    c["kernel"] = {"stable_git": {"kept_not_proven_absent": value}} if value is not ABSENT else {"stable_git": {}}
+    c["kernel"] = ({"stable_git": {"kept_not_proven_absent": value, "kept_not_proven_absent_cves": cves}}
+                   if value is not ABSENT else {"stable_git": {}})
     return c
 
 
@@ -327,21 +329,30 @@ ABSENT = object()
 @pytest.mark.parametrize("stage", ["OK", "GAP"])
 def test_kept_not_proven_absent_sentence_when_files_positive(tmp_path, stage):
     scan = kernel_scan(tmp_path / "s", stages={"C-kernel-coverage": stage})
-    write_json(scan / "scan" / "kernel-config.json", kept_cfg({"files": 7, "cves": 3}))
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg(7, 3))
     r, s, reports = run(make_project(tmp_path / "p"), scan)
     for text in (section_87((reports / "risk-assessment.md").read_text(encoding="utf-8")), (reports / "kernel-vulnerabilities.md").read_text(encoding="utf-8")):
         assert KEPT in text
         assert len(text.split(KEPT)) == 2
 
 
-@pytest.mark.parametrize("name,value", [("absent field", ABSENT), ("files zero", {"files": 0, "cves": 0}), ("files zero with cves", {"files": 0, "cves": 4}),
-                                        ("bad type", {"files": "7", "cves": 3}), ("bool", {"files": True, "cves": 1}), ("not a dict", 7)])
-def test_kept_not_proven_absent_not_written_otherwise(tmp_path, name, value):
+@pytest.mark.parametrize("name,value,cves", [("absent field", ABSENT, 3), ("files zero", 0, 0), ("files zero with cves", 0, 4),
+                                             ("bad type", "7", 3), ("bool", True, 1), ("cves missing", 7, None), ("cves bad type", 7, "3"),
+                                             ("cves negative", 7, -1), ("legacy dict with zero files", {"files": 0, "cves": 4}, None)])
+def test_kept_not_proven_absent_not_written_otherwise(tmp_path, name, value, cves):
     scan = kernel_scan(tmp_path / "s")
-    write_json(scan / "scan" / "kernel-config.json", kept_cfg(value))
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg(value, cves))
     r, s, reports = run(make_project(tmp_path / "p"), scan)
     for n in ("risk-assessment.md", "kernel-vulnerabilities.md"):
         assert "partial kernel headers tree" not in (reports / n).read_text(encoding="utf-8")
+
+
+def test_kept_not_proven_absent_legacy_dict_is_still_read(tmp_path):
+    """WP1 S1 之前的 kernel-config.json（kept_not_proven_absent 是 {"files": n, "cves": m}）照舊讀得懂。"""
+    scan = kernel_scan(tmp_path / "s")
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg({"files": 7, "cves": 3}, None))
+    r, s, reports = run(make_project(tmp_path / "p"), scan)
+    assert KEPT in (reports / "kernel-vulnerabilities.md").read_text(encoding="utf-8")
 
 
 def test_kept_not_proven_absent_without_stable_git_is_byte_identical(tmp_path):
@@ -358,7 +369,7 @@ def test_kept_not_proven_absent_without_stable_git_is_byte_identical(tmp_path):
 
 def test_kept_sentence_not_in_customer_package(tmp_path):
     scan = kernel_scan(tmp_path / "scan")
-    write_json(scan / "scan" / "kernel-config.json", kept_cfg({"files": 7, "cves": 3}))
+    write_json(scan / "scan" / "kernel-config.json", kept_cfg(7, 3))
     r, s, rep = run(make_project(tmp_path / "p", dict(MIN_CFG, role="supplier")), scan)
     for p in (rep / "supplier-package").rglob("*"):
         if p.is_file() and p.suffix in (".md", ".json", ".txt", ".csv"):

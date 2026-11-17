@@ -13,7 +13,8 @@ kbuild 紀錄（.<物件>.o.cmd 的 source_／deps_、.<模組>.ko.cmd），回�
     的成員（x.mod 的每一行）也要有 .cmd，遞迴到編譯的物件；
   - 資料夾裡的 .cmd 有任何一個被截斷或看不懂 → 整份紀錄 GAP（不用）。
 映像的樹外 .ko 與紀錄的對應靠模組名稱（- 與 _ 視為相同）；紀錄資料夾裡有那個 .ko 時再驗證它和映像的是同一份建置，依序：
-.modinfo 的 srcversion（兩邊都有而不同 → 不是同一份程式，不再試別的方法）；srcversion 兩邊其中一邊讀不到 → ELF 區段比對
+.modinfo 的 srcversion（兩邊都有而不同 → 不是同一份程式，不再試別的方法；唯一的例外是 verify_build_path_only：用紀錄的原始碼重算
+srcversion，只把 kbuild 產生檔裡的建置路徑換成映像的就和映像相同，見檔尾）；srcversion 兩邊其中一邊讀不到 → ELF 區段比對
 （ko_sections／compare_ko_sections，見檔尾：區段內容、符號表、重定位都要相同；第 2 級只允許建置日期時間／建置者／建置路徑的字串不同）。
 名稱相同、沒有 .ko 可比的只靠名稱（identity name_only）。同名的候選有好幾個時，只要有一個用內容驗證過就採用（其他候選的不符不抵銷）。"""
 import hashlib
@@ -500,3 +501,338 @@ def compare_ko_sections(img, rec):
                     nstr += 1
     return "sections_masked", (f"code and data sections and symbols identical, relocations identical except addends into the differing string sections; only {nstr} string(s) in {', '.join(diff)} differ, and only in "
                                f"{' / '.join(sorted(kinds))} (masked); debug/notes/modinfo ignored")
+
+
+# =====================================================================================================
+# srcversion 重算（scripts/mod/sumversion.c 的移植）：srcversion 不同時，檢查是不是只因為建置路徑不同
+# =====================================================================================================
+# srcversion＝MD4（.mod 列出的每個物件：它的 source_ 檔＋deps_ 裡同一資料夾的檔，去掉空白與 /* */ 註解）。kbuild 產生的檔
+# （例如 mods.dtb.S：.incbin "<建置資料夾>/mods.dtb"）會把建置資料夾的絕對路徑寫進內容，所以同一份原始碼在不同資料夾編，srcversion 就不同。
+# 規則（srcversion_build_path）：
+#   1. 用紀錄的 .mod／.cmd 與 .cmd 裡寫的原始碼檔（建置機器上的路徑，要讀得到）重算，結果要等於紀錄 .ko 的 srcversion（證明重算正確、
+#      原始碼就是紀錄編的那一份）；
+#   2. 只在「kbuild 產生的 .dtb.S」（檔名以 .dtb.S 結尾，而且紀錄裡有它自己的 .<檔名>.cmd、那個 .cmd 不是編譯指令）裡，把紀錄的建置路徑前綴換成映像的建置路徑前綴再算，結果要等於映像的 srcversion。
+#   映像的前綴從映像 .ko 字串區段裡的原始碼絕對路徑（__FILE__）找：和紀錄的原始碼檔路徑尾端相同（至少 PATH_TAIL 層）的那一個，
+#   前面不同的部分就是兩邊的前綴；找到的前綴對要剛好一組。任何一步做不到 → None（照舊「不是同一份建置」）。
+# 這個移植要和核心的實作逐位元相同：MD4 的訊息字以大端序讀（le32_to_cpu_array 用 ntohl）、長度字是原生整數、輸出每個字再位元組反轉。
+SV_SPACE = b" \t\n\v\f\r"
+MAX_SV_FILE = 16 << 20           # 單一原始碼檔
+MAX_SV_TOTAL = 64 << 20          # 一次重算餵進去的原始碼合計（重複列出的檔也算）；純 Python 約 0.3 秒／MB
+MAX_SV_GLOBAL = 256 << 20        # 一次執行（所有模組、所有重算）合計：惡意紀錄不能讓重算跑幾個小時
+MAX_SV_FILES = 20000             # 一次重算讀的檔案數
+SV_DENY_PREFIX = ("/proc/", "/sys/", "/dev/", "/run/")
+SV_GENERATED_EXT = (".dtb.S",)   # 可以換路徑的產生檔：只有 kbuild 的 cmd_dt_S_dtb（.incbin "<建置資料夾>/x.dtb"）
+
+
+def _sv_rol(x, s):
+    x &= 0xFFFFFFFF
+    return ((x << s) | (x >> (32 - s))) & 0xFFFFFFFF
+
+
+def _sv_transform(h, X):
+    a, b, c, d = h
+    for i in range(16):
+        a, b, c, d = d, _sv_rol(a + ((b & c) | (~b & d)) + X[i], (3, 7, 11, 19)[i % 4]), b, c
+    for i in range(16):
+        a, b, c, d = d, _sv_rol(a + ((b & c) | (b & d) | (c & d)) + X[(i % 4) * 4 + i // 4] + 0x5A827999, (3, 5, 9, 13)[i % 4]), b, c
+    for i, k in enumerate((0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15)):
+        a, b, c, d = d, _sv_rol(a + (b ^ c ^ d) + X[k] + 0x6ED9EBA1, (3, 9, 11, 15)[i % 4]), b, c
+    return [(h[0] + a) & 0xFFFFFFFF, (h[1] + b) & 0xFFFFFFFF, (h[2] + c) & 0xFFFFFFFF, (h[3] + d) & 0xFFFFFFFF]
+
+
+def sumversion_md4(data):
+    """sumversion.c 的 md4_init／md4_update／md4_final_ascii（在 little-endian 建置機器上）→ 32 個十六進位大寫字元。"""
+    h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]
+    n = len(data)
+    full = n - n % 64
+    for o in range(0, full, 64):
+        h = _sv_transform(h, struct.unpack(">16I", data[o:o + 64]))
+    tail = data[full:] + b"\x80"
+    if len(tail) > 56:
+        tail += b"\0" * (64 - len(tail))
+        h = _sv_transform(h, struct.unpack(">16I", tail))
+        tail = b""
+    tail += b"\0" * (56 - len(tail))
+    h = _sv_transform(h, list(struct.unpack(">14I", tail)) + [(n << 3) & 0xFFFFFFFF, (n >> 29) & 0xFFFFFFFF])
+    return "".join("%08X" % struct.unpack("<I", struct.pack(">I", x))[0] for x in h)
+
+
+def sumversion_feed(text, out):
+    """sumversion.c 的 parse_file（＋parse_string、parse_comment）：去掉空白、反斜線換行與 /* */ 註解，字串整段保留。"""
+    n = text.find(b"\0")                    # read_text_file＋strlen：第一個 NUL 之後不算
+    f = text if n < 0 else text[:n]
+    L, i = len(f), 0
+    while i < L:
+        ch = f[i]
+        if ch == 0x5C and i + 1 < L and f[i + 1] == 0x0A:
+            i += 2
+            continue
+        if ch in SV_SPACE:
+            i += 1
+            continue
+        if ch == 0x22:
+            out.append(ch)
+            k = 1
+            while k < L - i:
+                out.append(f[i + k])
+                if f[i + k] == 0x22 and f[i + k - 1] != 0x5C:
+                    break
+                k += 1
+            i += k + 1
+            continue
+        if ch == 0x2F and i + 1 < L and f[i + 1] == 0x2A:
+            k = 2
+            while k < L - i:
+                if f[i + k - 1] == 0x2A and f[i + k] == 0x2F:
+                    break
+                k += 1
+            i += k + 1
+            continue
+        out.append(ch)
+        i += 1
+
+
+class SvBudget:
+    """重算的上限。一次執行建一個（global_left 跨模組共用），每次重算再重設 files／bytes。"""
+
+    def __init__(self, global_bytes=MAX_SV_GLOBAL):
+        self.files = self.bytes = 0
+        self.global_left = global_bytes
+        self.exhausted = False
+
+    def reset(self):
+        self.files = self.bytes = 0
+
+
+def _sv_read(path, budget):
+    """建置機器上的原始碼檔（.cmd 寫的絕對路徑）→ bytes 或 None。只讀一般檔案、不跟隨最後一層的符號連結、有大小與數量上限。"""
+    if not isinstance(path, str) or not path.startswith("/") or "\x00" in path:
+        return None
+    canon = "/" + posixpath.normpath(path).lstrip("/") + "/"          # /./sys/…、//proc/…、/x/../dev/… 都先正規化再比
+    if canon.startswith(SV_DENY_PREFIX):
+        return None
+    budget.files += 1
+    if budget.files > MAX_SV_FILES:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOCTTY", 0))
+    except OSError:
+        return None
+    try:
+        s = os.fstat(fd)
+        if not stat.S_ISREG(s.st_mode) or s.st_size > MAX_SV_FILE or budget.bytes + s.st_size > MAX_SV_TOTAL:
+            return None
+        if s.st_size > budget.global_left:
+            budget.exhausted = True
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            data = f.read(s.st_size + 1)
+        if len(data) > s.st_size:
+            return None
+        budget.bytes += len(data)
+        budget.global_left -= len(data)
+        return data
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _sv_cmd_for(recs, obj):
+    """物件（.mod 裡的建置路徑）→ 紀錄資料夾裡它的 .cmd 檔路徑或 None（可以在任何一份紀錄；呼叫端把候選所屬的紀錄放第一個）。"""
+    t = _norm(obj)
+    for r in recs:
+        info = r.cmds.get(t) if t else None
+        if info is not None:
+            return os.path.join(info["dir"], "." + posixpath.basename(t) + ".cmd")
+    return None
+
+
+def _sv_generated(recs, path):
+    """路徑是可以換建置路徑的 kbuild 產生檔 → True：檔名以 .dtb.S 結尾，某份紀錄有它自己的 .cmd，而且那個 .cmd 不是編譯指令（沒有 source_）。
+    只看「有沒有 .cmd」不夠：紀錄可以多放一個 .foo.c.cmd 把真正的原始碼冒充成產生檔。"""
+    t = _norm(path)
+    if not t or not t.endswith(SV_GENERATED_EXT):
+        return False
+    return any(t in r.cmds and not r.cmds[t]["src"] for r in recs)
+
+
+def _sv_swap(data, swap):
+    """只換「路徑開頭」的前綴（前一個字元不是路徑字元），回傳 (新內容, 換了幾處)。"""
+    rx = re.compile(rb"(?<![\w.+@/-])" + re.escape(swap[0]))
+    return rx.subn(lambda m: swap[1], data)
+
+
+def recompute_srcversion(recs, kc, ko_dir, ko_target, swap=None, budget=None):
+    """紀錄的模組 → (srcversion 23 字元, 用到的檔案數, 換過路徑的產生檔數) 或 (None, 原因, 0)。
+    swap＝(紀錄前綴 bytes, 映像前綴 bytes)：只在 kbuild 產生的檔裡替換。照 sumversion.c：.mod 每行一個物件（.a 略過）；
+    每個物件讀 .<物件>.cmd：source_ 行的檔，deps_ 之後以反斜線結尾的行裡、和物件在同一資料夾的檔。"""
+    modname = posixpath.basename(ko_target)[:-3] + ".mod"
+    p = os.path.join(ko_dir, modname)
+    budget = budget or SvBudget()
+    budget.reset()
+    buf, nswap = bytearray(), 0
+    try:
+        s = os.lstat(p)
+        if not stat.S_ISREG(s.st_mode) or s.st_size > MAX_OOT_CMD:
+            return None, f"{modname} is missing, not a regular file or too large", 0
+        with kc.flash_package().open_nofollow(p) as f:
+            mtext = f.read(s.st_size + 1)
+    except OSError:
+        return None, f"{modname} cannot be read", 0
+    n0 = mtext.find(b"\0")                  # read_text_file：第一個 NUL 之後不算
+    if n0 >= 0:
+        mtext = mtext[:n0]
+    objs = [x for x in mtext.split(b"\n") if x]
+    if not objs:
+        return None, f"{modname} lists no object", 0
+
+    def feed(path):
+        nonlocal nswap
+        data = _sv_read(path, budget)
+        if data is None:
+            return False
+        if swap and _sv_generated(recs, path):
+            data, hits = _sv_swap(data, swap)
+            nswap += bool(hits)
+        sumversion_feed(data, buf)
+        return True
+
+    for ob in objs:
+        o = ob.decode("utf-8", "surrogateescape")
+        if o.endswith(".a"):
+            continue
+        cut = o.rfind("/")
+        if cut < 0:
+            return None, f"object {o} in {modname} is not an absolute build path", 0
+        d = o[:cut + 1]
+        cmd = _sv_cmd_for(recs, o)
+        if cmd is None:
+            return None, f"no .cmd for {posixpath.basename(o)}", 0
+        try:
+            cs = os.lstat(cmd)
+            if not stat.S_ISREG(cs.st_mode) or cs.st_size > MAX_OOT_CMD:
+                return None, f"{posixpath.basename(cmd)} is not a regular file or too large", 0
+            with kc.flash_package().open_nofollow(cmd) as f:
+                ctext = f.read(cs.st_size + 1)
+        except OSError:
+            return None, f"{posixpath.basename(cmd)} cannot be read", 0
+        n0 = ctext.find(b"\0")
+        if n0 >= 0:
+            ctext = ctext[:n0]
+        check = False
+        for raw in ctext.split(b"\n"):
+            line = raw.lstrip(SV_SPACE)
+            if line.startswith(b"source_"):
+                sp = line.rfind(b" ")
+                if sp < 0:
+                    return None, f"malformed source_ line in {posixpath.basename(cmd)}", 0
+                src = line[sp + 1:].decode("utf-8", "surrogateescape")
+                if not feed(src):
+                    if budget.exhausted:
+                        return None, f"the limit of {MAX_SV_GLOBAL >> 20} MB of source read for srcversion recomputation in one run is used up", 0
+                    return None, f"source file {src} cannot be read on this machine", 0
+                continue
+            if line.startswith(b"deps_"):
+                check = True
+                continue
+            if not check:
+                continue
+            if not line.endswith(b"\\"):
+                break
+            m = re.search(rb"[ \t\n\v\f\r]", line)
+            path = (line[:m.start()] if m else line).decode("utf-8", "surrogateescape")
+            at = path.find(d)
+            if at >= 0 and at + len(d) - 1 == path.rfind("/"):
+                if not feed(path):
+                    if budget.exhausted:
+                        return None, f"the limit of {MAX_SV_GLOBAL >> 20} MB of source read for srcversion recomputation in one run is used up", 0
+                    return None, f"dependency {path} cannot be read on this machine", 0
+    return sumversion_md4(bytes(buf))[:23], budget.files, nswap
+
+
+def _sv_source_paths(recs, kc, ko_dir, ko_target):
+    """紀錄模組的 source_ 檔（不含 kbuild 產生的檔）→ 絕對路徑清單。"""
+    out = []
+    p = os.path.join(ko_dir, posixpath.basename(ko_target)[:-3] + ".mod")
+    try:
+        with kc.flash_package().open_nofollow(p) as f:
+            objs = [x.decode("utf-8", "surrogateescape") for x in f.read(MAX_OOT_CMD + 1).split(b"\n") if x]
+    except OSError:
+        return out
+    for o in objs:
+        t = _norm(o)
+        for r in recs:
+            info = r.cmds.get(t) if t else None
+            if info is None:
+                continue
+            try:
+                with kc.flash_package().open_nofollow(os.path.join(info["dir"], "." + posixpath.basename(t) + ".cmd")) as f:
+                    txt = f.read(MAX_OOT_CMD + 1)
+            except OSError:
+                break
+            for line in txt.split(b"\n"):
+                line = line.lstrip(SV_SPACE)
+                if line.startswith(b"source_") and b" " in line:
+                    src = line[line.rfind(b" ") + 1:].decode("utf-8", "surrogateescape")
+                    if src.startswith("/") and not _sv_generated(recs, src):
+                        out.append(src)
+            break
+    return out
+
+
+def build_path_prefixes(rec_sources, image_strings):
+    """紀錄的原始碼路徑＋映像 .ko 字串區段（{區段名: [bytes 或 None]}）→ (紀錄前綴 bytes, 映像前綴 bytes) 或 (None, 原因)。
+    映像字串裡的原始碼絕對路徑（MASK_PATH）和紀錄的原始碼路徑檔名相同、尾端至少 PATH_TAIL 層相同時，取最長的相同尾端，
+    前面的部分就是兩邊的建置路徑前綴；全部配對要得到同一組前綴，而且兩邊不同。"""
+    img_paths = set()
+    for bodies in (image_strings or {}).values():
+        for body in bodies or ():
+            if body:
+                img_paths.update(MASK_PATH.findall(body))
+    by_base = {}
+    for ip in img_paths:
+        by_base.setdefault(ip.rsplit(b"/", 1)[-1], []).append(ip)
+    pairs = set()
+    for rs in rec_sources:
+        rb = rs.encode("utf-8", "surrogateescape")
+        rc = rb.split(b"/")
+        for ip in by_base.get(rc[-1], ()):
+            ic = ip.split(b"/")
+            n = 0
+            while n < min(len(rc), len(ic)) - 1 and rc[-1 - n] == ic[-1 - n]:
+                n += 1
+            if n < PATH_TAIL:
+                continue
+            pairs.add((b"/".join(rc[:-n]) + b"/", b"/".join(ic[:-n]) + b"/"))
+    if not pairs:
+        return None, "no source file path of the module appears in the image's .ko strings, so the image's build path is unknown"
+    if len(pairs) > 1:
+        return None, f"source paths in the image's .ko give {len(pairs)} different build-path prefixes"
+    rp, ip = pairs.pop()
+    if rp == ip or len(rp) < 2 or len(ip) < 2:
+        return None, "the record and the image have the same build path"
+    return (rp, ip), None
+
+
+def verify_build_path_only(recs, kc, cand, rec_sv, img_sv, image_strings, budget=None):
+    """srcversion 不同（rec_sv ≠ img_sv）時：差異是不是只來自建置路徑 → (True, 說明) 或 (False, 原因)。
+    recs：候選所屬的紀錄放第一個（.cmd 先在那份找）。budget：SvBudget（一次執行共用一個）。"""
+    budget = budget or SvBudget()
+    v0, files, _ = recompute_srcversion(recs, kc, cand["dir"], cand["target"], budget=budget)
+    if v0 is None:
+        return False, f"srcversion cannot be recomputed from the record ({files})"
+    if v0 != rec_sv:
+        return False, f"srcversion recomputed from the record and its source files ({v0}) differs from the record's .ko ({rec_sv}): the source files changed after the build"
+    pre, why = build_path_prefixes(_sv_source_paths(recs, kc, cand["dir"], cand["target"]), image_strings)
+    if pre is None:
+        return False, why
+    v1, files1, nswap = recompute_srcversion(recs, kc, cand["dir"], cand["target"], swap=pre, budget=budget)
+    if v1 is None:
+        return False, f"srcversion cannot be recomputed with the image's build path ({files1})"
+    if not nswap:
+        return False, "no kbuild-generated .dtb.S of the module contains the record's build path"
+    if v1 != img_sv:
+        return False, f"srcversion recomputed with the image's build path ({v1}) still differs from the image's .ko ({img_sv}): the source differs"
+    return True, (f"srcversion differs only because of the build path: recomputed from {files} source file(s) it equals the record's .ko, and with "
+                  f"{pre[0].decode('utf-8', 'replace')} replaced by {pre[1].decode('utf-8', 'replace')} in {nswap} kbuild-generated file(s) it equals the image's .ko ({img_sv})")

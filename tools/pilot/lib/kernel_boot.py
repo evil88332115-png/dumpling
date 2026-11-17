@@ -187,8 +187,9 @@ def extlinux_info(imgs, rootfs_image):
     return ext
 
 
-def evaluate(imgs, diff_fn, board_text=None, build_shas=None):
-    """imgs：kernel_config.image_inputs 的結果；diff_fn(a_text, b_text)->kernel_config.config_diff；board_text：os.txt 內容或 None；
+def evaluate(imgs, diff_fn, board_text=None, build_shas=None, self_built=False):
+    """self_built：K1 的 identity.result 是 self_built（--k1-config 讀到）才為真；其他情況（含拿不到 K1 結果）BUILD-INFO 映像雜湊不符維持 ATTENTION。
+    imgs：kernel_config.image_inputs 的結果；diff_fn(a_text, b_text)->kernel_config.config_diff；board_text：os.txt 內容或 None；
     build_shas：建置紀錄 BUILD-INFO.txt 的 image sha256 集合或 None（沒給＝沒有這項資料）。→ record dict（含 status、detail、k1_kernel）。"""
     fl, rf = (imgs or {}).get("flashed"), (imgs or {}).get("rootfs")
     rec = {"schema": SCHEMA, "status": None, "detail": None, "k1_kernel": "partition", "partition_image": describe_image(fl),
@@ -215,6 +216,8 @@ def evaluate(imgs, diff_fn, board_text=None, build_shas=None):
         rec["build_record"] = {"image_sha256": sorted(build_shas), "matches_partition_image": m_part, "matches_rootfs_image": m_root}
         if m_part:
             notes.append("the build record's BUILD-INFO image sha256 matches kernel/Image" + (" and rootfs/boot/Image" if m_root else ""))
+        elif self_built:
+            notes.append("自編紀錄，映像雜湊本來就不同 (self-built build record: the BUILD-INFO image sha256 differs from kernel/Image by design)")
         else:
             attention = True
             notes.append("the build record's BUILD-INFO image sha256 does not match kernel/Image"
@@ -303,6 +306,8 @@ def main(argv=None):
     ap.add_argument("--from", dest="from_")
     ap.add_argument("--prefix")
     ap.add_argument("--build-record")
+    ap.add_argument("--build-record-self-built", action="store_true")
+    ap.add_argument("--k1-config", help="C-kernel-config 的輸出（kernel-config.json）：identity.result 是 self_built 時，BUILD-INFO 映像雜湊不符才降為註記；沒給或讀不到 → 維持 ATTENTION")
     ap.add_argument("--board-os-txt")
     ap.add_argument("--out")
     try:
@@ -337,7 +342,15 @@ def main(argv=None):
             if rr.error:
                 raise InputError(f"建置紀錄讀不了：{rr.error}")
             shas = kc.build_info_sha256s(rr) or None          # 沒有 BUILD-INFO.txt 的雜湊＝沒有這項資料，不算對不上
-        rec = evaluate(imgs, kc.config_diff, board_text, shas)
+        k1_self = False
+        if a.build_record_self_built and a.k1_config:
+            try:
+                with open(a.k1_config, encoding="utf-8") as fh:
+                    br = ((json.load(fh).get("kernel") or {}).get("build_record") or {})
+                k1_self = br.get("status") == "OK" and (br.get("identity") or {}).get("result") == "self_built"
+            except (OSError, ValueError, AttributeError):
+                k1_self = False
+        rec = evaluate(imgs, kc.config_diff, board_text, shas, k1_self)
     except InputError as e:
         line("FAIL", f"kernel_boot.py 輸入錯誤：{e}")
         return 3

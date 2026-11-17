@@ -25,13 +25,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_SITE_CONFIG = Path("~/.config/sca-center/wizard.json")
 # 站台設定檔（JSON）的鍵；每一項都有預設值，路徑類可以用 ~。說明見 tools/wizard/README.md
-SITE_KEYS = {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "rules_template", "upstream"}
+SITE_KEYS = {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "kernel_rename_map", "rules_template", "upstream"}
 # 沒有產品設定包時可套用的通用處理規則：rules_template 指向一份 vex-rules.json（通用規則，不含人工判定、不含產品專屬規則）
 PRODUCT_SPECIFIC_RULES = {"R9m"}
 REPO = ROOT = OUTROOT = GRYPE_CACHE = None
 PY = TOOLS_BIN = None
 PILOT_ENV = GRYPE_SEED = RULES_TEMPLATE = None
 STABLE_GIT = {}
+RENAME_MAP = None
 UPSTREAM = {}      # 上游基準：{組名: {"public_sources": 路徑, "bsp": 路徑, ...}}，輸入清單用組名＋鍵引用
 INPUT_KINDS = {"flash_package", "source_archive", "build_record", "extra_deliverable", "upstream_source", "upstream_bsp",
                "upstream_uefi", "vendor_bulletin", "board_test", "product_config", "other"}
@@ -44,7 +45,7 @@ def _p(v):
 
 def load_site_config(path=None):
     """讀站台設定。順序：--site-config → 環境變數 SCA_WIZARD_CONFIG → ~/.config/sca-center/wizard.json（可以不存在，全用預設值）。"""
-    global REPO, ROOT, OUTROOT, PY, TOOLS_BIN, PILOT_ENV, GRYPE_SEED, GRYPE_CACHE, STABLE_GIT, RULES_TEMPLATE, UPSTREAM
+    global REPO, ROOT, OUTROOT, PY, TOOLS_BIN, PILOT_ENV, GRYPE_SEED, GRYPE_CACHE, STABLE_GIT, RENAME_MAP, RULES_TEMPLATE, UPSTREAM
     explicit = path or os.environ.get("SCA_WIZARD_CONFIG")
     cf = _p(explicit) if explicit else DEFAULT_SITE_CONFIG.expanduser()
     c = {}
@@ -69,6 +70,7 @@ def load_site_config(path=None):
     GRYPE_SEED = _p(c["grype_seed"]) if c.get("grype_seed") else None
     GRYPE_CACHE = _p(c["grype_cache"]) if c.get("grype_cache") else ROOT / "grype-db"
     STABLE_GIT = {str(k): _p(v) for k, v in (c.get("stable_git") or {}).items()}
+    RENAME_MAP = _p(c["kernel_rename_map"]) if c.get("kernel_rename_map") else None
     RULES_TEMPLATE = _p(c["rules_template"]) if c.get("rules_template") else None
     up = c.get("upstream") or {}
     if not isinstance(up, dict) or any(not isinstance(v, dict) for k, v in up.items() if not str(k).startswith("_")):
@@ -725,7 +727,7 @@ def find_built_oot(base, maxdepth=4):
     return []
 
 
-def split_pack_record(br, dest):
+def split_pack_record(br, dest, notes=None):
     """pack-build-record.sh 的壓縮檔裡有 kernel/ 與 oot<N>-<名稱>/：掃描工具要分開給（核心一份、樹外模組各一個資料夾），
     混在一起會被判成格式不對（GAP）。安全解開後回傳 (核心資料夾, [樹外模組資料夾…])；不是這種格式就原樣回傳 (br, [])。"""
     br = Path(br)
@@ -739,6 +741,13 @@ def split_pack_record(br, dest):
     with tarfile.open(br, "r:*") as t:
         t.extractall(dest, filter="data")
     oot = sorted((dest / x for x in tops if re.match(r"oot\d+-", x)), key=lambda p: int(re.match(r"oot(\d+)-", p.name).group(1)))
+    sh = dest / "SOURCE-HASHES"       # pack-build-record.sh 寫在壓縮檔最上層；K1 只在紀錄根目錄（kernel/）找，所以複製過去（一般檔案才複製）
+    if sh.is_file() and not sh.is_symlink() and sh.stat().st_size <= (8 << 20):
+        try:
+            shutil.copyfile(sh, dest / "kernel" / "SOURCE-HASHES")
+        except OSError as e:          # 複製失敗不讓精靈例外結束：K1 看不到 SOURCE-HASHES，只比路徑，內容沒比對（報告會寫）
+            if notes is not None:
+                notes.append(f"SOURCE-HASHES 複製失敗（{type(e).__name__}）：自編紀錄的原始檔內容沒有比對")
     return dest / "kernel", [p for p in oot if p.is_dir()]
 
 
@@ -872,6 +881,9 @@ def main():
     ap.add_argument("--archive"); ap.add_argument("--source"); ap.add_argument("--name"); ap.add_argument("--version")
     ap.add_argument("--rootfs"); ap.add_argument("--config"); ap.add_argument("--role", choices=["both", "manufacturer", "supplier"])
     ap.add_argument("--generic-rules", choices=["yes", "no"]); ap.add_argument("--build-record")
+    ap.add_argument("--build-record-self-built", action="store_true",
+                    help="（預設已開，有建置紀錄就套用）先照出貨那次建置核對；對不上時才檢查自編條件：.config 與出貨核心相同、release 與編譯器相同、UTS_VERSION 只有序號與時間不同、原始檔路徑（有 SOURCE-HASHES 時含內容）對得上出貨原始碼樹；任一項不符就不採用")
+    ap.add_argument("--build-record-shipped", action="store_true", help="建置紀錄就是出貨那次建置：關掉自編模式（預設有建置紀錄就走自編模式，採用條件嚴格）")
     ap.add_argument("--oot-build-dir", help="已編譯過的 sources 資料夾（NVIDIA 樹外模組有 .cmd 編譯紀錄）；不給時在 SourceCode 資料夾裡自動找")
     ap.add_argument("--extra-deliverable", action="append", help="另外交給客戶的韌體檔（例如 capsule .Cap），可重複；不給時互動模式會問")
     ap.add_argument("--board-test", action="append", help="板子檢查結果檔（board-test-*.tar.gz、board-net-*.tar.gz；board-on-device.sh／board-from-network.sh 的產出），可重複；掃描後匯入，不給時互動模式會問")
@@ -990,6 +1002,11 @@ def main():
         b = ask("   另外有建置紀錄檔嗎？（路徑；沒有就按 Enter）", "", check=lambda v: None if not v or Path(v).exists() else "找不到這個路徑",
                 args_value=a.build_record, noninteractive=ni)
         br = Path(b).resolve() if b else None
+    # 自編模式預設開（有建置紀錄就開），但 K1 的採用條件很嚴：.config 與出貨核心內建設定相同、版本字串除建置序號／時間／主機外相同、
+    # 引用的原始檔都在出貨原始碼樹裡（有 SOURCE-HASHES 時內容也要相同）；任何一項不符就不採用（GAP）。--build-record-shipped 可關掉。
+    self_built = bool(br) and not a.build_record_shipped
+    if (a.build_record_self_built or a.build_record_shipped) and not br:
+        say("  警告：給了 --build-record-self-built／--build-record-shipped 但沒有建置紀錄，旗標不會用到（核心判斷照路線 B）。")
     # 樹外模組的編譯紀錄：--oot-build-dir 指定的 sources 資料夾 → SourceCode 裡已編譯過的原始碼樹 → （沒有就用解開的原始碼，沒有 .cmd）
     if a.oot_build_dir:
         built_oot = [Path(a.oot_build_dir).resolve() / x for x in JETSON_OOT
@@ -1000,22 +1017,25 @@ def main():
         built_oot = find_built_oot(sp if sp and sp.is_dir() else None)
     stable = STABLE_GIT.get(kt[1]) if kt else None
     stable = stable if stable and stable.exists() else None
+    rename_map = RENAME_MAP if RENAME_MAP and RENAME_MAP.is_file() else None
 
     say("\n== 找到的輸入（請確認）==")
     say(f"  刷機包：{fp}")
     say(f"  核心原始碼：{kt[0] if kt else (no_source or '找不到 → 核心判斷會標 GAP')}" + (f"（Linux {kt[1]}）" if kt else ""))
     say(f"  UEFI 原始碼：{uefi or '找不到 → 不比對 UEFI 內建函式庫'}")
-    say(f"  核心建置紀錄：{br or '找不到 → 核心判斷不了的一律當成受影響（路線 B）'}")
+    say(f"  核心建置紀錄：{br or '找不到 → 核心判斷不了的一律當成受影響（路線 B）'}" + ("（自編模式：採用條件嚴格，不符就不採用）" if self_built else ""))
     say(f"  樹外模組編譯紀錄：{(str(built_oot[0].parent) + f'（{len(built_oot)} 個資料夾有 .cmd）') if built_oot else '沒有已編譯的原始碼樹 → 標頭檔類的核心漏洞較多判斷不了'}")
     say(f"  NVIDIA 樹外模組（{len(oot)} 個）：{', '.join(p.name if p.name != 'kernel-open' else 'unifiedgpudisp/kernel-open' for p in oot) or '無'}")
-    say(f"  Linux 穩定版對照：{stable or '無（只影響少數核心列）'}")
+    stable_want = STABLE_GIT.get(kt[1]) if kt else None
+    say(f"  Linux 穩定版對照：{stable or (f'設定了但找不到：{stable_want}（只影響少數核心列）' if stable_want else '無（只影響少數核心列）')}")
+    say(f"  核心檔案改名對照表：{rename_map or (f'設定了但找不到：{RENAME_MAP}（舊核心上檔名不同的檔案會是 unknown）' if RENAME_MAP else '無（舊核心上檔名不同的檔案會是 unknown）')}")
     say(f"  產品設定包：{cfg_dir or ('無；套用通用規則' if generic == 'yes' else '無；不套規則（全部列會是未評估）')}")
     say(f"  名稱／版本／rootfs／角色：{name}／{version}／{rootfs}／{role}")
     say(f"  另外交付的韌體（{len(extras)} 個）：{', '.join(p.name for p in extras) or '無'}")
     say(f"  板子檢查結果檔（{len(board_tests)} 個）：{', '.join(p.name for p in board_tests) or '無 → 對外服務欄顯示「不明」'}")
     plan = {"archive": str(fp), "source_archive": str(sa) if sa else None, "source_note": no_source, "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
-            "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
-            "stable_git": str(stable) if stable else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
+            "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "build_record_self_built": self_built, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
+            "stable_git": str(stable) if stable else None, "kernel_rename_map": str(rename_map) if rename_map else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
             "name": name, "version": version, "rootfs": rootfs, "role": role, "extra_deliverables": [str(p) for p in extras],
             "platform": a.platform or None}      # 由呼叫端（project.yml）明確給定；沒給就是 None，不從映像格式推測
     # 輸入清單：--inputs → 設定包裡的 inputs.json → --platform 範本
@@ -1077,6 +1097,11 @@ def main():
         chk = {"manifest": str(mpath), "platform": manifest.get("platform"), "draft": bool(manifest.get("draft")), "upstream_set": up_name,
                "missing_required": [r["id"] for r in miss_req], "missing_optional": [r["id"] for r in miss_opt],
                "unconfirmed_required": [r["id"] for r in unconf], "continued_with_missing_required": bool(miss_req) and cont, "inputs": res}
+        chk["build_record_self_built"] = self_built
+        for r in chk["inputs"]:
+            if r.get("id") == "build_record" and r.get("status") == "found" and self_built:
+                r["self_built"] = True
+                r["note"] = (str(r.get("note") or "") + " 建置紀錄：自編（用出貨原始碼重編）").strip()
         (OUT / "inputs-check.json").write_text(json.dumps(chk, ensure_ascii=False, indent=1), encoding="utf-8")
         plan["inputs_check"] = {"file": "inputs-check.json", "missing_required": chk["missing_required"],
                                 "missing_optional": chk["missing_optional"], "unconfirmed_required": chk["unconfirmed_required"],
@@ -1095,6 +1120,12 @@ def main():
     if uefi:
         plan_steps.append({"id": "uefi-platform-defines", "label": "UEFI 平台設定（建置紀錄的 config.dsc.inc）", "status": "OK" if uefi_defs else "GAP",
                            "note": f"{len(uefi_defs)} 份" if uefi_defs else "；".join(uefi_notes), "affects": "UEFI 映像檢查的 DSC 佐證做不了，該列維持 not_assessed"})
+    if br:
+        plan_steps.append({"id": "build-record-mode", "label": "核心建置紀錄模式", "status": "OK",
+                           "note": ("自編模式（用出貨原始碼重編的紀錄也接受；條件：.config 與出貨核心相同、版本字串除建置序號／時間／主機外相同、"
+                                    "原始檔路徑都在出貨原始碼樹裡；是否採用見 kernel-config.json 的 kernel.build_record）") if self_built
+                           else "出貨那次建置的紀錄（識別檔要和映像相符）",
+                           "affects": "不符時建置紀錄不採用，核心 CVE 依 Makefile 判定，較多 unknown"})
     if manifest:          # 沒有輸入清單時，步驟狀態等掃描後才寫（plan-only 不產生 inputs-check.json）
         merge_step_status(OUT, plan_steps)
     (OUT / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1170,8 +1201,14 @@ def main():
         env["KERNEL_BOARD_OS_TXT"] = str(bos)      # C-kernel-boot 用板子的 uname -v 確認實際跑的核心（board-import 之後照常匯入整個檔案）
         say(f"  板子 os.txt：{bos}（給 C-kernel-boot 比對）")
     if br:
-        kbr, ooot = split_pack_record(br, OUT / "buildrecord")
+        split_notes = []
+        kbr, ooot = split_pack_record(br, OUT / "buildrecord", split_notes)
+        if split_notes:
+            say("  警告：" + "；".join(split_notes))
+            merge_step_status(OUT, plan_steps + [{"id": "source-hashes-copy", "label": "建置紀錄的 SOURCE-HASHES", "status": "GAP",
+                                                   "note": "；".join(split_notes), "affects": "自編建置紀錄的原始檔只比路徑，不比內容"}])
         env["KERNEL_BUILD_RECORD"] = str(kbr)
+        env["KERNEL_BUILD_RECORD_SELF_BUILT"] = "1" if self_built else "0"      # 明確設定，不繼承殼層殘留的值
         use_oot = ooot or built_oot or oot
         if use_oot:
             env["KERNEL_OOT_BUILD_RECORDS"] = ":".join(str(p) for p in use_oot)
@@ -1179,6 +1216,8 @@ def main():
                                        (f"；樹外模組紀錄取自已編譯的原始碼樹（{len(built_oot)} 個）" if built_oot else "")))
         if stable:
             env["KERNEL_STABLE_GIT"] = str(stable)
+        if rename_map:
+            env["KERNEL_RENAME_MAP"] = str(rename_map)
     cmd = ["tools/demo/scan-flash-package.sh", "--archive", str(fp), "--rootfs", rootfs, "--name", name, "--version", version,
            "--no-company", "--out", str(OUT / "scan")]
     if a.platform:      # 平台由呼叫端（project.yml）明確給，原樣傳下去；沒給時 scan-flash-package.sh 對原始磁碟映像標 GAP，不推測

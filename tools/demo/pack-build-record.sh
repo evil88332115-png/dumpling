@@ -42,14 +42,20 @@ for D in "$@"; do
   n="oot$i-$(basename "$D")"
   c=$( cd "$D"; find . -name '.*.cmd' -type f | wc -l )
   k=$( cd "$D"; find . -name '*.ko' -type f | wc -l )
-  ( cd "$D"; find . \( -name '.*.cmd' -o -name 'modules.order' -o -name 'Module.symvers' -o -name '*.ko' \) -type f | sed "s|^\./|$n/|" ) >> "$LIST"
+  mf=$( cd "$D"; find . -name '*.mod' -type f | wc -l )
+  # kbuild's <module>.mod (object list of a module): K1 needs it to follow composite modules; every .ko should have one
+  nomod=$( cd "$D"; find . -name '*.ko' -type f | while IFS= read -r ko; do [ -f "${ko%.ko}.mod" ] || echo "$ko"; done | wc -l )
+  ( cd "$D"; find . \( -name '.*.cmd' -o -name 'modules.order' -o -name 'Module.symvers' -o -name '*.ko' -o -name '*.mod' \) -type f | sed "s|^\./|$n/|" ) >> "$LIST"
   if [ "$c" -gt 0 ] && [ "$k" -eq 0 ]; then
     echo "WARNING: $D has build commands but no .ko files; the scanner cannot confirm these modules are the shipped ones." >&2
   fi
   if [ "$c" -eq 0 ]; then
     echo "WARNING: $D has no build commands (.*.cmd). Was it built here? If you built with O=<dir> or nvbuild.sh (kernel_out/), give that directory instead." >&2
   fi
-  echo "out-of-tree $D: $c build command file(s), $k module file(s) (.ko)"
+  if [ "$nomod" -gt 0 ]; then
+    echo "WARNING: $D has $nomod .ko file(s) without a matching .mod file (object list); the scanner will not use those modules' records." >&2
+  fi
+  echo "out-of-tree $D: $c build command file(s), $k module file(s) (.ko), $mf object-list file(s) (.mod)"
 done
 # 2b. UEFI (optional): generated Kconfig file(s) and build log(s)
 if [ -n "$UEFI" ]; then
@@ -82,6 +88,15 @@ i=0; for D in "$@"; do i=$((i+1)); [ -d "$D" ] && ln -s "$(readlink -f "$D")" "$
   grep -m1 '^CONFIG_CC_VERSION_TEXT' "$K/.config" || true
 } > "$TMP/BUILD-INFO.txt"
 echo "BUILD-INFO.txt" >> "$LIST"
+
+# 5. SOURCE-HASHES: sha256 of the source files that the kernel .cmd files name (source_*), relative paths inside the build tree only.
+#    K1 compares them with the shipped source tree when the record is self-built (a rebuild from the shipped source).
+( cd "$K"
+  find . -name '.*.cmd' -type f -print0 2>/dev/null | xargs -0 -r awk '/^source_[^ ]* := /{print $3}' 2>/dev/null \
+    | sed 's|^\./||' | grep -v '^/' | grep -v '^\.\./' | LC_ALL=C sort -u \
+    | while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && sha256sum -- "$f"; done
+) > "$TMP/SOURCE-HASHES" || true
+echo "SOURCE-HASHES" >> "$LIST"
 
 tar -C "$TMP" -czhf "$OUT" -T "$LIST"
 echo "Done: $OUT ($(wc -l < "$LIST") files, $(du -h "$OUT" | cut -f1))"
