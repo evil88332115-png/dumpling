@@ -1,0 +1,267 @@
+name: offline-scan
+
+# T-06 第 2 層驗收（只能手動觸發）：在 GitHub hosted runner 上，用內部鏡像模式跑一次 release scan，證明 scan 期間沒有任何對外連線。
+#   mirror：可以連網。用 tools/mirror/*.sh 產生內部鏡像根目錄（kernel-cve、euvd、osv-distro、nvidia-bulletins、grype-db），模擬更新主機同步好的鏡像；
+#           上傳成 artifact，兩個 scan 用同一份快照（資料內容相同，結果才能逐列比對）。
+#   scan ：block＝on／off 各跑一次，兩次都是內部模式（INTERNAL_MIRROR_URL、DUMPLING_REQUIRE_INTERNAL_MIRROR=1）。
+#           準備（可以連網）：沿用 reuse_build_run 的 build artifact（不重編）、安裝工具、fetch、assemble、先 pull DT 的映像。
+#           scan 那一步先把自己的 shell 移進 cgroup dumpling-offline，再用 iptables／ip6tables 的 cgroup 比對封住這個 cgroup 往外的連線
+#           （loopback 照常：scan 連 DT 走 127.0.0.1）。不用 owner 比對封 runner 帳號：runner 程式本身也用這個帳號連 GitHub，封了 job 會斷線。
+#           DT 容器的連線不屬於這個 cgroup，不會被封（等於常駐 DT 有自己的資料源，T-14）。
+#           strace 記下 scan 期間每一次 connect（block off 也記：連得到時有沒有程式試著連外）；docker events 記 scan 期間的映像事件（pull 由 dockerd 執行，
+#           cgroup 比對與 strace 都看不到）。判定：pipeline/offline-check.py（對外連線 0、名稱查詢 0、REJECT 0、映像事件 0、鏡像都是 source=internal）。
+#           標準答案比對在 scan.sh 裡（不符就 FAIL）。兩次的結果用 jcmp 逐列比對（在 workflow 外做，結果寫進 PR 說明）。
+# 限制（C0 2026-11-17）：只能 workflow_dispatch；runs-on 寫死 GitHub hosted 的 ubuntu-24.04（會用 sudo 改 iptables，不能在自架 runner 跑）；
+#   permissions 只有 contents: read 與 actions: read（下載別的 run 的 artifact）；不用任何 secret。這不是真正的「沒有外網」：真正的驗收要在內部 GitLab、沒有外網的 runner 上做（GITLAB-PORT 第 6 節）。
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "專案名稱（projects/ 底下的資料夾）"
+        type: string
+        default: orin-nano-demo
+      version:
+        description: "版本（sources.yml 的版本）"
+        type: string
+        default: v39.2.1-demo1
+      reuse_build_run:
+        description: "沿用哪一個 run 的 build artifact（build-<專案>-<版本>；artifact 只保留 1 天）。build.mode 是 none 的平台留空"
+        type: string
+        default: ""
+      osv_ecosystems:
+        description: "內部 osv-distro 鏡像的生態系（Jetson：Ubuntu；Debian 系平台：Debian）"
+        type: string
+        default: Ubuntu
+
+permissions:
+  contents: read
+  actions: read     # 下載別的 run 的 build artifact（reuse_build_run）要這個；只有讀取，其他權限一律不給
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DUMPLING_PROJECT_DIR: projects/${{ inputs.project }}
+  DUMPLING_IN_PROJECT: ${{ inputs.project }}
+  DUMPLING_IN_VERSION: ${{ inputs.version }}
+  DUMPLING_IN_REUSE: ${{ inputs.reuse_build_run }}
+  DUMPLING_IN_OSV: ${{ inputs.osv_ecosystems }}
+
+jobs:
+  mirror:
+    name: 內部鏡像快照
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 輸入格式
+        run: |
+          [[ "$DUMPLING_IN_PROJECT" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || { echo "offline-scan: FAIL（project 格式不合法）"; exit 64; }
+          [[ "$DUMPLING_IN_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "offline-scan: FAIL（version 格式不合法）"; exit 64; }
+          [[ -z "$DUMPLING_IN_REUSE" || "$DUMPLING_IN_REUSE" =~ ^[0-9]{1,20}$ ]] || { echo "offline-scan: FAIL（reuse_build_run 必須是數字）"; exit 64; }
+          [[ "$DUMPLING_IN_OSV" =~ ^[A-Za-z]+(,[A-Za-z]+)*$ ]] || { echo "offline-scan: FAIL（osv_ecosystems 格式不合法）"; exit 64; }
+
+      - name: 產生內部鏡像根目錄（可以連網）
+        run: |
+          root=$RUNNER_TEMP/mirror; man=$RUNNER_TEMP/manifests; mkdir -p "$root" "$man"
+          for k in kernel-cve euvd osv-distro nvidia-bulletins grype-db; do
+            echo "== $k"
+            if [ "$k" = osv-distro ]; then
+              OSV_DISTRO_ECOSYSTEMS=$DUMPLING_IN_OSV bash "tools/mirror/$k.sh" "$root/$k" "$man/$k.manifest" | tail -n 3
+            else
+              bash "tools/mirror/$k.sh" "$root/$k" "$man/$k.manifest" | tail -n 3
+            fi
+            [ "${PIPESTATUS[0]}" = 0 ] || { echo "offline-scan: FAIL（tools/mirror/$k.sh 失敗）"; exit 1; }
+          done
+          du -sh "$root"/*
+
+      - name: artifact（內部鏡像快照；只保留 1 天）
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: internal-mirror
+          path: ${{ runner.temp }}/mirror
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  scan:
+    name: scan (block ${{ matrix.block }})
+    needs: mirror
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        block: ["on", "off"]
+    env:
+      DUMPLING_BLOCK: ${{ matrix.block }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 路徑與規劃值
+        id: p
+        run: |
+          [[ "$DUMPLING_IN_PROJECT" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || { echo "offline-scan: FAIL（project 格式不合法）"; exit 64; }
+          [[ "$DUMPLING_IN_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "offline-scan: FAIL（version 格式不合法）"; exit 64; }
+          [[ -z "$DUMPLING_IN_REUSE" || "$DUMPLING_IN_REUSE" =~ ^[0-9]{1,20}$ ]] || { echo "offline-scan: FAIL（reuse_build_run 必須是數字）"; exit 64; }
+          {
+            echo "DUMPLING_OUT_BASE=$RUNNER_TEMP/out"
+            echo "PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env"
+            echo "DUMPLING_MIRROR_ROOT=$RUNNER_TEMP/mirror"
+            echo "DUMPLING_EVIDENCE=$RUNNER_TEMP/evidence"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          python3 -I pipeline/project-info.py --dir "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" | tee info.txt
+          grep -E '^(BUILD_MODE|SCAN_APT|SCAN_TOOLS)=' info.txt >> "$GITHUB_OUTPUT"
+          bm=$(sed -n 's/^BUILD_MODE=//p' info.txt)
+          if [ "$bm" = compile ] && [ -z "$DUMPLING_IN_REUSE" ]; then echo "offline-scan: FAIL（build.mode 是 compile：要給 reuse_build_run）"; exit 64; fi
+
+      - name: 取得 build 的 handoff 與步驟紀錄（沿用 reuse_build_run）
+        if: ${{ steps.p.outputs.BUILD_MODE == 'compile' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build-${{ inputs.project }}-${{ inputs.version }}
+          path: ${{ runner.temp }}/out/${{ inputs.project }}/${{ inputs.version }}
+          run-id: ${{ inputs.reuse_build_run }}
+          github-token: ${{ github.token }}
+
+      - name: build 沒有執行的紀錄（build.mode 不是 compile）
+        if: ${{ steps.p.outputs.BUILD_MODE != 'compile' }}
+        env:
+          BUILD_MODE: ${{ steps.p.outputs.BUILD_MODE }}
+        run: |
+          bash pipeline/run-step.sh --record "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" build NOT_RUN 4 "不適用：build.mode: $BUILD_MODE（這個平台不編譯）"
+
+      - name: "Go（scan.tools 是 full 才需要）"
+        if: ${{ steps.p.outputs.SCAN_TOOLS == 'full' }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: 安裝掃描工具、strace（可以連網）
+        env:
+          SCAN_APT: ${{ steps.p.outputs.SCAN_APT }}
+          SCAN_TOOLS: ${{ steps.p.outputs.SCAN_TOOLS }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          bash pipeline/install-scan-tools.sh "$SCAN_TOOLS" "$RUNNER_TEMP/tools/versions.txt"
+          sudo apt-get update -qq
+          # shellcheck disable=SC2086 — scan.apt 的套件名稱已由 project_config 驗證
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap python3-yaml strace $SCAN_APT > /dev/null
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true && echo "bubblewrap: OK"
+          strace -V | head -n 1
+
+      - name: 驗證、fetch、assemble（可以連網）
+        run: |
+          bash pipeline/run-step.sh validate "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
+          bash pipeline/run-step.sh fetch "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
+          bash pipeline/run-step.sh assemble "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
+
+      - name: 取得內部鏡像快照
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: internal-mirror
+          path: ${{ runner.temp }}/mirror
+
+      - name: 先 pull DT 的映像（scan 期間不該再有映像下載）
+        run: |
+          DT_PORT=8080 DT_DB_PASSWORD=unused docker compose -f pipeline/dt-compose.yaml pull -q
+
+      - name: scan（內部鏡像模式；block on 時封住這一步的對外連線）
+        env:
+          MIRROR_REFRESH_STATUS: ""
+        run: |
+          ev=$DUMPLING_EVIDENCE
+          export INTERNAL_MIRROR_URL="file://$DUMPLING_MIRROR_ROOT" DUMPLING_REQUIRE_INTERNAL_MIRROR=1
+          unset KCVE_CACHE_DIR
+          # 這一步的 shell 移進 cgroup dumpling-offline（之後開的程式都在裡面）；runner 程式本身不在裡面，照常連 GitHub
+          cg=/sys/fs/cgroup/dumpling-offline
+          sudo mkdir -p "$cg"
+          echo "$$" | sudo tee "$cg/cgroup.procs" > /dev/null
+          grep -qx "0::/dumpling-offline" "/proc/$$/cgroup" || { echo "offline-scan: FAIL（shell 沒有進到 cgroup dumpling-offline：$(cat "/proc/$$/cgroup")）"; exit 1; }
+          if [ "$DUMPLING_BLOCK" = on ]; then
+            for t in iptables ip6tables; do
+              sudo "$t" -N DUMPLING_OFFLINE
+              sudo "$t" -A DUMPLING_OFFLINE -j REJECT
+              sudo "$t" -I OUTPUT 1 -m cgroup --path dumpling-offline ! -o lo -j DUMPLING_OFFLINE
+            done
+            # 封鎖真的有效：這個 cgroup 連不出去（連得出去就停，不算驗收）
+            if curl -sS -m 15 -o /dev/null https://github.com 2> "$ev/precheck.err"; then echo "offline-scan: FAIL（封鎖沒有生效：curl 連得到 github.com）"; exit 1; fi
+            echo "封鎖生效：$(tail -n 1 "$ev/precheck.err")"
+            for t in iptables ip6tables; do sudo "$t" -Z DUMPLING_OFFLINE; done   # 計數從 0 開始（上面那次 curl 不算）
+          fi
+          t0=$(date +%s)
+          rc=0
+          strace -f -qq --seccomp-bpf -e trace=connect -o "$ev/connect.log" \
+            bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" || rc=$?
+          t1=$(date +%s)
+          docker events --since "$t0" --until "$t1" --filter type=image > "$ev/docker-events.txt" 2>&1 || true
+          if [ "$DUMPLING_BLOCK" = on ]; then
+            for t in iptables ip6tables; do sudo "$t" -L DUMPLING_OFFLINE -v -n -x; done > "$ev/iptables.txt"
+            for t in iptables ip6tables; do
+              sudo "$t" -D OUTPUT -m cgroup --path dumpling-offline ! -o lo -j DUMPLING_OFFLINE
+              sudo "$t" -F DUMPLING_OFFLINE; sudo "$t" -X DUMPLING_OFFLINE
+            done
+          fi
+          echo "scan 結束碼：$rc"
+          echo "$rc" > "$ev/scan-rc.txt"
+
+      - name: 判定（offline-check.py）
+        if: ${{ always() }}
+        run: |
+          ev=$DUMPLING_EVIDENCE
+          o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
+          ipt=(); [ "$DUMPLING_BLOCK" = on ] && ipt=(--iptables "$ev/iptables.txt")
+          rc=0
+          python3 -I pipeline/offline-check.py --strace "$ev/connect.log" --block "$DUMPLING_BLOCK" --out "$ev/offline-check.json" \
+            --docker-events "$ev/docker-events.txt" --mirrors "$o/mirrors" "${ipt[@]}" | tee "$ev/offline-check.txt" || rc=$?
+          {
+            echo "## 斷網驗收（block $DUMPLING_BLOCK）"
+            echo "- $(tail -n 1 "$ev/offline-check.txt")"
+            echo "- scan 結束碼：$(cat "$ev/scan-rc.txt" 2> /dev/null || echo 沒有執行)；pipeline-steps 的 scan 列：$(awk -F'\t' '$1 == "scan" {print $2 "（" $4 "）"}' "$o/pipeline-steps.tsv" 2> /dev/null | tail -n 1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          src=$(cat "$ev/scan-rc.txt" 2> /dev/null || echo 1)
+          [ "$rc" = 0 ] && [ "$src" = 0 ]
+
+      - name: 解除封鎖（保險：上一步中途失敗時規則可能還在）
+        if: ${{ always() }}
+        run: |
+          for t in iptables ip6tables; do
+            while sudo "$t" -D OUTPUT -m cgroup --path dumpling-offline ! -o lo -j DUMPLING_OFFLINE 2> /dev/null; do :; done
+            sudo "$t" -F DUMPLING_OFFLINE 2> /dev/null || true; sudo "$t" -X DUMPLING_OFFLINE 2> /dev/null || true
+          done
+          bash pipeline/dt-ephemeral.sh down || true
+
+      - name: 整理結果
+        if: ${{ always() }}
+        run: |
+          o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
+          r=$RUNNER_TEMP/result; mkdir -p "$r/evidence" "$r/mirrors"
+          [ -d "$o/release" ] && cp -r "$o/release/." "$r/" || true
+          for f in scan.json expected-check.txt pipeline-steps.tsv; do [ -f "$o/$f" ] && cp "$o/$f" "$r/" || true; done
+          # 證據：判定結果、iptables 計數、docker events（不放 connect.log 原檔：裡面有 runner 上的本機 socket 路徑）
+          for f in offline-check.json offline-check.txt iptables.txt docker-events.txt scan-rc.txt precheck.err; do
+            [ -f "$DUMPLING_EVIDENCE/$f" ] && cp "$DUMPLING_EVIDENCE/$f" "$r/evidence/" || true
+          done
+          for f in "$o"/mirrors/*.result; do [ -f "$f" ] && cp "$f" "$r/mirrors/" || true; done
+          ls -l "$r" "$r/evidence"
+
+      - name: artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offline-scan-${{ inputs.project }}-${{ inputs.version }}-block-${{ matrix.block }}
+          path: ${{ runner.temp }}/result
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
