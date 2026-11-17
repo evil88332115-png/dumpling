@@ -98,8 +98,8 @@ def load_config(project):
 
 
 def readme(rec, demo):
-    lines = ["# CSAF 使用者通知草稿（CRA 第 14 條第 8 項）", "",
-             "**這是草稿，工具不發布。** `csaf-exploited-draft.json` 的 `tracking.status` 是 `draft`；緩解措施、修補時程、發布者資料等要人補（見 `csaf-exploited-summary.json`）。"
+    lines = ["# 草稿：工具不發布（CSAF 使用者通知草稿，CRA 第 14 條第 8 項）", "",
+             "`csaf-exploited-draft.json` 的 `tracking.status` 是 `draft`；緩解措施、修補時程、發布者資料等要人補（見 `csaf-exploited-summary.json`）。"
              "要不要通知使用者、怎麼通知由負責人決定；向主管機關的通報是另一件事。", ""]
     if demo:
         lines += ["**示範專案（公開 BSP）**：dumpling 公開 repo 的示範專案，以公開 BSP／公開資料建置；Release 的 shipped 只是示範狀態，**不是真的出貨產品**。", ""]
@@ -187,7 +187,8 @@ class Drafts:
                                if isinstance(x, str) and DATE_RE.match(x))
                 evidence[c] = {"sources": srcs or ["dumpling daily monitoring (KEV match)"], "date": dates[0] if dates else None}
             ca = self.tool()
-            st, detail, _ = ca.exploited_run(Path(src), rec["cves"], load_config(rec["project"]), Path(leaf), now=self.now,
+            now = self.now.strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(self.now, "strftime") else str(self.now)
+            st, detail, _ = ca.exploited_run(Path(src), rec["cves"], load_config(rec["project"]), Path(leaf), now=now,
                                              detected=detected, evidence=evidence)
             rec.update(status=st, detail=str(detail)[:300], dir=rel if st in ("OK", "ATTENTION") else None)
             if rec["dir"]:
