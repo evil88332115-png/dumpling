@@ -12,18 +12,27 @@
 #       kernel-cve.sh --check <鏡像資料夾>
 # 環境變數：
 #   KERNEL_CVE_GIT_URL         來源（預設 https://git.kernel.org/pub/scm/linux/security/vulns.git；只接受 https:// 與 file://）
+#   KERNEL_CVE_GIT_FALLBACK_URLS 備援來源（空白分隔，依序；預設 Google 的 kernel.org 鏡像 https://kernel.googlesource.com/pub/scm/linux/security/vulns；
+#                              設成空字串＝不用備援；同樣只接受 https:// 與 file://）。主來源 ls-remote 失敗就直接換下一個；clone 失敗也換下一個。
+#                              （2026-11-16 git.kernel.org 回 502、clone 逾時，Google 鏡像正常。）同一個 git 庫，commit 雜湊相同；
+#                              SOURCE 的 source／source_role（primary｜fallback）記這次用了哪一個，manifest 也記。
+#                              備援來源 clone 下來的資料（commit_date）比上一份（KERNEL_CVE_REUSE_FROM，沒有時看 KERNEL_CVE_FALLBACK_FROM）舊時不換：
+#                              鏡像落後時不拿舊資料蓋掉新的；這時照下面 KERNEL_CVE_FALLBACK_FROM 的規則沿用上一份（ATTENTION），不能沿用就 FAIL。
+#                              主來源不做這個檢查（上游改寫歷史時仍要能更新）。
+#   KERNEL_CVE_TOTAL_TIMEOUT   所有來源、所有重試合計的時間上限秒數（整數，預設 1500）。剩不到 10 秒就不再試；clone 的上限是
+#                              KERNEL_CVE_GIT_TIMEOUT，但不超過剩下的合計時間。
 #   KERNEL_CVE_MAX_AGE_DAYS    --check 的新舊上限（預設 7；與 kernel_config.py 相同。過期只會讓新的 CVE 變成「沒有紀錄」→ unknown，
 #                              不會產生錯的「沒編進核心」，所以比 NVD／OSV 的 3 天寬）
 #   KERNEL_CVE_MIN_RECORDS     至少幾筆紀錄（預設 10000），防止拿到空的或一部分
 #   KERNEL_CVE_MAX_DOWNLOAD_MB clone 寫入的單一檔案上限（預設 500；以 ulimit -f 擋，git 的 pack 超過就失敗）
 #   KERNEL_CVE_MAX_RECORD_KB   單筆紀錄上限（預設 4096；實測最大約 1 MB）；KERNEL_CVE_MAX_UNPACKED_MB 全部紀錄合計上限（預設 1500）
-#   KERNEL_CVE_GIT_TIMEOUT     每次 clone 的時間上限秒數（預設 900）；ls-remote 固定 120 秒
-#   KERNEL_CVE_GIT_TRIES       clone 最多試幾次（預設 3；runner 連 git.kernel.org 偶爾逾時）；KERNEL_CVE_GIT_RETRY_DELAY 第一次重試前
-#                              等幾秒（預設 30，之後每次加倍：30、60…）。傳輸 60 秒低於 1 KB/s 就放棄這一次（http.lowSpeedLimit／Time）。
-#                              全部失敗、又沒有可沿用的舊資料（下一項）才 FAIL；不換來源
-#   KERNEL_CVE_FALLBACK_FROM   上游連不上（ls-remote 與 clone 都失敗）時可以沿用的上一份鏡像（例如 CI 的 actions/cache 還原的）；
+#   KERNEL_CVE_GIT_TIMEOUT     每次 clone 的時間上限秒數（預設 900）；ls-remote 最多 120 秒（不超過剩下的合計時間）
+#   KERNEL_CVE_GIT_TRIES       最多試幾輪（預設 3；runner 連 git.kernel.org 偶爾逾時）。一輪＝主來源與備援依序各試一次；
+#                              KERNEL_CVE_GIT_RETRY_DELAY 第一次重試前等幾秒（預設 30，之後每次加倍：30、60…）。傳輸 60 秒低於 1 KB/s
+#                              就放棄這一次（http.lowSpeedLimit／Time）。所有來源都失敗、又沒有可沿用的舊資料（下一項）才 FAIL，並逐一列出原因
+#   KERNEL_CVE_FALLBACK_FROM   上游（所有來源）連不上（ls-remote 與 clone 都失敗）時可以沿用的上一份鏡像（例如 CI 的 actions/cache 還原的）；
 #                              它要通過 --check，而且 fetched_utc 在 KERNEL_CVE_FALLBACK_MAX_HOURS（預設 48）小時內，否則 FAIL。
-#                              沿用時 SOURCE 的 fetched_utc 維持舊值（資料沒有重新核對），另寫 fallback=yes、fallback_utc、fallback_note；
+#                              沿用時 SOURCE 的 fetched_utc、source、source_role 維持上一份的值（資料沒有重新核對），另寫 fallback=yes、fallback_utc、fallback_note；
 #                              最後一行印 ATTENTION（不是 OK），sca-scan 讀到 fallback=yes 會記 C-kernel-cve-mirror ATTENTION。結束碼仍是 0
 #   KERNEL_CVE_REUSE_FROM      上一份鏡像：上游的 HEAD commit（git ls-remote）和它的 SOURCE 相同、而且 zip 的 sha256 相符時沿用，不重新 clone
 # 安全：下載的內容不可信，只讀：git 不 checkout（--no-checkout），hooks 指到 /dev/null，只允許 https 與 file 協定；
@@ -31,10 +40,14 @@
 #   的一般檔案（mode 100644）；--check 遇到一般檔案與資料夾以外的東西（符號連結、FIFO、裝置）一律失敗（鏡像會被 root 的 mirror-sync.sh 複製）。
 set -euo pipefail
 URL="${KERNEL_CVE_GIT_URL:-https://git.kernel.org/pub/scm/linux/security/vulns.git}"
-case $URL in https://*|file://*) ;; *) echo "FAIL KERNEL_CVE_GIT_URL 只接受 https:// 或 file://：$URL" >&2; exit 3;; esac
+read -r -a FB_URLS <<< "${KERNEL_CVE_GIT_FALLBACK_URLS-https://kernel.googlesource.com/pub/scm/linux/security/vulns}"
+URLS=("$URL" "${FB_URLS[@]}")
+for u in "${URLS[@]}"; do
+  case $u in https://*|file://*) ;; *) echo "FAIL KERNEL_CVE_GIT_URL／KERNEL_CVE_GIT_FALLBACK_URLS 只接受 https:// 或 file://：$u" >&2; exit 3;; esac; done
 for v in KERNEL_CVE_MAX_AGE_DAYS KERNEL_CVE_MIN_RECORDS KERNEL_CVE_MAX_DOWNLOAD_MB KERNEL_CVE_MAX_RECORD_KB KERNEL_CVE_MAX_UNPACKED_MB KERNEL_CVE_GIT_TIMEOUT \
          KERNEL_CVE_GIT_TRIES KERNEL_CVE_GIT_RETRY_DELAY KERNEL_CVE_FALLBACK_MAX_HOURS; do
   [ -z "${!v:-}" ] || [[ "${!v}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "FAIL $v 必須是數字" >&2; exit 3; }; done
+[ -z "${KERNEL_CVE_TOTAL_TIMEOUT:-}" ] || [[ "$KERNEL_CVE_TOTAL_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "FAIL KERNEL_CVE_TOTAL_TIMEOUT 必須是整數" >&2; exit 3; }
 GITC=(git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always -c protocol.file.allow=always -c core.fsmonitor=false
       -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60)
 check() {
@@ -120,16 +133,11 @@ FETCHED="$(date -u +%FT%TZ)"
 mkdir -p "$DEST"
 work=$(mktemp -d "$(dirname "$DEST")/.kernel-cve-clone.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-# 上游的 HEAD（只問 commit，不下載）；取不到就照常 clone
-head=$(timeout 120 "${GITC[@]}" ls-remote "$URL" HEAD 2>/dev/null | awk 'NR==1{print $1}') || head=
-how=clone
-if [ -n "$REUSE" ] && [ -n "$head" ] && [ -f "$REUSE/SOURCE" ] && [ -f "$REUSE/kernel-cves.zip" ] && [ ! -L "$REUSE/kernel-cves.zip" ] \
-   && [ "$(sed -n 's/^commit=//p' "$REUSE/SOURCE")" = "$head" ] \
-   && [ "$(sha256sum "$REUSE/kernel-cves.zip" | cut -d' ' -f1)" = "$(sed -n 's/^zip_sha256=//p' "$REUSE/SOURCE")" ]; then
-  cp --reflink=auto "$REUSE/kernel-cves.zip" "$DEST/kernel-cves.zip"
-  grep -E '^(commit|commit_date|records|unpacked_bytes)=' "$REUSE/SOURCE" > "$work/meta"
-  how="沿用 $REUSE（上游 HEAD 沒有變：$head）"
-fi
+reuse_ok() {   # $1＝上游的 HEAD：和上一份鏡像的 commit 相同、zip 的 sha256 也相符才沿用
+  [ -n "$REUSE" ] && [ -n "$1" ] && [ -f "$REUSE/SOURCE" ] && [ -f "$REUSE/kernel-cves.zip" ] && [ ! -L "$REUSE/kernel-cves.zip" ] \
+    && [ "$(sed -n 's/^commit=//p' "$REUSE/SOURCE")" = "$1" ] \
+    && [ "$(sha256sum "$REUSE/kernel-cves.zip" | cut -d' ' -f1)" = "$(sed -n 's/^zip_sha256=//p' "$REUSE/SOURCE")" ]
+}
 FB_EXTRA=
 # 上游連不上時沿用 KERNEL_CVE_FALLBACK_FROM（見檔頭）。成功 → 0（$DEST 已放好 zip、$work/meta、FETCHED 改成舊值）；不能沿用 → 1（原因印在 stderr）
 use_fallback() {
@@ -147,28 +155,57 @@ use_fallback() {
   grep -E '^(commit|commit_date|records|unpacked_bytes)=' "$fb/SOURCE" > "$work/meta"
   local c cd; c=$(sed -n 's/^commit=//p' "$fb/SOURCE"); cd=$(sed -n 's/^commit_date=//p' "$fb/SOURCE")
   FETCHED=$fu
+  used=$(sed -n 's/^source=//p' "$fb/SOURCE" | head -1); used=${used:-$URL}          # 資料是上一份的：來源照上一份記
+  role=$(sed -n 's/^source_role=//p' "$fb/SOURCE" | head -1); role=${role:-primary}
   FB_EXTRA=$(printf 'fallback=yes\nfallback_utc=%s\nfallback_note=%s\n' "$(date -u +%FT%TZ)" \
     "上游連不上（$why），沿用 vulns.git ${c:0:12}（提交時間 ${cd:-未取得}，下載於 $fu，$hours 小時前；上限 $max 小時）：這段時間新增的核心 CVE 不在清單裡")
   how="沿用上一份鏡像 $fb（上游連不上）"
 }
-if [ "$how" = clone ]; then
-  tries=${KERNEL_CVE_GIT_TRIES:-3}; tries=${tries%%.*}; [ "$tries" -ge 1 ] 2> /dev/null || tries=1
-  # ls-remote 已經連不上、又有可沿用的舊資料：clone 只再試一次（連線階段的逾時重試幾次通常也一樣）
-  [ -z "$head" ] && [ -n "$FALLBACK" ] && tries=1
-  delay=${KERNEL_CVE_GIT_RETRY_DELAY:-30}; delay=${delay%%.*}
-  n=1
-  until ( ulimit -f $(( ${KERNEL_CVE_MAX_DOWNLOAD_MB:-500} * 1024 ))
-          timeout "${KERNEL_CVE_GIT_TIMEOUT:-900}" "${GITC[@]}" clone -q --depth 1 --no-checkout --single-branch --no-tags "$URL" "$work/v" ); do
-    rm -rf "$work/v"
-    if [ "$n" -ge "$tries" ]; then
-      msg="git clone 試了 $n 次都失敗（每次超過 ${KERNEL_CVE_GIT_TIMEOUT:-900} 秒、連線失敗或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}）"
-      use_fallback "$msg" && break
-      echo "FAIL $msg：$URL" >&2
-      exit 1
+T0=$SECONDS; TOTAL=${KERNEL_CVE_TOTAL_TIMEOUT:-1500}; GTS=${KERNEL_CVE_GIT_TIMEOUT:-900}; GT=${GTS%.*}; GT=${GT:-0}
+left() { echo $(( TOTAL - (SECONDS - T0) )); }
+tries=${KERNEL_CVE_GIT_TRIES:-3}; tries=${tries%%.*}; [ "$tries" -ge 1 ] 2> /dev/null || tries=1
+delay=${KERNEL_CVE_GIT_RETRY_DELAY:-30}; delay=${delay%%.*}
+used=; role=; how=; tried=(); n=0; any_head=; budget=
+# 一輪＝依序試每個來源：先 ls-remote 問 HEAD（只問 commit，不下載）；HEAD 和上一份相同就沿用，否則 clone。
+# ls-remote 取不到：後面還有來源就直接換；最後一個來源照常 clone（有的伺服器 ls-remote 不通但 clone 可以）
+while [ -z "$used" ] && [ -z "$budget" ]; do
+  n=$(( n + 1 )); i=0
+  for u in "${URLS[@]}"; do
+    i=$(( i + 1 )); role=primary; [ "$i" -eq 1 ] || role=fallback
+    l=$(left); [ "$l" -ge 10 ] || { tried+=("$u：合計時間上限 KERNEL_CVE_TOTAL_TIMEOUT=${TOTAL} 秒快用完，沒有再試"); budget=1; break; }
+    head=$(timeout $(( l < 120 ? l : 120 )) "${GITC[@]}" ls-remote "$u" HEAD 2>/dev/null | awk 'NR==1{print $1}') || head=
+    [ -z "$head" ] || any_head=1
+    if [ -z "$head" ] && [ "$i" -lt "${#URLS[@]}" ]; then tried+=("$u：git ls-remote 失敗（第 $n 輪）"); continue; fi
+    if reuse_ok "$head"; then
+      cp --reflink=auto "$REUSE/kernel-cves.zip" "$DEST/kernel-cves.zip"
+      grep -E '^(commit|commit_date|records|unpacked_bytes)=' "$REUSE/SOURCE" > "$work/meta"
+      used=$u; how="沿用 $REUSE（上游 HEAD 沒有變：$head）"; break
     fi
-    echo "git clone 第 $n 次失敗，$delay 秒後重試（最多 $tries 次）：$URL" >&2
-    sleep "$delay"; delay=$(( delay * 2 )); n=$(( n + 1 ))
+    l=$(left); [ "$l" -ge 10 ] || { tried+=("$u：合計時間上限 KERNEL_CVE_TOTAL_TIMEOUT=${TOTAL} 秒快用完，沒有 clone"); budget=1; break; }
+    if [ "$l" -le "$GT" ]; then t=$l; else t=$GTS; fi   # clone 的上限：KERNEL_CVE_GIT_TIMEOUT，但不超過剩下的合計時間
+    rm -rf "$work/v"
+    if ( ulimit -f $(( ${KERNEL_CVE_MAX_DOWNLOAD_MB:-500} * 1024 ))
+         timeout "$t" "${GITC[@]}" clone -q --depth 1 --no-checkout --single-branch --no-tags "$u" "$work/v" ); then
+      used=$u; how=clone; break
+    fi
+    rm -rf "$work/v"
+    tried+=("$u：git clone 失敗、超過 $t 秒或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}（第 $n 輪）")
+    echo "git clone 第 $n 次失敗（來源 $role：$u）" >&2
   done
+  [ -z "$used" ] && [ -z "$budget" ] || break
+  [ "$n" -lt "$tries" ] || break
+  # 所有來源連 ls-remote 都不通、又有可沿用的舊資料：不再重試（連線階段的逾時重試幾次通常也一樣）
+  [ -n "$any_head" ] || [ -z "$FALLBACK" ] || break
+  [ "$(left)" -ge $(( delay + 10 )) ] || { tried+=("合計時間上限 KERNEL_CVE_TOTAL_TIMEOUT=${TOTAL} 秒不夠再等 $delay 秒重試"); break; }
+  echo "所有來源第 $n 輪都失敗，$delay 秒後重試（最多 $tries 輪）" >&2
+  sleep "$delay"; delay=$(( delay * 2 ))
+done
+if [ -z "$used" ]; then
+  for x in "${tried[@]}"; do echo "FAIL $x" >&2; done
+  msg="git clone 試了 $n 次都失敗，所有來源都失敗（${#URLS[@]} 個；每次超過 ${KERNEL_CVE_GIT_TIMEOUT:-900} 秒、連線失敗或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}）"
+  use_fallback "$msg" || { echo "FAIL $msg：${URLS[*]}" >&2; exit 1; }
+else
+  for x in "${tried[@]}"; do echo "WARN $x；之後改用其他來源或重試成功" >&2; done
 fi
 if [ "$how" = clone ]; then      # clone 成功（沒有改用 use_fallback）
   [ "$n" -eq 1 ] || echo "git clone 第 $n 次成功" >&2
@@ -218,14 +255,29 @@ with open(meta, "w", encoding="utf-8") as f:
 print(f"{len(want)} 筆紀錄，{total} bytes（commit {commit[:12]}，{cdate}）")
 PY
   rm -rf "$work/v"
+  # 備援鏡像可能落後：資料比上一份舊就不換（主來源照舊不檢查，上游改寫歷史時仍要能更新）
+  prev=${REUSE:-$FALLBACK}
+  if [ "$role" = fallback ] && [ -n "$prev" ] && [ -f "$prev/SOURCE" ]; then
+    old=$(sed -n 's/^commit_date=//p' "$prev/SOURCE" | head -1); new=$(sed -n 's/^commit_date=//p' "$work/meta" | head -1)
+    # date -d "" 會得到今天零時，所以空字串要先擋掉
+    if [ -n "$old" ] && [ -n "$new" ] && os=$(date -d "$old" +%s 2>/dev/null) && ns=$(date -d "$new" +%s 2>/dev/null); then
+      if [ "$ns" -lt "$os" ]; then
+        msg="備援來源 $used 的資料（commit_date=$new）比上一份（$old）舊，不換"
+        rm -f "$DEST/kernel-cves.zip"
+        use_fallback "$msg" || { echo "FAIL $msg" >&2; exit 1; }
+      fi
+    else
+      echo "WARN 讀不到 commit_date（上一份：${old:-無}；這次：${new:-無}），沒有檢查備援資料是否比上一份舊" >&2
+    fi
+  fi
 fi
 sha=$(sha256sum "$DEST/kernel-cves.zip" | cut -d' ' -f1); sz=$(stat -c %s "$DEST/kernel-cves.zip")
-{ printf 'source=%s\nfetched_utc=%s\nzip_sha256=%s\nzip_bytes=%s\n' "$URL" "$FETCHED" "$sha" "$sz"; cat "$work/meta"
+{ printf 'source=%s\nsource_role=%s\nfetched_utc=%s\nzip_sha256=%s\nzip_bytes=%s\n' "$used" "$role" "$FETCHED" "$sha" "$sz"; cat "$work/meta"
   [ -z "$FB_EXTRA" ] || printf '%s\n' "$FB_EXTRA"; } > "$DEST/SOURCE"
-echo "kernel-cves.zip：$how，$sz bytes"
+echo "kernel-cves.zip：$how（來源 $role：$used），$sz bytes"
 check "$DEST" 1    # 下載時多做一次完整的 CRC 檢查（testzip）
 {
-  echo "# source: $URL"; echo "# fetched_utc: $FETCHED"; echo "# $(grep -E '^commit=' "$DEST/SOURCE")"
+  echo "# source: $used ($role)"; echo "# fetched_utc: $FETCHED"; echo "# $(grep -E '^commit=' "$DEST/SOURCE")"
   echo "# files: $(find "$DEST" -type f | wc -l)  bytes: $(du -sb "$DEST" | cut -f1)"
   (cd "$DEST" && find . -type f -print0 | sort -z | xargs -0 sha256sum)
 } > "$MANIFEST"
