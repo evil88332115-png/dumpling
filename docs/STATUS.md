@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 17:11 +0800（C3）
+最後更新：2026-11-17 17:24 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -446,12 +446,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：T-14（常駐 DT 模式）開工；**pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 現在在 C4 手上**（C1 同意由 C4 改、C1 審；C1 的 T-06 PR-2 排在 T-14 之後）；PR #189 等 CI 後 C0 合併
-- 分支／PR／commit：`wp7/notes-no-url`（74dfe16）→ PR #189；#174、#178 已合併
+- 目前在做：T-14 PR #199 等 C1 審；**pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 現在在 C4 手上**（#199 合併前不要改；C1 的 T-06 PR-2 排在後面）；PR #189 等 CI 後 C0 合併
+- 分支／PR／commit：`wp7/t14-resident-dt`（cd7ee42）→ PR #199；`wp7/notes-no-url`（74dfe16）→ PR #189
 - 代理：0 個（D-048 上限 3）
 - CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）；ai-nas 44040129677 兩次 403，診斷 run 44051748503 建出 draft 448371388（target 6de7d01，#189 合併後重跑換掉，重跑前 C0 問使用者）
 - 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（上游轉 sca-center、dumpling 後處理由 C1 做）；ai-nas 草稿 403 診斷與修正 (a)
 - 下一步：#189 合併 → ai-nas 草稿重跑（等使用者）→ T-14（含 --official 只認 tag push：jetson/scan.sh 先給 C1 審、scan-disk.sh 一起改；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6（屬性名稱照 D-072：inventory:）
 - 403 紀錄（已知原因之一：Release body 含 https 網址會 403；2026-11-17 診斷，原因沒有查出來）：run 44040129677（ai-nas 草稿），07:50:40–07:54:12Z 與補跑 08:06:20–08:09:52Z，POST /releases 各連續 8 次 403「Resource not accessible by integration」，同一步驟的 GET /releases 是 200；同 SHA 的 rpi、rock 都成功；body 唯一明顯差異是 ai-nas 的 notes 含 `https://github.com/…`；同一份 scan 只拿掉 https:// 後 run 44051748503 第一次成功、0 次 403。查過最近 76 個 Release／發布 job 與現有 12 個 Release body：之前沒有 403、body 都沒有網址；沒有次級速率限制的跡象；repo 沒有 ruleset。修正：(a) WP7 notes 產生端 #189（C4）；(b) 所有平台的 Release 說明寫入端 release-meta.py（C1，排在 SBOM 路徑 PR 之後）；release.yml:118 註解由 C1 更新
-- 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
+- 卡住／等決定：T-14 的 Jetson 草稿＋jcmp.py 比對（要觸發 workflow，等使用者）；compose 假常駐 DT 整合測試要不要做（C0）。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
