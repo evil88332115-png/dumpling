@@ -972,6 +972,24 @@ def test_previous_from_env_data_present_but_unusable_is_gap(tmp_path):
     assert w.previous_from_env("widget", env(d))[2] == "gap"
 
 
+def test_previous_from_env_missing_layer_is_not_run_even_if_another_layer_is_gap(tmp_path):
+    """前一版沒有 widget-os 這一層、widget-bsp 壞了（整體 GAP）：缺的那層 not_run（僅供參考），壞的才是 gap。"""
+    w = _wiz_module()
+    env = lambda d: {"DUMPLING_PREVIOUS_REPORTS": str(d)}
+    d = _prev_env_dir(tmp_path / "a", status="GAP", layers={"widget": "OK", "widget-bsp": "GAP"})
+    r, note, st = w.previous_from_env("widget-os", env(d))
+    assert (r, st) == (None, "not_run") and "widget-os" in note
+    assert w.previous_from_env("widget-bsp", env(d))[2] == "gap" and w.previous_from_env("widget", env(d))[2] == "ok"
+    # 整體 GAP 不是因為某一層（沒列出任何層、或沒有前一版的 tag）：每一層都照整體記 gap
+    d = _prev_env_dir(tmp_path / "b", status="GAP", note="GitHub API 失敗（HTTP 403）", layers={})
+    assert w.previous_from_env("widget-os", env(d))[2] == "gap"
+    d = _prev_env_dir(tmp_path / "c", status="GAP", layers={"widget": "OK"}, tag="")
+    assert w.previous_from_env("widget-os", env(d))[2] == "gap"
+    # 某一層是 NOT_RUN（缺 VEX 的舊格式）：not_run，不是 gap
+    d = _prev_env_dir(tmp_path / "d", layers={"widget": "OK", "widget-bsp": "NOT_RUN"})
+    assert w.previous_from_env("widget-bsp", env(d))[2] == "not_run"
+
+
 def test_plan_records_previous_from_env(site):
     tmp, flash, src, out, cfg, _ = site
     base = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--generic-rules", "no", "--yes", "--plan-only"]

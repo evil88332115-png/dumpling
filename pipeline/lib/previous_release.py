@@ -9,15 +9,20 @@
   意外的例外也當成 GAP，不擋 build／scan）。有給 --steps 時記一列 `pipeline-previous-release`（NOT_RUN 是 recorded 且說明以「僅供參考」開頭：不降低整體狀態；GAP 會降成 GAP）。
 
 什麼時候是什麼狀態：
-  NOT_RUN  不是正式 Release 的 tag push（dev、草稿、手動觸發；**不呼叫 API**）；或列出 Release 後沒有符合條件的前一個正式 Release（第一個正式 Release）。
-  OK       找到前一個正式 Release，每一層的報告 zip 都下載、檢查、組好。
-  GAP      找到了，但列出／下載／檢查／組裝失敗（附件缺、太大、zip 不合規則、VEX 格式不對、同一個版本排不出先後…）。**不當成沒有前一版**。
+  NOT_RUN  （說明都以「僅供參考」開頭，不降低整體狀態）不是正式 Release 的 tag push（dev、草稿、手動觸發；**不呼叫 API**）；列出 Release 後沒有符合條件的前一個正式 Release（第一個正式 Release）；
+           前一個正式 Release 沒有任何報告 zip，或每一層的 zip 裡都沒有 VEX 成員（報告格式導入前的舊版：缺必要的附件，沒辦法比較，但不是這次資料出了問題）。
+  OK       找到前一個正式 Release，至少一層的報告 zip 下載、檢查、組好，而且沒有任何一層是 GAP。有些層缺 VEX（舊格式）時，那幾層的狀態是 NOT_RUN（記在 manifest 的 layers，說明裡也列出）。
+  GAP      找到了，但列出／下載／檢查／組裝失敗（列出 Release 逾時、附件沒上傳完、太大、zip 壞掉或不合規則、大小不符、VEX 格式不對、同一個版本排不出先後…）。**不當成沒有前一版**。
+           只要有任何一層是 GAP，整體就是 GAP；沒有任何一層是 GAP，整體就不會是 GAP。
 
 選前一版的規則（只看版本，不看建立時間）：
   - 同一個專案的 tag `<專案>/v…`；不是草稿、不是 prerelease、不是這次的 tag（同名 tag 被重打、這次的版本已經有 Release 時不會拿自己比）。
   - 版本比這次小的之中取最大的（比較「前一個」，不是「最近發布的」：補丁版在舊版本線上發時，前一版是它的上一個版本）。
-  - 版本字串拆成數字與字母段：數字段比大小；多出來的段落是數字（v1.0 < v1.0.1）算較大；字母段不同（demo 與 rc）、一邊數字一邊字母、
-    完全相同寫法不同（v1.0 與 v1.00）、同一個 tag 有多個正式 Release → **排不出先後 → GAP**，不猜。
+  - 版本字串拆成主版本（數字，`.` 分段，比數值；多出來的段落算較大：v1.0 < v1.0.1）與後綴（`-` 之後）。主版本相同時，沒有後綴的比有後綴的大
+    （v1.0-rc1 < v1.0、v39.2.1-demo1 < v39.2.1）；兩邊都有後綴時用 `.` 分段逐段比：純數字比數值，排在含字母的前面；含字母的先比字母（ASCII）、字母相同再比後面的數字
+    （demo2 < demo10、rc < rc1、demo3 < rc1）；前面都相同時段落少的在前。**這是 dumpling 的延伸規則，不是純 semver**（semver 會讓 demo10 < demo2；選錯前一版，公告的「這版修了什麼」就整份算錯，
+    而 dumpling 的 tag 本來就是 -demo1 這種寫法）。
+  - 排不出先後 → **GAP**，不猜：寫法不同的同一版（v1.0 與 v1.00、大小寫、+建置資訊）、後綴的段落不是純數字／純字母／字母加數字（例如 1a、a1b）、版本不是 <數字>(.<數字>)*(-<後綴>)? 的形式、同一個 tag 有多個正式 Release。
 資料夾版面（--out）：
   previous-release.json            狀態、說明、前一版的 tag、每一層的狀態（精靈 tools/wizard/cra-scan.py 讀它）
   <名稱>/vex.cdx.json、summary.json  <名稱> ＝精靈的 --name（<專案>、<專案>-bsp、<專案>-os…），取自 report-<專案>-<版本><後綴>.zip 裡的
@@ -28,7 +33,8 @@
 暫時性錯誤（5xx、429、連線錯誤）最多試 5 次，間隔 10、30、60、60 秒；回應有 Retry-After 時照它（有上限）。4xx（429 除外）不重試。
   正式 Release 不能重跑：一次失敗那個 tag 就永久記 GAP，所以寧可多等。這些值都能用環境變數覆寫（測試設成 0）：
   DUMPLING_PREV_DOWNLOAD_DEADLINE（每個附件的整體時間上限，秒，預設 600）、DUMPLING_PREV_RETRIES（嘗試次數，預設 5）、
-  DUMPLING_PREV_RETRY_DELAYS（逗號分隔的退避秒數，預設 10,30,60；次數比清單長時沿用最後一個）、DUMPLING_PREV_RETRY_AFTER_MAX（Retry-After 的上限秒數，預設 120）。
+  DUMPLING_PREV_RETRY_DELAYS（逗號分隔的退避秒數，預設 10,30,60；次數比清單長時沿用最後一個）、DUMPLING_PREV_RETRY_AFTER_MAX（Retry-After 的上限秒數，預設 120）、
+  DUMPLING_PREV_LIST_DEADLINE（列出所有 Release（含分頁與重試）的整體時間上限，秒，預設 300；超過就是 GAP）。
 """
 import argparse
 import datetime
@@ -67,11 +73,13 @@ LIMITS = {
 }
 TIMEOUT = 120              # 單一 socket 操作的逾時
 DOWNLOAD_DEADLINE = 600    # 每個附件（含重試與等待）的整體時間上限，秒；實際最多再多一個 TIMEOUT（卡在一次 recv 時）
+LIST_DEADLINE = 300        # 列出所有 Release（含分頁、重試與等待）的整體時間上限，秒；實際最多再多一個 TIMEOUT
 RETRIES = 5                # 暫時性錯誤（5xx、429、連線錯誤）嘗試次數
 RETRY_DELAYS = (10, 30, 60)    # 第 n 次失敗後等的秒數；次數比清單長時沿用最後一個
 RETRY_AFTER_MAX = 120      # 回應的 Retry-After 最多照這麼多秒
 ENV_DEADLINE, ENV_RETRIES = "DUMPLING_PREV_DOWNLOAD_DEADLINE", "DUMPLING_PREV_RETRIES"
 ENV_DELAYS, ENV_AFTER_MAX = "DUMPLING_PREV_RETRY_DELAYS", "DUMPLING_PREV_RETRY_AFTER_MAX"
+ENV_LIST_DEADLINE = "DUMPLING_PREV_LIST_DEADLINE"
 _sleep = time.sleep                                  # 測試換掉它（不真的等；不能換 time.sleep，那是全域的）
 LOOPBACK = ("127.0.0.1", "localhost", "::1")      # 測試用：只有這幾個主機可以用 plain http
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -81,6 +89,10 @@ REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 
 class PrevError(Exception):
     """這次的狀態是 GAP（找到了前一版，但資料取不到或不能用）；說明寫進狀態行與 manifest。"""
+
+
+class PrevOld(PrevError):
+    """前一版的這一層沒有必要的附件（舊格式：zip 裡沒有 VEX 成員）：這一層是 NOT_RUN（僅供參考），不是 GAP。"""
 
 
 # ---------------------------------------------------------------- 是不是正式 Release
@@ -134,28 +146,74 @@ def _env_delays(environ, default):
 
 # ---------------------------------------------------------------- 版本排序
 
-def _tokens(v):
-    v = re.sub(r"^[vV](?=\d)", "", str(v))
-    return [int(t) if t.isdigit() else t.lower() for t in re.findall(r"\d+|[A-Za-z]+", v)]
+_VER_RE = re.compile(r"([0-9]+(?:\.[0-9]+)*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
+_NUM_ID = re.compile(r"[0-9]+")
+_ALPHA_ID = re.compile(r"([A-Za-z]+)([0-9]*)")      # 純字母（rc、alpha）或「字母加數字」（demo2、rc10）
+
+
+def _parse(v):
+    """版本字串 → (主版本的整數 tuple, 後綴識別碼 list 或 None)；去掉開頭的 v 與 +建置資訊。不是 <數字>(.<數字>)*(-<後綴>)? 的形式 → None。"""
+    s = re.sub(r"^[vV](?=[0-9])", "", str(v)).split("+", 1)[0]
+    m = _VER_RE.fullmatch(s)
+    if not m:
+        return None
+    return tuple(int(x) for x in m.group(1).split(".")), (m.group(2).split(".") if m.group(2) else None)
+
+
+def _norm(ident):
+    """識別碼的正規形（只用來判斷「寫法不同的同一版」：前導零、大小寫）。"""
+    if _NUM_ID.fullmatch(ident):
+        return int(ident)
+    m = _ALPHA_ID.fullmatch(ident)
+    return (m.group(1).lower(), int(m.group(2)) if m.group(2) else -1) if m else ident.lower()
+
+
+def _cmp_ident(x, y):
+    """後綴的兩個識別碼 → -1／0／1；不是純數字、純字母、字母加數字三種之一 → None（排不出，不猜）。
+    純數字比數值，排在含字母的前面；含字母的（dumpling 的延伸，不是純 semver）：先比字母部分（ASCII），字母相同再比後面的數字（自然排序：demo2 < demo10；沒有數字的 rc < rc1）。"""
+    nx, ny = _NUM_ID.fullmatch(x), _NUM_ID.fullmatch(y)
+    if nx and ny:
+        return (int(x) > int(y)) - (int(x) < int(y))
+    if nx or ny:
+        other = y if nx else x
+        if not _ALPHA_ID.fullmatch(other):
+            return None
+        return -1 if nx else 1
+    mx, my = _ALPHA_ID.fullmatch(x), _ALPHA_ID.fullmatch(y)
+    if not mx or not my:
+        return None
+    kx = (mx.group(1), int(mx.group(2)) if mx.group(2) else -1)
+    ky = (my.group(1), int(my.group(2)) if my.group(2) else -1)
+    return (kx > ky) - (kx < ky)
 
 
 def compare(a, b):
-    """版本字串比較 → -1（a 較小）、0（相同）、1（a 較大）、None（排不出先後：不猜）。
-    數字段比大小；一邊多出來的段落是數字才算較大（v1.0 < v1.0.1），是字母（demo、rc…）就排不出；兩邊不同的字母段、一邊數字一邊字母也排不出。
-    段落完全相同但字串不同（v1.0 與 v1.00、V1.0）→ 0，由呼叫端當成重複。"""
-    ta, tb = _tokens(a), _tokens(b)
-    for x, y in zip(ta, tb):
+    """版本字串比較 → -1（a 較小）、0（相同，或只是寫法不同：前導零 v1.00、大小寫、+建置資訊；由呼叫端當成重複）、1（a 較大）、None（排不出先後：不猜）。
+    主版本的數字段比數值，多出來的段落算較大（v1.0 < v1.0.1，維持原規則）。主版本相同時：沒有後綴 > 有後綴（v1.0-rc1 < v1.0）；
+    兩邊都有後綴時用 `.` 分段，逐段比（見 _cmp_ident），前面都相同時段落少的在前（rc < rc.1）。
+    這是 dumpling 的延伸規則，不是純 semver：semver 把 demo10 當字母比（demo10 < demo2），這裡 demo2 < demo10。後綴的段落不是上述形式（例如 1a、a1b）→ None。"""
+    pa, pb = _parse(a), _parse(b)
+    if pa is None or pb is None:
+        return None
+    (ma, sa), (mb, sb) = pa, pb
+    if ma == mb and (sa is None) == (sb is None) and (sa is None or [_norm(i) for i in sa] == [_norm(i) for i in sb]):
+        return 0
+    for x, y in zip(ma, mb):
+        if x != y:
+            return -1 if x < y else 1
+    if len(ma) != len(mb):
+        return 1 if len(ma) > len(mb) else -1
+    if sa is None or sb is None:
+        return 1 if sa is None else -1
+    for x, y in zip(sa, sb):
         if x == y:
             continue
-        if isinstance(x, int) and isinstance(y, int):
-            return -1 if x < y else 1
-        return None
-    if len(ta) == len(tb):
-        return 0
-    longer = ta[len(tb):] if len(ta) > len(tb) else tb[len(ta):]
-    if not isinstance(longer[0], int):
-        return None
-    return 1 if len(ta) > len(tb) else -1
+        c = _cmp_ident(x, y)
+        if c is None:
+            return None
+        if c:
+            return c
+    return (len(sa) > len(sb)) - (len(sa) < len(sb))
 
 
 def select_previous(releases, project, version):
@@ -239,7 +297,7 @@ class _Redirect(urllib.request.HTTPRedirectHandler):
 class GitHub:
     """唯讀 GitHub API 用戶端。下載網址用 API 路徑自己組，不用回應裡的網址。"""
     def __init__(self, repo, token=None, base="https://api.github.com", limits=None, retries=None, delay=None, deadline=None,
-                 retry_after_max=None, environ=None):
+                 retry_after_max=None, environ=None, list_deadline=None):
         if not REPO_RE.fullmatch(repo or ""):
             raise PrevError("GITHUB_REPOSITORY 格式不對")
         u = urllib.parse.urlsplit(base)
@@ -253,6 +311,7 @@ class GitHub:
         self.delays = (delay,) if delay is not None else _env_delays(env, RETRY_DELAYS)
         self.deadline = deadline if deadline is not None else (_env_num(env, ENV_DEADLINE, DOWNLOAD_DEADLINE) or DOWNLOAD_DEADLINE)
         self.retry_after_max = retry_after_max if retry_after_max is not None else _env_num(env, ENV_AFTER_MAX, RETRY_AFTER_MAX)
+        self.list_deadline = list_deadline if list_deadline is not None else (_env_num(env, ENV_LIST_DEADLINE, LIST_DEADLINE) or LIST_DEADLINE)
         self.opener = urllib.request.build_opener(_Redirect(loop))
 
     def _wait_for(self, n, headers):
@@ -296,17 +355,28 @@ class GitHub:
         raise PrevError("GitHub API 失敗（%s）" % last)
 
     def list_releases(self):
-        """所有 Release（分頁）。頁數用完還有下一頁、回應太大、不是 JSON 清單 → PrevError。"""
+        """所有 Release（分頁）。整體時間（含分頁、重試、等待、慢速涓滴的回應）超過上限、頁數用完還有下一頁、回應太大、不是 JSON 清單 → PrevError。"""
         out = []
+        deadline = time.monotonic() + self.list_deadline
+        what = "列出 Release 超過時間上限（%g 秒），中止" % self.list_deadline
         for page in range(1, self.limits["pages"] + 1):
             url = "%s/repos/%s/releases?per_page=100&page=%d" % (self.base, self.repo, page)
             try:
-                with self._open(url, "application/vnd.github+json") as resp:
-                    raw = resp.read(self.limits["api"] + 1)
+                with self._open(url, "application/vnd.github+json", deadline) as resp:
+                    chunks, n = [], 0
+                    while True:
+                        if time.monotonic() >= deadline:
+                            raise PrevError(what)
+                        b = resp.read1(1 << 16)       # read1：涓滴的回應才有機會檢查時間
+                        if not b:
+                            break
+                        n += len(b)
+                        if n > self.limits["api"]:
+                            raise PrevError("列出 Release 的回應太大")
+                        chunks.append(b)
+                    raw = b"".join(chunks)
             except (OSError, http.client.HTTPException) as e:
                 raise PrevError("讀取 Release 清單中斷（%s）" % type(e).__name__)
-            if len(raw) > self.limits["api"]:
-                raise PrevError("列出 Release 的回應太大")
             try:
                 doc = json.loads(raw)
             except (ValueError, RecursionError):
@@ -332,9 +402,9 @@ class GitHub:
         h, n = hashlib.sha256(), 0
         deadline = time.monotonic() + self.deadline
         with self._open(url, "application/octet-stream", deadline) as resp:
-            cl = resp.headers.get("Content-Length")
-            if cl and cl.isdigit() and int(cl) > max_size:
-                raise PrevError("附件太大（%s 位元組，上限 %d）" % (cl, max_size))
+            cl = (resp.headers.get("Content-Length") or "").strip()
+            if cl.isascii() and cl.isdigit() and len(cl) < 20 and int(cl) > max_size:       # isdigit 對 ² 這類字元也是真，int() 會丟 ValueError：只收 ASCII 數字
+                raise PrevError("附件太大（%s 位元組，上限 %d）" % (_c(cl, 20), max_size))
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
                 with os.fdopen(fd, "wb") as f:
@@ -417,7 +487,7 @@ def build_layer(zip_path, dest_dir, limits):
     except (zipfile.BadZipFile, NotImplementedError, RuntimeError, EOFError, OSError, ValueError) as e:
         raise PrevError("報告 zip 讀不了（%s）" % type(e).__name__)
     if vex is None:
-        raise PrevError("報告 zip 裡沒有 %s" % VEX_MEMBER)
+        raise PrevOld("報告 zip 裡沒有 %s（舊格式）" % VEX_MEMBER)
     v = load_json(vex, "zip 裡的 vex.cdx.json")
     if not isinstance(v, dict) or v.get("bomFormat") != "CycloneDX" or not isinstance(v.get("vulnerabilities"), list):
         raise PrevError("zip 裡的 vex.cdx.json 不是 CycloneDX VEX（沒有 vulnerabilities 清單）")
@@ -493,15 +563,19 @@ def prepare(project, version, out, env=None, client=None, limits=None):
             return "NOT_RUN", doc["note"], doc
         prev_ver = rel["tag_name"][len(project) + 1:]
         doc.update(previous_tag=rel["tag_name"], previous_version=prev_ver, release_id=rel.get("id") if isinstance(rel.get("id"), int) else None)
+        if not isinstance(rel.get("assets"), list):
+            raise PrevError("%s 的附件欄位不是清單（API 回應格式不對），不能當成沒有報告 zip" % _c(rel["tag_name"], 100))
         assets = layer_assets(rel, project, prev_ver)
         if not assets:
-            raise PrevError("%s 沒有 report-%s-%s….zip 這類的報告附件，無法和它比較" % (_c(rel["tag_name"], 100), project, prev_ver))
+            doc.update(status="NOT_RUN", note="%s：前一版 %s 沒有報告 zip（舊格式），無法產生版本間公告" % (step_rows.INFORMATIONAL, _c(rel["tag_name"], 100)))
+            return "NOT_RUN", doc["note"], doc
         os.mkdir(work, 0o700)
-        total, bad = 0, 0
+        total, bad, old = 0, 0, []
+        for name in sorted(assets):                      # 先全部登記成 GAP：中途意外中斷時，沒處理到的層不會被當成「前一版沒有這一層」
+            doc["layers"][name] = {"asset": assets[name].get("name") if isinstance(assets[name], dict) else None, "status": "GAP", "note": "還沒處理就中斷了"}
         for name in sorted(assets):
             a = assets[name]
-            ent = {"asset": a.get("name") if isinstance(a, dict) else None}
-            doc["layers"][name] = ent
+            ent = doc["layers"][name]
             try:
                 if a is None:
                     raise PrevError("同名的附件有好幾個")
@@ -520,6 +594,9 @@ def prepare(project, version, out, env=None, client=None, limits=None):
                     raise PrevError("下載的大小（%d）和 Release 記的（%d）不同" % (n, size))
                 ent.update(build_layer(zp, os.path.join(out, name), lim))
                 ent.update(status="OK", note="")
+            except PrevOld as e:                         # zip 好好的，但沒有 VEX 成員：舊格式，這一層 NOT_RUN（僅供參考），不算 GAP
+                ent.update(status="NOT_RUN", note="%s：前一版 %s 的 %s 層%s，無法產生這一層的版本間公告" % (step_rows.INFORMATIONAL, _c(rel["tag_name"], 100), name, e))
+                old.append(name)
             except PrevError as e:
                 ent.update(status="GAP", note=str(e))
                 bad += 1
@@ -528,11 +605,16 @@ def prepare(project, version, out, env=None, client=None, limits=None):
                     os.unlink(os.path.join(work, name + ".zip"))
                 except OSError:
                     pass
-        names = ", ".join(sorted(assets))
+        # 整體狀態：任何一層是 GAP → GAP；沒有 GAP、每一層都是舊格式 → NOT_RUN（僅供參考）；其他（至少一層 OK，其餘最多是舊格式的 NOT_RUN）→ OK
         if bad:
-            bads = "；".join("%s：%s" % (k, v["note"]) for k, v in sorted(doc["layers"].items()) if v["status"] != "OK")
+            bads = "；".join("%s：%s" % (k, v["note"]) for k, v in sorted(doc["layers"].items()) if v["status"] == "GAP")
             raise PrevError("%s 有 %d／%d 層組不起來（%s）" % (_c(rel["tag_name"], 100), bad, len(assets), bads))
-        doc.update(status="OK", note="前一個正式 Release %s，%d 層：%s" % (_c(rel["tag_name"], 100), len(assets), names))
+        if len(old) == len(assets):
+            doc.update(status="NOT_RUN", note="%s：前一版 %s 的報告 zip 裡都沒有 VEX（舊格式），無法產生版本間公告" % (step_rows.INFORMATIONAL, _c(rel["tag_name"], 100)))
+            return "NOT_RUN", doc["note"], doc
+        good = ", ".join(n for n in sorted(assets) if n not in old)
+        extra = "；%s：%s 沒有 VEX（舊格式），這幾層無法產生版本間公告" % (step_rows.INFORMATIONAL, ", ".join(old)) if old else ""
+        doc.update(status="OK", note="前一個正式 Release %s，%d 層：%s%s" % (_c(rel["tag_name"], 100), len(assets) - len(old), good, extra))
         return "OK", doc["note"], doc
     except PrevError as e:
         doc.update(status="GAP", note=str(e))

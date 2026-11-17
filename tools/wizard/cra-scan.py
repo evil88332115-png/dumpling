@@ -407,7 +407,10 @@ def previous_from_env(name, environ=None):
     layers = m.get("layers") if isinstance(m.get("layers"), dict) else {}
     ent = layers.get(key) if key not in ("", ".", "..") else None
     if not isinstance(ent, dict):
-        if m["status"] == "OK":
+        # 前一版的 Release 找到了、也列出了它有哪些層（layers 不是空的），而這一層不在裡面：前一版就是沒有這一層 → not_run（僅供參考），
+        # 就算整體因為別的層壞掉是 GAP 也一樣（壞的那一層才是 gap）。沒有找到前一版、或沒列出任何層（API 失敗、排不出先後…）時整體的狀態就是這一層的狀態。
+        listed = isinstance(m.get("previous_tag"), str) and bool(m.get("previous_tag")) and bool(layers) and key not in ("", ".", "..")
+        if m["status"] == "OK" or (m["status"] == "GAP" and listed):
             return None, f"前一個正式 Release（{str(m.get('previous_tag') or '')[:100]}）沒有 {key} 這一層的報告", "not_run"
         ent = m
     st, enote = ent.get("status"), (str(ent.get("note") or "")[:300] or note)

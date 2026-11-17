@@ -64,16 +64,27 @@
 
 - 同一個專案的 tag `<專案>/v…`；**不是草稿、不是 prerelease、不是這次的 tag**（同名 tag 被重打、這個版本已經有 Release 時，不拿自己比）。`dev/<專案>`（滾動的開發版，prerelease）與其他專案的 tag 不在候選裡。
 - **只看版本，不看建立時間**：版本比這次小的之中取最大的。補丁版在舊版本線上才發（例如 v1.1.0 之後才發 v1.0.1）時，前一版是 v1.0.0，不是時間上最近的 v1.1.0。
-- 版本字串拆成數字段與字母段：數字段比大小（v1.10.0 大於 v1.9.0）；多出來的段落是數字算較大（v1.0 小於 v1.0.1）。**排不出先後就不猜，記 GAP**：字母後綴（v1.0.0 與 v1.0.0-demo1、demo1 與 rc1）、一邊數字一邊字母、寫法不同的同一版（v1.0 與 v1.00）、同一個 tag 有多個正式 Release。
+- 版本字串拆成主版本（`-` 之前）與後綴（`-` 之後）。主版本的數字段比大小（v1.10.0 大於 v1.9.0）；多出來的段落算較大（v1.0 小於 v1.0.1）。主版本相同時：**沒有後綴的比有後綴的大**（v39.2.1-demo1 小於 v39.2.1、v1.0-rc1 小於 v1.0，所以 v39.2.1 的前一版是 v39.2.1-demo1）；兩邊都有後綴時用 `.` 分段逐段比，規則如下表。
+- **這是 dumpling 的延伸規則，不是純 semver**：semver 把 `demo10` 當成字母比（demo10 小於 demo2），這裡「字母加數字」的段落用自然排序（demo2 小於 demo10、rc9 小於 rc10）。理由：選錯前一版，公告上「這版修了什麼」就會整份算錯，而 dumpling 的 tag 本來就是 `-demo1` 這種寫法。其餘照 semver。
+
+  | 後綴的段落 | 怎麼比 | 例 |
+  |---|---|---|
+  | 純數字 | 比數值；排在含字母的段落前面 | `rc.2` 小於 `rc.10`；`1` 小於 `alpha` |
+  | 純字母 | 照 ASCII | `alpha` 小於 `beta` |
+  | 字母加數字 | 先比字母部分（ASCII），字母相同再比後面的數字（沒有數字的排前面） | `demo2` 小於 `demo10`；`demo3` 小於 `rc1`；`rc` 小於 `rc1` |
+  | 前面的段落都相同 | 段落少的排前面 | `rc` 小於 `rc.1` |
+  | 其他形式（`1a`、`a1b`） | **排不出先後，記 GAP**（保守，不照 ASCII 猜） | |
+
+- **排不出先後就不猜，記 GAP**：寫法不同的同一版（v1.0 與 v1.00、`rc1` 與 `RC1`、`+` 之後的建置資訊不同）、後綴的段落是上表的「其他形式」、版本不是 `<數字>(.<數字>)*(-<後綴>)?` 的形式（例如 `v1.0rc1`）、同一個 tag 有多個正式 Release。只有比到那一段才會排不出：主版本不同就已經分得出先後。
 - 列 Release 的 `draft`／`prerelease` 旗標不是布林值的項目，不當成正式 Release（統計在說明裡）。
 
 ### 三種狀態
 
 | 狀態 | 什麼時候 | 結果 |
 |---|---|---|
-| `NOT_RUN`（僅供參考） | 不是正式 Release 的 tag push；或第一個正式 Release（沒有符合條件的前一版）；或前一版沒有這一層的報告（例如這一版新增了 `-os` 分層） | **不算 GAP**。`pipeline-steps.tsv` 記一列 `pipeline-previous-release`（recorded、說明以「僅供參考」開頭，不降低整體狀態）；報告的 `inputs-check.json` 記 informational 的 `csaf-fix-advisory` 步驟，報告訊息寫 `CSAF 修補公告：未產生（NOT_RUN…）` |
-| `OK` | 找到前一個正式 Release，這一層的報告 zip 下載、檢查、組好 | 精靈給 `--csaf-previous`，`交給PM/CSAF/` 產生草稿 |
-| `GAP` | 找到了前一版，但列出／下載／檢查／組裝失敗：API 錯誤、前一版沒有報告 zip、附件還沒上傳完或太大、zip 不合規則、VEX 不是 CycloneDX、`summary.json` 不是 JSON、版本排不出先後、資料夾缺或 manifest 讀不到 | **照實記，不當成沒有前一版**。`pipeline-steps.tsv` 記 GAP（整體狀態降成 GAP，不擋 Release）；精靈在 `inputs-check.json` 記一般步驟 `gap`，報告的 `交給PM/未產生的項目.md` 列出原因。產生了但 `csaf_advisory.py` 判 FAIL（兩版不是同一個產品、版本相同或順序反了、輸入格式不對）時，由 `report_package.py` 記 GAP |
+| `NOT_RUN`（僅供參考） | 不是正式 Release 的 tag push；或第一個正式 Release（沒有符合條件的前一版）；或前一版沒有任何報告 zip（報告格式導入前的舊版，說明「僅供參考：前一版 <tag> 沒有報告 zip（舊格式），無法產生版本間公告」）；或前一版每一層的 zip 裡都沒有 VEX 成員（同樣是舊格式）；或前一版沒有這一層的報告（例如這一版新增了 `-os` 分層）；或某一層的 zip 裡沒有 VEX（那一層記 NOT_RUN，其他層照常） | **不算 GAP**。`pipeline-steps.tsv` 記一列 `pipeline-previous-release`（recorded、說明以「僅供參考」開頭，不降低整體狀態）；報告的 `inputs-check.json` 記 informational 的 `csaf-fix-advisory` 步驟，報告訊息寫 `CSAF 修補公告：未產生（NOT_RUN…）` |
+| `OK` | 找到前一個正式 Release，這一層的報告 zip 下載、檢查、組好。整體：至少一層 OK、而且沒有任何一層是 GAP（有些層缺 VEX 時整體仍是 OK，說明裡列出缺的層，manifest 裡那幾層是 NOT_RUN） | 精靈給 `--csaf-previous`，`交給PM/CSAF/` 產生草稿 |
+| `GAP` | 找到了前一版，但列出／下載／檢查／組裝失敗：API 錯誤、列出 Release 超過整體時間上限（`DUMPLING_PREV_LIST_DEADLINE`，預設 300 秒）、Release 的附件欄位格式不對、附件還沒上傳完或太大、大小與 Release 記的不同、zip 壞掉或不合規則、VEX 不是 CycloneDX、`summary.json` 不是 JSON、版本排不出先後、資料夾缺或 manifest 讀不到。**只要有任何一層是 GAP，整體就是 GAP；沒有任何一層是 GAP，整體就不會是 GAP**；精靈對每一層各看各的：GAP 的層記 GAP，前一版沒有的層（不在 manifest 的 `layers` 裡）與缺 VEX 的層記 NOT_RUN | **照實記，不當成沒有前一版**。`pipeline-steps.tsv` 記 GAP（整體狀態降成 GAP，不擋 Release）；精靈在 `inputs-check.json` 記一般步驟 `gap`，報告的 `交給PM/未產生的項目.md` 列出原因。產生了但 `csaf_advisory.py` 判 FAIL（兩版不是同一個產品、版本相同或順序反了、輸入格式不對）時，由 `report_package.py` 記 GAP |
 
 這個步驟本身不會讓 pipeline 失敗：資料問題、意外的例外都記成 GAP，build 與 scan 照跑。
 

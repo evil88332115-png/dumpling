@@ -111,9 +111,28 @@ class Versions(unittest.TestCase):
     def test_compare_table(self):
         T = [("v39.2.1-demo1", "v39.2.0-demo1", 1), ("v39.2.0-demo1", "v39.2.1-demo1", -1), ("v1.10.0", "v1.9.0", 1),       # 數字比大小，不是字串
              ("v1.0.1", "v1.0", 1), ("v1.0", "v1.0.1", -1), ("v1.0.0-demo2", "v1.0.0-demo1", 1), ("v1.0", "V1.0", 0), ("v1.0", "v1.00", 0),
-             ("v1.0.0", "v1.0.0-demo1", None), ("v1.0.0-demo1", "v1.0.0-rc1", None), ("v1.rc", "v1.2", None)]
+             ("v1.rc", "v1.2", None), ("v1.0.0", "v1.0.0", 0)]
         for a, b, want in T:
             self.assertEqual(pr.compare(a, b), want, (a, b))
+            self.assertEqual(pr.compare(b, a), None if want is None else -want, (b, a))
+
+    def test_compare_suffix_rules(self):
+        """有後綴 < 沒有後綴；後綴逐段比（純數字比數值、含字母的先比字母再比數字、數字段在字母段前、段落少的在前）。"""
+        T = [("v39.2.1-demo1", "v39.2.1", -1), ("v1.0-rc1", "v1.0", -1), ("v1.0.0-rc.1", "v1.0.0", -1),                         # demo／rc 轉正式版
+             ("v1.0.0-demo1", "v1.0.0-demo2", -1), ("v1.0.0-rc.1", "v1.0.0-rc.2", -1), ("v1.0.0-alpha", "v1.0.0-beta", -1),       # 兩個後綴互比
+             ("v1.0.0-rc", "v1.0.0-rc.1", -1), ("v1.0.0-1", "v1.0.0-alpha", -1), ("v1.0.0-rc.1", "v1.0.0-rc.alpha", -1),            # 段落少的在前、數字段在字母段前
+             ("v1.0.0-demo2", "v1.0.0-demo10", -1), ("v1.0.0-rc9", "v1.0.0-rc10", -1),                                              # 字母加數字：自然排序（純 semver 會相反）
+             ("v1.0.0-demo3", "v1.0.0-rc1", -1), ("v1.0.0-rc1", "v1.0.0-demo99", 1),                                               # 字母部分不同：照 ASCII（demo < rc）
+             ("v1.0.0-rc", "v1.0.0-rc1", -1), ("v1.0.0-rc.2", "v1.0.0-rc.10", -1), ("v1.0.0-2", "v1.0.0-10", -1),
+             ("v1.0.1-rc1", "v1.0.0", 1), ("v1.0-rc1", "v1.0.1", -1),                                                              # 主版本先決定
+             ("v1.0.0-rc1", "v1.0.0-RC1", 0), ("v1.0.0-demo01", "v1.0.0-demo1", 0), ("v1.0.0-rc.01", "v1.0.0-rc.1", 0),           # 寫法不同的同一版：0（呼叫端記 GAP）
+             ("v1.0.0+a", "v1.0.0+b", 0), ("v1.0.0-1a", "v1.0.0-1a", 0),
+             ("v1.0.0-1a", "v1.0.0-1b", None), ("v1.0.0-a1b", "v1.0.0-a2b", None), ("v1.0.0-1a", "v1.0.0-5", None),               # 不是純數字／純字母／字母加數字：排不出
+             ("v1.0.0-a1b", "v1.0.0-rc1", None), ("v1.0.0-a1b", "v1.0.0", -1),                                                      # 只有比到那一段才排不出
+             ("v1.0.0-rc1", "v1.0-rc1", 1), ("v1.0.0-", "v1.0.0", None), ("v1.0.0--x", "v1.0.0", -1), ("v1.0.0-rc..1", "v1.0.0", None)]
+        for a, b, want in T:
+            self.assertEqual(pr.compare(a, b), want, (a, b))
+            self.assertEqual(pr.compare(b, a), None if want is None else -want, (b, a))
 
     def sel(self, rels, ver="v1.1.0"):
         return pr.select_previous(rels, PROJ, ver)
@@ -156,6 +175,16 @@ class Versions(unittest.TestCase):
         self.assertIsNone(self.sel([self.tag("v2.0.0")])[0])                      # 只有比較新的
         self.assertIn("沒有前一個正式 Release", self.sel([])[1])
 
+    def test_other_project_tag_with_same_length_name_is_not_a_candidate(self):
+        """別的專案的名稱和本專案一樣長（acme-boarx／acme-board）：只看長度切字串會把它的 tag 當成候選。"""
+        other = "acme-boarx/v1.0.0"
+        self.assertEqual(len(other.split("/")[0]), len(PROJ))
+        r, _, st = self.sel([release(other), release("acme-boar/v1.0.0"), release("acme-board-x/v1.0.0")])
+        self.assertIsNone(r)
+        self.assertEqual(st["other_projects"], 3)
+        r, _, _ = self.sel([release(other), release("%s/v0.9.0" % PROJ)])
+        self.assertEqual(r["tag_name"], "acme-board/v0.9.0")
+
     def test_non_bool_flags_are_not_trusted(self):
         r = self.tag("v1.0.0")
         r["draft"] = "false"                                                         # 字串不是 bool：不當成正式 Release
@@ -170,23 +199,50 @@ class Versions(unittest.TestCase):
         r, _, _ = self.sel([self.tag("v1.0.0", rid=1), self.tag("v1.0.0", rid=2, draft=True)])
         self.assertEqual(r["id"], 1)
 
+    def test_demo_and_rc_to_final(self):
+        """demo／rc 轉正式版：沒有後綴的版本比有後綴的大，前一版是那個有後綴的版本（不再是 GAP）。"""
+        r, _, _ = self.sel([self.tag("v39.2.1-demo1"), self.tag("v39.2.0-demo1")], "v39.2.1")
+        self.assertEqual(r["tag_name"], "acme-board/v39.2.1-demo1")
+        r, _, _ = self.sel([self.tag("v1.0-rc1"), self.tag("v0.9")], "v1.0")
+        self.assertEqual(r["tag_name"], "acme-board/v1.0-rc1")
+        r, _, _ = self.sel([self.tag("v39.2.0-demo1"), self.tag("v39.2.1-demo1")], "v39.2.1-demo2")           # 同一版的下一個 demo
+        self.assertEqual(r["tag_name"], "acme-board/v39.2.1-demo1")
+        r, _, st = self.sel([self.tag("v39.2.1"), self.tag("v39.2.0-demo1")], "v39.2.1-demo1")                 # 較新的是正式版：不是前一版
+        self.assertEqual((r["tag_name"], st["newer"]), ("acme-board/v39.2.0-demo1", 1))
+
+    def test_existing_demo_sequence_unchanged(self):
+        r, _, _ = self.sel([self.tag("v39.2.0-demo1"), self.tag("v39.1.0-demo1")], "v39.2.1-demo1")
+        self.assertEqual(r["tag_name"], "acme-board/v39.2.0-demo1")
+
+    def test_suffix_ordering_in_selection(self):
+        r, _, _ = self.sel([self.tag("v1.0.0-demo1"), self.tag("v1.0.0-demo2"), self.tag("v1.0.0-demo10")], "v1.0.0-demo11")
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0-demo10")               # demo10 > demo2（自然排序）
+        r, _, _ = self.sel([self.tag("v1.0.0-rc.1"), self.tag("v1.0.0-rc")], "v1.0.0")
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0-rc.1")
+        r, _, _ = self.sel([self.tag("v1.0.0-alpha"), self.tag("v1.0.0-demo3")], "v1.0.0-rc1")                  # demo3 < rc1，alpha < demo3
+        self.assertEqual(r["tag_name"], "acme-board/v1.0.0-demo3")
+        self.assertIsNone(self.sel([self.tag("v1.0.0-rc1")], "v1.0.0-demo1")[0])   # demo1 對 rc1 排得出（rc1 較新）：不是 GAP，只是沒有前一版
+
     def test_unorderable_versions_are_gap_not_guess(self):
         with self.assertRaises(pr.PrevError):
-            self.sel([self.tag("v1.0.0")], "v1.0.0-demo1")                          # 後綴是字母：排不出
+            self.sel([self.tag("v1.0.0-1a"), self.tag("v0.9.0")], "v1.0.0-5")        # 不是純數字／純字母／字母加數字：排不出，也可能比 v0.9.0 更前，不能略過
         with self.assertRaises(pr.PrevError):
-            self.sel([self.tag("v1.0.0-rc1"), self.tag("v0.9.0")], "v1.0.0-demo1")    # 排不出的版本可能比 v0.9.0 更前，不能略過
+            self.sel([self.tag("v1.00"), self.tag("v0.9.0")], "v1.0")                # 寫法不同的同一版（前導零）
         with self.assertRaises(pr.PrevError):
-            self.sel([self.tag("v1.00"), self.tag("v0.9.0")], "v1.0")                # 寫法不同的同一版
+            self.sel([self.tag("v1.0.0-RC1")], "v1.0.0-rc1")                         # 寫法不同的同一版（大小寫）
         with self.assertRaises(pr.PrevError):
-            self.sel([self.tag("v1.0.0-rc1"), self.tag("v1.0.0-demo0")], "v1.0.0-demo1")
+            self.sel([self.tag("v1.0.0rc1"), self.tag("v0.9.0")], "v1.0.0")          # 不是 <數字>-<後綴> 的形式
 
     def test_odd_suffix_on_an_older_version_does_not_block(self):
-        # v0.5.0-x 和 v0.9.0 的第一個不同處是數字（5 < 9），排得出先後：不影響
-        r, _, _ = self.sel([self.tag("v0.9.0"), self.tag("v0.5.0-x")], "v1.0.0")
+        # v0.5.0-1a 和 v0.9.0 的主版本就分得出先後（5 < 9），後綴怪不怪都不影響
+        r, _, _ = self.sel([self.tag("v0.9.0"), self.tag("v0.5.0-1a")], "v1.0.0")
         self.assertEqual(r["tag_name"], "acme-board/v0.9.0")
-        # v0.9.0-x 和 v0.9.0 之間排不出先後，而兩個都比這次小：不猜
+        # 兩個都比這次小、主版本相同、後綴都是排不出的形式：不猜
         with self.assertRaises(pr.PrevError):
-            self.sel([self.tag("v0.9.0"), self.tag("v0.9.0-x")], "v1.0.0")
+            self.sel([self.tag("v0.9.0-1a"), self.tag("v0.9.0-1b")], "v1.0.0")
+        # 不是 <數字>-<後綴> 形式的 tag（v0.9.0rc1）和 v0.9.0 排不出先後：不猜
+        with self.assertRaises(pr.PrevError):
+            self.sel([self.tag("v0.9.0"), self.tag("v0.9.0rc1")], "v1.0.0")
 
 
 # ---------------------------------------------------------------- 是不是正式 Release
@@ -275,21 +331,103 @@ class Prepare(Tmp):
         self.assertEqual(st, "NOT_RUN")
         self.assertEqual(fake.downloads, [])
 
-    def test_previous_without_report_assets_is_gap(self):
-        st, note, doc = self.run_prepare(Fake([release("%s/v1.0.0" % PROJ, [{"id": 1, "name": "sbom-%s-v1.0.0.cdx.json" % PROJ, "size": 5, "state": "uploaded"}])]))
-        self.assertEqual(st, "GAP")
-        self.assertIn("沒有 report-", note)
+    def test_previous_without_report_assets_is_informational_not_run(self):
+        """前一版只有 SBOM、沒有報告 zip（報告格式導入前的舊版）：NOT_RUN，說明以「僅供參考」開頭，步驟列不降級。"""
+        rel = release("%s/v1.0.0" % PROJ, [{"id": 1, "name": "sbom-%s-v1.0.0.cdx.json" % PROJ, "size": 5, "state": "uploaded"}])
+        fake = Fake([rel])
+        st, note, doc = self.run_prepare(fake)
+        self.assertEqual(st, "NOT_RUN")
+        self.assertEqual(note, "僅供參考：前一版 acme-board/v1.0.0 沒有報告 zip（舊格式），無法產生版本間公告")
+        self.assertEqual((doc["status"], doc["previous_tag"], doc["layers"], fake.downloads), ("NOT_RUN", "acme-board/v1.0.0", {}, []))
+        self.assertEqual(json.load(open(self.p("out", pr.MANIFEST), encoding="utf-8"))["status"], "NOT_RUN")
+        # 附件清單是空的、tag 帶控制字元以外的怪字元：照樣 NOT_RUN，tag 經過 _c
+        self.assertEqual(self.run_prepare(Fake([release("%s/v1.0.0" % PROJ)]), out="o2")[0], "NOT_RUN")
+        # 步驟列：recorded 的 NOT_RUN，整體不降級
+        rows = self.p("steps.tsv")
+        sr.append_row(rows, pr.STEP, st, pr.EXIT[st], note, recorded=True)
+        self.assertEqual(sr.overall(sr.read_rows(rows)), "OK")
 
-    def test_one_layer_broken_is_gap_other_layers_still_built(self):
+    def test_assets_field_not_a_list_is_gap_not_old_format(self):
+        """API 回應的 assets 欄位壞掉（不是清單）是資料問題，不能當成「舊格式沒有報告 zip」。"""
+        for bad in (None, "x", {"a": 1}):
+            rel = release("%s/v1.0.0" % PROJ)
+            rel["assets"] = bad
+            self.assertEqual(self.run_prepare(Fake([rel]), out="o")[0], "GAP", bad)
+        rel = release("%s/v1.0.0" % PROJ)
+        del rel["assets"]
+        self.assertEqual(self.run_prepare(Fake([rel]), out="o3")[0], "GAP")
+
+    def test_zip_without_vex_member_is_not_run_not_gap(self):
+        """zip 好好的，但沒有 VEX 成員（舊格式）：每一層都這樣 → 整體 NOT_RUN（僅供參考）。"""
+        rel, blobs = prev_release("v1.0.0", layers=("", "-bsp"))
+        for i in (100, 101):
+            blobs[i] = make_zip({"報告/其他.txt": b"x"})
+            rel["assets"][i - 100]["size"] = len(blobs[i])
+        st, note, doc = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "NOT_RUN", note)
+        self.assertTrue(note.startswith("僅供參考：前一版 acme-board/v1.0.0") and "沒有 VEX" in note and "舊格式" in note)
+        self.assertEqual({k: v["status"] for k, v in doc["layers"].items()}, {PROJ: "NOT_RUN", PROJ + "-bsp": "NOT_RUN"})
+        self.assertTrue(all(v["note"].startswith("僅供參考") for v in doc["layers"].values()))
+        self.assertEqual(os.listdir(self.p("out")), [pr.MANIFEST])                  # 沒有層的資料夾、暫存檔
+
+    def test_one_layer_missing_vex_others_ok_is_ok_with_that_layer_not_run(self):
+        """其他層 OK、這層缺 VEX（舊格式）：整體 OK（沒有任何一層是 GAP），那一層在 manifest 是 NOT_RUN，說明裡列出。"""
         rel, blobs = prev_release("v1.0.0")
-        blobs[101] = make_zip({"報告/其他.txt": b"x"})                               # -bsp 的 zip 沒有 vex
+        blobs[101] = make_zip({"報告/其他.txt": b"x"})
         rel["assets"][1]["size"] = len(blobs[101])
         st, note, doc = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "OK", note)
+        self.assertEqual({k: v["status"] for k, v in doc["layers"].items()}, {PROJ: "OK", PROJ + "-bsp": "NOT_RUN", PROJ + "-os": "OK"})
+        self.assertIn("2 層：%s, %s-os" % (PROJ, PROJ), note)
+        self.assertIn("%s-bsp" % PROJ, note.split("；", 1)[1])
+        self.assertTrue(note.split("；", 1)[1].startswith("僅供參考"))
+        self.assertTrue(os.path.isfile(self.p("out", PROJ, "vex.cdx.json")))
+        self.assertFalse(os.path.exists(self.p("out", PROJ + "-bsp")))
+
+    def test_broken_zip_or_bad_vex_stays_gap_other_layers_still_built(self):
+        """zip 壞掉、大小不符、VEX 格式不對維持 GAP；有 GAP 時就算別的層是缺 VEX 的 NOT_RUN，整體也是 GAP，NOT_RUN 的層維持 NOT_RUN。"""
+        rel, blobs = prev_release("v1.0.0")
+        blobs[101] = b"not a zip at all"                                             # -bsp：壞掉
+        rel["assets"][1]["size"] = len(blobs[101])
+        blobs[102] = make_zip({"報告/其他.txt": b"x"})                               # -os：舊格式
+        rel["assets"][2]["size"] = len(blobs[102])
+        st, note, doc = self.run_prepare(Fake([rel], blobs))
         self.assertEqual(st, "GAP")
-        self.assertEqual(doc["layers"][PROJ + "-bsp"]["status"], "GAP")
-        self.assertEqual(doc["layers"][PROJ]["status"], "OK")
+        self.assertEqual({k: v["status"] for k, v in doc["layers"].items()}, {PROJ: "OK", PROJ + "-bsp": "GAP", PROJ + "-os": "NOT_RUN"})
+        self.assertIn("1／3 層組不起來", note)
+        self.assertNotIn("%s-os：" % PROJ, note)                                    # 說明只列 GAP 的層
         self.assertTrue(os.path.isfile(self.p("out", PROJ, "vex.cdx.json")))
         self.assertFalse(os.path.exists(self.p("out", PROJ + "-bsp")))              # 壞的那層不留半成品
+        rel, blobs = prev_release("v1.0.0", layers=("",), vex={"bomFormat": "CycloneDX"})   # VEX 格式不對（沒有 vulnerabilities）
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o2")[0], "GAP")
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        rel["assets"][0]["size"] += 1                                               # 大小不符
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o3")[0], "GAP")
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        blobs[100] = blobs[100][:-30]                                               # 下載不完整的 zip
+        rel["assets"][0]["size"] = len(blobs[100])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs), out="o4")[0], "GAP")
+
+    def test_unexpected_error_midway_does_not_make_other_layers_look_missing(self):
+        """處理到一半意外中斷：還沒處理的層在 manifest 是 GAP（不是不存在，不會被精靈當成「前一版沒有這一層」）。"""
+        class Bug(Fake):
+            def download(self, asset_id, dest, max_size):
+                if asset_id == 101:
+                    raise KeyError("x")
+                return super().download(asset_id, dest, max_size)
+        rel, blobs = prev_release("v1.0.0")
+        st, note, doc = self.run_prepare(Bug([rel], blobs))
+        self.assertEqual(st, "GAP")
+        self.assertEqual({k: v["status"] for k, v in doc["layers"].items()}, {PROJ: "OK", PROJ + "-bsp": "GAP", PROJ + "-os": "GAP"})
+
+    def test_ok_note_has_no_absolute_path(self):
+        rel, blobs = prev_release("v1.0.0")
+        st, note, doc = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "OK")
+        text = note + json.dumps(doc, ensure_ascii=False) + open(self.p("out", pr.MANIFEST), encoding="utf-8").read()
+        self.assertNotIn(self.tmp, text)
+        self.assertNotIn(os.path.dirname(self.tmp) + os.sep, text)
+        self.assertIsNone(re.search(r"(?<![A-Za-z0-9_.])/[A-Za-z0-9._-]+/|[A-Za-z]:\\", text), text)               # 沒有 /x/ 開頭的路徑、也沒有 Windows 路徑
 
     def test_asset_not_uploaded_or_zero_size_or_duplicate_is_gap(self):
         for mut in (lambda r: r["assets"][0].update(state="starter"), lambda r: r["assets"][0].update(size=0),
@@ -541,6 +679,8 @@ class Server:
         self.flaky = {}           # {路徑: [狀態碼, …]}：前幾次回這些狀態碼，之後正常
         self.drip = None          # (每次送幾個位元組, 間隔秒)：附件內容慢慢送
         self.redirect_to = None   # 附件轉址到這個網址（預設轉到自己的 /blob/<id>）
+        self.list_drip = None     # (每次送幾個位元組, 間隔秒)：Release 清單慢慢送
+        self.cl_header = None     # 附件的 Content-Length 標頭值（預設是真的長度；測試放怪值）
         outer = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -565,6 +705,16 @@ class Server:
                     self.send_response(200)
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
+                    if outer.list_drip:
+                        step, gap = outer.list_drip
+                        try:
+                            for i in range(0, len(body), step):
+                                self.wfile.write(body[i:i + step])
+                                self.wfile.flush()
+                                time.sleep(gap)
+                        except OSError:
+                            pass
+                        return
                     self.wfile.write(body)
                     return
                 m = re.fullmatch(r"/repos/example-org/example-repo/releases/assets/(\d+)", self.path)
@@ -578,7 +728,7 @@ class Server:
                     body = outer.blobs[int(m.group(1))]
                     self.send_response(200)
                     if not outer.nolen:                                              # 沒有 Content-Length：只能靠實際讀到的位元組數擋
-                        self.send_header("Content-Length", str(len(body)))
+                        self.send_header("Content-Length", outer.cl_header or str(len(body)))
                     self.end_headers()
                     if outer.drip:
                         step, gap = outer.drip
@@ -749,6 +899,53 @@ class Http(Tmp):
         for bad in ({pr.ENV_RETRIES: "abc"}, {pr.ENV_RETRIES: "0"}, {pr.ENV_DELAYS: "x,y"}, {pr.ENV_DELAYS: "-1"}, {pr.ENV_DEADLINE: "nan"}):
             c = self.client(s, environ=bad)                                                # 設錯不當機，用預設
             self.assertEqual((c.retries, c.delays, c.deadline), (5, (10, 30, 60), 600), bad)
+
+    def test_content_length_must_be_ascii_digits(self):
+        """Content-Length 是 ² 這類 isdigit() 為真但 int() 會失敗的字元：不當成數字，不是「意外」，照實際讀到的位元組數走。"""
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        s.cl_header = "²"
+        c = self.client(s)
+        dest = self.p("x.zip")
+        self.assertEqual(c.download(100, dest, 1 << 20)[0], len(blobs[100]))
+        os.unlink(dest)
+        with self.assertRaises(pr.PrevError) as cm:
+            c.download(100, dest, 20)                                                      # 仍然擋得住過大的內容（實際讀到的位元組數）
+        self.assertIn("太大", str(cm.exception))
+        self.assertFalse(os.path.exists(dest))
+        st, note, doc = pr.prepare(PROJ, "v1.1.0", self.p("out"), env=self.env(s))
+        self.assertEqual(st, "OK", note)
+
+    def test_list_releases_has_overall_deadline(self):
+        """列出 Release 的整體時間上限：涓滴的回應、分頁、重試等待加起來超過就是 GAP（不是卡住）。"""
+        rel, blobs = prev_release("v1.0.0", layers=("",))
+        s = self.server([rel], blobs)
+        s.list_drip = (20, 0.1)
+        t0 = time.monotonic()
+        with self.assertRaises(pr.PrevError) as cm:
+            self.client(s, list_deadline=0.5, delay=0).list_releases()
+        self.assertIn("時間上限", str(cm.exception))
+        self.assertLess(time.monotonic() - t0, 4)
+        env = dict(self.env(s), **{pr.ENV_LIST_DEADLINE: "0.4", pr.ENV_DELAYS: "0"})
+        st, note, doc = pr.prepare(PROJ, "v1.1.0", self.p("out"), env=env)
+        self.assertEqual(st, "GAP")
+        self.assertIn("時間上限", note)
+        self.assertEqual(json.load(open(self.p("out", pr.MANIFEST), encoding="utf-8"))["status"], "GAP")
+        s.list_drip = None
+        self.assertEqual(len(self.client(s, list_deadline=5).list_releases()), 1)           # 沒有涓滴就正常
+
+    def test_list_deadline_also_bounds_retry_waits_and_has_default(self):
+        s = self.server([], {})
+        s.fail["/repos/example-org/example-repo/releases"] = 503
+        t0 = time.monotonic()
+        with self.assertRaises(pr.PrevError):
+            self.client(s, list_deadline=1, delay=30).list_releases()
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertEqual(len(s.log), 1)
+        self.assertEqual(self.client(s, environ={}).list_deadline, 300)
+        self.assertEqual(self.client(s, environ={pr.ENV_LIST_DEADLINE: "42"}).list_deadline, 42)
+        for bad in ("abc", "nan", "0", "-5", "inf"):
+            self.assertEqual(self.client(s, environ={pr.ENV_LIST_DEADLINE: bad}).list_deadline, 300, bad)
 
     def test_slow_drip_download_hits_deadline_and_leaves_no_file(self):
         rel, blobs = prev_release("v1.0.0", layers=("",))
@@ -949,6 +1146,53 @@ class Wizard(Tmp):
         self.assertEqual(w.previous_from_env(PROJ, env)[2], "gap")                           # manifest 說 OK、資料夾卻不見
         os.symlink(self.p("out"), self.p("link"))
         self.assertEqual(w.previous_from_env(PROJ + "-os", {w.PREVIOUS_ENV: self.p("link")})[2], "gap")
+
+    def test_missing_layer_is_not_run_even_when_another_layer_is_broken(self):
+        """前一版沒有 -os 這一層、-bsp 的 zip 壞了（整體 GAP）：-os 是 NOT_RUN（僅供參考），壞的 -bsp 才是 GAP，好的那層照常 OK。"""
+        w = wiz_module()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        rel, blobs = prev_release("v1.0.0", layers=("", "-bsp"))
+        blobs[101] = b"broken"
+        rel["assets"][1]["size"] = 6
+        st, _, doc = self.run_prepare(Fake([rel], blobs))
+        self.assertEqual(st, "GAP")
+        self.assertEqual(w.previous_from_env(PROJ + "-os", env)[2:], ("not_run",))
+        r, note, status = w.previous_from_env(PROJ + "-os", env)
+        self.assertIsNone(r)
+        self.assertIn("-os", note)
+        self.assertEqual(w.previous_from_env(PROJ + "-bsp", env)[2], "gap")
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "ok")
+
+    def test_missing_layer_stays_gap_when_nothing_was_enumerated(self):
+        """整體 GAP 不是因為某一層（沒找到前一版、沒列出任何層）：每一層都照整體記 GAP，不能因為「不在 layers 裡」就變成 NOT_RUN。"""
+        w = wiz_module()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        self.run_prepare(Fake([release("%s/v1.0.0" % PROJ), release("%s/v1.0.0" % PROJ, rid=2)]))      # 同 tag 兩個正式 Release：排不出
+        self.assertEqual(w.previous_from_env(PROJ + "-os", env)[2], "gap")
+        doc = json.load(open(self.p("out", pr.MANIFEST), encoding="utf-8"))
+        doc.update(status="GAP", previous_tag="acme-board/v1.0.0", layers={})                         # 找到前一版、但沒有列出任何層
+        json.dump(doc, open(self.p("out", pr.MANIFEST), "w", encoding="utf-8"))
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "gap")
+        doc.update(previous_tag=None, layers={PROJ: {"status": "OK"}})                                 # 沒有前一版 tag 卻有層：不可信，照整體
+        json.dump(doc, open(self.p("out", pr.MANIFEST), "w", encoding="utf-8"))
+        self.assertEqual(w.previous_from_env(PROJ + "-os", env)[2], "gap")
+
+    def test_old_format_states_are_not_run_for_the_wizard(self):
+        """前一版沒有報告 zip（整體 NOT_RUN），或某一層缺 VEX（那一層 NOT_RUN）：精靈記 not_run（僅供參考），不是 gap。"""
+        w = wiz_module()
+        env = {w.PREVIOUS_ENV: self.p("out")}
+        self.run_prepare(Fake([release("%s/v1.0.0" % PROJ)]))
+        r, note, status = w.previous_from_env(PROJ, env)
+        self.assertEqual((r, status), (None, "not_run"))
+        self.assertIn("舊格式", note)
+        shutil.rmtree(self.p("out"))
+        rel, blobs = prev_release("v1.0.0")
+        blobs[101] = make_zip({"報告/其他.txt": b"x"})
+        rel["assets"][1]["size"] = len(blobs[101])
+        self.assertEqual(self.run_prepare(Fake([rel], blobs))[0], "OK")
+        self.assertEqual(w.previous_from_env(PROJ + "-bsp", env)[2], "not_run")
+        self.assertIn("舊格式", w.previous_from_env(PROJ + "-bsp", env)[1])
+        self.assertEqual(w.previous_from_env(PROJ, env)[2], "ok")
 
     def test_layer_folder_must_be_exactly_that_layer(self):
         """manifest 的 layers 鍵與資料夾名稱不可帶路徑；名稱 .、.. 不接受。"""
