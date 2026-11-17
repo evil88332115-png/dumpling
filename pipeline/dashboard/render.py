@@ -766,6 +766,8 @@ def render_issue_group(ctx, data, key, title, with_cve=False):
         out.append("<p>目前沒有開著的 Issue（共列出 %d 個）。</p>" % len(rows))
     if key == "support":
         out.append("<p class=\"muted\">支援期限的 Issue 是否真的開出，取決於 repo 變數 WATCH_REAL_ISSUES；沒開時只有上方的檢查結果，沒有 Issue。</p>")
+    if key in ("kev", "support"):
+        out.append("<p class=\"muted\">開著的 Issue 是待人審的清單（D-069）：要有人看過、寫下結論才關；關閉等於宣稱看過。</p>")
     if closed:
         out.append("<details><summary>已關閉（%d）</summary>%s</details>" % (
             len(closed), table(headers, render_issue_rows(ctx, closed, with_cve), title + "（已關閉）")))
@@ -818,6 +820,43 @@ def render_per_sbom(ctx, plan):
     return table(["Release", "層", "核心對應 kernel_map", "核心 CNA", "已遭利用（KEV）命中數（含狀態）", "說明"], rows, "每份 SBOM 的監控狀態") + note
 
 
+CSAF_RETENTION_DAYS = 90       # watch-round.yml 的 retention-days（watch-csaf-drafts artifact）
+
+
+def render_csaf_drafts(ctx, w, plan):
+    """CRA 第 14 條第 8 項的使用者通知草稿（每日監控，docs/WATCH.md 第 8 節）：最近一輪 result.json 的 csaf_drafts。
+    草稿本身在那一輪 run 的 artifact（保留 90 天）；本頁只列紀錄，不放草稿內容。"""
+    head = "<h4>CSAF 使用者通知草稿（第 14 條第 8 項）</h4>"
+    recs = plan.get("csaf_drafts")
+    if recs is None:
+        return head + "<p>%s：這一輪的 result.json 沒有草稿紀錄（建基準的那一次、演練或舊版的 result.json 不產生）。</p>" % ctx.st("NOT_RUN")
+    note = ('<p class="muted">只有 shipped 的正式版有新的 KEV 命中群組時才產生；草稿的 tracking.status 一律是 draft，工具不發布。'
+            '草稿檔在那一輪 run 的 artifact watch-csaf-drafts-…（保留 %d 天），本頁不放草稿內容。'
+            '草稿只在群組第一次開 Issue 時產生一次，沒有產生的之後不會自動重產。</p>' % CSAF_RETENTION_DAYS)
+    if not recs:
+        return head + "<p>這一輪沒有新的 KEV 命中群組，沒有要產生草稿的對象（共 0 筆紀錄）。</p>" + note
+    counts = {}
+    for r in recs:
+        k = dct(r).get("status")
+        counts[k] = counts.get(k, 0) + 1
+    # 每個數字都和它的狀態放在一起（不單獨顯示數字）
+    summary = "、".join("%s %d 筆" % (ctx.st(k), n) for k, n in sorted(counts.items(), key=lambda kv: str(kv[0])))
+    run = w.get("run") if isinstance(w.get("run"), dict) else {}
+    link = run_url(ctx.repo, run.get("id"))
+    rows = []
+    for r in recs:
+        r = dct(r)
+        where = (ctx.a(link, "run 的 artifact") + "：" + ext(r.get("dir"), 40)) if r.get("dir") and link else (ext(r.get("dir"), 40) if r.get("dir") else "—")
+        rows.append([ext(r.get("project"), 63), ext(r.get("version"), 64), ext(r.get("layer"), 20),
+                     " ".join(cve_text(x) for x in lst(r.get("cves"))) or "—", ctx.st(r.get("status")), where,
+                     ext(r.get("detail"), 300) if r.get("detail") else ""])
+    cut = plan.get("csaf_drafts_cut")
+    cut_note = ("<p>%s</p>" % ctx.gap("草稿紀錄只列前 200 筆，另有 %d 筆沒有列出（見 watch run 的 result.json）" % cut)
+                if isinstance(cut, int) and not isinstance(cut, bool) and cut > 0 else "")
+    return (head + "<p>這一輪的紀錄：%s。</p>" % summary +
+            table(["專案", "版本", "層", "CVE", "狀態", "草稿", "說明"], rows, "CSAF 使用者通知草稿") + cut_note + note)
+
+
 def render_watch(ctx, data):
     w = dct(data.get("watch"))
     out = []
@@ -833,6 +872,7 @@ def render_watch(ctx, data):
     if isinstance(plan, dict) and not plan.get("gap"):
         out.append("<p>每日比對結果：%s %s</p>" % (ctx.st(plan.get("status")), ext(plan.get("detail"), 400)))
         out.append(render_per_sbom(ctx, plan))
+        out.append(render_csaf_drafts(ctx, w, plan))
         for key, title in (("gaps", "GAP"), ("attention", "ATTENTION"), ("notes", "說明")):
             xs = [x for x in lst(plan.get(key)) if isinstance(x, str)]
             if xs:

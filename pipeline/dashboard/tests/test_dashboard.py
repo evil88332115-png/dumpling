@@ -993,3 +993,69 @@ class MissingDataIsGap(unittest.TestCase):
         self.assertNotIn("不一致", next(r for r in rows if '<span class="ext">full</span>' in r))
         self.assertIn("分級合計 6 與 rows_total 10 不一致", next(r for r in rows if '<span class="ext">bsp</span>' in r))
 
+
+
+# ---------------------------------------------------------------- CSAF 使用者通知草稿（DASHBOARD.md 第 3 節 C、docs/WATCH.md 第 8 節）
+
+def plan_with(drafts=None, missing=False):
+    p = {"status": "ATTENTION", "detail": "1 份 SBOM", "per_sbom": {}, "notes": [], "attention": [], "gaps": [], "stats": {}}
+    if not missing:
+        p["csaf_drafts"] = drafts if drafts is not None else []
+    return p
+
+
+def draft(status="NOT_RUN", dir_=None, detail="development 的 dev Release：還沒上市，也沒有報告 zip", cves=("CVE-2026-0001",), **kw):
+    return dict({"project": "demo", "version": "dev", "layer": "os", "cves": list(cves), "status": status, "detail": detail,
+                 "reason": None, "dir": dir_, "issue": False}, **kw)
+
+
+class CsafDrafts(unittest.TestCase):
+    def section(self, h):
+        i = h.index("CSAF 使用者通知草稿（第 14 條第 8 項）")
+        return h[i:h.index("<h4>", i + 10)]
+
+    def test_missing_field_is_not_run(self):
+        e = Env(self, watch_kw={"plan": plan_with(missing=True)})
+        sec = self.section(e.html)
+        self.assertIn('<span class="st st-NOT_RUN">NOT_RUN</span>', sec)
+        self.assertIn("沒有草稿紀錄", sec)
+        self.assertIsNone(e.data["watch"]["plan"]["csaf_drafts"])
+
+    def test_empty_list_says_zero_records(self):
+        e = Env(self, watch_kw={"plan": plan_with([])})
+        self.assertIn("共 0 筆紀錄", self.section(e.html))
+
+    def test_records_counts_next_to_status_and_run_link(self):
+        recs = [draft(), draft(), draft("ATTENTION", "csaf-drafts/01-0123abcd", "1 個 CVE、1 個元件", issue=True, version="v1", layer="bsp")]
+        e = Env(self, watch_kw={"plan": plan_with(recs)})
+        sec = self.section(e.html)
+        self.assertIn('<span class="st st-NOT_RUN">NOT_RUN</span> 2 筆', sec)
+        self.assertIn('<span class="st st-ATTENTION">ATTENTION</span> 1 筆', sec)
+        self.assertIn("/actions/runs/555", sec)                                  # 連到那一輪 run（artifact 在那裡）
+        self.assertIn("csaf-drafts/01-0123abcd", sec)
+        self.assertIn("保留 90 天", sec)
+        self.assertIn("不會自動重產", sec)
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_untrusted_fields_are_cleaned(self):
+        recs = [draft("FAIL", "/home/runner/work/_temp/w/out/csaf-drafts/01-0123abcd", "<script>alert(1)</script> [x](http://evil.test)",
+                      cves=("CVE-2026-0002", "<img src=x>"), project="demo<b>")]
+        e = Env(self, watch_kw={"plan": plan_with(recs)})
+        rec = e.data["watch"]["plan"]["csaf_drafts"][0]
+        self.assertIsNone(rec["dir"])                                            # 不是 csaf-drafts/NN-hash 的值不收
+        self.assertEqual(rec["cves"], ["CVE-2026-0002"])
+        sec = self.section(e.html)
+        self.assertNotIn("<script>", sec)
+        self.assertNotIn("<img", sec)
+        self.assertNotIn("/home/runner", e.html)
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_over_limit_is_gap_not_silent(self):
+        recs = [draft() for _ in range(build.CSAF_MAX + 3)]
+        e = Env(self, watch_kw={"plan": plan_with(recs)})
+        self.assertEqual(len(e.data["watch"]["plan"]["csaf_drafts"]), build.CSAF_MAX)
+        self.assertIn("另有 3 筆沒有列出", self.section(e.html))
+
+    def test_review_note_on_kev_and_support_groups(self):
+        e = Env(self)
+        self.assertEqual(e.html.count("開著的 Issue 是待人審的清單（D-069）"), 2)
