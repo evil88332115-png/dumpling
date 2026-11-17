@@ -92,7 +92,8 @@ class Base(unittest.TestCase):
         a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
                                kev_overlay=kw.get("overlay"), max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
                                grype=None, grype_total_timeout=100, vendor_config=kw.get("vendor_config"), now=now, demo=kw.get("demo", False),
-                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999")
+                               allow_baseline=kw.get("allow_baseline", True), prev_schedule=kw.get("prev"), run_id="999",
+                               firmware_rematch=kw.get("fw_rematch"))
         st, detail = match.run(a, kw.get("kernel_runner"))
         plan = json.load(open(os.path.join(out, "plan.json")))
         # 模擬 notify：把新狀態寫回 state-dir
@@ -492,30 +493,212 @@ class T(Base):
         self.assertIn("報告狀態（report_status）NOT_RUN", body)
         self.assertIn("發行閘門（release_gate）NOT_RUN", body)
 
-    def test_firmware_vendors_new_kev_opens_vendor_issue(self):
-        """D-043 第 3 點：Intel／AMD／AMI／NVIDIA（BIOS／vBIOS 韌體）新的 KEV 一律提醒（廠商層級，沒有元件比對也提醒）。
-        KEV 的 vendorProject 拼法：CISA 2026.11.10 實查 Intel、AMI；AMD、NVIDIA 目前沒有條目，以 exploited_vendor 的別名涵蓋常見拼法。"""
-        cfg = os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json")
-        self.run_once(NOW1, vendor_config=cfg)
-        self.kev_extra = [
-            {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90002", "vendorProject": "Advanced Micro Devices", "product": "AGESA", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90003", "vendorProject": "NVIDIA Corporation", "product": "GPU Firmware", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME", "dateAdded": NOW2[:10]},
-            {"cveID": "CVE-2026-90005", "vendorProject": "Contoso", "product": "Widget", "dateAdded": NOW2[:10]},   # 不在清單：不提醒
-        ]
-        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+    VENDOR_CFG = os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json")
+
+    def as_project(self, name):
+        """把測試的 Release 改成指定的專案名（vendor-watch.json 的 projects 鍵比對專案名）。
+        SBOM 另加一個帶 linux CPE 的核心元件：exploited_vendor 會從 SBOM 取出 linux 這個廠商（exclude 要擋的就是這條路）。"""
+        doc = json.load(open(self.sb))
+        doc["components"].append({"type": "operating-system", "name": "linux-kernel", "version": "6.8.12", "bom-ref": "kernel",
+                                  "cpe": "cpe:2.3:o:linux:linux_kernel:6.8.12:*:*:*:*:*:*:*"})
+        raw = json.dumps(doc).encode()
+        open(self.sb, "wb").write(raw)
+        r = self.inventory["releases"][0]
+        r.update(tag=f"{name}/v1", project=name, html_url=f"https://github.com/o/r/releases/tag/{name}/v1")
+        r["sboms"]["bsp"].update(sha256=hashlib.sha256(raw).hexdigest(), size=len(raw))
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+
+    def vendor_cves(self, plan):
         vend = [x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]]
-        cves = sorted(__import__("re").search(r"CVE-\d{4}-\d+", t["title"]).group(0) for t in vend)
-        self.assertEqual(cves, ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
-        _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天不重複
-        self.assertEqual([x for x in plan["actions"] if x["op"] == "open" and "vendor-level" in x["labels"]], [])
+        return sorted(__import__("re").search(r"CVE-\d{4}-\d+", t["title"]).group(0) for t in vend)
+
+    FW_KEV = [
+        {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V"},
+        {"cveID": "CVE-2026-90002", "vendorProject": "Advanced Micro Devices", "product": "AGESA"},
+        {"cveID": "CVE-2026-90003", "vendorProject": "NVIDIA Corporation", "product": "GPU Firmware"},
+        {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME"},
+        {"cveID": "CVE-2026-90005", "vendorProject": "Contoso", "product": "Widget"},     # 不在任何清單：不提醒
+        {"cveID": "CVE-2026-90006", "vendorProject": "Linux", "product": "Kernel"},
+    ]
+
+    def run_vendor_kev(self, project):
+        self.as_project(project)
+        self.run_once(NOW1, vendor_config=self.VENDOR_CFG)
+        self.kev_extra = [dict(e, dateAdded=NOW2[:10]) for e in self.FW_KEV]
+        _, _, plan = self.run_once(NOW2, vendor_config=self.VENDOR_CFG)
+        got = self.vendor_cves(plan)
+        _, _, plan = self.run_once(NOW3, vendor_config=self.VENDOR_CFG)                 # 隔天不重複
+        self.assertEqual(self.vendor_cves(plan), [])
+        return got
+
+    def test_vendor_watch_x86_project_gets_firmware_vendors(self):
+        """D-064（D-043 第 3 點的變更）：Intel／AMD／AMI 的新 KEV 只對列了它們的專案（x86 的 ai-nas-demo）提醒；
+        NVIDIA 不在 ai-nas-demo 的清單。linux 是安全網（核心比對不完整的專案）。
+        KEV 的 vendorProject 拼法：CISA 2026.11.10 實查 Intel、AMI；AMD、NVIDIA 目前沒有條目，以 exploited_vendor 的別名涵蓋常見拼法。"""
+        self.assertEqual(self.run_vendor_kev("ai-nas-demo"), ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90004", "CVE-2026-90006"])
+
+    def test_vendor_watch_orin_no_x86_firmware_no_linux(self):
+        """Orin 沒有 Intel／AMD／AMI 韌體：不提醒（之前全體清單會對每份 SBOM 各開一個）。
+        Orin 的核心元件比對完整（kernel_map、kernel_cna OK），linux 的廠商層級不開（exclude 拿掉 SBOM 取出的 linux）。"""
+        self.assertEqual(self.run_vendor_kev("orin-nano-demo"), ["CVE-2026-90003"])
+
+    def test_vendor_watch_rock5b_keeps_linux_safety_net(self):
+        """rock-5b 是廠商核心、核心比對不完整：linux 留著當安全網（手動清單不受 exclude 影響）。"""
+        self.assertEqual(self.run_vendor_kev("rock-5b-demo"), ["CVE-2026-90006"])
+
+    def test_vendor_watch_firmware_demo_gets_firmware_vendors(self):
+        """韌體示範專案（firmware-demo）：Intel／AMD／AMI／NVIDIA 的新 KEV 都提醒；Linux 不列（韌體 SBOM 沒有核心）。"""
+        self.assertEqual(self.run_vendor_kev("firmware-demo"), ["CVE-2026-90001", "CVE-2026-90002", "CVE-2026-90003", "CVE-2026-90004"])
+
+    def test_vendor_watch_unlisted_project_gets_no_manual_vendors(self):
+        """不在 projects 裡的專案沒有手動清單（測試 VendorWatchConfig 會擋下 projects/ 裡漏列的專案）；SBOM 取出的 linux 被 exclude 擋下。"""
+        self.assertEqual(self.run_vendor_kev("demo"), [])
+
+    def test_vendor_watch_sbom_linux_without_exclude_would_alert(self):
+        """對照組：同一份 SBOM，exclude 沒有 linux 時，SBOM 取出的 linux 會開廠商層級（證明上面幾個測試真的走到 exclude）。"""
+        cfg = json.load(open(self.VENDOR_CFG, encoding="utf-8"))
+        cfg["exclude"] = []
+        alt = os.path.join(self.w, "vendor-watch-noexclude.json")
+        json.dump(cfg, open(alt, "w"))
+        self.VENDOR_CFG = alt
+        self.assertEqual(self.run_vendor_kev("orin-nano-demo"), ["CVE-2026-90003", "CVE-2026-90006"])
+
+    # ---- 廠商層級：同一個廠商 × CVE 只開一個 Issue（D-064 B，C0 決定 2026-11-15）----
+    def add_sbom(self, version, layer, new_release=False):
+        """在 inventory 加一份 SBOM（同一個 demo 專案）：new_release=True 時另加一個 Release（demo/<version>）。"""
+        comps = [("log4j-core", "2.14.1", LOG4J), ("requests", "2.19.0", REQ)]
+        raw = json.dumps(sbom(comps)).encode()
+        rel = f"releases/0/sbom-demo-{version}-{layer}.cdx.json"
+        open(os.path.join(self.inv, rel), "wb").write(raw)
+        ent = {"file": rel, "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)}
+        if new_release:
+            r = dict(self.inventory["releases"][0], tag=f"demo/{version}", version=version, watch_version=version,
+                     html_url=f"https://github.com/o/r/releases/tag/demo/{version}", sboms={})
+            self.inventory["releases"].append(r)
+        r = next(x for x in self.inventory["releases"] if x["watch_version"] == version)
+        r["sboms"][layer] = ent
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+
+    def vendor_cfg(self):
+        path = os.path.join(self.w, "vendor-watch-test.json")
+        json.dump({"vendors": ["intel", "ami"]}, open(path, "w"))
+        return path
+
+    INTEL = {"cveID": "CVE-2026-90004", "vendorProject": "Intel", "product": "CSME"}
+    AMI = {"cveID": "CVE-2026-90001", "vendorProject": "AMI", "product": "Aptio V"}
+
+    def vendor_acts(self, plan, op=None):
+        return [x for x in plan["actions"] if "vendor-level" in x["labels"] and (op is None or x["op"] == op)]
+
+    def test_vendor_issue_one_per_vendor_and_cve(self):
+        """同一個 CVE 出現在多份 SBOM（v1 的 bsp、os 與 v2 的 bsp）：一個廠商 × CVE 只開一個 Issue，內文列出全部受影響的版本。"""
+        self.add_sbom("v1", "os")
+        self.add_sbom("v2", "bsp", new_release=True)
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10]), dict(self.AMI, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        opens = self.vendor_acts(plan, "open")
+        self.assertEqual(len(opens), 2, [x["title"] for x in opens])                  # Intel 一個、AMI 一個（不是 3 份 SBOM × 2）
+        self.assertEqual(self.vendor_acts(plan, "open_if_closed"), [])
+        intel = next(x for x in opens if "CVE-2026-90004" in x["title"])
+        self.assertEqual(intel["key"], match.issue_key("real", "vendor", "CVE-2026-90004", "intel"))
+        self.assertIn("等 2 個版本", intel["title"])
+        for ver, layer in (("v1", "bsp"), ("v1", "os"), ("v2", "bsp")):
+            self.assertRegex(intel["body"], rf"\| demo \| {ver} \| {layer} \|")
+        self.assertIn("3 份 SBOM", intel["body"])
+        self.assertIn("layer-bsp", intel["labels"])
+        self.assertIn("layer-os", intel["labels"])
+        self.assertEqual(match.unsafe_markdown(intel["body"]), [])
+        _, _, plan = self.run_once(NOW3, vendor_config=cfg)                 # 隔天：不重複、也不留言
+        self.assertEqual(self.vendor_acts(plan), [])
+
+    def test_vendor_new_version_comments_on_existing_issue(self):
+        """已開 Issue 的廠商 × CVE，之後新的版本加入也命中：在原 Issue 留言（open_if_closed，原 Issue 關閉時開新的），不另開一個。"""
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        opens = self.vendor_acts(plan, "open")
+        self.assertEqual(len(opens), 1)
+        key = opens[0]["key"]
+        self.assertNotIn("等", opens[0]["title"])                                  # 只有一個版本：標題寫版本，不寫「等 n 個版本」
+        self.add_sbom("v2", "bsp", new_release=True)
+        _, _, plan = self.run_once(NOW3, vendor_config=cfg)
+        self.assertEqual(self.vendor_acts(plan, "open"), [])
+        com = self.vendor_acts(plan, "open_if_closed")
+        self.assertEqual(len(com), 1)
+        self.assertEqual(com[0]["key"], key)
+        self.assertRegex(com[0]["body"], r"\| demo \| v2 \| bsp \|")
+        self.assertNotRegex(com[0]["body"], r"\| demo \| v1 \|")                 # 留言只列新的版本
+        self.assertEqual(match.unsafe_markdown(com[0]["body"]), [])
+        _, _, plan = self.run_once("2026-11-13T01:00:00Z", vendor_config=cfg)
+        self.assertEqual(self.vendor_acts(plan), [])
+
+    def test_vendor_state_format_unchanged(self):
+        """狀態格式不變：vendor_matches 的鍵仍是 [專案 UUID, CVE, 廠商]（每份 SBOM 一筆），欄位照 VENDOR_FIELDS；
+        只有 Issue 群組（dumpling.issues 的鍵）改成廠商 × CVE。"""
+        self.add_sbom("v1", "os")
+        cfg = self.vendor_cfg()
+        self.run_once(NOW1, vendor_config=cfg)
+        self.kev_extra = [dict(self.INTEL, dateAdded=NOW2[:10])]
+        _, _, plan = self.run_once(NOW2, vendor_config=cfg)
+        st = plan["state"]
+        self.assertEqual(st["schema"], 1)
+        keys = sorted(json.loads(k) for k in st["vendor_matches"] if "CVE-2026-90004" in k)
+        self.assertEqual(keys, [["dumpling:demo/v1#bsp", "CVE-2026-90004", "intel"], ["dumpling:demo/v1#os", "CVE-2026-90004", "intel"]])
+        for k, e in st["vendor_matches"].items():
+            self.assertLessEqual(set(e), set(match.VENDOR_FIELDS), k)
+        gk = match.issue_key("real", "vendor", "CVE-2026-90004", "intel")
+        self.assertEqual(st["dumpling"]["issues"][gk]["kind"], "vendor")
+        self.assertEqual([k for k, r in st["dumpling"]["issues"].items() if r["kind"] == "vendor"], [gk])
 
     def test_state_has_no_paths(self):
         _, _, plan = self.run_once(NOW1)
         txt = json.dumps(plan["state"])
         self.assertNotIn(self.w, txt)
         self.assertNotIn("releases/0", txt)
+
+
+class VendorWatchConfig(unittest.TestCase):
+    """vendor-watch.json 的規則（C0 決定 2026-11-15，D-064）：
+    每個 projects/*/ 都有一筆、鍵沒有打錯字、全體清單是空的；linux 只在核心元件比對完整的專案拿掉。"""
+    ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    # 核心元件比對完整（per_sbom 的 kernel_map、kernel_cna 都是 OK）的專案：可以不列 linux。
+    # 新增之前要先確認該專案每日監控的 kernel_map／kernel_cna 是 OK（M7d-2／M7d-3b 之後才可能加 rpi、rock-5b、ai-nas）。
+    KERNEL_COMPLETE = {"orin-nano-demo"}
+    # 不是產品、不在 projects/ 的監控專案（FIRMWARE-WATCH.md §5）：只有韌體示範專案
+    NON_PRODUCT = {"firmware-demo"}
+
+    def setUp(self):
+        self.cfg = json.load(open(os.path.join(os.path.dirname(__file__), "..", "vendor-watch.json"), encoding="utf-8"))
+        pdir = os.path.join(self.ROOT, "projects")
+        self.projects = {d for d in os.listdir(pdir) if os.path.isfile(os.path.join(pdir, d, "project.yml"))}
+
+    def test_every_project_listed_and_no_typos(self):
+        self.assertTrue(self.projects)
+        keys = set(self.cfg["projects"])
+        self.assertEqual(sorted(self.projects - keys), [], "projects/ 裡有專案沒列在 vendor-watch.json 的 projects")
+        bad = sorted(k for k in keys if k.split("@")[0] not in self.projects | self.NON_PRODUCT)
+        self.assertEqual(bad, [], "vendor-watch.json 的 projects 鍵不是現有專案（打錯字？）")
+
+    def test_firmware_demo_entry(self):
+        """韌體 Release 也有廠商層級的提醒（FIRMWARE-WATCH.md §5，C0 2026-11-15）：鍵是正規化後的名稱。"""
+        self.assertEqual(sorted(self.cfg["projects"]["firmware-demo"]), ["amd", "ami", "insyde", "intel", "nvidia", "phoenix"])
+        self.assertNotIn("firmware-demo", self.projects)        # 不是 projects/ 的產品
+
+    def test_no_global_vendor_list(self):
+        self.assertEqual(self.cfg["vendors"], [], "全體清單會對每份 SBOM 各開一個廠商層級 Issue，改列在 projects")
+
+    def test_linux_only_dropped_where_kernel_matching_complete(self):
+        self.assertIn("linux", self.cfg["exclude"])
+        for p in sorted(self.projects):
+            vs = self.cfg["projects"].get(p, [])
+            if p in self.KERNEL_COMPLETE:
+                self.assertNotIn("linux", vs, p)
+            else:
+                self.assertIn("linux", vs, f"{p} 的核心元件比對不完整，要列 linux 當安全網")
+        self.assertIn("linux", self.cfg.get("notes", {}), "要註明 linux 的原因與何時可以拿掉")
 
 
 class FeedFallback(Base):
@@ -617,13 +800,34 @@ class Injection(Base):
         e = {"cve": "CVE-2024-0001", "kev_vendor": "@acme [x](https://evil.example)", "kev_product": "![i](https://evil.example/a.png) #1",
              "project": "demo", "version": "v1", "vendor": "acme`x", "watch_via": ["@x"], "component_count": 1,
              "date_added": "2024-01-01", "source": "@src", "first_detected": NOW1}
-        body = match.vendor_body("real", e, None, None, match.parse_now(NOW1))
+        body = match.vendor_body("real", [e], [None], None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
         self.assertNotRegex(body, r"[#＃]1")                         # \#1 照樣會連結（GitHub 實測），# 後面要有零寬空白
         p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1", "gaps": ["upstream_note: @bob [x](https://evil.example)"]}
         body = match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                          "component": "c", "purl": "p", "basis": "b", "sources": []}], p, [], None, match.parse_now(NOW1))
         self.assertEqual(match.unsafe_markdown(body), [])
+
+    def test_vendor_rows_hostile_project_and_version(self):
+        """專案、版本欄的 md_cell：敵意的專案名與版本（表格分隔符號、換行、反引號、@、連結、#數字）不能弄壞表格或逃出跳脫（C0 的 #121 驗證建議 2）。"""
+        e = {"cve": "CVE-2024-0001", "kev_vendor": "Intel", "kev_product": "CSME", "vendor": "intel", "watch_via": ["manual list"],
+             "component_count": 1, "date_added": "2024-01-01", "source": "CISA KEV", "first_detected": NOW1}
+        hostile = [("a|b|c", "v1|x"), ("p\n| x | y |", "v`1`|"), ("@everyone [x](https://evil.example)", "#12"),
+                   ("![i](https://evil.example/a.png)", "&commat;bob"), ("p\\|q", "v\\|")]
+        for proj, ver in hostile:
+            with self.subTest(proj=proj, ver=ver):
+                ee = dict(e, project=proj, version=ver)
+                p = {"layer": "bsp", "status": "shipped", "tag": "demo/v1"}
+                body = match.vendor_body("real", [ee, dict(ee, version=ver + "b")], [p, p], None, match.parse_now(NOW1))
+                self.assertEqual(match.unsafe_markdown(body), [])
+                self.assertNotRegex(body, r"[#＃]\d")
+                rows = [l for l in body.splitlines() if l.startswith("| ") and "---" not in l]
+                self.assertEqual(len(rows), 3, rows)                          # 表頭＋兩列（換行沒有拆出新列）
+                for r in rows:
+                    cells = __import__("re").split(r"(?<!\\)\|", r)
+                    self.assertEqual(len(cells), 10, r)                      # 8 欄：前後各一個空的
+                i = body.index(rows[-1])
+                self.assertTrue(body[i + len(rows[-1]):].startswith("\n\n- "), "表格最後一列後面要空一行")
 
     def test_unsafe_markdown_catches_unescaped(self):
         for raw in ("@everyone", "[x](https://evil.example)", "![i](https://evil.example/a.png)"):
@@ -658,7 +862,7 @@ class Injection(Base):
              "date_added": "2024-01-01", "source": "&excl;&lbrack;i&rbrack;(https://evil.example/a.png)", "first_detected": NOW1}
         p = {"layer": "bsp", "status": "shipped", "tag": "&commat;everyone/v1", "html_url": "&lbrack;x&rbrack;(https://evil.example)",
              "release_version": "&commat;x", "gaps": ["&commat;bob &lbrack;x&rbrack;(https://evil.example)"]}
-        for body in (match.vendor_body("real", e, p, None, match.parse_now(NOW1)),
+        for body in (match.vendor_body("real", [e], [p], None, match.parse_now(NOW1)),
                      match.kev_body("real", [{"cve": "CVE-2024-0001", "project": "demo", "version": "v1", "first_detected": NOW1,
                                               "component": "&commat;c", "purl": "p", "basis": "b", "sources": ["&#64;s"]}], p, [], None,
                                     match.parse_now(NOW1))):

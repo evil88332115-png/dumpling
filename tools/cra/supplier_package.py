@@ -42,7 +42,7 @@ PURPOSE = {
     "vex.cdx.json": "Vulnerability status of each candidate vulnerability (CycloneDX VEX)",
     "vex.openvex.json": "The same vulnerability statements in OpenVEX format",
     "vulnerability-status.md": "Summary of known vulnerabilities, their status and what was not assessed",
-    "vulnerabilities.xlsx": "Filterable list of all vulnerabilities and their status, one row per vulnerability and component (Excel)",
+    "vulnerabilities.xlsx": "Filterable list of all vulnerabilities and their status, one row per vulnerability and component; kernel packages that share a vulnerability are listed in one row (Excel)",
     "risk-summary.md": "Summary of the supplier's risk assessment for the supplied part (residual risks, mitigations, security testing)",
     "security-testing-summary.md": "Security tests performed on the supplied image and board, and their results",
     "integration-and-configuration.md": "Information for the integrator: known risks, recommended configuration, responsibilities",
@@ -323,7 +323,7 @@ def vulnerability_status(summary, vrows, ctx, table):
     out += ["## Summary", "",
             table(["Status", "Rows"], [["Affected", c.get("exploitable", 0)], ["Under assessment", under], ["Fixed", c.get("resolved", 0)],
                                        ["Not affected", c.get("not_affected", 0)]]),
-            "", "A row is one vulnerability on one component version. Rows under assessment have not been assessed yet; "
+            "", "A row is one vulnerability on one component version; kernel packages that share a vulnerability are listed in one row. Rows under assessment have not been assessed yet; "
                 "they are candidates from automated matching, not confirmed vulnerabilities.", "",
             "Rows are counted per vulnerability identifier, including aliases of the same vulnerability, so the totals can differ "
             "slightly from the number of statements in the VEX files.", "",
@@ -340,12 +340,12 @@ def vulnerability_status(summary, vrows, ctx, table):
                 if kev else "")
     out += ["## Affected vulnerabilities", "",
             table(["Vulnerability", "Component", "Version", "Response", "Fix"],
-                  [[r["id"], r.get("component"), r.get("version") or "unknown", customer_response(r), affected_fix(customer_fix(r))] for r in sorted(aff, key=lambda r: (r["id"], str(r.get("component"))))])
+                  [[r["id"], component_cell(r), r.get("version") or "unknown", customer_response(r), affected_fix(customer_fix(r))] for r in sorted(aff, key=lambda r: (r["id"], str(r.get("component"))))])
             if aff else "None recorded as affected.", "",
             "## Reported as actively exploited and not resolved", "",
             *([kev_line, ""] if kev else []),
             table(["Vulnerability", "Component", "Version", "Status"],
-                  [[r["id"], r.get("component"), r.get("version") or "unknown", CUSTOMER_STATUS.get((r.get("vex") or {}).get("state"), "Under assessment")]
+                  [[r["id"], component_cell(r), r.get("version") or "unknown", CUSTOMER_STATUS.get((r.get("vex") or {}).get("state"), "Under assessment")]
                    for r in kev]) if kev else "None.", "",
             "## Not assessed", "",
             "Only the components listed in the SBOM were matched against vulnerability databases. Parts that are not software packages in the "
@@ -370,6 +370,16 @@ XLSX_NOTES = [
 ]
 
 
+def component_cell(x):
+    """元件欄。核心列去重後（M7d-1）一個 CVE 一列、帶全部核心套件：寫主套件加「and N other kernel packages」（套件名稱與版本是產品 SBOM 公開的資訊；
+    不放內部路徑或核心版本以外的內部資訊）。VEX 的 affects 帶全部套件，這裡的說法要和它一致。"""
+    kp = [p for p in x.get("kernel_packages") or [] if isinstance(p, dict)]
+    if len(kp) > 1:
+        n = len(kp) - 1
+        return f"{x.get('component')} and {n} other kernel package{'s' if n != 1 else ''}"
+    return x.get("component")
+
+
 def xlsx_rows(vrows, stats=None):
     """vulnerabilities.xlsx 的資料列：沿用 vulnerability-status.md 與客戶 VEX 的同一批列（含別名 CVE）與同一套客戶用語。"""
     out = []
@@ -391,7 +401,7 @@ def xlsx_rows(vrows, stats=None):
         elif state == "resolved" and (not has_fix(x) or ambiguous_owner(x)):
             fix = FALLBACK["fixed"]        # 已修補但沒有修補版本資料：不寫「沒有修補」
         out.append((not exploited, STATUS_RANK[status], str(x.get("id")),
-                    [x.get("id"), x.get("component"), x.get("version") or "unknown", status, "Yes" if exploited else "No",
+                    [x.get("id"), component_cell(x), x.get("version") or "unknown", status, "Yes" if exploited else "No",
                      score if score is not None else "", "" if score is not None else "No CVSS score", customer_response(x),
                      fix, just]))
     out.sort(key=lambda t: (t[0], t[1], t[2], str(t[3][1]), str(t[3][2])))

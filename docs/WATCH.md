@@ -21,6 +21,7 @@
 | DT（OSV）那條路 | 有 | **NOT_RUN**（每份報告與每個 KEV Issue 都列在「每日沒有涵蓋」，不分層） | — |
 | NVIDIA 公告 | 有 | **NOT_RUN**（報告列出；廠商層級的 nvidia 仍有） | — |
 | 廠商層級（exploited_vendor） | — | 有 | — |
+| 韌體（`firmware-demo/<版本>` Release 上每個樣本的 SBOM 與 inventory；`docs/FIRMWARE-WATCH.md`） | 有（firmware.yml 自己的比對與 DT） | **Grype＋KEV／EUVD**：比 Release 附件 `fw-<slug>.cdx.json`，設定同板子；沒有 purl／CPE 的樣本 Grype 是 `NOT_ASSESSED（可比對元件 0：沒有 purl／CPE）`（不是 OK，Grype 空的不代表沒有漏洞，以廠商公告為準）；有可比對元件時照常比對，NVD 的 CSME 資料不完整。**公告重跑**：每天用 repo 當下的三張表（規則表、Intel 微碼、NVIDIA vBIOS）對 Release 附的 inventory 重跑（`pipeline/firmware-rematch.sh`，離線），結果有變化列在報告。**廠商層級**照舊（`vendor-watch.json`）。核心對應、核心 CNA：沒有這一項（韌體 SBOM 沒有 Linux 核心，不算 GAP、不降級）。**限制**：只監控最新的一個韌體 Release；重跑只反映表的更新，不重新解析映像（解析器改進要重新打 Release）；inventory 缺欄位是 GAP，不猜預設值；樣本是公開測試資料（status development），不是出貨品；供應商 SBOM（kind sbom）沒有 inventory，公告比對寫 `NOT_ASSESSED（沒有 inventory，不重跑公告比對）`；ME、微碼、AGESA、PSP、AMI 核心、vBIOS 靠規則表或對照表，比不到就 NOT_ASSESSED（以廠商公告為準） | 公告重跑沒執行（腳本不存在、失敗、不在總表）→ 該樣本 NOT_RUN、整輪降級；檔案不合格 → GAP；表過期或 GAP → 需注意＋降級 |
 
 ## 3. 程式與資料流
 
@@ -32,6 +33,7 @@ watch.yml（每天）
     （real）這次新抓的核心 CVE 鏡像存回 cache（頂替用的舊資料不存）
     collect.py          → $W/inventory.json＋$W/releases/<n>/…（Release 附件）
     issues.py read-state→ $W/state.json＋$W/state-base.json（狀態 Issue 的內容與樂觀鎖資訊）
+    （real，collect 收到韌體 Release 才有）firmware-rematch.sh → $W/fw-rematch/（continue-on-error；沒有輸出時韌體公告標 NOT_RUN、整輪降級）
     match.py            → $W/plan.json（要開的 Issue、要留言的 Issue、新的狀態）＋$W/report.md
     （plan.json 以 artifact 交給下一個 job）
   notify（issues: write）
@@ -96,6 +98,10 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
     不是規則檔名 → problem、不讀；列了但 Release 沒有這個附件 → problem。開發版 `dev/<專案>` 也有這個附件。
   - status：API 失敗 → FAIL；有 Release 有 problem → GAP；否則 OK。stdout 一行 `WATCH-COLLECT<TAB>狀態<TAB>說明`；結束碼 OK 0、FAIL 1、GAP 3、用法 64。
 
+- **韌體 Release**（`docs/FIRMWARE-WATCH.md`）：tag `firmware-demo/<版本>`（不是 prerelease）分類成 `firmware`，**不進 `releases`**（不要求 release-meta），放在 inventory 的 `firmware`；只收最新的一個（`published_at`），其他列在 `firmware_older`（第一階段示範的限制）。
+  讀 `firmware-meta.json`（schema `dumpling-firmware-meta/1`、tag 要一致；壞掉 → 整個韌體 Release 的 problem、inventory GAP），依它下載每個樣本的 `fw-<slug>.cdx.json` 與（bios）`fw-inventory-<slug>.json`，**每個附件都核對 meta 列的 sha256**；單一樣本的問題只讓那一份 GAP。
+  監控鍵的版本部分 `watch_version`：`<slug>@<firmware_version>`；版本讀不到或是佔位字串（空、`xx.xx`、`0.0`、`unknown`、`TO BE COMPLETED`…）→ `<slug>@sha256-<映像雜湊前 16 碼>` 並標 GAP；兩者都沒有 → 不監控、列進 `not_watched`。meta 的 `tables` 只留三張表的字串欄位。meta 的 `dt`（C2 #140：DT 上傳的結果，只用來顯示）存成 inventory 的 `firmware.dt`：合法組合只有 `OK/OK/null` 與 `GAP/(FAIL|NOT_RUN)/非空原因（≤ 200 字）`，其他一律 `dt 欄位格式不對`（不顯示原文），沒有這個欄位是 null；match 在 `dt` 不是 OK 時把原因放進「需注意」，不影響公告比對、不開 Issue、不降級（C0，2026-11-15）。match.py 讀 `firmware`（見 3.2 的「韌體」），support.py 跳過韌體（不是產品，沒有支援期限）。
+
 ### 3.2 `pipeline/watch/match.py`（4b、4c，C3 自己寫）
 
 讀 inventory、feeds、state.json → 呼叫既有工具 → 產生 `plan.json`。規則：
@@ -116,14 +122,22 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
   已有 Issue 的群組出現新元件（同一個 CVE 的新 purl：SBOM 重發、開發版元件版本變了、Grype DB 多比對到一個元件）或再出現 → `open_if_closed`
   （原 Issue 開著就留言，關閉了就開新的）；基準裡的比對消失後又出現、群組從來沒有 Issue → 不再算基準，開 Issue；
   群組全部消失 → 在原 Issue 留言（不自動關閉，關閉由人決定）。
-- 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`，對所有專案生效）：BIOS／vBIOS 韌體的 **Intel、AMD、AMI、NVIDIA**（D-043 第 3 點）
-  只要 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。比對 KEV 的 `vendorProject`，
+  - **給 RD：新 Release 帶進來的既有 KEV 也會開 Issue**。基準只涵蓋「建立基準那一刻」已有的 Release；之後才加入的 Release（新 tag、第一次發布的開發版）裡已經有的 KEV 命中都算新的，就算同一個 CVE 在舊 Release 因為在基準裡而沒有 Issue。所以新版本一發布，可能一次開好幾個 Issue，而且舊版本沒有對應的 Issue——這是規則本來的設計（舊 Release 的既有命中不通知，新 Release 是新的出貨，要有人看過）。2026-11-15 第一次真實基準之後新增 `dev/orin-nano-demo`，dry_run 會開 16 個 dev 的 KEV Issue、正式版 0 個；使用者決定重建基準，把 dev 一起納入（見 §5）。
+- 廠商層級的手動清單（`pipeline/watch/vendor-watch.json`）：**每個專案各自列**（`projects`，鍵是專案名；全體清單 `vendors` 是空的，D-064，C0 決定 2026-11-15）。
+  原本 11 個廠商對每一份 SBOM 生效，一個新的 Intel KEV 就會對每個 Orin 版本的 bsp／os 各開一個 Issue（Orin 沒有 Intel 韌體）。現在：
+  orin-nano-demo：nvidia、arm、trustedfirmware、realtek；rpi-lite-demo：broadcom、arm；rock-5b-demo：rockchip、arm、trustedfirmware、realtek；
+  ai-nas-demo（x86）：intel、amd、ami、insyde、phoenix、realtek（板子的硬體廠商依公開規格，待 C4 確認）。SBOM 自動取出的廠商照舊監看。
+  **linux**：`exclude` 拿掉 SBOM 取出的 linux（核心的 KEV 由 Grype＋核心 CNA 做元件比對）；手動清單不受排除，所以核心元件比對還不完整的專案（rpi-lite-demo：CNA 候選沒列進報告；rock-5b-demo：廠商核心；ai-nas-demo：Debian 核心只有 NVD 上游範圍）把 linux 列在自己的清單當安全網，M7d-2／M7d-3b 完成、確認該專案每日的 kernel_map／kernel_cna 是 OK 才拿掉；目前只有 orin-nano-demo 不列。測試（`VendorWatchConfig`）檢查每個 `projects/*/` 都有一筆、鍵沒有打錯、這條 linux 規則。
+  D-043 第 3 點的 Intel、AMD、AMI、NVIDIA：列在 x86 專案；韌體示範專案 `firmware-demo`（不在 `projects/`，FIRMWARE-WATCH.md §5）列 intel、amd、ami、insyde、phoenix、nvidia，韌體 Release 也有廠商層級的提醒（測試裡另列「非產品專案」只有 `firmware-demo`）。
+  清單裡的廠商在 KEV／EUVD 出現新的條目，就開廠商層級 Issue（沒有元件比對也提醒；已有元件比對的走 KEV Issue）。新加進清單的廠商，第一次監看時既有的條目記成基準（`watched`），不會一次開一批。比對 KEV 的 `vendorProject`，
   經 `exploited_vendor` 的正規化與別名（`American Megatrends`→ami、`Advanced Micro Devices`→amd、`NVIDIA Corporation`→nvidia）。
   拼法查核（2026-11-13）：CISA KEV catalogVersion 2026.11.10（1779 筆）實際有 `Intel`（2 筆）、`AMI`（1 筆，CVE-2024-54085 MegaRAC SPx）；
   **AMD、NVIDIA 在 CISA KEV 與 EUVD 的 KEV dump（1796 筆）都還沒有條目，拼法無法從資料確認**——待辦：第一筆出現時核對 `vendorProject` 的實際拼法，
   不在別名裡就補進 `vendor-watch.json` 的 `aliases`（在那之前，`AMD`／`Advanced Micro Devices`／`NVIDIA`／`NVIDIA Corporation` 已涵蓋）。
   C2 的韌體 SBOM 公告比對會用到這裡的廠商層級結果。
 - 廠商層級：只對新的命中開 Issue；再出現與消失**不留言**（廠商層級是較粗的提示，`exploited_vendor` 的再出現本來就不算新的）。
+  **一個廠商 × CVE 只開一個 Issue**（D-064 B，C0 決定 2026-11-15）：群組鍵是 `issue_key(mode, "vendor", CVE, 廠商)`，不含專案 UUID；內文的表格列出這次命中的每份 SBOM（專案、版本、分層、狀態、Release、監看來源），標籤取各版本狀態與分層的聯集。之後新的版本也命中（KEV 加入不到 `BASELINE_DAYS`＝7 天的條目，新版本第一次監看時不算基準）→ 在原 Issue 留言、只列新的版本（`open_if_closed`：原 Issue 已關閉就開新的）。狀態格式不變：`vendor_matches` 的鍵仍是 `[專案 UUID, CVE, 廠商]`，每份 SBOM 一筆。
+  升級前如果已經有「每份 SBOM 一個」的廠商層級 Issue（舊的群組鍵含專案 UUID），升級後新的命中用新的鍵，會另開一個 Issue，不會對到舊的；舊鍵的群組紀錄在 PRUNE_DAYS 後修剪。合併這個改動時（2026-11-15）還沒有任何廠商層級 Issue，所以不會發生。
 - 降級（只在 real；核心 CNA 缺附件、schema 不符、upstream_version 為 null 也算）：Grype NOT_RUN、CISA KEV／EUVD／Grype DB 不能用或過期、L4T 核心對應 GAP／FAIL、核心 CNA NOT_RUN、已遭利用但元件版本未知
   、Release 附件問題（SBOM 下載失敗、release-meta 不符）、已有狀態卻沒有任何可監控的 Release、
   **上一次排程 run 被取消／失敗／逾時或超過 36 小時沒有排程**（compute 用 `actions: read` 查 watch.yml 的排程 run；keepalive 也印出最近 3 次）
@@ -131,6 +145,29 @@ python3 -I pipeline/watch/collect.py (--repo <owner/repo> | --from-dir <資料�
 - 已有 Issue 的群組的事件（新增元件、再出現）一次超過 `--max-new-issues` 個 → 併成一個彙總 Issue，不逐一開。
 - 已知窗口：降級要連續 2 次才開健康 Issue，第一天只在 Step Summary（結束碼 2 視為成功）；排程 dry_run 期間狀態不寫入，連續次數不會累積。
   C0 打開 `WATCH_REAL_ISSUES` 前要知道這一點。
+- **韌體**（依據 `docs/FIRMWARE-WATCH.md` §2、§4、§5、§7；C0 決定 2026-11-15）：
+  - **監控單位**：inventory `firmware.samples` 裡 `watch_version` 與 SBOM 都有的樣本，每份一個：`dumpling:firmware-demo/<slug>@<版本>#firmware`（名稱 `firmware-demo`、層 `firmware`、status `development`：公開的示範樣本，不是出貨品）。
+    樣本的 GAP（`problems`）與 `not_watched` 裡 `source: collect` 的列進 Release 問題（降級、擋第一次基準）；`source: meta`（合成 vBIOS 等）只列在「說明」。
+  - **Grype**：和板子同一套。SBOM 沒有任何帶 purl、CPE（含 `syft:cpe23` 屬性）的元件 → 不跑 Grype，per_sbom 的 grype 寫 `NOT_ASSESSED（可比對元件 0：沒有 purl／CPE）`：不是 OK，也不算「Grype 沒跑完」（不降級、不擋第一次基準）。
+    核心對應、核心 CNA 寫「沒有這一項」，不算 GAP、不降級。
+  - **公告重跑**（`match.py --firmware-rematch <資料夾>`，選填）：讀 `rematch-summary.json` 與 `rematch-<slug>.json`，**當不可信資料**：大小上限、不跟隨連結、schema 不符就是 GAP；
+    `slug`、`release_tag`、`inventory_sha256` 要和 inventory 一致，不一致就 GAP；`key` 當不透明字串，只檢查字元集 `A-Za-z0-9._=+-:/#`（1～300 字元）；字串一律經過 md_text／md_code／md_title。
+    介面照 C2 的 rematch 入口（`pipeline/firmware-rematch.sh`）：結束碼 0＝全部 OK、2＝有 ATTENTION 或 GAP（輸出照寫），只有這兩種而且有 `rematch-summary.json`（最後才寫）才交給 match；1、64 是失敗，watch-round 這一步失敗、不傳 `--firmware-rematch`（韌體標 NOT_RUN、整輪降級），步驟上限 20 分鐘（C2 的入口整次上限 900 秒、單份 300 秒，超過的那份 GAP）。總表的 `rejected`（rematch 丟掉的 firmware-meta 條目：索引＋原因代碼，不帶輸入字串）不是空的 → GAP、整輪降級（meta 是 firmware.yml 產生的，有 rejected 就是產生端有問題）；原因代碼只收 C2 定的幾種，其他寫「格式不對」。總表 `meta_status: GAP`（讀不了 firmware-meta）→ 全部 bios 樣本 GAP，原因照錄；表讀不到時識別是 null、另有 `gap`（原因）；`changed[].before.result` 是 null＝Release 當時沒有這個元件的結果，只有 `review` 變了也算 changed。每個樣本的 affected 最多 100 筆（狀態 Issue 有大小上限），超過整份 GAP。rematch 輸出的上限和 C2 的 `tools/cra/fw_rematch.py` 同名同值（兩邊測試互相鎖住）：`REMATCH_MAX_BULLETINS`＝64（每筆公告 ID 數，超過整份 GAP、不截斷——公告是資料）、`REMATCH_MAX_BULLETIN_CHARS`＝80、`REMATCH_MAX_REASONS`＝50 筆、`REMATCH_MAX_REASON_CHARS`＝1000 字元（rematch 端超過會截斷並標示「…（已截斷）」「…（另有 N 項，已截斷）」）、`REMATCH_MAX_RESULT_REASON_CHARS`＝300（results[].reason 是代碼，超過整份 GAP）。C0 決定（2026-11-15，#135 用真實樣本驗證：NUC11 的微碼 24 個 INTEL-SA、ASUS 的 reasons 最長約 386 字元）。讀入的舊狀態先 sanitize（型別不對的紀錄丟掉，不讓 match 當掉）。
+    每份 SBOM 多一欄 `advisory`：OK／ATTENTION／GAP／NOT_RUN（不在總表、沒有輸出的 bios 樣本是 NOT_RUN，不拿 Release 當時的結果頂替）；供應商 SBOM 是 `NOT_ASSESSED（沒有 inventory，不重跑公告比對）`（設計上不重跑，不是 NOT_RUN）。
+    NOT_RUN／GAP、表過期或 GAP → 整輪降級；結果和 Release 當時不同（`changed`）→ 需注意。報告的「韌體」一節列 `changed`、三張表的識別、status、stale。
+  - **公告 Issue**（標籤 `firmware-advisory`、`development`、`layer-firmware`；`mark_demo` 照舊；超過 `--max-new-issues` 併成彙總 Issue）：
+    - 規則表、NVIDIA vBIOS（result `affected`）：**一則公告一個 Issue**（群組鍵 `issue_key(mode, "fwadv", <公告 ID>)`），內文列出受影響的樣本（樣本、版本、元件、key、映像 sha256）。
+      用語：`review: preliminary` 寫「建議受影響（初步規則，待人審）」，`confirmed` 寫「建議受影響（規則已確認，待負責單位確認）」，vBIOS 照實寫依據（對照表的列、裝置 ID、vBIOS 版本、表的識別）；不能寫成確定受影響。
+    - Intel 微碼（`affected-candidate`）：**一個 rematch key 一個 Issue**（`issue_key(mode, "fwadv-ucode", <key>)`），內文列出全部候選 SA 與樣本；用語「版本比較的候選，待人審」。
+    - 之後又有樣本變成 affected → 在原 Issue 留言（`open_if_closed`，只列新的樣本）；樣本變成 not-affected／NOT_ASSESSED／不在結果裡、微碼的候選清單變了 → 留言，**不自動關閉**。
+    - 表過期（`stale`）或 GAP：不開公告 Issue，進「需注意」，降級（連續兩次開健康 Issue）；表的識別與 status／stale 在報告、`state.firmware.tables`、狀態 Issue 的摘要行。
+    - **基準**：第一次基準那一輪的公告結果記成基準（狀態裡 `baseline: true`），不開 Issue（比照 KEV）；基準要求公告重跑沒有 NOT_RUN／GAP、表沒有過期。基準之後才加入的韌體，它既有的 affected 會開 Issue（上面 #112 的規則）。
+  - **同 slug、同版本，`image_sha256` 不同**：不開新鍵；進「需注意」、報告列兩個 sha256；這個監控鍵每個開著的 KEV、廠商層級、公告群組 Issue 各留言一次（列兩個 sha256）。
+    狀態記每個鍵最近一次的 `image_sha256` 與 `image_sha256_history`（每次變化追加 `{at, old, new}`）；隔天同一個新 sha256 不再留言；`image_sha256` 是 null 不比。
+  - **狀態**：`firmware: {"tables": {表: 識別、status、stale}, "samples": {監控鍵: {image_sha256, image_sha256_history, advisory: {key: {kind, result, bulletins, component, review, baseline}}}}}`；
+    只存 affected／affected-candidate 的 key。舊的狀態沒有 `firmware` 也能讀；沒重跑（NOT_RUN／GAP）的樣本沿用上一次的紀錄，不當成「不再受影響」；韌體 Release 沒收到或有 problem 時整份沿用。`prune_state` 不修剪還有 affected 的公告群組。
+  - **watch-round.yml**：match 之前多一步「韌體公告重跑」（只在 real；collect 收到韌體 Release、`pipeline/firmware-rematch.sh` 存在且可執行才跑；`continue-on-error`；輸出在 `$RUNNER_TEMP/w/fw-rematch`，另存 artifact `watch-fw-rematch-*`）。腳本不存在或失敗時 match 照跑，不傳 `--firmware-rematch`。
+  - 限制見 FIRMWARE-WATCH.md §7：重跑只反映表的更新、不重新解析映像；舊的韌體 Release 不比對（只監控最新的一個）。
 - 待 M2 之後確認：D-034 的 U-Boot 上游 CPE 實際被 Grype 比對到（目前沒有含 CPE 的測試資料）。
 - 每個 KEV Issue 列出靜態的「每日沒有涵蓋」三項，加上這個 Release 這次的 GAP（例如核心 CNA 缺附件時的 upstream_note、L4T 核心對應失敗）。
 - 正式版的版本字串是 `dev` → 不比對（會跟開發版的專案鍵相同），記成 Release 問題。一次最多開 `--max-new-issues`（預設 20）個，其餘併成一個彙總 Issue。
@@ -165,6 +202,7 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
   只有假 API 測試、未對真實 GitLab 驗證；清單見 GITLAB-PORT T-05。內文或留言有以 `/` 開頭的行（GitLab quick action 可能被執行）→ 不送、FAIL。
 - Token：`GH_TOKEN`／`GITHUB_TOKEN`，只放 HTTP 標頭；不跟隨轉址到別的主機；只連 `api.github.com`（`GITHUB_API_URL` 可改，給 GHES／測試用）。
 - 監控 Issue 的內文第一行是標記：`<!-- dumpling-watch key=<64 hex> mode=<real|drill> -->`。
+- stateless plan（不寫狀態、不做樂觀鎖）有兩種 `stateless_kind`：`support`（預設；支援期限，標記 `dumpling-support`、標籤 `support-period`，只能 `open`）與 `deadman`（死人開關，標記 `dumpling-deadman`、標籤 `watch-deadman`；除了 `open` 還可以對 deadman Issue `comment`，不重開）。兩種都不算進 `read-state` 的 `watch_keys`。
   去重：列出標籤 `dumpling-watch` 的所有 Issue（open＋closed，分頁），本地解析標記；**不用 search API**（索引有延遲）。
 - 狀態 Issue：標籤 `watch-state`（drill 是 `watch-state-drill`），內文第一行 `<!-- dumpling-watch-state mode=<mode> schema=1 -->`，
   接著一個程式碼區塊：狀態 JSON 經 gzip＋base64。超過 60000 字元 → FAIL（不截斷）。同時有兩個狀態 Issue → FAIL。
@@ -192,6 +230,8 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 - 修剪過的群組之後再出現：用 `open_if_closed`（舊 Issue 已關閉就開新的、開著就留言），不會被「已有 Issue」跳過；群組鍵記在 `dumpling.pruned_keys`。
 - 大小：編碼後超過約 45000 字元 → 整輪 ATTENTION，並在健康 Issue 留言「接近上限」（7 天一次，不每天留言）。超過 60000 字元 → `apply` 照樣執行 Issue 動作（新的 KEV、彙總 Issue 開得出來），
   **狀態不寫**，最後明確 FAIL（下一輪從舊狀態重算：open 因標記跳過，不重複開；留言可能重複）。分段存放是之後的待辦。
+  實際的影響是**留言可能重複，不是重複開 Issue**（`open` 有 Issue 標記，下一輪會跳過；`open_if_closed` 的留言與「新增元件」等事件留言會再送一次）。#28 刻意這樣做：漏掉 KEV 通知比重複留言嚴重（C0 確認，2026-11-15）。
+  **韌體另有一道**（C0 裁定，2026-11-15）：韌體的資料是外來的（rematch 結果），不能讓它撐爆狀態而擋到 KEV。match 在寫入韌體這一輪的結果後先估算整份狀態的大小；超過 60000 字元 → **只有韌體停下來**：這一輪的韌體結果不寫進狀態（沿用上一輪的韌體狀態）、不產生公告 Issue 的動作、每份韌體樣本的公告比對標 GAP、整輪降級；`state.firmware.size_stopped_at` 記停止的時間，狀態 Issue 的摘要寫「韌體因狀態大小上限停止（時間）」，健康 Issue 當輪就開或留言（7 天一次）。板子的 KEV 照常處理。大小恢復後停止標記清掉、韌體照常。另外每筆公告結果的公告 ID 最多 64 個（`REMATCH_MAX_BULLETINS`；原本 20，#135 用真實樣本放寬）、每個樣本的 affected 最多 100 筆，超過就那份樣本 GAP（不截斷）；放寬之後仍由這道大小保護兜底。
 - `runs` 只留最近 30 次。
 - GitLab 階段：狀態 Issue 一定設成 confidential（寫在 GITLAB-PORT）。
 
@@ -202,6 +242,19 @@ python3 -I pipeline/watch/issues.py close-drill --repo <owner/repo>      # 演�
 通知寄給「最後修改 cron 語法的使用者」。做法：keepalive job（只有 `actions: write`）每天先讀 workflow 的 state 並寫進 job 摘要，再呼叫 enable；
 `status` 分支上 `docs/STATUS.md` 的 C3 節（D-008，不在 main）記「下次人工檢查日期」，每月人工看一次 `gh workflow view watch.yml`。
 workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋得住。
+
+### 4.1 死人開關（`pipeline/watch/deadman.py`，GitLab 用；GITLAB-PORT T-12）
+
+「每日監控沒有結果」本身要有人發現：`deadman.py` 讀狀態 Issue，最後更新時間（state 的 `runs` 最後一筆的 `at`）超過 36 小時（`--max-age-hours`，和儀表板的 `STALE_HOURS` 一致）
+就開一個 Issue（標籤 `watch-health`、`watch-deadman`；同一次停擺只開一個，恢復後在原 Issue 留言「已恢復」，不自動關閉）。GitLab 上加 `--schedules` 還會巡檢 pipeline schedules
+（`DUMPLING_JOB=watch` 的排程不見、被停用、擁有者不是 active、`next_run_at` 過期超過 2 小時〔獨立的常數，不跟狀態的 36 小時走〕；看不到 variables 算 GAP 也是警告）。
+輸出 `result.json`，有警告（或要留恢復／提醒留言）時另寫 stateless 的 `plan.json`（`stateless_kind: deadman`）交給 `issues.py apply`；結束碼 OK 0、ALERT 2、FAIL 1。查舊 Issue／留言失敗時，已確定的警告仍然送出，但結果是 FAIL（1），不是 ALERT。範本在 rc＝2 時還會確認 `result.json` 的 `status` 是 `ALERT`（Python 找不到檔案的結束碼也是 2）。
+狀態的 `runs` 不是非空列表（缺少、空的、壞掉）也是警告，不退回 Issue 的 `updated_at`。
+**停擺次數 n**：同一種停擺的 key 含「第幾次」（`<base>|<n>`）：同一次停擺持續好幾天只開一個 Issue；恢復（deadman 在原 Issue 留言「已恢復」）、人關閉之後再發生，開新的 Issue（標題加「（第 n 次）」）。
+deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 ≥ Developer，或 token 自己；GitHub：OWNER／MEMBER／COLLABORATOR 或 github-actions[bot]）；偽造的同 key Issue 不能吞掉警告，也收不到恢復留言（細節與威脅模型見 GITLAB-PORT T-12）。
+同一次停擺持續時，每 7 天在原 Issue 留一則「仍在停擺（自 …）」（可信作者的機器標記加時間判斷，7 天內不重複；已關閉的不提醒），直到 T-08 的寄信做好。已關閉的可信 Issue 在恢復時也會收到「已恢復」留言（不重開）。
+**只偵測與開 Issue，email 還沒做（T-08）。**範本現在是 `when: manual`：沒人點就不會跑，死人開關要等驗證完放開 manual 才真的有作用。範本 `gitlab/.gitlab-ci.yml` 的 `watch:deadman` 用獨立的排程（`DUMPLING_JOB=deadman`）、獨立的擁有者與 token（`DEADMAN_GITLAB_TOKEN`）。
+**GitHub 端目前沒有 deadman**：公開 repo 靠上面的 keepalive 加每月人工檢查（`docs/STATUS.md` 的「下次人工檢查日期」）；第一階段只做 GitLab 範本，GitHub 後端只用在測試與演練。
 
 ## 5. 公開 repo 的 real 模式（D-040）
 
@@ -217,6 +270,7 @@ workflow 一旦被停用，keepalive 本身也不會跑，只有人工檢查擋�
 - 標題與內文寫明「示範專案（公開 BSP）」、加 `demo` 標籤（`match.py --demo`）；release-meta 的 shipped／development 照用。
 - 第 14 條通報在公開 repo 只做演練（`art14-drill`）；real 命中不開 art14 Issue（M8，見 `docs/ART14.md`）。
 - 狀態 Issue（`watch-state`）不是通知：標題與內文格式不變，但公開 repo（`--demo`）建立時也加 `demo` 標籤（C0 決定，2026-11-14；第一次真實基準的 #99 是手動補的）。read-state 靠 `watch-state` 標籤與第一行標記找，多了標籤不影響。
+- **重建基準**（例如基準建立後才加入、還沒開 Issue 前就要納入的 Release）：只有在「找不到狀態 Issue、也還沒有任何監控 Issue」時才能重建（§3.2）。做法：在舊的狀態 Issue 留言寫明原因與決定者，移除 `watch-state` 標籤並關閉（**不刪除**，保留紀錄；read-state 只靠標籤找）；再手動 `mode=real`＋`baseline=true`，先 dry_run 看報告、同意後實跑；最後看一輪一般的 dry_run，確認 KEV Issue 是 0 個。已經有監控 Issue 時不能這樣做（會吞掉新的命中，FAIL）。2026-11-15：#99 依此關閉（原因：基準建立後新增 dev Release，使用者決定），改由新的狀態 Issue 接手。
 
 ## 6. 演練（drill，公開 repo 只做演練）
 

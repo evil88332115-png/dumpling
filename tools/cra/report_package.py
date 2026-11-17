@@ -466,6 +466,17 @@ def list_row(r, fix_all, conf):
             h["誰處理"], "；".join(x for x in parts if x), h["判定者"], h["判定日期"]]
 
 
+def comp_label(r):
+    """P1 判斷表的「元件與版本」：核心列去重後（kernel_packages 有 2 個以上套件）列出每個核心套件（最多 20 個），其他是元件與版本。"""
+    kp = r.get("kernel_packages") or []
+    if len(kp) > 1:
+        return "；".join(f"{p['name']} {p['version'] or ''}".strip() for p in kp[:20]) + (f"；…（共 {len(kp)} 個核心套件）" if len(kp) > 20 else "")
+    return f"{r.get('component')} {r.get('version') or ''}".strip()
+
+
+KERNEL_RESULT_ZH = {"not_affected": "沒編進核心", "affected": "受影響", "unknown": "判斷不了", "no_result": "沒有結果", "not_judged": "沒有判定"}
+
+
 def human_row(r, fix_all, conf):
     code, cls, concl, act, who, basis, bad = wording(r, fix_all)
     jwho, jdate, dnote = judge(r, code, *conf)
@@ -485,6 +496,12 @@ def human_row(r, fix_all, conf):
     if isinstance(ic, dict) and ic.get("result") == "not_assessed":
         notes.append("UEFI 映像檢查：映像沒有完整解開或證據不足，無法確認有沒有編進（not_assessed）")
     comp = r.get("component") or "?"
+    kp = r.get("kernel_packages") or []
+    if len(kp) > 1:
+        # 核心列去重（M7d-1）：一個 CVE 一列，列出其他核心套件；逐顆判定時另外寫每顆核心的結果
+        comp += f"（另有 {len(kp) - 1} 個核心套件：" + "、".join(f"{p['name']} {p['version']}".strip() for p in kp[1:4]) + ("…" if len(kp) > 4 else "") + "）"
+    if r.get("kernel_results"):
+        notes.append("各顆核心的核心設定比對：" + "；".join(f"{v}：{KERNEL_RESULT_ZH.get(x, x)}" for v, x in sorted(r["kernel_results"].items())))
     sev, why_no = severity_cells(r)
     fix = NOT_AFFECTED_FIX if r["tier"] in ("accepted", "distro_fixed") else fix_text(r, fix_all)
     return [cls, concl, act, who, r["id"], comp, r.get("version") or "", fix, sev, why_no,
@@ -1026,7 +1043,7 @@ def p1_sheet(doc, fix_all, p1_layers=None):
     rows = []
     for i, cve in enumerate(sorted(by), 1):
         xs = sorted(by[cve], key=lambda r: (str(r.get("component")), str(r.get("version"))))
-        comps = "；".join(f"{r.get('component')} {r.get('version') or ''}".strip() for r in xs)
+        comps = "；".join(comp_label(r) for r in xs)
         ft = [fix_text(r, fix_all) for r in xs]
         fixes = ft[0] if len(set(ft)) == 1 else "；".join(f"{r.get('component')} {r.get('version') or ''}：{t}".replace("  ", " ") for r, t in zip(xs, ft))
         ev = "；".join(dict.fromkeys(e for r in xs for e in (exploit_text(r).split("；") if exploit_text(r) else [])))

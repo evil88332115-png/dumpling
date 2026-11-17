@@ -175,6 +175,25 @@ def test_sheet_only_workbook_unchanged_styles(tmp_path):
         assert not [n for n in z.namelist() if "chart" in n or "drawing" in n]
 
 
+def test_same_content_same_bytes_across_clock(tmp_path, monkeypatch):
+    """同樣的內容寫兩次，中間時鐘跳了 10 秒，檔案仍然逐位元組相同：zip 成員的時間固定是 ZIP_EPOCH。"""
+    import time
+    now = [1_800_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    out = []
+    for i in (1, 2):
+        p = tmp_path / f"{i}.xlsx"
+        xlsx_min.write_xlsx(p, [dash(ROWS), xlsx_min.Sheet("a", ["x"], [[1]])])   # Canvas（含圖表部件）＋一般工作表
+        out.append(p.read_bytes())
+        now[0] += 10
+    assert out[0] == out[1]
+    with zipfile.ZipFile(tmp_path / "1.xlsx") as z:
+        infos = z.infolist()
+        assert any("chart" in zi.filename for zi in infos)
+        assert all(zi.date_time == xlsx_min.ZIP_EPOCH for zi in infos)
+        assert all(zi.compress_type == zipfile.ZIP_DEFLATED and zi.external_attr == 0o600 << 16 for zi in infos)
+
+
 def test_canvas_validation():
     cv = xlsx_min.Canvas("c")
     cv.set("A1", "x")

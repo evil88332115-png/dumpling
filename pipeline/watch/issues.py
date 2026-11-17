@@ -42,6 +42,10 @@ MARK_RE = re.compile(r"<!-- dumpling-watch key=([0-9a-f]{64}) mode=(real|drill) 
 # 不能讓 read-state 算進 watch_keys（沒有狀態 Issue 時會擋住第一次基準，M8 預驗應修 1）
 SUPPORT_MARK_RE = re.compile(r"<!-- dumpling-support key=([0-9a-f]{64}) mode=(real|drill) -->")
 SUPPORT_LABEL = "support-period"
+# 每日監控的死人開關（deadman.py，GITLAB-PORT T-12，stateless plan 的第二種 kind）：同樣自己的標記與標籤，不是監控 Issue
+DEADMAN_MARK_RE = re.compile(r"<!-- dumpling-deadman key=([0-9a-f]{64}) mode=(real|drill) -->")
+DEADMAN_LABEL = "watch-deadman"
+STATELESS_KINDS = ("support", "deadman")      # plan 的 stateless_kind；沒寫＝support（原本的行為）
 STATE_MARK_RE = re.compile(r"<!-- dumpling-watch-state mode=(real|drill) schema=1 -->")
 KEY_RE = re.compile(r"[0-9a-f]{64}")
 REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
@@ -345,7 +349,7 @@ class GitLabApi(Api):
         if not isinstance(d, dict) or type(d.get("iid")) is not int:
             raise Fail("GitLab Issue 回應格式不符（沒有整數 iid）")
         return {"number": d["iid"], "title": d.get("title"), "body": d.get("description"),
-                "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"),
+                "state": "open" if d.get("state") == "opened" else "closed", "updated_at": d.get("updated_at"), "created_at": d.get("created_at"),
                 "labels": d.get("labels") or [], "confidential": d.get("confidential"),
                 "user": d.get("author") if isinstance(d.get("author"), dict) else {}}
 
@@ -407,7 +411,8 @@ class GitLabApi(Api):
             if not isinstance(n, dict) or type(n.get("id")) is not int:
                 raise Fail("GitLab 留言回應格式不符（沒有整數 id）")
             out.append({"id": n["id"], "body": n.get("body"), "user": n.get("author") if isinstance(n.get("author"), dict) else {},
-                        "system": n.get("system") is True})
+                        "system": n.get("system") is True,
+                        "created_at": n.get("created_at") if isinstance(n.get("created_at"), str) else None})   # 伺服器記的時間（作者改不了）
         return out
 
     def edit_note(self, repo, number, note_id, body):
@@ -575,7 +580,9 @@ class Labels:
 ACTION_OPS = ("open", "comment", "open_if_closed")      # plan 的 action 認得的 op；stateless plan 只能用 open
 MAX_ACTIONS = 200       # match.py 一次最多：20 個 open＋1 個彙總＋留言＋健康 Issue；超過代表 compute 有問題
 ALLOWED_LABELS = frozenset({"dumpling-watch", "kev", "vendor-level", "shipped", "development", "layer-bsp", "layer-os", "layer-product",
+                            "layer-firmware", "firmware-advisory",      # 韌體（FIRMWARE-WATCH.md）：KEV／廠商層級掛在韌體層，公告 Issue 用 firmware-advisory
                             "demo", "summary", "attention", "drill", "watch-health", "support-period"})
+ALLOWED_LABELS = ALLOWED_LABELS | {DEADMAN_LABEL}     # 另起一行：不動上面的 frozenset 字面值
 
 
 def load_plan(path, want_mode=None):
@@ -606,13 +613,29 @@ def load_plan(path, want_mode=None):
         bad("demo")
     if "stateless" in plan and not isinstance(plan["stateless"], bool):
         bad("stateless")
+    if "stateless_kind" in plan and (plan["stateless_kind"] not in STATELESS_KINDS or not plan.get("stateless")):
+        bad("stateless_kind 只能是 support／deadman，而且只能用在 stateless 的 plan")
     if plan.get("stateless"):
+        deadman = plan.get("stateless_kind") == "deadman"
         if plan.get("state") is not None:
             bad("stateless 的 plan 不能帶 state")
-        if any(not isinstance(a, dict) or a.get("op") != "open" for a in plan.get("actions") or []):
-            bad("stateless 的 plan 只能有 open")
+        # support 只能 open；deadman 另外可以對「開著的」deadman Issue 留言（恢復通知）：不重開、不碰別種 Issue
+        ops = ("open", "comment") if deadman else ("open",)
+        if any(not isinstance(a, dict) or a.get("op") not in ops for a in plan.get("actions") or []):
+            bad("stateless 的 plan 只能有 " + "、".join(ops))
+        if deadman and any(isinstance(a, dict) and a.get("reopen_if_closed") for a in plan.get("actions") or []):
+            bad("deadman 的 plan 不能重開 Issue（reopen_if_closed）")
+        if any(isinstance(a, dict) and "issue" in a and (not deadman or a.get("op") != "comment" or type(a["issue"]) is not int or a["issue"] <= 0)
+               for a in plan.get("actions") or []):
+            bad("issue（指定留言的 Issue 編號）只能用在 deadman 的 comment，而且要是正整數")
         if any(isinstance(a, dict) and isinstance(a.get("labels"), list) and "dumpling-watch" in a["labels"] for a in plan.get("actions") or []):
-            bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限的 Issue 不是監控 Issue）")
+            bad("stateless 的 plan 不能用 dumpling-watch 標籤（支援期限與死人開關的 Issue 不是監控 Issue）")
+        if deadman and any(isinstance(a, dict) and isinstance(a.get("labels"), list) and SUPPORT_LABEL in a["labels"] for a in plan.get("actions") or []):
+            bad("deadman 的 plan 不能用 support-period 標籤")
+    # watch-deadman 標籤只給 deadman 的 stateless plan 用（一般監控與支援期限的 plan 帶它，會讓 Issue 混進 deadman 的 key 與恢復判斷）
+    if not (plan.get("stateless") and plan.get("stateless_kind") == "deadman") and any(
+            isinstance(a, dict) and isinstance(a.get("labels"), list) and DEADMAN_LABEL in a["labels"] for a in plan.get("actions") or []):
+        bad("watch-deadman 標籤只能用在 stateless_kind=deadman 的 plan")
     sb = plan.get("state_base")
     if sb is not None:
         if (not isinstance(sb, dict) or type(sb.get("issue")) is not int
@@ -654,6 +677,34 @@ def public_check(texts):
         hits += [f"{name}: {p}" for p in publiccheck.check_text(t, rules)]
     if hits:
         raise Fail(f"公開檢查命中 {len(hits)} 筆，什麼都沒寫：" + "；".join(hits[:3]))
+
+
+_SUMMARY_VAL = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_SUMMARY_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def state_summary(gen, nm, st=None):
+    """狀態 Issue 的第一行摘要。有韌體狀態時另列三張比對表的識別、status、stale（FIRMWARE-WATCH.md §5：表的狀態要看得到，不能只在 artifact 裡）。
+    值來自外來資料（公告重跑的結果）：只收 [A-Za-z0-9._-]{1,64}，其他寫 ?（摘要是 Markdown，不放任何可被解讀的字元）。"""
+    out = f"最後執行：{gen}；比對數：{nm}"
+    tables = ((st or {}).get("firmware") or {}).get("tables") if isinstance((st or {}).get("firmware"), dict) else None
+    if isinstance(tables, dict) and tables:
+        def v(x):
+            x = str(x).lower() if isinstance(x, bool) else x
+            return x if isinstance(x, str) and _SUMMARY_VAL.fullmatch(x) else "?"
+        parts = []
+        for n in ("fw_advisory_rules", "intel_microcode", "nvidia_vbios"):
+            t = tables.get(n)
+            if isinstance(t, dict):
+                ident = next((t[k] for k in ("sha256", "table_sha256", "source_commit", "mirror_commit") if k in t), None)
+                parts.append(f"{n} {v(ident)[:16]}（status {v(t.get('status'))}、stale {v(t.get('stale'))}）")
+        if parts:
+            out += "；韌體的比對表：" + "；".join(parts)
+    fwst = (st or {}).get("firmware") if isinstance((st or {}).get("firmware"), dict) else {}
+    if fwst.get("size_stopped_at") is not None:            # C0（2026-11-15）：韌體因狀態大小上限停止，摘要要看得到
+        t = fwst["size_stopped_at"]
+        out += "；韌體因狀態大小上限停止（%s）" % (t if isinstance(t, str) and _SUMMARY_TIME.fullmatch(t) else "?")
+    return out
 
 
 # ---------- 指令 ----------
@@ -703,7 +754,7 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     st = plan["state"]
     no_state = st is None       # match.py 在「沒有基準」時只開提醒 Issue、不寫狀態（#32 驗證 F4）
     nm = len(st["matches"]) if not no_state and isinstance(st.get("matches"), (dict, list)) else 0
-    summary = f"最後執行：{gen}；比對數：{nm}"
+    summary = state_summary(gen, nm, st if not no_state else None)
     too_big, state_body = None, None
     try:
         if not no_state:
@@ -715,6 +766,8 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
     texts = [] if no_state else [("狀態JSON", json.dumps(st, sort_keys=True, ensure_ascii=False)), ("狀態摘要", summary)]
     prepared = []
     mark_name, base_label, mark_re = ("dumpling-support", SUPPORT_LABEL, SUPPORT_MARK_RE) if stateless else ("dumpling-watch", "dumpling-watch", MARK_RE)
+    if stateless and plan.get("stateless_kind") == "deadman":
+        mark_name, base_label, mark_re = "dumpling-deadman", DEADMAN_LABEL, DEADMAN_MARK_RE
     for n, a in enumerate(plan["actions"]):
         a = dict(a)
         if a["op"] != "comment":
@@ -757,6 +810,20 @@ def cmd_apply(api, repo, plan_path, dry, want_mode=None):
                         num = d["number"]
                     created.add(key)
                     r.update(result="would_open" if dry else "opened", issue=num)
+            elif stateless:
+                # deadman 的恢復通知：只對 deadman Issue 留言，從不重開；找不到就跳過（不算 problem）
+                idx = watch_index(api, repo, problems, base_label, mark_re)
+                cands = [e for e in idx.get(key, []) if e["mode"] == mode]
+                if a.get("issue") is not None:      # plan 指定了 Issue（同 key 有多個時，不能讓偽造的那個收到留言）
+                    cands = [e for e in cands if e["number"] == a["issue"]]
+                ent = pick(cands)
+                # 指定了 Issue 編號（deadman.py 一律指定）：已關閉的也留言、不改狀態（恢復留言是「這一次停擺結束了」的持久標記）；沒指定：只對開著的
+                if not ent or (ent["state"] != "open" and a.get("issue") is None):
+                    r.update(result="skipped", reason="Issue 已關閉或不存在，不留言")
+                    continue
+                if not dry:
+                    api.add_comment(repo, ent["number"], a["body"])
+                r.update(result="would_comment" if dry else "commented", issue=ent["number"])
             else:
                 idx = watch_index(api, repo, problems)
                 ent = pick([e for e in idx.get(key, []) if e["mode"] == mode])

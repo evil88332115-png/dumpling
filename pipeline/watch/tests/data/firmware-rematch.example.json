@@ -1,0 +1,146 @@
+{
+  "schema": "dumpling-firmware-rematch/1",
+  "_note": "介面範例（C2 維護，C3 只讀）。內容是對 main 的表實際重跑的輸出（Release 當時的微碼候選少一個 INTEL-SA-01443，所以有一筆 changed）；雜湊是佔位值。每個樣本一份 rematch-<slug>.json；key 的格式見 docs/notes/c2-firmware-rematch.md。",
+  "slug": "novacustom-v540tu-mtl-v1.0.1",
+  "firmware_version": "v1.0.1",
+  "release_tag": "firmware-demo/2026.11.20",
+  "inventory_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "now": "2026-11-21T02:00:00Z",
+  "status": "ATTENTION",
+  "reasons": [
+    "changed since release: 1 result(s)",
+    "inventory: novacustom_v54x_mtl_igpu_v1.0.1_btg_prod.rom：UEFI 內的 Intel GOP／VBT／legacy VBIOS 搜尋不完整（GAP，沒找到不代表不存在；原因見 SBOM 的 sca-center:gap）",
+    "inventory: 規則表建議 affected：1 個元件（規則 INTEL-SA-01315；依初審規則的建議，待負責單位確認；是否受影響以廠商公告為準），待人審",
+    "inventory: 沒有版本清單（無法核對）"
+  ],
+  "tables": {
+    "fw_advisory_rules": {
+      "sha256": "cd2433c53c49b2c40fbde48ecedf1fb1c9b4872e61ed7101076d77d2a80f1c31",
+      "table_updated": "2026-11-14",
+      "status": "OK",
+      "stale": false
+    },
+    "intel_microcode": {
+      "source_commit": "d71fe4e2f0f70a49ebbac7f2c7e915f181361974",
+      "source_tag": "microcode-20261110",
+      "table_sha256": "253aab94c3c2a14eda457b1ee4a7a1490e00d4e854622cd9f05e77a07904e271",
+      "status": "OK",
+      "stale": false
+    },
+    "nvidia_vbios": {
+      "sha256": "c5324efc7d0b04b2740c08c6161807a37c167e1410a007d1f110a1421238b534",
+      "mirror_commit": "98dc5d70d87f6f068c38161930fcda2ae3193bb3",
+      "reviewed_until": "2025-09-02",
+      "status": "OK",
+      "stale": false
+    }
+  },
+  "results": [
+    {
+      "key": "rule:bios_image:e915ed1eae8b7b91:image",
+      "kind": "rule",
+      "component": "BIOS image",
+      "result": "NOT_ASSESSED",
+      "bulletins": [],
+      "reason": "no-rule",
+      "review": null
+    },
+    {
+      "key": "rule:intel_csme:e915ed1eae8b7b91:me=18.0.10.2285",
+      "kind": "rule",
+      "component": "ME 18.0.10.2285",
+      "result": "affected",
+      "bulletins": [
+        "INTEL-SA-01315"
+      ],
+      "reason": null,
+      "review": "preliminary"
+    },
+    {
+      "key": "rule:intel_fsp:e915ed1eae8b7b91:fsp=13.0.177.32:74cb6d3079cd",
+      "kind": "rule",
+      "component": "FSP 13.0.177.32",
+      "result": "NOT_ASSESSED",
+      "bulletins": [],
+      "reason": "no-rule",
+      "review": null
+    },
+    {
+      "key": "rule:intel_fsp:e915ed1eae8b7b91:fsp=13.0.177.32:bf837755c5a5",
+      "kind": "rule",
+      "component": "FSP 13.0.177.32",
+      "result": "NOT_ASSESSED",
+      "bulletins": [],
+      "reason": "no-rule",
+      "review": null
+    },
+    {
+      "key": "rule:intel_fsp:e915ed1eae8b7b91:fsp=13.0.177.32:8ce3e0be4d2a",
+      "kind": "rule",
+      "component": "FSP 13.0.177.32",
+      "result": "NOT_ASSESSED",
+      "bulletins": [],
+      "reason": "no-rule",
+      "review": null
+    },
+    {
+      "key": "ucode:000A06A4/0xE6:0x25",
+      "kind": "intel-microcode",
+      "component": "microcode 000A06A4 rev 0x25",
+      "result": "affected-candidate",
+      "bulletins": [
+        "INTEL-SA-01083",
+        "INTEL-SA-01379",
+        "INTEL-SA-01396",
+        "INTEL-SA-01404",
+        "INTEL-SA-01423",
+        "INTEL-SA-01428",
+        "INTEL-SA-01435",
+        "INTEL-SA-01441",
+        "INTEL-SA-01442",
+        "INTEL-SA-01443"
+      ],
+      "reason": null,
+      "review": null
+    }
+  ],
+  "changed": [
+    {
+      "key": "ucode:000A06A4/0xE6:0x25",
+      "kind": "intel-microcode",
+      "before": {
+        "result": "affected-candidate",
+        "bulletins": [
+          "INTEL-SA-01083",
+          "INTEL-SA-01379",
+          "INTEL-SA-01396",
+          "INTEL-SA-01404",
+          "INTEL-SA-01423",
+          "INTEL-SA-01428",
+          "INTEL-SA-01435",
+          "INTEL-SA-01441",
+          "INTEL-SA-01442"
+        ],
+        "reason": null,
+        "review": null
+      },
+      "after": {
+        "result": "affected-candidate",
+        "bulletins": [
+          "INTEL-SA-01083",
+          "INTEL-SA-01379",
+          "INTEL-SA-01396",
+          "INTEL-SA-01404",
+          "INTEL-SA-01423",
+          "INTEL-SA-01428",
+          "INTEL-SA-01435",
+          "INTEL-SA-01441",
+          "INTEL-SA-01442",
+          "INTEL-SA-01443"
+        ],
+        "reason": null,
+        "review": null
+      }
+    }
+  ]
+}

@@ -166,6 +166,18 @@ def test_report_notes_kernel_gap_in_vulnerability_section(tmp_path):
         assert "核心的漏洞不在下面的數字裡" not in page
 
 
+def test_report_says_upstream_ranges_only_when_kernel_coverage_has_distro_data_unused(tmp_path):
+    """M7d-5：核心有比對、但只有上游版本範圍（kernel-coverage.json 的 distro_data_unused）：不寫「沒有做漏洞比對」，照實寫比對的限制。"""
+    out = make_out(tmp_path / "gap", ALL_OK + [("C-kernel-coverage", "GAP", "x")], grype=[], meta={"mode": "image"})
+    (out / "scan" / "kernel-coverage.json").write_text(json.dumps({"versions": [{"version": KVER, "source": "modules_path"}],
+                                                                   "distro_data_unused": {"rule": "generic-only-no-distro-package-match"}}), encoding="utf-8")
+    rep, page = run_report(out)
+    assert rep["kernel_coverage"] == {"status": "GAP", "versions": [KVER], "upstream_ranges_only": True}
+    assert f"作業系統核心（版本 {KVER}）的比對只有上游版本範圍（NVD）" in page and "可能有誤報，也可能漏報" in page
+    assert "沒有做漏洞比對" not in page
+    assert_no_conclusion(page)
+
+
 def test_sca_scan_runs_kernelcheck_after_grype_for_image_and_sbom_only():
     s = (PILOT / "sca-scan").read_text(encoding="utf-8")
     i = s.index('kernelcheck.py" --sbom "$SBOM"')

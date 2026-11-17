@@ -1,0 +1,121 @@
+name: pages
+# GitHub Pages 靜態儀表板（D-062，docs/DASHBOARD.md）。唯讀、沒有 JS；頁面資料一律重新從 API 讀，不用事件帶進來的任何欄位產生內容。
+# 觸發：watch／dev／release／firmware 完成（workflow_run，依來源各自判斷，見 pipeline/dashboard/trigger.py）與手動（只能在 main 上跑）。不接 pull_request。
+# 權限照 D-012：頂層沒有權限；build 只讀（contents、issues、actions）；deploy 只有 pages: write、id-token: write，
+# 環境 github-pages（repo 設定：Pages 來源選 GitHub Actions；環境的 Deployment branches 只允許 main，見 docs/DASHBOARD.md 第 7 節）。
+on:
+  workflow_run:
+    workflows: [watch, dev, release, firmware]
+    types: [completed]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    # 先擋最明顯的：手動只能在 main；workflow_run 必須出自本 repo、不是被取消。
+    # watch／dev 的 main、release 與 firmware 的 tag push（firmware：event 必須是 push、tag 是 firmware-demo/<版本>）由第一步 trigger.py 判斷（和這裡的條件一樣，只是更嚴；不符就是 go=false）。
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_run'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+      && github.event.workflow_run.conclusion != 'cancelled') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      actions: read
+    outputs:
+      go: ${{ steps.trigger.outputs.go }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 要不要更新頁面（watch／dev 在 main、release 是 <專案>/v<版本> 的 tag push、firmware 是 firmware-demo/<版本> 的 tag push）
+        id: trigger
+        run: python3 -I pipeline/dashboard/trigger.py | tee -a "$GITHUB_OUTPUT"
+      # 最近一次在 main 上成功、而且 artifact 還在的 watch run：下載 watch-plan-real-N、watch-support-real-N，另寫 run.json（id、時間、event、結果）。
+      # 找不到不算失敗：build.py 會在頁面寫 GAP，並在頁首警告。
+      - name: 最近一輪每日監控（watch artifact）
+        if: steps.trigger.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WATCH_DIR: ${{ runner.temp }}/watch
+        run: |
+          mkdir -p "$WATCH_DIR"
+          ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch.yml/runs?branch=main&status=success&per_page=20" \
+            --jq '.workflow_runs[].id' || true)
+          found=false
+          while read -r id; do
+            case $id in ''|*[!0-9]*) continue ;; esac
+            names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | .name') || continue
+            plan=$(printf '%s\n' "$names" | grep -E '^watch-plan-real-[0-9]+$' | sort -V | tail -n 1 || true)
+            [ -n "$plan" ] || continue
+            rm -rf "${WATCH_DIR:?}"/*
+            gh run download "$id" -n "$plan" -D "$WATCH_DIR/$plan" || continue
+            sup="watch-support-real-${plan##*-}"
+            if printf '%s\n' "$names" | grep -qx "$sup"; then
+              gh run download "$id" -n "$sup" -D "$WATCH_DIR/$sup" || echo "::warning::$sup 下載失敗：支援期限那一格會是 GAP"
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" \
+              --jq '{id: .id, created_at: .created_at, event: .event, conclusion: .conclusion}' > "$WATCH_DIR/run.json" || continue
+            echo "監控資料取自 watch run $id（$plan）"
+            found=true
+            break
+          done <<< "$ids"
+          if [ "$found" != true ]; then
+            echo "::warning::找不到最近一次成功且有 watch-plan-real-N artifact 的 watch run：頁面的每日監控區會是 GAP"
+          fi
+      - name: 產生頁面（site/）
+        if: steps.trigger.outputs.go == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WATCH_DIR: ${{ runner.temp }}/watch
+        run: |
+          python3 -I pipeline/dashboard/build.py --repo "$GITHUB_REPOSITORY" --watch-dir "$WATCH_DIR" \
+            --projects-dir projects --out site --commit "$(git rev-parse HEAD)"
+      - name: 檢查頁面（沒有 script／事件屬性、CSP、href 白名單、沒有總結字樣）
+        if: steps.trigger.outputs.go == 'true'
+        run: python3 -I pipeline/dashboard/check_site.py --repo "$GITHUB_REPOSITORY" --site site
+      # ci/public-check.sh 讀的是 git 的內容：把 site/ 放進暫存的 git 目錄（只 add、不 commit），對它的 tree 跑同一套規則。
+      - name: 公開檢查（site/，和 pre-push 同一套規則）
+        if: steps.trigger.outputs.go == 'true'
+        run: |
+          d="$RUNNER_TEMP/site-public-check"
+          rm -rf "$d"; mkdir -p "$d"
+          cp -R site/. "$d/"
+          git init -q "$d"
+          git -C "$d" add -A
+          tree=$(git -C "$d" write-tree)
+          (cd "$d" && bash "$GITHUB_WORKSPACE/ci/public-check.sh" --rev "$tree")
+      - name: 上傳 Pages artifact
+        if: steps.trigger.outputs.go == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

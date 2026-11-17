@@ -51,6 +51,7 @@ SCHEMA = "sca-center-evidence-bundle/1"
 LIMITS = {"file": 512 << 20, "total": 4 << 30, "files": 5000}
 CHUNK = 1 << 20
 UNKNOWN = "unknown"
+KERNEL_VER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,99}$")       # 逐顆判定的版本資料夾（同 sca-scan 的核心版本檢查）
 
 # sca-scan 輸出資料夾裡要收的檔案（相對路徑）。.json 也收 .json.xz（cra_report 兩種都讀）
 SCAN_FILES = ("status.tsv", "meta.json", "report.json", "report.html",
@@ -261,6 +262,29 @@ class Stager:
             src, dst = f"{base}/{rel}" if base else rel, f"{dest_base}/{rel}"
             if not self.add(root_fd, src, dst) and rel.endswith(".json"):
                 self.add(root_fd, src + ".xz", dst + ".xz")
+        self.add_kernels(root_fd, f"{base}/scan/kernels" if base else "scan/kernels", f"{dest_base}/scan/kernels")
+
+    def add_kernels(self, root_fd, base, dest_base):
+        """逐顆判定（M7d-1）：scan/kernels/<版本>/kernel-config.json 與 kernel-module-map.json（每顆核心各一份；排除的依據）。
+        版本資料夾名稱要是合法的核心版本字串（同 sca-scan），其他不收；沒有這個資料夾（單顆核心）什麼都不做。"""
+        try:
+            dfd = open_path(root_fd, base, directory=True)
+        except Skip as e:
+            self.skipped.append({"path": dest_base, "reason": str(e)})
+            return
+        if dfd is None:
+            return
+        try:
+            names = sorted(os.listdir(dfd))
+        finally:
+            os.close(dfd)
+        for n in names:
+            if not KERNEL_VER.match(n):
+                self.skipped.append({"path": f"{dest_base}/{clean(n, 80)}", "reason": "名稱不是合法的核心版本"})
+                continue
+            for f in ("kernel-config.json", "kernel-module-map.json"):
+                if not self.add(root_fd, f"{base}/{n}/{f}", f"{dest_base}/{n}/{f}"):
+                    self.add(root_fd, f"{base}/{n}/{f}.xz", f"{dest_base}/{n}/{f}.xz")
 
     def add_board(self, root_fd, base, dest_base):
         """<rootfs>/board-test/<名稱>/ 的板子結果（board_import.py 匯入的；只收 BOARD_RESULT 的檔名，隱藏的暫存資料夾不收）。"""
