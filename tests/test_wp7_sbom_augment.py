@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 AUG = os.path.join(ROOT, "pipeline", "platforms", "_shared", "sbom_augment.py")
@@ -213,17 +214,20 @@ class AugmentTest(unittest.TestCase):
 
 
 class SourcePathsTest(unittest.TestCase):
-    """原始碼 SBOM（cdxgen）的絕對路徑：併入後改成相對於原始碼根目錄（<WORK>/cdxgen-src）的路徑；其他絕對路徑只留檔名。
-    鎖住：完整、-bsp、-os、產品 SBOM（sbom-layers.py split 的實際輸出）走訪整份 JSON 都沒有暫存路徑；原始碼元件沒有任何絕對路徑。
-    映像元件（Syft 記的是裝置上的路徑，例如 /usr/lib/…）不是暫存路徑，原樣保留。"""
+    """原始碼 SBOM（cdxgen）的絕對路徑：併入後去掉掃描暫存資料夾（<WORK>，原始碼根目錄是 <WORK>/cdxgen-src）的前綴；整個值是絕對路徑時只留檔名；
+    自由文字的其他斜線不碰。原始碼元件的 bom-ref、purl 也改，依賴的 ref 用同一份對照表。最後保險：整份 SBOM 還有 WORK 的任何寫法 → FAIL。
+    鎖住：完整、bsp、os、產品 SBOM（sbom-layers.py split 的實際輸出）走訪整份 JSON（沒有例外欄位）都沒有暫存路徑。
+    映像元件（Syft 記的是裝置上的路徑，例如 /usr/…）不是暫存路徑，原樣保留。"""
     LAYERS = os.path.join(ROOT, "pipeline", "sbom-layers.py")
+    SUF = ".sca-scan-work.Ab12Cd"
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="wp7-aug-paths-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.parent = os.path.join(self.tmp, "out", "augment")
         os.makedirs(self.parent)
-        self.root = os.path.join(self.parent, ".sca-scan-work.Ab12Cd", "cdxgen-src")     # sca-scan 掃完會刪掉：這裡也不建
+        self.work = os.path.join(self.parent, self.SUF)                 # sca-scan 掃完會刪掉：這裡也不建
+        self.root = os.path.join(self.work, "cdxgen-src")
 
     def w(self, name, doc):
         p = os.path.join(self.tmp, name)
@@ -231,34 +235,43 @@ class SourcePathsTest(unittest.TestCase):
             json.dump(doc, f)
         return p
 
-    def lockfile(self, rel):
-        return os.path.join(self.root, rel)
-
     def src(self, root=None):
         root = root or self.root
-        f = os.path.join(root, "deb/openmediavault/workbench/package-lock.json")
-        def lib(name, extra=None):
-            c = {"bom-ref": "pkg:npm/%s@1" % name, "type": "library", "name": name, "version": "1", "purl": "pkg:npm/%s@1" % name,
+        work = os.path.dirname(root)
+        f = root + "/deb/openmediavault/workbench/package-lock.json"
+        def lib(name, extra=None, ref=None):
+            purl = "pkg:npm/%s@1" % name
+            c = {"bom-ref": ref or purl, "type": "library", "name": name, "version": "1", "purl": purl,
                  "properties": [{"name": "SrcFile", "value": f}, {"name": "ResolvedUrl", "value": "https://registry.npmjs.org/%s/-/%s-1.tgz" % (name, name)}],
                  "evidence": {"identity": [{"field": "purl", "confidence": 1, "concludedValue": f,
                                             "methods": [{"technique": "manifest-analysis", "confidence": 1, "value": f}]}]}}
             c.update(extra or {})
             return c
+        withpath_ref = "pkg:npm/withpath@1?file_path=" + urllib.parse.quote(root + "/a.json", safe="")
         return {"bomFormat": "CycloneDX", "specVersion": "1.6",
                 "metadata": {"component": {"bom-ref": "pkg:npm/openmediavault-workbench@0.0.0", "type": "application",
                                            "name": "openmediavault-workbench", "version": "0.0.0",
                                            "properties": [{"name": "SrcFile", "value": root}]}},
-                "components": [lib("tmp"), lib("core", {"description": "built from /home/runner/work/_temp/x/core.js"}),
-                               lib("nested", {"components": [lib("inner")]})],
-                "dependencies": []}
+                "components": [
+                    lib("tmp"),
+                    lib("core", {"description": "Route requests to /login and /api/v1; limit 10 /s",
+                                 "properties": [{"name": "Other", "value": "/opt/build/core.js"},
+                                                {"name": "Url", "value": "file://" + root + "/a/b.json"},
+                                                {"name": "Work", "value": work + "/o/cdxgen/bom.json"}]}),
+                    lib("withpath", {"purl": "pkg:npm/withpath@1?file_path=" + urllib.parse.quote(root + "/a.json", safe="")}, ref=withpath_ref),
+                    lib("nested", {"components": [lib("inner")]})],
+                "dependencies": [{"ref": "pkg:npm/openmediavault-workbench@0.0.0", "dependsOn": [withpath_ref, "pkg:npm/tmp@1"]},
+                                 {"ref": withpath_ref, "dependsOn": ["pkg:npm/core@1"]}]}
 
     def image(self):
         return bom([{"bom-ref": "pkg:deb/debian/bash@5", "type": "library", "name": "bash", "version": "5", "purl": "pkg:deb/debian/bash@5",
                      "properties": [{"name": "syft:location:0:path", "value": "/usr/share/doc/bash/copyright"}]}])
 
-    def merge(self, *extra, src=None):
+    def merge(self, *extra, src=None, img=None):
         out = os.path.join(self.tmp, "merged.json")
-        p = subprocess.run([sys.executable, "-I", AUG, "merge-source", self.w("img.json", self.image()), self.w("src.json", src or self.src()), out,
+        if os.path.exists(out):
+            os.remove(out)
+        p = subprocess.run([sys.executable, "-I", AUG, "merge-source", self.w("img.json", img or self.image()), self.w("src.json", src or self.src()), out,
                             "--label", "app-source", "--repo", REPO, "--commit", COMMIT, "--app-name", "openmediavault", "--app-version", "8.6.1-1",
                             *extra], capture_output=True, text=True)
         return p.returncode, (p.stdout.strip().splitlines() or [""])[-1], out
@@ -266,6 +279,7 @@ class SourcePathsTest(unittest.TestCase):
     def strings(self, o, path=""):
         if isinstance(o, dict):
             for k, v in o.items():
+                yield path + ".<key>", k
                 yield from self.strings(v, path + "." + k)
         elif isinstance(o, list):
             for i, v in enumerate(o):
@@ -274,66 +288,124 @@ class SourcePathsTest(unittest.TestCase):
             yield path, o
 
     def assert_clean(self, doc, name):
-        bad = ("/home/runner", ".sca-scan-work", self.tmp)
-        for p, v in self.strings(doc):
-            for b in bad:
-                self.assertNotIn(b, v, "%s %s" % (name, p))
+        """整份 JSON（鍵與值，沒有例外欄位）都沒有暫存路徑；原始碼元件沒有「整個值是絕對路徑」的字串。"""
+        text = json.dumps(doc, ensure_ascii=False)
+        for b in (self.tmp, self.tmp.replace("/", "\\/"), urllib.parse.quote(self.tmp, safe=""), ".sca-scan-work", "/home/runner"):
+            self.assertNotIn(b, text, name)
         for c in doc.get("components") or []:
             if props(c).get("dumpling:origin") != "source":
                 continue
-            for p, v in self.strings({k: x for k, x in c.items() if k not in ("bom-ref", "purl")}):
-                self.assertNotRegex(v, r"(^|[\s(=])/(?!/)[^\s]*", "%s 原始碼元件有絕對路徑 %s" % (name, p))
+            for p, v in self.strings(c):
+                self.assertFalse(v.startswith("/") and " " not in v, "%s 原始碼元件有絕對路徑 %s=%s" % (name, p, v))
+
+    def by_name(self, d):
+        return {c["name"]: c for c in d["components"] if props(c).get("dumpling:origin") == "source"}
 
     def test_paths_become_relative_and_all_outputs_are_clean(self):
         rc, line, out = self.merge("--work-parent", self.parent)
         self.assertEqual(rc, 0, line)
-        self.assertIn("路徑：相對 ", line)
         d = rj(out)
-        src = {c["name"]: c for c in d["components"] if props(c).get("dumpling:origin") == "source"}
-        self.assertEqual(props(src["tmp"])["SrcFile"], "deb/openmediavault/workbench/package-lock.json")
+        src = self.by_name(d)
+        rel = "deb/openmediavault/workbench/package-lock.json"
+        self.assertEqual(props(src["tmp"])["SrcFile"], rel)
         ev = src["tmp"]["evidence"]["identity"][0]
-        self.assertEqual((ev["concludedValue"], ev["methods"][0]["value"]), ("deb/openmediavault/workbench/package-lock.json",) * 2)
-        self.assertEqual(props(src["tmp"])["ResolvedUrl"], "https://registry.npmjs.org/tmp/-/tmp-1.tgz")   # 網址不動
-        self.assertEqual(src["core"]["description"], "built from core.js")                                 # 根目錄外的絕對路徑：只留檔名
-        self.assertEqual(props(src["nested"]["components"][0])["SrcFile"], "deb/openmediavault/workbench/package-lock.json")
-        self.assertEqual(props(src["openmediavault"])["SrcFile"], ".")                                      # 根目錄本身
+        self.assertEqual((ev["concludedValue"], ev["methods"][0]["value"]), (rel, rel))
+        self.assertEqual(props(src["tmp"])["ResolvedUrl"], "https://registry.npmjs.org/tmp/-/tmp-1.tgz")            # 網址不動
+        core = src["core"]
+        self.assertEqual(core["description"], "Route requests to /login and /api/v1; limit 10 /s")                  # 自由文字不碰
+        pc = props(core)
+        self.assertEqual((pc["Other"], pc["Url"], pc["Work"]), ("core.js", "a/b.json", "o/cdxgen/bom.json"))       # 只留檔名、file:// 拿掉、相對於 WORK
+        wp = src["withpath"]
+        self.assertEqual(wp["purl"], "pkg:npm/withpath@1?file_path=a.json")                                          # purl 的 qualifier（百分比編碼）
+        self.assertEqual(wp["bom-ref"], "dumpling:src:app-source:pkg:npm/withpath@1?file_path=a.json")              # bom-ref 也改
+        deps = {e["ref"]: e["dependsOn"] for e in d["dependencies"]}
+        self.assertEqual(deps[wp["bom-ref"]], ["dumpling:src:app-source:pkg:npm/core@1"])                           # 依賴的 ref 對得起來
+        self.assertIn(wp["bom-ref"], deps[src["openmediavault"]["bom-ref"]])
+        allrefs = {c["bom-ref"] for c in d["components"]} | {x["bom-ref"] for c in d["components"] for x in c.get("components", [])}
+        for e in d["dependencies"]:
+            for r in [e["ref"]] + e["dependsOn"]:
+                self.assertIn(r, allrefs | {"root-1"})
+        self.assertEqual(props(src["nested"]["components"][0])["SrcFile"], rel)
+        self.assertEqual(props(src["openmediavault"])["SrcFile"], ".")                                               # 根目錄本身
         bash = [c for c in d["components"] if c["name"] == "bash"][0]
-        self.assertEqual(props(bash)["syft:location:0:path"], "/usr/share/doc/bash/copyright")            # 映像裡的路徑原樣
+        self.assertEqual(props(bash)["syft:location:0:path"], "/usr/share/doc/bash/copyright")                      # 映像裡的路徑原樣
         mp = {x["name"]: x["value"] for x in d["metadata"]["properties"]}
-        self.assertEqual(mp["dumpling:augment:source:app-source:paths"], "改成相對路徑 13 個；不在原始碼根目錄底下的絕對路徑只留檔名 1 個")   # 4 個元件 × 3 個欄位＋根目錄本身
+        self.assertRegex(mp["dumpling:augment:source:app-source:paths"], r"^改成相對路徑 \d+ 個；不在原始碼根目錄底下的絕對路徑只留檔名 1 個$")
+        self.assertIn("只留檔名 1", line)
         self.assert_clean(d, "merged")
         lay = os.path.join(self.tmp, "layers")
         r = subprocess.run([sys.executable, "-I", self.LAYERS, "split", out, "ai-nas", os.path.join(ROOT, "projects", "ai-nas-demo"), lay,
                             "--os-responsibility", "ours"], capture_output=True, text=True)
         self.assertIn(r.returncode, (0, 3), r.stdout + r.stderr)
         made = sorted(f for f in os.listdir(lay) if f.endswith(".cdx.json"))
-        self.assertIn("sbom.product.cdx.json", made)
-        self.assertTrue({"sbom.bsp.cdx.json", "sbom.os.cdx.json"} <= set(made), made)
+        self.assertTrue({"sbom.bsp.cdx.json", "sbom.os.cdx.json", "sbom.product.cdx.json"} <= set(made), made)
         for f in made:
             self.assert_clean(rj(os.path.join(lay, f)), f)
 
-    def test_without_work_parent_absolute_paths_keep_only_file_name(self):
+    def test_without_work_parent_only_whole_absolute_values_change(self):
         rc, line, out = self.merge()
         self.assertEqual(rc, 0, line)
-        d = rj(out)
-        tmp = [c for c in d["components"] if c["name"] == "tmp"][0]
-        self.assertEqual(props(tmp)["SrcFile"], "package-lock.json")
-        self.assert_clean(d, "merged")
+        src = self.by_name(rj(out))
+        self.assertEqual(props(src["tmp"])["SrcFile"], "package-lock.json")
+        self.assertEqual(src["core"]["description"], "Route requests to /login and /api/v1; limit 10 /s")
 
     def test_root_must_be_the_real_parent(self):
-        # 同樣長得像 .sca-scan-work.XXXXXX/cdxgen-src，但不在 --work-parent 底下：不當成根目錄，只留檔名
+        # 同樣長得像 .sca-scan-work.XXXXXX/cdxgen-src，但不在 --work-parent 底下：不當成 WORK（整個值是絕對路徑的只留檔名）
         other = os.path.join(self.tmp, "elsewhere", ".sca-scan-work.Zz99Yy", "cdxgen-src")
         rc, line, out = self.merge("--work-parent", self.parent, src=self.src(other))
         self.assertEqual(rc, 0, line)
-        self.assertEqual(props([c for c in rj(out)["components"] if c["name"] == "tmp"][0])["SrcFile"], "package-lock.json")
-        self.assertIn("相對 0、只留檔名", line)
+        self.assertEqual(props(self.by_name(rj(out))["tmp"])["SrcFile"], "package-lock.json")
+        self.assertIn("相對 0、", line)
 
-    def test_two_roots_fail(self):
+    def test_two_work_dirs_fail(self):
         s = self.src()
         s["components"][0]["properties"][0]["value"] = os.path.join(self.parent, ".sca-scan-work.Qq11Ww", "cdxgen-src", "a.json")
         rc, line, _ = self.merge("--work-parent", self.parent, src=s)
         self.assertEqual(rc, 1)
-        self.assertIn("2 個不同的掃描根目錄", line)
+        self.assertIn("2 個不同的掃描暫存資料夾", line)
+
+    def test_abspath_and_realpath_of_the_same_work_are_one_root(self):
+        real = os.path.join(self.tmp, "real-out")
+        os.makedirs(os.path.join(real, "augment"))
+        link = os.path.join(self.tmp, "link-out")
+        os.symlink(real, link)
+        parent = os.path.join(link, "augment")
+        s = self.src(os.path.join(parent, self.SUF, "cdxgen-src"))                                  # abspath（經過符號連結）
+        s["components"][0]["properties"][0]["value"] = os.path.join(real, "augment", self.SUF, "cdxgen-src", "x.json")   # realpath
+        rc, line, out = self.merge("--work-parent", parent, src=s)
+        self.assertEqual(rc, 0, line)
+        d = rj(out)
+        self.assertEqual(props(self.by_name(d)["tmp"])["SrcFile"], "x.json")
+        for b in (real, link):
+            self.assertNotIn(b, json.dumps(d))
+
+    def test_safety_net_knows_the_other_spelling_of_the_work_dir(self):
+        # 原始碼 SBOM 只出現 abspath 的寫法；映像 SBOM 裡出現同一個 WORK 的 realpath 寫法 → 也算 WORK，FAIL、不輸出
+        real = os.path.join(self.tmp, "real-out")
+        os.makedirs(os.path.join(real, "augment"))
+        link = os.path.join(self.tmp, "link-out")
+        os.symlink(real, link)
+        parent = os.path.join(link, "augment")
+        img = self.image()
+        img["components"][0]["properties"].append({"name": "y", "value": os.path.join(real, "augment", self.SUF, "o", "log.txt") + " (scan)"})
+        rc, line, out = self.merge("--work-parent", parent, src=self.src(os.path.join(parent, self.SUF, "cdxgen-src")), img=img)
+        self.assertEqual(rc, 1, line)
+        self.assertIn("改寫後 SBOM 仍有掃描暫存資料夾的路徑", line)
+        self.assertFalse(os.path.exists(out))
+
+    def test_safety_net_fails_on_unhandled_forms(self):
+        # 鍵名裡的路徑（只改值，不改鍵）、映像元件裡的 WORK 路徑：都不該出現，出現就 FAIL、不輸出
+        s = self.src()
+        s["components"][0]["properties"].append({"name": "x", self.root + "/k": "v"})
+        rc, line, out = self.merge("--work-parent", self.parent, src=s)
+        self.assertEqual(rc, 1, line)
+        self.assertIn("改寫後 SBOM 仍有掃描暫存資料夾的路徑", line)
+        self.assertFalse(os.path.exists(out))
+        img = self.image()
+        img["components"][0]["properties"].append({"name": "y", "value": "see " + self.work.replace("/", "\\/") + "\\/z"})
+        rc, line, out = self.merge("--work-parent", self.parent, img=img)
+        self.assertEqual(rc, 1, line)
+        self.assertFalse(os.path.exists(out))
 
     def test_scan_disk_passes_work_parent(self):
         with open(os.path.join(ROOT, "pipeline", "platforms", "_shared", "scan-disk.sh"), encoding="utf-8") as f:

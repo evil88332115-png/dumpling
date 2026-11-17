@@ -206,81 +206,147 @@ def from_raw_sectors(doc, raw):
 # ---------------------------------------------------------------- merge-source
 
 # 原始碼 SBOM（cdxgen）的檔案路徑是掃描當下的絕對路徑：sca-scan 把原始碼複製到 <WORK>/cdxgen-src 再交給 cdxgen，
-# WORK＝mktemp -d "<輸出資料夾的上一層>/.sca-scan-work.XXXXXX"（在 /tmp、/run 底下時改用 $HOME/.cache/sca-scan/work.XXXXXX），
-# 掃完 sca-scan 就把 WORK 刪掉，所以根目錄只能由「實際的上一層資料夾＋mktemp 的樣式」比對出來（--work-parent），不只比對字串片段。
-# 併入時：在原始碼根目錄底下的 → 相對路徑；其他絕對路徑 → 只留檔名並計數（不讓 runner 或公司 runner 的路徑進給客戶的 SBOM）。
-def source_root_pattern(work_parent):
-    """→ 原始碼根目錄的正規式（比對字串開頭）；work_parent 是 sca-scan --out 的上一層（用掃描時的實際路徑）。"""
-    alts = []
-    for base in {os.path.abspath(work_parent), os.path.realpath(work_parent)}:
-        alts.append(re.escape(base.rstrip("/")) + r"/\.sca-scan-work\.[A-Za-z0-9]{6}/cdxgen-src")
+# WORK＝mktemp -d "<--out 的上一層>/.sca-scan-work.XXXXXX"（在 /tmp、/run 底下時改用 $HOME/.cache/sca-scan/work.XXXXXX），
+# 掃完 sca-scan 就把 WORK 刪掉，所以 WORK 只能由「實際的上一層資料夾（--work-parent）＋mktemp 的樣式」比對出來，不只比對字串片段。
+# 同一個 WORK 可能以 abspath 與 realpath 兩種寫法出現（上一層是符號連結）：後綴相同就是同一個；後綴不同的兩個 WORK → FAIL（不猜）。
+# 併入時，原始碼元件的每一個字串（包括 bom-ref、purl；依賴的 ref 用同一份對照表改，不會對不起來）：
+#   1. <WORK>/cdxgen-src 底下 → 相對路徑（根目錄本身是 .）；file://<根目錄>/… 連 file:// 一起拿掉；<WORK> 底下的其他位置 → 相對於 <WORK>。
+#      百分比編碼（purl 的 qualifier）與 \/ 跳脫的寫法也一樣處理。
+#   2. 整個值就是一個絕對路徑（沒有空白）→ 只留檔名並計數；自由文字裡其他的斜線一律不碰（例如「/login」「10 /s」）。
+#   3. 最後保險：改寫完，整份 SBOM 任何字串（含 purl、bom-ref；\/ 跳脫與百分比編碼都算）還出現 WORK 的任何寫法 → FAIL。
+# Windows 路徑（C:\…）不處理：sca-scan 只在 Linux 上跑。
+WHOLE_ABS_RE = re.compile(r"/[^\s]*[^\s/]")
+
+
+def _strings(o):
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from _strings(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _strings(v)
+    elif isinstance(o, str):
+        yield o
+
+
+def _variants(sv):
+    """一個字串的幾種寫法：原樣、\/ 還原、百分比解碼（沒有 \/ 或 % 時只有原樣，省時間）。"""
+    out = {sv}
+    if "\\/" in sv:
+        out.add(sv.replace("\\/", "/"))
+    if "%" in sv:
+        out |= {urllib.parse.unquote(x) for x in list(out)}
+    return out
+
+
+def _work_bases(work_parent):
+    """→ {(上一層的寫法, WORK 名稱的正規式)}：--work-parent 的 abspath／realpath，以及 $HOME/.cache/sca-scan。"""
+    bases = set()
+    for x in (os.path.abspath(work_parent), os.path.realpath(work_parent)):
+        bases.add((x.rstrip("/"), r"\.sca-scan-work\.[A-Za-z0-9]{6}"))
     home = os.environ.get("HOME")
     if home:
-        alts.append(re.escape(os.path.join(os.path.abspath(home), ".cache", "sca-scan")) + r"/work\.[A-Za-z0-9]{6}/cdxgen-src")
-    return re.compile("(?:%s)(?=/|$)" % "|".join(alts))
+        for h in (os.path.abspath(home), os.path.realpath(home)):
+            bases.add((os.path.join(h, ".cache", "sca-scan"), r"work\.[A-Za-z0-9]{6}"))
+    return bases
 
 
-def find_source_root(src, pat):
-    """原始碼 SBOM 裡實際出現的根目錄（只能有一個；兩個以上 → AugError，不猜哪個對）。沒有 → None。"""
-    found = set()
-
-    def scan(o):
-        if isinstance(o, dict):
-            for v in o.values():
-                scan(v)
-        elif isinstance(o, list):
-            for v in o:
-                scan(v)
-        elif isinstance(o, str):
-            for m in pat.finditer(o):
-                found.add(m.group(0))
-    scan(src)
+def find_work(src, work_parent):
+    """原始碼 SBOM 裡實際出現的 WORK → 它所有的寫法（長的在前）；沒有 → []。後綴不同的 WORK 兩個以上 → AugError。"""
+    bases = _work_bases(work_parent)
+    pats = [(base, name, re.compile(re.escape(base) + "/(" + name + ")(?=/|$)")) for base, name in bases]
+    found = {}
+    for sv in _strings(src):
+        if "work" not in sv:
+            continue
+        for v in _variants(sv):
+            for base, _, pat in pats:
+                for m in pat.finditer(v):
+                    found.setdefault(m.group(1), set()).add(base + "/" + m.group(1))
     if len(found) > 1:
-        raise AugError("原始碼 SBOM 裡出現 %d 個不同的掃描根目錄，不能判斷相對路徑" % len(found))
-    return next(iter(found), None)
+        raise AugError("原始碼 SBOM 裡出現 %d 個不同的掃描暫存資料夾，不能判斷相對路徑" % len(found))
+    if not found:
+        return []
+    suf, forms = next(iter(found.items()))
+    forms |= {base + "/" + suf for base, name, _ in pats if re.fullmatch(name, suf)}    # 同一個後綴：每一種上一層的寫法都算
+    return sorted(forms, key=len, reverse=True)
 
 
-# 絕對路徑：字串開頭，或空白與常見分隔符號之後的 /…（網址裡的 /x/-/y 不算：前面不是這些字元）
-ABS_RE = re.compile(r"(?:^|(?<=[\s(=,;'\"（：、「]))/(?:[^\s/\"'<>|]+/)*[^\s/\"'<>|]+")
+def _replacements(works):
+    """→ (正規式, {要找的字串: 換成})，長的在前；含百分比編碼的寫法。沒有 WORK → None。"""
+    pairs = []
+    for w in works:
+        root = w + "/cdxgen-src"
+        for x, y in (("file://" + root + "/", ""), (root + "/", ""), ("file://" + root, "."), (root, "."),
+                     ("file://" + w + "/", ""), (w + "/", ""), ("file://" + w, "."), (w, ".")):
+            pairs.append((x, y))
+            for q in (urllib.parse.quote(x, safe=""), urllib.parse.quote(x, safe="/")):
+                if q != x:
+                    pairs.append((q, y))
+    if not pairs:
+        return None
+    table = {}
+    for x, y in sorted(pairs, key=lambda t: len(t[0]), reverse=True):
+        table.setdefault(x, y)
+    return re.compile("|".join(re.escape(x) for x in table)), table
 
 
-def relativize(o, root, counts, skip=()):
-    """o 裡每個字串：根目錄底下的路徑 → 相對路徑（counts["relative"]）；其他絕對路徑 → 只留檔名（counts["basename"]）。
-    原地改；skip 是 o（dict）最上層不處理的鍵。"""
-    def fix(sv):
-        if root and root in sv:
-            n = sv.count(root + "/") + (1 if sv == root else 0)
-            counts["relative"] += n
-            sv = sv.replace(root + "/", "")
-            if sv == root:
-                sv = "."
-        def base(m):
-            counts["basename"] += 1
-            return os.path.basename(m.group(0))
-        return ABS_RE.sub(base, sv)
+def fix_path_string(sv, reps, counts):
+    """一個字串：WORK 的前綴拿掉（counts["relative"]）；整個值是絕對路徑時只留檔名（counts["basename"]）；其他文字不動。"""
+    if reps:
+        pat, table = reps
+        if "\\/" in sv and pat.search(sv.replace("\\/", "/")):
+            sv = sv.replace("\\/", "/")
+        def sub(m):
+            counts["relative"] += 1
+            return table[m.group(0)]
+        sv = pat.sub(sub, sv)
+    if WHOLE_ABS_RE.fullmatch(sv):
+        counts["basename"] += 1
+        sv = os.path.basename(sv) or "."
+    return sv
+
+
+def relativize(o, reps, counts, skip=()):
+    """o 裡每個字串交給 fix_path_string。原地改；skip 是 o（dict）最上層不處理的鍵。"""
     if isinstance(o, dict):
         for k, v in list(o.items()):
             if k in skip:
                 continue
             if isinstance(v, str):
-                o[k] = fix(v)
+                o[k] = fix_path_string(v, reps, counts)
             else:
-                relativize(v, root, counts)
+                relativize(v, reps, counts)
     elif isinstance(o, list):
         for i, v in enumerate(o):
             if isinstance(v, str):
-                o[i] = fix(v)
+                o[i] = fix_path_string(v, reps, counts)
             else:
-                relativize(v, root, counts)
+                relativize(v, reps, counts)
+
+
+def assert_no_work(doc, works):
+    """最後保險：整份 SBOM 任何字串（含 purl、bom-ref；\/ 跳脫與百分比編碼都算）還有 WORK 的任何寫法 → AugError。"""
+    if not works:
+        return
+    # 鍵與值都在序列化的文字裡；json.dumps 不會輸出 \/，字串裡真的有 \/（反斜線＋斜線）時序列化後是 \\/
+    text = json.dumps(doc, ensure_ascii=False)
+    low = text.lower()
+    for w in works:
+        forms = {w, w.replace("/", "\\\\/"), urllib.parse.quote(w, safe=""), urllib.parse.quote(w, safe="/")}
+        if any(f in text or f.lower() in low for f in forms):
+            raise AugError("改寫後 SBOM 仍有掃描暫存資料夾的路徑（沒想到的寫法；不輸出）")
 
 
 def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None, work_parent=None):
     counts = {"relative": 0, "basename": 0}
-    root = find_source_root(src, source_root_pattern(work_parent)) if work_parent else None
+    works = find_work(src, work_parent) if work_parent else []
+    reps = _replacements(works)
     for c in walk(doc.get("components")):
         prop(c, "dumpling:origin", "image")
     pre = "dumpling:src:%s:" % label
     mapping = {}
+    assigned = set()
 
     def remap(c):
         c = copy.deepcopy(c)
@@ -288,13 +354,17 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None,
         if old is not None:
             if not isinstance(old, str):
                 raise AugError("原始碼 SBOM 的 bom-ref 不是字串")
-            mapping[old] = pre + old
-            c["bom-ref"] = pre + old
+            ref = pre + fix_path_string(old, reps, counts)        # 路徑改寫後的 bom-ref；依賴的 ref 用同一份對照表
+            if ref in assigned and mapping.get(old) != ref:
+                raise AugError("路徑改寫後 bom-ref 重複（%s）" % ref[:120])
+            assigned.add(ref)
+            mapping[old] = ref
+            c["bom-ref"] = ref
         else:
             c["bom-ref"] = pre + "anon-%d" % len(mapping)
             mapping[c["bom-ref"]] = c["bom-ref"]
         c["properties"] = [p for p in c.get("properties") or [] if isinstance(p, dict) and not str(p.get("name", "")).startswith("dumpling:origin")]
-        relativize(c, root, counts, skip=("components", "bom-ref", "purl"))   # 子元件在下面 remap 時各自處理
+        relativize(c, reps, counts, skip=("components", "bom-ref"))   # purl 也改；bom-ref 在上面改；子元件在下面 remap 時各自處理
         prop(c, "dumpling:origin", "source")
         prop(c, "dumpling:origin-label", label)
         prop(c, "dumpling:origin-repo", repo)
@@ -357,6 +427,7 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None,
         kept += len(outs)
     if app_ref:
         add_root_deps(doc, [app_ref])
+    assert_no_work(doc, works)
     meta_prop(doc, "dumpling:augment:source:%s" % label, "%s@%s：%d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）"
               % (repo, commit, len(list(walk(merged))), kept, dropped))
     meta_prop(doc, "dumpling:augment:source:%s:paths" % label, "改成相對路徑 %d 個；不在原始碼根目錄底下的絕對路徑只留檔名 %d 個"
