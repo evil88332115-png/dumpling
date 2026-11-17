@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 11:16 +0800（C2）
+最後更新：2026-11-17 11:17 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -117,7 +117,7 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-> **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 驗證通過，補件 bbad2aa 已推送、CI 綠，等 C0 看 diff 後合併，見 M7f。
+> **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。第一階段裡 C2 負責的部分已完成；T-04 要等 C4 的 T-14，其他 C2 項目照 D-063 凍結到第二階段。下一件等 C0 確認。
 >
 > **2026-11-15 下午**：D-063（PR #117）已定，先完成第一階段的端到端流程。
 > - **韌體進每日監控（D-063 第 5 點，和 C3 一起設計，設計稿由 C3 寫，先給 C2 看，再一起送 C0 審）**：
@@ -218,7 +218,7 @@
 >     - 照 D-063：驗證排後面，先不合併。worktree `$AGENT_TMP/dumpling-wt-c2-fit`。
 >     - **2026-11-17 恢復後**：本機和遠端都是 427d9b6，沒有沒推的 commit（C0 看到的「多 2 個」是相對 origin/main 算的）。和 main ca6b872 有衝突（只有 `tests/run.d/c2-x86-firmware.sh` 的測試清單：保留 main 的 rematch 測試，再加回 test_fw_integrity.py）→ 本機合併 **249a9d8**，**還沒推**。C2 測試清單 1430 passed（3.12 venv）；firmware-expect 與 watch 688 passed；public-check OK。
 >     - #170（日期測試修正）合併後，再併 main cece9be → **be50aab 已推送**（乾淨合併，只多 main 的 4 個檔）。CI dt-smoke 44003567955、firmware 44003567993、tests 44003567987 都綠（unit-tests 4918 passed、C2 清單 1430 passed）；PR 說明的 head 已改成 be50aab。已通知 C0。
->     - C0 的獨立驗證：**通過**（報告在 PR 上），合併前補 5 項 → C2 修 **bbad2aa**：integrity.statement 與 SBOM 的 integrity-basis 依狀態產生（只有 observed 才寫 structure observed）；補 C_V 位元、位址高 32 位元、bios_image() 回 None 的測試（C0 指出的兩個變異現在都會被抓到）；not-found 的證據、firmware.yml 與筆記寫明只讀一張 FIT。另照 C0 的要求，tests/test_firmware_dt.py 的暫存名稱改用 enumerate 序號。本機 1576 passed；CI tests 44007548195（4985 passed、C2 清單 1440 passed）、firmware 44007548187、dt-smoke 44007548183 都綠。已通知 C0，等 C0 看 diff 後合併。
+>     - C0 的獨立驗證：**通過**（報告在 PR 上），合併前補 5 項 → C2 修 **bbad2aa**：integrity.statement 與 SBOM 的 integrity-basis 依狀態產生（只有 observed 才寫 structure observed）；補 C_V 位元、位址高 32 位元、bios_image() 回 None 的測試（C0 指出的兩個變異現在都會被抓到）；not-found 的證據、firmware.yml 與筆記寫明只讀一張 FIT。另照 C0 的要求，tests/test_firmware_dt.py 的暫存名稱改用 enumerate 序號。本機 1576 passed；CI tests 44007548195（4985 passed、C2 清單 1440 passed）、firmware 44007548187、dt-smoke 44007548183 都綠。C0 看過 diff → **#130 已合併（main 20ba05e）**。本機 worktree fit、rnote、cisurvey、nvfu（都已合併、沒有未提交的改動）已移除。
 >   - 其他程式碼完整性的實作凍結到第二階段。
 > - D-046 的實作等 C1 的發現介面。
 > - 環境：這台的 `/usr/bin/python3` 變成 3.14，沒有 venv 模組，`tests/run.d/c2-x86-firmware.sh` 建不起 venv；改用既有的 3.12 venv 跑同一份清單（GitHub CI 不受影響）。要修得裝 python3.14-venv，C0 會轉問使用者；在那之前，C2 的測試都用 3.12 venv 跑同一份清單（C0 同意，記在這裡）。
