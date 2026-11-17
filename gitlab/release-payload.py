@@ -2,7 +2,9 @@
 """產生 GitLab Releases API（POST /projects/:id/releases）的 JSON：附件 assets links 指向 Generic Package Registry 的檔案。
 
 用法：python3 -I gitlab/release-payload.py --manifest result/manifest.tsv --tag <專案>/<版本> --project <專案> --version <版本> \
-        --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" [--notes result/notes.md] [--files-dir result] --out release.json
+        --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes result/release-body.md [--files-dir result] --out release.json
+--notes（必要）：Release 說明的檔案（release-meta.py --body-out 產生的 release-body.md）。讀不到、是空的、不是 UTF-8 → FAIL，
+不會發出沒有說明的 Release（GitHub 版的 gh --notes-file 讀不到檔也是失敗）。
 manifest.tsv 每行「檔名<TAB>標籤」（與 GitHub 版 release.yml 的 manifest 相同）。
 欄位名稱依官方 Releases API：tag_name、name、description、assets.links[].name／url／direct_asset_path／link_type。
 所有輸入都當不可信資料：檔名只允許安全字元，不含路徑。
@@ -69,7 +71,7 @@ def main(argv=None):
     ap.add_argument("--version", required=True)
     ap.add_argument("--api-url", required=True)
     ap.add_argument("--project-id", required=True)
-    ap.add_argument("--notes")
+    ap.add_argument("--notes", required=True, help="Release 說明的檔案（必要；讀不到或是空的 → FAIL）")
     ap.add_argument("--files-dir", help="附件所在的資料夾：每個附件都要存在而且是一般檔案")
     ap.add_argument("--list-out", help="驗過的附件檔名清單（一行一個，給 release-publish.sh 上傳用）")
     ap.add_argument("--out", required=True)
@@ -80,13 +82,13 @@ def main(argv=None):
         if "\r" in text:
             raise ValueError("manifest 有 \\r（CR）：只接受 \\n 換行")
         lines = text.split("\n")
-        notes = ""
-        if a.notes:
-            try:
-                with open(a.notes, encoding="utf-8") as fh:
-                    notes = fh.read()
-            except FileNotFoundError:
-                notes = ""
+        try:
+            with open(a.notes, encoding="utf-8") as fh:
+                notes = fh.read()
+        except (OSError, UnicodeDecodeError) as e:       # 讀不到不當成空的說明：直接呼叫 payload 也不會靜靜發出沒有說明的 Release
+            raise ValueError("讀不到 Release 說明 %s（%s）" % (os.path.basename(a.notes), type(e).__name__)) from None
+        if not notes.strip():
+            raise ValueError("Release 說明 %s 是空的" % os.path.basename(a.notes))
         payload = build(lines, a.tag, a.project, a.version, a.api_url, a.project_id, notes, a.files_dir)
     except (ValueError, OSError) as e:
         print("release-payload: FAIL（%s）" % e)
