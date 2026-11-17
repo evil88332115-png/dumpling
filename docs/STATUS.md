@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 19:10 +0800（C2）
+最後更新：2026-11-17 19:31 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -438,7 +438,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
 - 卡住／等決定：WATCH_REAL_ISSUES on；11-18 01:17 UTC 的排程等 C0 通知後核對（不開背景等待）→ 上線第一天報告：開出的 Issue（預期 KEV 彙總 1、支援期限 8）、沒有重複、#149～#164 沒重開也沒被重複留言、csaf_drafts 全部 NOT_RUN（沒有 artifact）、狀態大小、執行時間、排程延遲。#182（儀表板 CSAF 草稿紀錄、D-069 說明）、#183（GitLab T-24）已合併
-- 開著的 PR：#203（wp2/csaf-doc-previous：GitLab release-payload.py 讀不到 Release 說明就 FAIL＋測試；docs/CSAF.md 第 39 行改寫成 #186 合併後的行為），CI 跑中
+- 開著的 PR：#205（wp2/dashboard-pages-switch：Pages 先不開（使用者決定），deploy 只在 repo 變數 DASHBOARD_PAGES=on 時跑，沒設是 skipped，build／artifact 照舊；測試鎖住條件），CI 跑中。#203 已合併
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 
