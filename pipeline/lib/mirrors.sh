@@ -14,7 +14,7 @@
 #
 # 結果看腳本輸出的最後一行：
 #   OK …         成功。
-#   ATTENTION …  成功，但用了舊資料頂替（例如 git.kernel.org 連不上、沿用 48 小時內的上一份）：繼續往下走，並在 pipeline-steps.tsv 記一列
+#   ATTENTION …  成功，但用了舊資料頂替（例如核心 CVE：git.kernel.org 與備援來源都連不上、沿用 48 小時內的上一份）：繼續往下走，並在 pipeline-steps.tsv 記一列
 #                「pipeline-<腳本名>-mirror	ATTENTION	0	<那一行>」（整體狀態因此不是 OK，也不會 FAIL；報告、release-meta.json、Release 說明都看得到）。
 #   其他（含結束碼不是 0）  這一次失敗；試完 MIRRORS_TRIES 次都失敗 → mirror 回傳 1（弱點資料不完整，不能當作沒有漏洞）。
 # 回傳值：0＝成功（OK 或 ATTENTION）；1＝失敗。呼叫端自己決定怎麼 fail。成功時印一行「鏡像 <名>：OK｜ATTENTION（…）」。
