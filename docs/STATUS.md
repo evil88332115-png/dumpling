@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 16:02 +0800（C1）
+最後更新：2026-11-17 16:03 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -450,5 +450,6 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）、ai-nas 44040129677 failure（403）
 - 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（Syft 依上游 sca-scan 給的 docker-archive 路徑命名），已回報 C0（D-071）
 - 下一步：等 ai-nas 補跑的決定 → T-14（含 --official 只認 tag push，先給 C1 審；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6
+- 偶發 403 紀錄（C0 決定先不改 release.yml，第二次樣本出現再決定是否改用 gh api 建立以取得回應標頭）：run 44040129677（ai-nas 草稿），07:50:40–07:54:12Z，POST /releases（gh release create）連續 8 次 403「Resource not accessible by integration」；同一步驟的 GET /releases 是 200；同一天先跑的 rpi（44034643050）、rock（44037426757）都成功；查過 release.yml／dev.yml 最近 76 個 Release／發布 job，只有這一次；沒有次級速率限制的跡象（X-Ratelimit-Remaining 4990）；repo 沒有 ruleset
 - 卡住／等決定：ai-nas release 草稿補跑（使用者）；metadata.component 路徑的處理方式（C0）。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
