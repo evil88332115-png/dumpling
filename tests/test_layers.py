@@ -357,6 +357,39 @@ class Cli(Base):
         with open(os.path.join(out, name), encoding="utf-8") as fh:
             return json.load(fh)
 
+    def test_component_name_path_is_replaced_in_every_output(self):
+        """metadata.component.name 是 runner 的工作路徑（掃描工具寫的）→ 完整、-bsp、-os 與 layers.json 都不含那段路徑；
+        名稱換成專案名稱（專案資料夾名），原本的路徑不另外保存；bom-ref、version 不動。"""
+        work = os.path.join(self.tmp, "out", "demo-product", "v1.0.0-demo1", "wizard-out", "demo-product-v1.0.0-demo1-20261117-0101",
+                            "scan", ".sca-scan-work.Ab12Cd", "image.tar")
+        doc = load_fixture()
+        doc["metadata"]["component"].update(name=work, version="sha256:" + "1" * 64)
+        ref = doc["metadata"]["component"]["bom-ref"]
+        for resp in ("customer", "ours"):
+            r, out = self.split(resp, doc, tag="-name")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            project = os.path.basename(self.project(resp).rstrip("/"))
+            for name in sorted(os.listdir(out)):
+                with open(os.path.join(out, name), encoding="utf-8") as fh:
+                    text = fh.read()
+                for bad in (self.tmp, ".sca-scan-work", "wizard-out", "image.tar"):
+                    self.assertNotIn(bad, text, (resp, name, bad))
+                if name.endswith(".cdx.json"):
+                    mc = json.loads(text)["metadata"]["component"]
+                    self.assertEqual(mc["name"], project, (resp, name))
+                    self.assertEqual((mc["bom-ref"], mc["version"]), (ref, "sha256:" + "1" * 64))
+                    self.assertFalse(os.path.isabs(mc["name"]) or "/" in mc["name"])
+        # tag 也一樣
+        src, dst = os.path.join(self.tmp, "in-tag.json"), os.path.join(self.tmp, "out-tag.json")
+        with open(src, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        r = self.run_cli("tag", src, "jetson", self.project("customer"), dst)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(dst, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn(self.tmp, text)
+        self.assertNotIn(".sca-scan-work", text)
+
     def test_split_fixture_customer(self):
         r, out = self.split("customer")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -489,3 +522,26 @@ class JetsonPlatformConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComponentName(unittest.TestCase):
+    def test_clean_component_name(self):
+        f = ly.clean_component_name
+        self.assertEqual(f("/a/b/.sca-scan-work.x/image.tar", "demo-product"), ("demo-product", True))
+        self.assertEqual(f("/a/b/image.tar"), ("image.tar", True))                       # 沒有專案名稱：只留檔名
+        self.assertEqual(f("C:\\work\\image.tar"), ("image.tar", True))
+        self.assertEqual(f("rel/dir/image.tar", "p"), ("p", True))
+        self.assertEqual(f("~/x.tar", "p"), ("p", True))
+        self.assertEqual(f("/"), ("unnamed", True))
+        self.assertEqual(f("demo-image", "p"), ("demo-image", False))                    # 不是路徑：原樣
+        self.assertEqual(f(None, "p"), (None, False))
+        self.assertEqual(f("", "p"), ("", False))
+
+    def test_tag_sbom_does_not_keep_the_old_path_anywhere(self):
+        bom = {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [],
+               "metadata": {"component": {"bom-ref": "r1", "type": "container", "name": "/w/.sca-scan-work.q/image.tar", "version": "sha256:" + "2" * 64}}}
+        t, _ = ly.tag_sbom(bom, {"platform": "jetson"}, product="demo-product")
+        self.assertEqual(t["metadata"]["component"], {"bom-ref": "r1", "type": "container", "name": "demo-product", "version": "sha256:" + "2" * 64})
+        self.assertNotIn("sca-scan-work", json.dumps(t))
+        self.assertEqual(bom["metadata"]["component"]["name"], "/w/.sca-scan-work.q/image.tar")   # 不改傳入的 bom
+
