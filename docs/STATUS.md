@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 11:41 +0800（C2）
+最後更新：2026-11-17 11:42 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -127,7 +127,7 @@
 >   - 代表樣本 `dasharo-protectli-vp46xx-v1.2.0`（備選 NUC BOX），限制寫明。
 >   - 接法建議示範用 (a) firmware-demo Release 的 SBOM（sha256 取自 meta），(b) `sca-scan --sbom` 匯入供應商 SBOM 留作實際產品的介面；合併條件 5 點。
 >   - EC：只有 Dasharo NS5x 筆電的公開 EC 檔（sha256 已核對，版本和供應商 SBOM 一致）；Protectli 沒有 → AI NAS 的 EC 層 GAP。
->   - C0 的決定：示範用 (a)，(b) 留作實際產品的介面；AI NAS 的 firmware 層不另開 Issue，用 `dumpling:firmware-ref` 指到 firmware-demo 的 key（C4 在 N1 和 C3 對齊）；責任分層歸 bsp（LAYERS.md 第 2 條 `type: firmware → bsp`），「代表樣本」寫進 N1 的限制；NS5x 的 EC 排第二階段。輸入檔已照這些決定更新。
+>   - C0 的決定：示範用 (a)，(b) 留作實際產品的介面；AI NAS 的 firmware 層不另開 Issue，用 `dumpling:firmware-ref` 指到 firmware-demo 的 key（C4 在 N1 和 C3 對齊）；責任分層歸 bsp（LAYERS.md 第 2 條 `type: firmware → bsp`），「代表樣本」寫進 N1 的限制；NS5x 的 EC 排第二階段。輸入檔已照這些決定更新。C4 已併進 N1 設計第 1 節。C4 問 specVersion：fw SBOM 是 CycloneDX 1.6（x86_firmware.py:2552 寫死；NS5x 供應商 SBOM 是 1.4），AI NAS 是 1.7 → C2 建議 Release 檔不改，由 N2 合併時寫 1.7 並用 1.7 schema 驗整份，欄位語意差異待 N2 核對；產生器改輸出 1.7 排第二階段。
 > - **T-04 對齊（C0 轉 C4 定案的 T-14 設計）**：之後韌體上傳改呼叫 `pipeline/lib/dt-session.sh` 的 `dt_begin <PILOT_ENV>`／`dt_end`（`DUMPLING_DT_MODE=ephemeral|resident`），不另外寫 up／wait／env／down。設計草稿等 C4 的實作合併後再寫。
 >
 > **2026-11-15 下午**：D-063（PR #117）已定，先完成第一階段的端到端流程。
