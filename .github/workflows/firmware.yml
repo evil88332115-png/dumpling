@@ -11,6 +11,8 @@ on:
       - 'pipeline/firmware-expect.py'
       - 'pipeline/lib/firmware_*.py'
       - 'pipeline/dt-*'
+      - 'pipeline/lib/dt-session.sh'
+      - 'pipeline/lib/dt_resident.py'
       - 'pipeline/scan-status-check.py'
       - 'pipeline/watch/collect.py'
       - 'tools/pilot/**'
@@ -173,24 +175,10 @@ jobs:
           # 放進 /usr/local/bin：sca-scan 的沙箱遮蔽家目錄與 runner 目錄，工具不能在那裡
           sudo install -m 0755 -t /usr/local/bin "$RUNNER_TEMP/tools/bin/syft" "$RUNNER_TEMP/tools/bin/grype"
           cat "$RUNNER_TEMP/tools/versions.txt"
-      - name: 臨時 DT：up
-        run: bash pipeline/dt-ephemeral.sh up
-      - name: 臨時 DT：wait（OSV、KEV 鏡像）
-        run: |
-          # 結束碼 3＝GAP（資料不完整）：不中止，結束碼寫進 dt-wait.rc，report 會把所有樣本標 GAP；其他非 0 才讓這步失敗
-          mkdir -p "$RESULT_DIR"
-          s=$(date +%s)
-          rc=0; bash pipeline/dt-ephemeral.sh wait || rc=$?
-          echo "wait 用時 $(( $(date +%s) - s )) 秒，結束碼 $rc"
-          echo "$rc" > "$RESULT_DIR/dt-wait.rc"
-          case $rc in 0|3) ;; *) exit "$rc" ;; esac
-      - name: 臨時 DT：env（pilot.env）
-        run: |
-          mkdir -p "$(dirname "$PILOT_ENV")"
-          bash pipeline/dt-ephemeral.sh env "$PILOT_ENV"
-      - name: 上傳各樣本 SBOM 並驗證
-        env:
-          MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度（沒有那個狀態檔）
+      # DT 的起停（up → wait → env → down）由 pipeline/lib/dt-session.sh 做（T-14／T-04），在同一個 shell 裡包住 firmware-dt.sh：
+      #   pipeline/firmware-dt-session.sh。這裡不選常駐模式（＝臨時 DT）；常駐 DT 在 GitHub Actions 上一律 FAIL（dt_begin）。
+      #   wait 結束碼 3＝GAP（資料不完整）：不中止，結束碼寫進 dt-wait.rc，report 會把所有樣本標 GAP；其他非 0 讓這步失敗。
+      - name: 臨時 DT（dt-session.sh）＋上傳各樣本 SBOM 並驗證
         run: |
           args=()
           for m in firmware/bios/*/firmware.yml; do
@@ -204,7 +192,7 @@ jobs:
             done
           done
           rc=0
-          pipeline/firmware-dt.sh --work "$RUNNER_TEMP/firmware-dt-work" --result "$RESULT_DIR" "${args[@]}" \
+          pipeline/firmware-dt-session.sh --work "$RUNNER_TEMP/firmware-dt-work" --result "$RESULT_DIR" "${args[@]}" \
             --synthetic-vbios firmware/vbios/standalone-nvidia-option-rom/firmware.yml || rc=$?
           {
             echo '### firmware-dt'
@@ -269,9 +257,13 @@ jobs:
           path: ${{ runner.temp }}/firmware-dt-result/out
           retention-days: 3
           if-no-files-found: ignore
-      - name: 臨時 DT：down
+      # 正常情況上面那一步結束時 dt_end 已經關掉臨時 DT；這一步是取消或中途失敗時的保險。down 失敗只印 WARNING，不讓 job 失敗（runner 用完就丟）。
+      - name: 臨時 DT：down（dt_end，保險）
         if: always()
-        run: bash pipeline/dt-ephemeral.sh down
+        run: |
+          root=$PWD
+          . pipeline/lib/dt-session.sh
+          dt_end
 
   # 示範用韌體 Release 的附件（docs/notes/c2-firmware-release.md）：產生 firmware-meta.json 與附件資料夾，並在上傳之前自我檢查。
   # PR、workflow_dispatch、tag 三種觸發都跑；只有 tag 觸發用真的 tag，其餘用測試 tag（firmware-demo/0000.00.00，日期不是有效日期，真的 tag 不會撞到）。

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 韌體 SBOM 上傳臨時 Dependency-Track（DT）：每個樣本 prep → expected → sca-scan --sbom → scan-status-check → dt-verify，最後 report。
-# workflow（.github/workflows/firmware.yml 的 firmware-dt）與本機用同一支。臨時 DT 的 up／wait／env／down 不在這裡（由呼叫端做）：
-#   呼叫前先 `pipeline/dt-ephemeral.sh up`、`wait`、`env <自己的子資料夾>/pilot.env` 並 `export PILOT_ENV=…`；
+# workflow（.github/workflows/firmware.yml 的 firmware-dt）與本機用同一支。DT 的起停不在這裡（由呼叫端做）：
+#   workflow 經 pipeline/firmware-dt-session.sh 呼叫（pipeline/lib/dt-session.sh 的 dt_begin／dt_ready／dt_end，T-04），它會 export PILOT_ENV；
 #   wait 的結束碼寫進 <結果>/dt-wait.rc（0 以外都是 GAP：3＝資料不完整，其他值看不懂；report 會把所有樣本標 GAP。內容必須是 ASCII 數字，否則 report 失敗）。沒有 PILOT_ENV 時 sca-scan 的上傳階段是 NOT_RUN。
 #
 # 用法：pipeline/firmware-dt.sh --work <工作資料夾> --result <結果資料夾>

@@ -13,12 +13,12 @@
         │     （kind: sbom 的供應商 SBOM 另做最小格式正規化 → normalize.json；見 c2-supplier-sbom.md）
         ▼  firmware_dt.py expected --prep prep/<slug>
         │     → expected.json（C1 格式）、firmware-dt-expected.json（我們的）
-        ▼  dt-ephemeral.sh up → wait → env <自己的子資料夾>/pilot.env
+        ▼  firmware-dt-session.sh：dt_begin → dt_ready（dt-session.sh；臨時 DT＝dt-ephemeral.sh up → wait → env <自己的子資料夾>/pilot.env）
         ▼  每個樣本：tools/pilot/sca-scan --sbom prep/<slug>/sbom.cdx.json --name <專案名> --version <專案版本> --out dt/<專案名>/scan --no-license
         │     （內含 Grype 比對 C-grype、上傳 DT D-dt-*）
         ▼  每個樣本：dt-verify.py verify prep/<slug>/expected.json dt/<專案名>
         ▼  firmware_dt.py report --prep prep/* --dt-result dt --out report   → firmware-dt.md
-        ▼  dt-ephemeral.sh down（always）
+        ▼  dt_end（firmware-dt-session.sh 結束時；workflow 另有 always() 的 dt_end 當保險）
 
 report 讀的結果資料夾（`--dt-result`）：
 
@@ -83,8 +83,26 @@ report 讀的結果資料夾（`--dt-result`）：
 注意：`firmware/**` 的 PR 也會觸發這個 job（整個 workflow 共用 `paths`）；DT 鏡像本機約 6 分鐘，Actions 上可能更久。權限 `contents: read`，actions 用固定 SHA。
 
 步驟：checkout → 路徑（`PILOT_ENV` 在自己的子資料夾）→ 下載（bios＋sbom 樣本）→ `firmware-ci.sh` → `install-tools.sh --sbom-only`（Syft／Grype 放 `/usr/local/bin`）→
-`dt-ephemeral.sh up` → `wait`（結束碼寫進 `dt-wait.rc`；0、3 繼續，其他非 0 失敗）→ `env` → `firmware-dt.sh`（BIOS 樣本、供應商 SBOM、`--synthetic-vbios`）→
-NVIDIA 公告步驟 → 小型 artifact（不含 pilot.env）→ `down`（`if: always()`）。摘要寫進 `$GITHUB_STEP_SUMMARY`。
+`firmware-dt-session.sh`（同一步：DT 的 up → wait（結束碼寫進 `dt-wait.rc`；0、3 繼續，其他非 0 失敗）→ env → `firmware-dt.sh`（BIOS 樣本、供應商 SBOM、`--synthetic-vbios`）→ down）→
+NVIDIA 公告步驟 → 小型 artifact（不含 pilot.env）→ `dt_end`（`if: always()`，保險）。摘要寫進 `$GITHUB_STEP_SUMMARY`。
+
+## DT 的起停（T-04：`pipeline/firmware-dt-session.sh` 與 `pipeline/lib/dt-session.sh`）
+
+`firmware-dt-session.sh` 在同一個 shell 裡做 `dt_begin PyPI,npm,Ubuntu` → `dt_ready "$PILOT_ENV"` → `dt_mirror_status` → `firmware-dt.sh`（參數原樣轉過去）→ `dt_end`（EXIT trap）。
+dt-session.sh 的 `$out` 是 `--result`；`PILOT_ENV` 在 `--result` 底下就 FAIL（裡面有 API key）。
+
+- **沒設 `DUMPLING_DT_MODE`（臨時 DT，firmware.yml 用的就是這個）**：dt-ephemeral.sh 的命令、參數和順序與 T-04 之前分開寫的步驟相同：
+  - `DT_OSV_ECOSYSTEMS` 沒設時是 `PyPI,npm,Ubuntu`（firmware.yml 的 job env 也是這個值）；`DT_WAIT_MIN` 沒設時是 40（dt-ephemeral.sh 的預設；dt_begin 自己的預設是 60，外層先設，不吃那個 60）。
+  - wait 的結束碼經 dt-session.sh 的 `DT_WAIT_RC_FILE` 寫進 `<結果>/dt-wait.rc`：0、3 繼續（3＝GAP，report 把所有樣本標 GAP），其他值 FAIL，不跑 firmware-dt.sh。開始前先刪掉舊的 `dt-wait.rc`。
+  - `MIRROR_REFRESH_STATUS` 設成空字串（臨時 DT 沒有常駐環境的鏡像狀態檔）。
+  - up、env 失敗，或 wait 不是 0／3 → `firmware-dt-session: FAIL（…）`，結束碼 1，down 照樣執行。其餘情況結束碼就是 firmware-dt.sh 的結束碼。
+- **`DUMPLING_DT_MODE=resident`**：只給本機或內部 GitLab 用。GitHub Actions 上一律 FAIL（dt_begin 的檢查；firmware.yml 的情境下，即使設了 dt-smoke 用的測試開關也照樣 FAIL）：不連常駐 DT、不寫 pilot.env、不跑 firmware-dt.sh。
+  firmware.yml 不出現任何 `DUMPLING_DT_*` 設定（測試鎖住）。本機的 resident 不寫 `dt-wait.rc`、不設 `MIRROR_REFRESH_STATUS`，`pipeline-dt-resident` 那一列寫在 `<結果>/pipeline-steps.tsv`。
+
+和 T-04 之前的差異（C0 同意）：
+- **down 失敗**：dt_end 不改結束碼，只在 stderr 印 `dt-session: WARNING（臨時 DT down 失敗：容器或 volume 可能殘留）`。之前 down 留下容器會讓 job 失敗；GitHub 的 runner 用完就丟，內部 GitLab 走 resident、不起臨時 DT。
+- **down 的時間點**：提早到上傳那一步結束時（NVIDIA 公告對照與 artifact 之前；這兩步不用 DT）。workflow 最後的 `dt_end`（`if: always()`）是取消或中途失敗時的保險；臨時 DT 已經關掉時再呼叫一次沒有影響。
+- **log**：「wait 用時 N 秒，結束碼 rc」改成 `firmware-dt-session: DT 就緒（ephemeral；dt_ready 用時 N 秒；wait 結束碼 rc）`，量的是 wait＋env；down 的 `dt-ephemeral down: OK` 那一行不再印（dt_end 不印成功的輸出）。
 
 必要階段（`scan-status-check.py`）：用 C1 預設的 11 個（A-source、B-sandbox、B-sandbox-secrets、B-sbom-provided、C-grype、C-upload-sbom、D-dt-project、D-dt-upload、
 D-dt-bom-processing、D-dt-vuln-analysis、F-secret-scan），**一個都沒拿掉**，在 `firmware-dt.sh` 明列。韌體的 `C-sbomgate` 是 NOT_ASSESSED（sbomgate 只把 library／framework 當套件），
