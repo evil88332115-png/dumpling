@@ -130,6 +130,7 @@ jobs:
             done
           }
           [ -s manifest.tsv ] || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
+          [ -s release-body.md ] || { echo "release: FAIL（沒有 Release 說明 release-body.md，或是空的：release-meta.py --body-out 沒有執行或失敗）"; exit 1; }
           args=()
           while IFS=$'\t' read -r f label; do
             [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }

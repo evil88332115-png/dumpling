@@ -10,6 +10,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI = os.path.join(ROOT, "pipeline", "release-meta.py")
+BODY_CLI = os.path.join(ROOT, "pipeline", "release-body.py")
 sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
 _spec = importlib.util.spec_from_file_location("release_meta", CLI)
 rm = importlib.util.module_from_spec(_spec)
@@ -79,6 +80,24 @@ class Defang(unittest.TestCase):
         self.assertIsNone(LOCAL.search(out))
         self.assertFalse(set(re.findall(r"/[A-Za-z0-9_.-]+", out)) - set(re.findall(r"/[A-Za-z0-9_.-]+", text)))   # 沒有冒出原文沒有的路徑
 
+    def test_urls_glued_to_cjk_underscore_or_file(self):
+        """網址前面緊貼中文字或底線（\\w 會把它們當成字的一部分）也要改寫；file:// 緊貼也一樣省略。"""
+        out = self.check("網址https://example.org/a、名稱_https://example.org/b、見file:///home/runner/x、路徑_file:///tmp/y、網站www.example.org/c", 5,
+                         ("網址`example.org/a`", "名稱_`example.org/b`", "網站`www.example.org/c`"))
+        self.assertIsNone(LOCAL.search(out), out)
+
+    def test_url_inside_query_string(self):
+        """查詢字串裡又有完整網址：scheme 全部去掉（只去第一個會留下 scheme，而且再跑一次不一樣）；夾帶的 file:// 也省略。"""
+        self.check("見 https://a.example.org/x?u=https://b.example.org/y&v=http://c.example.org/z", 1,
+                   ("`a.example.org/x?u=b.example.org/y&v=c.example.org/z`",))
+        out = self.check("下載 https://a.example.org/?f=file:///home/runner/secret.tar", 1)
+        self.assertIsNone(LOCAL.search(out), out)
+
+    def test_autolink_brackets_are_removed(self):
+        out = self.check("請看 <https://example.org/x> 與 <http://example.org/y>。", 2, ("`example.org/x`", "`example.org/y`"))
+        self.assertNotIn("<", out)
+        self.assertNotIn(">", out)
+
     def test_text_without_urls_is_unchanged(self):
         t = "**report_status OK**｜**release_gate GAP**｜**pipeline_result OK**\n\n| 步驟 | 狀態 |\n|---|---|\n| scan | OK |\n"
         self.assertEqual(rm.defang_urls(t), (t, 0))
@@ -123,6 +142,35 @@ class Cli(unittest.TestCase):
         r = self.run_meta("--body-out", self.p("release-body.md"))
         self.assertEqual(r.returncode, 64, r.stdout)
         self.assertFalse(os.path.exists(self.p("m.json")) or os.path.exists(self.p("release-body.md")))
+
+    def test_release_body_cli(self):
+        """pipeline/release-body.py：給直接用 gh release create --notes-file 的流程（例如韌體）用，同一個函式。"""
+        src, dst = self.p("notes.md"), self.p("body.md")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write("韌體 https://example.org/fw 與 [說明](https://example.org/doc)\n")
+        run = lambda *a: subprocess.run([sys.executable, "-I", BODY_CLI, *a], capture_output=True, text=True)
+        r = run(src, dst)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "release-body: OK（notes.md → body.md，改寫了 2 處網址）")
+        self.assertIsNone(SCHEME.search(read(dst)))
+        self.assertIn("https://example.org/fw", read(src))                                  # 輸入檔不改
+        self.assertFalse(os.path.exists(dst + ".part"))
+        self.assertEqual(run(src).returncode, 64)
+        self.assertEqual(run(src, src).returncode, 1)                                       # 不覆蓋輸入
+        with open(self.p("empty.md"), "w", encoding="utf-8") as f:
+            f.write("  \n")
+        for bad in (self.p("empty.md"), self.p("nope.md")):
+            os.path.exists(self.p("out2.md")) and os.unlink(self.p("out2.md"))
+            r = run(bad, self.p("out2.md"))
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertTrue(r.stdout.strip().startswith("release-body: FAIL"), r.stdout)
+            self.assertFalse(os.path.exists(self.p("out2.md")))
+
+    def test_release_workflow_checks_the_body_before_creating(self):
+        t = read(os.path.join(ROOT, ".github", "workflows", "release.yml"))
+        guard = t.index("[ -s release-body.md ]")
+        self.assertLess(guard, t.index("gh release create"))
+        self.assertLess(guard, t.index("ghx gh api"))                                       # 缺檔時不打任何 API、不重試
 
     def test_release_workflow_uses_the_rewritten_body(self):
         t = read(os.path.join(ROOT, ".github", "workflows", "release.yml"))

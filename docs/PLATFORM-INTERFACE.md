@@ -254,7 +254,7 @@ Jetson 的 `sources.yml` `platform_params`：
   - `report_status`：**產品結論**＝報告（cra_report `summary.json`）的整體狀態；分層時每份報告（完整、bsp、os）各一個，列在 `reports`，這裡取最差的那份。
   - `release_gate`：VEX 發行閘門（`summary.json` 的 `vex.gate.verdict`），同樣取最差的那份。
   - `pipeline_result`：workflow 各步驟的結果（`pipeline-steps.tsv`），只代表流程有沒有跑完，**不是產品結論**。
-  - 值的範圍 `OK`｜`ATTENTION`｜`NOT_RUN`｜`GAP`｜`NOT_ASSESSED`｜`FAIL`；缺檔、讀不到、值不認得 → `NOT_RUN`，不留空。Release 說明（notes.md）開頭依序印 report_status、release_gate、pipeline_result。實際送給 GitHub／GitLab 的說明是 `release-meta.py --body-out` 從 notes.md 產生的 `release-body.md`：網址都改成不會自動連結的寫法（Release 說明含網址時 GitHub 的 POST /releases 回 403），notes.md 本身不動。
+  - 值的範圍 `OK`｜`ATTENTION`｜`NOT_RUN`｜`GAP`｜`NOT_ASSESSED`｜`FAIL`；缺檔、讀不到、值不認得 → `NOT_RUN`，不留空。Release 說明（notes.md）開頭依序印 report_status、release_gate、pipeline_result。實際送給 GitHub／GitLab 的說明是 `release-meta.py --body-out` 從 notes.md 產生的 `release-body.md`：網址都改成不會自動連結的寫法（Release 說明含網址時 GitHub 的 POST /releases 回 403），notes.md 本身不動。自己用 `gh release create --notes-file` 建 Release 的流程（例如韌體），先用 `python3 -I pipeline/release-body.py <notes.md> <release-body.md>` 產生改寫過的說明（同一個函式，`pipeline/lib/release_body.py`），再把它交給 `--notes-file`。
   已出貨版本的 SBOM 不提交進 repo（D-029）：Release 就是正式來源；開發版發到每個專案一個滾動的 pre-release `dev/<專案>`（只在 `main` 或 `dev/**` 分支發布）。
 
 ## 6. platform.yml
