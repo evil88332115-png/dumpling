@@ -48,6 +48,10 @@
   - 跨來源層不合併同名元件：韌體裡的 Intel 微碼和 OS 的 `intel-microcode` deb 是兩個東西；edk2 和 OVMF 也是（第 2 節的例外規則要涵蓋）。
   - bom-ref 保留原樣，撞到就 FAIL。
 - **限制**：11-15 的 Release 還沒有 integrity 屬性，下一個 tag 才有。
+- **CycloneDX 版本**（C2 核對）：firmware-demo 的 fw-*.cdx.json 是 **1.6**（`tools/cra/x86_firmware.py` 寫死，C2 用 bom-1.6 的 schema 驗）；NS5x 供應商 SBOM 範例是 1.4（`firmware_dt.py prep` 正規化格式，但 specVersion 不變）；AI NAS 的 SBOM 是 1.7。
+  - Release 上的檔案**不改**（sha256 已寫進 meta，rematch 要逐位元組比對）。版本對齊在 N2 合併時做：合併後的文件寫 1.7，用 1.7 的 schema 驗整份結果，驗不過就 FAIL。
+  - 1.6、1.4 的元件併進 1.7 之前，用到的欄位（type firmware、properties、hashes、dependencies、purl、cpe）語意有沒有變，**待 N2（C1）核對**，不先說沒問題。
+  - 讓韌體產生器直接輸出 1.7 會改掉每一份 fw SBOM 的位元組（rematch 基準、DT、C2 的測試都要一起改），排第二階段，另開 PR。
 
 ## 2. 不重複算
 
