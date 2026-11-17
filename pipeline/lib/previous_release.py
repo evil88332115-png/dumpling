@@ -24,10 +24,15 @@
                                    `報告/交給PM/VEX/vex.cdx.json`、`報告/內部存檔/summary.json`（csaf_advisory 只讀舊版的這兩個檔；舊版的 SBOM 不用，所以不下載）。
 下載的內容一律當成不可信資料：附件與 zip 有大小上限、API 回應有大小上限；zip 只用名稱精確比對的兩個成員（讀進記憶體、寫成固定檔名），
   zip 裡有路徑穿越、絕對路徑、符號連結、特殊檔案、重複名稱、加密成員就整個不用（GAP）；GitHub 的下載網址不從回應取，用 API 路徑自己組；
-  轉址到別的主機時不帶 Authorization。
+  轉址到別的主機時不帶 Authorization。每個附件有整體時間上限（慢速涓滴的下載會中止、刪掉暫存檔、該層記 GAP）。
+暫時性錯誤（5xx、429、連線錯誤）最多試 5 次，間隔 10、30、60、60 秒；回應有 Retry-After 時照它（有上限）。4xx（429 除外）不重試。
+  正式 Release 不能重跑：一次失敗那個 tag 就永久記 GAP，所以寧可多等。這些值都能用環境變數覆寫（測試設成 0）：
+  DUMPLING_PREV_DOWNLOAD_DEADLINE（每個附件的整體時間上限，秒，預設 600）、DUMPLING_PREV_RETRIES（嘗試次數，預設 5）、
+  DUMPLING_PREV_RETRY_DELAYS（逗號分隔的退避秒數，預設 10,30,60；次數比清單長時沿用最後一個）、DUMPLING_PREV_RETRY_AFTER_MAX（Retry-After 的上限秒數，預設 120）。
 """
 import argparse
 import datetime
+import email.utils
 import hashlib
 import http.client
 import json
@@ -60,9 +65,15 @@ LIMITS = {
     "api": 20 << 20,           # 列出 Release 的單頁回應
     "pages": 30,               # 每頁 100 個 Release
 }
-TIMEOUT = 120
-RETRIES = 3
-RETRY_DELAY = 5
+TIMEOUT = 120              # 單一 socket 操作的逾時
+DOWNLOAD_DEADLINE = 600    # 每個附件（含重試與等待）的整體時間上限，秒；實際最多再多一個 TIMEOUT（卡在一次 recv 時）
+RETRIES = 5                # 暫時性錯誤（5xx、429、連線錯誤）嘗試次數
+RETRY_DELAYS = (10, 30, 60)    # 第 n 次失敗後等的秒數；次數比清單長時沿用最後一個
+RETRY_AFTER_MAX = 120      # 回應的 Retry-After 最多照這麼多秒
+ENV_DEADLINE, ENV_RETRIES = "DUMPLING_PREV_DOWNLOAD_DEADLINE", "DUMPLING_PREV_RETRIES"
+ENV_DELAYS, ENV_AFTER_MAX = "DUMPLING_PREV_RETRY_DELAYS", "DUMPLING_PREV_RETRY_AFTER_MAX"
+_sleep = time.sleep                                  # 測試換掉它（不真的等；不能換 time.sleep，那是全域的）
+LOOPBACK = ("127.0.0.1", "localhost", "::1")      # 測試用：只有這幾個主機可以用 plain http
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 VERSION_RE = re.compile(r"v[A-Za-z0-9][A-Za-z0-9._+-]{0,79}")
 REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
@@ -88,6 +99,37 @@ def official_tag_push(env, project, version):
 def _c(v, n=200):
     """外部字串進輸出前：去掉控制字元、截斷。"""
     return "".join(ch for ch in str(v) if ch.isprintable())[:n]
+
+
+_ZIP_NAME_OK = re.compile(r"[A-Za-z0-9._/\-\u3400-\u4dbf\u4e00-\u9fff]")
+
+
+def _zn(v, n=80):
+    """來自 zip 的成員名稱進輸出（步驟說明、notes.md、Release 說明）前：只留 [A-Za-z0-9._/-] 和中文，其他字元（Markdown、HTML、控制字元、其他文字）換成 ?，再截斷。"""
+    return "".join(ch if _ZIP_NAME_OK.fullmatch(ch) else "?" for ch in str(v))[:n]
+
+
+def _env_num(environ, name, default, cast=float, lo=0):
+    """環境變數的數字覆寫：沒設、不是數字、小於 lo → 預設值（不因為設錯就整個失敗）。"""
+    v = (environ or {}).get(name)
+    if v is None or str(v).strip() == "":
+        return default
+    try:
+        x = cast(str(v).strip())
+    except ValueError:
+        return default
+    return x if x >= lo and x == x and x != float("inf") else default
+
+
+def _env_delays(environ, default):
+    v = (environ or {}).get(ENV_DELAYS)
+    if v is None or str(v).strip() == "":
+        return tuple(default)
+    try:
+        out = tuple(float(t) for t in str(v).split(",") if t.strip())
+    except ValueError:
+        return tuple(default)
+    return out if out and all(0 <= x < float("inf") for x in out) else tuple(default)
 
 
 # ---------------------------------------------------------------- 版本排序
@@ -178,13 +220,13 @@ def select_previous(releases, project, version):
 # ---------------------------------------------------------------- GitHub API
 
 class _Redirect(urllib.request.HTTPRedirectHandler):
-    """轉址（GitHub 的附件下載會轉到簽名網址）：換主機就不帶 Authorization；只接受 https（或測試用的 loopback http）。"""
+    """轉址（GitHub 的附件下載會轉到簽名網址）：換主機就不帶 Authorization；只接受 https（或測試用、而且轉去的主機是 loopback 的 http）。"""
     def __init__(self, allow_http):
         self.allow_http = allow_http
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         u = urllib.parse.urlsplit(newurl)
-        if u.scheme != "https" and not (self.allow_http and u.scheme == "http"):
+        if u.scheme != "https" and not (self.allow_http and u.scheme == "http" and u.hostname in LOOPBACK):
             raise urllib.error.URLError("轉址到不接受的網址（scheme %s）" % _c(u.scheme, 10))
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None:
@@ -196,35 +238,61 @@ class _Redirect(urllib.request.HTTPRedirectHandler):
 
 class GitHub:
     """唯讀 GitHub API 用戶端。下載網址用 API 路徑自己組，不用回應裡的網址。"""
-    def __init__(self, repo, token=None, base="https://api.github.com", limits=None, retries=None, delay=None):
+    def __init__(self, repo, token=None, base="https://api.github.com", limits=None, retries=None, delay=None, deadline=None,
+                 retry_after_max=None, environ=None):
         if not REPO_RE.fullmatch(repo or ""):
             raise PrevError("GITHUB_REPOSITORY 格式不對")
         u = urllib.parse.urlsplit(base)
-        loop = u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost", "::1")
+        loop = u.scheme == "http" and u.hostname in LOOPBACK
         if not (u.scheme == "https" or loop) or not u.hostname or u.username or u.password or u.query or u.fragment:
             raise PrevError("GITHUB_API_URL 只接受 https（測試用：127.0.0.1／localhost 的 http）")
         self.repo, self.token, self.base = repo, token or None, base.rstrip("/")
         self.limits = dict(LIMITS, **(limits or {}))
-        self.retries = RETRIES if retries is None else retries
-        self.delay = RETRY_DELAY if delay is None else delay
+        env = os.environ if environ is None else environ
+        self.retries = retries if retries is not None else _env_num(env, ENV_RETRIES, RETRIES, int, 1)
+        self.delays = (delay,) if delay is not None else _env_delays(env, RETRY_DELAYS)
+        self.deadline = deadline if deadline is not None else (_env_num(env, ENV_DEADLINE, DOWNLOAD_DEADLINE) or DOWNLOAD_DEADLINE)
+        self.retry_after_max = retry_after_max if retry_after_max is not None else _env_num(env, ENV_AFTER_MAX, RETRY_AFTER_MAX)
         self.opener = urllib.request.build_opener(_Redirect(loop))
 
-    def _open(self, url, accept):
+    def _wait_for(self, n, headers):
+        """第 n 次失敗（從 0 算）之後要等幾秒：有 Retry-After（秒數或 HTTP 日期）就照它、不超過上限；沒有就照退避清單。"""
+        ra = headers.get("Retry-After") if headers is not None else None
+        if ra:
+            ra, secs = ra.strip(), None
+            if ra.isascii() and ra.isdigit() and len(ra) < 10:
+                secs = int(ra)
+            else:
+                try:
+                    secs = email.utils.parsedate_to_datetime(ra).timestamp() - time.time()
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    secs = None
+            if secs is not None:
+                return max(0.0, min(secs, self.retry_after_max))
+        return self.delays[min(n, len(self.delays) - 1)]
+
+    def _open(self, url, accept, deadline=None):
+        """開啟網址；暫時性錯誤（5xx、429、連線錯誤）重試。deadline（time.monotonic 的時間點）到了就不再等、不再試。"""
         h = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "dumpling-previous-release"}
         if self.token:
             h["Authorization"] = "Bearer " + self.token
         last = None
         for n in range(self.retries):
+            hdrs = None
             try:
                 return self.opener.open(urllib.request.Request(url, headers=h), timeout=TIMEOUT)
             except urllib.error.HTTPError as e:
-                last = "HTTP %d" % e.code
+                last, hdrs = "HTTP %d" % e.code, e.headers
+                e.close()
                 if e.code < 500 and e.code != 429:
                     break
             except (urllib.error.URLError, OSError) as e:
                 last = type(e).__name__
             if n + 1 < self.retries:
-                time.sleep(self.delay)
+                wait = self._wait_for(n, hdrs)
+                if deadline is not None and time.monotonic() + wait >= deadline:
+                    raise PrevError("GitHub API 失敗（%s），再等下去會超過時間上限" % last)
+                _sleep(wait)
         raise PrevError("GitHub API 失敗（%s）" % last)
 
     def list_releases(self):
@@ -262,7 +330,8 @@ class GitHub:
 
     def _download(self, url, dest, max_size):
         h, n = hashlib.sha256(), 0
-        with self._open(url, "application/octet-stream") as resp:
+        deadline = time.monotonic() + self.deadline
+        with self._open(url, "application/octet-stream", deadline) as resp:
             cl = resp.headers.get("Content-Length")
             if cl and cl.isdigit() and int(cl) > max_size:
                 raise PrevError("附件太大（%s 位元組，上限 %d）" % (cl, max_size))
@@ -270,7 +339,9 @@ class GitHub:
             try:
                 with os.fdopen(fd, "wb") as f:
                     while True:
-                        b = resp.read(1 << 20)
+                        if time.monotonic() >= deadline:
+                            raise PrevError("下載附件超過時間上限（%g 秒），中止" % self.deadline)
+                        b = resp.read1(1 << 16)       # read1：一次 recv 就回來，涓滴的下載才有機會檢查時間（read 會等到湊滿才回）
                         if not b:
                             break
                         n += len(b)
@@ -298,15 +369,15 @@ def check_zip(zf, limits):
     for i in infos:
         n = i.filename
         if not n or "\x00" in n or "\\" in n or n.startswith("/") or re.match(r"^[A-Za-z]:", n) or ".." in n.split("/"):
-            raise PrevError("zip 有不合規則的路徑（%s）" % _c(n, 80))
+            raise PrevError("zip 有不合規則的路徑（%s）" % _zn(n, 80))
         if n in seen:
-            raise PrevError("zip 有重複的成員名稱（%s）" % _c(n, 80))
+            raise PrevError("zip 有重複的成員名稱（%s）" % _zn(n, 80))
         seen.add(n)
         kind = (i.external_attr >> 16) & 0o170000
         if kind == 0o120000:
-            raise PrevError("zip 有符號連結（%s）" % _c(n, 80))
+            raise PrevError("zip 有符號連結（%s）" % _zn(n, 80))
         if kind in (0o020000, 0o060000, 0o010000, 0o140000):
-            raise PrevError("zip 有特殊檔案（%s）" % _c(n, 80))
+            raise PrevError("zip 有特殊檔案（%s）" % _zn(n, 80))
         if i.flag_bits & 0x1:
             raise PrevError("zip 有加密的成員")
         total += i.file_size
@@ -415,7 +486,7 @@ def prepare(project, version, out, env=None, client=None, limits=None):
             raise PrevError("專案或版本的格式不對（%s／%s），沒辦法找前一版" % (_c(project, 40), _c(version, 40)))
         if client is None:
             client = GitHub(env.get("GITHUB_REPOSITORY", ""), env.get("GITHUB_TOKEN") or env.get("GH_TOKEN"),
-                            env.get("GITHUB_API_URL") or "https://api.github.com", lim)
+                            env.get("GITHUB_API_URL") or "https://api.github.com", lim, environ=env)
         rel, note, stats = select_previous(client.list_releases(), project, version)
         if rel is None:
             doc.update(status="NOT_RUN", note="僅供參考：" + note)

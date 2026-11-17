@@ -82,7 +82,7 @@
 - 單一報告 zip、所有層加起來、API 回應、zip 裡每個成員都有大小上限（見 `previous_release.py` 的 `LIMITS`）；下載超過上限就停止並刪掉檔案，Release 記的大小和實際下載的不同也當成失敗。
 - zip 有路徑穿越、絕對路徑、反斜線、符號連結、特殊檔案、重複名稱、加密的成員、成員太多、宣告的解開後大小太大，**整個 zip 不用**（GAP）。只讀名稱精確相同的兩個成員，讀進記憶體後寫成固定檔名（0600），不依 zip 內的路徑解開。
 - 下載網址用 `GITHUB_REPOSITORY` 與附件 id 自己組，不用 API 回應裡的網址；轉址（GitHub 轉到簽名網址）不帶 `Authorization`，也只接受 https。`GITHUB_API_URL` 只接受 https（測試用：127.0.0.1／localhost 的 http）。
-- `previous-release.json` 與資料夾由精靈再檢查一次：不是一般檔案、太大、格式不對、資料夾是符號連結、層名稱是 `.`／`..`，都記 GAP。
+- `previous-release.json` 與資料夾由精靈再檢查一次：不是一般檔案、太大、格式不對、資料夾是符號連結、manifest 說這一層 OK 但層資料夾裡找不到 `vex.cdx.json`（或它是符號連結），都記 GAP。層名稱（精靈的 `--name` 把 `[A-Za-z0-9._-]` 以外的字元換成 `_` 後）是空白、`.`、`..` 時**不去找資料夾**：manifest 狀態是 OK 時，manifest 不會有這個名稱的層，當成「前一版沒有這一層」記 NOT_RUN（僅供參考，不是 GAP，也不會採用任何資料）；manifest 狀態不是 OK 時照 manifest 的狀態（NOT_RUN 記 NOT_RUN，其他記 GAP）。
 
 ### GitLab 版怎麼接（給之後的 T-03 或 C3）
 

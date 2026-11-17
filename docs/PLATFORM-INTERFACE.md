@@ -196,6 +196,8 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 | `scan` | 平台各自（`scan.sh`）：呼叫共用掃描，只提供平台設定；**平台名稱由 project.yml 明確傳下去**（見下） |
 | `raw-sectors` | 選用掛點，見下 |
 
+另一類不降低 pipeline_result 的 recorded NOT_RUN：說明以「僅供參考」開頭的列（`pipeline-previous-release`，`pipeline/lib/previous_release.py` 寫：不是正式 Release 的 tag push、或第一個正式 Release 沒有前一版可比較）。它和「不適用」開頭的一樣要有 `recorded` 標記才算，也不降級；同一個步驟找到前一版卻組不起來是 GAP，會降成 GAP。
+
 **每一步**是一個指令、最後印一行 `<步驟>: OK｜GAP｜NOT_RUN｜FAIL（說明）`，結束碼：
 
 | 狀態 | 結束碼 |
@@ -208,6 +210,8 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 
 dispatcher 先驗證專案與平台設定，失敗就印 `<步驟>: FAIL（…）` 結束；轉接器沒有該步驟的腳本 → `NOT_RUN`（4）。
 轉接器腳本收到位置參數 `<專案資料夾> <版本>` 與環境變數：`DUMPLING_ROOT`、`DUMPLING_PROJECT`、`DUMPLING_PROJECT_DIR`、`DUMPLING_VERSION`、`DUMPLING_PLATFORM`、`DUMPLING_PLATFORM_DIR`、`DUMPLING_OS_RESPONSIBILITY`、`DUMPLING_ARCH`（platform.yml 的 `arch`，預設 `arm64`）、`DUMPLING_OUT`（預設 `$DUMPLING_OUT_BASE` 或 `<repo>/out` 底下的 `<專案>/<版本>/`）、`DUMPLING_SUPPORT_UNTIL`（project.yml 的 `support_until`，YYYY-MM-DD；還沒填是空字串）。
+
+選用環境變數 `DUMPLING_PREVIOUS_REPORTS`：正式 Release 的 pipeline 在 scan 之前由 workflow 寫進 `$GITHUB_ENV`，值是 `$DUMPLING_OUT/previous-release`（`previous_release.py` 組出的前一個正式 Release 的報告資料夾，含 `previous-release.json` 與依層的資料夾）。`platform.sh` → `scan.sh` → 精靈（`cra-scan.py`）會繼承，轉接器的 `scan.sh` 不必處理；精靈的 `--previous-report` 優先於它。資料夾裡有 `previous-release.json` 就會設（NOT_RUN、GAP 也有，精靈靠它分辨）；沒有（腳本沒跑成）就不設，精靈照舊走 `--previous-report` 或互動選擇。格式與狀態見 `docs/CSAF.md`。
 
 **精靈對產品設定包複本做的事（D-039、D-055；原始的 `CRA/Config/` 不動）**：`product.version` 改成這次的版本（沒寫就填入）；有刷機包時 `product.identification` 改成這次的刷機包（沒寫而且有 MD5 就填入 `Flash package <檔名> (MD5 <md5>)`）；`support.end_date` 沒寫時由 `DUMPLING_SUPPORT_UNTIL` 產生（YYYY-MM），已寫而月份不同 → ATTENTION（project.yml 的一致性檢查會先 FAIL）。`platform_scan.collect` 之後核對每份報告設定包的 `product.version`（去掉 ` (rootfs)` 這類非版本後綴）等於 Release tag 的版本，不一致 → scan 步驟 FAIL，結果在 scan.json 的 `product_version_check`；這只是拿 tag 和 tag 自己比（tag 同時餵精靈的 `--version`），所以平台再用 `Hooks.independent_version(ctx)` 提供一個和 tag 無關的版本來源（M7b），結果在 `product_version_check.independent`：
   - 不一致或讀到了卻無法確定 → FAIL（scan 步驟 FAIL）。
@@ -309,6 +313,9 @@ project_defaults:              # 選填：new-project.sh 帶入 project.yml／so
 scan job 還原後接著寫自己的列；`build.mode: none` 時 scan job 寫 `pipeline-build	NOT_RUN	4	不適用：build.mode: none（這個平台不編譯）	recorded`（`run-step.sh --record` 寫，列尾多一欄 `recorded`）。
 `platform_scan.collect` 把這些列放進 `summary.md`、Release 說明（notes.md）、scan.json 的 `pipeline_steps`／`pipeline_status`；`release-meta.json` 多 `steps` 與 `pipeline_result`（`OK`｜`ATTENTION`｜`GAP`｜`FAIL`；沒給步驟檔是 `NOT_RUN`；有 FAIL 是 FAIL、有 GAP 或沒能執行的 NOT_RUN 至少 GAP、只有 ATTENTION 是 ATTENTION；有 ATTENTION 列時另有 `attention`＝那幾行說明；
 `status` 仍是 project.yml 的 shipped／development）；`pipeline/scan-status-check.py --pipeline-steps` 也會看。所以平台的 scan 沒去讀 `raw-sectors.json` 之類的檔案，GAP 也不會消失。NOT_RUN 分兩類（`pipeline/lib/step_rows.py`）：workflow 用 `run-step.sh --record` 記的列（列尾多一欄 `recorded`）且說明以「不適用」開頭＝本來就不該做（目前只有 build.mode 不是 compile 的那一列），不降低整體狀態；其他 NOT_RUN（結束碼 4，例如平台沒有實作這一步）＝該做卻沒做，整體降成 GAP。平台腳本沒辦法自己宣告「不適用」：結束碼 4 的最後一行就算以「不適用」開頭，也照樣是 GAP（最後一行仍照規則寫 `<步驟>: NOT_RUN（…）`）。**這裡只處理 workflow 步驟層；掃描層（sca-scan、cra_report 的階段，例如核心階段的 NOT_RUN）見下一個 PR。**
+
+補充：說明以「僅供參考」開頭的 recorded NOT_RUN（`pipeline-previous-release`）也不降級，和「不適用」開頭的相同；只認 recorded 的列，一般步驟輸出的文字就算寫「僅供參考」也照樣是 GAP（`pipeline/lib/step_rows.py` 的 `not_applicable`）。
+
 手動觸發（workflow_dispatch）只建 draft；push tag 建正式 Release（`--verify-tag`）。**GAP 不擋正式 Release**：scan 回 3（GAP）時 `run-step.sh` 記一列、以 0 繼續，Release 照樣發，結論寫在 `release-meta.json` 的 `report_status`／`release_gate`／`pipeline_result` 與 Release 說明開頭（D-033：資料缺口照實標示，不靠擋發佈）。只有 FAIL（1、64 或其他）讓 job 失敗、不發 Release。
 
 **ATTENTION 與弱點資料鏡像的共用函式**：ATTENTION＝這一步完成了，但用了舊資料頂替；整體狀態不是 OK、比 GAP 輕（FAIL > GAP > ATTENTION > OK），只由 `pipeline/lib/mirrors.sh` 寫。

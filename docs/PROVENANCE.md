@@ -450,9 +450,10 @@ C4 沒有從 sca-center 複製新檔。對已複製檔案的修改記在這裡�
 
 | dumpling 路徑 | 說明 |
 |---|---|
-| `pipeline/lib/previous_release.py` | 新增：列出同一個 repo 的 Release（GitHub API，唯讀）、選前一個正式 Release（只看版本；排不出先後記 GAP）、下載每一層的報告 zip（大小上限、zip 檢查：路徑穿越、符號連結、特殊檔案、重複名稱、加密）、依層組成資料夾與 `previous-release.json`；只有正式 Release 的 tag push 才呼叫 API；狀態 OK／NOT_RUN／GAP，記進 `pipeline-steps.tsv` |
-| `tests/test_previous_release.py` | 新增：版本比較與選法、官方 tag push 的判斷、下載與 zip 的各種壞資料、本機 HTTP 伺服器（分頁、轉址不帶 Authorization、API 回應裡的網址不使用）、精靈讀資料夾、`report_package.py` 真的產生 `交給PM/CSAF/`、workflow 靜態檢查。資料全部合成，產品與專案名稱是虛構的（`acme-board`、`ACME-X100`、`example-org/example-repo`） |
+| `pipeline/lib/previous_release.py` | 新增：列出同一個 repo 的 Release（GitHub API，唯讀）、選前一個正式 Release（只看版本；排不出先後記 GAP）、下載每一層的報告 zip（大小上限、每個附件的整體時間上限、暫時性錯誤重試 5 次並照 Retry-After、zip 檢查：路徑穿越、符號連結、特殊檔案、重複名稱、加密；zip 成員名稱進說明前只留 `[A-Za-z0-9._/-]` 和中文）、依層組成資料夾與 `previous-release.json`；只有正式 Release 的 tag push 才呼叫 API；狀態 OK／NOT_RUN／GAP，記進 `pipeline-steps.tsv` |
+| `tests/test_previous_release.py` | 新增：版本比較與選法、官方 tag push 的判斷、下載與 zip 的各種壞資料、本機 HTTP 伺服器（分頁、轉址不帶 Authorization、API 回應裡的網址不使用）、精靈讀資料夾、`report_package.py` 真的產生 `交給PM/CSAF/`、下載時間上限與重試的測試（本機伺服器慢慢送資料）、workflow 靜態檢查（含實際執行路徑換行檢查）。資料全部合成，產品與專案名稱是虛構的（`acme-board`、`ACME-X100`、`example-org/example-repo`） |
 | `pipeline/lib/step_rows.py` | 行為修改：recorded 的 NOT_RUN 說明以「僅供參考」開頭，與「不適用」一樣不降低整體狀態（只給 `previous_release.py` 的 NOT_RUN 用；一般步驟輸出的文字不算） |
-| `.github/workflows/pipeline.yml` | 行為修改：scan job 在 scan 之前多一步「前一個正式 Release 的報告」（token 只在這一步、只有 tag push 才給），`DUMPLING_PREVIOUS_REPORTS` 寫進 `GITHUB_ENV`；診斷用的 `previous-release.json` 放進 artifact。`release.yml` 與各平台的 `scan.sh`、`scan-disk.sh` 沒有改 |
+| `.github/workflows/pipeline.yml` | 行為修改：scan job 在 scan 之前多一步「前一個正式 Release 的報告」（token 只在這一步、只有 tag push 才給），`DUMPLING_PREVIOUS_REPORTS` 寫進 `GITHUB_ENV`（路徑含換行或 CR 就 `::error::` 結束）；診斷用的 `previous-release.json` 放進 artifact。`release.yml` 與各平台的 `scan.sh`、`scan-disk.sh` 沒有改 |
 | `docs/CSAF.md` | 新增一節「pipeline 接線」（既有內容沒改） |
+| `docs/PLATFORM-INTERFACE.md` | 補充：「僅供參考」開頭的 recorded NOT_RUN 不降級、環境變數 `DUMPLING_PREVIOUS_REPORTS`（既有句子沒改） |
 

@@ -220,6 +220,10 @@ jobs:
           # OK（找到並組好）、NOT_RUN（沒有前一個正式 Release、或這次不是正式 Release；僅供參考，不降低整體狀態）、GAP（找到了但下載或組裝失敗）。
           # 資料夾用環境變數 DUMPLING_PREVIOUS_REPORTS 交給精靈（platform.sh → scan.sh → 精靈會繼承；不用改各平台的 scan.sh）
           o="$DUMPLING_OUT_BASE/$DUMPLING_IN_PROJECT/$DUMPLING_IN_VERSION"
+          # 路徑會寫進 $GITHUB_ENV（一行一個變數）：含換行或 CR 就可能多寫出別的變數，不接受（同時擋在建資料夾與呼叫腳本之前）
+          case "$o" in
+            *$'\n'*|*$'\r'*) echo "::error::輸出路徑含換行或 CR，不寫進 GITHUB_ENV"; exit 1;;
+          esac
           mkdir -p "$o"
           rc=0
           python3 -I pipeline/lib/previous_release.py prepare --project "$DUMPLING_IN_PROJECT" --version "$DUMPLING_IN_VERSION" \
