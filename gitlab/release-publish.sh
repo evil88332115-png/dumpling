@@ -23,7 +23,7 @@ test -s "$res/manifest.tsv" || { echo "release: FAIL（scan 沒有產生 manifes
 # 上傳清單只用 release-payload.py 驗過、寫出來的那一份（release-files.txt）：bash 不再自己解析 manifest（#72 驗證應修 1）
 rm -f release.json release-files.txt
 python3 -I "$here/release-payload.py" --manifest "$res/manifest.tsv" --files-dir "$res" --tag "$tag" --project "$project" --version "$version" \
-  --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes "$res/notes.md" --out release.json --list-out release-files.txt
+  --api-url "$CI_API_V4_URL" --project-id "$CI_PROJECT_ID" --notes "$res/release-body.md" --out release.json --list-out release-files.txt
 want=$(python3 -I -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["assets"]["links"]))' release.json)
 have=$(grep -c . release-files.txt || true)
 [ "$want" -ge 1 ] && [ "$have" = "$want" ] || { echo "release: FAIL（驗過的附件清單 $have 個，Release 連結 $want 個，不一致）"; exit 1; }

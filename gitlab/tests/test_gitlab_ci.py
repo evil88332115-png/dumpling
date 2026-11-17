@@ -502,16 +502,18 @@ class CiFile(unittest.TestCase):
         self.assertEqual(sorted(mine), sorted(gh_flags), "release:publish 的 release-meta.py 參數和 release.yml 不同")
 
     def test_release_notes_rewritten_then_used(self):
-        # release-meta.py --notes 重寫的 notes.md，就是 release-payload.py 拿來當 Release 說明的那一份（notes.md 與 release-meta.json 的 pipeline_result 一致）
-        # release:publish 先跑 release-meta.py（重寫 result/notes.md），再跑 release-publish.sh result …（它的 release-payload.py 讀 $res/notes.md）
+        # release-meta.py --notes 重寫 notes.md（pipeline_result 與 release-meta.json 一致），--body-out 再從它產生 Release 說明 release-body.md
+        # （網址改成不會自動連結的寫法；GitHub 對含網址的說明回 403，GitLab 照同一份），release-payload.py 拿 release-body.md 當 Release 說明
+        # release:publish 先跑 release-meta.py，再跑 release-publish.sh result …（它的 release-payload.py 讀 $res/release-body.md）
         text = self.lines_of("release:publish")
         meta = command_args(text, "pipeline/release-meta.py")
         self.assertEqual(meta.get("--notes"), "result/notes.md")
+        self.assertEqual(meta.get("--body-out"), "result/release-body.md")
         m = re.search(r"bash gitlab/release-publish\.sh (\S+) ", text)
         self.assertEqual(m.group(1), "result")
         self.assertLess(text.index("pipeline/release-meta.py"), m.start())
         pub = (HERE.parent / "release-publish.sh").read_text(encoding="utf-8")
-        self.assertEqual(command_args(pub, "\"$here/release-payload.py\"").get("--notes"), "$res/notes.md")
+        self.assertEqual(command_args(pub, "\"$here/release-payload.py\"").get("--notes"), "$res/release-body.md")
 
     def test_t01_kernel_cve_cache(self):
         # 核心 CVE 鏡像的上一份（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：scan 與 watch:compute 都用，只存新抓的

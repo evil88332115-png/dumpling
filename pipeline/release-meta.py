@@ -15,6 +15,10 @@ tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev
 --notes（要有 --steps）：用同一份步驟紀錄、同一個算法重寫 notes.md 開頭的 pipeline_result 與「流程步驟」一節，讓 notes.md 與 release-meta.json 一致
 （scan 步驟產生 notes.md 時，它自己的那一列還沒寫進紀錄；adapter-gaps #26）。同時給 --scan-summary 時，也用同一份紀錄重寫那個檔的
 pipeline_steps／pipeline_status／pipeline_attention（M7b-4），三個檔的 pipeline 結果一致。
+--body-out <檔>（要有 --notes）：從（重寫後的）notes.md 產生 GitHub Release 的說明（release.yml 用 --notes-file 傳它），網址一律改成不會自動連結的寫法
+（defang_urls：去掉 scheme 放進 code span；markdown 連結留下文字、網址放進括號裡的 code span；file:// 換成「本機路徑，已省略」），
+log 印改了幾處。原因：Release 說明含網址時 POST /releases 一直回 403（ai-nas 草稿 run 44040129677；拿掉網址後 run 44051748503 一次就成功）。
+notes.md 與報告本身不動。
 """
 import argparse
 import datetime
@@ -30,6 +34,89 @@ import step_rows  # noqa: E402
 from platform_scan import refresh_notes, refresh_scan_summary, verdict, worst_verdict  # noqa: E402
 
 REPORT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+
+# Release 說明的網址改寫（defang_urls）：GitHub 對含網址的 Release 說明回 403，所以一律改成不會自動連結的寫法
+_CJK_STOP = "，、。；：！？（）「」『』【】《》〈〉"            # 全形標點不算網址的一部分
+_URL_STOP = r"[^\s<>`'\"" + _CJK_STOP + r"]+"
+_MD_LINK = re.compile(r"\[([^\]\n]*)\]\(\s*<?((?:https?|ftp|file)://[^)\s>]*)>?(?:\s+\"[^\"\n]*\")?\s*\)", re.I)
+_AUTOLINK = re.compile(r"<((?:https?|ftp|file)://[^>\s]*)>", re.I)
+_BARE = re.compile(r"(?<![\w/])((?:https?|ftp|file)://" + _URL_STOP + r")", re.I)
+_WWW = re.compile(r"(?<![\w./@-])(www\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+" + r"[^\s<>`'\"" + _CJK_STOP + r"]*)", re.I)
+_SCHEME = re.compile(r"(?:https?|ftp)://", re.I)
+_FILE = re.compile(r"file://[^\s`]*", re.I)       # 不吃掉 code span 結尾的反引號
+LOCAL_PATH_NOTE = "本機路徑，已省略"
+
+
+def _plain(url):
+    """網址 → 不含 scheme 的文字；file:// → 「本機路徑，已省略」（不把路徑帶進說明）。結尾的標點不算網址。"""
+    if url.lower().startswith("file://"):
+        return LOCAL_PATH_NOTE, ""
+    tail = ""
+    while url and url[-1] in ".,;:!?。，；：！？":
+        tail, url = url[-1] + tail, url[:-1]
+    return _SCHEME.sub("", url, count=1), tail
+
+
+def _defang_text(seg):
+    """code span／code block 以外的文字。→ (新文字, 改了幾處)"""
+    n = 0
+    def md(m):
+        nonlocal n
+        n += 1
+        p, _ = _plain(m.group(2))
+        return "%s（%s）" % (m.group(1), p if p == LOCAL_PATH_NOTE else "`%s`" % p) if m.group(1) else (p if p == LOCAL_PATH_NOTE else "`%s`" % p)
+    def bare(m):
+        nonlocal n
+        n += 1
+        p, tail = _plain(m.group(1))
+        return (p if p == LOCAL_PATH_NOTE else "`%s`" % p) + tail
+    def www(m):
+        nonlocal n
+        n += 1
+        p, tail = _plain(m.group(1))
+        return "`%s`" % p + tail
+    seg = _MD_LINK.sub(md, seg)
+    seg = _AUTOLINK.sub(bare, seg)
+    seg = _BARE.sub(bare, seg)
+    # www. 開頭的裸網址：只看還不在 code span 裡的部分（上面剛包好的不再包一次）
+    parts = re.split(r"(`[^`\n]*`)", seg)
+    for i in range(0, len(parts), 2):
+        parts[i] = _WWW.sub(www, parts[i])
+    return "".join(parts), n
+
+
+def _defang_code(seg):
+    """code span／code block 裡面：不會自動連結，但 scheme 一樣去掉（403 看的可能是文字本身）；file:// 照樣省略路徑。"""
+    n = len(_SCHEME.findall(seg)) + len(_FILE.findall(seg))
+    seg = _FILE.sub(LOCAL_PATH_NOTE, seg)
+    return _SCHEME.sub("", seg), n
+
+
+def defang_urls(text):
+    """Markdown → (網址都改成不會自動連結的寫法的 Markdown, 改了幾處)。fenced code block（``` 或 ~~~）與行內 code span 裡只去掉 scheme。"""
+    out, total, fence = [], 0, None
+    for line in text.split("\n"):
+        s = line.lstrip()
+        if fence is None and (s.startswith("```") or s.startswith("~~~")):
+            fence = s[:3]
+            out.append(line)
+            continue
+        if fence is not None:
+            if s.startswith(fence):
+                fence = None
+                out.append(line)
+                continue
+            line, k = _defang_code(line)
+            total += k
+            out.append(line)
+            continue
+        parts = re.split(r"(`+[^`\n]*`+)", line)
+        for i, part in enumerate(parts):
+            part, k = (_defang_code(part) if i % 2 else _defang_text(part))
+            parts[i] = part
+            total += k
+        out.append("".join(parts))
+    return "\n".join(out), total
 
 
 def conclusions(scan, project, version):
@@ -80,11 +167,15 @@ def main(argv=None):
     ap.add_argument("--scan-summary", help="scan-summary-<專案>-<版本>.json（platform_scan.collect 寫的 scan.json）：產品結論 report_status、release_gate、reports、kernel_versions；"
                                            "沒給、不存在或讀不到 → NOT_RUN")
     ap.add_argument("--notes", help="notes.md（platform_scan.collect 寫的）：用 --steps 的紀錄重寫開頭的 pipeline_result 與「流程步驟」一節，與這個檔的 pipeline_result 一致；要有 --steps")
+    ap.add_argument("--body-out", help="（要有 --notes）GitHub Release 說明的輸出檔：notes.md 的網址改成不會自動連結的寫法（見檔頭）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--projects-dir", default=os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(HERE, "..", "projects")))
     a = ap.parse_args(argv)
     if a.notes and not a.steps:
         print("release-meta: FAIL（--notes 要和 --steps 一起給：沒有步驟紀錄就沒有可以對齊的 pipeline_result）")
+        return 64
+    if a.body_out and not a.notes:
+        print("release-meta: FAIL（--body-out 要和 --notes 一起給）")
         return 64
     try:
         meta = build_meta(a.projects_dir, a.project, a.version, a.commit, a.run_id, a.built_at, a.tag)
@@ -124,6 +215,16 @@ def main(argv=None):
                 print("release-meta: FAIL（讀不了或寫不了 %s：%s）" % (os.path.basename(a.scan_summary), type(e).__name__))
                 return 1
             notes_msg += "；scan-summary 的 pipeline_status 也一致" + ("（重寫了）" if ch2 else "（本來就一致）")
+        if a.body_out:
+            try:
+                with open(a.notes, encoding="utf-8") as f:
+                    body, nurl = defang_urls(f.read())
+                with open(a.body_out, "w", encoding="utf-8") as f:
+                    f.write(body)
+            except (OSError, UnicodeDecodeError) as e:
+                print("release-meta: FAIL（產生不了 Release 說明 %s：%s）" % (os.path.basename(a.body_out), type(e).__name__))
+                return 1
+            notes_msg += "；Release 說明（%s）改寫了 %d 處網址" % (os.path.basename(a.body_out), nurl)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=1)
         f.write("\n")
