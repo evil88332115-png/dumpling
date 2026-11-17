@@ -1,5 +1,5 @@
 """pipeline/offline-check.py（T-06 第 2 層斷網驗收的判定）與 .github/workflows/offline-scan.yml 的限制（C0 2026-11-17：只能手動觸發、
-GitHub hosted runner、contents: read、不用 secret）。strace 的樣本格式取自 strace 6.x 的實際輸出；位址只用文件專用的 192.0.2.0/24、2001:db8::/32。"""
+GitHub hosted runner、contents: read 加 actions: read、不用 secret）。strace 的樣本格式取自 strace 6.x 的實際輸出；位址只用文件專用的 192.0.2.0/24、2001:db8::/32。"""
 import json
 import os
 import re
@@ -23,6 +23,9 @@ UNSPEC = '102 connect(5, {sa_family=AF_UNSPEC, sa_data="\\0\\0\\0\\0"}, 16) = 0'
 DNS = '103 connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0'
 EXT4 = '104 connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.10")}, 16) = -1 ECONNREFUSED (Connection refused)'
 EXT6 = '104 connect(3, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr), sin6_scope_id=0}, 28) = -1 ENETUNREACH (Network is unreachable)'
+EXT_SPLIT = ['105 connect(3, {sa_family=AF_INET, sin_port=htons(80), sin_addr=inet_addr("192.0.2.20")}, 16 <unfinished ...>',
+             '106 connect(4, {sa_family=AF_UNIX, sun_path="/run/x.sock"}, 13) = 0',
+             '105 <... connect resumed>) = -1 ECONNREFUSED (Connection refused)']
 SIG = "101 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=104, si_uid=1001, si_status=0} ---"
 IPT = """Chain DUMPLING_OFFLINE (1 references)
     pkts      bytes target     prot opt in     out     source               destination
@@ -80,6 +83,13 @@ class Check(unittest.TestCase):
         self.assertIn("192.0.2.10:443×2（ECONNREFUSED）", r.stdout)
         self.assertIn("名稱查詢（127.0.0.53:53）1 次", r.stdout)
 
+    def test_connect_split_by_signal_is_counted(self):
+        # 被訊號打斷的 connect：位址在 <unfinished ...> 那一行，不能因為結果在下一行就漏掉
+        r, doc = self.run_check([LOOP4] + EXT_SPLIT)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(doc["strace"]["external"], [{"addr": "192.0.2.20", "port": 80, "count": 1, "results": ["unfinished"]}])
+        self.assertEqual((doc["strace"]["connects"], doc["strace"]["unix"]), (3, 1))
+
     def test_rejects_counted_in_block_mode(self):
         self.w("ipt.txt", IPT % 3 + IPT.replace("DUMPLING_OFFLINE", "DUMPLING_OFFLINE6") % 2)
         r, doc = self.run_check([LOOP4])
@@ -135,9 +145,10 @@ class Workflow(unittest.TestCase):
         self.assertEqual(list(on), ["workflow_dispatch"])
 
     def test_read_only_permissions_everywhere(self):
-        self.assertEqual(self.doc["permissions"], {"contents": "read"})
+        # 只有讀取：contents（checkout）與 actions（下載別的 run 的 build artifact）；job 不可以另外加權限
+        self.assertEqual(self.doc["permissions"], {"contents": "read", "actions": "read"})
         for name, job in self.doc["jobs"].items():
-            self.assertIn(job.get("permissions", {"contents": "read"}), ({"contents": "read"},), name)
+            self.assertNotIn("permissions", job, name)
 
     def test_hosted_runner_only(self):
         for name, job in self.doc["jobs"].items():

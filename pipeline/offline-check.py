@@ -27,7 +27,9 @@ import os
 import re
 import sys
 
-CONNECT_RE = re.compile(r"connect\(\d+, \{sa_family=(AF_[A-Z0-9]+)(.*?)\}, \d+\) = (-?\d+)(?: (E[A-Z]+))?")
+# 一般是一行「connect(…) = 結果」；被訊號打斷時 strace 拆成兩行：「connect(…, 16 <unfinished ...>」與「<... connect resumed>) = 結果」，
+# 位址只在第一行，所以第一行就要算（結果記 unfinished），第二行沒有位址、不算
+CONNECT_RE = re.compile(r"connect\(\d+, \{sa_family=(AF_[A-Z0-9]+)(.*?)\}, \d+(?:\) = (-?\d+)(?: (E[A-Z]+))?| <unfinished \.\.\.>)")
 V4_RE = re.compile(r'sin_port=htons\((\d+)\), sin_addr=inet_addr\("([0-9.]+)"\)')
 V6_RE = re.compile(r'sin6_port=htons\((\d+)\).*?inet_pton\(AF_INET6, "([0-9a-fA-F:.]+)"')
 DNS = (ipaddress.ip_address("127.0.0.53"), 53)
@@ -75,7 +77,7 @@ def read_strace(path):
             key = (ip, port)
             e = external.setdefault(key, {"addr": ip, "port": port, "count": 0, "results": []})
             e["count"] += 1
-            res = m.group(4) or ("ok" if m.group(3) == "0" else m.group(3))
+            res = m.group(4) or ("unfinished" if m.group(3) is None else "ok" if m.group(3) == "0" else m.group(3))
             if res not in e["results"]:
                 e["results"].append(res)
         else:

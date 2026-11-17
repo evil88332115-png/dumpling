@@ -12,7 +12,7 @@ name: offline-scan
 #           cgroup 比對與 strace 都看不到）。判定：pipeline/offline-check.py（對外連線 0、名稱查詢 0、REJECT 0、映像事件 0、鏡像都是 source=internal）。
 #           標準答案比對在 scan.sh 裡（不符就 FAIL）。兩次的結果用 jcmp 逐列比對（在 workflow 外做，結果寫進 PR 說明）。
 # 限制（C0 2026-11-17）：只能 workflow_dispatch；runs-on 寫死 GitHub hosted 的 ubuntu-24.04（會用 sudo 改 iptables，不能在自架 runner 跑）；
-#   permissions 只有 contents: read；不用任何 secret。這不是真正的「沒有外網」：真正的驗收要在內部 GitLab、沒有外網的 runner 上做（GITLAB-PORT 第 6 節）。
+#   permissions 只有 contents: read 與 actions: read（下載別的 run 的 artifact）；不用任何 secret。這不是真正的「沒有外網」：真正的驗收要在內部 GitLab、沒有外網的 runner 上做（GITLAB-PORT 第 6 節）。
 on:
   workflow_dispatch:
     inputs:
@@ -35,6 +35,7 @@ on:
 
 permissions:
   contents: read
+  actions: read     # 下載別的 run 的 build artifact（reuse_build_run）要這個；只有讀取，其他權限一律不給
 
 defaults:
   run:
