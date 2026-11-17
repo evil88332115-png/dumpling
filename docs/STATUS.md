@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 21:37 +0800（C3）
+最後更新：2026-11-17 22:01 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -40,6 +40,7 @@
 - 2026-11-17 合併：**#170**（cece9be，日期測試修正，main 恢復綠）、**#127**（a896a5a，M7d-4＋C4 的 AI NAS 標準答案 31b0d5d）、**#166**（c30fb0e，D-065～D-067）、**#167**（37b8909，README）、**#168**（60b9cbb，dsc PROVENANCE）。等合併：#169（C3 支援期限合併＋用詞，C0 驗證通過、補件已看；CI rerun 偶發 test_platform_plan 撞名→轉 C1）；#138（C4 處理 note 衝突中）；#172（S3 板子檢查，驗證不通過 1 項→lockdown=absent 保留 low 寫成例外＋補測試，C0 看過 30cf876）；#171（S1 前的 fc8c8e2 備援下載，驗證通過，C1 補 3 測試＋5 處說明）。驗證中：#130（C2 Intel FIT）。進行中：C1 S1（wp1/s1-kernel，符號連結判 unproven 與上游刻意不同，已通知 sca-center）；C3 S4 PR-1（CSAF）。待使用者：同步模式 A（複本＋每週同步）或 B（只用 sca-center 公開版）；16 個示範 Issue 留或關；板上收集腳本要不要帶。
 - 2026-11-17 下午：合併 #169（支援期限去重＋用詞）、#171（fc8c8e2 備援下載＋補件）、#172（S3 板子檢查匯入端）、#173（偶發撞名）、#138（M7d-3a boot config，C0 補派驗證通過）、#130（Intel FIT，basis 依狀態）、#174（三平台 version-state）、#175（S4 CSAF 工具＋4 項修正保留）、#176（SUBLEVEL＋缺標頭 GAP）、#177（D-068 M9 六層 SBOM、D-069、D-070 aisbom／Semgrep 條件）、#178（M9 N1 設計）。WATCH_REAL_ISSUES=on（使用者 03:17Z 設）；第一次開 Issue 是 11-18 01:17Z 排程，預期 9 個，C3 核對。使用者決定 D-071（PR #180）：上游原有問題只回報不修、S2 暫停、sca-center 在 dumpling 測試完後打包乾淨版本（打包前問使用者）；已回報 sca-center：符號連結判 absent、csaf 4 處、DT autoCreate／權限註解、source_tree 只比主.次、kernel_boot 漏傳 --k1-config、rename 表新舊檢查。進行中：C1 S1 開 PR；C3 #179（S4 PR-2，預驗中）；C4 等 S1 後跑 dev run，M9 N1 已合併；C2 待指派。待使用者：無。
 - 2026-11-17 晚：再合併 #179（S4 PR-2 監控接 CSAF 草稿）、#181（S1 K1 同步）、#182（儀表板 CSAF 區塊）、#183（GitLab T-24）、#184、#185（T-06 PR-1 內部鏡像）、#186（S4 接線：正式 Release 比前一版；舊格式 NOT_RUN、semver＋自然排序）、#187、#188（D-072 inventory: 命名）、#189（wp7 notes 不帶網址）、#200（SBOM 根名稱不帶路徑）、#201（Release body 網址統一改寫）、#202（原始碼 SBOM 相對路徑＋最後保險）、#203（GitLab payload 說明必要）、#204（韌體 Release 也改寫）。今天共 33 個 PR。三個平台 dev run＋release 草稿全部完成（rpi 44034643050、rock 44037426757、ai-nas 44059629464）；ai-nas 403 原因：body 含 https 網址（診斷 44051748503）。Jetson not_affected +274 已由 C1 逐筆解釋（樹外模組建置紀錄 184/184 完整，標頭判定）。D-071：上游問題只回報；四支 tools/cra 報告／VEX 程式凍結，等乾淨版本；已回報 sca-center 約 15 項。sca-center 確認四個機器讀取路徑不變、zip 會先加 manifest.json、已緩解改 exploitable＋workaround_available（換版時 C3 儀表板必須同步分開計數）。進行中：#199（T-14，等 Jetson 草稿 jcmp 與 C1 OK）。待使用者：GitHub Pages、python3.14-venv。明天 01:17Z 第一次正式監控（預期 9 個 Issue），C3 核對。
+- **2026-11-17 晚：使用者決定這禮拜暫停 dumpling 開發，資源移到 sca-center。** C1–C4 收工（推到自己分支、不開 PR、停代理、寫 STATUS）。已上線的每日監控照常跑，不停。停的位置：第一階段剩 T-06 PR-2（wp1/t06-pr2：等上游 sca-center #245 合併後同步 grype_db_update_mode；斷網實跑 44088390117 證明抓得到洩漏，另有 Cloudflare／Fastly／169.254.169.254 連線待查，診斷 run 44097431503）、明天第一次正式開 Issue（C0 自己看）、收尾重打 Jetson tag（先 v39.2.0 再 v39.2.1）。今天再合併 #199（T-14）、#205、#206（T-14 收尾）、#207（T-04）、#208（T-06 第 2 層 workflow）、#209（GitLab 常駐 DT 接線，預設關閉，打開前要 T-07）。sca-center 試用包 bbe75e1 本機試接：不能直接替換（16 介面、14 行為），疑似內部資料位置已回報；採用規格 A／B／C 已傳 sca-center，等使用者決定。
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
