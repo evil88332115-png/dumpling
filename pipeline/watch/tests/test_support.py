@@ -235,6 +235,50 @@ class TestRun(Base):
         self.assertTrue(any(r[0] == "p1" and r[1] == "FAIL" and "RuntimeError" in r[2] for r in res["rows"]), res["rows"])
         self.assertEqual(len(self.titles(plan)), 1)       # p2 照樣開
 
+    def test_our_os_and_release_component_one_issue(self):
+        # 我們自己的 OS 是 Debian 12，Release SBOM 裡也有 Debian 12：同一個資料表項目只開一個 Issue，用 OS 的 key（和只有 OS 時相同，已經開過的不重開），
+        # 內文寫兩個來源與受影響的 Release
+        os_block = 'os:\n  distro: debian\n  release: "12"'
+        self.project(until="2031-12-31", os_resp="ours", status="shipped", os_block=os_block)
+        rc, res, plan_os, _ = self.run_support()
+        self.assertEqual(len(plan_os["actions"]), 1, self.titles(plan_os))
+        self.release(version="v1.0.0", comps=(("debian", "12.5"),))
+        rc, res, plan, _ = self.run_support()
+        t = self.titles(plan)
+        self.assertEqual(len(t), 1, t)
+        self.assertIn("OS Debian 12", t[0])
+        a = plan["actions"][0]
+        self.assertEqual(a["key"], plan_os["actions"][0]["key"])
+        self.assertEqual(a["key"], support.key_of("p1", "os", "debian-12", "ends before the product support period", "2026-06", "2031-12"))
+        self.assertIn("project.yml 的 os", a["body"])
+        self.assertIn("p1/v1.0.0", a["body"])
+        self.assertNotIn("project.yml 的 os", plan_os["actions"][0]["body"])     # 只有 OS 時內文照舊
+        # 兩邊都還在報告裡（各一列），只有 Issue 合併
+        self.assertIn("p1（OS）", [r[0] for r in res["rows"]])
+        self.assertIn("p1@v1.0.0", [r[0] for r in res["rows"]])
+
+    def test_our_os_different_entry_from_component_not_merged(self):
+        # OS 是 Debian 12、Release 裡的是另一個資料表項目：各開各的
+        t = table()
+        t["entries"].append({"id": "acme-kernel-6", "name": "Acme kernel 6", "match": [{"type": "operating-system", "name": "acme-kernel", "version_prefix": "6"}],
+                             "phases": [{"name": "vendor", "end": None}], "sources": ["https://example.org/kernel"], "checked": "2026-11-01"})
+        self.write_table(t)
+        self.project(until="2031-12-31", os_resp="ours", status="shipped", os_block='os:\n  distro: debian\n  release: "12"')
+        self.release(comps=(("acme-kernel", "6.1"),))
+        rc, res, plan, _ = self.run_support()
+        t = self.titles(plan)
+        self.assertEqual(len(t), 2, t)
+        self.assertTrue(any("OS Debian 12" in x for x in t), t)
+        self.assertTrue(any("Acme kernel 6" in x and "維護期沒有公開" in x for x in t), t)
+
+    def test_customer_os_component_key_unchanged(self):
+        # os_responsibility 不是 ours：照舊只有元件的 Issue（key 不變）
+        self.project(until="2031-12-31")
+        self.release()
+        rc, res, plan, _ = self.run_support()
+        self.assertEqual([a["key"] for a in plan["actions"]],
+                         [support.key_of("p1", "component", "debian-12", "ends before the product support period", "2026-06", "2031-12")])
+
     def test_component_issue_once_per_project(self):
         # 同一個元件問題在兩個 Release：一個 Issue，列出兩個版本（舊 Release 不各開一堆，預驗建議 9）
         self.project(until="2031-12-31")

@@ -1927,7 +1927,7 @@ def render_report(mode, detail, status, per, gaps, attn, notes, coverage, action
           "|---|---|---|---|---|---|---|---|---|"]
     for r in per.values():
         L.append(f"| {md_cell(r['uuid'])} | {md_code(r['tag'])} | {r.get('report_status') or 'NOT_RUN'} | {r.get('release_gate') or 'NOT_RUN'} | "
-                 f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or '不適用'} | {md_cell(r['why'])} |")
+                 f"{r['grype']} | {r['exploited']} | {r['version_unknown']} | {r['kernel_cna'] or FW_NO_ITEM} | {md_cell(r['why'])} |")
     L += ["", "## 每日沒有涵蓋的項目", ""] + [f"- {x}：{y}" for x, y in coverage]
     if fw is not None:
         L += render_firmware(per, fw, inv_fw, projs or [])
