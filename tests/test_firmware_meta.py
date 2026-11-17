@@ -796,6 +796,35 @@ class Workflow(unittest.TestCase):
             self.assertIn("GHX_TRIES:-8", fh.read())
         self.assertIn("firmware-ghx.sh", "\n".join(s.get("run", "") for s in steps))
 
+    def test_dt_lifecycle_goes_through_dt_session(self):
+        # T-04：firmware-dt 的 DT 起停只經 pipeline/firmware-dt-session.sh（dt-session.sh 的 dt_begin／dt_ready／dt_end），不自己呼叫 dt-ephemeral.sh
+        steps = self.wf["jobs"]["firmware-dt"]["steps"]
+        runs = [s.get("run", "") for s in steps]
+        for r in runs:
+            self.assertNotIn("dt-ephemeral.sh", r)
+            self.assertNotRegex(r, r"(^|[\s;|&])pipeline/firmware-dt\.sh")             # 只經外層呼叫
+        up = [s for s in steps if "firmware-dt-session.sh" in s.get("run", "")]
+        self.assertEqual(len(up), 1)
+        self.assertIn('--result "$RESULT_DIR"', up[0]["run"])
+        self.assertNotIn("if", up[0])
+        self.assertNotIn("MIRROR_REFRESH_STATUS", str(up[0].get("env")))           # 外層自己設（resident 時由 dt_mirror_status 拿掉）
+        down = [s for s in steps if "dt_end" in s.get("run", "")]
+        self.assertEqual(len(down), 1)
+        self.assertEqual(down[0].get("if"), "always()")
+        self.assertIn(". pipeline/lib/dt-session.sh", down[0]["run"])
+        self.assertGreater(steps.index(down[0]), steps.index(up[0]))
+        # 不選常駐 DT（GitHub 上一律 FAIL）：這份 workflow 的任何地方都不出現常駐模式的設定
+        for name in ("DUMPLING_DT_", "DT_WAIT_RC_FILE"):
+            self.assertNotIn(name, self.text)
+        self.assertEqual(self.wf["jobs"]["firmware-dt"]["env"], {"DT_OSV_ECOSYSTEMS": "PyPI,npm,Ubuntu"})
+        for p in ("pipeline/lib/dt-session.sh", "pipeline/lib/dt_resident.py", "pipeline/firmware-*.sh"):
+            self.assertIn(p, self.on["pull_request"]["paths"])                     # 改了 DT 的起停也要跑這份 workflow
+
+    def test_pilot_env_is_outside_the_result_dir(self):
+        paths = next(s["run"] for s in self.wf["jobs"]["firmware-dt"]["steps"] if s.get("name") == "路徑")
+        self.assertIn("PILOT_ENV=$RUNNER_TEMP/pilot-env/pilot.env", paths)          # dt_ready 也會擋，這裡先鎖住設定
+        self.assertIn("RESULT_DIR=$RUNNER_TEMP/firmware-dt-result", paths)
+
     def test_no_pull_request_target_and_no_continue_on_error(self):
         self.assertNotIn("pull_request_target", self.on)
         self.assertNotIn("pull_request_target", self.text)
