@@ -1181,3 +1181,33 @@ class TestFirmware(Base):
         self.assertFalse(os.path.islink(os.path.join(self.out, "firmware")))
         self.assertEqual(os.listdir(target), [])
 
+
+
+class TestFirmwareDt(Base):
+    """firmware-meta 的 dt（C2 #140）：只用來顯示；合法組合以外一律「dt 欄位格式不對」，不顯示原文。"""
+    WHY = "DT 上傳沒有完成；Release 的內容與 DT 的結果無關"
+
+    def test_combinations(self):
+        ok = {"status": "OK", "result": "OK", "reason": None}
+        self.assertEqual(collect.fw_dt({"dt": ok}), ok)
+        for res in ("FAIL", "NOT_RUN"):
+            self.assertEqual(collect.fw_dt({"dt": {"status": "GAP", "result": res, "reason": self.WHY}}),
+                             {"status": "GAP", "result": res, "reason": self.WHY})
+        self.assertIsNone(collect.fw_dt({}))
+        bad = [None, [], "x", 5, True, {}, {"status": "OK", "result": "OK", "reason": "x"},
+               {"status": "GAP", "result": "OK", "reason": None}, {"status": "OK", "result": "FAIL", "reason": self.WHY},
+               {"status": "GAP", "result": "FAIL", "reason": None}, {"status": "GAP", "result": "FAIL", "reason": "   "},
+               {"status": "GAP", "result": "FAIL", "reason": "x" * 201}, {"status": "GAP", "result": "BOOM", "reason": "x"},
+               {"status": "GAP", "result": "FAIL", "reason": ["x"]}, {"status": "<b>", "result": "OK", "reason": None}]
+        for d in bad:
+            with self.subTest(d=d):
+                self.assertEqual(collect.fw_dt({"dt": d}), collect.FW_DT_BAD)
+
+    def test_collected_into_inventory(self):
+        def mut(m, f):
+            m["dt"] = {"status": "GAP", "result": "NOT_RUN", "reason": self.WHY}
+        root = self.dirs({"fw": ({"tag_name": FW_TAG, "prerelease": False, "draft": False, "published_at": "2026-11-20T03:10:00Z",
+                                  "html_url": "https://github.com/o/r/x"}, fw_files(mutate=mut))})
+        code, so = go(["--from-dir", root, "--out", self.out])
+        self.assertEqual(self.inv()["firmware"]["dt"], {"status": "GAP", "result": "NOT_RUN", "reason": self.WHY})
+        self.assertEqual(code, 0, so)                 # dt 只用來顯示：不讓韌體 Release GAP

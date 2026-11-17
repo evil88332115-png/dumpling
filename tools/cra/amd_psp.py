@@ -68,6 +68,7 @@ EFS 有位移時指標值可以是「視窗座標」（加視窗開頭）或「�
 """
 import hashlib
 import importlib.util
+import re
 import struct
 import sys
 from pathlib import Path
@@ -1377,12 +1378,12 @@ def markdown_lines(amd, e):
             flag += ("（**歧義**：" + (f"同一個指標的另一種讀法在 {e(', '.join(r['readings']))}；" if r.get("readings") else f"同一個位置也用視窗開頭 {e(', '.join(r['other_bases']))} 讀過；"
                                      if r.get("other_bases") else "它在這樣的目錄底下；")
                      + "兩種以上的讀法都通過結構檢查而內容不同、或都沒通過，工具不判斷哪個是硬體實際使用的，條目與版本不進 SBOM）")
-        L += [f"#### {e(KIND_TEXT[r['kind']])} `{e(r['cookie'])}`（位移 0x{r['offset']:x}，視窗開頭 0x{r['base']:x}）{flag}", "",      # 不寫 ` @0x…`：空白後接 @ 在 GitHub 可能被當成提及
-              f"{r['num_entries']} 項；checksum {r['checksum']}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
+        L += [f"#### {e(KIND_TEXT[r['kind']])} `{re.sub(r'[^A-Za-z0-9$]', '?', str(r['cookie']))[:16]}`（位移 0x{r['offset']:x}，視窗開頭 0x{r['base']:x}）{flag}", "",      # 不寫 ` @0x…`：空白後接 @ 在 GitHub 可能被當成提及
+              f"{e(r['num_entries'])} 項；checksum {e(r['checksum'])}（{'相符' if r['checksum_ok'] else '不符' if r['checksum_ok'] is False else '未檢查'}）；來源：" + e("；".join(r["reached_via"])), ""]
         if r["kind"].startswith("combo"):
             if r["entries"]:
                 L += ["| # | id | 目錄位址 | 解到 |", "|---|---|---|---|"]
-                L += [f"| {x['index']} | {e(x['id'])} | {e(x['address'])} | {e(', '.join(f'0x{c:x}' for c in x.get('children', [])) or '無')} |" for x in r["entries"]]
+                L += [f"| {e(x['index'])} | {e(x['id'])} | {e(x['address'])} | {e(', '.join(f'0x{c:x}' for c in x.get('children', [])) or '無')} |" for x in r["entries"]]
                 L.append("")
             continue
         if r["entries"]:
@@ -1392,26 +1393,26 @@ def markdown_lines(amd, e):
                 note = x["kind"] if x["kind"] in ("ish", "compressed", "empty", "dest-only", "value", "unresolved") else ""
                 if x["kind"] == "ish":
                     note = "slot header，checksum " + ("相符" if x["ish"]["checksum_verified"] else "不符")
-                L.append(f"| {x['index']} | 0x{x['type']:02x} | {e(x['type_name'] or '未知')} | {x.get('subprogram', '')} | {x.get('instance', '')} | {e(loc or '未解')} | 0x{x['size']:x} | {e(x['version'] or note)} |")
+                L.append(f"| {e(x['index'])} | 0x{x['type']:02x} | {e(x['type_name'] or '未知')} | {e(x.get('subprogram', ''))} | {e(x.get('instance', ''))} | {e(loc or '未解')} | 0x{x['size']:x} | {e(x['version'] or note)} |")
             L.append("")
     amb = amd.get("ambiguous") or {"psp_firmware": [], "microcode": []}
     if amb["psp_firmware"] or amb["microcode"]:
         L += ["#### 歧義目錄裡的版本與微碼（GAP：不進 SBOM）", "",
               "下列項目只在「兩種解讀都成立」的目錄裡讀到（見上面標 **歧義** 的目錄）。工具不判斷哪一個解讀才是硬體實際使用的，所以只列出，不當成確定的結果。", ""]
-        L += [f"- PSP type 0x{p['type']:02x} {e(p['type_name'] or '')} sub {p['subprogram']}：版本 {e(p['version'])}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in p['locations'][:2]))}）" for p in amb["psp_firmware"]]
-        L += [f"- 微碼 patch level {m['patch_id']}、equivalence id {m['equiv_id']}、{m['date']}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in m['locations'][:2]))}）" for m in amb["microcode"]]
+        L += [f"- PSP type 0x{p['type']:02x} {e(p['type_name'] or '')} sub {e(p['subprogram'])}：版本 {e(p['version'])}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in p['locations'][:2]))}）" for p in amb["psp_firmware"]]
+        L += [f"- 微碼 patch level {e(m['patch_id'])}、equivalence id {e(m['equiv_id'])}、{e(m['date'])}（{e('；'.join(x['directory'] + ' #' + str(x['index']) for x in m['locations'][:2]))}）" for m in amb["microcode"]]
         L.append("")
     L += ["#### AMD 微碼（BIOS 目錄 type 0x66）", ""]
     if amd["microcode"]:
         L += ["| patch level | 日期 | equivalence id | CPUID | 形式 | 大小 | 位置 |", "|---|---|---|---|---|---|---|"]
-        L += [f"| {m['patch_id']} | {m['date']} | {m['equiv_id']} | {e(', '.join(m['cpuids']) if m['cpuids'] else '未對出（沒有等價表）')} | {m['form']} | 0x{m['patch_size']:x} | "
+        L += [f"| {e(m['patch_id'])} | {e(m['date'])} | {e(m['equiv_id'])} | {e(', '.join(m['cpuids']) if m['cpuids'] else '未對出（沒有等價表）')} | {e(m['form'])} | 0x{m['patch_size']:x} | "
               + e("；".join(f"{x['directory']} #{x['index']} @0x{x['offset']:x}" for x in m["locations"][:2])) + " |" for m in amd["microcode"]]
     else:
         L.append("沒有讀到（GAP，不是沒有微碼）。")
     L += ["", "#### AGESA", ""]
     if amd["agesa"]["values"]:
         L += ["| 標記 | 字串 | 次數 | 位置 |", "|---|---|---|---|"]
-        L += [f"| {e(x['tag'])} | {e(x['value'])}{'（被截斷，不是完整版本）' if x.get('truncated') else ''} | {x['count']} | " + e("；".join(f"{w['where']} +0x{w['offset']:x}" for w in x["found"][:2])) + " |" for x in amd["agesa"]["values"]]
+        L += [f"| {e(x['tag'])} | {e(x['value'])}{'（被截斷，不是完整版本）' if x.get('truncated') else ''} | {e(x['count'])} | " + e("；".join(f"{w['where']} +0x{w['offset']:x}" for w in x["found"][:2])) + " |" for x in amd["agesa"]["values"]]
     else:
         L.append("沒有找到" + ("" if amd["agesa"]["complete"] else "（搜尋不完整，不代表不存在）") + "。")
     L += [""] + [f"- AGESA 搜尋：{e(p)}" for p in amd["agesa"]["problems"]]

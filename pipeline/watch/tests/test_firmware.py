@@ -539,8 +539,8 @@ class InterfaceD38962f(RematchInput):
         self.assertEqual(self.adv(self.load(), "bios-a")["state"], "ATTENTION")
 
     def test_reasons_cap(self):
-        self.set_results("bios-a", [], "OK", reasons=["r"] * 21)
-        self.set_results("bios-b", [], "OK", reasons=["r"] * 20)
+        self.set_results("bios-a", [], "OK", reasons=["r"] * (match.REMATCH_MAX_REASONS + 1))
+        self.set_results("bios-b", [], "OK", reasons=["r"] * match.REMATCH_MAX_REASONS)
         self.write_rm()
         rm = self.load()
         self.assertEqual(self.adv(rm, "bios-a")["state"], "GAP")
@@ -1275,8 +1275,8 @@ class StateSizeGuard(FW):
         self.assertTrue(self.fw_opens(plan))
 
     def test_bulletins_cap_20(self):
-        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(21)))], "ATTENTION")
-        self.set_results("bios-b", [rule("rule:b", tuple("AMI-SA-%d" % i for i in range(20)))], "ATTENTION")
+        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(match.REMATCH_MAX_BULLETINS + 1)))], "ATTENTION")
+        self.set_results("bios-b", [rule("rule:b", tuple("AMI-SA-%d" % i for i in range(match.REMATCH_MAX_BULLETINS)))], "ATTENTION")
         self.write_rm()
         _, projs, _ = match.load_inventory(os.path.join(self.inv, "inventory.json"), self.inv)
         rm = match.load_rematch(self.rmdir, [p for p in projs if match.is_fw(p)])
@@ -1287,7 +1287,7 @@ class StateSizeGuard(FW):
         """C0：21 個公告 ID 的結果不會被截斷成 20 個寫進狀態（看起來像完整的）。rematch 那條路整份樣本 GAP、沿用上一輪；
         讀入的舊狀態有 21 個的紀錄整筆丟掉。"""
         self.baseline()
-        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(21)))], "ATTENTION")
+        self.set_results("bios-a", [rule("rule:a", tuple("AMI-SA-%d" % i for i in range(match.REMATCH_MAX_BULLETINS + 1)))], "ATTENTION")
         self.set_results("bios-b", [], "OK")
         _, _, plan = self.go(NOW2)
         adv = plan["state"]["firmware"]["samples"][self.uuid("bios-a")]["advisory"]
@@ -1296,9 +1296,128 @@ class StateSizeGuard(FW):
         for x in plan["state"]["firmware"]["samples"].values():
             for e in x["advisory"].values():
                 self.assertLessEqual(len(e["bulletins"]), match.FW_MAX_BULLETINS)
-        old = {"samples": {"u": {"advisory": {"rule:x": {"kind": "rule", "result": "affected", "bulletins": ["S-%d" % i for i in range(21)]},
+        old = {"samples": {"u": {"advisory": {"rule:x": {"kind": "rule", "result": "affected",
+                                                         "bulletins": ["S-%d" % i for i in range(match.REMATCH_MAX_BULLETINS + 1)]},
                                               "rule:y": {"kind": "rule", "result": "affected", "bulletins": ["S-1"]}}}}}
         out = match.sanitize_firmware(old)["samples"]["u"]["advisory"]
         self.assertNotIn("rule:x", out)
         self.assertEqual(out["rule:y"]["bulletins"], ["S-1"])
 
+
+class RejectedEntries(RematchInput):
+    """C2 介面 4ec170b：rematch-summary.json 的 rejected（firmware-meta 條目被丟掉）→ GAP、整輪降級；代碼白名單。"""
+
+    def test_rejected_listed_and_degrades(self):
+        self.baseline()
+        self.set_results("bios-a", [], "OK")
+        self.set_results("bios-b", [], "OK")
+        self.write_rm({"rejected": [{"index": 3, "reason": "invalid-slug (length 4)"}, {"index": 4, "reason": "duplicate-slug"}]})
+        _, _, plan = self.go(NOW2, write=False)
+        res_ = json.load(open(os.path.join(self.w, "out-" + NOW2[:10], "result.json")))
+        g = [x for x in res_["gaps"] if "拒絕了 firmware-meta.json 的 2 筆" in x]
+        self.assertTrue(g, res_["gaps"])
+        self.assertIn("第 3 筆（從 0 起算）：invalid-slug (length 4)", g[0])
+        self.assertIn("duplicate-slug", g[0])
+        self.assertTrue([x for x in res_["serious"] if "拒絕" in x])
+        self.assertEqual(res_["status"], "ATTENTION")
+        report = open(os.path.join(self.w, "out-" + NOW2[:10], "report.md")).read()
+        self.assertEqual(match.unsafe_markdown(report), [])
+
+    def test_rejected_bad_shapes(self):
+        for bad in ("x", [{"index": "3", "reason": "duplicate-slug"}], [{"index": 1, "reason": "@everyone [x](https://e.example)"}],
+                    [{"index": True, "reason": "reserved-slug"}], [{"index": 1, "reason": "invalid-slug (type str\n)"}]):
+            with self.subTest(bad=bad):
+                self.set_results("bios-a", [], "OK")
+                self.set_results("bios-b", [], "OK")
+                self.write_rm({"rejected": bad})
+                rm = self.load()
+                self.assertTrue(rm["rejected"])
+                self.assertNotIn("everyone", "".join(rm["rejected"]))
+
+    def test_empty_or_missing_rejected_is_fine(self):
+        for over in ({"rejected": []}, {}):
+            self.set_results("bios-a", [], "OK")
+            self.set_results("bios-b", [], "OK")
+            self.write_rm(over)
+            self.assertEqual(self.load()["rejected"], [])
+
+
+class RematchLimits(RematchInput):
+    """C0 決定（2026-11-15，#135 用真實樣本驗證）：bulletins 每筆 64 個（NUC11 的微碼 000806C2 rev 0x16 有 24 個 INTEL-SA）、
+    reasons 50 筆×1000 字元（ASUS 樣本有 376～386 字元的）。和 C2 的 tools/cra/fw_rematch.py 同名同值。"""
+
+    def test_values(self):
+        self.assertEqual((match.REMATCH_MAX_REASONS, match.REMATCH_MAX_REASON_CHARS, match.REMATCH_MAX_BULLETINS,
+                          match.REMATCH_MAX_BULLETIN_CHARS, match.REMATCH_MAX_RESULT_REASON_CHARS), (50, 1000, 64, 80, 300))
+
+    def test_real_sizes_accepted(self):
+        self.set_results("bios-a", [ucode("ucode:000806C2/0x80:0x16", tuple("INTEL-SA-%05d" % i for i in range(24)))], "ATTENTION",
+                         reasons=["r" * 386, "x" * match.REMATCH_MAX_REASON_CHARS])
+        self.set_results("bios-b", [], "OK")
+        self.write_rm()
+        self.assertEqual(self.adv(self.load(), "bios-a")["state"], "ATTENTION")
+
+    def test_over_limits_gap(self):
+        for name, over in (("reason chars", {"reasons": ["x" * (match.REMATCH_MAX_REASON_CHARS + 1)]}),
+                           ("bulletin chars", None), ("result reason", "rr")):
+            with self.subTest(name):
+                if over == "rr":
+                    r = rule("rule:a", ("AMI-SA-1",))
+                    r["reason"] = "x" * (match.REMATCH_MAX_RESULT_REASON_CHARS + 1)
+                    self.set_results("bios-a", [r], "ATTENTION")
+                elif over is None:
+                    self.set_results("bios-a", [rule("rule:a", ("A" * (match.REMATCH_MAX_BULLETIN_CHARS + 1),))], "ATTENTION")
+                else:
+                    self.set_results("bios-a", [], "OK", **over)
+                self.set_results("bios-b", [], "OK")
+                self.write_rm()
+                self.assertEqual(self.adv(self.load(), "bios-a")["state"], "GAP")
+
+    def test_same_as_c2_constants(self):
+        """C2 那邊的 tools/cra/fw_rematch.py 存在（#135 合併後）就比對四個常數；還沒合併時跳過。"""
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "cra", "fw_rematch.py")
+        if not os.path.isfile(path):
+            self.skipTest("tools/cra/fw_rematch.py 還沒合併（C2 的 #135）")
+        src = open(path, encoding="utf-8").read()
+        import re as _re
+        for name in ("REMATCH_MAX_REASONS", "REMATCH_MAX_REASON_CHARS", "REMATCH_MAX_BULLETINS", "REMATCH_MAX_BULLETIN_CHARS",
+                     "REMATCH_MAX_RESULT_REASON_CHARS"):
+            m = _re.search(r"^%s\s*=\s*(\d+)" % name, src, _re.M)        # 讀原始碼，不 import（不執行對方的模組）
+            self.assertIsNotNone(m, name)
+            self.assertEqual(int(m.group(1)), getattr(match, name), name)
+
+
+
+class FirmwareDt(FW):
+    """C0（2026-11-15）：dt 的 status 不是 OK → 需注意（原因照 meta 的固定句），不影響公告比對、不開 Issue、不降級。"""
+
+    def result(self, day):
+        return json.load(open(os.path.join(self.w, "out-" + day[:10], "result.json")))
+
+    def test_gap_goes_to_attention_not_serious(self):
+        self.baseline()
+        self.fw["dt"] = {"status": "GAP", "result": "NOT_RUN", "reason": "DT 上傳沒有完成；Release 的內容與 DT 的結果無關"}
+        for s in ("bios-a", "bios-b"):
+            self.set_results(s, [], "OK")
+        _, _, plan = self.go(NOW2)
+        r = self.result(NOW2)
+        self.assertTrue([x for x in r["attention"] if "DT 上傳（NOT_RUN）：DT 上傳沒有完成" in x], r["attention"])
+        self.assertFalse([x for x in r["serious"] if "DT" in x])
+        self.assertEqual(self.fw_opens(plan), [])
+        self.assertFalse([x for x in plan["actions"] if "watch-health" in x.get("labels", [])])
+
+    def test_ok_absent_and_bad(self):
+        self.baseline()
+        for s in ("bios-a", "bios-b"):
+            self.set_results(s, [], "OK")
+        for dt, where, text in (({"status": "OK", "result": "OK", "reason": None}, "notes", "DT 上傳：OK"),
+                                (None, "notes", "沒有 DT 結果"),
+                                ({"status": "GAP", "result": "FAIL", "reason": "dt 欄位格式不對"}, "attention", "dt 欄位格式不對")):
+            with self.subTest(dt=dt):
+                if dt is None:
+                    self.fw.pop("dt", None)
+                else:
+                    self.fw["dt"] = dt
+                self.go(NOW2)
+                r = self.result(NOW2)
+                self.assertTrue([x for x in r[where] if text in x], r[where])

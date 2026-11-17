@@ -1,0 +1,2 @@
+KERNEL-NOT-JUDGED	6.1.120	出貨但沒有列在 --kernel-version，這次只判定指定的核心
+KERNEL-VERSIONS-NOTE	映像出貨的核心 6.1.120 沒有判定（出貨但沒有列在 --kernel-version，這次只判定指定的核心）；要排除某顆核心必須記錄證據（例如設計文件寫明「這個板子不載入它」），沒有證據不能當作它不受影響

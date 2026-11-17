@@ -10,6 +10,9 @@ top：表頭前面的列（例如摘要數字）；表頭、凍結與篩選都�
 
 自由版面（儀表板用）：Canvas(name) 逐格 set(ref, 值, Style(...))、merge("A1:L1")、height(列, 點數)、原生圖表 Chart；
 write_xlsx 的工作表清單可以混用 Sheet 與 Canvas。沒有用到 Canvas 時，輸出與以前相同。
+
+同樣的內容一定寫出位元組相同的檔案：zip 成員的時間固定是 1980-01-01 00:00:00（ZIP_EPOCH），不寫產生當下的時間，
+所以重跑時檔案與 SHA256SUMS 不會因為跨秒而不同。
 """
 import dataclasses
 import math
@@ -18,6 +21,7 @@ import zipfile
 from xml.sax.saxutils import escape
 
 MAX_CELL = 32000      # Excel 一格最多 32767 字元
+ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)   # zip 格式能表示的最早時間；所有成員都用這個時間
 _BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
 _BAD_NAME = re.compile(r"[\[\]:*?/\\]")
 
@@ -423,15 +427,21 @@ def write_xlsx(path, sheets):
               + f'<Relationship Id="rId{len(sheets) + 1}" '
               'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", ct)
-        z.writestr("_rels/.rels", rels)
-        z.writestr("xl/workbook.xml", wb)
-        z.writestr("xl/_rels/workbook.xml.rels", wbrels)
-        z.writestr("xl/styles.xml", reg.xml())
+        def put(name, data):
+            # 用固定時間的 ZipInfo（writestr 給字串名稱時會寫入當下時間）；權限與壓縮方式和 writestr 給字串名稱時相同
+            zi = zipfile.ZipInfo(name, ZIP_EPOCH)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.external_attr = 0o600 << 16
+            z.writestr(zi, data)
+        put("[Content_Types].xml", ct)
+        put("_rels/.rels", rels)
+        put("xl/workbook.xml", wb)
+        put("xl/_rels/workbook.xml.rels", wbrels)
+        put("xl/styles.xml", reg.xml())
         for i, s in enumerate(sheets, 1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", sheet_xml[i] if i in sheet_xml else _sheet_xml(s))
+            put(f"xl/worksheets/sheet{i}.xml", sheet_xml[i] if i in sheet_xml else _sheet_xml(s))
         for fn, data in extra.items():
-            z.writestr(fn, data)
+            put(fn, data)
 
 
 def read_xlsx(path):

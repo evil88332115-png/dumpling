@@ -148,7 +148,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 - 有 `gap` 的檔案不下載，fetch 回報 GAP；**不自動接受第一次看到的 sha256**。
 - 有 `commit` 的封存檔若 sha256 不符，不接受新雜湊，改用 `git clone`（只 https、不跑 hook、不抓 submodule）取該 commit、核對 `git rev-parse HEAD`，工作樹放 `<下載資料夾>/<name>.checkout`；clone 也失敗就是 FAIL。
 - 下載的檔案是不可信資料：只下載、不解開、不執行。
-- `platform_params.kernel_release` 可以是字串或清單（映像有不只一顆核心時，例如 Raspberry Pi 的 Pi 5 與 Pi 4），轉給 wizard 時每個值一個 `--kernel-version`（可重複；wizard 另接受環境變數 `SCA_KERNEL_VERSIONS`，命令列優先）。值原樣往下傳到 sca-scan 與核心工具；映像出貨但沒指定的核心記為「出貨但沒有判定」（`scan/kernel-versions.json`），指定 2 顆以上時一顆都不判定（多顆逐一判定還沒實作）。
+- `platform_params.kernel_release` 可以是字串或清單（映像有不只一顆核心時，例如 Raspberry Pi 的 Pi 5 與 Pi 4），轉給 wizard 時每個值一個 `--kernel-version`（可重複；wizard 另接受環境變數 `SCA_KERNEL_VERSIONS`，命令列優先）。值原樣往下傳到 sca-scan 與核心工具；映像出貨但沒指定的核心記為「出貨但沒有判定」（`scan/kernel-versions.json`），指定 2 顆以上時逐顆判定、沒指定而映像有多顆時全部逐顆判定（M7d-1，D-036／D-061：每顆的結果在 `scan/kernels/<版本>/`，`scan/kernel-versions.json` 在逐顆判定〔judged 2 顆以上〕時是 schema /3、judged 每顆記依據 basis 與結果檔；單顆照舊 /2）。
 - `platform_params.kernel_upstream_version`（選用）：核心的上游版本 X.Y.Z（每日監控的核心 CNA 比對用）。字串＝只有一顆 `kernel_release` 時那一顆的；多顆寫成 `{<kernel_release>: X.Y.Z}`。
   轉給 wizard 時每個一個 `--kernel-upstream-version <kernel_release>=<X.Y.Z>`，一路傳到 `kernel_versions.py --upstream-version`：和核心原始碼 Makefile 一致 → `upstream_basis` 是 `source-makefile+platform-param`；
   不一致 → 不採用任何一個（`upstream_version` 是 null，note 寫兩個值）。scan.sh 用 `python3 -I pipeline/project-info.py --kernel-args <專案資料夾> <版本>` 取得這兩種參數（一行一個；沒設定不印），
@@ -161,7 +161,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
   不能只由「SBOM 沒有核心」推定：單一 SBOM 的廠商核心（不是套件）要走 CNA 版本比對。名稱只接受 `^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$`，否則 exit 64。Jetson 的 `scan.sh` 是範例。
 - **宣告核心不是發行版的核心**（`kernel_not_distro`，選用）。Grype、DT 對 Debian／Ubuntu 套件是用發行版的原始碼套件與版本字串比對；核心若不是發行版建的（廠商 BSP 核心的 deb、Raspberry Pi、Radxa），這個比對不可靠，
   而且是漏報的方向（例如 `1:6.18.50-1+rpt1` 因為 epoch，被當成比 Debian 6.12.x 的任何修補都新，Debian 修好的 CVE 全算已修好，只剩 Debian 尚未修的）。所以 `C-kernel-coverage` 在這種核心上是 GAP，
-  即使 Grype 對核心有比對；核心 CVE 要改以上游版本對核心 CNA（尚未實作，見 M7）。
+  即使 Grype 對核心有比對；核心 CVE 沒有以上游版本對核心 CNA 列出（報告的核心段落照實寫出這個限制）。
   - 自動判斷（`tools/pilot/lib/kernelcheck.py`，只看 deb 核心套件；規則是**或**：任何一條成立就是，沒有一條能取消另一條，所有成立的原因都寫進 `scan/kernel-coverage.json` 的 `off_series`）：
     - a. 版本的 epoch ≥ 1（`1:6.18.50-1`；解析成整數，`0:` 等於沒有 epoch，不算）。Debian、Ubuntu 自己的 `linux` 不用 epoch。
     - b. 版本含已知的廠商後綴 `+rpt`、`+rpi`（不分大小寫，上游部分或 Debian revision 都算），或套件名稱含 `+rpt`、`-rpt-`。清單與理由在 `kernelcheck.py` 的 `VENDOR_LOCAL_SUFFIXES`、`VENDOR_NAME_MARKERS`。
@@ -171,6 +171,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
     - 名稱與版本取 SBOM 元件的欄位與 purl 兩邊（purl 先解碼），任何一邊成立就算。`nvidia-l4t-kernel*`（NVIDIA 的核心套件，經 `C-kernel-l4t-map` 對應 Canonical 核心比對）和 Canonical 的 Tegra 核心不會被標，Jetson 不受影響。
   - **自動規則抓不到的**（要用 `kernel_not_distro` 宣告）：廠商核心 deb 的版本與名稱都長得像 Debian／Ubuntu（沒有 epoch、沒有 `+rpt`／`+rpi`），而且 purl 沒有 `upstream=`／`distro=` 限定詞，或限定詞也像發行版
     （例如把來源套件命名成 `linux` 的廠商）；非 deb 的核心（rpm、apk、Yocto 的 `linux-kernel` 元件、沒有套件的廠商核心）；後綴不在清單裡的廠商（例如其他 SoC 廠商的 `+vendor1` 後綴）或不是 `+` 的寫法（`~rpt`、`.rpt`）；`distro=` 不是 Debian（例如 `raspbian-*`）而來源套件是自訂名稱、或 purl 只有 `upstream=` 沒有 `distro=`；套件名稱不在核心套件清單（`KERNEL_PACKAGE_PATTERNS`）裡，連「SBOM 有核心」都偵測不到的套件（例如 `raspberrypi-kernel`）。這些規則抓得到已知的樣子，抓不到不代表核心是發行版的。
+  - **只有上游版本範圍的比對**（另一條獨立的 GAP 規則，不需要設定；結構化判斷，不解析說明文字）：SBOM 有發行版的核心 deb（不含 `nvidia-l4t-kernel*`），所有核心比對都落在 generic／NVD 的核心元件（`pkg:generic/linux-kernel`、CPE `linux_kernel`），deb 一筆都沒有比對到，也沒有 `C-kernel-l4t-map` 的對應 → `C-kernel-coverage` 是 GAP：沒有用到發行版安全資料的修補（含回移）資訊，可能有誤報，也可能漏報（例如 Debian 13 的核心 deb，原始碼套件是 `linux-signed-amd64`，Debian 安全追蹤用 `linux` 記錄核心 CVE）。證據在 `scan/kernel-coverage.json` 的 `distro_data_unused`；和上面的 off-series 同時成立時兩個原因都記。交付報告的核心段落（`risk-assessment.md` 8.7 節、`kernel-vulnerabilities.md`）在 `C-kernel-coverage` 不是 OK 時依 `kernel-coverage.json` 的結構化欄位寫固定的英文句子（中文的狀態說明原文只留在 `scan-status.tsv`），以及核心 CVE 清單（`scan/kernel-config.json` 的 `results`）沒有成列的數量；客戶版沒有核心段落，不加。
   - 宣告：`sources.yml` 的 `releases.<版本>.platform_params.kernel_not_distro: "<理由>"`，或 `platform.yml` 的 `scan.kernel_not_distro: "<理由>"`（該平台所有專案、所有版本的預設；版本的值取代平台的預設）。理由字串非空、沒有控制字元、不以 `-` 開頭（精靈會當成選項）、最多 300 位元組。
     `project-info.py --kernel-args` 轉成 `--kernel-not-distro <理由>`（一行一個參數；理由不能是空的、不能有換行或控制字元、最多 300 位元組，否則 sources.yml／platform.yml 驗證就報錯），
     wizard → `scan-flash-package.sh` → `sca-scan` 一路傳（後兩者另接受 `SCA_KERNEL_NOT_DISTRO`）。SBOM 有核心時 `C-kernel-coverage` 是 GAP，說明寫出理由；SBOM 沒有核心（例如 `-os` 層）時照舊不寫這一列。Jetson 不設。

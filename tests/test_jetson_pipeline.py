@@ -449,8 +449,39 @@ class ScanHelpers(Tmp):
                          {"id": "CVE-4", "tier": "p1", "layer": "unknown"}]}
         m = js.vuln_metrics(rows)
         self.assertEqual((m["rows_total"], m["cves_total"], m["p1_rows"]), (5, 4, 2))
+        # tiers 固定 6 個 key（0 也寫）；清單外的值另外記
+        self.assertEqual(m["tiers"], {"p1": 4, "p2": 0, "p3": 1, "accepted": 0, "distro_fixed": 0, "nvidia_bulletin": 0})
+        self.assertEqual(m["tiers_unknown"], {})
+        self.assertEqual(js.vuln_metrics({"rows": []})["tiers"], {t: 0 for t in __import__("platform_scan").KNOWN_TIERS})
         self.assertIsNone(js.vuln_metrics({"nope": 1}))
         self.assertIsNone(js.vuln_metrics(None))
+
+    def test_vuln_metrics_unknown_tiers_are_kept_apart(self):
+        rows = {"rows": [{"id": "CVE-1", "tier": "p2"}, {"id": "CVE-2"}, {"id": "CVE-3", "tier": None}, {"id": "CVE-4", "tier": "P1"},
+                         {"id": "CVE-5", "tier": "later"}, {"id": "CVE-6", "tier": "distro_fixed"}, {"id": "CVE-7", "tier": ["p1"]}]}
+        m = js.vuln_metrics(rows)
+        self.assertEqual(m["tiers"], {"p1": 0, "p2": 1, "p3": 0, "accepted": 0, "distro_fixed": 1, "nvidia_bulletin": 0})
+        self.assertEqual(m["tiers_unknown"], {"None": 2, "P1": 1, "later": 1, "['p1']": 1})
+        self.assertEqual(sum(m["tiers"].values()) + sum(m["tiers_unknown"].values()), m["rows_total"])
+
+    def test_known_tiers_match_cra_report_and_vex_export(self):
+        """KNOWN_TIERS 要和實際會給 tier 的地方一致：cra_report 的 TIERS、cra_report 設的 distro_fixed、vex_export 設的 nvidia_bulletin。
+        那兩個檔案新增任何以字面值設定的 tier 時，這裡會失敗（要同步 KNOWN_TIERS 與儀表板）。"""
+        import ast
+        import re
+        cra = open(os.path.join(ROOT, "tools", "cra", "cra_report.py"), encoding="utf-8").read()
+        vex = open(os.path.join(ROOT, "tools", "cra", "vex_export.py"), encoding="utf-8").read()
+        tiers = [n.value for n in ast.walk(ast.parse(cra)) if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id == "TIERS" for t in n.targets)]
+        self.assertEqual(len(tiers), 1)
+        declared = set(ast.literal_eval(tiers[0]))
+        # 以字面值設定 tier 的地方：r["tier"] = "x"、"tier": "x"、r["tier"], ... = ..., "x"（tuple 指定的最後一個 tier 值）
+        pat = re.compile(r'\["tier"\]\s*=\s*"([a-z0-9_]+)"|"tier":\s*"([a-z0-9_]+)"|r\["tier"\][^\n=]*=[^\n]*,\s*"([a-z0-9_]+)"\s*$', re.M)
+        assigned = {next(g for g in m.groups() if g) for src in (cra, vex) for m in pat.finditer(src)}
+        self.assertIn("distro_fixed", assigned)
+        self.assertIn("nvidia_bulletin", assigned)
+        self.assertEqual(set(__import__("platform_scan").KNOWN_TIERS), declared | assigned)
+        self.assertEqual(len(__import__("platform_scan").KNOWN_TIERS), len(set(__import__("platform_scan").KNOWN_TIERS)))
 
     def test_vuln_metrics_p1_follows_layer_todo(self):
         """p1_rows＝P1 判斷表的列（我們的待辦）：依 cra_report 的 layer_todo。os_responsibility: ours 時 os 層的 P1 也算（缺口 24：

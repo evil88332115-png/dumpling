@@ -1,6 +1,6 @@
 # dumpling
 
-可執行的 CRA（EU Cyber Resilience Act）自動化掃描流程，**只用公開資料**在 GitHub Actions 上跑：
+可執行的韌體與 Linux 映像 SBOM、漏洞比對與監控自動化流程，**只用公開資料**在 GitHub Actions 上跑：
 
 - Jetson BSP 的 git 流程：打 tag → CI 編譯核心與樹外模組 → 掃描 → 臨時 Dependency-Track → GitHub Release 附報告、SBOM、VEX
 - mini PC 的 BIOS（含 Intel 內顯 GOP／VBT）與顯示卡／獨顯的 vBIOS：解析、身分 SBOM、比對公告

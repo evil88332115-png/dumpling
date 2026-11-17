@@ -15,7 +15,7 @@ PLAN「BSP 掃描範圍」要求：BSP（我們的待辦）、OS（範例 rootfs
 | `unknown` | **判斷不了**。不猜、不歸成 os；一律當我們的待辦（最保守，不漏報） | 沒有發行版套件身分、也沒有路徑的 Go／Python 套件 |
 
 層寫在 SBOM 每個元件的 property：`dumpling:layer`（值）、`dumpling:layer-basis`（依據：`package-name`、`path`、`own-software`、
-`own-software-list`、`component-type`、`inherited`、`unresolved`）；SBOM 的 metadata 記 `dumpling:os-responsibility`、`dumpling:platform`。
+`own-software-list`、`own-software-source`（轉接器掃的自有應用原始碼，`dumpling:origin` = source，歸 bsp）、`component-type`、`inherited`、`unresolved`）；SBOM 的 metadata 記 `dumpling:os-responsibility`、`dumpling:platform`。
 子元件（元件裡的 `components`）跟著父元件，依據標 `inherited`。cra_report 只讀這些 property（不 import `pipeline/`，兩邊的名稱由測試核對）。
 
 ## 2. 判斷規則（`layers.classify_component`，第一個成立的就是答案；**不看版本字尾**，D-027）

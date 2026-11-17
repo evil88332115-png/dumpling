@@ -2,6 +2,9 @@ kind: vbios
 vendor: NVIDIA
 model: 獨立 NVIDIA vBIOS 映像（顯示卡或 mini PC 獨顯）
 status: GAP
+watch:
+  monitored: false
+  why: "GAP：沒有官方可合法下載、可直接讀出 vBIOS 版本的公開檔案（CI 只用合成 option ROM 測流程）"
 notes: |
   GAP：沒有官方可合法下載、可直接讀出 vBIOS 版本的公開檔案（NVIDIA 不公開發佈消費型 vBIOS 映像；
   TechPowerUp 等收藏站不是官方來源，不使用）。官方的 DisplayPort 韌體更新工具也確認沒有完整 vBIOS

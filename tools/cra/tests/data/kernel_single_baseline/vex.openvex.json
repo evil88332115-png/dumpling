@@ -1,0 +1,163 @@
+{
+ "@context": "https://openvex.dev/ns/v0.2.0",
+ "@id": "urn:uuid:<UUID>",
+ "author": "Example Co.",
+ "timestamp": "<TIME>",
+ "version": 1,
+ "statements": [
+  {
+   "vulnerability": {
+    "name": "CVE-2024-1086"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0003"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.11?arch=arm64&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0101"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0102"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "not_affected",
+   "justification": "vulnerable_code_not_present",
+   "impact_statement": "Kernel configuration check (kernel 6.8.12-1021-tegra, configuration /boot/config, SHA-256 abababababab): CONFIG_X is not set",
+   "status_notes": "dumpling: evidence=build-record; kernel=6.8.12-1021-tegra; location=scan/kernel-config.json (kernel 6.8.12-1021-tegra, config SHA-256 abababababababababababababababababababababababababababababababab)"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0103"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0104"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0105"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0106"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0107"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-nvidia-tegra@6.8.0-1021.21?arch=source&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "not_affected",
+   "justification": "vulnerable_code_not_present",
+   "impact_statement": "driver not built",
+   "status_notes": "dumpling: evidence=none"
+  },
+  {
+   "vulnerability": {
+    "name": "CVE-2025-0200"
+   },
+   "products": [
+    {
+     "@id": "pkg:deb/ubuntu/linux-libc-dev@6.8.0-45.45?arch=arm64&distro=ubuntu-24.04",
+     "identifiers": {
+      "purl": "pkg:deb/ubuntu/linux-libc-dev@6.8.0-45.45?arch=arm64&distro=ubuntu-24.04"
+     }
+    }
+   ],
+   "status": "under_investigation",
+   "status_notes": "dumpling: not assessed"
+  }
+ ]
+}
