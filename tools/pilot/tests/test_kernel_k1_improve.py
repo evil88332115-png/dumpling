@@ -325,14 +325,14 @@ def test_backport_added_files_must_exist_in_the_kernel_and_be_code(tmp_path, rep
     assert by["CVE-2024-2012"]["decision"] == "unknown" and by["CVE-2024-2012"]["stable_git_added_files"] == ["include/linux/absent.h"]
     assert by["CVE-2024-2013"]["decision"] == "not_affected" and by["CVE-2024-2013"]["stable_git_added_files"] == ["drivers/bar/baz_main.c"]
     assert out["kernel"]["stable_git"]["decision_changes"] == {"not_affected->unknown": 2, "not_affected->not_affected": 1}
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert kept(out) == (1, 1)
     # 完整原始碼樹（--source-tree）裡沒有 renamed_away.c：這個核心沒有這個檔案 → 丟掉，維持 not_affected、不併入
     sub = tmp_path / "full"
     sub.mkdir()
     p, st, out = hdr_run(sub, repo, None, {"CVE-2024-2011": recs["CVE-2024-2011"]}, tree=source_tree_with(sub), src=tvf.thin_rootfs(sub))
     r = by_cve(out)["CVE-2024-2011"]
     assert r["decision"] == "not_affected" and "stable_git_added_files" not in r and "files_origin" not in r
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+    assert kept(out) == (0, 0)
 
 
 def test_references_commits_for_cves_without_cna_record(tmp_path, repo):
@@ -424,6 +424,12 @@ def test_sca_scan_and_flash_package_wiring():
 # --stable-git (b)：headers 樹是部分檔案時，找不到不當作「不存在」（K1 標頭檔修正）
 # =====================================================================================================
 
+def kept(out):
+    """kernel.stable_git 的 (kept_not_proven_absent, kept_not_proven_absent_cves)：保留的檔案數（整數，同上游）與涉及的 CVE 數（dumpling 另加）。"""
+    sg = out["kernel"]["stable_git"]
+    return sg["kept_not_proven_absent"], sg["kept_not_proven_absent_cves"]
+
+
 FOO_H = "drivers/foo/foo.h"           # 驅動自帶的 .h：映像的 headers 套件沒有，真正的原始碼樹才有
 CVE_H = "CVE-2024-4001"
 
@@ -459,7 +465,7 @@ def test_header_missing_from_partial_headers_tree_is_not_treated_as_absent(tmp_p
     assert r["decision"] == "unknown" and "justification" not in r
     assert r["files_origin"] == "cna+commits" and r["stable_git_added_files"] == [FOO_H]
     sg = out["kernel"]["stable_git"]
-    assert sg["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert kept(out) == (1, 1)
     assert sg["decision_changes"] == {"not_affected->unknown": 1} and sg["cves_with_added_files"] == 1
     assert out["counts"] == {"not_affected": 0, "affected": 0, "unknown": 1}
     # 輸出的 limitations 說明這條規則；摘要那一行也帶計數
@@ -475,7 +481,7 @@ def test_header_present_in_headers_tree_is_counted_as_present_not_kept(tmp_path,
     p, st, out = hdr_run(tmp_path, repo, None, recs)
     r = by_cve(out)[CVE_H]
     assert r["decision"] == "unknown" and r["stable_git_added_files"] == ["include/linux/foo.h"]
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+    assert kept(out) == (0, 0)
 
 
 def source_tree_with(tmp_path, extra_files=(), link=None):
@@ -497,14 +503,14 @@ def test_header_missing_from_complete_source_tree_is_still_dropped(tmp_path, rep
     r = by_cve(out)[CVE_H]
     assert r["decision"] == "not_affected" and "stable_git_added_files" not in r and "files_origin" not in r
     sg = out["kernel"]["stable_git"]
-    assert sg["kept_not_proven_absent"] == {"files": 0, "cves": 0} and sg["decision_changes"] == {} and sg["cves_with_added_files"] == 0
+    assert kept(out) == (0, 0) and sg["decision_changes"] == {} and sg["cves_with_added_files"] == 0
     # 同一棵樹有 foo.h → 併入（證據是 present，不算保留）→ unknown
     sub = tmp_path / "w"
     sub.mkdir()
     p, st, out = hdr_run(sub, repo, None, recs, tree=source_tree_with(sub, [FOO_H]), src=tvf.thin_rootfs(sub))
     r = by_cve(out)[CVE_H]
     assert r["decision"] == "unknown" and r["stable_git_added_files"] == [FOO_H]
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+    assert kept(out) == (0, 0)
 
 
 def test_header_under_a_symlink_in_the_complete_tree_is_kept(tmp_path, repo):
@@ -514,7 +520,7 @@ def test_header_under_a_symlink_in_the_complete_tree_is_kept(tmp_path, repo):
     p, st, out = hdr_run(tmp_path, repo, None, recs, tree=source_tree_with(tmp_path, link="drivers/linkdir"), src=tvf.thin_rootfs(tmp_path))
     r = by_cve(out)[CVE_H]
     assert r["decision"] == "unknown" and r["stable_git_added_files"] == ["drivers/linkdir/x.h"]
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert kept(out) == (1, 1)
 
 
 def rec_dir(tmp_path, extra_deps):
@@ -538,7 +544,7 @@ def test_header_in_deps_of_a_built_object_is_affected(tmp_path, repo):
     assert r["decision"] == "affected" and r["stable_git_added_files"] == [FOO_H]
     assert any(f["path"] == FOO_H and f["built"] is True and "deps of drivers/foo/always.o" in f["evidence"] for f in r["files"])
     assert out["kernel"]["stable_git"]["decision_changes"] == {"not_affected->affected": 1}
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert kept(out) == (1, 1)
 
 
 def test_header_not_in_deps_and_not_shown_to_exist_is_unknown(tmp_path, repo):
@@ -555,7 +561,7 @@ def test_header_not_in_deps_and_not_shown_to_exist_is_unknown(tmp_path, repo):
     ev = [f["evidence"] for f in by[CVE_H]["files"] if f["path"] == FOO_H][0]
     assert "do not show that drivers/foo/foo.h exists" in ev
     assert by["CVE-2024-4002"]["decision"] == "not_affected"
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 1, "cves": 1}
+    assert kept(out) == (1, 1)
 
 
 def test_unknown_file_names_are_never_proof_of_absence():
@@ -566,14 +572,14 @@ def test_unknown_file_names_are_never_proof_of_absence():
     for complete in (False, True):
         info = NS(tree_names=None, tree_complete=complete, tree_links=frozenset())
         for path in (FOO_H, "drivers/foo/renamed_away.c", "drivers/foo/x.S"):
-            assert kc.kernel_file_proof(model, info, path) == "unproven", (complete, path)
+            assert kc.kernel_file_state(model, info, path) == "unproven", (complete, path)
             assert kc.kernel_has_file(model, info, path) is True
     full = NS(tree_names={"drivers/foo/a.c"}, tree_complete=True, tree_links=frozenset())
-    assert kc.kernel_file_proof(model, full, FOO_H) == "absent" and kc.kernel_has_file(model, full, FOO_H) is False
-    assert kc.kernel_file_proof(model, full, "drivers/foo/a.c") == "present"
+    assert kc.kernel_file_state(model, full, FOO_H) == "absent" and kc.kernel_has_file(model, full, FOO_H) is False
+    assert kc.kernel_file_state(model, full, "drivers/foo/a.c") == "present"
     partial = NS(tree_names={"drivers/foo/a.c"}, tree_complete=False, tree_links=frozenset())
-    assert kc.kernel_file_proof(model, partial, FOO_H) == "unproven"
-    assert kc.kernel_file_proof(NS(obj_refs={"drivers/foo/b.o"}), full, "drivers/foo/b.c") == "present"
+    assert kc.kernel_file_state(model, partial, FOO_H) == "unproven"
+    assert kc.kernel_file_state(NS(obj_refs={"drivers/foo/b.o"}), full, "drivers/foo/b.c") == "present"
 
 
 def test_stable_git_with_nothing_to_add_keeps_the_results_of_no_stable_git(tmp_path, repo):
@@ -585,4 +591,32 @@ def test_stable_git_with_nothing_to_add_keeps_the_results_of_no_stable_git(tmp_p
     p, st, out = hdr_run(tmp_path, repo, None, recs)
     assert out["results"] == base["results"] and out["counts"] == base["counts"]
     assert "stable_git" not in base["kernel"] and base["limitations"] == kc.LIMITATIONS
-    assert out["kernel"]["stable_git"]["kept_not_proven_absent"] == {"files": 0, "cves": 0}
+    assert kept(out) == (0, 0)
+
+
+def test_symlink_path_state_is_a_single_switch(monkeypatch):
+    """D-066 f7366f6 (3)：樹裡符號連結底下的路徑，dumpling 判 unproven（保留）；SYMLINK_PATH_STATE 改成 "absent" 就等於上游（丟掉）。
+    連結以外的路徑不受這個開關影響。"""
+    from types import SimpleNamespace as NS
+    model = NS(obj_refs=set())
+    info = NS(tree_names={"drivers/foo/a.c"}, tree_complete=True, tree_links=frozenset({"drivers/linkdir"}))
+    assert kc.SYMLINK_PATH_STATE == "unproven"
+    assert kc.kernel_file_state(model, info, "drivers/linkdir/x.h") == "unproven"
+    assert kc.kernel_file_state(model, info, "drivers/linkdir") == "unproven"
+    assert kc.kernel_file_state(model, info, FOO_H) == "absent"
+    monkeypatch.setattr(kc, "SYMLINK_PATH_STATE", "absent")
+    assert kc.kernel_file_state(model, info, "drivers/linkdir/x.h") == "absent"
+    assert kc.kernel_file_state(model, info, FOO_H) == "absent"
+
+
+def test_from_pointing_at_the_tree_itself_is_a_complete_tree(tmp_path):
+    """D-066 f7366f6 (2)：--from 指到核心原始碼樹本身時，檔案名稱就是完整的樹：tree_complete 為真，樹裡的連結也記下來（沒有跟隨）。"""
+    from types import SimpleNamespace as NS
+    tree = source_tree_with(tmp_path, [FOO_H], link="drivers/linkdir")
+    a = NS(config=None, from_=str(tree), prefix=None, source_tree=None, build_record=None, makefiles_dir=None)
+    info, gap, _label = kc.build_info(a, "6.8.12")
+    assert gap is None and info.tree_complete is True and "drivers/linkdir" in info.tree_links
+    model = NS(obj_refs=set())
+    assert kc.kernel_file_state(model, info, FOO_H) == "present"
+    assert kc.kernel_file_state(model, info, "drivers/foo/not_there.h") == "absent"
+    assert kc.kernel_file_state(model, info, "drivers/linkdir/x.h") == "unproven"

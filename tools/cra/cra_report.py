@@ -43,7 +43,7 @@ Ubuntu 打包的 Python 模組（SBOM 的 pypi 元件在 /usr/lib/python3/dist-p
 作業系統核心（Jetson 的對應 Canonical 核心約 6000 列）：風險評估的主清單（8.4–8.6、附錄 A）不列核心的列，改在 8.7 節摘要
   （修補狀態、層級、修補全部所需的最低核心版本、只列 P1 與 accepted 的表格），完整清單寫 kernel-vulnerabilities.md。
   層級與整體狀態照樣算進核心的列（例如核心有未處理的 P1 → ATTENTION）。
-  C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另依 scan/kernel-coverage.json 的結構化欄位寫固定的英文句子（中文的狀態說明原文只留在 scan-status.tsv）；kernel-config.json 的 kernel.stable_git.kept_not_proven_absent（files > 0）另寫固定英文句；scan/kernel-config.json 讀得到
+  C-kernel-coverage 不是 OK 時（D-063），8.7 節與 kernel-vulnerabilities.md 另依 scan/kernel-coverage.json 的結構化欄位寫固定的英文句子（中文的狀態說明原文只留在 scan-status.tsv）；kernel-config.json 的 kernel.stable_git.kept_not_proven_absent（> 0；保留的檔案數，kept_not_proven_absent_cves 是 CVE 數）另寫固定英文句；scan/kernel-config.json 讀得到
   核心 CVE 清單（results）而且比報告裡成列的核心 CVE 多時，再寫「Kernel CVE list: N CVEs (source: …); listed as rows: M CVEs; the other N−M are not listed as rows」（M 是清單裡有、而且成列的 CVE 數；核心列另有 K 個 CVE 不在清單時，再接「A further K CVEs of the kernel rows are not in the list.」，K 是 0 不寫；N 不大於 M 但 K > 0 時寫「Kernel CVE list: N CVEs (source: …); all of them are listed as rows. A further K …」）。
   資料狀態與 VEX 不受影響（C-kernel-coverage 本來就在 COND_STAGES）。客戶版（supplier-package）沒有核心段落，不加任何核心狀態文字。
 stdout 印一行「狀態<TAB>說明」。退出碼：FAIL → 1；其他非 OK → 2；全部 OK → 0（仍不代表產品安全）；參數錯誤 → 64。
@@ -3982,18 +3982,22 @@ KEPT_NOT_PROVEN_ABSENT = ("Kernel configuration check: {n} file(s) changed by th
 
 
 def kernel_kept_text(kcfg):
-    """scan/kernel-config.json 的 kernel.stable_git.kept_not_proven_absent = {"files": n, "cves": m}（只在有 --stable-git 時有）：
-    files > 0 才回傳固定英文句；欄位不存在、型別不對或 files 是 0 回傳空字串（輸出不變）。
+    """scan/kernel-config.json 的 kernel.stable_git.kept_not_proven_absent = n（保留的檔案數，整數）與 kept_not_proven_absent_cves = m
+    （CVE 數）（只在有 --stable-git 時有；舊格式 {"files": n, "cves": m} 也讀得懂）：
+    n > 0 才回傳固定英文句；欄位不存在、型別不對或 n 是 0 回傳空字串（輸出不變）。
     逐顆判定的合併文件（M7d-1）：合併文件沒有 stable_git，改讀每顆核心自己的文件，每顆一句、前面標 [版本]。"""
     docs = merged_kernel_docs(kcfg)
     if docs is not None:
         return " ".join(f"[{v}] {t}" for v, t in ((v, kernel_kept_text(d)) for v, d in sorted(docs.items())) if t)
     k = kcfg.get("kernel") if isinstance(kcfg, dict) else None
     sg = k.get("stable_git") if isinstance(k, dict) else None
-    v = sg.get("kept_not_proven_absent") if isinstance(sg, dict) else None
-    if not isinstance(v, dict):
+    if not isinstance(sg, dict):
         return ""
-    n, m = v.get("files"), v.get("cves")
+    v = sg.get("kept_not_proven_absent")
+    if isinstance(v, dict):                     # 舊格式（kept_not_proven_absent 是 {"files": n, "cves": m}）
+        n, m = v.get("files"), v.get("cves")
+    else:
+        n, m = v, sg.get("kept_not_proven_absent_cves")
     if not (isinstance(n, int) and not isinstance(n, bool) and n > 0 and isinstance(m, int) and not isinstance(m, bool) and m >= 0):
         return ""
     return KEPT_NOT_PROVEN_ABSENT.format(n=n, m=m)

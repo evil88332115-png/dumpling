@@ -66,7 +66,8 @@
     references 裡上游核心 commit（每一個都查得到才用）改的程式檔與標頭檔；(b) 有 CNA 紀錄的：紀錄裡修補 commit 在 clone 裡的，實際改的程式檔
     與標頭檔（除非完整的核心原始碼樹證明這個核心沒有它）和 programFiles 聯集（只會更保守）。只有 --source-tree（完整的樹，檔案名稱完整）找不到
     才算「沒有這個檔案」而不併入；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 .h 不在裡面）、--makefiles-dir 或讀不到名稱時，
-    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。計數在 kernel.stable_git.kept_not_proven_absent（也包含修正前本來就會併入的情況，例如名稱超過上限、讀不到名稱；不等於這次修正多併入的數量）。找不到 commit 就照舊。
+    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。完整的樹包括 --source-tree 與 --from 指到樹本身；路徑在樹裡符號連結底下時，名稱清單看不到連結指向的內容，也不當作不存在（SYMLINK_PATH_STATE）。
+    保留的檔案數記在 kernel.stable_git.kept_not_proven_absent（整數）、涉及的 CVE 數記在 kept_not_proven_absent_cves（也包含修正前本來就會併入的情況，例如名稱超過上限、讀不到名稱；不等於這次修正多併入的數量）。找不到 commit 就照舊。
     結果在 kernel.stable_git。
   --mirror：kernel.org 的 CVE 紀錄（Linux 核心 CNA，vulns.git 的 cve/published/<年>/CVE-….json）；SOURCE 記 commit、
     下載時間與 zip 的 sha256。--max-age-days 預設 7（環境變數 KERNEL_CVE_MAX_AGE_DAYS；同 kernel-cve.sh --check）。
@@ -265,10 +266,11 @@ STABLE_GIT_LIMITATION = (
     "are added to programFiles (union: a file the mainline fix did not touch can only make the result more conservative). A commit "
     "that the clone does not have, a merge commit or an unusual file name is not used. The file list is that of the commit, which "
     "may not be the complete fix when the fix is split over several commits that the references do not all name. A file that a fix "
-    "commit changed is treated as absent from this kernel (and left out) only when a complete kernel source tree (--source-tree) "
-    "does not have it; when the file names come only from the image's partial headers package (a driver's own .h is not in it), a "
-    "changed file that the headers tree lacks is not treated as absent and is still added, so it can only turn not_affected into "
-    "unknown (kernel.stable_git.kept_not_proven_absent counts those files and CVEs).")
+    "commit changed is treated as absent from this kernel (and left out) only when a complete kernel source tree (--source-tree, or "
+    "--from pointing at the tree itself) does not have it; when the file names come only from the image's partial headers package (a "
+    "driver's own .h is not in it), or the path is under a symbolic link of the tree (links are not followed), a "
+    "changed file that the tree lacks is not treated as absent and is still added, so it can only turn not_affected into "
+    "unknown (kernel.stable_git.kept_not_proven_absent counts those files, kept_not_proven_absent_cves those CVEs).")
 LIMITATIONS = [
     "C files #included by other kernel sources are never judged not_affected; the list is generated from upstream sources per "
     "kernel version (data/kernel-included-c-<major.minor>.json; currently 5.15, 6.1 and 6.8) and does not include vendor-added #include "
@@ -1365,7 +1367,7 @@ class BuildInfo:
         self.tree_names = None                    # 樹內一般檔案的相對路徑（字串）集合；None：不知道（建置紀錄不用它判「沒編」）
         self.config_raw = None                    # .config 的原始位元組（locate 讀到的；改用 IKCONFIG 時是 IKCONFIG）
         self.source_tree = None                   # apply_source_tree()：Makefile 改讀核心原始碼樹時的紀錄（kernel.source_tree）
-        self.tree_complete = False                # tree_names 是完整核心原始碼樹（--source-tree）的檔案名稱：檔案不在裡面＝這個核心沒有它（只有 apply_source_tree 設）
+        self.tree_complete = False                # tree_names 是完整核心原始碼樹（--source-tree、--from 指到樹本身）的檔案名稱：檔案不在裡面＝這個核心沒有它（apply_source_tree 與 build_info 的樹分支設）
 
 
 def follow_path(col, vfs, parts):
@@ -3313,30 +3315,39 @@ def code_file(path):
     return p.endswith((".h", ".c", ".S", ".rs")) and not p.endswith(".lds.S")
 
 
-def kernel_file_proof(model, info, path):
+# D-066 f7366f6 (3)：路徑在完整的樹裡「符號連結底下」時的狀態。樹的符號連結沒有跟隨，名稱清單看不到連結指向的內容，不能證明檔案不存在，
+# 所以 dumpling 判 "unproven"（保留；只會更保守）。上游 sca-center 判 "absent"（丟掉）。要照上游，把這個值改成 "absent"。
+SYMLINK_PATH_STATE = "unproven"
+
+
+def kernel_file_state(model, info, path):
     """修補 commit 改到的檔案，這個核心有沒有 → "present"（Makefile 的規則提到它的物件，或檔案名稱裡有它）、
-    "absent"（只有完整的核心原始碼樹〔--source-tree，info.tree_complete〕裡找不到，而且路徑不在樹裡的符號連結底下）、
+    "absent"（只有完整的核心原始碼樹〔--source-tree、--from 指到樹本身，info.tree_complete〕裡找不到）、
     "unproven"（其他：不能證明沒有）。tree_names 只來自 /usr/src/linux-headers-*（映像的 headers 套件）或 --makefiles-dir 時，
-    名稱只是部分檔案（驅動自帶的 .h 不在裡面），找不到不代表這個核心沒有，所以是 unproven，不是 absent。"""
+    名稱只是部分檔案（驅動自帶的 .h 不在裡面），找不到不代表這個核心沒有，所以是 unproven，不是 absent。
+    路徑在樹裡的符號連結底下：狀態由 SYMLINK_PATH_STATE 決定（dumpling 是 unproven，見上面的說明）。"""
     p = posixpath.normpath(path)
     for ext in (".c", ".S", ".rs"):
         if p.endswith(ext) and p[:-len(ext)] + ".o" in model.obj_refs:
             return "present"
     names = getattr(info, "tree_names", None)
-    if names is None:
-        return "unproven"
-    if p in names:
+    if names is not None and p in names:
         return "present"
-    if not getattr(info, "tree_complete", False):
+    if names is None or not getattr(info, "tree_complete", False):
         return "unproven"
     if any(p == l or p.startswith(l + "/") for l in getattr(info, "tree_links", ())):
-        return "unproven"            # 符號連結沒有跟隨：名稱清單不能證明連結底下的檔案不存在
+        return SYMLINK_PATH_STATE
     return "absent"
 
 
 def kernel_has_file(model, info, path):
-    """這個核心「可能有」這個檔案：只有完整的核心原始碼樹證明沒有時才是 False（見 kernel_file_proof）。"""
-    return kernel_file_proof(model, info, path) != "absent"
+    """這個核心有這個檔案：Makefile 的規則提到它的物件，或核心樹／headers 的檔案名稱裡有它。檔案名稱不知道（tree_names 是 None）→ True（保守）。"""
+    p = posixpath.normpath(path)
+    for ext in (".c", ".S", ".rs"):
+        if p.endswith(ext) and p[:-len(ext)] + ".o" in model.obj_refs:
+            return True
+    names = getattr(info, "tree_names", None)
+    return True if names is None else p in names
 
 
 def oot_header_hit(records, path):
@@ -4205,6 +4216,8 @@ def build_info(a, want, images=False):
         cfg = open(os.path.join(a.from_, ".config"), encoding="utf-8", errors="replace").read()
         info = BuildInfo(files, cfg, os.path.join(os.path.abspath(a.from_), ".config"), want, src)
         info.tree_names = tree_names(col, {base: ()})
+        info.tree_complete = info.tree_names is not None                   # --from 指到樹本身：名稱完整（超過上限就不算）
+        info.tree_links = frozenset("/".join(k[len(base):]) for k in col.links if k[:len(base)] == base)     # 樹裡的符號連結（沒有跟隨）
         return info, None, None
     info, gap = locate(col, src, want)
     if info is not None and images:
@@ -4698,7 +4711,7 @@ def assess(a, max_age):
         sg = kernel_git_files().StableGit(a.stable_git)
         out["kernel"]["stable_git"] = {"source": sg.label, "ok": sg.ok, "reason": sg.error, "head": sg.head, "refs": sg.branch,
                                        "cves_with_commit_files": 0, "cves_with_added_files": 0, "cves_from_references_only": 0,
-                                       "kept_not_proven_absent": {"files": 0, "cves": 0},
+                                       "kept_not_proven_absent": 0, "kept_not_proven_absent_cves": 0,
                                        "commits_resolved": 0, "decision_changes": {},
                                        "note": "read-only local clone; no fetch. Files are the file names in the history of this clone; "
                                                "a commit that the clone does not have is not used (unknown, as without --stable-git)."}
@@ -4726,19 +4739,21 @@ def assess(a, max_age):
         if sg is not None and sg.ok:
             if files is not None:
                 # (b) CNA 的修補 commit（產品分支的 backport）實際改的檔案，和 programFiles 聯集（只會更保守）
-                # 只加「程式檔與標頭檔」，而且不是「完整核心原始碼樹證明這個核心沒有」的檔案（kernel_file_proof）：
+                # 只加「程式檔與標頭檔」，而且不是「完整核心原始碼樹證明這個核心沒有」的檔案（kernel_file_state）：
                 # 只有完整的核心原始碼樹（--source-tree）找不到，才算這個核心沒有它（不可能編進這個核心，加進去只會多一個
                 # 「看不出存在」的 unknown）。名稱只來自映像的 headers 套件（部分檔案；驅動自帶的 .h 不在裡面）時，找不到
                 # 不是證據：照樣併入（被改的 .h 可能被有編的 .c include），不能因此判沒編。
                 # CNA 的 programFiles 本來的判定不變，聯集只會更保守（只會讓 not_affected 變少）
                 fc = sg.files(mir.fix_commits(cve))
                 commits = [h for h, f in fc.items() if f]
-                proofs = {x: kernel_file_proof(model, info, x) for x in {x for h in commits for x in fc[h]} - set(files) if code_file(x)}
-                gfiles = sorted(x for x, pr in proofs.items() if pr != "absent")
-                kept = [x for x in gfiles if proofs[x] == "unproven"]
+                cand = sorted(x for x in {x for h in commits for x in fc[h]} - set(files) if code_file(x))
+                states = {x: kernel_file_state(model, info, x) for x in cand}
+                gfiles = [x for x in cand if states[x] != "absent"]
+                kept = [x for x in gfiles if states[x] == "unproven"]
                 if kept:
-                    out["kernel"]["stable_git"]["kept_not_proven_absent"]["files"] += len(kept)
-                    out["kernel"]["stable_git"]["kept_not_proven_absent"]["cves"] += 1
+                    sgo = out["kernel"]["stable_git"]
+                    sgo["kept_not_proven_absent"] += len(kept)         # 保留的檔案數（上游的整數）
+                    sgo["kept_not_proven_absent_cves"] += 1            # 有檔案被保留的 CVE 數（dumpling 另加）
                 if gfiles:
                     origin = "cna+commits" if files else "commits"
             else:
@@ -4850,7 +4865,7 @@ def assess(a, max_age):
     if sgi:
         rsuffix += ("；--stable-git " + (f"{sgi['source']}：查到 commit 檔案的 CVE {sgi['cves_with_commit_files']} 個（補進 programFiles "
                                         f"{sgi['cves_with_added_files']}、只靠 References {sgi['cves_from_references_only']}；"
-                                        f"樹不完整、沒有證明不存在而照樣併入的檔案 {sgi['kept_not_proven_absent']['files']} 個／CVE {sgi['kept_not_proven_absent']['cves']} 個）；判定變化 "
+                                        f"樹不完整、沒有證明不存在而照樣併入的檔案 {sgi['kept_not_proven_absent']} 個／CVE {sgi['kept_not_proven_absent_cves']} 個）；判定變化 "
                                         + ("、".join(f"{k} {v}" for k, v in sorted(sgi['decision_changes'].items())) or "無")
                                         if sgi["ok"] else f"不能用（{sgi['reason']}）"))
     rmi = out["kernel"].get("rename_map")
