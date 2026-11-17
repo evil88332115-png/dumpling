@@ -272,8 +272,23 @@ def new_counts():
     return {"layers": dict.fromkeys(LAYERS, 0), "basis": {}, "unknown_by_purl_type": {}, "unknown_by_reason": {}}
 
 
-def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None, owners=None):
-    """標每個元件的層。回傳 (新的 SBOM, 摘要)；不改傳入的 bom。owners：見 classify_component。"""
+def clean_component_name(name, product=None):
+    """metadata.component.name 如果是路徑（掃描工具寫進來的工作目錄，例如 <暫存>/…/.sca-scan-work.xxx/image.tar）→ 換成不含路徑的名稱：
+    有 product（專案名稱）就用它，沒有就只留檔名。不是路徑的名稱原樣保留。→ (新名稱, 有沒有改)。"""
+    if not isinstance(name, str) or not name:
+        return name, False
+    if "/" not in name and "\\" not in name and not name.startswith("~"):
+        return name, False
+    if product:
+        return product, True
+    base = name.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return (base or "unnamed"), True
+
+
+def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None, owners=None, product=None):
+    """標每個元件的層。回傳 (新的 SBOM, 摘要)；不改傳入的 bom。owners：見 classify_component。
+    product：專案名稱。metadata.component.name 是路徑時（掃描工具寫進來的 runner 工作目錄）改成它，見 clean_component_name；
+    原本的名稱不另外保存（不能變成客戶 SBOM 裡的內部路徑）。bom-ref 與 version 不動。"""
     if os_responsibility is not None and os_responsibility not in pc.OS_RESPONSIBILITIES:
         raise LayerError("os_responsibility 必須是 %s" % "／".join(pc.OS_RESPONSIBILITIES))
     b = copy.deepcopy(bom)
@@ -286,6 +301,9 @@ def tag_sbom(bom, config, own=((), (), 0), os_responsibility=None, platform=None
     m = b.setdefault("metadata", {})
     if not isinstance(m, dict):
         raise LayerError("metadata 格式不對")
+    mc = m.get("component")
+    if isinstance(mc, dict):
+        mc["name"], _ = clean_component_name(mc.get("name"), product)
     kv = {}
     if os_responsibility:
         kv[RESP_PROP] = os_responsibility
