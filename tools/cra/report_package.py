@@ -93,7 +93,7 @@ SUGGESTIONS = {
 }
 RULE_ORDER = ["P1", "K1", "K2", "U1", "U2", "DISTRO", "R1", "R2", "R3", "R4", "R5", "R5w", "R6", "R7", "R8", "R9", "R9m", "NVIDIA", "人工"]
 MANUAL = {  # 人工判定（具名的 RD在 vex-annotations.json 或 Dependency-Track 做的）：依狀態
-    T_OK: ("RD 判定不受影響或已修補", "不用處理；有新資訊時重判", NONE),
+    T_OK: ("RD 判定 not_affected或已修補", "不用處理；有新資訊時重判", NONE),
     T_TRACK: ("RD 判定受影響或仍在評估", "依判定排修補或追蹤", ENG),
     T_NOW: ("已被攻擊者利用，RD 已有判定", "依判定處理", ENG),
 }
@@ -173,7 +173,7 @@ def not_ours_os(doc):
 
 
 def notify_rows(doc):
-    """要通知客戶的列：OS 層不是我們的待辦、已被利用、還沒判定為不受影響（cra_report 的 notify_customer 同一個條件）。"""
+    """要通知客戶的列：OS 層不是我們的待辦、已被利用、還沒判定為 not_affected（cra_report 的 notify_customer 同一個條件）。"""
     return [r for r in not_ours_os(doc) if r.get("exploited") and r["tier"] in ("p1", "p2", "p3", "distro_fixed")]
 
 
@@ -1310,10 +1310,10 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
 CSAF_DIR = "CSAF"
 CSAF_STATUS_TEXT = (
     ("fixed", "已修補（fixed）", "舊版受影響、這一版已判定修補或元件已移除；有證據才寫。只有這一類會有 vendor_fix（更新到這一版）"),
-    ("new", "新增（new）", "這一版才有、舊版沒有評估過或舊版判定不受影響；對使用者是保守的方向"),
+    ("new", "新增（new）", "這一版才有、舊版沒有評估過或舊版判定 not_affected；對使用者是保守的方向"),
     ("still", "仍存在（still）", "兩版都還受影響或還在評估"),
-    ("reassessed", "重新評估（reassessed）", "重新評估成不受影響。**這不是修補**，不寫 vendor_fix；要不要對外說明由 PM 決定"),
-    ("changed", "其他狀態改變（changed）", "例如不受影響改成已修補"),
+    ("reassessed", "重新評估（reassessed）", "重新評估成 not_affected。**這不是修補**，不寫 vendor_fix；要不要對外說明由 PM 決定"),
+    ("changed", "其他狀態改變（changed）", "例如 not_affected 改成已修補"),
     ("not_stated", "這一版沒有判定（not_stated）", "舊版受影響、這一版沒有判定而元件還在，或新版本已修但舊版本還在：**不當成已修**，要 RD 先判定"),
 )
 

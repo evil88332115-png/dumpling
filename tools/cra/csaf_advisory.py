@@ -21,7 +21,7 @@
   - fixed：舊版 open，新版判定 resolved，而且是同一個版本或舊版本已不在新版 SBOM；或新版沒有判定、而新版 SBOM 已經沒有這個元件
     （SBOM 沒有或是空的不判斷移除；只在 VEX 自己的元件清單、不在產品 SBOM 的元件也不判斷）。
   - reassessed：舊版 open，新版判定 not affected（重新評估，不是修補；不寫 vendor_fix）。
-  - new：新版 open，舊版沒有這筆或舊版判定不受影響。still：兩版都 open。changed：其他狀態改變。
+  - new：新版 open，舊版沒有這筆或舊版判定 not_affected。still：兩版都 open。changed：其他狀態改變。
   - not_stated：舊版 open，新版沒有判定而元件還在，或新版本已修但舊版本還在 SBOM（**不當成已修**）。
 - 發布者資料（csaf.publisher_name、csaf.publisher_namespace、csaf.tracking_id_prefix；沒有時退回 manufacturer.name、manufacturer.website）
   缺的寫 TO BE COMPLETED（namespace 是 schema 要的 URI，用 https://to-be-completed.invalid），列在 csaf-summary.json，狀態 ATTENTION。
@@ -234,7 +234,7 @@ def classify(old, new, idx, removal_ok=True):
         if os_ in OPEN and ns in ("resolved", "resolved_with_pedigree"):
             cat = "fixed" if covered else "not_stated"     # 新版本已修，但舊版本還在 SBOM 裡（或 SBOM 不能當證據）、沒有判定
         elif os_ in OPEN and ns in ("not_affected", "false_positive"):
-            cat = "reassessed"                                             # 重新評估成不受影響，不是修補
+            cat = "reassessed"                                             # 重新評估成 not_affected，不是修補
         elif os_ in OPEN and n is None:
             # 「消失」要能當證據：新版 SBOM 完整（removal_ok）、元件不在 SBOM（purl 與正規化名稱都對不到）、不是只在 VEX 自己的元件清單
             oname = norm_name(purl_name(o["purl"]) if o["purl"] else comp_name(o["component"]))
@@ -247,7 +247,7 @@ def classify(old, new, idx, removal_ok=True):
         elif o and n and os_ != ns and STATUS[os_] != STATUS[ns]:      # not_affected ↔ false_positive 都是 known_not_affected：不算改變
             cat = "changed"
         else:
-            continue          # 兩版都不受影響，或只有一版有不受影響的判定：不放進公告
+            continue          # 兩版都是 not_affected，或只有一版有 not_affected 的判定：不放進公告
         rows.append({"key": list(k), "id": (n or o)["id"], "component": (n or o)["component"], "old_component": (o or {}).get("component"),
                      "purl": (n or {}).get("purl") or "", "old_purl": (o or {}).get("purl") or "", "old": os_, "new": ns, "category": cat,
                      "removed": removed, "response": (n or o)["response"], "fix_state": (n or o).get("fix_state") or "", "detail": (n or {}).get("detail") or "",
@@ -1047,7 +1047,7 @@ def exploited_run(reports, cves, cfg, out, now=None, detected=None, euvd_file=No
         if sel:
             by_cve[c] = sel
         else:
-            warnings.append(f"{c}：這份報告沒有這個 CVE 的列，草稿不含它（沒找到不等於不受影響；請確認 CVE 編號與版本）")
+            warnings.append(f"{c}：這份報告沒有這個 CVE 的列，草稿不含它（沒找到不等於 not_affected；請確認 CVE 編號與版本）")
     if not by_cve:
         return fail("; ".join(warnings))
 
@@ -1135,7 +1135,7 @@ def exploited_run(reports, cves, cfg, out, now=None, detected=None, euvd_file=No
             kinds = sorted({STATUS_WORDS[info[x]["status"]] for x in closed})
             warnings.append(f"{c}：這個版本的判定全部是「{'、'.join(kinds)}」；可能不需要通知使用者（草稿仍已產生，請 RD／PM 確認是否真的要發）")
         elif closed:
-            warnings.append(f"{c}：部分元件已判定為不受影響或已修補（{len(closed)} 個），草稿只把它們標成該狀態；請確認通知內容")
+            warnings.append(f"{c}：部分元件已判定為 not_affected或已修補（{len(closed)} 個），草稿只把它們標成該狀態；請確認通知內容")
         v = {"cve": c}
         extra = sorted({clean(x, 90) for r in sel for x in [r.get("id")] + list(r.get("aliases") or [])
                         if isinstance(x, str) and ID_OK.match(clean(x, 90)) and clean(x, 90).upper() != c})[:10]

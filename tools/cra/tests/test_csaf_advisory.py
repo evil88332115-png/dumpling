@@ -67,7 +67,7 @@ NEW = [stmt("CVE-2026-0001", "openssl", "3.0.13-2", "resolved"),
        stmt("CVE-2026-0002", "libfoo", "1.1", "exploitable", ["update"]),
        stmt("CVE-2026-0005", "libbaz", "1.1", "resolved"),
        stmt("GHSA-aaaa-bbbb-cccc", "tool", "0.2", "exploitable"),                     # 新增，沒有 CVE
-       stmt("CVE-2026-0006", "libnew", "1.0", "not_affected")]                        # 只有不受影響：不放進公告
+       stmt("CVE-2026-0006", "libnew", "1.0", "not_affected")]                        # 只有 not_affected：不放進公告
 SBOM_NEW = [("openssl", "3.0.13-2"), ("libfoo", "1.1"), ("libbar", "1.1"), ("libbaz", "1.1"), ("tool", "0.2"), ("libnew", "1.0")]
 
 SCHEMA_DIR = HERE.parent / "data" / "csaf-2.0"
