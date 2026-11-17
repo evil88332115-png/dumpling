@@ -43,3 +43,17 @@ expected:
     - {component: "Intel CSE firmware", version: "18.0.10.2285", suggestion: affected, rule_ids: ["INTEL-SA-01315"]}
   # AMI 核心版本：不是 AMI 韌體（沒有 AMI 的 Firmware ID 紀錄）；coreboot 的 CBFS 檔案沒有解開，所以只鎖定「沒讀到」，不代表映像裡沒有。
   ami_core: {status: not-found}
+  # 程式碼完整性的結構證據（不是平台有沒有開啟的結論；說明 docs/notes/c2-code-integrity.md）。依據：另寫的獨立腳本直接讀映像位元組——
+  # 檔尾 −0x40 的 FIT 指標 0xFFAAA6F0 指到 `_FIT_   `（檔案位置 0x1AAA6F0），表頭 C_V 位元有設、整張表加總為 0、版本 0x0100、共 4 個項目：
+  # type 0x01（微碼）、0x02（startup ACM，位址 0xFFC40000）、0x0B（Key Manifest，位址 0xFFAAAF00，開頭 8 bytes 是 `__KEYM__`）、
+  # 0x0C（Boot Policy Manifest，位址 0xFFAAA880，開頭 8 bytes 是 `__ACBP__`）；沒有 type 0x2F。位址都落在映像內。
+  # 只讀一張 FIT，不含 top swap 的第二張表；not-found 只對這張表成立。
+  # 項目類型編號依 Intel FIT BIOS Specification rev 1.6；`__KEYM__`／`__ACBP__` 的字串 Intel 規格沒有列，只當觀察值，狀態不靠它。
+  # 生效與否（熔絲）不在映像裡，固定 NOT_ASSESSED。檔名裡的 btg_prod 不是依據。
+  integrity:
+    boot_guard_structure: observed
+    key_manifest: observed
+    boot_policy_manifest: observed
+    startup_acm: observed
+    fit_debug_policy: not-found
+    boot_guard_enforcement: NOT_ASSESSED

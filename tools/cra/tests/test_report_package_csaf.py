@@ -153,3 +153,23 @@ def test_customer_package_never_contains_csaf(tmp_path):
         assert b"csaf_security_advisory" not in data and b"csaf_version" not in data, x
     csaf_files = [x for x in walk(out) if "csaf" in x.lower()]
     assert csaf_files and all(x.startswith(("交給PM/CSAF/", "內部存檔/csaf-fix-advisory/")) for x in csaf_files), csaf_files
+
+
+def test_deeply_nested_previous_vex_is_gap_and_package_still_built(tmp_path):
+    """dumpling（#175 獨立驗證）：前一版的 vex.cdx.json 是很深的巢狀 JSON（RecursionError）→ CSAF 記 GAP，整包照樣產生。"""
+    p = pkg_project(tmp_path)
+    prev = old_reports(tmp_path)
+    (prev / "vex.cdx.json").write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
+    out = tmp_path / "out"
+    code, msgs = rp.build(p, out, allow_tmp=True, csaf_previous=prev)
+    assert code == 2 and not (out / "交給PM" / "CSAF").exists() and (out / "SHA256SUMS.txt").is_file()
+    text = (out / "交給PM" / "未產生的項目.md").read_text(encoding="utf-8")
+    assert "CSAF 修補公告草稿" in text and "RecursionError" in text
+
+
+def test_pm_readme_first_line_says_draft(tmp_path):
+    p = pkg_project(tmp_path)
+    out = tmp_path / "out"
+    rp.build(p, out, allow_tmp=True, csaf_previous=old_reports(tmp_path))
+    first = (out / "交給PM" / "CSAF" / "README.md").read_text(encoding="utf-8").splitlines()[0]
+    assert first == "# 草稿：工具不發布，也不會自動放進客戶資料包"

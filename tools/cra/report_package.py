@@ -1318,10 +1318,15 @@ CSAF_STATUS_TEXT = (
 )
 
 
+def ca_first_line():
+    import csaf_advisory as ca
+    return ca.DRAFT_FIRST_LINE
+
+
 def csaf_readme(summ, new_name, fname):
     c = summ.get("counts") or {}
     miss = summ.get("missing_fields") or []
-    lines = ["# CSAF 修補公告草稿（只給 PM，尚未發布）", "",
+    lines = [f"# {ca_first_line()}", "", "## CSAF 修補公告草稿（只給 PM，尚未發布）", "",
              f"- 檔案：`{fname}`（CSAF 2.0，category `csaf_security_advisory`，`tracking.status` 是 `draft`）",
              f"- 本版：{new_name}；產生狀態：{summ.get('status')}（ATTENTION＝還有要補的欄位或要注意的事，不是錯誤）", "",
              "## 這是什麼", "",

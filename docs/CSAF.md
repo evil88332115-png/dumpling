@@ -1,6 +1,6 @@
 # CSAF 草稿（修補公告與被利用漏洞的使用者通知）
 
-`tools/cra/csaf_advisory.py` 產生兩種 CSAF 2.0（`csaf_security_advisory`）文件。**兩種都只是草稿**：`document.tracking.status` 固定是 `draft`、版本 `0`，工具沒有任何參數能改成 `final`，也不會發布或自動放進客戶資料包。要不要發、怎麼發由負責人決定。
+`tools/cra/csaf_advisory.py` 產生兩種 CSAF 2.0（`csaf_security_advisory`）文件。**兩種都只是草稿**：`document.tracking.status` 固定是 `draft`、版本 `0`，工具沒有任何參數能改成 `final`，也不會發布或自動放進客戶資料包；`advisory.md` 與 PM 資料夾的 `README.md` 第一行都寫「草稿：工具不發布，也不會自動放進客戶資料包」。要不要發、怎麼發由負責人決定。
 
 來源：同步 sca-center edac554（D-066 的 S4），移植與清理內容見 `docs/PROVENANCE.md` 的「C3 CSAF 草稿」節。
 
@@ -19,7 +19,7 @@
 - **驗證**：每份輸出都跑兩層檢查，不符就 FAIL、不產生（並刪掉上一次的輸出）。
   - 完整的 OASIS CSAF 2.0 JSON schema（`tools/cra/data/csaf-2.0/`，官方原檔，來源與授權見同資料夾 `NOTICE.md`），需要 `jsonschema` 與 `referencing`。沒有這兩個套件時，summary 的 `schema_validation.status` 是 `NOT_RUN`，notes 寫明「這不是通過」，狀態 ATTENTION。
   - 內建檢查（不依賴套件，一定會跑）：document 必要欄位與列舉值、security_advisory 設定檔的必要欄位、產品 ID 都有定義、同一產品不同時在互斥的狀態裡。結果寫在 summary 的 `builtin_checks`。
-- **輸入是不可信資料**：不跟隨符號連結、單一檔案有大小上限，字串去掉控制字元與 Unicode 格式字元並截斷。
+- **輸入是不可信資料**：不跟隨符號連結、單一檔案有大小上限、巢狀太深的 JSON 當成讀不到；A、B 兩條路徑讀進來的字串都去掉控制字元與 Unicode 格式字元並截斷。
 - 工具只帶入判定（VEX）的狀態與元件；漏洞描述、嚴重度說明、修補方式的文字要人補。
 
 ## A：版本間的修補公告
@@ -41,7 +41,7 @@
 ## B：被利用漏洞的使用者通知
 
 - 輸入：報告的 `vulnerability-rows.json`（必要），`vex.cdx.json`／`sbom.cdx.json` 用來取產品名稱與版本。
-- **關卡**：要通知的 CVE 在報告裡沒有任何被利用的證據（KEV、EUVD、Grype 的 knownExploited、人工證據）時不產生，狀態 GAP。有報告以外的證據時加 `--assume-exploited "<證據說明>"`，說明會寫進草稿。
+- **關卡**：要通知的 CVE 在報告裡沒有任何被利用的證據（KEV、EUVD、Grype 的 knownExploited、人工證據）時不產生，狀態 GAP。**這不代表這個 CVE 沒有被利用**，是否需要第 14(8) 條的通知由人判斷。有報告以外的證據時加 `--assume-exploited "<證據說明>"`，說明會寫進草稿。
 - 產品狀態依這一版目前的判定：沒有判定或 in_triage → `under_investigation`；exploitable → `known_affected`；not_affected／false_positive → `known_not_affected`；這一版判定 resolved → `fixed`。上游或發行版有修補版本**不算**這個產品已修補。判定是 not_affected 或已修補時會警告「可能不需要通知」。
 - 緩解措施預設是 `TO BE COMPLETED by RD`；受影響的元件底下不放 `vendor_fix`。
 

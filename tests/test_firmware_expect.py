@@ -140,6 +140,33 @@ class CompareTest(unittest.TestCase):
             with self.assertRaises(fe.FormatError, msg=repr(bad)):
                 fe.compare(bad, INV, SBOM)
 
+    def test_integrity(self):
+        """完整性結構證據：inventory 的 integrity.items 與 SBOM 的 dumpling:integrity-* 要同值；NOT_ASSESSED 只能寫在 boot_guard_enforcement。"""
+        def item(i, st):
+            return {"id": i, "state": st, "evidence": "", "basis": "", "reason": ""}
+        inv = lambda *xs: {"bios": [{"integrity": {"items": [item(i, st) for i, st in xs]}}]}      # noqa: E731
+        sbom = lambda **kv: {"components": [{"name": "BIOS.bin", "properties": [{"name": "dumpling:integrity-" + k.replace("_", "-"), "value": v}
+                                                                              for k, v in kv.items()]}]}      # noqa: E731
+        iv = inv(("CI-01", "observed"), ("CI-01.km", "observed"), ("CI-01.bpm", "not-found"), ("CI-01.acm", "GAP"), ("CI-02", "NOT_ASSESSED"), ("CI-07", "not-found"))
+        sb = sbom(ci_01="observed", ci_01_km="observed", ci_01_bpm="not-found", ci_01_acm="GAP", ci_02="NOT_ASSESSED", ci_07="not-found")
+        ok = {"integrity": {"boot_guard_structure": "observed", "key_manifest": "observed", "boot_policy_manifest": "not-found", "startup_acm": "GAP",
+                            "boot_guard_enforcement": "NOT_ASSESSED", "fit_debug_policy": "not-found"}}
+        self.assertEqual(statuses(ok, iv, sb), ["OK"] * 6)
+        self.assertEqual(statuses({"integrity": {"boot_guard_structure": "not-found"}}, iv, sb), ["MISMATCH"])
+        self.assertEqual(statuses({"integrity": {"startup_acm": "not-found"}}, iv, sb), ["MISMATCH"])                  # GAP 不能當成 not-found
+        self.assertEqual(statuses({"integrity": {"key_manifest": "observed"}}, iv, sbom(ci_01_km="GAP")), ["MISMATCH"])   # SBOM 不同值
+        self.assertEqual(statuses({"integrity": {"key_manifest": "observed"}}, iv, sbom()), ["MISMATCH"])                  # SBOM 沒有 property
+        self.assertEqual(statuses({"integrity": {"key_manifest": "observed"}}, {"bios": [{}]}, sb), ["MISSING"])            # inventory 沒有 integrity（例如 AMD 平台）
+        self.assertEqual(statuses({"integrity": {"key_manifest": "observed"}}, inv(("CI-01", "observed")), sb), ["MISSING"])
+        two = {"bios": iv["bios"] + inv(("CI-01.km", "GAP"))["bios"]}
+        self.assertEqual(statuses({"integrity": {"key_manifest": "observed"}}, two, sb), ["MISMATCH"])                      # 兩個映像不同值
+        self.assertEqual(statuses(ok, None, None), ["NOT_RUN"] * 6)
+        for bad in ({"integrity": {}}, {"integrity": "observed"}, {"integrity": {"boot_guard": "observed"}}, {"integrity": {"key_manifest": "enabled"}},
+                    {"integrity": {"key_manifest": "NOT_ASSESSED"}}, {"integrity": {"boot_guard_enforcement": "observed"}},
+                    {"integrity": {"boot_guard_structure": ["observed"]}}):
+            with self.assertRaises(fe.FormatError, msg=repr(bad)):
+                fe.compare(bad, iv, sb)
+
     def test_mismatch(self):
         r = dict(fe.compare({"intel_me": "14.0.47.1559"}, INV, SBOM))
         self.assertEqual(list(r), ["MISMATCH"])
