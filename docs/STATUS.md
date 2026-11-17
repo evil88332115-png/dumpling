@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 21:09 +0800（C4）
+最後更新：2026-11-17 21:10 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -449,12 +449,12 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：T-14 PR #199 等 C1 OK 後 C0 合併（40acba6 CI 綠；Jetson 草稿 jcmp 沒有 T-14 造成的差異）；**pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 在 C4 手上，#199 合併前不要改**
-- 分支／PR／commit：`wp7/t14-resident-dt`（40acba6）→ PR #199；#189、#202（原始碼 SBOM 路徑改成相對）已合併
+- 目前在做：第一階段的工作完成（T-14 全部完成：#199、#206 已合併）；收尾時需要的話配合重打 tag；其餘時間做 M9 的書面準備（不碰程式）
+- 分支／PR／commit：無進行中的 PR；今天合併 #189、#202、#199、#206；pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 已交回 C1（T-06 PR-2）
 - 代理：0 個（D-048 上限 3）
-- CI：dev run 三專案與 release 草稿三平台完成（ai-nas 草稿重跑 run 44059629464 成功，draft 448438767，0 次 403、body 沒有網址、SBOM 名稱沒有路徑）。T-14 的 Jetson 草稿 44069302697／44069319204（40acba6）對 C1 基準 44043290235／44043307286：jcmp scan-summary 0 差異、列數／核心列／VEX 相同；其餘差異只有 build 不可重現（/boot/Image＋6 個樹外 .ko 的 hashes 及衍生的 layerID、bom-ref、serial）與 Grype DB 的 age_days
-- 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（上游轉 sca-center、dumpling 後處理由 C1 做）；ai-nas 草稿 403 診斷與修正 (a)
-- 下一步：#199 合併 → T-14 收尾 PR：dt-smoke.yml 加假常駐 DT 的整合 job（測試開關要同時滿足 DUMPLING_DT_TEST_RESIDENT=1 與 GITHUB_WORKFLOW_REF 指向 dt-smoke.yml；鎖住 dt-smoke 沒有 workflow_call）→ GitLab 範本 .scan-steps 和 C3 對齊 → M9 N3／N4／N6（屬性照 D-072：inventory:；書面準備已寫）
-- 403 紀錄（已知原因之一：Release body 含 https 網址會 403；2026-11-17 診斷，原因沒有查出來）：run 44040129677（ai-nas 草稿），07:50:40–07:54:12Z 與補跑 08:06:20–08:09:52Z，POST /releases 各連續 8 次 403「Resource not accessible by integration」，同一步驟的 GET /releases 是 200；同 SHA 的 rpi、rock 都成功；body 唯一明顯差異是 ai-nas 的 notes 含 `https://github.com/…`；同一份 scan 只拿掉 https:// 後 run 44051748503 第一次成功、0 次 403。查過最近 76 個 Release／發布 job 與現有 12 個 Release body：之前沒有 403、body 都沒有網址；沒有次級速率限制的跡象；repo 沒有 ruleset。修正：(a) WP7 notes 產生端 #189（C4）；(b) 所有平台的 Release 說明寫入端 release-meta.py（C1，排在 SBOM 路徑 PR 之後）；release.yml:118 註解由 C1 更新
+- CI：dev run 三專案（S1／K1 沒有改變既有判定）、release 草稿三平台（ai-nas 草稿 448438767：0 次 403、body 沒有網址、SBOM 名稱沒有路徑）、T-14 的 Jetson 草稿比對（沒有 T-14 造成的差異）、dt-smoke 的假常駐 DT 整合測試（089d1a7：建立→沿用、C-mirror-freshness GAP、沒有起或關容器、log 沒有 key）都完成
+- 今天處理：dev run 與 K1 比對；CVE-2026-80920 是上游 REJECTED；ai-nas 草稿 403＝body 的 https 網址（修正 (a) #189、(b) C1 #201）；SBOM 的 runner 路徑（metadata.component：C1 #200；原始碼元件：#202）；T-14 常駐 DT 模式（#199）與整合測試（#206）；審 C2 的 T-04 #207（dt-session.sh 部分 OK）
+- 下一步：GitLab 範本 .scan-steps 改連常駐 DT 和 C3 對齊（另開 PR，等 C0 排）→ M9 N3／N4／N6（設計 docs/references/m9-n1-design.md；屬性照 D-072：inventory:；實作前讀碼筆記已寫：N3 用 sca-scan --dir 不改上游、N4 docker pull＋digest cache、N6 自寫 machine-learning-model 元件＋aisbom 離線）
+- 403 紀錄（已知原因之一：Release body 含 https 網址會 403；2026-11-17 診斷，原因沒有查出來）：run 44040129677 兩次各 8 次 403，只拿掉 https:// 後 run 44051748503 成功；修正 (a) #189、(b) #201
 - 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
