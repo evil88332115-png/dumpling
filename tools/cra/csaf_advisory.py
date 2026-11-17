@@ -79,7 +79,7 @@ def read_json(p, what, required=True):
         if required:
             raise InputError(f"{what}：沒有 {p}")
         return None, None
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:      # RecursionError：巢狀太深的 JSON（不可信輸入），當成讀不到（dumpling）
         raise InputError(f"{what}：讀不到 {p}（{type(e).__name__}）")
 
 
@@ -109,8 +109,8 @@ def statements(vex, what):
     out, dropped = {}, {"not_an_object": 0, "no_id": 0, "unknown_state": 0, "merged_duplicates": 0}
     dropped["not_an_object"] = sum(1 for v in vex["vulnerabilities"] if not isinstance(v, dict))
     for v in lst(vex["vulnerabilities"]):
-        vid = v.get("id")
-        if not isinstance(vid, str) or not vid.strip():
+        vid = clean(v.get("id"), 120)        # dumpling：外部字串一律 clean（去控制字元與 Unicode 格式字元、截斷），和路徑 B 相同
+        if not vid:
             dropped["no_id"] += 1
             continue
         a = d(v.get("analysis"))
@@ -119,13 +119,13 @@ def statements(vex, what):
             dropped["unknown_state"] += 1
             continue
         pp = props(v)
-        purl = pp.get("sca-center:component-purl") if isinstance(pp.get("sca-center:component-purl"), str) else ""
-        comp = str(pp.get("sca-center:component") or "").strip()
-        key = (vid.strip().upper(), purl_base(purl) if purl else ("name:" + comp_name(comp).lower()))
-        fs = pp.get("sca-center:fix-state")
-        st = {"id": vid.strip(), "state": state, "fix_state": fs if isinstance(fs, str) else "", "component": comp or "?", "purl": purl, "detail": str(a.get("detail") or ""),
-              "response": [str(x) for x in a.get("response") or [] if isinstance(x, str)] if isinstance(a.get("response"), list) else [],
-              "justification": a.get("justification") if isinstance(a.get("justification"), str) else None,
+        purl = clean(pp.get("sca-center:component-purl"), 300)
+        comp = clean(pp.get("sca-center:component"), 200)
+        key = (vid.upper(), purl_base(purl) if purl else ("name:" + comp_name(comp).lower()))
+        fs = clean(pp.get("sca-center:fix-state"), 40)
+        st = {"id": vid, "state": state, "fix_state": fs, "component": comp or "?", "purl": purl, "detail": clean(a.get("detail"), 1000),
+              "response": [clean(x, 40) for x in a.get("response") or [] if isinstance(x, str) and clean(x, 40)] if isinstance(a.get("response"), list) else [],
+              "justification": clean(a.get("justification"), 80) or None,
               "local": any(isinstance(d(x).get("ref"), str) and d(x)["ref"] in local for x in lst(v.get("affects")))}
         purls = set(out[key]["purls"]) if key in out else set()
         purls.update([purl] if purl else [])
@@ -154,10 +154,10 @@ def product_of(vex, summary):
     na = gate.get("not_assessed")
     if not (isinstance(na, list) and not na):
         gaps.append(f"{len(na)} matches were not assessed" if isinstance(na, list) else "the list of unassessed matches is unknown")
-    return {"name": str(c.get("name") or "") or None, "gaps": gaps, "version": str(c.get("version") or "") or None,
-            "sbom_serial": props(m).get("sca-center:product-sbom-serial"),
+    return {"name": clean(c.get("name")) or None, "gaps": gaps, "version": clean(c.get("version"), 80) or None,
+            "sbom_serial": clean(props(m).get("sca-center:product-sbom-serial"), 120) or None,
             "untriaged": u if isinstance(u, int) and not isinstance(u, bool) else None,
-            "verdict": gate.get("verdict") if isinstance(gate.get("verdict"), str) else None,
+            "verdict": clean(gate.get("verdict"), 40) or None,
             "sbom_status": d(docs.get("sbom")).get("status") if isinstance(d(docs.get("sbom")).get("status"), str) else None}
 
 
@@ -485,9 +485,12 @@ def table(head, rows):
     return "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(esc(x) for x in r) + " |" for r in rows])
 
 
+DRAFT_FIRST_LINE = "草稿：工具不發布，也不會自動放進客戶資料包"      # dumpling：advisory.md 與 PM 的 README 第一行（C0 #175 驗證）
+
+
 def advisory_md(doc, rows, counts, miss, scope, summary_text, notes):
     t = doc["document"]
-    out = [f"# {t['title']}", "", f"Status: **draft** · Tracking ID: `{t['tracking']['id']}` · Generated: {t['tracking']['current_release_date']}", "",
+    out = [DRAFT_FIRST_LINE, "", f"# {t['title']}", "", f"Status: **draft** · Tracking ID: `{t['tracking']['id']}` · Generated: {t['tracking']['current_release_date']}", "",
            summary_text, "", scope, ""]
     if miss:
         out += ["Fields TO BE COMPLETED before publication: " + ", ".join(f"`{m}`" for m in miss) + ".", ""]
@@ -938,7 +941,7 @@ def load_kev_dates(reports, euvd_file=None):
     try:
         raw = p.read_bytes()
         doc = json.loads((bounded_xz(raw) if p.suffix == ".xz" else raw).decode("utf-8"))
-    except (OSError, ValueError, lzma.LZMAError):
+    except (OSError, ValueError, RecursionError, lzma.LZMAError):
         return {}, None, f"no KEV/EUVD dates: {p.name} could not be read"
     out = {}
     for cve, x in (d(doc).get("cves") or {}).items() if isinstance(d(doc).get("cves"), dict) else ():
@@ -1053,7 +1056,7 @@ def exploited_run(reports, cves, cfg, out, now=None, detected=None, euvd_file=No
     if not by_cve:
         return fail("; ".join(warnings))
 
-    # 關卡：沒有被利用證據的 CVE 不需要第 14(8) 條的通知（除非明確 --assume-exploited）
+    # 關卡：報告沒有被利用證據的 CVE 不產生草稿（除非明確 --assume-exploited）。沒有證據不代表沒有被利用，要不要通知由人判斷（dumpling 改寫）
     assume = clean(assume_exploited, 300)
     ev_of, no_ev, assumed = {}, [], set()
     for c in list(by_cve):
@@ -1083,7 +1086,7 @@ def exploited_run(reports, cves, cfg, out, now=None, detected=None, euvd_file=No
         if not evid:
             no_ev.append(c)
             del by_cve[c]
-            warnings.append(f"{c}：這個 CVE 沒有被利用的證據，不需要第 14(8) 條的通知（沒有產生草稿；若有報告以外的證據，例如廠商公告，請用 --assume-exploited \"<證據說明>\"）")
+            warnings.append(f"{c}：報告裡沒有這個 CVE 被利用的證據，這次沒有產生使用者通知草稿；這不代表這個 CVE 沒有被利用，是否需要第 14(8) 條的通知由人判斷（若有報告以外的證據，例如廠商公告，請用 --assume-exploited \"<證據說明>\"）")
         else:
             ev_of[c] = (evid, dates)
     if not by_cve:
@@ -1280,7 +1283,7 @@ def main_exploited(argv):
     ap.add_argument("--report", required=True, help="這個產品版本的 CRA/Reports 資料夾（有 vulnerability-rows.json）")
     ap.add_argument("--cve", required=True, action="append", help="要通知的 CVE（可重複）")
     ap.add_argument("--config", help="產品設定 config.json（發布者資料：csaf.*、manufacturer.*）；沒給＝發布者欄位都是 TO BE COMPLETED")
-    ap.add_argument("--assume-exploited", metavar="證據說明", help="報告沒有被利用證據的 CVE 預設不產生草稿（不需要第 14(8) 條的通知）；"
+    ap.add_argument("--assume-exploited", metavar="證據說明", help="報告沒有被利用證據的 CVE 預設不產生草稿（這不代表沒有被利用；是否需要第 14(8) 條的通知由人判斷）；"
                     "有報告以外的證據（例如廠商公告已被利用、報告還沒更新）時加這個，說明會寫進 threats 與 notes")
     ap.add_argument("--euvd", help="（選用）掃描輸出的 scan/euvd.json（KEV 日期來源）；不給＝照 Reports/summary.json 的 scan_dir 找，找不到就不寫日期")
     ap.add_argument("--out", required=True, help="輸出資料夾")
@@ -1291,7 +1294,7 @@ def main_exploited(argv):
     if a.config:
         try:
             cfg = json.loads(Path(a.config).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, RecursionError) as e:
             print(f"CSAF-EXPLOITED\tFAIL\t讀不到設定 {a.config}（{type(e).__name__}）")
             return 1
     status, detail, summ = exploited_run(Path(a.report), a.cve, cfg if isinstance(cfg, dict) else {}, Path(a.out), euvd_file=a.euvd, assume_exploited=a.assume_exploited)
@@ -1318,7 +1321,7 @@ def main(argv=None):
             ap.error(f"{opt} 要是資料夾：{v}")
     try:
         cfg = json.loads(Path(a.config).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         print(f"CSAF\tFAIL\t讀不到設定 {a.config}（{type(e).__name__}）")
         return 1
     status, detail, _ = run(Path(a.old), Path(a.new), cfg if isinstance(cfg, dict) else {}, Path(a.out))

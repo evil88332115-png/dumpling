@@ -663,3 +663,32 @@ def test_schema_ran_is_ok_and_generator_is_dumpling(tmp_path):
     assert tr["status"] == "draft" and tr["generator"]["engine"]["name"] == "dumpling csaf_advisory.py"
     assert all("dumpling" in r["summary"] for r in tr["revision_history"])
     assert "sca-center csaf" not in json.dumps(doc)
+
+
+# ---- dumpling（#175 獨立驗證）：路徑 A 的字串清理、很深的巢狀 JSON、草稿第一行 ----
+def test_path_a_cleans_ids_components_and_versions(tmp_path):
+    bidi, zw = "‮", "​"
+    long_id = "GHSA-" + "a" * 100000
+    new = NEW + [stmt(f"CVE-2026-0099{bidi}", f"libbidi{zw}", f"1.0{zw}", "exploitable"),
+                 stmt(long_id, "liblong", "1.0", "exploitable")]
+    st, detail, summ, out = gen(tmp_path, new=new, sbom=SBOM_NEW + [("libbidi", "1.0"), ("liblong", "1.0")])
+    for f in ("csaf.json", "advisory.md", "csaf-summary.json"):
+        text = (out / f).read_text(encoding="utf-8")
+        assert bidi not in text and zw not in text, f
+        assert "a" * 200 not in text, f                                   # 外部字串有截斷（ID 最多 120 字）
+    doc = json.loads((out / "csaf.json").read_text(encoding="utf-8"))
+    assert "CVE-2026-0099" in [v.get("cve") for v in doc["vulnerabilities"]]
+    assert not list(csaf_validator().iter_errors(doc))
+
+
+def test_deeply_nested_previous_vex_is_input_error_not_crash(tmp_path):
+    o = reports(tmp_path / "old", "1.0.0", OLD)
+    (o / "vex.cdx.json").write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
+    n = reports(tmp_path / "new", "1.1.0", NEW, 0, SBOM_NEW)
+    st, detail, summ = ca.run(o, n, CFG, tmp_path / "out", NOW)          # 不丟 RecursionError：當成讀不到的輸入
+    assert st == "FAIL" and "RecursionError" in detail and summ is None and not (tmp_path / "out" / "csaf.json").exists()
+
+
+def test_advisory_md_first_line_says_draft(tmp_path):
+    st, detail, summ, out = gen(tmp_path)
+    assert (out / "advisory.md").read_text(encoding="utf-8").splitlines()[0] == "草稿：工具不發布，也不會自動放進客戶資料包"
