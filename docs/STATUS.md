@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 19:10 +0800（C0）
+最後更新：2026-11-17 19:10 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -120,7 +120,7 @@
 ## C2 韌體（WP3＋WP4）
 
 > **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。T-04 要等 C4 的 T-14（C0：T-04 的設計準備也等 T-14 的設計出來再做），其他 C2 項目照 D-063 凍結到第二階段。
-> - **PR #204（wp3/fw-release-body，C0 指派）**：`pipeline/firmware-release-publish.sh` 建 Release 前先跑 `python3 -I pipeline/release-body.py`（#201），改寫過的暫存檔才交給 `--notes-file`；改寫失敗、沒產生檔或空白 → FAIL，不呼叫任何 GitHub API。PublishScript 新增 3 項測試；本機 test_firmware*.py 499 項 OK，3 個 mutation 都抓得到；shellcheck 沒有警告。等 CI。
+> - **PR #204（wp3/fw-release-body，C0 指派）**：`pipeline/firmware-release-publish.sh` 建 Release 前先跑 `python3 -I pipeline/release-body.py`（#201），改寫過的暫存檔才交給 `--notes-file`；改寫失敗、沒產生檔或空白 → FAIL，不呼叫任何 GitHub API。PublishScript 新增 3 項測試；本機 test_firmware*.py 499 項 OK，3 個 mutation 都抓得到；shellcheck 沒有警告。CI 通過，C0 已合併（67e209f），worktree 已移除。第一階段只剩 T-04，等 C4 的 T-14（#199）合併後 C0 通知開工。
 > - **DT 失敗路徑已在真的 Actions 上驗過**：測試分支 `wp3/test-dt-fail`（629fe1a，從 main 20ba05e）只改 `pipeline/dt-ephemeral.sh` 的 DT 位址為連不到的埠；沒有推 tag，也沒有改 repo 變數或 secret。workflow_dispatch run 44009322155 的結果：
 >   - firmware-dt 是 failure，在「臨時 DT：up」失敗（API 600 秒內沒有回應），down 照跑。
 >   - firmware-release-check 照跑，是 success：meta 的 dt 是 `{"status": "GAP", "result": "FAIL", "reason": "DT 上傳沒有完成；Release 的內容與 DT 的結果無關"}`；collect-check OK；6 個 bios 樣本 rematch 的 changed 都是 0；public-check OK。
