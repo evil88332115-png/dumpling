@@ -211,5 +211,135 @@ class AugmentTest(unittest.TestCase):
         self.assertEqual(rb(a), rb(b))
 
 
+
+class SourcePathsTest(unittest.TestCase):
+    """原始碼 SBOM（cdxgen）的絕對路徑：併入後改成相對於原始碼根目錄（<WORK>/cdxgen-src）的路徑；其他絕對路徑只留檔名。
+    鎖住：完整、-bsp、-os、產品 SBOM（sbom-layers.py split 的實際輸出）走訪整份 JSON 都沒有暫存路徑；原始碼元件沒有任何絕對路徑。
+    映像元件（Syft 記的是裝置上的路徑，例如 /usr/lib/…）不是暫存路徑，原樣保留。"""
+    LAYERS = os.path.join(ROOT, "pipeline", "sbom-layers.py")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="wp7-aug-paths-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.parent = os.path.join(self.tmp, "out", "augment")
+        os.makedirs(self.parent)
+        self.root = os.path.join(self.parent, ".sca-scan-work.Ab12Cd", "cdxgen-src")     # sca-scan 掃完會刪掉：這裡也不建
+
+    def w(self, name, doc):
+        p = os.path.join(self.tmp, name)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        return p
+
+    def lockfile(self, rel):
+        return os.path.join(self.root, rel)
+
+    def src(self, root=None):
+        root = root or self.root
+        f = os.path.join(root, "deb/openmediavault/workbench/package-lock.json")
+        def lib(name, extra=None):
+            c = {"bom-ref": "pkg:npm/%s@1" % name, "type": "library", "name": name, "version": "1", "purl": "pkg:npm/%s@1" % name,
+                 "properties": [{"name": "SrcFile", "value": f}, {"name": "ResolvedUrl", "value": "https://registry.npmjs.org/%s/-/%s-1.tgz" % (name, name)}],
+                 "evidence": {"identity": [{"field": "purl", "confidence": 1, "concludedValue": f,
+                                            "methods": [{"technique": "manifest-analysis", "confidence": 1, "value": f}]}]}}
+            c.update(extra or {})
+            return c
+        return {"bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"component": {"bom-ref": "pkg:npm/openmediavault-workbench@0.0.0", "type": "application",
+                                           "name": "openmediavault-workbench", "version": "0.0.0",
+                                           "properties": [{"name": "SrcFile", "value": root}]}},
+                "components": [lib("tmp"), lib("core", {"description": "built from /home/runner/work/_temp/x/core.js"}),
+                               lib("nested", {"components": [lib("inner")]})],
+                "dependencies": []}
+
+    def image(self):
+        return bom([{"bom-ref": "pkg:deb/debian/bash@5", "type": "library", "name": "bash", "version": "5", "purl": "pkg:deb/debian/bash@5",
+                     "properties": [{"name": "syft:location:0:path", "value": "/usr/share/doc/bash/copyright"}]}])
+
+    def merge(self, *extra, src=None):
+        out = os.path.join(self.tmp, "merged.json")
+        p = subprocess.run([sys.executable, "-I", AUG, "merge-source", self.w("img.json", self.image()), self.w("src.json", src or self.src()), out,
+                            "--label", "app-source", "--repo", REPO, "--commit", COMMIT, "--app-name", "openmediavault", "--app-version", "8.6.1-1",
+                            *extra], capture_output=True, text=True)
+        return p.returncode, (p.stdout.strip().splitlines() or [""])[-1], out
+
+    def strings(self, o, path=""):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                yield from self.strings(v, path + "." + k)
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                yield from self.strings(v, "%s[%d]" % (path, i))
+        elif isinstance(o, str):
+            yield path, o
+
+    def assert_clean(self, doc, name):
+        bad = ("/home/runner", ".sca-scan-work", self.tmp)
+        for p, v in self.strings(doc):
+            for b in bad:
+                self.assertNotIn(b, v, "%s %s" % (name, p))
+        for c in doc.get("components") or []:
+            if props(c).get("dumpling:origin") != "source":
+                continue
+            for p, v in self.strings({k: x for k, x in c.items() if k not in ("bom-ref", "purl")}):
+                self.assertNotRegex(v, r"(^|[\s(=])/(?!/)[^\s]*", "%s 原始碼元件有絕對路徑 %s" % (name, p))
+
+    def test_paths_become_relative_and_all_outputs_are_clean(self):
+        rc, line, out = self.merge("--work-parent", self.parent)
+        self.assertEqual(rc, 0, line)
+        self.assertIn("路徑：相對 ", line)
+        d = rj(out)
+        src = {c["name"]: c for c in d["components"] if props(c).get("dumpling:origin") == "source"}
+        self.assertEqual(props(src["tmp"])["SrcFile"], "deb/openmediavault/workbench/package-lock.json")
+        ev = src["tmp"]["evidence"]["identity"][0]
+        self.assertEqual((ev["concludedValue"], ev["methods"][0]["value"]), ("deb/openmediavault/workbench/package-lock.json",) * 2)
+        self.assertEqual(props(src["tmp"])["ResolvedUrl"], "https://registry.npmjs.org/tmp/-/tmp-1.tgz")   # 網址不動
+        self.assertEqual(src["core"]["description"], "built from core.js")                                 # 根目錄外的絕對路徑：只留檔名
+        self.assertEqual(props(src["nested"]["components"][0])["SrcFile"], "deb/openmediavault/workbench/package-lock.json")
+        self.assertEqual(props(src["openmediavault"])["SrcFile"], ".")                                      # 根目錄本身
+        bash = [c for c in d["components"] if c["name"] == "bash"][0]
+        self.assertEqual(props(bash)["syft:location:0:path"], "/usr/share/doc/bash/copyright")            # 映像裡的路徑原樣
+        mp = {x["name"]: x["value"] for x in d["metadata"]["properties"]}
+        self.assertEqual(mp["dumpling:augment:source:app-source:paths"], "改成相對路徑 13 個；不在原始碼根目錄底下的絕對路徑只留檔名 1 個")   # 4 個元件 × 3 個欄位＋根目錄本身
+        self.assert_clean(d, "merged")
+        lay = os.path.join(self.tmp, "layers")
+        r = subprocess.run([sys.executable, "-I", self.LAYERS, "split", out, "ai-nas", os.path.join(ROOT, "projects", "ai-nas-demo"), lay,
+                            "--os-responsibility", "ours"], capture_output=True, text=True)
+        self.assertIn(r.returncode, (0, 3), r.stdout + r.stderr)
+        made = sorted(f for f in os.listdir(lay) if f.endswith(".cdx.json"))
+        self.assertIn("sbom.product.cdx.json", made)
+        self.assertTrue({"sbom.bsp.cdx.json", "sbom.os.cdx.json"} <= set(made), made)
+        for f in made:
+            self.assert_clean(rj(os.path.join(lay, f)), f)
+
+    def test_without_work_parent_absolute_paths_keep_only_file_name(self):
+        rc, line, out = self.merge()
+        self.assertEqual(rc, 0, line)
+        d = rj(out)
+        tmp = [c for c in d["components"] if c["name"] == "tmp"][0]
+        self.assertEqual(props(tmp)["SrcFile"], "package-lock.json")
+        self.assert_clean(d, "merged")
+
+    def test_root_must_be_the_real_parent(self):
+        # 同樣長得像 .sca-scan-work.XXXXXX/cdxgen-src，但不在 --work-parent 底下：不當成根目錄，只留檔名
+        other = os.path.join(self.tmp, "elsewhere", ".sca-scan-work.Zz99Yy", "cdxgen-src")
+        rc, line, out = self.merge("--work-parent", self.parent, src=self.src(other))
+        self.assertEqual(rc, 0, line)
+        self.assertEqual(props([c for c in rj(out)["components"] if c["name"] == "tmp"][0])["SrcFile"], "package-lock.json")
+        self.assertIn("相對 0、只留檔名", line)
+
+    def test_two_roots_fail(self):
+        s = self.src()
+        s["components"][0]["properties"][0]["value"] = os.path.join(self.parent, ".sca-scan-work.Qq11Ww", "cdxgen-src", "a.json")
+        rc, line, _ = self.merge("--work-parent", self.parent, src=s)
+        self.assertEqual(rc, 1)
+        self.assertIn("2 個不同的掃描根目錄", line)
+
+    def test_scan_disk_passes_work_parent(self):
+        with open(os.path.join(ROOT, "pipeline", "platforms", "_shared", "scan-disk.sh"), encoding="utf-8") as f:
+            sh = f.read()
+        self.assertIn('--out "$out/augment/app-scan"', sh)                       # sca-scan 的 --out 在 $out/augment 底下
+        self.assertIn('--work-parent "$out/augment")', sh)                        # → WORK 在 $out/augment/.sca-scan-work.XXXXXX
+
 if __name__ == "__main__":
     unittest.main()

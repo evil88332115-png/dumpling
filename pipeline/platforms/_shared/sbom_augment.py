@@ -205,7 +205,78 @@ def from_raw_sectors(doc, raw):
 
 # ---------------------------------------------------------------- merge-source
 
-def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None):
+# 原始碼 SBOM（cdxgen）的檔案路徑是掃描當下的絕對路徑：sca-scan 把原始碼複製到 <WORK>/cdxgen-src 再交給 cdxgen，
+# WORK＝mktemp -d "<輸出資料夾的上一層>/.sca-scan-work.XXXXXX"（在 /tmp、/run 底下時改用 $HOME/.cache/sca-scan/work.XXXXXX），
+# 掃完 sca-scan 就把 WORK 刪掉，所以根目錄只能由「實際的上一層資料夾＋mktemp 的樣式」比對出來（--work-parent），不只比對字串片段。
+# 併入時：在原始碼根目錄底下的 → 相對路徑；其他絕對路徑 → 只留檔名並計數（不讓 runner 或公司 runner 的路徑進給客戶的 SBOM）。
+def source_root_pattern(work_parent):
+    """→ 原始碼根目錄的正規式（比對字串開頭）；work_parent 是 sca-scan --out 的上一層（用掃描時的實際路徑）。"""
+    alts = []
+    for base in {os.path.abspath(work_parent), os.path.realpath(work_parent)}:
+        alts.append(re.escape(base.rstrip("/")) + r"/\.sca-scan-work\.[A-Za-z0-9]{6}/cdxgen-src")
+    home = os.environ.get("HOME")
+    if home:
+        alts.append(re.escape(os.path.join(os.path.abspath(home), ".cache", "sca-scan")) + r"/work\.[A-Za-z0-9]{6}/cdxgen-src")
+    return re.compile("(?:%s)(?=/|$)" % "|".join(alts))
+
+
+def find_source_root(src, pat):
+    """原始碼 SBOM 裡實際出現的根目錄（只能有一個；兩個以上 → AugError，不猜哪個對）。沒有 → None。"""
+    found = set()
+
+    def scan(o):
+        if isinstance(o, dict):
+            for v in o.values():
+                scan(v)
+        elif isinstance(o, list):
+            for v in o:
+                scan(v)
+        elif isinstance(o, str):
+            for m in pat.finditer(o):
+                found.add(m.group(0))
+    scan(src)
+    if len(found) > 1:
+        raise AugError("原始碼 SBOM 裡出現 %d 個不同的掃描根目錄，不能判斷相對路徑" % len(found))
+    return next(iter(found), None)
+
+
+# 絕對路徑：字串開頭，或空白與常見分隔符號之後的 /…（網址裡的 /x/-/y 不算：前面不是這些字元）
+ABS_RE = re.compile(r"(?:^|(?<=[\s(=,;'\"（：、「]))/(?:[^\s/\"'<>|]+/)*[^\s/\"'<>|]+")
+
+
+def relativize(o, root, counts, skip=()):
+    """o 裡每個字串：根目錄底下的路徑 → 相對路徑（counts["relative"]）；其他絕對路徑 → 只留檔名（counts["basename"]）。
+    原地改；skip 是 o（dict）最上層不處理的鍵。"""
+    def fix(sv):
+        if root and root in sv:
+            n = sv.count(root + "/") + (1 if sv == root else 0)
+            counts["relative"] += n
+            sv = sv.replace(root + "/", "")
+            if sv == root:
+                sv = "."
+        def base(m):
+            counts["basename"] += 1
+            return os.path.basename(m.group(0))
+        return ABS_RE.sub(base, sv)
+    if isinstance(o, dict):
+        for k, v in list(o.items()):
+            if k in skip:
+                continue
+            if isinstance(v, str):
+                o[k] = fix(v)
+            else:
+                relativize(v, root, counts)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            if isinstance(v, str):
+                o[i] = fix(v)
+            else:
+                relativize(v, root, counts)
+
+
+def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None, work_parent=None):
+    counts = {"relative": 0, "basename": 0}
+    root = find_source_root(src, source_root_pattern(work_parent)) if work_parent else None
     for c in walk(doc.get("components")):
         prop(c, "dumpling:origin", "image")
     pre = "dumpling:src:%s:" % label
@@ -223,6 +294,7 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None)
             c["bom-ref"] = pre + "anon-%d" % len(mapping)
             mapping[c["bom-ref"]] = c["bom-ref"]
         c["properties"] = [p for p in c.get("properties") or [] if isinstance(p, dict) and not str(p.get("name", "")).startswith("dumpling:origin")]
+        relativize(c, root, counts, skip=("components", "bom-ref", "purl"))   # 子元件在下面 remap 時各自處理
         prop(c, "dumpling:origin", "source")
         prop(c, "dumpling:origin-label", label)
         prop(c, "dumpling:origin-repo", repo)
@@ -287,8 +359,11 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None)
         add_root_deps(doc, [app_ref])
     meta_prop(doc, "dumpling:augment:source:%s" % label, "%s@%s：%d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）"
               % (repo, commit, len(list(walk(merged))), kept, dropped))
-    gaps = [] if app_ref else ["原始碼 SBOM 沒有 metadata.component（應用本身），無法標 source-vs-package"]
-    return len(list(walk(merged))), kept, dropped, gaps
+    meta_prop(doc, "dumpling:augment:source:%s:paths" % label, "改成相對路徑 %d 個；不在原始碼根目錄底下的絕對路徑只留檔名 %d 個"
+              % (counts["relative"], counts["basename"]))
+
+    gaps = ([] if app_ref else ["原始碼 SBOM 沒有 metadata.component（應用本身），無法標 source-vs-package"])
+    return len(list(walk(merged))), kept, dropped, gaps, counts
 
 
 def main(argv=None):
@@ -300,6 +375,7 @@ def main(argv=None):
     m.add_argument("sbom"); m.add_argument("src"); m.add_argument("out")
     m.add_argument("--label", required=True); m.add_argument("--repo", required=True); m.add_argument("--commit", required=True)
     m.add_argument("--app-name"); m.add_argument("--app-version")
+    m.add_argument("--work-parent", help="sca-scan --out 的上一層資料夾（掃描時的實際路徑）：用來比對原始碼根目錄，路徑改成相對")
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -323,8 +399,9 @@ def main(argv=None):
         else:
             src = read_json(a.src)
             check_bom(src, "原始碼 SBOM")
-            n, kept, dropped, gaps = merge_source(doc, src, a.label, a.repo, a.commit, a.app_name, a.app_version)
-            msg = "併入 %s 的 %d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）" % (a.label, n, kept, dropped)
+            n, kept, dropped, gaps, counts = merge_source(doc, src, a.label, a.repo, a.commit, a.app_name, a.app_version, a.work_parent)
+            msg = "併入 %s 的 %d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）；路徑：相對 %d、只留檔名 %d" % (
+                a.label, n, kept, dropped, counts["relative"], counts["basename"])
         write_json(doc, a.out)
     except AugError as e:
         print("sbom-augment: FAIL（%s）" % e)
