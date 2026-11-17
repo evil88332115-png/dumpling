@@ -93,20 +93,24 @@ class GrypeBlock(unittest.TestCase):
                 self.assertEqual(self.e.grype_calls(), [])                   # 這一段不呼叫 grype；import 在 sca-scan 裡
 
     def test_internal_missing_grype_db_fails_without_public_fallback(self):
-        r = self.run_block()                                                 # 根目錄底下沒有 grype-db/
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertEqual(r.stdout.strip().splitlines()[-1],
-                         "scan: FAIL（鏡像 grype-db.sh 失敗（內部鏡像不可用，不退回公開下載；弱點資料不完整，不當作沒有漏洞））")
-        self.assertNotIn("GM=", r.stdout)
-        self.assertEqual(self.e.marked(), [])
-        self.assertEqual(self.e.grype_calls(), [])
+        for path in (JETSON, SCAN_DISK):
+            with self.subTest(p=os.path.basename(path)):
+                r = self.run_block(path)                                     # 根目錄底下沒有 grype-db/
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertEqual(r.stdout.strip().splitlines()[-1],
+                                 "scan: FAIL（鏡像 grype-db.sh 失敗（內部鏡像不可用，不退回公開下載；弱點資料不完整，不當作沒有漏洞））")
+                self.assertNotIn("GM=", r.stdout)
+                self.assertEqual(self.e.marked(), [])
+                self.assertEqual(self.e.grype_calls(), [])
 
     def test_internal_check_failure_fails(self):
         self.e.write_grype_db(hours_ago=2)
-        r = self.run_block(STUB_CHECK="fail")
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("內部鏡像不可用，不退回公開下載", r.stdout)
-        self.assertEqual(self.e.marked(), [])
+        for path in (JETSON, SCAN_DISK):
+            with self.subTest(p=os.path.basename(path)):
+                r = self.run_block(path, STUB_CHECK="fail")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("內部鏡像不可用，不退回公開下載", r.stdout)
+                self.assertEqual(self.e.marked(), [])
 
     def test_internal_too_old_fails(self):
         self.e.write_grype_db(hours_ago=80)                                 # 超過失敗門檻 72 小時
@@ -118,12 +122,13 @@ class GrypeBlock(unittest.TestCase):
         self.e.write_grype_db(hours_ago=2)
         for kw in (dict(INTERNAL_MIRROR_URL="https://mirror.example.invalid/m"), dict(INTERNAL_MIRROR_URL="file://relative/x"),
                    dict(INTERNAL_MIRROR_URL=None, DUMPLING_REQUIRE_INTERNAL_MIRROR="1")):
-            with self.subTest(**{k: str(v) for k, v in kw.items()}):
-                r = self.run_block(**kw)
-                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-                self.assertEqual(r.stdout.strip().splitlines()[-1],
-                                 "scan: FAIL（Grype DB 的內部鏡像設定不合法（INTERNAL_MIRROR_URL 等，見上面的訊息；不退回公開下載））")
-                self.assertEqual(self.e.marked(), [])
+            for path in (JETSON, SCAN_DISK):
+                with self.subTest(p=os.path.basename(path), **{k: str(v) for k, v in kw.items()}):
+                    r = self.run_block(path, **kw)
+                    self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                    self.assertEqual(r.stdout.strip().splitlines()[-1],
+                                     "scan: FAIL（Grype DB 的內部鏡像設定不合法（INTERNAL_MIRROR_URL 等，見上面的訊息；不退回公開下載））")
+                    self.assertEqual(self.e.marked(), [])
 
     def test_unset_is_online_and_silent(self):
         self.e.write_grype_db(hours_ago=2)                                   # 有內部鏡像也不讀：沒設變數就是公開模式
@@ -220,6 +225,32 @@ class Items(unittest.TestCase):
             it = ds.mirror_item(self.tmp, "kcve", "kernel-cve")
             self.assertEqual((it["snapshot_field"], it["snapshot_utc"]), (None, None), val)
 
+    def test_odd_dates_never_crash_or_pass(self):
+        # 時區換算後超出 1～9999 年（OverflowError）、非 ASCII 數字、不存在的日期：都變成 null，不讓 collect 崩潰
+        w(self.p("kcve.result"), "OK x\n")
+        for val in ("0001-01-01T00:00:00+23:59", "9999-12-31T23:59:59-23:59"):
+            w(self.p("kcve", "SOURCE"), "fetched_utc=%s\n" % val)
+            self.assertIsNone(ds.mirror_item(self.tmp, "kcve", "kernel-cve")["snapshot_utc"], val)
+        self.assertIsNone(ds.grype_item({"grype_db_update": "online", "grype_db_built": "0001-01-01T00:00:00+23:59"})["snapshot_utc"])
+        base = {"kind": "euvd", "source": "internal", "status": "OK", "snapshot_field": "fetched_utc"}
+        for bad in ("\u0662\u0660\u0662\u0666-\u0661\u0661-\u0661\u0667T\u0660\u0661:\u0660\u0662:\u0660\u0663Z", "9999-99-99T99:99:99Z", "2026-02-30T00:00:00Z"):
+            self.assertIsNone(ds.clean([dict(base, snapshot_utc=bad)])[0]["snapshot_utc"], bad)
+        self.assertEqual(ds.clean([dict(base, snapshot_utc="2026-02-28T00:00:00Z")])[0]["snapshot_utc"], "2026-02-28T00:00:00Z")
+
+    def test_clean_rejects_unknown_snapshot_field_even_with_a_good_time(self):
+        it = {"kind": "euvd", "source": "internal", "status": "OK", "snapshot_field": "/srv/mirror", "snapshot_utc": "2026-11-17T01:00:00Z"}
+        self.assertEqual(ds.clean([it])[0], {"kind": "euvd", "source": "internal", "status": "OK", "snapshot_field": None, "snapshot_utc": None})
+
+    def test_internal_grype_must_really_be_imported(self):
+        # gdb 鏡像合格，但 sca-scan 實際走 online（或匯入失敗）：不能記成內部
+        w(self.p("gdb.result"), "OK source=internal kind=grype-db built_utc=2026-11-17T00:00:00Z age_hours=1.0\n")
+        for meta, src in (({"grype_db_update": "import:/x/db.tar.zst", "grype_db_update_status": "OK"}, "internal"),
+                          ({"grype_db_update": "online", "grype_db_update_status": "OK"}, None),
+                          ({"grype_db_update": "import:/x/db.tar.zst", "grype_db_update_status": "FAIL"}, None)):
+            it = ds.collect(self.tmp, "gdb=grype-db", meta)[0]
+            self.assertEqual(it["source"], src, meta)
+            self.assertEqual(it["status"], "OK" if src else "UNKNOWN", meta)
+
     def test_public_grype_from_meta(self):
         it = ds.grype_item({"grype_db_update": "online", "grype_db_update_status": "OK", "grype_db_built": "2026-11-17T06:07:08Z"})
         self.assertEqual(it, {"kind": "grype-db", "source": "public", "status": "OK", "snapshot_field": "built_utc", "snapshot_utc": "2026-11-17T06:07:08Z"})
@@ -275,7 +306,8 @@ class CollectAndReleaseMeta(unittest.TestCase):
         self.w0 = self.p("w0")
         w(os.path.join(self.w0, "scan", "rootfs", "scan", "status.tsv"), "stage\tstatus\tdetail\nA-md5\tOK\tx\n")
         w(os.path.join(self.w0, "scan", "rootfs", "scan", "meta.json"),
-          json.dumps({"grype_db_update": "import:" + self.p("mirrors", "gdb", "v6", "db.tar.zst"), "grype_db_built": "2026-11-17T01:00:00Z"}))
+          json.dumps({"grype_db_update": "import:" + self.p("mirrors", "gdb", "v6", "db.tar.zst"), "grype_db_update_status": "OK",
+                      "grype_db_built": "2026-11-17T01:00:00Z"}))
         w(os.path.join(self.w0, "cra-project", "CRA", "Reports", "vulnerability-rows.json"), json.dumps({"rows": []}))
         w(os.path.join(self.w0, "報告", "x.txt"), "x")
 

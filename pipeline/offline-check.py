@@ -9,7 +9,8 @@
   AF_UNIX（本機 socket）、loopback（127.0.0.0/8、::1；systemd-resolved 的 127.0.0.53:53 另外算「名稱查詢」）、其他＝對外。
   紀錄讀不到或是空的 → NOT_RUN（沒有證據，不算 OK）。
 - --iptables：`iptables -L DUMPLING_OFFLINE -v -n -x` 與 ip6tables 的輸出（block on 才有）：REJECT 的封包數加總。
-- --docker-events：`docker events --filter type=image` 在 scan 期間的輸出：有任何一行（例如 pull）＝映像在 scan 期間被下載。
+- --docker-events：`docker events --filter type=image --filter event=pull` 在 scan 期間的輸出：有 pull 的那一行＝映像在 scan 期間被下載
+  （scan 自己的 docker import／save／image rm 是本機操作，不算；workflow 已用 event=pull 過濾，這裡再只認 pull 一次）。
   docker 由 dockerd（root）執行，iptables 的 owner 比對與 strace 都看不到，所以另外查。
 - --mirrors：每個 <資料夾名>.result 的第一行要有 source=internal。
 
@@ -36,9 +37,11 @@ DNS = (ipaddress.ip_address("127.0.0.53"), 53)
 
 
 def classify(family, rest):
-    """→ ("unix"|"loopback"|"dns"|"external"|"other", 位址, 埠)。"""
+    """→ ("unix"|"local"|"loopback"|"dns"|"external"|"other", 位址, 埠)。local：AF_UNSPEC（解除 UDP socket 的對象）、AF_NETLINK（核心）。"""
     if family == "AF_UNIX":
         return "unix", None, None
+    if family in ("AF_UNSPEC", "AF_NETLINK"):   # 不是網路連線：AF_UNSPEC 解除 UDP socket 的對象、AF_NETLINK 連核心
+        return "local", None, None
     m = V4_RE.search(rest) if family == "AF_INET" else V6_RE.search(rest) if family == "AF_INET6" else None
     if not m:
         return "other", None, None
@@ -64,7 +67,7 @@ def read_strace(path):
             lines = f.read().splitlines()
     except OSError:
         return None
-    counts = {"unix": 0, "loopback": 0, "dns": 0, "other": 0}
+    counts = {"unix": 0, "local": 0, "loopback": 0, "dns": 0, "other": 0}
     external = {}
     n = 0
     for line in lines:
@@ -104,7 +107,7 @@ def read_rejects(path):
 def read_docker_events(path):
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            return [l for l in f.read().splitlines() if l.strip()]
+            return [l for l in f.read().splitlines() if re.search(r"\bimage pull\b", l)]
     except OSError:
         return None
 
@@ -133,6 +136,8 @@ def judge(block, st, rejects, events, mirrors):
     if st["external"]:
         findings.append("對外連線 %d 個目的地：%s" % (len(st["external"]), "、".join(
             "%s:%d×%d（%s）" % (e["addr"], e["port"], e["count"], "/".join(e["results"])) for e in st["external"][:20])))
+    if st["other"]:
+        findings.append("有 %d 個 connect 的位址解析不出來（AF_INET／AF_INET6 的位址格式認不得，或是其他位址家族）：無法判斷是不是對外" % st["other"])
     if st["dns"]:
         findings.append("名稱查詢（127.0.0.53:53）%d 次：有程式試著找外部主機" % st["dns"])
     if block == "on":

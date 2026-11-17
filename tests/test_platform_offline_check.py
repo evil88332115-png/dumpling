@@ -68,7 +68,8 @@ class Check(unittest.TestCase):
         r, doc = self.run_check([LOOP4, LOOP6, MAPPED, UNIX, UNSPEC, SIG])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(doc["verdict"], "OK")
-        self.assertEqual((doc["strace"]["connects"], doc["strace"]["unix"], doc["strace"]["loopback"], doc["strace"]["other"]), (5, 1, 3, 1))
+        self.assertEqual((doc["strace"]["connects"], doc["strace"]["unix"], doc["strace"]["local"], doc["strace"]["loopback"], doc["strace"]["other"]),
+                         (5, 1, 1, 3, 0))
         self.assertTrue(r.stdout.startswith("offline-check: OK（block=on；connect 5 次"))
         self.assertNotIn("docker.sock", json.dumps(doc))              # 本機 socket 的路徑不寫
 
@@ -89,6 +90,38 @@ class Check(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertEqual(doc["strace"]["external"], [{"addr": "192.0.2.20", "port": 80, "count": 1, "results": ["unfinished"]}])
         self.assertEqual((doc["strace"]["connects"], doc["strace"]["unix"]), (3, 1))
+
+    def test_unparsable_inet_address_fails(self):
+        # 位址格式認不得的 AF_INET（例如 strace 印成十六進位）不能當成本機
+        r, doc = self.run_check([LOOP4, '107 connect(3, {sa_family=AF_INET, sa_data="\\x01\\xbb\\xc0\\x00\\x02\\x0a"}, 16) = 0'])
+        self.assertEqual((r.returncode, doc["strace"]["other"]), (1, 1))
+        self.assertTrue(any("解析不出來" in f for f in doc["findings"]))
+
+    def test_unspecified_and_mapped_loopback_are_local(self):
+        unspec = '108 connect(3, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, 16) = 0'
+        r, doc = self.run_check([unspec, MAPPED])
+        self.assertEqual((r.returncode, doc["strace"]["loopback"], doc["strace"]["external"]), (0, 2, []))
+        mapped_ext = MAPPED.replace("::ffff:127.0.0.1", "::ffff:192.0.2.30")
+        r, doc = self.run_check([mapped_ext])
+        self.assertEqual(doc["strace"]["external"][0]["addr"], "192.0.2.30")   # IPv4-mapped 轉回 IPv4 再判斷
+
+    def test_local_docker_image_operations_are_not_downloads(self):
+        # scan 自己的 docker import／save／image rm 會產生 image 事件，不是下載
+        self.w("events.txt", "2026-11-17T01:00:00Z image import sha256:aa (name=x)\n2026-11-17T01:01:00Z image save sha256:aa (name=x)\n"
+                             "2026-11-17T01:02:00Z image untag sha256:aa (name=x)\n2026-11-17T01:02:01Z image delete sha256:aa (name=x)\n")
+        r, doc = self.run_check([LOOP4])
+        self.assertEqual((r.returncode, doc["docker_image_events"]), (0, 0))
+
+    def test_missing_docker_events_or_empty_mirrors_fail(self):
+        os.remove(self.p("events.txt"))
+        r, doc = self.run_check([LOOP4])
+        self.assertIn("沒有 docker events 的紀錄（--docker-events）", doc["findings"])
+        self.w("events.txt", "")
+        for n in os.listdir(self.mir):
+            os.remove(os.path.join(self.mir, n))
+        r, doc = self.run_check([LOOP4])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("鏡像資料夾裡沒有任何 .result", doc["findings"])
 
     def test_rejects_counted_in_block_mode(self):
         self.w("ipt.txt", IPT % 3 + IPT.replace("DUMPLING_OFFLINE", "DUMPLING_OFFLINE6") % 2)
@@ -173,6 +206,34 @@ class Workflow(unittest.TestCase):
         self.assertIn('sudo "$t" -D OUTPUT -m cgroup --path dumpling-offline ! -o lo -j DUMPLING_OFFLINE', self.text)
         self.assertIn('echo "$$" | sudo tee "$cg/cgroup.procs"', self.text)
         self.assertIn("封鎖沒有生效", self.text)                     # 先確認封鎖有效才開始
+        self.assertIn('if curl -sS -m 15 -o /dev/null https://github.com 2> "$ev/precheck.err"; then', self.text)
+        self.assertIn('strace -f -qq --seccomp-bpf -e trace=connect -o "$ev/connect.log"', self.text)
+        self.assertIn('--filter type=image --filter event=pull > "$ev/docker-events.txt"', self.text)
+        self.assertIn('--docker-events "$ev/docker-events.txt" --mirrors "$o/mirrors"', self.text)
+
+    def test_scan_row_lookup_matches_step_rows(self):
+        # 步驟名稱是 step_rows 寫的 pipeline-scan；用判定步驟裡同一段 awk 對真的紀錄檔取狀態
+        sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
+        import step_rows
+        judge = [s for s in self.doc["jobs"]["scan"]["steps"] if s.get("name", "").startswith("判定")][0]["run"]
+        line = [l for l in judge.splitlines() if l.strip().startswith("sst=")][0].strip()
+        tmp = tempfile.mkdtemp(prefix="t06-steps-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        o = tmp
+        for rows, want in (([("build", "OK"), ("scan", "ATTENTION")], "ATTENTION"), ([("scan", "OK"), ("scan", "GAP")], "GAP"), ([("build", "OK")], "")):
+            p = os.path.join(o, "pipeline-steps.tsv")
+            if os.path.exists(p):
+                os.remove(p)
+            for st, status in rows:
+                step_rows.append_row(p, st, status, 0, "x")
+            r = subprocess.run(["bash", "-eo", "pipefail", "-c", line + '\nprintf %s "$sst"'], capture_output=True, text=True, env=dict(os.environ, o=o), timeout=30)
+            self.assertEqual((r.returncode, r.stdout), (0, want), rows)
+
+    def test_judge_step_fails_on_any_problem(self):
+        judge = [s for s in self.doc["jobs"]["scan"]["steps"] if s.get("name", "").startswith("判定")][0]
+        self.assertEqual(judge.get("if"), "${{ always() }}")
+        last = [l for l in judge["run"].strip().splitlines() if l.strip()][-1].strip()
+        self.assertEqual(last, '[ "$rc" = 0 ] && [ "$src" = 0 ] && [ "$sok" = 1 ]')   # 判定、scan 結束碼、scan 那一列（OK／ATTENTION）三個都要過
         self.assertIn("pipeline/offline-check.py", self.text)
         self.assertIn("INTERNAL_MIRROR_URL", self.text)
         self.assertIn("DUMPLING_REQUIRE_INTERNAL_MIRROR=1", self.text)

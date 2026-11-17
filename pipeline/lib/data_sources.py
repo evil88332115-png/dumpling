@@ -25,7 +25,7 @@ STATUSES = ("OK", "ATTENTION", "UNKNOWN")
 SOURCES = ("internal", "public")
 MODES = ("internal", "public", "mixed", "unknown")
 DIR_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
-UTC_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+UTC_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")   # 只收 ASCII 數字（\d 會比對到其他文字的數字）
 KEYS = ("kind", "source", "status", "snapshot_field", "snapshot_utc")
 
 
@@ -35,11 +35,22 @@ def _utc(val):
         return None
     try:
         t = datetime.datetime.fromisoformat(val.strip().replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            return None
+        return t.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError):      # OverflowError：時區換算後超出 1～9999 年
+        return None
+
+
+def _valid_utc(v):
+    """clean() 用：格式是 YYYY-MM-DDTHH:MM:SSZ（ASCII 數字）而且是真的日期時間。"""
+    if not isinstance(v, str) or not UTC_RE.fullmatch(v):
+        return False
+    try:
+        datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
-        return None
-    if t.tzinfo is None:
-        return None
-    return t.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return False
+    return True
 
 
 def parse_spec(spec):
@@ -128,6 +139,12 @@ def collect(mirrors_dir, spec, meta=None):
     items = [mirror_item(mirrors_dir, d, kind) for d, kind in pairs]
     if all(kind != "grype-db" for _, kind in pairs):
         items.append(grype_item(meta))
+    elif isinstance(meta, dict):
+        # 內部的 grype-db 鏡像只證明複本合格；sca-scan 真的用它匯入了嗎，看 meta.json：不是 import: 或匯入沒成功 → 來源不明（不能記成內部）
+        upd, st = meta.get("grype_db_update"), meta.get("grype_db_update_status")
+        for it in items:
+            if it["kind"] == "grype-db" and it["source"] == "internal" and not (isinstance(upd, str) and upd.startswith("import:") and st == "OK"):
+                it.update(source=None, status="UNKNOWN")
     return items
 
 
@@ -142,7 +159,7 @@ def clean(items):
         src = it.get("source") if it.get("source") in SOURCES else None
         st = it.get("status") if it.get("status") in STATUSES else "UNKNOWN"
         sf = it.get("snapshot_field") if it.get("snapshot_field") in SNAPSHOT_FIELDS else None
-        su = it.get("snapshot_utc") if isinstance(it.get("snapshot_utc"), str) and UTC_RE.fullmatch(it["snapshot_utc"]) else None
+        su = it.get("snapshot_utc") if _valid_utc(it.get("snapshot_utc")) else None
         if sf is None or su is None:
             sf = su = None
         out.append({"kind": it["kind"], "source": src, "status": st, "snapshot_field": sf, "snapshot_utc": su})
@@ -187,6 +204,6 @@ def read_meta(path):
     try:
         with open(path, encoding="utf-8") as f:
             v = json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     return v if isinstance(v, dict) else None

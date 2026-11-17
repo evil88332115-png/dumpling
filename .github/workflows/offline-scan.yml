@@ -223,7 +223,7 @@ jobs:
           strace -f -qq --seccomp-bpf -e trace=connect -o "$ev/connect.log" \
             bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" || rc=$?
           t1=$(date +%s)
-          docker events --since "$t0" --until "$t1" --filter type=image > "$ev/docker-events.txt" 2>&1 || true
+          docker events --since "$t0" --until "$t1" --filter type=image --filter event=pull > "$ev/docker-events.txt" 2>&1 || true
           if [ "$DUMPLING_BLOCK" = on ]; then
             for t in iptables ip6tables; do sudo "$t" -L DUMPLING_OFFLINE -v -n -x; done > "$ev/iptables.txt"
             for t in iptables ip6tables; do
@@ -246,10 +246,14 @@ jobs:
           {
             echo "## 斷網驗收（block $DUMPLING_BLOCK）"
             echo "- $(tail -n 1 "$ev/offline-check.txt")"
-            echo "- scan 結束碼：$(cat "$ev/scan-rc.txt" 2> /dev/null || echo 沒有執行)；pipeline-steps 的 scan 列：$(awk -F'\t' '$1 == "scan" {print $2 "（" $4 "）"}' "$o/pipeline-steps.tsv" 2> /dev/null | tail -n 1)"
+            echo "- scan 結束碼：$(cat "$ev/scan-rc.txt" 2> /dev/null || echo 沒有執行)；pipeline-steps 的 scan 列：$(awk -F'\t' '$1 == "pipeline-scan" {print $2 "（" $4 "）"}' "$o/pipeline-steps.tsv" 2> /dev/null | tail -n 1)"
           } >> "$GITHUB_STEP_SUMMARY"
           src=$(cat "$ev/scan-rc.txt" 2> /dev/null || echo 1)
-          [ "$rc" = 0 ] && [ "$src" = 0 ]
+          # run-step.sh 遇到 GAP／NOT_RUN 也是結束碼 0：scan 那一列要是 OK 或 ATTENTION 才算
+          sst=$(awk -F'\t' '$1 == "pipeline-scan" {s = $2} END {print s}' "$o/pipeline-steps.tsv" 2> /dev/null || true)
+          sok=0; case $sst in OK|ATTENTION) sok=1;; esac
+          echo "scan 那一列：${sst:-沒有}"
+          [ "$rc" = 0 ] && [ "$src" = 0 ] && [ "$sok" = 1 ]
 
       - name: 解除封鎖（保險：上一步中途失敗時規則可能還在）
         if: ${{ always() }}
