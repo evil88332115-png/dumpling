@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 17:11 +0800（C3）
+最後更新：2026-11-17 17:11 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -446,7 +446,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：PR #189（WP7 notes 不帶 http(s):// 網址，403 修正 (a)）等驗證；同時準備 T-14（只讀、寫設計）
+- 目前在做：T-14（常駐 DT 模式）開工；**pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 現在在 C4 手上**（C1 同意由 C4 改、C1 審；C1 的 T-06 PR-2 排在 T-14 之後）；PR #189 等 CI 後 C0 合併
 - 分支／PR／commit：`wp7/notes-no-url`（74dfe16）→ PR #189；#174、#178 已合併
 - 代理：0 個（D-048 上限 3）
 - CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）；ai-nas 44040129677 兩次 403，診斷 run 44051748503 建出 draft 448371388（target 6de7d01，#189 合併後重跑換掉，重跑前 C0 問使用者）
