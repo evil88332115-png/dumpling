@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 09:23 +0800（C0）
+最後更新：2026-11-17 09:59 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -36,6 +36,7 @@
 - 第二台接手檢查（已完成 2026-11-13）：local.env 五個變數、forbidden.txt（含主機名與 Windows 路徑）、`$REPO_MAIN` 在 main 已 pull 到 26a6377、pre-push hook、user.email 是 noreply、`$SCA_CENTER` 有 25fa89a、gh 同一帳號都 OK。tmux 未使用（五個對話是各自的 Claude Code 視窗，名稱 c0–c4，跨對話訊息可達）
 - 主要主機舊環境：使用者同意刪除（2026-11-13）。新 C1、C2 確認可以刪（分支 SHA 已在 origin 核對：wp1/m2 877ffbc、m2-pr-draft d3efdc8、amd-psp ebac3e9、csme-new 61e8ef7、supplier-normalize 8a960c0）。已通知 c1-old、c2-old 先自己檢查再移除各自的 worktree 和暫存，最後由 c0-old 檢查整個 clone 後刪 repo。**範圍只限 dumpling-* 項目**：主要主機的 `$AGENT_TMP` 和 sca-center 共用，不刪整個資料夾（c0-old 指出，HANDOFF 已補 f9e8d70）；`dumpling-heavy.lock`、`~/.config/dumpling/` 保留。c0-old 刪之前會直接向使用者確認範圍；等 c0-old 回報
 - 2026-11-16／17：**使用者要求 C1–C4 全部暫停**，先討論 CRA 範圍是否太窄（C1、C2、C3 閒置；C4 11-17 確認停在 #97 之後、三個示範 dev run 沒觸發、wp7/adapters 2f9d177 乾淨）。C0 做了 CRA 逐條對照表（107 列：已涵蓋 4、部分 47、只規劃 10、沒有 6、非工具範圍 40；私人頁面，不進 repo），等使用者逐列決定第一階段／第二階段／其他部門。sca-center 轉述的 repo 分工（sca-center 正式版、dumpling 單向同步、公司 CRA 文件由 sca-center 寫）**待使用者確認**後才記 D 編號。C0 唯讀比對 sca-center 25fa89a 之後的變動：8 個 PR，複製過又改的 29 檔、新增 17 檔（含 #223 CSAF 草稿、#224 板子完整性／更新通道／記錄檢查、#221 核心可利用性建議）；恢復後第一件建議是從 sca-center 同步，做法先給使用者看。外部工具評估（只當參考）：cra-agent 低（第 14 條期限理解錯）、TARATool 高（補 A13-2／A13-3 風險評估；注意 PDF 攻擊樹送外部渲染、GPLv3）、cra-scanner 低。11-17 舊 C0 程序（被 Ctrl+Z 凍結）經使用者同意結束，C0 改由新程序接手。
+- 2026-11-17 續：使用者確認 **D-065**（sca-center 正式版、dumpling 單向同步只帶公開資料、公司層級 CRA 文件由 sca-center 寫）、**D-066**（同步四批：S1 核心比對 C1 → S2 可利用性第 2、3 層 C1；S3 板子檢查 C4；S4 CSAF 修補公告 C3；fc8c8e2 備援下載 C1 先做；每週一 C0 比對上游；C4 示範 dev run 等 S1 後）、**D-067**（首頁只描述功能，repo 簡介已改、README 走 #167），都在 PR #166。**C1–C4 已恢復**（各自收到新優先順序）。main 單元測試從 11-16 起紅：#141 的 test_kernel_single_baseline／test_cra_kernel_gap 把 support_check 的 today 寫進標準答案；C0 代理在 wp0/test-today-fix 修（只動測試），合併順序：測試修正 → #166 → #167。
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
