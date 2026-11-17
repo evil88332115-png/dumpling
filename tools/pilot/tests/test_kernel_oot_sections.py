@@ -184,7 +184,7 @@ def run_with(tmp_path, img_ko, rec_kos):
 
 def test_sections_identical_adopts_records_and_says_which_method(tmp_path):
     st, out, oo = run_with(tmp_path, {"foo": elf(base())}, {"foo": elf(base())})
-    assert oo["used"] is True and oo["identity"] == {"srcversion": 0, "sections": 1, "sections_masked": 0, "name_only": 0}, oo
+    assert oo["used"] is True and oo["identity"] == {"srcversion": 0, "srcversion_build_path": 0, "sections": 1, "sections_masked": 0, "name_only": 0}, oo
     assert tki.by_cve(out)["CVE-2024-1003"]["decision"] == "not_affected"
     assert "ELF 區段相同 1" in st[2] and "same build" not in st[2]
     assert "identical ELF code and data sections" in out["kernel"]["build_record"]["limitations"][-1]

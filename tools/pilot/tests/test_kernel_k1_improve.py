@@ -66,7 +66,7 @@ def test_oot_header_not_listed_by_any_module_is_not_built(tmp_path):
     p, st, out = oot_run(tmp_path, ["foo"], [root])
     oo = out["kernel"]["build_record"]["out_of_tree_records"]
     assert oo["used"] is True and oo["image_modules"] == 1 and oo["covered"] == 1 and oo["uncovered"] == 0, oo
-    assert oo["identity"] == {"srcversion": 0, "sections": 0, "sections_masked": 0, "name_only": 1} and oo["records"][0]["status"] == "OK"
+    assert oo["identity"] == {"srcversion": 0, "srcversion_build_path": 0, "sections": 0, "sections_masked": 0, "name_only": 1} and oo["records"][0]["status"] == "OK"
     by = by_cve(out)
     # absent.h（核心 headers 有、沒有任何核心物件讀它）：樹外模組的紀錄也沒有列它 → not_affected
     d = by["CVE-2024-1003"]
@@ -172,7 +172,7 @@ def test_oot_srcversion_must_match_when_both_known(tmp_path):
     oot_module(root2, "foo", ko_bytes=tvf.fake_ko_bytes(srcversion="AAAA"))
     p, st, out = oot_run(sub, [], [root2], extra_ko=img)
     oo = out["kernel"]["build_record"]["out_of_tree_records"]
-    assert oo["used"] is True and oo["identity"] == {"srcversion": 1, "sections": 0, "sections_masked": 0, "name_only": 0}
+    assert oo["used"] is True and oo["identity"] == {"srcversion": 1, "srcversion_build_path": 0, "sections": 0, "sections_masked": 0, "name_only": 0}
     assert by_cve(out)["CVE-2024-1003"]["decision"] == "not_affected"
 
 

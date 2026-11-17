@@ -3806,9 +3806,10 @@ def attach_oot_records(brec, brecord, paths, info, mods):
         sm["reason"] = f"{len(bad)} out-of-tree build record(s) are not usable: " + "; ".join(f"{x['source']}: {x['reason']}" for x in bad)[:300]
         return
     minfo = (info.modules or {}).get("modinfo") or {}
-    ident, unc, closure_cache = {"srcversion": 0, "sections": 0, "sections_masked": 0, "name_only": 0}, [], {}
+    ident, unc, closure_cache = {"srcversion": 0, "srcversion_build_path": 0, "sections": 0, "sections_masked": 0, "name_only": 0}, [], {}
     verified_by = {}
     masked_examples = []
+    sv_budget = mod.SvBudget()          # srcversion 重算（只差建置路徑）的讀取上限，這次執行所有模組共用
     fp = me.flash_package()
     for k in oot:
         name = oot_module_name(k)
@@ -3823,7 +3824,7 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                 continue
             # 紀錄資料夾裡有同名的 .ko：一定要讀得到 srcversion 而且和映像的相同（讀不到、被截斷、是符號連結、不同 → 整個模組不採用）；
             # 沒有 .ko 可比的候選只靠名稱
-            kind, bad = "name_only", None
+            kind, bad, cw = "name_only", None, None
             try:
                 present = os.path.lexists(c["file"])
             except OSError:
@@ -3840,7 +3841,14 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                 rv = got.get("srcversion") if isinstance(got, dict) and got.get("ok") else None
                 if rv and iv:
                     if iv != rv:
-                        bad = f"srcversion of the record's .ko ({rv}) differs from the image's .ko ({iv}): not the same build"
+                        # srcversion 不同：只有在「用紀錄重算等於紀錄的 .ko、只把 kbuild 產生檔裡的建置路徑換成映像的再算等於映像的 .ko」時採用
+                        # （kernel_oot_record.verify_build_path_only）；否則照舊不是同一份建置
+                        okp, w = mod.verify_build_path_only([r] + [x for x in recs if x is not r], me, c, rv, iv,
+                                                            ((minfo.get(k) or {}).get("elf") or {}).get("strings"), sv_budget)
+                        if okp:
+                            kind, cw = "srcversion_build_path", w
+                        else:
+                            bad = f"srcversion of the record's .ko ({rv}) differs from the image's .ko ({iv}): not the same build ({w})"
                     else:
                         kind = "srcversion"
                 else:
@@ -3851,15 +3859,20 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                         bad = ("the record has a .ko of this name but its srcversion (or the image's) cannot be read, and the ELF section "
                                "comparison does not verify it (" + str(w) + "): not verified")
                     else:
-                        verified_by[k] = w
+                        cw = w
             if bad:
                 mismatch = bad
                 continue
-            if best is None or kind == "srcversion" or (kind == "sections" and best in ("sections_masked", "name_only")):
+            rank = ("name_only", "sections_masked", "sections", "srcversion_build_path", "srcversion")
+            if best is None or rank.index(kind) > rank.index(best):
                 best = kind
+                if cw is not None:
+                    verified_by[k] = cw          # 說明跟著採用的那個候選（不被後面較弱的候選蓋掉）
+                else:
+                    verified_by.pop(k, None)
         # 同名的 .ko 在紀錄裡可以有好幾個（例如兩種建置的 nvidia.ko）：映像的 .ko 只要有一個候選用內容驗證過（srcversion 或 ELF 區段），
         # 就是那一個建置，其他候選不相干；沒有任何內容驗證過的候選，而有候選對不上 → 整個模組不採用。只比名稱的候選不抵銷對不上的候選。
-        if mismatch and best not in ("srcversion", "sections", "sections_masked"):
+        if mismatch and best not in ("srcversion", "srcversion_build_path", "sections", "sections_masked"):
             best, why = None, mismatch
         if best == "name_only" and brecord.get("self_built"):
             best, why = None, "self-built record: the module is matched by name only (no .ko of it in the record to verify by srcversion or ELF sections)"
@@ -3867,12 +3880,15 @@ def attach_oot_records(brec, brecord, paths, info, mods):
             unc.append((k, why))
         else:
             ident[best] += 1
-            if best == "sections_masked" and len(masked_examples) < 3:
+            if best in ("sections_masked", "srcversion_build_path") and len(masked_examples) < 3:
                 masked_examples.append(f"{posixpath.basename(k)}: {verified_by.get(k)}")
     sm["covered"], sm["uncovered"], sm["identity"] = len(oot) - len(unc), len(unc), ident
     sm["uncovered_examples"] = [f"{posixpath.basename(k)}: {w}" for k, w in unc[:10]]
     sm["uncovered_modules"] = [posixpath.basename(k) for k, _ in unc[:200]]
-    sm["verified_by"] = {"srcversion": ".modinfo srcversion equal", "sections": "code and data ELF sections identical (debug/notes/modinfo ignored)",
+    sm["verified_by"] = {"srcversion": ".modinfo srcversion equal",
+                         "srcversion_build_path": (".modinfo srcversion differs only because of the build path: recomputed from the record's source files "
+                                                   "it equals the record's .ko, and with the build path in kbuild-generated files (e.g. *.dtb.S) replaced "
+                                                   "by the image's it equals the image's .ko"), "sections": "code and data ELF sections identical (debug/notes/modinfo ignored)",
                          "sections_masked": "ELF sections identical except .rodata.str* strings that differ only in build date/time or build path (masked)",
                          "name_only": "module name only (the record has no .ko to compare)"}
     sm["masked_examples"] = masked_examples
@@ -3885,7 +3901,8 @@ def attach_oot_records(brec, brecord, paths, info, mods):
     brec.stats.update(header_in_out_of_tree_deps=0, header_not_built_oot_checked=0)
     brecord["limitations"].append(
         f"Out-of-tree build records ({', '.join(x['source'] for x in sm['records'])}) cover all {len(oot)} out-of-tree module(s) of the image "
-        f"({ident['srcversion']} matched by .modinfo srcversion, {ident['sections']} by identical ELF code and data sections, "
+        f"({ident['srcversion']} matched by .modinfo srcversion, {ident['srcversion_build_path']} by srcversion recomputed with only the build path "
+        f"in kbuild-generated files changed, {ident['sections']} by identical ELF code and data sections, "
         f"{ident['sections_masked']} by identical sections except build date/time or build path strings (masked), {ident['name_only']} by module name only): a kernel header that "
         "no in-tree object and no out-of-tree module lists in its deps is judged not built; one that an out-of-tree module lists is "
         "built (by path suffix, so a same-named header of the module's own also counts). The records are trusted to be the builds of "
@@ -4715,6 +4732,7 @@ def assess(a, max_age):
     oo = (out["kernel"].get("build_record") or {}).get("out_of_tree_records")
     if oo:
         rsuffix += ("；樹外模組建置紀錄：" + (f"採用（映像的 {oo['image_modules']} 個樹外模組都有紀錄；驗證方式 srcversion {oo['identity'].get('srcversion', 0)}、"
+                                          f"srcversion 只差建置路徑（重算核對）{oo['identity'].get('srcversion_build_path', 0)}、"
                                           f"ELF 區段相同 {oo['identity'].get('sections', 0)}、ELF 區段相同但建置日期／路徑字串遮罩 {oo['identity'].get('sections_masked', 0)}、"
                                           f"只比名稱 {oo['identity'].get('name_only', 0)}；標頭檔看紀錄的 deps）" if oo.get("used")
                                           else f"不採用（{oo.get('reason')}；已驗證 {oo.get('covered')}／{oo.get('image_modules')}），標頭檔照舊因為樹外模組而 unknown"))
