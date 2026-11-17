@@ -833,6 +833,214 @@ def test_filled_identification_label_follows_platform(tmp_path):
         assert st == "OVERRIDDEN" and info[1] == f"{label} img-v2.img.xz (MD5 {'d' * 32})", plat
 
 
+# ---- --previous-report（CSAF 修補公告草稿的前一版）----
+def _wiz_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cra_scan_wizard_prev", WIZ)
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+    return w
+
+
+def _prev_output(root, name, stamp, pname="widget", version="V1.1.0", with_vex=True):
+    d = root / f"{name}-{stamp}"
+    rep = d / "cra-project" / "CRA" / "Reports"
+    rep.mkdir(parents=True)
+    if with_vex:
+        (rep / "vex.cdx.json").write_text("{}", encoding="utf-8")
+    if pname is not None:
+        (d / "plan.json").write_text(json.dumps({"name": pname, "version": version}), encoding="utf-8")
+    return d
+
+
+def test_find_previous_outputs_same_product_newest_first(tmp_path):
+    w = _wiz_module()
+    root = tmp_path / "o"
+    a = _prev_output(root, "widget-V1.0.0", "20261101-1000", version="V1.0.0")
+    b = _prev_output(root, "widget-V1.1.0", "20261105-0900")
+    _prev_output(root, "gadget-V9", "20261106-0900", pname="gadget")                     # 別的產品
+    _prev_output(root, "widget-V0.9", "20261031-0900", with_vex=False)                    # 沒跑完（沒有 vex.cdx.json）
+    c = _prev_output(root, "widget-V1.2.0", "20261107-0900", pname=None)                  # 沒有 plan.json：看資料夾名稱前綴
+    assert [k for k, _ in w.find_previous_outputs(root, "widget")] == [c, b, a]
+    assert w.find_previous_outputs(root, "nothing") == [] and w.find_previous_outputs(tmp_path / "missing", "widget") == []
+
+
+def test_pick_previous_yes_does_not_guess_and_explicit_path(tmp_path, monkeypatch):
+    w = _wiz_module()
+    root = tmp_path / "o"
+    b = _prev_output(root, "widget-V1.1.0", "20261105-0900")
+    r, note = w.pick_previous_report(None, root, "widget", True)          # --yes：不自己挑
+    assert r is None and "--yes" in note
+    r, note = w.pick_previous_report(str(b), root, "widget", True)        # 精靈輸出資料夾
+    assert r == b / "cra-project" / "CRA" / "Reports"
+    r, _ = w.pick_previous_report(str(b / "cra-project" / "CRA" / "Reports"), root, "widget", True)
+    assert r == b / "cra-project" / "CRA" / "Reports"
+    with pytest.raises(SystemExit) as e:
+        w.pick_previous_report(str(tmp_path), root, "widget", True)
+    assert "找不到 vex.cdx.json" in str(e.value)
+
+
+def test_pick_previous_interactive_default_newest_or_none(tmp_path, monkeypatch):
+    w = _wiz_module()
+    root = tmp_path / "o"
+    _prev_output(root, "widget-V1.0.0", "20261101-1000", version="V1.0.0")
+    b = _prev_output(root, "widget-V1.1.0", "20261105-0900")
+    for answer, expect in (("", b), ("n", None), ("2", root / "widget-V1.0.0-20261101-1000"), ("9", None), ("abc", None)):
+        monkeypatch.setattr("builtins.input", lambda *_a, _x=answer: _x)
+        r, note = w.pick_previous_report(None, root, "widget", False)
+        assert r == (expect / "cra-project" / "CRA" / "Reports" if expect else None), (answer, note)
+    assert w.pick_previous_report(None, root, "gadget", False)[0] is None            # 沒有同名稱的較早輸出
+
+
+def test_add_info_step_is_informational_and_replaces(tmp_path):
+    w = _wiz_module()
+    w.add_info_step(tmp_path, {"id": "csaf-fix-advisory", "label": "L", "status": "not_run", "note": "n1"})
+    w.add_info_step(tmp_path, {"id": "csaf-fix-advisory", "label": "L", "status": "not_run", "note": "n2"})
+    d = json.loads((tmp_path / "inputs-check.json").read_text(encoding="utf-8"))
+    steps = [r for r in d["inputs"] if r["id"] == "step:csaf-fix-advisory"]
+    assert len(steps) == 1 and steps[0]["informational"] is True and steps[0]["kind"] == "step" and steps[0]["status"] == "not_run" and steps[0]["note"] == "n2"
+
+
+def test_plan_records_previous_report(site):
+    tmp, flash, src, out, cfg, _ = site
+    prev = _prev_output(out, "widget-V1.1.0", "20261105-0900")
+    base = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--generic-rules", "no", "--yes", "--plan-only"]
+    r = run(base)
+    assert r.returncode == 0, r.stdout + r.stderr
+    new = next(d for d in out.iterdir() if d != prev)
+    plan = json.loads((new / "plan.json").read_text(encoding="utf-8"))
+    assert plan["csaf_previous"] is None and "--yes" in plan["csaf_previous_note"] and "NOT_RUN" in r.stdout
+    shutil.rmtree(new)
+    r = run(base + ["--previous-report", str(prev)])
+    assert r.returncode == 0, r.stdout + r.stderr
+    new = next(d for d in out.iterdir() if d != prev)
+    assert json.loads((new / "plan.json").read_text(encoding="utf-8"))["csaf_previous"] == str(prev / "cra-project" / "CRA" / "Reports")
+    r = run(base + ["--previous-report", str(tmp)])
+    assert r.returncode != 0 and "找不到 vex.cdx.json" in r.stderr
+
+
+# ---- DUMPLING_PREVIOUS_REPORTS（dumpling：pipeline 在正式 Release 時組好的前一版，依 --name 分層；不改各平台的 scan.sh）----
+def _prev_env_dir(root, status="OK", layers=None, note="", tag="widget/v1.0.0", manifest=True):
+    root.mkdir(parents=True)
+    for name, st in (layers or {}).items():
+        if st == "OK":
+            (root / name).mkdir()
+            (root / name / "vex.cdx.json").write_text("{}", encoding="utf-8")
+    if manifest:
+        (root / "previous-release.json").write_text(json.dumps(
+            {"status": status, "note": note, "previous_tag": tag, "layers": {n: {"status": s, "note": "n-" + n} for n, s in (layers or {}).items()}}), encoding="utf-8")
+    return root
+
+
+def test_previous_from_env_each_layer_gets_its_own_folder(tmp_path):
+    w = _wiz_module()
+    d = _prev_env_dir(tmp_path / "prev", layers={"widget": "OK", "widget-bsp": "OK", "widget-os": "OK"})
+    env = {"DUMPLING_PREVIOUS_REPORTS": str(d)}
+    for n in ("widget", "widget-bsp", "widget-os"):
+        r, note, st = w.previous_from_env(n, env)
+        assert st == "ok" and r == d / n, n
+    assert w.previous_from_env("widget", {}) is None and w.previous_from_env("widget", {"DUMPLING_PREVIOUS_REPORTS": ""}) is None
+
+
+def test_previous_from_env_not_run_is_not_gap(tmp_path):
+    w = _wiz_module()
+    env = lambda d: {"DUMPLING_PREVIOUS_REPORTS": str(d)}
+    d = _prev_env_dir(tmp_path / "a", status="NOT_RUN", note="僅供參考：沒有前一個正式 Release")           # 第一個正式 Release、或不是正式 Release
+    r, note, st = w.previous_from_env("widget", env(d))
+    assert (r, st) == (None, "not_run") and "僅供參考" in note
+    d = _prev_env_dir(tmp_path / "b", layers={"widget": "OK"})                                               # 前一版沒有 -os 這一層
+    r, note, st = w.previous_from_env("widget-os", env(d))
+    assert (r, st) == (None, "not_run") and "widget-os" in note
+
+
+def test_previous_from_env_data_present_but_unusable_is_gap(tmp_path):
+    w = _wiz_module()
+    env = lambda d: {"DUMPLING_PREVIOUS_REPORTS": str(d)}
+    d = _prev_env_dir(tmp_path / "a", status="GAP", note="GitHub API 失敗（HTTP 403）")                      # 找前一版的步驟失敗
+    r, note, st = w.previous_from_env("widget", env(d))
+    assert (r, st) == (None, "gap") and "403" in note
+    d = _prev_env_dir(tmp_path / "b", status="GAP", layers={"widget": "OK", "widget-bsp": "GAP"})            # 只有一層壞
+    assert w.previous_from_env("widget", env(d))[2] == "ok"
+    assert w.previous_from_env("widget-bsp", env(d))[2:] == ("gap",)
+    d = _prev_env_dir(tmp_path / "c", layers={"widget": "OK"})                                               # manifest 說 OK、資料夾被清掉
+    shutil.rmtree(d / "widget")
+    assert w.previous_from_env("widget", env(d))[2] == "gap"
+    assert w.previous_from_env("widget", env(tmp_path / "nowhere"))[2] == "gap"                              # 資料夾不見
+    d = _prev_env_dir(tmp_path / "d", layers={"widget": "OK"}, manifest=False)                               # 沒有 manifest：無法確認
+    assert w.previous_from_env("widget", env(d))[2] == "gap"
+    (d / "previous-release.json").write_text("[1", encoding="utf-8")                                         # manifest 壞掉
+    assert w.previous_from_env("widget", env(d))[2] == "gap"
+
+
+def test_previous_from_env_missing_layer_is_not_run_even_if_another_layer_is_gap(tmp_path):
+    """前一版沒有 widget-os 這一層、widget-bsp 壞了（整體 GAP）：缺的那層 not_run（僅供參考），壞的才是 gap。"""
+    w = _wiz_module()
+    env = lambda d: {"DUMPLING_PREVIOUS_REPORTS": str(d)}
+    d = _prev_env_dir(tmp_path / "a", status="GAP", layers={"widget": "OK", "widget-bsp": "GAP"})
+    r, note, st = w.previous_from_env("widget-os", env(d))
+    assert (r, st) == (None, "not_run") and "widget-os" in note
+    assert w.previous_from_env("widget-bsp", env(d))[2] == "gap" and w.previous_from_env("widget", env(d))[2] == "ok"
+    # 整體 GAP 不是因為某一層（沒列出任何層、或沒有前一版的 tag）：每一層都照整體記 gap
+    d = _prev_env_dir(tmp_path / "b", status="GAP", note="GitHub API 失敗（HTTP 403）", layers={})
+    assert w.previous_from_env("widget-os", env(d))[2] == "gap"
+    d = _prev_env_dir(tmp_path / "c", status="GAP", layers={"widget": "OK"}, tag="")
+    assert w.previous_from_env("widget-os", env(d))[2] == "gap"
+    # 某一層是 NOT_RUN（缺 VEX 的舊格式）：not_run，不是 gap
+    d = _prev_env_dir(tmp_path / "d", layers={"widget": "OK", "widget-bsp": "NOT_RUN"})
+    assert w.previous_from_env("widget-bsp", env(d))[2] == "not_run"
+
+
+def test_plan_records_previous_from_env(site):
+    tmp, flash, src, out, cfg, _ = site
+    base = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--generic-rules", "no", "--yes", "--plan-only"]
+    d = _prev_env_dir(tmp / "prev", layers={"widget": "OK"})
+    r = run(base, {"DUMPLING_PREVIOUS_REPORTS": str(d)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    plan = json.loads(next(out.iterdir()).joinpath("plan.json").read_text(encoding="utf-8"))
+    assert plan["csaf_previous"] == str(d / "widget") and plan["csaf_previous_status"] == "ok"
+    shutil.rmtree(next(out.iterdir()))
+    d2 = _prev_env_dir(tmp / "prev2", status="GAP", note="GitHub API 失敗（HTTP 403）", layers={})           # 有前一版但資料取不到：照實是 GAP
+    r = run(base, {"DUMPLING_PREVIOUS_REPORTS": str(d2)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    plan = json.loads(next(out.iterdir()).joinpath("plan.json").read_text(encoding="utf-8"))
+    assert plan["csaf_previous"] is None and plan["csaf_previous_status"] == "gap" and "CSAF 修補公告草稿的前一版：無 → 不產生（GAP：" in r.stdout and "403" in r.stdout
+    shutil.rmtree(next(out.iterdir()))
+    d3 = _prev_env_dir(tmp / "prev3", status="NOT_RUN", note="僅供參考：沒有前一個正式 Release", layers={})
+    r = run(base, {"DUMPLING_PREVIOUS_REPORTS": str(d3)})
+    plan = json.loads(next(out.iterdir()).joinpath("plan.json").read_text(encoding="utf-8"))
+    assert plan["csaf_previous_status"] == "not_run" and "CSAF 修補公告草稿的前一版：無 → 不產生（NOT_RUN：" in r.stdout
+    shutil.rmtree(next(out.iterdir()))
+    r = run(base + ["--previous-report", str(_prev_output(tmp / "o2", "widget-V1.1.0", "20261105-0900"))], {"DUMPLING_PREVIOUS_REPORTS": str(d2)})
+    assert json.loads(next(out.iterdir()).joinpath("plan.json").read_text(encoding="utf-8"))["csaf_previous_status"] == "ok"      # 命令列優先
+
+
+def test_csaf_previous_plan_decides_args_and_step(tmp_path):
+    w = _wiz_module()
+    p = tmp_path / "Reports"
+    # 有前一版、製造商專案、report_package 有這個參數：給參數，不另外記步驟
+    assert w.csaf_previous_plan(p, "n", "ok", "both", True) == (["--csaf-previous", str(p)], None)
+    assert w.csaf_previous_plan(p, "n", "ok", "manufacturer", True)[1] is None
+    # 沒有前一版：僅供參考的 not_run（第一版不算 GAP）
+    args, step = w.csaf_previous_plan(None, "沒有前一個正式 Release", "not_run", "both", True)
+    assert args == [] and step["status"] == "not_run" and step.get("informational", True) is True and "沒有前一個正式 Release" in step["note"]
+    # 有前一版、資料卻缺或讀不到：一般步驟 gap（不是 informational），note 帶原因
+    args, step = w.csaf_previous_plan(None, "HTTP 403", "gap", "both", True)
+    assert args == [] and step["status"] == "gap" and step["informational"] is False and "HTTP 403" in step["note"]
+    # 供應商角色沒有製造商專案：即使有前一版也只是僅供參考；gap 也不算（沒有東西可產生）
+    assert w.csaf_previous_plan(p, "n", "ok", "supplier", True)[1]["status"] == "not_run"
+    assert w.csaf_previous_plan(None, "HTTP 403", "gap", "supplier", True)[1]["status"] == "not_run"
+    # 這版 report_package 沒有 --csaf-previous：不傳參數（會讓它 exit 64）
+    args, step = w.csaf_previous_plan(p, "n", "ok", "both", False)
+    assert args == [] and step["status"] == "not_run" and "--csaf-previous" in step["note"]
+    # 記進 inputs-check 之後，report_package：僅供參考不算 GAP，gap 要列在「未產生的項目」
+    w.add_info_step(tmp_path, w.csaf_previous_plan(None, "n", "not_run", "both", True)[1])
+    d = json.loads((tmp_path / "inputs-check.json").read_text(encoding="utf-8"))
+    assert [r["informational"] for r in d["inputs"]] == [True]
+    w.add_info_step(tmp_path, w.csaf_previous_plan(None, "HTTP 403", "gap", "both", True)[1])
+    d = json.loads((tmp_path / "inputs-check.json").read_text(encoding="utf-8"))
+    assert [(r["status"], r["informational"]) for r in d["inputs"]] == [("gap", False)]
+
+
 def test_split_pack_record_copies_source_hashes_into_kernel_dir(tmp_path):
     import io
     import tarfile as tf

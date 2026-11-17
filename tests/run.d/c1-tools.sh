@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # C1 工具（tools/）的單元測試：先檢查 PROVENANCE，再在 venv 裡跑 pytest。
+# tests/test_previous_release.py（pipeline/lib/previous_release.py 與精靈、report_package 的接線；有兩項要用 tools/cra/tests 的 pytest 測試輔助）也在這裡跑：
+# 它不屬於 test_platform_* 等 unittest discover 的樣式（c1-m2-platform.sh 等），而且需要這個 venv 的 pytest。
 # C2 的 test_x86_firmware*.py 由 c2-x86-firmware.sh 跑，這裡略過。
 # 需要網路、Docker、bwrap 權限或外部測試資料的測試會自己 skip；這裡把 skip 當成 NOT_RUN 列出數量與原因，不算通過。
 # venv 用 --system-site-packages（沿用系統的 PyYAML），pytest 等套件固定版本（tools/cra/tests/requirements.txt）。
@@ -30,7 +32,7 @@ trap 'rm -rf "$work"' EXIT
   || { echo "c1-tools: FAIL（裝不起測試套件）"; exit 1; }
 
 log="$work/pytest.log"
-"$work/venv/bin/python" -m pytest tools -q -p no:cacheprovider -rs --basetemp="$work/pytest" \
+"$work/venv/bin/python" -m pytest tools tests/test_previous_release.py -q -p no:cacheprovider -rs --basetemp="$work/pytest" \
   --ignore-glob='*/test_x86_firmware*.py' 2>&1 | tee "$log"
 rc=${PIPESTATUS[0]}
 

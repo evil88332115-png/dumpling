@@ -46,3 +46,55 @@
 - 緩解措施預設是 `TO BE COMPLETED by RD`；受影響的元件底下不放 `vendor_fix`。
 
 `tools/cra/exploited_watch.py`（以 Dependency-Track 為來源的監控）在有新的比對時，可以替 `--shipped` 清單裡帶 `cra_project` 的已出貨版本寫草稿到 `<輸出資料夾>/csaf-drafts/<UTC 時間>/`（`--csaf-draft`／`--no-csaf-draft`、`EW_CSAF_DRAFT`；不覆寫既有的草稿；失敗只記在報告的 `csaf_drafts`，不改變監控狀態）。dumpling 在 GitHub 上的每日監控（`pipeline/watch/`）另外接上：新的 KEV 群組落在 shipped 的正式版時，用同一個 Release 的報告 zip 產生草稿，以 workflow artifact 上傳，見 `docs/WATCH.md` 第 8 節。
+
+## pipeline 接線：正式 Release 自動比較前一個正式 Release（S4，C1）
+
+來源：同步 sca-center edac554 的精靈 `--previous-report`，加上 dumpling 自己的 pipeline 部分（`pipeline/lib/previous_release.py`、`pipeline.yml` 的一個步驟）。**只是接上 A 路徑（版本間的修補公告草稿）**；草稿的內容、狀態與不發布的規則照上面。
+
+流程（`pipeline.yml` 的 scan job，在 scan 之前）：
+
+1. `previous_release.py prepare` 判斷這次是不是正式 Release：**只有 tag push**（`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag`、`GITHUB_REF` 就是這次的 `<專案>/<版本>`）。dev 分支的 push、每日排程、手動觸發（包括手動輸入 tag 建草稿）一律 `NOT_RUN`，**不呼叫 GitHub API**，workflow 也不給這一步 token。
+2. 用 GitHub API（`GITHUB_TOKEN` 唯讀即可）列出同一個 repo 的 Release，選「前一個正式 Release」（規則見下）。
+3. 下載前一版每一層的 `report-<專案>-<版本><後綴>.zip`，只取兩個成員：`報告/交給PM/VEX/vex.cdx.json`、`報告/內部存檔/summary.json`（`csaf_advisory.py` 只讀舊版的這兩個檔；舊版 SBOM 不用）。
+4. 依層組成資料夾 `$DUMPLING_OUT/previous-release/`：`previous-release.json`（狀態、前一版 tag、每一層的狀態與說明）與 `<名稱>/vex.cdx.json`、`<名稱>/summary.json`。`<名稱>` 是精靈的 `--name`：`<專案>`（完整）、`<專案>-bsp`、`<專案>-os`。
+5. workflow 把資料夾路徑放進環境變數 `DUMPLING_PREVIOUS_REPORTS`（寫進 `GITHUB_ENV`）。`run-step.sh scan` → 各平台的 `scan.sh` → 精靈會繼承它，**各平台的 `scan.sh` 不用改**；完整、`-bsp`、`-os` 三次呼叫精靈時 `--name` 不同，各自拿到對應層的資料夾。
+6. 精靈（`tools/wizard/cra-scan.py`）取前一版的順序：`--previous-report` ＞ `DUMPLING_PREVIOUS_REPORTS` ＞ 互動模式列出同名稱的較早輸出（`--yes` 不會自己挑）。拿到資料就給 `report_package.py --csaf-previous`，草稿放 `報告/交給PM/CSAF/`，**只對製造商專案做**。
+
+### 前一個正式 Release 怎麼選
+
+- 同一個專案的 tag `<專案>/v…`；**不是草稿、不是 prerelease、不是這次的 tag**（同名 tag 被重打、這個版本已經有 Release 時，不拿自己比）。`dev/<專案>`（滾動的開發版，prerelease）與其他專案的 tag 不在候選裡。
+- **只看版本，不看建立時間**：版本比這次小的之中取最大的。補丁版在舊版本線上才發（例如 v1.1.0 之後才發 v1.0.1）時，前一版是 v1.0.0，不是時間上最近的 v1.1.0。
+- 版本字串拆成主版本（`-` 之前）與後綴（`-` 之後）。主版本的數字段比大小（v1.10.0 大於 v1.9.0）；多出來的段落算較大（v1.0 小於 v1.0.1）。主版本相同時：**沒有後綴的比有後綴的大**（v39.2.1-demo1 小於 v39.2.1、v1.0-rc1 小於 v1.0，所以 v39.2.1 的前一版是 v39.2.1-demo1）；兩邊都有後綴時用 `.` 分段逐段比，規則如下表。
+- **這是 dumpling 的延伸規則，不是純 semver**：semver 把 `demo10` 當成字母比（demo10 小於 demo2），這裡「字母加數字」的段落用自然排序（demo2 小於 demo10、rc9 小於 rc10）。理由：選錯前一版，公告上「這版修了什麼」就會整份算錯，而 dumpling 的 tag 本來就是 `-demo1` 這種寫法。其餘照 semver。
+
+  | 後綴的段落 | 怎麼比 | 例 |
+  |---|---|---|
+  | 純數字 | 比數值；排在含字母的段落前面 | `rc.2` 小於 `rc.10`；`1` 小於 `alpha` |
+  | 純字母 | 照 ASCII | `alpha` 小於 `beta` |
+  | 字母加數字 | 先比字母部分（ASCII），字母相同再比後面的數字（沒有數字的排前面） | `demo2` 小於 `demo10`；`demo3` 小於 `rc1`；`rc` 小於 `rc1` |
+  | 前面的段落都相同 | 段落少的排前面 | `rc` 小於 `rc.1` |
+  | 其他形式（`1a`、`a1b`） | **排不出先後，記 GAP**（保守，不照 ASCII 猜） | |
+
+- **排不出先後就不猜，記 GAP**：寫法不同的同一版（v1.0 與 v1.00、`rc1` 與 `RC1`、`+` 之後的建置資訊不同）、後綴的段落是上表的「其他形式」、版本不是 `<數字>(.<數字>)*(-<後綴>)?` 的形式（例如 `v1.0rc1`）、同一個 tag 有多個正式 Release。只有比到那一段才會排不出：主版本不同就已經分得出先後。
+- 列 Release 的 `draft`／`prerelease` 旗標不是布林值的項目，不當成正式 Release（統計在說明裡）。
+
+### 三種狀態
+
+| 狀態 | 什麼時候 | 結果 |
+|---|---|---|
+| `NOT_RUN`（僅供參考） | 不是正式 Release 的 tag push；或第一個正式 Release（沒有符合條件的前一版）；或前一版沒有任何報告 zip（報告格式導入前的舊版，說明「僅供參考：前一版 <tag> 沒有報告 zip（舊格式），無法產生版本間公告」）；或前一版每一層的 zip 裡都沒有 VEX 成員（同樣是舊格式）；或前一版沒有這一層的報告（例如這一版新增了 `-os` 分層）；或某一層的 zip 裡沒有 VEX（那一層記 NOT_RUN，其他層照常） | **不算 GAP**。`pipeline-steps.tsv` 記一列 `pipeline-previous-release`（recorded、說明以「僅供參考」開頭，不降低整體狀態）；報告的 `inputs-check.json` 記 informational 的 `csaf-fix-advisory` 步驟，報告訊息寫 `CSAF 修補公告：未產生（NOT_RUN…）` |
+| `OK` | 找到前一個正式 Release，這一層的報告 zip 下載、檢查、組好。整體：至少一層 OK、而且沒有任何一層是 GAP（有些層缺 VEX 時整體仍是 OK，說明裡列出缺的層，manifest 裡那幾層是 NOT_RUN） | 精靈給 `--csaf-previous`，`交給PM/CSAF/` 產生草稿 |
+| `GAP` | 找到了前一版，但列出／下載／檢查／組裝失敗：API 錯誤、列出 Release 超過整體時間上限（`DUMPLING_PREV_LIST_DEADLINE`，預設 300 秒）、Release 的附件欄位格式不對、附件還沒上傳完或太大、大小與 Release 記的不同、zip 壞掉或不合規則、VEX 不是 CycloneDX、`summary.json` 不是 JSON、版本排不出先後、資料夾缺或 manifest 讀不到。**只要有任何一層是 GAP，整體就是 GAP；沒有任何一層是 GAP，整體就不會是 GAP**；精靈對每一層各看各的：GAP 的層記 GAP，前一版沒有的層（不在 manifest 的 `layers` 裡）與缺 VEX 的層記 NOT_RUN | **照實記，不當成沒有前一版**。`pipeline-steps.tsv` 記 GAP（整體狀態降成 GAP，不擋 Release）；精靈在 `inputs-check.json` 記一般步驟 `gap`，報告的 `交給PM/未產生的項目.md` 列出原因。產生了但 `csaf_advisory.py` 判 FAIL（兩版不是同一個產品、版本相同或順序反了、輸入格式不對）時，由 `report_package.py` 記 GAP |
+
+這個步驟本身不會讓 pipeline 失敗：資料問題、意外的例外都記成 GAP，build 與 scan 照跑。
+
+### 下載的內容是不可信資料
+
+- 單一報告 zip、所有層加起來、API 回應、zip 裡每個成員都有大小上限（見 `previous_release.py` 的 `LIMITS`）；下載超過上限就停止並刪掉檔案，Release 記的大小和實際下載的不同也當成失敗。
+- zip 有路徑穿越、絕對路徑、反斜線、符號連結、特殊檔案、重複名稱、加密的成員、成員太多、宣告的解開後大小太大，**整個 zip 不用**（GAP）。只讀名稱精確相同的兩個成員，讀進記憶體後寫成固定檔名（0600），不依 zip 內的路徑解開。
+- 下載網址用 `GITHUB_REPOSITORY` 與附件 id 自己組，不用 API 回應裡的網址；轉址（GitHub 轉到簽名網址）不帶 `Authorization`，也只接受 https。`GITHUB_API_URL` 只接受 https（測試用：127.0.0.1／localhost 的 http）。
+- `previous-release.json` 與資料夾由精靈再檢查一次：不是一般檔案、太大、格式不對、資料夾是符號連結、manifest 說這一層 OK 但層資料夾裡找不到 `vex.cdx.json`（或它是符號連結），都記 GAP。層名稱（精靈的 `--name` 把 `[A-Za-z0-9._-]` 以外的字元換成 `_` 後）是空白、`.`、`..` 時**不去找資料夾**：manifest 狀態是 OK 時，manifest 不會有這個名稱的層，當成「前一版沒有這一層」記 NOT_RUN（僅供參考，不是 GAP，也不會採用任何資料）；manifest 狀態不是 OK 時照 manifest 的狀態（NOT_RUN 記 NOT_RUN，其他記 GAP）。
+
+### GitLab 版怎麼接（給之後的 T-03 或 C3）
+
+`previous_release.py` 目前只有 GitHub 的 API 用戶端（`GitHub` 類別）。GitLab 的做法：在 CI 範本的 scan 之前，用 Releases API（`GET /projects/:id/releases`）與 `CI_JOB_TOKEN`（或唯讀 token）換一個新的用戶端實作，提供同樣的 `list_releases()`（回傳含 `tag_name`、`draft`、`prerelease` 與附件清單；GitLab 的 Release 沒有草稿，`upcoming_release` 當成 prerelease）與 `download()`，其餘（選版本的規則、zip 檢查、依層組資料夾、manifest）可重用。判斷正式 Release 要改看 `CI_COMMIT_TAG` 與 `CI_PIPELINE_SOURCE`。把資料夾路徑放進 `DUMPLING_PREVIOUS_REPORTS` 就會被精靈讀到。
