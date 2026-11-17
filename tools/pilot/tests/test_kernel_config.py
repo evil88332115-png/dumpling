@@ -489,7 +489,7 @@ def git_repo(tmp_path, records):
 
 
 def run_mirror(*args, env=None):
-    e = {**os.environ, "KERNEL_CVE_MIN_RECORDS": "3", **(env or {})}
+    e = {**os.environ, "KERNEL_CVE_MIN_RECORDS": "3", "KERNEL_CVE_GIT_FALLBACK_URLS": "", **(env or {})}   # 不連網上的備援
     return subprocess.run(["bash", str(MIRROR_SH), *map(str, args)], capture_output=True, text=True, timeout=120, env=e)
 
 
@@ -516,7 +516,7 @@ def test_mirror_script_builds_checks_and_reuses(tmp_path):
     p, st, out = run(tmp_path, mirror=tmp_path / "m")
     assert st[1] == "OK" and out["counts"]["not_affected"] == 2
     s = MIRROR_SH.read_text(encoding="utf-8")
-    assert "core.hooksPath=/dev/null" in s and "--no-checkout" in s and "ulimit -f" in s and 'timeout "${KERNEL_CVE_GIT_TIMEOUT:-900}"' in s
+    assert "core.hooksPath=/dev/null" in s and "--no-checkout" in s and "ulimit -f" in s and 'GTS=${KERNEL_CVE_GIT_TIMEOUT:-900}' in s and 'timeout "$t"' in s
     assert "cat-file" in s and "git archive" not in s.split("set -euo pipefail", 1)[1]
 
 

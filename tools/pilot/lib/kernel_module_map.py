@@ -9,6 +9,9 @@
   另外 [--source-tree <核心原始碼樹>]（Makefile／Kbuild 的來源，和 kernel_config.py 同一個讀法與規則；.config、模組、Image 照舊來自 --from）、
   [--cves-origin <文字>]（--cves 的清單來源，只記在 inputs.cves_origin）。
   --kernel-config：記下 C-kernel-config 用的 CNA 鏡像 commit；和這次讀到的不同 → GAP。
+  沒有 linux-headers 時（例如 Debian 的雲端映像）：和 kernel_config.py 同一個判斷（kc.build_info、kc.settle_config）：改讀 rootfs 出貨的
+  /boot/config-<版本>，要 dpkg 驗證通過（擁有者是 linux-image-<版本>／-unsigned 之類同一顆核心的 image 套件、md5 相符），而且有 --source-tree
+  （/boot 沒有 Makefile）；否則 GAP 與原因。兩邊永遠用同一份設定（config_sha256 不同 → GAP，照舊）。
   讀取、CVE 的選取、CNA 鏡像、.config／Makefile 的解析與「有沒有編」都沿用 kernel_config.py（同一份程式，以路徑載入），
   這裡只多做「編進哪裡」：
     每個 programFile（.c／.S／.rs → .o）依 Kbuild 的文字規則找到它最後連結成的物件：
@@ -586,6 +589,10 @@ def assess(a, max_age):
     out["sources"]["kernel_config_cna_mirror"] = k1cna
     if gap:
         return "GAP", f"{len(cves)} 個核心 CVE 沒有對應到模組：{gap}", out
+    bgap = kc.boot_config_unverified(info, out)       # 沒有 headers、改讀 /boot/config-<版本>：dpkg 驗證不成立 → GAP（和 C-kernel-config 同一個判斷）
+    if bgap:
+        out["sources"].update({"kernel_version": info.kernel_version or want, "config": info.config_path, "config_sha256": out["kernel"]["config_sha256"]})
+        return "GAP", f"{len(cves)} 個核心 CVE 沒有對應到模組：{bgap}", out
     chk, ksha = kc.settle_config(info)
     if getattr(a, "cves_origin", None) and not out["component"] and (info.kernel_version or want):
         out["component"] = kc.vendor_kernel_component(info.kernel_version or want)
@@ -596,6 +603,11 @@ def assess(a, max_age):
         out["kernel"]["makefiles_from"] = "source-tree"
         out["kernel"]["source_tree"] = info.source_tree
     out["sources"].update({"kernel_version": info.kernel_version or want, "config": info.config_path, "config_sha256": ksha})
+    if info.boot_config:
+        info.boot_config["makefiles_from"] = "source-tree" if info.source_tree else None
+        out["kernel"]["boot_config"] = info.boot_config
+        out["sources"]["boot_config"] = {"path": info.boot_config["path"], "sha256": info.boot_config["sha256"],
+                                         "verified": info.boot_config["verified"], "makefiles_from": info.boot_config["makefiles_from"]}
     if chk:
         r = chk["record"]
         out["sources"]["config_check"] = {"result": r["result"], "config_source": info.config_path, "config_sha256": ksha,
@@ -603,6 +615,10 @@ def assess(a, max_age):
                                           "image_config_sha256": r["image_config_sha256"],
                                           "ikconfig_complete": r["image"]["ikconfig_complete"],
                                           "differences_total": r.get("differences_total")}
+    bgap = kc.boot_config_gap(info)        # /boot/config 已驗證但沒有 Makefile 來源（--source-tree）
+    if bgap:
+        return "GAP", f"{len(cves)} 個核心 CVE 沒有對應到模組：{bgap}", out
+    if chk:
         if chk["gap"]:
             return "GAP", f"{len(cves)} 個核心 CVE 沒有對應到模組：{chk['gap']}", out
         if chk["use"] is not None and not r["image"]["ikconfig_complete"]:

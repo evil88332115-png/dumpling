@@ -307,7 +307,7 @@ def evaluate(img_path, brd_path, decisions, dec_info, rel=lambda p: Path(p).name
             for i in info:
                 if k == "board":
                     sysinfo = ", ".join(x for x in (md(i.get("os"), 60) if i.get("os") else "", f"L4T {md(i.get('l4t'), 20)}" if i.get("l4t") else "") if x)
-                    tool.append("board-on-device.sh (script version not recorded)" + (f"; system tested: {sysinfo}" if sysinfo else "")
+                    tool.append((f"board-on-device.sh {md(i.get('script_version'), 20)}" if i.get("script_version") else "board-on-device.sh (script version not recorded)") + (f"; system tested: {sysinfo}" if sysinfo else "")
                                 + (f"; Lynis {md(i.get('lynis_version'), 20)} (hardening index {i.get('lynis_hardening_index')})"
                                    if i.get("lynis_version") else ""))
                 else:

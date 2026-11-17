@@ -50,6 +50,8 @@
 #   環境變數 KERNEL_SOURCE_DIR（選用；只用於 --image、--sbom）：核心原始碼樹（資料夾，唯讀）當 Makefile／Kbuild 的來源——映像／刷機包的
 #     linux-headers 不完整（例如廠商核心不是套件安裝的）時。.config、IKCONFIG 核對、模組與 Image 照舊來自 --kernel-build；
 #     樹有 .config 時和判定用的設定核對，不同記出來（ATTENTION）；主.次版本不同 → GAP。不執行樹裡的任何東西，符號連結不跟隨。
+#     映像沒有 linux-headers、只有出貨的 /boot/config-<版本>（dpkg 驗證通過）時，這是 Makefile 的唯一來源：沒給就 GAP
+#     （「有 /boot/config-<版本>（dpkg 驗證通過），但沒有 Makefile 來源（linux-headers 或 KERNEL_SOURCE_DIR）」）。
 #     給 C-kernel-config 與 C-kernel-module-map 的 --source-tree。
 #   環境變數 KERNEL_CVES（選用）：明確給的核心 CVE 清單（檔案，每行一個 CVE；Grype、DT 都沒有核心 CVE 時用，或兩者都沒執行時）。
 #     沒給時，Grype、DT 都沒有核心元件的 CVE（廠商核心不是套件，例如 SoC 廠商的 BSP 核心）而且有 KERNEL_CVE_MIRROR：依產品核心版本
@@ -786,6 +788,9 @@ fi
 # 核心 config 過濾（tools/pilot/lib/kernel_config.py）：映像與 --sbom。核心元件（C-kernel-l4t-map 加上的 Canonical 核心等）上的 CVE，
 # 以 Linux 核心 CNA 紀錄的 programFiles（PILOT_ENV 的 KERNEL_CVE_MIRROR，tools/mirror/kernel-cve.sh 的輸出）對照產品核心的 .config
 # 與 Makefile（映像裡 /usr/src/linux-headers-<版本>/），判斷修補的程式有沒有編進核心，寫 scan/kernel-config.json。
+# 映像沒有 linux-headers 時（例如 Debian 的雲端映像）改讀出貨的 /boot/config-<版本>：要 rootfs 的 dpkg 驗證通過（擁有者是 linux-image-<版本>
+# 之類同一顆核心的 image 套件、md5 相符；符號連結、超過上限、版本不同的 config 都不用），而且要 KERNEL_SOURCE_DIR（/boot 只有 .config，沒有
+# Makefile）；兩者缺一 → GAP 與原因，不判定。config_source 記 "/boot/config-<版本> (dpkg verified)"。有 headers 時完全不看 /boot/config。
 # 放在 D-dt-findings 之後：CVE 清單取 Grype 與 DT 兩邊（C-kernel-coverage 之後，Grype 的結果已經寫好）。只列出，原始的發現不改。
 # 建置設定的來源：--kernel-build（rootfs tar、資料夾，或刷機包＋--kernel-build-prefix）；--image 沒給時用 docker save 的映像 tar。
 # --sbom 沒給 --kernel-build 時不執行，記 NOT_RUN；沒有核心的 CVE（kernel_config.py 回 NOT_RUN）不寫這一列；沒有 .config、版本不符、

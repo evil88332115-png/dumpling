@@ -66,7 +66,7 @@ bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
 export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
 mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
 # 共用的鏡像函式（C1 的 pipeline/lib/mirrors.sh）：最多試 3 次；kernel-cve 有 KCVE_CACHE_DIR（workflow 的 cache）時，
-# 上游沒變就沿用、git.kernel.org 連不上就退回 48 小時內的上一份（最後一行 ATTENTION，記一列 pipeline-steps.tsv）；其他失敗 = FAIL
+# 上游沒變就沿用；git.kernel.org 連不上先試備援來源，都失敗才退回 48 小時內的上一份（最後一行 ATTENTION，記一列 pipeline-steps.tsv）；其他失敗 = FAIL
 # shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
 . "$root/pipeline/lib/mirrors.sh"
 mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
@@ -268,6 +268,9 @@ if [ "$arc" = 3 ]; then state=GAP; msg="$msg；補充元件有 GAP（$augment）
 if [ "$kurc" = 3 ]; then state=GAP; msg="$msg；廠商核心的上游版本或 CVE 清單有 GAP（見 kernel-upstream.json）"; fi
 kst=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print((d.get("kernel_source") or {}).get("status") or "")' "$out/scan.json" 2> /dev/null)
 case $kst in ""|OK) ;; *) state=GAP; msg="$msg；核心原始碼判斷 $kst（見 scan.json 的 kernel_source）";; esac
+# 版本核對（product_version_check）不是 OK → scan 步驟記 GAP；FAIL 記 FAIL、結束碼 1，不降成 GAP（M7b-4；照抄 jetson/scan.sh 那一段）
+vs=$(python3 -I "$root/pipeline/lib/platform_scan.py" version-state "$out/scan.json" 2> /dev/null) || vs=$'GAP\tversion-state 執行失敗：版本沒有核對'
+case ${vs%%$'\t'*} in OK) ;; FAIL) state=FAIL; msg="$msg；${vs#*$'\t'}";; *) [ "$state" = FAIL ] || state=GAP; msg="$msg；${vs#*$'\t'}";; esac
 {
   echo "## scan（$DUMPLING_PROJECT $ver，平台 $DUMPLING_PLATFORM）"
   echo "- 流程步驟：$state（$msg）。這不是產品的結論，產品看下一行"
@@ -283,4 +286,4 @@ print("- 漏洞 %s"%d.get("vulnerabilities"))' "$out/scan.json"
 # 解開的大檔用完就刪（磁碟映像可能好幾 GB；官方映像的壓縮檔留在 downloads/）
 rm -f "$out/work/disk.img" "$out/work/kernel-source.tar.gz"
 echo "scan: $state（$msg；用時 $(( $(date +%s) - t0 )) 秒）"
-[ "$state" = OK ] && exit 0 || exit 3
+case $state in OK) exit 0;; FAIL) exit 1;; *) exit 3;; esac   # FAIL 不降成 GAP（run-step.sh：1 → FAIL，job 失敗）
