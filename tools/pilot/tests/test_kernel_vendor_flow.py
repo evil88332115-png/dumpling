@@ -302,6 +302,21 @@ def test_source_tree_without_sublevel_is_gap(tmp_path):
     assert st[1] == "GAP" and "讀不出 SUBLEVEL" in st[2] and out["results"] == []
 
 
+@pytest.mark.parametrize("header, why", [(None, "沒有「# Linux/<ARCH> <版本> Kernel Configuration」標頭"),
+                                         ("# Linux/arm64 6.8 Kernel Configuration", "沒有 SUBLEVEL")])
+@pytest.mark.parametrize("sub", ["1", "12"])
+def test_config_without_full_version_header_is_gap(tmp_path, monkeypatch, header, why, sub):
+    """.config 讀不出完整的核心版本（沒有標頭，或標頭只有主.次版本）→ 不能確認和樹是同一版 → GAP。
+    樹的 SUBLEVEL 是 1 或 12 都一樣（不能因為標頭缺了就跳過比對）。"""
+    line = "# Linux/arm64 6.8.12 Kernel Configuration"
+    assert line in tkc.CONFIG
+    monkeypatch.setattr(tkc, "CONFIG", tkc.CONFIG.replace(line + "\n", "" if header is None else header + "\n"))
+    files = dict(TREE_FILES)
+    files["Makefile"] = files["Makefile"].replace("SUBLEVEL = 12", f"SUBLEVEL = {sub}")
+    p, st, out = tkc.run(tmp_path, "--source-tree", str(write_tree(tmp_path / "t", files)), src=thin_rootfs(tmp_path))
+    assert st[1] == "GAP" and why in st[2] and out["results"] == [], st
+
+
 def test_source_tree_same_sublevel_is_judged(tmp_path):
     """對照：SUBLEVEL 相同（6.8.12）照常判定。"""
     p, st, out = tkc.run(tmp_path, "--source-tree", str(write_tree(tmp_path / "t")), src=thin_rootfs(tmp_path))

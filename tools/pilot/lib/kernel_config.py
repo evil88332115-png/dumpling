@@ -4203,24 +4203,27 @@ def version_sublevel(ver):
 def source_tree_gap(info, model):
     """樹的版本和判定的核心（.config 標頭）不同 → GAP 的原因；沒有或相同 → None。樹的版本不明也 GAP（不猜）。
     主.次版本與 SUBLEVEL 都要相同：同一個主.次版本、不同 SUBLEVEL 的樹（例如 6.8.1 的樹配 6.8.12 的核心）檔案與 Makefile 可能不一樣，
-    用它判「沒編」可能錯放（往寬鬆的方向錯），所以也 GAP；任何一邊讀不出 SUBLEVEL 也 GAP。"""
+    用它判「沒編」可能錯放（往寬鬆的方向錯），所以也 GAP；任何一邊讀不出版本或 SUBLEVEL 也 GAP（.config 沒有版本標頭也算）。
+    EXTRAVERSION（例如 -rc1）不比：.config 標頭的版本字串後面接的是 EXTRAVERSION 加 LOCALVERSION，兩者分不開。"""
     st = info.source_tree
     if not st:
         return None
     want = major_minor(model.kver_hdr)
     if st["major_minor"] is None:
         return "--source-tree 的最上層 Makefile 讀不出核心版本（VERSION／PATCHLEVEL）：不確定是哪個核心的原始碼"
-    if want and st["major_minor"] != want:
+    if not want:
+        return (f"判定用的設定（.config）沒有「# Linux/<ARCH> <版本> Kernel Configuration」標頭、讀不出核心版本："
+                f"不確定和 --source-tree {st['version']} 是不是同一個核心")
+    if st["major_minor"] != want:
         return f"--source-tree 是核心 {st['version']} 的原始碼，判定用的設定是核心 {model.kver_hdr} 的（主.次版本不同）：不是同一個核心"
-    if want:
-        ts, ks = version_sublevel(st["version"]), version_sublevel(model.kver_hdr)
-        if ts is None:
-            return (f"--source-tree 的最上層 Makefile 讀不出 SUBLEVEL（樹是 {st['version']}）：不確定和判定的核心 {model.kver_hdr} 是不是同一版")
-        if ks is None:
-            return (f"判定用的設定（.config 標頭）的核心版本 {model.kver_hdr} 沒有 SUBLEVEL：不確定和 --source-tree {st['version']} 是不是同一版")
-        if ts != ks:
-            return (f"--source-tree 是核心 {st['version']} 的原始碼，判定用的設定是核心 {model.kver_hdr} 的（SUBLEVEL 不同）："
-                    "檔案與 Makefile 可能不一樣，不能用來判斷有沒有編")
+    ts, ks = version_sublevel(st["version"]), version_sublevel(model.kver_hdr)
+    if ts is None:
+        return (f"--source-tree 的最上層 Makefile 讀不出 SUBLEVEL（樹是 {st['version']}）：不確定和判定的核心 {model.kver_hdr} 是不是同一版")
+    if ks is None:
+        return (f"判定用的設定（.config 標頭）的核心版本 {model.kver_hdr} 沒有 SUBLEVEL：不確定和 --source-tree {st['version']} 是不是同一版")
+    if ts != ks:
+        return (f"--source-tree 是核心 {st['version']} 的原始碼，判定用的設定是核心 {model.kver_hdr} 的（SUBLEVEL 不同）："
+                "檔案與 Makefile 可能不一樣，不能用來判斷有沒有編")
     return None
 
 

@@ -230,7 +230,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
   映像／刷機包的 linux-headers 不完整（廠商核心不是套件安裝的，rootfs 的 headers 常常只有少數幾個 Makefile）時，指定一棵核心原始碼樹當 Makefile／Kbuild 的來源。
   `.config`、IKCONFIG 核對、模組與 Image 照舊來自 `--kernel-build`；只有 Makefile 類檔案與檔案名稱改讀這棵樹（沿用 `collect_tree` 的讀法與上限；唯讀、
   不執行任何東西、符號連結不跟隨）。樹有 `.config` 時和判定用的設定核對（`kernel.source_tree.config_compare`：same／same_except_toolchain／differs／no_config），
-  `differs` → ATTENTION；樹的版本（主.次版本與 SUBLEVEL）和 `.config` 標頭不同、或讀不出版本 → GAP（例如 6.8.1 的樹配 6.8.12 的核心也是 GAP）。輸出的 `kernel.makefiles_from: source-tree` 與 `kernel.source_tree`（版本、Makefile 數、資料夾名稱，不寫路徑）記 Makefile 的來源。
+  `differs` → ATTENTION；樹的版本（主.次版本與 SUBLEVEL）和 `.config` 標頭不同、或任何一邊讀不出版本（`.config` 沒有 `# Linux/<ARCH> <版本> Kernel Configuration` 標頭、標頭只有主.次版本也算）→ GAP（例如 6.8.1 的樹配 6.8.12 的核心也是 GAP）。EXTRAVERSION（例如 -rc1）不比：標頭的版本字串後面接的是 EXTRAVERSION 加 LOCALVERSION，分不開。輸出的 `kernel.makefiles_from: source-tree` 與 `kernel.source_tree`（版本、Makefile 數、資料夾名稱，不寫路徑）記 Makefile 的來源。
   **沒有 linux-headers 的映像（出貨的 `/boot/config-<版本>`，M7d-3a）**：Debian 的雲端映像沒有 linux-headers，但有 `/boot/config-<版本>`。
   找不到 headers 的 `.config` 時（有 headers 時完全不看 /boot/config，輸出不變），`C-kernel-config` 與 `C-kernel-module-map`（同一個 `settle_config`，兩邊永遠同一份設定）改讀它，
   條件（不可信的輸入：只解析、有上限、不跟隨連結；一致性檢查，不防竄改）：一般檔案（符號連結、硬連結不採用；`--from` 資料夾時以 st_nlink > 1 判斷硬連結；docker 上層換成資料夾或其他種類也不採用）、不超過 2 MB（`/boot` 底下最多讀 16 個 `config-*`，其餘只記名稱、不採用），而且 rootfs 的 dpkg 驗證通過——
