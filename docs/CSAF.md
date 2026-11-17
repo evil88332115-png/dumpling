@@ -45,4 +45,4 @@
 - 產品狀態依這一版目前的判定：沒有判定或 in_triage → `under_investigation`；exploitable → `known_affected`；not_affected／false_positive → `known_not_affected`；這一版判定 resolved → `fixed`。上游或發行版有修補版本**不算**這個產品已修補。判定是 not_affected 或已修補時會警告「可能不需要通知」。
 - 緩解措施預設是 `TO BE COMPLETED by RD`；受影響的元件底下不放 `vendor_fix`。
 
-`tools/cra/exploited_watch.py`（以 Dependency-Track 為來源的監控）在有新的比對時，可以替 `--shipped` 清單裡帶 `cra_project` 的已出貨版本寫草稿到 `<輸出資料夾>/csaf-drafts/<UTC 時間>/`（`--csaf-draft`／`--no-csaf-draft`、`EW_CSAF_DRAFT`；不覆寫既有的草稿；失敗只記在報告的 `csaf_drafts`，不改變監控狀態）。dumpling 在 GitHub 上的每日監控是 `pipeline/watch/`（`docs/WATCH.md`），接上草稿是另一個 PR。
+`tools/cra/exploited_watch.py`（以 Dependency-Track 為來源的監控）在有新的比對時，可以替 `--shipped` 清單裡帶 `cra_project` 的已出貨版本寫草稿到 `<輸出資料夾>/csaf-drafts/<UTC 時間>/`（`--csaf-draft`／`--no-csaf-draft`、`EW_CSAF_DRAFT`；不覆寫既有的草稿；失敗只記在報告的 `csaf_drafts`，不改變監控狀態）。dumpling 在 GitHub 上的每日監控（`pipeline/watch/`）另外接上：新的 KEV 群組落在 shipped 的正式版時，用同一個 Release 的報告 zip 產生草稿，以 workflow artifact 上傳，見 `docs/WATCH.md` 第 8 節。

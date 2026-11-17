@@ -185,6 +185,7 @@ jobs:
           OVERLAY: ${{ inputs.overlay }}
           EXPECT: ${{ inputs.expect_opened }}
           ALLOW_BASELINE: ${{ inputs.allow_baseline }}
+          ROUND: ${{ inputs.round }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ov=()
@@ -194,7 +195,8 @@ jobs:
           if [ -f "$RUNNER_TEMP/w/prev-schedule.json" ]; then ov+=(--prev-schedule "$RUNNER_TEMP/w/prev-schedule.json" --run-id "$GITHUB_RUN_ID"); fi
           set +e
           python3 -I pipeline/watch/match.py --inventory "$RUNNER_TEMP/w/inv/inventory.json" --state-dir "$RUNNER_TEMP/w/state" \
-            --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}"
+            --feeds "$RUNNER_TEMP/w/feeds" --out "$RUNNER_TEMP/w/out" --mode "$MODE" --run-url "$RUN_URL" --demo "${ov[@]}" \
+            --csaf-artifact "watch-csaf-drafts-$ROUND-$GITHUB_RUN_ATTEMPT"
           rc=$?
           set -e
           if [ -f "$RUNNER_TEMP/w/out/report.md" ]; then cat "$RUNNER_TEMP/w/out/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
@@ -213,6 +215,16 @@ jobs:
             ${{ runner.temp }}/w/out/result.json
           retention-days: 14
           if-no-files-found: warn
+      # CSAF 使用者通知草稿（CRA 第 14 條第 8 項；docs/WATCH.md 第 8 節）：只有 shipped 的正式版有新的 KEV 群組時才有。
+      # 公開 repo 的 artifact 誰都能下載：內容只來自示範專案的公開 Release 與 repo 裡的設定；草稿的 tracking.status 一律 draft。
+      # 保留 90 天（Issue 內文寫這個 artifact 名稱）
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.mode == 'real'
+        with:
+          name: watch-csaf-drafts-${{ inputs.round }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w/out/csaf-drafts/
+          retention-days: 90
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: inputs.mode == 'real'
         with:

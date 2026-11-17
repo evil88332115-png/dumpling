@@ -1,0 +1,420 @@
+"""csaf_draft.py 與 match.py 的接線：新的 KEV 群組 → CSAF 使用者通知草稿（CRA 第 14 條第 8 項；docs/WATCH.md 第 8 節）。
+資料全部是合成的。tools/cra/csaf_advisory.py 照真的跑（沒有 jsonschema 時 schema 驗證是 NOT_RUN，草稿照樣產生、狀態 ATTENTION）。"""
+import datetime
+import io
+import json
+import os
+import stat
+import sys
+import tempfile
+import unittest
+import zipfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, HERE)
+import collect  # noqa: E402
+import csaf_draft  # noqa: E402
+import match  # noqa: E402
+from test_match import NOW1, NOW2, REQ, Base  # noqa: E402
+
+ROWS_SCHEMA = "sca-center-vulnerability-rows/1"
+NOW = datetime.datetime(2026, 11, 11, 1, 0, tzinfo=datetime.timezone.utc)
+
+
+def report_zip(path, cve="CVE-2018-18074", purl=REQ, product="demo", version="v1", extra=None, skip=(), dup=None, link=None):
+    """report_package 的 zip 結構（只放 csaf_draft 讀的 4 個成員；extra：多放的成員 {名稱: 內容}）。"""
+    row = {"id": cve, "aliases": [], "component": "requests", "version": "2.19.0", "purl": purl, "tier": "p1", "vex": None,
+           "fix_state": "fixed", "fix_versions": ["2.20.0"], "fix_next": "2.20.0", "cvss": None, "exploited": True,
+           "exploitation_evidence": ["KEV (test)"]}
+    files = {"vulnerability-rows.json": {"schema": ROWS_SCHEMA, "vulnerability_data_status": "OK", "rows": [row]},
+             "vex.cdx.json": {"bomFormat": "CycloneDX", "metadata": {"component": {"name": product, "version": version}}, "vulnerabilities": []},
+             "summary.json": {}, "sbom.cdx.json": {"bomFormat": "CycloneDX", "components": []}}
+    with zipfile.ZipFile(path, "w") as z:
+        for k, v in files.items():
+            if k not in skip:
+                z.writestr(collect.REPORT_MEMBERS[k], json.dumps(v))
+        if dup:
+            z.writestr(collect.REPORT_MEMBERS[dup], "{}")
+        if link:
+            i = zipfile.ZipInfo(collect.REPORT_MEMBERS[link])
+            i.external_attr = (stat.S_IFLNK | 0o777) << 16
+            z.writestr(i, "/etc/passwd")
+        for k, v in (extra or {}).items():
+            z.writestr(k, v)
+    return path
+
+
+class Extract(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory(prefix="c3-csaf-")
+        self.d = self._td.name
+        self.addCleanup(self._td.cleanup)
+
+    def test_only_fixed_members_are_written(self):
+        z = report_zip(os.path.join(self.d, "r.zip"), extra={"../../evil.txt": "x", "報告/內部存檔/other.json": "{}"})
+        self.assertIsNone(collect.report_zip_problem(z))
+        dest = os.path.join(self.d, "out")
+        csaf_draft.extract_reports(z, dest)
+        self.assertEqual(sorted(os.listdir(dest)), ["sbom.cdx.json", "summary.json", "vex.cdx.json", "vulnerability-rows.json"])
+        self.assertFalse(os.path.exists(os.path.join(self.d, "evil.txt")))
+
+    def test_missing_duplicate_symlink_and_oversize_are_rejected(self):
+        cases = {"missing": dict(skip=("vulnerability-rows.json",)), "dup": dict(dup="vex.cdx.json"), "link": dict(link="summary.json")}
+        for name, kw in cases.items():
+            z = report_zip(os.path.join(self.d, f"{name}.zip"), **kw)
+            self.assertIsNotNone(collect.report_zip_problem(z), name)
+            with self.assertRaises(csaf_draft.ZipProblem, msg=name):
+                csaf_draft.extract_reports(z, os.path.join(self.d, f"out-{name}"))
+        z = report_zip(os.path.join(self.d, "big.zip"))
+        old = collect.REPORT_MEMBER_MAX
+        collect.REPORT_MEMBER_MAX = 10
+        try:
+            self.assertIn("上限", collect.report_zip_problem(z))
+            with self.assertRaises(csaf_draft.ZipProblem):
+                csaf_draft.extract_reports(z, os.path.join(self.d, "out-big"))
+        finally:
+            collect.REPORT_MEMBER_MAX = old
+        bad = os.path.join(self.d, "bad.zip")
+        open(bad, "wb").write(b"not a zip")
+        self.assertEqual(collect.report_zip_problem(bad), "不是可讀的 zip")
+
+    def test_extract_alone_rejects_symlink_member(self):
+        # 只有符號連結（沒有同名的一般成員）：extract 自己要擋（不靠 collect 的檢查、也不是因為重複）
+        z = report_zip(os.path.join(self.d, "link.zip"), skip=("summary.json",), link="summary.json")
+        with zipfile.ZipFile(z) as f:
+            self.assertEqual([i.filename for i in f.infolist()].count(collect.REPORT_MEMBERS["summary.json"]), 1)
+        with self.assertRaises(csaf_draft.ZipProblem) as cm:
+            csaf_draft.extract_reports(z, os.path.join(self.d, "out-link"))
+        self.assertIn("不是一般檔案", str(cm.exception))
+
+    def test_extract_alone_rejects_too_many_members(self):
+        z = report_zip(os.path.join(self.d, "many.zip"), extra={f"報告/x/{i}.txt": "" for i in range(5)})
+        old = collect.REPORT_MAX_MEMBERS
+        collect.REPORT_MAX_MEMBERS = 6
+        try:
+            with self.assertRaises(csaf_draft.ZipProblem) as cm:
+                csaf_draft.extract_reports(z, os.path.join(self.d, "out-many"))
+            self.assertIn("成員超過", str(cm.exception))
+        finally:
+            collect.REPORT_MAX_MEMBERS = old
+
+
+class DraftsUnit(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory(prefix="c3-csaf-")
+        self.d = self._td.name
+        self.addCleanup(self._td.cleanup)
+        self.es = [{"project": "demo", "version": "v1", "cve": "CVE-2018-18074", "first_detected": "2026-11-11T01:00:00Z",
+                    "sources": ["CISA KEV"], "euvd": {"date_added": "2026-01-01"}, "project_uuid": "dumpling:demo/v1#bsp"}]
+
+    def p(self, **kw):
+        return dict({"uuid": "dumpling:demo/v1#bsp", "layer": "bsp", "kind": "release", "status": "shipped", "report_zip": None}, **kw)
+
+    def test_firmware_development_release_and_unknown_get_no_issue_line(self):
+        dr = csaf_draft.Drafts(self.d, NOW)
+        for p in (self.p(kind="firmware", status="development", layer="firmware"), self.p(status="development"), None):
+            rec = dr.for_group(self.es, p)
+            self.assertEqual(rec["status"], "NOT_RUN", p)
+            self.assertFalse(rec["issue"], p)
+            self.assertIsNone(dr.issue_line(rec), p)
+        self.assertIsNone(dr.summary_line())
+
+    def test_fail_detail_with_paths_is_scrubbed_and_not_in_issue(self):
+        z = report_zip(os.path.join(self.d, "r.zip"))
+        out = self.d
+
+        class PathTool:
+            def exploited_run(self, src, cves, cfg, leaf, **k):
+                return "FAIL", f"vulnerability-rows：讀不到 {src}/vulnerability-rows.json（ValueError）；另見 /srv/build-cache/x/y.json", None
+        dr = csaf_draft.Drafts(out, NOW, tool=PathTool())
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertNotIn(out, rec["detail"])
+        self.assertNotIn("/srv/", rec["detail"])
+        self.assertIn("<輸出資料夾>", rec["detail"])
+        line = dr.issue_line(rec)
+        self.assertNotIn("vulnerability-rows", line)                       # Issue 只寫固定原因，不放工具的說明
+        self.assertIn("產生失敗", line)
+        self.assertFalse(os.path.exists(os.path.join(out, csaf_draft.DRAFT_DIR, "01-" + "x")))
+
+    def test_exception_after_writing_removes_partial_draft(self):
+        z = report_zip(os.path.join(self.d, "r.zip"))
+        old = csaf_draft.readme
+        csaf_draft.readme = lambda rec, demo: (_ for _ in ()).throw(OSError("disk full"))
+        try:
+            dr = csaf_draft.Drafts(self.d, NOW, demo=True)
+            rec = dr.for_group(self.es, self.p(report_zip=z))
+        finally:
+            csaf_draft.readme = old
+        self.assertEqual((rec["status"], rec["dir"]), ("FAIL", None))
+        root = os.path.join(self.d, csaf_draft.DRAFT_DIR)
+        self.assertEqual([x for x in os.listdir(root)] if os.path.isdir(root) else [], [])     # 寫了一半的草稿不留在 artifact
+
+    def test_corrupt_deflate_member_is_unreadable_zip_not_internal_error(self):
+        z = os.path.join(self.d, "deflate.zip")
+        with zipfile.ZipFile(z, "w", compression=zipfile.ZIP_DEFLATED) as f:
+            for k, m in collect.REPORT_MEMBERS.items():
+                f.writestr(m, json.dumps({"k": k, "pad": "x" * 2000}))
+        with zipfile.ZipFile(z) as f:
+            info = f.getinfo(collect.REPORT_MEMBERS["vulnerability-rows.json"])
+        raw = bytearray(open(z, "rb").read())
+        hdr = info.header_offset
+        n, e = int.from_bytes(raw[hdr + 26:hdr + 28], "little"), int.from_bytes(raw[hdr + 28:hdr + 30], "little")
+        raw[hdr + 30 + n + e] = 0xFF                          # deflate 區塊型別 11：zlib.error（不是 CRC 錯誤）
+        open(z, "wb").write(bytes(raw))
+        with self.assertRaises(csaf_draft.ZipProblem) as cm:
+            csaf_draft.extract_reports(z, os.path.join(self.d, "out-deflate"))
+        self.assertIn("error", str(cm.exception))
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual((rec["status"], rec["reason"]), ("FAIL", "報告 zip 讀不了"))
+        self.assertNotIn("內部錯誤", rec["detail"])
+
+    def test_scan_dir_in_report_summary_is_not_read(self):
+        """zip 裡 summary.json 的 scan_dir（不可信資料）指向一個有 scan/euvd.json 的資料夾：草稿不能讀它（euvd_file 覆寫）。"""
+        sd = os.path.join(self.d, "scandir")
+        os.makedirs(os.path.join(sd, "scan"))
+        json.dump({"cves": {"CVE-2018-18074": {"exploited": "yes", "kev_date_added": "2025-03-03", "kev_sources": ["cisa_kev"]}}},
+                  open(os.path.join(sd, "scan", "euvd.json"), "w"))
+        z = os.path.join(self.d, "r.zip")
+        with zipfile.ZipFile(report_zip(os.path.join(self.d, "base.zip"))) as src, zipfile.ZipFile(z, "w") as dst:
+            for i in src.infolist():
+                data = json.dumps({"scan_dir": sd}).encode() if i.filename == collect.REPORT_MEMBERS["summary.json"] else src.read(i)
+                dst.writestr(i.filename, data)
+        es = [dict(self.es[0], euvd=None)]
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(es, self.p(report_zip=z))
+        self.assertIn(rec["status"], ("OK", "ATTENTION"), rec)
+        leaf = os.path.join(self.d, rec["dir"])
+        doc = open(os.path.join(leaf, "csaf-exploited-draft.json"), encoding="utf-8").read()
+        summ = json.load(open(os.path.join(leaf, "csaf-exploited-summary.json"), encoding="utf-8"))
+        self.assertNotIn("2025-03-03", doc)
+        self.assertIsNone(summ.get("kev_dates_from"))
+
+    def test_previous_drafts_folder_is_cleared(self):
+        old = os.path.join(self.d, csaf_draft.DRAFT_DIR, "01-deadbeef")
+        os.makedirs(old)
+        open(os.path.join(old, "csaf-exploited-draft.json"), "w").write("{}")
+        csaf_draft.Drafts(self.d, NOW)
+        self.assertFalse(os.path.exists(os.path.join(self.d, csaf_draft.DRAFT_DIR)))
+
+    def test_not_ok_result_removes_the_draft_folder(self):
+        z = report_zip(os.path.join(self.d, "r.zip"))
+
+        class GapTool:
+            def exploited_run(self, src, cves, cfg, leaf, **k):
+                leaf.mkdir(parents=True)
+                (leaf / "csaf-exploited-draft.json").write_text("{}", encoding="utf-8")
+                return "GAP", "no evidence", None
+        dr = csaf_draft.Drafts(self.d, NOW, tool=GapTool())
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual((rec["status"], rec["dir"]), ("GAP", None))
+        root = os.path.join(self.d, csaf_draft.DRAFT_DIR)
+        self.assertEqual(os.listdir(root) if os.path.isdir(root) else [], [])
+        self.assertIn("這不代表沒有被利用", dr.issue_line(rec))
+
+    def test_dev_release_is_not_run_and_no_issue_line(self):
+        dr = csaf_draft.Drafts(self.d, NOW, demo=True, artifact="watch-csaf-drafts-x-1")
+        rec = dr.for_group(self.es, self.p(kind="dev", status="development"))
+        self.assertEqual((rec["status"], rec["dir"]), ("NOT_RUN", None))
+        self.assertIn("development", rec["detail"])
+        self.assertNotIn("不需要", rec["detail"])                            # 不下「不需要通知」的結論
+        self.assertIsNone(dr.issue_line(rec))
+        self.assertIsNone(dr.summary_line())
+        self.assertFalse(os.path.exists(os.path.join(self.d, csaf_draft.DRAFT_DIR)))
+
+    def test_shipped_without_report_zip_is_not_run_with_reason_in_issue(self):
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(self.es, self.p())
+        self.assertEqual(rec["status"], "NOT_RUN")
+        line = dr.issue_line(rec)
+        self.assertIn("沒有產生（NOT_RUN）", line)
+        self.assertIn("報告 zip", line)
+
+    def test_shipped_with_report_zip_writes_draft_readme_and_tbc_publisher(self):
+        z = report_zip(os.path.join(self.d, "report-demo-v1-bsp.zip"))
+        dr = csaf_draft.Drafts(self.d, NOW, demo=True, artifact="watch-csaf-drafts-real-1")
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertIn(rec["status"], ("OK", "ATTENTION"), rec)
+        leaf = os.path.join(self.d, rec["dir"])
+        doc = json.load(open(os.path.join(leaf, "csaf-exploited-draft.json"), encoding="utf-8"))
+        self.assertEqual(doc["document"]["tracking"]["status"], "draft")
+        self.assertEqual(doc["document"]["tracking"]["generator"]["engine"]["name"], "dumpling csaf_advisory.py exploited")
+        pub = doc["document"]["publisher"]
+        self.assertEqual(pub["name"], "TO BE COMPLETED")                    # 沒有這個專案的設定：發布者全部 TO BE COMPLETED
+        self.assertEqual(pub["namespace"], "https://to-be-completed.invalid")
+        self.assertNotIn("contact_details", pub)                             # 沒有預設的聯絡人
+        rd = open(os.path.join(leaf, "README.md"), encoding="utf-8").read().splitlines()
+        self.assertTrue(rd[0].startswith("# 草稿：工具不發布"))
+        self.assertTrue(any("不是真的出貨產品" in x for x in rd))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.d, csaf_draft.DRAFT_DIR))), [os.path.basename(rec["dir"])])   # 暫存的 Reports 已清掉
+        line = dr.issue_line(rec)
+        self.assertIn("watch-csaf-drafts-real-1", line)
+        self.assertIn("draft", line)
+        self.assertIn("保留 90 天", line)
+
+    def test_demo_project_config_has_no_default_domain_or_contact(self):
+        for name in sorted(os.listdir(os.path.join(csaf_draft.ROOT, "projects"))):
+            cfg = csaf_draft.load_config(name)
+            cs = cfg.get("csaf") or {}
+            self.assertFalse(cs.get("publisher_namespace") or cs.get("contact") or cs.get("advisory_url_base"), name)
+            self.assertFalse((cfg.get("manufacturer") or {}).get("website") or (cfg.get("manufacturer") or {}).get("email"), name)
+        self.assertEqual(csaf_draft.load_config("../etc"), {})
+
+    def test_bad_zip_is_fail_without_draft_and_limit(self):
+        bad = os.path.join(self.d, "bad.zip")
+        open(bad, "wb").write(b"x")
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(self.es, self.p(report_zip=bad))
+        self.assertEqual((rec["status"], rec["dir"]), ("FAIL", None))
+        z = report_zip(os.path.join(self.d, "r.zip"))
+        dr = csaf_draft.Drafts(self.d, NOW)
+        dr.made = csaf_draft.MAX_DRAFTS
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual(rec["status"], "NOT_RUN")
+        self.assertIn("上限", rec["detail"])
+
+    def test_internal_error_is_recorded_not_raised(self):
+        z = report_zip(os.path.join(self.d, "r.zip"))
+
+        class Boom:
+            def exploited_run(self, *a, **k):
+                raise RuntimeError("boom")
+        dr = csaf_draft.Drafts(self.d, NOW, tool=Boom())
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertIn("RuntimeError", rec["detail"])
+
+
+class MatchWiring(Base):
+    """match.run：shipped 的正式版有新的 KEV 群組 → 草稿與 Issue 內文一句；drill 不產生；彙總 Issue 一句。"""
+
+    def add_report_zip(self, **kw):
+        z = report_zip(os.path.join(self.inv, "releases", "0", "report-demo-v1-bsp.zip"), **kw)
+        self.inventory["releases"][0]["report_zips"] = {"bsp": {"file": "releases/0/report-demo-v1-bsp.zip", "sha256": "x", "size": 1}}
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        return z
+
+    def run_once(self, now, mode="real", **kw):
+        out = os.path.join(self.w, "out-" + now[:10])
+        vs = [{"cveID": c, "vendorProject": "x", "product": "y", "dateAdded": "2021-12-10"} for c in self.kev]
+        json.dump({"dateReleased": now, "vulnerabilities": vs}, open(os.path.join(self.feeds, "cisa-kev.json"), "w"))
+        import argparse
+        a = argparse.Namespace(inventory=os.path.join(self.inv, "inventory.json"), state_dir=self.state, feeds=self.feeds, out=out, mode=mode,
+                               kev_overlay=None, max_new_issues=kw.get("max_new", 20), run_url="https://github.com/o/r/actions/runs/1",
+                               grype=None, grype_total_timeout=100, vendor_config=None, now=now, demo=True, allow_baseline=True,
+                               prev_schedule=None, run_id="999", firmware_rematch=None, csaf_artifact="watch-csaf-drafts-real-1")
+        match.run(a)
+        plan = json.load(open(os.path.join(out, "plan.json")))
+        json.dump(plan["state"], open(os.path.join(self.state, "state.json"), "w"))
+        self.write_base(7, 1)
+        res = json.load(open(os.path.join(out, "result.json")))
+        return out, plan, res
+
+    def test_new_kev_on_shipped_release_writes_draft_and_issue_line(self):
+        self.add_report_zip()
+        self.run_once(NOW1)                                     # 基準（不產生草稿）
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        out, plan, res = self.run_once(NOW2)
+        (rec,) = res["csaf_drafts"]
+        self.assertIn(rec["status"], ("OK", "ATTENTION"), rec)
+        self.assertTrue(os.path.isfile(os.path.join(out, rec["dir"], "csaf-exploited-draft.json")))
+        op = [x for x in plan["actions"] if x["op"] == "open" and "CVE-2018-18074" in x["title"]]
+        self.assertEqual(len(op), 1)
+        self.assertIn("watch-csaf-drafts-real-1", op[0]["body"])
+        self.assertEqual(op[0]["body"].count("CRA 第 14 條第 8 項的使用者通知草稿"), 1)   # Issue 只寫一句
+        self.assertNotIn("csaf_security_advisory", op[0]["body"])                          # 不貼草稿內容
+        self.assertEqual(match.unsafe_markdown(op[0]["body"]), [])
+        report = open(os.path.join(out, "report.md"), encoding="utf-8").read()
+        self.assertIn("CSAF 使用者通知草稿", report)
+        # 成功的路徑也不能有絕對路徑（plan、result、report 都是公開的）：草稿資料夾一律是相對的 csaf-drafts/…
+        self.assertFalse(os.path.isabs(rec["dir"]))
+        for name, text in (("plan.json", json.dumps(plan, ensure_ascii=False)), ("result.json", json.dumps(res, ensure_ascii=False)), ("report.md", report)):
+            self.assertNotIn(self.w, text, name)
+            self.assertNotIn(os.path.abspath(out), text, name)
+
+    def test_broken_rows_on_shipped_release_still_makes_plan_without_paths(self):
+        """報告 zip 結構對、rows 內容壞掉 → 草稿 FAIL；Issue 照開（只寫固定原因、沒有本機路徑），plan.json 照樣產生。"""
+        z = os.path.join(self.inv, "releases", "0", "report-demo-v1-bsp.zip")
+        with zipfile.ZipFile(z, "w") as f:
+            f.writestr(collect.REPORT_MEMBERS["vulnerability-rows.json"], "{}")
+            f.writestr(collect.REPORT_MEMBERS["vex.cdx.json"], "{}")
+        self.inventory["releases"][0]["report_zips"] = {"bsp": {"file": "releases/0/report-demo-v1-bsp.zip", "sha256": "x", "size": 1}}
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1)
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        out, plan, res = self.run_once(NOW2)
+        (rec,) = res["csaf_drafts"]
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertNotIn(self.w, json.dumps(res["csaf_drafts"], ensure_ascii=False))
+        op = [x for x in plan["actions"] if x["op"] == "open" and "CVE-2018-18074" in x["title"]]
+        self.assertEqual(len(op), 1)
+        self.assertNotIn(self.w, op[0]["body"])
+        self.assertIn("產生失敗", op[0]["body"])
+
+    def test_report_zip_problem_does_not_change_monitoring(self):
+        """collect 記的 report_zip_problems 不是 Release 問題：沒有 GAP、沒有 serious，草稿那一筆寫原因。"""
+        self.inventory["releases"][0]["report_zip_problems"] = {"bsp": "report-demo-v1-bsp.zip：下載連線失敗（URLError）"}
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        out, plan, res = self.run_once(NOW1)                    # 建基準不會因此 FAIL
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        out, plan, res = self.run_once(NOW2)
+        self.assertFalse(any("report-demo" in g for g in res["gaps"]))
+        self.assertFalse(any("report-demo" in s for s in res["serious"]))
+        (rec,) = res["csaf_drafts"]
+        self.assertEqual(rec["status"], "NOT_RUN")
+        self.assertIn("下載連線失敗", rec["detail"])
+
+    def test_dev_release_records_not_run_without_issue_line(self):
+        r = self.inventory["releases"][0]
+        r.update(kind="dev", tag="dev/demo", watch_version="dev", status="development")
+        json.dump(self.inventory, open(os.path.join(self.inv, "inventory.json"), "w"))
+        self.run_once(NOW1)
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        out, plan, res = self.run_once(NOW2)
+        (rec,) = res["csaf_drafts"]
+        self.assertEqual(rec["status"], "NOT_RUN")
+        self.assertIn("development", rec["detail"])
+        self.assertFalse(any("使用者通知草稿" in x["body"] for x in plan["actions"]))
+        self.assertFalse(os.path.exists(os.path.join(out, csaf_draft.DRAFT_DIR)))
+
+    def test_baseline_and_drill_do_not_make_drafts(self):
+        self.add_report_zip()
+        out, plan, res = self.run_once(NOW1)
+        self.assertNotIn("csaf_drafts", res)                     # 建基準的那一次不產生
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        self.state = os.path.join(self.w, "state-drill")
+        os.makedirs(self.state)
+        self.write_base(None, 0)
+        self.run_once(NOW1, mode="drill")
+        out, plan, res = self.run_once(NOW2, mode="drill")
+        self.assertNotIn("csaf_drafts", res)
+        self.assertFalse(os.path.exists(os.path.join(out, csaf_draft.DRAFT_DIR)))
+
+    def test_summary_issue_has_one_line(self):
+        self.add_report_zip()
+        self.run_once(NOW1)
+        self.kev = ["CVE-2021-44228", "CVE-2018-18074"]
+        out, plan, res = self.run_once(NOW2, max_new=0)          # 超過上限 → 併成彙總 Issue
+        self.assertEqual(len(res["csaf_drafts"]), 1)
+        (summ,) = [x for x in plan["actions"] if "summary" in (x.get("labels") or [])]
+        self.assertEqual(summ["body"].count("CRA 第 14 條第 8 項的使用者通知草稿"), 1)
+        self.assertIn("已產生 1 份", summ["body"])
+        self.assertEqual(match.unsafe_markdown(summ["body"]), [])
+
+
+class Workflow(unittest.TestCase):
+    def test_round_uploads_drafts_and_passes_artifact_name(self):
+        y = open(os.path.join(csaf_draft.ROOT, ".github", "workflows", "watch-round.yml"), encoding="utf-8").read()
+        self.assertIn("--csaf-artifact \"watch-csaf-drafts-", y)
+        i = y.index("name: watch-csaf-drafts-")
+        block = y[y.rindex("- uses:", 0, i):y.index("\n      - ", i)]
+        self.assertIn("actions/upload-artifact@", block)
+        self.assertIn("/w/out/csaf-drafts", block)
+        self.assertIn("retention-days: 90", block)
+        self.assertIn("if: inputs.mode == 'real'", block)
+
+
+if __name__ == "__main__":
+    unittest.main()
