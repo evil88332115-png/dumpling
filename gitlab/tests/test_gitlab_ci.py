@@ -589,6 +589,11 @@ class CiFile(unittest.TestCase):
         self.assertIn("--csaf-artifact", item)
         self.assertNotIn("--demo", item)
         self.assertIn("--out watch-out ", item)
+        # 草稿含產品資料：同一份 artifacts 不能明確放寬給所有人（public: true 或 access: all）。
+        # 預設值（沒寫）是 all，內部私有專案＝專案成員；改成 developer 要等第 3.1 節的驗證
+        arts = job["artifacts"]
+        self.assertIsNot(arts.get("public"), True)
+        self.assertNotIn(str(arts.get("access", "")).lower(), ("all",))
 
     def run_notify(self, files, watch_rc=0, support_rc=0, **extra_env):
         """實際執行 watch:notify 的最後一項（假的 python3：記錄呼叫、依 plan 回傳結束碼）。"""

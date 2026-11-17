@@ -166,12 +166,13 @@
 5. **內部版不加 `--demo`**：草稿與 README 不寫示範說明；草稿含真實的產品名稱、版本與元件。
 
 **誰看得到 artifacts**（官方，`artifacts:access`）：預設 `all`——公開 pipeline 誰都能下載；內部私有專案就是專案成員。`developer` 只給 Developer、Maintainer、Owner；`maintainer`（18.4 起）只給 Maintainer、Owner；`none` 誰都不能下載。`artifacts:access` 與 `artifacts:public` 不能同時用。
-- 草稿和同一份 artifacts 裡的 `plan.json`（含狀態與命中資料）一樣敏感，**範本沒有改 `artifacts:access`**（維持和現在相同的可見範圍）。
+- 草稿和同一份 artifacts 裡的 `plan.json`（含狀態與命中資料）一樣敏感，**範本沒有改 `artifacts:access`**（維持和現在相同的可見範圍）；測試鎖住不能明確加 `public: true` 或 `access: all`。
 - 建議內部版改成 `artifacts:access: developer`，但 `watch:notify` 要靠 `needs` 拿同一份 artifacts 的 `plan.json`：官方文件沒寫 `developer`／`none` 時同一個 pipeline 的下游 job 還能不能下載，**待內部環境驗證**後再改。
 
 **要換的東西**：產品 config 的 `csaf` 區塊（公司的正式發布者資料）；`artifacts:access`（驗證後）；內部版 `publiccheck` 的規則（第 3 節第 7 點）。
 
 **驗收**：
+- [ ] 內部 GitLab 的正式版 Release 真的帶 `report-<專案>-<版本>-<層>.zip`（或 `report-<專案>-<版本>.zip`）附件，而且 `collect.py --backend gitlab` 收得到（inventory 的 `report_zips` 有值）。沒有的話草稿永遠是 NOT_RUN，只寫在報告，不會讓監控降級，所以要主動確認。
 - [ ] shipped 的正式版有新的 KEV 命中時，`watch:compute` 的 artifacts 有 `watch-out/csaf-drafts/NN-<hash>/`（`csaf-exploited-draft.json` 的 `tracking.status` 是 `draft`），Issue 內文有那一句。
 - [ ] 90 天後 artifacts 被刪除（或 instance 的上限更短時，Issue 那句的天數要跟著改）。
 - [ ] 改成 `artifacts:access: developer` 後：Reporter／Planner 下載不到，`watch:notify` 仍拿得到 `plan.json`。
@@ -454,7 +455,7 @@
 9. runner「只跑保護 ref」旗標在各層級的操作步驟（第 5 節）。
 10. 常駐 DT 的 `pilot.env` 格式與權限模型（內部系統）（第 4 節）。
 11. CI Lint 的操作與內部版本的語法支援（第 1、0.2 節）。
-12. `artifacts:access` 是 `developer`／`none` 時，同一個 pipeline 的下游 job（`needs`）能不能下載；instance 是否限制 `expire_in` 的上限（第 3.1 節，T-24）。
+12. `artifacts:access` 是 `developer`／`none` 時，同一個 pipeline 的下游 job（`needs`）能不能下載；instance 是否限制 `expire_in` 的上限；內部 Release 是否真的帶 `report-*.zip` 附件（沒有的話草稿一直是 NOT_RUN 卻不會降級）（第 3.1 節，T-24）。
 
 ---
 
@@ -492,7 +493,7 @@
 - [ ] 所有 Issue 為 confidential。驗收：第 3 節驗收項。
 - [ ] 指派與 email 通知。驗收：被指派者收到信，無權限者沒收到。
 - [ ] 排程 owner 已換成服務帳號，接手程序已文件化並演練。驗收：第 8 節驗收項。
-- [ ] CSAF 使用者通知草稿（T-24，第 3.1 節）：shipped 版的新 KEV 命中有草稿 artifact（draft）、Issue 一句、90 天後刪除；改 `artifacts:access: developer` 後 `watch:notify` 照常。
+- [ ] CSAF 使用者通知草稿（T-24，第 3.1 節）：內部 Release 帶 `report-*.zip`；shipped 版的新 KEV 命中有草稿 artifact（draft）、Issue 一句、90 天後刪除；改 `artifacts:access: developer` 後 `watch:notify` 照常。
 - [ ] 每日無結果告警（T-12；偵測與開 Issue 已實作但未對真實 GitLab 驗證，email 要等 T-08）。驗收：停掉排程一天，警告 Issue 出現；恢復後留言「已恢復」；email 寄出（T-08 完成後）。
 
 **簽章（T-11 決定後）**
