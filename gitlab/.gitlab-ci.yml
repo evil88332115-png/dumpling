@@ -519,15 +519,18 @@ watch:compute:
       ab=()
       if { [ "$CI_PIPELINE_SOURCE" = web ] || [ "$CI_PIPELINE_SOURCE" = api ]; } && [ "${DUMPLING_WATCH_BASELINE:-0}" = 1 ]; then ab=(--allow-baseline); fi
       python3 -I pipeline/watch/match.py --inventory "$DUMPLING_OUT_BASE/w/inv/inventory.json" --state-dir "$DUMPLING_OUT_BASE/w/state" \
-        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" "${ab[@]}" || rc=$?
+        --feeds "$DUMPLING_OUT_BASE/w/feeds" --out watch-out --mode real --run-url "$CI_PIPELINE_URL" "${ab[@]}" \
+        --csaf-artifact "watch:compute 的 job artifacts（watch-out/csaf-drafts/）" || rc=$?
       [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 3 ] || exit "$rc"
   after_script:
     - rm -rf "$DUMPLING_OUT_BASE"
   artifacts:
     when: always
-    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json,
+    # watch-out/csaf-drafts/：CRA 第 14 條第 8 項的使用者通知草稿（docs/WATCH.md 第 8 節；T-24）。Issue 內文寫「保留 90 天」，
+    # 一個 job 只有一個 expire_in，所以整份 artifacts 都保留 90 天（plan／report／result 很小）
+    paths: [watch-out/plan.json, watch-out/report.md, watch-out/result.json, watch-out/csaf-drafts/,
             watch-out-support/plan.json, watch-out-support/report.md, watch-out-support/result.json, watch-out-support/status]
-    expire_in: 14 days
+    expire_in: 90 days
 
 # notify：只有這個 job 拿得到 WATCH_GITLAB_TOKEN（protected＋masked 的 CI/CD 變數，project access token，scope api；
 # 官方：Issues API 寫入需要 api scope，沒有更細的 scope）。狀態 Issue 與命中 Issue 一律 confidential。

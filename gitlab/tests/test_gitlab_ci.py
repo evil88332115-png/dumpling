@@ -577,6 +577,19 @@ class CiFile(unittest.TestCase):
         for f in ("plan.json", "report.md", "result.json", "status"):
             self.assertIn("watch-out-support/" + f, paths)
 
+    def test_t24_csaf_drafts_artifact(self):
+        # T-24：CRA 第 14 條第 8 項的使用者通知草稿（docs/WATCH.md 第 8 節）。match 寫進 watch-out/csaf-drafts/，artifacts 帶出去；
+        # Issue 內文寫的保留天數（csaf_draft.py）要和 expire_in 一致；內部版不加 --demo
+        job = self.jobs["watch:compute"]
+        self.assertIn("watch-out/csaf-drafts/", job["artifacts"]["paths"])
+        self.assertEqual(job["artifacts"]["expire_in"], "90 days")
+        draft_src = (HERE.parent.parent / "pipeline" / "watch" / "csaf_draft.py").read_text(encoding="utf-8")
+        self.assertIn("artifact 保留 90 天", draft_src)
+        item = [it for it in self.items_of("watch:compute") if "pipeline/watch/match.py" in it][0]
+        self.assertIn("--csaf-artifact", item)
+        self.assertNotIn("--demo", item)
+        self.assertIn("--out watch-out ", item)
+
     def run_notify(self, files, watch_rc=0, support_rc=0, **extra_env):
         """實際執行 watch:notify 的最後一項（假的 python3：記錄呼叫、依 plan 回傳結束碼）。"""
         import os
