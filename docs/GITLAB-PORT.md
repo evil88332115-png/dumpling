@@ -196,7 +196,7 @@
   - 連線冒煙：`GET /api/version`，再讀 key 自己的權限：key 屬於使用者／服務帳號 → `GET /api/v1/user/self/permissions`；屬於團隊（那個端點回 401）→ `GET /api/v1/team/self`。缺 `BOM_UPLOAD`、`VIEW_PORTFOLIO`、`VIEW_VULNERABILITY` 任一個 → FAIL；沒有 `PORTFOLIO_MANAGEMENT`／`PORTFOLIO_MANAGEMENT_CREATE`（建專案）→ 不 FAIL，在 `pipeline-steps.tsv` 的 `pipeline-dt-resident` 那一列寫明「專案必須事先存在」（之後 sca-scan 的 D-dt-project 會在專案不存在時 FAIL）。權限名稱依 DependencyTrack apiserver 5.2.0（`auth/Permissions.java`）。
   - `MIRROR_REFRESH_STATUS` **不設為空**：sca-scan 讀常駐環境的狀態檔（預設 `/var/lib/sca-gitlab/refresh-status.tsv`），讀不到或過期 → C-mirror-freshness GAP。
   - 只做 sca-scan 本身的「查專案、建專案、上傳、讀結果」；不改資料源、不刪專案、不管 key。
-  - **驗證範圍**：以本機的假常駐 DT（127.0.0.1，`DUMPLING_DT_ALLOW_HTTP_LOCAL=1`，只在測試用）驗證；**對真實的內部常駐 DT 未驗證**。範本的 `.scan-steps` 改連常駐 DT 要和 C3 對齊（另一個 PR）。
+  - **驗證範圍**：單元測試用本機的假常駐 DT（127.0.0.1 的替身伺服器，`DUMPLING_DT_ALLOW_HTTP_LOCAL=1`，只在測試用）；整合測試在 GitHub 的 `dt-smoke.yml`：同一台 runner 上 `dt-ephemeral.sh` 起的臨時 DT 當成常駐 DT（`pipeline/dt-resident-smoke.sh`：權限讀自 `/api/v1/user/self/permissions`、沒有起或關容器、專案第一次建立第二次沿用、過期的狀態檔 → C-mirror-freshness GAP）。GitHub 上 resident 一律 FAIL，只有這個整合測試例外（`DUMPLING_DT_TEST_RESIDENT=1` 而且 `GITHUB_WORKFLOW_REF` 是 dt-smoke.yml，兩個都要）。**對真實的內部常駐 DT 未驗證**。範本的 `.scan-steps` 改連常駐 DT 要和 C3 對齊（另一個 PR）。
 - DT 專案分層：GitHub 版是 `<名稱>-bsp`／`<名稱>-os` 兩個平行專案（D-030(4)）。**T-07：parent／child 專案在常駐 DT 再評估**（會影響每日監控的專案鍵 `dumpling:<專案>/<版本>#<層>` 與 DT 內的呈現；評估時一併決定舊的平行專案是否遷移）。
 - 持續性：常駐 DT 的 UUID 穩定，每日監控理論上可以改走 DT 路線（`exploited_watch.py` 以 DT 專案 UUID 為鍵）。要不要改是另一個決定，不在這次範圍；範本維持與 GitHub 相同的 Grype＋KEV＋EUVD 路線。
 

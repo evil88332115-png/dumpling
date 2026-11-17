@@ -12,6 +12,9 @@
 #                          git 看 GIT_SSL_CAINFO，這裡都不設。不提供關掉 TLS 驗證的選項。
 #     只做「查專案、建專案、上傳、讀結果」（sca-scan 本身的動作）；這裡只讀 /api/version 與 key 自己的權限，不改資料源、不刪專案、不管 key。
 #     GitHub Actions 上不能用（公開 repo 沒有常駐 DT 的連線檔；GITHUB_ACTIONS=true → FAIL）。
+#     唯一的例外是整合測試（T-14 收尾）：DUMPLING_DT_TEST_RESIDENT=1 **而且** GITHUB_WORKFLOW_REF 是這個 repo 的
+#     .github/workflows/dt-smoke.yml（<GITHUB_REPOSITORY>/.github/workflows/dt-smoke.yml@refs/…）。兩個條件少一個照舊 FAIL；
+#     dt-smoke.yml 不能被 workflow_call 呼叫（reusable workflow 裡的 GITHUB_WORKFLOW_REF 指的是呼叫端），有測試鎖住。
 #
 # 三段（中間的鏡像留在呼叫端，和臨時 DT 的啟動並行）：
 #   dt_begin <臨時 DT 預設的 OSV 生態系>   ephemeral：EXIT trap、DT_OSV_ECOSYSTEMS／DT_WAIT_MIN、dt-ephemeral.sh up
@@ -30,6 +33,13 @@ _DT_PREV_EXIT=
 _DT_TMP=
 
 dt_mode() { printf '%s' "${DUMPLING_DT_MODE:-ephemeral}"; }
+
+_dt_github_test_allowed() {  # GitHub Actions 上允許 resident 的唯一情況：dt-smoke.yml 的整合測試（兩個條件都要）
+  [ "${DUMPLING_DT_TEST_RESIDENT:-}" = 1 ] || return 1
+  [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
+  case ${GITHUB_WORKFLOW_REF:-} in "$GITHUB_REPOSITORY/.github/workflows/dt-smoke.yml@refs/"?*) return 0;; esac
+  return 1
+}
 
 # 常駐 DT 的 HTTP：-q 不讀 .curlrc（第一個參數）；回應上限 1 MB（--max-filesize；伺服器沒給長度時 curl 可能收完才知道，讀的那一端另有上限）。
 # 不加 -k／--insecure（不提供關掉 TLS 驗證的選項）。
@@ -74,7 +84,9 @@ dt_begin() {
       bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
       ;;
     resident)
-      [ "${GITHUB_ACTIONS:-}" = true ] && fail "常駐 DT 模式不在 GitHub Actions 上用（公開 repo 沒有常駐 DT 的連線檔）"
+      if [ "${GITHUB_ACTIONS:-}" = true ] && ! _dt_github_test_allowed; then
+        fail "常駐 DT 模式不在 GitHub Actions 上用（公開 repo 沒有常駐 DT 的連線檔；只有 dt-smoke.yml 的整合測試例外）"
+      fi
       [ -n "${DUMPLING_DT_CONN:-}" ] || fail "DUMPLING_DT_MODE=resident 需要 DUMPLING_DT_CONN（常駐 DT 連線檔的路徑）；不退回臨時 DT"
       local msg sys=
       msg=$(python3 -I "$_dt_lib/dt_resident.py" check "$DUMPLING_DT_CONN") || fail "常駐 DT 的連線檔不合：$msg"
