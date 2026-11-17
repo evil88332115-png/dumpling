@@ -545,7 +545,10 @@ class CiFile(unittest.TestCase):
         self.assertIn("command -v docker", txt)
         self.assertNotIn("test -n \"${PILOT_ENV:-}\"", txt)
         self.assertIn("bubblewrap python3-yaml $SCAN_APT", txt)
-        self.assertNotIn("DUMPLING_DT_MODE", txt, "範本設了 DT 模式：照 T-14 重新評估範本的 scan（DUMPLING_DT_CONN、MIRROR_REFRESH_STATUS）")
+        # 範本本身不設 DUMPLING_DT_MODE（預設臨時 DT）：只在 script 裡依每個 job 的開關 export（見 ScanDtMode）
+        for n in ("release:scan", "dev:scan"):
+            self.assertNotIn("DUMPLING_DT_MODE", self.jobs[n].get("variables", {}), n)
+        self.assertNotIn("DUMPLING_DT_MODE", self.vars)
         scan_sh = (HERE.parents[1] / "pipeline" / "platforms" / "jetson" / "scan.sh").read_text(encoding="utf-8")
         disk_sh = (HERE.parents[1] / "pipeline" / "platforms" / "_shared" / "scan-disk.sh").read_text(encoding="utf-8")
         session = (HERE.parents[1] / "pipeline" / "lib" / "dt-session.sh").read_text(encoding="utf-8")
@@ -727,6 +730,140 @@ class CiFile(unittest.TestCase):
             self.assertEqual(j["variables"]["DT_EPH_PROJECT"], "dumpling-dt-$CI_JOB_ID")
             self.assertTrue(j["variables"]["DT_EPH_DIR"].startswith("$DUMPLING_OUT_BASE/"))
             self.assertIn("KCVE_CACHE_DIR", j["variables"])          # 跟 .kcve-cache 的變數合併，不是取代
+
+class ScanDtMode(unittest.TestCase):
+    """T-14 之後的 DT 接線（GITLAB-PORT 第 4 節）：預設臨時 DT；常駐 DT 由每個 job 自己的開關打開，只在保護的 ref 上跑。
+    直接跑範本裡真的那幾段 script（bash），不是只比對字串。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.doc = gitlabci.load()
+        cls.jobs = gitlabci.jobs(cls.doc)
+
+    def items(self, job):
+        return CiFile.items_of(self, job)
+
+    def dt_items(self, job):
+        """job 裡和 DT 模式有關的 script 項目（照順序）：外面帶進來的 DUMPLING_DT_MODE、依開關決定模式、常駐 DT 的連線檔。"""
+        it = self.items(job)
+        guard = [x for x in it if "DUMPLING_DT_MODE+x" in x]
+        mode = [x for x in it if 'case "${DUMPLING_SCAN_KIND:-}"' in x]
+        conn = [x for x in it if 'case "$DUMPLING_DT_MODE"' in x]
+        self.assertEqual((len(guard), len(mode), len(conn)), (1, 1, 1), job)
+        self.assertEqual(it.index(guard[0]), 0, "外面帶進來的 DUMPLING_DT_MODE 要在 job script 一開始就擋")
+        self.assertLess(it.index(mode[0]), it.index(conn[0]))
+        return guard[0], mode[0], conn[0]
+
+    def run_dt(self, job, env, conn_file=True, conn_mode=0o644):
+        import os
+        import subprocess
+        import tempfile
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        d = Path(td.name)
+        base = d / "out-base"
+        e = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "DUMPLING_OUT_BASE": str(base),
+             "DUMPLING_SCAN_KIND": self.jobs[job]["variables"]["DUMPLING_SCAN_KIND"]}
+        if conn_file:
+            src = d / "gitlab-file-var"
+            src.write_text("DT_URL=https://dt.example.invalid\nDT_API_KEY=odt_x\n")
+            src.chmod(conn_mode)
+            e["DUMPLING_DT_CONN"] = str(src)
+        e.update({k: v.replace("@D@", str(d)) for k, v in env.items()})
+        script = "set -eu\n" + "\n".join(self.dt_items(job)) + '\necho "MODE=$DUMPLING_DT_MODE"\necho "CONN=${DUMPLING_DT_CONN:-}"\n'
+        r = subprocess.run(["bash", "-c", script], env=e, capture_output=True, text=True, timeout=30)
+        return r, base
+
+    def test_default_is_ephemeral_for_both_jobs(self):
+        for job in ("release:scan", "dev:scan"):
+            r, base = self.run_dt(job, {"CI_COMMIT_REF_PROTECTED": "true"})
+            self.assertEqual(r.returncode, 0, (job, r.stdout, r.stderr))
+            self.assertIn("MODE=ephemeral", r.stdout, job)
+            self.assertFalse((base / "dt-conn").exists(), job)          # 臨時 DT：不碰連線檔
+
+    def test_each_job_has_its_own_switch(self):
+        r, _ = self.run_dt("release:scan", {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_DEV_DT_MODE": "resident"})
+        self.assertIn("MODE=ephemeral", r.stdout)                         # dev 的開關不影響 release
+        r, _ = self.run_dt("dev:scan", {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_RELEASE_DT_MODE": "resident"})
+        self.assertIn("MODE=ephemeral", r.stdout)                         # release 的開關不影響 dev
+
+    def test_outside_dt_mode_fails_first(self):
+        for v in ("resident", "ephemeral", ""):
+            r, _ = self.run_dt("release:scan", {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_DT_MODE": v})
+            self.assertEqual(r.returncode, 1, v)
+            self.assertIn("外面帶進來了 DUMPLING_DT_MODE", r.stdout, v)
+            self.assertNotIn("MODE=", r.stdout, v)
+
+    def test_resident_on_unprotected_ref_fails(self):
+        for job, sw in (("release:scan", "DUMPLING_RELEASE_DT_MODE"), ("dev:scan", "DUMPLING_DEV_DT_MODE")):
+            for prot in ("false", "", "TRUE", "1"):
+                env = {sw: "resident"}
+                if prot:
+                    env["CI_COMMIT_REF_PROTECTED"] = prot
+                r, base = self.run_dt(job, env)
+                self.assertEqual(r.returncode, 1, (job, prot))
+                self.assertIn("不是保護的", r.stdout, (job, prot))
+                self.assertIn("不退回臨時 DT", r.stdout)
+                self.assertIn(sw, r.stdout)                                # 訊息寫明是哪一個開關
+                self.assertFalse((base / "dt-conn").exists())
+
+    def test_resident_copies_conn_to_private_600_file(self):
+        import os
+        import stat
+        r, base = self.run_dt("release:scan", {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_RELEASE_DT_MODE": "resident"},
+                              conn_mode=0o644)
+        self.assertEqual(r.returncode, 0, (r.stdout, r.stderr))
+        self.assertIn("MODE=resident", r.stdout)
+        copy = base / "dt-conn" / "conn.env"
+        self.assertIn("CONN=" + str(copy), r.stdout)
+        self.assertEqual(stat.S_IMODE(os.stat(copy).st_mode), 0o600)     # runner 給的檔是 644 也一樣
+        self.assertEqual(stat.S_IMODE(os.stat(base / "dt-conn").st_mode), 0o700)
+        self.assertIn("DT_API_KEY=odt_x", copy.read_text())
+
+    def test_resident_conn_must_be_regular_file(self):
+        import os
+        cases = {"missing": ({}, False), "symlink": ({"DUMPLING_DT_CONN": "@D@/link"}, True), "dir": ({"DUMPLING_DT_CONN": "@D@"}, True),
+                 "nofile": ({"DUMPLING_DT_CONN": "@D@/nope"}, True)}
+        for why, (env, have) in cases.items():
+            e = {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_RELEASE_DT_MODE": "resident"}
+            e.update(env)
+            if why == "symlink":
+                # 連結指向一個正常的連線檔：複製會把連結攤平，所以要先擋
+                r0, base0 = self.run_dt("release:scan", {"CI_COMMIT_REF_PROTECTED": "true"})
+                d = base0.parent
+                os.symlink(d / "gitlab-file-var", d / "link")
+                e["DUMPLING_DT_CONN"] = str(d / "link")
+            r, base = self.run_dt("release:scan", e, conn_file=have)
+            self.assertEqual(r.returncode, 1, (why, r.stdout))
+            self.assertIn("scan: FAIL", r.stdout, why)
+            self.assertFalse((base / "dt-conn" / "conn.env").exists(), why)
+
+    def test_bad_switch_value_fails(self):
+        for v in ("Resident", "resident ", "off", "1"):
+            r, _ = self.run_dt("dev:scan", {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_DEV_DT_MODE": v})
+            self.assertEqual(r.returncode, 1, v)
+            self.assertIn("DUMPLING_DEV_DT_MODE 只能是 resident 或 ephemeral", r.stdout, v)
+
+    def test_template_never_sets_test_or_status_variables(self):
+        text = gitlabci.CI_FILE.read_text(encoding="utf-8")
+        code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+        for v in ("DUMPLING_DT_ALLOW_HTTP_LOCAL", "DUMPLING_DT_TEST_RESIDENT", "MIRROR_REFRESH_STATUS"):
+            self.assertNotIn(v, code, v)                                   # 測試用的旗標、狀態檔路徑都不由範本設
+        for v in ("DUMPLING_RELEASE_DT_MODE", "DUMPLING_DEV_DT_MODE", "DUMPLING_DT_MODE", "DUMPLING_DT_CONN", "DUMPLING_DT_CA_FILE"):
+            self.assertNotRegex(code, r"(?m)^\s+" + v + r"\s*:", v)       # 開關與連線檔不寫成範本的 variables（內部在專案變數設）
+
+    def test_resident_path_never_starts_ephemeral_dt(self):
+        # 範本這一層的保險：DT 的 up／wait 只在 dt-session.sh 裡（依模式），範本自己只有 after_script 的 down
+        for job in ("release:scan", "dev:scan"):
+            joined = "\n".join(self.items(job))
+            self.assertNotRegex(joined, r"dt-ephemeral\.sh\s+(up|wait|env)\b", job)
+
+    def test_scan_jobs_queue_per_dt_project(self):
+        self.assertEqual(self.jobs["release:scan"].get("resource_group"), "dt-scan-release")
+        self.assertEqual(self.jobs["dev:scan"].get("resource_group"), "dt-scan-dev-$PROJECT")
+        for job, kind in (("release:scan", "release"), ("dev:scan", "dev")):
+            self.assertEqual(self.jobs[job]["variables"]["DUMPLING_SCAN_KIND"], kind)
+
 
 class ReleasePayload(unittest.TestCase):
     @classmethod

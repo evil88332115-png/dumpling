@@ -5,7 +5,9 @@
 #
 # job 呼叫的指令與 GitHub 版相同（pipeline/run-step.sh、pipeline/platform.sh、pipeline/watch/*）；已對照 M2 合併後的 main 核對（GITLAB-PORT T-01）。
 # runner 的前提（GITLAB-PORT 第 5 節）：跟 GitHub 代管 runner 一樣——非 root 時要有免密碼 sudo（install-scan-tools.sh、install-tools.sh 用 sudo）；
-# scan 用的 runner 要能跑 docker（pipeline/platforms/*/scan.sh 目前一定開臨時 DT，常駐 DT 模式是待辦 T-14）。
+# scan 用的 runner 要能跑 docker：掃描映像要 docker import／save；scan 預設開臨時 DT（同 GitHub 版），所以還要能跑 docker compose、綁 8080、concurrent=1。
+# 常駐 DT（T-14）的接線已寫好，預設關閉：專案的 CI/CD 變數 DUMPLING_RELEASE_DT_MODE／DUMPLING_DEV_DT_MODE=resident 才打開，只在保護的 ref 上跑；
+# 打開之前必須先完成 T-07（DT 專案的前綴或 parent；dev 另外要版本後綴），見 GITLAB-PORT 第 4 節。
 #
 # 這份範本只由「語法檢查＋單元測試」驗證過（gitlab/tests、官方 CI JSON schema），尚未在內部 GitLab 實際執行。
 # 標「待內部驗證」的地方，是官方文件沒寫、要在內部環境確認的行為。
@@ -142,17 +144,55 @@ workflow:
         echo "build.mode: $BUILD_MODE" > build-handoff/NO-BUILD
       fi
 
+.dt-mode-guard:
+  script:
+    # scan job 的第一步（在 .setup 之前、在 .scan-steps 自己 export DUMPLING_DT_MODE 之前）：這時 DUMPLING_DT_MODE 有值，一定是外面帶進來的
+    # （專案／群組／pipeline 變數；範本本身沒設）。專案變數會套用到所有 job、蓋過 job 的 variables，用它就沒辦法只開 release → FAIL。
+    - |
+      [ -z "${DUMPLING_DT_MODE+x}" ] || { echo "scan: FAIL（外面帶進來了 DUMPLING_DT_MODE（專案、群組或 pipeline 變數）：範本不讀它。要打開常駐 DT，改設 DUMPLING_RELEASE_DT_MODE 或 DUMPLING_DEV_DT_MODE，見 GITLAB-PORT 第 4 節）"; exit 1; }
+
 .scan-steps:
   script:
-    # 臨時 DT（同 GitHub 版）：pipeline/platforms/*/scan.sh 目前一定用 dt-ephemeral.sh 開臨時 DT（要 docker），把連線資訊寫進 PILOT_ENV 這個路徑、
-    # 自己下載鏡像、MIRROR_REFRESH_STATUS 設空。目標是改連內部常駐 DT（GITLAB-PORT 第 4 節），要等 scan.sh 有常駐 DT 模式（待辦 T-14）。
-    # PILOT_ENV 放單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾；同 pipeline.yml）。
+    # DT（T-14，pipeline/lib/dt-session.sh）：預設 ephemeral，同 GitHub 版，dt-ephemeral.sh 開臨時 DT、自己下載鏡像、MIRROR_REFRESH_STATUS 設空。
+    # resident（打開見下面的開關）：連內部常駐 DT，scan.sh 把連線檔的內容寫進 PILOT_ENV 這個路徑（權限 600），不設 MIRROR_REFRESH_STATUS
+    # （sca-scan 讀常駐環境的狀態檔，讀不到或過期 → C-mirror-freshness GAP；專案變數也不要設它）。
+    # PILOT_ENV 放單獨一個資料夾（sca-scan 的沙箱會遮蔽 PILOT_ENV 所在的整個資料夾；同 pipeline.yml），不在 $DUMPLING_OUT 底下（dt-session 會擋）。
     # install-tools.sh 只有 amd64 的 Syft／Grype（同 pipeline.yml 的 scan job 檢查）
     - |
       [ "$(uname -m)" = x86_64 ] || { echo "scan: FAIL（掃描 runner 要 x86_64，這台是 $(uname -m)）"; exit 1; }
     - export PILOT_ENV="$DUMPLING_OUT_BASE/pilot-env/pilot.env"
     - |
-      command -v docker > /dev/null || { echo "scan: FAIL（runner 沒有 docker：臨時 DT 需要；常駐 DT 模式是待辦 T-14）"; exit 1; }
+      command -v docker > /dev/null || { echo "scan: FAIL（runner 沒有 docker：掃描映像要 docker import／save；臨時 DT 也要）"; exit 1; }
+    # 開關每個 job 各一個（專案的 CI/CD 變數會套用到所有 job，只用 DUMPLING_DT_MODE 一個開關就沒辦法只開 release）：
+    #   release:scan ← DUMPLING_RELEASE_DT_MODE、dev:scan ← DUMPLING_DEV_DT_MODE；沒設都是 ephemeral。
+    #   直接設 DUMPLING_DT_MODE（專案、群組、pipeline 變數）→ FAIL（不悄悄忽略，也不會一次打開兩個 job）。
+    #   dev 在常駐 DT 上會和 release 用同一個 DT 專案（同名同版本，dev 每跑一次就換掉 release 的 BOM），T-07 定好 dev 的版本後綴之前不要打開。
+    #   外面帶進來的 DUMPLING_DT_MODE 在 job script 一開始就擋（.dt-mode-guard，在 .setup 之前）。
+    - |
+      case "${DUMPLING_SCAN_KIND:-}" in
+        release) DUMPLING_DT_MODE="${DUMPLING_RELEASE_DT_MODE:-ephemeral}"; DT_SWITCH=DUMPLING_RELEASE_DT_MODE ;;
+        dev) DUMPLING_DT_MODE="${DUMPLING_DEV_DT_MODE:-ephemeral}"; DT_SWITCH=DUMPLING_DEV_DT_MODE ;;
+        *) echo "scan: FAIL（DUMPLING_SCAN_KIND 只能是 release 或 dev）"; exit 1 ;;
+      esac
+      export DUMPLING_DT_MODE
+      echo "scan: DT 模式 $DUMPLING_DT_MODE（$DUMPLING_SCAN_KIND）"
+    # 常駐 DT：連線檔 DUMPLING_DT_CONN 是 File 類型、protected 的 CI/CD 變數（只有保護分支、保護 tag 的 pipeline 拿得到，官方 ci/variables）。
+    # 不在保護的 ref 上就 FAIL，寫清楚原因，不退回臨時 DT（C0 決定，2026-11-17）。官方沒寫 File 變數的檔案權限與位置：不依賴它，
+    # 先擋連結（複製會把連結攤平，dt_resident.py 的連結檢查就失效），再複製成 600 的私用檔（$DUMPLING_OUT_BASE 底下、不在 $DUMPLING_OUT 底下：
+    # 不上傳，after_script 刪掉），之後 scan.sh 讀這份。DUMPLING_DT_CA_FILE（選用，也是 File 變數）原樣交給 dt-session 檢查。
+    - |
+      case "$DUMPLING_DT_MODE" in
+        resident)
+          [ "${CI_COMMIT_REF_PROTECTED:-}" = true ] || { echo "scan: FAIL（常駐 DT 模式只在保護的分支或 tag 上跑：這個 ref 不是保護的，拿不到 protected 的 DUMPLING_DT_CONN；不退回臨時 DT。要用臨時 DT，把 $DT_SWITCH 拿掉或設成 ephemeral）"; exit 1; }
+          [ -n "${DUMPLING_DT_CONN:-}" ] || { echo "scan: FAIL（沒有 DUMPLING_DT_CONN：常駐 DT 的連線檔，File 類型、protected 的 CI/CD 變數）"; exit 1; }
+          { [ ! -L "$DUMPLING_DT_CONN" ] && [ -f "$DUMPLING_DT_CONN" ]; } || { echo "scan: FAIL（DUMPLING_DT_CONN 不是一般檔案，或是連結）"; exit 1; }
+          rm -rf "$DUMPLING_OUT_BASE/dt-conn" && mkdir -p "$DUMPLING_OUT_BASE" && mkdir -m 700 "$DUMPLING_OUT_BASE/dt-conn"
+          install -m 600 "$DUMPLING_DT_CONN" "$DUMPLING_OUT_BASE/dt-conn/conn.env"
+          export DUMPLING_DT_CONN="$DUMPLING_OUT_BASE/dt-conn/conn.env"
+          ;;
+        ephemeral) ;;
+        *) echo "scan: FAIL（$DT_SWITCH 只能是 resident 或 ephemeral）"; exit 1 ;;
+      esac
     # scan job 的 apt（同 pipeline.yml：bubblewrap、python3-yaml＋platform.yml 的 scan.apt）
     - |
       if [ -n "$DUMPLING_APT" ]; then
@@ -207,12 +247,13 @@ workflow:
   timeout: 4 hours
   interruptible: false
   variables:
-    # 臨時 DT（pipeline/dt-ephemeral.sh）：compose 專案名與狀態資料夾每個 job 分開（自架 runner 不像 GitHub 每次換新機器；
-    # 預設的 /tmp 與 dumpling-dt 會讓同一台的 job 互相干擾）。埠 DT_PORT 預設 8080：掃描 runner 的 concurrent 請設 1（第 5 節）。
+    # 臨時 DT（預設，pipeline/dt-ephemeral.sh）：compose 專案名與狀態資料夾每個 job 分開（自架 runner 不像 GitHub 每次換新機器；
+    # 預設的 /tmp 與 dumpling-dt 會讓同一台的 job 互相干擾）。埠 DT_PORT 預設 8080：ephemeral 時掃描 runner 的 concurrent 請設 1（第 5 節）。
     DT_EPH_PROJECT: "dumpling-dt-$CI_JOB_ID"
     DT_EPH_DIR: "$DUMPLING_OUT_BASE/dt-eph"
   after_script:
     # job 被取消或逾時時 scan.sh 的 EXIT trap 不一定跑到：這裡再收一次臨時 DT（同 pipeline.yml 的 always() 的 down），容器與 volume 不殘留
+    # （resident 時沒有臨時 DT 可收：DT_EPH_PROJECT 每個 job 不同，down 找不到東西，|| true）
     - bash pipeline/dt-ephemeral.sh down || true
     # 核心 CVE 鏡像：只有這次新抓的才放進 cache 資料夾（頂替用的舊資料不存回去；同 pipeline.yml 的 kcve-fresh）。after_script 是新的 shell，用 glob 找
     - |
@@ -261,7 +302,13 @@ release:build:
 release:scan:
   extends: [.scan, .rules-tag-release]
   needs: ["release:build"]
+  # 常駐 DT 的專案以名稱＋版本為鍵：同一個 tag 的 push 與 T-17 試跑同時掃描會互相蓋掉 BOM、讀到對方的結果。專案要到 script 裡才從 tag 解出來，
+  # 所以 release 的 scan 全部排同一個佇列（release 不常同時發；GitLab 展開 resource_group 的變數，但這裡不依賴變數）
+  resource_group: dt-scan-release
+  variables:
+    DUMPLING_SCAN_KIND: "release"
   script:
+    - !reference [.dt-mode-guard, script]
     - !reference [.setup, script]
     - !reference [.resolve-from-tag, script]
     - !reference [.scan-steps, script]
@@ -341,6 +388,11 @@ dev:build:
 
 dev:scan:
   extends: [.scan, .rules-dev]
+  # 同上，dev 依專案排隊。parallel:matrix 的變數在 resource_group 能不能展開，官方沒寫（待內部驗證，GITLAB-PORT 第 13 節）；
+  # 展不開時名稱就是字面的 "$PROJECT"，等於全部 dev scan 排同一個佇列：比較慢，但不會同時掃
+  resource_group: dt-scan-dev-$PROJECT
+  variables:
+    DUMPLING_SCAN_KIND: "dev"
   parallel:
     matrix:
       - PROJECT: ["orin-nano-demo"]
@@ -350,6 +402,7 @@ dev:scan:
         matrix:
           - PROJECT: ["orin-nano-demo"]
   script:
+    - !reference [.dt-mode-guard, script]
     - !reference [.setup, script]
     - !reference [.resolve-from-matrix, script]
     - !reference [.scan-steps, script]
