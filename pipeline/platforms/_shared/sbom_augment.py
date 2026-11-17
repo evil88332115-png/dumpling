@@ -230,7 +230,7 @@ def _strings(o):
 
 
 def _variants(sv):
-    """一個字串的幾種寫法：原樣、\/ 還原、百分比解碼（沒有 \/ 或 % 時只有原樣，省時間）。"""
+    r"""一個字串的幾種寫法：原樣、\/ 還原、百分比解碼（沒有 \/ 或 % 時只有原樣，省時間）。"""
     out = {sv}
     if "\\/" in sv:
         out.add(sv.replace("\\/", "/"))
@@ -325,16 +325,57 @@ def relativize(o, reps, counts, skip=()):
                 relativize(v, reps, counts)
 
 
-def assert_no_work(doc, works):
-    """最後保險：整份 SBOM 任何字串（含 purl、bom-ref；\/ 跳脫與百分比編碼都算）還有 WORK 的任何寫法 → AugError。"""
-    if not works:
+MAX_UNQUOTE = 8          # 最後保險反覆百分比解碼的上限（多層編碼）
+
+
+def _work_patterns(work_parent):
+    """→ (整份 SBOM 都要檢查的正規式, 只檢查 metadata.component 以外的正規式)。不靠 find_work 有沒有找到 WORK。
+    --work-parent（abspath／realpath）底下的 .sca-scan-work.XXXXXX：整份 SBOM。
+    $HOME/.cache/sca-scan/work.XXXXXX：精靈那次掃描（映像）的 WORK 也可能在這裡，而它寫進 metadata.component.name 的路徑
+    要到之後 sbom-layers.py tag 才換掉（#200），所以這個樣式略過 metadata.component，其他地方照樣檢查。"""
+    whole, rest = [], []
+    for base, name in _work_bases(work_parent) if work_parent else set():
+        (whole if name.startswith(r"\.sca") else rest).append(re.escape(base) + "/" + name)
+    home = os.environ.get("HOME")
+    if home and not work_parent:
+        for h in (os.path.abspath(home), os.path.realpath(home)):
+            rest.append(re.escape(os.path.join(h, ".cache", "sca-scan")) + r"/work\.[A-Za-z0-9]{6}")
+    comp = lambda xs: re.compile("|".join(sorted(set(xs)))) if xs else None
+    return comp(whole), comp(rest)
+
+
+def _decoded_forms(text):
+    """序列化後的文字 → 它的幾種寫法：\\/ 與 \\\\/ 還原，再反覆百分比解碼到不變為止（最多 MAX_UNQUOTE 次）。"""
+    t = text.replace("\\\\/", "/").replace("\\/", "/")
+    out = [text, t]
+    for _ in range(MAX_UNQUOTE):
+        u = urllib.parse.unquote(t)
+        if u == t:
+            break
+        out.append(u)
+        t = u
+    return out
+
+
+def assert_no_work(doc, work_parent):
+    r"""最後保險：改寫完，序列化後的整份 SBOM（鍵與值、purl、bom-ref；\/ 跳脫、多層百分比編碼都算）還出現掃描暫存資料夾 → AugError。
+    直接用已知的上一層資料夾加 mktemp 的樣式比對，不靠 find_work 有沒有找到（根目錄只出現在鍵名、或藏在兩層編碼裡時，find_work 找不到）。"""
+    whole, rest = _work_patterns(work_parent)
+    if whole is None and rest is None:
         return
-    # 鍵與值都在序列化的文字裡；json.dumps 不會輸出 \/，字串裡真的有 \/（反斜線＋斜線）時序列化後是 \\/
     text = json.dumps(doc, ensure_ascii=False)
-    low = text.lower()
-    for w in works:
-        forms = {w, w.replace("/", "\\\\/"), urllib.parse.quote(w, safe=""), urllib.parse.quote(w, safe="/")}
-        if any(f in text or f.lower() in low for f in forms):
+    if whole is not None and any(whole.search(t) for t in _decoded_forms(text)):
+        raise AugError("改寫後 SBOM 仍有掃描暫存資料夾的路徑（沒想到的寫法；不輸出）")
+    if rest is not None:
+        md = doc.get("metadata")
+        mc = md.get("component") if isinstance(md, dict) else None
+        if mc is not None:
+            md = dict(md)
+            md.pop("component")
+        other = dict(doc)
+        if mc is not None:
+            other["metadata"] = md
+        if any(rest.search(t) for t in _decoded_forms(json.dumps(other, ensure_ascii=False))):
             raise AugError("改寫後 SBOM 仍有掃描暫存資料夾的路徑（沒想到的寫法；不輸出）")
 
 
@@ -427,7 +468,7 @@ def merge_source(doc, src, label, repo, commit, app_name=None, app_version=None,
         kept += len(outs)
     if app_ref:
         add_root_deps(doc, [app_ref])
-    assert_no_work(doc, works)
+    assert_no_work(doc, work_parent)
     meta_prop(doc, "dumpling:augment:source:%s" % label, "%s@%s：%d 個元件、%d 條依賴邊（丟掉 %d 條懸空的）"
               % (repo, commit, len(list(walk(merged))), kept, dropped))
     meta_prop(doc, "dumpling:augment:source:%s:paths" % label, "改成相對路徑 %d 個；不在原始碼根目錄底下的絕對路徑只留檔名 %d 個"

@@ -267,13 +267,14 @@ class SourcePathsTest(unittest.TestCase):
         return bom([{"bom-ref": "pkg:deb/debian/bash@5", "type": "library", "name": "bash", "version": "5", "purl": "pkg:deb/debian/bash@5",
                      "properties": [{"name": "syft:location:0:path", "value": "/usr/share/doc/bash/copyright"}]}])
 
-    def merge(self, *extra, src=None, img=None):
+    def merge(self, *extra, src=None, img=None, home=None):
         out = os.path.join(self.tmp, "merged.json")
         if os.path.exists(out):
             os.remove(out)
+        env = dict(os.environ, HOME=home) if home else None
         p = subprocess.run([sys.executable, "-I", AUG, "merge-source", self.w("img.json", img or self.image()), self.w("src.json", src or self.src()), out,
                             "--label", "app-source", "--repo", REPO, "--commit", COMMIT, "--app-name", "openmediavault", "--app-version", "8.6.1-1",
-                            *extra], capture_output=True, text=True)
+                            *extra], capture_output=True, text=True, env=env)
         return p.returncode, (p.stdout.strip().splitlines() or [""])[-1], out
 
     def strings(self, o, path=""):
@@ -406,6 +407,63 @@ class SourcePathsTest(unittest.TestCase):
         rc, line, out = self.merge("--work-parent", self.parent, img=img)
         self.assertEqual(rc, 1, line)
         self.assertFalse(os.path.exists(out))
+
+    def minimal_src(self, comp):
+        return {"bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"component": {"bom-ref": "app", "type": "application", "name": "a", "version": "1"}},
+                "components": [comp], "dependencies": []}
+
+    def test_duplicate_bom_ref_after_rewrite_fails(self):
+        s = self.src()
+        s["components"].append({"bom-ref": "pkg:npm/dup@1?file=" + self.root + "/x.json", "type": "library", "name": "dup1"})
+        s["components"].append({"bom-ref": "pkg:npm/dup@1?file=x.json", "type": "library", "name": "dup2"})
+        rc, line, out = self.merge("--work-parent", self.parent, src=s)
+        self.assertEqual(rc, 1, line)
+        self.assertIn("路徑改寫後 bom-ref 重複", line)
+        self.assertFalse(os.path.exists(out))
+
+    def test_safety_net_root_only_in_a_key(self):
+        # find_work 只看值：根目錄只出現在鍵名時找不到 → 最後保險直接用 --work-parent 的樣式比對，仍然 FAIL（不是結束碼 0）
+        comp = {"bom-ref": "pkg:npm/k@1", "type": "library", "name": "k", "properties": [{"name": "x", self.root + "/k.json": "v"}]}
+        rc, line, out = self.merge("--work-parent", self.parent, src=self.minimal_src(comp))
+        self.assertEqual(rc, 1, line)
+        self.assertIn("改寫後 SBOM 仍有掃描暫存資料夾的路徑", line)
+        self.assertFalse(os.path.exists(out))
+
+    def test_safety_net_double_percent_encoding(self):
+        # 兩層百分比編碼的 purl：find_work 只解一層 → 最後保險反覆解碼，仍然 FAIL
+        twice = urllib.parse.quote(urllib.parse.quote(self.root + "/a.json", safe=""), safe="")
+        comp = {"bom-ref": "pkg:npm/e@1", "type": "library", "name": "e", "purl": "pkg:npm/e@1?file_path=" + twice}
+        rc, line, out = self.merge("--work-parent", self.parent, src=self.minimal_src(comp))
+        self.assertEqual(rc, 1, line)
+        self.assertIn("改寫後 SBOM 仍有掃描暫存資料夾的路徑", line)
+        self.assertFalse(os.path.exists(out))
+
+    def test_image_metadata_component_path_does_not_trip_the_safety_net(self):
+        # 精靈那次掃描（映像）的 WORK 寫在 metadata.component.name（之後 sbom-layers.py tag 才換掉）：不在 --work-parent 底下，不擋
+        img = self.image()
+        img["metadata"]["component"]["name"] = os.path.join(self.tmp, "wizard-out", "x", ".sca-scan-work.Mm55Nn", "image.tar")
+        rc, line, _ = self.merge("--work-parent", self.parent, img=img)
+        self.assertEqual(rc, 0, line)
+
+    def test_home_cache_work_dir(self):
+        # sca-scan 的 WORK 退回 $HOME/.cache/sca-scan/work.XXXXXX 時：映像的 metadata.component.name 有這種路徑不擋（之後才換掉），
+        # 其他地方有就 FAIL
+        home = os.path.join(self.tmp, "home")
+        hw = os.path.join(home, ".cache", "sca-scan", "work.Hh77Jj")
+        img = self.image()
+        img["metadata"]["component"]["name"] = hw + "/image.tar"
+        rc, line, _ = self.merge("--work-parent", self.parent, img=img, home=home)
+        self.assertEqual(rc, 0, line)
+        img["components"][0]["properties"].append({"name": "z", "value": "see " + hw + "/log (x)"})
+        rc, line, out = self.merge("--work-parent", self.parent, img=img, home=home)
+        self.assertEqual(rc, 1, line)
+        self.assertFalse(os.path.exists(out))
+
+    def test_no_syntax_warning(self):
+        r = subprocess.run([sys.executable, "-I", "-W", "error::SyntaxWarning", "-c",
+                            "import ast,sys;ast.parse(open(sys.argv[1],encoding='utf-8').read())", AUG], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_scan_disk_passes_work_parent(self):
         with open(os.path.join(ROOT, "pipeline", "platforms", "_shared", "scan-disk.sh"), encoding="utf-8") as f:
