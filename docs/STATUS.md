@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 21:12 +0800（C3）
+最後更新：2026-11-17 21:20 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -438,8 +438,8 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：WATCH_REAL_ISSUES on；11-18 01:17 UTC 的排程等 C0 通知後核對（不開背景等待）→ 上線第一天報告：開出的 Issue（預期 KEV 彙總 1、支援期限 8）、沒有重複、#149～#164 沒重開也沒被重複留言、csaf_drafts 全部 NOT_RUN（沒有 artifact）、狀態大小、執行時間、排程延遲。#182（儀表板 CSAF 草稿紀錄、D-069 說明）、#183（GitLab T-24）已合併。GitLab 範本 .scan-steps 改連常駐 DT（T-14 之後，C0 交辦，C4 審）：草案已給 C4；等 C0 決定 dev:scan（dev/* 保護＋常駐，或 dev 照舊臨時 DT）、等 C4 回 DT 專案名稱會不會撞 sca-center 的專案
-- 開著的 PR：沒有（#203、#205 已合併）。#205 之後第一次 pages run：核對 build success、deploy skipped（併入上線第一天報告）
+- 卡住／等決定：WATCH_REAL_ISSUES on；11-18 01:17 UTC 的排程等 C0 通知後核對（不開背景等待）→ 上線第一天報告：開出的 Issue（預期 KEV 彙總 1、支援期限 8）、沒有重複、#149～#164 沒重開也沒被重複留言、csaf_drafts 全部 NOT_RUN（沒有 artifact）、狀態大小、執行時間、排程延遲。#182（儀表板 CSAF 草稿紀錄、D-069 說明）、#183（GitLab T-24）已合併
+- 開著的 PR：#209（wp5/gitlab-resident-dt：GitLab 範本的常駐 DT 接線，每個 job 各一個開關 DUMPLING_RELEASE_DT_MODE／DUMPLING_DEV_DT_MODE、預設關閉；打開前要先完成 T-07），C4 審、CI 跑中。#205 已合併；#205 之後第一次 pages run：核對 build success、deploy skipped（併入上線第一天報告）
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 
