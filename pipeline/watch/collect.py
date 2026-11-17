@@ -67,7 +67,7 @@ REPORT_MEMBERS = {"vulnerability-rows.json": "報告/內部存檔/vulnerability-
                   "vex.cdx.json": "報告/交給PM/VEX/vex.cdx.json", "sbom.cdx.json": "報告/交給PM/SBOM/sbom.cdx.json"}
 REPORT_REQUIRED = ("vulnerability-rows.json", "vex.cdx.json")
 REPORT_MAX_MEMBERS = 5000
-REPORT_MEMBER_MAX = 256 * 1024 * 1024     # 單一成員解壓後的上限（宣告值；csaf_draft.py 讀的時候再算一次）
+REPORT_MEMBER_MAX = 128 * 1024 * 1024     # 單一成員解壓後的上限（宣告值；csaf_draft.py 讀的時候再算一次）；和 csaf_advisory.MAX_INPUT 相同
 
 
 class ApiError(Exception):
@@ -693,7 +693,7 @@ def collect_release(source, rel, kind, project, tagver, out, n):
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
          "sboms": {}, "kernel_versions": None, "scan_summary": None, "layers": None, "problems": [],
          "report_status": "NOT_RUN", "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN", "reports": [], "attention": [],
-         "report_zips": {}}
+         "report_zips": {}, "report_zip_problems": {}}
     probs = e["problems"]
     reldir = os.path.join(out, "releases", str(n))
     relpath = "releases/%d" % n
@@ -781,13 +781,29 @@ def collect_release(source, rel, kind, project, tagver, out, n):
     e["kernel_versions"] = s["file"] if s else None
     s = grab("scan-summary-%s-%s.json" % (project, version), _json_ok)  # 選填
     e["scan_summary"] = s["file"] if s else None
-    # 4. 報告 zip（只有 shipped 的正式版；CSAF 使用者通知草稿用）：每份收到的 SBOM 層各一個，沒有就不收（不算問題，草稿記 NOT_RUN）
+    # 4. 報告 zip（只有 shipped 的正式版；CSAF 使用者通知草稿用）：每份收到的 SBOM 層各一個。
+    # 只是草稿的選用輸入：沒有、下載失敗、結構不對都**不算 Release 的問題**（不進 problems，不影響每日監控），
+    # 記在 report_zip_problems（{層: 說明}），草稿那一筆記 NOT_RUN 與原因
     if kind == "release" and e["status"] == "shipped":
         for l in sorted(e["sboms"]):
             name = "report-%s-%s.zip" % (project, version) if l == "product" else "report-%s-%s-%s.zip" % (project, version, l)
-            s = grab(name, report_zip_problem)
-            if s:
-                e["report_zips"][l] = s
+            lst = assets.get(name)
+            if not lst:
+                continue
+            if len(lst) > 1:
+                e["report_zip_problems"][l] = "%s：附件同名重複" % name
+                continue
+            try:
+                sha, size = source.fetch(lst[0], reldir, name)
+            except AssetError as ex:
+                e["report_zip_problems"][l] = "%s：%s" % (name, ex)
+                continue
+            err = report_zip_problem(os.path.join(reldir, name))
+            if err:
+                _rm(os.path.join(reldir, name))
+                e["report_zip_problems"][l] = "%s：%s" % (name, err)
+                continue
+            e["report_zips"][l] = {"file": "%s/%s" % (relpath, name), "sha256": sha, "size": size}
     return e
 
 

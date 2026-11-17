@@ -934,17 +934,31 @@ class TestReportZips(Base):
         self.assertEqual(r["report_zips"]["bsp"]["file"], "releases/0/report-p-v1-bsp.zip")
         self.assertEqual(r["problems"], [])
 
-    def test_missing_is_fine_bad_zip_is_problem(self):
+    def test_missing_is_fine_bad_zip_is_not_a_release_problem(self):
+        """報告 zip 只是草稿的選用輸入：壞掉或下載失敗都不進 Release 的 problems（不影響每日監控），記在 report_zip_problems。"""
         w = World()
         f = files()
         f["report-p-v1-bsp.zip"] = report_zip_bytes(ok=False)
-        w.add("p/v1", f)
+        w.add("p/v1", f, size_lie=None)
         code, so, inv = self.repo(w)
         r = inv["releases"][0]
         self.assertEqual(r["report_zips"], {})
-        self.assertEqual(len(r["problems"]), 1)
-        self.assertIn("report-p-v1-bsp.zip", r["problems"][0])
+        self.assertEqual(r["problems"], [])
+        self.assertEqual(list(r["report_zip_problems"]), ["bsp"])
+        self.assertIn("report-p-v1-bsp.zip", r["report_zip_problems"]["bsp"])
         self.assertFalse(os.path.exists(os.path.join(self.out, "releases/0/report-p-v1-bsp.zip")))
+
+    def test_report_zip_download_failure_is_not_a_release_problem(self):
+        w = World()
+        f = files()
+        f["report-p-v1-os.zip"] = report_zip_bytes()
+        w.add("p/v1", f)
+        url = next(a["url"] for e in w.entries for a in e["assets"] if a["name"] == "report-p-v1-os.zip")
+        del w.blobs[url]                                     # 下載回 404
+        code, so, inv = self.repo(w)
+        r = inv["releases"][0]
+        self.assertEqual((code, r["problems"]), (0, []))
+        self.assertIn("os", r["report_zip_problems"])
 
     def test_development_and_dev_releases_are_not_fetched(self):
         w = World()

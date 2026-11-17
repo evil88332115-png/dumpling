@@ -218,7 +218,9 @@ def load_inventory(path, base):
                           "reports": r.get("reports") or [], "meta_attention": r.get("attention") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
                           and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None,
-                          "report_zip": rel_path(base, (r.get("report_zips") or {}).get(layer) if isinstance(r.get("report_zips"), dict) else None)})
+                          "report_zip": rel_path(base, (r.get("report_zips") or {}).get(layer) if isinstance(r.get("report_zips"), dict) else None),
+                          "report_zip_problem": _plain(str((r.get("report_zip_problems") or {}).get(layer)), 200)
+                          if isinstance(r.get("report_zip_problems"), dict) and (r.get("report_zip_problems") or {}).get(layer) else None})
     if isinstance(inv.get("firmware"), dict):
         projs += firmware_projs(inv["firmware"], base, problems, {p["uuid"] for p in projs})
     return inv, projs, problems
@@ -1383,7 +1385,7 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
         sk = issue_key(mode, "summary", ts[:10], str(len(rest)), rest[0][0])
         body = [f"這次執行有 {len(rest)} 個新的命中群組，超過一次 {max_new} 個的上限，全部列在這個彙總 Issue（ATTENTION），不逐一開 Issue。", "",
                 "| 種類 | 標題 |", "|---|---|"] + [f"| {k} | {md_cell(t)} |" for _, k, t, _, _, _ in rest] + \
-            ([ "", drafts.summary_line()] if drafts is not None and drafts.summary_line() else []) + ["", ART14_NOTE]
+            ([ "", sline] if (sline := drafts.summary_line() if drafts is not None else None) else []) + ["", ART14_NOTE]
         if mode == "drill":
             body.insert(0, "> **演練（合成資料）**\n")
         if run_url:

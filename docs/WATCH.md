@@ -314,10 +314,12 @@ deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 �
 新的 KEV 命中群組（第一次開 Issue 的群組，含併進彙總 Issue 的）落在 **shipped 的正式版**時，每日監控替它產生一份 CSAF 使用者通知草稿。工具與草稿的規則見 `docs/CSAF.md` 的 B。
 
 - **只在 real、而且不是建基準的那一次**。演練（drill）是合成資料，不產生。
-- **只有 shipped 的正式版**：development 的 dev Release 還沒上市，也沒有報告 zip，記 NOT_RUN（原因寫在報告與 `result.json` 的 `csaf_drafts`，Issue 不寫）。
-- **報告來源**：`collect.py` 只替 shipped 的正式版下載同一個 Release 的報告 zip（`report-<專案>-<版本>-<層>.zip`；沒有分層時 `report-<專案>-<版本>.zip`），每天都抓（目前每份幾 MB）。zip 是不可信資料：`collect.report_zip_problem` 只檢查結構（成員數、必要成員、重複、符號連結、宣告的大小），`csaf_draft.extract_reports` 只讀 4 個固定成員（`vulnerability-rows.json`、`summary.json`、VEX、SBOM），邊讀邊算大小，寫成固定檔名，不用 zip 裡的路徑寫檔。zip 壞掉記成那個 Release 的問題；沒有 zip 不算問題（草稿記 NOT_RUN）。
+- **只有 shipped 的正式版**（`kind` 是 release、`status` 是 shipped）：其他（development 的 dev Release、狀態是 development 的正式版、韌體示範樣本）記 NOT_RUN，原因寫在報告與 `result.json` 的 `csaf_drafts`，Issue 不寫。
+- **dry_run 也會產生草稿 artifact，但不開 Issue**（C0 同意，方便事先檢查草稿；條件相同：只有示範資料、沒有預設的發布者）。
+- **報告來源**：`collect.py` 只替 shipped 的正式版下載同一個 Release 的報告 zip（`report-<專案>-<版本>-<層>.zip`；沒有分層時 `report-<專案>-<版本>.zip`），每天都抓（目前每份幾 MB）。zip 是不可信資料：`collect.report_zip_problem` 只檢查結構（成員數、必要成員、重複、符號連結、宣告的大小），`csaf_draft.extract_reports` 只讀 4 個固定成員（`vulnerability-rows.json`、`summary.json`、VEX、SBOM），邊讀邊算大小，寫成固定檔名，不用 zip 裡的路徑寫檔。報告 zip 只是草稿的選用輸入：沒有、下載失敗、結構不對都**不算 Release 的問題**（不進 `problems`，不影響每日監控的狀態、GAP 與健康 Issue），記在 inventory 的 `report_zip_problems`，草稿那一筆記 NOT_RUN 與原因。單一成員的上限 128 MiB（和 `csaf_advisory.py` 的輸入上限相同）。
 - **發布者資料**：repo 裡 `projects/<專案>/CRA/Config/config.json`（公開示範專案的設定）。沒填的欄位是 TO BE COMPLETED，**沒有預設的網域或聯絡人**（有測試檢查示範專案的設定沒有這些值）。
 - **輸出**：`<out>/csaf-drafts/NN-<8 碼 hash>/`（`csaf-exploited-draft.json`、`csaf-exploited-summary.json`、`README.md`），workflow 以 artifact `watch-csaf-drafts-<round>-<attempt>` 上傳，保留 90 天。公開 repo 的 artifact 誰都能下載：內容只來自示範專案的公開 Release 與 repo 裡的設定；`README.md` 第一行寫明是草稿、示範專案時寫明不是真的出貨產品。
-- **Issue 只寫一句**：新的 KEV Issue（或彙總 Issue）多一句「使用者通知草稿已產生／沒有產生＋原因」與 artifact 名稱，不貼草稿內容。
-- 一次最多 20 份；產生失敗只記在那一份的狀態（FAIL），不影響監控與 Issue。
+- **Issue 只寫一句**：新的 KEV Issue（或彙總 Issue）多一句「使用者通知草稿已產生／沒有產生」與 artifact 名稱，不貼草稿內容。沒有產生時只寫固定的原因（例如「沒有可用的報告 zip」「產生失敗」），工具的詳細說明只進報告與 `result.json`，而且先把本機路徑換成 `<輸出資料夾>`／`<路徑>`。
+- 一次最多 20 份；產生失敗只記在那一份的狀態（FAIL），寫了一半的草稿刪掉；監控的狀態、Issue 數量與 key 不變。
+- 工具的 KEV 日期只用監控手上的證據（EUVD 的加入日期）：不讓工具依報告 `summary.json` 的 `scan_dir`（zip 裡的不可信資料）去讀本機路徑。
 - 和第 14 條的演練（`docs/ART14.md`）無關：草稿不是通報，也不碰 art14 的流程。

@@ -30,6 +30,9 @@ MAX_DRAFTS = 20
 CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}\Z")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\Z")
+NO_EUVD = "no-euvd.json"        # 不存在的檔名（見 _make）
+ABS_PATH_RE = re.compile(r"(?<![\w<])/(?:[^\s/，；：（）()「」]+/)+[^\s，；：（）()「」]*")
+REASON_OF = {"GAP": "報告裡沒有這個 CVE 被利用的證據（這不代表沒有被利用，要不要通知由人判斷）", "FAIL": "產生失敗（原因見執行報告）"}
 STATUS_ZH = {"OK": "已產生", "ATTENTION": "已產生（還有要補的欄位）", "GAP": "沒有產生（GAP）", "NOT_RUN": "沒有產生（NOT_RUN）",
              "FAIL": "沒有產生（FAIL）"}
 
@@ -130,53 +133,68 @@ class Drafts:
             self._tool = _tool()
         return self._tool
 
+    def scrub(self, text, n=300):
+        """工具的說明可能帶本機路徑（上游的錯誤訊息含檔案路徑）：輸出資料夾換成 <輸出資料夾>，其他絕對路徑換成 <路徑>。"""
+        t = str(text).replace(os.path.abspath(self.out_dir), "<輸出資料夾>").replace(self.out_dir, "<輸出資料夾>")
+        return ABS_PATH_RE.sub("<路徑>", t)[:n]
+
     def for_group(self, es, p):
-        """es：同一個群組（同一份 SBOM × CVE）的比對；p：那份 SBOM 的 Release 資訊（可能是 None）。→ 這一筆的紀錄。"""
+        """es：同一個群組（同一份 SBOM × CVE）的比對；p：那份 SBOM 的 Release 資訊（可能是 None）。→ 這一筆的紀錄。
+        rec["issue"]：只有 shipped 的正式版是 True（Issue 內文才寫一句）；rec["reason"]：寫進 Issue 的固定原因（不放工具的說明）。"""
         e0 = es[0]
         cves = sorted({e.get("cve") for e in es if isinstance(e.get("cve"), str) and CVE_RE.match(e["cve"])})
+        shipped = bool(p) and p.get("kind") == "release" and p.get("status") == "shipped"
         rec = {"project": str(e0.get("project") or "?"), "version": str(e0.get("version") or "?"), "layer": (p or {}).get("layer") or "?",
-               "cves": cves, "status": "NOT_RUN", "detail": "", "dir": None}
+               "cves": cves, "status": "NOT_RUN", "detail": "", "reason": None, "dir": None, "issue": shipped}
         self.records.append(rec)
+        leaf = None
         try:
-            self._make(rec, es, p)
-        except Exception as e:      # 草稿是額外的：任何意外都只記在這一筆，不影響監控
-            rec.update(status="FAIL", detail=f"內部錯誤（{type(e).__name__}）", dir=None)
+            leaf = self._make(rec, es, p)
+        except Exception as e:      # 草稿是額外的：任何意外都只記在這一筆，不影響監控；寫了一半的草稿刪掉
+            rec.update(status="FAIL", detail=f"內部錯誤（{type(e).__name__}）", reason="產生時發生內部錯誤", dir=None)
+            if leaf is None and rec.get("_leaf"):
+                leaf = rec["_leaf"]
+            if leaf:
+                shutil.rmtree(leaf, ignore_errors=True)
+        rec.pop("_leaf", None)
         return rec
 
     def _make(self, rec, es, p):
         if not p:
-            rec["detail"] = "找不到這份 SBOM 的 Release 資訊"
-            return
-        if p.get("kind") != "release" or p.get("status") != "shipped":
-            rec["detail"] = ("development 的 dev Release：還沒上市，也沒有報告 zip，不需要第 14 條第 8 項的使用者通知" if p.get("kind") == "dev"
-                             else f"這個 Release 的狀態是 {p.get('status')}（只有 shipped 的正式版才產生）")
-            return
+            rec.update(detail="找不到這份 SBOM 的 Release 資訊", reason="找不到這份 SBOM 的 Release 資訊")
+            return None
+        if not rec["issue"]:
+            rec["detail"] = ("development 的 dev Release：還沒上市，也沒有報告 zip" if p.get("kind") == "dev"
+                             else f"種類 {p.get('kind')}、狀態 {p.get('status')}：只有 shipped 的正式版才產生")
+            return None
         if not rec["cves"]:
-            rec["detail"] = "這個群組沒有 CVE 編號"
-            return
+            rec.update(detail="這個群組沒有 CVE 編號", reason="這個群組沒有 CVE 編號")
+            return None
         if not p.get("report_zip") or not os.path.isfile(p["report_zip"]):
-            rec["detail"] = "這個 Release 沒有這一層的報告 zip（report-<專案>-<版本>[-<層>].zip），沒有可用的判定資料"
-            return
+            rec.update(detail="這個 Release 沒有這一層的報告 zip（report-<專案>-<版本>[-<層>].zip），沒有可用的判定資料"
+                       + (f"；{self.scrub(p.get('report_zip_problem'), 200)}" if p.get("report_zip_problem") else ""),
+                       reason="這個 Release 沒有可用的報告 zip")
+            return None
         if self.made >= MAX_DRAFTS:
-            rec["detail"] = f"這次已經產生 {MAX_DRAFTS} 份草稿（一次的上限），其餘下一次有新的命中時才會產生"
-            return
+            rec.update(detail=f"這次已經產生 {MAX_DRAFTS} 份草稿（一次的上限），其餘下一次有新的命中時才會產生", reason=f"超過一次 {MAX_DRAFTS} 份的上限")
+            return None
         self.made += 1
         tag = hashlib.sha256((p["uuid"] + "|" + ",".join(rec["cves"])).encode()).hexdigest()[:8]
         rel = f"{DRAFT_DIR}/{self.made:02d}-{tag}"
         leaf = os.path.join(self.out_dir, rel)
+        rec["_leaf"] = leaf
         src = os.path.join(self.out_dir, DRAFT_DIR, f".src-{self.made:02d}-{tag}")
         try:
             try:
                 extract_reports(p["report_zip"], src)
             except ZipProblem as e:
-                rec.update(status="FAIL", detail=str(e))
-                return
+                rec.update(status="FAIL", detail=self.scrub(e), reason="報告 zip 讀不了")
+                return leaf
             h = hashlib.sha256()
             with open(p["report_zip"], "rb") as f:
                 for b in iter(lambda: f.read(1 << 20), b""):
                     h.update(b)
-            zsha = h.hexdigest()
-            rec["report"], rec["report_sha256"] = os.path.basename(p["report_zip"]), zsha
+            rec["report"], rec["report_sha256"] = os.path.basename(p["report_zip"]), h.hexdigest()
             detected = {c: min(str(e.get("cve_first_detected") or e.get("first_detected") or "") for e in es if e.get("cve") == c) or None
                         for c in rec["cves"]}
             evidence = {}
@@ -188,35 +206,40 @@ class Drafts:
                 evidence[c] = {"sources": srcs or ["dumpling daily monitoring (KEV match)"], "date": dates[0] if dates else None}
             ca = self.tool()
             now = self.now.strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(self.now, "strftime") else str(self.now)
+            # euvd_file 指向不存在的檔：不讓工具依報告 summary.json 的 scan_dir（zip 裡的不可信資料）去讀本機路徑；KEV 日期由 evidence 傳入
             st, detail, _ = ca.exploited_run(Path(src), rec["cves"], load_config(rec["project"]), Path(leaf), now=now,
-                                             detected=detected, evidence=evidence)
-            rec.update(status=st, detail=str(detail)[:300], dir=rel if st in ("OK", "ATTENTION") else None)
-            if rec["dir"]:
+                                             detected=detected, evidence=evidence, euvd_file=str(Path(src) / NO_EUVD))
+            ok = st in ("OK", "ATTENTION")
+            rec.update(status=st, detail=self.scrub(detail), dir=rel if ok else None,
+                       reason=None if ok else REASON_OF.get(st, "產生失敗（原因見執行報告）"))
+            if ok:
                 with open(os.path.join(leaf, "README.md"), "w", encoding="utf-8") as f:
                     f.write(readme(rec, self.demo))
             else:
                 shutil.rmtree(leaf, ignore_errors=True)
+            return leaf
         finally:
             shutil.rmtree(src, ignore_errors=True)
 
+    def where(self):
+        return f"這次執行的 artifact {self.c(self.artifact)}" if self.artifact else "這次執行的輸出資料夾"
+
     def issue_line(self, rec):
-        """新 Issue 內文的一句（只有 shipped 的正式版才寫；development 只記在報告與 result.json）。"""
-        if rec is None or rec["detail"].startswith("development 的 dev Release"):
+        """新 Issue 內文的一句。只有 shipped 的正式版才寫（其他只記在報告與 result.json）；不放工具的說明，只用固定的原因。"""
+        if rec is None or not rec.get("issue"):
             return None
-        where = f"這次執行的 artifact {self.c(self.artifact)}" if self.artifact else "這次執行的輸出資料夾"
         if rec["dir"]:
-            return (f"CRA 第 14 條第 8 項的使用者通知草稿（CSAF，draft，未發布）{STATUS_ZH[rec['status']]}：{where} 的 {self.c(rec['dir'] + '/')}"
+            return (f"CRA 第 14 條第 8 項的使用者通知草稿（CSAF，draft，未發布）{STATUS_ZH[rec['status']]}：{self.where()} 的 {self.c(rec['dir'] + '/')}"
                     "（artifact 保留 90 天；草稿只是起點，要不要通知使用者由負責人決定）。")
-        return f"CRA 第 14 條第 8 項的使用者通知草稿{STATUS_ZH.get(rec['status'], 'NOT_RUN')}：{self.t(rec['detail'])}。"
+        return f"CRA 第 14 條第 8 項的使用者通知草稿{STATUS_ZH.get(rec['status'], STATUS_ZH['NOT_RUN'])}：{rec['reason'] or '原因見執行報告'}（詳細見執行報告）。"
 
     def summary_line(self):
         """彙總 Issue 的一句（有 shipped 的正式版才寫）。"""
-        recs = [r for r in self.records if not r["detail"].startswith("development 的 dev Release")]
+        recs = [r for r in self.records if r.get("issue")]
         if not recs:
             return None
         made = [r for r in recs if r["dir"]]
-        where = f"這次執行的 artifact {self.c(self.artifact)}" if self.artifact else "這次執行的輸出資料夾"
-        return (f"CRA 第 14 條第 8 項的使用者通知草稿（CSAF，draft，未發布）：已產生 {len(made)} 份（{where}，保留 90 天）、"
+        return (f"CRA 第 14 條第 8 項的使用者通知草稿（CSAF，draft，未發布）：已產生 {len(made)} 份（{self.where()}，保留 90 天）、"
                 f"沒有產生 {len(recs) - len(made)} 份（原因見執行報告）。")
 
     def report_lines(self):
