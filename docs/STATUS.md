@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 20:49 +0800（C2）
+最後更新：2026-11-17 20:58 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -443,7 +443,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
 
-- 換乾淨版本時要改（sca-center 11-17 回覆：機器讀取的 4 個路徑不變，只改給人看的 Excel 檔名與客戶資料包資料夾名；zip 根目錄新增 manifest.json（格式版本＋每個用途對應的路徑）；已緩解不新增 analysis.state，CycloneDX 改為 exploitable＋response 含 workaround_available、detail 寫緩解措施，不再輸出 not_affected＋protected_by_mitigating_control；tools/cra 四支報告／VEX 程式凍結中）：① `pipeline/watch/collect.py` REPORT_MEMBERS／REPORT_REQUIRED：改成先讀 manifest.json、找不到才退回舊路徑，兩邊都要有測試 ② `pipeline/watch/csaf_draft.py` 用 collect 的成員表，跟著 ① 改 ③ `pipeline/dashboard/build.py` VEX 判定統計（state×justification）：不會出現 UNKNOWN，但已緩解的項目會從 not_affected／protected_by_mitigating_control 移到 exploitable，數字會變。**換版的必要條件（C0 11-17）**：換乾淨版本的同一個 PR 要把儀表板改成分開計數，exploitable 且 response 含 workaround_available 算「已緩解」，並加測試鎖住已緩解的項目不會算進「受影響、未處理」；不能晚於換版
+- 換乾淨版本時要改（sca-center 11-17 回覆：機器讀取的 4 個路徑不變，只改給人看的 Excel 檔名與客戶資料包資料夾名；zip 根目錄新增 manifest.json（格式版本＋每個用途對應的路徑）；已緩解不新增 analysis.state，CycloneDX 改為 exploitable＋response 含 workaround_available、detail 寫緩解措施，不再輸出 not_affected＋protected_by_mitigating_control；tools/cra 四支報告／VEX 程式凍結中）：① `pipeline/watch/collect.py` REPORT_MEMBERS／REPORT_REQUIRED：改成先讀 manifest.json、找不到才退回舊路徑，兩邊都要有測試 ② `pipeline/watch/csaf_draft.py` 用 collect 的成員表，跟著 ① 改 ③ `pipeline/dashboard/build.py` VEX 判定統計（state×justification）：不會出現 UNKNOWN，但已緩解的項目會從 not_affected／protected_by_mitigating_control 移到 exploitable，數字會變。**換版的必要條件（C0 11-17）**：換乾淨版本的同一個 PR 要把儀表板改成分開計數，exploitable 且 response 含 workaround_available 算「已緩解」，並加測試鎖住已緩解的項目不會算進「受影響、未處理」；不能晚於換版。sca-center #244 定案（C0 11-17 轉）：CycloneDX 已緩解＝exploitable＋response 只有 workaround_available＋detail＋屬性 sca-center:mitigation-status、沒有 justification；舊的 not_affected＋protected_by_mitigating_control 讀入時改寫並標 legacy_form、sca-center:vex-migrated；閘門 open_affected 多 blocking／mitigated／mitigated_undocumented，rows 仍含已緩解。**分開計數用 blocking 和 mitigated 判斷，不只看 state**；待解：儀表板現在只讀 Release 附件 vex-*.cdx.json（vex_counts），讀不到閘門的 open_affected，要先決定資料來源（已問 C0）
 <!-- END C3 -->
 
 <!-- BEGIN C4 -->
