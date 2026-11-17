@@ -251,7 +251,7 @@
 - [ ] （T-06、T-14 之後）斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。現況 scan.sh 與 feeds.sh 都直接從公開網址下載，**還不能斷網**。
 - [ ] 鏡像過期時狀態是 GAP；沒有任何步驟靜默回退到公開網址。
 
-**官方依據**：內部系統，不適用 GitLab 官方文件。
+**官方依據**：內部系統，沒有對應的 GitLab 官方文件。
 
 ---
 
@@ -263,7 +263,7 @@
 
 | 機密／設定 | 放哪裡 | 設定 |
 |---|---|---|
-| DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不適用於多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
+| DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不能用在多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN`（通知用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**；只有 `watch:notify` 讀（測試檢查） |
 | `WATCH_GITLAB_READ_TOKEN`（每日監控讀取用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**（建議 Masked and hidden）；只有 `watch:compute` 讀。scope `read_api`（官方：唯讀 API）、角色 Planner（官方：confidential Issue 要 Planner 以上才看得到，17.7 起；之前是 Reporter）。狀態 Issue 與監控 Issue 都是 confidential，私有專案的 Release 也要權限，所以 compute 不能沒有 token |
 | `COSIGN` 金鑰（若選金鑰對方案，見第 9 節） | KMS 優先；其次 protected＋masked variable | 待內部決定 |
