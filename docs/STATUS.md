@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 22:02 +0800（C3）
+最後更新：2026-11-17 22:03 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -450,12 +450,18 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：第一階段的工作完成（T-14 全部完成：#199、#206 已合併）；收尾時需要的話配合重打 tag；其餘時間做 M9 的書面準備（不碰程式）
-- 分支／PR／commit：無進行中的 PR；今天合併 #189、#202、#199、#206；pipeline/platforms/jetson/scan.sh 與 _shared/scan-disk.sh 已交回 C1（T-06 PR-2）
-- 代理：0 個（D-048 上限 3）
-- CI：dev run 三專案（S1／K1 沒有改變既有判定）、release 草稿三平台（ai-nas 草稿 448438767：0 次 403、body 沒有網址、SBOM 名稱沒有路徑）、T-14 的 Jetson 草稿比對（沒有 T-14 造成的差異）、dt-smoke 的假常駐 DT 整合測試（089d1a7：建立→沿用、C-mirror-freshness GAP、沒有起或關容器、log 沒有 key）都完成
-- 今天處理：dev run 與 K1 比對；CVE-2026-80920 是上游 REJECTED；ai-nas 草稿 403＝body 的 https 網址（修正 (a) #189、(b) C1 #201）；SBOM 的 runner 路徑（metadata.component：C1 #200；原始碼元件：#202）；T-14 常駐 DT 模式（#199）與整合測試（#206）；審 C2 的 T-04 #207（dt-session.sh 部分 OK）
-- 下一步：GitLab 範本 .scan-steps 改連常駐 DT 和 C3 對齊（另開 PR，等 C0 排）→ M9 N3／N4／N6（設計 docs/references/m9-n1-design.md；屬性照 D-072：inventory:；實作前讀碼筆記已寫：N3 用 sca-scan --dir 不改上游、N4 docker pull＋digest cache、N6 自寫 machine-learning-model 元件＋aisbom 離線）
-- 403 紀錄（已知原因之一：Release body 含 https 網址會 403；2026-11-17 診斷，原因沒有查出來）：run 44040129677 兩次各 8 次 403，只拿掉 https:// 後 run 44051748503 成功；修正 (a) #189、(b) #201
-- 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
+- 目前在做：**暫停**（2026-11-17 使用者決定這禮拜暫停 dumpling 的開發，資源移到 sca-center；等 C0 通知再恢復）
+- 停在哪裡：
+  - 第一階段的工作完成：T-14 全部完成（#199 常駐 DT 模式、#206 dt-smoke 的整合測試，都已合併）；收尾時需要的話配合重打 tag。
+  - 審查：C2 的 T-04 #207（dt-session.sh 部分 OK，已合併）；C3 的 #209（範本的常駐 DT 接線，預設關閉；我已給 OK，等 C0 合併）。
+  - M9：只有書面準備，沒有程式、沒有分支、沒有 PR。設計在 main 的 docs/references/m9-n1-design.md；讀碼筆記在本機 $AGENT_TMP/pr-draft/m9-notes.md
+    （N3 用 sca-scan --dir、不改上游；N4 docker pull＋以 digest 為鍵的 cache、還原後重新核對；N6 自寫 machine-learning-model 元件＋aisbom 離線在沙箱；屬性照 D-072 用 inventory:）。
+    恢復後的第一步：等 N2（C1 的來源層欄位與去重）對齊，再開 N3。
+  - T-14 的後續（上線前必須決定，C0 已列）：T-07 的 DT 專案前綴或 parent、dev 的版本後綴；改名稱的位置在 dumpling 傳 --name／--version 的地方，不改上游 sca-scan。筆記在 $AGENT_TMP/pr-draft/t14-design.md。
+- 分支／PR／commit：無進行中的 PR、無未推的 commit。本機 worktree：dumpling-wt-c4-vs（detached，main 4a63479）、dumpling-wt-c4-adapters（wp7/adapters，遠端分支已刪）、
+  dumpling-wt-c4-platform-samples（wp7/platform-samples）；後兩個乾淨、沒有未推的修改，但有不在 main 裡的 commit（多半是 squash 合併的舊分支），沒有確認前不刪。
+- 代理：0 個；背景程序：0 個（已確認）。
+- 暫存：已刪 $AGENT_TMP/tmp/c4-*、dumpling-tmp-c4-{jcmp,reldraft,devrun,403,cve80920,dtsrc,truenas,verify-m6,verify28}、審查用的 worktree；保留 dumpling-tmp-c4-samples（STATUS 原稿）、dumpling-tmp-c4-venv（uv Python 3.12 的 venv，含 shellcheck-py 0.9.0）、pr-draft 的筆記。
+- 403 紀錄：Release body 含 https 網址會 403（run 44040129677 兩次各 8 次 403，只拿掉 https:// 後 run 44051748503 成功；修正 #189、#201）。
+- 卡住／等決定：無（暫停中）。缺口 19、7、20、22、23 排 M7。
 <!-- END C4 -->
