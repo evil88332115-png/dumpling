@@ -744,15 +744,18 @@ class ScanDtMode(unittest.TestCase):
         return CiFile.items_of(self, job)
 
     def dt_items(self, job):
-        """job 裡和 DT 模式有關的 script 項目（照順序）：外面帶進來的 DUMPLING_DT_MODE、依開關決定模式、常駐 DT 的連線檔。"""
+        """job 裡和 DT 模式有關的 script 項目（照順序）：外面帶進來的變數、job 自己的 kind、依開關決定模式、常駐 DT 的連線檔。"""
         it = self.items(job)
         guard = [x for x in it if "DUMPLING_DT_MODE+x" in x]
+        kind = [x for x in it if x.startswith("DUMPLING_SCAN_KIND=")]
         mode = [x for x in it if 'case "${DUMPLING_SCAN_KIND:-}"' in x]
         conn = [x for x in it if 'case "$DUMPLING_DT_MODE"' in x]
-        self.assertEqual((len(guard), len(mode), len(conn)), (1, 1, 1), job)
-        self.assertEqual(it.index(guard[0]), 0, "外面帶進來的 DUMPLING_DT_MODE 要在 job script 一開始就擋")
+        self.assertEqual((len(guard), len(kind), len(mode), len(conn)), (1, 1, 1, 1), job)
+        self.assertEqual(it.index(guard[0]), 0, "外面帶進來的變數要在 job script 一開始就擋")
+        self.assertEqual(it.index(kind[0]), 1, "kind 在 guard 之後、.setup 之前賦值")
+        self.assertIn("DUMPLING_SCAN_KIND+x", guard[0])
         self.assertLess(it.index(mode[0]), it.index(conn[0]))
-        return guard[0], mode[0], conn[0]
+        return guard[0], kind[0], mode[0], conn[0]
 
     def run_dt(self, job, env, conn_file=True, conn_mode=0o644):
         import os
@@ -762,8 +765,7 @@ class ScanDtMode(unittest.TestCase):
         self.addCleanup(td.cleanup)
         d = Path(td.name)
         base = d / "out-base"
-        e = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "DUMPLING_OUT_BASE": str(base),
-             "DUMPLING_SCAN_KIND": self.jobs[job]["variables"]["DUMPLING_SCAN_KIND"]}
+        e = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "DUMPLING_OUT_BASE": str(base)}
         if conn_file:
             src = d / "gitlab-file-var"
             src.write_text("DT_URL=https://dt.example.invalid\nDT_API_KEY=odt_x\n")
@@ -793,6 +795,21 @@ class ScanDtMode(unittest.TestCase):
             self.assertEqual(r.returncode, 1, v)
             self.assertIn("外面帶進來了 DUMPLING_DT_MODE", r.stdout, v)
             self.assertNotIn("MODE=", r.stdout, v)
+
+    def test_outside_scan_kind_fails_first(self):
+        # 專案變數蓋得過 job 的 variables：kind 若被外面設成 release，dev:scan 就會讀 release 的開關（C4 審查）
+        for job in ("dev:scan", "release:scan"):
+            for v in ("release", "dev", ""):
+                r, base = self.run_dt(job, {"CI_COMMIT_REF_PROTECTED": "true", "DUMPLING_SCAN_KIND": v,
+                                            "DUMPLING_RELEASE_DT_MODE": "resident"})
+                self.assertEqual(r.returncode, 1, (job, v))
+                self.assertIn("外面帶進來了 DUMPLING_SCAN_KIND", r.stdout, (job, v))
+                self.assertNotIn("MODE=", r.stdout)
+                self.assertFalse((base / "dt-conn").exists())
+
+    def test_kind_is_not_a_job_variable(self):
+        for job in ("release:scan", "dev:scan"):
+            self.assertNotIn("DUMPLING_SCAN_KIND", self.jobs[job].get("variables", {}), job)
 
     def test_resident_on_unprotected_ref_fails(self):
         for job, sw in (("release:scan", "DUMPLING_RELEASE_DT_MODE"), ("dev:scan", "DUMPLING_DEV_DT_MODE")):
@@ -862,7 +879,7 @@ class ScanDtMode(unittest.TestCase):
         self.assertEqual(self.jobs["release:scan"].get("resource_group"), "dt-scan-release")
         self.assertEqual(self.jobs["dev:scan"].get("resource_group"), "dt-scan-dev-$PROJECT")
         for job, kind in (("release:scan", "release"), ("dev:scan", "dev")):
-            self.assertEqual(self.jobs[job]["variables"]["DUMPLING_SCAN_KIND"], kind)
+            self.assertEqual(self.dt_items(job)[1], "DUMPLING_SCAN_KIND=" + kind)
 
 
 class ReleasePayload(unittest.TestCase):

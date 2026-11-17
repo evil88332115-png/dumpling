@@ -146,10 +146,12 @@ workflow:
 
 .dt-mode-guard:
   script:
-    # scan job 的第一步（在 .setup 之前、在 .scan-steps 自己 export DUMPLING_DT_MODE 之前）：這時 DUMPLING_DT_MODE 有值，一定是外面帶進來的
-    # （專案／群組／pipeline 變數；範本本身沒設）。專案變數會套用到所有 job、蓋過 job 的 variables，用它就沒辦法只開 release → FAIL。
+    # scan job 的第一步（在 .setup 之前、在 .scan-steps 自己 export DUMPLING_DT_MODE 之前）：這時 DUMPLING_DT_MODE、DUMPLING_SCAN_KIND 有值，
+    # 一定是外面帶進來的（專案／群組／pipeline 變數；範本本身沒設，兩個都在 script 裡賦值）。專案變數會套用到所有 job、蓋過 job 的 variables：
+    # DUMPLING_DT_MODE 一個開關就沒辦法只開 release；DUMPLING_SCAN_KIND 被蓋過，dev:scan 就會讀 release 的開關 → 都 FAIL。
     - |
       [ -z "${DUMPLING_DT_MODE+x}" ] || { echo "scan: FAIL（外面帶進來了 DUMPLING_DT_MODE（專案、群組或 pipeline 變數）：範本不讀它。要打開常駐 DT，改設 DUMPLING_RELEASE_DT_MODE 或 DUMPLING_DEV_DT_MODE，見 GITLAB-PORT 第 4 節）"; exit 1; }
+      [ -z "${DUMPLING_SCAN_KIND+x}" ] || { echo "scan: FAIL（外面帶進來了 DUMPLING_SCAN_KIND（專案、群組或 pipeline 變數）：它由每個 scan job 自己決定，不能從外面設）"; exit 1; }
 
 .scan-steps:
   script:
@@ -305,10 +307,9 @@ release:scan:
   # 常駐 DT 的專案以名稱＋版本為鍵：同一個 tag 的 push 與 T-17 試跑同時掃描會互相蓋掉 BOM、讀到對方的結果。專案要到 script 裡才從 tag 解出來，
   # 所以 release 的 scan 全部排同一個佇列（release 不常同時發；GitLab 展開 resource_group 的變數，但這裡不依賴變數）
   resource_group: dt-scan-release
-  variables:
-    DUMPLING_SCAN_KIND: "release"
   script:
     - !reference [.dt-mode-guard, script]
+    - DUMPLING_SCAN_KIND=release   # 在 script 裡賦值：專案變數蓋不過（job 的 variables 會被蓋過）
     - !reference [.setup, script]
     - !reference [.resolve-from-tag, script]
     - !reference [.scan-steps, script]
@@ -391,8 +392,6 @@ dev:scan:
   # 同上，dev 依專案排隊。parallel:matrix 的變數在 resource_group 能不能展開，官方沒寫（待內部驗證，GITLAB-PORT 第 13 節）；
   # 展不開時名稱就是字面的 "$PROJECT"，等於全部 dev scan 排同一個佇列：比較慢，但不會同時掃
   resource_group: dt-scan-dev-$PROJECT
-  variables:
-    DUMPLING_SCAN_KIND: "dev"
   parallel:
     matrix:
       - PROJECT: ["orin-nano-demo"]
@@ -403,6 +402,7 @@ dev:scan:
           - PROJECT: ["orin-nano-demo"]
   script:
     - !reference [.dt-mode-guard, script]
+    - DUMPLING_SCAN_KIND=dev   # 在 script 裡賦值：專案變數蓋不過（job 的 variables 會被蓋過）
     - !reference [.setup, script]
     - !reference [.resolve-from-matrix, script]
     - !reference [.scan-steps, script]
