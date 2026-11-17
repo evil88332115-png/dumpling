@@ -67,7 +67,18 @@ pyl jetson_scan.py inputs --src "$proj/CRA/Config" --dst "$out/cra-config" --rel
 pyl jetson_scan.py site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
   --grype-cache "$out/grype-db" --upstream-set "jetson-r$rel" --public-sources "$out/downloads/public_sources.tbz2" --bsp "$out/downloads/$bsp" \
   --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
-export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
+# Grype DB（T-06 PR-2，pipeline/lib/mirrors.sh 的 grype_db_mode）：公開模式 online（sca-scan 掃描前 grype db update，行為不變）；
+# 內部模式從內部鏡像複製、--check 之後 import:<複本裡的壓縮檔>，不可用就 FAIL，不退回公開下載
+gm=$(grype_db_mode gdb); grc=$?
+case $grc in
+  0) ;;
+  64) fail "Grype DB 的內部鏡像設定不合法（INTERNAL_MIRROR_URL 等，見上面的訊息；不退回公開下載）";;
+  *) fail "鏡像 grype-db.sh 失敗（內部鏡像不可用，不退回公開下載；弱點資料不完整，不當作沒有漏洞）";;
+esac
+# 弱點資料的來源與快照時間：collect 讀這份清單（<資料夾名>=<種類>）寫進 scan.json、notes.md、release-meta.json（pipeline/lib/data_sources.py）
+dsrc="nvbul=nvidia-bulletins kcve=kernel-cve euvd=euvd osv=osv-distro"; case $gm in import:*) dsrc="$dsrc gdb=grype-db";; esac
+export DUMPLING_DATA_SOURCES=$dsrc
+export GRYPE_DB_UPDATE="$gm" MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
 dt_mirror_status   # 常駐 DT 模式：不設 MIRROR_REFRESH_STATUS（讀常駐環境的狀態檔；讀不到 → C-mirror-freshness GAP）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift

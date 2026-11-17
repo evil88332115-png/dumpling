@@ -9,7 +9,9 @@
 - release_gate：VEX 發行閘門（summary.json 的 vex.gate.verdict），同樣取最差的那份。
 - pipeline_result：workflow 流程步驟的結果（--steps；FAIL > GAP（含沒能執行的 NOT_RUN：不是 run-step.sh --record 記的「不適用」那種）> ATTENTION > OK，檔案不存在是 GAP，沒給是 NOT_RUN），不是產品結論。
 另有 reports（[{report: full｜bsp｜os…, report_status, release_gate}]）、kernel_versions（Release 附件 kernel-versions-<專案>-<版本>.json 的檔名或 null）、
-steps（每個 workflow 步驟）、attention（用了舊資料頂替的說明，有才放）。值的範圍：OK｜ATTENTION｜NOT_RUN｜GAP｜NOT_ASSESSED｜FAIL。
+steps（每個 workflow 步驟）、attention（用了舊資料頂替的說明，有才放）、
+data_sources（弱點資料的來源與快照時間，T-06 PR-2：{mode: internal｜public｜mixed｜unknown, items: [{kind, source: internal｜public｜null, status: OK｜ATTENTION｜UNKNOWN, snapshot_field, snapshot_utc}]}；
+從 --scan-summary 的 data_sources 再過一次白名單（lib/data_sources.py），不寫路徑、主機名、網址；scan 沒有記錄是 null）。值的範圍：OK｜ATTENTION｜NOT_RUN｜GAP｜NOT_ASSESSED｜FAIL。
 tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev/<專案>）；給了 tag 又不是 dev/ 開頭時必須是 <專案>/<版本>，否則 FAIL（D-055 (3)：版本以 Release tag 為準）。
 專案或版本不合法 → 不寫檔、結束碼 1。
 --notes（要有 --steps）：用同一份步驟紀錄、同一個算法重寫 notes.md 開頭的 pipeline_result 與「流程步驟」一節，讓 notes.md 與 release-meta.json 一致
@@ -31,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import project_config as pc  # noqa: E402
 import step_rows  # noqa: E402
+import data_sources  # noqa: E402
 from platform_scan import refresh_notes, refresh_scan_summary, verdict, worst_verdict  # noqa: E402
 
 REPORT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
@@ -106,6 +109,9 @@ def main(argv=None):
             except (OSError, ValueError):
                 scan = None
         meta.update(conclusions(scan, a.project, a.version))
+        # 弱點資料的來源與快照時間（T-06 PR-2，lib/data_sources.py）：scan.json 的 data_sources 再過一次白名單；沒有記錄是 null
+        dsrc = scan.get("data_sources") if isinstance(scan, dict) else None
+        meta["data_sources"] = data_sources.summary(dsrc.get("items")) if isinstance(dsrc, dict) else None
         meta["pipeline_result"] = "NOT_RUN"
         if a.steps:
             rows = step_rows.read_rows(a.steps)

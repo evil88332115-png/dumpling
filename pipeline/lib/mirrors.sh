@@ -43,7 +43,7 @@
 # 只試一次（本機複製，不重試）。回傳值：0＝成功（OK 或 ATTENTION）；1＝這個來源不可用（呼叫端：scan 要 FAIL、feeds.sh 記 GAP）；
 #   64＝用法錯誤（變數的值不合法；呼叫端一律失敗，不可改走公開下載）。mirror_is_fresh 在內部模式一律回傳 1（內部複本不存回 cache）。
 # grype_db_mode <資料夾名>：給 sca-scan 的 GRYPE_DB_UPDATE 值。公開模式印 online；內部模式先 mirror grype-db.sh 之後印 import:<複本裡的壓縮檔>
-#   （內部模式絕不印 online；鏡像不可用就回傳 1、什麼都不印）。目前 scan.sh 還沒有改用它（T-06 PR-2）。
+#   （內部模式絕不印 online；鏡像不可用就回傳 1、什麼都不印）。jetson/scan.sh、_shared/scan-disk.sh 用它設 GRYPE_DB_UPDATE（T-06 PR-2），不可用就 FAIL。
 _mirrors_lib=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 _mirror_public() {  # <腳本> <資料夾名>：公開模式（沒設 INTERNAL_MIRROR_URL）：跟以前完全一樣

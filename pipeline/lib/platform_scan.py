@@ -68,6 +68,7 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import step_rows  # noqa: E402
+import data_sources  # noqa: E402
 
 LAYER_PROP = "dumpling:layer"
 # 報告結論的值，由最差到最好（同 tools/cra/cra_report.py 的 ORDER）；讀不到或不在這裡面 → NOT_RUN（不留空、不當成 OK）
@@ -484,6 +485,10 @@ def collect(a, hooks=None):
             kv_name = "kernel-versions-%s-%s.json" % (proj, ver)
             shutil.copy2(kv_src, os.path.join(out, kv_name))
             add(manifest, out, kv_name, "映像出貨的核心與上游版本")
+    # 弱點資料的來源與快照時間（T-06 PR-2）：鏡像資料夾 MIRRORS_DIR 與 scan.sh 設的清單 DUMPLING_DATA_SOURCES；公開模式的 Grype DB 看完整掃描那次的 meta.json。
+    # 沒有清單（單元測試、手動呼叫）→ None，notes.md 不寫那一行
+    meta_main = data_sources.read_meta(os.path.join(run_paths(kv_spec.partition("=")[2], hooks.rootfs)["scan"], "meta.json")) if kv_spec is not None else None
+    ds = data_sources.summary(data_sources.collect(os.environ.get("MIRRORS_DIR"), os.environ.get("DUMPLING_DATA_SOURCES"), meta_main))
     _, pk_all = sbom_layer_counts(os.path.join(a.layers, "sbom.product.cdx.json"), hooks.package_purl_prefix) if a.layers else (None, None)
     comp = layers.get("components") or {}
     ctx = {"project": proj, "version": ver, "out": out, "args": a, "build": build, "asm": asm, "layers": layers, "runs": runs,
@@ -516,6 +521,7 @@ def collect(a, hooks=None):
     scan["vulnerabilities"] = {("full" if k == "" else k.lstrip("-")): v.get("vulnerabilities") for k, v in runs.items()}
     # D-055 (3)：精靈覆寫後的版本要等於 Release tag 的版本；M7b：再用和 tag 無關的來源核對 tag 本身
     scan["product_version_check"] = pvc = check_product_versions(last, ver, hooks.independent_version(ctx))
+    scan["data_sources"] = ds
     with open(a.scan_json, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=1)
     shutil.copy2(a.scan_json, os.path.join(out, "scan-summary-%s-%s.json" % (proj, ver)))
@@ -535,6 +541,9 @@ def collect(a, hooks=None):
     ind = pvc["independent"]
     L += ["- 版本核對（`product_version_check`）：**%s**。設定包：%s；和 tag 無關的來源：**%s**，%s" % (
         pvc["status"], config_version_phrase(pvc), ind["status"], ind.get("detail") or "沒有說明"), ""]
+    dl = data_sources.notes_line(ds)
+    if dl:
+        L += [dl, ""]
     if steps_path and scan.get("pipeline_attention"):
         # ATTENTION：這次用了舊資料頂替（例如 git.kernel.org 連不上，沿用上一份核心 CVE 鏡像）。不擋 Release，但要讓讀的人一眼看到
         L += ["> **ATTENTION（用了舊資料頂替，結果照樣產生，不是 OK）**", ">"] + ["> - " + t.replace("\n", " ") for t in scan["pipeline_attention"]] + [""]
