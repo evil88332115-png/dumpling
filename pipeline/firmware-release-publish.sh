@@ -7,6 +7,8 @@
 #     依 id 刪；非草稿的 id 不會出現在待刪清單裡（firmware_release_api.py releases-plan）。
 #   - 草稿用 tag 名稱查不到，所以用 API 依 id 找、刪。
 #   - 每個 GitHub API 呼叫都用 ghx 重試（API 偶爾回 403）；建立草稿與核對是一組，失敗就整組重來（先清掉上一次留下的草稿）。
+#   - 說明文字檔先經 pipeline/release-body.py 把網址改成不會自動連結的寫法（含網址的說明 GitHub 建 Release 時回 403），
+#     改寫過的暫存檔才交給 --notes-file；改寫失敗或結果是空的 → FAIL，不呼叫任何 GitHub API、不建 Release。說明文字檔本身不改。
 # 退出碼：0＝已發布；1＝失敗（可能留下草稿，下次執行會先清掉）；2＝同一個 tag 已有非草稿的 Release；64＝參數錯誤。
 # shellcheck disable=SC2317  # plan、delete_drafts、attempt 由 ghx 當參數間接呼叫（重試）
 set -uo pipefail
@@ -56,6 +58,11 @@ for f in "${files[@]}"; do
   case $f in *.json) ;; *) echo "firmware-release: 附件只能是 JSON：$(basename "$f")"; exit 64 ;; esac
 done
 
+# 0. 說明改寫成網址不會自動連結的寫法（docs/PLATFORM-INTERFACE.md §5）；失敗或空白就停，不建 Release
+body="$tmp/release-body.md"
+python3 -I "$here/release-body.py" "$notes" "$body" || { echo "firmware-release: FAIL（Release 說明改寫失敗，不建 Release）"; exit 1; }
+grep -q '[^[:space:]]' "$body" 2> /dev/null || { echo "firmware-release: FAIL（改寫後的 Release 說明是空的，不建 Release）"; exit 1; }
+
 # 1. 先看有沒有非草稿的同 tag Release（有就停，不刪）
 ghx plan; rc=$?
 if [ "$rc" -eq 3 ]; then echo "firmware-release: FAIL（$tag 已經有非草稿的 Release，不覆蓋；同一天第二次請用 .2）"; exit 2; fi
@@ -65,7 +72,7 @@ if [ "$rc" -eq 3 ]; then echo "firmware-release: FAIL（$tag 已經有非草稿�
 attempt() {
   local r
   delete_drafts; r=$?; [ "$r" -eq 0 ] || return "$r"
-  gh release create "$tag" "${files[@]}" --draft --verify-tag --latest=false --title "$tag" --notes-file "$notes" || return 1
+  gh release create "$tag" "${files[@]}" --draft --verify-tag --latest=false --title "$tag" --notes-file "$body" || return 1
   plan; r=$?; [ "$r" -eq 0 ] || return "$r"
   [ "$(wc -l < "$tmp/drafts")" -eq 1 ] || { echo "firmware-release: 找不到唯一的草稿"; return 1; }
   id=$(cat "$tmp/drafts")

@@ -1108,6 +1108,9 @@ if a[:1] == ["api"]:
                 x["draft"] = False; x["prerelease"] = False
         state.setdefault("patched", []).append(args); save(); sys.exit(0)
 if a[:2] == ["release", "create"]:
+    if "--notes-file" in a:
+        state["notes_path"] = a[a.index("--notes-file") + 1]
+        state["notes_body"] = open(state["notes_path"], encoding="utf-8").read(); save()
     if fail_once("create"):
         state["releases"].append({"id": state["next"], "tag_name": a[2], "draft": True, "assets": []}); state["next"] += 1; save()
         sys.stderr.write("upload failed\n"); sys.exit(1)
@@ -1230,6 +1233,51 @@ class PublishScript(unittest.TestCase):
         r = self.run_script("--cleanup", self.TAGN)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.load().get("deleted", []), [])
+
+    def test_notes_urls_are_rewritten_before_the_release_is_created(self):
+        text = "DT：https://dt.example.org/projects/1 與 [Release](https://github.com/o/r/releases/tag/x)。\n"
+        with open(self.notes, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        self.state()
+        r = self.run_script(self.TAGN, self.assets, self.notes)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        st = self.load()
+        self.assertNotEqual(st["notes_path"], self.notes)                            # 交給 gh 的是改寫過的暫存檔
+        self.assertNotIn("://", st["notes_body"])
+        self.assertIn("`dt.example.org/projects/1`", st["notes_body"])
+        self.assertIn("Release", st["notes_body"])
+        self.assertEqual(slurp(self.notes), text)                                    # 說明文字檔本身不改
+
+    def test_notes_rewrite_failure_creates_nothing(self):
+        for content in (b"", b" \n\t\n", b"\xff\xfe not utf-8"):
+            with open(self.notes, "wb") as fh:
+                fh.write(content)
+            self.state()
+            r = self.run_script(self.TAGN, self.assets, self.notes)
+            self.assertEqual(r.returncode, 1, content)
+            self.assertIn("FAIL", r.stdout, content)
+            self.assertFalse(os.path.exists(os.path.join(self.state_dir, "calls.log")), content)   # 一個 GitHub API 都沒有呼叫
+
+    def test_failed_or_empty_rewrite_output_creates_nothing(self):
+        pipe = os.path.join(self.dir, "pipeline")
+        os.makedirs(os.path.join(pipe, "lib"))
+        shutil.copy(PUBLISH, pipe)
+        shutil.copy(GHX, pipe)
+        shutil.copy(API, os.path.join(pipe, "lib"))
+        stubs = ("import sys\nopen(sys.argv[2], 'w').write(' \\n')\n",         # 回 0 但內容空白
+                 "import sys\nsys.exit(0)\n",                                      # 回 0 但沒有產生檔案
+                 "import sys\nopen(sys.argv[2], 'w').write('notes')\nsys.exit(1)\n")   # 有內容但回 1
+        for stub in stubs:
+            with open(os.path.join(pipe, "release-body.py"), "w") as fh:
+                fh.write(stub)
+            self.state()
+            env = {"PATH": self.bin + ":" + os.environ["PATH"], "FAKE_GH_STATE": self.state_dir, "GH_REPO": "o/r", "GHX_SLEEP": "0",
+                   "GHX_TRIES": "3", "TMPDIR": self.dir, "HOME": self.dir}
+            r = subprocess.run(["bash", os.path.join(pipe, "firmware-release-publish.sh"), self.TAGN, self.assets, self.notes],
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 1, stub + r.stdout + r.stderr)
+            self.assertIn("FAIL", r.stdout, stub)
+            self.assertFalse(os.path.exists(os.path.join(self.state_dir, "calls.log")), stub)
 
     def test_argument_and_attachment_checks(self):
         self.state()
