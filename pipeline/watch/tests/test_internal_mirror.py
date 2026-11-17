@@ -207,6 +207,41 @@ class Freshness(Base):
         self.assertIn("無法判斷新舊", r.stdout)
         self.no_public()
 
+    def test_missing_or_naive_time_fails(self):
+        """SOURCE 缺 fetched_utc、或時間沒有時區 → 判斷不了新舊 → 失敗（不能當成剛抓到的）。"""
+        import datetime
+        naive = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")   # 2 小時前、沒有時區
+        for body in ("source=x\n", f"source=x\nfetched_utc={naive}\n", "source=x\nfetched_utc=\n"):
+            with self.subTest(body=body):
+                self.e.stub("kernel-cve.sh")
+                d = self.e.source_dir("kernel-cve")
+                open(os.path.join(d, "SOURCE"), "w").write(body)
+                r = self.run_fn("mirror kernel-cve.sh kcve; echo rc=$?")
+                self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+                self.assertNotIn("Traceback", r.stdout + r.stderr)
+                self.no_public()
+
+    def test_grype_db_without_usable_built_fails(self):
+        """Grype 的 latest.json 缺 built、built 不是字串、沒有時區 → 失敗。"""
+        import json
+        import datetime
+        naive = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        for built in (None, 1731830400, naive):
+            with self.subTest(built=built):
+                self.e.stub("grype-db.sh")
+                d = self.e.write_grype_db()
+                f = os.path.join(d, "v6", "latest.json")
+                doc = json.load(open(f, encoding="utf-8"))
+                if built is None:
+                    doc.pop("built")
+                else:
+                    doc["built"] = built
+                json.dump(doc, open(f, "w", encoding="utf-8"))
+                r = self.run_fn("mirror grype-db.sh gdb; echo rc=$?")
+                self.assertIn("rc=1", r.stdout, r.stdout + r.stderr)
+                self.assertNotIn("Traceback", r.stdout + r.stderr)
+                self.no_public()
+
     def test_future_time_fails(self):
         self.e.stub("kernel-cve.sh")
         self.e.write_source("kernel-cve", hours_ago=-48)

@@ -258,20 +258,21 @@ _mirror_internal() {  # <腳本> <資料夾名>（先呼叫過 mirror_internal_c
     "$rroot"/*) ;;
     *) _mirror_internal_usage "$d" "$(_mirror_internal_pathvar "$kind") 的子路徑解開之後跳出了內部鏡像根目錄"; return 64;;
   esac
-  if [ -f "$src" ]; then
+  # 之後的檢查與複製一律用解開後的 $rsrc：頂層的符號連結在「檢查」與「複製」之間被換掉，也不會改去複製根目錄外的東西
+  if [ -f "$rsrc" ] && [ ! -L "$rsrc" ]; then
     [ "$kind" = cisa-kev ] || { _mirror_internal_fail "$d" "$kind" "$kind 的子路徑是檔案（只有 cisa-kev 可以指到單一 JSON 檔）"; return 1; }
     mode=file
-  elif [ ! -d "$src" ]; then
+  elif [ ! -d "$rsrc" ] || [ -L "$rsrc" ]; then
     _mirror_internal_fail "$d" "$kind" "$kind 的子路徑不是資料夾"; return 1
   fi
   mkdir -p "$dest" || return 1
   if [ "$mode" = file ]; then
     # 單一 JSON 檔（沒有 SOURCE）：複製成資料夾模式一樣的檔名，feeds.sh 與 match.py 的讀取不變
-    sz=$(stat -L -c %s -- "$src" 2> /dev/null) || sz=
+    sz=$(stat -c %s -- "$rsrc" 2> /dev/null) || sz=
     if [ -z "$sz" ] || [ "$sz" -gt "${CISA_KEV_MAX_BYTES:-104857600}" ] 2> /dev/null; then
       _mirror_internal_fail "$d" "$kind" "單一檔案讀不到大小，或超過 CISA_KEV_MAX_BYTES（預設 100 MB）"; return 1
     fi
-    cp -- "$src" "$dest/known_exploited_vulnerabilities.json" 2>> "$mir/$d.log" || { _mirror_internal_fail "$d" "$kind" "複製單一檔案失敗"; return 1; }
+    cp -- "$rsrc" "$dest/known_exploited_vulnerabilities.json" 2>> "$mir/$d.log" || { _mirror_internal_fail "$d" "$kind" "複製單一檔案失敗"; return 1; }
     { [ -f "$dest/known_exploited_vulnerabilities.json" ] && [ ! -L "$dest/known_exploited_vulnerabilities.json" ]; } \
       || { _mirror_internal_fail "$d" "$kind" "複製之後的檔案不是一般檔案"; return 1; }
     if ! bash "$sd/$s" --check-file "$dest/known_exploited_vulnerabilities.json" >> "$mir/$d.log" 2>&1; then
@@ -279,9 +280,9 @@ _mirror_internal() {  # <腳本> <資料夾名>（先呼叫過 mirror_internal_c
     fi
     info=$(_mirror_internal_age cisa-kev-file "$dest" "$MIRROR_INTERNAL_KEV_FILE_FRESH" inf 2>> "$mir/$d.log"); rc=$?
   else
-    bad=$(_mirror_internal_scan "$src"); rc=$?
+    bad=$(_mirror_internal_scan "$rsrc"); rc=$?
     [ "$rc" -eq 0 ] || { _mirror_internal_fail "$d" "$kind" "內部鏡像 $kind 不合格：${bad:-}（只收一般檔案與資料夾；符號連結、FIFO、裝置一律失敗）"; return 1; }
-    if ! cp -R --no-dereference -- "$src/." "$dest/" 2>> "$mir/$d.log"; then
+    if ! cp -R --no-dereference -- "$rsrc/." "$dest/" 2>> "$mir/$d.log"; then
       _mirror_internal_fail "$d" "$kind" "複製內部鏡像 $kind 失敗"; return 1
     fi
     bad=$(_mirror_internal_scan "$dest"); rc=$?
