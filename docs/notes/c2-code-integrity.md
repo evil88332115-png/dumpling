@@ -5,8 +5,7 @@
 
 ## 1. 做了什麼、沒做什麼
 
-映像能回答的只有「結構有沒有出現」。平台有沒有照這些結構執行（Boot Guard 的啟用、金鑰雜湊、除錯鎖）在熔絲與晶片組狀態，映像讀不到。所以產生物固定寫成
-**structure observed; enforcement not assessed**：
+映像能回答的只有「結構有沒有出現」。平台有沒有照這些結構執行（Boot Guard 的啟用、金鑰雜湊、除錯鎖）在熔絲與晶片組狀態，映像讀不到。所以產生物的說明句依項目的狀態產生（見 2.1），結尾一律是 **enforcement not assessed**：
 
 - 做：`x86_firmware.py` 的 `fit_table()` 記錄 FIT 的每一個項目；`integrity_section()` 從項目產生 `bios[].integrity`（`fw-inventory.json`）；BIOS 映像元件加 `dumpling:integrity-*` property；`firmware-expect.py` 加 `expected.integrity`。
 - 沒做（PR-8）：`fw-inventory.md` 的新段落、`firmware-ci.sh` 的摘要欄。`status_of()` 沒有讀 `integrity`：GAP 與 NOT_ASSESSED 不會讓報告變 ATTENTION，`fw-inventory.md` 與狀態行的內容與沒有這個欄位時相同（測試鎖住）。
@@ -18,7 +17,7 @@
 
 ```
 integrity: {
-  scope, statement ("structure observed; enforcement not assessed"),
+  scope, statement（依狀態產生，見下）,
   fit: {status, offset, complete, issues[], declared_entries, read_entries, header_version, checksum, entries[]},
   items: [{id, state, evidence, basis, reason}, …]
 }
@@ -28,6 +27,15 @@ integrity: {
   `in_image`（位址連同大小欄位都在映像內；type 0x7F 是 null）、KM／BPM 另有 `id_string`（位址開頭 8 bytes，不可印的位元組換成 `.`）。
 - `fit.complete`：整張表讀完而且沒有任何問題。`fit.issues`：不完整的原因（見 3.2）。`fit.checksum`：`valid`（C_V 位元有設、整張表加總為 0）、`invalid`（C_V 有設但加總不是 0）、`not-set`（C_V 沒設，規格不要求 checksum）、`not-checked`（表沒完整讀進來）。
 - 既有的 `fit` 物件（`status`、`offset`、`entries`、`microcode`、`note`）和微碼的 `in_fit`、`incomplete` 沒有改；新資料只在 `integrity`。AMD 平台的 `integrity.items` 是空的（沒有 FIT），`note` 寫明。
+
+`statement`：依 `CI-01.km`、`CI-01.bpm`、`CI-01.acm`、`CI-07` 的狀態分組產生，順序固定，最後一律接 `enforcement not assessed`：
+
+- 有 observed 的項目才寫 `structure observed: <id>, …`；
+- not-found 寫 `no entry in a completely read FIT (one FIT only; a top-swap second table is not read): <id>, …`；
+- GAP 寫 `structure not determined (GAP): <id>, …`；
+- 沒有項目（AMD 平台）寫 `no Intel FIT items produced`。
+
+例如 FIT 只有微碼時是 `no entry in a completely read FIT (…): CI-01.km, CI-01.bpm, CI-01.acm, CI-07; enforcement not assessed`，不會出現 `structure observed`。
 
 項目 id：
 
@@ -49,7 +57,7 @@ integrity: {
 BIOS 映像元件（不是 ME、微碼等子元件）加：
 
 - `dumpling:integrity-ci-01`、`-ci-01-km`、`-ci-01-bpm`、`-ci-01-acm`、`-ci-02`、`-ci-07`、`-ci-07-lock`：值是該項目的 state。
-- `dumpling:integrity-basis`：`structure observed; enforcement not assessed; self-declared by the image: …; no signature was verified; assumes the image was not modified`。
+- `dumpling:integrity-basis`：`<statement>; self-declared by the image: …; no signature was verified; assumes the image was not modified`，開頭和 `integrity.statement` 是同一句（依狀態產生，見 2.1）。
 
 命名空間是 `dumpling:`，不放進 `sca-center:`（C1 的報告工具可能依賴舊名稱，見 `docs/PROVENANCE.md`）。AMD 平台沒有這些 property。
 
@@ -86,6 +94,8 @@ KM、BPM 位址開頭的 `__KEYM__`、`__ACBP__` 只是觀察值：證據寫「�
 | FIT 指標對到映像外，或指到的位置不是 `_FIT_` 表頭 | `ci-not-found-parse-incomplete` |
 
 AMD 平台（認出 AMD 標記的映像）不產生項目。
+
+認不出任何結構時（例如只有壞掉的 FIT 指標，沒有 descriptor、微碼或其他可辨識的結構），`bios_image()` 回傳 None，這個檔案不列為 BIOS 映像，也不會產生 `integrity`。
 
 ## 4. FIT 的讀法與限制
 

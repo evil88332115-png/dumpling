@@ -1232,7 +1232,8 @@ def fit_item(data, e, i, off):
 
 # ---------- 程式碼完整性的結構證據（FIT 的 Boot Guard 項目與除錯政策項目） ----------
 
-INTEGRITY_STATEMENT = "structure observed; enforcement not assessed"
+INTEGRITY_ENFORCEMENT = "enforcement not assessed"
+ONE_FIT = "one FIT only; a top-swap second table is not read"
 INTEGRITY_BASIS = ("self-declared by the image: FIT entry types follow the Intel FIT BIOS Specification rev 1.6 and coreboot util/cbfstool/fit.h; "
                    "no signature was verified; assumes the image was not modified")
 INTEGRITY_FUSE_BASIS = ("whether the platform acts on this structure is held in fuses and chipset state, which an image does not contain; "
@@ -1246,6 +1247,19 @@ INTEGRITY_STATES = ("observed", "not-found", "GAP", "NOT_ASSESSED")
 # （item id, FIT type）：id 的 CI 編號見 docs/notes/c2-code-integrity-survey.md 第 2 節；CI-01 是 KM 與 BPM 的合併
 FIT_INTEGRITY_TYPES = (("CI-01.km", "Key Manifest", 0x0B), ("CI-01.bpm", "Boot Policy Manifest", 0x0C),
                        ("CI-01.acm", "startup ACM", 0x02), ("CI-07", "JMP $ debug policy", 0x2F))
+
+
+def integrity_statement(items):
+    """依項目的狀態產生的一句話（integrity.statement 與 SBOM 的 dumpling:integrity-basis 開頭）。只列 FIT 的項目類型（不含匯總的 CI-01 與兩個 NOT_ASSESSED 項目）：
+    有 observed 才寫 structure observed；not-found 與 GAP 各用照實的句子；沒有項目（AMD 平台）寫明沒有產生。生效與否一律 enforcement not assessed。"""
+    by = {}
+    for x in items:
+        if x["id"] != "CI-01" and x["state"] != "NOT_ASSESSED":
+            by.setdefault(x["state"], []).append(x["id"])
+    parts = [f"{head}: {', '.join(by[st])}" for st, head in (("observed", "structure observed"),
+                                                             ("not-found", f"no entry in a completely read FIT ({ONE_FIT})"),
+                                                             ("GAP", "structure not determined (GAP)")) if st in by]
+    return "; ".join(parts or ["no Intel FIT items produced"]) + f"; {INTEGRITY_ENFORCEMENT}"
 
 
 def ci_item(id_, state, evidence, reason, basis=INTEGRITY_BASIS):
@@ -1283,7 +1297,7 @@ def fit_type_item(id_, label, typ, entries, blanket, table):
         return ci_item(id_, "GAP", f"no entry of type {hexn} ({label}) among the {table['read_entries']} entr{'y' if table['read_entries'] == 1 else 'ies'} read, but the FIT was not read completely ("
                        + "; ".join(table["issues"]) + "); this is not 'not-found'", CI_INCOMPLETE)
     return ci_item(id_, "not-found", f"the FIT was read completely ({table['read_entries']} entr{'y' if table['read_entries'] == 1 else 'ies'}, header checksum {table['checksum']}) "
-                   f"and has no entry of type {hexn} ({label})", CI_NOT_FOUND)
+                   f"and has no entry of type {hexn} ({label}); {ONE_FIT}", CI_NOT_FOUND)
 
 
 def integrity_section(fit, items, table, *, amd=False, descriptor_bios=False, container=None, truncated=None):
@@ -1291,7 +1305,7 @@ def integrity_section(fit, items, table, *, amd=False, descriptor_bios=False, co
     amd：AMD 平台沒有 FIT，這一段不產生項目（PSP 目錄另有結構）。descriptor_bios：有 flash descriptor 而且有 BIOS 區域（完整 SPI 映像）。
     container：映像是 AMI PFAT 等封裝組回來的（位移不是 SPI 位址）。truncated：descriptor 的區域超出檔案的說明（檔案被截短）。
     FIT 沒有讀到、容器不支援、表沒讀完一律是 GAP，不寫 not-found。"""
-    sec = {"scope": "Intel FIT: Boot Guard manifests, startup ACM and debug policy entries", "statement": INTEGRITY_STATEMENT, "fit": None, "items": []}
+    sec = {"scope": "Intel FIT: Boot Guard manifests, startup ACM and debug policy entries", "statement": integrity_statement([]), "fit": None, "items": []}
     if amd:
         sec["note"] = "AMD platform: no FIT; the Intel FIT items are not produced (AMD PSP directory entries are listed under amd)"
         return sec
@@ -1338,6 +1352,7 @@ def integrity_section(fit, items, table, *, amd=False, descriptor_bios=False, co
                     by_id["CI-07"],
                     ci_item("CI-07.lock", "NOT_ASSESSED", "whether debug access is locked is held in fuses and platform state; the image does not contain it",
                             CI_FUSE, INTEGRITY_FUSE_BASIS)]
+    sec["statement"] = integrity_statement(sec["items"])
     return sec
 
 
@@ -1346,7 +1361,7 @@ def integrity_props(sec):
     if not sec or not sec.get("items"):
         return []
     return [*[prop("dumpling:integrity-" + x["id"].lower().replace(".", "-"), x["state"]) for x in sec["items"]],
-            prop("dumpling:integrity-basis", f"{INTEGRITY_STATEMENT}; {INTEGRITY_BASIS}")]
+            prop("dumpling:integrity-basis", f"{integrity_statement(sec['items'])}; {INTEGRITY_BASIS}")]
 
 
 def amd_markers(data, budget=None):

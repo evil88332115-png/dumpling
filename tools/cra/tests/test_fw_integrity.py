@@ -115,7 +115,8 @@ def test_key_manifest_boot_policy_and_acm_observed_enforcement_not_assessed():
     km = items(b)["CI-01.km"]["evidence"]
     assert "type 0x0b" in km and f"file offset 0x{KM_AT:x}" in km and "__KEYM__ (seen)" in km
     assert "__ACBP__ (seen)" in items(b)["CI-01.bpm"]["evidence"]
-    assert b["integrity"]["statement"] == "structure observed; enforcement not assessed"
+    assert b["integrity"]["statement"] == ("structure observed: CI-01.km, CI-01.bpm, CI-01.acm; no entry in a completely read FIT "
+                                           "(one FIT only; a top-swap second table is not read): CI-07; enforcement not assessed")
     for x in b["integrity"]["items"]:
         assert set(x) == {"id", "state", "evidence", "basis", "reason"}
 
@@ -343,7 +344,8 @@ def test_report_and_sbom_never_state_enabled_or_signed(tmp_path, img):
     ids = [x["id"].lower().replace(".", "-") for x in b["integrity"]["items"]]
     assert set(props) == {"dumpling:integrity-" + i for i in ids} | {"dumpling:integrity-basis"}
     assert {k: v for k, v in props.items() if k != "dumpling:integrity-basis"} == {"dumpling:integrity-" + x["id"].lower().replace(".", "-"): x["state"] for x in b["integrity"]["items"]}
-    assert props["dumpling:integrity-basis"].startswith("structure observed; enforcement not assessed; self-declared by the image")
+    assert props["dumpling:integrity-basis"] == f"{b['integrity']['statement']}; {xf.INTEGRITY_BASIS}"
+    assert props["dumpling:integrity-basis"].startswith("structure observed: ") == (OBSERVED in {x["state"] for x in b["integrity"]["items"]})
     assert props["dumpling:integrity-ci-02"] == NA and props["dumpling:integrity-ci-07-lock"] == NA
     assert not [p for p in img_comp["properties"] if p["name"].startswith("sca-center:integrity")]
     texts = list(all_strings(b["integrity"]["items"])) + list(all_strings(b["integrity"]["statement"])) + [v for k, v in props.items()] + [xf.markdown(inv)]
@@ -376,3 +378,68 @@ def test_integrity_props_use_the_dumpling_namespace_and_one_per_item():
     assert [p["name"] for p in ps] == ["dumpling:integrity-ci-01", "dumpling:integrity-ci-01-km", "dumpling:integrity-ci-01-bpm", "dumpling:integrity-ci-01-acm",
                                        "dumpling:integrity-ci-02", "dumpling:integrity-ci-07", "dumpling:integrity-ci-07-lock", "dumpling:integrity-basis"]
     assert xf.integrity_props(None) == [] and xf.integrity_props({"items": []}) == []
+
+
+# ---------- statement 依狀態產生（驗證建議 1） ----------
+
+ONE_FIT = "(one FIT only; a top-swap second table is not read)"
+
+
+@pytest.mark.parametrize("img,want", [
+    (fit_image([(0x01, UCODE_AT)]), f"no entry in a completely read FIT {ONE_FIT}: CI-01.km, CI-01.bpm, CI-01.acm, CI-07; enforcement not assessed"),
+    (spi_image(), "structure not determined (GAP): CI-01.km, CI-01.bpm, CI-01.acm, CI-07; enforcement not assessed"),
+    (fit_image(FULL, ptr=(1 << 32) - 0x20000), "structure not determined (GAP): CI-01.km, CI-01.bpm, CI-01.acm, CI-07; enforcement not assessed"),
+    (fit_image([(0x01, UCODE_AT), (0x02, ACM_AT)]),
+     f"structure observed: CI-01.acm; no entry in a completely read FIT {ONE_FIT}: CI-01.km, CI-01.bpm, CI-07; enforcement not assessed"),
+    (fit_image([(0x01, UCODE_AT), (0x0B, KM_AT, 4)], bad_sum=True),
+     "structure observed: CI-01.km; structure not determined (GAP): CI-01.bpm, CI-01.acm, CI-07; enforcement not assessed"),
+], ids=["microcode-only", "no-fit", "bad-pointer", "acm-only", "km-table-incomplete"])
+def test_statement_and_sbom_basis_follow_the_states(img, want):
+    """「structure observed」只在有 observed 的項目時出現；not-found 與 GAP 各自照實寫，SBOM 的 basis 用同一句。"""
+    sec = xf.bios_image(img)["integrity"]
+    assert sec["statement"] == want
+    basis = {p["name"]: p["value"] for p in xf.integrity_props(sec)}["dumpling:integrity-basis"]
+    assert basis == f"{want}; {xf.INTEGRITY_BASIS}"
+    assert ("structure observed" in basis) == (OBSERVED in states_of(sec))
+
+
+def states_of(sec):
+    return {x["state"] for x in sec["items"]}
+
+
+def test_amd_statement_says_no_items_were_produced():
+    sec = xf.integrity_section({"status": "not-found", "offset": None, "note": None}, [], None, amd=True)
+    assert sec["items"] == [] and sec["statement"] == "no Intel FIT items produced; enforcement not assessed"
+    assert "structure observed" not in sec["statement"] and xf.integrity_props(sec) == []
+
+
+def test_not_found_evidence_says_only_one_fit_is_read():
+    ev = items(xf.bios_image(fit_image([(0x01, UCODE_AT)])))["CI-01.km"]["evidence"]
+    assert ev.endswith("has no entry of type 0x0b (Key Manifest); one FIT only; a top-swap second table is not read")
+
+
+# ---------- 項目類型位元組的 C_V 位元、位址的高 32 位元（驗證建議 2、3） ----------
+
+def test_entry_type_with_the_checksum_valid_bit_set_is_still_recognised():
+    """類型位元組的最高位元是 C_V：0x8B、0x8C、0x82、0xAF 仍是 KM、BPM、startup ACM、0x2F，不能變成 not-found。"""
+    b = xf.bios_image(fit_image([(0x01, UCODE_AT), (0x8B, KM_AT, 0x35), (0x8C, BPM_AT, 0x39), (0x82, ACM_AT), (0xAF, DBG_AT)]))
+    only(b, CI_01=OBSERVED, CI_01_km=OBSERVED, CI_01_bpm=OBSERVED, CI_01_acm=OBSERVED, CI_07=OBSERVED)
+    es = b["integrity"]["fit"]["entries"]
+    assert [(e["type"], e["checksum_valid_bit"]) for e in es] == [("0x01", False), ("0x0b", True), ("0x0c", True), ("0x02", True), ("0x2f", True)]
+    assert [e["name"] for e in es[1:]] == ["key manifest", "boot policy manifest", "startup ACM", "JMP $ debug policy"]
+
+
+def test_entry_address_with_nonzero_high_32_bits_is_outside_the_image():
+    """位址的高 32 位元不是 0：不在 4 GB 以下，不能只看低 32 位元對到映像（否則會誤判 observed）。"""
+    n = len(spi_image())
+    low = (1 << 32) - (n - KM_AT)                      # 低 32 位元剛好是 KM_AT 在映像裡的位址
+    b = xf.bios_image(fit_image([(0x01, UCODE_AT), (0x0B, ("raw", (1 << 32) | low), 0x35)]))
+    km = b["integrity"]["fit"]["entries"][1]
+    assert (km["address"], km["offset"], km["in_image"]) == (f"0x00000001{low:08x}", None, False) and "id_string" not in km
+    only(b, CI_01=GAP, CI_01_km=GAP, CI_01_bpm=NOT_FOUND)
+    assert reasons(b)["CI-01.km"] == "ci-not-found-parse-incomplete" and "none with an address inside the image" in items(b)["CI-01.km"]["evidence"]
+
+
+def test_nothing_recognised_gives_no_bios_entry_and_no_integrity():
+    """只有壞掉的 FIT 指標、認不出任何結構：bios_image() 回 None，不產生 integrity（筆記 3.3）。"""
+    assert xf.bios_image(bytes(0x10000 - 8) + struct.pack("<Q", (1 << 32) - 0x20000)) is None

@@ -50,6 +50,7 @@ expected:
   ami_core: {status: not-found}
   # 程式碼完整性的結構證據（說明 docs/notes/c2-code-integrity.md）。依據：另寫的獨立腳本直接讀映像位元組——檔尾 −0x40 的 FIT 指標 0xFFA913B0 指到 `_FIT_   `
   # （檔案位置 0x1A913B0），表頭 C_V 位元有設、整張表加總為 0、版本 0x0100，共 1 個項目：type 0x01（微碼）。表完整讀完、沒有 0x02／0x0B／0x0C／0x2F。
+  # 只讀一張 FIT，不含 top swap 的第二張表；not-found 只對這張表成立。
   integrity:
     boot_guard_structure: not-found
     key_manifest: not-found

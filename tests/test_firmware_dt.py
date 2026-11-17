@@ -593,10 +593,10 @@ class ReportTests(ReportBase):
         self.assertEqual(self.run_report([o], dt)[0], 0)
 
     def test_expected_dt_validation(self):
-        for bad in ("expected_dt: yes\n", "expected_dt:\n  upload: accepted\n  reason: x\n",
+        for i, bad in enumerate(("expected_dt: yes\n", "expected_dt:\n  upload: accepted\n  reason: x\n",
                     "expected_dt:\n  upload: rejected\n", "expected_dt:\n  upload: rejected\n  reason: x\n  extra: 1\n",
-                    "expected_dt:\n  upload: rejected\n  reason: ''\n"):
-            s = self.sample("bad-" + str(abs(hash(bad)) % 1000), kind="sbom", version="firmware_version: 1\n" + bad)
+                    "expected_dt:\n  upload: rejected\n  reason: ''\n")):
+            s = self.sample(f"bad-{i}", kind="sbom", version="firmware_version: 1\n" + bad)
             b = self.w("in/b.json", bom(comp("a", "r1")))
             with self.assertRaises(fd.DtError, msg=bad):
                 fd.prep(b, s, os.path.join(self.tmp, "pbad"))
