@@ -392,7 +392,8 @@ class ReleaseMeta(Tmp):
         self.assertEqual(r.returncode, 0, r.stdout)
         d = json.load(open(out))
         self.assertEqual(set(d), {"schema", "project", "version", "tag", "status", "platform", "os_responsibility", "commit", "built_at", "workflow_run",
-                                  "report_status", "release_gate", "pipeline_result", "reports", "kernel_versions"})   # 三個結果欄位一律有值（讀不到是 NOT_RUN）
+                                  "report_status", "release_gate", "pipeline_result", "reports", "kernel_versions", "data_sources"})   # 三個結果欄位一律有值（讀不到是 NOT_RUN）
+        self.assertIsNone(d["data_sources"])          # 沒給 --scan-summary：弱點資料來源沒有記錄（T-06 PR-2），不是空清單
         self.assertEqual((d["report_status"], d["release_gate"], d["pipeline_result"]), ("NOT_RUN", "NOT_RUN", "NOT_RUN"))
         self.assertEqual((d["tag"], d["platform"], d["workflow_run"]), ("orin-nano-demo/v39.2.1-demo1", "jetson", "42"))
         self.assertIn(d["status"], ("shipped", "development"))
