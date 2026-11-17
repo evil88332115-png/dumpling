@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 SCHEMA = "dumpling-watch-inventory/1"
 # pipeline/lib/project_config.py 在 main 上還不存在，先用保守的正規式（之後有了再改成 import）。
@@ -60,6 +61,13 @@ MAX_API_BYTES = 64 * 1024 * 1024
 MAX_REDIRECTS = 3
 EXIT = {"OK": 0, "FAIL": 1, "GAP": 3}
 UA = "dumpling-watch-collect"
+# 已出貨 Release 的報告 zip（report_package 的輸出）：CSAF 使用者通知草稿（docs/CSAF.md、WATCH.md）要用到的 4 個成員。
+# 只收 shipped 的正式版；zip 是不可信資料：只檢查結構，內容由 csaf_draft.py 依固定成員名稱、有上限地讀。
+REPORT_MEMBERS = {"vulnerability-rows.json": "報告/內部存檔/vulnerability-rows.json", "summary.json": "報告/內部存檔/summary.json",
+                  "vex.cdx.json": "報告/交給PM/VEX/vex.cdx.json", "sbom.cdx.json": "報告/交給PM/SBOM/sbom.cdx.json"}
+REPORT_REQUIRED = ("vulnerability-rows.json", "vex.cdx.json")
+REPORT_MAX_MEMBERS = 5000
+REPORT_MEMBER_MAX = 256 * 1024 * 1024     # 單一成員解壓後的上限（宣告值；csaf_draft.py 讀的時候再算一次）
 
 
 class ApiError(Exception):
@@ -609,6 +617,33 @@ def _sbom_ok(path):
     return None
 
 
+def report_zip_problem(path):
+    """報告 zip 的結構檢查 → 問題字串或 None。不解壓；成員數、必要成員、宣告的大小、沒有符號連結。"""
+    try:
+        with zipfile.ZipFile(path) as z:
+            infos = z.infolist()
+            if len(infos) > REPORT_MAX_MEMBERS:
+                return "成員超過 %d 個" % REPORT_MAX_MEMBERS
+            by = {}
+            for i in infos:
+                by.setdefault(i.filename, []).append(i)
+            for k in REPORT_REQUIRED:
+                if REPORT_MEMBERS[k] not in by:
+                    return "沒有 %s" % REPORT_MEMBERS[k]
+            for k, m in REPORT_MEMBERS.items():
+                lst = by.get(m) or []
+                if len(lst) > 1:
+                    return "%s 重複" % m
+                for i in lst:
+                    if stat.S_ISLNK(i.external_attr >> 16) or i.is_dir():
+                        return "%s 不是一般檔案" % m
+                    if i.file_size > REPORT_MEMBER_MAX:
+                        return "%s 超過大小上限" % m
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError):
+        return "不是可讀的 zip"
+    return None
+
+
 def _http_url(u):
     if isinstance(u, str) and u.startswith("https://") and not re.search(r"[\x00-\x20\x7f]", u):
         return u[:500]
@@ -657,7 +692,8 @@ def collect_release(source, rel, kind, project, tagver, out, n):
          "status": None, "platform": None, "os_responsibility": None, "commit": None,
          "published_at": _date(rel.get("published_at")), "html_url": _http_url(rel.get("html_url")),
          "sboms": {}, "kernel_versions": None, "scan_summary": None, "layers": None, "problems": [],
-         "report_status": "NOT_RUN", "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN", "reports": [], "attention": []}
+         "report_status": "NOT_RUN", "release_gate": "NOT_RUN", "pipeline_result": "NOT_RUN", "reports": [], "attention": [],
+         "report_zips": {}}
     probs = e["problems"]
     reldir = os.path.join(out, "releases", str(n))
     relpath = "releases/%d" % n
@@ -745,6 +781,13 @@ def collect_release(source, rel, kind, project, tagver, out, n):
     e["kernel_versions"] = s["file"] if s else None
     s = grab("scan-summary-%s-%s.json" % (project, version), _json_ok)  # 選填
     e["scan_summary"] = s["file"] if s else None
+    # 4. 報告 zip（只有 shipped 的正式版；CSAF 使用者通知草稿用）：每份收到的 SBOM 層各一個，沒有就不收（不算問題，草稿記 NOT_RUN）
+    if kind == "release" and e["status"] == "shipped":
+        for l in sorted(e["sboms"]):
+            name = "report-%s-%s.zip" % (project, version) if l == "product" else "report-%s-%s-%s.zip" % (project, version, l)
+            s = grab(name, report_zip_problem)
+            if s:
+                e["report_zips"][l] = s
     return e
 
 

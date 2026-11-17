@@ -50,6 +50,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools", "cra"))
+import csaf_draft  # noqa: E402（第 14 條第 8 項的使用者通知草稿）
 import publiccheck  # noqa: E402
 
 STAGE = "WATCH-MATCH"
@@ -168,6 +169,16 @@ def uuid_of(project, watch_version, layer):
 
 # ---------- 輸入 ----------
 
+def rel_path(base, s):
+    """inventory 的附件紀錄（{file, sha256, size}）→ 絕對路徑；不是 inventory 資料夾內的相對路徑 → None。"""
+    if not isinstance(s, dict) or not isinstance(s.get("file"), str):
+        return None
+    rel = s["file"]
+    if not rel or os.path.isabs(rel) or ".." in rel.split("/"):
+        return None
+    return os.path.join(base, rel)
+
+
 def load_inventory(path, base):
     inv = read_json(path, "inventory.json")
     if not isinstance(inv, dict) or inv.get("schema") != "dumpling-watch-inventory/1" or not isinstance(inv.get("releases"), list):
@@ -206,7 +217,8 @@ def load_inventory(path, base):
                           "pipeline_result": r.get("pipeline_result") or "NOT_RUN",
                           "reports": r.get("reports") or [], "meta_attention": r.get("attention") or [],
                           "kernel_versions": os.path.join(base, r["kernel_versions"]) if isinstance(r.get("kernel_versions"), str)
-                          and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None})
+                          and not os.path.isabs(r["kernel_versions"]) and ".." not in r["kernel_versions"].split("/") else None,
+                          "report_zip": rel_path(base, (r.get("report_zips") or {}).get(layer) if isinstance(r.get("report_zips"), dict) else None)})
     if isinstance(inv.get("firmware"), dict):
         projs += firmware_projs(inv["firmware"], base, problems, {p["uuid"] for p in projs})
     return inv, projs, problems
@@ -1246,7 +1258,7 @@ def vendor_rows(es, ps):
     return lines
 
 
-def kev_body(mode, entries, p, coverage, run_url, now):
+def kev_body(mode, entries, p, coverage, run_url, now, draft_line=None):
     e0 = entries[0]
     lines = []
     if mode == "drill":
@@ -1264,6 +1276,8 @@ def kev_body(mode, entries, p, coverage, run_url, now):
     lines += ["", f"每日監控沒有涵蓋的項目（每次都列出）：", *[f"- {a}：{b}" for a, b in coverage]]
     if p and p.get("gaps"):
         lines += ["", "這個 Release 這次的 GAP：", *[f"- {md_cell(g)}" for g in p["gaps"]]]
+    if draft_line:
+        lines += ["", draft_line]
     lines += ["", ART14_NOTE]
     if run_url:
         lines += ["", f"執行紀錄：{run_url}"]
@@ -1302,8 +1316,9 @@ def mark_demo(actions):
     return actions
 
 
-def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, run_url, now, max_new, fw=None):
-    """→ (actions, 統計)。在 state["dumpling"]["issues"] 記下每個群組對應的 Issue（或彙總 Issue）。"""
+def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, run_url, now, max_new, fw=None, drafts=None):
+    """→ (actions, 統計)。在 state["dumpling"]["issues"] 記下每個群組對應的 Issue（或彙總 Issue）。
+    drafts：csaf_draft.Drafts（real 模式）；新的 KEV 群組各產生一次 CSAF 使用者通知草稿，Issue 內文多一句（只有 shipped 的正式版）。"""
     dd = state.setdefault("dumpling", {})
     dd["mode"] = mode
     iss = dd.setdefault("issues", {})
@@ -1332,7 +1347,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
             continue
         p = pinfo_of(projs, es[0]["project_uuid"])
         title = f"[KEV] {md_title(es[0]['cve'])} 在 {md_title(es[0]['project'])} {md_title(es[0]['version'])}（{p['layer'] if p else '?'} 層）"
-        pending.append((gk, "kev", title, kev_body(mode, es, p, coverage, run_url, now), labels_for(p, "kev"), es[0]))
+        dline = drafts.issue_line(drafts.for_group(es, p)) if drafts is not None else None
+        pending.append((gk, "kev", title, kev_body(mode, es, p, coverage, run_url, now, dline), labels_for(p, "kev"), es[0]))
     vgroups = {}
     for e in (vrep or {}).get("new") or []:
         vgroups.setdefault(vendor_group_key(mode, e), []).append(e)
@@ -1366,7 +1382,8 @@ def plan_issues(mode, state, projs, new, back, gone, vrep, baseline, coverage, r
     if rest:        # 超過上限：全部併成一個彙總 Issue（不一筆一個，D-040）
         sk = issue_key(mode, "summary", ts[:10], str(len(rest)), rest[0][0])
         body = [f"這次執行有 {len(rest)} 個新的命中群組，超過一次 {max_new} 個的上限，全部列在這個彙總 Issue（ATTENTION），不逐一開 Issue。", "",
-                "| 種類 | 標題 |", "|---|---|"] + [f"| {k} | {md_cell(t)} |" for _, k, t, _, _, _ in rest] + ["", ART14_NOTE]
+                "| 種類 | 標題 |", "|---|---|"] + [f"| {k} | {md_cell(t)} |" for _, k, t, _, _, _ in rest] + \
+            ([ "", drafts.summary_line()] if drafts is not None and drafts.summary_line() else []) + ["", ART14_NOTE]
         if mode == "drill":
             body.insert(0, "> **演練（合成資料）**\n")
         if run_url:
@@ -1759,7 +1776,10 @@ def run(a, kernel_runner=None):
         nb_actions = [{"op": "comment", "key": nb_key, "reopen_if_closed": False,
                        "body": f"已建立基準（{utc(now)}，{len(projs)} 份 SBOM）。每日監控開始比對，這個 Issue 可以關閉。"}] \
             if first and nb_key in (sbase.get("watch_keys") or []) else []
-        actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues, fwx)
+        # CSAF 使用者通知草稿：只在 real、不是建基準的那一次（演練是合成資料，不產生）
+        drafts = csaf_draft.Drafts(a.out, now, demo=a.demo, artifact=getattr(a, "csaf_artifact", None), text=md_text, code=md_code, cell=md_cell) \
+            if a.mode == "real" and not first else None
+        actions, stats = plan_issues(a.mode, state, projs, new, back, gone, vrep, first, coverage, a.run_url, now, a.max_new_issues, fwx, drafts)
         actions += nb_actions
         if not first and a.mode == "real":      # 演練刻意不下載 EUVD／核心 CNA：不開健康 Issue
             actions += health_actions(a.mode, state, serious, now, a.run_url)
@@ -1804,6 +1824,8 @@ def run(a, kernel_runner=None):
     if a.demo:
         plan["demo"] = True        # 公開 repo（D-040）：狀態 Issue 建立時也加 demo 標籤（標題與內文格式不變；C0 決定，2026-11-14）
     report = render_report(a.mode, detail, status, per, gaps, attn, notes, coverage, actions, first, vrep, fwx, inv.get("firmware"), projs)
+    if drafts is not None and drafts.records:
+        report = report.rstrip("\n") + "\n" + "\n".join(drafts.report_lines()) + "\n"
     rules = publiccheck.load_rules()
     probs = publiccheck.check_text(json.dumps(clean, ensure_ascii=False, indent=0), rules) + \
         [x for act in actions for x in publiccheck.check_text(act.get("title", "") + "\n" + act.get("body", ""), rules)]
@@ -1815,6 +1837,8 @@ def run(a, kernel_runner=None):
         raise Fail(f"要寫進公開 Issue 的內容有沒淨化的 Markdown（例如 {bad[0]!r}）：不產生 plan.json")
     result = {"status": status, "detail": detail, "per_sbom": per, "gaps": gaps, "attention": attn, "notes": notes, "serious": serious,
               "new": new, "back": back, "gone": gone, "stats": stats, "baseline": first}
+    if drafts is not None:
+        result["csaf_drafts"] = drafts.records
     if fwx is not None:
         result["firmware"] = {"tables": fwx["tables"], "table_flags": fwx["rm"]["table_flags"], "image_sha256_changes": fwx["changes"],
                               "advisory": {u: {"state": x["state"], "why": x["why"], "reasons": x["reasons"], "changed": x["changed"]}
@@ -1950,6 +1974,7 @@ def main(argv=None):
     ap.add_argument("--kev-overlay")
     ap.add_argument("--max-new-issues", type=int, default=20)
     ap.add_argument("--run-url")
+    ap.add_argument("--csaf-artifact", help="CSAF 使用者通知草稿的 artifact 名稱（watch-round.yml 上傳 <out>/csaf-drafts/；Issue 內文寫這個名稱）")
     ap.add_argument("--grype")
     ap.add_argument("--grype-total-timeout", type=float, default=GRYPE_TOTAL)
     ap.add_argument("--vendor-config", default=os.path.join(HERE, "vendor-watch.json"))
