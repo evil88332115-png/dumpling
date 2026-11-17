@@ -64,6 +64,8 @@ def normalized(reports, tmp):
         # （檔案本身的內容在這個測試裡逐位元組比；輸入檔的雜湊由輸入決定，和程式無關）
         if name == "summary.json":
             t = re.sub(r'("sha256": ")[0-9a-f]{64}', r"\1<SHA>", t)
+            # support_check.today 是執行當天的日期（support_check.py），每天不同：只換這一個欄位，其他日期照比
+            t = re.sub(r'("support_check": \{(?:(?!\n \},?\n).)*?"today": ")\d{4}-\d\d-\d\d"', r'\1<TODAY>"', t, flags=re.S)
         if name == "risk-assessment.md":                  # 風險評估列出 VEX 檔案的雜湊（前 12 碼）
             t = re.sub(r"SHA-256 [0-9a-f]{12}\)", "SHA-256 <SHA12>)", t)
         out[name] = t
