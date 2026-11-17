@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 11:04 +0800（C1）
+最後更新：2026-11-17 11:09 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -431,11 +431,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：S3（上游 79d11ba 板子檢查三組）短說明已交 C0，等決定；#127（wp1/m7d4，31b0d5d）、#138（wp1/m7d3，3f30fd1）已補 AI NAS 標準答案，#168（dsc PROVENANCE）已開
-- 分支／PR／commit：`wp1/m7d4`（31b0d5d，C1 的 PR #127）、`wp1/m7d3`（3f30fd1，C1 的 PR #138）、`wp7/provenance-dsc`（PR #168）；`wp7/adapters`（2f9d177，#97 已合併）
+- 目前在做：version-state PR #174（wp7/version-state，76ba35f）等 C0 的驗證；#127、#138、#168、#172（S3）都已合併
+- 分支／PR／commit：`wp7/version-state`（76ba35f）→ PR #174；`wp7/adapters`（#97 已合併）、`wp7/platform-samples`（868f064）
 - 代理：0 個（D-048 上限 3）
-- CI：#127、#138 的標準答案用各自的 dev run 核對（43676839283：78 項 OK；43688443345：77 項 OK）；main 的單元測試因日期測試紅（C0 修 wp0/test-today-fix）。三個示範專案的 dev run 延後到 C1 的 S1（K1）合併後
-- 今天處理：#127／#138 標準答案（C0 同意前後數字）、#168 dsc PROVENANCE（TOFU，.dsc 的 Checksums 重新核對）、S3 調查
-- 下一步：S3（C0 決定後）；#127、#138 後合併的那個要 merge main 解 note 欄位衝突；S1 合併後三個示範專案 dev run；release 草稿試跑、version-state、T-14
+- CI：#127／#138 的 AI NAS 標準答案用各自的 dev run 核對（78／77 項 OK），兩者合併後 note 兩段都保留；三個示範專案的 dev run 等 C1 的 S1（K1）合併後重跑一次，同時驗證 S1 與 #174
+- 今天處理：#127／#138 標準答案、#138 併 main（C1 同意解 kernel_config.py 與 PROVENANCE 衝突）、#168 dsc PROVENANCE、#172 S3 匯入端移植（驗證後補 lockdown 例外與兩個白名單測試）、#174 version-state
+- 下一步：#174 驗證結果；S1 合併後三個示範專案 dev run（rpi → rock → ai-nas，每個確認 Release 是 prerelease 非 draft）；release 草稿試跑；T-14（先交設計）
 - 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
