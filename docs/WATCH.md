@@ -48,8 +48,8 @@ watch.yml（每天）
 
 - CISA KEV：官方 feed，檢查是陣列、至少 1000 筆。Grype DB：`grype db update`。
 - **內部鏡像模式**（GitLab；GITLAB-PORT 第 6 節、T-06）：設了 `INTERNAL_MIRROR_URL=file:///<runner 主機上的內部鏡像根目錄>`（或 `DUMPLING_REQUIRE_INTERNAL_MIRROR=1`）時，`feeds.sh` 不做任何公開下載（沒有 curl、git clone、`grype db update`），也不會退回公開網址：KEV 讀 `cisa-kev` 子路徑（`tools/mirror/cisa-kev.sh` 的資料夾，或單一 JSON 檔）並放到 `<out>/cisa-kev.json`；EUVD、核心 CVE 照樣經過 `mirrors.sh`（改讀 `euvd`、`kernel-cve` 子路徑，不用 `KCVE_CACHE_DIR`）；Grype DB 通過 `grype-db.sh --check` 後 `grype db import`。子路徑可用 `INTERNAL_MIRROR_PATH_<種類>` 改。資料超過 `INTERNAL_MIRROR_FRESH_HOURS`（預設 36）小時 → feeds.tsv 記 ATTENTION；超過 `INTERNAL_MIRROR_MAX_HOURS`（預設 72）或該鏡像 `--check` 的上限、子路徑不存在、內容不合格 → 記 GAP（match.py 照現有規則處理）。變數值不合法（不是 `file:///<絕對路徑>`、含 `..`）或要求內部鏡像卻沒設 → 每個來源記 GAP、結束碼 64。feeds.tsv 每一列的說明都標明內部鏡像；單一 KEV 檔沒有同步時間，固定寫「同步時間不明（單一檔案，只依 dateReleased）」，dateReleased 超過 7 天 ATTENTION、超過 14 天 GAP。目前 runner 主機上若沒有同步 `euvd`、`grype-db`、`cisa-kev`，這幾列就是 GAP。match.py 比對時 Grype 一律 `GRYPE_DB_AUTO_UPDATE=false`，兩種模式都一樣。
-- EUVD、核心 CVE：**經過 `pipeline/lib/mirrors.sh`**（跟 Release 掃描同一份規則，不另寫）：EUVD 最多試 3 次；核心 CVE 只讓 mirror 試 1 次（`WATCH_KCVE_MIRROR_TRIES` 可改），因為 kernel-cve.sh 自己會重試 clone 3 次、每次最多 900 秒，兩層疊起來會超過 compute job 的上限（150 分鐘）；失敗刪掉不完整的資料夾 → feeds.tsv 記 GAP，match.py 看不到資料夾 → EUVD GAP／核心 CNA NOT_RUN。
-- 核心 CVE 用 `mirror_kernel_cve`：有 `KCVE_CACHE_DIR`（actions/cache 還原的上一份）時，上游沒變就沿用；git.kernel.org 連不上就用 48 小時內的上一份頂替，鏡像腳本最後一行是 ATTENTION、SOURCE 寫 `fallback=yes`。
+- EUVD、核心 CVE：**經過 `pipeline/lib/mirrors.sh`**（跟 Release 掃描同一份規則，不另寫）：EUVD 最多試 3 次；核心 CVE 只讓 mirror 試 1 次（`WATCH_KCVE_MIRROR_TRIES` 可改），因為 kernel-cve.sh 自己會重試（每一輪主來源與備援來源各試一次，最多 3 輪，合計上限 `KERNEL_CVE_TOTAL_TIMEOUT` 預設 1500 秒），兩層疊起來會超過 compute job 的上限（150 分鐘）；失敗刪掉不完整的資料夾 → feeds.tsv 記 GAP，match.py 看不到資料夾 → EUVD GAP／核心 CNA NOT_RUN。
+- 核心 CVE 用 `mirror_kernel_cve`：有 `KCVE_CACHE_DIR`（actions/cache 還原的上一份）時，上游沒變就沿用；git.kernel.org 連不上先試備援來源（`KERNEL_CVE_GIT_FALLBACK_URLS`，預設 kernel.googlesource.com，SOURCE 記 `source_role`），都失敗才用 48 小時內的上一份頂替，鏡像腳本最後一行是 ATTENTION、SOURCE 寫 `fallback=yes`。
 - **用了舊資料頂替時**：feeds.tsv 記 ATTENTION、`::warning::`；match.py 讀 `<名>.result`／SOURCE，把「核心 CVE 鏡像（Linux 核心 CNA）用了舊資料頂替：…：這段時間新增的核心 CVE 不在清單裡」列進報告的「需注意」（整輪 ATTENTION），並附在這次每個要開的 Issue 與留言最後。訊息裡的絕對路徑換成 `<路徑>`（runner 的暫存路徑不進公開 Issue）。不擋第一次基準（資料最多 48 小時舊；超過就 FAIL → 核心 CNA NOT_RUN，照降級規則處理）。
 - 演練不下載 EUVD 與核心 CVE（`--no-euvd --no-kernel-cve`），也不碰 cache。
 - watch-round.yml 的資料源步驟有自己的 `timeout-minutes: 100`＋`continue-on-error`：卡住時這一步失敗、job 繼續比對並留下報告；沒有 `.result` 的鏡像（沒做完）先刪掉，缺的資料源在報告標 GAP／NOT_RUN（CISA KEV 與 EUVD 都沒有就 FAIL），也不存 cache。
@@ -295,7 +295,7 @@ deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 �
   - 比對用的設定是複本：`support.end_date` 由 `support_until` 產生，`support.subscriptions` 照 `config.json`。
   - 元件比產品先停止維護、維護期沒有公開、或需要的訂閱沒有設定：ATTENTION。同一個專案的同一個元件問題只開一個 Issue，列出受影響的 Release；之後的新版本有同樣問題不重開。
   - 元件版本不在資料表：NOT_ASSESSED，只寫進報告。
-- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。
+- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。OS 和某個 Release SBOM 的元件對到同一個資料表項目（例如都是 Debian 13）、結論也一樣時，只開一個 Issue：用 OS 的 key（和只有 OS 時開的 Issue 相同，不重開），內文寫兩個來源與受影響的 Release。
 - **資料表的查核日期**超過 `max_age_days`（或在未來）：這些項目併成一個提醒 Issue。
 - **不重複開**：每個 Issue 的 key 由專案、門檻或元件、日期組成，同一個 key 已經有 Issue（含已關閉）就不再開。支援期限改了，key 就會變，會重新提醒。
   - plan 是 `stateless`：`issues.py apply` 不碰監控的狀態 Issue，也不做樂觀鎖，而且只能有 `open`。

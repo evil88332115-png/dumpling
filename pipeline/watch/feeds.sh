@@ -8,7 +8,7 @@
 #   <out>/euvd/           tools/mirror/euvd.sh 的鏡像（index.tsv）；<out>/euvd.result 是腳本最後一行
 #   <out>/kernel-cve/     tools/mirror/kernel-cve.sh 的鏡像（SOURCE＋kernel-cves.zip）；<out>/kernel-cve.result 是腳本最後一行
 #   鏡像都經過 pipeline/lib/mirrors.sh（跟 Release 掃描同一份：最多試 MIRRORS_TRIES 次；最後一行 ATTENTION＝用了舊資料頂替，
-#   例如 git.kernel.org 連不上、沿用 $KCVE_CACHE_DIR 裡 48 小時內的上一份 → feeds.tsv 記 ATTENTION，match.py 把那一行寫進報告與 Issue）。
+#   例如核心 CVE 的 git.kernel.org 與備援來源都連不上、沿用 $KCVE_CACHE_DIR 裡 48 小時內的上一份 → feeds.tsv 記 ATTENTION，match.py 把那一行寫進報告與 Issue）。
 #   失敗時刪掉不完整的資料夾（match.py 看到沒有資料夾 → NOT_RUN／GAP，不會讀到半份鏡像）。
 #   Grype DB：grype db update（GRYPE_DB_CACHE_DIR；grype 要在 PATH）
 #   <out>/feeds.tsv       來源<TAB>狀態<TAB>說明
@@ -109,9 +109,10 @@ rm -f "$out/cisa.err"
 if [ "$euvd" = 1 ]; then
   mirror euvd.sh euvd; mirror_row euvd $?
 else row euvd NOT_RUN "--no-euvd$tag"; fi
-# 核心 CVE：kernel-cve.sh 自己會重試 clone（KERNEL_CVE_GIT_TRIES，預設 3 次、每次最多 KERNEL_CVE_GIT_TIMEOUT=900 秒），
-# mirror 再整支重試 3 次會疊成兩個多小時、超過 compute job 的上限 → 每日監控預設只讓 mirror 試 1 次（WATCH_KCVE_MIRROR_TRIES 可改）。
-# 上游連不上時有 $KCVE_CACHE_DIR 就用 48 小時內的上一份頂替（ATTENTION），不用一直重試。
+# 核心 CVE：kernel-cve.sh 自己會重試（一輪＝主來源與備援來源各試一次，KERNEL_CVE_GIT_TRIES 預設 3 輪，
+# 合計上限 KERNEL_CVE_TOTAL_TIMEOUT 預設 1500 秒），mirror 再整支重試 3 次會疊得太久、超過 compute job 的上限
+# → 每日監控預設只讓 mirror 試 1 次（WATCH_KCVE_MIRROR_TRIES 可改）。
+# 公開模式：所有來源都連不上時有 $KCVE_CACHE_DIR 就用 48 小時內的上一份頂替（ATTENTION），不用一直重試。
 if [ "$kcve" = 1 ]; then
   MIRRORS_TRIES=${WATCH_KCVE_MIRROR_TRIES:-1} mirror_kernel_cve kernel-cve; mirror_row kernel-cve $?
 else row kernel-cve NOT_RUN "--no-kernel-cve$tag"; fi

@@ -214,7 +214,7 @@ jobs:
       - name: scan（臨時 DT → 精靈 → 分層 → 報告 → 標準答案比對）
         env:
           MIRROR_REFRESH_STATUS: ""   # 不檢查常駐環境的鏡像新鮮度
-          # 上一份核心 CVE 鏡像：上游沒變就沿用，git.kernel.org 連不上就退而求其次（≤48 小時、通過檢查；結果標 ATTENTION，不擋 Release）
+          # 上一份核心 CVE 鏡像：上游沒變就沿用；git.kernel.org 連不上先試備援來源，都失敗才退而求其次用上一份（≤48 小時、通過檢查；結果標 ATTENTION，不擋 Release）
           KCVE_CACHE_DIR: ${{ runner.temp }}/kcve-cache/kcve
         run: bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION"
 

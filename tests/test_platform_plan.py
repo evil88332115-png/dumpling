@@ -125,14 +125,14 @@ class Plan(unittest.TestCase):
             r, kv = info("--dir", d, "v39.2.1-demo1", env={"DUMPLING_PLATFORMS_DIR": plats})
             self.assertEqual(r.returncode, 0, r.stdout)
             self.assertEqual(kv["SCAN_TOOLS"], want)
-        for bad in ("minimal", "FULL", "[syft]", "'full; rm'"):
+        for i, bad in enumerate(("minimal", "FULL", "[syft]", "'full; rm'")):
             plats = self.platforms_with_scan_tools(bad.replace("'", "q").replace("[", "l").replace("]", "r").replace(" ", "_").replace(";", "s"))
             y = os.path.join(plats, "toolp", "platform.yml")
             t = open(y, encoding="utf-8").read()
             import re
             t = re.sub(r"  tools: .*\n", "  tools: %s\n" % bad, t, count=1)
             open(y, "w", encoding="utf-8").write(t)
-            d = self.project("plan-tools-bad%d" % abs(hash(bad) % 1000), "toolp")
+            d = self.project("plan-tools-bad%d" % i, "toolp")      # 序號（字串 hash 每個程序不同，取 mod 會撞名）
             r, _ = info("--dir", d, "v39.2.1-demo1", env={"DUMPLING_PLATFORMS_DIR": plats})
             self.assertEqual(r.returncode, 64, (bad, r.stdout))
             self.assertIn("scan.tools", r.stdout)

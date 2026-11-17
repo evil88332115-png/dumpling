@@ -39,7 +39,7 @@ ORDER = ("OK", "ATTENTION", "NOT_ASSESSED", "FAIL")     # 同 support_check.py
 LABEL = "support-period"
 ISSUE_VERDICTS = ("ends before the product support period", "end of maintenance not published",
                   "no maintenance phase applies (subscription not configured)")
-VERDICT_TODO = {"ends before the product support period": "確認元件在產品支援期後段怎麼取得安全更新（換版本、付費維護並寫進 support.subscriptions、或縮短支援期並寫明依據）",
+VERDICT_TODO = {"ends before the product support period": "確認元件在產品支援期後段怎麼取得資安更新（換版本、付費維護並寫進 support.subscriptions、或縮短支援期並寫明依據）",
                 "end of maintenance not published": "向廠商確認維護期（取得書面說明後更新資料表的 end 與來源），在那之前不能假設維護到產品支援期結束",
                 "no maintenance phase applies (subscription not configured)": "確認有沒有買需要的維護（有的話寫進 config.json 的 support.subscriptions）"}
 VERDICT_ZH = {"ends before the product support period": "比產品先停止維護",
@@ -198,47 +198,65 @@ def run(a):
                 if not x["informational"] and x["verdict"] in ISSUE_VERDICTS:
                     g = groups.setdefault((x["id"], x["verdict"], x["end"]), {"x": x, "rels": []})
                     g["rels"].append((ver, tag, x["matched"]))
+        rel_lines = lambda g: [f"  - {match.md_code(tag)}：{'、'.join(match.md_code(m) for m in matched)}" for _, tag, matched in g["rels"][:20]]
+        src_lines = lambda x: ([f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}"]
+                               + ([f"- 涵蓋範圍：{t(x['coverage'])}"] if x.get("coverage") else []))
+        # 3. 我們自己的 OS（先算，才知道哪些元件問題和 OS 是同一件事）
+        os_hits = check_os(name, pname, proj, cfg, run_line)
+        # 同一個資料表項目（名稱加版本線，例如 Debian 13）、同樣的結論：Release 的元件和 project.yml 的 OS 只開一個 Issue，
+        # 用 OS 的 key（和合併前開過的 OS Issue 相容，不重開），內文寫兩個來源（C0 11-17）
+        merged = {k for k in os_hits if k in groups}
         for (eid, verdict, end), g in sorted(groups.items(), key=lambda kv: kv[0][0]):
+            if (eid, verdict, end) in merged:
+                continue
             x, vz = g["x"], VERDICT_ZH[verdict]
             act(key_of(name, "component", eid, verdict, end, pend),
                 f"[支援期限][ATTENTION] {match.md_title(pname)}：{match.md_title(x['name'])} {vz}",
                 "\n".join([f"**{t(pname)}**（專案 {match.md_code(name)}）的 **{t(x['name'])}**：{vz}。", "",
                            f"- 產品支援期限：{t(pend or '—')}（project.yml 的 support_until）",
                            f"- 元件的維護期：{t(x['end'] or '沒有公開') + '（' + t(x['phase']) + '）' if x['phase'] else '—'}",
-                           "- 受影響的 Release（這次比對到的）：",
-                           *[f"  - {match.md_code(tag)}：{'、'.join(match.md_code(m) for m in matched)}" for _, tag, matched in g["rels"][:20]],
-                           f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
-                           *([f"- 涵蓋範圍：{t(x['coverage'])}"] if x.get("coverage") else []),
+                           "- 受影響的 Release（這次比對到的）：", *rel_lines(g), *src_lines(x),
                            f"- 要人處理：{VERDICT_TODO[verdict]}。", "", *run_line]), ["attention"])
-        # 3. 我們自己的 OS
-        if proj.get("os_responsibility") == "ours":
-            os_ = proj.get("os") if isinstance(proj.get("os"), dict) else {}
-            dist, rel = os_.get("distro"), os_.get("release")
-            if dist in (None, "", "TO BE COMPLETED") or rel in (None, "", "TO BE COMPLETED"):
-                sts.append("NOT_ASSESSED")
-                rows.append((f"{name}（OS）", "NOT_ASSESSED", "os.distro／os.release 還沒填"))
-                return
-            res = sc.check({"components": [{"type": "operating-system", "name": dist, "version": str(rel)}]}, cfg, table, table_sha, today)
-            hit = [x for x in res["entries"] if not x["informational"]]
-            if not hit:
-                sts.append("ATTENTION")
-                rows.append((f"{name}（OS）", "ATTENTION", f"{dist} {rel} 不在資料表：維護期不明（不推估）"))
-                act(key_of(name, "os-missing", dist, rel), f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(dist)} {match.md_title(rel)} 不在資料表",
-                    "\n".join([f"**{t(pname)}** 的 OS（project.yml 的 os：{match.md_code(dist)} {match.md_code(rel)}）不在 "
-                               f"{match.md_code('tools/cra/data/support-lifecycle.json')}，維護期不明。工具不推估日期。", "",
-                               "- 要人處理：在資料表加這個版本（附來源網址與查核日期；沒有公開資料就寫 null）。", "", *run_line]), ["attention"])
-                return
-            sts.append(res["status"])
-            rows.append((f"{name}（OS）", res["status"], "；".join(res["reasons"]) or "OS 維護到產品支援期結束或更晚"))
-            for x in hit:
-                if x["verdict"] in ISSUE_VERDICTS:
-                    vz = VERDICT_ZH[x["verdict"]]
-                    act(key_of(name, "os", x["id"], x["verdict"], x["end"], pend),
-                        f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(x['name'])} {vz}",
-                        "\n".join([f"**{t(pname)}** 的 OS {match.md_code(dist)} {match.md_code(rel)}（{t(x['name'])}）：{vz}。", "",
-                                   f"- 產品支援期限：{t(pend or '—')}；OS 的維護期：{t(x['end'] or '沒有公開')}",
-                                   f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}",
-                                   f"- 要人處理：{VERDICT_TODO[x['verdict']]}。", "", *run_line]), ["attention"])
+        for k, (x, dist, rel) in os_hits.items():
+            vz = VERDICT_ZH[x["verdict"]]
+            g = groups.get(k) if k in merged else None
+            act(key_of(name, "os", x["id"], x["verdict"], x["end"], pend),
+                f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(x['name'])} {vz}",
+                "\n".join([f"**{t(pname)}** 的 OS {match.md_code(dist)} {match.md_code(rel)}（{t(x['name'])}）：{vz}。", "",
+                           f"- 產品支援期限：{t(pend or '—')}；OS 的維護期：{t(x['end'] or '沒有公開')}",
+                           *(["- 來源：project.yml 的 os（我們自己的 OS），以及 Release SBOM 裡的元件（同一個資料表項目，只開這一個 Issue）",
+                              "- 受影響的 Release（這次比對到的）：", *rel_lines(g)] if g else []),
+                           *(src_lines(x) if g else [f"- 資料表來源（查核 {t(x['checked'])}）：{'；'.join(match.md_code(u) for u in x['sources'])}"]),
+                           f"- 要人處理：{VERDICT_TODO[x['verdict']]}。", "", *run_line]), ["attention"])
+
+    def check_os(name, pname, proj, cfg, run_line):
+        """os_responsibility: ours 時比對 project.yml 的 OS。→ {(資料表項目 id, 結論, end): (項目, distro, release)}（要開 Issue 的）；
+        沒填、不在資料表時自己記結果（不在資料表另外開一個 Issue），回空的。"""
+        if proj.get("os_responsibility") != "ours":
+            return {}
+        os_ = proj.get("os") if isinstance(proj.get("os"), dict) else {}
+        dist, rel = os_.get("distro"), os_.get("release")
+        if dist in (None, "", "TO BE COMPLETED") or rel in (None, "", "TO BE COMPLETED"):
+            sts.append("NOT_ASSESSED")
+            rows.append((f"{name}（OS）", "NOT_ASSESSED", "os.distro／os.release 還沒填"))
+            return {}
+        res = sc.check({"components": [{"type": "operating-system", "name": dist, "version": str(rel)}]}, cfg, table, table_sha, today)
+        hit = [x for x in res["entries"] if not x["informational"]]
+        if not hit:
+            sts.append("ATTENTION")
+            rows.append((f"{name}（OS）", "ATTENTION", f"{dist} {rel} 不在資料表：維護期不明（不推估）"))
+            act(key_of(name, "os-missing", dist, rel), f"[支援期限][ATTENTION] {match.md_title(pname)}：OS {match.md_title(dist)} {match.md_title(rel)} 不在資料表",
+                "\n".join([f"**{t(pname)}** 的 OS（project.yml 的 os：{match.md_code(dist)} {match.md_code(rel)}）不在 "
+                           f"{match.md_code('tools/cra/data/support-lifecycle.json')}，維護期不明。工具不推估日期。", "",
+                           "- 要人處理：在資料表加這個版本（附來源網址與查核日期；沒有公開資料就寫 null）。", "", *run_line]), ["attention"])
+            return {}
+        sts.append(res["status"])
+        rows.append((f"{name}（OS）", res["status"], "；".join(res["reasons"]) or "OS 維護到產品支援期結束或更晚"))
+        out = {}
+        for x in hit:
+            if x["verdict"] in ISSUE_VERDICTS:
+                out.setdefault((x["id"], x["verdict"], x["end"]), (x, dist, rel))
+        return out
 
     for name, d, proj, err in load_projects(a.projects_dir):
         seen_projects.add(name)
