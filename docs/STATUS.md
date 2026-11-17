@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 11:17 +0800（C2）
+最後更新：2026-11-17 11:19 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -117,7 +117,8 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-> **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。第一階段裡 C2 負責的部分已完成；T-04 要等 C4 的 T-14，其他 C2 項目照 D-063 凍結到第二階段。下一件等 C0 確認。
+> **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。T-04 要等 C4 的 T-14（C0：T-04 的設計準備也等 T-14 的設計出來再做），其他 C2 項目照 D-063 凍結到第二階段。
+> - **進行中（C0 同意）**：在真的 Actions 上驗「firmware-dt 失敗時 firmware-release-check 照跑、meta 的 dt 記成 GAP」。測試分支 `wp3/test-dt-fail`（629fe1a，從 main 20ba05e；worktree `$AGENT_TMP/dumpling-wt-c2-dtfail`）只改 `pipeline/dt-ephemeral.sh` 的 DT 位址成連不到的埠，不合併；不推 tag、不改 repo 變數或 secret。workflow_dispatch run 44009322155。firmware-release 的 if（firmware.yml:402）要求 push＋tag，這次不會建 Release 或草稿。跑完刪測試分支；刪除被擋就停下回報 C0。
 >
 > **2026-11-15 下午**：D-063（PR #117）已定，先完成第一階段的端到端流程。
 > - **韌體進每日監控（D-063 第 5 點，和 C3 一起設計，設計稿由 C3 寫，先給 C2 看，再一起送 C0 審）**：
