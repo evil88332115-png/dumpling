@@ -248,7 +248,7 @@ done <<< "$plan"
 # ---------- 5. 收集與標準答案 ----------
 echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
-# 正式 Release＝這個 tag 的 push（和 pipeline/lib/previous_release.py 的 official_tag_push 相同）：分支 push、手動觸發都不是
+# 正式 Release＝這個 tag 的 push（和 pipeline/lib 的 official_tag_push 同一個判斷）：分支 push、手動觸發都不是
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ] && [ "${GITHUB_REF:-}" = "refs/tags/$DUMPLING_PROJECT/$ver" ] && official=(--official)
 srcargs=(); [ -n "$srcjson" ] && srcargs=(--source-json "$srcjson")
 python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" --platform "$DUMPLING_PLATFORM" \

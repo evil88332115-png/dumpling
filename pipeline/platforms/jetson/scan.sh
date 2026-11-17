@@ -116,7 +116,7 @@ done <<< "$plan"
 # ---------- 4. 收集與標準答案 ----------
 echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
-# 正式 Release＝這個 tag 的 push（和 pipeline/lib/previous_release.py 的 official_tag_push 相同）：分支 push、手動觸發都不是
+# 正式 Release＝這個 tag 的 push（和 pipeline/lib 的 official_tag_push 同一個判斷）：分支 push、手動觸發都不是
 official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ] && [ "${GITHUB_REF:-}" = "refs/tags/$DUMPLING_PROJECT/$ver" ] && official=(--official)
 pyl jetson_scan.py collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" \
   --build-json "$out/handoff/build.json" --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" --build-record "$br" --project-dir "$proj" --steps "$out/pipeline-steps.tsv" --steps-md "$out/steps-summary.md" "${runargs[@]}" "${official[@]+"${official[@]}"}" \
