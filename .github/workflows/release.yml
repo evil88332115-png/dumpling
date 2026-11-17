@@ -105,7 +105,7 @@ jobs:
           TAG: ${{ needs.info.outputs.tag }}
         run: |
           python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$TAG" --notes "$RUNNER_TEMP/result/notes.md" \
-            --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps "$RUNNER_TEMP/result/pipeline-steps.tsv" \
+            --body-out "$RUNNER_TEMP/result/release-body.md" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --steps "$RUNNER_TEMP/result/pipeline-steps.tsv" \
             --scan-summary "$RUNNER_TEMP/result/scan-summary-$PROJECT-$VERSION.json" --out "$RUNNER_TEMP/result/release-meta.json"
           printf 'release-meta.json\trelease-meta.json\n' >> "$RUNNER_TEMP/result/manifest.tsv"
       - name: 建立 Release（手動觸發只建 draft；tag push 才發正式 Release）
@@ -115,7 +115,9 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           cd "$RUNNER_TEMP/result"
-          # GitHub API 偶爾回 403 Resource not accessible by integration（原因還沒查出來）：每 30 秒重試、最多 8 次，仍失敗就印出回應標頭與本文當診斷
+          # GitHub API 回 403 Resource not accessible by integration：已知的原因是 Release 說明裡有網址（ai-nas 草稿 run 44040129677 連續 403；
+          # 拿掉網址後 run 44051748503 一次就成功），所以說明改用 release-meta.py --body-out 產生的 release-body.md（網址都不會自動連結）。
+          # 其他偶發的 403 照舊：每 30 秒重試、最多 8 次，仍失敗就印出回應標頭與本文當診斷
           ghx() {
             local n=0
             until "$@"; do
@@ -128,6 +130,7 @@ jobs:
             done
           }
           [ -s manifest.tsv ] || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
+          [ -s release-body.md ] || { echo "release: FAIL（沒有 Release 說明 release-body.md，或是空的：release-meta.py --body-out 沒有執行或失敗）"; exit 1; }
           args=()
           while IFS=$'\t' read -r f label; do
             [ -f "$f" ] || { echo "release: FAIL（manifest 列出的 $f 不存在）"; exit 1; }
@@ -140,9 +143,9 @@ jobs:
           done
           if [ "$EVENT" = push ]; then
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then echo "release: FAIL（$TAG 已經有正式 Release，不覆蓋）"; exit 1; fi
-            ghx gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            ghx gh release create "$TAG" "${args[@]}" --verify-tag --title "$TAG" --notes-file release-body.md --repo "$GITHUB_REPOSITORY"
             echo "release: OK（正式 Release $TAG，${#args[@]} 個附件）"
           else
-            ghx gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG（手動觸發的草稿）" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            ghx gh release create "$TAG" "${args[@]}" --draft --target "$GITHUB_SHA" --title "$TAG（手動觸發的草稿）" --notes-file release-body.md --repo "$GITHUB_REPOSITORY"
             echo "release: OK（draft $TAG，${#args[@]} 個附件；手動觸發不發正式 Release、不建 git tag）"
           fi

@@ -12,12 +12,31 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
 import platform_scan as ps  # noqa: E402
+
+# notes.md（＝Release 說明）不放 http(s):// 網址：2026-11-17 ai-nas 草稿，body 帶「https://github.com/…」時 POST /releases 連續 16 次 403
+# （run 44040129677 兩次），同一份 scan 拿掉 https:// 後一次成功（run 44051748503）。原因沒有查出來，不推測；網址照樣寫，只是不帶 scheme。
+URL_SCHEME_RE = re.compile(r"https?://", re.I)   # 不加 \b：中文字後面緊接網址（「見https://…」）時沒有字邊界
+
+
+def display_url(u):
+    """notes.md 用的網址寫法：去掉 http(s):// 與結尾的 .git（例如 github.com/openmediavault/openmediavault）。None → None。"""
+    if u is None:
+        return None
+    u = URL_SCHEME_RE.sub("", str(u))
+    return u[:-4] if u.endswith(".git") else u
+
+
+def no_url_scheme(lines):
+    """notes.md 的每一行去掉 http(s)://（來源可能是精靈或上游工具的說明文字，不只上面那一行）。"""
+    return [URL_SCHEME_RE.sub("", l) for l in lines]
+
 
 # 對外連線服務（D-027）：分層照名稱清單（不影響待辦歸誰），但報告要標成要特別注意的項目。
 # 清單依平台定義；沒有定義清單的平台記 NOT_ASSESSED（不是「沒有」：例如 Rockchip、AI NAS 的映像有 ssh、avahi、samba 等服務，沒有評估）。
@@ -197,7 +216,7 @@ class Wp7Hooks(ps.Hooks):
         if src:
             L += ["", "## NAS 應用的原始碼", "",
                   "- `%s` commit `%s`：%s；元件帶 `dumpling:origin=source` 與 commit。原始碼與正式 deb 是否完全相同：**NOT_ASSESSED**（D-025）。" % (
-                      src.get("repo"), src.get("commit"), src.get("line")),
+                      display_url(src.get("repo")), src.get("commit"), src.get("line")),
                   "- 應用本身：`%s` `%s`。根元件名稱由 sources.yml 指定（cdxgen 原值是 `%s`，版本 `%s`）；版本取自固定 commit 的 debian/changelog（D-025），"
                   "版本與 commit 是否完全相同：**%s**。" % (src.get("app_name"), src.get("app_version"), src.get("cdxgen_root_name"),
                                                           src.get("cdxgen_root_version"), src.get("version_vs_commit") or "NOT_ASSESSED")]
@@ -209,7 +228,7 @@ class Wp7Hooks(ps.Hooks):
             L.append("- %s：清單裡的服務都不在 SBOM 裡。" % sv.get("reason"))
         else:
             L.append("- **%s**：%s" % (sv.get("status"), sv.get("reason")))
-        return L
+        return no_url_scheme(L)
 
     def notes_after_vulnerabilities(self, ctx):
         if (ctx.get("layers") or {}).get("os_responsibility") == "ours":
