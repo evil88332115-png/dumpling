@@ -31,6 +31,7 @@
   - `dt-secure-boot`、`dmesg-secureboot`。
   - `tegra-fuse`：Jetson，只收白名單節點。
   - `lockdown`、`modsig`、`tpm`、`ima`、`dm-verity`。
+  - `lockdown` 段：只有 securityfs 讀得到時才能寫 `lockdown=absent`（表示核心沒有 lockdown）；securityfs 不在、或讀不到時一律寫 `lockdown=NOT_RUN (<原因>)`，匯入後是沒量到，不出 finding。
 - **`update-channel.txt`** 的段落：
   - `apt-sources`：每個來源只有協定、主機、路徑第一段；本機來源只有協定。
   - `apt-config`：只收白名單的鍵。
@@ -58,6 +59,10 @@ ima=NOT_RUN (no securityfs)
 - **沒找到保護機制**、**沒量到**，最多出 info。這兩種都不當作通過。
   - 測試 `test_not_found_or_not_measured_is_at_most_info` 和 `test_not_found_or_not_measured_end_to_end_is_info` 檢查這條規則。
 - 來源互相矛盾時（例如 efivar 和 dmesg 不一致）不下結論，記一條 note。
+- **例外：`lockdown=absent` 出 low**（C0 決定，與上游一致）。
+  - absent 的意思是 securityfs 讀得到，但沒有 `/sys/kernel/security/lockdown`，也就是**量到了**核心沒編進 lockdown，屬於「找到弱點」，不是「沒量到」。
+  - IMA、dm-verity 沒找到只算 info，因為完整性可能用別的機制做（簽章更新包、唯讀 rootfs 等）。
+  - 測試：`test_integrity_secure_boot_off_and_jetson_fuse_unreadable`（absent → low）、`test_lockdown_not_run_when_securityfs_missing`（securityfs 不在 → NOT_RUN，不出 finding）。
 
 | finding ID | 條件 | 嚴重度 |
 |---|---|---|
@@ -65,7 +70,7 @@ ima=NOT_RUN (no securityfs)
 | `board:secureboot-fuse-not-burned` | Jetson 的 `odm_production_mode` 是 0（開發狀態） | medium |
 | `board:secureboot-fuse-not-assessed` | Jetson，但讀不到 fuse 節點 | info |
 | `board:secureboot-not-assessed` | 沒有任何 UEFI 或 fuse 的證據 | info |
-| `board:lockdown-none` | 核心 lockdown 是 none，或核心沒有 lockdown | low |
+| `board:lockdown-none` | 核心 lockdown 是 none，或核心沒有 lockdown（`absent`：securityfs 讀得到但沒有 lockdown 檔；**例外**，見上面） | low |
 | `board:integrity-verification-not-found` | 沒找到 dm-verity，也沒找到 IMA | info |
 | `board:apt-insecure-allowed` | apt 允許沒有簽章的套件或來源（`AllowUnauthenticated` 等，或網路來源有 `trusted=yes`） | high（只有本機來源時 medium） |
 | `board:apt-tls-verify-off` | `Verify-Peer`／`Verify-Host` 設成 false | medium |
@@ -94,7 +99,7 @@ ima=NOT_RUN (no securityfs)
 
 ## Jetson fuse 節點的出處與限制
 
-- `odm_production_mode` 是 NVIDIA 公開的 tegra-fuse 驅動原始碼裡的 sysfs 屬性：`drivers/misc/tegra-fuse/tegra_fuse.c` 的 `DEVICE_ATTR(odm_production_mode, 0440, …)`，
+- `odm_production_mode` 是 NVIDIA tegra 核心原始碼（android.googlesource.com 上的鏡像）裡 tegra-fuse 驅動的 sysfs 屬性：`drivers/misc/tegra-fuse/tegra_fuse.c` 的 `DEVICE_ATTR(odm_production_mode, 0440, …)`，
   <https://android.googlesource.com/kernel/tegra.git/+/8a95a1a8e5817af21188ad74872b768d5d1ebe35/drivers/misc/tegra-fuse/tegra_fuse.c>。
 - Jetson Linux Developer Guide 的 Secure Boot 一節列出 `odm_production_mode`（tegraflash 別名 SecurityMode）與 Security_info（BootSecurityInfo）這兩個 fuse，
   例如 <https://docs.nvidia.com/jetson/archives/l4t-archived/l4t-3273/Tegra%20Linux%20Driver%20Package%20Development%20Guide/bootloader_secure_boot.html>。

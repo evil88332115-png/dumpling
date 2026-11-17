@@ -846,7 +846,7 @@ def parse_integrity(t, stem, notes):
     else:
         info["secure_boot_uefi"] = "no_uefi" if efi == "absent" else None
     # Jetson：boot chain 的 Secure Boot 由 fuse 決定。只讀 sysfs 的少數白名單節點；原始 fuse 陣列不讀
-    # 節點名稱的公開出處：odm_production_mode 是 NVIDIA 公開的 tegra-fuse 驅動原始碼裡的 sysfs 屬性
+    # 節點名稱的公開出處：odm_production_mode 是 NVIDIA tegra 核心原始碼（android.googlesource.com 上的鏡像）裡 tegra-fuse 驅動的 sysfs 屬性
     # （drivers/misc/tegra-fuse/tegra_fuse.c 的 DEVICE_ATTR(odm_production_mode, 0440, …)；
     #  https://android.googlesource.com/kernel/tegra.git/+/8a95a1a8e5817af21188ad74872b768d5d1ebe35/drivers/misc/tegra-fuse/tegra_fuse.c），
     # Jetson Linux Developer Guide 的 Secure Boot 一節列出 odm_production_mode（tegraflash 別名 SecurityMode）與 Security_info（BootSecurityInfo）這兩個 fuse。

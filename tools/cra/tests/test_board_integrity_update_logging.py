@@ -213,6 +213,8 @@ def new_ids(ids):
 
 
 def test_integrity_secure_boot_off_and_jetson_fuse_unreadable():
+    # 例外（C0 決定，與上游一致）：lockdown=absent 是 low，不是 info。absent＝securityfs 讀得到、卻沒有 lockdown 檔，
+    # 也就是「量到了核心沒編進 lockdown」（找到弱點），不是「沒量到」；securityfs 不在時是 NOT_RUN，見 test_lockdown_not_run_when_securityfs_missing
     ids, info, notes = run(only(integrity=INTEG_OFF))
     assert new_ids(ids) == {"board:secureboot-disabled": "medium", "board:secureboot-fuse-not-assessed": "info", "board:lockdown-none": "low",
                             "board:integrity-verification-not-found": "info"}
@@ -507,3 +509,31 @@ def test_security_findings_shows_script_version(tmp_path):
         res = sf.evaluate(None, str(rd / "board-test" / "board-test.json"), {}, {})
         board = next(t for t in res["tests"] if t["key"] == "board")
         assert board["tool"].startswith(want), board["tool"]
+
+
+def test_lockdown_not_run_when_securityfs_missing():
+    """securityfs 不在 → lockdown=NOT_RUN → 列進 not_run，不出 board:lockdown-none（只有 securityfs 讀得到、沒有 lockdown 檔時才寫 absent）。"""
+    t = INTEG_ON.replace("lockdown=none [integrity] confidentiality", "lockdown=NOT_RUN (no securityfs)")
+    ids, info, _ = run(only(integrity=t))
+    assert "board:lockdown-none" not in ids and info["integrity"]["lockdown"] is None and "lockdown" in info["integrity"]["not_run"]
+    # 對照：securityfs 讀得到、核心沒有 lockdown（absent）→ low；選項是 none → low
+    for v in ("absent", "[none] integrity confidentiality"):
+        ids, info, _ = run(only(integrity=INTEG_ON.replace("lockdown=none [integrity] confidentiality", "lockdown=" + v)))
+        assert ids["board:lockdown-none"]["severity"] == "low", v
+
+
+# ---------- 上游的值白名單測試（匯入端；驗證時補回） ----------
+
+def test_l4_values_are_whitelisted():
+    bad = LOG_GOOD.replace("rsyslog enabled=enabled active=active", "rsyslog enabled=SECRETVALUE active=weird\nsshd enabled=enabled active=active")
+    _, info, _ = run(only(logging=bad))
+    assert info["logging"]["daemons"]["rsyslog"] == {"enabled": "?", "active": "?"} and "sshd" not in info["logging"]["daemons"]
+    cfg = UPD_GOOD.replace('Acquire::AllowInsecureRepositories "0";', 'Acquire::AllowInsecureRepositories "SECRETCFG";\nAcquire::Check-Valid-Until "false";')
+    _, info, _ = run(only(update_channel=cfg))
+    assert info["update_channel"]["apt_config"] == {"Acquire::AllowInsecureRepositories": "?", "Acquire::Check-Valid-Until": "false"}
+
+
+def test_l5_dm_devices_whitelisted():
+    t = INTEG_ON.replace("dm=CRYPT-VERITY", "dm=CRYPT-VERITY\ndm=CRYPT-LUKS2\ndm=CRYPT-SECRETNAME\ndm=LVM")
+    _, info, _ = run(only(integrity=t))
+    assert info["integrity"]["dm_devices"] == ["CRYPT", "CRYPT-LUKS2", "CRYPT-VERITY", "LVM"]
