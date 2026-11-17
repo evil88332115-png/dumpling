@@ -253,12 +253,12 @@
 | 項目 | GitHub 版 | GitLab 版 |
 |---|---|---|
 | BSP／原始碼 | `projects/<專案>/sources.yml` 的公開網址＋sha256（`fetch` 步驟下載並核對） | 公司產品 repo 與內部檔案庫；`sources.yml` 的網址換成內部網址，**sha256 照樣核對**（硬性限制 3 的精神：二進位檔不進 git、下載後核對）。網址放變數，不寫死 |
-| CISA KEV、EUVD、核心 CNA、Grype DB | `pipeline/watch/feeds.sh` 每天從公開網址下載 | 改讀 runner 主機上的**內部鏡像根目錄**（內容由更新主機用 `tools/mirror/*.sh` 產生、同步到 runner 主機）：範本變數 `INTERNAL_MIRROR_URL=file:///<根目錄>` 加 `DUMPLING_REQUIRE_INTERNAL_MIRROR=1`。`feeds.sh` 與 `pipeline/lib/mirrors.sh` 的內部鏡像模式已完成（T-06 PR-1，見下）；`scan.sh` 與 GitLab 範本還沒接（PR-2） |
+| CISA KEV、EUVD、核心 CNA、Grype DB | `pipeline/watch/feeds.sh` 每天從公開網址下載 | 改讀 runner 主機上的**內部鏡像根目錄**（內容由更新主機用 `tools/mirror/*.sh` 產生、同步到 runner 主機）：範本變數 `INTERNAL_MIRROR_URL=file:///<根目錄>` 加 `DUMPLING_REQUIRE_INTERNAL_MIRROR=1`。`feeds.sh` 與 `pipeline/lib/mirrors.sh` 的內部鏡像模式（T-06 PR-1，見下）、release scan 的 Grype DB 與資料來源紀錄（PR-2）已完成；GitLab 範本還沒接 |
 | NVIDIA 公告、OSV | 臨時 DT 開機時下載 | 常駐 DT 已有 |
 | 編譯環境 | runner 上 `apt-get` 安裝（`build.apt`） | RD 的 Docker 映像（`DUMPLING_IMAGE`），`DUMPLING_APT` 清空 |
 
 **驗收**：
-- [ ] （T-06 PR-2、T-14 之後）斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。現況：`feeds.sh` 與 `mirrors.sh` 已有內部鏡像模式（PR-1，本機以假的 curl／git／grype 驗證沒有公開下載）；`scan.sh` 還沒有接（PR-2），Grype DB 在掃描前的更新（`GRYPE_DB_UPDATE` 預設 `online`）也還是公開網址，所以 `release:scan` **還不能斷網**。
+- [ ] （T-06 PR-2、T-14 之後）斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。現況：`feeds.sh`、`mirrors.sh`（PR-1）與 release scan 的 Grype DB（PR-2：`grype_db_mode` → `GRYPE_DB_UPDATE=import:…`，精靈照外部設定傳下去）都有內部鏡像模式；GitHub hosted runner 上的出站封鎖實跑見 `.github/workflows/offline-scan.yml`。GitLab 範本還沒接，也還沒在沒有外網的內部 runner 上跑過，所以這一項還不能勾。
 - [ ] watch 的資料源過期記 GAP；release scan 過期超過 --check 上限 FAIL、超過新鮮門檻 ATTENTION；兩者都不退回公開網址。
 
 **內部鏡像模式（T-06 PR-1）**：
@@ -272,7 +272,7 @@
 - **目前 runner 主機上的內部鏡像沒有 `euvd`、`grype-db`（`cisa-kev` 是否有資料夾版本也要看內部決定）**：內部模式下這幾個子路徑不存在時，`feeds.sh` 記 GAP（EUVD 缺 → match.py 的 EUVD GAP；Grype DB 缺 → GAP）；release scan 要 euvd 時會 FAIL，Grype DB 的 `grype_db_mode` 回報失敗、scan FAIL（PR-2）。要不要同步這幾種是內部決定，在那之前 GitLab 上這幾項會是 GAP／FAIL。
 - **時間沒有時區一律失敗**：`fetched_utc`、`built`、`dateReleased`（包括只有日期）都一樣，不假設是 UTC；未來時間只容忍 1 小時（主機時鐘誤差），超過就失敗。CISA 官方的 dateReleased 都帶 `Z`，不會誤擋。
 - **部署限制**：根目錄路徑不能含空白（用法錯誤）。**內部鏡像根目錄只能由同步帳號寫入**（job 的帳號、其他使用者都不能寫）：程式在 `realpath` 確認子路徑在根目錄內之後才複製，兩者之間如果有人把子路徑換成指向根目錄外的符號連結，可能讀到根目錄外的檔案（複製後的型別檢查與 `--check` 仍會擋下大部分情況，但不能取代寫入權限的限制）。
-- **範圍（T-06 PR-2 之後）**：`DUMPLING_REQUIRE_INTERNAL_MIRROR=1` 時，`feeds.sh`、`pipeline/lib/mirrors.sh` 的各鏡像，以及 release scan 的 Grype DB 都只讀內部鏡像：`jetson/scan.sh` 與 `_shared/scan-disk.sh` 用 `grype_db_mode`，內部模式下是 `grype db import <複本裡的壓縮檔>`，`grype-db` 鏡像不可用（或設定不合法）時 scan **FAIL**，不退回 `grype db update`。沒設兩個變數時行為不變（`online`）。這次用的資料來源與快照時間寫進 `scan.json` 與 `release-meta.json` 的 `data_sources`（`mode`＝internal｜public｜mixed｜unknown，每一種的 `source`、`snapshot_utc`；不寫路徑），notes.md 也有一行摘要。Dependency-Track 的資料由 DT 自己的資料源提供（常駐 DT，T-14），不在 `data_sources` 裡。下面列的是之後仍會連外、不在 T-06 範圍的地方。
+- **範圍（T-06 PR-2 之後）**：`DUMPLING_REQUIRE_INTERNAL_MIRROR=1` 時，`feeds.sh`、`pipeline/lib/mirrors.sh` 的各鏡像，以及 release scan 的 Grype DB 都只讀內部鏡像：`jetson/scan.sh` 與 `_shared/scan-disk.sh` 用 `grype_db_mode`，內部模式下是 `grype db import <複本裡的壓縮檔>`，`grype-db` 鏡像不可用（或設定不合法）時 scan **FAIL**，不退回 `grype db update`。精靈（`tools/wizard/cra-scan.py` 的 `grype_db_update_mode`，同步自 sca-center）照外部設定把這個值傳給 sca-scan，沒設才是 `online`。複本合格但 sca-scan 匯入本身失敗時，sca-scan 記 `C-grype-db-update` FAIL、報告是 GAP（不是 FAIL），`data_sources` 的 grype-db 記成來源不明。沒設兩個變數時行為不變（`online`）。這次用的資料來源與快照時間寫進 `scan.json` 與 `release-meta.json` 的 `data_sources`（`mode`＝internal｜public｜mixed｜unknown，每一種的 `source`、`snapshot_utc`；不寫路徑），notes.md 也有一行摘要。Dependency-Track 的資料由 DT 自己的資料源提供（常駐 DT，T-14），不在 `data_sources` 裡。下面列的是之後仍會連外、不在 T-06 範圍的地方。
 - **PR-2 之後仍會連外的地方**（不在 T-06 範圍）：臨時 DT 自己下載 NVD／OSV／KEV／EPSS 與 docker pull（T-14 改連常駐 DT）；掃描工具的安裝（第 5 節，改用 `DUMPLING_IMAGE`）；`sources.yml` 的 BSP 與 `app_repo` 下載（本節第 1 列，換內部網址、sha256 照樣核對）；**Go 專案的 govulncheck 會連 `vuln.go.dev`**（`scan.tools: full` 才跑；`tools/pilot/sca-scan` 是上游的檔，要等上游支援指定內部漏洞資料庫，例如 govulncheck 的 `-db` 或 `GOVULNDB`；已轉給 sca-center，D-071）。
 
 **官方依據**：內部系統，沒有對應的 GitLab 官方文件。

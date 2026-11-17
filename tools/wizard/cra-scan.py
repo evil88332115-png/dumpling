@@ -254,6 +254,13 @@ def check_board_test_file(v):
     return None
 
 
+def grype_db_update_mode(environ):
+    """掃描用的 GRYPE_DB_UPDATE：外面有設（online｜off｜import:<鏡像檔或 URL>，例如內部鏡像、離線環境）就照設定，沒設才 online。
+    值的檢查交給 sca-scan／scan-flash-package.sh（它們本來就驗證並把結果寫進 meta.json）；這裡不覆蓋外部設定。"""
+    v = str(environ.get("GRYPE_DB_UPDATE") or "").strip()
+    return v or "online"
+
+
 def board_import_status(rc, log):
     """board-import.sh 的結果 → (狀態, 說明)。board_import.py 的退出碼：0＝OK、2＝匯入成功但有 ATTENTION／GAP（有發現事項）、1＝FAIL；
     狀態以它印的 `D-board-test<TAB>狀態<TAB>說明`（有 --kernel-modules-from 時還有 D-kernel-modules）為準，沒有狀態行才當 FAIL。"""
@@ -1360,7 +1367,9 @@ def main():
 
     say("\n== 3、4. 掃描（約 10–15 分鐘）==")
     env = dict(os.environ)
-    env.update(GRYPE_DB_CACHE_DIR=str(GRYPE_CACHE), GRYPE_DB_UPDATE="online", TMPDIR=str(OUT / "tmp"))
+    gdu = grype_db_update_mode(os.environ)
+    say(f"  Grype 資料庫更新方式：{gdu}" + ("（外部設定 GRYPE_DB_UPDATE）" if os.environ.get("GRYPE_DB_UPDATE", "").strip() else "（預設）"))
+    env.update(GRYPE_DB_CACHE_DIR=str(GRYPE_CACHE), GRYPE_DB_UPDATE=gdu, TMPDIR=str(OUT / "tmp"))
     if TOOLS_BIN:
         env["PATH"] = f"{TOOLS_BIN}:{env.get('PATH', '')}"
     env["PILOT_ENV"] = str(pe)

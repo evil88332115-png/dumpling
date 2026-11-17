@@ -1073,3 +1073,18 @@ def test_split_pack_record_copy_failure_is_noted_not_fatal(tmp_path, monkeypatch
     kdir, oot = w.split_pack_record(tarp, tmp_path / "dest", notes)
     assert len(oot) == 1 and not (kdir / "SOURCE-HASHES").exists()
     assert notes and "SOURCE-HASHES" in notes[0] and "PermissionError" in notes[0]
+
+
+def test_grype_db_update_respects_the_caller_setting():
+    """外面設了 GRYPE_DB_UPDATE（例如 import:<內部鏡像>、off）時精靈不可蓋回 online；沒設或空白才 online。"""
+    w = _load_wizard()
+    assert w.grype_db_update_mode({}) == "online"
+    assert w.grype_db_update_mode({"GRYPE_DB_UPDATE": ""}) == "online"
+    assert w.grype_db_update_mode({"GRYPE_DB_UPDATE": "  "}) == "online"
+    assert w.grype_db_update_mode({"GRYPE_DB_UPDATE": "off"}) == "off"
+    assert w.grype_db_update_mode({"GRYPE_DB_UPDATE": "import:/srv/mirror/grype/latest.tar.zst"}) == "import:/srv/mirror/grype/latest.tar.zst"
+
+
+def test_wizard_no_longer_hard_codes_grype_online():
+    src = open(WIZ, encoding="utf-8").read()
+    assert 'GRYPE_DB_UPDATE="online"' not in src
