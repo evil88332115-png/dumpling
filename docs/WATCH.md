@@ -321,5 +321,6 @@ deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 �
 - **輸出**：`<out>/csaf-drafts/NN-<8 碼 hash>/`（`csaf-exploited-draft.json`、`csaf-exploited-summary.json`、`README.md`），workflow 以 artifact `watch-csaf-drafts-<round>-<attempt>` 上傳，保留 90 天。公開 repo 的 artifact 誰都能下載：內容只來自示範專案的公開 Release 與 repo 裡的設定；`README.md` 第一行寫明是草稿、示範專案時寫明不是真的出貨產品。
 - **Issue 只寫一句**：新的 KEV Issue（或彙總 Issue）多一句「使用者通知草稿已產生／沒有產生」與 artifact 名稱，不貼草稿內容。沒有產生時只寫固定的原因（例如「沒有可用的報告 zip」「產生失敗」），工具的詳細說明只進報告與 `result.json`，而且先把本機路徑換成 `<輸出資料夾>`／`<路徑>`。
 - 一次最多 20 份；產生失敗只記在那一份的狀態（FAIL），寫了一半的草稿刪掉；監控的狀態、Issue 數量與 key 不變。
+- **已知限制：草稿只在群組第一次開 Issue 時產生一次，之後不會自動重產。** 群組不管草稿成不成功都會記進狀態，所以那一次沒有產生的（例如報告 zip 暫時下載失敗、一次超過 20 組、工具 FAIL）之後的執行不會再試；需要時用 `tools/cra/csaf_advisory.py exploited` 手動產生。要不要改成可以重產排第二階段（C0）。
 - 工具的 KEV 日期只用監控手上的證據（EUVD 的加入日期）：不讓工具依報告 `summary.json` 的 `scan_dir`（zip 裡的不可信資料）去讀本機路徑。
 - 和第 14 條的演練（`docs/ART14.md`）無關：草稿不是通報，也不碰 art14 的流程。

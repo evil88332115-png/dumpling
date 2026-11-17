@@ -18,6 +18,7 @@ import re
 import shutil
 import stat
 import zipfile
+import zlib
 from pathlib import Path
 
 import collect
@@ -81,7 +82,7 @@ def extract_reports(zpath, dest):
                         if n > collect.REPORT_MEMBER_MAX:
                             raise ZipProblem(f"報告 zip 的 {member} 解壓後超過大小上限")
                         dst.write(b)
-    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError, EOFError) as e:
+    except (OSError, zipfile.BadZipFile, zlib.error, ValueError, RuntimeError, NotImplementedError, EOFError) as e:      # zlib.error：壞掉的 deflate 成員
         raise ZipProblem(f"報告 zip 讀不了（{type(e).__name__}）")
 
 
@@ -173,10 +174,11 @@ class Drafts:
         if not p.get("report_zip") or not os.path.isfile(p["report_zip"]):
             rec.update(detail="這個 Release 沒有這一層的報告 zip（report-<專案>-<版本>[-<層>].zip），沒有可用的判定資料"
                        + (f"；{self.scrub(p.get('report_zip_problem'), 200)}" if p.get("report_zip_problem") else ""),
-                       reason="這個 Release 沒有可用的報告 zip")
+                       reason="這個 Release 沒有可用的報告 zip（之後不會自動重產）")
             return None
         if self.made >= MAX_DRAFTS:
-            rec.update(detail=f"這次已經產生 {MAX_DRAFTS} 份草稿（一次的上限），其餘下一次有新的命中時才會產生", reason=f"超過一次 {MAX_DRAFTS} 份的上限")
+            rec.update(detail=f"這次已經產生 {MAX_DRAFTS} 份草稿（一次的上限），這一組沒有產生；之後不會自動重產（草稿只在群組第一次開 Issue 時產生），"
+                              "需要時用 tools/cra/csaf_advisory.py exploited 手動產生", reason=f"超過一次 {MAX_DRAFTS} 份的上限，之後不會自動重產")
             return None
         self.made += 1
         tag = hashlib.sha256((p["uuid"] + "|" + ",".join(rec["cves"])).encode()).hexdigest()[:8]
@@ -225,7 +227,8 @@ class Drafts:
         return f"這次執行的 artifact {self.c(self.artifact)}" if self.artifact else "這次執行的輸出資料夾"
 
     def issue_line(self, rec):
-        """新 Issue 內文的一句。只有 shipped 的正式版才寫（其他只記在報告與 result.json）；不放工具的說明，只用固定的原因。"""
+        """新 Issue 內文的一句。只有 shipped 的正式版才寫（其他只記在報告與 result.json）；不放工具的說明，只用固定的原因。
+        草稿只在群組第一次開 Issue 時產生一次（plan_issues 不管草稿成不成功都把群組記進狀態）：沒有產生的不會在之後的執行自動重產。"""
         if rec is None or not rec.get("issue"):
             return None
         if rec["dir"]:

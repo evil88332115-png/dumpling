@@ -151,6 +151,69 @@ class DraftsUnit(unittest.TestCase):
         root = os.path.join(self.d, csaf_draft.DRAFT_DIR)
         self.assertEqual([x for x in os.listdir(root)] if os.path.isdir(root) else [], [])     # 寫了一半的草稿不留在 artifact
 
+    def test_corrupt_deflate_member_is_unreadable_zip_not_internal_error(self):
+        z = os.path.join(self.d, "deflate.zip")
+        with zipfile.ZipFile(z, "w", compression=zipfile.ZIP_DEFLATED) as f:
+            for k, m in collect.REPORT_MEMBERS.items():
+                f.writestr(m, json.dumps({"k": k, "pad": "x" * 2000}))
+        with zipfile.ZipFile(z) as f:
+            info = f.getinfo(collect.REPORT_MEMBERS["vulnerability-rows.json"])
+        raw = bytearray(open(z, "rb").read())
+        hdr = info.header_offset
+        n, e = int.from_bytes(raw[hdr + 26:hdr + 28], "little"), int.from_bytes(raw[hdr + 28:hdr + 30], "little")
+        raw[hdr + 30 + n + e] = 0xFF                          # deflate 區塊型別 11：zlib.error（不是 CRC 錯誤）
+        open(z, "wb").write(bytes(raw))
+        with self.assertRaises(csaf_draft.ZipProblem) as cm:
+            csaf_draft.extract_reports(z, os.path.join(self.d, "out-deflate"))
+        self.assertIn("error", str(cm.exception))
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual((rec["status"], rec["reason"]), ("FAIL", "報告 zip 讀不了"))
+        self.assertNotIn("內部錯誤", rec["detail"])
+
+    def test_scan_dir_in_report_summary_is_not_read(self):
+        """zip 裡 summary.json 的 scan_dir（不可信資料）指向一個有 scan/euvd.json 的資料夾：草稿不能讀它（euvd_file 覆寫）。"""
+        sd = os.path.join(self.d, "scandir")
+        os.makedirs(os.path.join(sd, "scan"))
+        json.dump({"cves": {"CVE-2018-18074": {"exploited": "yes", "kev_date_added": "2025-03-03", "kev_sources": ["cisa_kev"]}}},
+                  open(os.path.join(sd, "scan", "euvd.json"), "w"))
+        z = os.path.join(self.d, "r.zip")
+        with zipfile.ZipFile(report_zip(os.path.join(self.d, "base.zip"))) as src, zipfile.ZipFile(z, "w") as dst:
+            for i in src.infolist():
+                data = json.dumps({"scan_dir": sd}).encode() if i.filename == collect.REPORT_MEMBERS["summary.json"] else src.read(i)
+                dst.writestr(i.filename, data)
+        es = [dict(self.es[0], euvd=None)]
+        dr = csaf_draft.Drafts(self.d, NOW)
+        rec = dr.for_group(es, self.p(report_zip=z))
+        self.assertIn(rec["status"], ("OK", "ATTENTION"), rec)
+        leaf = os.path.join(self.d, rec["dir"])
+        doc = open(os.path.join(leaf, "csaf-exploited-draft.json"), encoding="utf-8").read()
+        summ = json.load(open(os.path.join(leaf, "csaf-exploited-summary.json"), encoding="utf-8"))
+        self.assertNotIn("2025-03-03", doc)
+        self.assertIsNone(summ.get("kev_dates_from"))
+
+    def test_previous_drafts_folder_is_cleared(self):
+        old = os.path.join(self.d, csaf_draft.DRAFT_DIR, "01-deadbeef")
+        os.makedirs(old)
+        open(os.path.join(old, "csaf-exploited-draft.json"), "w").write("{}")
+        csaf_draft.Drafts(self.d, NOW)
+        self.assertFalse(os.path.exists(os.path.join(self.d, csaf_draft.DRAFT_DIR)))
+
+    def test_not_ok_result_removes_the_draft_folder(self):
+        z = report_zip(os.path.join(self.d, "r.zip"))
+
+        class GapTool:
+            def exploited_run(self, src, cves, cfg, leaf, **k):
+                leaf.mkdir(parents=True)
+                (leaf / "csaf-exploited-draft.json").write_text("{}", encoding="utf-8")
+                return "GAP", "no evidence", None
+        dr = csaf_draft.Drafts(self.d, NOW, tool=GapTool())
+        rec = dr.for_group(self.es, self.p(report_zip=z))
+        self.assertEqual((rec["status"], rec["dir"]), ("GAP", None))
+        root = os.path.join(self.d, csaf_draft.DRAFT_DIR)
+        self.assertEqual(os.listdir(root) if os.path.isdir(root) else [], [])
+        self.assertIn("這不代表沒有被利用", dr.issue_line(rec))
+
     def test_dev_release_is_not_run_and_no_issue_line(self):
         dr = csaf_draft.Drafts(self.d, NOW, demo=True, artifact="watch-csaf-drafts-x-1")
         rec = dr.for_group(self.es, self.p(kind="dev", status="development"))
@@ -263,7 +326,13 @@ class MatchWiring(Base):
         self.assertEqual(op[0]["body"].count("CRA 第 14 條第 8 項的使用者通知草稿"), 1)   # Issue 只寫一句
         self.assertNotIn("csaf_security_advisory", op[0]["body"])                          # 不貼草稿內容
         self.assertEqual(match.unsafe_markdown(op[0]["body"]), [])
-        self.assertIn("CSAF 使用者通知草稿", open(os.path.join(out, "report.md"), encoding="utf-8").read())
+        report = open(os.path.join(out, "report.md"), encoding="utf-8").read()
+        self.assertIn("CSAF 使用者通知草稿", report)
+        # 成功的路徑也不能有絕對路徑（plan、result、report 都是公開的）：草稿資料夾一律是相對的 csaf-drafts/…
+        self.assertFalse(os.path.isabs(rec["dir"]))
+        for name, text in (("plan.json", json.dumps(plan, ensure_ascii=False)), ("result.json", json.dumps(res, ensure_ascii=False)), ("report.md", report)):
+            self.assertNotIn(self.w, text, name)
+            self.assertNotIn(os.path.abspath(out), text, name)
 
     def test_broken_rows_on_shipped_release_still_makes_plan_without_paths(self):
         """報告 zip 結構對、rows 內容壞掉 → 草稿 FAIL；Issue 照開（只寫固定原因、沒有本機路徑），plan.json 照樣產生。"""
