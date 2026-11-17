@@ -17,9 +17,12 @@
 #   dt_begin <臨時 DT 預設的 OSV 生態系>   ephemeral：EXIT trap、DT_OSV_ECOSYSTEMS／DT_WAIT_MIN、dt-ephemeral.sh up
 #                                         resident：檢查連線檔與 CA、建私用暫存資料夾（不在 $out 底下）
 #   dt_ready <PILOT_ENV>                  ephemeral：dt-ephemeral.sh wait、env
+#                                           DT_WAIT_RC_FILE（選用，韌體 pipeline/firmware-dt-session.sh 用）：有設時把 wait 的結束碼寫進這個檔，
+#                                           0、3（GAP：鏡像逾時，呼叫端自己標 GAP）繼續做 env，其他值照樣 FAIL（訊息相同）；沒設時 3 也是 FAIL（scan 的行為）
 #                                         resident：寫 PILOT_ENV（權限 600）、GET /api/version、讀 key 的權限，記一列 pipeline-dt-resident
 #   dt_mirror_status                      呼叫端 export MIRROR_REFRESH_STATUS="" 之後呼叫：resident 時把它拿掉
 #   dt_end                                EXIT 時執行（dt_begin 把它接在呼叫端原有的 EXIT trap 後面，不蓋掉）
+#                                           ephemeral：down 失敗不改結束碼，但在 stderr 印一行 WARNING（容器或 volume 可能殘留）
 # PILOT_ENV 裡有 API key：不能放在 $out 底下（$out 會上傳成 artifact）→ 兩種模式都檢查，放在底下就 FAIL。
 
 _dt_lib=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -102,7 +105,13 @@ dt_ready() {  # <PILOT_ENV>
   _dt_outside_out "$pe" || fail "PILOT_ENV 不能放在 DUMPLING_OUT 底下（裡面有 DT 的 API key，DUMPLING_OUT 會上傳成 artifact）"
   case $(dt_mode) in
     ephemeral)
-      bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
+      if [ -n "${DT_WAIT_RC_FILE:-}" ]; then
+        rc=0; bash "$root/pipeline/dt-ephemeral.sh" wait || rc=$?
+        printf '%s\n' "$rc" > "$DT_WAIT_RC_FILE" || fail "寫不了 DT_WAIT_RC_FILE（$DT_WAIT_RC_FILE）"
+        case $rc in 0|3) ;; *) fail "臨時 DT wait 失敗";; esac
+      else
+        bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
+      fi
       mkdir -p "$(dirname "$pe")"
       bash "$root/pipeline/dt-ephemeral.sh" env "$pe" || fail "臨時 DT env 失敗"
       ;;
@@ -139,7 +148,7 @@ dt_mirror_status() {
 
 dt_end() {
   case $(dt_mode) in
-    ephemeral) bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true;;
+    ephemeral) bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || echo "dt-session: WARNING（臨時 DT down 失敗：容器或 volume 可能殘留）" >&2;;
     resident) [ -n "$_DT_TMP" ] && rm -rf "$_DT_TMP";;
   esac
   return 0
