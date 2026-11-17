@@ -9,6 +9,7 @@
 - 平台：pipeline/platforms/<平台>/platform.yml（也可給 platform.yml 的路徑）；專案資料夾：projects/<專案>/（讀 own_software 與
   os_responsibility；--os-responsibility 可覆寫專案的值）。
 - tag：每個元件加 dumpling:layer／dumpling:layer-basis，metadata 加 dumpling:os-responsibility、dumpling:platform，寫一份新的 SBOM。
+  metadata.component.name 如果是路徑（掃描工具寫進來的 runner 工作目錄）就換成專案名稱（專案資料夾名），原本的路徑不保存；bom-ref、version 不動。
 - split：先 tag，再依層拆成（輸出資料夾裡；沒有元件的檔案不產生）
     sbom.bsp.cdx.json        bsp 與 unknown 的元件（unknown 當我們的待辦，最保守）→ DT 專案 <名稱>-bsp
     sbom.os.cdx.json         os 的元件 → DT 專案 <名稱>-os
@@ -67,7 +68,7 @@ def write_json(path, doc):
 
 
 def setup(platform, project_dir, opts):
-    """→ (平台設定, own_software 樣式, os_responsibility（可能是 None）)。"""
+    """→ (平台設定, own_software 樣式, os_responsibility（可能是 None）, 專案名稱（專案資料夾名，用來取代 SBOM 裡路徑形式的名稱）)。"""
     pdir = opts.get("platforms-dir") or pc.PLATFORMS_DIR
     config = pc.load_platform_config(platform, pdir)
     project = pc.load_project(project_dir, pdir)
@@ -76,7 +77,7 @@ def setup(platform, project_dir, opts):
         raise pc.ConfigError("os_responsibility 必須是 %s" % "／".join(pc.OS_RESPONSIBILITIES))
     if project.get("platform") != config["platform"]:
         raise pc.ConfigError("專案的 platform 和指定的平台不同")
-    return config, ly.own_patterns(project), resp
+    return config, ly.own_patterns(project), resp, os.path.basename(os.path.abspath(project_dir).rstrip("/"))
 
 
 def scan_plan(resp, files):
@@ -119,8 +120,8 @@ def cmd_tag(pos, opts):
     if len(pos) != 4:
         return usage("tag 需要 4 個位置參數")
     sbom, platform, project_dir, out = pos
-    config, own, resp = setup(platform, project_dir, opts)
-    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts))
+    config, own, resp, product = setup(platform, project_dir, opts)
+    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts), product)
     write_json(out, ly.dumps(tagged))
     return report("tag", summary, resp)
 
@@ -139,8 +140,8 @@ def cmd_split(pos, opts):
     if len(pos) != 4:
         return usage("split 需要 4 個位置參數")
     sbom, platform, project_dir, outdir = pos
-    config, own, resp = setup(platform, project_dir, opts)
-    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts))
+    config, own, resp, product = setup(platform, project_dir, opts)
+    tagged, summary = ly.tag_sbom(ly.load_sbom(sbom), config, own, resp, config["platform"], load_owners(opts), product)
     # bsp 檔＝bsp＋unknown（unknown 當我們的待辦）；product 檔＝除了 host-tool 以外全部
     parts, dropped = ly.split_sbom(tagged, {"bsp": "bsp", "unknown": "bsp", "os": "os", "host-tool": "host-tool"})
     product, _ = ly.split_sbom(tagged, {"bsp": "product", "unknown": "product", "os": "product"})
