@@ -38,6 +38,16 @@ expected 欄位（都選填，只寫有佐證的）：
                       bios_tag        字串清單；每個 tag 都要是元件的 `sca-center:ami-fid-bios-tag`（多出來的不比）
                       project_version 字串，元件的 `sca-center:ami-fid-project-version`（例如 "34.04"）
                       這是對核心版本的預期，不是漏洞判定；規則表對它的建議用 advisory_rule 寫
+  integrity           mapping（至少一項），映像的程式碼完整性結構證據（見 docs/notes/c2-code-integrity.md）。只比「FIT 裡看到了什麼」，不是平台有沒有開啟的結論；
+                      值是映像自述（沒有簽章驗證、假設映像沒被改過）。每一項比 fw-inventory.json 每個 BIOS 映像的 integrity.items 的 state，
+                      並要求 SBOM 的 BIOS 映像元件有同值的 `dumpling:integrity-*` property：
+                      boot_guard_structure   CI-01（Key Manifest 或 Boot Policy Manifest 有一個就是 observed）：observed／not-found／GAP
+                      key_manifest           CI-01.km（FIT type 0x0B）：observed／not-found／GAP
+                      boot_policy_manifest   CI-01.bpm（FIT type 0x0C）：observed／not-found／GAP
+                      startup_acm            CI-01.acm（FIT type 0x02）：observed／not-found／GAP
+                      fit_debug_policy       CI-07（FIT type 0x2F）：observed／not-found／GAP
+                      boot_guard_enforcement CI-02：只能寫 NOT_ASSESSED（生效與否在熔絲，映像讀不到）
+                      not-found 只在整張 FIT 完整讀完時成立；FIT 找不到、容器不支援、表沒讀完是 GAP。
   （沒有 intel_vbt：VBT 元件的 version 是 $VBT 表頭的格式版本（x100），不是顯示韌體的發行版本，不拿來比對）
 """
 import argparse
@@ -51,10 +61,15 @@ except ImportError:
     yaml = None
 
 KEYS = ("intel_me", "microcode", "fsp", "coreboot_version", "coreboot_revision",
-        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode", "advisory_rule", "ami_core")
+        "dasharo_version", "coreboot_build_date", "edk2_revision", "intel_gop", "intel_legacy_vbios", "amd_agesa", "amd_microcode", "advisory_rule", "ami_core", "integrity")
 AMI_KEYS = ("status", "version", "product", "bios_tag", "project_version")
 AMI_STATUSES = ("read", "not-found", "conflict", "layout-unknown", "not-searched")
 AMI_NAMES = ("AMI Aptio V core", "AMI firmware core")
+STRUCTURE_STATES = ("observed", "not-found", "GAP")
+# integrity 的鍵 → (項目 id, 可以寫的值)；SBOM property 名稱是 dumpling:integrity-<id 小寫、. 換成 ->
+INTEGRITY_KEYS = {"boot_guard_structure": ("CI-01", STRUCTURE_STATES), "key_manifest": ("CI-01.km", STRUCTURE_STATES),
+                  "boot_policy_manifest": ("CI-01.bpm", STRUCTURE_STATES), "startup_acm": ("CI-01.acm", STRUCTURE_STATES),
+                  "fit_debug_policy": ("CI-07", STRUCTURE_STATES), "boot_guard_enforcement": ("CI-02", ("NOT_ASSESSED",))}
 GFX_NAMES = {"intel_gop": "Intel GOP driver", "intel_legacy_vbios": "Intel legacy VBIOS (option ROM)"}
 STATUSES = ("OK", "MISMATCH", "MISSING", "NOT_RUN")
 
@@ -205,9 +220,18 @@ def compare(exp, inv, sbom):
                 raise FormatError("ami_core.bios_tag 必須是非空的字串清單")
             for i, t in enumerate(am["bios_tag"]):
                 plan.append(("ami_tag", "AMI FID BIOS tag", scalar(t, "ami_core.bios_tag[%d]" % i)))
+    if "integrity" in exp:
+        ig = exp["integrity"]
+        if not isinstance(ig, dict) or not ig or not set(ig) <= set(INTEGRITY_KEYS):
+            raise FormatError("integrity 必須是 mapping，只能有 %s（至少一項）" % "、".join(INTEGRITY_KEYS))
+        for k, v in ig.items():
+            iid, allowed = INTEGRITY_KEYS[k]
+            if v not in allowed:
+                raise FormatError("integrity.%s 必須是 %s 之一" % (k, "、".join(allowed)))
+            plan.append(("integrity", "完整性結構 %s（%s）" % (iid, k), (iid, v, iid.lower().replace(".", "-"))))
     if inv is None:
         return [("NOT_RUN", "%s：預期 %s、沒有 fw-inventory.json（firmware-bios.sh 沒跑或沒有輸出）"
-                 % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2][2] if p[0] == "advisory_rule" else p[2])) for p in plan]
+                 % (p[1], p[2][3] if p[0] == "microcode" else p[2][2] if p[0] == "amd_microcode" else p[2][2] if p[0] == "advisory_rule" else p[2][1] if p[0] == "integrity" else p[2])) for p in plan]
     bios = bios_images(inv)
     for key, label, want in plan:
         if key == "intel_me":
@@ -286,6 +310,20 @@ def compare(exp, inv, sbom):
             ok = any(g[0] == sug and g[1] == ids for g in got)
             items.append(result("OK" if ok else ("MISMATCH" if any(g[0] != "（沒有標）" for g in got) else "MISSING"), label, expect,
                                 "；".join("%s（規則 %s）" % (g[0], "、".join(g[1]) if g[1] else "無") for g in got)))
+        elif key == "integrity":
+            iid, state, slug = want
+            got = uniq(x.get("state") for b in bios for x in ((b.get("integrity") or {}).get("items") or []) if isinstance(x, dict) and x.get("id") == iid)
+            if not got:
+                items.append(result("MISSING", label, state, "（inventory 沒有 integrity 項目 %s）" % iid))
+                continue
+            if got != [state]:
+                items.append(result("MISMATCH", label, state, show(got)))
+                continue
+            sb = uniq(v for c in sbom_components(sbom) for v in prop(c, "dumpling:integrity-" + slug))
+            if sbom is not None and sb != [state]:
+                items.append(result("MISMATCH", label, state, "inventory %s，但 SBOM 的 dumpling:integrity-%s 是 %s" % (show(got), slug, show(sb))))
+                continue
+            items.append(result("OK", label, state, show(got)))
         elif key == "ami_status":
             got = uniq((b.get("ami_core") or {}).get("status") for b in bios)
             if not got:

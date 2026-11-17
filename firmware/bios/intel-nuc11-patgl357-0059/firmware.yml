@@ -44,3 +44,13 @@ expected:
   ami_core: {status: read, version: "5.19", product: "Aptio V", bios_tag: ["PATGL357"], project_version: "0.59"}
   advisory_rule:
     - {component: "AMI Aptio V core", version: "5.19", suggestion: affected, rule_ids: ["AMI-SA-2026001", "AMI-SA-2026002"]}
+  # 程式碼完整性的結構證據（說明 docs/notes/c2-code-integrity.md）：全部 GAP，不是 not-found。依據：另寫的獨立腳本讀 zip 裡的 .CAP 檔——檔案開頭 +8 是 `_AMIPFAT`
+  # （AMI PFAT 封裝，不是完整 SPI 映像），檔尾 −0x40 的位置沒有 FIT 指標（高 32 bits 不是 0、低 32 bits 不在 4 GB 以下 16 MB 內）。
+  # 組回的映像的位移不是 SPI 位址，FIT 指標的位置沒有意義，容器不支援（ci-container-unsupported）；不能因此說這個平台沒有 Boot Guard 結構。
+  integrity:
+    boot_guard_structure: GAP
+    key_manifest: GAP
+    boot_policy_manifest: GAP
+    startup_acm: GAP
+    fit_debug_policy: GAP
+    boot_guard_enforcement: NOT_ASSESSED
