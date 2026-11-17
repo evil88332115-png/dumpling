@@ -196,7 +196,7 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
 | `scan` | 平台各自（`scan.sh`）：呼叫共用掃描，只提供平台設定；**平台名稱由 project.yml 明確傳下去**（見下） |
 | `raw-sectors` | 選用掛點，見下 |
 
-另一類不降低 pipeline_result 的 recorded NOT_RUN：說明以「僅供參考」開頭的列（`pipeline-previous-release`，`pipeline/lib/previous_release.py` 寫：不是正式 Release 的 tag push、或第一個正式 Release 沒有前一版可比較）。它和「不適用」開頭的一樣要有 `recorded` 標記才算，也不降級；同一個步驟找到前一版卻組不起來是 GAP，會降成 GAP。
+另一類不降低 pipeline_result 的 recorded NOT_RUN：說明以「僅供參考」開頭的列（`pipeline-previous-release`，`pipeline/lib/previous_release.py` 寫：不是正式 Release 的 tag push、第一個正式 Release 沒有前一版可比較、或前一版沒有報告 zip／zip 裡沒有 VEX 的舊格式）。它和「不適用」開頭的一樣要有 `recorded` 標記才算，也不降級；同一個步驟找到前一版卻組不起來是 GAP，會降成 GAP。
 
 **每一步**是一個指令、最後印一行 `<步驟>: OK｜GAP｜NOT_RUN｜FAIL（說明）`，結束碼：
 
