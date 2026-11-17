@@ -315,7 +315,7 @@ def render_issue(m, drill=True, gitlab=False):
           "## 預填欄位（工具帶入，請核對）", f"- 產品名稱與版本：{match.md_text(m['product'])} {m['version']}"]
     if inc:
         L += [f"- 事件代號：{m['incident_id']}", f"- 事件說明：{m['description']}",
-              f"- 嚴重度（對產品安全的影響）：{m['severity'] + '（來源：' + m['severity_source'] + '）' if m['severity'] and m['severity_source'] else '待填'}"]
+              f"- 嚴重度（對產品資安的影響）：{m['severity'] + '（來源：' + m['severity_source'] + '）' if m['severity'] and m['severity_source'] else '待填'}"]
     else:
         L += [f"- 層：{m['layer']}", f"- CVE：{m['cve']}", f"- 說明：{m['description']}"]
         for src, note, ref in m["evidence"]:

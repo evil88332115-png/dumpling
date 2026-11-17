@@ -176,6 +176,13 @@ releases:                      # 一個專案多個版本；tag 是 <專案>/<�
     `project-info.py --kernel-args` 轉成 `--kernel-not-distro <理由>`（一行一個參數；理由不能是空的、不能有換行或控制字元、最多 300 位元組，否則 sources.yml／platform.yml 驗證就報錯），
     wizard → `scan-flash-package.sh` → `sca-scan` 一路傳（後兩者另接受 `SCA_KERNEL_NOT_DISTRO`）。SBOM 有核心時 `C-kernel-coverage` 是 GAP，說明寫出理由；SBOM 沒有核心（例如 `-os` 層）時照舊不寫這一列。Jetson 不設。
 
+- **映像沒有 linux-headers 時的核心設定（`/boot/config-<版本>`，M7d-3a）**：`C-kernel-config`／`C-kernel-module-map` 改讀出貨的 `/boot/config-<版本>`，
+  要 rootfs 的 dpkg 驗證通過（擁有者是這顆核心的 `linux-image-*` 套件、md5 相同、已安裝），Makefile 的來源要由轉接器以 `KERNEL_SOURCE_DIR` 給發行版的核心原始碼
+  （例如 AI NAS 的 `debian_kernel_source.py`：orig＋debian patch，雜湊照 D-027 固定）；規則細節見 `tools/pilot/README.md`。已知限制（照實 GAP 或保守，不會誤判）：
+  - Ubuntu 的 `/boot/config-<版本>` 通常屬於 `linux-modules-<版本>`，不在擁有者名稱規則裡 → GAP（要支援得另訂規則：modules 與 image 套件成對）。
+  - 核心的主.次版本沒有 `tools/pilot/lib/data/kernel-included-c-<版本>.json`（目前有 6.1、6.8；例如 Debian 13 的 6.12 沒有）時，任何 CVE 都不判 not_affected
+    （只有 affected／unknown）；要減少待人審，得從那個版本的原始碼產生清單。
+
 ## 5. 平台轉接器
 
 `pipeline/platform.sh <步驟> <專案資料夾> <版本> [--out <資料夾>]`，步驟：

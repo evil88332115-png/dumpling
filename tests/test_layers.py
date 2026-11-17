@@ -200,6 +200,30 @@ class ClassifyRules(Base):
         c = comp("ours", purl="pkg:generic/ours@1", props={"syft:location:0:path": "/opt/ours/bin/ours"})
         self.assertEqual(self.classify(c, own), ("bsp", "own-software-list"))
 
+    def test_source_origin_is_own_software_source(self):
+        # adapter-gaps #7（M7d）：轉接器掃的自有應用原始碼（sbom_augment.py 的 dumpling:origin=source）沒有路徑，以前是 unknown／no-path
+        src = {"dumpling:origin": "source", "dumpling:origin-repo": "https://example.invalid/app.git"}
+        c = comp("guzzlehttp/guzzle", purl="pkg:composer/guzzlehttp/guzzle@7.8.1", props=src)
+        self.assertEqual(self.classify(c), ("bsp", "own-software-source"))
+        self.assertEqual(self.classify(comp("lodash", purl="pkg:npm/lodash@4.17.21")), ("unknown", "unresolved"))
+        # 有路徑、路徑沒有規則（path-no-rule）也一樣：property 優先於路徑
+        c = comp("requests", purl="pkg:pypi/requests@2.32.0", props=dict(src, **{"syft:location:0:path": "/src/requirements.txt"}))
+        self.assertEqual(self.classify(c), ("bsp", "own-software-source"))
+        # 只認完全相同的值；映像（image）、磁區（raw-sectors）的元件照舊
+        for v in ("image", "raw-sectors", "Source", "source "):
+            c = comp("lodash", purl="pkg:npm/lodash@4.17.21", props={"dumpling:origin": v})
+            self.assertEqual(self.classify(c), ("unknown", "unresolved"), v)
+        d = deb("openssl"); d["properties"] = [{"name": "dumpling:origin", "value": "image"}]
+        self.assertEqual(self.classify(d), ("os", "package-name"))
+        # 專案清單（own-software-list）與自有軟體標記仍然優先
+        own = ly.own_patterns({"own_software": ["guzzlehttp*"]})
+        c = comp("guzzlehttp/guzzle", purl="pkg:composer/guzzlehttp/guzzle@7.8.1", props=src)
+        self.assertEqual(self.classify(c, own), ("bsp", "own-software-list"))
+        tagged, summary = ly.tag_sbom(sbom(comp("guzzlehttp/guzzle", purl="pkg:composer/guzzlehttp/guzzle@7.8.1", props=src)),
+                                      self.cfg, os_responsibility="ours", platform="generic")
+        self.assertEqual(summary["basis"], {"own-software-source": 1})
+        self.assertEqual(summary["layers"]["bsp"], 1)
+
     def test_children_inherit_the_parent_layer(self):
         parent = deb("openssl")
         parent["components"] = [deb("nvidia-l4t-core")]

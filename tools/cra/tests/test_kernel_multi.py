@@ -882,8 +882,8 @@ def vex_state(reports, cve):
 def test_tamper_shipped_minus_judged_is_recomputed_not_trusted(tmp_path):
     """kernel-versions.json 的 not_judged 寫空，但 shipped 比 judged 多一顆（或多一個不合法的版本字串）：讀取端自己算差集，視為 scope_incomplete，不排除。"""
     a = {"CVE-2026-1001": "not_affected"}
-    for extra in ("6.12.99+rpt-rpi-x", "../x"):
-        sub = tmp_path / ("c" + str(abs(hash(extra)) % 1000))
+    for i, extra in enumerate(("6.12.99+rpt-rpi-x", "../x")):
+        sub = tmp_path / f"c{i}"          # 序號（字串 hash 每個程序不同，取 mod 會撞名）
         kvs = kvdoc(judged=(A, B), shipped=(A, B, extra), not_judged=())            # not_judged 空
         assert kvs["not_judged"] == []
         scan = multi_scan(sub, a, dict(a), kvers=kvs)
