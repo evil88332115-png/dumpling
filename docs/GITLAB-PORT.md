@@ -188,8 +188,8 @@
 **GitHub 現況**：每個 job 用 `pipeline/dt-ephemeral.sh up/wait/env/down` 開臨時 Dependency-Track（DT），UUID 每天不同；`dt-smoke.yml` 做煙霧測試。每日監控刻意不開 DT（WATCH.md 第 1 節）。
 
 **GitLab 做法**：
-- **現況（範本照這個寫）**：`pipeline/platforms/*/scan.sh` 一定用 `pipeline/dt-ephemeral.sh` 開臨時 DT（要 docker），把連線資訊寫進 `PILOT_ENV` 這個**路徑**、自己從公開網址抓 NVIDIA 公告／核心 CVE／EUVD／OSV 鏡像，並設 `MIRROR_REFRESH_STATUS=""`。所以範本的 scan 跟 GitHub 版一樣開臨時 DT：`PILOT_ENV` 是 `$DUMPLING_OUT_BASE/pilot-env/pilot.env`（單獨一個資料夾），掃描 runner 要有 docker（第 5 節），還不能斷外網。
-- **常駐 DT 模式（T-14，`pipeline/lib/dt-session.sh`）**：`DUMPLING_DT_MODE=resident` 時 scan 不起臨時 DT，改連**內部常駐 DT**（已有完整鏡像：OSV、KEV、NVD 等）。沒設或 `ephemeral` 時照舊開臨時 DT（行為和 T-14 之前相同）。
+- **現況（範本照這個寫）**：`pipeline/platforms/*/scan.sh` 預設（沒設 `DUMPLING_DT_MODE`）經 `pipeline/lib/dt-session.sh` 用 `pipeline/dt-ephemeral.sh` 開臨時 DT（要 docker），把連線資訊寫進 `PILOT_ENV` 這個**路徑**、自己從公開網址抓 NVIDIA 公告／核心 CVE／EUVD／OSV 鏡像，並設 `MIRROR_REFRESH_STATUS=""`。所以範本的 scan 跟 GitHub 版一樣開臨時 DT：`PILOT_ENV` 是 `$DUMPLING_OUT_BASE/pilot-env/pilot.env`（單獨一個資料夾），掃描 runner 要有 docker（第 5 節），還不能斷外網。
+- **常駐 DT 模式（T-14，`pipeline/lib/dt-session.sh`）**：`DUMPLING_DT_MODE=resident` 時 scan 不起臨時 DT，改連**內部常駐 DT**（已有完整鏡像：OSV、KEV、NVD 等）。沒設或 `ephemeral` 時照舊開臨時 DT：行為和 T-14 之前相同，只多了一個保護（`PILOT_ENV` 在 `$DUMPLING_OUT` 底下就 FAIL；現有的 pipeline.yml、dt-smoke.yml 與範本的位置都不在底下，不會碰到）。
   - `DUMPLING_DT_CONN`：連線檔的**路徑**，GitLab 用 **File** 類型 CI/CD 變數、protected。內容一行一個 `KEY=VALUE`，只收 `DT_URL`、`DT_API_KEY`（必要）與 `DT_FRONTEND_URL`（選用）；其他鍵、重複鍵、空值、值含空白或引號、網址不是 `https://`、檔案是連結或權限比 600 寬 → FAIL。沒設 `DUMPLING_DT_CONN` → FAIL，**不退回臨時 DT**。GitHub Actions 上一律 FAIL（公開 repo 沒有這個連線檔）。
   - `DUMPLING_DT_CA_FILE`（選用）：公司自己的 CA（PEM）。和系統的 CA 合併成暫存檔後設 `CURL_CA_BUNDLE`，**只影響 curl**（sca-scan 連 DT 只用 curl）。不提供關掉 TLS 驗證的選項。
   - `PILOT_ENV` 仍是 scan 寫出來的**路徑**（內容來自連線檔，權限 600）；不能放在 `$DUMPLING_OUT` 底下（會上傳成 artifact），放在底下就 FAIL。

@@ -53,6 +53,8 @@ class FakeDT(http.server.BaseHTTPRequestHandler):
     perms = list(ALL)       # /api/v1/user/self/permissions 的回應；None → 401（key 屬於團隊）
     team = None             # /api/v1/team/self 的權限；None → 401
     version_code = 200
+    version = "5.2.0"
+    pad = 0                 # 權限回應另外塞的位元組數（測回應上限）
     seen = []
 
     def log_message(self, *a):
@@ -69,20 +71,25 @@ class FakeDT(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         FakeDT.seen.append((self.path, self.headers.get("X-Api-Key")))
         if self.path == "/api/version":
-            return self.send(FakeDT.version_code, {"version": "5.2.0"})
+            return self.send(FakeDT.version_code, {"version": FakeDT.version})
         if self.headers.get("X-Api-Key") != KEY:
             return self.send(401, {})
         if self.path == "/api/v1/user/self/permissions":
-            return self.send(401, {}) if FakeDT.perms is None else self.send(200, FakeDT.perms)
+            return self.send(401, {}) if FakeDT.perms is None else self.send(200, FakeDT.perms + ["X" * FakeDT.pad] if FakeDT.pad else FakeDT.perms)
         if self.path == "/api/v1/team/self":
             return self.send(401, {}) if FakeDT.team is None else self.send(200, {"name": "t", "permissions": [{"name": p} for p in FakeDT.team]})
         return self.send(404, {})
 
 
+class QuietServer(http.server.ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        pass                # curl 收到上限就斷線（回應太大的測試），不印 BrokenPipe
+
+
 class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeDT)
+        cls.srv = QuietServer(("127.0.0.1", 0), FakeDT)
         cls.port = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -92,7 +99,7 @@ class Base(unittest.TestCase):
         cls.srv.server_close()
 
     def setUp(self):
-        FakeDT.perms, FakeDT.team, FakeDT.version_code, FakeDT.seen = list(ALL), None, 200, []
+        FakeDT.perms, FakeDT.team, FakeDT.version_code, FakeDT.version, FakeDT.pad, FakeDT.seen = list(ALL), None, 200, "5.2.0", 0, []
         self.tmp = tempfile.mkdtemp(prefix="dumpling-dtsess-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = os.path.join(self.tmp, "root")
@@ -243,11 +250,68 @@ class Resident(Base):
                 self.assertNotIn("X-Api-Key", line)
 
     def test_missing_required_permission_fails(self):
-        FakeDT.perms = ["VIEW_PORTFOLIO", "VIEW_VULNERABILITY", "PORTFOLIO_MANAGEMENT"]
+        for miss in ("BOM_UPLOAD", "VIEW_PORTFOLIO", "VIEW_VULNERABILITY"):
+            with self.subTest(missing=miss):
+                FakeDT.perms = [p for p in ALL if p != miss]
+                r, _ = self.resident()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("缺少必要權限：%s" % miss, r.stdout)
+                self.assertEqual(self.steps(), [])
+
+    def assert_no_key_anywhere(self, r):
+        self.assertNotIn(KEY, r.stdout + r.stderr)
+        for d, _, fs in os.walk(self.out):
+            for f in fs:
+                self.assertNotIn(KEY, read(os.path.join(d, f)), f)
+
+    def test_key_not_in_failure_output(self):
+        cases = [("version 503", dict(version_code=503)), ("缺權限", dict(perms=["BOM_UPLOAD"])),
+                 ("key 不屬於任何人", dict(perms=None, team=None)), ("權限格式不對", dict(perms={"x": 1})),
+                 ("回應太大", dict(pad=2 * 1024 * 1024))]
+        for name, kw in cases:
+            with self.subTest(name):
+                self.setUp()
+                for k, v in kw.items():
+                    setattr(FakeDT, k, v)
+                r, _ = self.resident()
+                self.assertEqual(r.returncode, 1, (name, r.stdout))
+                self.assert_no_key_anywhere(r)
+
+    def test_oversized_permission_response_fails(self):
+        FakeDT.pad = 2 * 1024 * 1024
         r, _ = self.resident()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("缺少必要權限：BOM_UPLOAD", r.stdout)
+        self.assertIn("常駐 DT 回應太大（/api/v1/user/self/permissions，超過 1048576 bytes）", r.stdout)   # 寫明是太大，不是連不上
         self.assertEqual(self.steps(), [])
+
+    def test_long_version_string_is_truncated(self):
+        FakeDT.version = "5.2.0" + "A" * (2 * 1024 * 1024)
+        r, _ = self.resident()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("常駐 DT 回應太大（/api/version，超過 1048576 bytes）", r.stdout)   # 不會變成誤導的「寫不了 pipeline-steps.tsv」或「連不上」
+        FakeDT.version = "5.2.0" + "B" * 100
+        r, _ = self.resident()
+        self.assertEqual(r.returncode, 0, r.stdout[-300:])
+        row = self.steps()[0].split("\t")[3]
+        self.assertIn("apiserver 5.2.0" + "B" * 59 + "）", row)   # 最多 64 字元
+
+    def test_curlrc_is_ignored(self):
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home)
+        self.w(os.path.join(home, ".curlrc"), "proxy = http://127.0.0.1:9\ninsecure\n", 0o644)   # 讀了就連不上
+        r, _ = self.resident(HOME=home, CURL_HOME=home)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_curl_calls_are_hardened(self):
+        src = read(os.path.join(LIB, "dt-session.sh"))
+        code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+        calls = [l for l in code if re.search(r"(^|[\s(;|&{])curl\s+-", l)]
+        self.assertEqual(len(calls), 1, calls)                                  # 只有 _dt_curl 直接呼叫 curl
+        self.assertRegex(calls[0], r"_dt_curl\(\) \{ curl -q -sS -m 30 --max-filesize ")
+        for l in code:
+            self.assertNotRegex(l, r"(\s-k\b|--insecure|--proxy-insecure|--ssl-no-revoke|-K\s*-)", l)
+        self.assertEqual(sum(bool(re.search(r"\$\(_dt_http ", l)) for l in code), 3)                # 三個請求都經 _dt_http → _dt_curl
+        self.assertIn('c=$(_dt_curl "$@"); rc=$?', src)
 
     def test_no_create_permission_is_written_in_steps(self):
         FakeDT.perms = ["BOM_UPLOAD", "VIEW_PORTFOLIO", "VIEW_VULNERABILITY"]
@@ -350,6 +414,8 @@ class ConnFile(Base):
 
     def test_valid(self):
         self.assertEqual(self.check("# c\n\nDT_URL=https://dt.example/api/\nDT_API_KEY=%s\n" % KEY), (0, "OK"))
+        for port in ("1", "443", "65535"):
+            self.assertEqual(self.check("DT_URL=https://dt.example:%s/x\nDT_API_KEY=k\n" % port), (0, "OK"), port)
 
     def test_rejected(self):
         bad = {
@@ -363,10 +429,26 @@ class ConnFile(Base):
             "引號": 'DT_URL=https://dt.example\nDT_API_KEY="k"\n',
             "不是 KEY=VALUE": "DT_URL=https://dt.example\nDT_API_KEY=k\nexport X\n",
             "前端 http": "DT_URL=https://dt.example\nDT_API_KEY=k\nDT_FRONTEND_URL=http://dt.example\n",
+            "反斜線": "DT_URL=https://dt.example\nDT_API_KEY=k\\x\n",
+            "埠 0": "DT_URL=https://dt.example:0\nDT_API_KEY=k\n",
+            "埠 65536": "DT_URL=https://dt.example:65536\nDT_API_KEY=k\n",
+            "路徑 ..": "DT_URL=https://dt.example/a/../api\nDT_API_KEY=k\n",
+            "路徑 .": "DT_URL=https://dt.example/./api\nDT_API_KEY=k\n",
+            "路徑結尾 ..": "DT_URL=https://dt.example/..\nDT_API_KEY=k\n",
         }
         for name, text in bad.items():
             with self.subTest(name):
                 self.assertEqual(self.check(text)[0], 1)
+
+    def test_reader_limits_response_size(self):
+        """讀伺服器回應的那一端也有上限（伺服器沒給長度時 curl 可能收完才知道）。"""
+        big = os.path.join(self.tmp, "big.json")
+        with open(big, "w", encoding="utf-8") as fh:
+            json.dump({"version": "5.2.0", "x": "A" * (1024 * 1024)}, fh)
+        for args in (["version", big], ["perms", big, "user"]):
+            r = subprocess.run(["python3", "-I", os.path.join(LIB, "dt_resident.py")] + args, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, args)
+            self.assertIn("超過 1048576 bytes", r.stdout, args)
 
     def test_local_http_needs_flag_and_loopback(self):
         t = "DT_URL=http://127.0.0.1:8080\nDT_API_KEY=k\n"

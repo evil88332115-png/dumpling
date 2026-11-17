@@ -3,7 +3,8 @@
 # 呼叫端要先定義 fail（印「…: FAIL（說明）」並結束）以及 $root（repo 根目錄）、$out（DUMPLING_OUT）。
 #
 # DUMPLING_DT_MODE
-#   ephemeral（預設）：pipeline/dt-ephemeral.sh 起臨時 DT。命令、順序、輸出都和 T-14 之前的 scan.sh 逐字相同。
+#   ephemeral（預設）：pipeline/dt-ephemeral.sh 起臨時 DT。命令、順序、輸出和 T-14 之前的 scan.sh 相同，只多了一個保護：
+#     PILOT_ENV 在 DUMPLING_OUT 底下就 FAIL（現有的 pipeline.yml、dt-smoke.yml 與 GitLab 範本都不在底下，不會碰到）。
 #   resident：連既有的常駐 DT（公司內部 GitLab 用）。不起、不關 docker 的 DT；不設 MIRROR_REFRESH_STATUS（狀態檔讀不到 → C-mirror-freshness GAP）。
 #     DUMPLING_DT_CONN     連線檔的路徑（GitLab 的 File 類型、protected 變數）。格式見 pipeline/lib/dt_resident.py；沒有就 FAIL，不退回臨時 DT。
 #     DUMPLING_DT_CA_FILE  （選用）公司自己的 CA 憑證（PEM）。和系統的 CA 合併成暫存檔，CURL_CA_BUNDLE 指過去。
@@ -26,6 +27,19 @@ _DT_PREV_EXIT=
 _DT_TMP=
 
 dt_mode() { printf '%s' "${DUMPLING_DT_MODE:-ephemeral}"; }
+
+# 常駐 DT 的 HTTP：-q 不讀 .curlrc（第一個參數）；回應上限 1 MB（--max-filesize；伺服器沒給長度時 curl 可能收完才知道，讀的那一端另有上限）。
+# 不加 -k／--insecure（不提供關掉 TLS 驗證的選項）。
+_DT_MAX_BYTES=1048576
+_dt_curl() { curl -q -sS -m 30 --max-filesize "$_DT_MAX_BYTES" "$@"; }
+_dt_http() {  # <curl 參數…> → 印 HTTP 狀態碼（curl 失敗印 000）；回應超過上限（curl 結束碼 63）→ 回傳 63，呼叫端寫明是太大而不是連不上
+  local c rc
+  c=$(_dt_curl "$@"); rc=$?
+  [ "$rc" = 63 ] && return 63
+  [ "$rc" = 0 ] || c=000
+  printf '%s' "$c"
+}
+_dt_too_big() { fail "常駐 DT 回應太大（$1，超過 $_DT_MAX_BYTES bytes），不處理"; }
 
 _dt_take3() { _DT_PREV_EXIT=$3; }
 
@@ -97,16 +111,15 @@ dt_ready() {  # <PILOT_ENV>
       mkdir -p "$(dirname "$pe")"
       r=$(umask 077; python3 -I "$_dt_lib/dt_resident.py" write "$DUMPLING_DT_CONN" "$pe") || fail "寫不了 PILOT_ENV：$r"
       url=$(python3 -I "$_dt_lib/dt_resident.py" url "$DUMPLING_DT_CONN") || fail "常駐 DT 的連線檔不合：$url"
-      c=$(curl -sS -m 30 -o "$_DT_TMP/version.json" -w '%{http_code}' "$url/api/version") || c=000
+      c=$(_dt_http -o "$_DT_TMP/version.json" -w '%{http_code}' "$url/api/version") || _dt_too_big "/api/version"
       [ "$c" = 200 ] || fail "常駐 DT 連不上：GET /api/version http=$c"
-      ver=$(python3 -I -c 'import json,sys;v=json.load(open(sys.argv[1])).get("version");print(v if isinstance(v,str) and v.isprintable() else "?")' \
-        "$_DT_TMP/version.json" 2> /dev/null) || ver='?'
+      ver=$(python3 -I "$_dt_lib/dt_resident.py" version "$_DT_TMP/version.json" 2> /dev/null) || ver='?'
       r=$(python3 -I "$_dt_lib/dt_resident.py" curlcfg "$DUMPLING_DT_CONN" "$_DT_TMP/key.cfg") || fail "常駐 DT 的連線檔不合：$r"
       # API key 屬於使用者／服務帳號 → /api/v1/user/self/permissions；屬於團隊（那個端點回 401）→ /api/v1/team/self（apiserver 5.2.0）
-      c=$(curl -sS -m 30 -K "$_DT_TMP/key.cfg" -o "$_DT_TMP/perm.json" -w '%{http_code}' "$url/api/v1/user/self/permissions") || c=000
+      c=$(_dt_http -K "$_DT_TMP/key.cfg" -o "$_DT_TMP/perm.json" -w '%{http_code}' "$url/api/v1/user/self/permissions") || _dt_too_big "/api/v1/user/self/permissions"
       src=user
       if [ "$c" = 401 ]; then
-        c=$(curl -sS -m 30 -K "$_DT_TMP/key.cfg" -o "$_DT_TMP/perm.json" -w '%{http_code}' "$url/api/v1/team/self") || c=000
+        c=$(_dt_http -K "$_DT_TMP/key.cfg" -o "$_DT_TMP/perm.json" -w '%{http_code}' "$url/api/v1/team/self") || _dt_too_big "/api/v1/team/self"
         src=team
       fi
       rm -f "$_DT_TMP/key.cfg"

@@ -537,14 +537,20 @@ class CiFile(unittest.TestCase):
                     self.assertIn('($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH)', cond, n)
 
     def test_scan_matches_current_scan_sh(self):
-        # pipeline/platforms/*/scan.sh 目前一定開臨時 DT（docker）並寫入 PILOT_ENV 這個路徑：範本不能要求 File 變數、要檢查 docker
+        # pipeline/platforms/*/scan.sh 預設（沒設 DUMPLING_DT_MODE）一定開臨時 DT（docker）並寫入 PILOT_ENV 這個路徑：範本不能要求 File 變數、要檢查 docker
         txt = self.lines_of("release:scan")
         self.assertIn('export PILOT_ENV="$DUMPLING_OUT_BASE/pilot-env/pilot.env"', txt)
         self.assertIn("command -v docker", txt)
         self.assertNotIn("test -n \"${PILOT_ENV:-}\"", txt)
         self.assertIn("bubblewrap python3-yaml $SCAN_APT", txt)
+        self.assertNotIn("DUMPLING_DT_MODE", txt, "範本設了 DT 模式：照 T-14 重新評估範本的 scan（DUMPLING_DT_CONN、MIRROR_REFRESH_STATUS）")
         scan_sh = (HERE.parents[1] / "pipeline" / "platforms" / "jetson" / "scan.sh").read_text(encoding="utf-8")
-        self.assertIn("dt-ephemeral.sh", scan_sh, "scan.sh 已不用臨時 DT：重新評估 T-14 與範本的 scan")
+        disk_sh = (HERE.parents[1] / "pipeline" / "platforms" / "_shared" / "scan-disk.sh").read_text(encoding="utf-8")
+        session = (HERE.parents[1] / "pipeline" / "lib" / "dt-session.sh").read_text(encoding="utf-8")
+        self.assertIn('. "$root/pipeline/lib/dt-session.sh"', scan_sh, "scan.sh 已不經 dt-session.sh：重新評估 T-14 與範本的 scan")
+        self.assertIn('. "$root/pipeline/lib/dt-session.sh"', disk_sh, "scan-disk.sh 已不經 dt-session.sh：重新評估 T-14 與範本的 scan")
+        self.assertIn('printf \'%s\' "${DUMPLING_DT_MODE:-ephemeral}"', session, "預設已不是臨時 DT：重新評估範本的 scan（範本沒設 DUMPLING_DT_MODE）")
+        self.assertIn("dt-ephemeral.sh", session, "dt-session.sh 已不用臨時 DT：重新評估 T-14 與範本的 scan")
 
     def test_platform_apt_and_sudo(self):
         # platform.yml 的 build.apt／scan.apt 要裝（同 pipeline.yml）；非 root 用 sudo（install-scan-tools.sh 本身用 sudo）
