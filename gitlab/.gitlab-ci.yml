@@ -281,7 +281,7 @@ release:publish:
     - !reference [.resolve-from-tag, script]
     - |
       python3 -I pipeline/release-meta.py --project "$PROJECT" --version "$VERSION" --tag "$RELEASE_TAG" --notes result/notes.md \
-        --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
+        --body-out result/release-body.md --commit "$CI_COMMIT_SHA" --run-id "$CI_PIPELINE_ID" --steps result/pipeline-steps.tsv \
         --scan-summary "result/scan-summary-$PROJECT-$VERSION.json" --out result/release-meta.json
       printf 'release-meta.json\trelease-meta.json\n' >> result/manifest.tsv
     # 先驗再傳（T-21）：release-publish.sh 先用 release-payload.py 驗完全部附件，驗不過一個檔都不上傳；

@@ -502,16 +502,18 @@ class CiFile(unittest.TestCase):
         self.assertEqual(sorted(mine), sorted(gh_flags), "release:publish 的 release-meta.py 參數和 release.yml 不同")
 
     def test_release_notes_rewritten_then_used(self):
-        # release-meta.py --notes 重寫的 notes.md，就是 release-payload.py 拿來當 Release 說明的那一份（notes.md 與 release-meta.json 的 pipeline_result 一致）
-        # release:publish 先跑 release-meta.py（重寫 result/notes.md），再跑 release-publish.sh result …（它的 release-payload.py 讀 $res/notes.md）
+        # release-meta.py --notes 重寫 notes.md（pipeline_result 與 release-meta.json 一致），--body-out 再從它產生 Release 說明 release-body.md
+        # （網址改成不會自動連結的寫法；GitHub 對含網址的說明回 403，GitLab 照同一份），release-payload.py 拿 release-body.md 當 Release 說明
+        # release:publish 先跑 release-meta.py，再跑 release-publish.sh result …（它的 release-payload.py 讀 $res/release-body.md）
         text = self.lines_of("release:publish")
         meta = command_args(text, "pipeline/release-meta.py")
         self.assertEqual(meta.get("--notes"), "result/notes.md")
+        self.assertEqual(meta.get("--body-out"), "result/release-body.md")
         m = re.search(r"bash gitlab/release-publish\.sh (\S+) ", text)
         self.assertEqual(m.group(1), "result")
         self.assertLess(text.index("pipeline/release-meta.py"), m.start())
         pub = (HERE.parent / "release-publish.sh").read_text(encoding="utf-8")
-        self.assertEqual(command_args(pub, "\"$here/release-payload.py\"").get("--notes"), "$res/notes.md")
+        self.assertEqual(command_args(pub, "\"$here/release-payload.py\"").get("--notes"), "$res/release-body.md")
 
     def test_t01_kernel_cve_cache(self):
         # 核心 CVE 鏡像的上一份（pipeline/lib/mirrors.sh 的 KCVE_CACHE_DIR）：scan 與 watch:compute 都用，只存新抓的
@@ -765,7 +767,7 @@ class ReleasePublish(unittest.TestCase):
                                        'case " $* " in *" --upload-file "*) if [ "${FAIL_UPLOAD:-}" = 1 ]; then '
                                        'case " $* " in *" --fail "*) exit 22 ;; esac; fi ;; esac\nexit 0\n')
         (self.bin / "curl").chmod(0o755)
-        for f in ("sbom-p-v1.cdx.json", "release-meta.json", "notes.md"):
+        for f in ("sbom-p-v1.cdx.json", "release-meta.json", "notes.md", "release-body.md"):
             (self.res / f).write_text("{}")
         (self.res / "manifest.tsv").write_text("sbom-p-v1.cdx.json\tSBOM\nrelease-meta.json\tmeta\n")
 
@@ -787,6 +789,23 @@ class ReleasePublish(unittest.TestCase):
         self.assertIn("--upload-file", calls[0])
         self.assertIn("--upload-file", calls[1])
         self.assertTrue(calls[2].endswith("/projects/12/releases"), calls[2])
+
+    def test_missing_or_empty_release_body_writes_nothing(self):
+        # release-body.md（Release 說明）沒有或是空的：一個檔都不上傳、不建 Release（不發出空白說明的 Release）；試跑也一樣先擋
+        for case in ("missing", "empty"):
+            body = self.res / "release-body.md"
+            if case == "missing":
+                body.unlink()
+            else:
+                body.write_text("")
+            for dry in ("0", "1"):
+                if self.log.exists():
+                    self.log.unlink()
+                rc, out, calls = self.run_pub(DUMPLING_RELEASE_DRY_RUN=dry)
+                self.assertNotEqual(rc, 0, (case, dry))
+                self.assertIn("release-body.md", out)
+                self.assertEqual(calls, [], (case, dry))
+            body.write_text("{}")
 
     def test_any_invalid_attachment_uploads_nothing(self):
         # 第二個檔才有問題：第一個也不能先傳（T-21）

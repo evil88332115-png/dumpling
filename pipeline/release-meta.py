@@ -15,6 +15,10 @@ tag 沒給時是 <專案>/<版本>（dev 版本沒有 tag 時由呼叫端傳 dev
 --notes（要有 --steps）：用同一份步驟紀錄、同一個算法重寫 notes.md 開頭的 pipeline_result 與「流程步驟」一節，讓 notes.md 與 release-meta.json 一致
 （scan 步驟產生 notes.md 時，它自己的那一列還沒寫進紀錄；adapter-gaps #26）。同時給 --scan-summary 時，也用同一份紀錄重寫那個檔的
 pipeline_steps／pipeline_status／pipeline_attention（M7b-4），三個檔的 pipeline 結果一致。
+--body-out <檔>（要有 --notes）：從（重寫後的）notes.md 產生 GitHub Release 的說明（release.yml 用 --notes-file 傳它），網址一律改成不會自動連結的寫法
+（defang_urls：去掉 scheme 放進 code span；markdown 連結留下文字、網址放進括號裡的 code span；file:// 換成「本機路徑，已省略」），
+log 印改了幾處。原因：Release 說明含網址時 POST /releases 一直回 403（ai-nas 草稿 run 44040129677；拿掉網址後 run 44051748503 一次就成功）。
+notes.md 與報告本身不動。
 """
 import argparse
 import datetime
@@ -30,6 +34,8 @@ import step_rows  # noqa: E402
 from platform_scan import refresh_notes, refresh_scan_summary, verdict, worst_verdict  # noqa: E402
 
 REPORT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+
+from release_body import LOCAL_PATH_NOTE, DefangError, defang_urls  # noqa: E402,F401  （Release 說明的網址改寫，見 lib/release_body.py）
 
 
 def conclusions(scan, project, version):
@@ -80,11 +86,15 @@ def main(argv=None):
     ap.add_argument("--scan-summary", help="scan-summary-<專案>-<版本>.json（platform_scan.collect 寫的 scan.json）：產品結論 report_status、release_gate、reports、kernel_versions；"
                                            "沒給、不存在或讀不到 → NOT_RUN")
     ap.add_argument("--notes", help="notes.md（platform_scan.collect 寫的）：用 --steps 的紀錄重寫開頭的 pipeline_result 與「流程步驟」一節，與這個檔的 pipeline_result 一致；要有 --steps")
+    ap.add_argument("--body-out", help="（要有 --notes）GitHub Release 說明的輸出檔：notes.md 的網址改成不會自動連結的寫法（見檔頭）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--projects-dir", default=os.environ.get("DUMPLING_PROJECTS_DIR", os.path.join(HERE, "..", "projects")))
     a = ap.parse_args(argv)
     if a.notes and not a.steps:
         print("release-meta: FAIL（--notes 要和 --steps 一起給：沒有步驟紀錄就沒有可以對齊的 pipeline_result）")
+        return 64
+    if a.body_out and not a.notes:
+        print("release-meta: FAIL（--body-out 要和 --notes 一起給）")
         return 64
     try:
         meta = build_meta(a.projects_dir, a.project, a.version, a.commit, a.run_id, a.built_at, a.tag)
@@ -124,6 +134,20 @@ def main(argv=None):
                 print("release-meta: FAIL（讀不了或寫不了 %s：%s）" % (os.path.basename(a.scan_summary), type(e).__name__))
                 return 1
             notes_msg += "；scan-summary 的 pipeline_status 也一致" + ("（重寫了）" if ch2 else "（本來就一致）")
+        if a.body_out:
+            try:
+                with open(a.notes, encoding="utf-8") as f:
+                    try:
+                        body, nurl = defang_urls(f.read())
+                    except DefangError as e:
+                        print("release-meta: FAIL（%s）" % e)
+                        return 1
+                with open(a.body_out, "w", encoding="utf-8") as f:
+                    f.write(body)
+            except (OSError, UnicodeDecodeError) as e:
+                print("release-meta: FAIL（產生不了 Release 說明 %s：%s）" % (os.path.basename(a.body_out), type(e).__name__))
+                return 1
+            notes_msg += "；Release 說明（%s）改寫了 %d 處網址" % (os.path.basename(a.body_out), nurl)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=1)
         f.write("\n")
