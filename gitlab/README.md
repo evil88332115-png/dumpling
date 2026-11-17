@@ -37,7 +37,10 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 | `DUMPLING_DEV_PROJECTS` | `.gitlab-ci.yml` | 目前未使用，保留給動態 matrix（T-02）；專案清單目前寫在 `dev:*` 的 `parallel:matrix` |
 | `DUMPLING_SIGN_MODE` | `.gitlab-ci.yml` | `none`（預設，不簽章）或 `cosign-keyless`（需自架 Sigstore，見 GITLAB-PORT 第 9 節） |
 | `tags:`（`dumpling`、`dumpling-build`、`dumpling-scan`） | `.gitlab-ci.yml` | 換成內部 runner 的標籤 |
-| `PILOT_ENV` | 目前由範本設定（`$DUMPLING_OUT_BASE/pilot-env/pilot.env`，臨時 DT 寫入）；**T-14 之後**改成 CI/CD 變數，File 類型、protected | 常駐 DT 的連線設定（含 `$INTERNAL_DT_URL` 與 API key），格式待內部驗證 |
+| `PILOT_ENV` | 範本設定（`$DUMPLING_OUT_BASE/pilot-env/pilot.env`），**不要另外設** | scan 寫出來的 DT 連線資訊（臨時 DT 或常駐 DT 都是），權限 600 |
+| `DUMPLING_RELEASE_DT_MODE`、`DUMPLING_DEV_DT_MODE` | CI/CD 變數（不是機密） | `release:scan`／`dev:scan` 各自的 DT 開關：沒設是 `ephemeral`（臨時 DT，預設），`resident` 連內部常駐 DT，只在保護的 ref 上跑。**打開之前必須先完成 T-07**（DT 專案命名；dev 另外要版本後綴與保護 `dev/*`），見 GITLAB-PORT 第 4 節。不要設 `DUMPLING_DT_MODE`（會 FAIL） |
+| `DUMPLING_DT_CONN` | CI/CD 變數，**File 類型＋protected** | 常駐 DT 的連線檔（一行一個 `DT_URL=`、`DT_API_KEY=`，選用 `DT_FRONTEND_URL=`；格式見 `pipeline/lib/dt_resident.py`），只有開關是 `resident` 時用 |
+| `DUMPLING_DT_CA_FILE` | CI/CD 變數，File 類型（選用） | 公司自己的 CA 憑證（PEM），只給連 DT 的 curl 用 |
 | `WATCH_GITLAB_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控通知用的 project access token（scope `api`，只給一個專案）；只有 `watch:notify` 使用 |
 | `WATCH_GITLAB_READ_TOKEN` | CI/CD 變數，**protected＋masked** | 每日監控讀取用的 project access token（scope `read_api`、角色 Planner：confidential Issue 要 Planner 以上）；只有 `watch:compute` 使用 |
 | `DUMPLING_JOB` | Pipeline schedule 的變數 | `watch`（每日監控）或 `dev`（每日開發版） |
@@ -54,7 +57,7 @@ bash tests/run.sh          # 含 c3-gitlab（規則測試）與 c3-gitlab-schema
 - `dev:publish`（T-03）、`firmware:dt`（T-04）：同樣印 `NOT_RUN`。
 - `release:sign`：預設 `DUMPLING_SIGN_MODE=none` 就印 `NOT_RUN`；`cosign` 執行檔尚未進 `tools.lock`（T-09）。
 - M2 的指令（`project-info.py`、`run-step.sh`、`release-meta.py`…）已對照 M2 合併後的 main 核對（T-01，2026-11-13）。
-- runner 前提同 GitHub 代管 runner：非 root 要免密碼 sudo、掃描 runner 要有 docker（scan.sh 目前一定開臨時 DT，常駐 DT 模式是 T-14）；`DUMPLING_APT` 清空時，映像要自己含 platform.yml 的 `build.apt`／`scan.apt`（見 GITLAB-PORT 第 5 節）。
+- runner 前提同 GitHub 代管 runner：非 root 要免密碼 sudo、掃描 runner 要有 docker（掃描映像要；預設的臨時 DT 另外要 docker compose、綁 8080、`concurrent=1`）；`DUMPLING_APT` 清空時，映像要自己含 platform.yml 的 `build.apt`／`scan.apt`（見 GITLAB-PORT 第 5 節）。
 
 ## 內部版本核對表
 
