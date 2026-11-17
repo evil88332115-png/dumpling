@@ -376,6 +376,8 @@ class Resident(Base):
             (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/release.yml@refs/tags/p/v1"), False),
             (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="x/y/.github/workflows/dt-smoke.yml@refs/heads/main"), False),  # 別的 repo
             (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@"), False),  # 沒有 ref
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@main"), False),  # 不是 refs/…
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@refs/"), False),  # refs/ 後面沒有東西
             (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_WORKFLOW_REF=ok_ref), False),                              # 沒有 GITHUB_REPOSITORY
             (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/xdt-smoke.yml@refs/heads/main"), False),
         ]
@@ -541,6 +543,52 @@ class NoResidentInGithubWorkflows(unittest.TestCase):
         self.assertEqual(len(where), 1, where)                                # 只有那一步，不是整個 job
         if "env" in d:
             self.assertNotIn("DUMPLING_DT_TEST_RESIDENT", json.dumps(d["env"]))
+
+
+class ResidentSmokeScript(unittest.TestCase):
+    """pipeline/dt-resident-smoke.sh（dt-smoke.yml 的整合測試）的靜態檢查：秘密不印、結束時刪掉、過期狀態檔的檢查前後一致。"""
+    PATH = os.path.join(ROOT, "pipeline", "dt-resident-smoke.sh")
+    SECRET = r"(dt\.conn|\$w/conn|\$\{?PILOT_ENV\}?|pilot\.env|\$\{?pe\}?\b|DT_API_KEY|DUMPLING_DT_CONN)"
+
+    def code(self, text=None):
+        text = read(self.PATH) if text is None else text
+        return [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+
+    def violations(self, text=None):
+        bad = []
+        for l in self.code(text):
+            if re.search(r"\bset\s+(-[a-wyz]*x|-o\s+xtrace)|\bbash\s+-[a-z]*x\b|BASH_XTRACEFD", l):
+                bad.append(("xtrace", l))
+            if re.search(r"\b(cat|tee|head|tail|less|more|xxd|od|base64)\b[^|;&]*" + self.SECRET, l):
+                bad.append(("印出秘密檔", l))
+            if re.search(r"\b(echo|printf)\b[^|;&]*(\$\{?DT_API_KEY|\$\{?PILOT_ENV|dt\.conn|\$w/conn|\$\{?pe\}?\b)", l):
+                bad.append(("echo 秘密", l))
+            if re.search(r"\bexport\s+[^#]*\bDT_API_KEY=", l):
+                bad.append(("export key", l))
+        return bad
+
+    def test_no_xtrace_and_no_printing_secrets(self):
+        self.assertEqual(self.violations(), [])
+
+    def test_the_check_catches_mistakes(self):
+        base = read(self.PATH)
+        for extra in ('set -x', 'set -euxo pipefail', 'bash -x "$0"', 'cat "$w/conn/dt.conn"', 'echo "$DT_API_KEY"', 'tail -1 "$PILOT_ENV"',
+                      'printf "%s" "$pe"', 'cat "$pe"', 'export DT_API_KEY=x'):
+            with self.subTest(extra):
+                self.assertNotEqual(self.violations(base + "\n" + extra + "\n"), [])
+
+    def test_cleanup_removes_the_work_dir(self):
+        t = read(self.PATH)
+        self.assertRegex(t, r"cleanup\(\) \{[^}]*rm -rf \"\$w\"")
+        self.assertIn("trap cleanup EXIT", t)
+        self.assertRegex(t, r"\nw=\$RUNNER_TEMP/dt-resident\n")
+
+    def test_stale_status_check_matches_the_file_it_writes(self):
+        t = read(self.PATH)
+        m = re.search(r"finished\\t(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)", t)
+        self.assertIsNotNone(m)
+        self.assertIn("*finished=%s*" % m.group(1), t)                       # 要是「過期」的 GAP
+        self.assertIn("*不可用*) fail", t)                                     # 不是「讀不到狀態檔」的 GAP
 
 
 class OfficialOnlyForThisTagPush(unittest.TestCase):

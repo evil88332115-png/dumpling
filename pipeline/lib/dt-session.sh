@@ -13,7 +13,7 @@
 #     只做「查專案、建專案、上傳、讀結果」（sca-scan 本身的動作）；這裡只讀 /api/version 與 key 自己的權限，不改資料源、不刪專案、不管 key。
 #     GitHub Actions 上不能用（公開 repo 沒有常駐 DT 的連線檔；GITHUB_ACTIONS=true → FAIL）。
 #     唯一的例外是整合測試（T-14 收尾）：DUMPLING_DT_TEST_RESIDENT=1 **而且** GITHUB_WORKFLOW_REF 是這個 repo 的
-#     .github/workflows/dt-smoke.yml（<GITHUB_REPOSITORY>/.github/workflows/dt-smoke.yml@<ref>）。兩個條件少一個照舊 FAIL；
+#     .github/workflows/dt-smoke.yml（<GITHUB_REPOSITORY>/.github/workflows/dt-smoke.yml@refs/…）。兩個條件少一個照舊 FAIL；
 #     dt-smoke.yml 不能被 workflow_call 呼叫（reusable workflow 裡的 GITHUB_WORKFLOW_REF 指的是呼叫端），有測試鎖住。
 #
 # 三段（中間的鏡像留在呼叫端，和臨時 DT 的啟動並行）：
@@ -34,7 +34,7 @@ dt_mode() { printf '%s' "${DUMPLING_DT_MODE:-ephemeral}"; }
 _dt_github_test_allowed() {  # GitHub Actions 上允許 resident 的唯一情況：dt-smoke.yml 的整合測試（兩個條件都要）
   [ "${DUMPLING_DT_TEST_RESIDENT:-}" = 1 ] || return 1
   [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
-  case ${GITHUB_WORKFLOW_REF:-} in "$GITHUB_REPOSITORY/.github/workflows/dt-smoke.yml@"?*) return 0;; esac
+  case ${GITHUB_WORKFLOW_REF:-} in "$GITHUB_REPOSITORY/.github/workflows/dt-smoke.yml@refs/"?*) return 0;; esac
   return 1
 }
 

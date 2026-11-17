@@ -10,6 +10,8 @@
 #   3. sca-scan --sbom 用同一個名稱與版本跑兩次：第一次 D-dt-project「建立」、第二次「沿用」；兩次 dt-verify.py verify 都通過。
 #   4. 不設 MIRROR_REFRESH_STATUS，預設路徑（/var/lib/sca-gitlab/refresh-status.tsv）放一個過期的狀態檔 → C-mirror-freshness GAP；測完刪掉。
 # 以 GitHub runner 上的假常駐 DT 驗證；對真實的內部常駐 DT 未驗證。
+# 秘密：連線檔、pilot.env、DT_API_KEY 一律不印（不 set -x、不 cat／echo 它們；tests/test_wp7_dt_session.py 有靜態檢查）；
+#       結束時刪掉 $RUNNER_TEMP/dt-resident（裡面有連線檔與 key）。
 # 最後一行：dt-resident-smoke: OK｜FAIL（說明）。
 set -uo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -19,7 +21,7 @@ if [ -z "${PILOT_ENV:-}" ] || [ ! -f "$PILOT_ENV" ]; then fail "需要 PILOT_ENV
 w=$RUNNER_TEMP/dt-resident
 rm -rf "$w"; mkdir -p "$w/conn" "$w/pilot-env" "$w/out"; chmod 700 "$w/conn" "$w/pilot-env"
 status_file=/var/lib/sca-gitlab/refresh-status.tsv
-cleanup() { sudo rm -f "$status_file" 2> /dev/null || true; }
+cleanup() { sudo rm -f "$status_file" 2> /dev/null || true; rm -rf "$w"; }   # $w 裡有連線檔與 key
 trap cleanup EXIT
 
 # 連線檔：只放 DT_URL、DT_API_KEY（權限 600；值不印）
@@ -70,7 +72,11 @@ for i in 1 2; do
   [ "$(cut -f1 <<< "$p")" = OK ] || fail "第 $i 次 D-dt-project 不是 OK：$(cut -f2 <<< "$p")"
   case $(cut -f2 <<< "$p") in "$want $name@1.0.0"*) ;; *) fail "第 $i 次 D-dt-project 應該是「$want」：$(cut -f2 <<< "$p")";; esac
   m=$(awk -F'\t' '$1=="C-mirror-freshness"{print $2}' "$st")
+  md=$(awk -F'\t' '$1=="C-mirror-freshness"{print $3}' "$st")
   [ "$m" = GAP ] || fail "第 $i 次 C-mirror-freshness 應該是 GAP（過期的狀態檔），實際 ${m:-沒有這一列}"
+  # 要是「過期」的 GAP（讀到了這個狀態檔、finished 太舊），不是「讀不到狀態檔」的 GAP
+  case $md in *finished=2020-01-01T00:00:00Z*) ;; *) fail "第 $i 次 C-mirror-freshness 的 GAP 不是因為過期：$md";; esac
+  case $md in *不可用*) fail "第 $i 次 C-mirror-freshness 是「讀不到狀態檔」：$md";; esac
   PILOT_ENV="$pe" python3 -I "$root/pipeline/dt-verify.py" verify "$w/expected.json" "$w/verify$i" > "$w/verify$i.log" 2>&1 \
     || { tail -20 "$w/verify$i.log"; fail "第 $i 次 dt-verify 沒有通過"; }
   echo "第 $i 次：D-dt-project $(cut -f2 <<< "$p" | cut -c1-80)；C-mirror-freshness $m；dt-verify 通過"
