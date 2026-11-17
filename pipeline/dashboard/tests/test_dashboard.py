@@ -1059,3 +1059,43 @@ class CsafDrafts(unittest.TestCase):
     def test_review_note_on_kev_and_support_groups(self):
         e = Env(self)
         self.assertEqual(e.html.count("開著的 Issue 是待人審的清單（D-069）"), 2)
+
+    def test_render_escapes_project_version_layer_and_dir_regex_is_anchored(self):
+        recs = [draft(project='demo<b>x</b>&"', version="v1<script>", layer="os<i>", dir_="csaf-drafts/01-0123abcd\n/srv/x"),
+                draft(dir_="csaf-drafts/01-0123abcdEXTRA")]
+        e = Env(self, watch_kw={"plan": plan_with(recs)})
+        recs_d = e.data["watch"]["plan"]["csaf_drafts"]
+        self.assertEqual([r["dir"] for r in recs_d], [None, None])            # 正規式的 \Z：後面多了東西就不收
+        sec = self.section(e.html)
+        for raw in ("<b>x</b>", "<script>", "<i>"):
+            self.assertNotIn(raw, sec)
+        self.assertIn("demo&lt;b&gt;x&lt;/b&gt;&amp;", sec)
+        self.assertIn("v1&lt;script&gt;", sec)
+        self.assertIn("os&lt;i&gt;", sec)
+        self.assertEqual(check_site.check_html(e.html, REPO), [])
+
+    def test_wrong_type_is_gap_not_not_run_and_non_objects_are_counted(self):
+        for bad in ("x", {"a": 1}, 3):
+            e = Env(self, watch_kw={"plan": dict(plan_with([]), csaf_drafts=bad)})
+            sec = self.section(e.html)
+            self.assertIn("GAP", sec)
+            self.assertIn("資料格式不對", sec)
+            self.assertNotIn("NOT_RUN", sec)
+        e = Env(self, watch_kw={"plan": plan_with([draft(), "junk", 7])})
+        sec = self.section(e.html)
+        self.assertIn("有 2 筆不是物件", sec)
+        self.assertEqual(len(e.data["watch"]["plan"]["csaf_drafts"]), 1)
+        e = Env(self, watch_kw={"plan": plan_with(["junk"])})
+        sec = self.section(e.html)
+        self.assertIn("有 1 筆不是物件", sec)
+        self.assertNotIn("共 0 筆紀錄", sec)
+
+    def test_missing_project_version_layer_show_placeholder_not_none(self):
+        r = draft()
+        for k in ("project", "version", "layer"):
+            r.pop(k)
+        e = Env(self, watch_kw={"plan": plan_with([r])})
+        sec = self.section(e.html)
+        self.assertNotIn(">None<", sec)
+        self.assertNotIn("None", visible(sec))
+        self.assertEqual(sec.count("（缺）"), 3)

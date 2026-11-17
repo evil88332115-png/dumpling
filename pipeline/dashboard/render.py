@@ -828,12 +828,19 @@ def render_csaf_drafts(ctx, w, plan):
     草稿本身在那一輪 run 的 artifact（保留 90 天）；本頁只列紀錄，不放草稿內容。"""
     head = "<h4>CSAF 使用者通知草稿（第 14 條第 8 項）</h4>"
     recs = plan.get("csaf_drafts")
+    if plan.get("csaf_drafts_bad"):
+        return head + "<p>%s</p>" % ctx.gap("草稿紀錄的資料格式不對：" + str(plan.get("csaf_drafts_bad")))
     if recs is None:
         return head + "<p>%s：這一輪的 result.json 沒有草稿紀錄（建基準的那一次、演練或舊版的 result.json 不產生）。</p>" % ctx.st("NOT_RUN")
     note = ('<p class="muted">只有 shipped 的正式版有新的 KEV 命中群組時才產生；草稿的 tracking.status 一律是 draft，工具不發布。'
             '草稿檔在那一輪 run 的 artifact watch-csaf-drafts-…（保留 %d 天），本頁不放草稿內容。'
             '草稿只在群組第一次開 Issue 時產生一次，沒有產生的之後不會自動重產。</p>' % CSAF_RETENTION_DAYS)
+    sk = plan.get("csaf_drafts_skipped")
+    skip_note = ("<p>%s</p>" % ctx.gap("草稿紀錄裡有 %d 筆不是物件（資料格式不對），沒有列出" % sk)
+                 if isinstance(sk, int) and not isinstance(sk, bool) and sk > 0 else "")
     if not recs:
+        if skip_note:
+            return head + skip_note + note
         return head + "<p>這一輪沒有新的 KEV 命中群組，沒有要產生草稿的對象（共 0 筆紀錄）。</p>" + note
     counts = {}
     for r in recs:
@@ -847,14 +854,16 @@ def render_csaf_drafts(ctx, w, plan):
     for r in recs:
         r = dct(r)
         where = (ctx.a(link, "run 的 artifact") + "：" + ext(r.get("dir"), 40)) if r.get("dir") and link else (ext(r.get("dir"), 40) if r.get("dir") else "—")
-        rows.append([ext(r.get("project"), 63), ext(r.get("version"), 64), ext(r.get("layer"), 20),
+        miss = '<span class="muted">（缺）</span>'
+        rows.append([ext(r["project"], 63) if r.get("project") else miss, ext(r["version"], 64) if r.get("version") else miss,
+                     ext(r["layer"], 20) if r.get("layer") else miss,
                      " ".join(cve_text(x) for x in lst(r.get("cves"))) or "—", ctx.st(r.get("status")), where,
                      ext(r.get("detail"), 300) if r.get("detail") else ""])
     cut = plan.get("csaf_drafts_cut")
     cut_note = ("<p>%s</p>" % ctx.gap("草稿紀錄只列前 200 筆，另有 %d 筆沒有列出（見 watch run 的 result.json）" % cut)
                 if isinstance(cut, int) and not isinstance(cut, bool) and cut > 0 else "")
     return (head + "<p>這一輪的紀錄：%s。</p>" % summary +
-            table(["專案", "版本", "層", "CVE", "狀態", "草稿", "說明"], rows, "CSAF 使用者通知草稿") + cut_note + note)
+            table(["專案", "版本", "層", "CVE", "狀態", "草稿", "說明"], rows, "CSAF 使用者通知草稿") + cut_note + skip_note + note)
 
 
 def render_watch(ctx, data):
