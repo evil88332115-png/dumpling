@@ -37,10 +37,27 @@
     都沒有時映像只有一個模組目錄才用它，否則 GAP（不猜）。
   --cves-origin：--cves 的清單從哪裡來（例如 kernel-cna-version：sca-scan 在 Grype／DT 都沒有核心 CVE 時，用 kernel_cna_version.py
     依產品核心版本產生的清單）；只記在輸出的 inputs.cves_origin 與說明，不改判定。沒給時輸出和以前逐位元組相同。
-  --source-tree：核心原始碼樹（資料夾，唯讀）當 Makefile／Kbuild 的來源（刷機包／rootfs 的 linux-headers 不完整時）。.config、IKCONFIG
+  --source-tree：核心原始碼樹（資料夾，唯讀）當 Makefile／Kbuild 的來源（刷機包／rootfs 的 linux-headers 不完整或沒有時；沒有 headers 時
+    設定來自 /boot/config-<版本>，見下面）。.config、IKCONFIG
     核對、modules 與 Image 照舊來自 --from；只有 Makefile 類檔案（Makefile*、Kbuild*、*.mk，沿用同樣的讀法與上限）與檔案名稱改讀這棵樹。
     不執行樹裡的任何東西，符號連結不跟隨（不會跟出樹外）。樹裡有 .config 時和判定用的設定核對（kernel.source_tree.config_compare），
     相同或只差工具鏈照舊；不同 → 記出來，狀態 ATTENTION。樹的主.次版本和判定的核心不同 → GAP。輸出的 kernel.source_tree 記 Makefile 的來源。
+  沒有 linux-headers 時（映像沒有 /usr/lib/modules/<版本>/build 或 /usr/src/linux-headers-<版本>*/ 的 .config 與 Makefile，例如 Debian 的雲端映像）：
+    改讀 rootfs 出貨的 /boot/config-<版本>（<版本> 就是判定的核心版本；有 headers 時完全不看它，輸出和以前逐位元組相同）。
+    不可信的輸入：只解析、不執行；檔案要是一般檔案（符號連結、硬連結不跟隨；--from 資料夾時 st_nlink > 1 算硬連結；docker 上層換成資料夾等其他種類也不採用）、不超過 MAX_BOOT_CONFIG（/boot 底下最多讀 MAX_BOOT_CONFIGS 個 config-*），而且 rootfs 的 dpkg 驗證通過
+    （boot_config_dpkg，和 dpkg_verify 同一種讀法：var/lib/dpkg/info/*.md5sums 與 status，一致性檢查，不防竄改）：
+      1. md5sums 有恰好一個套件擁有 boot/config-<版本>；
+      2. 擁有者是這顆核心的 image 套件：名稱整串等於 linux-image-<版本>、linux-image-<版本>-unsigned（Debian）或 linux-image-unsigned-<版本>
+         （Ubuntu），不是這三個名稱（linux-headers-*、linux-modules-*、其他套件）一律不採用；
+      3. 套件記的 md5 和檔案內容的 md5 相同；
+      4. status 有這個套件而且是已安裝。
+    任何一項不成立 → GAP 與原因（沒有 dpkg 紀錄、擁有者不是 image 套件、md5 不同、是連結、超過上限），不判定、不退回其他設定。
+    成立時 config_source 記 "/boot/config-<版本> (dpkg verified)"，config_sha256 是檔案內容的 SHA-256，kernel.boot_config 記驗證（套件、md5、
+    檢查項目）。有燒錄的 Image 時，照上面的規則再核對一次（IKCONFIG 相同 → 照舊；不同 → 改用 IKCONFIG；沒有 IKCONFIG → dpkg 驗證，
+    /boot/Image 與 /boot/config 的擁有者要是同一個 image 套件）。
+    /boot 只有 .config，沒有 Makefile／Kbuild：只有給了 --source-tree（sca-scan 的 KERNEL_SOURCE_DIR）才判定；原始碼樹的主.次版本要和核心相同
+    （沿用上面的檢查）。沒有 --source-tree → GAP：有 /boot/config-<版本>（dpkg 驗證通過），但沒有 Makefile 來源（linux-headers 或
+    KERNEL_SOURCE_DIR）。依據（vex_export 的 kcfg_basis）：build-record，位置寫 /boot/config-<版本> 與 config 的 SHA-256、原始碼樹的識別。
   --probe-kernel-version：不判定，只從 --from 讀出產品核心版本（/lib/modules/<版本>，沒有時 Image 的版本字串），印一行
     KERNEL-VERSION<TAB>OK|NONE|GAP<TAB>版本或原因（sca-scan 在 Grype／DT 沒有核心 CVE 時用）；不需要 --out。
   --list-kernel-versions：不判定，只列出 --from 的映像出貨的每顆核心（/usr/lib/modules/<版本>/ 有 .ko 或檔案的資料夾，排序、空白分隔），印一行
@@ -167,7 +184,8 @@ Ubuntu 還沒修的約 3,400 個。很多是產品核心根本沒編進去的驅
   rejected_members、ignored_links、out_of_tree_modules、limitations；採用時另有
   counts_without_record、decision_changes（只用 Makefile → 有紀錄）、file_judgements）；採用時每個 files[] 多一個 evidence
   （紀錄沒有判斷的檔案是 null）。沒給 --build-record 時輸出和以前逐位元組相同；給了但階段 GAP（沒有判定）→ status NOT_RUN。
-狀態：沒有核心的 CVE → NOT_RUN（sca-scan 不寫這一列）；有核心 CVE 但沒有 .config／Makefile、核心版本對不上、CNA 鏡像沒有或過期、
+狀態：沒有核心的 CVE → NOT_RUN（sca-scan 不寫這一列）；有核心 CVE 但沒有 .config／Makefile（沒有 headers 時：/boot/config-<版本> 沒有通過 dpkg
+  驗證，或驗證通過但沒有 --source-tree）、核心版本對不上、CNA 鏡像沒有或過期、
   燒錄的核心讀不到 IKCONFIG 又無法以 dpkg 驗證 → GAP（results 為空，不改變任何發現）；headers 的 .config 和燒錄的核心不同
   （改用 IKCONFIG 判定）→ ATTENTION（讀取端只採用 OK）；其他 → OK（說明列出各判定的數量）。
 """
@@ -216,6 +234,17 @@ MAX_EXTLINUX = 64 << 10        # extlinux.conf 上限（通常不到 1 KB）
 MAX_BOOT_PROBES = 16           # /boot 底下讀幾個 Image* 檔案（符號連結、硬連結的目標）
 MAX_DPKG_STATUS = 32 << 20     # var/lib/dpkg/status（Ubuntu 約 3 MB）
 MAX_DPKG_LINES = 100_000       # md5sums 留下的行數上限（只留 boot/ 與 usr/src/…/.config）
+MAX_BOOT_CONFIG = 2 << 20      # /boot/config-<版本> 單一檔案上限（發行版的 config 約 300 KB）；超過 → 不採用（GAP）
+MAX_BOOT_CONFIGS = 16          # 記下內容的 /boot/config-* 檔案數上限（其餘只記有這個名稱）
+BOOT_CONFIG_LIMITATIONS = [
+    "/boot/config-<version> is used only when the image has no linux-headers .config for the kernel. It is the configuration the "
+    "distribution shipped, tied to the package that owns it (dpkg md5sums and status); it has no Makefile/Kbuild, so the judgement "
+    "needs --source-tree (the source of this kernel: only its major.minor version is checked).",
+    "The dpkg check reads var/lib/dpkg from the same untrusted rootfs as /boot/config-<version>: it is a consistency check (the stock "
+    "package file was not replaced or edited), not protection against tampering.",
+    "Accepted owners: linux-image-<version>, linux-image-<version>-unsigned, linux-image-unsigned-<version> (<version> is the "
+    "kernel version of the config file name). A config owned by another package (linux-headers-*, linux-modules-*, ...) is not used.",
+]
 IMAGE_LIMITATIONS = [
     "EFI zboot kernel images (MZ header with 'zimg') are not unpacked: treated as having no IKCONFIG.",
     "Ubuntu's /boot/vmlinuz-* is not read; only /boot/Image (or Image.gz) and the flash package's kernel/Image are.",
@@ -370,6 +399,8 @@ class Collected:
         self.want_images, self.pkg_root = False, None
         self.want_modinfo = False      # 模組的 .modinfo（intree、author…）：建置紀錄比對多出的模組時才讀（--build-record）
         self.boot = {}                 # rootfs 的 /boot 底下：路徑 → (層, "probe"／"symlink"／"hardlink", ImageProbe／連結目標)
+        self.boot_cfg_read = 0         # boot_cfg 裡讀過內容的檔案數（不隨 whiteout 減少：上限只會更保守）
+        self.boot_cfg = {}             # rootfs 的 /boot/config-*：路徑 → (層, "file"／"symlink"／"hardlink"／"toolarge"／"skipped"／其他, 內容／目標／大小)
         self.dpkg = {}                 # var/lib/dpkg/status 與 info/*.md5sums：路徑 → (層, 內容)（md5sums 只留 boot/ 與 .config 的行）
         self.boot_probes = 0
         self.pkg_images = {}           # 刷機包的 <pkg_root>/kernel/<名稱>：名稱 → ImageProbe
@@ -411,6 +442,22 @@ class Collected:
             return
         self.src_names[parts] = layer
 
+    def boot_config_entry(self, parts, kind, link, opener, size, layer):
+        """/boot/config-*（沒有 headers 時的 .config 候選，見 boot_config_info）：一般檔案在上限內才讀內容；連結不跟隨，只記目標；
+        太大或超過個數上限的只記原因。不可信的輸入：只存位元組，不解析、不執行。"""
+        if kind == "file":
+            if size > MAX_BOOT_CONFIG:
+                self.boot_cfg[parts] = (layer, "toolarge", size)
+            elif self.boot_cfg_read >= MAX_BOOT_CONFIGS and (parts not in self.boot_cfg or self.boot_cfg[parts][1] != "file"):
+                self.boot_cfg[parts] = (layer, "skipped", None)
+            else:
+                self.boot_cfg_read += parts not in self.boot_cfg or self.boot_cfg[parts][1] != "file"
+                self.boot_cfg[parts] = (layer, "file", read_all(opener, size))
+        elif kind == "symlink":
+            self.boot_cfg[parts] = (layer, "symlink", link)
+        else:       # 資料夾、裝置檔等：記下來（docker 上層把它換成資料夾時，下層的舊檔不可以留著被採用）→ 不是一般檔案，GAP
+            self.boot_cfg[parts] = (layer, kind, None)
+
     def feed(self, parts, kind, link=None, opener=None, size=0, layer=0):
         """一個項目（parts 是 rootfs 相對路徑）。只留需要的。"""
         if not parts:
@@ -422,6 +469,8 @@ class Collected:
             else:
                 self.extlinux_reason = f"extlinux.conf is not a regular file under the size limit ({kind}, {size} bytes); not read"
             return
+        if self.want_images and len(parts) == 2 and parts[0] == "boot" and parts[1].startswith("config-"):
+            self.boot_config_entry(parts, kind, link, opener, size, layer)      # 只多記一筆；下面照舊（不 return）
         if self.want_images and len(parts) >= 2 and parts[0] == "boot":
             if kind == "symlink":
                 self.boot[parts] = (layer, "symlink", link)      # 只記目標（在映像裡解開，見 boot_image）
@@ -500,7 +549,7 @@ class Collected:
     def whiteout(self, parts, layer, opaque=False):
         """docker 層的 whiteout：.wh.<名稱> 刪掉下層的那個路徑（含底下）；.wh..wh..opq 刪掉下層在這個資料夾底下的全部。"""
         n = len(parts)
-        for d in (self.boot, self.dpkg):
+        for d in (self.boot, self.dpkg, self.boot_cfg):
             for k in [k for k, v in d.items() if k[:n] == parts and (len(k) > n or not opaque) and v[0] < layer]:
                 del d[k]
         for k in [k for k, ly in self.other_ko.items() if k[:n] == parts and (len(k) > n or not opaque) and ly < layer]:
@@ -687,6 +736,8 @@ def feed_tar(col, t, layer=0, strip=None):
             if hasattr(col, "hardlink"):           # 呼叫端自己處理（kernel_modules.py：目標沒有收內容的也要記）
                 col.hardlink(parts, tp, layer)
                 continue
+            if getattr(col, "want_images", False) and len(parts) == 2 and parts[0] == "boot" and parts[1].startswith("config-"):
+                col.boot_cfg[parts] = (layer, "hardlink", tp)          # /boot/config-* 的硬連結：不採用（boot_config_info）
             if getattr(col, "want_images", False) and len(parts) >= 2 and parts[0] == "boot":
                 col.note(parts, "file")
                 col.boot[parts] = (layer, "hardlink", tp)          # /boot/Image 的硬連結：在映像裡解開（見 boot_image）
@@ -790,6 +841,9 @@ def collect(src, prefix=None, col=None, images=False, modinfo=False):
                 continue
             col.feed(e.parts, e.kind, link=e.link if e.kind == "symlink" else None, opener=e.open if e.kind == "file" else None,
                      size=e.size)
+            if e.kind == "file" and e.key is not None and col.want_images and len(e.parts) == 2 and e.parts[0] == "boot" \
+                    and e.parts[1].startswith("config-"):
+                col.boot_cfg[e.parts] = (0, "hardlink", None)     # 資料夾來源的硬連結（st_nlink > 1）：同 tar 的硬連結，不採用
         if col.want_images and strip:
             for n in IMAGE_NAMES:
                 got = probe_dir_file(src, col.pkg_root + ("kernel", n))
@@ -1215,13 +1269,18 @@ def image_inputs(col):
     rf = boot_image(col)
     if fl is None and rf is None:
         return None
+    return {"flashed": fl, "rootfs": rf, "extlinux": col.extlinux, "extlinux_reason": col.extlinux_reason, "prefer_rootfs": False,
+            "dpkg": dpkg_inputs(col)}
+
+
+def dpkg_inputs(col):
+    """擷取到的 rootfs dpkg（var/lib/dpkg/status 與 info/*.md5sums）→ {"status", "status_reason", "md5sums", "md5sums_skipped"}。"""
     st = col.dpkg.get(("var", "lib", "dpkg", "status"))
     md5 = {k[-1][:-len(".md5sums")]: v[1] for k, v in col.dpkg.items() if k[3:4] == ("info",)}
-    return {"flashed": fl, "rootfs": rf, "extlinux": col.extlinux, "extlinux_reason": col.extlinux_reason, "prefer_rootfs": False,
-            "dpkg": {"status": st[1] if st else None, "status_reason": None if st is None or st[1] is not None else
-                     f"var/lib/dpkg/status is larger than {MAX_DPKG_STATUS >> 20} MB (limit)",
-                     "md5sums": {k: v for k, v in md5.items() if v is not None},
-                     "md5sums_skipped": sorted(k for k, v in md5.items() if v is None)}}
+    return {"status": st[1] if st else None, "status_reason": None if st is None or st[1] is not None else
+            f"var/lib/dpkg/status is larger than {MAX_DPKG_STATUS >> 20} MB (limit)",
+            "md5sums": {k: v for k, v in md5.items() if v is not None},
+            "md5sums_skipped": sorted(k for k, v in md5.items() if v is None)}
 
 
 # ---------- 虛擬檔案系統（擷取的內容＋連結） ----------
@@ -1344,6 +1403,7 @@ class BuildInfo:
         self.tree_names = None                    # 樹內一般檔案的相對路徑（字串）集合；None：不知道（建置紀錄不用它判「沒編」）
         self.config_raw = None                    # .config 的原始位元組（locate 讀到的；改用 IKCONFIG 時是 IKCONFIG）
         self.source_tree = None                   # apply_source_tree()：Makefile 改讀核心原始碼樹時的紀錄（kernel.source_tree）
+        self.boot_config = None                   # boot_config_info()：沒有 headers、改讀 /boot/config-<版本> 時的驗證紀錄（kernel.boot_config）
         self.tree_complete = False                # tree_names 是完整核心原始碼樹（--source-tree）的檔案名稱：檔案不在裡面＝這個核心沒有它（只有 apply_source_tree 設）
 
 
@@ -1505,10 +1565,16 @@ def locate(col, src, want_ver):
             return None, f"/usr/src/linux-headers-{ver}* 有 {len(cands)} 個內容不同的 .config，不猜是哪一個"
         roots = cands[:1]
     if not roots:
+        # 沒有 headers：改讀出貨的 /boot/config-<版本>（boot_config_info；要 dpkg 驗證，Makefile 另外要 --source-tree）。沒有這個檔案 → 照舊 GAP
+        bi = boot_config_info(col, ver, src, mod)
+        if bi is not None:
+            return bi, None
         have = sorted({"/".join(k[:3]) for k in col.files if len(k) > 3})
+        other = sorted(k[1] for k in getattr(col, "boot_cfg", {}))
         return None, (f"映像沒有核心 {ver} 的建置設定（/usr/lib/modules/{ver}/build 或 /usr/src/linux-headers-{ver}*/ 底下的 .config"
                       f" 與 Makefile；/usr/src 有：{'、'.join(have[:3]) or '沒有'}）：要安裝核心 headers 套件"
-                      "（Jetson：nvidia-l4t-kernel-headers）")
+                      "（Jetson：nvidia-l4t-kernel-headers）"
+                      + (f"；/boot 有 {'、'.join(other[:3])}，但沒有 config-{ver}" if other else ""))
     root = roots[0]
     dirmap = {}
     files = {rel: data for rel, data in vfs.walk(root, dirmap)}
@@ -1517,6 +1583,110 @@ def locate(col, src, want_ver):
     info.config_raw = cfg
     info.tree_names = tree_names(col, dirmap)
     return info, None
+
+
+def boot_config_owner_rule(name, ver):
+    """擁有 /boot/config-<ver> 的套件名稱是不是同一顆核心的 image 套件 → 規則說明；不是 → None。只認三種名稱（<ver> 是 config 檔名的核心版本，
+    整串相等，不用前綴或萬用字元）：Debian 的 linux-image-<ver> 與 linux-image-<ver>-unsigned，Ubuntu 的 linux-image-unsigned-<ver>
+    （同一顆核心未簽署的 image）。linux-headers-*、linux-modules-*、linux-image-<ver>-dbg 等其他名稱都不算。"""
+    for fmt in ("linux-image-{v}", "linux-image-{v}-unsigned", "linux-image-unsigned-{v}"):
+        if name == fmt.format(v=ver):
+            return fmt
+    return None
+
+
+def boot_config_dpkg(col, ver, rec, data):
+    """/boot/config-<ver> 的內容（不可信）和 rootfs 的 dpkg 核對 → 不成立的原因或 None；檢查項目寫進 rec["checks"]、套件寫進 rec["package"]。
+    沿用 dpkg_verify 的讀法（var/lib/dpkg/info/*.md5sums 與 status；一致性檢查，不防竄改）：
+      1. md5sums 有恰好一個套件擁有 boot/config-<ver>（沒有 → 沒有 dpkg 紀錄；有多個 → 不確定）；
+      2. 擁有者是同一顆核心的 image 套件（boot_config_owner_rule）；
+      3. 套件記的 md5 和實際內容相同；
+      4. var/lib/dpkg/status 有這個套件而且是已安裝（只有一個版本）。"""
+    dp = dpkg_inputs(col)
+    md5s = dp.get("md5sums") or {}
+    if not md5s:
+        return "沒有 dpkg 紀錄：讀不到 dpkg 的 md5sums（var/lib/dpkg/info/*.md5sums）" + (
+            f"（超過上限而略過：{'、'.join(dp['md5sums_skipped'][:3])}）" if dp.get("md5sums_skipped") else "")
+    path = "boot/config-" + ver
+    own, why = dpkg_owner(md5s, path)
+    if why:
+        return ("沒有 dpkg 紀錄：" if not own else "擁有者不確定：") + why
+    name, arch, pmd5 = own[0]
+    rule = boot_config_owner_rule(name, ver)
+    rec["package"] = {"name": name, "arch": arch, "version": None, "path": path, "md5": pmd5}
+    rec["owner_rule"] = rule
+    rec["checks"].append({"check": "owner is the image package of this kernel", "ok": rule is not None, "rule": rule})
+    if rule is None:
+        return (f"擁有者是 {name}，不是這顆核心的 image 套件（要 linux-image-{ver}、linux-image-{ver}-unsigned 或 "
+                f"linux-image-unsigned-{ver}）")
+    ok = pmd5 == rec["md5"]
+    rec["checks"].append({"check": "file md5 == dpkg md5sums", "ok": ok, "dpkg_md5": pmd5})
+    if not ok:
+        return f"md5 不同：/{path} 的 md5 是 {rec['md5']}，套件 {name} 記的是 {pmd5}（檔案被換過或改過）"
+    if dp.get("status") is None:
+        return f"沒有 dpkg 紀錄：讀不到 var/lib/dpkg/status（{dp.get('status_reason') or '沒有這個檔案'}）"
+    got, why = dpkg_version(dpkg_status_versions(dp["status"]), name, arch)
+    rec["checks"].append({"check": "package is installed (dpkg status)", "ok": got is not None})
+    if why:
+        return f"沒有 dpkg 紀錄：{why}"
+    rec["package"].update(version=got[0], source=got[1])
+    return None
+
+
+def boot_config_info(col, ver, src, mod):
+    """沒有 headers 的 .config 時：rootfs 的 /boot/config-<ver> → BuildInfo（info.boot_config 記驗證結果）；沒有這個名稱 → None（照舊 GAP）。
+    檔案要是一般檔案（連結、硬連結不跟隨）、不超過 MAX_BOOT_CONFIG，而且 dpkg 驗證通過（boot_config_dpkg）才算 verified；
+    任何一項不成立 → verified false 與原因（呼叫端 GAP，不判定）。BuildInfo 沒有 Makefile：只有 --source-tree 才能判定（boot_config_gap）。"""
+    key = ("boot", "config-" + ver)
+    e = getattr(col, "boot_cfg", {}).get(key)
+    if e is None:
+        return None
+    layer, kind, val = e
+    path = "/boot/config-" + ver
+    rec = {"path": path, "kernel_version": ver, "verified": False, "reason": None, "kind": kind, "size": None, "sha256": None, "md5": None,
+           "package": None, "owner_rule": None, "checks": [], "config_source": None, "makefiles_from": None,
+           "limitations": BOOT_CONFIG_LIMITATIONS}
+    data = None
+    if kind == "file":
+        data = val
+        rec.update(size=len(data), sha256=hashlib.sha256(data).hexdigest(), md5=hashlib.md5(data, usedforsecurity=False).hexdigest())
+        rec["reason"] = boot_config_dpkg(col, ver, rec, data)
+    elif kind == "symlink":
+        rec["reason"] = f"{path} 是符號連結（連到 {str(val)[:100]}），不跟隨、不採用"
+    elif kind == "hardlink":
+        rec["reason"] = f"{path} 是硬連結，不採用"
+    elif kind == "toolarge":
+        rec["size"] = val
+        rec["reason"] = f"{path} 有 {val} 位元組，超過上限 {MAX_BOOT_CONFIG}，不讀"
+    elif kind == "skipped":
+        rec["reason"] = f"/boot 底下的 config-* 檔案超過 {MAX_BOOT_CONFIGS} 個，{path} 沒有讀"
+    else:
+        rec["reason"] = f"{path} 不是一般檔案（{kind}）"
+    rec["verified"] = rec["reason"] is None
+    if rec["verified"]:
+        rec["config_source"] = f"{path} (dpkg verified)"
+    info = BuildInfo({}, (data or b"").decode("utf-8", "replace"), path, ver, src, mod)
+    info.config_raw = data if data is not None else b""
+    info.boot_config = rec
+    return info
+
+
+def boot_config_unverified(info, out):
+    """info 是 /boot/config 但 dpkg 驗證不成立 → GAP 的原因（並把紀錄寫進 out["kernel"]）；其他 → None。不成立時不用這份設定，也不往下判定。"""
+    bc = getattr(info, "boot_config", None)
+    if not bc or bc["verified"]:
+        return None
+    out["kernel"].update({"version": info.kernel_version or out["kernel"].get("version"), "config_source": info.config_path,
+                          "config_sha256": bc["sha256"], "source": info.source.get("label"), "boot_config": bc})
+    return f"{bc['path']} 不採用（沒有通過 dpkg 驗證）：{bc['reason']}"
+
+
+def boot_config_gap(info):
+    """info 是已驗證的 /boot/config 但沒有 Makefile 來源（--source-tree）→ GAP 的原因；其他 → None。"""
+    bc = getattr(info, "boot_config", None)
+    if bc and bc["verified"] and not info.source_tree:
+        return f"有 {bc['path']}（dpkg 驗證通過），但沒有 Makefile 來源（linux-headers 或 KERNEL_SOURCE_DIR）"
+    return None
 
 
 def tree_names(col, dirmap):
@@ -4181,6 +4351,9 @@ def dpkg_verify(info, fl, rf):
         return rec, f"第 3 項不成立：{kname} 是 {kv}，headers 的 {hname} 是 {hv}（版本不同）"
     # 只認名稱成對：Source 相同不算（L4T 的 RT 核心與一般核心可能來自同一個原始碼套件，設定卻不同，例如 PREEMPT_RT）
     pair = dpkg_paired(kname, hname)
+    if pair is None and getattr(info, "boot_config", None) and kname == hname:
+        # /boot/config-<版本>（沒有 headers）：它的擁有者已經確定是這顆核心的 image 套件（boot_config_dpkg），/boot/Image 也是同一個套件的 → 同一組
+        pair = f"{kname} owns both /boot/Image and the /boot/config"
     rec["checks"].append({"check": "kernel and headers packages belong together (name pair)", "ok": pair is not None,
                           "rule": pair})
     if pair is None:
@@ -4242,12 +4415,14 @@ def config_check(info):
     if fail is None:
         k, h = drec["kernel_package"], drec["headers_package"]
         rec["result"] = "dpkg_verified"
+        bcfg = getattr(info, "boot_config", None) is not None          # 設定來自 /boot/config-<版本>（沒有 headers）
+        cn_en, cn_zh = ("/boot/config", "/boot/config") if bcfg else ("headers .config", "headers 的")
         rec["note"] = (f"{name} has no readable IKCONFIG ({why}); dpkg shows it is the kernel of package {k['name']} {k['version']} "
-                       f"(md5 matches) and the headers .config belongs to {h['name']} of the same version (md5 matches): the headers "
-                       ".config is used" + ("" if pkg else "; the flashed kernel/Image is not visible (rootfs only)"))
+                       f"(md5 matches) and the {cn_en} belongs to {h['name']} of the same version (md5 matches): the {cn_en} "
+                       "is used" + ("" if pkg else "; the flashed kernel/Image is not visible (rootfs only)"))
         res["note"] = (f"{name} 讀不到 IKCONFIG（{why}），dpkg 驗證通過（{k['name']} {k['version']} 的 md5 和 "
-                       f"{'kernel/Image、' if pkg else ''}/boot/Image 相符，headers 的 {h['name']} 同一組、同版本、.config 的 md5 相符），"
-                       "沿用 headers .config" + ("" if pkg else "；只有 rootfs，看不到實際燒錄的 kernel/Image"))
+                       f"{'kernel/Image、' if pkg else ''}/boot/Image 相符，{cn_zh} {h['name']} 同一組、同版本、.config 的 md5 相符），"
+                       f"沿用 {cn_en}" + ("" if pkg else "；只有 rootfs，看不到實際燒錄的 kernel/Image"))
         return res
     rec["result"] = "dpkg_not_verified"
     rec["note"] = f"{name} has no readable IKCONFIG ({why}) and dpkg cannot show it is the kernel the headers belong to"
@@ -4304,8 +4479,11 @@ def settle_config(info):
     if chk and chk["use"] is not None:
         info.config_raw, info.config_path = chk["use"], chk["label"]        # 只換設定的來源，判定的規則不變
         info.config_text = chk["use"].decode("utf-8", "replace")
+    bc = getattr(info, "boot_config", None)
+    if bc and bc["verified"] and not (chk and chk["use"] is not None):
+        info.config_path = bc["config_source"]       # "/boot/config-<版本> (dpkg verified)"；改用 IKCONFIG 時留 IKCONFIG 的標籤
     source_tree_check(info)                      # --source-tree 的 .config 和判定用的設定核對（沒有 --source-tree 時什麼都不做）
-    if chk:
+    if chk or bc:
         raw = info.config_raw if info.config_raw is not None else info.config_text.encode("utf-8", "surrogateescape")
         return chk, hashlib.sha256(raw).hexdigest()
     return None, hashlib.sha256(info.config_text.encode("utf-8", "surrogateescape")).hexdigest()
@@ -4336,6 +4514,9 @@ def assess(a, max_age):
                        "ok": mir.state["ok"], "reason": mir.state["reason"]}
     if gap:
         return "GAP", f"{len(cves)} 個核心 CVE 沒有依 .config 判定：{gap}", out
+    bgap = boot_config_unverified(info, out)       # 沒有 headers、改讀 /boot/config-<版本>：dpkg 驗證不成立 → GAP，不用這份設定
+    if bgap:
+        return "GAP", f"{len(cves)} 個核心 CVE 沒有依 .config 判定：{bgap}", out
     chk, ksha = settle_config(info)
     if getattr(a, "cves_origin", None) and not out["component"] and (info.kernel_version or want):
         out["component"] = vendor_kernel_component(info.kernel_version or want)     # 清單不是 Grype／DT 的：元件由核心版本決定
@@ -4345,10 +4526,17 @@ def assess(a, max_age):
     if info.source_tree:
         out["kernel"]["makefiles_from"] = "source-tree"
         out["kernel"]["source_tree"] = info.source_tree
+    if info.boot_config:
+        info.boot_config["makefiles_from"] = "source-tree" if info.source_tree else None
+        out["kernel"]["boot_config"] = info.boot_config
+        out["limitations"] = list(out["limitations"]) + [BOOT_CONFIG_LIMITATIONS[0]]
     if chk:
         out["kernel"]["config_check"] = chk["record"]
-        if chk["gap"]:
-            return "GAP", f"{len(cves)} 個核心 CVE 沒有依 .config 判定：{chk['gap']}", out
+    bgap = boot_config_gap(info)
+    if bgap:
+        return "GAP", f"{len(cves)} 個核心 CVE 沒有依 .config 判定：{bgap}", out
+    if chk and chk["gap"]:
+        return "GAP", f"{len(cves)} 個核心 CVE 沒有依 .config 判定：{chk['gap']}", out
     if out["kernel"]["makefiles"] < 50:
         if info.source_tree:
             return "GAP", (f"{len(cves)} 個核心 CVE 沒有依 .config 判定：--source-tree 只有 {out['kernel']['makefiles']} 個 Makefile／Kbuild"
@@ -4540,6 +4728,10 @@ def assess(a, max_age):
     if getattr(a, "cves_origin", None):
         detail = f"CVE 清單來源：{a.cves_origin}（不是 Grype／DT）；{detail}"
     tcmp = (info.source_tree or {}).get("config_compare") or {}
+    if info.boot_config:
+        pk = info.boot_config["package"] or {}
+        detail += (f"；沒有 linux-headers，設定讀自出貨的 {info.boot_config['path']}（dpkg 驗證通過：套件 {pk.get('name')} {pk.get('version')}，"
+                   f"md5 相符；sha256 {str(info.boot_config['sha256'])[:12]}…）")
     if info.source_tree:
         detail += (f"；--source-tree 的 .config 核對：{tcmp.get('result')}" + (f"（{tcmp['differences_total']} 項不同，例如 "
                    f"{', '.join(tcmp['examples'][:3])}）" if tcmp.get("result") == "differs" else ""))

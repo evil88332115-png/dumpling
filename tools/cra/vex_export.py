@@ -440,10 +440,18 @@ def sha_part(path, sha, label="SHA-256"):
 
 
 def kcfg_basis(kcfg):
-    """核心設定檢查（scan/kernel-config.json）的依據：build-record，位置寫檔案、核心版本與 config 的 SHA-256。"""
+    """核心設定檢查（scan/kernel-config.json）的依據：build-record，位置寫檔案、核心版本與 config 的 SHA-256。
+    設定讀自出貨的 /boot/config-<版本>（沒有 linux-headers，kernel.boot_config 驗證通過）時：位置另寫這個檔案的路徑（用的就是它時），
+    以及 Makefile 的來源（核心原始碼樹的識別：資料夾名稱與版本，kernel.source_tree 記的）。"""
     k = (kcfg or {}).get("kernel") or {}
     ver, sha = k.get("version"), k.get("config_sha256")
-    inner = ", ".join(x for x in (f"kernel {ver}" if ver else "", f"config SHA-256 {sha}" if sha else "") if x)
+    bc = k.get("boot_config") if isinstance(k.get("boot_config"), dict) and k["boot_config"].get("verified") is True else None
+    src = (k.get("source_tree") if isinstance(k.get("source_tree"), dict) else None) if bc else None
+    cfg = "config SHA-256"
+    if bc and isinstance(bc.get("path"), str) and str(k.get("config_source") or "").startswith(bc["path"]):
+        cfg = f"config {bc['path']} SHA-256"                      # 用的就是 /boot/config（沒有被燒錄核心的 IKCONFIG 取代）
+    tree = (f"Makefile source tree {str(src.get('path_label') or '?')[:100]} version {src.get('version') or '?'}" if src else "")
+    inner = ", ".join(x for x in (f"kernel {ver}" if ver else "", f"{cfg} {sha}" if sha else "", tree) if x)
     return basis_entry("build-record", "scan/kernel-config.json" + (f" ({inner})" if inner else ""), ver)
 
 

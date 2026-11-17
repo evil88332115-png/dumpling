@@ -2,7 +2,7 @@
  "schema": 1,
  "project": "ai-nas-demo",
  "version": "v1.0.0-demo1",
- "note": "C4 的標準答案（2026-11-14 定案；2026-11-17 依 dev run 43676839283（M7d-4，c41be8e）改分層：OMV 原始碼相依歸 bsp，見 adapter-gaps #7；之前依據的 CI 是 dev run 43536522257（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43467217687（併上 main 7b5c6b2 之後，7b3bb41）、43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
+ "note": "C4 的標準答案（2026-11-14 定案；2026-11-17 依 dev run 43676839283（M7d-4，c41be8e）改分層：OMV 原始碼相依歸 bsp，見 adapter-gaps #7；2026-11-17 依 dev run 43688443345（M7d-3a，e8487c5）把 C-kernel-config／C-kernel-module-map 改成 OK，見 adapter-gaps #23；之前依據的 CI 是 dev run 43536522257（M6 最終重跑：併上 main d67ef47 之後，跑的 commit 是 d12d1eb）；之前依 43467217687（併上 main 7b5c6b2 之後，7b3bb41）、43416974360（1abab06）、第一版 43386797521（5bd67f0））。不是直接存輸出：deb 套件與 Debian 官方清單逐一核對、OMV 版本對固定 commit 的 changelog；驗證代理獨立核對後定案（見 docs/references/wp7-expected-review.md）。元件數、雜湊、狀態用 equals；漏洞數隨資料庫變動，用範圍。範圍不符時人工看過原因再改，並更新 reason。",
  "checks": {
   "platform": {
    "equals": "ai-nas",
@@ -178,12 +178,12 @@
    "reason": "已知不完整（缺口 22，M7）：OK 只代表有做核心比對，不代表涵蓋完整。2026-11-13 是 OK，428 列都來自 linux-kernel 元件（pkg:generic）依 NVD 上游範圍比對，沒有用 Debian 安全追蹤，也沒有用 CNA 清單；Debian 的核心 deb 沒有列。M7 改成依發行版資料或 CNA 之後可能變 GAP，所以兩個都允許，但不允許 NOT_RUN 或 FAIL"
   },
   "runs..stages.C-kernel-config": {
-   "equals": "GAP",
-   "reason": "固定是 GAP：雲端映像沒有核心 headers 套件（322 個 deb 裡沒有 linux-headers）；映像其實有 /boot/config-6.12.116+deb13-amd64，但工具只找 /usr/lib/modules/<版本>/build 與 /usr/src/linux-headers-*（缺口 23）。工具改成也讀 /boot/config-* 之後這一項會變，到時要更新"
+   "equals": "OK",
+   "reason": "M7d-3a（#138）起：雲端映像沒有 linux-headers，改讀出貨的 /boot/config-6.12.116+deb13-amd64（dpkg 驗證：擁有者 linux-image-6.12.116+deb13-amd64、md5 相符），Makefile／Kbuild 來自 Debian 原始碼樹 linux-6.12.116（orig＋debian 修補，見 kernel_source）。OK 代表 .config 讀得到、來源驗證過，不代表都判定了：dev run 43688443345 的 428 個 CVE 沒編進核心 0、有編 256、無法判斷 172（沒有 CNA 紀錄 68、含標頭檔或非程式檔 23、規則判斷不了 81）。無法判斷的 172 個仍為 untriaged，閘門維持 GAP。6.12 沒有 data/kernel-included-c 清單，所以沒有任何 CVE 判成 not_affected（缺口 23 未完全解決）。2026-11-15 之前是 GAP（找不到 headers）"
   },
   "runs..stages.C-kernel-module-map": {
-   "equals": "GAP",
-   "reason": "固定是 GAP：同上（缺口 23），核心 CVE 對不到模組"
+   "equals": "OK",
+   "reason": "同 C-kernel-config：M7d-3a 起用同一份 /boot/config（settle_config）。dev run 43688443345：607 個檔案 builtin 93、unknown 514；只對應，不判定。2026-11-15 之前是 GAP"
   },
   "runs..stages.C-pyver": {
    "equals": "GAP",
@@ -353,7 +353,7 @@
   },
   "product_status.full.documents.kernel-vulnerabilities": {
    "equals": "GAP",
-   "reason": "核心 CVE 不能依 .config 判定（缺口 23）"
+   "reason": "GAP 的原因是資料狀態：dev run 43688443345 的 detail 是 D-dt-data-sources／D-dt-kev-sources／D-dt-findings、C-sbomgate、C-pyver 為 GAP，C-mirror-freshness NOT_RUN，C-dt-feeds GAP。M7d-3a 之後 .config 讀得到（C-kernel-config OK），但 6.12 沒有 included-c 清單，428 個核心 CVE 都沒有排除（缺口 23）"
   },
   "product_status.full.documents.security-findings": {
    "equals": "ATTENTION",
