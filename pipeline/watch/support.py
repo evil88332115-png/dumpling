@@ -39,7 +39,7 @@ ORDER = ("OK", "ATTENTION", "NOT_ASSESSED", "FAIL")     # 同 support_check.py
 LABEL = "support-period"
 ISSUE_VERDICTS = ("ends before the product support period", "end of maintenance not published",
                   "no maintenance phase applies (subscription not configured)")
-VERDICT_TODO = {"ends before the product support period": "確認元件在產品支援期後段怎麼取得安全更新（換版本、付費維護並寫進 support.subscriptions、或縮短支援期並寫明依據）",
+VERDICT_TODO = {"ends before the product support period": "確認元件在產品支援期後段怎麼取得資安更新（換版本、付費維護並寫進 support.subscriptions、或縮短支援期並寫明依據）",
                 "end of maintenance not published": "向廠商確認維護期（取得書面說明後更新資料表的 end 與來源），在那之前不能假設維護到產品支援期結束",
                 "no maintenance phase applies (subscription not configured)": "確認有沒有買需要的維護（有的話寫進 config.json 的 support.subscriptions）"}
 VERDICT_ZH = {"ends before the product support period": "比產品先停止維護",

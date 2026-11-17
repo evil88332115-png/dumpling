@@ -271,6 +271,21 @@ class TestRun(Base):
         self.assertTrue(any("OS Debian 12" in x for x in t), t)
         self.assertTrue(any("Acme kernel 6" in x and "維護期沒有公開" in x for x in t), t)
 
+    def test_our_os_and_release_component_different_series_not_merged(self):
+        # OS 是 Debian 12、Release 裡是 Debian 13（不同版本線＝不同資料表項目），兩者都比產品先停止維護：開 2 個 Issue（不跨版本線合併）
+        self.project(until="2036-12-31", os_resp="ours", status="shipped", os_block='os:\n  distro: debian\n  release: "12"')
+        self.release(comps=(("debian", "13.1"),))
+        rc, res, plan, _ = self.run_support()
+        t = self.titles(plan)
+        self.assertEqual(len(t), 2, t)
+        self.assertTrue(any("OS Debian 12" in x and "比產品先停止維護" in x for x in t), t)
+        self.assertTrue(any("Debian 13" in x and "OS Debian 13" not in x and "比產品先停止維護" in x for x in t), t)
+        keys = sorted(a["key"] for a in plan["actions"])
+        self.assertEqual(keys, sorted([support.key_of("p1", "os", "debian-12", "ends before the product support period", "2026-06", "2036-12"),
+                                       support.key_of("p1", "component", "debian-13", "ends before the product support period", "2035-06", "2036-12")]))
+        os_body = next(a["body"] for a in plan["actions"] if "OS Debian 12" in a["title"])
+        self.assertNotIn("p1/v1.0.0", os_body)          # Debian 13 的 Release 不寫進 Debian 12 的 Issue
+
     def test_customer_os_component_key_unchanged(self):
         # os_responsibility 不是 ours：照舊只有元件的 Issue（key 不變）
         self.project(until="2031-12-31")
