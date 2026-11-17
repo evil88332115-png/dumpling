@@ -817,6 +817,8 @@ class Workflow(unittest.TestCase):
         for name in ("DUMPLING_DT_", "DT_WAIT_RC_FILE"):
             self.assertNotIn(name, self.text)
         self.assertEqual(self.wf["jobs"]["firmware-dt"]["env"], {"DT_OSV_ECOSYSTEMS": "PyPI,npm,Ubuntu"})
+        for p in ("pipeline/lib/dt-session.sh", "pipeline/lib/dt_resident.py", "pipeline/firmware-*.sh"):
+            self.assertIn(p, self.on["pull_request"]["paths"])                     # 改了 DT 的起停也要跑這份 workflow
 
     def test_pilot_env_is_outside_the_result_dir(self):
         paths = next(s["run"] for s in self.wf["jobs"]["firmware-dt"]["steps"] if s.get("name") == "路徑")

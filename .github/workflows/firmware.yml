@@ -11,6 +11,8 @@ on:
       - 'pipeline/firmware-expect.py'
       - 'pipeline/lib/firmware_*.py'
       - 'pipeline/dt-*'
+      - 'pipeline/lib/dt-session.sh'
+      - 'pipeline/lib/dt_resident.py'
       - 'pipeline/scan-status-check.py'
       - 'pipeline/watch/collect.py'
       - 'tools/pilot/**'
