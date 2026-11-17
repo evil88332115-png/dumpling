@@ -51,6 +51,7 @@ PRECEDENCE = ("bsp", "unknown", "os", "host-tool")
 DISTRO_PURL_TYPES = ("deb", "rpm", "apk", "alpm")
 OWN_REF_PREFIX = "sca-center:own:"
 OWN_SOURCE_PREFIX = "own software"
+ORIGIN_PROP, ORIGIN_SOURCE = "dumpling:origin", "source"   # 轉接器掃的自有應用原始碼（sbom_augment.py）
 PATH_PROP_RE = re.compile(r"^syft:location:\d+:path$")
 PATH_PROPS = ("syft:metadata:path", "syft:metadata:virtualPath", "sca-center:own-software-path", "sca-center:flash-package-path")
 MAX_SBOM_BYTES = 512 << 20
@@ -193,7 +194,9 @@ def normalize_owner_path(p):
 
 
 def classify_component(c, config, own=((), (), 0), owners=None):
-    """→ (層, 依據)。依據：own-software｜own-software-list｜component-type｜package-name｜file-owner｜path｜unresolved。
+    """→ (層, 依據)。依據：own-software｜own-software-list｜own-software-source｜component-type｜package-name｜file-owner｜path｜unresolved。
+    own-software-source：轉接器掃產品自有應用的固定 commit 原始碼時加上的元件（`dumpling:origin` = source，sbom_augment.py），
+    也就是自有應用的相依，和自有軟體一樣歸 bsp（adapter-gaps #7，M7d；只看這個 property，不看名稱或路徑）。
     owners：{相對路徑: 擁有它的套件名稱}（dpkg 的 .list）；型別 file 的元件（Syft 的檔案紀錄，沒有 purl）用它找擁有的套件，
     再用 classify_package 決定層（擁有者與路徑規則都有結果時取最保守的）。"""
     props = _props(c)
@@ -205,6 +208,8 @@ def classify_component(c, config, own=((), (), 0), owners=None):
     name = c.get("name") if isinstance(c.get("name"), str) else ""
     if (name and _match_any(name, own_names)) or any(_match_any(p, own_paths) for p in paths):
         return "bsp", "own-software-list"
+    if props.get(ORIGIN_PROP) == ORIGIN_SOURCE:
+        return "bsp", "own-software-source"
     typ = c.get("type")
     if typ == "operating-system":
         return "os", "component-type"
