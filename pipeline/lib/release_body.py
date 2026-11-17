@@ -8,6 +8,8 @@ defang_urls(text) → (新文字, 改了幾處)：
 - code span 與 fenced code block（``` 或 ~~~）裡：只去掉 scheme。
 - file://：一律換成「本機路徑，已省略」，不把路徑帶進說明。
 - 句尾標點與全形標點不算網址；再跑一次不會再改（冪等）。
+- 最後對整份文字無條件再清一次：規則沒抓到的（ASCII 英數字緊貼，例如 abchttps://…）scheme 一律去掉、file://… 一律換成固定句，
+  所以輸出一定沒有 http(s)://、ftp://、file://。
 """
 import re
 
@@ -20,7 +22,7 @@ _AUTOLINK = re.compile(r"<((?:https?|ftp|file)://[^>\s]*)>", re.I)
 _BARE = re.compile(r"(?<![A-Za-z0-9])((?:https?|ftp|file)://" + _URL_STOP + r")", re.I)
 _WWW = re.compile(r"(?<![A-Za-z0-9./@-])(www\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+" + r"[^\s<>`'\"" + _CJK_STOP + r"]*)", re.I)
 _SCHEME = re.compile(r"(?:https?|ftp)://", re.I)
-_FILE = re.compile(r"file://[^\s`]*", re.I)       # 不吃掉 code span 結尾的反引號
+_FILE = re.compile(r"file://[^\s`<>'\"" + _CJK_STOP + r"]*", re.I)   # 不吃掉 code span 結尾的反引號與後面的全形標點
 LOCAL_PATH_NOTE = "本機路徑，已省略"
 
 
@@ -94,4 +96,10 @@ def defang_urls(text):
             parts[i] = part
             total += k
         out.append("".join(parts))
-    return "\n".join(out), total
+    # 最後一道保險（無條件）：上面的規則沒抓到的（例如 ASCII 英數字緊貼 abchttps://…、v1https://…），整份文字裡剩下的
+    # file://… 一律換成固定句、(https?|ftp):// 一律去掉；也算進計數。輸出因此一定沒有 http(s)://、ftp://、file://
+    text = "\n".join(out)
+    nf = len(_FILE.findall(text))
+    text = _FILE.sub(LOCAL_PATH_NOTE, text)
+    ns = len(_SCHEME.findall(text))
+    return _SCHEME.sub("", text), total + nf + ns

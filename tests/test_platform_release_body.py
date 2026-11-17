@@ -86,6 +86,14 @@ class Defang(unittest.TestCase):
                          ("網址`example.org/a`", "名稱_`example.org/b`", "網站`www.example.org/c`"))
         self.assertIsNone(LOCAL.search(out), out)
 
+    def test_ascii_glued_urls_are_caught_by_the_final_pass(self):
+        """ASCII 英數字緊貼網址（lookbehind 不抓的情況）：最後一道無條件處理把 scheme 去掉、file:// 換成固定句，也算進計數。"""
+        out = self.check("版本abchttps://example.org/a 與 v1https://example.org/b、_https://example.org/c、abcfile:///etc/x、xftp://example.org/d", 5)
+        self.assertNotRegex(out, r"(?i)(?:https?|ftp|file)://")
+        self.assertIn(rm.LOCAL_PATH_NOTE, out)
+        self.assertNotIn("/etc/x", out)
+        self.assertIn("abcexample.org/a", out)                     # 剩下的文字保留（只拿掉 scheme）
+
     def test_url_inside_query_string(self):
         """查詢字串裡又有完整網址：scheme 全部去掉（只去第一個會留下 scheme，而且再跑一次不一樣）；夾帶的 file:// 也省略。"""
         self.check("見 https://a.example.org/x?u=https://b.example.org/y&v=http://c.example.org/z", 1,
