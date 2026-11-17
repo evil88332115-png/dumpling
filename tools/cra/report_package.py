@@ -8,6 +8,7 @@
 輸出：
     交給PM/漏洞清單.xlsx        總覽、完整漏洞清單、排除後剩下的、規則說明
     交給PM/SBOM/、VEX/、安全檢查結果.md、待確認事項.xlsx、客戶資料包/（有給 --supplier-project 才有）
+    交給PM/CSAF/                 （有給 --csaf-previous 才有）CSAF 2.0 修補公告草稿 csaf-fix-advisory-<名稱>-<版本>.json＋README.md（只給 PM，不自動進客戶資料包）
     給RD/P1判斷表.xlsx          只有立即處理（P1）：一個 CVE 一列
     內部存檔/                    Reports 裡的其他檔案（證據、機器可讀的 vulnerability-rows.json 等）
     SHA256SUMS.txt
@@ -1146,8 +1147,15 @@ def sha256(p):
     return h.hexdigest()
 
 
+INFO_STEP_IDS = ("step:csaf-fix-advisory",)       # 「僅供參考」的步驟（例如第一版沒有前一版可比較）：只有這個 id 的 informational 才不算 GAP
+
+
+def informational_step(r):
+    return r.get("informational") is True and r.get("id") in INFO_STEP_IDS
+
+
 def build(project, out, supplier_project=None, name=None, version=None, allow_tmp=False, previous=None, diff_grype_db=None, inputs_check=None,
-          p1_layers=None):
+          p1_layers=None, csaf_previous=None):
     """→ (退出碼, 訊息列表)。0＝完整；2＝有缺的輸入（GAP，記在未產生的項目.md）；PackageError＝失敗，沒有留下半成品。"""
     project = Path(project)
     reports = project / "CRA" / "Reports"
@@ -1180,7 +1188,7 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
         for r in ic["inputs"]:
             if r.get("status") == "missing" and r.get("required"):
                 doc.setdefault("_warnings", []).append(f"必要輸入缺少（GAP）：{r.get('label')}；影響：{r.get('affects') or '未說明'}")
-            elif r.get("status") in ("gap", "fail", "not_run") and r.get("kind") == "step":     # 精靈附加步驟（OP-TEE／UEFI 平台設定／A0／板子結果）沒做成
+            elif r.get("status") in ("gap", "fail", "not_run") and r.get("kind") == "step" and not informational_step(r):     # 精靈附加步驟（OP-TEE／UEFI 平台設定／A0／板子結果）沒做成
                 doc.setdefault("_warnings", []).append(f"{r.get('label')}：{str(r.get('status')).upper()}（{r.get('note') or '未說明'}）；影響：{r.get('affects') or '未說明'}")
             elif r.get("status") == "unchecked" and r.get("required"):    # 警告，不算 GAP：只是沒辦法自動確認，不等於缺
                 doc.setdefault("_warnings", []).append(f"必要輸入未確認（無法自動檢查，請人工確認）：{r.get('label')}；影響：{r.get('affects') or '未說明'}")
@@ -1253,10 +1261,18 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
             for r in ic.get("inputs") or []:
                 if r.get("status") == "missing" and r.get("required"):
                     missing.append((f"必要輸入：{r.get('label')}", f"沒有提供；影響：{r.get('affects') or '未說明'}"))
-                elif r.get("kind") == "step" and r.get("status") in ("gap", "fail", "not_run"):
+                elif r.get("kind") == "step" and r.get("status") in ("gap", "fail", "not_run") and not informational_step(r):
                     missing.append((f"附加步驟：{r.get('label')}（{str(r.get('status')).upper()}）", f"{r.get('note') or '未說明'}；影響：{r.get('affects') or '未說明'}"))
         if previous:
             add_diff(previous, reports, arch, pm / "客戶資料包", diff_grype_db)
+        if csaf_previous:
+            csaf_msg, csaf_fail = add_csaf(csaf_previous, reports, project, pm, arch, name, version)
+            if csaf_fail:
+                missing.append(("CSAF 修補公告草稿（csaf_advisory.py）", csaf_fail))
+            else:
+                msgs.append(csaf_msg)
+        else:
+            msgs.append(f"CSAF 修補公告：未產生（{NOT_RUN}；沒有給前一版 --csaf-previous，無法比較兩版）")
         if missing:
             lines = [f"# 未產生的項目（{NOT_RUN}）", "", "下列輸入缺少，對應的檔案沒有產生；不要把缺少當成沒有問題。", ""]
             lines += [f"- {w}：{why}" for w, why in missing]
@@ -1291,6 +1307,75 @@ def build(project, out, supplier_project=None, name=None, version=None, allow_tm
     return (0 if final == "OK" else 2), msgs
 
 
+CSAF_DIR = "CSAF"
+CSAF_STATUS_TEXT = (
+    ("fixed", "已修補（fixed）", "舊版受影響、這一版已判定修補或元件已移除；有證據才寫。只有這一類會有 vendor_fix（更新到這一版）"),
+    ("new", "新增（new）", "這一版才有、舊版沒有評估過或舊版判定不受影響；對使用者是保守的方向"),
+    ("still", "仍存在（still）", "兩版都還受影響或還在評估"),
+    ("reassessed", "重新評估（reassessed）", "重新評估成不受影響。**這不是修補**，不寫 vendor_fix；要不要對外說明由 PM 決定"),
+    ("changed", "其他狀態改變（changed）", "例如不受影響改成已修補"),
+    ("not_stated", "這一版沒有判定（not_stated）", "舊版受影響、這一版沒有判定而元件還在，或新版本已修但舊版本還在：**不當成已修**，要 RD 先判定"),
+)
+
+
+def csaf_readme(summ, new_name, fname):
+    c = summ.get("counts") or {}
+    miss = summ.get("missing_fields") or []
+    lines = ["# CSAF 修補公告草稿（只給 PM，尚未發布）", "",
+             f"- 檔案：`{fname}`（CSAF 2.0，category `csaf_security_advisory`，`tracking.status` 是 `draft`）",
+             f"- 本版：{new_name}；產生狀態：{summ.get('status')}（ATTENTION＝還有要補的欄位或要注意的事，不是錯誤）", "",
+             "## 這是什麼", "",
+             "依 CRA Annex I Part II(4)：修補可用之後，要公開已修補漏洞的資訊（說明、受影響產品、影響、嚴重度、修補方式）。"
+             "這份草稿由兩個版本的判定（VEX）比對產生，**只是草稿，工具不發布，也不會自動放進客戶資料包**；要不要給客戶、怎麼發布由 PM 決定。", "",
+             "和「被積極利用漏洞的使用者通知」（`csaf_advisory.py exploited`，第 14 條第 8 項）是兩件事：那一份在**還沒有修補**時使用，這一份在**修補之後**使用。"
+             "官網的公告文字仍是對外的主要管道，這份 JSON 是它的機器可讀版本；向主管機關的通報（第 14 條的單一通報平台、24／72 小時）另外處理，不公開。", "",
+             "## 各分類的意思", "", "| 分類 | 本次筆數 | 意思 |", "|---|---|---|"]
+    lines += [f"| {title} | {c.get(k, 0)} | {meaning} |" for k, title, meaning in CSAF_STATUS_TEXT]
+    lines += ["", "## 發布前一定要補的欄位", "",
+              "- 發布者：`csaf.publisher_name`、`csaf.publisher_namespace`、`csaf.tracking_id_prefix`、`csaf.advisory_url_base`、聯絡方式 `csaf.contact`（寫在產品設定 config.json 的 `csaf` 區塊）。"
+              + (f"**這一次還缺：{'、'.join(miss)}**（檔案裡是 TO BE COMPLETED）。" if miss else "這一次這幾項都有值。"),
+              "- 每個漏洞的描述、嚴重度（CVSS）與修補方式的說明：工具只帶入狀態與元件，**沒有**自動帶入漏洞描述與分數，要人補。",
+              "- `tracking.status` 從 `draft` 改成 `final`、版本號與發布日期：由發布的人改，工具不改。",
+              "- `not_stated`、`reassessed` 的列：先由 RD 判定或確認要不要寫進公告。",
+              f"- 其他注意事項（見 `{ARCH}/csaf-fix-advisory/csaf-summary.json` 與 `advisory.md`）：{'；'.join(summ.get('notes') or []) or '無'}", "",
+              "## 客戶是誰", "",
+              "我們是供應商時：客戶就是製造商，這份可以給客戶當作他們自己公告的輸入，但是否提供由 PM 決定。"
+              "製造商自己的產品時：這份是我們自己要對使用者公開的內容。", ""]
+    return "\n".join(lines)
+
+
+def add_csaf(previous, reports, project, pm, arch, name, version):
+    """--csaf-previous：和前一版比較，CSAF 修補公告草稿放 交給PM/CSAF/，完整輸出（含摘要）放 內部存檔/csaf-fix-advisory/。→ (訊息, 失敗原因或 None)。
+    失敗不擋整包：呼叫端把原因記進「未產生的項目」（GAP）。客戶資料包（add_diff 的英文差異、供應商資料包）不放 CSAF。"""
+    import csaf_advisory as ca
+    try:
+        old = ca.resolve_reports(previous)
+        if old.resolve() == Path(reports).resolve():
+            return None, f"前一版和這一版是同一個資料夾（{previous}）"
+        try:
+            cfg = load_json(Path(project) / "CRA" / "Config" / "config.json")
+        except (OSError, ValueError):
+            cfg = {}
+        cfg = cfg if isinstance(cfg, dict) else {}
+        work = arch / "csaf-fix-advisory"
+        status, detail, summ = ca.run(old, Path(reports), cfg, work)
+    except ca.InputError as e:
+        return None, str(e)
+    if status == "FAIL":
+        return None, detail
+    pr = cfg.get("product") if isinstance(cfg.get("product"), dict) else {}
+    nm = ca.slug(str(name or pr.get("name") or "product"))
+    ver = ca.slug(str(version or pr.get("version") or "version"))
+    fname = f"csaf-fix-advisory-{nm}-{ver}.json"
+    (pm / CSAF_DIR).mkdir(parents=True, exist_ok=True)
+    copy_file(work / "csaf.json", pm / CSAF_DIR / fname)
+    new_name = f"{summ['new'].get('name') or ''} {summ['new'].get('version') or ''}".strip() or product_label(project, name, version)
+    (pm / CSAF_DIR / "README.md").write_text(csaf_readme(summ, new_name, fname), encoding="utf-8")
+    c = summ["counts"]
+    return (f"CSAF 修補公告草稿：{status}（已修補 {c['fixed']}、新增 {c['new']}、仍存在 {c['still']}、重新評估 {c['reassessed']}、"
+            f"其他改變 {c['changed']}、這一版沒判定 {c['not_stated']}）；放在 {PM}/{CSAF_DIR}/，只是草稿"), None
+
+
 def add_diff(previous, reports, arch, customer_dir, grype_db=None):
     """--previous：和前一份報告比較，中文＋json 放內部存檔，英文版放客戶資料包（有客戶資料包才放）。沒給 --previous 時不呼叫。"""
     import report_diff
@@ -1313,6 +1398,7 @@ def main(argv=None):
     ap.add_argument("--version", help="產品版本（預設取 config.json）")
     ap.add_argument("--previous", help="（選用）同一產品前一份報告的資料夾；給了就產生和它的差異（內部存檔＋客戶資料包的英文版）")
     ap.add_argument("--diff-grype-db", help="（選用，要有 --previous）這一次用的 vulnerability.db，唯讀，用來核對發行版狀態")
+    ap.add_argument("--csaf-previous", help="（選用）同一產品前一版的 CRA/Reports、專案資料夾或精靈輸出資料夾；給了就產生 CSAF 修補公告草稿（交給PM/CSAF/）；沒給＝NOT_RUN")
     ap.add_argument("--inputs-check", help="（選用）精靈產生的 inputs-check.json；缺少的必要輸入會在報告標 GAP，檔案放內部存檔")
     ap.add_argument("--p1-layers", help="（選用，只在報告有分層時）P1 判斷表放哪幾層的 P1，逗號分隔：bsp,unknown,os；預設只放我們的待辦"
                                         "（bsp、unknown，OS 層只有 os_responsibility 是 ours 或沒給時）")
@@ -1331,7 +1417,8 @@ def main(argv=None):
             return 64
     try:
         code, msgs = build(a.project, a.out, a.supplier_project, a.name, a.version, previous=a.previous,
-                           diff_grype_db=a.diff_grype_db, inputs_check=a.inputs_check, p1_layers=p1_layers)
+                           diff_grype_db=a.diff_grype_db, inputs_check=a.inputs_check, p1_layers=p1_layers,
+                           csaf_previous=a.csaf_previous)
     except PackageError as e:
         print(f"FAIL\t{e}", file=sys.stderr)
         return 1
