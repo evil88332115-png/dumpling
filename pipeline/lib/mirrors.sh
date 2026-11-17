@@ -250,7 +250,9 @@ _mirror_internal() {  # <腳本> <資料夾名>（先呼叫過 mirror_internal_c
   dest=$mir/$d
   [ -d "$root" ] || { _mirror_internal_fail "$d" "$kind" "內部鏡像根目錄不存在或不是資料夾"; return 1; }
   [ -e "$src" ] || { _mirror_internal_fail "$d" "$kind" "內部鏡像根目錄底下沒有 $kind 的子路徑（$sub）：這種鏡像還沒有同步到 runner 主機"; return 1; }
-  rroot=$(realpath -e -- "$root") && rsrc=$(realpath -e -- "$src") || { _mirror_internal_fail "$d" "$kind" "無法解開 $kind 的子路徑"; return 1; }
+  if ! rroot=$(realpath -e -- "$root") || ! rsrc=$(realpath -e -- "$src"); then
+    _mirror_internal_fail "$d" "$kind" "無法解開 $kind 的子路徑"; return 1
+  fi
   case $rsrc in
     "$rroot"/*) ;;
     *) _mirror_internal_usage "$d" "$(_mirror_internal_pathvar "$kind") 的子路徑解開之後跳出了內部鏡像根目錄"; return 64;;
@@ -258,7 +260,7 @@ _mirror_internal() {  # <腳本> <資料夾名>（先呼叫過 mirror_internal_c
   # 之後的檢查與複製一律用解開後的 $rsrc：頂層的符號連結在「檢查」與「複製」之間被換掉，也不會改去複製根目錄外的東西
   if [ -f "$rsrc" ] && [ ! -L "$rsrc" ]; then
     [ "$kind" = cisa-kev ] || { _mirror_internal_fail "$d" "$kind" "$kind 的子路徑是檔案（只有 cisa-kev 可以指到單一 JSON 檔）"; return 1; }
-    mode=file
+    mode="file"
   elif [ ! -d "$rsrc" ] || [ -L "$rsrc" ]; then
     _mirror_internal_fail "$d" "$kind" "$kind 的子路徑不是資料夾"; return 1
   fi
