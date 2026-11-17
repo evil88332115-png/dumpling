@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 12:38 +0800（C1）
+最後更新：2026-11-17 12:53 +0800（C3）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -435,7 +435,7 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 - C2 的 md_safe 要比照 md_text 處理 @ 與 HTML 實體：C2 來問時分享實作（C0 交辦）
 - 代理（D-048）：目前 0 個；任務說明一律寫明 model sonnet＋effort，且不得以任何方式略過 hook
 - 防 60 天停用：**下次人工檢查日期：2026-12-13**（`gh workflow view watch.yml`）
-- 卡住／等決定：WATCH_REAL_ISSUES on（使用者 11-17 設）；等 11-18 01:17 UTC 的排程 run（可能延遲數小時），之後核對實際開出的 9 個（KEV 彙總 1、支援期限 8）、沒有重開 #149～#164（D-069：保留待人審）。#175（S4 PR-1 CSAF 工具）已合併。S4 PR-2 #179（每日監控接使用者通知草稿）開了，Sonnet 預驗中 → 交 C0。上游原有的問題只回報、不在 dumpling 修
+- 卡住／等決定：WATCH_REAL_ISSUES on；等 11-18 01:17 UTC 排程（可能延遲數小時）→ 核對 9 個 Issue（KEV 彙總 1、支援期限 8）、#149～#164 沒重開、result.json 的 csaf_drafts 全部 NOT_RUN（dev Release，沒有 artifact）。S4 完成（#175、#179 合併；Release 比對接線歸 C1）。下一件等 C0 選：上線第一天報告／儀表板加支援期限與草稿區塊／GitLab 文件／草稿重產（第二階段）
 - 開著的 PR：沒有
 - 韌體進監控：C3 這邊全部合併；第一個 firmware-demo Release 已發布，dry_run 結果已交 C0、C2 核對一致
 - 儀表板：#126、#129 已合併；T-12（死人開關）#133 已合併（GitLab 範本 when: manual，待內部驗證）
