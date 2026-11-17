@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 20:45 +0800（C2）
+最後更新：2026-11-17 20:49 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -119,8 +119,8 @@
 <!-- BEGIN C2 -->
 ## C2 韌體（WP3＋WP4）
 
-> **目前（2026-11-17）**：暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。T-04 要等 C4 的 T-14（C0：T-04 的設計準備也等 T-14 的設計出來再做），其他 C2 項目照 D-063 凍結到第二階段。
-> - **T-04：PR #207（wp3/fw-dt-session，c58fce4）已開**。C0 同意設計：DT_WAIT_RC_FILE 和 dt_end 的 down 失敗 WARNING 都放在這個 PR 裡改 dt-session.sh，由 C4 審。新增 pipeline/firmware-dt-session.sh；firmware.yml 的 up／wait／env／上傳合成一步，down 改成 dt_end（always）。沒設 DUMPLING_DT_MODE 時的呼叫序列由測試逐字鎖住；resident 在 GitHub 上 FAIL（含 DUMPLING_DT_TEST_RESIDENT 的情境）。本機 test_firmware*.py 519 項、test_wp7*.py 154 項 OK；13 個 mutation 有 12 個被抓到（剩下那個是等價的）。workflow_dispatch run 44084096336：firmware-release 是 skipped；dt-wait.rc 是 0，FIRMWARE-DT 40 行和 #204 的 run 44069264233 逐字相同（PR 留言）。PR 的 CI 全綠，C4 審過 dt-session.sh 的部分，回覆 OK。已通知 C0 派驗證。
+> **目前（2026-11-17）**：第一階段的 C2 工作已全部完成（T-04 #207 已合併）。暫停後已恢復（C0 通知）。#130 已合併（20ba05e）。T-04 要等 C4 的 T-14（C0：T-04 的設計準備也等 T-14 的設計出來再做），其他 C2 項目照 D-063 凍結到第二階段。
+> - **T-04：PR #207（wp3/fw-dt-session，c58fce4）已開**。C0 同意設計：DT_WAIT_RC_FILE 和 dt_end 的 down 失敗 WARNING 都放在這個 PR 裡改 dt-session.sh，由 C4 審。新增 pipeline/firmware-dt-session.sh；firmware.yml 的 up／wait／env／上傳合成一步，down 改成 dt_end（always）。沒設 DUMPLING_DT_MODE 時的呼叫序列由測試逐字鎖住；resident 在 GitHub 上 FAIL（含 DUMPLING_DT_TEST_RESIDENT 的情境）。本機 test_firmware*.py 519 項、test_wp7*.py 154 項 OK；13 個 mutation 有 12 個被抓到（剩下那個是等價的）。workflow_dispatch run 44084096336：firmware-release 是 skipped；dt-wait.rc 是 0，FIRMWARE-DT 40 行和 #204 的 run 44069264233 逐字相同（PR 留言）。PR 的 CI 全綠，C4 審過 dt-session.sh 的部分，回覆 OK。獨立驗證通過，C0 已合併（a8e7e99），worktree 已移除。**T-04 完成，第一階段的 C2 工作全部做完。** C4 的 #206 之後由 C4 merge main。等 C0 通知第一階段收尾或第二階段的排程。
 > - **PR #204（wp3/fw-release-body，C0 指派）**：`pipeline/firmware-release-publish.sh` 建 Release 前先跑 `python3 -I pipeline/release-body.py`（#201），改寫過的暫存檔才交給 `--notes-file`；改寫失敗、沒產生檔或空白 → FAIL，不呼叫任何 GitHub API。PublishScript 新增 3 項測試；本機 test_firmware*.py 499 項 OK，3 個 mutation 都抓得到；shellcheck 沒有警告。CI 通過，C0 已合併（67e209f），worktree 已移除。第一階段只剩 T-04，等 C4 的 T-14（#199）合併後 C0 通知開工。
 > - **DT 失敗路徑已在真的 Actions 上驗過**：測試分支 `wp3/test-dt-fail`（629fe1a，從 main 20ba05e）只改 `pipeline/dt-ephemeral.sh` 的 DT 位址為連不到的埠；沒有推 tag，也沒有改 repo 變數或 secret。workflow_dispatch run 44009322155 的結果：
 >   - firmware-dt 是 failure，在「臨時 DT：up」失敗（API 600 秒內沒有回應），down 照跑。
