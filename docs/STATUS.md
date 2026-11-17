@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 11:40 +0800（C2）
+最後更新：2026-11-17 11:41 +0800（C2）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -127,7 +127,7 @@
 >   - 代表樣本 `dasharo-protectli-vp46xx-v1.2.0`（備選 NUC BOX），限制寫明。
 >   - 接法建議示範用 (a) firmware-demo Release 的 SBOM（sha256 取自 meta），(b) `sca-scan --sbom` 匯入供應商 SBOM 留作實際產品的介面；合併條件 5 點。
 >   - EC：只有 Dasharo NS5x 筆電的公開 EC 檔（sha256 已核對，版本和供應商 SBOM 一致）；Protectli 沒有 → AI NAS 的 EC 層 GAP。
->   - 待決定：AI NAS 對 firmware 層要不要另開 Issue（C3）；韌體元件在 D-027 的責任分層（C4／C0，C2 建議 unknown）；NS5x EC 要不要加成樣本（C2 建議第二階段）。
+>   - C0 的決定：示範用 (a)，(b) 留作實際產品的介面；AI NAS 的 firmware 層不另開 Issue，用 `dumpling:firmware-ref` 指到 firmware-demo 的 key（C4 在 N1 和 C3 對齊）；責任分層歸 bsp（LAYERS.md 第 2 條 `type: firmware → bsp`），「代表樣本」寫進 N1 的限制；NS5x 的 EC 排第二階段。輸入檔已照這些決定更新。
 > - **T-04 對齊（C0 轉 C4 定案的 T-14 設計）**：之後韌體上傳改呼叫 `pipeline/lib/dt-session.sh` 的 `dt_begin <PILOT_ENV>`／`dt_end`（`DUMPLING_DT_MODE=ephemeral|resident`），不另外寫 up／wait／env／down。設計草稿等 C4 的實作合併後再寫。
 >
 > **2026-11-15 下午**：D-063（PR #117）已定，先完成第一階段的端到端流程。
