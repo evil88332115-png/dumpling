@@ -363,6 +363,41 @@ class Resident(Base):
         self.assertIn("不在 GitHub Actions 上用", r.stdout)
         self.assertEqual((calls, FakeDT.seen), ([], []))
 
+    def test_github_test_switch_needs_both_conditions(self):
+        """GitHub 上只有 dt-smoke.yml 的整合測試例外：DUMPLING_DT_TEST_RESIDENT=1 而且 GITHUB_WORKFLOW_REF 是這個 repo 的 dt-smoke.yml。"""
+        ok_ref = "o/r/.github/workflows/dt-smoke.yml@refs/pull/7/merge"
+        cases = [
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF=ok_ref), True),
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@refs/heads/main"), True),
+            (dict(GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF=ok_ref), False),                                   # 少了開關
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r"), False),                                # 少了 workflow ref
+            (dict(DUMPLING_DT_TEST_RESIDENT="true", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF=ok_ref), False),  # 只認 1
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/pipeline.yml@refs/heads/main"), False),
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/release.yml@refs/tags/p/v1"), False),
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="x/y/.github/workflows/dt-smoke.yml@refs/heads/main"), False),  # 別的 repo
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@"), False),  # 沒有 ref
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_WORKFLOW_REF=ok_ref), False),                              # 沒有 GITHUB_REPOSITORY
+            (dict(DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r", GITHUB_WORKFLOW_REF="o/r/.github/workflows/xdt-smoke.yml@refs/heads/main"), False),
+        ]
+        for env, allowed in cases:
+            with self.subTest(**env):
+                if os.path.exists(os.path.join(self.out, "pipeline-steps.tsv")):
+                    os.remove(os.path.join(self.out, "pipeline-steps.tsv"))
+                r, calls = self.resident(GITHUB_ACTIONS="true", **env)
+                if allowed:
+                    self.assertEqual(r.returncode, 0, r.stdout)
+                else:
+                    self.assertEqual(r.returncode, 1, r.stdout)
+                    self.assertIn("不在 GitHub Actions 上用", r.stdout)
+                self.assertEqual(calls, [])
+
+    def test_switch_does_nothing_outside_resident(self):
+        # 開關只放行 resident 的 GitHub 防呆，不改 ephemeral 的行為
+        r, calls = self.session(GITHUB_ACTIONS="true", DUMPLING_DT_TEST_RESIDENT="1", GITHUB_REPOSITORY="o/r",
+                                GITHUB_WORKFLOW_REF="o/r/.github/workflows/dt-smoke.yml@refs/heads/main")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual([c.split(" OSV=")[0].strip() for c in calls], ["up", "wait", "env %s" % self.pe, "down"])
+
     def test_unknown_mode_fails(self):
         r, calls = self.session(DUMPLING_DT_MODE="off")
         self.assertEqual(r.returncode, 1)
@@ -469,12 +504,43 @@ class ConnFile(Base):
 
 
 class NoResidentInGithubWorkflows(unittest.TestCase):
-    def test_workflows_never_set_resident(self):
-        wf = os.path.join(ROOT, ".github", "workflows")
-        for f in sorted(os.listdir(wf)):
-            t = read(os.path.join(wf, f))
-            for name in ("DUMPLING_DT_MODE", "DUMPLING_DT_CONN", "DUMPLING_DT_CA_FILE", "DUMPLING_DT_ALLOW_HTTP_LOCAL"):
-                self.assertNotIn(name, t, f)
+    WF = os.path.join(ROOT, ".github", "workflows")
+
+    def workflows(self):
+        return {f: read(os.path.join(self.WF, f)) for f in sorted(os.listdir(self.WF)) if f.endswith((".yml", ".yaml"))}
+
+    def test_only_dt_smoke_mentions_dumpling_dt(self):
+        for f, t in self.workflows().items():
+            names = set(re.findall(r"DUMPLING_DT_[A-Z_]+", t))
+            if f == "dt-smoke.yml":
+                self.assertEqual(names, {"DUMPLING_DT_TEST_RESIDENT"}, f)     # 其他變數在 pipeline/dt-resident-smoke.sh 裡設
+            else:
+                self.assertEqual(names, set(), f)
+
+    def test_dt_smoke_is_not_reusable_and_not_called(self):
+        # reusable workflow 的 GITHUB_WORKFLOW_REF 是呼叫端：dt-smoke.yml 不能有 workflow_call，也不能被別的 workflow 呼叫
+        import yaml
+        wfs = self.workflows()
+        on = yaml.safe_load(wfs["dt-smoke.yml"]).get(True) or yaml.safe_load(wfs["dt-smoke.yml"]).get("on")
+        self.assertNotIn("workflow_call", on if isinstance(on, (dict, list)) else [on])
+        self.assertNotIn("workflow_call", wfs["dt-smoke.yml"])
+        for f, t in wfs.items():
+            self.assertNotRegex(t, r"uses:\s*\S*dt-smoke\.ya?ml", f)
+
+    def test_switch_is_set_only_on_the_integration_step(self):
+        import yaml
+        d = yaml.safe_load(self.workflows()["dt-smoke.yml"])
+        where = []
+        for jn, job in (d.get("jobs") or {}).items():
+            if "DUMPLING_DT_TEST_RESIDENT" in json.dumps(job.get("env") or {}):
+                where.append((jn, "<job env>"))
+            for st in job.get("steps") or []:
+                if "DUMPLING_DT_TEST_RESIDENT" in json.dumps(st.get("env") or {}):
+                    where.append((jn, st.get("name")))
+                    self.assertIn("pipeline/dt-resident-smoke.sh", st.get("run", ""))
+        self.assertEqual(len(where), 1, where)                                # 只有那一步，不是整個 job
+        if "env" in d:
+            self.assertNotIn("DUMPLING_DT_TEST_RESIDENT", json.dumps(d["env"]))
 
 
 class OfficialOnlyForThisTagPush(unittest.TestCase):

@@ -103,13 +103,24 @@ jobs:
         run: |
           python3 -I pipeline/dt-verify.py verify tests/fixtures/sbom/smoke.expected.json "$RESULT_DIR"
 
+      # T-14 收尾：同一台的臨時 DT 當成常駐 DT，用常駐 DT 模式（resident）連它（pipeline/dt-resident-smoke.sh 設好模式與連線檔）。
+      # resident 在 GitHub Actions 上一律 FAIL，只有這一步例外：DUMPLING_DT_TEST_RESIDENT=1，而且 GITHUB_WORKFLOW_REF 是這個 workflow
+      # （pipeline/lib/dt-session.sh 兩個都核對）。key 是上面 dt-ephemeral.sh 在這個 job 裡產生的，不是 secret。
+      # 這個 workflow 不能改成可被其他 workflow 呼叫的 reusable workflow（那時 GITHUB_WORKFLOW_REF 是呼叫端；tests/test_wp7_dt_session.py 鎖住）。
+      - name: 假常駐 DT（resident 模式）
+        if: ${{ hashFiles('tools/pilot/sca-scan') != '' }}
+        env:
+          DUMPLING_DT_TEST_RESIDENT: "1"
+        run: |
+          bash pipeline/dt-resident-smoke.sh | tee "$RUNNER_TEMP/line-resident"
+
       - name: 摘要
         if: always()
         run: |
           {
             echo "## dt-smoke"
-            for step in up wait env upload; do
-              if [ -s "$RUNNER_TEMP/line-$step" ]; then echo "- $step: $(grep -E '^(dt-ephemeral|上傳|wait 用時)' "$RUNNER_TEMP/line-$step" | tr '\n' ' ')"
+            for step in up wait env upload resident; do
+              if [ -s "$RUNNER_TEMP/line-$step" ]; then echo "- $step: $(grep -E '^(dt-ephemeral|上傳|wait 用時|dt-resident-smoke)' "$RUNNER_TEMP/line-$step" | tr '\n' ' ')"
               else echo "- $step: NOT_RUN"; fi
             done
             echo
