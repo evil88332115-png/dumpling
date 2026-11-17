@@ -58,11 +58,10 @@ if [ "$augment" = app-source ]; then
   aversion=$(python3 -I "$here/disk_image.py" param "$proj" "$ver" app_version) || fail "sources.yml 沒有 platform_params.app_version"
 fi
 
-# ---------- 1. 臨時 DT 與鏡像 ----------
-trap 'bash "$root/pipeline/dt-ephemeral.sh" down > /dev/null 2>&1 || true' EXIT
-export DT_OSV_ECOSYSTEMS=${DT_OSV_ECOSYSTEMS:-Debian,PyPI,Go,npm,Maven}
-export DT_WAIT_MIN=${DT_WAIT_MIN:-60}
-bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
+# ---------- 1. DT（臨時或常駐，pipeline/lib/dt-session.sh，T-14）與鏡像 ----------
+# shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
+. "$root/pipeline/lib/dt-session.sh"
+dt_begin Debian,PyPI,Go,npm,Maven       # 臨時 DT 的 OSV 生態系預設（平台的 scan.sh 可以先設 DT_OSV_ECOSYSTEMS）
 export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
 mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
 # 共用的鏡像函式（C1 的 pipeline/lib/mirrors.sh）：最多試 3 次；kernel-cve 有 KCVE_CACHE_DIR（workflow 的 cache）時，
@@ -72,9 +71,7 @@ mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
 mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 mirror euvd.sh euvd || fail "鏡像 euvd.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
 OSV_DISTRO_ECOSYSTEMS=Debian mirror osv-distro.sh osv || fail "鏡像 osv-distro.sh 失敗（弱點資料不完整，不當作沒有漏洞）"
-bash "$root/pipeline/dt-ephemeral.sh" wait || { rc=$?; [ $rc = 3 ] && fail "臨時 DT 的鏡像逾時（GAP：弱點資料不完整）"; fail "臨時 DT wait 失敗"; }
-mkdir -p "$(dirname "$PILOT_ENV")"
-bash "$root/pipeline/dt-ephemeral.sh" env "$PILOT_ENV" || fail "臨時 DT env 失敗"
+dt_ready "$PILOT_ENV"
 {
   echo "KERNEL_CVE_MIRROR=$mir/kcve"
   echo "EUVD_MIRROR=$mir/euvd"
@@ -147,6 +144,7 @@ cp -r "$proj/CRA/Config" "$out/cra-config" || fail "複製 CRA/Config 失敗"
 python3 -I "$here/wp7_scan.py" site-config --out "$out/wizard.json" --repo "$root" --root "$wk" --outroot "$wo" --pilot-env "$PILOT_ENV" \
   --grype-cache "$out/grype-db" --python "$(command -v python3)" > /dev/null || fail "站台設定失敗"
 export GRYPE_DB_UPDATE=online MIRROR_REFRESH_STATUS="" SCA_ARCH="${DUMPLING_ARCH:-arm64}"   # SCA_ARCH：docker import 的架構（platform.yml 的 arch）
+dt_mirror_status   # 常駐 DT 模式：不設 MIRROR_REFRESH_STATUS（讀常駐環境的狀態檔；讀不到 → C-mirror-freshness GAP）
 wiz() {  # <名稱後綴> [額外參數…]  → 精靈輸出資料夾印在最後一行 "WIZARD_OUT=…"
   local suffix=$1; shift
   python3 -I "$root/tools/wizard/cra-scan.py" --site-config "$out/wizard.json" --archive "$img" --source "$srcpath" \
@@ -250,7 +248,8 @@ done <<< "$plan"
 # ---------- 5. 收集與標準答案 ----------
 echo "== 收集"
 runargs=(); for r in "${runs[@]}"; do runargs+=("--run=$r"); done
-official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && official=(--official)
+# 正式 Release＝這個 tag 的 push（和 pipeline/lib/previous_release.py 的 official_tag_push 相同）：分支 push、手動觸發都不是
+official=(); [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ] && [ "${GITHUB_REF:-}" = "refs/tags/$DUMPLING_PROJECT/$ver" ] && official=(--official)
 srcargs=(); [ -n "$srcjson" ] && srcargs=(--source-json "$srcjson")
 python3 -I "$here/wp7_scan.py" collect --out "$out/release" --project "$DUMPLING_PROJECT" --version "$ver" --layers "$out/layers" --platform "$DUMPLING_PLATFORM" \
   --assemble-json "$out/assemble.json" --scan-json "$out/scan.json" "${runargs[@]}" ${rsargs[@]+"${rsargs[@]}"} ${ksjson[@]+"${ksjson[@]}"} ${kujson[@]+"${kujson[@]}"} \
