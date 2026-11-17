@@ -635,6 +635,15 @@ class T(Base):
         _, _, plan = self.run_once("2026-11-13T01:00:00Z", vendor_config=cfg)
         self.assertEqual(self.vendor_acts(plan), [])
 
+    def test_report_kernel_cna_cell_for_os_layer(self):
+        """同一個 Release 的 -os 那份沒有核心 CNA 比對：報告表格寫「沒有這一項」，不用禁用詞。"""
+        self.add_sbom("v1", "os")
+        self.run_once(NOW1)
+        report = open(os.path.join(self.w, "out-" + NOW1[:10], "report.md"), encoding="utf-8").read()
+        row = next(x for x in report.splitlines() if x.startswith("| dumpling:demo/v1\\#os |"))
+        self.assertIn(f"| {match.FW_NO_ITEM} |", row)
+        self.assertNotIn("不適用", report)
+
     def test_vendor_state_format_unchanged(self):
         """狀態格式不變：vendor_matches 的鍵仍是 [專案 UUID, CVE, 廠商]（每份 SBOM 一筆），欄位照 VENDOR_FIELDS；
         只有 Issue 群組（dumpling.issues 的鍵）改成廠商 × CVE。"""

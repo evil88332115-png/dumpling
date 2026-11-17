@@ -294,7 +294,7 @@ deadman 只認作者可信的 Issue 與留言（GitLab：專案成員且等級 �
   - 比對用的設定是複本：`support.end_date` 由 `support_until` 產生，`support.subscriptions` 照 `config.json`。
   - 元件比產品先停止維護、維護期沒有公開、或需要的訂閱沒有設定：ATTENTION。同一個專案的同一個元件問題只開一個 Issue，列出受影響的 Release；之後的新版本有同樣問題不重開。
   - 元件版本不在資料表：NOT_ASSESSED，只寫進報告。
-- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。
+- **我們自己的 OS**（`os_responsibility: ours`）：把 `os.distro`／`os.release` 當成 operating-system 元件比對。資料表沒有這個版本：ATTENTION，開一次 Issue，不推估日期。OS 和某個 Release SBOM 的元件對到同一個資料表項目（例如都是 Debian 13）、結論也一樣時，只開一個 Issue：用 OS 的 key（和只有 OS 時開的 Issue 相同，不重開），內文寫兩個來源與受影響的 Release。
 - **資料表的查核日期**超過 `max_age_days`（或在未來）：這些項目併成一個提醒 Issue。
 - **不重複開**：每個 Issue 的 key 由專案、門檻或元件、日期組成，同一個 key 已經有 Issue（含已關閉）就不再開。支援期限改了，key 就會變，會重新提醒。
   - plan 是 `stateless`：`issues.py apply` 不碰監控的狀態 Issue，也不做樂觀鎖，而且只能有 `open`。
