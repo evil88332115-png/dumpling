@@ -413,7 +413,8 @@ def run_headers(tmp_path, src, lib=tkc.LIB):
 
 
 # 改動前（main 4f64db7）的程式在 headers_rootfs 上的輸出（去掉 cve_data）的 SHA-256；改動後必須相同
-BASELINE_K1 = "59827e06a922e1372f69fa7acdd4510c5e4df8bf7f3beccad6a4e748e9473118"
+# S1（e6388fc）之後 limitations 的 included-c 清單多了 5.15（"currently 5.15, 6.1 and 6.8"），只有這一句不同，基準跟著更新
+BASELINE_K1 = "058fb735777ee8e2f5a0b400d988fbd5bb513452c1ff0da11f70a60a11058015"
 BASELINE_K1_LINE = "6464bce1461991177af03fdd79fdd69de145fb6a50dd98014bcdaab48d38e3a4"      # 狀態列（C-kernel-config<TAB>OK<TAB>說明）的 SHA-256
 BASELINE_K2 = "297dd4168b955a94523420c0c1618668b0c5ddf8bafd94d0fb1c5fba61a80026"           # kernel_module_map.py 同一份輸入（去掉 sources.cna_mirror）
 BASELINE_K2_LINE = "d0bb5c5ab5b2c52c6b9500c86f917d921d115a896bf0932b2204201dca3a6317"

@@ -45,6 +45,8 @@
 #     否則標頭檔照舊因為樹外模組而 unknown（kernel.build_record.out_of_tree_records 記原因）。給 C-kernel-config 的 --oot-build-record。
 #   環境變數 KERNEL_STABLE_GIT（選用；只用於 --image、--sbom）：linux-stable 的本機 clone（唯讀，不 fetch）：沒有 CNA 紀錄的 CVE 從 References 的
 #     上游 commit 查改了哪些檔案；有 CNA 紀錄的 CVE 把產品分支 backport 實際改的程式檔併進 programFiles（聯集）。給 C-kernel-config 的 --stable-git。
+#   環境變數 KERNEL_RENAME_MAP（選用；只用於 --image、--sbom，需要 KERNEL_BUILD_RECORD）：tools/mirror/kernel-renames.sh 產生的核心檔案改名對照表（JSON）。CNA 的檔案路徑是主線現在的名字，
+#     舊核心這個檔案可能叫別的名字（fs/ksmbd/、fs/cifs/ …）；順著上游改名紀錄找回舊路徑再判斷。表缺、過期（KERNEL_RENAME_MAP_MAX_AGE_DAYS，預設 60）或不涵蓋這個核心 → kernel.rename_map 記 GAP，照舊 unknown。給 C-kernel-config 的 --rename-map。
 #   環境變數 KERNEL_SOURCE_DIR（選用；只用於 --image、--sbom）：核心原始碼樹（資料夾，唯讀）當 Makefile／Kbuild 的來源——映像／刷機包的
 #     linux-headers 不完整（例如廠商核心不是套件安裝的）時。.config、IKCONFIG 核對、模組與 Image 照舊來自 --kernel-build；
 #     樹有 .config 時和判定用的設定核對，不同記出來（ATTENTION）；主.次版本不同 → GAP。不執行樹裡的任何東西，符號連結不跟隨。
@@ -809,6 +811,8 @@ KVMULTI=0; KVARGS=(); KVACT=0; KVJ=(); KVAUTO=0; KVN=0; KJ_SKIP=0
 declare -A KJR_CF=() KJR_CS=() KJR_MF=() KJR_MS=()   # 每顆判定的核心的結果檔與狀態（kernel_versions.py --judged-result，schema /3 的 judged）
 # 核心建置紀錄（環境變數 KERNEL_BUILD_RECORD，選用）：只給 kernel_config.py（kernel_module_map.py 不讀）；不存在等問題由 kernel_config.py 記 GAP
 [ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+# 建置紀錄是自己用出貨原始碼重編的（環境變數 KERNEL_BUILD_RECORD_SELF_BUILT=1，選用）：給 kernel_config.py 的 --build-record-self-built
+[ "${KERNEL_BUILD_RECORD_SELF_BUILT:-}" = 1 ] && [ -n "${KERNEL_BUILD_RECORD:-}" ] && KREC+=(--build-record-self-built)
 # 樹外模組的建置紀錄（環境變數 KERNEL_OOT_BUILD_RECORDS，選用；用冒號分隔多個資料夾）：給 kernel_config.py 的 --oot-build-record（可重複）。
 # 標頭檔只有在「核心與所有樹外 .ko 的紀錄都沒有列它」而且映像每個樹外 .ko 都有紀錄時，才不因為樹外模組而 unknown。需要 KERNEL_BUILD_RECORD。
 if [ -n "${KERNEL_OOT_BUILD_RECORDS:-}" ]; then
@@ -817,6 +821,9 @@ if [ -n "${KERNEL_OOT_BUILD_RECORDS:-}" ]; then
 fi
 # 本機 linux-stable 的 clone（環境變數 KERNEL_STABLE_GIT，選用，唯讀、不 fetch）：給 kernel_config.py 的 --stable-git
 [ -n "${KERNEL_STABLE_GIT:-}" ] && KREC+=(--stable-git "$(readlink -m -- "$KERNEL_STABLE_GIT")")
+# 核心檔案改名對照表（環境變數 KERNEL_RENAME_MAP，選用；tools/mirror/kernel-renames.sh 的 JSON）：給 kernel_config.py 的 --rename-map。
+# 需要 KERNEL_BUILD_RECORD；新舊上限用 KERNEL_RENAME_MAP_MAX_AGE_DAYS（預設 60，kernel_config.py 直接讀環境變數）
+[ -n "${KERNEL_RENAME_MAP:-}" ] && KREC+=(--rename-map "$(readlink -m -- "$KERNEL_RENAME_MAP")")
 if [ -n "$KBUILD" ]; then KSRC=(--from "$KBUILD"); [ -n "$KBUILD_PREFIX" ] && KSRC+=(--prefix "$KBUILD_PREFIX"); KLABEL="--kernel-build"
 elif [ "$MODE" = image ] && [ -s "${IMG_TAR:-}" ]; then KSRC=(--from "$IMG_TAR"); KLABEL="映像"; fi
 # 核心原始碼樹（環境變數 KERNEL_SOURCE_DIR，選用）：Makefile／Kbuild 的來源；放進 KSRC，C-kernel-config 與 C-kernel-module-map 都收到
@@ -1041,6 +1048,7 @@ rm -f "$KBF"
 if [[ "$MODE" =~ ^(image|sbom)$ ]] && [ $SBOM_OK = 1 ] && [ ${#KSRC[@]} -gt 0 ] && [ -n "$KBUILD_PREFIX" ]; then
   kba=(--out "$KBF"); [ -n "${KERNEL_BOARD_OS_TXT:-}" ] && kba+=(--board-os-txt "$(readlink -m -- "$KERNEL_BOARD_OS_TXT")")
   [ -n "${KERNEL_BUILD_RECORD:-}" ] && kba+=(--build-record "$(readlink -m -- "$KERNEL_BUILD_RECORD")")
+  [ "${KERNEL_BUILD_RECORD_SELF_BUILT:-}" = 1 ] && [ -n "${KERNEL_BUILD_RECORD:-}" ] && kba+=(--build-record-self-built)
   r=$(timeout 3600 python3 -I "$ROOT/tools/pilot/lib/kernel_boot.py" --from "$KBUILD" --prefix "$KBUILD_PREFIX" "${kba[@]}" 2>&1)
   l=$(printf '%s\n' "$r" | grep -m1 $'^C-kernel-boot\t')
   if [ -n "$l" ]; then IFS=$'\t' read -r s1 s2 s3 <<< "$l"

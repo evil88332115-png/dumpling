@@ -154,6 +154,33 @@
 
 **官方文件沒寫，待內部環境驗證**：Issues API 需要的 token scope 沒有逐端點列出（只知道寫入需要 `api` scope，見第 7 節）；confidential Issue 的 email 通知收件範圍；Free 層級的單一指派參數。
 
+### 3.1 CSAF 使用者通知草稿（CRA 第 14 條第 8 項；T-24）
+
+**GitHub 現況**（`docs/WATCH.md` 第 8 節、`docs/CSAF.md`）：新的 KEV 命中群組落在 shipped 的正式版時，`pipeline/watch/match.py` 用同一個 Release 的報告 zip 產生 CSAF 使用者通知草稿（`tracking.status` 一律 draft），放 `<out>/csaf-drafts/`，以 workflow artifact 上傳（保留 90 天）；Issue 內文只寫一句（已產生／沒有產生＋artifact 名稱），不貼草稿內容。
+
+**GitLab 做法（範本已接，沒有對真實 GitLab 驗證）**：
+1. `watch:compute` 的 match 帶 `--csaf-artifact "watch:compute 的 job artifacts（watch-out/csaf-drafts/）"`（Issue 內文寫這個名稱），artifacts 多 `watch-out/csaf-drafts/`。
+2. Issue 內文寫「保留 90 天」（`pipeline/watch/csaf_draft.py`），所以 `watch:compute` 的 `expire_in` 改成 `90 days`。一個 job 只有一個 `expire_in`，整份 artifacts（plan／report／result 都很小）一起保留 90 天。測試 `test_t24_csaf_drafts_artifact` 檢查兩邊的天數一致。
+3. **報告 zip**：`collect.py --backend gitlab` 只替 shipped 的正式版下載 `report-<專案>-<版本>-<層>.zip`（沒有分層時 `report-<專案>-<版本>.zip`），走和 SBOM 相同的附件路徑（第 2 節的 Release 連結）。Release 附件的檔名要和 GitHub 版相同，草稿才找得到報告；沒有 zip 只記 NOT_RUN，不影響監控。
+4. **發布者資料**：產品 repo 的 `projects/<專案>/CRA/Config/config.json` 的 `csaf` 區塊（`publisher_name`、`publisher_namespace`、`tracking_id_prefix`、`contact`、`advisory_url_base`、`tlp`）。內部版要填公司的正式值；沒填的照樣是 TO BE COMPLETED，工具不放預設值。
+5. **內部版不加 `--demo`**：草稿與 README 不寫示範說明；草稿含真實的產品名稱、版本與元件。
+
+**誰看得到 artifacts**（官方，`artifacts:access`）：預設 `all`——公開 pipeline 誰都能下載；內部私有專案就是專案成員。`developer` 只給 Developer、Maintainer、Owner；`maintainer`（18.4 起）只給 Maintainer、Owner；`none` 誰都不能下載。`artifacts:access` 與 `artifacts:public` 不能同時用。
+- 草稿和同一份 artifacts 裡的 `plan.json`（含狀態與命中資料）一樣敏感，**範本沒有改 `artifacts:access`**（維持和現在相同的可見範圍）；測試鎖住不能明確加 `public: true` 或 `access: all`。
+- 建議內部版改成 `artifacts:access: developer`，但 `watch:notify` 要靠 `needs` 拿同一份 artifacts 的 `plan.json`：官方文件沒寫 `developer`／`none` 時同一個 pipeline 的下游 job 還能不能下載，**待內部環境驗證**後再改。
+
+**要換的東西**：產品 config 的 `csaf` 區塊（公司的正式發布者資料）；`artifacts:access`（驗證後）；內部版 `publiccheck` 的規則（第 3 節第 7 點）。
+
+**驗收**：
+- [ ] 內部 GitLab 的正式版 Release 真的帶 `report-<專案>-<版本>-<層>.zip`（或 `report-<專案>-<版本>.zip`）附件，而且 `collect.py --backend gitlab` 收得到（inventory 的 `report_zips` 有值）。沒有的話草稿永遠是 NOT_RUN，只寫在報告，不會讓監控降級，所以要主動確認。
+- [ ] shipped 的正式版有新的 KEV 命中時，`watch:compute` 的 artifacts 有 `watch-out/csaf-drafts/NN-<hash>/`（`csaf-exploited-draft.json` 的 `tracking.status` 是 `draft`），Issue 內文有那一句。
+- [ ] 90 天後 artifacts 被刪除（或 instance 的上限更短時，Issue 那句的天數要跟著改）。
+- [ ] 改成 `artifacts:access: developer` 後：Reporter／Planner 下載不到，`watch:notify` 仍拿得到 `plan.json`。
+
+**官方依據**（2026-11-17）：`artifacts:access`（`all` 預設、`developer`、`maintainer` 18.4 起、`none`；不能和 `artifacts:public` 同時用）、`artifacts:expire_in`（沒寫時用 instance 的設定；`never` 不會自動刪除；從上傳時開始算）、`artifacts:public`（已由 `artifacts:access` 取代）：https://docs.gitlab.com/ci/yaml/
+
+**官方文件沒寫，待內部環境驗證**：`artifacts:access` 是 `developer`／`none` 時，同一個 pipeline 裡用 `needs` 的下游 job 能不能下載；instance 是否限制 `expire_in` 的上限。
+
 ---
 
 ## 4. 臨時 DT → 內部常駐 DT
@@ -174,7 +201,7 @@
 - [ ] （T-14 之後）鏡像過期時（故意讓狀態檔過期）scan 標 GAP，不是 OK。
 - [ ] DT API key 沒有出現在 job log、artifacts（`result/`）。
 
-**官方依據**：這一節大部分是內部系統，沒有 GitLab 官方文件；File 類型變數與 protected 見第 7 節的 https://docs.gitlab.com/ci/variables/ 。**常駐 DT 的 pilot.env 格式與權限模型：官方文件不適用，待內部環境驗證。**
+**官方依據**：這一節大部分是內部系統，沒有 GitLab 官方文件；File 類型變數與 protected 見第 7 節的 https://docs.gitlab.com/ci/variables/ 。**常駐 DT 的 pilot.env 格式與權限模型：GitLab 官方文件沒有這部分（內部系統），待內部環境驗證。**
 
 ---
 
@@ -192,7 +219,7 @@
 - `concurrent`／清理：編譯需要大量磁碟；範本在 `after_script` 刪除 `$DUMPLING_OUT_BASE`（輸出放在專案資料夾外，避免被掃到自己）；runner 本身需要週期清理工作資料夾與 Docker 資源（做法內部決定）。`concurrent` 的值依磁碟與 CPU 決定，**建議從 1 開始**（掃描與編譯同時跑會互搶磁碟）。**掃描 runner 在 T-14 之前必須是 1**：臨時 DT 綁固定的 `127.0.0.1:${DT_PORT:-8080}`，同一台同時兩個 scan 會搶埠（compose 專案名與狀態資料夾範本已依 `$CI_JOB_ID` 分開，`after_script` 會 `dt-ephemeral.sh down`，job 被取消也不殘留容器）。
 - 不開 `interruptible`：build／scan／release 的 job 設 `interruptible: false`，避免新的 push 取消一個已跑一小時的編譯（`default` 設 true 是給測試類 job）。
 - 逾時：job 預設 `timeout` 範本已個別設定（編譯 2 小時、掃描 4 小時，沿用 GitHub 版的 120／240 分鐘）。官方：runner 的最大逾時只有比專案設定短時才生效，最小值 600 秒。
-- **「公開 repo 不接自架 runner」的理由在內部不適用**（內部 repo 只有受信任的成員能推 code），但仍要做：
+- **「公開 repo 不接自架 runner」的理由在內部不成立**（內部 repo 只有受信任的成員能推 code），但仍要做：
   - 掃描與發行用的 runner 設為**只跑 protected branch／protected tag**（官方：runner 可設定只跑保護分支或保護 tag，避免洩漏敏感資訊）。
   - 對應地，`WATCH_GITLAB_TOKEN`（與 T-14 之後的 `PILOT_ENV`）這類變數設 protected（第 7 節），只有保護 ref 的 pipeline 拿得到。
   - merge request pipeline 不拿 protected 變數（官方：MR pipeline 預設拿不到 protected 變數，可選擇開放；**不要開**）。
@@ -225,7 +252,7 @@
 - [ ] （T-06、T-14 之後）斷開外網的 runner 上，`release:scan` 與 `watch:compute` 的資料源步驟都能完成（全部來自內部鏡像）。現況 scan.sh 與 feeds.sh 都直接從公開網址下載，**還不能斷網**。
 - [ ] 鏡像過期時狀態是 GAP；沒有任何步驟靜默回退到公開網址。
 
-**官方依據**：內部系統，不適用 GitLab 官方文件。
+**官方依據**：內部系統，沒有對應的 GitLab 官方文件。
 
 ---
 
@@ -237,7 +264,7 @@
 
 | 機密／設定 | 放哪裡 | 設定 |
 |---|---|---|
-| DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不適用於多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
+| DT API key／`PILOT_ENV`（T-14 之後；現況由臨時 DT 寫入路徑） | 專案（或群組）CI/CD variable，**File** 類型 | **protected**；是 File 類型，內容含 key，**masked 不能用在多行或有空白的值**（官方：masked 值必須單行、不含空白、至少 8 字元），所以靠 protected＋runner 只跑保護 ref 來保護，並確保 job log 不印出；內容格式待內部驗證 |
 | `WATCH_GITLAB_TOKEN`（通知用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**；只有 `watch:notify` 讀（測試檢查） |
 | `WATCH_GITLAB_READ_TOKEN`（每日監控讀取用的 project access token） | CI/CD variable，**Variable** 類型 | **protected＋masked**（建議 Masked and hidden）；只有 `watch:compute` 讀。scope `read_api`（官方：唯讀 API）、角色 Planner（官方：confidential Issue 要 Planner 以上才看得到，17.7 起；之前是 Reporter）。狀態 Issue 與監控 Issue 都是 confidential，私有專案的 Release 也要權限，所以 compute 不能沒有 token |
 | `COSIGN` 金鑰（若選金鑰對方案，見第 9 節） | KMS 優先；其次 protected＋masked variable | 待內部決定 |
@@ -411,6 +438,7 @@
 | T-21 | **已完成（2026-11-14）**：`release:publish` 改呼叫 `gitlab/release-publish.sh`：先用 `release-payload.py --files-dir` 驗完全部附件（檔名安全、存在、是一般檔案、不重複），**驗不過一個檔都不上傳**，驗過才上傳 Generic Package、再建 Release。`release-payload.py` 只接受 `https://` 的 API 網址（內部也用 https）。上傳清單只用 release-payload.py 驗過後寫出的 `release-files.txt`（bash 不再自己解析 manifest：最後一行沒有換行、孤立的 `\r` 兩邊切行不同；manifest 有 `\r` 一律拒絕），上傳數要等於 Release 的連結數才建 Release。測試：`ReleasePublish`（假 curl：任何一個附件有問題時呼叫次數是 0；最後一行沒換行時照樣全部上傳；上傳回 HTTP 錯誤時不建 Release）。**TOCTOU（風險低，記一筆）**：驗證與上傳之間附件理論上可能被換掉；result/ 是同一個 job 從 artifact 解出來的暫存資料夾，只有這個 job 寫得到 | — |
 | T-22 | 預設映像 `DUMPLING_IMAGE: ubuntu:24.04` 是版本標籤、不是 digest，apt 套件也沒固定版本：內部換成 RD 映像時固定 digest（第 5 節、第 14 節） | 搬移時 |
 | T-23 | **已完成（2026-11-14；沒有對真實 GitLab 驗證）**：範本的 `watch:compute` 在 collect 之後、比對之前跑 `pipeline/watch/support.py`（`--inventory`、`--out watch-out-support`；內部版不加 `--demo`），結果寫進 `watch-out-support/status`，這一步不會讓 compute 失敗；`watch:notify` 先套用每日監控的 plan、再套用支援期限的 stateless plan（confidential，每日監控的 apply 失敗也照樣套用），兩份都做完後，status 是 FAIL（或沒有 status 檔）才讓 job 變紅。測試：`test_t23_support_check_wiring`、`test_t23_notify_applies_both_and_reports_support_fail`（實際執行 notify 的 script，假 python3 記錄呼叫） | — |
+| T-24 | **已完成（2026-11-17；沒有對真實 GitLab 驗證）**：CSAF 使用者通知草稿（第 3.1 節）：`watch:compute` 的 match 帶 `--csaf-artifact`，artifacts 多 `watch-out/csaf-drafts/`，`expire_in` 改 90 天（和 Issue 內文的保留天數一致）；`artifacts:access` 不改，待驗證下游 job 能否下載後再改成 `developer`。測試：`test_t24_csaf_drafts_artifact` | `artifacts:access` 的驗證 |
 
 ---
 
@@ -427,6 +455,7 @@
 9. runner「只跑保護 ref」旗標在各層級的操作步驟（第 5 節）。
 10. 常駐 DT 的 `pilot.env` 格式與權限模型（內部系統）（第 4 節）。
 11. CI Lint 的操作與內部版本的語法支援（第 1、0.2 節）。
+12. `artifacts:access` 是 `developer`／`none` 時，同一個 pipeline 的下游 job（`needs`）能不能下載；instance 是否限制 `expire_in` 的上限；內部 Release 是否真的帶 `report-*.zip` 附件（沒有的話草稿一直是 NOT_RUN 卻不會降級）（第 3.1 節，T-24）。
 
 ---
 
@@ -464,6 +493,7 @@
 - [ ] 所有 Issue 為 confidential。驗收：第 3 節驗收項。
 - [ ] 指派與 email 通知。驗收：被指派者收到信，無權限者沒收到。
 - [ ] 排程 owner 已換成服務帳號，接手程序已文件化並演練。驗收：第 8 節驗收項。
+- [ ] CSAF 使用者通知草稿（T-24，第 3.1 節）：內部 Release 帶 `report-*.zip`；shipped 版的新 KEV 命中有草稿 artifact（draft）、Issue 一句、90 天後刪除；改 `artifacts:access: developer` 後 `watch:notify` 照常。
 - [ ] 每日無結果告警（T-12；偵測與開 Issue 已實作但未對真實 GitLab 驗證，email 要等 T-08）。驗收：停掉排程一天，警告 Issue 出現；恢復後留言「已恢復」；email 寄出（T-08 完成後）。
 
 **簽章（T-11 決定後）**

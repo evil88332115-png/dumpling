@@ -300,6 +300,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
     `@x.mod` 的每個成員都有完整的 `.cmd`，可以分散在好幾個資料夾；紀錄資料夾裡有同名 `.ko` 時 `.modinfo` 的 `srcversion` 要和映像的相同）時，
     標頭檔才看紀錄：核心與樹外模組都沒有把它列進 deps → 沒編（not_affected）；樹外模組的 deps 列了它（路徑以 `/<標頭檔>` 結尾）→ 有編（affected）。
     只要有一個樹外 `.ko` 沒有紀錄、一份紀錄被截斷／太大／含連結、`srcversion` 不同、或建置紀錄（`--build-record`）本身不能用 → 全部不採用，標頭檔照舊 unknown。
+  - **核心檔案改名對照表**：環境變數 `KERNEL_RENAME_MAP`（`--rename-map`，`tools/mirror/kernel-renames.sh` 的 JSON，需要 `KERNEL_BUILD_RECORD`）。CNA 的檔案路徑是主線現在的名字，舊核心可能叫別的名字（`fs/ksmbd/` → `fs/smb/server/`）；這個核心沒有該檔案時順著上游的整個檔案改名往回找到這個核心有的舊路徑，再用既有規則判斷，證據寫改名鏈與 commit。拆分、多個舊名、找不到鏈 → 照舊 unknown；表缺、過期、不涵蓋這個核心 → `kernel.rename_map` 記 GAP、判定不變。細節見 `tools/mirror/kernel-renames.sh` 開頭的說明。
     **怎麼確認紀錄的 `.ko` 和映像的是同一份建置**（依序，每個模組記用了哪一種，`identity` 有各自的模組數）：(1) 兩邊的 `.modinfo` 都有 `srcversion` 而且相同（`srcversion`；
     兩邊都有而不同 → 不同份程式，不再試別的方法）；(2) `srcversion` 讀不到（NVIDIA 的樹外模組多半沒有）時比 ELF 區段：只讀 ELF64 little-endian 的區段表，
     SHT_PROGBITS 區段（排除 `.debug*`、`.note*`、`.comment`、`.BTF*`、`.gnu_debuglink`、`.modinfo`、`__versions`、`.gnu.linkonce*`）的名稱與 sha256 全部相同（`sections`）；
@@ -314,7 +315,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
     `git cat-file --batch-check` 與 `git log --no-walk --name-only`，clone 的設定不信任）。(a) 沒有 CNA 紀錄的 CVE：Grype／DT 的 references 裡
     git.kernel.org／github torvalds 的 commit，**每一個都查得到**才用，取程式檔與標頭檔照一般規則判斷，一個查不到就照舊 unknown；
     (b) 有 CNA 紀錄的 CVE：紀錄裡修補 commit（git 範圍的 `lessThan`）在 clone 裡的（產品分支的 backport），實際改的程式檔／標頭檔和
-    `programFiles` **聯集**，只會更保守（例如主線改 `btmtk.c`、6.1 的 backport 改 `btusb.c`）。只有**完整的核心原始碼樹**（`KERNEL_SOURCE_DIR`／`--source-tree`）找不到某個檔案時，才算這個核心沒有它而不併入；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 `.h` 不在裡面）、`--makefiles-dir`，或名稱超過上限讀不到時，找不到不當作不存在，照樣併入（只會讓 not_affected 變成 unknown；K1 標頭檔修正 #136）。`kernel.stable_git.kept_not_proven_absent`（`files`、`cves`）記「沒有證明不存在而照樣併入」的檔案與 CVE 數，**也包含修正前本來就會併入的情況**（例如名稱超過上限、讀不到名稱時，修正前也是照樣併入），所以它不等於「這次修正多併入的數量」。結果在 `kernel.stable_git`，
+    `programFiles` **聯集**，只會更保守（例如主線改 `btmtk.c`、6.1 的 backport 改 `btusb.c`）。只有**完整的核心原始碼樹**（`KERNEL_SOURCE_DIR`／`--source-tree`，或 `--from` 指到樹本身）找不到某個檔案時，才算這個核心沒有它而不併入；路徑在樹裡符號連結底下時，名稱清單看不到連結指向的內容，也不當作不存在（`kernel_config.py` 的 `SYMLINK_PATH_STATE`；sca-center 上游判不存在，dumpling 判未證明）；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 `.h` 不在裡面）、`--makefiles-dir`，或名稱超過上限讀不到時，找不到不當作不存在，照樣併入（只會讓 not_affected 變成 unknown；K1 標頭檔修正 #136）。`kernel.stable_git.kept_not_proven_absent`（整數）記「沒有證明不存在而照樣併入」的檔案數、`kernel.stable_git.kept_not_proven_absent_cves` 記涉及的 CVE 數，**也包含修正前本來就會併入的情況**（例如名稱超過上限、讀不到名稱時，修正前也是照樣併入），所以它不等於「這次修正多併入的數量」。結果在 `kernel.stable_git`，
     每筆多 `files_origin`、`stable_git_commits`、`stable_git_added_files`。
   - **CNA 版本比對的分支修補**（`kernel_cna_version.py`）：同一筆紀錄有只含 git 範圍的項目（defaultStatus unaffected），另一個項目的 semver 明寫
     「X.Y.Z <= v <= X.Y.\*：unaffected」而且涵蓋產品版本 → 以分支紀錄為準判 not_affected（理由 `branch X.Y fixed in X.Y.Z`）；有 semver 項目判受影響、

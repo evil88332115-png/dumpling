@@ -67,7 +67,7 @@
 # 環境變數：PILOT_ENV（預設 $HOME/.config/sca-scan/pilot.env，常駐 DT；一定明確傳給 sca-scan，不讓它退回 repo 預設的設定）
 #   核心判定的選用環境變數（原樣傳給 sca-scan，說明見 tools/pilot/sca-scan 開頭）：KERNEL_BUILD_RECORD（核心建置紀錄）、
 #   KERNEL_SOURCE_DIR（核心原始碼樹，Makefile／Kbuild 的來源；廠商核心的 rootfs headers 不完整時）、KERNEL_CVES（明確給的核心 CVE 清單）、
-#   KERNEL_OOT_BUILD_RECORDS（樹外模組的建置資料夾，冒號分隔）、KERNEL_STABLE_GIT（linux-stable 的本機 clone，唯讀）。
+#   KERNEL_OOT_BUILD_RECORDS（樹外模組的建置資料夾，冒號分隔）、KERNEL_STABLE_GIT（linux-stable 的本機 clone，唯讀）、KERNEL_RENAME_MAP（核心檔案改名對照表 JSON）。
 #   廠商核心（Grype、DT 都沒有核心 CVE，例如 SoC 廠商的 BSP 核心）有 KERNEL_CVE_MIRROR 時，sca-scan 依 /lib/modules/<版本> 或 Image 的版本字串從 CNA 鏡像產生清單（狀態列 C-kernel-cve-list）。
 #
 # 規則：

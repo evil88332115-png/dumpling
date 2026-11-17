@@ -906,6 +906,76 @@ def fw_files(tag=FW_TAG, samples=None, mutate=None):
     return f
 
 
+def report_zip_bytes(ok=True):
+    """report_package 的 zip（只放 CSAF 使用者通知草稿用的成員；ok=False 少了必要成員）。"""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for k, m in collect.REPORT_MEMBERS.items():
+            if ok or k != "vulnerability-rows.json":
+                z.writestr(m, "{}")
+    return buf.getvalue()
+
+
+class TestReportZips(Base):
+    """CSAF 使用者通知草稿用的報告 zip：只收 shipped 的正式版，每份 SBOM 層一個；壞的 zip 記 problem，沒有不算問題。"""
+
+    def test_shipped_release_report_zips_per_layer(self):
+        w = World()
+        f = files()
+        f["report-p-v1-bsp.zip"] = report_zip_bytes()
+        f["report-p-v1-os.zip"] = report_zip_bytes()
+        f["report-p-v1.zip"] = report_zip_bytes()          # 整份的不收（有分層時）
+        w.add("p/v1", f)
+        code, so, inv = self.repo(w)
+        r = inv["releases"][0]
+        self.assertEqual(sorted(r["report_zips"]), ["bsp", "os"])
+        self.assertEqual(r["report_zips"]["bsp"]["file"], "releases/0/report-p-v1-bsp.zip")
+        self.assertEqual(r["problems"], [])
+
+    def test_missing_is_fine_bad_zip_is_not_a_release_problem(self):
+        """報告 zip 只是草稿的選用輸入：壞掉或下載失敗都不進 Release 的 problems（不影響每日監控），記在 report_zip_problems。"""
+        w = World()
+        f = files()
+        f["report-p-v1-bsp.zip"] = report_zip_bytes(ok=False)
+        w.add("p/v1", f, size_lie=None)
+        code, so, inv = self.repo(w)
+        r = inv["releases"][0]
+        self.assertEqual(r["report_zips"], {})
+        self.assertEqual(r["problems"], [])
+        self.assertEqual(list(r["report_zip_problems"]), ["bsp"])
+        self.assertIn("report-p-v1-bsp.zip", r["report_zip_problems"]["bsp"])
+        self.assertFalse(os.path.exists(os.path.join(self.out, "releases/0/report-p-v1-bsp.zip")))
+
+    def test_report_zip_download_failure_is_not_a_release_problem(self):
+        w = World()
+        f = files()
+        f["report-p-v1-os.zip"] = report_zip_bytes()
+        w.add("p/v1", f)
+        url = next(a["url"] for e in w.entries for a in e["assets"] if a["name"] == "report-p-v1-os.zip")
+        del w.blobs[url]                                     # 下載回 404
+        code, so, inv = self.repo(w)
+        r = inv["releases"][0]
+        self.assertEqual((code, r["problems"]), (0, []))
+        self.assertIn("os", r["report_zip_problems"])
+
+    def test_development_and_dev_releases_are_not_fetched(self):
+        w = World()
+        f = files(status="development")
+        f["report-p-v1-bsp.zip"] = report_zip_bytes()
+        w.add("p/v1", f)
+        d = files(tag="dev/p", status="development", version="dev-abc")
+        d["report-p-dev-abc-bsp.zip"] = report_zip_bytes()
+        w.add("dev/p", d, prerelease=True)
+        code, so, inv = self.repo(w)
+        self.assertTrue(all(r["report_zips"] == {} for r in inv["releases"]))
+        rz = {a["url"] for e in w.entries for a in e["assets"] if a["name"].startswith("report-")}
+        self.assertEqual(len(rz), 2)
+        asked = {u for u, _ in w.requests}
+        self.assertFalse(asked & (rz | {w.cdn(u) for u in rz}))         # 報告 zip 一次都沒有下載
+
+
 class TestFirmware(Base):
     def rj(self, tag=FW_TAG, published="2026-11-20T03:10:00Z", prerelease=False):
         return {"tag_name": tag, "prerelease": prerelease, "draft": False, "published_at": published,

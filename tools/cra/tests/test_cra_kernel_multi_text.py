@@ -19,7 +19,7 @@ def doc(cves, origin=None, kept=None):
     d = {"schema": SCHEMA, "inputs": {"cves_origin": origin} if origin is not None else {},
          "results": [{"cve": c, "decision": "unknown", "files": []} for c in cves], "kernel": {}}
     if kept is not None:
-        d["kernel"]["stable_git"] = {"kept_not_proven_absent": kept}
+        d["kernel"]["stable_git"] = {"kept_not_proven_absent": kept["files"], "kept_not_proven_absent_cves": kept["cves"]}      # 整數的檔案數＋CVE 數（WP1 S1）
     return d
 
 
@@ -63,7 +63,7 @@ def test_cve_list_source_differs_per_kernel_is_listed_per_kernel():
 
 def test_a_plain_dict_that_claims_to_be_merged_is_read_as_a_single_kernel_doc():
     fake = {"schema": SCHEMA, "inputs": {}, "results": [{"cve": "CVE-2025-0001"}], "merged": True,
-            "kernel": {"config_source": "merged", "stable_git": {"kept_not_proven_absent": {"files": 1, "cves": 1}}},
+            "kernel": {"config_source": "merged", "stable_git": {"kept_not_proven_absent": 1, "kept_not_proven_absent_cves": 1}},
             "docs": {"x": doc(["CVE-2025-0009"], origin="kernel-cna-version", kept={"files": 9, "cves": 9})}}
     assert cr.kernel_kept_text(fake) == cr.KEPT_NOT_PROVEN_ABSENT.format(n=1, m=1)
     assert cr.kernel_cve_list_info(fake) == ({"CVE-2025-0001"}, "Grype and Dependency-Track kernel findings; `scan/kernel-config.json`")

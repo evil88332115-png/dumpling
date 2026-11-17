@@ -26,6 +26,7 @@ cp tools/wizard/wizard.example.json ~/.config/sca-center/wizard.json   # 然後�
 | `grype_seed` | Grype 資料庫的種子；`grype_cache` 不存在時複製過去 | 無 |
 | `grype_cache` | Grype 資料庫快取（`GRYPE_DB_CACHE_DIR`） | `<root>/grype-db` |
 | `stable_git` | 物件：核心主次版號 → Linux 穩定版 git 資料夾（核心判斷用） | `{}` |
+| `kernel_rename_map` | 核心檔案改名對照表（`tools/mirror/kernel-renames.sh` 的 JSON；舊核心上檔名和主線不同的檔案用它找回舊路徑；需要核心建置紀錄） | 無 |
 | `upstream` | 物件：組名 → {鍵: 路徑}，放上游基準檔（輸入清單用組名＋鍵引用，不寫死路徑），例如 `{"jetson-r39.2.0": {"public_sources": "…/public_sources.tbz2", "bsp": "…/Jetson_Linux_R39.2.0_aarch64.tbz2"}}` | `{}` |
 | `rules_template` | 沒有產品設定包時套用的通用 `vex-rules.json` | 無。沒設定卻要求通用規則時，計畫與步驟 5 會明說「沒有套用」，`plan.json` 的 `generic_rules` 為 `no`、`generic_rules_requested` 為 `yes` |
 
@@ -103,3 +104,17 @@ python3 -I tools/wizard/cra-scan.py --site-config /path/to/wizard.json
 | 板子檢查結果 | `--board-test <board-test-*.tar.gz｜board-net-*.tar.gz>`（可重複；互動模式問「有板子檢查結果檔嗎？」） | 掃描後 `board-import.sh --result <rootfs> --no-cra <檔案…>`（`SCA_PYTHON` 用站台設定的 python），在 CRA 步驟之前；檔案內容由 `board_import.py` 驗證 | 沒給 → `board-import` 記 NOT_RUN，對外服務欄維持「不明」；輸入清單的 `board_test`（kind＝board_test）依此判斷 found／missing |
 
 A-provenance 的 sca-center commit：精靈跑的是 `git archive`（沒有 `.git`），所以把「取工具」那個 commit 以環境變數 `SCA_CENTER_COMMIT`（40 位十六進位）告訴掃描；`provenance.json` 記 `from: wizard-archive`、`dirty: false`。有 `.git` 或部署資料夾時以它們為準，這個變數不會蓋過。
+
+## 自編的建置紀錄（預設開，條件嚴格）
+
+每個產品可以有三種輸入，第三種是「用出貨原始碼自己重編、收集建置紀錄」。這種紀錄的 UTS_VERSION 建置序號與時間、編譯主機和燒錄的 Image 不同，是預期的。
+有建置紀錄時精靈預設走自編模式（`--build-record-shipped` 關掉；`--build-record-self-built` 仍可明確給），傳 `--build-record-self-built` 給 K1。
+K1 在自編模式只在**全部**成立時採用，任何一項不符 → GAP（照舊依 Makefile 判定）：
+
+1. `.config` 與出貨核心內建設定（IKCONFIG）相同，或只差工具鏈類選項；
+2. `kernel.release` 等於燒錄核心；編譯器字串相同；UTS_VERSION 去掉建置序號與日期時間後相同（例如都是 `SMP PREEMPT`）；只有建置序號、時間、編譯者／主機可以不同；
+3. 紀錄 `.cmd` 引用的每個非 kbuild 產生的原始檔路徑都在出貨原始碼樹（`--kernel-source`）裡（沒有原始碼樹或有缺的檔案 → GAP）；
+4. 紀錄有 `SOURCE-HASHES`（`pack-build-record.sh` 現在會寫）時，抽樣比對內容，有一個不同 → GAP；沒有 `SOURCE-HASHES` 時**只比路徑，不比檔案內容**，報告與 limitations 都會寫明。
+
+結果記在 `plan.json`（`build_record_self_built`）、`inputs-check.json`（一步 `build-record-mode`）、`kernel-config.json` 的 `kernel.build_record`
+（`identity.result = self_built`、`self_built_source_check`），報告警告區寫「自編建置紀錄（.config 已核對與出貨核心相同）」。

@@ -103,7 +103,7 @@ def test_example_config_valid_and_placeholder_only():
     ex = os.path.join(os.path.dirname(WIZ), "wizard.example.json")
     d = json.load(open(ex))
     keys = {k for k in d if not k.startswith("_")}
-    assert keys == {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "rules_template", "upstream"}
+    assert keys == {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "kernel_rename_map", "rules_template", "upstream"}
     assert "/media" not in json.dumps(d) and "/home" not in json.dumps(d)
 
 
@@ -617,6 +617,20 @@ def test_platform_is_explicit_and_never_guessed(site):
     assert json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))["platform"] == "rockchip"
 
 
+@pytest.mark.parametrize("flag", [False, True])
+def test_build_record_self_built_flag_in_plan(site, flag):
+    """預設（有建置紀錄）走自編模式；--build-record-shipped 關掉。"""
+    tmp, flash, src, out, cfg, stable = site
+    rec = tmp / "rec"
+    rec.mkdir()
+    args = [str(tmp), "--site-config", str(cfg), "--archive", str(flash), "--source", str(src), "--role", "both",
+            "--generic-rules", "no", "--build-record", str(rec)] + ([] if flag else ["--build-record-shipped"]) + ["--yes", "--plan-only"]
+    r = run(args)
+    assert r.returncode == 0, r.stdout + r.stderr
+    plan = json.loads((next(out.iterdir()) / "plan.json").read_text(encoding="utf-8"))
+    assert plan["build_record_self_built"] is flag
+    assert ("自編" in r.stdout) is flag
+
 # ---- 設定包的版本與刷機包識別由精靈覆寫 ----
 def _pack(tmp_path, **prod):
     d = tmp_path / "pack"
@@ -1007,3 +1021,37 @@ def test_csaf_previous_plan_decides_args_and_step(tmp_path):
     w.add_info_step(tmp_path, w.csaf_previous_plan(None, "HTTP 403", "gap", "both", True)[1])
     d = json.loads((tmp_path / "inputs-check.json").read_text(encoding="utf-8"))
     assert [(r["status"], r["informational"]) for r in d["inputs"]] == [("gap", False)]
+
+
+def test_split_pack_record_copies_source_hashes_into_kernel_dir(tmp_path):
+    import io
+    import tarfile as tf
+    w = _load_wizard()
+    tarp = tmp_path / "BuildRecord.tar.gz"
+    with tf.open(tarp, "w:gz") as t:
+        for name, data in (("kernel/.config", b"CONFIG_X=y\n"), ("oot1-foo/.a.cmd", b"x\n"), ("SOURCE-HASHES", b"ab  a.c\n"), ("BUILD-INFO.txt", b"x\n")):
+            ti = tf.TarInfo(name)
+            ti.size = len(data)
+            t.addfile(ti, io.BytesIO(data))
+    kdir, oot = w.split_pack_record(tarp, tmp_path / "dest")
+    assert (kdir / "SOURCE-HASHES").read_bytes() == b"ab  a.c\n" and len(oot) == 1
+
+
+def test_split_pack_record_copy_failure_is_noted_not_fatal(tmp_path, monkeypatch):
+    import io
+    import tarfile as tf
+    w = _load_wizard()
+    tarp = tmp_path / "BuildRecord.tar.gz"
+    with tf.open(tarp, "w:gz") as t:
+        for name, data in (("kernel/.config", b"CONFIG_X=y\n"), ("oot1-foo/.a.cmd", b"x\n"), ("SOURCE-HASHES", b"ab  a.c\n")):
+            ti = tf.TarInfo(name)
+            ti.size = len(data)
+            t.addfile(ti, io.BytesIO(data))
+
+    def boom(*a, **k):
+        raise PermissionError("denied")
+    monkeypatch.setattr(w.shutil, "copyfile", boom)
+    notes = []
+    kdir, oot = w.split_pack_record(tarp, tmp_path / "dest", notes)
+    assert len(oot) == 1 and not (kdir / "SOURCE-HASHES").exists()
+    assert notes and "SOURCE-HASHES" in notes[0] and "PermissionError" in notes[0]

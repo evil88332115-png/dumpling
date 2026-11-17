@@ -70,6 +70,10 @@
     --list-kernel-versions）。sca-scan 用它：刷機包 tbz2 不必為了列出核心再解壓一次。沒給時輸出和以前相同；--from 是核心原始碼樹時不印。
   --oot-build-record：樹外模組（例如 nvidia-oot、nvgpu）的建置資料夾，可重複；需要 --build-record。讀 .*.o.cmd 的 source／deps 與 .*.ko.cmd
     （kernel_oot_record.py）。映像裡每一個樹外 .ko 都有完整的紀錄時，標頭檔看紀錄的 deps（核心與樹外模組都沒列 → 沒編；樹外模組列了 → 有編），
+  --rename-map：核心檔案改名對照表（tools/mirror/kernel-renames.sh 的 JSON；主線 git 的整個檔案改名，kernel_renames.py）。CNA 的 programFiles 是主線
+    現在的路徑；這個核心沒有那個檔案時，順著改名紀錄往回找到這個核心有的舊路徑（鏈長有上限），當作 CNA 列的是舊路徑，用既有的規則判斷，證據寫改名鏈與 commit。
+    檔案拆分、有多個可能舊名、找不到鏈 → 照舊 unknown。表缺、讀不出、過期（--rename-map-max-age-days，預設 60，環境變數 KERNEL_RENAME_MAP_MAX_AGE_DAYS）、
+    不涵蓋這個核心、或沒有採用的建置紀錄 → 不用，kernel.rename_map 記 GAP 與原因（不會當成沒有改名）。結果在 kernel.rename_map。
     否則標頭檔照舊因為樹外模組而 unknown（全部或沒有：未驗證的模組可能讀了任何標頭檔，部分採用只能多判 affected，而且要限制在已驗證模組的物件，暫不做）。
     紀錄資料夾裡的 .ko 與映像的 .ko 是同一份建置，依序用：(1) .modinfo srcversion 相同；(2) srcversion 讀不到時比 ELF 區段（SHT_PROGBITS，
     排除 .debug*／.note*／.comment／.BTF*／.gnu_debuglink／.modinfo／__versions／.gnu.linkonce*）完全相同；(3) 只有 .rodata.str* 不同，而且不同的
@@ -79,7 +83,8 @@
     references 裡上游核心 commit（每一個都查得到才用）改的程式檔與標頭檔；(b) 有 CNA 紀錄的：紀錄裡修補 commit 在 clone 裡的，實際改的程式檔
     與標頭檔（除非完整的核心原始碼樹證明這個核心沒有它）和 programFiles 聯集（只會更保守）。只有 --source-tree（完整的樹，檔案名稱完整）找不到
     才算「沒有這個檔案」而不併入；檔案名稱只來自映像的 linux-headers 套件（部分檔案，驅動自帶的 .h 不在裡面）、--makefiles-dir 或讀不到名稱時，
-    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。計數在 kernel.stable_git.kept_not_proven_absent（也包含修正前本來就會併入的情況，例如名稱超過上限、讀不到名稱；不等於這次修正多併入的數量）。找不到 commit 就照舊。
+    找不到不當作不存在，照樣併入（只會讓 not_affected 變 unknown）。完整的樹包括 --source-tree 與 --from 指到樹本身；路徑在樹裡符號連結底下時，名稱清單看不到連結指向的內容，也不當作不存在（SYMLINK_PATH_STATE）。
+    保留的檔案數記在 kernel.stable_git.kept_not_proven_absent（整數）、涉及的 CVE 數記在 kept_not_proven_absent_cves（也包含修正前本來就會併入的情況，例如名稱超過上限、讀不到名稱；不等於這次修正多併入的數量）。找不到 commit 就照舊。
     結果在 kernel.stable_git。
   --mirror：kernel.org 的 CVE 紀錄（Linux 核心 CNA，vulns.git 的 cve/published/<年>/CVE-….json）；SOURCE 記 commit、
     下載時間與 zip 的 sha256。--max-age-days 預設 7（環境變數 KERNEL_CVE_MAX_AGE_DAYS；同 kernel-cve.sh --check）。
@@ -134,6 +139,12 @@ Ubuntu 還沒修的約 3,400 個。很多是產品核心根本沒編進去的驅
   建置的身分（record_identity）：紀錄的 include/config/kernel.release、include/generated/utsversion.h、compile.h 和燒錄的 Image
   （刷機包的 kernel/Image，沒有時 rootfs 的 /boot/Image）的 linux_banner 逐項核對，對不上 → GAP；沒有識別檔或讀不到 banner →
   identity.result not_tied（照舊採用，limitations 與說明列註明「沒有和映像綁定」）。
+  自編模式（--build-record-self-built；精靈 --build-record-self-built、環境變數 KERNEL_BUILD_RECORD_SELF_BUILT=1）：紀錄是我們用出貨原始碼重編的，
+  UTS_VERSION／編譯者與主機／編譯器／時間和燒錄的 Image 不同是預期的，不拒收；仍要求 kernel.release 等於燒錄的核心、.config 相同（或只差工具鏈）、
+  紀錄完整，其餘驗證照舊。identity.result self_built（image_banner、record_identity、differences、config_compare 一併記錄），
+  limitations 加「建置紀錄為自編（用出貨原始碼重編），與出貨核心設定相同；不是出貨那次建置」。.config 有非工具鏈差異 → GAP。沒給旗標 → 行為不變。
+  樹外模組紀錄的核對（srcversion、ELF 區段）在自編模式下規則不變：srcversion 由原始碼算出，同一份原始碼重編會相同；沒有 srcversion 時的 ELF 區段
+  比對若因工具鏈不同而對不上，該模組不採用（偏向 unknown，不會偏向 not_affected）。
   絕對路徑：source_ 推出的原始碼樹前綴（O= 建置；可以有好幾個；只認絕對路徑或只有 ../ 的前綴）去掉後對到樹；其他對不上樹的絕對路徑（in-tree 建置裡
   $(abspath …) 的路徑，例如 arm64 vDSO 的 lib/vdso/gettimeofday.c；O= 的符號連結路徑與實際路徑不同；系統標頭）不丟掉：
   任何一個這種路徑以 /<檔案> 結尾，那個檔案就算有編（只會偏向 affected；unmapped_absolute_paths 記數量，路徑本身不寫出）。
@@ -271,6 +282,12 @@ NEW_CODE_LIMITATION = (
     "rule names is judged not built when the CNA record says the problem was introduced after this kernel's major.minor "
     "(every semver 'affected' version is later, no semver entry says this kernel is affected). Both pieces of evidence are needed; "
     "a vendor backport of the later code would have created the file in the tree.")
+RENAME_MAP_LIMITATION = (
+    "--rename-map (whole-file renames of mainline, git log -M): a CNA path that this kernel does not have is traced back through the "
+    "renames to a path that this kernel has, and judged as if the CNA had listed that path. A file that was split, a path with several "
+    "possible old names, and a chain that never reaches a file of this kernel stay unknown. A rename detected at a low similarity may be "
+    "wrong; the chain and similarity are in the evidence.")
+
 STABLE_GIT_LIMITATION = (
     "--stable-git (read-only local linux-stable clone, no fetch): (a) for a CVE without a CNA record, the upstream kernel commits "
     "named in the Grype/DT references are looked up in the clone, and the CVE is judged only if every referenced commit is found; "
@@ -278,13 +295,14 @@ STABLE_GIT_LIMITATION = (
     "are added to programFiles (union: a file the mainline fix did not touch can only make the result more conservative). A commit "
     "that the clone does not have, a merge commit or an unusual file name is not used. The file list is that of the commit, which "
     "may not be the complete fix when the fix is split over several commits that the references do not all name. A file that a fix "
-    "commit changed is treated as absent from this kernel (and left out) only when a complete kernel source tree (--source-tree) "
-    "does not have it; when the file names come only from the image's partial headers package (a driver's own .h is not in it), a "
-    "changed file that the headers tree lacks is not treated as absent and is still added, so it can only turn not_affected into "
-    "unknown (kernel.stable_git.kept_not_proven_absent counts those files and CVEs).")
+    "commit changed is treated as absent from this kernel (and left out) only when a complete kernel source tree (--source-tree, or "
+    "--from pointing at the tree itself) does not have it; when the file names come only from the image's partial headers package (a "
+    "driver's own .h is not in it), or the path is under a symbolic link of the tree (links are not followed), a "
+    "changed file that the tree lacks is not treated as absent and is still added, so it can only turn not_affected into "
+    "unknown (kernel.stable_git.kept_not_proven_absent counts those files, kept_not_proven_absent_cves those CVEs).")
 LIMITATIONS = [
     "C files #included by other kernel sources are never judged not_affected; the list is generated from upstream sources per "
-    "kernel version (data/kernel-included-c-<major.minor>.json; currently 6.1 and 6.8) and does not include vendor-added #include "
+    "kernel version (data/kernel-included-c-<major.minor>.json; currently 5.15, 6.1 and 6.8) and does not include vendor-added #include "
     "of .c files. Without a list for the kernel's major.minor version no CVE is judged not_affected.",
     "Assembly files (.S) #included by another .S file are not covered by the list.",
     "Conditional Makefile sections (ifeq/ifdef) are treated as unknown; they can only turn 'affected' into 'unknown', never into 'not_affected'.",
@@ -324,6 +342,11 @@ def _load(name, path):
 @functools.lru_cache(maxsize=None)
 def kernelcheck():
     return _load("sca_center_kernelcheck", HERE / "kernelcheck.py")
+
+
+@functools.lru_cache(maxsize=None)
+def kernel_renames():
+    return _load("sca_center_kernel_renames", HERE / "kernel_renames.py")
 
 
 @functools.lru_cache(maxsize=None)
@@ -1404,7 +1427,7 @@ class BuildInfo:
         self.config_raw = None                    # .config 的原始位元組（locate 讀到的；改用 IKCONFIG 時是 IKCONFIG）
         self.source_tree = None                   # apply_source_tree()：Makefile 改讀核心原始碼樹時的紀錄（kernel.source_tree）
         self.boot_config = None                   # boot_config_info()：沒有 headers、改讀 /boot/config-<版本> 時的驗證紀錄（kernel.boot_config）
-        self.tree_complete = False                # tree_names 是完整核心原始碼樹（--source-tree）的檔案名稱：檔案不在裡面＝這個核心沒有它（只有 apply_source_tree 設）
+        self.tree_complete = False                # tree_names 是完整核心原始碼樹（--source-tree、--from 指到樹本身）的檔案名稱：檔案不在裡面＝這個核心沒有它（apply_source_tree 與 build_info 的樹分支設）
 
 
 def follow_path(col, vfs, parts):
@@ -2660,6 +2683,8 @@ def judge_cve(model, files, mods, mapper=None, brec=None, new_code=None):
                 built_as = mr["build"] if mr["build"] in ("builtin", "module") else None
                 module = mr["module"] if built_as == "module" else None
             out.append({"path": f, "configs": syms, "built": r.value, "built_as": built_as, "module": module, "evidence": ev})
+            if brec.cve_renames and brec.cve_renames[-1]["new"] == posixpath.normpath(f):
+                out[-1]["renamed_from"] = brec.cve_renames[-1]["old"]
             for s in syms:
                 v = model.config.get(s)
                 vals[s] = v if v is not None else "unset"
@@ -2822,6 +2847,21 @@ RECORD_NOT_TIED_LIMITATION = (
     "banner could not be read; it was accepted because its .config and module lists match. A record of another build of the same "
     "version and configuration (for example with other patches) would also pass: keep include/generated/ and "
     "include/config/kernel.release in the record.")
+SELF_BUILT_NOTE = ("自編建置紀錄（.config 已核對與出貨核心相同）。建置紀錄為自編（用出貨原始碼重編），與出貨核心設定相同；不是出貨那次建置 "
+                   "(self-built build record: .config verified identical to the shipped kernel's, kernel release and compiler equal; "
+                   "UTS_VERSION build number/time and compile host differ because it is not the build that was shipped).")
+SELF_BUILT_LIMITATION = (
+    SELF_BUILT_NOTE + " Every non-generated source file that the record's .cmd files name (source_) was found in the shipped source tree "
+    "by path; the file contents are NOT compared (the record has no SOURCE-HASHES), so a record built from a modified tree with the same "
+    "file names would pass.")
+SELF_BUILT_HASHED_LIMITATION = (
+    SELF_BUILT_NOTE + " Every non-generated source file that the record's .cmd files name was found in the shipped source tree by path, and "
+    "the content hashes (SOURCE-HASHES) are identical: compared {compared} of {listed} listed, skipped {skipped} (not in the tree, a link, "
+    "too large or unreadable).")
+SELF_BUILT_INCOMPLETE_IDENTITY_LIMITATION = (
+    "建置紀錄沒有完整識別檔，無法確認是出貨那次建置還是自編 (the build record has no complete build-identity files (version string and "
+    "compiler could not both be compared with the Image's banner), so it cannot be told whether it is the build that was shipped or a "
+    "self-built rebuild; it was accepted on kernel.release, .config and module lists only).")
 RECORD_NO_VERSION_LIMITATION = (
     "The kernel version being judged is not known (no module directory or --kernel-version): include/config/kernel.release "
     "was not compared (kernel_release_checked is false).")
@@ -3265,6 +3305,10 @@ class RecordJudge:
         self.full_tree = False              # 核心原始碼樹（--source-tree）的檔案名稱完整：檔案不在樹裡＝這個核心沒有這個檔案
         self.tree_links = frozenset()       # 樹裡的符號連結（路徑在連結底下的檔案，名稱清單不能證明它不存在）
         self.oot_records = []               # --oot-build-record：樹外模組的建置紀錄（OotRecord）；oot_complete 才用（見 attach_oot_records）
+        self.renames = None                 # --rename-map：kernel_renames.RenameMap（可用時才設）；檔案不在這個核心時找回舊路徑
+        self.rename_on = True               # False：不用改名對照表判斷（比較用）
+        self.cve_skipped = []               # 目前這個 CVE 因為 CNA 說問題比核心新而不用改名的檔案（{new, old, old_name}）
+        self.cve_renames = []               # 目前這個 CVE 用到的改名（assess 逐個 CVE 清空；{new, old, chain}）
         self.oot_complete = False           # 映像裡每一個樹外 .ko 都有完整的紀錄，標頭檔才可以不因為樹外模組而 unknown
         self.stats = {k: 0 for k in ("built", "built_by_unmapped_absolute_path", "not_built", "conflict_makefile_built",
                                      "built_makefile_not_built", "header_out_of_tree_modules", "not_shown_to_exist",
@@ -3295,7 +3339,12 @@ class RecordJudge:
             return True
         return self.tree_names is not None and p in self.tree_names
 
-    def judge(self, model, path, obj, new_code=None):
+    def known_file(self, model, q):
+        """改名鏈上的舊路徑：這個核心有這個檔案（建置紀錄、Makefile 或核心樹／headers 的檔案名稱），而且建置紀錄能判斷它。"""
+        o = self.eligible(q)
+        return o is not None and (q in self.paths or self.exists(model, q, o))
+
+    def judge(self, model, path, obj, new_code=None, _renamed=False):
         """→ (Res, 證據的說明)。obj：eligible() 的結果。new_code：CNA 紀錄說這個問題在核心之後的版本才出現（字串，例如 "6.10"）；
         只有核心原始碼樹完整（full_tree）而且檔案不在樹裡時才用（見下面 not self.exists 那一段）。"""
         p = posixpath.normpath(path)
@@ -3304,6 +3353,21 @@ class RecordJudge:
         absolute = False
         if not hit:
             hit, absolute = self.suffixes.get(p), True
+        rnote = ""
+        if not hit and self.renames is not None and self.rename_on and not _renamed and not self.exists(model, p, obj) \
+                and not (new_code and self.full_tree and not any(p == l or p.startswith(l + "/") for l in self.tree_links)):
+            # 這個核心沒有這個檔案：CNA 的路徑是主線現在的名字，舊核心可能叫別的名字（整個檔案改名）。順著上游的改名紀錄往回找，
+            # 找到這個核心有的舊路徑 → 當作 CNA 列的是那個舊路徑，用同樣的規則判斷；找不到或不確定 → 照舊（下面的 unknown）
+            st, chain = self.renames.resolve(p, lambda q: self.known_file(model, q))
+            if st == "found":
+                old = chain[0][0]
+                r, ev = self.judge(model, old, self.eligible(old), new_code, _renamed=True)
+                ev = f"renamed upstream: {kernel_renames().chain_text(chain)}; judged as {old}: {ev}"
+                self.cve_renames.append({"new": p, "old": old, "chain": [{"old": o, "new": n, "commit": c[:12], "similarity": sm}
+                                                                          for o, n, c, sm in chain]})
+                return Res(r.value, r.syms, [ev] + r.why[1:], r.modules), ev
+            rnote = (" (the rename map lists several possible old names, so none is used)" if st == "ambiguous" else
+                     " (the rename map has no whole-file rename chain to a file of this kernel; a split file is not a rename)")
         if hit:
             o, how = hit
             ev = (f"build record: {'compiled as' if how == 'source' else 'in the deps of'} {o}" if not absolute else
@@ -3372,16 +3436,29 @@ class RecordJudge:
         if not self.exists(model, p, obj) and new_code and self.full_tree and not any(
                 p == l or p.startswith(l + "/") for l in self.tree_links):
             # 這個檔案不在出貨的核心原始碼樹裡、也沒有 Makefile 的規則提到它，而 CNA 紀錄說這個問題在 new_code 才出現（比這個核心新）：
-            # 那一段程式不是這個核心的一部分（沒有搬過家的可能：問題出現之前沒有這段程式，不會有舊路徑）。兩項證據缺一不可。
+            # 那一段程式不是這個核心的一部分。兩項證據缺一不可。這個檔案有可能搬過家（--rename-map 找得到舊名時，舊名存在於這個核心），
+            # 但舊名存在不代表有問題的那段程式在（CNA 的版本證據還在），所以判定不變，只在證據裡寫明（廠商若把新程式 backport 進舊檔，這裡看不出來）。
             self.stats["absent_new_code"] = self.stats.get("absent_new_code", 0) + 1
             ev = (f"build record: not in any compiled object's source or deps; {p} is not in the shipped kernel source tree and no Makefile "
                   f"rule names it, and the CNA record says the problem was introduced in {new_code}, after this kernel: the code is not "
                   "part of this kernel")
+            if self.renames is not None and self.rename_on and not _renamed:
+                sv = self.renames.resolve(p, lambda q: self.known_file(model, q), quiet=True)
+                if sv[0] == "found":
+                    old = sv[1][0][0]
+                    saved = dict(self.stats)
+                    ro, _e = self.judge(model, old, self.eligible(old), None, _renamed=True)
+                    self.stats.clear(); self.stats.update(saved)
+                    state = {True: "built", False: "not built", None: "undetermined"}[ro.value]
+                    ev += (f"; renamed upstream: {kernel_renames().chain_text(sv[1])}: the old name {old} exists in this kernel ({state}), "
+                           f"still judged not affected because the CNA says the problem was introduced in {new_code}, after this kernel; "
+                           "if the vendor backported the newer code into the old file, this cannot be seen here")
+                    self.cve_skipped.append({"new": p, "old": old, "old_name": state})
             return Res(False, why=[ev]), ev
         if not self.exists(model, p, obj):
             self.stats["not_shown_to_exist"] += 1
             ev = (f"build record: not in any compiled object's source or deps, but this kernel's files do not show that {p} exists "
-                  "(added or moved after this kernel?)")
+                  "(added or moved after this kernel?)" + rnote)
             return Res(None, why=[ev]), ev
         if obj:
             stem = obj[:-2]
@@ -3408,30 +3485,39 @@ def code_file(path):
     return p.endswith((".h", ".c", ".S", ".rs")) and not p.endswith(".lds.S")
 
 
-def kernel_file_proof(model, info, path):
+# D-066 f7366f6 (3)：路徑在完整的樹裡「符號連結底下」時的狀態。樹的符號連結沒有跟隨，名稱清單看不到連結指向的內容，不能證明檔案不存在，
+# 所以 dumpling 判 "unproven"（保留；只會更保守）。上游 sca-center 判 "absent"（丟掉）。要照上游，把這個值改成 "absent"。
+SYMLINK_PATH_STATE = "unproven"
+
+
+def kernel_file_state(model, info, path):
     """修補 commit 改到的檔案，這個核心有沒有 → "present"（Makefile 的規則提到它的物件，或檔案名稱裡有它）、
-    "absent"（只有完整的核心原始碼樹〔--source-tree，info.tree_complete〕裡找不到，而且路徑不在樹裡的符號連結底下）、
+    "absent"（只有完整的核心原始碼樹〔--source-tree、--from 指到樹本身，info.tree_complete〕裡找不到）、
     "unproven"（其他：不能證明沒有）。tree_names 只來自 /usr/src/linux-headers-*（映像的 headers 套件）或 --makefiles-dir 時，
-    名稱只是部分檔案（驅動自帶的 .h 不在裡面），找不到不代表這個核心沒有，所以是 unproven，不是 absent。"""
+    名稱只是部分檔案（驅動自帶的 .h 不在裡面），找不到不代表這個核心沒有，所以是 unproven，不是 absent。
+    路徑在樹裡的符號連結底下：狀態由 SYMLINK_PATH_STATE 決定（dumpling 是 unproven，見上面的說明）。"""
     p = posixpath.normpath(path)
     for ext in (".c", ".S", ".rs"):
         if p.endswith(ext) and p[:-len(ext)] + ".o" in model.obj_refs:
             return "present"
     names = getattr(info, "tree_names", None)
-    if names is None:
-        return "unproven"
-    if p in names:
+    if names is not None and p in names:
         return "present"
-    if not getattr(info, "tree_complete", False):
+    if names is None or not getattr(info, "tree_complete", False):
         return "unproven"
     if any(p == l or p.startswith(l + "/") for l in getattr(info, "tree_links", ())):
-        return "unproven"            # 符號連結沒有跟隨：名稱清單不能證明連結底下的檔案不存在
+        return SYMLINK_PATH_STATE
     return "absent"
 
 
 def kernel_has_file(model, info, path):
-    """這個核心「可能有」這個檔案：只有完整的核心原始碼樹證明沒有時才是 False（見 kernel_file_proof）。"""
-    return kernel_file_proof(model, info, path) != "absent"
+    """這個核心有這個檔案：Makefile 的規則提到它的物件，或核心樹／headers 的檔案名稱裡有它。檔案名稱不知道（tree_names 是 None）→ True（保守）。"""
+    p = posixpath.normpath(path)
+    for ext in (".c", ".S", ".rs"):
+        if p.endswith(ext) and p[:-len(ext)] + ".o" in model.obj_refs:
+            return True
+    names = getattr(info, "tree_names", None)
+    return True if names is None else p in names
 
 
 def oot_header_hit(records, path):
@@ -3454,11 +3540,26 @@ def header_defines(data):
     return out
 
 
-def record_identity(got, info):
+UTS_DATE_RE = re.compile(r"\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\d{4}\s*$")
+
+
+def uts_norm(v):
+    """UTS_VERSION（"#4 SMP PREEMPT Thu Aug  6 11:33:36 CST 2026"）去掉建置序號與日期時間 → "SMP PREEMPT"；格式看不懂 → None。"""
+    m = re.match(r"^#\d+\s+(.*)$", (v or "").strip())
+    if not m:
+        return None
+    rest = UTS_DATE_RE.sub("", m.group(1)).strip()
+    return rest if rest and rest != m.group(1).strip() else None
+
+
+def record_identity(got, info, self_built=False):
     """紀錄的建置識別檔（kernel.release、utsversion.h、compile.h）和映像的 Image banner（linux_banner：
     "Linux version <release> (<by>@<host>) (<compiler>) <version>"）核對 → (紀錄, GAP 的原因或 None)。
     result：matched（有識別檔、banner 讀得到、每一項都對上）／not_tied（沒有識別檔，或讀不到 banner：照舊採用，limitations 註明）。
-    對不上 → GAP（不是出貨的那一次建置）。"""
+    對不上 → GAP（不是出貨的那一次建置）。
+    self_built（--build-record-self-built）：先做上面出貨建置的嚴格核對；matched／not_tied 照舊（不標自編）；只有對不上時才看自編條件：
+    release、編譯器相同、UTS_VERSION 去掉序號與日期時間後相同（兩邊都要看得懂），只有編譯者／主機與序號、時間不同 → result self_built，
+    兩邊的 banner 與不同的項目記在紀錄裡；其他 → mismatch（GAP）。.config 與原始碼的核對由 check_build_record 做。"""
     imgs = getattr(info, "images", None) or {}
     prim = primary_image(imgs)
     banner = getattr(prim, "banner", None) if prim is not None else None
@@ -3474,8 +3575,11 @@ def record_identity(got, info):
     files = [n for n in ("kernel.release", "utsversion.h", "compile.h") if got.get(n) is not None]
     rec = {"files": files, "image": (prim.path if prim is not None else None), "banner_read": banner is not None,
            "compared": sorted(want) if banner is not None else [], "result": "not_tied"}
+    if self_built:
+        rec["record_identity"] = {k: want[k] for k in sorted(want)}
+        rec["image_banner"] = banner
     if not want or banner is None:
-        return rec, None
+        return rec, None                    # not_tied：沒有識別檔或讀不到 banner → 照舊（出貨紀錄的舊行為），不走自編條件
     bad = []
     if "release" in want and not banner.startswith(f"Linux version {want['release']} ("):
         bad.append("release")
@@ -3485,11 +3589,28 @@ def record_identity(got, info):
         bad.append("compiler")
     if "version" in want and not banner.rstrip().endswith(" " + want["version"]):
         bad.append("version (UTS_VERSION)")
-    if bad:
+    if not bad:
+        rec["result"] = "matched"            # 出貨那次建置的嚴格核對全部對上：就是出貨的建置，不標自編（旗標有沒有給都一樣）
+        return rec, None
+    why_ship = (f"the record's build-identity files do not match the version banner of the image's kernel ({prim.path}): "
+                f"{', '.join(bad)} differ: not the build that was shipped")
+    if not self_built:
         rec["result"] = "mismatch"
-        return rec, (f"the record's build-identity files do not match the version banner of the image's kernel ({prim.path}): "
-                     f"{', '.join(bad)} differ: not the build that was shipped")
-    rec["result"] = "matched"
+        return rec, why_ship
+    # 只有嚴格核對對不上時才走自編條件（--build-record-self-built）：kernel.release、編譯器、UTS_VERSION 去掉建置序號與日期時間後
+    # 的其餘部分（SMP／PREEMPT… 旗標）都要和映像相同，三項都要有可比的值；只有編譯者／主機與建置序號、時間可以不同。看不懂就不採用。
+    m = re.search(r" (#\d+ .*)$", banner)
+    img_uts = m.group(1) if m else None
+    nv, ni = uts_norm(want.get("version")), uts_norm(img_uts)
+    missing = [k for k in ("release", "compiler", "version") if k not in want]
+    if missing or "release" in bad or "compiler" in bad or nv is None or ni is None or nv != ni:
+        rec["result"] = "mismatch"
+        reason = (f"missing {', '.join(missing)} in the record" if missing else "kernel.release differs" if "release" in bad
+                  else "the compiler differs" if "compiler" in bad else "the UTS_VERSION flags cannot be compared or differ "
+                  f"({nv or '?'} vs {ni or '?'})")
+        return rec, f"self-built conditions not met ({reason}); strict check: {why_ship}"
+    rec["result"] = "self_built"
+    rec["differences"] = bad
     return rec, None
 
 
@@ -3584,14 +3705,115 @@ def build_info_sha256s(rec):
     return out
 
 
-def check_build_record(rec, info, model, mods):
+SOURCE_HASHES_NAME = "SOURCE-HASHES"
+MAX_HASH_FILE = 8 << 20
+
+
+def record_toplevel_text(rec, name, limit=8 << 20):
+    """BuildRecord 根目錄的小檔（SOURCE-HASHES）：tar 內最上層（至多一層資料夾），或資料夾紀錄自己的根目錄一般檔案（不跟隨連結、不往上一層找）。"""
+    texts = [v for k, v in rec.files.items() if len(k) <= 2 and k[-1] == name]
+    path = getattr(rec, "path", None)
+    if not texts and path and os.path.isdir(path):
+        f = os.path.join(path, name)
+        try:
+            if stat.S_ISREG(os.lstat(f).st_mode) and os.lstat(f).st_size <= limit:
+                with flash_package().open_nofollow(f) as fh:
+                    return fh.read(limit)
+        except OSError:
+            pass
+    return texts[0] if texts else None
+
+
+def compare_source_hashes(text, info, prefixes):
+    """SOURCE-HASHES（sha256sum 格式：<64 hex>  <路徑>；pack-build-record.sh 寫，只含 .cmd 引用的樹內檔案）抽樣對出貨原始碼樹的檔案內容。
+    → {present, listed, compared, mismatched, examples, error}。路徑對不到樹或是 kbuild 產生的檔案 → 略過（路徑那一關已核對）。"""
+    res = {"present": text is not None, "listed": 0, "compared": 0, "skipped": 0, "mismatched": 0, "examples": [], "error": None}
+    if text is None:
+        return res
+    root = getattr(info, "source_tree_root", None)
+    names = getattr(info, "tree_names", None)
+    ents = {}
+    for l in text.decode("utf-8", "replace").splitlines():
+        m = re.match(r"^([0-9a-f]{64})[ \t]+\*?(.+)$", l)
+        if not m:
+            continue
+        pth = record_norm(m.group(2).strip(), prefixes)
+        if pth is None or GENERATED_SOURCE_RE.search(pth):
+            continue
+        ents[pth] = m.group(1)
+    res["listed"] = len(ents)
+    if not root or names is None:
+        res["error"] = "no shipped source tree to compare the record's SOURCE-HASHES with"
+        return res
+    keys = sorted(k for k in ents if k in names)
+    fp = flash_package()
+    for k in keys:
+        f = os.path.join(root, *k.split("/"))
+        try:
+            st = os.lstat(f)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_HASH_FILE:
+                continue                    # 連結、特殊檔案、太大：不跟隨、不比（略過的數量記在 skipped）
+            h = hashlib.sha256()
+            with fp.open_nofollow(f) as fh:
+                for b in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(b)
+        except OSError:
+            continue
+        res["compared"] += 1
+        if h.hexdigest() != ents[k]:
+            res["mismatched"] += 1
+            if len(res["examples"]) < 10:
+                res["examples"].append(k)
+    res["skipped"] = res["listed"] - res["compared"]        # 不在樹裡、連結、太大、讀不到
+    return res
+
+
+# kbuild 在建置時產生、所以不在出貨原始碼樹裡的「原始檔」（.cmd 的 source_ 會寫到它們）。依 kbuild 的規則：
+#   *.mod.c（modpost 的模組 stub）、*.asn1.c（asn1_compiler）、*.dtb.S／*.dtbo.S（dtb 轉組合語言）、*.gen.S（firmware 轉檔）、
+#   隱藏檔名（.vmlinux.export.c 等 kbuild 內部產物）、lib/raid6/ 的 int*／neon*／altivec*／vpermxor*／tables（unroll.awk／mktables 產生）、
+#   drivers/video/logo/logo_*_clut224.c 等（pnmtologo）、consolemap_deftbl.c（conmakehash）、net/wireless/shipped-certs.c（genc）、defkeymap.c（loadkeys）、arch/*/crypto/*-core.S（perlasm）、arm64 nvhe hyp-reloc.S（gen-hyprel）。
+#   （清單來自實測：.cmd 的 source_ 有近千個產生檔不在出貨樹；缺的非產生檔 → GAP。）
+GENERATED_SOURCE_RE = re.compile(
+    r"(?:^|/)[^/]*\.mod\.c$|\.asn1\.c$|\.dtbo?\.S$|\.gen\.S$|(?:^|/)\.[^/]+$|"
+    r"^lib/raid6/(?:int|neon|altivec|vpermxor)\d+\.c$|^lib/raid6/tables\.c$|"
+    r"^drivers/video/logo/logo_[^/]+_(?:clut224|vga16|mono|gray256)\.c$|^drivers/tty/vt/consolemap_deftbl\.c$|"
+    r"^net/wireless/shipped-certs\.c$|^drivers/tty/vt/defkeymap\.c$|^arch/[^/]+/crypto/[^/]+-core\.S$|^arch/arm64/kvm/hyp/nvhe/hyp-reloc\.S$|^certs/(?:x509_certificate_list|system_certificates\.S)$")
+
+
+def self_built_source_check(paths, info):
+    """自編模式：紀錄 .cmd 的 source_ 路徑（已對到樹內相對路徑）除了 kbuild 產生的檔案之外，都要在出貨的原始碼樹（--source-tree）裡。
+    只比路徑，不比內容（紀錄沒有內容或雜湊）。→ {checked, generated_exempt, missing, examples, error, contents_compared: False}。"""
+    sc = {"checked": 0, "generated_exempt": 0, "missing": 0, "examples": [], "error": None, "contents_compared": False}
+    names = getattr(info, "tree_names", None)
+    if not getattr(info, "source_tree", None) or names is None:
+        sc["error"] = ("there is no shipped source tree to compare the record's source files with (--source-tree / --kernel-source), so the "
+                       "record cannot be tied to the shipped source")
+        return sc
+    miss = []
+    for p, (_t, how) in paths.items():
+        if how != "source":
+            continue
+        if GENERATED_SOURCE_RE.search(p):
+            sc["generated_exempt"] += 1
+        elif p in names:
+            sc["checked"] += 1
+        else:
+            miss.append(p)
+    sc["missing"] = len(miss)
+    sc["examples"] = sorted(miss)[:10]
+    return sc
+
+
+def check_build_record(rec, info, model, mods, self_built=False):
     """讀進來的 BuildRecord → (kernel.build_record 的紀錄, RecordJudge 或 None)。任何一項不成立 → status GAP（reason），
     不用這份紀錄（照舊用 Makefile 的判定）。"""
-    out = {"source": rec.label, "status": "GAP", "reason": None, "root": None, "config_sha256": None, "config_compare": None,
+    out = {"source": rec.label, "status": "GAP", "reason": None, "self_built_requested": bool(self_built), "root": None, "config_sha256": None, "config_compare": None,
            "kernel_release": None, "kernel_release_checked": False, "cmd_files": 0, "object_cmd_files": 0, "host_cmd_files": 0,
            "closure": None, "paths": 0, "unmapped_absolute_paths": 0, "source_tree_prefixes": 0,
            "rejected_members": rec.rejected, "ignored_links": rec.ignored_links, "out_of_tree_modules": None,
            "limitations": list(BUILD_RECORD_LIMITATIONS)}
+
+    hash_gap = None
 
     def gap(why):
         out["reason"] = why
@@ -3604,9 +3826,12 @@ def check_build_record(rec, info, model, mods):
         # 板子跑的是 rootfs/boot/Image（C-kernel-boot）：紀錄要和它同一次建置才能用；BUILD-INFO.txt 的 sha256 對不上（或沒有）→ 不採用
         shas = build_info_sha256s(rec)
         if imgs["rootfs"].sha256 not in shas:
-            return gap("the board runs rootfs/boot/Image (sha256 " + str(imgs["rootfs"].sha256)[:12] + "...), which is not the kernel this build "
-                       "record describes (BUILD-INFO.txt image sha256 " + (", ".join(x[:12] + "..." for x in sorted(shas)) or "not found") + "): "
-                       "the record's exclusions do not apply to the running kernel")
+            msg = ("the board runs rootfs/boot/Image (sha256 " + str(imgs["rootfs"].sha256)[:12] + "...), which is not the kernel this build "
+                   "record describes (BUILD-INFO.txt image sha256 " + (", ".join(x[:12] + "..." for x in sorted(shas)) or "not found") + "): "
+                   "the record's exclusions do not apply to the running kernel")
+            if not self_built:
+                return gap(msg)
+            hash_gap = msg          # 自編紀錄的映像雜湊本來就不同：等身分核對的結果（只有走自編條件才放行）
     if rec.needed_links.n:
         return gap(f"{rec.needed_links.n} .cmd or list file(s) in the record are links or special files (not followed): "
                    + rec.needed_links.text())
@@ -3688,12 +3913,25 @@ def check_build_record(rec, info, model, mods):
             out["limitations"].append(RECORD_RELEASE_LIMITATION)
         elif not info.kernel_version:
             out["limitations"].append(RECORD_NO_VERSION_LIMITATION)
-    ident, why = record_identity(got, info)
+    ident, why = record_identity(got, info, self_built)
     out["identity"] = ident
+    out["self_built"] = False
     if why:
         return gap(why)
-    if ident["result"] != "matched":
-        out["limitations"].append(RECORD_NOT_TIED_LIMITATION)
+    if ident["result"] == "self_built":
+        self_built = True
+        ident["config_compare"] = out["config_compare"]["result"]
+        out["self_built"] = True
+        out["limitations"].append(SELF_BUILT_LIMITATION)          # 內容有沒有比對過，等 source check 之後再換成 HASHED 版
+    else:
+        self_built = False                  # 出貨建置的核對過了（matched／not_tied）：舊行為
+        if hash_gap:
+            return gap(hash_gap)
+        if ident["result"] != "matched":
+            out["limitations"].append(RECORD_NOT_TIED_LIMITATION)
+        if out["self_built_requested"] and not {"version", "compiler"} <= set(ident.get("compared") or []):
+            out["identity_incomplete"] = True        # 自編旗標開著，但識別檔不全：不能無聲當成「出貨那次」
+            out["limitations"].append(SELF_BUILT_INCOMPLETE_IDENTITY_LIMITATION)
     prefixes = sorted((p for p in r["prefix"] if p), key=lambda p: (-len(p), p))
     paths, suffixes, unmapped = {}, {}, 0
     for raw, v in r["paths"].items():
@@ -3712,6 +3950,29 @@ def check_build_record(rec, info, model, mods):
         elif p not in paths or (v[1] == "source" and paths[p][1] != "source"):
             paths[p] = v
     out.update(paths=len(paths), unmapped_absolute_paths=unmapped, source_tree_prefixes=len(prefixes))
+    if self_built:
+        sc = self_built_source_check(paths, info)
+        out["self_built_source_check"] = sc
+        if sc["error"]:
+            out["self_built"] = False
+            return gap("self-built record: " + sc["error"])
+        sh = compare_source_hashes(record_toplevel_text(rec, SOURCE_HASHES_NAME), info, prefixes)
+        sc["source_hashes"] = sh
+        if sh["present"] and sh["mismatched"]:
+            out["self_built"] = False
+            return gap(f"self-built record: {sh['mismatched']} of {sh['compared']} sampled source file(s) differ in content from the shipped "
+                       f"source tree (SOURCE-HASHES), for example {', '.join(sh['examples'][:5])}: not built from the same source")
+        if sh["present"] and sh["error"]:
+            out["self_built"] = False
+            return gap("self-built record: " + sh["error"])
+        sc["contents_compared"] = bool(sh["present"] and sh["compared"])
+        if sc["contents_compared"] and SELF_BUILT_LIMITATION in out["limitations"]:
+            out["limitations"][out["limitations"].index(SELF_BUILT_LIMITATION)] = SELF_BUILT_HASHED_LIMITATION.format(
+                compared=sh["compared"], listed=sh["listed"], skipped=sh["skipped"])
+        if sc["missing"]:
+            out["self_built"] = False
+            return gap(f"self-built record: {sc['missing']} source file(s) named by the record's .cmd files are not in the shipped source tree "
+                       f"(not a generated file; the record may come from another tree), for example {', '.join(sc['examples'][:5])}")
     order = set(rkeys.get("modules.order") or ())
     # 映像 kernel/ 底下有 .ko 不在紀錄的 modules.order：不拒收（modules.order／modules.builtin 與映像相同、身分相符時，多出的模組是出貨時
     # 另外放進映像的）。這些模組的檔案不判沒編（RecordJudge.extra_objs），找不到來源的標 GAP，列在 image_modules_not_in_record
@@ -3754,7 +4015,7 @@ def attach_oot_records(brec, brecord, paths, info, mods):
     或建置紀錄（--build-record）本身不能用 → 不採用，標頭檔照舊因為樹外模組而 unknown。brec 是 None（建置紀錄 GAP）時只記原因。"""
     mod = kernel_oot_record()
     me = sys.modules[__name__]
-    sm = {"records": [], "image_modules": None, "covered": 0, "uncovered": 0, "uncovered_examples": [], "identity": {},
+    sm = {"self_built": bool(brecord.get("self_built")), "records": [], "image_modules": None, "covered": 0, "uncovered": 0, "uncovered_examples": [], "identity": {},
           "used": False, "reason": None}
     brecord["out_of_tree_records"] = sm
     recs = []
@@ -3780,9 +4041,10 @@ def attach_oot_records(brec, brecord, paths, info, mods):
         sm["reason"] = f"{len(bad)} out-of-tree build record(s) are not usable: " + "; ".join(f"{x['source']}: {x['reason']}" for x in bad)[:300]
         return
     minfo = (info.modules or {}).get("modinfo") or {}
-    ident, unc, closure_cache = {"srcversion": 0, "sections": 0, "sections_masked": 0, "name_only": 0}, [], {}
+    ident, unc, closure_cache = {"srcversion": 0, "srcversion_build_path": 0, "sections": 0, "sections_masked": 0, "name_only": 0}, [], {}
     verified_by = {}
     masked_examples = []
+    sv_budget = mod.SvBudget()          # srcversion 重算（只差建置路徑）的讀取上限，這次執行所有模組共用
     fp = me.flash_package()
     for k in oot:
         name = oot_module_name(k)
@@ -3797,7 +4059,7 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                 continue
             # 紀錄資料夾裡有同名的 .ko：一定要讀得到 srcversion 而且和映像的相同（讀不到、被截斷、是符號連結、不同 → 整個模組不採用）；
             # 沒有 .ko 可比的候選只靠名稱
-            kind, bad = "name_only", None
+            kind, bad, cw = "name_only", None, None
             try:
                 present = os.path.lexists(c["file"])
             except OSError:
@@ -3814,7 +4076,14 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                 rv = got.get("srcversion") if isinstance(got, dict) and got.get("ok") else None
                 if rv and iv:
                     if iv != rv:
-                        bad = f"srcversion of the record's .ko ({rv}) differs from the image's .ko ({iv}): not the same build"
+                        # srcversion 不同：只有在「用紀錄重算等於紀錄的 .ko、只把 kbuild 產生檔裡的建置路徑換成映像的再算等於映像的 .ko」時採用
+                        # （kernel_oot_record.verify_build_path_only）；否則照舊不是同一份建置
+                        okp, w = mod.verify_build_path_only([r] + [x for x in recs if x is not r], me, c, rv, iv,
+                                                            ((minfo.get(k) or {}).get("elf") or {}).get("strings"), sv_budget)
+                        if okp:
+                            kind, cw = "srcversion_build_path", w
+                        else:
+                            bad = f"srcversion of the record's .ko ({rv}) differs from the image's .ko ({iv}): not the same build ({w})"
                     else:
                         kind = "srcversion"
                 else:
@@ -3825,26 +4094,36 @@ def attach_oot_records(brec, brecord, paths, info, mods):
                         bad = ("the record has a .ko of this name but its srcversion (or the image's) cannot be read, and the ELF section "
                                "comparison does not verify it (" + str(w) + "): not verified")
                     else:
-                        verified_by[k] = w
+                        cw = w
             if bad:
                 mismatch = bad
                 continue
-            if best is None or kind == "srcversion" or (kind == "sections" and best in ("sections_masked", "name_only")):
+            rank = ("name_only", "sections_masked", "sections", "srcversion_build_path", "srcversion")
+            if best is None or rank.index(kind) > rank.index(best):
                 best = kind
+                if cw is not None:
+                    verified_by[k] = cw          # 說明跟著採用的那個候選（不被後面較弱的候選蓋掉）
+                else:
+                    verified_by.pop(k, None)
         # 同名的 .ko 在紀錄裡可以有好幾個（例如兩種建置的 nvidia.ko）：映像的 .ko 只要有一個候選用內容驗證過（srcversion 或 ELF 區段），
         # 就是那一個建置，其他候選不相干；沒有任何內容驗證過的候選，而有候選對不上 → 整個模組不採用。只比名稱的候選不抵銷對不上的候選。
-        if mismatch and best not in ("srcversion", "sections", "sections_masked"):
+        if mismatch and best not in ("srcversion", "srcversion_build_path", "sections", "sections_masked"):
             best, why = None, mismatch
+        if best == "name_only" and brecord.get("self_built"):
+            best, why = None, "self-built record: the module is matched by name only (no .ko of it in the record to verify by srcversion or ELF sections)"
         if best is None:
             unc.append((k, why))
         else:
             ident[best] += 1
-            if best == "sections_masked" and len(masked_examples) < 3:
+            if best in ("sections_masked", "srcversion_build_path") and len(masked_examples) < 3:
                 masked_examples.append(f"{posixpath.basename(k)}: {verified_by.get(k)}")
     sm["covered"], sm["uncovered"], sm["identity"] = len(oot) - len(unc), len(unc), ident
     sm["uncovered_examples"] = [f"{posixpath.basename(k)}: {w}" for k, w in unc[:10]]
     sm["uncovered_modules"] = [posixpath.basename(k) for k, _ in unc[:200]]
-    sm["verified_by"] = {"srcversion": ".modinfo srcversion equal", "sections": "code and data ELF sections identical (debug/notes/modinfo ignored)",
+    sm["verified_by"] = {"srcversion": ".modinfo srcversion equal",
+                         "srcversion_build_path": (".modinfo srcversion differs only because of the build path: recomputed from the record's source files "
+                                                   "it equals the record's .ko, and with the build path in kbuild-generated files (e.g. *.dtb.S) replaced "
+                                                   "by the image's it equals the image's .ko"), "sections": "code and data ELF sections identical (debug/notes/modinfo ignored)",
                          "sections_masked": "ELF sections identical except .rodata.str* strings that differ only in build date/time or build path (masked)",
                          "name_only": "module name only (the record has no .ko to compare)"}
     sm["masked_examples"] = masked_examples
@@ -3857,7 +4136,8 @@ def attach_oot_records(brec, brecord, paths, info, mods):
     brec.stats.update(header_in_out_of_tree_deps=0, header_not_built_oot_checked=0)
     brecord["limitations"].append(
         f"Out-of-tree build records ({', '.join(x['source'] for x in sm['records'])}) cover all {len(oot)} out-of-tree module(s) of the image "
-        f"({ident['srcversion']} matched by .modinfo srcversion, {ident['sections']} by identical ELF code and data sections, "
+        f"({ident['srcversion']} matched by .modinfo srcversion, {ident['srcversion_build_path']} by srcversion recomputed with only the build path "
+        f"in kbuild-generated files changed, {ident['sections']} by identical ELF code and data sections, "
         f"{ident['sections_masked']} by identical sections except build date/time or build path strings (masked), {ident['name_only']} by module name only): a kernel header that "
         "no in-tree object and no out-of-tree module lists in its deps is judged not built; one that an out-of-tree module lists is "
         "built (by path suffix, so a same-named header of the module's own also counts). The records are trusted to be the builds of "
@@ -4106,6 +4386,8 @@ def build_info(a, want, images=False):
         cfg = open(os.path.join(a.from_, ".config"), encoding="utf-8", errors="replace").read()
         info = BuildInfo(files, cfg, os.path.join(os.path.abspath(a.from_), ".config"), want, src)
         info.tree_names = tree_names(col, {base: ()})
+        info.tree_complete = info.tree_names is not None                   # --from 指到樹本身：名稱完整（超過上限就不算）
+        info.tree_links = frozenset("/".join(k[len(base):]) for k in col.links if k[:len(base)] == base)     # 樹裡的符號連結（沒有跟隨）
         return info, None, None
     info, gap = locate(col, src, want)
     if info is not None and images:
@@ -4164,6 +4446,7 @@ def apply_source_tree(info, tree):
     n_mk = sum(1 for k in files if k and k[-1] in ("Makefile", "Kbuild"))
     info.files = files
     info.tree_names = tree_names(col, {base: ()})
+    info.source_tree_root = root                  # 自編紀錄的 SOURCE-HASHES 抽樣比對要讀樹裡的檔案內容（不寫進輸出）
     info.tree_complete = info.tree_names is not None                   # 名稱超過上限（None）就不算完整
     info.tree_links = frozenset("/".join(k[len(base):]) for k in col.links if k[:len(base)] == base)     # 樹裡的符號連結（沒有跟隨）
     info.source_tree = {"type": "source-tree", "path_label": os.path.basename(root.rstrip("/")) or "(root)",
@@ -4593,7 +4876,8 @@ def assess(a, max_age):
     brec = None
     if getattr(a, "build_record", None):
         # 建置紀錄：驗證過才用（check_build_record）；GAP 時照舊只用 Makefile 的判定，kernel.build_record 記原因
-        brecord, brec = check_build_record(read_build_record(a.build_record), info, model, mods)
+        brecord, brec = check_build_record(read_build_record(a.build_record), info, model, mods,
+                                           bool(getattr(a, "build_record_self_built", False)))
         out["kernel"]["build_record"] = brecord
         if getattr(a, "oot_build_record", None):
             attach_oot_records(brec, brecord, a.oot_build_record, info, mods)
@@ -4602,12 +4886,40 @@ def assess(a, max_age):
                                          "out_of_tree_records": {"records": [], "image_modules": None, "covered": 0, "uncovered": 0,
                                                                 "uncovered_examples": [], "identity": {}, "used": False,
                                                                 "reason": "--oot-build-record needs --build-record"}}
+    rmap = None
+    if getattr(a, "rename_map", None):
+        # 核心檔案改名對照表（kernel-renames.sh）：只有建置紀錄採用時才用（檔案「這個核心有沒有」由建置紀錄與核心樹判斷）；
+        # 缺、讀不出、過期、不涵蓋這個核心 → GAP（不用，照舊判定），不會當成「沒有改名」
+        rmax = getattr(a, "rename_map_max_age_days", None)
+        rerr = None
+        if rmax is None:
+            try:
+                rmax = float(os.environ.get("KERNEL_RENAME_MAP_MAX_AGE_DAYS") or 60)
+            except ValueError:
+                rmax, rerr = 60.0, "環境變數 KERNEL_RENAME_MAP_MAX_AGE_DAYS 不是數字，不用改名對照表"
+        if rerr is None and not (rmax == rmax and rmax >= 0):
+            rerr = "改名對照表的新舊上限（天數）不是有效的數字，不用改名對照表"
+        mmv = major_minor(model.kver_hdr or info.kernel_version)
+        rmap = kernel_renames().RenameMap(a.rename_map, rmax, tuple(int(x) for x in mmv.split(".")) if mmv else None, max_age_error=rerr)
+        rst = rmap.state
+        if rst["ok"] and brec is None:
+            rst["ok"], rst["reason"] = False, "沒有採用的建置紀錄（--build-record）：改名對照表只配建置紀錄用"
+        out["kernel"]["rename_map"] = {"source": rst["source"], "ok": rst["ok"], "status": "OK" if rst["ok"] else "GAP", "reason": rst["reason"],
+                                       "head_commit": rst["head_commit"], "head_date": rst["head_date"], "generated_utc": rst["generated_utc"],
+                                       "age_days": rst["age_days"], "max_age_days": rmax, "base_version": rst["base_version"],
+                                       "renames": rst["renames"], "files_resolved": 0, "cves_with_renamed_files": 0,
+                                       "skipped_new_code": {"cves": 0, "files": 0, "old_name_built": 0, "examples": []}, "decision_changes": {},
+                                       "note": "whole-file renames of mainline (git log -M); a file that was split, or that has several possible old "
+                                               "names, or no chain to a file of this kernel, is not resolved (unknown, as without --rename-map)."}
+        if rst["ok"]:
+            brec.renames = rmap
+            out["limitations"] = list(out["limitations"]) + [RENAME_MAP_LIMITATION]
     sg = None
     if getattr(a, "stable_git", None):
         sg = kernel_git_files().StableGit(a.stable_git)
         out["kernel"]["stable_git"] = {"source": sg.label, "ok": sg.ok, "reason": sg.error, "head": sg.head, "refs": sg.branch,
                                        "cves_with_commit_files": 0, "cves_with_added_files": 0, "cves_from_references_only": 0,
-                                       "kept_not_proven_absent": {"files": 0, "cves": 0},
+                                       "kept_not_proven_absent": 0, "kept_not_proven_absent_cves": 0,
                                        "commits_resolved": 0, "decision_changes": {},
                                        "note": "read-only local clone; no fetch. Files are the file names in the history of this clone; "
                                                "a commit that the clone does not have is not used (unknown, as without --stable-git)."}
@@ -4635,19 +4947,21 @@ def assess(a, max_age):
         if sg is not None and sg.ok:
             if files is not None:
                 # (b) CNA 的修補 commit（產品分支的 backport）實際改的檔案，和 programFiles 聯集（只會更保守）
-                # 只加「程式檔與標頭檔」，而且不是「完整核心原始碼樹證明這個核心沒有」的檔案（kernel_file_proof）：
+                # 只加「程式檔與標頭檔」，而且不是「完整核心原始碼樹證明這個核心沒有」的檔案（kernel_file_state）：
                 # 只有完整的核心原始碼樹（--source-tree）找不到，才算這個核心沒有它（不可能編進這個核心，加進去只會多一個
                 # 「看不出存在」的 unknown）。名稱只來自映像的 headers 套件（部分檔案；驅動自帶的 .h 不在裡面）時，找不到
                 # 不是證據：照樣併入（被改的 .h 可能被有編的 .c include），不能因此判沒編。
                 # CNA 的 programFiles 本來的判定不變，聯集只會更保守（只會讓 not_affected 變少）
                 fc = sg.files(mir.fix_commits(cve))
                 commits = [h for h, f in fc.items() if f]
-                proofs = {x: kernel_file_proof(model, info, x) for x in {x for h in commits for x in fc[h]} - set(files) if code_file(x)}
-                gfiles = sorted(x for x, pr in proofs.items() if pr != "absent")
-                kept = [x for x in gfiles if proofs[x] == "unproven"]
+                cand = sorted(x for x in {x for h in commits for x in fc[h]} - set(files) if code_file(x))
+                states = {x: kernel_file_state(model, info, x) for x in cand}
+                gfiles = [x for x in cand if states[x] != "absent"]
+                kept = [x for x in gfiles if states[x] == "unproven"]
                 if kept:
-                    out["kernel"]["stable_git"]["kept_not_proven_absent"]["files"] += len(kept)
-                    out["kernel"]["stable_git"]["kept_not_proven_absent"]["cves"] += 1
+                    sgo = out["kernel"]["stable_git"]
+                    sgo["kept_not_proven_absent"] += len(kept)         # 保留的檔案數（上游的整數）
+                    sgo["kept_not_proven_absent_cves"] += 1            # 有檔案被保留的 CVE 數（dumpling 另加）
                 if gfiles:
                     origin = "cna+commits" if files else "commits"
             else:
@@ -4672,7 +4986,22 @@ def assess(a, max_age):
             nc = None
             if brec is not None and brec.full_tree and base_files:
                 nc = mir.new_code(cve, kbase)          # CNA 紀錄：這個問題比核心新（只有核心原始碼樹完整時才用）
+            if brec is not None:
+                brec.cve_renames, brec.cve_skipped = [], []
             dec, detail, fl, vals = judge_cve(model, files, mods, mapper, brec, nc)
+            renamed = list(brec.cve_renames) if brec is not None else []
+            if renamed:
+                # 沒有改名對照表時的判定（比較用；不計入 file_judgements）
+                saved = dict(brec.stats)
+                brec.rename_on = False
+                d_wo = judge_cve(model, files, mods, mapper, brec, nc)[0]
+                brec.rename_on = True
+                brec.stats.clear(); brec.stats.update(saved)
+                rmo = out["kernel"]["rename_map"]
+                rmo["cves_with_renamed_files"] += 1
+                k = f"{d_wo}->{dec}"
+                rmo["decision_changes"][k] = rmo["decision_changes"].get(k, 0) + 1
+                detail += f"; renamed upstream: {', '.join(x['new'] + ' was ' + x['old'] for x in renamed[:3])}"
             if brec is not None:
                 d0 = judge_cve(model, files, mods, mapper)[0]          # 只用 Makefile 的判定（比較用）
                 base_counts[d0] += 1
@@ -4690,6 +5019,16 @@ def assess(a, max_age):
             if dec == "not_affected":
                 res["justification"] = "vulnerable_code_not_present"
             res.update({"detail": detail, "files": fl, "config_values": vals})
+            if renamed:
+                res["rename_resolved"] = renamed[:10]
+            if brec is not None and brec.cve_skipped and "rename_map" in out["kernel"]:
+                sk = out["kernel"]["rename_map"]["skipped_new_code"]
+                sk["cves"] += 1
+                sk["files"] += len(brec.cve_skipped)
+                sk["old_name_built"] += sum(1 for x in brec.cve_skipped if x["old_name"] == "built")
+                if len(sk["examples"]) < 10:
+                    sk["examples"].append(cve)
+                res["rename_skipped_new_code"] = list(brec.cve_skipped[:10])
             if gfiles:
                 res["files_origin"] = origin
                 res["stable_git_commits"] = [h[:12] for h in commits[:10]]
@@ -4708,14 +5047,17 @@ def assess(a, max_age):
         out["kernel"]["stable_git"]["cves_with_commit_files"] = sum(1 for r in out["results"] if r.get("files_origin"))
     out["unknown_reasons"] = unk
     rsuffix = ""
+    if rmap is not None and rmap.state["ok"]:
+        out["kernel"]["rename_map"].update(files_resolved=rmap.stats["files_resolved"], files_ambiguous=rmap.stats["ambiguous"],
+                                           files_not_resolved=rmap.stats["not_resolved"])
     if brec is not None:
         br = out["kernel"]["build_record"]
         br.update(counts_without_record=base_counts, decision_changes=dict(sorted(changes.items())), file_judgements=dict(brec.stats))
-        rsuffix = (f"；建置紀錄 {br['source']} 採用（.cmd {br['cmd_files']} 個、物件 {br['object_cmd_files']} 個；和只用 Makefile 相比："
+        rsuffix = (f"；建置紀錄 {br['source']} 採用" + ("（自編：用出貨原始碼重編，不是出貨那次建置）" if br.get("self_built") else "") + f"（.cmd {br['cmd_files']} 個、物件 {br['object_cmd_files']} 個；和只用 Makefile 相比："
                    + ("、".join(f"{k} {v}" for k, v in sorted(changes.items())) or "判定沒有改變")
                    + (f"；建置紀錄與 Makefile 矛盾的檔案 {brec.stats['conflict_makefile_built']} 個，判 unknown" if brec.stats["conflict_makefile_built"] else "")
                    + "）")
-        if (br.get("identity") or {}).get("result") != "matched":
+        if (br.get("identity") or {}).get("result") not in ("matched", "self_built"):
             rsuffix += ("；建置紀錄沒有和映像綁定（.config 與模組清單相符；沒有建置識別檔"
                         + ("" if not (br.get("identity") or {}).get("files") else "或讀不到 Image 的版本字串") + "）")
     elif (out["kernel"].get("build_record") or {}).get("status") == "GAP":
@@ -4723,6 +5065,7 @@ def assess(a, max_age):
     oo = (out["kernel"].get("build_record") or {}).get("out_of_tree_records")
     if oo:
         rsuffix += ("；樹外模組建置紀錄：" + (f"採用（映像的 {oo['image_modules']} 個樹外模組都有紀錄；驗證方式 srcversion {oo['identity'].get('srcversion', 0)}、"
+                                          f"srcversion 只差建置路徑（重算核對）{oo['identity'].get('srcversion_build_path', 0)}、"
                                           f"ELF 區段相同 {oo['identity'].get('sections', 0)}、ELF 區段相同但建置日期／路徑字串遮罩 {oo['identity'].get('sections_masked', 0)}、"
                                           f"只比名稱 {oo['identity'].get('name_only', 0)}；標頭檔看紀錄的 deps）" if oo.get("used")
                                           else f"不採用（{oo.get('reason')}；已驗證 {oo.get('covered')}／{oo.get('image_modules')}），標頭檔照舊因為樹外模組而 unknown"))
@@ -4730,9 +5073,16 @@ def assess(a, max_age):
     if sgi:
         rsuffix += ("；--stable-git " + (f"{sgi['source']}：查到 commit 檔案的 CVE {sgi['cves_with_commit_files']} 個（補進 programFiles "
                                         f"{sgi['cves_with_added_files']}、只靠 References {sgi['cves_from_references_only']}；"
-                                        f"樹不完整、沒有證明不存在而照樣併入的檔案 {sgi['kept_not_proven_absent']['files']} 個／CVE {sgi['kept_not_proven_absent']['cves']} 個）；判定變化 "
+                                        f"樹不完整、沒有證明不存在而照樣併入的檔案 {sgi['kept_not_proven_absent']} 個／CVE {sgi['kept_not_proven_absent_cves']} 個）；判定變化 "
                                         + ("、".join(f"{k} {v}" for k, v in sorted(sgi['decision_changes'].items())) or "無")
                                         if sgi["ok"] else f"不能用（{sgi['reason']}）"))
+    rmi = out["kernel"].get("rename_map")
+    if rmi:
+        rsuffix += ("；--rename-map " + (f"{rmi['source']}（主線 {str(rmi['head_commit'])[:12]}，產生後 {rmi['age_days']} 天）：{rmi['files_resolved']} 個檔案找回舊路徑"
+                                         f"（CVE {rmi['cves_with_renamed_files']} 個）；另有 CVE {rmi['skipped_new_code']['cves']} 個（舊名有編 "
+                                         f"{rmi['skipped_new_code']['old_name_built']} 個檔案）因為 CNA 說問題比核心新，照舊判 not_affected、沒有改用舊名；判定變化 "
+                                         + ("、".join(f"{k} {v}" for k, v in sorted(rmi['decision_changes'].items())) or "無")
+                                         if rmi["ok"] else f"不能用（GAP：{rmi['reason']}），找不到的檔案照舊 unknown"))
     exm = (out["kernel"].get("build_record") or {}).get("image_modules_not_in_record") if brec is not None else None
     if exm:
         rsuffix += (f"；出貨映像有 {exm['count']} 個模組不在建置紀錄的 modules.order（樹內 {exm['in_tree']}、找不到來源 {exm['not_found']}）："
@@ -4837,8 +5187,12 @@ def main(argv=None):
     ap.add_argument("--mirror")
     ap.add_argument("--max-age-days", type=float, default=None)
     ap.add_argument("--build-record")
+    ap.add_argument("--build-record-self-built", action="store_true",
+                    help="the build record was rebuilt by us from the shipped source (not the shipped build): accept it when kernel.release and .config match")
     ap.add_argument("--oot-build-record", action="append", default=[])
     ap.add_argument("--stable-git")
+    ap.add_argument("--rename-map", help="kernel-renames.sh JSON: whole-file renames of mainline; finds the old path of a file that this kernel does not have")
+    ap.add_argument("--rename-map-max-age-days", type=float, default=None)
     ap.add_argument("--cves-origin")
     ap.add_argument("--source-tree")
     ap.add_argument("--probe-kernel-version", action="store_true")
@@ -4918,7 +5272,8 @@ def main(argv=None):
     if out is not None and a.build_record and "build_record" not in out["kernel"]:
         # 給了建置紀錄、但這個階段沒有判定（GAP）：沒有讀紀錄
         out["kernel"]["build_record"] = {"source": os.path.basename(os.path.normpath(a.build_record)) or a.build_record,
-                                         "status": "NOT_RUN", "reason": "no CVE was judged (the stage is GAP), so the record was not read"}
+                                         "status": "NOT_RUN", "reason": "no CVE was judged (the stage is GAP), so the record was not read",
+                                         "self_built_requested": bool(getattr(a, "build_record_self_built", False))}
     if out is not None:
         out["status"], out["detail"] = st, detail
         try:

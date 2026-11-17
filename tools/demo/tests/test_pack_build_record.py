@@ -26,6 +26,7 @@ def trees(tmp_path):
     o1 = tmp_path / "modA"
     w(o1 / ".y.o.cmd", "cmd\n")
     w(o1 / "y.ko", "ko")
+    w(o1 / "y.mod", "y.o\n")
     w(o1 / "y.c", "source-not-packed")
     o2 = tmp_path / "modB"          # 有 .cmd、沒有 .ko
     w(o2 / ".z.o.cmd", "cmd\n")
@@ -116,3 +117,37 @@ def test_uefi_without_kconfig_warns(trees):
     assert r.returncode == 0, r.stderr
     assert "no nvidia-config/*/config.dsc.inc" in r.stderr
     assert not any(x.startswith("uefi/") for x in names(out))
+
+
+def test_source_hashes_of_cmd_sources(tmp_path):
+    k = tmp_path / "kb"
+    w(k / ".config", "CONFIG_X=y\n")
+    w(k / "System.map", "0000 T start\n")
+    w(k / "drivers/foo/a.c", "int a;\n")
+    w(k / "drivers/foo/.a.o.cmd", "savedcmd_drivers/foo/a.o := gcc -c\nsource_drivers/foo/a.o := drivers/foo/a.c\nsource_x.o := /abs/outside.c\n")
+    out = tmp_path / "rec.tar.gz"
+    r = subprocess.run(["bash", SCRIPT, str(k), str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    with tarfile.open(out) as t:
+        text = t.extractfile("SOURCE-HASHES").read().decode()
+    import hashlib
+    assert text.strip() == f"{hashlib.sha256(b'int a;' + b'\n').hexdigest()}  drivers/foo/a.c"
+
+
+def test_oot_mod_files_packed_and_missing_mod_warns(tmp_path):
+    k = tmp_path / "kb"
+    w(k / ".config", "CONFIG_X=y\n")
+    w(k / "System.map", "0000 T start\n")
+    w(k / ".x.o.cmd", "cmd\n")
+    o = tmp_path / "modA"
+    w(o / ".y.o.cmd", "cmd\n")
+    w(o / "y.ko", "ko")
+    w(o / "y.mod", "y1.o\ny2.o\n")
+    w(o / "sub/z.ko", "ko")                     # 沒有 z.mod
+    out = tmp_path / "rec.tar.gz"
+    r = subprocess.run(["bash", SCRIPT, str(k), str(out), str(o)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    n = names(out)
+    assert "oot1-modA/y.mod" in n and "oot1-modA/y.ko" in n
+    assert "1 object-list file(s) (.mod)" in r.stdout
+    assert "1 .ko file(s) without a matching .mod" in r.stderr

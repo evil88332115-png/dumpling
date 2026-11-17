@@ -9,6 +9,7 @@
   "grype_seed": "/path/to/grype-db-seed",
   "grype_cache": "/path/to/wizard-work-root/grype-db",
   "stable_git": {"6.8": "/path/to/linux-stable-6.8-clone"},
+  "kernel_rename_map": "/path/to/kernel-renames.json",
   "rules_template": "/path/to/vex-rules.json",
   "upstream": {"jetson-r39.2.0": {"public_sources": "/path/to/public_sources.tbz2", "bsp": "/path/to/Jetson_Linux_R39.2.0_aarch64.tbz2"}}
 }
