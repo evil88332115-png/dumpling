@@ -621,6 +621,38 @@ def coverage_lines(path):
     return out[:30]
 
 
+CSAF_MAX = 200
+CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}\Z")
+CSAF_DIR_RE = re.compile(r"^csaf-drafts/[0-9]{2}-[0-9a-f]{8}\Z")
+
+
+def csaf_drafts(d):
+    """result.json 的 csaf_drafts（CRA 第 14 條第 8 項的使用者通知草稿，docs/WATCH.md 第 8 節）→ 清理過的紀錄。
+    → {"records", "cut", "bad", "skipped"}。
+    沒有這個欄位 → records None（這一輪沒有產生草稿的流程：建基準、演練或舊版 result.json；頁面標 NOT_RUN）；
+    欄位在但不是清單 → bad（頁面標 GAP：資料格式不對，不和「沒有欄位」混在一起）；清單裡不是物件的元素計數（skipped，頁面標 GAP），不默默丟掉；
+    超過 CSAF_MAX 筆記下實際筆數（cut），不靜默截斷。專案、版本、層缺少或不是字串 → None（頁面寫「（缺）」）。"""
+    if "csaf_drafts" not in d:
+        return {"records": None, "cut": 0, "bad": None, "skipped": 0}
+    v = d.get("csaf_drafts")
+    if not isinstance(v, list):
+        return {"records": None, "cut": 0, "bad": "csaf_drafts 不是清單（型別 %s）" % type(v).__name__, "skipped": 0}
+    out, skipped = [], 0
+
+    def s(x, n):
+        return c(x, n) if isinstance(x, str) and x else None
+    for r in v[:CSAF_MAX]:
+        if not isinstance(r, dict):
+            skipped += 1
+            continue
+        dr = r.get("dir")
+        out.append({"project": s(r.get("project"), 63), "version": s(r.get("version"), 64), "layer": s(r.get("layer"), 20),
+                    "cves": [c(x, 30) for x in r["cves"][:20] if isinstance(x, str) and CVE_ID_RE.match(x)] if isinstance(r.get("cves"), list) else [],
+                    "status": cs(r.get("status")), "dir": dr if isinstance(dr, str) and CSAF_DIR_RE.match(dr) else None,
+                    "detail": c(r.get("detail"), 300) if r.get("detail") else None, "issue": r.get("issue") is True})
+    return {"records": out, "cut": max(0, len(v) - CSAF_MAX), "bad": None, "skipped": skipped}
+
+
 def plan_result(d):
     if not isinstance(d, dict) or not isinstance(d.get("status"), str):
         raise Gap("result.json 格式不認得")
@@ -645,7 +677,9 @@ def plan_result(d):
     stats = d.get("stats") if isinstance(d.get("stats"), dict) else {}
     # 超過 200 份不靜默截斷：記下實際份數，頁面寫 GAP（硬性限制 5）
     cut = max(0, len(ps) - 200)
+    cd = csaf_drafts(d)
     return {"gap": None, "status": cs(d.get("status")), "detail": c(d.get("detail"), 400), "per_sbom": per, "per_sbom_cut": cut,
+            "csaf_drafts": cd["records"], "csaf_drafts_cut": cd["cut"], "csaf_drafts_bad": cd["bad"], "csaf_drafts_skipped": cd["skipped"],
             "notes": strs("notes"),
             "attention": strs("attention"), "gaps": strs("gaps"),
             "stats": {k: ci(v) for k, v in stats.items() if isinstance(k, str) and ci(v) is not None and len(k) < 40}}
