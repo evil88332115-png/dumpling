@@ -66,7 +66,7 @@ bash "$root/pipeline/dt-ephemeral.sh" up || fail "臨時 DT up 失敗"
 export MIRRORS_DIR=$out/mirrors MIRRORS_STEPS=$out/pipeline-steps.tsv
 mir=$MIRRORS_DIR; rm -rf "$mir"; mkdir -p "$mir"
 # 共用的鏡像函式（C1 的 pipeline/lib/mirrors.sh）：最多試 3 次；kernel-cve 有 KCVE_CACHE_DIR（workflow 的 cache）時，
-# 上游沒變就沿用、git.kernel.org 連不上就退回 48 小時內的上一份（最後一行 ATTENTION，記一列 pipeline-steps.tsv）；其他失敗 = FAIL
+# 上游沒變就沿用；git.kernel.org 連不上先試備援來源，都失敗才退回 48 小時內的上一份（最後一行 ATTENTION，記一列 pipeline-steps.tsv）；其他失敗 = FAIL
 # shellcheck disable=SC1091 # 路徑用變數組（$root），shellcheck 跟不到
 . "$root/pipeline/lib/mirrors.sh"
 mirror_kernel_cve kcve || fail "鏡像 kernel-cve.sh 失敗（弱點資料不完整，不當作沒有漏洞）"

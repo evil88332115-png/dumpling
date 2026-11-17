@@ -201,7 +201,7 @@ while [ -z "$used" ] && [ -z "$budget" ]; do
   sleep "$delay"; delay=$(( delay * 2 ))
 done
 if [ -z "$used" ]; then
-  for x in "${tried[@]}"; do echo "FAIL $x" >&2; done
+  for x in "${tried[@]}"; do echo "嘗試失敗：$x" >&2; done     # 各來源的失敗；整體判定看最後一行（沿用上一份＝ATTENTION，否則 FAIL）
   msg="git clone 試了 $n 次都失敗，所有來源都失敗（${#URLS[@]} 個；每次超過 ${KERNEL_CVE_GIT_TIMEOUT:-900} 秒、連線失敗或超過 KERNEL_CVE_MAX_DOWNLOAD_MB=${KERNEL_CVE_MAX_DOWNLOAD_MB:-500}）"
   use_fallback "$msg" || { echo "FAIL $msg：${URLS[*]}" >&2; exit 1; }
 else

@@ -28,7 +28,7 @@ def make_repo(path, date, ids=("CVE-2024-0001", "CVE-2024-0002", "CVE-2024-0003"
     return subprocess.run(g + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(tmp, primary, fallback, reuse=None, name="out", extra=None):
+def run(tmp, primary, fallback, reuse=None, name="out", extra=None, timeout=300):
     env = dict(os.environ, KERNEL_CVE_GIT_URL=primary, KERNEL_CVE_MIN_RECORDS="1", KERNEL_CVE_GIT_TIMEOUT="120",
                KERNEL_CVE_GIT_RETRY_DELAY="0")
     for k in ("KERNEL_CVE_GIT_FALLBACK_URLS", "KERNEL_CVE_REUSE_FROM", "KERNEL_CVE_FALLBACK_FROM", "KERNEL_CVE_TOTAL_TIMEOUT"):
@@ -39,7 +39,7 @@ def run(tmp, primary, fallback, reuse=None, name="out", extra=None):
         env["KERNEL_CVE_REUSE_FROM"] = str(reuse)
     env.update(extra or {})
     dest = tmp / name
-    p = subprocess.run(["bash", str(SCRIPT), str(dest), str(tmp / f"{name}.manifest")], env=env, capture_output=True, text=True, timeout=300)
+    p = subprocess.run(["bash", str(SCRIPT), str(dest), str(tmp / f"{name}.manifest")], env=env, capture_output=True, text=True, timeout=timeout)
     src = {}
     if (dest / "SOURCE").exists():
         src = dict(l.split("=", 1) for l in (dest / "SOURCE").read_text(encoding="utf-8").splitlines() if "=" in l)
@@ -200,3 +200,54 @@ exec {real} "$@"
     assert src["source_role"] == "fallback" and "git ls-remote 失敗" in p.stderr
     clones = log.read_text().splitlines()
     assert len(clones) == 1 and repos["new"][0] in clones[0] and primary not in clones[0]
+
+
+def _fake_git_bin(tmp_path, body):
+    """PATH 前面放假的 git：body 是 bash 片段（$is_clone、$is_ls 已設好），其他情況交給真的 git。"""
+    import shutil
+    real = shutil.which("git")
+    fake = tmp_path / "fakegit"
+    fake.mkdir(exist_ok=True)
+    (fake / "git").write_text(f"""#!/bin/bash
+is_ls=0; is_clone=0
+for a in "$@"; do case $a in ls-remote) is_ls=1;; clone) is_clone=1;; esac; done
+{body}
+exec {real} "$@"
+""")
+    (fake / "git").chmod(0o755)
+    return f"{fake}:{os.environ['PATH']}"
+
+
+def test_previous_copy_from_fallback_keeps_its_role(tmp_path, repos):
+    """所有來源都失敗、沿用上一份：上一份是備援來源抓的 → SOURCE 的 source／source_role 照上一份記（fallback），不改成 primary。"""
+    p, prev_src, prev = run(tmp_path, repos["bad"], repos["new"][0], name="prev")
+    assert p.returncode == 0 and prev_src["source_role"] == "fallback", p.stderr
+    p, src, _ = run(tmp_path, repos["bad"], repos["bad"] + "2", name="next",
+                    extra={"KERNEL_CVE_GIT_TRIES": "1", "KERNEL_CVE_FALLBACK_FROM": str(prev)})
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip().splitlines()[-1].startswith("ATTENTION mirror=")
+    assert src["source_role"] == "fallback" and src["source"] == repos["new"][0] and src["fallback"] == "yes"
+    assert "嘗試失敗：" in p.stderr and "\nFAIL " not in "\n" + p.stderr       # 各來源的失敗不印成 FAIL（整體是 ATTENTION）
+
+
+def test_staleness_check_uses_fallback_from_when_no_reuse(tmp_path, repos):
+    """只設 KERNEL_CVE_FALLBACK_FROM（沒有 REUSE_FROM）：備援資料比它舊時一樣不換，改沿用它（ATTENTION）。"""
+    p, cur_src, cur = run(tmp_path, repos["new"][0], "", name="cur")
+    assert p.returncode == 0, p.stderr
+    p, src, _ = run(tmp_path, repos["bad"], repos["old"][0], name="next",
+                    extra={"KERNEL_CVE_GIT_TRIES": "1", "KERNEL_CVE_FALLBACK_FROM": str(cur)})
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip().splitlines()[-1].startswith("ATTENTION mirror=") and "比上一份" in p.stdout
+    assert src["commit"] == repos["new"][1] and src["fetched_utc"] == cur_src["fetched_utc"]
+
+
+def test_clone_timeout_capped_by_total_budget(tmp_path, repos):
+    """KERNEL_CVE_TOTAL_TIMEOUT 比 KERNEL_CVE_GIT_TIMEOUT 小、clone 卡住：clone 的上限用剩下的合計時間，不等滿 GIT_TIMEOUT。"""
+    import time
+    path = _fake_git_bin(tmp_path, '[ "$is_clone" = 1 ] && exec sleep 600')
+    t0 = time.monotonic()
+    p, _, _ = run(tmp_path, repos["new"][0], "", extra={"PATH": path, "KERNEL_CVE_TOTAL_TIMEOUT": "15", "KERNEL_CVE_GIT_TIMEOUT": "900",
+                                                         "KERNEL_CVE_GIT_TRIES": "1"}, timeout=90)
+    assert p.returncode == 1, p.stderr
+    assert time.monotonic() - t0 < 60
+    assert "超過 1" in p.stderr and "超過 900 秒" not in p.stderr.split("試了")[0]
