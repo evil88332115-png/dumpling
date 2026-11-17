@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "pipeline", "lib"))
 _spec = importlib.util.spec_from_file_location("release_meta", CLI)
 rm = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rm)
+import release_body as rb  # noqa: E402
 
 SCHEME = re.compile(r"(?:https?|ftp|file)://", re.I)
 LOCAL = re.compile(r"/home/|/tmp/|/Users/|/root/|/runner/|[A-Za-z]:\\\\")
@@ -93,6 +94,42 @@ class Defang(unittest.TestCase):
         self.assertIn(rm.LOCAL_PATH_NOTE, out)
         self.assertNotIn("/etc/x", out)
         self.assertIn("abcexample.org/a", out)                     # 剩下的文字保留（只拿掉 scheme）
+
+    def test_removal_that_spells_a_new_scheme_is_repeated(self):
+        """拿掉 scheme 之後拼出新的 scheme（hthttps://tps://x → https://x、fifile://le:///x）：重複到沒有命中為止，輸出照樣沒有 scheme、冪等。"""
+        out = self.check("A hthttps://tps://example.org/x B", 2)
+        self.assertIn("example.org/x", out)
+        out = self.check("C fifile://le:///home/runner/x D", 1)
+        self.assertIsNone(LOCAL.search(out), out)
+
+    def test_nested_within_the_limit_is_cleaned(self):
+        s = "https://"
+        for _ in range(rb.FINAL_PASS_MAX - 2):
+            m = SCHEME.search(s)
+            s = s[:m.start() + 3] + "https://" + s[m.start() + 3:]
+        out = self.check("x" + s + "example.org", rb.FINAL_PASS_MAX - 1)
+        self.assertIn("example.org", out)
+
+    def test_too_many_rounds_fail(self):
+        """拼了很多層（每拿掉一層又拼出一層）：超過 FINAL_PASS_MAX 次 → DefangError；CLI 記 FAIL、不寫輸出。"""
+        s = "https://"
+        for _ in range(rb.FINAL_PASS_MAX + 2):           # 每次插在目前唯一看得見的 scheme 中間：每拿掉一層只會露出下一層
+            m = SCHEME.search(s)
+            s = s[:m.start() + 3] + "https://" + s[m.start() + 3:]
+        with self.assertRaises(rm.DefangError):
+            rm.defang_urls("x" + s + "example.org")
+        d = tempfile.mkdtemp(prefix="dumpling-body-")
+        try:
+            src, dst = os.path.join(d, "n.md"), os.path.join(d, "b.md")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("x" + s + "example.org\n")
+            r = subprocess.run([sys.executable, "-I", BODY_CLI, src, dst], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("release-body: FAIL", r.stdout)
+            self.assertFalse(os.path.exists(dst))
+        finally:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
 
     def test_url_inside_query_string(self):
         """查詢字串裡又有完整網址：scheme 全部去掉（只去第一個會留下 scheme，而且再跑一次不一樣）；夾帶的 file:// 也省略。"""

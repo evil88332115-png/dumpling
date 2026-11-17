@@ -9,7 +9,8 @@ defang_urls(text) → (新文字, 改了幾處)：
 - file://：一律換成「本機路徑，已省略」，不把路徑帶進說明。
 - 句尾標點與全形標點不算網址；再跑一次不會再改（冪等）。
 - 最後對整份文字無條件再清一次：規則沒抓到的（ASCII 英數字緊貼，例如 abchttps://…）scheme 一律去掉、file://… 一律換成固定句，
-  所以輸出一定沒有 http(s)://、ftp://、file://。
+  所以輸出一定沒有 http(s)://、ftp://、file://。拿掉之後可能拼出新的 scheme（hthttps://tps://x），所以重複到沒有命中為止，
+  最多 FINAL_PASS_MAX（10）次，超過就丟 DefangError（release-meta.py、release-body.py 記 FAIL，不產生說明）。
 """
 import re
 
@@ -24,6 +25,11 @@ _WWW = re.compile(r"(?<![A-Za-z0-9./@-])(www\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
 _SCHEME = re.compile(r"(?:https?|ftp)://", re.I)
 _FILE = re.compile(r"file://[^\s`<>'\"" + _CJK_STOP + r"]*", re.I)   # 不吃掉 code span 結尾的反引號與後面的全形標點
 LOCAL_PATH_NOTE = "本機路徑，已省略"
+FINAL_PASS_MAX = 10                 # 最後一道無條件清理最多重複幾次
+
+
+class DefangError(ValueError):
+    """最後一道清理重複 FINAL_PASS_MAX 次仍有 scheme：不產生說明（呼叫端記 FAIL）。"""
 
 
 def _plain(url):
@@ -98,8 +104,12 @@ def defang_urls(text):
         out.append("".join(parts))
     # 最後一道保險（無條件）：上面的規則沒抓到的（例如 ASCII 英數字緊貼 abchttps://…、v1https://…），整份文字裡剩下的
     # file://… 一律換成固定句、(https?|ftp):// 一律去掉；也算進計數。輸出因此一定沒有 http(s)://、ftp://、file://
+    # 拿掉之後前後的字可能剛好拼出新的 scheme（hthttps://tps://x → https://x），所以重複到沒有命中為止；超過 FINAL_PASS_MAX 次就失敗
     text = "\n".join(out)
-    nf = len(_FILE.findall(text))
-    text = _FILE.sub(LOCAL_PATH_NOTE, text)
-    ns = len(_SCHEME.findall(text))
-    return _SCHEME.sub("", text), total + nf + ns
+    for _ in range(FINAL_PASS_MAX):
+        nf, ns = len(_FILE.findall(text)), len(_SCHEME.findall(text))
+        if not nf and not ns:
+            return text, total
+        text = _SCHEME.sub("", _FILE.sub(LOCAL_PATH_NOTE, text))
+        total += nf + ns
+    raise DefangError("網址改寫重複了 %d 次仍有 scheme 留下（輸入可能是刻意拼出來的）" % FINAL_PASS_MAX)

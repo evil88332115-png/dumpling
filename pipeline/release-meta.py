@@ -35,7 +35,7 @@ from platform_scan import refresh_notes, refresh_scan_summary, verdict, worst_ve
 
 REPORT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 
-from release_body import LOCAL_PATH_NOTE, defang_urls  # noqa: E402,F401  （Release 說明的網址改寫，見 lib/release_body.py）
+from release_body import LOCAL_PATH_NOTE, DefangError, defang_urls  # noqa: E402,F401  （Release 說明的網址改寫，見 lib/release_body.py）
 
 
 def conclusions(scan, project, version):
@@ -137,7 +137,11 @@ def main(argv=None):
         if a.body_out:
             try:
                 with open(a.notes, encoding="utf-8") as f:
-                    body, nurl = defang_urls(f.read())
+                    try:
+                        body, nurl = defang_urls(f.read())
+                    except DefangError as e:
+                        print("release-meta: FAIL（%s）" % e)
+                        return 1
                 with open(a.body_out, "w", encoding="utf-8") as f:
                     f.write(body)
             except (OSError, UnicodeDecodeError) as e:

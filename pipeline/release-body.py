@@ -13,7 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from release_body import defang_urls  # noqa: E402
+from release_body import DefangError, defang_urls  # noqa: E402
 
 
 def main(argv=None):
@@ -34,7 +34,11 @@ def main(argv=None):
     if not text.strip():
         print("release-body: FAIL（%s 是空的：不產生空白的 Release 說明）" % os.path.basename(src))
         return 1
-    out, n = defang_urls(text)
+    try:
+        out, n = defang_urls(text)
+    except DefangError as e:
+        print("release-body: FAIL（%s）" % e)
+        return 1
     tmp = dst + ".part"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
