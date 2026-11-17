@@ -137,7 +137,7 @@ def test_cli_flag(tmp_path, capsys, monkeypatch):
 
 
 def test_customer_package_never_contains_csaf(tmp_path):
-    """dumpling：客戶資料包（--supplier-project 的資料包，加上 --previous 的英文差異）裡沒有任何 CSAF 檔案或 CSAF 內容；
+    """dumpling：客戶資料包（--supplier-project 的資料包）裡沒有任何 CSAF 檔案或 CSAF 內容；
     CSAF 草稿只在 交給PM/CSAF/ 與 內部存檔/csaf-fix-advisory/。"""
     p = pkg_project(tmp_path)
     sp = tmp_path / "sup"

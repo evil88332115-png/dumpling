@@ -288,6 +288,8 @@ def company(cfg):
         miss.append("csaf.tracking_id_prefix")
         pre = "TBC-"
     contact = cs.get("contact") or vc.get("contact") or m.get("email")
+    if not (isinstance(contact, str) and contact.strip()):
+        miss.append("csaf.contact")     # dumpling：沒有聯絡方式時不寫 contact_details（不放預設值），列為要補的欄位
     return name or TBC, ns, pre.strip(), contact if isinstance(contact, str) and contact.strip() else None, miss
 
 
@@ -1135,7 +1137,7 @@ def exploited_run(reports, cves, cfg, out, now=None, detected=None, euvd_file=No
             kinds = sorted({STATUS_WORDS[info[x]["status"]] for x in closed})
             warnings.append(f"{c}：這個版本的判定全部是「{'、'.join(kinds)}」；可能不需要通知使用者（草稿仍已產生，請 RD／PM 確認是否真的要發）")
         elif closed:
-            warnings.append(f"{c}：部分元件已判定為 not_affected或已修補（{len(closed)} 個），草稿只把它們標成該狀態；請確認通知內容")
+            warnings.append(f"{c}：部分元件已判定為 not_affected 或已修補（{len(closed)} 個），草稿只把它們標成該狀態；請確認通知內容")
         v = {"cve": c}
         extra = sorted({clean(x, 90) for r in sel for x in [r.get("id")] + list(r.get("aliases") or [])
                         if isinstance(x, str) and ID_OK.match(clean(x, 90)) and clean(x, 90).upper() != c})[:10]

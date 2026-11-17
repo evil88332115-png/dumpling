@@ -151,7 +151,8 @@ def test_no_changes_still_produced(tmp_path):
 def test_company_fields_to_be_completed(tmp_path):
     st, detail, summ, out = gen(tmp_path, cfg={"manufacturer": {"name": "Acme Boards Ltd."}}, untriaged=0)
     doc = json.loads((out / "csaf.json").read_text(encoding="utf-8"))
-    assert set(summ["missing_fields"]) == {"csaf.publisher_namespace", "csaf.tracking_id_prefix", "csaf.advisory_url_base"}
+    assert set(summ["missing_fields"]) == {"csaf.publisher_namespace", "csaf.tracking_id_prefix", "csaf.advisory_url_base", "csaf.contact"}
+    assert "contact_details" not in doc["document"]["publisher"]          # 沒有聯絡方式：不寫預設值
     assert doc["document"]["publisher"]["namespace"] == ca.TBC_URI and doc["document"]["tracking"]["id"].startswith("TBC-")
     assert "TO BE COMPLETED" in (out / "advisory.md").read_text(encoding="utf-8") and st == "ATTENTION"
     assert not list(csaf_validator().iter_errors(doc))

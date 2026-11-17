@@ -93,7 +93,7 @@ SUGGESTIONS = {
 }
 RULE_ORDER = ["P1", "K1", "K2", "U1", "U2", "DISTRO", "R1", "R2", "R3", "R4", "R5", "R5w", "R6", "R7", "R8", "R9", "R9m", "NVIDIA", "人工"]
 MANUAL = {  # 人工判定（具名的 RD在 vex-annotations.json 或 Dependency-Track 做的）：依狀態
-    T_OK: ("RD 判定 not_affected或已修補", "不用處理；有新資訊時重判", NONE),
+    T_OK: ("RD 判定不受影響或已修補", "不用處理；有新資訊時重判", NONE),
     T_TRACK: ("RD 判定受影響或仍在評估", "依判定排修補或追蹤", ENG),
     T_NOW: ("已被攻擊者利用，RD 已有判定", "依判定處理", ENG),
 }
@@ -173,7 +173,7 @@ def not_ours_os(doc):
 
 
 def notify_rows(doc):
-    """要通知客戶的列：OS 層不是我們的待辦、已被利用、還沒判定為 not_affected（cra_report 的 notify_customer 同一個條件）。"""
+    """要通知客戶的列：OS 層不是我們的待辦、已被利用、還沒判定為不受影響（cra_report 的 notify_customer 同一個條件）。"""
     return [r for r in not_ours_os(doc) if r.get("exploited") and r["tier"] in ("p1", "p2", "p3", "distro_fixed")]
 
 

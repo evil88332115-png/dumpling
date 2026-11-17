@@ -355,7 +355,7 @@
 - `test_ubuntu_cve_status.py::test_script_safety_and_docs` 改名 `test_script_safety`，去掉要 `ci-run.sh`、`docs/offline-mirrors.md`、`deploy/versions.md` 的斷言，腳本安全項目保留；`test_pilot_utf8_truncation.py` 不再掃 `deploy/`（門檻 20 → 10 個檔）；`test_pilot_l4t_kernel.py` 去掉用 `scio_prep.py` 的一半。
 - `test_pilot_compare_and_scripts.py`、`test_pilot_lock_sandbox.py`、`test_pilot_sources_scio.py`：移除用到 `compare_expected.py`、`scio_prep.py`、`scio_diag.py`、`real-projects.sh`、`install-maven.sh`、`cdxgen_regression.py`、`tests/results` 的測試函式。
 - `test_exploited_vendor.py`、`test_exploited_watch_grype.py`、`test_exploited_watch_refresh.py`：移除用到 `alert_mail.py`、每日／備份腳本、`deploy/` 安裝腳本的測試函式。
-- `test_vex_no_response.py`：移除用到 `csaf_advisory.py` 的 CSAF 測試函式 1 個；另 1 個同時測 CSAF 與 CDX／OpenVEX 的函式，只刪 CSAF 的後半，CDX／OpenVEX 的斷言保留（改名 `test_legacy_responses_keep_cdx_and_openvex`）。
+- `test_vex_no_response.py`（S4 已恢復，見「C3 CSAF 草稿」節）：移除用到 `csaf_advisory.py` 的 CSAF 測試函式 1 個；另 1 個同時測 CSAF 與 CDX／OpenVEX 的函式，只刪 CSAF 的後半，CDX／OpenVEX 的斷言保留（改名 `test_legacy_responses_keep_cdx_and_openvex`）。
 - `tools/sbomgate/tests/test_sbomgate.py`：移除 `RealEvidence` 類與 6 個測試方法，它們讀 sca-center 的 `tests/results/`（e2e 的真實掃描輸出）、`tests/projects/`（被掃描的開源專案原始碼）和 `tests/expected/`，這些不帶（硬性限制：不帶 `tests/results/`）。其餘 sbomgate 單元測試（合成 SBOM）都保留。
 - `test_runtime_evidence.py`、`test_kernel_modules.py`：移除測板子端腳本 `board-on-device.sh` 的 3 個測試；`test_cra_exploitation.py`：讀 `cra/README.md` 的文件測試改成只留常數斷言（`KERNEL_NET_STAGING`、`KERNEL_NET_PREFIXES`），README 的內容核對未保留。
 - 不帶：`test_alert_mail.py`、`test_csaf_advisory.py`（S4 已帶進來，見「C3 CSAF 草稿」節）、`test_customer_package_round2.py`、`test_customer_sbom_and_wording.py`（都 import `csaf_advisory`）、`test_gitlab_ci.py`、`test_gitlab_bot.py`、`test_gitlab_runner.py`、`demo/tests/test_board_test.py`、`test_x86_firmware.py`（歸 C2）。
@@ -402,7 +402,7 @@
 
 | dumpling 路徑 | sca-center 路徑 | 來源 commit | 清理內容 |
 |---|---|---|---|
-| `tools/cra/csaf_advisory.py` | `scripts/cra/csaf_advisory.py` | 25fa89a、edac554 | 全檔（edac554 版）；檔頭的內部計畫編號拿掉（改寫成對應的 CRA 條文）；「公司欄位」→「發布者欄位」；CSAF 的 generator／revision_history 名稱 `sca-center csaf_advisory.py` → `dumpling csaf_advisory.py`；schema 資料夾改成 `tools/cra/data/csaf-2.0/`（上游放在 tests 底下）；README 參照改成 `docs/CSAF.md`。SBOM／VEX property 命名空間 `sca-center:` 與 `sca-center-vulnerability-rows/1` 維持不變（同 C1 的其他工具）。**行為修改**：summary 的 `schema_validation` 多 `status`（跑了 `OK`、沒跑 `NOT_RUN`），沒跑時 notes 寫「full schema validation NOT_RUN … this is not a pass」（上游只有 `ran: false` 與 not run 一句）；判定不變 |
+| `tools/cra/csaf_advisory.py` | `scripts/cra/csaf_advisory.py` | 25fa89a、edac554 | 全檔（edac554 版）；檔頭的內部計畫編號拿掉（改寫成對應的 CRA 條文）；「公司欄位」→「發布者欄位」；CSAF 的 generator／revision_history 名稱 `sca-center csaf_advisory.py` → `dumpling csaf_advisory.py`；schema 資料夾改成 `tools/cra/data/csaf-2.0/`（上游放在 tests 底下）；README 參照改成 `docs/CSAF.md`。SBOM／VEX property 命名空間 `sca-center:` 與 `sca-center-vulnerability-rows/1` 維持不變（同 C1 的其他工具）。**行為修改**：summary 的 `schema_validation` 多 `status`（跑了 `OK`、沒跑 `NOT_RUN`），沒跑時 notes 寫「full schema validation NOT_RUN … this is not a pass」（上游只有 `ran: false` 與 not run 一句）；發布者聯絡方式（`csaf.contact`、`vulnerability_contact.contact`、`manufacturer.email`）都沒有時，`csaf.contact` 列進缺的欄位（ATTENTION；上游只是不寫 `contact_details`），仍不放預設值；說明與警告文字裡的「不受影響」改寫成 `not_affected`；分類與判定不變 |
 | `tools/cra/tests/test_csaf_advisory.py` | `scripts/cra/tests/test_csaf_advisory.py` | 25fa89a、edac554 | 測試裡的產品名稱與公告編號前綴換成虛構名稱（`ACME-X100`／`ACME-X200`、`ACME-SA-`）；schema 路徑；新增 3 個測試：內建 schema 檔的 SHA-256 等於 `NOTICE.md` 且載得起來、沒有 jsonschema 時 summary 是 `NOT_RUN`、產生者名稱是 dumpling |
 | `tools/cra/tests/test_csaf_exploited.py` | `scripts/cra/tests/test_csaf_exploited.py` | edac554 | 產品名稱、公告編號前綴與一個版本字串換成虛構值；沒有 jsonschema 的測試改成檢查 `NOT_RUN` |
 | `tools/cra/tests/test_exploited_watch_csaf.py` | `scripts/cra/tests/test_exploited_watch_csaf.py` | edac554 | 刪掉用到 `alert_mail.py` 的部分（import、組信的輔助函式 1 個、檢查信內容的斷言 4 處）；改成檢查報告的 `csaf_drafts` 只列資料夾、專案、版本、CVE、狀態，報告不含草稿內容 |
@@ -416,7 +416,7 @@
 |---|---|---|
 | `tools/cra/exploited_watch.py` | 25fa89a、edac554 | edac554 的 CSAF 部分：`--shipped` 清單的 `cra_project`（沒有 `sbom` 也可以）、`write_csaf_drafts`、`parse_csaf_draft`、`--csaf-draft`／`--no-csaf-draft`、`EW_CSAF_DRAFT`。這個檔在 dumpling 只有路徑調整與清理，上游每一段的上下文都對得上；逐段看過後套上。寄信的說明（「信裡只寫…」）改成「報告的 csaf_drafts 只列資料夾、專案、版本、CVE 與狀態，不放草稿內容」 |
 | `tools/cra/report_package.py` | 25fa89a、edac554 | 手動移植：`--csaf-previous`（`build(..., csaf_previous=None)` 加在參數最後）、`add_csaf`、`csaf_readme`、`CSAF_STATUS_TEXT`、`INFO_STEP_IDS`／`informational_step`（「僅供參考」的步驟不算 GAP）；沒給 `--csaf-previous` 時訊息寫 NOT_RUN。`csaf_readme` 裡上游對客戶類型的稱呼改成中性說法（「我們是供應商時」／「製造商自己的產品時」），向主管機關的通報寫成「第 14 條的單一通報平台」 |
-| `tools/cra/config.schema.json` | 25fa89a、edac554 | `csaf` 區塊加 `contact`、`advisory_url_base`、`tlp`，說明改成兩種草稿共用 |
+| `tools/cra/config.schema.json` | 25fa89a、edac554 | `csaf` 區塊加 `contact`、`advisory_url_base`、`tlp`，說明改成兩種草稿共用；`tlp` 的說明改成「設定檔要寫大寫」（上游寫不分大小寫，但 enum 只收大寫，設定檢查會擋小寫）；`tracking_id_prefix` 說明裡的範例前綴換成虛構的 `ACME-SA-` |
 | `tools/cra/tests/test_vex_no_response.py` | 25fa89a、edac554 | 25fa89a 時刪掉的 CSAF 部分恢復（1 個函式與 1 個函式的後半，名稱改回 `test_legacy_responses_follow_fix_state_in_csaf_and_openvex`）；檔案和上游 edac554 相同 |
 
 dumpling 自己寫的：`docs/CSAF.md`。

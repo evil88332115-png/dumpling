@@ -15,7 +15,7 @@
 
 ## 共同規則
 
-- **發布者欄位**（`config.json` 的 `csaf` 區塊，見 `tools/cra/config.schema.json`）：`publisher_name`、`publisher_namespace`、`tracking_id_prefix`、`contact`、`advisory_url_base`、`tlp`。沒填時退回 `manufacturer.*`，再沒有就寫 `TO BE COMPLETED`（網址佔位 `https://to-be-completed.invalid`），狀態 ATTENTION。**工具沒有內建任何預設的網域或聯絡人**；範例值（example.com 等）也當成沒填。
+- **發布者欄位**（`config.json` 的 `csaf` 區塊，見 `tools/cra/config.schema.json`）：`publisher_name`、`publisher_namespace`、`tracking_id_prefix`、`contact`、`advisory_url_base`、`tlp`。沒填時退回 `manufacturer.*`（聯絡方式另外退回 `vulnerability_contact.contact`），再沒有就寫 `TO BE COMPLETED`（網址佔位 `https://to-be-completed.invalid`；聯絡方式不寫，列在缺的欄位），狀態 ATTENTION。`tlp` 要寫大寫。**工具沒有內建任何預設的網域或聯絡人**；範例值（example.com 等）也當成沒填。
 - **驗證**：每份輸出都跑兩層檢查，不符就 FAIL、不產生（並刪掉上一次的輸出）。
   - 完整的 OASIS CSAF 2.0 JSON schema（`tools/cra/data/csaf-2.0/`，官方原檔，來源與授權見同資料夾 `NOTICE.md`），需要 `jsonschema` 與 `referencing`。沒有這兩個套件時，summary 的 `schema_validation.status` 是 `NOT_RUN`，notes 寫明「這不是通過」，狀態 ATTENTION。
   - 內建檢查（不依賴套件，一定會跑）：document 必要欄位與列舉值、security_advisory 設定檔的必要欄位、產品 ID 都有定義、同一產品不同時在互斥的狀態裡。結果寫在 summary 的 `builtin_checks`。

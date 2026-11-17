@@ -128,10 +128,10 @@
       "properties": {
         "publisher_name": {"type": "string", "description": "CSAF document.publisher.name"},
         "publisher_namespace": {"type": "string", "description": "CSAF document.publisher.namespace（發布者的網址，https://…）"},
-        "tracking_id_prefix": {"type": "string", "description": "公告編號的前綴（例如 EXCO-SA-）；編號＝前綴＋產品名稱＋版本"},
-        "contact": {"type": "string", "description": "CSAF document.publisher.contact_details；沒有時退回 vulnerability_contact.contact、manufacturer.email"},
+        "tracking_id_prefix": {"type": "string", "description": "公告編號的前綴（例如 ACME-SA-）；編號＝前綴＋產品名稱＋版本"},
+        "contact": {"type": "string", "description": "CSAF document.publisher.contact_details；沒有時退回 vulnerability_contact.contact、manufacturer.email；都沒有時不寫，列在缺的欄位（ATTENTION）"},
         "advisory_url_base": {"type": "string", "description": "公告放在官網的網址前綴（https://…，不含檔名）；document.references 的 self 網址＝前綴＋/＋小寫公告編號＋.json。沒有或不是 https 網址就是 TO BE COMPLETED"},
-        "tlp": {"type": "string", "enum": ["WHITE", "GREEN", "AMBER", "RED"], "description": "CSAF document.distribution.tlp.label（不分大小寫）；不設定就不寫 distribution"}
+        "tlp": {"type": "string", "enum": ["WHITE", "GREEN", "AMBER", "RED"], "description": "CSAF document.distribution.tlp.label（設定檔要寫大寫；不設定就不寫 distribution）"}
       }
     },
     "technical_documentation": {
