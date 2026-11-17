@@ -286,6 +286,33 @@ def test_source_tree_version_mismatch_and_too_small_are_gap(tmp_path):
     assert st[1] == "GAP" and "不像核心原始碼樹" in st[2]
 
 
+@pytest.mark.parametrize("sub", ["1", "13", "0"])
+def test_source_tree_sublevel_mismatch_is_gap(tmp_path, sub):
+    """同一個主.次版本、不同 SUBLEVEL 的樹（例如 6.8.1 的樹配 6.8.12 的核心）→ GAP，不判定（候選全部待人審），不是 OK。"""
+    files = dict(TREE_FILES)
+    files["Makefile"] = files["Makefile"].replace("SUBLEVEL = 12", f"SUBLEVEL = {sub}")
+    p, st, out = tkc.run(tmp_path, "--source-tree", str(write_tree(tmp_path / f"t{sub}", files)), src=thin_rootfs(tmp_path))
+    assert st[1] == "GAP" and "SUBLEVEL 不同" in st[2] and f"6.8.{sub}" in st[2] and out["results"] == []
+
+
+def test_source_tree_without_sublevel_is_gap(tmp_path):
+    files = dict(TREE_FILES)
+    files["Makefile"] = files["Makefile"].replace("SUBLEVEL = 12\n", "")
+    p, st, out = tkc.run(tmp_path, "--source-tree", str(write_tree(tmp_path / "t", files)), src=thin_rootfs(tmp_path))
+    assert st[1] == "GAP" and "讀不出 SUBLEVEL" in st[2] and out["results"] == []
+
+
+def test_source_tree_same_sublevel_is_judged(tmp_path):
+    """對照：SUBLEVEL 相同（6.8.12）照常判定。"""
+    p, st, out = tkc.run(tmp_path, "--source-tree", str(write_tree(tmp_path / "t")), src=thin_rootfs(tmp_path))
+    assert st[1] == "OK" and out["results"]
+
+
+def test_version_sublevel():
+    assert kc.version_sublevel("6.8.12-1021-tegra") == 12 and kc.version_sublevel("6.1.0") == 0
+    assert kc.version_sublevel("6.8") is None and kc.version_sublevel(None) is None and kc.version_sublevel("x") is None
+
+
 def test_source_tree_is_read_only_and_links_stay_inside(tmp_path):
     """樹裡的符號連結不跟隨（連到樹外的 Makefile 不會被讀）；樹裡的檔案不會被執行或改動。"""
     outside = tmp_path / "outside"
@@ -336,6 +363,11 @@ def test_module_map_uses_source_tree_too(tmp_path):
     assert st[1] == "OK", st
     assert doc["kernel"]["makefiles_from"] == "source-tree" and doc["inputs"]["cves_origin"] == "kernel-cna-version"
     assert doc["kernel"]["source_tree"]["config_compare"]["result"] == "same" and "核心原始碼樹" in st[2]
+    # SUBLEVEL 不同的樹：模組對應也 GAP（和 kernel_config 同一個 source_tree_gap）
+    files = dict(TREE_FILES)
+    files["Makefile"] = files["Makefile"].replace("SUBLEVEL = 12", "SUBLEVEL = 1")
+    p, st, doc = go("--source-tree", str(write_tree(tmp_path / "tree-6.8.1", files)))
+    assert st[1] == "GAP" and "SUBLEVEL 不同" in st[2], st
     assert tkm is not None
 
 

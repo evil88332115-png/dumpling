@@ -41,7 +41,7 @@
     設定來自 /boot/config-<版本>，見下面）。.config、IKCONFIG
     核對、modules 與 Image 照舊來自 --from；只有 Makefile 類檔案（Makefile*、Kbuild*、*.mk，沿用同樣的讀法與上限）與檔案名稱改讀這棵樹。
     不執行樹裡的任何東西，符號連結不跟隨（不會跟出樹外）。樹裡有 .config 時和判定用的設定核對（kernel.source_tree.config_compare），
-    相同或只差工具鏈照舊；不同 → 記出來，狀態 ATTENTION。樹的主.次版本和判定的核心不同 → GAP。輸出的 kernel.source_tree 記 Makefile 的來源。
+    相同或只差工具鏈照舊；不同 → 記出來，狀態 ATTENTION。樹的版本（主.次版本與 SUBLEVEL）和判定的核心不同 → GAP。輸出的 kernel.source_tree 記 Makefile 的來源。
   沒有 linux-headers 時（映像沒有 /usr/lib/modules/<版本>/build 或 /usr/src/linux-headers-<版本>*/ 的 .config 與 Makefile，例如 Debian 的雲端映像）：
     改讀 rootfs 出貨的 /boot/config-<版本>（<版本> 就是判定的核心版本；有 headers 時完全不看它，輸出和以前逐位元組相同）。
     不可信的輸入：只解析、不執行；檔案要是一般檔案（符號連結、硬連結不跟隨；--from 資料夾時 st_nlink > 1 算硬連結；docker 上層換成資料夾等其他種類也不採用）、不超過 MAX_BOOT_CONFIG（/boot 底下最多讀 MAX_BOOT_CONFIGS 個 config-*），而且 rootfs 的 dpkg 驗證通過
@@ -55,7 +55,7 @@
     成立時 config_source 記 "/boot/config-<版本> (dpkg verified)"，config_sha256 是檔案內容的 SHA-256，kernel.boot_config 記驗證（套件、md5、
     檢查項目）。有燒錄的 Image 時，照上面的規則再核對一次（IKCONFIG 相同 → 照舊；不同 → 改用 IKCONFIG；沒有 IKCONFIG → dpkg 驗證，
     /boot/Image 與 /boot/config 的擁有者要是同一個 image 套件）。
-    /boot 只有 .config，沒有 Makefile／Kbuild：只有給了 --source-tree（sca-scan 的 KERNEL_SOURCE_DIR）才判定；原始碼樹的主.次版本要和核心相同
+    /boot 只有 .config，沒有 Makefile／Kbuild：只有給了 --source-tree（sca-scan 的 KERNEL_SOURCE_DIR）才判定；原始碼樹的版本（到 SUBLEVEL）要和核心相同
     （沿用上面的檢查）。沒有 --source-tree → GAP：有 /boot/config-<版本>（dpkg 驗證通過），但沒有 Makefile 來源（linux-headers 或
     KERNEL_SOURCE_DIR）。依據（vex_export 的 kcfg_basis）：build-record，位置寫 /boot/config-<版本> 與 config 的 SHA-256、原始碼樹的識別。
   --probe-kernel-version：不判定，只從 --from 讀出產品核心版本（/lib/modules/<版本>，沒有時 Image 的版本字串），印一行
@@ -4194,8 +4194,16 @@ def source_tree_check(info):
     return st
 
 
+def version_sublevel(ver):
+    """"6.8.12-1021-tegra" → 12；"6.8" 或讀不出 → None。"""
+    m = re.match(r"^\d+\.\d+\.(\d+)", str(ver or ""))
+    return int(m.group(1)) if m else None
+
+
 def source_tree_gap(info, model):
-    """樹的主.次版本和判定的核心（.config 標頭）不同 → GAP 的原因；沒有或相同 → None。樹的版本不明也 GAP（不猜）。"""
+    """樹的版本和判定的核心（.config 標頭）不同 → GAP 的原因；沒有或相同 → None。樹的版本不明也 GAP（不猜）。
+    主.次版本與 SUBLEVEL 都要相同：同一個主.次版本、不同 SUBLEVEL 的樹（例如 6.8.1 的樹配 6.8.12 的核心）檔案與 Makefile 可能不一樣，
+    用它判「沒編」可能錯放（往寬鬆的方向錯），所以也 GAP；任何一邊讀不出 SUBLEVEL 也 GAP。"""
     st = info.source_tree
     if not st:
         return None
@@ -4204,6 +4212,15 @@ def source_tree_gap(info, model):
         return "--source-tree 的最上層 Makefile 讀不出核心版本（VERSION／PATCHLEVEL）：不確定是哪個核心的原始碼"
     if want and st["major_minor"] != want:
         return f"--source-tree 是核心 {st['version']} 的原始碼，判定用的設定是核心 {model.kver_hdr} 的（主.次版本不同）：不是同一個核心"
+    if want:
+        ts, ks = version_sublevel(st["version"]), version_sublevel(model.kver_hdr)
+        if ts is None:
+            return (f"--source-tree 的最上層 Makefile 讀不出 SUBLEVEL（樹是 {st['version']}）：不確定和判定的核心 {model.kver_hdr} 是不是同一版")
+        if ks is None:
+            return (f"判定用的設定（.config 標頭）的核心版本 {model.kver_hdr} 沒有 SUBLEVEL：不確定和 --source-tree {st['version']} 是不是同一版")
+        if ts != ks:
+            return (f"--source-tree 是核心 {st['version']} 的原始碼，判定用的設定是核心 {model.kver_hdr} 的（SUBLEVEL 不同）："
+                    "檔案與 Makefile 可能不一樣，不能用來判斷有沒有編")
     return None
 
 
