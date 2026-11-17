@@ -26,6 +26,7 @@ cp tools/wizard/wizard.example.json ~/.config/sca-center/wizard.json   # 然後�
 | `grype_seed` | Grype 資料庫的種子；`grype_cache` 不存在時複製過去 | 無 |
 | `grype_cache` | Grype 資料庫快取（`GRYPE_DB_CACHE_DIR`） | `<root>/grype-db` |
 | `stable_git` | 物件：核心主次版號 → Linux 穩定版 git 資料夾（核心判斷用） | `{}` |
+| `kernel_rename_map` | 核心檔案改名對照表（`tools/mirror/kernel-renames.sh` 的 JSON；舊核心上檔名和主線不同的檔案用它找回舊路徑；需要核心建置紀錄） | 無 |
 | `upstream` | 物件：組名 → {鍵: 路徑}，放上游基準檔（輸入清單用組名＋鍵引用，不寫死路徑），例如 `{"jetson-r39.2.0": {"public_sources": "…/public_sources.tbz2", "bsp": "…/Jetson_Linux_R39.2.0_aarch64.tbz2"}}` | `{}` |
 | `rules_template` | 沒有產品設定包時套用的通用 `vex-rules.json` | 無。沒設定卻要求通用規則時，計畫與步驟 5 會明說「沒有套用」，`plan.json` 的 `generic_rules` 為 `no`、`generic_rules_requested` 為 `yes` |
 

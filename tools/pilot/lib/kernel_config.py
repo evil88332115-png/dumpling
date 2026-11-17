@@ -53,6 +53,10 @@
     --list-kernel-versions）。sca-scan 用它：刷機包 tbz2 不必為了列出核心再解壓一次。沒給時輸出和以前相同；--from 是核心原始碼樹時不印。
   --oot-build-record：樹外模組（例如 nvidia-oot、nvgpu）的建置資料夾，可重複；需要 --build-record。讀 .*.o.cmd 的 source／deps 與 .*.ko.cmd
     （kernel_oot_record.py）。映像裡每一個樹外 .ko 都有完整的紀錄時，標頭檔看紀錄的 deps（核心與樹外模組都沒列 → 沒編；樹外模組列了 → 有編），
+  --rename-map：核心檔案改名對照表（tools/mirror/kernel-renames.sh 的 JSON；主線 git 的整個檔案改名，kernel_renames.py）。CNA 的 programFiles 是主線
+    現在的路徑；這個核心沒有那個檔案時，順著改名紀錄往回找到這個核心有的舊路徑（鏈長有上限），當作 CNA 列的是舊路徑，用既有的規則判斷，證據寫改名鏈與 commit。
+    檔案拆分、有多個可能舊名、找不到鏈 → 照舊 unknown。表缺、讀不出、過期（--rename-map-max-age-days，預設 60，環境變數 KERNEL_RENAME_MAP_MAX_AGE_DAYS）、
+    不涵蓋這個核心、或沒有採用的建置紀錄 → 不用，kernel.rename_map 記 GAP 與原因（不會當成沒有改名）。結果在 kernel.rename_map。
     否則標頭檔照舊因為樹外模組而 unknown（全部或沒有：未驗證的模組可能讀了任何標頭檔，部分採用只能多判 affected，而且要限制在已驗證模組的物件，暫不做）。
     紀錄資料夾裡的 .ko 與映像的 .ko 是同一份建置，依序用：(1) .modinfo srcversion 相同；(2) srcversion 讀不到時比 ELF 區段（SHT_PROGBITS，
     排除 .debug*／.note*／.comment／.BTF*／.gnu_debuglink／.modinfo／__versions／.gnu.linkonce*）完全相同；(3) 只有 .rodata.str* 不同，而且不同的
@@ -248,6 +252,12 @@ NEW_CODE_LIMITATION = (
     "rule names is judged not built when the CNA record says the problem was introduced after this kernel's major.minor "
     "(every semver 'affected' version is later, no semver entry says this kernel is affected). Both pieces of evidence are needed; "
     "a vendor backport of the later code would have created the file in the tree.")
+RENAME_MAP_LIMITATION = (
+    "--rename-map (whole-file renames of mainline, git log -M): a CNA path that this kernel does not have is traced back through the "
+    "renames to a path that this kernel has, and judged as if the CNA had listed that path. A file that was split, a path with several "
+    "possible old names, and a chain that never reaches a file of this kernel stay unknown. A rename detected at a low similarity may be "
+    "wrong; the chain and similarity are in the evidence.")
+
 STABLE_GIT_LIMITATION = (
     "--stable-git (read-only local linux-stable clone, no fetch): (a) for a CVE without a CNA record, the upstream kernel commits "
     "named in the Grype/DT references are looked up in the clone, and the CVE is judged only if every referenced commit is found; "
@@ -301,6 +311,11 @@ def _load(name, path):
 @functools.lru_cache(maxsize=None)
 def kernelcheck():
     return _load("sca_center_kernelcheck", HERE / "kernelcheck.py")
+
+
+@functools.lru_cache(maxsize=None)
+def kernel_renames():
+    return _load("sca_center_kernel_renames", HERE / "kernel_renames.py")
 
 
 @functools.lru_cache(maxsize=None)
@@ -2496,6 +2511,8 @@ def judge_cve(model, files, mods, mapper=None, brec=None, new_code=None):
                 built_as = mr["build"] if mr["build"] in ("builtin", "module") else None
                 module = mr["module"] if built_as == "module" else None
             out.append({"path": f, "configs": syms, "built": r.value, "built_as": built_as, "module": module, "evidence": ev})
+            if brec.cve_renames and brec.cve_renames[-1]["new"] == posixpath.normpath(f):
+                out[-1]["renamed_from"] = brec.cve_renames[-1]["old"]
             for s in syms:
                 v = model.config.get(s)
                 vals[s] = v if v is not None else "unset"
@@ -3116,6 +3133,10 @@ class RecordJudge:
         self.full_tree = False              # 核心原始碼樹（--source-tree）的檔案名稱完整：檔案不在樹裡＝這個核心沒有這個檔案
         self.tree_links = frozenset()       # 樹裡的符號連結（路徑在連結底下的檔案，名稱清單不能證明它不存在）
         self.oot_records = []               # --oot-build-record：樹外模組的建置紀錄（OotRecord）；oot_complete 才用（見 attach_oot_records）
+        self.renames = None                 # --rename-map：kernel_renames.RenameMap（可用時才設）；檔案不在這個核心時找回舊路徑
+        self.rename_on = True               # False：不用改名對照表判斷（比較用）
+        self.cve_skipped = []               # 目前這個 CVE 因為 CNA 說問題比核心新而不用改名的檔案（{new, old, old_name}）
+        self.cve_renames = []               # 目前這個 CVE 用到的改名（assess 逐個 CVE 清空；{new, old, chain}）
         self.oot_complete = False           # 映像裡每一個樹外 .ko 都有完整的紀錄，標頭檔才可以不因為樹外模組而 unknown
         self.stats = {k: 0 for k in ("built", "built_by_unmapped_absolute_path", "not_built", "conflict_makefile_built",
                                      "built_makefile_not_built", "header_out_of_tree_modules", "not_shown_to_exist",
@@ -3146,7 +3167,12 @@ class RecordJudge:
             return True
         return self.tree_names is not None and p in self.tree_names
 
-    def judge(self, model, path, obj, new_code=None):
+    def known_file(self, model, q):
+        """改名鏈上的舊路徑：這個核心有這個檔案（建置紀錄、Makefile 或核心樹／headers 的檔案名稱），而且建置紀錄能判斷它。"""
+        o = self.eligible(q)
+        return o is not None and (q in self.paths or self.exists(model, q, o))
+
+    def judge(self, model, path, obj, new_code=None, _renamed=False):
         """→ (Res, 證據的說明)。obj：eligible() 的結果。new_code：CNA 紀錄說這個問題在核心之後的版本才出現（字串，例如 "6.10"）；
         只有核心原始碼樹完整（full_tree）而且檔案不在樹裡時才用（見下面 not self.exists 那一段）。"""
         p = posixpath.normpath(path)
@@ -3155,6 +3181,21 @@ class RecordJudge:
         absolute = False
         if not hit:
             hit, absolute = self.suffixes.get(p), True
+        rnote = ""
+        if not hit and self.renames is not None and self.rename_on and not _renamed and not self.exists(model, p, obj) \
+                and not (new_code and self.full_tree and not any(p == l or p.startswith(l + "/") for l in self.tree_links)):
+            # 這個核心沒有這個檔案：CNA 的路徑是主線現在的名字，舊核心可能叫別的名字（整個檔案改名）。順著上游的改名紀錄往回找，
+            # 找到這個核心有的舊路徑 → 當作 CNA 列的是那個舊路徑，用同樣的規則判斷；找不到或不確定 → 照舊（下面的 unknown）
+            st, chain = self.renames.resolve(p, lambda q: self.known_file(model, q))
+            if st == "found":
+                old = chain[0][0]
+                r, ev = self.judge(model, old, self.eligible(old), new_code, _renamed=True)
+                ev = f"renamed upstream: {kernel_renames().chain_text(chain)}; judged as {old}: {ev}"
+                self.cve_renames.append({"new": p, "old": old, "chain": [{"old": o, "new": n, "commit": c[:12], "similarity": sm}
+                                                                          for o, n, c, sm in chain]})
+                return Res(r.value, r.syms, [ev] + r.why[1:], r.modules), ev
+            rnote = (" (the rename map lists several possible old names, so none is used)" if st == "ambiguous" else
+                     " (the rename map has no whole-file rename chain to a file of this kernel; a split file is not a rename)")
         if hit:
             o, how = hit
             ev = (f"build record: {'compiled as' if how == 'source' else 'in the deps of'} {o}" if not absolute else
@@ -3223,16 +3264,29 @@ class RecordJudge:
         if not self.exists(model, p, obj) and new_code and self.full_tree and not any(
                 p == l or p.startswith(l + "/") for l in self.tree_links):
             # 這個檔案不在出貨的核心原始碼樹裡、也沒有 Makefile 的規則提到它，而 CNA 紀錄說這個問題在 new_code 才出現（比這個核心新）：
-            # 那一段程式不是這個核心的一部分（沒有搬過家的可能：問題出現之前沒有這段程式，不會有舊路徑）。兩項證據缺一不可。
+            # 那一段程式不是這個核心的一部分。兩項證據缺一不可。這個檔案有可能搬過家（--rename-map 找得到舊名時，舊名存在於這個核心），
+            # 但舊名存在不代表有問題的那段程式在（CNA 的版本證據還在），所以判定不變，只在證據裡寫明（廠商若把新程式 backport 進舊檔，這裡看不出來）。
             self.stats["absent_new_code"] = self.stats.get("absent_new_code", 0) + 1
             ev = (f"build record: not in any compiled object's source or deps; {p} is not in the shipped kernel source tree and no Makefile "
                   f"rule names it, and the CNA record says the problem was introduced in {new_code}, after this kernel: the code is not "
                   "part of this kernel")
+            if self.renames is not None and self.rename_on and not _renamed:
+                sv = self.renames.resolve(p, lambda q: self.known_file(model, q), quiet=True)
+                if sv[0] == "found":
+                    old = sv[1][0][0]
+                    saved = dict(self.stats)
+                    ro, _e = self.judge(model, old, self.eligible(old), None, _renamed=True)
+                    self.stats.clear(); self.stats.update(saved)
+                    state = {True: "built", False: "not built", None: "undetermined"}[ro.value]
+                    ev += (f"; renamed upstream: {kernel_renames().chain_text(sv[1])}: the old name {old} exists in this kernel ({state}), "
+                           f"still judged not affected because the CNA says the problem was introduced in {new_code}, after this kernel; "
+                           "if the vendor backported the newer code into the old file, this cannot be seen here")
+                    self.cve_skipped.append({"new": p, "old": old, "old_name": state})
             return Res(False, why=[ev]), ev
         if not self.exists(model, p, obj):
             self.stats["not_shown_to_exist"] += 1
             ev = (f"build record: not in any compiled object's source or deps, but this kernel's files do not show that {p} exists "
-                  "(added or moved after this kernel?)")
+                  "(added or moved after this kernel?)" + rnote)
             return Res(None, why=[ev]), ev
         if obj:
             stem = obj[:-2]
@@ -4611,6 +4665,34 @@ def assess(a, max_age):
                                          "out_of_tree_records": {"records": [], "image_modules": None, "covered": 0, "uncovered": 0,
                                                                 "uncovered_examples": [], "identity": {}, "used": False,
                                                                 "reason": "--oot-build-record needs --build-record"}}
+    rmap = None
+    if getattr(a, "rename_map", None):
+        # 核心檔案改名對照表（kernel-renames.sh）：只有建置紀錄採用時才用（檔案「這個核心有沒有」由建置紀錄與核心樹判斷）；
+        # 缺、讀不出、過期、不涵蓋這個核心 → GAP（不用，照舊判定），不會當成「沒有改名」
+        rmax = getattr(a, "rename_map_max_age_days", None)
+        rerr = None
+        if rmax is None:
+            try:
+                rmax = float(os.environ.get("KERNEL_RENAME_MAP_MAX_AGE_DAYS") or 60)
+            except ValueError:
+                rmax, rerr = 60.0, "環境變數 KERNEL_RENAME_MAP_MAX_AGE_DAYS 不是數字，不用改名對照表"
+        if rerr is None and not (rmax == rmax and rmax >= 0):
+            rerr = "改名對照表的新舊上限（天數）不是有效的數字，不用改名對照表"
+        mmv = major_minor(model.kver_hdr or info.kernel_version)
+        rmap = kernel_renames().RenameMap(a.rename_map, rmax, tuple(int(x) for x in mmv.split(".")) if mmv else None, max_age_error=rerr)
+        rst = rmap.state
+        if rst["ok"] and brec is None:
+            rst["ok"], rst["reason"] = False, "沒有採用的建置紀錄（--build-record）：改名對照表只配建置紀錄用"
+        out["kernel"]["rename_map"] = {"source": rst["source"], "ok": rst["ok"], "status": "OK" if rst["ok"] else "GAP", "reason": rst["reason"],
+                                       "head_commit": rst["head_commit"], "head_date": rst["head_date"], "generated_utc": rst["generated_utc"],
+                                       "age_days": rst["age_days"], "max_age_days": rmax, "base_version": rst["base_version"],
+                                       "renames": rst["renames"], "files_resolved": 0, "cves_with_renamed_files": 0,
+                                       "skipped_new_code": {"cves": 0, "files": 0, "old_name_built": 0, "examples": []}, "decision_changes": {},
+                                       "note": "whole-file renames of mainline (git log -M); a file that was split, or that has several possible old "
+                                               "names, or no chain to a file of this kernel, is not resolved (unknown, as without --rename-map)."}
+        if rst["ok"]:
+            brec.renames = rmap
+            out["limitations"] = list(out["limitations"]) + [RENAME_MAP_LIMITATION]
     sg = None
     if getattr(a, "stable_git", None):
         sg = kernel_git_files().StableGit(a.stable_git)
@@ -4681,7 +4763,22 @@ def assess(a, max_age):
             nc = None
             if brec is not None and brec.full_tree and base_files:
                 nc = mir.new_code(cve, kbase)          # CNA 紀錄：這個問題比核心新（只有核心原始碼樹完整時才用）
+            if brec is not None:
+                brec.cve_renames, brec.cve_skipped = [], []
             dec, detail, fl, vals = judge_cve(model, files, mods, mapper, brec, nc)
+            renamed = list(brec.cve_renames) if brec is not None else []
+            if renamed:
+                # 沒有改名對照表時的判定（比較用；不計入 file_judgements）
+                saved = dict(brec.stats)
+                brec.rename_on = False
+                d_wo = judge_cve(model, files, mods, mapper, brec, nc)[0]
+                brec.rename_on = True
+                brec.stats.clear(); brec.stats.update(saved)
+                rmo = out["kernel"]["rename_map"]
+                rmo["cves_with_renamed_files"] += 1
+                k = f"{d_wo}->{dec}"
+                rmo["decision_changes"][k] = rmo["decision_changes"].get(k, 0) + 1
+                detail += f"; renamed upstream: {', '.join(x['new'] + ' was ' + x['old'] for x in renamed[:3])}"
             if brec is not None:
                 d0 = judge_cve(model, files, mods, mapper)[0]          # 只用 Makefile 的判定（比較用）
                 base_counts[d0] += 1
@@ -4699,6 +4796,16 @@ def assess(a, max_age):
             if dec == "not_affected":
                 res["justification"] = "vulnerable_code_not_present"
             res.update({"detail": detail, "files": fl, "config_values": vals})
+            if renamed:
+                res["rename_resolved"] = renamed[:10]
+            if brec is not None and brec.cve_skipped and "rename_map" in out["kernel"]:
+                sk = out["kernel"]["rename_map"]["skipped_new_code"]
+                sk["cves"] += 1
+                sk["files"] += len(brec.cve_skipped)
+                sk["old_name_built"] += sum(1 for x in brec.cve_skipped if x["old_name"] == "built")
+                if len(sk["examples"]) < 10:
+                    sk["examples"].append(cve)
+                res["rename_skipped_new_code"] = list(brec.cve_skipped[:10])
             if gfiles:
                 res["files_origin"] = origin
                 res["stable_git_commits"] = [h[:12] for h in commits[:10]]
@@ -4717,6 +4824,9 @@ def assess(a, max_age):
         out["kernel"]["stable_git"]["cves_with_commit_files"] = sum(1 for r in out["results"] if r.get("files_origin"))
     out["unknown_reasons"] = unk
     rsuffix = ""
+    if rmap is not None and rmap.state["ok"]:
+        out["kernel"]["rename_map"].update(files_resolved=rmap.stats["files_resolved"], files_ambiguous=rmap.stats["ambiguous"],
+                                           files_not_resolved=rmap.stats["not_resolved"])
     if brec is not None:
         br = out["kernel"]["build_record"]
         br.update(counts_without_record=base_counts, decision_changes=dict(sorted(changes.items())), file_judgements=dict(brec.stats))
@@ -4743,6 +4853,13 @@ def assess(a, max_age):
                                         f"樹不完整、沒有證明不存在而照樣併入的檔案 {sgi['kept_not_proven_absent']['files']} 個／CVE {sgi['kept_not_proven_absent']['cves']} 個）；判定變化 "
                                         + ("、".join(f"{k} {v}" for k, v in sorted(sgi['decision_changes'].items())) or "無")
                                         if sgi["ok"] else f"不能用（{sgi['reason']}）"))
+    rmi = out["kernel"].get("rename_map")
+    if rmi:
+        rsuffix += ("；--rename-map " + (f"{rmi['source']}（主線 {str(rmi['head_commit'])[:12]}，產生後 {rmi['age_days']} 天）：{rmi['files_resolved']} 個檔案找回舊路徑"
+                                         f"（CVE {rmi['cves_with_renamed_files']} 個）；另有 CVE {rmi['skipped_new_code']['cves']} 個（舊名有編 "
+                                         f"{rmi['skipped_new_code']['old_name_built']} 個檔案）因為 CNA 說問題比核心新，照舊判 not_affected、沒有改用舊名；判定變化 "
+                                         + ("、".join(f"{k} {v}" for k, v in sorted(rmi['decision_changes'].items())) or "無")
+                                         if rmi["ok"] else f"不能用（GAP：{rmi['reason']}），找不到的檔案照舊 unknown"))
     exm = (out["kernel"].get("build_record") or {}).get("image_modules_not_in_record") if brec is not None else None
     if exm:
         rsuffix += (f"；出貨映像有 {exm['count']} 個模組不在建置紀錄的 modules.order（樹內 {exm['in_tree']}、找不到來源 {exm['not_found']}）："
@@ -4847,6 +4964,8 @@ def main(argv=None):
                     help="the build record was rebuilt by us from the shipped source (not the shipped build): accept it when kernel.release and .config match")
     ap.add_argument("--oot-build-record", action="append", default=[])
     ap.add_argument("--stable-git")
+    ap.add_argument("--rename-map", help="kernel-renames.sh JSON: whole-file renames of mainline; finds the old path of a file that this kernel does not have")
+    ap.add_argument("--rename-map-max-age-days", type=float, default=None)
     ap.add_argument("--cves-origin")
     ap.add_argument("--source-tree")
     ap.add_argument("--probe-kernel-version", action="store_true")

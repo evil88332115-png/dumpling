@@ -25,13 +25,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_SITE_CONFIG = Path("~/.config/sca-center/wizard.json")
 # 站台設定檔（JSON）的鍵；每一項都有預設值，路徑類可以用 ~。說明見 tools/wizard/README.md
-SITE_KEYS = {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "rules_template", "upstream"}
+SITE_KEYS = {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "kernel_rename_map", "rules_template", "upstream"}
 # 沒有產品設定包時可套用的通用處理規則：rules_template 指向一份 vex-rules.json（通用規則，不含人工判定、不含產品專屬規則）
 PRODUCT_SPECIFIC_RULES = {"R9m"}
 REPO = ROOT = OUTROOT = GRYPE_CACHE = None
 PY = TOOLS_BIN = None
 PILOT_ENV = GRYPE_SEED = RULES_TEMPLATE = None
 STABLE_GIT = {}
+RENAME_MAP = None
 UPSTREAM = {}      # 上游基準：{組名: {"public_sources": 路徑, "bsp": 路徑, ...}}，輸入清單用組名＋鍵引用
 INPUT_KINDS = {"flash_package", "source_archive", "build_record", "extra_deliverable", "upstream_source", "upstream_bsp",
                "upstream_uefi", "vendor_bulletin", "board_test", "product_config", "other"}
@@ -44,7 +45,7 @@ def _p(v):
 
 def load_site_config(path=None):
     """讀站台設定。順序：--site-config → 環境變數 SCA_WIZARD_CONFIG → ~/.config/sca-center/wizard.json（可以不存在，全用預設值）。"""
-    global REPO, ROOT, OUTROOT, PY, TOOLS_BIN, PILOT_ENV, GRYPE_SEED, GRYPE_CACHE, STABLE_GIT, RULES_TEMPLATE, UPSTREAM
+    global REPO, ROOT, OUTROOT, PY, TOOLS_BIN, PILOT_ENV, GRYPE_SEED, GRYPE_CACHE, STABLE_GIT, RENAME_MAP, RULES_TEMPLATE, UPSTREAM
     explicit = path or os.environ.get("SCA_WIZARD_CONFIG")
     cf = _p(explicit) if explicit else DEFAULT_SITE_CONFIG.expanduser()
     c = {}
@@ -69,6 +70,7 @@ def load_site_config(path=None):
     GRYPE_SEED = _p(c["grype_seed"]) if c.get("grype_seed") else None
     GRYPE_CACHE = _p(c["grype_cache"]) if c.get("grype_cache") else ROOT / "grype-db"
     STABLE_GIT = {str(k): _p(v) for k, v in (c.get("stable_git") or {}).items()}
+    RENAME_MAP = _p(c["kernel_rename_map"]) if c.get("kernel_rename_map") else None
     RULES_TEMPLATE = _p(c["rules_template"]) if c.get("rules_template") else None
     up = c.get("upstream") or {}
     if not isinstance(up, dict) or any(not isinstance(v, dict) for k, v in up.items() if not str(k).startswith("_")):
@@ -1015,6 +1017,7 @@ def main():
         built_oot = find_built_oot(sp if sp and sp.is_dir() else None)
     stable = STABLE_GIT.get(kt[1]) if kt else None
     stable = stable if stable and stable.exists() else None
+    rename_map = RENAME_MAP if RENAME_MAP and RENAME_MAP.is_file() else None
 
     say("\n== 找到的輸入（請確認）==")
     say(f"  刷機包：{fp}")
@@ -1023,14 +1026,16 @@ def main():
     say(f"  核心建置紀錄：{br or '找不到 → 核心判斷不了的一律當成受影響（路線 B）'}" + ("（自編模式：採用條件嚴格，不符就不採用）" if self_built else ""))
     say(f"  樹外模組編譯紀錄：{(str(built_oot[0].parent) + f'（{len(built_oot)} 個資料夾有 .cmd）') if built_oot else '沒有已編譯的原始碼樹 → 標頭檔類的核心漏洞較多判斷不了'}")
     say(f"  NVIDIA 樹外模組（{len(oot)} 個）：{', '.join(p.name if p.name != 'kernel-open' else 'unifiedgpudisp/kernel-open' for p in oot) or '無'}")
-    say(f"  Linux 穩定版對照：{stable or '無（只影響少數核心列）'}")
+    stable_want = STABLE_GIT.get(kt[1]) if kt else None
+    say(f"  Linux 穩定版對照：{stable or (f'設定了但找不到：{stable_want}（只影響少數核心列）' if stable_want else '無（只影響少數核心列）')}")
+    say(f"  核心檔案改名對照表：{rename_map or (f'設定了但找不到：{RENAME_MAP}（舊核心上檔名不同的檔案會是 unknown）' if RENAME_MAP else '無（舊核心上檔名不同的檔案會是 unknown）')}")
     say(f"  產品設定包：{cfg_dir or ('無；套用通用規則' if generic == 'yes' else '無；不套規則（全部列會是未評估）')}")
     say(f"  名稱／版本／rootfs／角色：{name}／{version}／{rootfs}／{role}")
     say(f"  另外交付的韌體（{len(extras)} 個）：{', '.join(p.name for p in extras) or '無'}")
     say(f"  板子檢查結果檔（{len(board_tests)} 個）：{', '.join(p.name for p in board_tests) or '無 → 對外服務欄顯示「不明」'}")
     plan = {"archive": str(fp), "source_archive": str(sa) if sa else None, "source_note": no_source, "kernel_source": str(kt[0]) if kt else None, "kernel_version": kt[1] if kt else None,
             "uefi_source": str(uefi) if uefi else None, "build_record": str(br) if br else None, "build_record_self_built": self_built, "oot": [str(p) for p in oot], "oot_build_records": [str(p) for p in built_oot],
-            "stable_git": str(stable) if stable else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
+            "stable_git": str(stable) if stable else None, "kernel_rename_map": str(rename_map) if rename_map else None, "config": str(cfg_dir) if cfg_dir else None, "generic_rules": generic, "generic_rules_requested": generic_requested,
             "name": name, "version": version, "rootfs": rootfs, "role": role, "extra_deliverables": [str(p) for p in extras],
             "platform": a.platform or None}      # 由呼叫端（project.yml）明確給定；沒給就是 None，不從映像格式推測
     # 輸入清單：--inputs → 設定包裡的 inputs.json → --platform 範本
@@ -1211,6 +1216,8 @@ def main():
                                        (f"；樹外模組紀錄取自已編譯的原始碼樹（{len(built_oot)} 個）" if built_oot else "")))
         if stable:
             env["KERNEL_STABLE_GIT"] = str(stable)
+        if rename_map:
+            env["KERNEL_RENAME_MAP"] = str(rename_map)
     cmd = ["tools/demo/scan-flash-package.sh", "--archive", str(fp), "--rootfs", rootfs, "--name", name, "--version", version,
            "--no-company", "--out", str(OUT / "scan")]
     if a.platform:      # 平台由呼叫端（project.yml）明確給，原樣傳下去；沒給時 scan-flash-package.sh 對原始磁碟映像標 GAP，不推測

@@ -288,6 +288,7 @@ GAP 照 `status.tsv` 的規則往上傳，報告不顯示為完整。
     `@x.mod` 的每個成員都有完整的 `.cmd`，可以分散在好幾個資料夾；紀錄資料夾裡有同名 `.ko` 時 `.modinfo` 的 `srcversion` 要和映像的相同）時，
     標頭檔才看紀錄：核心與樹外模組都沒有把它列進 deps → 沒編（not_affected）；樹外模組的 deps 列了它（路徑以 `/<標頭檔>` 結尾）→ 有編（affected）。
     只要有一個樹外 `.ko` 沒有紀錄、一份紀錄被截斷／太大／含連結、`srcversion` 不同、或建置紀錄（`--build-record`）本身不能用 → 全部不採用，標頭檔照舊 unknown。
+  - **核心檔案改名對照表**：環境變數 `KERNEL_RENAME_MAP`（`--rename-map`，`tools/mirror/kernel-renames.sh` 的 JSON，需要 `KERNEL_BUILD_RECORD`）。CNA 的檔案路徑是主線現在的名字，舊核心可能叫別的名字（`fs/ksmbd/` → `fs/smb/server/`）；這個核心沒有該檔案時順著上游的整個檔案改名往回找到這個核心有的舊路徑，再用既有規則判斷，證據寫改名鏈與 commit。拆分、多個舊名、找不到鏈 → 照舊 unknown；表缺、過期、不涵蓋這個核心 → `kernel.rename_map` 記 GAP、判定不變。細節見 `tools/mirror/kernel-renames.sh` 開頭的說明。
     **怎麼確認紀錄的 `.ko` 和映像的是同一份建置**（依序，每個模組記用了哪一種，`identity` 有各自的模組數）：(1) 兩邊的 `.modinfo` 都有 `srcversion` 而且相同（`srcversion`；
     兩邊都有而不同 → 不同份程式，不再試別的方法）；(2) `srcversion` 讀不到（NVIDIA 的樹外模組多半沒有）時比 ELF 區段：只讀 ELF64 little-endian 的區段表，
     SHT_PROGBITS 區段（排除 `.debug*`、`.note*`、`.comment`、`.BTF*`、`.gnu_debuglink`、`.modinfo`、`__versions`、`.gnu.linkonce*`）的名稱與 sha256 全部相同（`sections`）；

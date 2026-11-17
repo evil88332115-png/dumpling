@@ -103,7 +103,7 @@ def test_example_config_valid_and_placeholder_only():
     ex = os.path.join(os.path.dirname(WIZ), "wizard.example.json")
     d = json.load(open(ex))
     keys = {k for k in d if not k.startswith("_")}
-    assert keys == {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "rules_template", "upstream"}
+    assert keys == {"repo", "root", "outroot", "python", "tools_bin", "pilot_env", "grype_seed", "grype_cache", "stable_git", "kernel_rename_map", "rules_template", "upstream"}
     assert "/media" not in json.dumps(d) and "/home" not in json.dumps(d)
 
 
