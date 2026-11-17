@@ -220,7 +220,7 @@ jobs:
           fi
           t0=$(date +%s)
           rc=0
-          strace -f -qq --seccomp-bpf -e trace=connect -o "$ev/connect.log" \
+          strace -f -qq --seccomp-bpf -e trace=connect,execve,clone,clone3,fork,vfork -o "$ev/connect.log" \
             bash pipeline/run-step.sh scan "$DUMPLING_PROJECT_DIR" "$DUMPLING_IN_VERSION" || rc=$?
           t1=$(date +%s)
           docker events --since "$t0" --until "$t1" --filter type=image --filter event=pull > "$ev/docker-events.txt" 2>&1 || true

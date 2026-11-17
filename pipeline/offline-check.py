@@ -5,7 +5,8 @@
          [--iptables <封鎖規則的計數檔>] [--docker-events <docker events 的輸出>] [--mirrors <MIRRORS_DIR>]
 
 輸入：
-- --strace：`strace -f -e trace=connect -o <檔>` 的紀錄（每行「PID connect(…) = …」）。依位址分類：
+- --strace：`strace -f -e trace=connect,execve,clone,clone3,fork,vfork -o <檔>` 的紀錄（每行「PID 系統呼叫(…) = …」）。
+  execve 與 clone／fork 只用來標出每個連線是哪個程式（程式名稱與不含路徑的短參數）；只有 connect 也能判定，程式記成（不明）。依位址分類：
   AF_UNIX（本機 socket）、loopback（127.0.0.0/8、::1；systemd-resolved 的 127.0.0.53:53 另外算「名稱查詢」）、其他＝對外。
   紀錄讀不到或是空的 → NOT_RUN（沒有證據，不算 OK）。
 - --iptables：`iptables -L DUMPLING_OFFLINE -v -n -x` 與 ip6tables 的輸出（block on 才有）：REJECT 的封包數加總。
@@ -34,6 +35,28 @@ CONNECT_RE = re.compile(r"connect\(\d+, \{sa_family=(AF_[A-Z0-9]+)(.*?)\}, \d+(?
 V4_RE = re.compile(r'sin_port=htons\((\d+)\), sin_addr=inet_addr\("([0-9.]+)"\)')
 V6_RE = re.compile(r'sin6_port=htons\((\d+)\).*?inet_pton\(AF_INET6, "([0-9a-fA-F:.]+)"')
 DNS = (ipaddress.ip_address("127.0.0.53"), 53)
+# 哪個程式連的（workflow 的 strace 另外記 execve 與 clone／fork）：pid → 程式名稱；clone 出來的執行緒／子行程沿用父行程的名稱
+LINE_RE = re.compile(r"^(\d+) (.*)$")
+EXEC_RE = re.compile(r'^execve\("((?:[^"\\]|\\.)*)", \[(.*?)\](?:\.\.\.)?, ')
+CLONE_RE = re.compile(r"^(?:clone3?|fork|vfork)\(.*= (\d+)\s*$")
+CLONE_RESUMED_RE = re.compile(r"^<\.\.\. (?:clone3?|fork|vfork) resumed>.*= (\d+)\s*$")
+EXEC_RESUMED_RE = re.compile(r"^<\.\.\. execve resumed>.*= 0\s*$")
+SAFE_TOKEN = re.compile(r"[A-Za-z0-9._:=+-]{1,40}")
+SCRIPT_RE = re.compile(r"[A-Za-z0-9._-]{1,60}\.(?:py|sh)")
+
+
+def label_of(path, args_text):
+    """程式名稱：執行檔的檔名，加上前兩個參數（只留安全字元的短參數；含 / 的只留 .py／.sh 的檔名）。不寫路徑。"""
+    name = path.replace("\\", "").rsplit("/", 1)[-1]
+    parts = [name if SAFE_TOKEN.fullmatch(name) else "?"]
+    for tok in re.findall(r'"((?:[^"\\]|\\.)*)"', args_text)[1:3]:
+        if "/" in tok:
+            base = tok.rsplit("/", 1)[-1]
+            if SCRIPT_RE.fullmatch(base):
+                parts.append(base)
+        elif SAFE_TOKEN.fullmatch(tok):
+            parts.append(tok)
+    return " ".join(parts)
 
 
 def classify(family, rest):
@@ -69,23 +92,48 @@ def read_strace(path):
         return None
     counts = {"unix": 0, "local": 0, "loopback": 0, "dns": 0, "other": 0}
     external = {}
+    dns_procs = {}
+    proc, pending = {}, {}
     n = 0
     for line in lines:
+        lm = LINE_RE.match(line)
+        pid, body = (lm.group(1), lm.group(2)) if lm else ("?", line)
+        em = EXEC_RE.match(body)
+        if em:
+            if body.rstrip().endswith("= 0"):
+                proc[pid] = label_of(em.group(1), em.group(2))
+            elif "<unfinished ...>" in body:
+                pending[pid] = label_of(em.group(1), em.group(2))
+            continue
+        if EXEC_RESUMED_RE.match(body) and pid in pending:
+            proc[pid] = pending.pop(pid)
+            continue
+        cm = CLONE_RE.match(body) or CLONE_RESUMED_RE.match(body)
+        if cm:
+            if cm.group(1) != "0" and pid in proc:
+                proc[cm.group(1)] = proc[pid]
+            continue
         m = CONNECT_RE.search(line)
         if not m:
             continue
         n += 1
+        who = proc.get(pid, "（不明）")
         kind, ip, port = classify(m.group(1), m.group(2))
         if kind == "external":
             key = (ip, port)
-            e = external.setdefault(key, {"addr": ip, "port": port, "count": 0, "results": []})
+            e = external.setdefault(key, {"addr": ip, "port": port, "count": 0, "results": [], "procs": []})
             e["count"] += 1
             res = m.group(4) or ("unfinished" if m.group(3) is None else "ok" if m.group(3) == "0" else m.group(3))
             if res not in e["results"]:
                 e["results"].append(res)
+            if who not in e["procs"] and len(e["procs"]) < 8:
+                e["procs"].append(who)
         else:
             counts[kind] += 1
-    return {"connects": n, **counts, "external": sorted(external.values(), key=lambda e: (-e["count"], e["addr"], e["port"]))}
+            if kind == "dns":
+                dns_procs[who] = dns_procs.get(who, 0) + 1
+    return {"connects": n, **counts, "dns_procs": dict(sorted(dns_procs.items(), key=lambda kv: -kv[1])),
+            "external": sorted(external.values(), key=lambda e: (-e["count"], e["addr"], e["port"]))}
 
 
 def read_rejects(path):
@@ -135,11 +183,12 @@ def judge(block, st, rejects, events, mirrors):
         return "NOT_RUN", ["沒有 strace 的 connect 紀錄（沒有證據）"]
     if st["external"]:
         findings.append("對外連線 %d 個目的地：%s" % (len(st["external"]), "、".join(
-            "%s:%d×%d（%s）" % (e["addr"], e["port"], e["count"], "/".join(e["results"])) for e in st["external"][:20])))
+            "%s:%d×%d（%s；%s）" % (e["addr"], e["port"], e["count"], "/".join(e["results"]), "、".join(e["procs"])) for e in st["external"][:20])))
     if st["other"]:
         findings.append("有 %d 個 connect 的位址解析不出來（AF_INET／AF_INET6 的位址格式認不得，或是其他位址家族）：無法判斷是不是對外" % st["other"])
     if st["dns"]:
-        findings.append("名稱查詢（127.0.0.53:53）%d 次：有程式試著找外部主機" % st["dns"])
+        findings.append("名稱查詢（127.0.0.53:53）%d 次：有程式試著找外部主機（%s）" % (
+            st["dns"], "、".join("%s×%d" % kv for kv in list(st["dns_procs"].items())[:8])))
     if block == "on":
         if rejects is None:
             findings.append("讀不到封鎖規則的計數（--iptables）")

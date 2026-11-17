@@ -78,17 +78,17 @@ class Check(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertEqual(doc["verdict"], "FAIL")
         self.assertEqual(doc["strace"]["external"], [
-            {"addr": "192.0.2.10", "port": 443, "count": 2, "results": ["ECONNREFUSED"]},
-            {"addr": "2001:db8::1", "port": 443, "count": 1, "results": ["ENETUNREACH"]}])
+            {"addr": "192.0.2.10", "port": 443, "count": 2, "results": ["ECONNREFUSED"], "procs": ["（不明）"]},
+            {"addr": "2001:db8::1", "port": 443, "count": 1, "results": ["ENETUNREACH"], "procs": ["（不明）"]}])
         self.assertEqual(doc["strace"]["dns"], 1)
-        self.assertIn("192.0.2.10:443×2（ECONNREFUSED）", r.stdout)
-        self.assertIn("名稱查詢（127.0.0.53:53）1 次", r.stdout)
+        self.assertIn("192.0.2.10:443×2（ECONNREFUSED；（不明））", r.stdout)
+        self.assertIn("名稱查詢（127.0.0.53:53）1 次：有程式試著找外部主機（（不明）×1）", r.stdout)
 
     def test_connect_split_by_signal_is_counted(self):
         # 被訊號打斷的 connect：位址在 <unfinished ...> 那一行，不能因為結果在下一行就漏掉
         r, doc = self.run_check([LOOP4] + EXT_SPLIT)
         self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertEqual(doc["strace"]["external"], [{"addr": "192.0.2.20", "port": 80, "count": 1, "results": ["unfinished"]}])
+        self.assertEqual(doc["strace"]["external"], [{"addr": "192.0.2.20", "port": 80, "count": 1, "results": ["unfinished"], "procs": ["（不明）"]}])
         self.assertEqual((doc["strace"]["connects"], doc["strace"]["unix"]), (3, 1))
 
     def test_unparsable_inet_address_fails(self):
@@ -122,6 +122,27 @@ class Check(unittest.TestCase):
         r, doc = self.run_check([LOOP4])
         self.assertEqual(r.returncode, 1)
         self.assertIn("鏡像資料夾裡沒有任何 .result", doc["findings"])
+
+    def test_connections_are_attributed_to_programs(self):
+        # 格式取自 strace 6.19 的實際輸出（-e trace=connect,execve,clone,clone3）；路徑不寫出來
+        lines = [
+            '200 execve("/usr/bin/bash", ["bash", "-c", "x"], 0x7ffd /* 44 vars */) = 0',
+            '200 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f) = 201',
+            '201 execve("/usr/local/bin/grype", ["grype", "db", "update"], 0x7ffd /* 44 vars */) = 0',
+            '201 clone3({flags=CLONE_VM|CLONE_THREAD, child_tid=0x7f, parent_tid=0x7f, exit_signal=0, stack=0x7f, stack_size=0x7f, tls=0x7f} => {parent_tid=[202]}, 88) = 202',
+            '202 connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.40")}, 16) = -1 EINPROGRESS (Operation now in progress)',
+            '200 clone(child_stack=NULL, flags=SIGCHLD <unfinished ...>',
+            '200 <... clone resumed>, child_tidptr=0x7f) = 203',
+            '203 execve("/home/runner/work/x/venv/bin/python3", ["python3", "-I", "/home/runner/work/x/tools/cra/fetch_things.py"], 0x7f /* 1 vars */) = 0',
+            '203 connect(4, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0',
+            '204 connect(5, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.41")}, 16) = 0',
+        ]
+        r, doc = self.run_check(lines)
+        ext = {e["addr"]: e["procs"] for e in doc["strace"]["external"]}
+        self.assertEqual(ext, {"192.0.2.40": ["grype db update"], "192.0.2.41": ["（不明）"]})
+        self.assertEqual(doc["strace"]["dns_procs"], {"python3 -I fetch_things.py": 1})
+        self.assertIn("192.0.2.40:443×1（EINPROGRESS；grype db update）", r.stdout)
+        self.assertNotIn("/home/", json.dumps(doc) + r.stdout)
 
     def test_rejects_counted_in_block_mode(self):
         self.w("ipt.txt", IPT % 3 + IPT.replace("DUMPLING_OFFLINE", "DUMPLING_OFFLINE6") % 2)
@@ -207,7 +228,7 @@ class Workflow(unittest.TestCase):
         self.assertIn('echo "$$" | sudo tee "$cg/cgroup.procs"', self.text)
         self.assertIn("封鎖沒有生效", self.text)                     # 先確認封鎖有效才開始
         self.assertIn('if curl -sS -m 15 -o /dev/null https://github.com 2> "$ev/precheck.err"; then', self.text)
-        self.assertIn('strace -f -qq --seccomp-bpf -e trace=connect -o "$ev/connect.log"', self.text)
+        self.assertIn('strace -f -qq --seccomp-bpf -e trace=connect,execve,clone,clone3,fork,vfork -o "$ev/connect.log"', self.text)
         self.assertIn('--filter type=image --filter event=pull > "$ev/docker-events.txt"', self.text)
         self.assertIn('--docker-events "$ev/docker-events.txt" --mirrors "$o/mirrors"', self.text)
 
