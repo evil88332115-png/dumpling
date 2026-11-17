@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-17 15:51 +0800（C1）
+最後更新：2026-11-17 15:56 +0800（C4）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -444,11 +444,11 @@ repo 裡的所有文字（程式註解、文件、commit 訊息、PR 說明、fi
 <!-- BEGIN C4 -->
 ## C4 其他平台（WP7）
 
-- 目前在做：等 C1 的 S1 合併（之後三個示範專案 dev run 重跑一次，同時驗證 S1 與 #174）；M9 N1 設計 PR #178 等 #177（D-068～D-070）合併後合併
-- 分支／PR／commit：`wp7/m9-n1-design`（7ca689c）→ PR #178；#174 version-state 已合併
+- 目前在做：三平台 release 草稿試跑：rpi、rock 已建 draft；ai-nas 的 Release 步驟 403（release.yml:118 已知的偶發 403），沒有建出 draft，補跑要使用者同意
+- 分支／PR／commit：無進行中的 PR；#174、#178 已合併
 - 代理：0 個（D-048 上限 3）
-- CI：#127／#138 的 AI NAS 標準答案用各自的 dev run 核對（78／77 項 OK），兩者合併後 note 兩段都保留；三個示範專案的 dev run 等 C1 的 S1（K1）合併後重跑一次，同時驗證 S1 與 #174
-- 今天處理：#127／#138 標準答案、#138 併 main（C1 同意解 kernel_config.py 與 PROVENANCE 衝突）、#168 dsc PROVENANCE、#172 S3 匯入端移植（驗證後補 lockdown 例外與兩個白名單測試）、#174 version-state
-- 下一步：S1 後 dev run（rpi → rock → ai-nas）→ release 草稿試跑 → T-14（設計已定，C1 同意由 C4 改 jetson/scan.sh；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6
-- 卡住／等決定：無。缺口 19、7、20、22、23 排 M7
+- CI：dev run（main）rpi 44022035706、rock 44025451494、ai-nas 44028044503：標準答案 0 不符、scan GAP（版本核對）、K1／S1 沒有改變既有判定。release 草稿 rpi 44034643050、rock 44037426757（draft、無 tag、未登入 404）、ai-nas 44040129677 failure（403）
+- 今天處理：dev run 與 K1 前後比對；CVE-2026-80920 是上游 REJECTED（vulns.git 36aa4946）；ai-nas app-source GAP＝缺口 6（pypi 無鎖定檔）；SBOM metadata.component.name 帶 runner 暫存路徑（Syft 依上游 sca-scan 給的 docker-archive 路徑命名），已回報 C0（D-071）
+- 下一步：等 ai-nas 補跑的決定 → T-14（含 --official 只認 tag push，先給 C1 審；開工前 STATUS 寫明 scan.sh 在 C4 手上）→ M9 N3／N4／N6
+- 卡住／等決定：ai-nas release 草稿補跑（使用者）；metadata.component 路徑的處理方式（C0）。缺口 19、7、20、22、23 排 M7
 <!-- END C4 -->
