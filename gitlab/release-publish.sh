@@ -19,6 +19,8 @@ case $dry in 0|1) ;; *) echo "release: FAIL（DUMPLING_RELEASE_DRY_RUN 只能是
 : "${CI_API_V4_URL:?}" "${CI_PROJECT_ID:?}"
 
 test -s "$res/manifest.tsv" || { echo "release: FAIL（scan 沒有產生 manifest.tsv）"; exit 1; }
+# Release 說明（release-meta.py --body-out 產生的 release-body.md）：沒有或是空的就停，不發出空白說明的 Release（GitHub 版 gh 讀不到 --notes-file 也會失敗）
+test -s "$res/release-body.md" || { echo "release: FAIL（沒有 Release 說明 release-body.md，或是空的：release-meta.py --body-out 沒有執行或失敗）"; exit 1; }
 # 1. 驗證（release-payload.py 會檢查每個附件都存在於 $res；驗不過就在這裡結束，後面的上傳不會執行）
 # 上傳清單只用 release-payload.py 驗過、寫出來的那一份（release-files.txt）：bash 不再自己解析 manifest（#72 驗證應修 1）
 rm -f release.json release-files.txt

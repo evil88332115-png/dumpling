@@ -767,7 +767,7 @@ class ReleasePublish(unittest.TestCase):
                                        'case " $* " in *" --upload-file "*) if [ "${FAIL_UPLOAD:-}" = 1 ]; then '
                                        'case " $* " in *" --fail "*) exit 22 ;; esac; fi ;; esac\nexit 0\n')
         (self.bin / "curl").chmod(0o755)
-        for f in ("sbom-p-v1.cdx.json", "release-meta.json", "notes.md"):
+        for f in ("sbom-p-v1.cdx.json", "release-meta.json", "notes.md", "release-body.md"):
             (self.res / f).write_text("{}")
         (self.res / "manifest.tsv").write_text("sbom-p-v1.cdx.json\tSBOM\nrelease-meta.json\tmeta\n")
 
@@ -789,6 +789,23 @@ class ReleasePublish(unittest.TestCase):
         self.assertIn("--upload-file", calls[0])
         self.assertIn("--upload-file", calls[1])
         self.assertTrue(calls[2].endswith("/projects/12/releases"), calls[2])
+
+    def test_missing_or_empty_release_body_writes_nothing(self):
+        # release-body.md（Release 說明）沒有或是空的：一個檔都不上傳、不建 Release（不發出空白說明的 Release）；試跑也一樣先擋
+        for case in ("missing", "empty"):
+            body = self.res / "release-body.md"
+            if case == "missing":
+                body.unlink()
+            else:
+                body.write_text("")
+            for dry in ("0", "1"):
+                if self.log.exists():
+                    self.log.unlink()
+                rc, out, calls = self.run_pub(DUMPLING_RELEASE_DRY_RUN=dry)
+                self.assertNotEqual(rc, 0, (case, dry))
+                self.assertIn("release-body.md", out)
+                self.assertEqual(calls, [], (case, dry))
+            body.write_text("{}")
 
     def test_any_invalid_attachment_uploads_nothing(self):
         # 第二個檔才有問題：第一個也不能先傳（T-21）
