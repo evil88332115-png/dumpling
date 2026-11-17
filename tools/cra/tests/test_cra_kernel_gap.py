@@ -202,6 +202,8 @@ def test_no_kernel_rows_case_also_shows_text_and_counts(tmp_path):
 def normalize_summary(text):
     d = json.loads(text)
     d.pop("scan_dir", None)
+    if isinstance(d.get("support_check"), dict) and "today" in d["support_check"]:
+        d["support_check"]["today"] = "<TODAY>"                                     # 執行當天的日期，每天不同
     return re.sub(r"\b[0-9a-f]{64}\b", "H", STAMP.sub("TS", json.dumps(d, sort_keys=True, ensure_ascii=False)))
 
 
