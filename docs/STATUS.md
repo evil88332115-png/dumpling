@@ -2,7 +2,7 @@
 
 每個對話一節，**每做完一步就更新並推送**（`ci/status-update.sh`，見 main 的 `docs/HANDOFF.md`）。只改自己那節，`<!-- BEGIN/END -->` 標記不要動。
 
-最後更新：2026-11-18 08:16 +0800（C0）
+最後更新：2026-11-24 08:26 +0800（C0）
 
 <!-- BEGIN C0 -->
 ## C0 協調（WP0）
@@ -43,6 +43,7 @@
 - **2026-11-17 晚：使用者決定這禮拜暫停 dumpling 開發，資源移到 sca-center。** C1–C4 收工（推到自己分支、不開 PR、停代理、寫 STATUS）。已上線的每日監控照常跑，不停。停的位置：第一階段剩 T-06 PR-2（wp1/t06-pr2：等上游 sca-center #245 合併後同步 grype_db_update_mode；斷網實跑 44088390117 證明抓得到洩漏，另有 Cloudflare／Fastly／169.254.169.254 連線待查，診斷 run 44097431503）、明天第一次正式開 Issue（C0 自己看）、收尾重打 Jetson tag（先 v39.2.0 再 v39.2.1）。今天再合併 #199（T-14）、#205、#206（T-14 收尾）、#207（T-04）、#208（T-06 第 2 層 workflow）、#209（GitLab 常駐 DT 接線，預設關閉，打開前要 T-07）。sca-center 試用包 bbe75e1 本機試接：不能直接替換（16 介面、14 行為），疑似內部資料位置已回報；採用規格 A／B／C 已傳 sca-center，等使用者決定。
 - 2026-11-17 晚（暫停中）：C1–C4 全部收工。上游 #245 已合併（31fd8f0），恢復後 C1 照它同步。斷網實跑 Grype 以外的連線＝上游 tools/e2e/sandbox.sh 的沙箱自我檢查（連 pypi.org、169.254.169.254 證明沒有網路），已告知 sca-center。sca-center 轉述使用者決定（待使用者在 C0 確認後才記 D）：照採用規格 A／B／C 收進上游，A7–A9 韌體線先不收（換版時 dumpling 要保留自己的韌體工具）；順序＝先修回報的上游問題（約 1.5 天）→ 第 1 批 A3–A6、A10、A11、A13、A15、A17、B7、B11–B13、B16–B19（含 scripts/e2e 輔助程式）→ 第 2 批 B1–B6、B14、B15、B20；差異：B3 由 RD 在 P1 表選依據類型、B14 只套客戶版（內部 P1 表保留中文）；命名空間改中性，對照表會先和 C0 確認。
 - 2026-11-18（暫停中）：使用者確認測試與 config.example.json 裡的 EX-J100、EX-J200、EXCO-SA- 編號是**虛構範例**，不是公司真實型號，不用清理；repo 維持公開（私人 repo 會扣 Actions 分鐘數，每日監控會停）。csaf_advisory 兩批 8 處的 file:line 清單已補給 sca-center（對照它的 PR #248）。
+- 2026-11-24（暫停中）：每日監控第一次正式開 Issue 是 11-17 09:12Z 的排程（#190 KEV 彙總、#191–#198 支援期限，共 9 個，和預期相同）；11-18～11-23 每天成功，新開 1 個（#210，rpi-lite-demo dev 的 broadcom 廠商層級）。回覆 sca-center-c3：每種專案自動產生 SBOM 的 CI 現況（GitLab 範本沒在內部跑過；Windows 映像不在範圍）與 orin-nano-demo v39.2.0-demo1 SBOM 的差異（檔案層級 96.6%、模組版本 UNKNOWN 1476／1536、模組無依賴、沒有 UEFI／OP-TEE／TF-A 元件）。更正：AMI-SA 規則實際有開「建議受影響」Issue（#151、#152），firmware/README 寫「一律 NOT_ASSESSED」可能過時，恢復後請 C2 核對。
 <!-- END C0 -->
 
 <!-- BEGIN C1 -->
